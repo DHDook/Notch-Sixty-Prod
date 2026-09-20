@@ -18,6 +18,7 @@
 		A20000000000000000000014 /* AudioRouteConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000024 /* AudioRouteConfiguration.swift */; };
 		A20000000000000000000015 /* AudioLifecycleState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000025 /* AudioLifecycleState.swift */; };
 		A20000000000000000000016 /* AudioDiagnosticsSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000026 /* AudioDiagnosticsSnapshot.swift */; };
+		A30000000000000000000010 /* N60RealtimeAudioBridge.c in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000020 /* N60RealtimeAudioBridge.c */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -45,6 +46,7 @@
 		A20000000000000000000024 /* AudioRouteConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRouteConfiguration.swift; sourceTree = "<group>"; };
 		A20000000000000000000025 /* AudioLifecycleState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioLifecycleState.swift; sourceTree = "<group>"; };
 		A20000000000000000000026 /* AudioDiagnosticsSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioDiagnosticsSnapshot.swift; sourceTree = "<group>"; };
+		A30000000000000000000020 /* N60RealtimeAudioBridge.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = N60RealtimeAudioBridge.c; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -111,6 +113,7 @@
 				A20000000000000000000051 /* CoreAudio */,
 				A20000000000000000000052 /* Devices */,
 				A20000000000000000000053 /* Routing */,
+				A30000000000000000000050 /* Realtime */,
 				A20000000000000000000020 /* AudioIOEngine.swift */,
 			);
 			path = Audio;
@@ -155,6 +158,14 @@
 				A20000000000000000000026 /* AudioDiagnosticsSnapshot.swift */,
 			);
 			path = Diagnostics;
+			sourceTree = "<group>";
+		};
+		A30000000000000000000050 /* Realtime */ = {
+			isa = PBXGroup;
+			children = (
+				A30000000000000000000020 /* N60RealtimeAudioBridge.c */,
+			);
+			path = Realtime;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -265,6 +276,7 @@
 				A20000000000000000000014 /* AudioRouteConfiguration.swift in Sources */,
 				A20000000000000000000015 /* AudioLifecycleState.swift in Sources */,
 				A20000000000000000000016 /* AudioDiagnosticsSnapshot.swift in Sources */,
+				A30000000000000000000010 /* N60RealtimeAudioBridge.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -297,13 +309,16 @@
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Notch Sixty";
+				INFOPLIST_KEY_NSAudioCaptureUsageDescription = "Notch Sixty captures system audio so it can process and play it through your selected output device.";
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.dhdook.NotchSixty;
 				PRODUCT_MODULE_NAME = NotchSixty;
 				PRODUCT_NAME = "Notch Sixty";
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "NotchSixty/Audio/Realtime/NotchSixty-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 			};
 			name = Debug;
@@ -317,13 +332,16 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Notch Sixty";
+				INFOPLIST_KEY_NSAudioCaptureUsageDescription = "Notch Sixty captures system audio so it can process and play it through your selected output device.";
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.dhdook.NotchSixty;
 				PRODUCT_MODULE_NAME = NotchSixty;
 				PRODUCT_NAME = "Notch Sixty";
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "NotchSixty/Audio/Realtime/NotchSixty-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 			};
 			name = Release;
