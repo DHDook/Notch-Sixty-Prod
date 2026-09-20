@@ -2,20 +2,28 @@ name: macOS
 
 on:
   pull_request:
+    branches:
+      - main
   push:
     branches:
       - main
-      - bootstrap/virgin-xcode-app
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build-and-test:
-    runs-on: macos-15-xlarge
+    runs-on: xcode-27
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
-      - name: Show Xcode version
-        run: xcodebuild -version
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
 
       - name: List project
         run: xcodebuild -project NotchSixty.xcodeproj -list
@@ -28,6 +36,7 @@ jobs:
           -configuration Debug
           -destination 'platform=macOS,arch=arm64'
           CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
           build
 
       - name: Test
@@ -38,4 +47,5 @@ jobs:
           -configuration Debug
           -destination 'platform=macOS,arch=arm64'
           CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
           test
