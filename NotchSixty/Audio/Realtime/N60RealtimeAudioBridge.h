@@ -21,30 +21,30 @@ typedef struct {
     uint32_t bufferedFrames;
 } N60RealtimeAudioBridgeSnapshot;
 
-N60RealtimeAudioBridge *N60RealtimeAudioBridgeCreate(uint32_t capacityFrames);
-void N60RealtimeAudioBridgeDestroy(N60RealtimeAudioBridge *bridge);
-void N60RealtimeAudioBridgeReset(N60RealtimeAudioBridge *bridge);
-void N60RealtimeAudioBridgeSetOutputGain(N60RealtimeAudioBridge *bridge, float gain);
-N60RealtimeAudioBridgeSnapshot N60RealtimeAudioBridgeGetSnapshot(const N60RealtimeAudioBridge *bridge);
+N60RealtimeAudioBridge * _Nullable N60RealtimeAudioBridgeCreate(uint32_t capacityFrames);
+void N60RealtimeAudioBridgeDestroy(N60RealtimeAudioBridge * _Nonnull bridge);
+void N60RealtimeAudioBridgeReset(N60RealtimeAudioBridge * _Nonnull bridge);
+void N60RealtimeAudioBridgeSetOutputGain(N60RealtimeAudioBridge * _Nonnull bridge, float gain);
+N60RealtimeAudioBridgeSnapshot N60RealtimeAudioBridgeGetSnapshot(const N60RealtimeAudioBridge * _Nonnull bridge);
 
 OSStatus N60CaptureIOProc(
     AudioDeviceID inDevice,
-    const AudioTimeStamp *inNow,
-    const AudioBufferList *inInputData,
-    const AudioTimeStamp *inInputTime,
-    AudioBufferList *outOutputData,
-    const AudioTimeStamp *inOutputTime,
-    void *inClientData
+    const AudioTimeStamp * _Nonnull inNow,
+    const AudioBufferList * _Nonnull inInputData,
+    const AudioTimeStamp * _Nonnull inInputTime,
+    AudioBufferList * _Nonnull outOutputData,
+    const AudioTimeStamp * _Nonnull inOutputTime,
+    void * _Nullable inClientData
 );
 
 OSStatus N60OutputIOProc(
     AudioDeviceID inDevice,
-    const AudioTimeStamp *inNow,
-    const AudioBufferList *inInputData,
-    const AudioTimeStamp *inInputTime,
-    AudioBufferList *outOutputData,
-    const AudioTimeStamp *inOutputTime,
-    void *inClientData
+    const AudioTimeStamp * _Nonnull inNow,
+    const AudioBufferList * _Nonnull inInputData,
+    const AudioTimeStamp * _Nonnull inInputTime,
+    AudioBufferList * _Nonnull outOutputData,
+    const AudioTimeStamp * _Nonnull inOutputTime,
+    void * _Nullable inClientData
 );
 
 #ifdef __cplusplus
