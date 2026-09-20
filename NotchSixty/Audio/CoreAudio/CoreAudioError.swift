@@ -205,12 +205,13 @@ final class CoreAudioTransportSession {
                 operation: "create private aggregate device"
             )
 
+            let clientData = UnsafeMutableRawPointer(newBridge)
             try Self.check(
-                AudioDeviceCreateIOProcID(aggregateDeviceID, N60CaptureIOProc, newBridge, &captureIOProcID),
+                AudioDeviceCreateIOProcID(aggregateDeviceID, N60CaptureIOProc, clientData, &captureIOProcID),
                 operation: "create capture IOProc"
             )
             try Self.check(
-                AudioDeviceCreateIOProcID(selectedOutput.deviceID, N60OutputIOProc, newBridge, &outputIOProcID),
+                AudioDeviceCreateIOProcID(selectedOutput.deviceID, N60OutputIOProc, clientData, &outputIOProcID),
                 operation: "create output IOProc"
             )
 
