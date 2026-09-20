@@ -109,8 +109,9 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload DMG
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
+          name: NotchSixty-hardware-test
           path: ${{ runner.temp }}/NotchSixty-hardware-test.dmg
-          archive: false
+          if-no-files-found: error
           retention-days: 14
