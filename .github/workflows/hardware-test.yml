@@ -7,6 +7,7 @@ on:
       - main
     paths:
       - .github/workflows/hardware-test.yml
+      - NotchSixty/Info.plist
 
 permissions:
   contents: read
@@ -44,6 +45,8 @@ jobs:
           -destination 'platform=macOS,arch=arm64'
           -derivedDataPath "$RUNNER_TEMP/NotchSixtyDerivedData"
           CODE_SIGNING_ALLOWED=NO
+          GENERATE_INFOPLIST_FILE=NO
+          INFOPLIST_FILE=NotchSixty/Info.plist
           build
 
       - name: Ad-hoc sign sandboxed test app
@@ -71,7 +74,9 @@ jobs:
           echo "Architectures: $ARCHS"
           test "$ARCHS" = "arm64"
 
-          /usr/libexec/PlistBuddy -c 'Print :NSAudioCaptureUsageDescription' "$APP/Contents/Info.plist"
+          CAPTURE_USAGE="$(/usr/libexec/PlistBuddy -c 'Print :NSAudioCaptureUsageDescription' "$APP/Contents/Info.plist")"
+          test -n "$CAPTURE_USAGE"
+          echo "Audio capture usage description: $CAPTURE_USAGE"
 
           ENTITLEMENTS="$(codesign -d --entitlements :- "$APP" 2>&1)"
           echo "$ENTITLEMENTS"
