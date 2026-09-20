@@ -38,7 +38,7 @@ struct ContentView: View {
 
             HStack {
                 Button("Refresh Devices") {
-                    try? engine.refreshOutputDevices()
+                    _ = try? engine.refreshOutputDevices()
                 }
                 .disabled(engine.lifecycleState != .idle)
 
