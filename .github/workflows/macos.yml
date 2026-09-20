@@ -36,6 +36,7 @@ jobs:
           -configuration Debug
           -destination 'platform=macOS,arch=arm64'
           CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
           build
 
       - name: Test
@@ -46,4 +47,5 @@ jobs:
           -configuration Debug
           -destination 'platform=macOS,arch=arm64'
           CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
           test
