@@ -19,6 +19,7 @@ Historical GPL Notch Sixty / Equaliser source is not a permitted production sour
 | Area | Classification | Source of truth | Notes |
 |---|---|---|---|
 | Commercial repo bootstrap/docs | Original commercial implementation | Product requirements + clean-room architecture decisions | No GPL source imported |
+| Production Xcode project and Swift app shell | Original commercial implementation | `DHDook/Notch-Sixty-Prod` bootstrap requirements | Freshly and independently generated for this repository. No source, project file, test, asset, configuration, or Git history was imported from historical Notch Sixty, Equaliser, BlackHole, or `CoreAudioTapPOC-N60`; the app shell is newly generated bootstrap material. |
 | Core Audio process-tap architecture | Specification-derived / owner-validated behavior | Apple public Core Audio APIs + separate POC evidence | Production code not yet added |
 | Realtime architecture | Original commercial implementation | Product requirements + realtime design rules | Production code not yet added |
 | DSP implementations | Pending | Public specs / independent derivations | Add per-module entries as implemented |
