@@ -1,10 +1,15 @@
 # Xcode Bootstrap
 
-Create the initial app project locally in Xcode so Xcode owns the generated project metadata.
+Create the initial app project as fresh project metadata owned by this repository. A
+newly and independently generated Xcode project is permitted, including an
+AI-generated `project.pbxproj`, provided that no project metadata or source is copied
+from any prior repository. Validate generated metadata with Xcode and `xcodebuild` on
+macOS CI.
 
 ## Create project
 
-Use **File → New → Project → macOS → App**.
+The project may be created with **File → New → Project → macOS → App** or generated
+independently from the requirements below.
 
 Recommended settings:
 - Product Name: `Notch Sixty`
@@ -56,7 +61,10 @@ Do not create empty placeholder Swift files merely to force this hierarchy. Add 
 
 ## First local commit
 
-After Xcode generates the app and a clean build/test succeeds, commit only the virgin project/target files plus any Xcode-generated assets needed by that project. Do not import files from the historical GPL repository or the POC.
+After Xcode or macOS CI validates the app with a clean build and test, commit only the
+virgin project/target files plus newly generated assets needed by that project. Do not
+import files from the historical GPL repository, BlackHole, the POC, or any other
+existing application repository.
 
 Suggested commit message:
 
@@ -64,4 +72,5 @@ Suggested commit message:
 Initialize commercial macOS app project
 ```
 
-Once that commit is on `main`, the next PR should implement the production AudioIO skeleton and lifecycle state machine under the rules in `AGENTS.md`.
+After this bootstrap PR is merged, a separate PR should implement the production
+AudioIO skeleton and lifecycle state machine under the rules in `AGENTS.md`.

@@ -1,0 +1,41 @@
+name: macOS
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - bootstrap/virgin-xcode-app
+
+jobs:
+  build-and-test:
+    runs-on: macos-15-xlarge
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: List project
+        run: xcodebuild -project NotchSixty.xcodeproj -list
+
+      - name: Build
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          build
+
+      - name: Test
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          test
