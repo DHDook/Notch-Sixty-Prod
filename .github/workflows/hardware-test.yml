@@ -1,0 +1,116 @@
+name: Hardware Test DMG
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/hardware-test.yml
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: xcode-27
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+
+      - name: Run unit tests
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          test
+
+      - name: Build Release app
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Release
+          -destination 'platform=macOS,arch=arm64'
+          -derivedDataPath "$RUNNER_TEMP/NotchSixtyDerivedData"
+          CODE_SIGNING_ALLOWED=NO
+          build
+
+      - name: Ad-hoc sign sandboxed test app
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/NotchSixtyDerivedData/Build/Products/Release/Notch Sixty.app"
+          test -d "$APP"
+          codesign \
+            --force \
+            --sign - \
+            --timestamp=none \
+            --entitlements NotchSixty/NotchSixty.entitlements \
+            "$APP"
+          codesign --verify --strict --verbose=2 "$APP"
+
+      - name: Validate test app
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/NotchSixtyDerivedData/Build/Products/Release/Notch Sixty.app"
+          EXECUTABLE="$APP/Contents/MacOS/Notch Sixty"
+
+          ARCHS="$(lipo -archs "$EXECUTABLE")"
+          echo "Architectures: $ARCHS"
+          test "$ARCHS" = "arm64"
+
+          /usr/libexec/PlistBuddy -c 'Print :NSAudioCaptureUsageDescription' "$APP/Contents/Info.plist"
+
+          ENTITLEMENTS="$(codesign -d --entitlements :- "$APP" 2>&1)"
+          echo "$ENTITLEMENTS"
+          echo "$ENTITLEMENTS" | grep -q 'com.apple.security.app-sandbox'
+          echo "$ENTITLEMENTS" | grep -q '<true/>'
+
+      - name: Create DMG
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/NotchSixtyDerivedData/Build/Products/Release/Notch Sixty.app"
+          STAGE="$RUNNER_TEMP/NotchSixtyHardwareTest"
+          DMG="$RUNNER_TEMP/NotchSixty-hardware-test.dmg"
+
+          rm -rf "$STAGE" "$DMG"
+          mkdir -p "$STAGE"
+          cp -R "$APP" "$STAGE/"
+          ln -s /Applications "$STAGE/Applications"
+
+          hdiutil create \
+            -volname 'Notch Sixty Hardware Test' \
+            -srcfolder "$STAGE" \
+            -ov \
+            -format UDZO \
+            "$DMG"
+
+          SHA256="$(shasum -a 256 "$DMG" | awk '{print $1}')"
+          echo "SHA256=$SHA256" >> "$GITHUB_ENV"
+          {
+            echo '### Notch Sixty hardware-test DMG'
+            echo
+            echo "SHA-256: \`$SHA256\`"
+            echo
+            echo 'This artifact is ad-hoc signed for hardware validation only. It is not notarized and is not an App Store release.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ runner.temp }}/NotchSixty-hardware-test.dmg
+          archive: false
+          retention-days: 14
