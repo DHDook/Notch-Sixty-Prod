@@ -72,7 +72,7 @@ struct ContentView: View {
             Spacer(minLength: 0)
         }
         .padding(20)
-        .frame(minWidth: 560, minHeight: 500)
+        .frame(minWidth: 600, minHeight: 560)
         .onAppear {
             engine.prepareForUse()
         }
@@ -92,23 +92,27 @@ struct ContentView: View {
             diagnosticRow("Tap rate", snapshot.tapSampleRate.map(formattedRate) ?? "—")
             diagnosticRow("Output rate", snapshot.outputSampleRate.map(formattedRate) ?? "—")
 
-            if let primed = snapshot.startupPrimedBeforeOutput,
-               let targetFrames = snapshot.startupPrimeTargetFrames,
-               let waitMicroseconds = snapshot.startupPrimeWaitMicroseconds {
+            if let gateOpened = snapshot.startupGateOpened,
+               let targetFrames = snapshot.startupGateTargetFrames,
+               let activationFrames = snapshot.startupGateActivationFrames,
+               let waitMicroseconds = snapshot.startupGateWaitMicroseconds {
                 diagnosticRow(
-                    "Startup prime",
-                    "\(primed ? "ready" : "timeout") / \(targetFrames) frames / \(formattedMicroseconds(waitMicroseconds))"
+                    "Startup gate",
+                    "\(gateOpened ? "open" : "timeout") / target \(targetFrames) / activate \(activationFrames) / \(formattedMicroseconds(waitMicroseconds))"
                 )
             }
 
             diagnosticRow("Counter scope", "current processing session")
             diagnosticRow("Capture callbacks", "\(session.captureCallbacks)")
             diagnosticRow("Output callbacks", "\(session.outputCallbacks)")
+            diagnosticRow("Gated output callbacks", "\(session.gatedOutputCallbacks)")
+            diagnosticRow("Gated output frames", "\(session.gatedOutputFrames)")
             diagnosticRow("Captured frames", "\(session.capturedFrames)")
             diagnosticRow("Delivered frames", "\(session.deliveredFrames)")
             diagnosticRow("Underrun frames", "\(session.underrunFrames)")
             diagnosticRow("Overrun frames", "\(session.overrunFrames)")
             diagnosticRow("Buffered frames", "\(session.bufferedFrames)")
+            diagnosticRow("Bridge queue", formattedBridgeQueue(frames: session.bufferedFrames, sampleRate: snapshot.outputSampleRate))
             diagnosticRow("Lifetime underruns", "\(lifetime.underrunFrames)")
             diagnosticRow("Lifetime overruns", "\(lifetime.overrunFrames)")
             diagnosticRow("Rate rebuilds", "\(snapshot.sampleRateChangesHandled)")
@@ -142,5 +146,11 @@ struct ContentView: View {
             return String(format: "%.2f ms", Double(microseconds) / 1_000.0)
         }
         return "\(microseconds) µs"
+    }
+
+    private func formattedBridgeQueue(frames: UInt32, sampleRate: Double?) -> String {
+        guard let sampleRate, sampleRate > 0 else { return "\(frames) frames" }
+        let milliseconds = Double(frames) / sampleRate * 1_000.0
+        return String(format: "%u frames / %.2f ms", frames, milliseconds)
     }
 }
