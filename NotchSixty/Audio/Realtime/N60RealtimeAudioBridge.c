@@ -23,8 +23,12 @@ struct N60RealtimeAudioBridge {
     _Atomic uint64_t underrunFrames;
     _Atomic uint64_t overrunFrames;
     _Atomic uint64_t unsupportedBufferLayouts;
+    _Atomic uint64_t gatedOutputCallbacks;
+    _Atomic uint64_t gatedOutputFrames;
 
     _Atomic uint32_t outputGainBits;
+    _Atomic uint32_t outputGateMinimumBufferedFrames;
+    _Atomic bool outputGateOpen;
 };
 
 static uint32_t float_to_bits(float value) {
@@ -133,6 +137,7 @@ N60RealtimeAudioBridge *N60RealtimeAudioBridgeCreate(uint32_t capacityFrames) {
 
     bridge->capacityFrames = capacityFrames;
     atomic_store_explicit(&bridge->outputGainBits, float_to_bits(1.0f), memory_order_relaxed);
+    atomic_store_explicit(&bridge->outputGateOpen, true, memory_order_relaxed);
     return bridge;
 }
 
@@ -158,7 +163,11 @@ void N60RealtimeAudioBridgeReset(N60RealtimeAudioBridge *bridge) {
     atomic_store_explicit(&bridge->underrunFrames, 0, memory_order_relaxed);
     atomic_store_explicit(&bridge->overrunFrames, 0, memory_order_relaxed);
     atomic_store_explicit(&bridge->unsupportedBufferLayouts, 0, memory_order_relaxed);
+    atomic_store_explicit(&bridge->gatedOutputCallbacks, 0, memory_order_relaxed);
+    atomic_store_explicit(&bridge->gatedOutputFrames, 0, memory_order_relaxed);
     atomic_store_explicit(&bridge->outputGainBits, float_to_bits(1.0f), memory_order_relaxed);
+    atomic_store_explicit(&bridge->outputGateMinimumBufferedFrames, 0, memory_order_relaxed);
+    atomic_store_explicit(&bridge->outputGateOpen, true, memory_order_release);
 }
 
 void N60RealtimeAudioBridgeSetOutputGain(N60RealtimeAudioBridge *bridge, float gain) {
@@ -166,6 +175,15 @@ void N60RealtimeAudioBridgeSetOutputGain(N60RealtimeAudioBridge *bridge, float g
         return;
     }
     atomic_store_explicit(&bridge->outputGainBits, float_to_bits(gain), memory_order_release);
+}
+
+void N60RealtimeAudioBridgeConfigureOutputGate(N60RealtimeAudioBridge *bridge, uint32_t minimumBufferedFrames) {
+    if (bridge == NULL) {
+        return;
+    }
+
+    atomic_store_explicit(&bridge->outputGateMinimumBufferedFrames, minimumBufferedFrames, memory_order_relaxed);
+    atomic_store_explicit(&bridge->outputGateOpen, minimumBufferedFrames == 0, memory_order_release);
 }
 
 N60RealtimeAudioBridgeSnapshot N60RealtimeAudioBridgeGetSnapshot(const N60RealtimeAudioBridge *bridge) {
@@ -181,6 +199,9 @@ N60RealtimeAudioBridgeSnapshot N60RealtimeAudioBridgeGetSnapshot(const N60Realti
     snapshot.underrunFrames = atomic_load_explicit(&bridge->underrunFrames, memory_order_relaxed);
     snapshot.overrunFrames = atomic_load_explicit(&bridge->overrunFrames, memory_order_relaxed);
     snapshot.unsupportedBufferLayouts = atomic_load_explicit(&bridge->unsupportedBufferLayouts, memory_order_relaxed);
+    snapshot.gatedOutputCallbacks = atomic_load_explicit(&bridge->gatedOutputCallbacks, memory_order_relaxed);
+    snapshot.gatedOutputFrames = atomic_load_explicit(&bridge->gatedOutputFrames, memory_order_relaxed);
+    snapshot.outputGateOpen = atomic_load_explicit(&bridge->outputGateOpen, memory_order_acquire);
 
     uint64_t writeIndex = atomic_load_explicit(&bridge->writeIndex, memory_order_acquire);
     uint64_t readIndex = atomic_load_explicit(&bridge->readIndex, memory_order_acquire);
@@ -284,6 +305,19 @@ OSStatus N60OutputIOProc(
     uint64_t readIndex = atomic_load_explicit(&bridge->readIndex, memory_order_relaxed);
     uint64_t writeIndex = atomic_load_explicit(&bridge->writeIndex, memory_order_acquire);
     uint64_t available = writeIndex >= readIndex ? writeIndex - readIndex : 0;
+
+    if (!atomic_load_explicit(&bridge->outputGateOpen, memory_order_acquire)) {
+        uint32_t gateMinimum = atomic_load_explicit(&bridge->outputGateMinimumBufferedFrames, memory_order_relaxed);
+        if (available >= gateMinimum && available >= frameCount) {
+            atomic_store_explicit(&bridge->outputGateOpen, true, memory_order_release);
+        } else {
+            zero_output(outOutputData);
+            atomic_fetch_add_explicit(&bridge->gatedOutputCallbacks, 1, memory_order_relaxed);
+            atomic_fetch_add_explicit(&bridge->gatedOutputFrames, frameCount, memory_order_relaxed);
+            return noErr;
+        }
+    }
+
     UInt32 framesToRead = frameCount < available ? frameCount : (UInt32)available;
     float gain = bits_to_float(atomic_load_explicit(&bridge->outputGainBits, memory_order_acquire));
 
