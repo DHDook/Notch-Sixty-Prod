@@ -138,6 +138,7 @@ enum CoreAudioTransportError: Error, LocalizedError, Equatable {
     case unsupportedFormat(role: String, format: AudioStreamFormatDescription)
     case sampleRateMismatch(tap: Double, output: Double)
     case realtimeBridgeAllocationFailed
+    case dspGraphPublicationFailed
     case ioProcUnavailable(role: String)
     case outputBufferExceedsBridgeCapacity(bufferFrames: UInt32, capacityFrames: UInt32)
 
@@ -153,6 +154,8 @@ enum CoreAudioTransportError: Error, LocalizedError, Equatable {
             return "Native sample-rate mismatch: tap \(tap) Hz, output \(output) Hz. Transport SRC is intentionally disabled."
         case .realtimeBridgeAllocationFailed:
             return "Unable to allocate the preallocated realtime audio bridge."
+        case .dspGraphPublicationFailed:
+            return "Unable to publish the render-ready unity DSP graph."
         case .ioProcUnavailable(let role):
             return "Core Audio created the \(role) IOProc without returning a usable callback identifier."
         case .outputBufferExceedsBridgeCapacity(let bufferFrames, let capacityFrames):
@@ -233,6 +236,11 @@ final class CoreAudioTransportSession {
                 throw CoreAudioTransportError.sampleRateMismatch(tap: tapFormat.sampleRate, output: outputFormat.sampleRate)
             }
 
+            let unityGraph = N60DSPGraphSnapshotMakeUnity(outputFormat.sampleRate)
+            guard N60RealtimeAudioBridgePublishDSPGraph(newBridge, unityGraph) else {
+                throw CoreAudioTransportError.dspGraphPublicationFailed
+            }
+
             let outputBufferFrames = try Self.readUInt32Property(
                 objectID: selectedOutput.deviceID,
                 selector: kAudioDevicePropertyBufferFrameSize,
@@ -310,6 +318,11 @@ final class CoreAudioTransportSession {
     func counters() -> AudioTransportCounters {
         guard let bridge else { return AudioTransportCounters() }
         return AudioTransportCounters(snapshot: N60RealtimeAudioBridgeGetSnapshot(bridge))
+    }
+
+    func renderDiagnostics() -> RenderKernelDiagnostics? {
+        guard let bridge else { return nil }
+        return RenderKernelDiagnostics(N60RealtimeAudioBridgeGetRenderDiagnostics(bridge))
     }
 
     func stop(fadeOut: Bool) {
