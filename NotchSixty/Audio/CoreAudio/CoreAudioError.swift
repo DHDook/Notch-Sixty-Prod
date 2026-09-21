@@ -56,6 +56,8 @@ struct AudioTransportCounters: Equatable, Sendable {
     var underrunFrames: UInt64 = 0
     var overrunFrames: UInt64 = 0
     var unsupportedBufferLayouts: UInt64 = 0
+    var gatedOutputCallbacks: UInt64 = 0
+    var gatedOutputFrames: UInt64 = 0
     var bufferedFrames: UInt32 = 0
 
     init(snapshot: N60RealtimeAudioBridgeSnapshot) {
@@ -66,6 +68,8 @@ struct AudioTransportCounters: Equatable, Sendable {
         underrunFrames = snapshot.underrunFrames
         overrunFrames = snapshot.overrunFrames
         unsupportedBufferLayouts = snapshot.unsupportedBufferLayouts
+        gatedOutputCallbacks = snapshot.gatedOutputCallbacks
+        gatedOutputFrames = snapshot.gatedOutputFrames
         bufferedFrames = snapshot.bufferedFrames
     }
 
@@ -77,6 +81,8 @@ struct AudioTransportCounters: Equatable, Sendable {
         underrunFrames: UInt64 = 0,
         overrunFrames: UInt64 = 0,
         unsupportedBufferLayouts: UInt64 = 0,
+        gatedOutputCallbacks: UInt64 = 0,
+        gatedOutputFrames: UInt64 = 0,
         bufferedFrames: UInt32 = 0
     ) {
         self.captureCallbacks = captureCallbacks
@@ -86,6 +92,8 @@ struct AudioTransportCounters: Equatable, Sendable {
         self.underrunFrames = underrunFrames
         self.overrunFrames = overrunFrames
         self.unsupportedBufferLayouts = unsupportedBufferLayouts
+        self.gatedOutputCallbacks = gatedOutputCallbacks
+        self.gatedOutputFrames = gatedOutputFrames
         self.bufferedFrames = bufferedFrames
     }
 
@@ -98,13 +106,16 @@ struct AudioTransportCounters: Equatable, Sendable {
             underrunFrames: lhs.underrunFrames + rhs.underrunFrames,
             overrunFrames: lhs.overrunFrames + rhs.overrunFrames,
             unsupportedBufferLayouts: lhs.unsupportedBufferLayouts + rhs.unsupportedBufferLayouts,
+            gatedOutputCallbacks: lhs.gatedOutputCallbacks + rhs.gatedOutputCallbacks,
+            gatedOutputFrames: lhs.gatedOutputFrames + rhs.gatedOutputFrames,
             bufferedFrames: rhs.bufferedFrames
         )
     }
 }
 
-struct AudioStartupPrimingPolicy: Equatable, Sendable {
-    let targetFrames: UInt32
+struct AudioStartupGatePolicy: Equatable, Sendable {
+    let steadyStateTargetFrames: UInt32
+    let activationBufferedFrames: UInt32
     let timeoutMicroseconds: UInt32
     let pollIntervalMicroseconds: UInt32
 
@@ -113,7 +124,13 @@ struct AudioStartupPrimingPolicy: Equatable, Sendable {
         timeoutMicroseconds: UInt32 = 250_000,
         pollIntervalMicroseconds: UInt32 = 250
     ) {
-        targetFrames = max(outputBufferFrames, 1)
+        let bufferFrames = max(outputBufferFrames, 1)
+        steadyStateTargetFrames = bufferFrames
+        if bufferFrames > UInt32.max / 2 {
+            activationBufferedFrames = UInt32.max
+        } else {
+            activationBufferedFrames = bufferFrames * 2
+        }
         self.timeoutMicroseconds = max(timeoutMicroseconds, 1)
         self.pollIntervalMicroseconds = max(pollIntervalMicroseconds, 1)
     }
@@ -127,6 +144,7 @@ enum CoreAudioTransportError: Error, LocalizedError, Equatable {
     case realtimeBridgeAllocationFailed
     case ioProcUnavailable(role: String)
     case outputBufferExceedsBridgeCapacity(bufferFrames: UInt32, capacityFrames: UInt32)
+    case startupGateTimedOut(targetFrames: UInt32, waitedMicroseconds: UInt32)
 
     var errorDescription: String? {
         switch self {
@@ -143,7 +161,9 @@ enum CoreAudioTransportError: Error, LocalizedError, Equatable {
         case .ioProcUnavailable(let role):
             return "Core Audio created the \(role) IOProc without returning a usable callback identifier."
         case .outputBufferExceedsBridgeCapacity(let bufferFrames, let capacityFrames):
-            return "Physical output buffer size \(bufferFrames) frames exceeds realtime bridge capacity \(capacityFrames) frames."
+            return "Startup gate requires \(bufferFrames) buffered frames but realtime bridge capacity is \(capacityFrames) frames."
+        case .startupGateTimedOut(let targetFrames, let waitedMicroseconds):
+            return "Audio startup gate did not open after waiting \(waitedMicroseconds) µs for \(targetFrames) buffered frames."
         }
     }
 }
@@ -156,9 +176,10 @@ final class CoreAudioTransportSession {
     let selectedOutput: AudioOutputDevice
     private(set) var tapFormat = AudioStreamFormatDescription(AudioStreamBasicDescription())
     private(set) var outputFormat = AudioStreamFormatDescription(AudioStreamBasicDescription())
-    private(set) var startupPrimeTargetFrames: UInt32 = 0
-    private(set) var startupPrimedBeforeOutput = false
-    private(set) var startupPrimeWaitMicroseconds: UInt32 = 0
+    private(set) var startupGateTargetFrames: UInt32 = 0
+    private(set) var startupGateActivationFrames: UInt32 = 0
+    private(set) var startupGateOpened = false
+    private(set) var startupGateWaitMicroseconds: UInt32 = 0
 
     private var bridge: OpaquePointer?
     private var tapID = AudioObjectID(kAudioObjectUnknown)
@@ -222,14 +243,15 @@ final class CoreAudioTransportSession {
                 scope: kAudioObjectPropertyScopeGlobal,
                 operation: "read physical output buffer size"
             )
-            let primingPolicy = AudioStartupPrimingPolicy(outputBufferFrames: outputBufferFrames)
-            guard primingPolicy.targetFrames <= Self.bridgeCapacityFrames else {
+            let gatePolicy = AudioStartupGatePolicy(outputBufferFrames: outputBufferFrames)
+            guard gatePolicy.activationBufferedFrames <= Self.bridgeCapacityFrames else {
                 throw CoreAudioTransportError.outputBufferExceedsBridgeCapacity(
-                    bufferFrames: primingPolicy.targetFrames,
+                    bufferFrames: gatePolicy.activationBufferedFrames,
                     capacityFrames: Self.bridgeCapacityFrames
                 )
             }
-            startupPrimeTargetFrames = primingPolicy.targetFrames
+            startupGateTargetFrames = gatePolicy.steadyStateTargetFrames
+            startupGateActivationFrames = gatePolicy.activationBufferedFrames
 
             let tapEntry: [String: Any] = [
                 kAudioSubTapUIDKey: description.uuid.uuidString,
@@ -265,16 +287,24 @@ final class CoreAudioTransportSession {
             }
 
             N60RealtimeAudioBridgeSetOutputGain(newBridge, 0.0)
+            N60RealtimeAudioBridgeConfigureOutputGate(newBridge, gatePolicy.activationBufferedFrames)
+
+            try Self.check(AudioDeviceStart(selectedOutput.deviceID, outputIOProcID), operation: "start physical output")
+            isOutputStarted = true
 
             try Self.check(AudioDeviceStart(aggregateDeviceID, captureIOProcID), operation: "start tap capture")
             isCaptureStarted = true
 
-            let primingResult = Self.waitForStartupPrime(bridge: newBridge, policy: primingPolicy)
-            startupPrimedBeforeOutput = primingResult.primed
-            startupPrimeWaitMicroseconds = primingResult.waitedMicroseconds
+            let gateResult = Self.waitForStartupGate(bridge: newBridge, policy: gatePolicy)
+            startupGateOpened = gateResult.opened
+            startupGateWaitMicroseconds = gateResult.waitedMicroseconds
+            guard gateResult.opened else {
+                throw CoreAudioTransportError.startupGateTimedOut(
+                    targetFrames: gatePolicy.activationBufferedFrames,
+                    waitedMicroseconds: gateResult.waitedMicroseconds
+                )
+            }
 
-            try Self.check(AudioDeviceStart(selectedOutput.deviceID, outputIOProcID), operation: "start physical output")
-            isOutputStarted = true
             Self.fadeOutputIn(bridge: newBridge)
         } catch {
             stop(fadeOut: false)
@@ -332,15 +362,15 @@ final class CoreAudioTransportSession {
         }
     }
 
-    private static func waitForStartupPrime(
+    private static func waitForStartupGate(
         bridge: OpaquePointer,
-        policy: AudioStartupPrimingPolicy
-    ) -> (primed: Bool, waitedMicroseconds: UInt32) {
+        policy: AudioStartupGatePolicy
+    ) -> (opened: Bool, waitedMicroseconds: UInt32) {
         var waited: UInt32 = 0
 
         while waited < policy.timeoutMicroseconds {
             let snapshot = N60RealtimeAudioBridgeGetSnapshot(bridge)
-            if snapshot.bufferedFrames >= policy.targetFrames {
+            if snapshot.outputGateOpen {
                 return (true, waited)
             }
 
@@ -351,7 +381,7 @@ final class CoreAudioTransportSession {
         }
 
         let finalSnapshot = N60RealtimeAudioBridgeGetSnapshot(bridge)
-        return (finalSnapshot.bufferedFrames >= policy.targetFrames, waited)
+        return (finalSnapshot.outputGateOpen, waited)
     }
 
     private static func fadeOutputIn(bridge: OpaquePointer) {
