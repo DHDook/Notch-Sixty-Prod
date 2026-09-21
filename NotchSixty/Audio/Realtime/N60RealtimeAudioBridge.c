@@ -29,6 +29,8 @@ struct N60RealtimeAudioBridge {
     _Atomic uint32_t outputGainBits;
     _Atomic uint32_t outputGateMinimumBufferedFrames;
     _Atomic bool outputGateOpen;
+    _Atomic uint32_t startupFadeFramesTotal;
+    _Atomic uint32_t startupFadeFramesRemaining;
 };
 
 static uint32_t float_to_bits(float value) {
@@ -119,6 +121,19 @@ static bool write_output_frame(AudioBufferList *bufferList, UInt32 frameIndex, N
     return false;
 }
 
+static float startup_fade_gain(N60RealtimeAudioBridge *bridge, float masterGain) {
+    uint32_t remaining = atomic_load_explicit(&bridge->startupFadeFramesRemaining, memory_order_relaxed);
+    uint32_t total = atomic_load_explicit(&bridge->startupFadeFramesTotal, memory_order_relaxed);
+    if (remaining == 0 || total == 0) {
+        return masterGain;
+    }
+
+    uint32_t completed = total - remaining + 1;
+    float ramp = (float)completed / (float)total;
+    atomic_store_explicit(&bridge->startupFadeFramesRemaining, remaining - 1, memory_order_relaxed);
+    return masterGain * ramp;
+}
+
 N60RealtimeAudioBridge *N60RealtimeAudioBridgeCreate(uint32_t capacityFrames) {
     if (capacityFrames == 0) {
         return NULL;
@@ -168,6 +183,8 @@ void N60RealtimeAudioBridgeReset(N60RealtimeAudioBridge *bridge) {
     atomic_store_explicit(&bridge->outputGainBits, float_to_bits(1.0f), memory_order_relaxed);
     atomic_store_explicit(&bridge->outputGateMinimumBufferedFrames, 0, memory_order_relaxed);
     atomic_store_explicit(&bridge->outputGateOpen, true, memory_order_release);
+    atomic_store_explicit(&bridge->startupFadeFramesTotal, 0, memory_order_relaxed);
+    atomic_store_explicit(&bridge->startupFadeFramesRemaining, 0, memory_order_relaxed);
 }
 
 void N60RealtimeAudioBridgeSetOutputGain(N60RealtimeAudioBridge *bridge, float gain) {
@@ -177,12 +194,18 @@ void N60RealtimeAudioBridgeSetOutputGain(N60RealtimeAudioBridge *bridge, float g
     atomic_store_explicit(&bridge->outputGainBits, float_to_bits(gain), memory_order_release);
 }
 
-void N60RealtimeAudioBridgeConfigureOutputGate(N60RealtimeAudioBridge *bridge, uint32_t minimumBufferedFrames) {
+void N60RealtimeAudioBridgeConfigureOutputGate(
+    N60RealtimeAudioBridge *bridge,
+    uint32_t minimumBufferedFrames,
+    uint32_t fadeInFrames
+) {
     if (bridge == NULL) {
         return;
     }
 
     atomic_store_explicit(&bridge->outputGateMinimumBufferedFrames, minimumBufferedFrames, memory_order_relaxed);
+    atomic_store_explicit(&bridge->startupFadeFramesTotal, fadeInFrames, memory_order_relaxed);
+    atomic_store_explicit(&bridge->startupFadeFramesRemaining, fadeInFrames, memory_order_relaxed);
     atomic_store_explicit(&bridge->outputGateOpen, minimumBufferedFrames == 0, memory_order_release);
 }
 
@@ -319,10 +342,11 @@ OSStatus N60OutputIOProc(
     }
 
     UInt32 framesToRead = frameCount < available ? frameCount : (UInt32)available;
-    float gain = bits_to_float(atomic_load_explicit(&bridge->outputGainBits, memory_order_acquire));
+    float masterGain = bits_to_float(atomic_load_explicit(&bridge->outputGainBits, memory_order_acquire));
 
     for (UInt32 frameIndex = 0; frameIndex < framesToRead; ++frameIndex) {
         N60StereoFrame frame = bridge->frames[(readIndex + frameIndex) % bridge->capacityFrames];
+        float gain = startup_fade_gain(bridge, masterGain);
         if (!write_output_frame(outOutputData, frameIndex, frame, gain)) {
             zero_output(outOutputData);
             atomic_fetch_add_explicit(&bridge->unsupportedBufferLayouts, 1, memory_order_relaxed);
