@@ -103,12 +103,30 @@ struct AudioTransportCounters: Equatable, Sendable {
     }
 }
 
+struct AudioStartupPrimingPolicy: Equatable, Sendable {
+    let targetFrames: UInt32
+    let timeoutMicroseconds: UInt32
+    let pollIntervalMicroseconds: UInt32
+
+    init(
+        outputBufferFrames: UInt32,
+        timeoutMicroseconds: UInt32 = 250_000,
+        pollIntervalMicroseconds: UInt32 = 250
+    ) {
+        targetFrames = max(outputBufferFrames, 1)
+        self.timeoutMicroseconds = max(timeoutMicroseconds, 1)
+        self.pollIntervalMicroseconds = max(pollIntervalMicroseconds, 1)
+    }
+}
+
 enum CoreAudioTransportError: Error, LocalizedError, Equatable {
     case processObjectUnavailable
     case operationFailed(operation: String, status: OSStatus)
     case unsupportedFormat(role: String, format: AudioStreamFormatDescription)
     case sampleRateMismatch(tap: Double, output: Double)
     case realtimeBridgeAllocationFailed
+    case ioProcUnavailable(role: String)
+    case outputBufferExceedsBridgeCapacity(bufferFrames: UInt32, capacityFrames: UInt32)
 
     var errorDescription: String? {
         switch self {
@@ -122,16 +140,25 @@ enum CoreAudioTransportError: Error, LocalizedError, Equatable {
             return "Native sample-rate mismatch: tap \(tap) Hz, output \(output) Hz. Transport SRC is intentionally disabled."
         case .realtimeBridgeAllocationFailed:
             return "Unable to allocate the preallocated realtime audio bridge."
+        case .ioProcUnavailable(let role):
+            return "Core Audio created the \(role) IOProc without returning a usable callback identifier."
+        case .outputBufferExceedsBridgeCapacity(let bufferFrames, let capacityFrames):
+            return "Physical output buffer size \(bufferFrames) frames exceeds realtime bridge capacity \(capacityFrames) frames."
         }
     }
 }
 
 final class CoreAudioTransportSession {
     private static let bridgeCapacityFrames: UInt32 = 65_536
+    private static let fadeStepMicroseconds: UInt32 = 1_500
+    private static let fadeStepCount: UInt32 = 8
 
     let selectedOutput: AudioOutputDevice
     private(set) var tapFormat = AudioStreamFormatDescription(AudioStreamBasicDescription())
     private(set) var outputFormat = AudioStreamFormatDescription(AudioStreamBasicDescription())
+    private(set) var startupPrimeTargetFrames: UInt32 = 0
+    private(set) var startupPrimedBeforeOutput = false
+    private(set) var startupPrimeWaitMicroseconds: UInt32 = 0
 
     private var bridge: OpaquePointer?
     private var tapID = AudioObjectID(kAudioObjectUnknown)
@@ -189,6 +216,21 @@ final class CoreAudioTransportSession {
                 throw CoreAudioTransportError.sampleRateMismatch(tap: tapFormat.sampleRate, output: outputFormat.sampleRate)
             }
 
+            let outputBufferFrames = try Self.readUInt32Property(
+                objectID: selectedOutput.deviceID,
+                selector: kAudioDevicePropertyBufferFrameSize,
+                scope: kAudioObjectPropertyScopeGlobal,
+                operation: "read physical output buffer size"
+            )
+            let primingPolicy = AudioStartupPrimingPolicy(outputBufferFrames: outputBufferFrames)
+            guard primingPolicy.targetFrames <= Self.bridgeCapacityFrames else {
+                throw CoreAudioTransportError.outputBufferExceedsBridgeCapacity(
+                    bufferFrames: primingPolicy.targetFrames,
+                    capacityFrames: Self.bridgeCapacityFrames
+                )
+            }
+            startupPrimeTargetFrames = primingPolicy.targetFrames
+
             let tapEntry: [String: Any] = [
                 kAudioSubTapUIDKey: description.uuid.uuidString,
                 kAudioSubTapDriftCompensationKey: false,
@@ -215,14 +257,25 @@ final class CoreAudioTransportSession {
                 operation: "create output IOProc"
             )
 
-            if let outputIOProcID {
-                try Self.check(AudioDeviceStart(selectedOutput.deviceID, outputIOProcID), operation: "start physical output")
-                isOutputStarted = true
+            guard let captureIOProcID else {
+                throw CoreAudioTransportError.ioProcUnavailable(role: "capture")
             }
-            if let captureIOProcID {
-                try Self.check(AudioDeviceStart(aggregateDeviceID, captureIOProcID), operation: "start tap capture")
-                isCaptureStarted = true
+            guard let outputIOProcID else {
+                throw CoreAudioTransportError.ioProcUnavailable(role: "output")
             }
+
+            N60RealtimeAudioBridgeSetOutputGain(newBridge, 0.0)
+
+            try Self.check(AudioDeviceStart(aggregateDeviceID, captureIOProcID), operation: "start tap capture")
+            isCaptureStarted = true
+
+            let primingResult = Self.waitForStartupPrime(bridge: newBridge, policy: primingPolicy)
+            startupPrimedBeforeOutput = primingResult.primed
+            startupPrimeWaitMicroseconds = primingResult.waitedMicroseconds
+
+            try Self.check(AudioDeviceStart(selectedOutput.deviceID, outputIOProcID), operation: "start physical output")
+            isOutputStarted = true
+            Self.fadeOutputIn(bridge: newBridge)
         } catch {
             stop(fadeOut: false)
             throw error
@@ -243,9 +296,9 @@ final class CoreAudioTransportSession {
         stopped = true
 
         if fadeOut, let bridge, isOutputStarted {
-            for step in stride(from: 7, through: 0, by: -1) {
-                N60RealtimeAudioBridgeSetOutputGain(bridge, Float(step) / 8.0)
-                usleep(1_500)
+            for step in stride(from: Int(Self.fadeStepCount) - 1, through: 0, by: -1) {
+                N60RealtimeAudioBridgeSetOutputGain(bridge, Float(step) / Float(Self.fadeStepCount))
+                usleep(Self.fadeStepMicroseconds)
             }
         }
 
@@ -276,6 +329,35 @@ final class CoreAudioTransportSession {
         if let bridge {
             N60RealtimeAudioBridgeDestroy(bridge)
             self.bridge = nil
+        }
+    }
+
+    private static func waitForStartupPrime(
+        bridge: OpaquePointer,
+        policy: AudioStartupPrimingPolicy
+    ) -> (primed: Bool, waitedMicroseconds: UInt32) {
+        var waited: UInt32 = 0
+
+        while waited < policy.timeoutMicroseconds {
+            let snapshot = N60RealtimeAudioBridgeGetSnapshot(bridge)
+            if snapshot.bufferedFrames >= policy.targetFrames {
+                return (true, waited)
+            }
+
+            let remaining = policy.timeoutMicroseconds - waited
+            let sleepDuration = min(policy.pollIntervalMicroseconds, remaining)
+            usleep(sleepDuration)
+            waited += sleepDuration
+        }
+
+        let finalSnapshot = N60RealtimeAudioBridgeGetSnapshot(bridge)
+        return (finalSnapshot.bufferedFrames >= policy.targetFrames, waited)
+    }
+
+    private static func fadeOutputIn(bridge: OpaquePointer) {
+        for step in 1...fadeStepCount {
+            N60RealtimeAudioBridgeSetOutputGain(bridge, Float(step) / Float(fadeStepCount))
+            usleep(fadeStepMicroseconds)
         }
     }
 
@@ -320,6 +402,23 @@ final class CoreAudioTransportSession {
         var dataSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
         try check(AudioObjectGetPropertyData(objectID, &address, 0, nil, &dataSize, &format), operation: operation)
         return format
+    }
+
+    private static func readUInt32Property(
+        objectID: AudioObjectID,
+        selector: AudioObjectPropertySelector,
+        scope: AudioObjectPropertyScope,
+        operation: String
+    ) throws -> UInt32 {
+        var address = AudioObjectPropertyAddress(
+            mSelector: selector,
+            mScope: scope,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var value: UInt32 = 0
+        var dataSize = UInt32(MemoryLayout<UInt32>.size)
+        try check(AudioObjectGetPropertyData(objectID, &address, 0, nil, &dataSize, &value), operation: operation)
+        return value
     }
 
     private static func check(_ status: OSStatus, operation: String) throws {
