@@ -133,6 +133,7 @@ final class AudioIOEngine: ObservableObject {
             outputSampleRate: transportSession?.outputFormat.sampleRate,
             sessionTransportCounters: processingSessionCounters,
             lifetimeTransportCounters: lifetimeCounters,
+            renderKernelDiagnostics: transportSession?.renderDiagnostics(),
             startupGateOpened: transportSession?.startupGateOpened,
             startupGateTargetFrames: transportSession?.startupGateTargetFrames,
             startupGateActivationFrames: transportSession?.startupGateActivationFrames,
