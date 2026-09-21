@@ -94,11 +94,10 @@ struct ContentView: View {
 
             if let gateOpened = snapshot.startupGateOpened,
                let targetFrames = snapshot.startupGateTargetFrames,
-               let activationFrames = snapshot.startupGateActivationFrames,
-               let waitMicroseconds = snapshot.startupGateWaitMicroseconds {
+               let activationFrames = snapshot.startupGateActivationFrames {
                 diagnosticRow(
                     "Startup gate",
-                    "\(gateOpened ? "open" : "timeout") / target \(targetFrames) / activate \(activationFrames) / \(formattedMicroseconds(waitMicroseconds))"
+                    "\(gateOpened ? "open" : "armed") / target \(targetFrames) / activate \(activationFrames)"
                 )
             }
 
@@ -118,7 +117,7 @@ struct ContentView: View {
             diagnosticRow("Rate rebuilds", "\(snapshot.sampleRateChangesHandled)")
             diagnosticRow(
                 "Recovery",
-                "\(snapshot.recoverySuccesses) success / \(snapshot.recoveryFailures) failed / \(snapshot.recoveryAttempts) attempts"
+                "\(snapshot.recoverySuccesses) success / \(snapshot.recoveryFailures) retry errors / \(snapshot.recoveryAttempts) attempts"
             )
         }
         .font(.system(.body, design: .monospaced))
@@ -139,13 +138,6 @@ struct ContentView: View {
             return String(format: "%.1f kHz", rate / 1_000)
         }
         return String(format: "%.0f Hz", rate)
-    }
-
-    private func formattedMicroseconds(_ microseconds: UInt32) -> String {
-        if microseconds >= 1_000 {
-            return String(format: "%.2f ms", Double(microseconds) / 1_000.0)
-        }
-        return "\(microseconds) µs"
     }
 
     private func formattedBridgeQueue(frames: UInt32, sampleRate: Double?) -> String {
