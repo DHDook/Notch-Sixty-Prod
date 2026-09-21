@@ -19,6 +19,7 @@
 		A20000000000000000000015 /* AudioLifecycleState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000025 /* AudioLifecycleState.swift */; };
 		A20000000000000000000016 /* AudioDiagnosticsSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000026 /* AudioDiagnosticsSnapshot.swift */; };
 		A30000000000000000000010 /* N60RealtimeAudioBridge.c in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000020 /* N60RealtimeAudioBridge.c */; };
+		A30000000000000000000011 /* N60RenderKernel.c in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000021 /* N60RenderKernel.c */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -47,6 +48,8 @@
 		A20000000000000000000025 /* AudioLifecycleState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioLifecycleState.swift; sourceTree = "<group>"; };
 		A20000000000000000000026 /* AudioDiagnosticsSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioDiagnosticsSnapshot.swift; sourceTree = "<group>"; };
 		A30000000000000000000020 /* N60RealtimeAudioBridge.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = N60RealtimeAudioBridge.c; sourceTree = "<group>"; };
+		A30000000000000000000021 /* N60RenderKernel.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = N60RenderKernel.c; sourceTree = "<group>"; };
+		A30000000000000000000022 /* N60RenderKernel.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60RenderKernel.h; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -164,6 +167,8 @@
 			isa = PBXGroup;
 			children = (
 				A30000000000000000000020 /* N60RealtimeAudioBridge.c */,
+				A30000000000000000000021 /* N60RenderKernel.c */,
+				A30000000000000000000022 /* N60RenderKernel.h */,
 			);
 			path = Realtime;
 			sourceTree = "<group>";
@@ -277,6 +282,7 @@
 				A20000000000000000000015 /* AudioLifecycleState.swift in Sources */,
 				A20000000000000000000016 /* AudioDiagnosticsSnapshot.swift in Sources */,
 				A30000000000000000000010 /* N60RealtimeAudioBridge.c in Sources */,
+				A30000000000000000000011 /* N60RenderKernel.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
