@@ -373,12 +373,15 @@ OSStatus N60OutputIOProc(
 
     UInt32 framesToRead = frameCount < available ? frameCount : (UInt32)available;
     float masterGain = bits_to_float(atomic_load_explicit(&bridge->outputGainBits, memory_order_acquire));
+    N60RenderKernelRenderContext renderContext = N60RenderKernelBeginRender(bridge->renderKernel);
+    UInt32 renderedFrames = 0;
 
     for (UInt32 frameIndex = 0; frameIndex < framesToRead; ++frameIndex) {
         N60StereoFrame frame = bridge->frames[(readIndex + frameIndex) % bridge->capacityFrames];
         N60StereoFrame processed;
-        N60RenderKernelProcessStereoFrame(
+        N60RenderKernelProcessStereoFrameInContext(
             bridge->renderKernel,
+            &renderContext,
             frame.left,
             frame.right,
             &processed.left,
@@ -386,11 +389,15 @@ OSStatus N60OutputIOProc(
         );
         float gain = startup_fade_gain(bridge, masterGain);
         if (!write_output_frame(outOutputData, frameIndex, processed, gain)) {
+            N60RenderKernelEndRender(bridge->renderKernel, &renderContext, renderedFrames);
             zero_output(outOutputData);
             atomic_fetch_add_explicit(&bridge->unsupportedBufferLayouts, 1, memory_order_relaxed);
             return noErr;
         }
+        renderedFrames += 1;
     }
+
+    N60RenderKernelEndRender(bridge->renderKernel, &renderContext, renderedFrames);
 
     for (UInt32 frameIndex = framesToRead; frameIndex < frameCount; ++frameIndex) {
         N60StereoFrame silence = {0.0f, 0.0f};
