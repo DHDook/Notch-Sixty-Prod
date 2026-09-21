@@ -65,7 +65,6 @@ final class AudioIOEngine: ObservableObject {
         do {
             let discoveredDevices = try deviceCatalog.outputDevices()
             outputDevices = discoveredDevices
-            lastErrorDescription = nil
             return discoveredDevices
         } catch {
             lastErrorDescription = error.localizedDescription
@@ -137,7 +136,6 @@ final class AudioIOEngine: ObservableObject {
             startupGateOpened: transportSession?.startupGateOpened,
             startupGateTargetFrames: transportSession?.startupGateTargetFrames,
             startupGateActivationFrames: transportSession?.startupGateActivationFrames,
-            startupGateWaitMicroseconds: transportSession?.startupGateWaitMicroseconds,
             sampleRateChangesHandled: sampleRateChangesHandled,
             recoveryAttempts: recoveryAttempts,
             recoverySuccesses: recoverySuccesses,
@@ -209,8 +207,14 @@ final class AudioIOEngine: ObservableObject {
         do { try refreshOutputDevices() } catch { return }
         guard let selectedUID = routeConfiguration.selectedOutputUID else { return }
         let selectedIsPresent = outputDevices.contains { $0.uid == selectedUID }
+
         if !selectedIsPresent && (lifecycle.state == .running || lifecycle.state == .reconfiguring) {
             beginOutputRecovery()
+            return
+        }
+
+        if selectedIsPresent && lifecycle.state == .recoveringOutput {
+            scheduleRecoveryAttempt(generation: recoveryGeneration, delay: 0)
         }
     }
 
@@ -251,42 +255,49 @@ final class AudioIOEngine: ObservableObject {
         try? setLifecycle(.recoveringOutput)
         eventMonitor.removeSelectedOutputSampleRateMonitor()
         tearDownTransport(fadeOut: false)
-        scheduleRecoveryAttempt(generation: generation, attempt: 1)
+        scheduleRecoveryAttempt(generation: generation, delay: 0.5)
     }
 
-    private func scheduleRecoveryAttempt(generation: UInt64, attempt: Int) {
+    private func scheduleRecoveryAttempt(generation: UInt64, delay: TimeInterval) {
         guard generation == recoveryGeneration, lifecycle.state == .recoveringOutput else { return }
+        recoveryWorkItem?.cancel()
         let workItem = DispatchWorkItem { [weak self] in
-            self?.performRecoveryAttempt(generation: generation, attempt: attempt)
+            self?.performRecoveryAttempt(generation: generation)
         }
         recoveryWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: workItem)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
     }
 
-    private func performRecoveryAttempt(generation: UInt64, attempt: Int) {
+    private func performRecoveryAttempt(generation: UInt64) {
         guard generation == recoveryGeneration, lifecycle.state == .recoveringOutput else { return }
         recoveryAttempts &+= 1
+
         do {
             try refreshOutputDevices()
-            if let output = selectedOutputDevice {
+            guard let output = selectedOutputDevice else {
+                lastErrorDescription = "Waiting for selected output to return."
+                scheduleRecoveryAttempt(generation: generation, delay: 0.5)
+                return
+            }
+
+            do {
                 try buildTransport(output: output)
                 try eventMonitor.monitorSampleRate(of: output.deviceID)
                 recoverySuccesses &+= 1
                 try setLifecycle(.running)
                 lastErrorDescription = nil
+                recoveryWorkItem = nil
                 return
+            } catch {
+                recoveryFailures &+= 1
+                lastErrorDescription = "Selected output is present but not ready yet: \(error.localizedDescription)"
+                tearDownTransport(fadeOut: false)
             }
         } catch {
             lastErrorDescription = error.localizedDescription
-            tearDownTransport(fadeOut: false)
         }
 
-        if attempt < 10 {
-            scheduleRecoveryAttempt(generation: generation, attempt: attempt + 1)
-        } else {
-            recoveryFailures &+= 1
-            forceFailedState(AudioRouteSelectionError.outputDeviceUnavailable(uid: routeConfiguration.selectedOutputUID ?? "unknown"))
-        }
+        scheduleRecoveryAttempt(generation: generation, delay: 0.5)
     }
 
     private func handleWillSleep() {
@@ -297,13 +308,17 @@ final class AudioIOEngine: ObservableObject {
         resumeAfterWake = true
         eventMonitor.removeSelectedOutputSampleRateMonitor()
         try? setLifecycle(.stopping)
-        tearDownTransport(fadeOut: false)
+        tearDownTransport(fadeOut: true)
         try? setLifecycle(.idle)
     }
 
     private func handleDidWake() {
         guard resumeAfterWake else { return }
         resumeAfterWake = false
-        do { try start(resetProcessingSessionCounters: false) } catch { lastErrorDescription = error.localizedDescription }
+        do {
+            try start(resetProcessingSessionCounters: false)
+        } catch {
+            lastErrorDescription = error.localizedDescription
+        }
     }
 }
