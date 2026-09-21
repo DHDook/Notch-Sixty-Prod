@@ -5,6 +5,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "N60RenderKernel.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -34,7 +36,14 @@ void N60RealtimeAudioBridgeConfigureOutputGate(
     uint32_t minimumBufferedFrames,
     uint32_t fadeInFrames
 );
+bool N60RealtimeAudioBridgePublishDSPGraph(
+    N60RealtimeAudioBridge * _Nonnull bridge,
+    N60DSPGraphSnapshot snapshot
+);
 N60RealtimeAudioBridgeSnapshot N60RealtimeAudioBridgeGetSnapshot(const N60RealtimeAudioBridge * _Nonnull bridge);
+N60RenderKernelDiagnostics N60RealtimeAudioBridgeGetRenderDiagnostics(
+    const N60RealtimeAudioBridge * _Nonnull bridge
+);
 
 OSStatus N60CaptureIOProc(
     AudioDeviceID inDevice,
