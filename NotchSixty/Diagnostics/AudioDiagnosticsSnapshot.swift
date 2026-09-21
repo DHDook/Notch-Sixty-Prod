@@ -12,7 +12,6 @@ struct AudioDiagnosticsSnapshot: Equatable, Sendable {
     let startupGateOpened: Bool?
     let startupGateTargetFrames: UInt32?
     let startupGateActivationFrames: UInt32?
-    let startupGateWaitMicroseconds: UInt32?
     let sampleRateChangesHandled: UInt64
     let recoveryAttempts: UInt64
     let recoverySuccesses: UInt64
