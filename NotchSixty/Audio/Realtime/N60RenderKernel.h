@@ -21,6 +21,12 @@ typedef struct {
 } N60DSPGraphSnapshot;
 
 typedef struct {
+    N60DSPGraphSnapshot snapshot;
+    uint32_t slotIndex;
+    bool acquired;
+} N60RenderKernelRenderContext;
+
+typedef struct {
     uint64_t renderedFrames;
     uint64_t sanitizedNonFiniteSamples;
     uint64_t flushedDenormalSamples;
@@ -45,7 +51,24 @@ bool N60RenderKernelPublishSnapshot(
     N60DSPGraphSnapshot snapshot
 );
 
-// Realtime-safe: no allocation, blocking locks, logging, I/O, or control-plane work.
+// Realtime-safe buffer contract. Begin acquires one immutable graph generation
+// for the entire hardware buffer; End releases it and accounts rendered frames.
+N60RenderKernelRenderContext N60RenderKernelBeginRender(N60RenderKernel * _Nonnull kernel);
+void N60RenderKernelProcessStereoFrameInContext(
+    N60RenderKernel * _Nonnull kernel,
+    const N60RenderKernelRenderContext * _Nonnull context,
+    float inputLeft,
+    float inputRight,
+    float * _Nonnull outputLeft,
+    float * _Nonnull outputRight
+);
+void N60RenderKernelEndRender(
+    N60RenderKernel * _Nonnull kernel,
+    N60RenderKernelRenderContext * _Nonnull context,
+    uint32_t renderedFrames
+);
+
+// Convenience one-frame wrapper for deterministic tests and non-callback use.
 void N60RenderKernelProcessStereoFrame(
     N60RenderKernel * _Nonnull kernel,
     float inputLeft,
