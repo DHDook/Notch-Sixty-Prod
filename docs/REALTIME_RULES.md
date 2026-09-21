@@ -23,6 +23,18 @@ The audio render path is a hard realtime boundary.
 - count underrun/overrun/format events with atomics
 - keep control-plane recovery outside realtime callbacks
 
+## DSP graph publication
+
+The production render kernel uses preallocated publication slots. Graph construction and publication happen on the serialized control plane; the audio callback never constructs, frees, or waits for a graph.
+
+The output callback acquires one immutable graph generation at the beginning of a hardware buffer and releases it at the end. A hardware buffer therefore never renders partly with an old graph and partly with a newly published graph.
+
+Realtime acquisition is bounded. If the snapshot cannot be acquired within the fixed attempt limit, the kernel uses sanitized pass-through for that buffer and increments a diagnostic counter rather than waiting.
+
+The control-plane publisher is allowed to yield while waiting to reuse an inactive slot whose older realtime reader has not yet released it. This wait is never permitted from an audio callback.
+
+See `docs/DSP_KERNEL.md` for the concrete kernel contract.
+
 ## DSP component contract
 Every realtime DSP component must document:
 1. input/output format
@@ -42,6 +54,7 @@ RT allocations = 0
 RT blocking locks = 0
 RT disk/network I/O = 0
 unexpected NaNs = 0
+snapshot read misses = 0 under normal control-plane update rates
 sustained callback overruns = 0 under supported load
 ```
 

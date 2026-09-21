@@ -43,10 +43,20 @@ Owns control-plane Core Audio lifecycle, device selection, tap/aggregate creatio
 Preallocated lock-free transfer between capture and output clock domains. It exposes bounded counters and never performs control-plane work.
 
 ### RenderKernel
-Owns the realtime rendering contract and applies the current immutable/preallocated `DSPGraphSnapshot`.
+Owns the realtime rendering contract. It acquires one atomically published render-ready graph snapshot per physical-output hardware buffer and uses that immutable generation for the complete callback. Realtime snapshot acquisition is bounded and never waits; graph publication is control-plane-only.
+
+The current PR #12 reference graph is deliberately transparent:
+
+```text
+InputGain → IdentityReferenceStage → OutputGain
+```
+
+It has zero algorithmic latency at unity gain. NaN/Inf and denormal values are contained at the render boundary and diagnosed. See `docs/DSP_KERNEL.md`.
 
 ### DSPGraphSnapshot
-A render-ready graph assembled off the realtime thread. Initial target stages:
+A render-ready graph state assembled off the realtime thread and copied into preallocated publication slots. The foundation snapshot carries sample rate, stereo channel count, input/output gain, bypass, latency, and generation metadata.
+
+Planned substantive stages include:
 
 ```text
 InputGain
@@ -59,7 +69,7 @@ OutputGain
 MeterTap
 ```
 
-Stages may be absent/bypassed. Every stage declares latency and supported channel/rate constraints.
+Stages may be absent/bypassed. Every stage declares latency and supported channel/rate constraints. Richer future graphs must preserve the current render-safe publication and lifetime contract.
 
 ## Lifecycle
 
@@ -89,4 +99,4 @@ Normal termination should ramp output to zero over a short bounded interval, sto
 
 ## Future DSP
 
-DSP implementation should be based on public math/specifications and clean provenance. Multi-seat correction is measurement/optimization logic and must not introduce an actual multichannel playback architecture.
+Substantive DSP implementation should be based on public math/specifications and clean provenance. Multi-seat correction is measurement/optimization logic and must not introduce an actual multichannel playback architecture.

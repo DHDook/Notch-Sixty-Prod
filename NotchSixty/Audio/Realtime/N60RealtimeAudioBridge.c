@@ -12,6 +12,7 @@ typedef struct {
 struct N60RealtimeAudioBridge {
     uint32_t capacityFrames;
     N60StereoFrame *frames;
+    N60RenderKernel *renderKernel;
 
     _Atomic uint64_t writeIndex;
     _Atomic uint64_t readIndex;
@@ -150,6 +151,13 @@ N60RealtimeAudioBridge *N60RealtimeAudioBridgeCreate(uint32_t capacityFrames) {
         return NULL;
     }
 
+    bridge->renderKernel = N60RenderKernelCreate();
+    if (bridge->renderKernel == NULL) {
+        free(bridge->frames);
+        free(bridge);
+        return NULL;
+    }
+
     bridge->capacityFrames = capacityFrames;
     atomic_store_explicit(&bridge->outputGainBits, float_to_bits(1.0f), memory_order_relaxed);
     atomic_store_explicit(&bridge->outputGateOpen, true, memory_order_relaxed);
@@ -160,6 +168,7 @@ void N60RealtimeAudioBridgeDestroy(N60RealtimeAudioBridge *bridge) {
     if (bridge == NULL) {
         return;
     }
+    N60RenderKernelDestroy(bridge->renderKernel);
     free(bridge->frames);
     free(bridge);
 }
@@ -185,6 +194,7 @@ void N60RealtimeAudioBridgeReset(N60RealtimeAudioBridge *bridge) {
     atomic_store_explicit(&bridge->outputGateOpen, true, memory_order_release);
     atomic_store_explicit(&bridge->startupFadeFramesTotal, 0, memory_order_relaxed);
     atomic_store_explicit(&bridge->startupFadeFramesRemaining, 0, memory_order_relaxed);
+    N60RenderKernelReset(bridge->renderKernel);
 }
 
 void N60RealtimeAudioBridgeSetOutputGain(N60RealtimeAudioBridge *bridge, float gain) {
@@ -207,6 +217,16 @@ void N60RealtimeAudioBridgeConfigureOutputGate(
     atomic_store_explicit(&bridge->startupFadeFramesTotal, fadeInFrames, memory_order_relaxed);
     atomic_store_explicit(&bridge->startupFadeFramesRemaining, fadeInFrames, memory_order_relaxed);
     atomic_store_explicit(&bridge->outputGateOpen, minimumBufferedFrames == 0, memory_order_release);
+}
+
+bool N60RealtimeAudioBridgePublishDSPGraph(
+    N60RealtimeAudioBridge *bridge,
+    N60DSPGraphSnapshot snapshot
+) {
+    if (bridge == NULL || bridge->renderKernel == NULL) {
+        return false;
+    }
+    return N60RenderKernelPublishSnapshot(bridge->renderKernel, snapshot);
 }
 
 N60RealtimeAudioBridgeSnapshot N60RealtimeAudioBridgeGetSnapshot(const N60RealtimeAudioBridge *bridge) {
@@ -234,6 +254,16 @@ N60RealtimeAudioBridgeSnapshot N60RealtimeAudioBridgeGetSnapshot(const N60Realti
     }
     snapshot.bufferedFrames = (uint32_t)buffered;
     return snapshot;
+}
+
+N60RenderKernelDiagnostics N60RealtimeAudioBridgeGetRenderDiagnostics(
+    const N60RealtimeAudioBridge *bridge
+) {
+    if (bridge == NULL || bridge->renderKernel == NULL) {
+        N60RenderKernelDiagnostics diagnostics = {0};
+        return diagnostics;
+    }
+    return N60RenderKernelGetDiagnostics(bridge->renderKernel);
 }
 
 OSStatus N60CaptureIOProc(
@@ -343,16 +373,31 @@ OSStatus N60OutputIOProc(
 
     UInt32 framesToRead = frameCount < available ? frameCount : (UInt32)available;
     float masterGain = bits_to_float(atomic_load_explicit(&bridge->outputGainBits, memory_order_acquire));
+    N60RenderKernelRenderContext renderContext = N60RenderKernelBeginRender(bridge->renderKernel);
+    UInt32 renderedFrames = 0;
 
     for (UInt32 frameIndex = 0; frameIndex < framesToRead; ++frameIndex) {
         N60StereoFrame frame = bridge->frames[(readIndex + frameIndex) % bridge->capacityFrames];
+        N60StereoFrame processed;
+        N60RenderKernelProcessStereoFrameInContext(
+            bridge->renderKernel,
+            &renderContext,
+            frame.left,
+            frame.right,
+            &processed.left,
+            &processed.right
+        );
         float gain = startup_fade_gain(bridge, masterGain);
-        if (!write_output_frame(outOutputData, frameIndex, frame, gain)) {
+        if (!write_output_frame(outOutputData, frameIndex, processed, gain)) {
+            N60RenderKernelEndRender(bridge->renderKernel, &renderContext, renderedFrames);
             zero_output(outOutputData);
             atomic_fetch_add_explicit(&bridge->unsupportedBufferLayouts, 1, memory_order_relaxed);
             return noErr;
         }
+        renderedFrames += 1;
     }
+
+    N60RenderKernelEndRender(bridge->renderKernel, &renderContext, renderedFrames);
 
     for (UInt32 frameIndex = framesToRead; frameIndex < frameCount; ++frameIndex) {
         N60StereoFrame silence = {0.0f, 0.0f};
