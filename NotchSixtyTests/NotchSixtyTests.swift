@@ -84,6 +84,8 @@ final class NotchSixtyTests: XCTestCase {
             outputCallbacks: 9,
             capturedFrames: 5_120,
             deliveredFrames: 4_608,
+            gatedOutputCallbacks: 2,
+            gatedOutputFrames: 1_024,
             bufferedFrames: 512
         )
         let second = AudioTransportCounters(
@@ -94,6 +96,8 @@ final class NotchSixtyTests: XCTestCase {
             underrunFrames: 32,
             overrunFrames: 16,
             unsupportedBufferLayouts: 1,
+            gatedOutputCallbacks: 3,
+            gatedOutputFrames: 1_536,
             bufferedFrames: 0
         )
         let total = first + second
@@ -104,25 +108,35 @@ final class NotchSixtyTests: XCTestCase {
         XCTAssertEqual(total.underrunFrames, 32)
         XCTAssertEqual(total.overrunFrames, 16)
         XCTAssertEqual(total.unsupportedBufferLayouts, 1)
+        XCTAssertEqual(total.gatedOutputCallbacks, 5)
+        XCTAssertEqual(total.gatedOutputFrames, 2_560)
         XCTAssertEqual(total.bufferedFrames, 0)
     }
 
-    func testStartupPrimingPolicyUsesPhysicalBufferSize() {
-        let policy = AudioStartupPrimingPolicy(outputBufferFrames: 512)
-        XCTAssertEqual(policy.targetFrames, 512)
+    func testStartupGatePolicyKeepsOneHardwareBufferQueuedAfterOpening() {
+        let policy = AudioStartupGatePolicy(outputBufferFrames: 512)
+        XCTAssertEqual(policy.steadyStateTargetFrames, 512)
+        XCTAssertEqual(policy.activationBufferedFrames, 1_024)
         XCTAssertEqual(policy.timeoutMicroseconds, 250_000)
         XCTAssertEqual(policy.pollIntervalMicroseconds, 250)
     }
 
-    func testStartupPrimingPolicyNeverUsesZeroTargetOrWaitIntervals() {
-        let policy = AudioStartupPrimingPolicy(
+    func testStartupGatePolicyNeverUsesZeroTargetOrWaitIntervals() {
+        let policy = AudioStartupGatePolicy(
             outputBufferFrames: 0,
             timeoutMicroseconds: 0,
             pollIntervalMicroseconds: 0
         )
-        XCTAssertEqual(policy.targetFrames, 1)
+        XCTAssertEqual(policy.steadyStateTargetFrames, 1)
+        XCTAssertEqual(policy.activationBufferedFrames, 2)
         XCTAssertEqual(policy.timeoutMicroseconds, 1)
         XCTAssertEqual(policy.pollIntervalMicroseconds, 1)
+    }
+
+    func testStartupGatePolicyAvoidsUInt32Overflow() {
+        let policy = AudioStartupGatePolicy(outputBufferFrames: UInt32.max)
+        XCTAssertEqual(policy.steadyStateTargetFrames, UInt32.max)
+        XCTAssertEqual(policy.activationBufferedFrames, UInt32.max)
     }
 
     @MainActor
