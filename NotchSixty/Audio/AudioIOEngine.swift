@@ -8,7 +8,8 @@ final class AudioIOEngine: ObservableObject {
     private let eventMonitor: AudioHardwareEventMonitor
     private var lifecycle: AudioLifecycleStateMachine
     private var transportSession: CoreAudioTransportSession?
-    private var archivedCounters = AudioTransportCounters()
+    private var lifetimeArchivedCounters = AudioTransportCounters()
+    private var processingSessionArchivedCounters = AudioTransportCounters()
     private var reconfigurationWorkItem: DispatchWorkItem?
     private var recoveryWorkItem: DispatchWorkItem?
     private var recoveryGeneration: UInt64 = 0
@@ -88,29 +89,7 @@ final class AudioIOEngine: ObservableObject {
     }
 
     func start() throws {
-        guard lifecycle.state == .idle else { return }
-        try refreshOutputDevices()
-        guard let output = selectedOutputDevice else {
-            let error = AudioRouteSelectionError.outputDeviceUnavailable(uid: routeConfiguration.selectedOutputUID ?? "No output selected")
-            lastErrorDescription = error.localizedDescription
-            throw error
-        }
-
-        do {
-            try setLifecycle(.requestingPermission)
-            try setLifecycle(.creatingTap)
-            try buildTransport(output: output)
-            try setLifecycle(.creatingAggregate)
-            try setLifecycle(.openingOutput)
-            try setLifecycle(.starting)
-            try setLifecycle(.running)
-            try eventMonitor.monitorSampleRate(of: output.deviceID)
-            lastErrorDescription = nil
-        } catch {
-            tearDownTransport(fadeOut: false)
-            forceFailedState(error)
-            throw error
-        }
+        try start(resetProcessingSessionCounters: true)
     }
 
     func stop() {
@@ -142,7 +121,8 @@ final class AudioIOEngine: ObservableObject {
     func diagnosticsSnapshot() -> AudioDiagnosticsSnapshot {
         let selectedDevice = selectedOutputDevice
         let currentCounters = transportSession?.counters() ?? AudioTransportCounters()
-        let totalCounters = archivedCounters + currentCounters
+        let processingSessionCounters = processingSessionArchivedCounters + currentCounters
+        let lifetimeCounters = lifetimeArchivedCounters + currentCounters
         return AudioDiagnosticsSnapshot(
             lifecycleState: lifecycle.state,
             selectedOutputUID: routeConfiguration.selectedOutputUID,
@@ -152,13 +132,47 @@ final class AudioIOEngine: ObservableObject {
             discoveredOutputCount: outputDevices.count,
             tapSampleRate: transportSession?.tapFormat.sampleRate,
             outputSampleRate: transportSession?.outputFormat.sampleRate,
-            transportCounters: totalCounters,
+            sessionTransportCounters: processingSessionCounters,
+            lifetimeTransportCounters: lifetimeCounters,
+            startupPrimedBeforeOutput: transportSession?.startupPrimedBeforeOutput,
+            startupPrimeTargetFrames: transportSession?.startupPrimeTargetFrames,
+            startupPrimeWaitMicroseconds: transportSession?.startupPrimeWaitMicroseconds,
             sampleRateChangesHandled: sampleRateChangesHandled,
             recoveryAttempts: recoveryAttempts,
             recoverySuccesses: recoverySuccesses,
             recoveryFailures: recoveryFailures,
             lastErrorDescription: lastErrorDescription
         )
+    }
+
+    private func start(resetProcessingSessionCounters: Bool) throws {
+        guard lifecycle.state == .idle else { return }
+        try refreshOutputDevices()
+        guard let output = selectedOutputDevice else {
+            let error = AudioRouteSelectionError.outputDeviceUnavailable(uid: routeConfiguration.selectedOutputUID ?? "No output selected")
+            lastErrorDescription = error.localizedDescription
+            throw error
+        }
+
+        if resetProcessingSessionCounters {
+            processingSessionArchivedCounters = AudioTransportCounters()
+        }
+
+        do {
+            try setLifecycle(.requestingPermission)
+            try setLifecycle(.creatingTap)
+            try buildTransport(output: output)
+            try setLifecycle(.creatingAggregate)
+            try setLifecycle(.openingOutput)
+            try setLifecycle(.starting)
+            try setLifecycle(.running)
+            try eventMonitor.monitorSampleRate(of: output.deviceID)
+            lastErrorDescription = nil
+        } catch {
+            tearDownTransport(fadeOut: false)
+            forceFailedState(error)
+            throw error
+        }
     }
 
     private func setLifecycle(_ nextState: AudioLifecycleState) throws {
@@ -172,8 +186,11 @@ final class AudioIOEngine: ObservableObject {
 
     private func tearDownTransport(fadeOut: Bool) {
         if let session = transportSession {
-            archivedCounters = archivedCounters + session.counters()
-            archivedCounters.bufferedFrames = 0
+            let counters = session.counters()
+            lifetimeArchivedCounters = lifetimeArchivedCounters + counters
+            lifetimeArchivedCounters.bufferedFrames = 0
+            processingSessionArchivedCounters = processingSessionArchivedCounters + counters
+            processingSessionArchivedCounters.bufferedFrames = 0
             session.stop(fadeOut: fadeOut)
             transportSession = nil
         }
@@ -286,6 +303,6 @@ final class AudioIOEngine: ObservableObject {
     private func handleDidWake() {
         guard resumeAfterWake else { return }
         resumeAfterWake = false
-        do { try start() } catch { lastErrorDescription = error.localizedDescription }
+        do { try start(resetProcessingSessionCounters: false) } catch { lastErrorDescription = error.localizedDescription }
     }
 }

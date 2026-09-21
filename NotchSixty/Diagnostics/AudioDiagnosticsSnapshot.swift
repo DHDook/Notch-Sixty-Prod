@@ -7,7 +7,11 @@ struct AudioDiagnosticsSnapshot: Equatable, Sendable {
     let discoveredOutputCount: Int
     let tapSampleRate: Double?
     let outputSampleRate: Double?
-    let transportCounters: AudioTransportCounters
+    let sessionTransportCounters: AudioTransportCounters
+    let lifetimeTransportCounters: AudioTransportCounters
+    let startupPrimedBeforeOutput: Bool?
+    let startupPrimeTargetFrames: UInt32?
+    let startupPrimeWaitMicroseconds: UInt32?
     let sampleRateChangesHandled: UInt64
     let recoveryAttempts: UInt64
     let recoverySuccesses: UInt64

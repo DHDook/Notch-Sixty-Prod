@@ -72,7 +72,7 @@ struct ContentView: View {
             Spacer(minLength: 0)
         }
         .padding(20)
-        .frame(minWidth: 520, minHeight: 420)
+        .frame(minWidth: 560, minHeight: 500)
         .onAppear {
             engine.prepareForUse()
         }
@@ -83,18 +83,34 @@ struct ContentView: View {
 
     @ViewBuilder
     private func diagnosticsView(_ snapshot: AudioDiagnosticsSnapshot) -> some View {
+        let session = snapshot.sessionTransportCounters
+        let lifetime = snapshot.lifetimeTransportCounters
+
         Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 6) {
             diagnosticRow("State", snapshot.lifecycleState.rawValue)
             diagnosticRow("Selected output", snapshot.selectedOutputName ?? "—")
             diagnosticRow("Tap rate", snapshot.tapSampleRate.map(formattedRate) ?? "—")
             diagnosticRow("Output rate", snapshot.outputSampleRate.map(formattedRate) ?? "—")
-            diagnosticRow("Capture callbacks", "\(snapshot.transportCounters.captureCallbacks)")
-            diagnosticRow("Output callbacks", "\(snapshot.transportCounters.outputCallbacks)")
-            diagnosticRow("Captured frames", "\(snapshot.transportCounters.capturedFrames)")
-            diagnosticRow("Delivered frames", "\(snapshot.transportCounters.deliveredFrames)")
-            diagnosticRow("Underrun frames", "\(snapshot.transportCounters.underrunFrames)")
-            diagnosticRow("Overrun frames", "\(snapshot.transportCounters.overrunFrames)")
-            diagnosticRow("Buffered frames", "\(snapshot.transportCounters.bufferedFrames)")
+
+            if let primed = snapshot.startupPrimedBeforeOutput,
+               let targetFrames = snapshot.startupPrimeTargetFrames,
+               let waitMicroseconds = snapshot.startupPrimeWaitMicroseconds {
+                diagnosticRow(
+                    "Startup prime",
+                    "\(primed ? "ready" : "timeout") / \(targetFrames) frames / \(formattedMicroseconds(waitMicroseconds))"
+                )
+            }
+
+            diagnosticRow("Counter scope", "current processing session")
+            diagnosticRow("Capture callbacks", "\(session.captureCallbacks)")
+            diagnosticRow("Output callbacks", "\(session.outputCallbacks)")
+            diagnosticRow("Captured frames", "\(session.capturedFrames)")
+            diagnosticRow("Delivered frames", "\(session.deliveredFrames)")
+            diagnosticRow("Underrun frames", "\(session.underrunFrames)")
+            diagnosticRow("Overrun frames", "\(session.overrunFrames)")
+            diagnosticRow("Buffered frames", "\(session.bufferedFrames)")
+            diagnosticRow("Lifetime underruns", "\(lifetime.underrunFrames)")
+            diagnosticRow("Lifetime overruns", "\(lifetime.overrunFrames)")
             diagnosticRow("Rate rebuilds", "\(snapshot.sampleRateChangesHandled)")
             diagnosticRow(
                 "Recovery",
@@ -119,5 +135,12 @@ struct ContentView: View {
             return String(format: "%.1f kHz", rate / 1_000)
         }
         return String(format: "%.0f Hz", rate)
+    }
+
+    private func formattedMicroseconds(_ microseconds: UInt32) -> String {
+        if microseconds >= 1_000 {
+            return String(format: "%.2f ms", Double(microseconds) / 1_000.0)
+        }
+        return "\(microseconds) µs"
     }
 }

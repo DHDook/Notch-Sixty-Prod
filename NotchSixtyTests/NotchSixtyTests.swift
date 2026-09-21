@@ -107,6 +107,24 @@ final class NotchSixtyTests: XCTestCase {
         XCTAssertEqual(total.bufferedFrames, 0)
     }
 
+    func testStartupPrimingPolicyUsesPhysicalBufferSize() {
+        let policy = AudioStartupPrimingPolicy(outputBufferFrames: 512)
+        XCTAssertEqual(policy.targetFrames, 512)
+        XCTAssertEqual(policy.timeoutMicroseconds, 250_000)
+        XCTAssertEqual(policy.pollIntervalMicroseconds, 250)
+    }
+
+    func testStartupPrimingPolicyNeverUsesZeroTargetOrWaitIntervals() {
+        let policy = AudioStartupPrimingPolicy(
+            outputBufferFrames: 0,
+            timeoutMicroseconds: 0,
+            pollIntervalMicroseconds: 0
+        )
+        XCTAssertEqual(policy.targetFrames, 1)
+        XCTAssertEqual(policy.timeoutMicroseconds, 1)
+        XCTAssertEqual(policy.pollIntervalMicroseconds, 1)
+    }
+
     @MainActor
     func testSelectionFollowsStableUIDAcrossTransientDeviceIDChange() throws {
         let catalog = StubOutputDeviceCatalog(devices: [
