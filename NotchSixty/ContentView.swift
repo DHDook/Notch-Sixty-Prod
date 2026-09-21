@@ -23,7 +23,7 @@ struct ContentView: View {
             Text("Notch Sixty")
                 .font(.title.bold())
 
-            Text("Production transport validation")
+            Text("Production transport + DSP kernel validation")
                 .foregroundStyle(.secondary)
 
             Picker("Output", selection: selectedUIDBinding) {
@@ -72,7 +72,7 @@ struct ContentView: View {
             Spacer(minLength: 0)
         }
         .padding(20)
-        .frame(minWidth: 600, minHeight: 560)
+        .frame(minWidth: 640, minHeight: 680)
         .onAppear {
             engine.prepareForUse()
         }
@@ -99,6 +99,16 @@ struct ContentView: View {
                     "Startup gate",
                     "\(gateOpened ? "open" : "armed") / target \(targetFrames) / activate \(activationFrames)"
                 )
+            }
+
+            if let render = snapshot.renderKernelDiagnostics {
+                diagnosticRow("DSP graph", "generation \(render.publishedGeneration) / \(render.bypassed ? "bypassed" : "active")")
+                diagnosticRow("DSP rate", formattedRate(render.sampleRate))
+                diagnosticRow("DSP latency", formattedDSPTime(frames: render.latencyFrames, sampleRate: render.sampleRate))
+                diagnosticRow("DSP rendered frames", "\(render.renderedFrames)")
+                diagnosticRow("DSP non-finite sanitized", "\(render.sanitizedNonFiniteSamples)")
+                diagnosticRow("DSP denormals flushed", "\(render.flushedDenormalSamples)")
+                diagnosticRow("DSP snapshot read misses", "\(render.snapshotReadMisses)")
             }
 
             diagnosticRow("Counter scope", "current processing session")
@@ -144,5 +154,11 @@ struct ContentView: View {
         guard let sampleRate, sampleRate > 0 else { return "\(frames) frames" }
         let milliseconds = Double(frames) / sampleRate * 1_000.0
         return String(format: "%u frames / %.2f ms", frames, milliseconds)
+    }
+
+    private func formattedDSPTime(frames: UInt32, sampleRate: Double) -> String {
+        guard sampleRate > 0 else { return "\(frames) frames" }
+        let milliseconds = Double(frames) / sampleRate * 1_000.0
+        return String(format: "%u frames / %.3f ms", frames, milliseconds)
     }
 }
