@@ -9,9 +9,10 @@ struct AudioDiagnosticsSnapshot: Equatable, Sendable {
     let outputSampleRate: Double?
     let sessionTransportCounters: AudioTransportCounters
     let lifetimeTransportCounters: AudioTransportCounters
-    let startupPrimedBeforeOutput: Bool?
-    let startupPrimeTargetFrames: UInt32?
-    let startupPrimeWaitMicroseconds: UInt32?
+    let startupGateOpened: Bool?
+    let startupGateTargetFrames: UInt32?
+    let startupGateActivationFrames: UInt32?
+    let startupGateWaitMicroseconds: UInt32?
     let sampleRateChangesHandled: UInt64
     let recoveryAttempts: UInt64
     let recoverySuccesses: UInt64
