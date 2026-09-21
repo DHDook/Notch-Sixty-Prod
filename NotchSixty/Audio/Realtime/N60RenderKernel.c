@@ -46,22 +46,28 @@ static float sanitize_sample(N60RenderKernel *kernel, float sample) {
     return sample;
 }
 
-static bool acquire_snapshot(N60RenderKernel *kernel, N60DSPGraphSnapshot *snapshot) {
+static N60RenderKernelRenderContext acquire_render_context(N60RenderKernel *kernel) {
+    N60RenderKernelRenderContext context = {0};
+    if (kernel == NULL) {
+        return context;
+    }
+
     for (uint32_t attempt = 0; attempt < N60_SNAPSHOT_ACQUIRE_ATTEMPTS; ++attempt) {
         uint32_t slotIndex = atomic_load_explicit(&kernel->activeSlot, memory_order_acquire);
         N60SnapshotSlot *slot = &kernel->slots[slotIndex];
 
         atomic_fetch_add_explicit(&slot->readers, 1, memory_order_acq_rel);
         if (slotIndex == atomic_load_explicit(&kernel->activeSlot, memory_order_acquire)) {
-            *snapshot = slot->snapshot;
-            atomic_fetch_sub_explicit(&slot->readers, 1, memory_order_release);
-            return true;
+            context.snapshot = slot->snapshot;
+            context.slotIndex = slotIndex;
+            context.acquired = true;
+            return context;
         }
         atomic_fetch_sub_explicit(&slot->readers, 1, memory_order_release);
     }
 
     atomic_fetch_add_explicit(&kernel->snapshotReadMisses, 1, memory_order_relaxed);
-    return false;
+    return context;
 }
 
 N60DSPGraphSnapshot N60DSPGraphSnapshotMakeUnity(double sampleRate) {
@@ -115,8 +121,8 @@ bool N60RenderKernelPublishSnapshot(N60RenderKernel *kernel, N60DSPGraphSnapshot
     uint32_t inactive = active == 0 ? 1 : 0;
     N60SnapshotSlot *slot = &kernel->slots[inactive];
 
-    // Publication is control-plane only. Wait for any callback that still owns
-    // the inactive slot from the previous generation to finish before reuse.
+    // Publication is control-plane only. Wait for a callback that still owns
+    // the inactive slot from an older graph generation to release it.
     while (atomic_load_explicit(&slot->readers, memory_order_acquire) != 0) {
         sched_yield();
     }
@@ -125,6 +131,56 @@ bool N60RenderKernelPublishSnapshot(N60RenderKernel *kernel, N60DSPGraphSnapshot
     slot->snapshot = snapshot;
     atomic_store_explicit(&kernel->activeSlot, inactive, memory_order_release);
     return true;
+}
+
+N60RenderKernelRenderContext N60RenderKernelBeginRender(N60RenderKernel *kernel) {
+    return acquire_render_context(kernel);
+}
+
+void N60RenderKernelProcessStereoFrameInContext(
+    N60RenderKernel *kernel,
+    const N60RenderKernelRenderContext *context,
+    float inputLeft,
+    float inputRight,
+    float *outputLeft,
+    float *outputRight
+) {
+    if (kernel == NULL || context == NULL || outputLeft == NULL || outputRight == NULL) {
+        return;
+    }
+
+    float left = sanitize_sample(kernel, inputLeft);
+    float right = sanitize_sample(kernel, inputRight);
+
+    if (context->acquired && !context->snapshot.bypassed) {
+        left *= context->snapshot.inputGainLinear;
+        right *= context->snapshot.inputGainLinear;
+
+        // PR #12 reference processor: intentional identity stage.
+        // Future graph stages are inserted here behind the same snapshot contract.
+
+        left *= context->snapshot.outputGainLinear;
+        right *= context->snapshot.outputGainLinear;
+    }
+
+    *outputLeft = sanitize_sample(kernel, left);
+    *outputRight = sanitize_sample(kernel, right);
+}
+
+void N60RenderKernelEndRender(
+    N60RenderKernel *kernel,
+    N60RenderKernelRenderContext *context,
+    uint32_t renderedFrames
+) {
+    if (kernel == NULL || context == NULL) {
+        return;
+    }
+
+    if (context->acquired && context->slotIndex < N60_SNAPSHOT_SLOT_COUNT) {
+        atomic_fetch_sub_explicit(&kernel->slots[context->slotIndex].readers, 1, memory_order_release);
+        context->acquired = false;
+    }
+    atomic_fetch_add_explicit(&kernel->renderedFrames, renderedFrames, memory_order_relaxed);
 }
 
 void N60RenderKernelProcessStereoFrame(
@@ -138,28 +194,16 @@ void N60RenderKernelProcessStereoFrame(
         return;
     }
 
-    float left = sanitize_sample(kernel, inputLeft);
-    float right = sanitize_sample(kernel, inputRight);
-    N60DSPGraphSnapshot snapshot;
-
-    if (acquire_snapshot(kernel, &snapshot)) {
-        if (!snapshot.bypassed) {
-            left *= snapshot.inputGainLinear;
-            right *= snapshot.inputGainLinear;
-
-            // PR #12 reference processor: intentional identity stage.
-            // Future graph stages are inserted here behind the same snapshot contract.
-
-            left *= snapshot.outputGainLinear;
-            right *= snapshot.outputGainLinear;
-        }
-    }
-
-    left = sanitize_sample(kernel, left);
-    right = sanitize_sample(kernel, right);
-    *outputLeft = left;
-    *outputRight = right;
-    atomic_fetch_add_explicit(&kernel->renderedFrames, 1, memory_order_relaxed);
+    N60RenderKernelRenderContext context = N60RenderKernelBeginRender(kernel);
+    N60RenderKernelProcessStereoFrameInContext(
+        kernel,
+        &context,
+        inputLeft,
+        inputRight,
+        outputLeft,
+        outputRight
+    );
+    N60RenderKernelEndRender(kernel, &context, 1);
 }
 
 N60RenderKernelDiagnostics N60RenderKernelGetDiagnostics(const N60RenderKernel *kernel) {
@@ -169,13 +213,14 @@ N60RenderKernelDiagnostics N60RenderKernelGetDiagnostics(const N60RenderKernel *
     }
 
     N60RenderKernel *mutableKernel = (N60RenderKernel *)kernel;
-    N60DSPGraphSnapshot snapshot;
-    if (acquire_snapshot(mutableKernel, &snapshot)) {
-        diagnostics.publishedGeneration = snapshot.generation;
-        diagnostics.latencyFrames = snapshot.latencyFrames;
-        diagnostics.sampleRate = snapshot.sampleRate;
-        diagnostics.channelCount = snapshot.channelCount;
-        diagnostics.bypassed = snapshot.bypassed;
+    N60RenderKernelRenderContext context = acquire_render_context(mutableKernel);
+    if (context.acquired) {
+        diagnostics.publishedGeneration = context.snapshot.generation;
+        diagnostics.latencyFrames = context.snapshot.latencyFrames;
+        diagnostics.sampleRate = context.snapshot.sampleRate;
+        diagnostics.channelCount = context.snapshot.channelCount;
+        diagnostics.bypassed = context.snapshot.bypassed;
+        N60RenderKernelEndRender(mutableKernel, &context, 0);
     }
 
     diagnostics.renderedFrames = atomic_load_explicit(&kernel->renderedFrames, memory_order_relaxed);
