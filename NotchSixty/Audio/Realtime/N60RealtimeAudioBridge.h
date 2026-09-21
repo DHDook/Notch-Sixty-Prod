@@ -29,7 +29,11 @@ N60RealtimeAudioBridge * _Nullable N60RealtimeAudioBridgeCreate(uint32_t capacit
 void N60RealtimeAudioBridgeDestroy(N60RealtimeAudioBridge * _Nonnull bridge);
 void N60RealtimeAudioBridgeReset(N60RealtimeAudioBridge * _Nonnull bridge);
 void N60RealtimeAudioBridgeSetOutputGain(N60RealtimeAudioBridge * _Nonnull bridge, float gain);
-void N60RealtimeAudioBridgeConfigureOutputGate(N60RealtimeAudioBridge * _Nonnull bridge, uint32_t minimumBufferedFrames);
+void N60RealtimeAudioBridgeConfigureOutputGate(
+    N60RealtimeAudioBridge * _Nonnull bridge,
+    uint32_t minimumBufferedFrames,
+    uint32_t fadeInFrames
+);
 N60RealtimeAudioBridgeSnapshot N60RealtimeAudioBridgeGetSnapshot(const N60RealtimeAudioBridge * _Nonnull bridge);
 
 OSStatus N60CaptureIOProc(

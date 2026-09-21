@@ -1,6 +1,6 @@
 # Production Transport Validation
 
-This matrix validates the first production Core Audio transport implementation before DSP is added.
+This matrix validates the production Core Audio transport implementation before DSP is added.
 
 The application under test is the commercial `NotchSixty` target. Processing is unity transport only.
 
@@ -11,67 +11,48 @@ The application under test is the commercial `NotchSixty` target. Processing is 
 - original dry system audio is suppressed while the tap is actively read
 - transport remains native-rate; no hidden SRC
 - callbacks perform no allocation, blocking locks, logging, UI access, file/network I/O, or async work
-- physical output starts with a realtime gate closed and emits silence without counting underruns
-- the gate opens only when enough captured audio exists to consume one hardware buffer while retaining one hardware buffer queued
-- after permission has been granted, startup should produce zero session underruns/overruns and settle near one hardware buffer of bridge depth
-- normal Stop/Quit tears down tap/aggregate/output in a bounded order
+- startup may remain armed indefinitely while the source is silent; silence is not a transport failure
+- the realtime output callback opens the startup gate when enough captured audio arrives and applies a short fade-in
+- steady-state underrun/overrun counters must not grow
+- output recovery never silently falls back and does not fail merely because the source is paused
+- normal Stop/Quit and sleep teardown use bounded fade-out before stopping output
 - force-quit/crash must not leave system audio permanently muted
 
 ## Manual matrix
 
 | ID | Scenario | Expected result | Status |
 |---|---|---|---|
-| T-01 | Launch and enumerate outputs | Physical outputs appear; no private tap/aggregate is shown as a user-selectable product output | Pending |
-| T-02 | Start selected output at 48 kHz | State reaches `running`; startup gate reports open; audible system audio is routed through Notch Sixty; tap/output rates match; session underruns/overruns remain zero | Pending |
-| T-03 | Self exclusion | Notch Sixty does not recursively capture its own rendered output | Pending |
-| T-04 | Dry suppression | No doubled dry+processed signal while running; Stop restores normal system playback | Pending |
-| T-05 | 44.1 kHz cold start | Native tap/output both report 44.1 kHz and playback is clean | Pending |
-| T-06 | 96 kHz cold start | Native tap/output both report 96 kHz and playback is clean | Pending |
-| T-07 | High-rate cold start | Test every rate exposed by the selected DAC through 384 kHz; no transport whitelist may reject a device-supported rate | Partial — 384 kHz transport exercised successfully; low-latency gate validation pending |
-| T-08 | Live rate change | Change Audio MIDI nominal rate while running; lifecycle enters `reconfiguring`, rebuilds, and returns to `running` | Pending |
-| T-09 | Selected output unplug/replug | Lifecycle enters `recoveringOutput`; no silent fallback occurs; same UID resumes automatically after replug | Pending |
+| T-01 | Launch and enumerate outputs | Physical outputs appear; no private tap/aggregate is shown as a user-selectable product output | Passed |
+| T-02 | Start selected output with active audio | State reaches `running`; gate opens automatically; tap/output rates match; session underruns remain zero | Passed at 384 kHz |
+| T-03 | Self exclusion | Notch Sixty does not recursively capture its own rendered output | Passed |
+| T-04 | Dry suppression | No doubled dry+processed signal while running; Stop restores normal system playback | Passed |
+| T-05 | Start selected output while source is silent | State reaches `running`; gate remains `armed`; no fatal timeout; first later audio opens the gate and fades in | Pending PR #11 validation |
+| T-06 | 44.1/48/96/384 kHz cold start | Native tap/output rates match and playback is clean | Partial |
+| T-07 | High-rate steady state | Device-supported rates through 384 kHz are accepted without a transport whitelist | 384 kHz passed |
+| T-08 | Live rate change | Rebuilds automatically and returns to `running`; no underrun/overrun growth | Passed — five live rebuilds |
+| T-09 | Selected output unplug/replug while source paused | State remains recoverable; same UID resumes automatically; no fallback; playback resumes when source restarts | Pending PR #11 validation |
 | T-10 | Change macOS default output | Notch Sixty remains pinned to its explicitly selected physical output | Pending |
-| T-11 | Sleep/wake | Transport tears down for sleep and returns to `running` after wake when the selected device is present | Pending |
-| T-12 | Stop/Start repeatedly | Dry path restores on Stop and transport restarts cleanly with no stale buffered audio; session counters reset on an explicit new Start | Pending |
+| T-11 | Sleep/wake with paused source | Graceful fade on sleep; transport resumes/arms after wake; later playback resumes through app | Pending PR #11 validation |
+| T-12 | Stop/Start repeatedly, including while silent | Restarts cleanly; session counters reset only on explicit new Start | Pending PR #11 validation |
 | T-13 | Normal Quit while active | Short fade prevents abrupt termination artifact; system audio restores | Pending |
 | T-14 | Force Quit while active | System audio recovers without manual Core Audio reset; note any brief termination transient | Pending |
-| T-15 | 30-minute soak | 0 unsupported layouts; no sustained underrun/overrun growth during active playback; bridge depth remains bounded near the hardware-buffer target | Pending |
-| T-16 | 2-hour soak | Stable CPU/memory and transport counters; no runaway buffer drift or lifecycle failure | Pending |
-| T-17 | Permission first run | macOS system-audio capture permission flow is understandable; after granting required permission/relaunch, Start works | Pending |
+| T-15 | 30-minute soak | No sustained underrun/overrun growth; no audio artifacts | Pending |
+| T-16 | 2-hour soak | Stable CPU/memory and transport counters; no runaway bridge drift | Pending |
+| T-17 | Permission first run | macOS system-audio capture permission flow is understandable; after required permission/relaunch, Start works | Passed |
 
-## Preliminary hardware evidence
+## Hardware evidence to date
 
-### Initial output-first startup
+At 384 kHz on a Schiit Modi 5 with a 512-frame physical buffer:
 
-On 2026-09-20, the first production-repository hardware build was run through a Schiit Modi 5 at 384 kHz. A roughly ten-minute steady-state sample reported:
+- startup gate activation threshold: 1,024 frames
+- steady bridge queue: typically 512–1,024 frames (about 1.33–2.67 ms)
+- steady-state underruns: 0
+- steady-state overruns: 0
+- five live sample-rate rebuilds completed with audio recovering in under one second each
+- an unplug/replug test exposed that the prior startup gate incorrectly required active source audio; recovery attempts failed while the source was paused, then the same build started normally as soon as audio playback resumed
+- sleep/wake preserved transport functionality, but a brief sleep-entry transient was observed; PR #11 changes sleep teardown to use the normal fade-out path
 
-- tap rate: 384 kHz
-- output rate: 384 kHz
-- captured frames: 486,950,912
-- delivered frames: 486,950,400
-- buffered frames: 512
-- overrun frames: 0
-- underrun frames: 17,408, all accumulated during startup and unchanged throughout the steady-state observation
-- rate rebuilds: 0
-- recovery attempts: 0
-
-The 512-frame captured/delivered difference exactly matched the reported buffered depth. This established that steady-state transport was stable but startup ordering caused a brief underrun burst.
-
-### Capture-first priming experiment
-
-The next build started capture first and waited for one 512-frame buffer before starting physical output. It eliminated underruns and overruns, but exposed a fixed startup backlog:
-
-- startup prime: ready / 512 frames / 8.25 ms
-- session underruns: 0
-- session overruns: 0
-- buffered frames after startup: approximately 47,616–48,128
-- at 384 kHz that queue represented approximately 124–125 ms of bridge latency
-- captured minus delivered exactly matched the buffered-frame count
-- the backlog remained approximately stable over several minutes rather than growing continuously
-
-This showed that the physical output device took time to begin callbacks while capture was already accumulating audio. The final startup design therefore starts the physical output callback first behind a realtime gate. While gated, output emits silence and does not count underruns. Capture then starts. The output callback opens the gate only after two hardware buffers are queued, consumes one immediately, and should therefore retain approximately one hardware buffer in the bridge.
-
-For a 512-frame Modi 5 buffer at 384 kHz, the target bridge queue is approximately 512 frames / 1.33 ms.
+The idle-source finding changes the intended startup model: transport creation succeeds independently of program material. The gate remains armed for as long as necessary and opens asynchronously on the first captured audio.
 
 ## Diagnostic evidence
 
@@ -79,18 +60,17 @@ For hardware tests record:
 
 - macOS build and Mac model
 - selected output name + stable UID
-- nominal tap/output rates
-- startup-gate state, steady-state target, activation threshold, and wait duration
-- gated output callback/frame counts during startup
+- tap/output rates
+- startup-gate state (`armed` or `open`), target frames, activation frames
 - runtime
 - capture/output callback counts
+- gated output callbacks/frames
 - session captured/delivered frames
 - session underrun/overrun frames
 - lifetime underrun/overrun frames
-- unsupported buffer-layout count
-- buffered-frame depth and computed bridge-queue latency
+- buffered-frame depth / bridge queue milliseconds
 - rate rebuild count
-- recovery attempts/successes/failures
+- recovery attempts/successes/retry errors
 - last error, if any
 - subjective artifact notes
 
