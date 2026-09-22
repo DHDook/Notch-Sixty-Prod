@@ -10,10 +10,13 @@
 #define N60_SNAPSHOT_ACQUIRE_ATTEMPTS 3
 #define N60_EQ_TRANSITION_SECONDS 0.005
 #define N60_GAIN_TRANSITION_SECONDS 0.005
+#define N60_CROSSOVER_TRANSITION_SECONDS 0.008
 #define N60_EQ_MIN_TRANSITION_FRAMES 32
 #define N60_EQ_MAX_TRANSITION_FRAMES 4096
 #define N60_GAIN_MIN_TRANSITION_FRAMES 32
 #define N60_GAIN_MAX_TRANSITION_FRAMES 4096
+#define N60_CROSSOVER_MIN_TRANSITION_FRAMES 64
+#define N60_CROSSOVER_MAX_TRANSITION_FRAMES 8192
 
 typedef struct {
     N60DSPGraphSnapshot snapshot;
@@ -41,12 +44,27 @@ typedef struct {
     uint32_t transitionFramesRemaining;
 } N60SmoothedGain;
 
+typedef struct {
+    N60CrossoverSnapshot snapshot;
+    N60BiquadState mainsLeft[N60_MAX_CROSSOVER_SECTIONS];
+    N60BiquadState mainsRight[N60_MAX_CROSSOVER_SECTIONS];
+    N60BiquadState subMono[N60_MAX_CROSSOVER_SECTIONS];
+} N60CrossoverPathRuntime;
+
+typedef struct {
+    N60CrossoverPathRuntime current;
+    N60CrossoverPathRuntime pending;
+    uint32_t transitionFramesTotal;
+    uint32_t transitionFramesRemaining;
+} N60CrossoverRuntime;
+
 struct N60RenderKernel {
     N60SnapshotSlot slots[N60_SNAPSHOT_SLOT_COUNT];
     _Atomic uint32_t activeSlot;
     _Atomic uint64_t nextGeneration;
 
     N60EQBandRuntime eqRuntime[N60_MAX_EQ_BANDS];
+    N60CrossoverRuntime crossoverRuntime;
     N60SmoothedGain inputGain;
     N60SmoothedGain headroomGain;
     N60SmoothedGain outputGain;
@@ -92,11 +110,7 @@ static float bits_to_float(uint32_t bits) {
 }
 
 static bool coefficients_are_finite(N60BiquadCoefficients coefficients) {
-    return isfinite(coefficients.b0)
-        && isfinite(coefficients.b1)
-        && isfinite(coefficients.b2)
-        && isfinite(coefficients.a1)
-        && isfinite(coefficients.a2);
+    return N60BiquadCoefficientsAreFinite(coefficients);
 }
 
 static bool coefficients_equal(N60BiquadCoefficients lhs, N60BiquadCoefficients rhs) {
@@ -108,10 +122,7 @@ static bool coefficients_equal(N60BiquadCoefficients lhs, N60BiquadCoefficients 
 }
 
 static bool band_snapshot_is_valid(N60BiquadBandSnapshot band, double sampleRate) {
-    if (!band.enabled) {
-        return true;
-    }
-
+    if (!band.enabled) return true;
     return isfinite(band.frequencyHz)
         && band.frequencyHz > 0.0
         && band.frequencyHz < sampleRate * 0.5
@@ -119,6 +130,37 @@ static bool band_snapshot_is_valid(N60BiquadBandSnapshot band, double sampleRate
         && isfinite(band.q)
         && band.q > 0.0
         && coefficients_are_finite(band.coefficients);
+}
+
+static bool crossover_snapshot_is_valid(N60CrossoverSnapshot crossover, double sampleRate) {
+    if (!isfinite(crossover.frequencyHz)
+        || crossover.frequencyHz <= 0.0
+        || !isfinite(crossover.subGainLinear)
+        || crossover.subGainLinear < 0.0f
+        || crossover.monitorMode < N60CrossoverMonitorModeRecombined
+        || crossover.monitorMode > N60CrossoverMonitorModeSubOnly) {
+        return false;
+    }
+
+    if (!crossover.enabled) return true;
+    if (crossover.frequencyHz >= sampleRate * 0.5
+        || crossover.sectionCount == 0
+        || crossover.sectionCount > N60_MAX_CROSSOVER_SECTIONS) {
+        return false;
+    }
+
+    uint32_t expectedSections = crossover.topology == N60CrossoverTopologyLinkwitzRiley24 ? 2
+        : crossover.topology == N60CrossoverTopologyLinkwitzRiley48 ? 4
+        : 0;
+    if (expectedSections == 0 || crossover.sectionCount != expectedSections) return false;
+
+    for (uint32_t index = 0; index < crossover.sectionCount; ++index) {
+        if (!coefficients_are_finite(crossover.mainsHighPass[index])
+            || !coefficients_are_finite(crossover.subLowPass[index])) {
+            return false;
+        }
+    }
+    return true;
 }
 
 static bool snapshot_is_valid(N60DSPGraphSnapshot snapshot) {
@@ -131,26 +173,21 @@ static bool snapshot_is_valid(N60DSPGraphSnapshot snapshot) {
         || snapshot.headroomGainLinear < 0.0f
         || !isfinite(snapshot.outputGainLinear)
         || snapshot.outputGainLinear < 0.0f
-        || snapshot.eqBandCount > N60_MAX_EQ_BANDS) {
+        || snapshot.eqBandCount > N60_MAX_EQ_BANDS
+        || !crossover_snapshot_is_valid(snapshot.crossover, snapshot.sampleRate)) {
         return false;
     }
 
     for (uint32_t index = 0; index < snapshot.eqBandCount; ++index) {
-        if (!band_snapshot_is_valid(snapshot.eqBands[index], snapshot.sampleRate)) {
-            return false;
-        }
+        if (!band_snapshot_is_valid(snapshot.eqBands[index], snapshot.sampleRate)) return false;
     }
     return true;
 }
 
 static uint32_t transition_frames(double sampleRate, double seconds, uint32_t minimumFrames, uint32_t maximumFrames) {
     double requested = sampleRate * seconds;
-    if (requested < (double)minimumFrames) {
-        return minimumFrames;
-    }
-    if (requested > (double)maximumFrames) {
-        return maximumFrames;
-    }
+    if (requested < (double)minimumFrames) return minimumFrames;
+    if (requested > (double)maximumFrames) return maximumFrames;
     return (uint32_t)llround(requested);
 }
 
@@ -160,6 +197,10 @@ static uint32_t eq_transition_frames_for_sample_rate(double sampleRate) {
 
 static uint32_t gain_transition_frames_for_sample_rate(double sampleRate) {
     return transition_frames(sampleRate, N60_GAIN_TRANSITION_SECONDS, N60_GAIN_MIN_TRANSITION_FRAMES, N60_GAIN_MAX_TRANSITION_FRAMES);
+}
+
+static uint32_t crossover_transition_frames_for_sample_rate(double sampleRate) {
+    return transition_frames(sampleRate, N60_CROSSOVER_TRANSITION_SECONDS, N60_CROSSOVER_MIN_TRANSITION_FRAMES, N60_CROSSOVER_MAX_TRANSITION_FRAMES);
 }
 
 static void clear_state(N60BiquadState *state) {
@@ -181,9 +222,7 @@ static void reset_band_runtime(N60EQBandRuntime *runtime) {
 }
 
 static void reset_eq_runtime(N60RenderKernel *kernel) {
-    for (uint32_t index = 0; index < N60_MAX_EQ_BANDS; ++index) {
-        reset_band_runtime(&kernel->eqRuntime[index]);
-    }
+    for (uint32_t index = 0; index < N60_MAX_EQ_BANDS; ++index) reset_band_runtime(&kernel->eqRuntime[index]);
 }
 
 static void reset_smoothed_gain(N60SmoothedGain *gain, float value) {
@@ -195,9 +234,7 @@ static void reset_smoothed_gain(N60SmoothedGain *gain, float value) {
 }
 
 static void schedule_gain_transition(N60SmoothedGain *gain, float target, uint32_t transitionFrames) {
-    if (gain->target == target && gain->transitionFramesRemaining == 0) {
-        return;
-    }
+    if (gain->target == target && gain->transitionFramesRemaining == 0) return;
     gain->start = gain->current;
     gain->target = target;
     gain->transitionFramesTotal = transitionFrames > 0 ? transitionFrames : 1;
@@ -209,21 +246,16 @@ static float next_gain_value(N60SmoothedGain *gain) {
         gain->current = gain->target;
         return gain->current;
     }
-
     uint32_t completed = gain->transitionFramesTotal - gain->transitionFramesRemaining + 1;
     float mix = (float)completed / (float)gain->transitionFramesTotal;
     gain->current = gain->start + (gain->target - gain->start) * mix;
     gain->transitionFramesRemaining -= 1;
-    if (gain->transitionFramesRemaining == 0) {
-        gain->current = gain->target;
-    }
+    if (gain->transitionFramesRemaining == 0) gain->current = gain->target;
     return gain->current;
 }
 
 static void promote_pending_filter(N60EQBandRuntime *runtime) {
-    if (runtime->transitionFramesRemaining == 0) {
-        return;
-    }
+    if (runtime->transitionFramesRemaining == 0) return;
     runtime->currentCoefficients = runtime->pendingCoefficients;
     runtime->currentLeft = runtime->pendingLeft;
     runtime->currentRight = runtime->pendingRight;
@@ -234,11 +266,7 @@ static void promote_pending_filter(N60EQBandRuntime *runtime) {
 
 static void schedule_band_transition(N60EQBandRuntime *runtime, bool enabled, N60BiquadCoefficients coefficients, uint32_t transitionFrames) {
     promote_pending_filter(runtime);
-    if (runtime->currentEnabled == enabled
-        && (!enabled || coefficients_equal(runtime->currentCoefficients, coefficients))) {
-        return;
-    }
-
+    if (runtime->currentEnabled == enabled && (!enabled || coefficients_equal(runtime->currentCoefficients, coefficients))) return;
     runtime->pendingEnabled = enabled;
     runtime->pendingCoefficients = enabled ? coefficients : N60BiquadCoefficientsMakeIdentity();
     runtime->pendingLeft = runtime->currentLeft;
@@ -247,21 +275,59 @@ static void schedule_band_transition(N60EQBandRuntime *runtime, bool enabled, N6
     runtime->transitionFramesRemaining = runtime->transitionFramesTotal;
 }
 
-static void prepare_runtime_for_snapshot(N60RenderKernel *kernel, const N60DSPGraphSnapshot *snapshot) {
-    if (kernel->preparedGeneration == snapshot->generation) {
-        return;
+static void reset_crossover_path(N60CrossoverPathRuntime *path, N60CrossoverSnapshot snapshot) {
+    memset(path, 0, sizeof(*path));
+    path->snapshot = snapshot;
+}
+
+static void reset_crossover_runtime(N60CrossoverRuntime *runtime, N60CrossoverSnapshot snapshot) {
+    reset_crossover_path(&runtime->current, snapshot);
+    reset_crossover_path(&runtime->pending, snapshot);
+    runtime->transitionFramesTotal = 0;
+    runtime->transitionFramesRemaining = 0;
+}
+
+static bool crossover_snapshots_equal(N60CrossoverSnapshot lhs, N60CrossoverSnapshot rhs) {
+    if (lhs.enabled != rhs.enabled
+        || lhs.frequencyHz != rhs.frequencyHz
+        || lhs.topology != rhs.topology
+        || lhs.monitorMode != rhs.monitorMode
+        || lhs.subGainLinear != rhs.subGainLinear
+        || lhs.subPolarityInverted != rhs.subPolarityInverted
+        || lhs.sectionCount != rhs.sectionCount) {
+        return false;
     }
+    for (uint32_t index = 0; index < lhs.sectionCount; ++index) {
+        if (!coefficients_equal(lhs.mainsHighPass[index], rhs.mainsHighPass[index])
+            || !coefficients_equal(lhs.subLowPass[index], rhs.subLowPass[index])) return false;
+    }
+    return true;
+}
+
+static void promote_pending_crossover(N60CrossoverRuntime *runtime) {
+    if (runtime->transitionFramesRemaining == 0) return;
+    runtime->current = runtime->pending;
+    runtime->transitionFramesTotal = 0;
+    runtime->transitionFramesRemaining = 0;
+}
+
+static void schedule_crossover_transition(N60CrossoverRuntime *runtime, N60CrossoverSnapshot snapshot, uint32_t transitionFrames) {
+    promote_pending_crossover(runtime);
+    if (crossover_snapshots_equal(runtime->current.snapshot, snapshot)) return;
+    reset_crossover_path(&runtime->pending, snapshot);
+    runtime->transitionFramesTotal = transitionFrames > 0 ? transitionFrames : 1;
+    runtime->transitionFramesRemaining = runtime->transitionFramesTotal;
+}
+
+static void prepare_runtime_for_snapshot(N60RenderKernel *kernel, const N60DSPGraphSnapshot *snapshot) {
+    if (kernel->preparedGeneration == snapshot->generation) return;
 
     bool firstPreparation = kernel->preparedGeneration == 0;
-    bool sampleRateChanged = kernel->preparedSampleRate != 0.0
-        && fabs(kernel->preparedSampleRate - snapshot->sampleRate) > 0.5;
+    bool sampleRateChanged = kernel->preparedSampleRate != 0.0 && fabs(kernel->preparedSampleRate - snapshot->sampleRate) > 0.5;
     bool leavingGraphBypass = kernel->preparedGraphBypassed && !snapshot->bypassed;
     bool leavingEQBypass = kernel->preparedEQBypassed && !snapshot->eqBypassed;
 
-    uint32_t gainFrames = snapshot->gainTransitionFrames > 0
-        ? snapshot->gainTransitionFrames
-        : gain_transition_frames_for_sample_rate(snapshot->sampleRate);
-
+    uint32_t gainFrames = snapshot->gainTransitionFrames > 0 ? snapshot->gainTransitionFrames : gain_transition_frames_for_sample_rate(snapshot->sampleRate);
     if (firstPreparation || sampleRateChanged) {
         reset_smoothed_gain(&kernel->inputGain, snapshot->inputGainLinear);
         reset_smoothed_gain(&kernel->headroomGain, snapshot->headroomGainLinear);
@@ -272,14 +338,9 @@ static void prepare_runtime_for_snapshot(N60RenderKernel *kernel, const N60DSPGr
         schedule_gain_transition(&kernel->outputGain, snapshot->outputGainLinear, gainFrames);
     }
 
-    if (sampleRateChanged || leavingGraphBypass || leavingEQBypass) {
-        reset_eq_runtime(kernel);
-    }
-
+    if (sampleRateChanged || leavingGraphBypass || leavingEQBypass) reset_eq_runtime(kernel);
     if (!snapshot->bypassed && !snapshot->eqBypassed) {
-        uint32_t eqFrames = snapshot->eqTransitionFrames > 0
-            ? snapshot->eqTransitionFrames
-            : eq_transition_frames_for_sample_rate(snapshot->sampleRate);
+        uint32_t eqFrames = snapshot->eqTransitionFrames > 0 ? snapshot->eqTransitionFrames : eq_transition_frames_for_sample_rate(snapshot->sampleRate);
         for (uint32_t index = 0; index < N60_MAX_EQ_BANDS; ++index) {
             bool enabled = false;
             N60BiquadCoefficients coefficients = N60BiquadCoefficientsMakeIdentity();
@@ -293,6 +354,15 @@ static void prepare_runtime_for_snapshot(N60RenderKernel *kernel, const N60DSPGr
         reset_eq_runtime(kernel);
     }
 
+    if (firstPreparation || sampleRateChanged || leavingGraphBypass) {
+        reset_crossover_runtime(&kernel->crossoverRuntime, snapshot->crossover);
+    } else {
+        uint32_t crossoverFrames = snapshot->crossoverTransitionFrames > 0
+            ? snapshot->crossoverTransitionFrames
+            : crossover_transition_frames_for_sample_rate(snapshot->sampleRate);
+        schedule_crossover_transition(&kernel->crossoverRuntime, snapshot->crossover, crossoverFrames);
+    }
+
     kernel->preparedGeneration = snapshot->generation;
     kernel->preparedSampleRate = snapshot->sampleRate;
     kernel->preparedGraphBypassed = snapshot->bypassed;
@@ -302,15 +372,9 @@ static void prepare_runtime_for_snapshot(N60RenderKernel *kernel, const N60DSPGr
 static float process_eq_band(N60EQBandRuntime *runtime, float input, bool leftChannel) {
     N60BiquadState *currentState = leftChannel ? &runtime->currentLeft : &runtime->currentRight;
     N60BiquadState *pendingState = leftChannel ? &runtime->pendingLeft : &runtime->pendingRight;
-    float currentOutput = runtime->currentEnabled
-        ? N60BiquadProcessSample(runtime->currentCoefficients, currentState, input)
-        : input;
-    if (runtime->transitionFramesRemaining == 0) {
-        return currentOutput;
-    }
-    float pendingOutput = runtime->pendingEnabled
-        ? N60BiquadProcessSample(runtime->pendingCoefficients, pendingState, input)
-        : input;
+    float currentOutput = runtime->currentEnabled ? N60BiquadProcessSample(runtime->currentCoefficients, currentState, input) : input;
+    if (runtime->transitionFramesRemaining == 0) return currentOutput;
+    float pendingOutput = runtime->pendingEnabled ? N60BiquadProcessSample(runtime->pendingCoefficients, pendingState, input) : input;
     uint32_t completed = runtime->transitionFramesTotal - runtime->transitionFramesRemaining + 1;
     float mix = (float)completed / (float)runtime->transitionFramesTotal;
     return currentOutput + (pendingOutput - currentOutput) * mix;
@@ -319,9 +383,7 @@ static float process_eq_band(N60EQBandRuntime *runtime, float input, bool leftCh
 static void advance_eq_transitions(N60RenderKernel *kernel) {
     for (uint32_t index = 0; index < N60_MAX_EQ_BANDS; ++index) {
         N60EQBandRuntime *runtime = &kernel->eqRuntime[index];
-        if (runtime->transitionFramesRemaining == 0) {
-            continue;
-        }
+        if (runtime->transitionFramesRemaining == 0) continue;
         runtime->transitionFramesRemaining -= 1;
         if (runtime->transitionFramesRemaining == 0) {
             runtime->currentCoefficients = runtime->pendingCoefficients;
@@ -337,6 +399,72 @@ static void advance_eq_transitions(N60RenderKernel *kernel) {
     }
 }
 
+static void process_crossover_path(
+    N60CrossoverPathRuntime *path,
+    float inputLeft,
+    float inputRight,
+    float *outputLeft,
+    float *outputRight
+) {
+    if (!path->snapshot.enabled) {
+        *outputLeft = inputLeft;
+        *outputRight = inputRight;
+        return;
+    }
+
+    float mainsLeft = inputLeft;
+    float mainsRight = inputRight;
+    float subMono = (inputLeft + inputRight) * 0.5f;
+    for (uint32_t index = 0; index < path->snapshot.sectionCount; ++index) {
+        mainsLeft = N60BiquadProcessSample(path->snapshot.mainsHighPass[index], &path->mainsLeft[index], mainsLeft);
+        mainsRight = N60BiquadProcessSample(path->snapshot.mainsHighPass[index], &path->mainsRight[index], mainsRight);
+        subMono = N60BiquadProcessSample(path->snapshot.subLowPass[index], &path->subMono[index], subMono);
+    }
+    subMono *= path->snapshot.subGainLinear;
+    if (path->snapshot.subPolarityInverted) subMono = -subMono;
+
+    switch (path->snapshot.monitorMode) {
+    case N60CrossoverMonitorModeMainsOnly:
+        *outputLeft = mainsLeft;
+        *outputRight = mainsRight;
+        break;
+    case N60CrossoverMonitorModeSubOnly:
+        *outputLeft = subMono;
+        *outputRight = subMono;
+        break;
+    case N60CrossoverMonitorModeRecombined:
+    default:
+        *outputLeft = mainsLeft + subMono;
+        *outputRight = mainsRight + subMono;
+        break;
+    }
+}
+
+static void process_crossover(N60CrossoverRuntime *runtime, float inputLeft, float inputRight, float *outputLeft, float *outputRight) {
+    float currentLeft = inputLeft;
+    float currentRight = inputRight;
+    process_crossover_path(&runtime->current, inputLeft, inputRight, &currentLeft, &currentRight);
+    if (runtime->transitionFramesRemaining == 0) {
+        *outputLeft = currentLeft;
+        *outputRight = currentRight;
+        return;
+    }
+
+    float pendingLeft = inputLeft;
+    float pendingRight = inputRight;
+    process_crossover_path(&runtime->pending, inputLeft, inputRight, &pendingLeft, &pendingRight);
+    uint32_t completed = runtime->transitionFramesTotal - runtime->transitionFramesRemaining + 1;
+    float mix = (float)completed / (float)runtime->transitionFramesTotal;
+    *outputLeft = currentLeft + (pendingLeft - currentLeft) * mix;
+    *outputRight = currentRight + (pendingRight - currentRight) * mix;
+
+    runtime->transitionFramesRemaining -= 1;
+    if (runtime->transitionFramesRemaining == 0) {
+        runtime->current = runtime->pending;
+        runtime->transitionFramesTotal = 0;
+    }
+}
+
 static float sanitize_sample(N60RenderKernel *kernel, float sample) {
     if (!isfinite(sample)) {
         atomic_fetch_add_explicit(&kernel->sanitizedNonFiniteSamples, 1, memory_order_relaxed);
@@ -349,15 +477,7 @@ static float sanitize_sample(N60RenderKernel *kernel, float sample) {
     return sample;
 }
 
-static void meter_sample(
-    float left,
-    float right,
-    float *peakLeft,
-    float *peakRight,
-    double *squareSumLeft,
-    double *squareSumRight,
-    uint64_t *overRangeSamples
-) {
+static void meter_sample(float left, float right, float *peakLeft, float *peakRight, double *squareSumLeft, double *squareSumRight, uint64_t *overRangeSamples) {
     float absLeft = fabsf(left);
     float absRight = fabsf(right);
     if (absLeft > *peakLeft) *peakLeft = absLeft;
@@ -368,22 +488,8 @@ static void meter_sample(
     if (absRight > 1.0f) *overRangeSamples += 1;
 }
 
-static void publish_meter(
-    _Atomic uint32_t *peakLeftBits,
-    _Atomic uint32_t *peakRightBits,
-    _Atomic uint32_t *rmsLeftBits,
-    _Atomic uint32_t *rmsRightBits,
-    _Atomic uint64_t *overRangeSamples,
-    float peakLeft,
-    float peakRight,
-    double squareSumLeft,
-    double squareSumRight,
-    uint64_t overRangeCount,
-    uint32_t frameCount
-) {
-    if (frameCount == 0) {
-        return;
-    }
+static void publish_meter(_Atomic uint32_t *peakLeftBits, _Atomic uint32_t *peakRightBits, _Atomic uint32_t *rmsLeftBits, _Atomic uint32_t *rmsRightBits, _Atomic uint64_t *overRangeSamples, float peakLeft, float peakRight, double squareSumLeft, double squareSumRight, uint64_t overRangeCount, uint32_t frameCount) {
+    if (frameCount == 0) return;
     float rmsLeft = (float)sqrt(squareSumLeft / (double)frameCount);
     float rmsRight = (float)sqrt(squareSumRight / (double)frameCount);
     atomic_store_explicit(peakLeftBits, float_to_bits(peakLeft), memory_order_relaxed);
@@ -426,6 +532,8 @@ N60DSPGraphSnapshot N60DSPGraphSnapshotMakeUnity(double sampleRate) {
     snapshot.eqBypassed = false;
     snapshot.eqBandCount = 0;
     snapshot.eqTransitionFrames = eq_transition_frames_for_sample_rate(sampleRate);
+    snapshot.crossoverTransitionFrames = crossover_transition_frames_for_sample_rate(sampleRate);
+    snapshot.crossover = N60CrossoverSnapshotMakeBypassed();
     return snapshot;
 }
 
@@ -435,22 +543,20 @@ void N60DSPGraphSnapshotClearEQ(N60DSPGraphSnapshot *snapshot) {
     snapshot->eqBandCount = 0;
 }
 
-bool N60DSPGraphSnapshotSetEQBand(
-    N60DSPGraphSnapshot *snapshot,
-    uint32_t bandIndex,
-    N60BiquadFilterType type,
-    double frequencyHz,
-    double gainDB,
-    double q,
-    bool enabled
-) {
+bool N60DSPGraphSnapshotSetEQBand(N60DSPGraphSnapshot *snapshot, uint32_t bandIndex, N60BiquadFilterType type, double frequencyHz, double gainDB, double q, bool enabled) {
     if (snapshot == NULL || bandIndex >= N60_MAX_EQ_BANDS) return false;
     N60BiquadBandSnapshot band = {0};
-    if (!N60BiquadBandSnapshotMake(type, snapshot->sampleRate, frequencyHz, gainDB, q, enabled, &band)) {
-        return false;
-    }
+    if (!N60BiquadBandSnapshotMake(type, snapshot->sampleRate, frequencyHz, gainDB, q, enabled, &band)) return false;
     snapshot->eqBands[bandIndex] = band;
     if (snapshot->eqBandCount <= bandIndex) snapshot->eqBandCount = bandIndex + 1;
+    return true;
+}
+
+bool N60DSPGraphSnapshotSetCrossover(N60DSPGraphSnapshot *snapshot, double frequencyHz, N60CrossoverTopology topology, N60CrossoverMonitorMode monitorMode, float subGainLinear, bool subPolarityInverted, bool enabled) {
+    if (snapshot == NULL) return false;
+    N60CrossoverSnapshot crossover = {0};
+    if (!N60CrossoverSnapshotMake(snapshot->sampleRate, frequencyHz, topology, monitorMode, subGainLinear, subPolarityInverted, enabled, &crossover)) return false;
+    snapshot->crossover = crossover;
     return true;
 }
 
@@ -464,19 +570,19 @@ N60RenderKernel *N60RenderKernelCreate(void) {
     atomic_store_explicit(&kernel->activeSlot, 0, memory_order_relaxed);
     atomic_store_explicit(&kernel->nextGeneration, 1, memory_order_relaxed);
     reset_eq_runtime(kernel);
+    reset_crossover_runtime(&kernel->crossoverRuntime, initial.crossover);
     reset_smoothed_gain(&kernel->inputGain, 1.0f);
     reset_smoothed_gain(&kernel->headroomGain, 1.0f);
     reset_smoothed_gain(&kernel->outputGain, 1.0f);
     return kernel;
 }
 
-void N60RenderKernelDestroy(N60RenderKernel *kernel) {
-    free(kernel);
-}
+void N60RenderKernelDestroy(N60RenderKernel *kernel) { free(kernel); }
 
 void N60RenderKernelReset(N60RenderKernel *kernel) {
     if (kernel == NULL) return;
     reset_eq_runtime(kernel);
+    reset_crossover_runtime(&kernel->crossoverRuntime, N60CrossoverSnapshotMakeBypassed());
     reset_smoothed_gain(&kernel->inputGain, 1.0f);
     reset_smoothed_gain(&kernel->headroomGain, 1.0f);
     reset_smoothed_gain(&kernel->outputGain, 1.0f);
@@ -523,14 +629,7 @@ N60RenderKernelRenderContext N60RenderKernelBeginRender(N60RenderKernel *kernel)
     return context;
 }
 
-void N60RenderKernelProcessStereoFrameInContext(
-    N60RenderKernel *kernel,
-    N60RenderKernelRenderContext *context,
-    float inputLeft,
-    float inputRight,
-    float *outputLeft,
-    float *outputRight
-) {
+void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60RenderKernelRenderContext *context, float inputLeft, float inputRight, float *outputLeft, float *outputRight) {
     if (kernel == NULL || context == NULL || outputLeft == NULL || outputRight == NULL) return;
 
     float left = sanitize_sample(kernel, inputLeft);
@@ -554,6 +653,8 @@ void N60RenderKernelProcessStereoFrameInContext(
         }
 
         meter_sample(left, right, &context->postEQPeakLeft, &context->postEQPeakRight, &context->postEQSquareSumLeft, &context->postEQSquareSumRight, &context->postEQOverRangeSamples);
+        process_crossover(&kernel->crossoverRuntime, left, right, &left, &right);
+
         float outputGain = next_gain_value(&kernel->outputGain);
         left *= outputGain;
         right *= outputGain;
@@ -571,11 +672,9 @@ void N60RenderKernelProcessStereoFrameInContext(
 
 void N60RenderKernelEndRender(N60RenderKernel *kernel, N60RenderKernelRenderContext *context, uint32_t renderedFrames) {
     if (kernel == NULL || context == NULL) return;
-
     publish_meter(&kernel->inputPeakLeftBits, &kernel->inputPeakRightBits, &kernel->inputRMSLeftBits, &kernel->inputRMSRightBits, &kernel->inputOverRangeSamples, context->inputPeakLeft, context->inputPeakRight, context->inputSquareSumLeft, context->inputSquareSumRight, context->inputOverRangeSamples, context->meteredFrames);
     publish_meter(&kernel->postEQPeakLeftBits, &kernel->postEQPeakRightBits, &kernel->postEQRMSLeftBits, &kernel->postEQRMSRightBits, &kernel->postEQOverRangeSamples, context->postEQPeakLeft, context->postEQPeakRight, context->postEQSquareSumLeft, context->postEQSquareSumRight, context->postEQOverRangeSamples, context->meteredFrames);
     publish_meter(&kernel->outputPeakLeftBits, &kernel->outputPeakRightBits, &kernel->outputRMSLeftBits, &kernel->outputRMSRightBits, &kernel->outputOverRangeSamples, context->outputPeakLeft, context->outputPeakRight, context->outputSquareSumLeft, context->outputSquareSumRight, context->outputOverRangeSamples, context->meteredFrames);
-
     if (context->acquired && context->slotIndex < N60_SNAPSHOT_SLOT_COUNT) {
         atomic_fetch_sub_explicit(&kernel->slots[context->slotIndex].readers, 1, memory_order_release);
         context->acquired = false;
@@ -590,13 +689,7 @@ void N60RenderKernelProcessStereoFrame(N60RenderKernel *kernel, float inputLeft,
     N60RenderKernelEndRender(kernel, &context, 1);
 }
 
-static N60StereoMeterReading load_meter_reading(
-    const _Atomic uint32_t *peakLeftBits,
-    const _Atomic uint32_t *peakRightBits,
-    const _Atomic uint32_t *rmsLeftBits,
-    const _Atomic uint32_t *rmsRightBits,
-    const _Atomic uint64_t *overRangeSamples
-) {
+static N60StereoMeterReading load_meter_reading(const _Atomic uint32_t *peakLeftBits, const _Atomic uint32_t *peakRightBits, const _Atomic uint32_t *rmsLeftBits, const _Atomic uint32_t *rmsRightBits, const _Atomic uint64_t *overRangeSamples) {
     N60StereoMeterReading reading = {0};
     reading.peakLeft = bits_to_float(atomic_load_explicit(peakLeftBits, memory_order_relaxed));
     reading.peakRight = bits_to_float(atomic_load_explicit(peakRightBits, memory_order_relaxed));
@@ -623,6 +716,13 @@ N60RenderKernelDiagnostics N60RenderKernelGetDiagnostics(const N60RenderKernel *
         diagnostics.outputGainLinear = context.snapshot.outputGainLinear;
         diagnostics.eqBypassed = context.snapshot.eqBypassed;
         diagnostics.eqBandCount = context.snapshot.eqBandCount;
+        diagnostics.crossoverEnabled = context.snapshot.crossover.enabled;
+        diagnostics.crossoverFrequencyHz = context.snapshot.crossover.frequencyHz;
+        diagnostics.crossoverTopology = context.snapshot.crossover.topology;
+        diagnostics.crossoverMonitorMode = context.snapshot.crossover.monitorMode;
+        diagnostics.crossoverSubGainLinear = context.snapshot.crossover.subGainLinear;
+        diagnostics.crossoverSubPolarityInverted = context.snapshot.crossover.subPolarityInverted;
+        diagnostics.crossoverSectionCount = context.snapshot.crossover.sectionCount;
         N60RenderKernelEndRender(mutableKernel, &context, 0);
     }
 

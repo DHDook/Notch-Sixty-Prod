@@ -9,42 +9,48 @@ struct ContentView: View {
     private var selectedUIDBinding: Binding<String?> {
         Binding(
             get: { engine.routeConfiguration.selectedOutputUID },
-            set: { newValue in
-                do {
-                    try engine.selectOutput(uid: newValue)
-                } catch {
-                    // The engine publishes the user-facing error description.
-                }
-            }
+            set: { newValue in try? engine.selectOutput(uid: newValue) }
         )
     }
 
     private var eqBypassBinding: Binding<Bool> {
-        Binding(
-            get: { engine.eqConfiguration.bypassed },
-            set: { try? engine.setEQBypassed($0) }
-        )
+        Binding(get: { engine.eqConfiguration.bypassed }, set: { try? engine.setEQBypassed($0) })
     }
 
     private var inputPreampBinding: Binding<Double> {
-        Binding(
-            get: { engine.gainConfiguration.inputPreampDB },
-            set: { try? engine.setInputPreampDB($0) }
-        )
+        Binding(get: { engine.gainConfiguration.inputPreampDB }, set: { try? engine.setInputPreampDB($0) })
     }
 
     private var headroomBinding: Binding<Double> {
-        Binding(
-            get: { engine.gainConfiguration.headroomAttenuationDB },
-            set: { try? engine.setHeadroomAttenuationDB($0) }
-        )
+        Binding(get: { engine.gainConfiguration.headroomAttenuationDB }, set: { try? engine.setHeadroomAttenuationDB($0) })
     }
 
     private var outputGainBinding: Binding<Double> {
-        Binding(
-            get: { engine.gainConfiguration.outputGainDB },
-            set: { try? engine.setOutputGainDB($0) }
-        )
+        Binding(get: { engine.gainConfiguration.outputGainDB }, set: { try? engine.setOutputGainDB($0) })
+    }
+
+    private var crossoverEnabledBinding: Binding<Bool> {
+        crossoverBinding(\.enabled)
+    }
+
+    private var crossoverFrequencyBinding: Binding<Double> {
+        crossoverBinding(\.frequencyHz)
+    }
+
+    private var crossoverTopologyBinding: Binding<CrossoverTopology> {
+        crossoverBinding(\.topology)
+    }
+
+    private var crossoverMonitorBinding: Binding<CrossoverMonitorMode> {
+        crossoverBinding(\.monitorMode)
+    }
+
+    private var subGainBinding: Binding<Double> {
+        crossoverBinding(\.subGainDB)
+    }
+
+    private var subPolarityBinding: Binding<Bool> {
+        crossoverBinding(\.subPolarityInverted)
     }
 
     var body: some View {
@@ -52,12 +58,11 @@ struct ContentView: View {
             Text("Notch Sixty")
                 .font(.title.bold())
 
-            Text("Production transport + EQ + gain/headroom validation")
+            Text("Production transport + EQ + gain/headroom + crossover validation")
                 .foregroundStyle(.secondary)
 
             Picker("Output", selection: selectedUIDBinding) {
-                Text("Choose an output…")
-                    .tag(Optional<String>.none)
+                Text("Choose an output…").tag(Optional<String>.none)
                 ForEach(engine.outputDevices) { device in
                     Text("\(device.name) — \(formattedRate(device.nominalSampleRate))")
                         .tag(Optional(device.uid))
@@ -66,26 +71,21 @@ struct ContentView: View {
             .disabled(engine.lifecycleState != .idle)
 
             HStack {
-                Button("Refresh Devices") {
-                    _ = try? engine.refreshOutputDevices()
-                }
-                .disabled(engine.lifecycleState != .idle)
+                Button("Refresh Devices") { _ = try? engine.refreshOutputDevices() }
+                    .disabled(engine.lifecycleState != .idle)
 
                 if engine.lifecycleState == .idle {
-                    Button("Start Processing") {
-                        try? engine.start()
-                    }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(engine.selectedOutputDevice == nil)
+                    Button("Start Processing") { try? engine.start() }
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(engine.selectedOutputDevice == nil)
                 } else {
-                    Button("Stop Processing") {
-                        engine.stop()
-                    }
-                    .keyboardShortcut(.cancelAction)
+                    Button("Stop Processing") { engine.stop() }
+                        .keyboardShortcut(.cancelAction)
                 }
             }
 
             gainValidationView
+            crossoverValidationView
             eqValidationView
 
             Divider()
@@ -104,10 +104,8 @@ struct ContentView: View {
             }
         }
         .padding(20)
-        .frame(minWidth: 820, minHeight: 860)
-        .onAppear {
-            engine.prepareForUse()
-        }
+        .frame(minWidth: 880, minHeight: 940)
+        .onAppear { engine.prepareForUse() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
             engine.shutdownForTermination()
         }
@@ -116,26 +114,11 @@ struct ContentView: View {
     @ViewBuilder
     private var gainValidationView: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Gain / headroom validation")
-                .font(.headline)
-
-            gainControlRow(
-                label: "Input preamp",
-                value: inputPreampBinding,
-                range: DSPGainConfiguration.inputPreampRange
-            )
-            gainControlRow(
-                label: "Headroom attenuation",
-                value: headroomBinding,
-                range: DSPGainConfiguration.headroomAttenuationRange
-            )
-            gainControlRow(
-                label: "Output gain",
-                value: outputGainBinding,
-                range: DSPGainConfiguration.outputGainRange
-            )
-
-            Text("Headroom attenuation is a separate internal stage reserved for future automatic compensation; PR #15 does not change it automatically.")
+            Text("Gain / headroom validation").font(.headline)
+            gainControlRow(label: "Input preamp", value: inputPreampBinding, range: DSPGainConfiguration.inputPreampRange)
+            gainControlRow(label: "Headroom attenuation", value: headroomBinding, range: DSPGainConfiguration.headroomAttenuationRange)
+            gainControlRow(label: "Output gain", value: outputGainBinding, range: DSPGainConfiguration.outputGainRange)
+            Text("Headroom attenuation remains a separate internal stage reserved for future automatic compensation.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -146,36 +129,93 @@ struct ContentView: View {
     @ViewBuilder
     private func gainControlRow(label: String, value: Binding<Double>, range: ClosedRange<Double>) -> some View {
         HStack(spacing: 10) {
-            Text(label)
-                .frame(width: 155, alignment: .leading)
-            Slider(value: value, in: range, step: 0.5)
-                .frame(minWidth: 280)
+            Text(label).frame(width: 155, alignment: .leading)
+            Slider(value: value, in: range, step: 0.5).frame(minWidth: 280)
             TextField("dB", value: value, format: .number.precision(.fractionLength(1)))
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 70)
-            Text("dB")
+            Text("dB").foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var crossoverValidationView: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Bass management / crossover validation").font(.headline)
+                Spacer()
+                Toggle("Enable", isOn: crossoverEnabledBinding).toggleStyle(.switch)
+            }
+
+            HStack(spacing: 12) {
+                Text("Crossover").frame(width: 90, alignment: .leading)
+                Slider(
+                    value: crossoverFrequencyBinding,
+                    in: BassManagementConfiguration.frequencyRange,
+                    step: 1
+                )
+                TextField("Hz", value: crossoverFrequencyBinding, format: .number.precision(.fractionLength(0)))
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 70)
+                Text("Hz").foregroundStyle(.secondary)
+
+                Picker("Topology", selection: crossoverTopologyBinding) {
+                    ForEach(CrossoverTopology.allCases) { topology in
+                        Text(topology.displayName).tag(topology)
+                    }
+                }
+                .frame(width: 210)
+
+                Picker("Monitor", selection: crossoverMonitorBinding) {
+                    ForEach(CrossoverMonitorMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .frame(width: 175)
+            }
+
+            HStack(spacing: 12) {
+                Text("Sub gain").frame(width: 90, alignment: .leading)
+                Slider(value: subGainBinding, in: BassManagementConfiguration.subGainRange, step: 0.5)
+                TextField("dB", value: subGainBinding, format: .number.precision(.fractionLength(1)))
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 70)
+                Text("dB").foregroundStyle(.secondary)
+                Toggle("Invert sub polarity", isOn: subPolarityBinding)
+                    .toggleStyle(.switch)
+            }
+
+            Text("PR #16 exposes logical mains and mono-sub buses through stereo audition modes. It does not yet create an independently routable physical sub output.")
+                .font(.caption)
                 .foregroundStyle(.secondary)
         }
+        .padding(10)
+        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func crossoverBinding<Value>(_ keyPath: WritableKeyPath<BassManagementConfiguration, Value>) -> Binding<Value> {
+        Binding(
+            get: { engine.bassManagementConfiguration[keyPath: keyPath] },
+            set: { value in
+                var updated = engine.bassManagementConfiguration
+                updated[keyPath: keyPath] = value
+                try? engine.replaceBassManagementConfiguration(updated)
+            }
+        )
     }
 
     @ViewBuilder
     private var eqValidationView: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Parametric EQ validation")
-                    .font(.headline)
+                Text("Parametric EQ validation").font(.headline)
                 Text("\(engine.eqConfiguration.enabledBandCount) active / \(engine.eqConfiguration.bands.count) configured / \(EQConfiguration.maximumBandCount) max")
                     .foregroundStyle(.secondary)
                 Spacer()
-                Toggle("Bypass EQ", isOn: eqBypassBinding)
-                    .toggleStyle(.switch)
-                Button("Add Band") {
-                    try? engine.addEQBand()
-                }
-                .disabled(engine.eqConfiguration.bands.count >= EQConfiguration.maximumBandCount)
-                Button("Load 64-Band Stress") {
-                    load64BandStressConfiguration()
-                }
+                Toggle("Bypass EQ", isOn: eqBypassBinding).toggleStyle(.switch)
+                Button("Add Band") { try? engine.addEQBand() }
+                    .disabled(engine.eqConfiguration.bands.count >= EQConfiguration.maximumBandCount)
+                Button("Load 64-Band Stress") { load64BandStressConfiguration() }
             }
 
             if engine.eqConfiguration.bands.isEmpty {
@@ -189,7 +229,7 @@ struct ContentView: View {
                         }
                     }
                 }
-                .frame(maxHeight: 180)
+                .frame(maxHeight: 150)
             }
         }
         .padding(10)
@@ -200,49 +240,29 @@ struct ContentView: View {
     private func eqBandRow(index: Int, band: EQBand) -> some View {
         let binding = eqBandBinding(for: band.id)
         HStack(spacing: 8) {
-            Text("\(index + 1)")
-                .frame(width: 24, alignment: .trailing)
-                .foregroundStyle(.secondary)
-
-            Toggle("", isOn: binding.enabled)
-                .labelsHidden()
-
+            Text("\(index + 1)").frame(width: 24, alignment: .trailing).foregroundStyle(.secondary)
+            Toggle("", isOn: binding.enabled).labelsHidden()
             Picker("", selection: binding.type) {
-                ForEach(EQFilterType.allCases) { type in
-                    Text(type.displayName).tag(type)
-                }
+                ForEach(EQFilterType.allCases) { type in Text(type.displayName).tag(type) }
             }
             .labelsHidden()
             .frame(width: 115)
-
-            TextField("Hz", value: binding.frequencyHz, format: .number.precision(.fractionLength(0...1)))
-                .frame(width: 85)
+            TextField("Hz", value: binding.frequencyHz, format: .number.precision(.fractionLength(0...1))).frame(width: 85)
             Text("Hz").foregroundStyle(.secondary)
-
-            TextField("dB", value: binding.gainDB, format: .number.precision(.fractionLength(1)))
-                .frame(width: 65)
+            TextField("dB", value: binding.gainDB, format: .number.precision(.fractionLength(1))).frame(width: 65)
             Text("dB").foregroundStyle(.secondary)
-
-            TextField("Q", value: binding.q, format: .number.precision(.fractionLength(2...3)))
-                .frame(width: 65)
+            TextField("Q", value: binding.q, format: .number.precision(.fractionLength(2...3))).frame(width: 65)
             Text("Q").foregroundStyle(.secondary)
-
             Spacer()
-            Button("Remove") {
-                try? engine.removeEQBand(id: band.id)
-            }
+            Button("Remove") { try? engine.removeEQBand(id: band.id) }
         }
         .textFieldStyle(.roundedBorder)
     }
 
     private func eqBandBinding(for id: UUID) -> Binding<EQBand> {
         Binding(
-            get: {
-                engine.eqConfiguration.bands.first(where: { $0.id == id }) ?? EQBand(id: id, enabled: false)
-            },
-            set: { updated in
-                try? engine.updateEQBand(updated)
-            }
+            get: { engine.eqConfiguration.bands.first(where: { $0.id == id }) ?? EQBand(id: id, enabled: false) },
+            set: { updated in try? engine.updateEQBand(updated) }
         )
     }
 
@@ -279,10 +299,7 @@ struct ContentView: View {
             if let gateOpened = snapshot.startupGateOpened,
                let targetFrames = snapshot.startupGateTargetFrames,
                let activationFrames = snapshot.startupGateActivationFrames {
-                diagnosticRow(
-                    "Startup gate",
-                    "\(gateOpened ? "open" : "armed") / target \(targetFrames) / activate \(activationFrames)"
-                )
+                diagnosticRow("Startup gate", "\(gateOpened ? "open" : "armed") / target \(targetFrames) / activate \(activationFrames)")
             }
 
             if let render = snapshot.renderKernelDiagnostics {
@@ -293,6 +310,14 @@ struct ContentView: View {
                 diagnosticRow("Headroom stage", formattedGain(render.headroomGainLinear))
                 diagnosticRow("Output gain", formattedGain(render.outputGainLinear))
                 diagnosticRow("EQ stage", "\(render.eqBypassed ? "bypassed" : "active") / \(render.eqBandCount) rendered bands")
+                diagnosticRow(
+                    "Crossover",
+                    render.crossoverEnabled
+                        ? "active / \(render.crossoverFrequencyHz.formatted(.number.precision(.fractionLength(0)))) Hz / \(crossoverTopologyName(render.crossoverTopology)) / \(crossoverMonitorName(render.crossoverMonitorMode)) / \(render.crossoverSectionCount) sections"
+                        : "bypassed"
+                )
+                diagnosticRow("Sub polarity", render.crossoverSubPolarityInverted ? "inverted" : "normal")
+                diagnosticRow("Sub gain", formattedGain(render.crossoverSubGainLinear))
                 meterRow("Input meter", render.inputMeter)
                 meterRow("Post-EQ meter", render.postEQMeter)
                 meterRow("DSP output meter", render.outputMeter)
@@ -316,10 +341,7 @@ struct ContentView: View {
             diagnosticRow("Lifetime underruns", "\(lifetime.underrunFrames)")
             diagnosticRow("Lifetime overruns", "\(lifetime.overrunFrames)")
             diagnosticRow("Rate rebuilds", "\(snapshot.sampleRateChangesHandled)")
-            diagnosticRow(
-                "Recovery",
-                "\(snapshot.recoverySuccesses) success / \(snapshot.recoveryFailures) retry errors / \(snapshot.recoveryAttempts) attempts"
-            )
+            diagnosticRow("Recovery", "\(snapshot.recoverySuccesses) success / \(snapshot.recoveryFailures) retry errors / \(snapshot.recoveryAttempts) attempts")
         }
         .font(.system(.body, design: .monospaced))
         .textSelection(.enabled)
@@ -328,8 +350,7 @@ struct ContentView: View {
     @ViewBuilder
     private func diagnosticRow(_ label: String, _ value: String) -> some View {
         GridRow {
-            Text(label)
-                .foregroundStyle(.secondary)
+            Text(label).foregroundStyle(.secondary)
             Text(value)
         }
     }
@@ -342,23 +363,34 @@ struct ContentView: View {
         )
     }
 
-    private func formattedRate(_ rate: Double) -> String {
-        if rate >= 1_000 {
-            return String(format: "%.1f kHz", rate / 1_000)
+    private func crossoverTopologyName(_ topology: N60CrossoverTopology) -> String {
+        switch topology {
+        case N60CrossoverTopologyLinkwitzRiley48: return "LR48"
+        default: return "LR24"
         }
+    }
+
+    private func crossoverMonitorName(_ mode: N60CrossoverMonitorMode) -> String {
+        switch mode {
+        case N60CrossoverMonitorModeMainsOnly: return "mains"
+        case N60CrossoverMonitorModeSubOnly: return "sub"
+        default: return "recombined"
+        }
+    }
+
+    private func formattedRate(_ rate: Double) -> String {
+        if rate >= 1_000 { return String(format: "%.1f kHz", rate / 1_000) }
         return String(format: "%.0f Hz", rate)
     }
 
     private func formattedBridgeQueue(frames: UInt32, sampleRate: Double?) -> String {
         guard let sampleRate, sampleRate > 0 else { return "\(frames) frames" }
-        let milliseconds = Double(frames) / sampleRate * 1_000.0
-        return String(format: "%u frames / %.2f ms", frames, milliseconds)
+        return String(format: "%u frames / %.2f ms", frames, Double(frames) / sampleRate * 1_000.0)
     }
 
     private func formattedDSPTime(frames: UInt32, sampleRate: Double) -> String {
         guard sampleRate > 0 else { return "\(frames) frames" }
-        let milliseconds = Double(frames) / sampleRate * 1_000.0
-        return String(format: "%u frames / %.3f ms", frames, milliseconds)
+        return String(format: "%u frames / %.3f ms", frames, Double(frames) / sampleRate * 1_000.0)
     }
 
     private func formattedGain(_ linear: Float) -> String {

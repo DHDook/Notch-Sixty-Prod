@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "N60Biquad.h"
+#include "N60Crossover.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -28,6 +29,8 @@ typedef struct {
     uint32_t eqBandCount;
     uint32_t eqTransitionFrames;
     N60BiquadBandSnapshot eqBands[N60_MAX_EQ_BANDS];
+    uint32_t crossoverTransitionFrames;
+    N60CrossoverSnapshot crossover;
 } N60DSPGraphSnapshot;
 
 typedef struct {
@@ -79,6 +82,13 @@ typedef struct {
     float outputGainLinear;
     bool eqBypassed;
     uint32_t eqBandCount;
+    bool crossoverEnabled;
+    double crossoverFrequencyHz;
+    N60CrossoverTopology crossoverTopology;
+    N60CrossoverMonitorMode crossoverMonitorMode;
+    float crossoverSubGainLinear;
+    bool crossoverSubPolarityInverted;
+    uint32_t crossoverSectionCount;
     N60StereoMeterReading inputMeter;
     N60StereoMeterReading postEQMeter;
     N60StereoMeterReading outputMeter;
@@ -96,6 +106,15 @@ bool N60DSPGraphSnapshotSetEQBand(
     double frequencyHz,
     double gainDB,
     double q,
+    bool enabled
+);
+bool N60DSPGraphSnapshotSetCrossover(
+    N60DSPGraphSnapshot * _Nonnull snapshot,
+    double frequencyHz,
+    N60CrossoverTopology topology,
+    N60CrossoverMonitorMode monitorMode,
+    float subGainLinear,
+    bool subPolarityInverted,
     bool enabled
 );
 
