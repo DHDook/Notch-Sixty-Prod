@@ -17,6 +17,10 @@ struct ContentView: View {
         Binding(get: { engine.eqConfiguration.bypassed }, set: { try? engine.setEQBypassed($0) })
     }
 
+    private var eqPhaseModeBinding: Binding<EQPhaseMode> {
+        Binding(get: { engine.eqConfiguration.phaseMode }, set: { try? engine.setEQPhaseMode($0) })
+    }
+
     private var inputPreampBinding: Binding<Double> {
         Binding(get: { engine.gainConfiguration.inputPreampDB }, set: { try? engine.setInputPreampDB($0) })
     }
@@ -29,36 +33,19 @@ struct ContentView: View {
         Binding(get: { engine.gainConfiguration.outputGainDB }, set: { try? engine.setOutputGainDB($0) })
     }
 
-    private var crossoverEnabledBinding: Binding<Bool> {
-        crossoverBinding(\.enabled)
-    }
-
-    private var crossoverFrequencyBinding: Binding<Double> {
-        crossoverBinding(\.frequencyHz)
-    }
-
-    private var crossoverTopologyBinding: Binding<CrossoverTopology> {
-        crossoverBinding(\.topology)
-    }
-
-    private var crossoverMonitorBinding: Binding<CrossoverMonitorMode> {
-        crossoverBinding(\.monitorMode)
-    }
-
-    private var subGainBinding: Binding<Double> {
-        crossoverBinding(\.subGainDB)
-    }
-
-    private var subPolarityBinding: Binding<Bool> {
-        crossoverBinding(\.subPolarityInverted)
-    }
+    private var crossoverEnabledBinding: Binding<Bool> { crossoverBinding(\.enabled) }
+    private var crossoverFrequencyBinding: Binding<Double> { crossoverBinding(\.frequencyHz) }
+    private var crossoverTopologyBinding: Binding<CrossoverTopology> { crossoverBinding(\.topology) }
+    private var crossoverMonitorBinding: Binding<CrossoverMonitorMode> { crossoverBinding(\.monitorMode) }
+    private var subGainBinding: Binding<Double> { crossoverBinding(\.subGainDB) }
+    private var subPolarityBinding: Binding<Bool> { crossoverBinding(\.subPolarityInverted) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Notch Sixty")
                 .font(.title.bold())
 
-            Text("Production transport + EQ + gain/headroom + crossover validation")
+            Text("Production transport + minimum/linear EQ + gain/headroom + crossover validation")
                 .foregroundStyle(.secondary)
 
             Picker("Output", selection: selectedUIDBinding) {
@@ -149,11 +136,7 @@ struct ContentView: View {
 
             HStack(spacing: 12) {
                 Text("Crossover").frame(width: 90, alignment: .leading)
-                Slider(
-                    value: crossoverFrequencyBinding,
-                    in: BassManagementConfiguration.frequencyRange,
-                    step: 1
-                )
+                Slider(value: crossoverFrequencyBinding, in: BassManagementConfiguration.frequencyRange, step: 1)
                 TextField("Hz", value: crossoverFrequencyBinding, format: .number.precision(.fractionLength(0)))
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 70)
@@ -212,10 +195,29 @@ struct ContentView: View {
                 Text("\(engine.eqConfiguration.enabledBandCount) active / \(engine.eqConfiguration.bands.count) configured / \(EQConfiguration.maximumBandCount) max")
                     .foregroundStyle(.secondary)
                 Spacer()
+                Picker("Phase", selection: eqPhaseModeBinding) {
+                    ForEach(EQPhaseMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 250)
                 Toggle("Bypass EQ", isOn: eqBypassBinding).toggleStyle(.switch)
                 Button("Add Band") { try? engine.addEQBand() }
                     .disabled(engine.eqConfiguration.bands.count >= EQConfiguration.maximumBandCount)
                 Button("Load 64-Band Stress") { load64BandStressConfiguration() }
+            }
+
+            if engine.eqConfiguration.phaseMode == .linearPhase {
+                if let design = engine.linearPhaseDesignInfo {
+                    Text("Linear FIR: \(design.tapCount) taps / group delay \(design.groupDelayMilliseconds.formatted(.number.precision(.fractionLength(2)))) ms / total \(formattedDSPTime(frames: design.totalLatencyFrames, sampleRate: currentDSPRate))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Linear FIR will be designed for the active device sample rate when processing starts.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             if engine.eqConfiguration.bands.isEmpty {
@@ -234,6 +236,12 @@ struct ContentView: View {
         }
         .padding(10)
         .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var currentDSPRate: Double {
+        engine.diagnosticsSnapshot().renderKernelDiagnostics?.sampleRate
+            ?? engine.selectedOutputDevice?.nominalSampleRate
+            ?? 48_000
     }
 
     @ViewBuilder
@@ -282,7 +290,13 @@ struct ContentView: View {
                 q: 1.0
             )
         }
-        try? engine.replaceEQConfiguration(EQConfiguration(bypassed: false, bands: bands))
+        try? engine.replaceEQConfiguration(
+            EQConfiguration(
+                phaseMode: engine.eqConfiguration.phaseMode,
+                bypassed: false,
+                bands: bands
+            )
+        )
     }
 
     @ViewBuilder
@@ -309,7 +323,20 @@ struct ContentView: View {
                 diagnosticRow("Input preamp", formattedGain(render.inputGainLinear))
                 diagnosticRow("Headroom stage", formattedGain(render.headroomGainLinear))
                 diagnosticRow("Output gain", formattedGain(render.outputGainLinear))
-                diagnosticRow("EQ stage", "\(render.eqBypassed ? "bypassed" : "active") / \(render.eqBandCount) rendered bands")
+                diagnosticRow("EQ mode", engine.eqConfiguration.phaseMode.displayName)
+                diagnosticRow("EQ stage", "\(render.eqBypassed ? "bypassed" : "active") / \(render.eqBandCount) IIR bands")
+                diagnosticRow(
+                    "Linear FIR",
+                    render.convolutionEnabled
+                        ? "active / slot \(render.convolutionProgramSlot) / gen \(render.convolutionProgramGeneration) / \(render.convolutionTapCount) taps / \(render.convolutionPartitionCount) partitions"
+                        : "bypassed"
+                )
+                if render.convolutionEnabled {
+                    diagnosticRow(
+                        "FIR latency",
+                        "engine \(formattedDSPTime(frames: render.convolutionEngineLatencyFrames, sampleRate: render.sampleRate)) / group \(formattedDSPTime(frames: render.convolutionDeclaredLatencyFrames, sampleRate: render.sampleRate))"
+                    )
+                }
                 diagnosticRow(
                     "Crossover",
                     render.crossoverEnabled
@@ -325,6 +352,7 @@ struct ContentView: View {
                 diagnosticRow("DSP non-finite sanitized", "\(render.sanitizedNonFiniteSamples)")
                 diagnosticRow("DSP denormals flushed", "\(render.flushedDenormalSamples)")
                 diagnosticRow("DSP snapshot read misses", "\(render.snapshotReadMisses)")
+                diagnosticRow("FIR program misses", "\(render.convolutionProgramMisses)")
             }
 
             diagnosticRow("Counter scope", "current processing session")
