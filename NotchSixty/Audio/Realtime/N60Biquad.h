@@ -127,8 +127,7 @@ static inline bool N60BiquadDesign(
     }
     case N60BiquadFilterTypeLowShelf: {
         double A = pow(10.0, gainDB / 40.0);
-        double shelfAlpha = sinOmega / sqrt(2.0);
-        double beta = 2.0 * sqrt(A) * shelfAlpha;
+        double beta = 2.0 * sqrt(A) * alpha;
         b0 = A * ((A + 1.0) - (A - 1.0) * cosOmega + beta);
         b1 = 2.0 * A * ((A - 1.0) - (A + 1.0) * cosOmega);
         b2 = A * ((A + 1.0) - (A - 1.0) * cosOmega - beta);
@@ -139,8 +138,7 @@ static inline bool N60BiquadDesign(
     }
     case N60BiquadFilterTypeHighShelf: {
         double A = pow(10.0, gainDB / 40.0);
-        double shelfAlpha = sinOmega / sqrt(2.0);
-        double beta = 2.0 * sqrt(A) * shelfAlpha;
+        double beta = 2.0 * sqrt(A) * alpha;
         b0 = A * ((A + 1.0) + (A - 1.0) * cosOmega + beta);
         b1 = -2.0 * A * ((A - 1.0) + (A + 1.0) * cosOmega);
         b2 = A * ((A + 1.0) + (A - 1.0) * cosOmega - beta);
