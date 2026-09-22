@@ -276,6 +276,130 @@ final class ConvolutionTests: XCTestCase {
         XCTAssertTrue(diagnostics.convolutionEnabled)
     }
 
+    func testLinearPhaseRecommendedTapCountsScaleBySampleRate() {
+        let expected: [(Double, UInt32)] = [
+            (44_100, 1_883),
+            (48_000, 2_049),
+            (96_000, 4_097),
+            (192_000, 8_193),
+            (384_000, 16_385),
+        ]
+        for (rate, taps) in expected {
+            XCTAssertEqual(N60LinearPhaseEQRecommendedTapCount(rate), taps, "Unexpected tap count at \(rate) Hz")
+        }
+    }
+
+    func testLinearPhaseUnityDesignIsCenteredAndSymmetric() {
+        let sampleRate = 48_000.0
+        var taps = [Float](repeating: 0, count: Int(N60_LINEAR_PHASE_MAX_TAPS))
+        var info = N60LinearPhaseEQDesignInfo()
+        XCTAssertTrue(
+            taps.withUnsafeMutableBufferPointer { buffer in
+                N60LinearPhaseEQDesign(sampleRate, nil, 0, buffer.baseAddress!, UInt32(buffer.count), &info)
+            }
+        )
+
+        XCTAssertEqual(info.tapCount, 2_049)
+        XCTAssertEqual(info.groupDelayFrames, 1_024)
+        XCTAssertEqual(info.totalLatencyFrames, 1_280)
+        XCTAssertEqual(info.groupDelayMilliseconds, 21.333_333, accuracy: 0.001)
+
+        let count = Int(info.tapCount)
+        let center = Int(info.groupDelayFrames)
+        XCTAssertEqual(taps[center], 1.0, accuracy: 0.000_01)
+        for index in 0..<count {
+            XCTAssertEqual(taps[index], taps[count - 1 - index], accuracy: 0.000_001)
+            if index != center {
+                XCTAssertEqual(taps[index], 0.0, accuracy: 0.000_01)
+            }
+        }
+    }
+
+    func testLinearPhasePeakingBandMatchesRequestedMagnitudeAndRemainsSymmetric() {
+        let sampleRate = 96_000.0
+        var band = N60LinearPhaseEQBand()
+        band.enabled = true
+        band.type = N60BiquadFilterTypePeaking
+        band.frequencyHz = 1_000
+        band.gainDB = 6
+        band.q = 1.0
+        var bands = [band]
+        var taps = [Float](repeating: 0, count: Int(N60_LINEAR_PHASE_MAX_TAPS))
+        var info = N60LinearPhaseEQDesignInfo()
+
+        XCTAssertTrue(
+            bands.withUnsafeBufferPointer { bandBuffer in
+                taps.withUnsafeMutableBufferPointer { tapBuffer in
+                    N60LinearPhaseEQDesign(
+                        sampleRate,
+                        bandBuffer.baseAddress!,
+                        UInt32(bandBuffer.count),
+                        tapBuffer.baseAddress!,
+                        UInt32(tapBuffer.count),
+                        &info
+                    )
+                }
+            }
+        )
+
+        let count = Int(info.tapCount)
+        for index in 0..<(count / 2) {
+            XCTAssertEqual(taps[index], taps[count - 1 - index], accuracy: 0.000_01)
+        }
+        XCTAssertEqual(firMagnitudeDB(taps, count: count, sampleRate: sampleRate, frequency: 1_000), 6.0, accuracy: 0.35)
+        XCTAssertEqual(firMagnitudeDB(taps, count: count, sampleRate: sampleRate, frequency: 10_000), 0.0, accuracy: 0.35)
+    }
+
+    func testLinearPhaseUnityDesignRunsThroughProductionConvolverAtDeclaredLatency() {
+        let sampleRate = 48_000.0
+        var taps = [Float](repeating: 0, count: Int(N60_LINEAR_PHASE_MAX_TAPS))
+        var design = N60LinearPhaseEQDesignInfo()
+        XCTAssertTrue(
+            taps.withUnsafeMutableBufferPointer { buffer in
+                N60LinearPhaseEQDesign(sampleRate, nil, 0, buffer.baseAddress!, UInt32(buffer.count), &design)
+            }
+        )
+
+        guard let convolver = N60PartitionedConvolverCreate() else {
+            return XCTFail("Unable to allocate convolver")
+        }
+        defer { N60PartitionedConvolverDestroy(convolver) }
+
+        var generation: UInt64 = 0
+        XCTAssertTrue(
+            taps.withUnsafeBufferPointer { buffer in
+                N60PartitionedConvolverPrepareProgram(
+                    convolver,
+                    0,
+                    buffer.baseAddress!,
+                    nil,
+                    design.tapCount,
+                    design.groupDelayFrames,
+                    &generation
+                )
+            }
+        )
+        let program = N60PartitionedConvolverProgramInfo(convolver, 0)
+        XCTAssertEqual(program.tapCount, design.tapCount)
+        XCTAssertEqual(program.declaredLatencyFrames, design.groupDelayFrames)
+        XCTAssertEqual(program.engineLatencyFrames + program.declaredLatencyFrames, design.totalLatencyFrames)
+
+        var left: Float = 0
+        var right: Float = 0
+        let expectedLatency = Int(design.totalLatencyFrames)
+        for frame in 0...expectedLatency {
+            let input: Float = frame == 0 ? 1 : 0
+            XCTAssertTrue(N60PartitionedConvolverProcessSample(convolver, 0, generation, input, input, &left, &right))
+            if frame < expectedLatency {
+                XCTAssertEqual(left, 0, accuracy: 0.000_01)
+                XCTAssertEqual(right, 0, accuracy: 0.000_01)
+            } else {
+                XCTAssertEqual(left, 1, accuracy: 0.000_01)
+                XCTAssertEqual(right, 1, accuracy: 0.000_01)
+            }
+        }
+    }
+
     func testProgramPreparationRejectsInvalidInput() {
         guard let convolver = N60PartitionedConvolverCreate() else {
             return XCTFail("Unable to allocate convolver")
@@ -312,5 +436,18 @@ final class ConvolutionTests: XCTestCase {
                 )
             }
         )
+    }
+
+    private func firMagnitudeDB(_ taps: [Float], count: Int, sampleRate: Double, frequency: Double) -> Double {
+        var real = 0.0
+        var imaginary = 0.0
+        for index in 0..<count {
+            let phase = -2.0 * Double.pi * frequency * Double(index) / sampleRate
+            let tap = Double(taps[index])
+            real += tap * cos(phase)
+            imaginary += tap * sin(phase)
+        }
+        let magnitude = max(hypot(real, imaginary), 1.0e-12)
+        return 20.0 * log10(magnitude)
     }
 }
