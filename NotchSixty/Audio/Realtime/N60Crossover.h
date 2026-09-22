@@ -54,7 +54,7 @@ static inline N60CrossoverSnapshot N60CrossoverSnapshotMakeBypassed(void) {
 
 static inline bool N60CrossoverTopologyQValues(
     N60CrossoverTopology topology,
-    double qValues[N60_MAX_CROSSOVER_SECTIONS],
+    double * _Nonnull qValues,
     uint32_t * _Nonnull sectionCount
 ) {
     if (qValues == NULL || sectionCount == NULL) {
