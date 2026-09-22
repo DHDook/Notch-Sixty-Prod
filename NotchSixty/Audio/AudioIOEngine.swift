@@ -2,6 +2,118 @@ import Combine
 import CoreAudio
 import Foundation
 
+enum EQFilterType: String, CaseIterable, Identifiable, Sendable {
+    case peaking
+    case lowShelf
+    case highShelf
+    case lowPass
+    case highPass
+    case notch
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .peaking: return "Peak"
+        case .lowShelf: return "Low Shelf"
+        case .highShelf: return "High Shelf"
+        case .lowPass: return "Low Pass"
+        case .highPass: return "High Pass"
+        case .notch: return "Notch"
+        }
+    }
+
+    var cType: N60BiquadFilterType {
+        switch self {
+        case .peaking: return N60BiquadFilterTypePeaking
+        case .lowShelf: return N60BiquadFilterTypeLowShelf
+        case .highShelf: return N60BiquadFilterTypeHighShelf
+        case .lowPass: return N60BiquadFilterTypeLowPass
+        case .highPass: return N60BiquadFilterTypeHighPass
+        case .notch: return N60BiquadFilterTypeNotch
+        }
+    }
+}
+
+struct EQBand: Identifiable, Equatable, Sendable {
+    let id: UUID
+    var enabled: Bool
+    var type: EQFilterType
+    var frequencyHz: Double
+    var gainDB: Double
+    var q: Double
+
+    init(
+        id: UUID = UUID(),
+        enabled: Bool = true,
+        type: EQFilterType = .peaking,
+        frequencyHz: Double = 1_000,
+        gainDB: Double = 0,
+        q: Double = 0.707
+    ) {
+        self.id = id
+        self.enabled = enabled
+        self.type = type
+        self.frequencyHz = frequencyHz
+        self.gainDB = gainDB
+        self.q = q
+    }
+}
+
+enum EQConfigurationError: Error, LocalizedError, Equatable {
+    case tooManyBands(Int)
+    case invalidBand(index: Int)
+
+    var errorDescription: String? {
+        switch self {
+        case .tooManyBands(let count):
+            return "Parametric EQ supports at most \(Int(N60_MAX_EQ_BANDS)) bands; configuration contains \(count)."
+        case .invalidBand(let index):
+            return "EQ band \(index + 1) is invalid for the current output sample rate."
+        }
+    }
+}
+
+struct EQConfiguration: Equatable, Sendable {
+    static let maximumBandCount = Int(N60_MAX_EQ_BANDS)
+
+    var bypassed = false
+    var bands: [EQBand] = []
+
+    var enabledBandCount: Int {
+        bands.reduce(into: 0) { count, band in
+            if band.enabled { count += 1 }
+        }
+    }
+
+    func makeGraphSnapshot(sampleRate: Double) throws -> N60DSPGraphSnapshot {
+        guard bands.count <= Self.maximumBandCount else {
+            throw EQConfigurationError.tooManyBands(bands.count)
+        }
+
+        var graph = N60DSPGraphSnapshotMakeUnity(sampleRate)
+        graph.eqBypassed = bypassed
+        N60DSPGraphSnapshotClearEQ(&graph)
+
+        var renderIndex: UInt32 = 0
+        for (modelIndex, band) in bands.enumerated() where band.enabled {
+            guard N60DSPGraphSnapshotSetEQBand(
+                &graph,
+                renderIndex,
+                band.type.cType,
+                band.frequencyHz,
+                band.gainDB,
+                band.q,
+                true
+            ) else {
+                throw EQConfigurationError.invalidBand(index: modelIndex)
+            }
+            renderIndex += 1
+        }
+        return graph
+    }
+}
+
 @MainActor
 final class AudioIOEngine: ObservableObject {
     private let deviceCatalog: any OutputDeviceCataloging
@@ -23,6 +135,7 @@ final class AudioIOEngine: ObservableObject {
 
     @Published private(set) var outputDevices: [AudioOutputDevice] = []
     @Published private(set) var routeConfiguration: AudioRouteConfiguration
+    @Published private(set) var eqConfiguration = EQConfiguration()
     @Published private(set) var lastErrorDescription: String?
     @Published private(set) var lifecycleState: AudioLifecycleState
 
@@ -87,6 +200,38 @@ final class AudioIOEngine: ObservableObject {
         lastErrorDescription = nil
     }
 
+    func addEQBand(_ band: EQBand = EQBand()) throws {
+        guard eqConfiguration.bands.count < EQConfiguration.maximumBandCount else {
+            throw EQConfigurationError.tooManyBands(eqConfiguration.bands.count + 1)
+        }
+        var updated = eqConfiguration
+        updated.bands.append(band)
+        try applyEQConfiguration(updated)
+    }
+
+    func updateEQBand(_ band: EQBand) throws {
+        guard let index = eqConfiguration.bands.firstIndex(where: { $0.id == band.id }) else { return }
+        var updated = eqConfiguration
+        updated.bands[index] = band
+        try applyEQConfiguration(updated)
+    }
+
+    func removeEQBand(id: UUID) throws {
+        var updated = eqConfiguration
+        updated.bands.removeAll { $0.id == id }
+        try applyEQConfiguration(updated)
+    }
+
+    func setEQBypassed(_ bypassed: Bool) throws {
+        var updated = eqConfiguration
+        updated.bypassed = bypassed
+        try applyEQConfiguration(updated)
+    }
+
+    func replaceEQConfiguration(_ configuration: EQConfiguration) throws {
+        try applyEQConfiguration(configuration)
+    }
+
     func start() throws {
         try start(resetProcessingSessionCounters: true)
     }
@@ -145,6 +290,19 @@ final class AudioIOEngine: ObservableObject {
         )
     }
 
+    private func applyEQConfiguration(_ configuration: EQConfiguration) throws {
+        guard configuration.bands.count <= EQConfiguration.maximumBandCount else {
+            throw EQConfigurationError.tooManyBands(configuration.bands.count)
+        }
+
+        if let session = transportSession {
+            let graph = try configuration.makeGraphSnapshot(sampleRate: session.outputFormat.sampleRate)
+            try session.publishDSPGraph(graph)
+        }
+        eqConfiguration = configuration
+        lastErrorDescription = nil
+    }
+
     private func start(resetProcessingSessionCounters: Bool) throws {
         guard lifecycle.state == .idle else { return }
         try refreshOutputDevices()
@@ -181,7 +339,10 @@ final class AudioIOEngine: ObservableObject {
     }
 
     private func buildTransport(output: AudioOutputDevice) throws {
-        transportSession = try CoreAudioTransportSession(selectedOutput: output)
+        let session = try CoreAudioTransportSession(selectedOutput: output)
+        let graph = try eqConfiguration.makeGraphSnapshot(sampleRate: session.outputFormat.sampleRate)
+        try session.publishDSPGraph(graph)
+        transportSession = session
     }
 
     private func tearDownTransport(fadeOut: Bool) {
