@@ -18,12 +18,19 @@ struct ContentView: View {
         )
     }
 
+    private var eqBypassBinding: Binding<Bool> {
+        Binding(
+            get: { engine.eqConfiguration.bypassed },
+            set: { try? engine.setEQBypassed($0) }
+        )
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 14) {
             Text("Notch Sixty")
                 .font(.title.bold())
 
-            Text("Production transport + DSP kernel validation")
+            Text("Production transport + live parametric EQ validation")
                 .foregroundStyle(.secondary)
 
             Picker("Output", selection: selectedUIDBinding) {
@@ -56,10 +63,14 @@ struct ContentView: View {
                 }
             }
 
+            eqValidationView
+
             Divider()
 
-            TimelineView(.periodic(from: .now, by: 1.0)) { _ in
-                diagnosticsView(engine.diagnosticsSnapshot())
+            ScrollView {
+                TimelineView(.periodic(from: .now, by: 1.0)) { _ in
+                    diagnosticsView(engine.diagnosticsSnapshot())
+                }
             }
 
             if let error = engine.lastErrorDescription {
@@ -68,17 +79,100 @@ struct ContentView: View {
                     .foregroundStyle(.red)
                     .textSelection(.enabled)
             }
-
-            Spacer(minLength: 0)
         }
         .padding(20)
-        .frame(minWidth: 640, minHeight: 680)
+        .frame(minWidth: 760, minHeight: 760)
         .onAppear {
             engine.prepareForUse()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
             engine.shutdownForTermination()
         }
+    }
+
+    @ViewBuilder
+    private var eqValidationView: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Parametric EQ validation")
+                    .font(.headline)
+                Text("\(engine.eqConfiguration.enabledBandCount) active / \(engine.eqConfiguration.bands.count) configured / \(EQConfiguration.maximumBandCount) max")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Toggle("Bypass EQ", isOn: eqBypassBinding)
+                    .toggleStyle(.switch)
+                Button("Add Band") {
+                    try? engine.addEQBand()
+                }
+                .disabled(engine.eqConfiguration.bands.count >= EQConfiguration.maximumBandCount)
+            }
+
+            if engine.eqConfiguration.bands.isEmpty {
+                Text("No EQ bands configured. Add a band to validate live graph publication.")
+                    .foregroundStyle(.secondary)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 6) {
+                        ForEach(Array(engine.eqConfiguration.bands.enumerated()), id: \.element.id) { index, band in
+                            eqBandRow(index: index, band: band)
+                        }
+                    }
+                }
+                .frame(maxHeight: 220)
+            }
+        }
+        .padding(10)
+        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    @ViewBuilder
+    private func eqBandRow(index: Int, band: EQBand) -> some View {
+        let binding = eqBandBinding(for: band.id)
+        HStack(spacing: 8) {
+            Text("\(index + 1)")
+                .frame(width: 24, alignment: .trailing)
+                .foregroundStyle(.secondary)
+
+            Toggle("", isOn: binding.enabled)
+                .labelsHidden()
+
+            Picker("", selection: binding.type) {
+                ForEach(EQFilterType.allCases) { type in
+                    Text(type.displayName).tag(type)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 115)
+
+            TextField("Hz", value: binding.frequencyHz, format: .number.precision(.fractionLength(0...1)))
+                .frame(width: 85)
+            Text("Hz").foregroundStyle(.secondary)
+
+            TextField("dB", value: binding.gainDB, format: .number.precision(.fractionLength(1)))
+                .frame(width: 65)
+            Text("dB").foregroundStyle(.secondary)
+
+            TextField("Q", value: binding.q, format: .number.precision(.fractionLength(2...3)))
+                .frame(width: 65)
+            Text("Q").foregroundStyle(.secondary)
+
+            Spacer()
+            Button("Remove") {
+                try? engine.removeEQBand(id: band.id)
+            }
+        }
+        .textFieldStyle(.roundedBorder)
+    }
+
+    private func eqBandBinding(for id: UUID) -> Binding<EQBand> {
+        Binding(
+            get: {
+                engine.eqConfiguration.bands.first(where: { $0.id == id }) ?? EQBand(id: id, enabled: false)
+            },
+            set: { updated in
+                try? engine.updateEQBand(updated)
+            }
+        )
     }
 
     @ViewBuilder
@@ -105,6 +199,7 @@ struct ContentView: View {
                 diagnosticRow("DSP graph", "generation \(render.publishedGeneration) / \(render.bypassed ? "bypassed" : "active")")
                 diagnosticRow("DSP rate", formattedRate(render.sampleRate))
                 diagnosticRow("DSP latency", formattedDSPTime(frames: render.latencyFrames, sampleRate: render.sampleRate))
+                diagnosticRow("EQ stage", "\(render.eqBypassed ? "bypassed" : "active") / \(render.eqBandCount) rendered bands")
                 diagnosticRow("DSP rendered frames", "\(render.renderedFrames)")
                 diagnosticRow("DSP non-finite sanitized", "\(render.sanitizedNonFiniteSamples)")
                 diagnosticRow("DSP denormals flushed", "\(render.flushedDenormalSamples)")
