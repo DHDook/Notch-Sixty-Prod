@@ -29,6 +29,13 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
     let outputGainLinear: Float
     let eqBypassed: Bool
     let eqBandCount: UInt32
+    let crossoverEnabled: Bool
+    let crossoverFrequencyHz: Double
+    let crossoverTopology: N60CrossoverTopology
+    let crossoverMonitorMode: N60CrossoverMonitorMode
+    let crossoverSubGainLinear: Float
+    let crossoverSubPolarityInverted: Bool
+    let crossoverSectionCount: UInt32
     let inputMeter: StereoMeterReading
     let postEQMeter: StereoMeterReading
     let outputMeter: StereoMeterReading
@@ -48,6 +55,13 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
         outputGainLinear = diagnostics.outputGainLinear
         eqBypassed = diagnostics.eqBypassed
         eqBandCount = diagnostics.eqBandCount
+        crossoverEnabled = diagnostics.crossoverEnabled
+        crossoverFrequencyHz = diagnostics.crossoverFrequencyHz
+        crossoverTopology = diagnostics.crossoverTopology
+        crossoverMonitorMode = diagnostics.crossoverMonitorMode
+        crossoverSubGainLinear = diagnostics.crossoverSubGainLinear
+        crossoverSubPolarityInverted = diagnostics.crossoverSubPolarityInverted
+        crossoverSectionCount = diagnostics.crossoverSectionCount
         inputMeter = StereoMeterReading(diagnostics.inputMeter)
         postEQMeter = StereoMeterReading(diagnostics.postEQMeter)
         outputMeter = StereoMeterReading(diagnostics.outputMeter)
