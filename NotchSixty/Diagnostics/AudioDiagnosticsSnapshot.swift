@@ -19,6 +19,7 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
     let sanitizedNonFiniteSamples: UInt64
     let flushedDenormalSamples: UInt64
     let snapshotReadMisses: UInt64
+    let convolutionProgramMisses: UInt64
     let publishedGeneration: UInt64
     let latencyFrames: UInt32
     let sampleRate: Double
@@ -36,6 +37,13 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
     let crossoverSubGainLinear: Float
     let crossoverSubPolarityInverted: Bool
     let crossoverSectionCount: UInt32
+    let convolutionEnabled: Bool
+    let convolutionProgramSlot: UInt32
+    let convolutionProgramGeneration: UInt64
+    let convolutionTapCount: UInt32
+    let convolutionPartitionCount: UInt32
+    let convolutionEngineLatencyFrames: UInt32
+    let convolutionDeclaredLatencyFrames: UInt32
     let inputMeter: StereoMeterReading
     let postEQMeter: StereoMeterReading
     let outputMeter: StereoMeterReading
@@ -45,6 +53,7 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
         sanitizedNonFiniteSamples = diagnostics.sanitizedNonFiniteSamples
         flushedDenormalSamples = diagnostics.flushedDenormalSamples
         snapshotReadMisses = diagnostics.snapshotReadMisses
+        convolutionProgramMisses = diagnostics.convolutionProgramMisses
         publishedGeneration = diagnostics.publishedGeneration
         latencyFrames = diagnostics.latencyFrames
         sampleRate = diagnostics.sampleRate
@@ -62,6 +71,13 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
         crossoverSubGainLinear = diagnostics.crossoverSubGainLinear
         crossoverSubPolarityInverted = diagnostics.crossoverSubPolarityInverted
         crossoverSectionCount = diagnostics.crossoverSectionCount
+        convolutionEnabled = diagnostics.convolutionEnabled
+        convolutionProgramSlot = diagnostics.convolutionProgramSlot
+        convolutionProgramGeneration = diagnostics.convolutionProgramGeneration
+        convolutionTapCount = diagnostics.convolutionTapCount
+        convolutionPartitionCount = diagnostics.convolutionPartitionCount
+        convolutionEngineLatencyFrames = diagnostics.convolutionEngineLatencyFrames
+        convolutionDeclaredLatencyFrames = diagnostics.convolutionDeclaredLatencyFrames
         inputMeter = StereoMeterReading(diagnostics.inputMeter)
         postEQMeter = StereoMeterReading(diagnostics.postEQMeter)
         outputMeter = StereoMeterReading(diagnostics.outputMeter)
