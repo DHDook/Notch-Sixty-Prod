@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "N60Biquad.h"
+#include "N60Convolution.h"
 #include "N60Crossover.h"
 
 #ifdef __cplusplus
@@ -14,6 +15,16 @@ extern "C" {
 #define N60_MAX_EQ_BANDS 64
 
 typedef struct N60RenderKernel N60RenderKernel;
+
+typedef struct {
+    bool enabled;
+    uint32_t programSlot;
+    uint64_t programGeneration;
+    uint32_t tapCount;
+    uint32_t partitionCount;
+    uint32_t engineLatencyFrames;
+    uint32_t declaredLatencyFrames;
+} N60ConvolutionGraphState;
 
 typedef struct {
     double sampleRate;
@@ -31,6 +42,7 @@ typedef struct {
     N60BiquadBandSnapshot eqBands[N60_MAX_EQ_BANDS];
     uint32_t crossoverTransitionFrames;
     N60CrossoverSnapshot crossover;
+    N60ConvolutionGraphState convolution;
 } N60DSPGraphSnapshot;
 
 typedef struct {
@@ -72,6 +84,7 @@ typedef struct {
     uint64_t sanitizedNonFiniteSamples;
     uint64_t flushedDenormalSamples;
     uint64_t snapshotReadMisses;
+    uint64_t convolutionProgramMisses;
     uint64_t publishedGeneration;
     uint32_t latencyFrames;
     double sampleRate;
@@ -89,6 +102,13 @@ typedef struct {
     float crossoverSubGainLinear;
     bool crossoverSubPolarityInverted;
     uint32_t crossoverSectionCount;
+    bool convolutionEnabled;
+    uint32_t convolutionProgramSlot;
+    uint64_t convolutionProgramGeneration;
+    uint32_t convolutionTapCount;
+    uint32_t convolutionPartitionCount;
+    uint32_t convolutionEngineLatencyFrames;
+    uint32_t convolutionDeclaredLatencyFrames;
     N60StereoMeterReading inputMeter;
     N60StereoMeterReading postEQMeter;
     N60StereoMeterReading outputMeter;
@@ -96,8 +116,8 @@ typedef struct {
 
 N60DSPGraphSnapshot N60DSPGraphSnapshotMakeUnity(double sampleRate);
 
-// Control-plane graph helpers. Coefficients are designed before publication;
-// no trigonometry or filter construction occurs in the realtime callback.
+// Control-plane graph helpers. Coefficients/programs are prepared before
+// publication; no filter construction or FFT setup occurs in the callback.
 void N60DSPGraphSnapshotClearEQ(N60DSPGraphSnapshot * _Nonnull snapshot);
 bool N60DSPGraphSnapshotSetEQBand(
     N60DSPGraphSnapshot * _Nonnull snapshot,
@@ -117,10 +137,28 @@ bool N60DSPGraphSnapshotSetCrossover(
     bool subPolarityInverted,
     bool enabled
 );
+bool N60DSPGraphSnapshotSetConvolutionProgram(
+    N60DSPGraphSnapshot * _Nonnull snapshot,
+    uint32_t programSlot,
+    N60ConvolutionProgramInfo programInfo,
+    bool enabled
+);
 
 N60RenderKernel * _Nullable N60RenderKernelCreate(void);
 void N60RenderKernelDestroy(N60RenderKernel * _Nonnull kernel);
 void N60RenderKernelReset(N60RenderKernel * _Nonnull kernel);
+
+// Control-plane only. Programs are transformed into preallocated frequency-
+// domain partitions before a graph is allowed to reference them.
+bool N60RenderKernelPrepareConvolutionProgram(
+    N60RenderKernel * _Nonnull kernel,
+    uint32_t slot,
+    const float * _Nonnull leftTaps,
+    const float * _Nullable rightTaps,
+    uint32_t tapCount,
+    uint32_t declaredLatencyFrames,
+    N60ConvolutionProgramInfo * _Nullable programInfoOut
+);
 
 // Control-plane only. The caller must serialize publications.
 // The snapshot is copied into preallocated storage and atomically published.
