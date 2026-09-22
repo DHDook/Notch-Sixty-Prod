@@ -139,6 +139,7 @@ enum CoreAudioTransportError: Error, LocalizedError, Equatable {
     case sampleRateMismatch(tap: Double, output: Double)
     case realtimeBridgeAllocationFailed
     case dspGraphPublicationFailed
+    case convolutionProgramPreparationFailed
     case ioProcUnavailable(role: String)
     case outputBufferExceedsBridgeCapacity(bufferFrames: UInt32, capacityFrames: UInt32)
 
@@ -156,6 +157,8 @@ enum CoreAudioTransportError: Error, LocalizedError, Equatable {
             return "Unable to allocate the preallocated realtime audio bridge."
         case .dspGraphPublicationFailed:
             return "Unable to publish the render-ready DSP graph."
+        case .convolutionProgramPreparationFailed:
+            return "Unable to prepare an inactive convolution program slot."
         case .ioProcUnavailable(let role):
             return "Core Audio created the \(role) IOProc without returning a usable callback identifier."
         case .outputBufferExceedsBridgeCapacity(let bufferFrames, let capacityFrames):
@@ -168,6 +171,7 @@ final class CoreAudioTransportSession {
     private static let bridgeCapacityFrames: UInt32 = 65_536
     private static let fadeStepMicroseconds: UInt32 = 1_500
     private static let fadeStepCount: UInt32 = 8
+    private static let graphTransitionFadeMilliseconds = 8.0
 
     let selectedOutput: AudioOutputDevice
     private(set) var tapFormat = AudioStreamFormatDescription(AudioStreamBasicDescription())
@@ -294,6 +298,7 @@ final class CoreAudioTransportSession {
             }
 
             N60RealtimeAudioBridgeSetOutputGain(newBridge, 1.0)
+            N60RealtimeAudioBridgeSetTransitionGainImmediate(newBridge, 1.0)
             N60RealtimeAudioBridgeConfigureOutputGate(
                 newBridge,
                 gatePolicy.activationBufferedFrames,
@@ -325,10 +330,59 @@ final class CoreAudioTransportSession {
         return RenderKernelDiagnostics(N60RealtimeAudioBridgeGetRenderDiagnostics(bridge))
     }
 
+    func prepareConvolutionProgram(
+        slot: UInt32,
+        taps: [Float],
+        declaredLatencyFrames: UInt32
+    ) throws -> N60ConvolutionProgramInfo {
+        guard let bridge, !taps.isEmpty else {
+            throw CoreAudioTransportError.convolutionProgramPreparationFailed
+        }
+        var info = N60ConvolutionProgramInfo()
+        let prepared = taps.withUnsafeBufferPointer { buffer in
+            N60RealtimeAudioBridgePrepareConvolutionProgram(
+                bridge,
+                slot,
+                buffer.baseAddress!,
+                nil,
+                UInt32(buffer.count),
+                declaredLatencyFrames,
+                &info
+            )
+        }
+        guard prepared else { throw CoreAudioTransportError.convolutionProgramPreparationFailed }
+        return info
+    }
+
     func publishDSPGraph(_ snapshot: N60DSPGraphSnapshot) throws {
         guard let bridge, N60RealtimeAudioBridgePublishDSPGraph(bridge, snapshot) else {
             throw CoreAudioTransportError.dspGraphPublicationFailed
         }
+    }
+
+    func transitionDSPGraph(_ snapshot: N60DSPGraphSnapshot) throws {
+        guard let bridge else { throw CoreAudioTransportError.dspGraphPublicationFailed }
+
+        // This short control-plane fade deliberately crosses silence rather than
+        // crossfading paths with different algorithmic latencies. It is bounded,
+        // does not block the audio callback, and also works when program audio is idle.
+        for step in stride(from: Int(Self.fadeStepCount) - 1, through: 0, by: -1) {
+            N60RealtimeAudioBridgeSetTransitionGainImmediate(
+                bridge,
+                Float(step) / Float(Self.fadeStepCount)
+            )
+            usleep(Self.fadeStepMicroseconds)
+        }
+
+        guard N60RealtimeAudioBridgePublishDSPGraph(bridge, snapshot) else {
+            N60RealtimeAudioBridgeSetTransitionGainImmediate(bridge, 1.0)
+            throw CoreAudioTransportError.dspGraphPublicationFailed
+        }
+
+        let fadeFramesDouble = max(outputFormat.sampleRate, 1) * Self.graphTransitionFadeMilliseconds / 1_000.0
+        let fadeFrames = UInt32(min(max(fadeFramesDouble.rounded(), 1), Double(UInt32.max)))
+        N60RealtimeAudioBridgeSetTransitionGainImmediate(bridge, 0.0)
+        N60RealtimeAudioBridgeRampTransitionGain(bridge, 1.0, fadeFrames)
     }
 
     func stop(fadeOut: Bool) {
