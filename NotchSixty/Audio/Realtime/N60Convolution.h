@@ -12,7 +12,10 @@ extern "C" {
 #define N60_CONVOLUTION_FFT_SIZE (N60_CONVOLUTION_PARTITION_FRAMES * 2u)
 #define N60_CONVOLUTION_MAX_TAPS 32768u
 #define N60_CONVOLUTION_MAX_PARTITIONS (N60_CONVOLUTION_MAX_TAPS / N60_CONVOLUTION_PARTITION_FRAMES)
-#define N60_CONVOLUTION_PROGRAM_SLOTS 2u
+// Three program slots for two immutable graph snapshot slots guarantees a
+// spare control-plane preparation target while up to two graph generations
+// may still be referenced by the render path.
+#define N60_CONVOLUTION_PROGRAM_SLOTS 3u
 #define N60_CONVOLUTION_NO_PROGRAM UINT32_MAX
 
 typedef struct N60PartitionedConvolver N60PartitionedConvolver;
