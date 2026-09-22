@@ -105,6 +105,80 @@ enum DSPGainConfigurationError: Error, LocalizedError, Equatable {
     }
 }
 
+enum CrossoverTopology: String, CaseIterable, Identifiable, Sendable {
+    case linkwitzRiley24
+    case linkwitzRiley48
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .linkwitzRiley24: return "Linkwitz-Riley 24 dB/oct"
+        case .linkwitzRiley48: return "Linkwitz-Riley 48 dB/oct"
+        }
+    }
+
+    var cType: N60CrossoverTopology {
+        switch self {
+        case .linkwitzRiley24: return N60CrossoverTopologyLinkwitzRiley24
+        case .linkwitzRiley48: return N60CrossoverTopologyLinkwitzRiley48
+        }
+    }
+}
+
+enum CrossoverMonitorMode: String, CaseIterable, Identifiable, Sendable {
+    case recombined
+    case mainsOnly
+    case subOnly
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .recombined: return "Recombined preview"
+        case .mainsOnly: return "Mains only"
+        case .subOnly: return "Sub only"
+        }
+    }
+
+    var cType: N60CrossoverMonitorMode {
+        switch self {
+        case .recombined: return N60CrossoverMonitorModeRecombined
+        case .mainsOnly: return N60CrossoverMonitorModeMainsOnly
+        case .subOnly: return N60CrossoverMonitorModeSubOnly
+        }
+    }
+}
+
+struct BassManagementConfiguration: Equatable, Sendable {
+    static let frequencyRange = 20.0...500.0
+    static let subGainRange = -24.0...12.0
+
+    var enabled = false
+    var frequencyHz: Double = 80
+    var topology: CrossoverTopology = .linkwitzRiley24
+    var monitorMode: CrossoverMonitorMode = .recombined
+    var subGainDB: Double = 0
+    var subPolarityInverted = false
+}
+
+enum BassManagementConfigurationError: Error, LocalizedError, Equatable {
+    case invalidFrequency(Double)
+    case invalidSubGain(Double)
+    case graphDesignFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidFrequency(let value):
+            return "Crossover frequency \(value) Hz is outside the supported 20...500 Hz range."
+        case .invalidSubGain(let value):
+            return "Sub gain \(value) dB is outside the supported -24...+12 dB range."
+        case .graphDesignFailed:
+            return "Unable to design the crossover for the current output sample rate."
+        }
+    }
+}
+
 struct EQConfiguration: Equatable, Sendable {
     static let maximumBandCount = Int(N60_MAX_EQ_BANDS)
 
@@ -119,10 +193,19 @@ struct EQConfiguration: Equatable, Sendable {
 
     func makeGraphSnapshot(
         sampleRate: Double,
-        gainConfiguration: DSPGainConfiguration = DSPGainConfiguration()
+        gainConfiguration: DSPGainConfiguration = DSPGainConfiguration(),
+        bassManagementConfiguration: BassManagementConfiguration = BassManagementConfiguration()
     ) throws -> N60DSPGraphSnapshot {
         guard bands.count <= Self.maximumBandCount else {
             throw EQConfigurationError.tooManyBands(bands.count)
+        }
+        guard bassManagementConfiguration.frequencyHz.isFinite,
+              BassManagementConfiguration.frequencyRange.contains(bassManagementConfiguration.frequencyHz) else {
+            throw BassManagementConfigurationError.invalidFrequency(bassManagementConfiguration.frequencyHz)
+        }
+        guard bassManagementConfiguration.subGainDB.isFinite,
+              BassManagementConfiguration.subGainRange.contains(bassManagementConfiguration.subGainDB) else {
+            throw BassManagementConfigurationError.invalidSubGain(bassManagementConfiguration.subGainDB)
         }
 
         var graph = N60DSPGraphSnapshotMakeUnity(sampleRate)
@@ -146,6 +229,18 @@ struct EQConfiguration: Equatable, Sendable {
                 throw EQConfigurationError.invalidBand(index: modelIndex)
             }
             renderIndex += 1
+        }
+
+        guard N60DSPGraphSnapshotSetCrossover(
+            &graph,
+            bassManagementConfiguration.frequencyHz,
+            bassManagementConfiguration.topology.cType,
+            bassManagementConfiguration.monitorMode.cType,
+            DSPGainConfiguration.linearGain(forDB: bassManagementConfiguration.subGainDB),
+            bassManagementConfiguration.subPolarityInverted,
+            bassManagementConfiguration.enabled
+        ) else {
+            throw BassManagementConfigurationError.graphDesignFailed
         }
         return graph
     }
@@ -174,6 +269,7 @@ final class AudioIOEngine: ObservableObject {
     @Published private(set) var routeConfiguration: AudioRouteConfiguration
     @Published private(set) var eqConfiguration = EQConfiguration()
     @Published private(set) var gainConfiguration = DSPGainConfiguration()
+    @Published private(set) var bassManagementConfiguration = BassManagementConfiguration()
     @Published private(set) var lastErrorDescription: String?
     @Published private(set) var lifecycleState: AudioLifecycleState
 
@@ -297,6 +393,27 @@ final class AudioIOEngine: ObservableObject {
         try applyGainConfiguration(updated)
     }
 
+    func replaceBassManagementConfiguration(_ configuration: BassManagementConfiguration) throws {
+        guard configuration.frequencyHz.isFinite,
+              BassManagementConfiguration.frequencyRange.contains(configuration.frequencyHz) else {
+            throw BassManagementConfigurationError.invalidFrequency(configuration.frequencyHz)
+        }
+        guard configuration.subGainDB.isFinite,
+              BassManagementConfiguration.subGainRange.contains(configuration.subGainDB) else {
+            throw BassManagementConfigurationError.invalidSubGain(configuration.subGainDB)
+        }
+        if let session = transportSession {
+            let graph = try eqConfiguration.makeGraphSnapshot(
+                sampleRate: session.outputFormat.sampleRate,
+                gainConfiguration: gainConfiguration,
+                bassManagementConfiguration: configuration
+            )
+            try session.publishDSPGraph(graph)
+        }
+        bassManagementConfiguration = configuration
+        lastErrorDescription = nil
+    }
+
     func start() throws {
         try start(resetProcessingSessionCounters: true)
     }
@@ -363,7 +480,8 @@ final class AudioIOEngine: ObservableObject {
         if let session = transportSession {
             let graph = try configuration.makeGraphSnapshot(
                 sampleRate: session.outputFormat.sampleRate,
-                gainConfiguration: gainConfiguration
+                gainConfiguration: gainConfiguration,
+                bassManagementConfiguration: bassManagementConfiguration
             )
             try session.publishDSPGraph(graph)
         }
@@ -375,7 +493,8 @@ final class AudioIOEngine: ObservableObject {
         if let session = transportSession {
             let graph = try eqConfiguration.makeGraphSnapshot(
                 sampleRate: session.outputFormat.sampleRate,
-                gainConfiguration: configuration
+                gainConfiguration: configuration,
+                bassManagementConfiguration: bassManagementConfiguration
             )
             try session.publishDSPGraph(graph)
         }
@@ -422,7 +541,8 @@ final class AudioIOEngine: ObservableObject {
         let session = try CoreAudioTransportSession(selectedOutput: output)
         let graph = try eqConfiguration.makeGraphSnapshot(
             sampleRate: session.outputFormat.sampleRate,
-            gainConfiguration: gainConfiguration
+            gainConfiguration: gainConfiguration,
+            bassManagementConfiguration: bassManagementConfiguration
         )
         try session.publishDSPGraph(graph)
         transportSession = session
