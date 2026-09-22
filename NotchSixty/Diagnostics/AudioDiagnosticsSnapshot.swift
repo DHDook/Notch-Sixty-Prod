@@ -8,6 +8,8 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
     let sampleRate: Double
     let channelCount: UInt32
     let bypassed: Bool
+    let eqBypassed: Bool
+    let eqBandCount: UInt32
 
     init(_ diagnostics: N60RenderKernelDiagnostics) {
         renderedFrames = diagnostics.renderedFrames
@@ -19,6 +21,8 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
         sampleRate = diagnostics.sampleRate
         channelCount = diagnostics.channelCount
         bypassed = diagnostics.bypassed
+        eqBypassed = diagnostics.eqBypassed
+        eqBandCount = diagnostics.eqBandCount
     }
 }
 
