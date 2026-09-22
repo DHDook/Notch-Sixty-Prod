@@ -11,7 +11,6 @@ extern "C" {
 #endif
 
 #define N60_MAX_EQ_BANDS 16
-#define N60_EQ_COEFFICIENT_SMOOTHING_FRAMES 128
 
 typedef struct N60RenderKernel N60RenderKernel;
 
@@ -25,6 +24,7 @@ typedef struct {
     uint64_t generation;
     bool eqBypassed;
     uint32_t eqBandCount;
+    uint32_t eqTransitionFrames;
     N60BiquadBandSnapshot eqBands[N60_MAX_EQ_BANDS];
 } N60DSPGraphSnapshot;
 
