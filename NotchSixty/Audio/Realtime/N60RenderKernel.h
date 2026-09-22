@@ -4,9 +4,13 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "N60Biquad.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#define N60_MAX_EQ_BANDS 16
 
 typedef struct N60RenderKernel N60RenderKernel;
 
@@ -18,6 +22,10 @@ typedef struct {
     bool bypassed;
     uint32_t latencyFrames;
     uint64_t generation;
+    bool eqBypassed;
+    uint32_t eqBandCount;
+    uint32_t eqTransitionFrames;
+    N60BiquadBandSnapshot eqBands[N60_MAX_EQ_BANDS];
 } N60DSPGraphSnapshot;
 
 typedef struct {
@@ -36,9 +44,24 @@ typedef struct {
     double sampleRate;
     uint32_t channelCount;
     bool bypassed;
+    bool eqBypassed;
+    uint32_t eqBandCount;
 } N60RenderKernelDiagnostics;
 
 N60DSPGraphSnapshot N60DSPGraphSnapshotMakeUnity(double sampleRate);
+
+// Control-plane graph helpers. Coefficients are designed before publication;
+// no trigonometry or filter construction occurs in the realtime callback.
+void N60DSPGraphSnapshotClearEQ(N60DSPGraphSnapshot * _Nonnull snapshot);
+bool N60DSPGraphSnapshotSetEQBand(
+    N60DSPGraphSnapshot * _Nonnull snapshot,
+    uint32_t bandIndex,
+    N60BiquadFilterType type,
+    double frequencyHz,
+    double gainDB,
+    double q,
+    bool enabled
+);
 
 N60RenderKernel * _Nullable N60RenderKernelCreate(void);
 void N60RenderKernelDestroy(N60RenderKernel * _Nonnull kernel);
