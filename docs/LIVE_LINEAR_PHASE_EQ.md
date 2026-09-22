@@ -31,14 +31,18 @@ PR #17 originally placed its generic convolution stage after crossover because i
 
 ## Safe FIR program replacement
 
-The convolver owns two preallocated program slots. `N60PartitionedConvolverPrepareProgram` refuses to overwrite the slot currently consumed by the realtime path. Live linear-phase edits therefore use this lifecycle:
+The convolver owns **three preallocated program slots**, while the render kernel owns two immutable graph snapshot slots. Graph publications are serialized. Therefore, rotating FIR programs `0 → 1 → 2 → 0` always leaves one program slot that cannot be referenced by either currently reachable graph generation.
+
+`N60PartitionedConvolverPrepareProgram` also conservatively refuses to overwrite the last slot consumed by realtime processing. If that guard says the next rotation slot is not ready yet, the edit fails safely rather than falling through to a newer slot that could still be referenced.
+
+Live linear-phase edits use this lifecycle:
 
 1. design the new FIR on the control plane;
-2. prepare the inactive convolution slot;
+2. prepare the next guaranteed-spare convolution slot;
 3. fade the transport's dedicated graph-transition gain to silence;
 4. atomically publish a graph referencing the newly prepared slot;
 5. ramp the transition gain back to unity in the realtime callback;
-6. on the next redesign, reuse the now-inactive former slot.
+6. advance the rotation to the next of the three program slots.
 
 The user/master volume is not used for this transition.
 
@@ -67,7 +71,7 @@ Validate both 96 kHz and 384 kHz:
 - switch minimum ↔ linear while music is playing; expect only a very brief controlled dip, never a click/pop/buzz;
 - edit frequency, gain and Q repeatedly while linear mode is active;
 - verify linear mode renders zero IIR bands and an active FIR;
-- verify FIR program slot/generation changes on redesigns;
+- verify FIR program slot/generation rotates on redesigns;
 - verify FIR program misses, snapshot misses, underruns, overruns, and non-finite samples remain zero;
 - verify approximate linear-mode latency is ~24 ms at 96 kHz and ~22 ms at 384 kHz;
 - change native rate while linear mode is active and confirm the FIR is redesigned and playback recovers automatically.
