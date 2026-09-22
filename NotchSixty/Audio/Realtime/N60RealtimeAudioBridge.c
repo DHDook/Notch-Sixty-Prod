@@ -47,88 +47,61 @@ static float bits_to_float(uint32_t bits) {
 }
 
 static void zero_output(AudioBufferList *bufferList) {
-    if (bufferList == NULL) {
-        return;
-    }
-
+    if (bufferList == NULL) return;
     for (UInt32 index = 0; index < bufferList->mNumberBuffers; ++index) {
         AudioBuffer *buffer = &bufferList->mBuffers[index];
-        if (buffer->mData != NULL && buffer->mDataByteSize > 0) {
-            memset(buffer->mData, 0, buffer->mDataByteSize);
-        }
+        if (buffer->mData != NULL && buffer->mDataByteSize > 0) memset(buffer->mData, 0, buffer->mDataByteSize);
     }
 }
 
 static bool read_input_frame(const AudioBufferList *bufferList, UInt32 frameIndex, N60StereoFrame *frame) {
-    if (bufferList == NULL || frame == NULL) {
-        return false;
-    }
-
+    if (bufferList == NULL || frame == NULL) return false;
     if (bufferList->mNumberBuffers == 1) {
         const AudioBuffer *buffer = &bufferList->mBuffers[0];
-        if (buffer->mData == NULL || buffer->mNumberChannels != 2) {
-            return false;
-        }
+        if (buffer->mData == NULL || buffer->mNumberChannels != 2) return false;
         const float *samples = (const float *)buffer->mData;
         frame->left = samples[frameIndex * 2];
         frame->right = samples[frameIndex * 2 + 1];
         return true;
     }
-
     if (bufferList->mNumberBuffers >= 2) {
         const AudioBuffer *left = &bufferList->mBuffers[0];
         const AudioBuffer *right = &bufferList->mBuffers[1];
-        if (left->mData == NULL || right->mData == NULL || left->mNumberChannels < 1 || right->mNumberChannels < 1) {
-            return false;
-        }
+        if (left->mData == NULL || right->mData == NULL || left->mNumberChannels < 1 || right->mNumberChannels < 1) return false;
         frame->left = ((const float *)left->mData)[frameIndex];
         frame->right = ((const float *)right->mData)[frameIndex];
         return true;
     }
-
     return false;
 }
 
 static bool write_output_frame(AudioBufferList *bufferList, UInt32 frameIndex, N60StereoFrame frame, float gain) {
-    if (bufferList == NULL) {
-        return false;
-    }
-
+    if (bufferList == NULL) return false;
     frame.left *= gain;
     frame.right *= gain;
-
     if (bufferList->mNumberBuffers == 1) {
         AudioBuffer *buffer = &bufferList->mBuffers[0];
-        if (buffer->mData == NULL || buffer->mNumberChannels != 2) {
-            return false;
-        }
+        if (buffer->mData == NULL || buffer->mNumberChannels != 2) return false;
         float *samples = (float *)buffer->mData;
         samples[frameIndex * 2] = frame.left;
         samples[frameIndex * 2 + 1] = frame.right;
         return true;
     }
-
     if (bufferList->mNumberBuffers >= 2) {
         AudioBuffer *left = &bufferList->mBuffers[0];
         AudioBuffer *right = &bufferList->mBuffers[1];
-        if (left->mData == NULL || right->mData == NULL || left->mNumberChannels < 1 || right->mNumberChannels < 1) {
-            return false;
-        }
+        if (left->mData == NULL || right->mData == NULL || left->mNumberChannels < 1 || right->mNumberChannels < 1) return false;
         ((float *)left->mData)[frameIndex] = frame.left;
         ((float *)right->mData)[frameIndex] = frame.right;
         return true;
     }
-
     return false;
 }
 
 static float startup_fade_gain(N60RealtimeAudioBridge *bridge, float masterGain) {
     uint32_t remaining = atomic_load_explicit(&bridge->startupFadeFramesRemaining, memory_order_relaxed);
     uint32_t total = atomic_load_explicit(&bridge->startupFadeFramesTotal, memory_order_relaxed);
-    if (remaining == 0 || total == 0) {
-        return masterGain;
-    }
-
+    if (remaining == 0 || total == 0) return masterGain;
     uint32_t completed = total - remaining + 1;
     float ramp = (float)completed / (float)total;
     atomic_store_explicit(&bridge->startupFadeFramesRemaining, remaining - 1, memory_order_relaxed);
@@ -136,28 +109,20 @@ static float startup_fade_gain(N60RealtimeAudioBridge *bridge, float masterGain)
 }
 
 N60RealtimeAudioBridge *N60RealtimeAudioBridgeCreate(uint32_t capacityFrames) {
-    if (capacityFrames == 0) {
-        return NULL;
-    }
-
+    if (capacityFrames == 0) return NULL;
     N60RealtimeAudioBridge *bridge = calloc(1, sizeof(N60RealtimeAudioBridge));
-    if (bridge == NULL) {
-        return NULL;
-    }
-
+    if (bridge == NULL) return NULL;
     bridge->frames = calloc(capacityFrames, sizeof(N60StereoFrame));
     if (bridge->frames == NULL) {
         free(bridge);
         return NULL;
     }
-
     bridge->renderKernel = N60RenderKernelCreate();
     if (bridge->renderKernel == NULL) {
         free(bridge->frames);
         free(bridge);
         return NULL;
     }
-
     bridge->capacityFrames = capacityFrames;
     atomic_store_explicit(&bridge->outputGainBits, float_to_bits(1.0f), memory_order_relaxed);
     atomic_store_explicit(&bridge->outputGateOpen, true, memory_order_relaxed);
@@ -165,19 +130,14 @@ N60RealtimeAudioBridge *N60RealtimeAudioBridgeCreate(uint32_t capacityFrames) {
 }
 
 void N60RealtimeAudioBridgeDestroy(N60RealtimeAudioBridge *bridge) {
-    if (bridge == NULL) {
-        return;
-    }
+    if (bridge == NULL) return;
     N60RenderKernelDestroy(bridge->renderKernel);
     free(bridge->frames);
     free(bridge);
 }
 
 void N60RealtimeAudioBridgeReset(N60RealtimeAudioBridge *bridge) {
-    if (bridge == NULL) {
-        return;
-    }
-
+    if (bridge == NULL) return;
     atomic_store_explicit(&bridge->writeIndex, 0, memory_order_release);
     atomic_store_explicit(&bridge->readIndex, 0, memory_order_release);
     atomic_store_explicit(&bridge->captureCallbacks, 0, memory_order_relaxed);
@@ -198,9 +158,7 @@ void N60RealtimeAudioBridgeReset(N60RealtimeAudioBridge *bridge) {
 }
 
 void N60RealtimeAudioBridgeSetOutputGain(N60RealtimeAudioBridge *bridge, float gain) {
-    if (bridge == NULL) {
-        return;
-    }
+    if (bridge == NULL) return;
     atomic_store_explicit(&bridge->outputGainBits, float_to_bits(gain), memory_order_release);
 }
 
@@ -209,32 +167,42 @@ void N60RealtimeAudioBridgeConfigureOutputGate(
     uint32_t minimumBufferedFrames,
     uint32_t fadeInFrames
 ) {
-    if (bridge == NULL) {
-        return;
-    }
-
+    if (bridge == NULL) return;
     atomic_store_explicit(&bridge->outputGateMinimumBufferedFrames, minimumBufferedFrames, memory_order_relaxed);
     atomic_store_explicit(&bridge->startupFadeFramesTotal, fadeInFrames, memory_order_relaxed);
     atomic_store_explicit(&bridge->startupFadeFramesRemaining, fadeInFrames, memory_order_relaxed);
     atomic_store_explicit(&bridge->outputGateOpen, minimumBufferedFrames == 0, memory_order_release);
 }
 
-bool N60RealtimeAudioBridgePublishDSPGraph(
+bool N60RealtimeAudioBridgePrepareConvolutionProgram(
     N60RealtimeAudioBridge *bridge,
-    N60DSPGraphSnapshot snapshot
+    uint32_t slot,
+    const float *leftTaps,
+    const float *rightTaps,
+    uint32_t tapCount,
+    uint32_t declaredLatencyFrames,
+    N60ConvolutionProgramInfo *programInfoOut
 ) {
-    if (bridge == NULL || bridge->renderKernel == NULL) {
-        return false;
-    }
+    if (bridge == NULL || bridge->renderKernel == NULL) return false;
+    return N60RenderKernelPrepareConvolutionProgram(
+        bridge->renderKernel,
+        slot,
+        leftTaps,
+        rightTaps,
+        tapCount,
+        declaredLatencyFrames,
+        programInfoOut
+    );
+}
+
+bool N60RealtimeAudioBridgePublishDSPGraph(N60RealtimeAudioBridge *bridge, N60DSPGraphSnapshot snapshot) {
+    if (bridge == NULL || bridge->renderKernel == NULL) return false;
     return N60RenderKernelPublishSnapshot(bridge->renderKernel, snapshot);
 }
 
 N60RealtimeAudioBridgeSnapshot N60RealtimeAudioBridgeGetSnapshot(const N60RealtimeAudioBridge *bridge) {
     N60RealtimeAudioBridgeSnapshot snapshot = {0};
-    if (bridge == NULL) {
-        return snapshot;
-    }
-
+    if (bridge == NULL) return snapshot;
     snapshot.captureCallbacks = atomic_load_explicit(&bridge->captureCallbacks, memory_order_relaxed);
     snapshot.outputCallbacks = atomic_load_explicit(&bridge->outputCallbacks, memory_order_relaxed);
     snapshot.capturedFrames = atomic_load_explicit(&bridge->capturedFrames, memory_order_relaxed);
@@ -245,20 +213,15 @@ N60RealtimeAudioBridgeSnapshot N60RealtimeAudioBridgeGetSnapshot(const N60Realti
     snapshot.gatedOutputCallbacks = atomic_load_explicit(&bridge->gatedOutputCallbacks, memory_order_relaxed);
     snapshot.gatedOutputFrames = atomic_load_explicit(&bridge->gatedOutputFrames, memory_order_relaxed);
     snapshot.outputGateOpen = atomic_load_explicit(&bridge->outputGateOpen, memory_order_acquire);
-
     uint64_t writeIndex = atomic_load_explicit(&bridge->writeIndex, memory_order_acquire);
     uint64_t readIndex = atomic_load_explicit(&bridge->readIndex, memory_order_acquire);
     uint64_t buffered = writeIndex >= readIndex ? writeIndex - readIndex : 0;
-    if (buffered > bridge->capacityFrames) {
-        buffered = bridge->capacityFrames;
-    }
+    if (buffered > bridge->capacityFrames) buffered = bridge->capacityFrames;
     snapshot.bufferedFrames = (uint32_t)buffered;
     return snapshot;
 }
 
-N60RenderKernelDiagnostics N60RealtimeAudioBridgeGetRenderDiagnostics(
-    const N60RealtimeAudioBridge *bridge
-) {
+N60RenderKernelDiagnostics N60RealtimeAudioBridgeGetRenderDiagnostics(const N60RealtimeAudioBridge *bridge) {
     if (bridge == NULL || bridge->renderKernel == NULL) {
         N60RenderKernelDiagnostics diagnostics = {0};
         return diagnostics;
@@ -280,14 +243,9 @@ OSStatus N60CaptureIOProc(
     (void)inInputTime;
     (void)outOutputData;
     (void)inOutputTime;
-
     N60RealtimeAudioBridge *bridge = (N60RealtimeAudioBridge *)inClientData;
-    if (bridge == NULL || inInputData == NULL) {
-        return noErr;
-    }
-
+    if (bridge == NULL || inInputData == NULL) return noErr;
     atomic_fetch_add_explicit(&bridge->captureCallbacks, 1, memory_order_relaxed);
-
     UInt32 frameCount = 0;
     if (inInputData->mNumberBuffers == 1 && inInputData->mBuffers[0].mNumberChannels == 2) {
         frameCount = inInputData->mBuffers[0].mDataByteSize / (UInt32)(sizeof(float) * 2);
@@ -297,13 +255,11 @@ OSStatus N60CaptureIOProc(
         atomic_fetch_add_explicit(&bridge->unsupportedBufferLayouts, 1, memory_order_relaxed);
         return noErr;
     }
-
     uint64_t writeIndex = atomic_load_explicit(&bridge->writeIndex, memory_order_relaxed);
     uint64_t readIndex = atomic_load_explicit(&bridge->readIndex, memory_order_acquire);
     uint64_t used = writeIndex >= readIndex ? writeIndex - readIndex : 0;
     uint64_t available = used < bridge->capacityFrames ? bridge->capacityFrames - used : 0;
     UInt32 framesToWrite = frameCount < available ? frameCount : (UInt32)available;
-
     for (UInt32 frameIndex = 0; frameIndex < framesToWrite; ++frameIndex) {
         N60StereoFrame frame;
         if (!read_input_frame(inInputData, frameIndex, &frame)) {
@@ -312,13 +268,9 @@ OSStatus N60CaptureIOProc(
         }
         bridge->frames[(writeIndex + frameIndex) % bridge->capacityFrames] = frame;
     }
-
     atomic_store_explicit(&bridge->writeIndex, writeIndex + framesToWrite, memory_order_release);
     atomic_fetch_add_explicit(&bridge->capturedFrames, framesToWrite, memory_order_relaxed);
-    if (framesToWrite < frameCount) {
-        atomic_fetch_add_explicit(&bridge->overrunFrames, frameCount - framesToWrite, memory_order_relaxed);
-    }
-
+    if (framesToWrite < frameCount) atomic_fetch_add_explicit(&bridge->overrunFrames, frameCount - framesToWrite, memory_order_relaxed);
     return noErr;
 }
 
@@ -336,14 +288,9 @@ OSStatus N60OutputIOProc(
     (void)inInputData;
     (void)inInputTime;
     (void)inOutputTime;
-
     N60RealtimeAudioBridge *bridge = (N60RealtimeAudioBridge *)inClientData;
-    if (bridge == NULL || outOutputData == NULL) {
-        return noErr;
-    }
-
+    if (bridge == NULL || outOutputData == NULL) return noErr;
     atomic_fetch_add_explicit(&bridge->outputCallbacks, 1, memory_order_relaxed);
-
     UInt32 frameCount = 0;
     if (outOutputData->mNumberBuffers == 1 && outOutputData->mBuffers[0].mNumberChannels == 2) {
         frameCount = outOutputData->mBuffers[0].mDataByteSize / (UInt32)(sizeof(float) * 2);
@@ -354,11 +301,9 @@ OSStatus N60OutputIOProc(
         atomic_fetch_add_explicit(&bridge->unsupportedBufferLayouts, 1, memory_order_relaxed);
         return noErr;
     }
-
     uint64_t readIndex = atomic_load_explicit(&bridge->readIndex, memory_order_relaxed);
     uint64_t writeIndex = atomic_load_explicit(&bridge->writeIndex, memory_order_acquire);
     uint64_t available = writeIndex >= readIndex ? writeIndex - readIndex : 0;
-
     if (!atomic_load_explicit(&bridge->outputGateOpen, memory_order_acquire)) {
         uint32_t gateMinimum = atomic_load_explicit(&bridge->outputGateMinimumBufferedFrames, memory_order_relaxed);
         if (available >= gateMinimum && available >= frameCount) {
@@ -370,12 +315,10 @@ OSStatus N60OutputIOProc(
             return noErr;
         }
     }
-
     UInt32 framesToRead = frameCount < available ? frameCount : (UInt32)available;
     float masterGain = bits_to_float(atomic_load_explicit(&bridge->outputGainBits, memory_order_acquire));
     N60RenderKernelRenderContext renderContext = N60RenderKernelBeginRender(bridge->renderKernel);
     UInt32 renderedFrames = 0;
-
     for (UInt32 frameIndex = 0; frameIndex < framesToRead; ++frameIndex) {
         N60StereoFrame frame = bridge->frames[(readIndex + frameIndex) % bridge->capacityFrames];
         N60StereoFrame processed;
@@ -396,19 +339,13 @@ OSStatus N60OutputIOProc(
         }
         renderedFrames += 1;
     }
-
     N60RenderKernelEndRender(bridge->renderKernel, &renderContext, renderedFrames);
-
     for (UInt32 frameIndex = framesToRead; frameIndex < frameCount; ++frameIndex) {
         N60StereoFrame silence = {0.0f, 0.0f};
         (void)write_output_frame(outOutputData, frameIndex, silence, 1.0f);
     }
-
     atomic_store_explicit(&bridge->readIndex, readIndex + framesToRead, memory_order_release);
     atomic_fetch_add_explicit(&bridge->deliveredFrames, framesToRead, memory_order_relaxed);
-    if (framesToRead < frameCount) {
-        atomic_fetch_add_explicit(&bridge->underrunFrames, frameCount - framesToRead, memory_order_relaxed);
-    }
-
+    if (framesToRead < frameCount) atomic_fetch_add_explicit(&bridge->underrunFrames, frameCount - framesToRead, memory_order_relaxed);
     return noErr;
 }
