@@ -26,12 +26,33 @@ struct ContentView: View {
         )
     }
 
+    private var inputPreampBinding: Binding<Double> {
+        Binding(
+            get: { engine.gainConfiguration.inputPreampDB },
+            set: { try? engine.setInputPreampDB($0) }
+        )
+    }
+
+    private var headroomBinding: Binding<Double> {
+        Binding(
+            get: { engine.gainConfiguration.headroomAttenuationDB },
+            set: { try? engine.setHeadroomAttenuationDB($0) }
+        )
+    }
+
+    private var outputGainBinding: Binding<Double> {
+        Binding(
+            get: { engine.gainConfiguration.outputGainDB },
+            set: { try? engine.setOutputGainDB($0) }
+        )
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Notch Sixty")
                 .font(.title.bold())
 
-            Text("Production transport + live parametric EQ validation")
+            Text("Production transport + EQ + gain/headroom validation")
                 .foregroundStyle(.secondary)
 
             Picker("Output", selection: selectedUIDBinding) {
@@ -64,12 +85,13 @@ struct ContentView: View {
                 }
             }
 
+            gainValidationView
             eqValidationView
 
             Divider()
 
             ScrollView {
-                TimelineView(.periodic(from: .now, by: 1.0)) { _ in
+                TimelineView(.periodic(from: .now, by: 0.25)) { _ in
                     diagnosticsView(engine.diagnosticsSnapshot())
                 }
             }
@@ -82,12 +104,57 @@ struct ContentView: View {
             }
         }
         .padding(20)
-        .frame(minWidth: 760, minHeight: 760)
+        .frame(minWidth: 820, minHeight: 860)
         .onAppear {
             engine.prepareForUse()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
             engine.shutdownForTermination()
+        }
+    }
+
+    @ViewBuilder
+    private var gainValidationView: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Gain / headroom validation")
+                .font(.headline)
+
+            gainControlRow(
+                label: "Input preamp",
+                value: inputPreampBinding,
+                range: DSPGainConfiguration.inputPreampRange
+            )
+            gainControlRow(
+                label: "Headroom attenuation",
+                value: headroomBinding,
+                range: DSPGainConfiguration.headroomAttenuationRange
+            )
+            gainControlRow(
+                label: "Output gain",
+                value: outputGainBinding,
+                range: DSPGainConfiguration.outputGainRange
+            )
+
+            Text("Headroom attenuation is a separate internal stage reserved for future automatic compensation; PR #15 does not change it automatically.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(10)
+        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    @ViewBuilder
+    private func gainControlRow(label: String, value: Binding<Double>, range: ClosedRange<Double>) -> some View {
+        HStack(spacing: 10) {
+            Text(label)
+                .frame(width: 155, alignment: .leading)
+            Slider(value: value, in: range, step: 0.5)
+                .frame(minWidth: 280)
+            TextField("dB", value: value, format: .number.precision(.fractionLength(1)))
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 70)
+            Text("dB")
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -122,7 +189,7 @@ struct ContentView: View {
                         }
                     }
                 }
-                .frame(maxHeight: 220)
+                .frame(maxHeight: 180)
             }
         }
         .padding(10)
@@ -222,7 +289,13 @@ struct ContentView: View {
                 diagnosticRow("DSP graph", "generation \(render.publishedGeneration) / \(render.bypassed ? "bypassed" : "active")")
                 diagnosticRow("DSP rate", formattedRate(render.sampleRate))
                 diagnosticRow("DSP latency", formattedDSPTime(frames: render.latencyFrames, sampleRate: render.sampleRate))
+                diagnosticRow("Input preamp", formattedGain(render.inputGainLinear))
+                diagnosticRow("Headroom stage", formattedGain(render.headroomGainLinear))
+                diagnosticRow("Output gain", formattedGain(render.outputGainLinear))
                 diagnosticRow("EQ stage", "\(render.eqBypassed ? "bypassed" : "active") / \(render.eqBandCount) rendered bands")
+                meterRow("Input meter", render.inputMeter)
+                meterRow("Post-EQ meter", render.postEQMeter)
+                meterRow("DSP output meter", render.outputMeter)
                 diagnosticRow("DSP rendered frames", "\(render.renderedFrames)")
                 diagnosticRow("DSP non-finite sanitized", "\(render.sanitizedNonFiniteSamples)")
                 diagnosticRow("DSP denormals flushed", "\(render.flushedDenormalSamples)")
@@ -261,6 +334,14 @@ struct ContentView: View {
         }
     }
 
+    @ViewBuilder
+    private func meterRow(_ label: String, _ meter: StereoMeterReading) -> some View {
+        diagnosticRow(
+            label,
+            "peak L \(formattedLevel(meter.peakLeft)) / R \(formattedLevel(meter.peakRight)) | RMS L \(formattedLevel(meter.rmsLeft)) / R \(formattedLevel(meter.rmsRight)) | over-range \(meter.overRangeSamples)"
+        )
+    }
+
     private func formattedRate(_ rate: Double) -> String {
         if rate >= 1_000 {
             return String(format: "%.1f kHz", rate / 1_000)
@@ -278,5 +359,15 @@ struct ContentView: View {
         guard sampleRate > 0 else { return "\(frames) frames" }
         let milliseconds = Double(frames) / sampleRate * 1_000.0
         return String(format: "%u frames / %.3f ms", frames, milliseconds)
+    }
+
+    private func formattedGain(_ linear: Float) -> String {
+        guard linear > 0 else { return "−∞ dB" }
+        return String(format: "%+.2f dB", 20.0 * log10(Double(linear)))
+    }
+
+    private func formattedLevel(_ linear: Float) -> String {
+        guard linear > 0 else { return "−∞ dBFS" }
+        return String(format: "%.1f dBFS", 20.0 * log10(Double(linear)))
     }
 }
