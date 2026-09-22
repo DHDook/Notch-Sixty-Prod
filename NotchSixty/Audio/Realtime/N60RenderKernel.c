@@ -1,5 +1,6 @@
 #include "N60RenderKernel.h"
 
+#include <limits.h>
 #include <math.h>
 #include <sched.h>
 #include <stdatomic.h>
@@ -65,6 +66,7 @@ struct N60RenderKernel {
 
     N60EQBandRuntime eqRuntime[N60_MAX_EQ_BANDS];
     N60CrossoverRuntime crossoverRuntime;
+    N60PartitionedConvolver *convolver;
     N60SmoothedGain inputGain;
     N60SmoothedGain headroomGain;
     N60SmoothedGain outputGain;
@@ -77,6 +79,7 @@ struct N60RenderKernel {
     _Atomic uint64_t sanitizedNonFiniteSamples;
     _Atomic uint64_t flushedDenormalSamples;
     _Atomic uint64_t snapshotReadMisses;
+    _Atomic uint64_t convolutionProgramMisses;
 
     _Atomic uint32_t inputPeakLeftBits;
     _Atomic uint32_t inputPeakRightBits;
@@ -163,6 +166,22 @@ static bool crossover_snapshot_is_valid(N60CrossoverSnapshot crossover, double s
     return true;
 }
 
+static bool convolution_snapshot_is_valid(N60ConvolutionGraphState convolution) {
+    if (!convolution.enabled) return true;
+    if (convolution.programSlot >= N60_CONVOLUTION_PROGRAM_SLOTS
+        || convolution.programGeneration == 0
+        || convolution.tapCount == 0
+        || convolution.tapCount > N60_CONVOLUTION_MAX_TAPS
+        || convolution.partitionCount == 0
+        || convolution.partitionCount > N60_CONVOLUTION_MAX_PARTITIONS
+        || convolution.engineLatencyFrames != N60_CONVOLUTION_PARTITION_FRAMES) {
+        return false;
+    }
+    uint32_t expectedPartitions = (convolution.tapCount + N60_CONVOLUTION_PARTITION_FRAMES - 1u)
+        / N60_CONVOLUTION_PARTITION_FRAMES;
+    return convolution.partitionCount == expectedPartitions;
+}
+
 static bool snapshot_is_valid(N60DSPGraphSnapshot snapshot) {
     if (!isfinite(snapshot.sampleRate)
         || snapshot.sampleRate <= 0.0
@@ -174,7 +193,8 @@ static bool snapshot_is_valid(N60DSPGraphSnapshot snapshot) {
         || !isfinite(snapshot.outputGainLinear)
         || snapshot.outputGainLinear < 0.0f
         || snapshot.eqBandCount > N60_MAX_EQ_BANDS
-        || !crossover_snapshot_is_valid(snapshot.crossover, snapshot.sampleRate)) {
+        || !crossover_snapshot_is_valid(snapshot.crossover, snapshot.sampleRate)
+        || !convolution_snapshot_is_valid(snapshot.convolution)) {
         return false;
     }
 
@@ -534,6 +554,8 @@ N60DSPGraphSnapshot N60DSPGraphSnapshotMakeUnity(double sampleRate) {
     snapshot.eqTransitionFrames = eq_transition_frames_for_sample_rate(sampleRate);
     snapshot.crossoverTransitionFrames = crossover_transition_frames_for_sample_rate(sampleRate);
     snapshot.crossover = N60CrossoverSnapshotMakeBypassed();
+    snapshot.convolution.enabled = false;
+    snapshot.convolution.programSlot = N60_CONVOLUTION_NO_PROGRAM;
     return snapshot;
 }
 
@@ -560,9 +582,55 @@ bool N60DSPGraphSnapshotSetCrossover(N60DSPGraphSnapshot *snapshot, double frequ
     return true;
 }
 
+bool N60DSPGraphSnapshotSetConvolutionProgram(
+    N60DSPGraphSnapshot *snapshot,
+    uint32_t programSlot,
+    N60ConvolutionProgramInfo programInfo,
+    bool enabled
+) {
+    if (snapshot == NULL) return false;
+
+    uint64_t previousLatency = snapshot->convolution.enabled
+        ? (uint64_t)snapshot->convolution.engineLatencyFrames + snapshot->convolution.declaredLatencyFrames
+        : 0;
+    uint64_t baseLatency = snapshot->latencyFrames >= previousLatency
+        ? (uint64_t)snapshot->latencyFrames - previousLatency
+        : 0;
+
+    N60ConvolutionGraphState state = {0};
+    state.enabled = enabled;
+    state.programSlot = programSlot;
+    state.programGeneration = programInfo.generation;
+    state.tapCount = programInfo.tapCount;
+    state.partitionCount = programInfo.partitionCount;
+    state.engineLatencyFrames = programInfo.engineLatencyFrames;
+    state.declaredLatencyFrames = programInfo.declaredLatencyFrames;
+
+    if (enabled && (!programInfo.prepared
+        || programSlot >= N60_CONVOLUTION_PROGRAM_SLOTS
+        || programInfo.generation == 0
+        || programInfo.tapCount == 0
+        || programInfo.engineLatencyFrames != N60_CONVOLUTION_PARTITION_FRAMES)) {
+        return false;
+    }
+
+    uint64_t convolutionLatency = enabled
+        ? (uint64_t)programInfo.engineLatencyFrames + programInfo.declaredLatencyFrames
+        : 0;
+    if (baseLatency + convolutionLatency > UINT32_MAX) return false;
+    snapshot->convolution = state;
+    snapshot->latencyFrames = (uint32_t)(baseLatency + convolutionLatency);
+    return true;
+}
+
 N60RenderKernel *N60RenderKernelCreate(void) {
     N60RenderKernel *kernel = calloc(1, sizeof(N60RenderKernel));
     if (kernel == NULL) return NULL;
+    kernel->convolver = N60PartitionedConvolverCreate();
+    if (kernel->convolver == NULL) {
+        free(kernel);
+        return NULL;
+    }
     N60DSPGraphSnapshot initial = N60DSPGraphSnapshotMakeUnity(48000.0);
     initial.generation = 1;
     kernel->slots[0].snapshot = initial;
@@ -577,12 +645,17 @@ N60RenderKernel *N60RenderKernelCreate(void) {
     return kernel;
 }
 
-void N60RenderKernelDestroy(N60RenderKernel *kernel) { free(kernel); }
+void N60RenderKernelDestroy(N60RenderKernel *kernel) {
+    if (kernel == NULL) return;
+    N60PartitionedConvolverDestroy(kernel->convolver);
+    free(kernel);
+}
 
 void N60RenderKernelReset(N60RenderKernel *kernel) {
     if (kernel == NULL) return;
     reset_eq_runtime(kernel);
     reset_crossover_runtime(&kernel->crossoverRuntime, N60CrossoverSnapshotMakeBypassed());
+    N60PartitionedConvolverReset(kernel->convolver);
     reset_smoothed_gain(&kernel->inputGain, 1.0f);
     reset_smoothed_gain(&kernel->headroomGain, 1.0f);
     reset_smoothed_gain(&kernel->outputGain, 1.0f);
@@ -594,6 +667,7 @@ void N60RenderKernelReset(N60RenderKernel *kernel) {
     atomic_store_explicit(&kernel->sanitizedNonFiniteSamples, 0, memory_order_relaxed);
     atomic_store_explicit(&kernel->flushedDenormalSamples, 0, memory_order_relaxed);
     atomic_store_explicit(&kernel->snapshotReadMisses, 0, memory_order_relaxed);
+    atomic_store_explicit(&kernel->convolutionProgramMisses, 0, memory_order_relaxed);
     atomic_store_explicit(&kernel->inputPeakLeftBits, 0, memory_order_relaxed);
     atomic_store_explicit(&kernel->inputPeakRightBits, 0, memory_order_relaxed);
     atomic_store_explicit(&kernel->inputRMSLeftBits, 0, memory_order_relaxed);
@@ -611,8 +685,53 @@ void N60RenderKernelReset(N60RenderKernel *kernel) {
     atomic_store_explicit(&kernel->outputOverRangeSamples, 0, memory_order_relaxed);
 }
 
+bool N60RenderKernelPrepareConvolutionProgram(
+    N60RenderKernel *kernel,
+    uint32_t slot,
+    const float *leftTaps,
+    const float *rightTaps,
+    uint32_t tapCount,
+    uint32_t declaredLatencyFrames,
+    N60ConvolutionProgramInfo *programInfoOut
+) {
+    if (kernel == NULL || kernel->convolver == NULL) return false;
+    uint64_t generation = 0;
+    if (!N60PartitionedConvolverPrepareProgram(
+            kernel->convolver,
+            slot,
+            leftTaps,
+            rightTaps,
+            tapCount,
+            declaredLatencyFrames,
+            &generation)) {
+        return false;
+    }
+    N60ConvolutionProgramInfo info = N60PartitionedConvolverProgramInfo(kernel->convolver, slot);
+    if (info.generation != generation) return false;
+    if (programInfoOut != NULL) *programInfoOut = info;
+    return true;
+}
+
 bool N60RenderKernelPublishSnapshot(N60RenderKernel *kernel, N60DSPGraphSnapshot snapshot) {
     if (kernel == NULL || !snapshot_is_valid(snapshot)) return false;
+    if (snapshot.convolution.enabled) {
+        if (!N60PartitionedConvolverProgramMatches(
+                kernel->convolver,
+                snapshot.convolution.programSlot,
+                snapshot.convolution.programGeneration)) {
+            return false;
+        }
+        N60ConvolutionProgramInfo info = N60PartitionedConvolverProgramInfo(
+            kernel->convolver,
+            snapshot.convolution.programSlot
+        );
+        if (info.tapCount != snapshot.convolution.tapCount
+            || info.partitionCount != snapshot.convolution.partitionCount
+            || info.engineLatencyFrames != snapshot.convolution.engineLatencyFrames
+            || info.declaredLatencyFrames != snapshot.convolution.declaredLatencyFrames) {
+            return false;
+        }
+    }
     uint32_t active = atomic_load_explicit(&kernel->activeSlot, memory_order_acquire);
     uint32_t inactive = active == 0 ? 1 : 0;
     N60SnapshotSlot *slot = &kernel->slots[inactive];
@@ -654,6 +773,24 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
 
         meter_sample(left, right, &context->postEQPeakLeft, &context->postEQPeakRight, &context->postEQSquareSumLeft, &context->postEQSquareSumRight, &context->postEQOverRangeSamples);
         process_crossover(&kernel->crossoverRuntime, left, right, &left, &right);
+
+        if (context->snapshot.convolution.enabled) {
+            float convolvedLeft = left;
+            float convolvedRight = right;
+            if (N60PartitionedConvolverProcessSample(
+                    kernel->convolver,
+                    context->snapshot.convolution.programSlot,
+                    context->snapshot.convolution.programGeneration,
+                    left,
+                    right,
+                    &convolvedLeft,
+                    &convolvedRight)) {
+                left = convolvedLeft;
+                right = convolvedRight;
+            } else {
+                atomic_fetch_add_explicit(&kernel->convolutionProgramMisses, 1, memory_order_relaxed);
+            }
+        }
 
         float outputGain = next_gain_value(&kernel->outputGain);
         left *= outputGain;
@@ -723,6 +860,13 @@ N60RenderKernelDiagnostics N60RenderKernelGetDiagnostics(const N60RenderKernel *
         diagnostics.crossoverSubGainLinear = context.snapshot.crossover.subGainLinear;
         diagnostics.crossoverSubPolarityInverted = context.snapshot.crossover.subPolarityInverted;
         diagnostics.crossoverSectionCount = context.snapshot.crossover.sectionCount;
+        diagnostics.convolutionEnabled = context.snapshot.convolution.enabled;
+        diagnostics.convolutionProgramSlot = context.snapshot.convolution.programSlot;
+        diagnostics.convolutionProgramGeneration = context.snapshot.convolution.programGeneration;
+        diagnostics.convolutionTapCount = context.snapshot.convolution.tapCount;
+        diagnostics.convolutionPartitionCount = context.snapshot.convolution.partitionCount;
+        diagnostics.convolutionEngineLatencyFrames = context.snapshot.convolution.engineLatencyFrames;
+        diagnostics.convolutionDeclaredLatencyFrames = context.snapshot.convolution.declaredLatencyFrames;
         N60RenderKernelEndRender(mutableKernel, &context, 0);
     }
 
@@ -730,6 +874,7 @@ N60RenderKernelDiagnostics N60RenderKernelGetDiagnostics(const N60RenderKernel *
     diagnostics.sanitizedNonFiniteSamples = atomic_load_explicit(&kernel->sanitizedNonFiniteSamples, memory_order_relaxed);
     diagnostics.flushedDenormalSamples = atomic_load_explicit(&kernel->flushedDenormalSamples, memory_order_relaxed);
     diagnostics.snapshotReadMisses = atomic_load_explicit(&kernel->snapshotReadMisses, memory_order_relaxed);
+    diagnostics.convolutionProgramMisses = atomic_load_explicit(&kernel->convolutionProgramMisses, memory_order_relaxed);
     diagnostics.inputMeter = load_meter_reading(&kernel->inputPeakLeftBits, &kernel->inputPeakRightBits, &kernel->inputRMSLeftBits, &kernel->inputRMSRightBits, &kernel->inputOverRangeSamples);
     diagnostics.postEQMeter = load_meter_reading(&kernel->postEQPeakLeftBits, &kernel->postEQPeakRightBits, &kernel->postEQRMSLeftBits, &kernel->postEQRMSRightBits, &kernel->postEQOverRangeSamples);
     diagnostics.outputMeter = load_meter_reading(&kernel->outputPeakLeftBits, &kernel->outputPeakRightBits, &kernel->outputRMSLeftBits, &kernel->outputRMSRightBits, &kernel->outputOverRangeSamples);
