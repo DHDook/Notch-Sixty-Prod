@@ -1,4 +1,5 @@
 import CoreAudio
+import Foundation
 import XCTest
 @testable import NotchSixty
 
@@ -211,6 +212,131 @@ final class NotchSixtyTests: XCTestCase {
         XCTAssertEqual(N60RenderKernelGetDiagnostics(kernel).sanitizedNonFiniteSamples, 2)
     }
 
+    func testParametricEQPeakingCenterGainAcrossSupportedRates() {
+        for rate in [44_100.0, 48_000.0, 96_000.0, 192_000.0, 384_000.0] {
+            let gain = measuredEQGainDB(
+                sampleRate: rate,
+                toneFrequency: 1_000,
+                filterType: N60BiquadFilterTypePeaking,
+                filterFrequency: 1_000,
+                gainDB: 6,
+                q: 0.707
+            )
+            XCTAssertEqual(gain, 6.0, accuracy: 0.15, "Unexpected 1 kHz peaking gain at \(rate) Hz")
+        }
+    }
+
+    func testParametricEQLowPassAndHighPassHaveExpectedDirection() {
+        let lowPassLowTone = measuredEQGainDB(
+            sampleRate: 48_000,
+            toneFrequency: 200,
+            filterType: N60BiquadFilterTypeLowPass,
+            filterFrequency: 2_000,
+            gainDB: 0,
+            q: 0.707
+        )
+        let lowPassHighTone = measuredEQGainDB(
+            sampleRate: 48_000,
+            toneFrequency: 10_000,
+            filterType: N60BiquadFilterTypeLowPass,
+            filterFrequency: 2_000,
+            gainDB: 0,
+            q: 0.707
+        )
+        XCTAssertGreaterThan(lowPassLowTone, -0.5)
+        XCTAssertLessThan(lowPassHighTone, -20)
+
+        let highPassLowTone = measuredEQGainDB(
+            sampleRate: 48_000,
+            toneFrequency: 200,
+            filterType: N60BiquadFilterTypeHighPass,
+            filterFrequency: 2_000,
+            gainDB: 0,
+            q: 0.707
+        )
+        let highPassHighTone = measuredEQGainDB(
+            sampleRate: 48_000,
+            toneFrequency: 10_000,
+            filterType: N60BiquadFilterTypeHighPass,
+            filterFrequency: 2_000,
+            gainDB: 0,
+            q: 0.707
+        )
+        XCTAssertLessThan(highPassLowTone, -20)
+        XCTAssertGreaterThan(highPassHighTone, -0.5)
+    }
+
+    func testParametricEQRejectsInvalidBandDesigns() {
+        var graph = N60DSPGraphSnapshotMakeUnity(48_000)
+        XCTAssertFalse(
+            N60DSPGraphSnapshotSetEQBand(
+                &graph,
+                0,
+                N60BiquadFilterTypePeaking,
+                24_000,
+                6,
+                0.707,
+                true
+            )
+        )
+        XCTAssertFalse(
+            N60DSPGraphSnapshotSetEQBand(
+                &graph,
+                0,
+                N60BiquadFilterTypePeaking,
+                1_000,
+                6,
+                0,
+                true
+            )
+        )
+    }
+
+    func testParametricEQPerBandAndStageBypassAreDry() {
+        guard let kernel = N60RenderKernelCreate() else {
+            XCTFail("Unable to allocate render kernel")
+            return
+        }
+        defer { N60RenderKernelDestroy(kernel) }
+
+        var graph = N60DSPGraphSnapshotMakeUnity(96_000)
+        XCTAssertTrue(
+            N60DSPGraphSnapshotSetEQBand(
+                &graph,
+                0,
+                N60BiquadFilterTypePeaking,
+                1_000,
+                12,
+                0.707,
+                false
+            )
+        )
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+
+        var left: Float = 0
+        var right: Float = 0
+        N60RenderKernelProcessStereoFrame(kernel, 0.2, -0.3, &left, &right)
+        XCTAssertEqual(left, 0.2, accuracy: 0.000_001)
+        XCTAssertEqual(right, -0.3, accuracy: 0.000_001)
+
+        XCTAssertTrue(
+            N60DSPGraphSnapshotSetEQBand(
+                &graph,
+                0,
+                N60BiquadFilterTypePeaking,
+                1_000,
+                12,
+                0.707,
+                true
+            )
+        )
+        graph.eqBypassed = true
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        N60RenderKernelProcessStereoFrame(kernel, 0.2, -0.3, &left, &right)
+        XCTAssertEqual(left, 0.2, accuracy: 0.000_001)
+        XCTAssertEqual(right, -0.3, accuracy: 0.000_001)
+    }
+
     @MainActor
     func testSelectionFollowsStableUIDAcrossTransientDeviceIDChange() throws {
         let catalog = StubOutputDeviceCatalog(devices: [
@@ -256,6 +382,60 @@ final class NotchSixtyTests: XCTestCase {
         try engine.refreshOutputDevices()
         XCTAssertThrowsError(try engine.selectOutput(uid: "missing-device"))
         XCTAssertEqual(engine.routeConfiguration.selectedOutputUID, "persisted-device")
+    }
+
+    private func measuredEQGainDB(
+        sampleRate: Double,
+        toneFrequency: Double,
+        filterType: N60BiquadFilterType,
+        filterFrequency: Double,
+        gainDB: Double,
+        q: Double
+    ) -> Double {
+        guard let kernel = N60RenderKernelCreate() else {
+            XCTFail("Unable to allocate render kernel")
+            return .nan
+        }
+        defer { N60RenderKernelDestroy(kernel) }
+
+        var graph = N60DSPGraphSnapshotMakeUnity(sampleRate)
+        guard N60DSPGraphSnapshotSetEQBand(
+            &graph,
+            0,
+            filterType,
+            filterFrequency,
+            gainDB,
+            q,
+            true
+        ) else {
+            XCTFail("Unable to configure EQ band")
+            return .nan
+        }
+        guard N60RenderKernelPublishSnapshot(kernel, graph) else {
+            XCTFail("Unable to publish EQ graph")
+            return .nan
+        }
+
+        let warmupFrames = 8_192
+        let measurementFrames = 16_384
+        var inputPower = 0.0
+        var outputPower = 0.0
+        var left: Float = 0
+        var right: Float = 0
+
+        for frame in 0..<(warmupFrames + measurementFrames) {
+            let phase = 2.0 * Double.pi * toneFrequency * Double(frame) / sampleRate
+            let input = Float(sin(phase) * 0.1)
+            N60RenderKernelProcessStereoFrame(kernel, input, input, &left, &right)
+
+            if frame >= warmupFrames {
+                inputPower += Double(input * input)
+                outputPower += Double(left * left)
+            }
+        }
+
+        guard inputPower > 0, outputPower > 0 else { return -.infinity }
+        return 10.0 * log10(outputPower / inputPower)
     }
 
     private func makeDevice(deviceID: AudioDeviceID, uid: String, name: String) -> AudioOutputDevice {
