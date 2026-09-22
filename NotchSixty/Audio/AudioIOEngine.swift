@@ -230,8 +230,6 @@ struct EQConfiguration: Equatable, Sendable {
               band.q > 0 else {
             throw EQConfigurationError.invalidBand(index: index)
         }
-        // Preserve the user model across rate changes. Bands above the active
-        // Nyquist limit remain configured but are omitted from this graph.
         return band.frequencyHz < sampleRate * 0.5
     }
 
@@ -650,25 +648,29 @@ final class AudioIOEngine: ObservableObject {
         }
         guard designed else { throw EQConfigurationError.linearPhaseDesignFailed }
 
-        // Try the expected inactive slot first, then the other slot. The C
-        // convolver rejects whichever slot is still being consumed realtime.
-        let firstSlot = nextLinearPhaseProgramSlot % UInt32(N60_CONVOLUTION_PROGRAM_SLOTS)
-        let secondSlot = (firstSlot + 1) % UInt32(N60_CONVOLUTION_PROGRAM_SLOTS)
-        for slot in [firstSlot, secondSlot] {
-            if let programInfo = try? session.prepareConvolutionProgram(
+        // There are three FIR program slots and only two immutable graph
+        // snapshot slots. Rotating one slot per prepared generation guarantees
+        // that this candidate is not referenced by either currently reachable
+        // graph generation. If the convolver's conservative last-processed
+        // guard still rejects it briefly, fail this edit rather than falling
+        // through to a potentially referenced newer slot.
+        let slot = nextLinearPhaseProgramSlot % UInt32(N60_CONVOLUTION_PROGRAM_SLOTS)
+        let programInfo: N60ConvolutionProgramInfo
+        do {
+            programInfo = try session.prepareConvolutionProgram(
                 slot: slot,
                 taps: taps,
                 declaredLatencyFrames: designInfo.groupDelayFrames
-            ) {
-                nextLinearPhaseProgramSlot = (slot + 1) % UInt32(N60_CONVOLUTION_PROGRAM_SLOTS)
-                return PreparedLinearPhaseProgram(
-                    slot: slot,
-                    programInfo: programInfo,
-                    designInfo: designInfo
-                )
-            }
+            )
+        } catch {
+            throw EQConfigurationError.convolutionProgramUnavailable
         }
-        throw EQConfigurationError.convolutionProgramUnavailable
+        nextLinearPhaseProgramSlot = (slot + 1) % UInt32(N60_CONVOLUTION_PROGRAM_SLOTS)
+        return PreparedLinearPhaseProgram(
+            slot: slot,
+            programInfo: programInfo,
+            designInfo: designInfo
+        )
     }
 
     private func attachActiveLinearPhaseProgramIfNeeded(
