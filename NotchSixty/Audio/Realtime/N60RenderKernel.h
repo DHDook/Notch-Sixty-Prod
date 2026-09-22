@@ -18,10 +18,12 @@ typedef struct {
     double sampleRate;
     uint32_t channelCount;
     float inputGainLinear;
+    float headroomGainLinear;
     float outputGainLinear;
     bool bypassed;
     uint32_t latencyFrames;
     uint64_t generation;
+    uint32_t gainTransitionFrames;
     bool eqBypassed;
     uint32_t eqBandCount;
     uint32_t eqTransitionFrames;
@@ -32,7 +34,35 @@ typedef struct {
     N60DSPGraphSnapshot snapshot;
     uint32_t slotIndex;
     bool acquired;
+
+    float inputPeakLeft;
+    float inputPeakRight;
+    double inputSquareSumLeft;
+    double inputSquareSumRight;
+    uint64_t inputOverRangeSamples;
+
+    float postEQPeakLeft;
+    float postEQPeakRight;
+    double postEQSquareSumLeft;
+    double postEQSquareSumRight;
+    uint64_t postEQOverRangeSamples;
+
+    float outputPeakLeft;
+    float outputPeakRight;
+    double outputSquareSumLeft;
+    double outputSquareSumRight;
+    uint64_t outputOverRangeSamples;
+
+    uint32_t meteredFrames;
 } N60RenderKernelRenderContext;
+
+typedef struct {
+    float peakLeft;
+    float peakRight;
+    float rmsLeft;
+    float rmsRight;
+    uint64_t overRangeSamples;
+} N60StereoMeterReading;
 
 typedef struct {
     uint64_t renderedFrames;
@@ -44,8 +74,14 @@ typedef struct {
     double sampleRate;
     uint32_t channelCount;
     bool bypassed;
+    float inputGainLinear;
+    float headroomGainLinear;
+    float outputGainLinear;
     bool eqBypassed;
     uint32_t eqBandCount;
+    N60StereoMeterReading inputMeter;
+    N60StereoMeterReading postEQMeter;
+    N60StereoMeterReading outputMeter;
 } N60RenderKernelDiagnostics;
 
 N60DSPGraphSnapshot N60DSPGraphSnapshotMakeUnity(double sampleRate);
@@ -75,11 +111,12 @@ bool N60RenderKernelPublishSnapshot(
 );
 
 // Realtime-safe buffer contract. Begin acquires one immutable graph generation
-// for the entire hardware buffer; End releases it and accounts rendered frames.
+// for the entire hardware buffer; End releases it, publishes per-buffer meters,
+// and accounts rendered frames.
 N60RenderKernelRenderContext N60RenderKernelBeginRender(N60RenderKernel * _Nonnull kernel);
 void N60RenderKernelProcessStereoFrameInContext(
     N60RenderKernel * _Nonnull kernel,
-    const N60RenderKernelRenderContext * _Nonnull context,
+    N60RenderKernelRenderContext * _Nonnull context,
     float inputLeft,
     float inputRight,
     float * _Nonnull outputLeft,

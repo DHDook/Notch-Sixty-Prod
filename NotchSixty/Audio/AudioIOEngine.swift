@@ -74,6 +74,37 @@ enum EQConfigurationError: Error, LocalizedError, Equatable {
     }
 }
 
+struct DSPGainConfiguration: Equatable, Sendable {
+    static let inputPreampRange = -60.0...24.0
+    static let headroomAttenuationRange = -48.0...0.0
+    static let outputGainRange = -60.0...12.0
+
+    var inputPreampDB: Double = 0
+    var headroomAttenuationDB: Double = 0
+    var outputGainDB: Double = 0
+
+    static func linearGain(forDB db: Double) -> Float {
+        Float(pow(10.0, db / 20.0))
+    }
+}
+
+enum DSPGainConfigurationError: Error, LocalizedError, Equatable {
+    case invalidInputPreamp(Double)
+    case invalidHeadroomAttenuation(Double)
+    case invalidOutputGain(Double)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidInputPreamp(let value):
+            return "Input preamp \(value) dB is outside the supported -60...+24 dB range."
+        case .invalidHeadroomAttenuation(let value):
+            return "Headroom attenuation \(value) dB is outside the supported -48...0 dB range."
+        case .invalidOutputGain(let value):
+            return "Output gain \(value) dB is outside the supported -60...+12 dB range."
+        }
+    }
+}
+
 struct EQConfiguration: Equatable, Sendable {
     static let maximumBandCount = Int(N60_MAX_EQ_BANDS)
 
@@ -86,12 +117,18 @@ struct EQConfiguration: Equatable, Sendable {
         }
     }
 
-    func makeGraphSnapshot(sampleRate: Double) throws -> N60DSPGraphSnapshot {
+    func makeGraphSnapshot(
+        sampleRate: Double,
+        gainConfiguration: DSPGainConfiguration = DSPGainConfiguration()
+    ) throws -> N60DSPGraphSnapshot {
         guard bands.count <= Self.maximumBandCount else {
             throw EQConfigurationError.tooManyBands(bands.count)
         }
 
         var graph = N60DSPGraphSnapshotMakeUnity(sampleRate)
+        graph.inputGainLinear = DSPGainConfiguration.linearGain(forDB: gainConfiguration.inputPreampDB)
+        graph.headroomGainLinear = DSPGainConfiguration.linearGain(forDB: gainConfiguration.headroomAttenuationDB)
+        graph.outputGainLinear = DSPGainConfiguration.linearGain(forDB: gainConfiguration.outputGainDB)
         graph.eqBypassed = bypassed
         N60DSPGraphSnapshotClearEQ(&graph)
 
@@ -136,6 +173,7 @@ final class AudioIOEngine: ObservableObject {
     @Published private(set) var outputDevices: [AudioOutputDevice] = []
     @Published private(set) var routeConfiguration: AudioRouteConfiguration
     @Published private(set) var eqConfiguration = EQConfiguration()
+    @Published private(set) var gainConfiguration = DSPGainConfiguration()
     @Published private(set) var lastErrorDescription: String?
     @Published private(set) var lifecycleState: AudioLifecycleState
 
@@ -232,6 +270,33 @@ final class AudioIOEngine: ObservableObject {
         try applyEQConfiguration(configuration)
     }
 
+    func setInputPreampDB(_ value: Double) throws {
+        guard value.isFinite, DSPGainConfiguration.inputPreampRange.contains(value) else {
+            throw DSPGainConfigurationError.invalidInputPreamp(value)
+        }
+        var updated = gainConfiguration
+        updated.inputPreampDB = value
+        try applyGainConfiguration(updated)
+    }
+
+    func setHeadroomAttenuationDB(_ value: Double) throws {
+        guard value.isFinite, DSPGainConfiguration.headroomAttenuationRange.contains(value) else {
+            throw DSPGainConfigurationError.invalidHeadroomAttenuation(value)
+        }
+        var updated = gainConfiguration
+        updated.headroomAttenuationDB = value
+        try applyGainConfiguration(updated)
+    }
+
+    func setOutputGainDB(_ value: Double) throws {
+        guard value.isFinite, DSPGainConfiguration.outputGainRange.contains(value) else {
+            throw DSPGainConfigurationError.invalidOutputGain(value)
+        }
+        var updated = gainConfiguration
+        updated.outputGainDB = value
+        try applyGainConfiguration(updated)
+    }
+
     func start() throws {
         try start(resetProcessingSessionCounters: true)
     }
@@ -296,10 +361,25 @@ final class AudioIOEngine: ObservableObject {
         }
 
         if let session = transportSession {
-            let graph = try configuration.makeGraphSnapshot(sampleRate: session.outputFormat.sampleRate)
+            let graph = try configuration.makeGraphSnapshot(
+                sampleRate: session.outputFormat.sampleRate,
+                gainConfiguration: gainConfiguration
+            )
             try session.publishDSPGraph(graph)
         }
         eqConfiguration = configuration
+        lastErrorDescription = nil
+    }
+
+    private func applyGainConfiguration(_ configuration: DSPGainConfiguration) throws {
+        if let session = transportSession {
+            let graph = try eqConfiguration.makeGraphSnapshot(
+                sampleRate: session.outputFormat.sampleRate,
+                gainConfiguration: configuration
+            )
+            try session.publishDSPGraph(graph)
+        }
+        gainConfiguration = configuration
         lastErrorDescription = nil
     }
 
@@ -340,7 +420,10 @@ final class AudioIOEngine: ObservableObject {
 
     private func buildTransport(output: AudioOutputDevice) throws {
         let session = try CoreAudioTransportSession(selectedOutput: output)
-        let graph = try eqConfiguration.makeGraphSnapshot(sampleRate: session.outputFormat.sampleRate)
+        let graph = try eqConfiguration.makeGraphSnapshot(
+            sampleRate: session.outputFormat.sampleRate,
+            gainConfiguration: gainConfiguration
+        )
         try session.publishDSPGraph(graph)
         transportSession = session
     }

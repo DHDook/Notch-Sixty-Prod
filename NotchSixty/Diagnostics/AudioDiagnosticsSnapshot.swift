@@ -1,3 +1,19 @@
+struct StereoMeterReading: Equatable, Sendable {
+    let peakLeft: Float
+    let peakRight: Float
+    let rmsLeft: Float
+    let rmsRight: Float
+    let overRangeSamples: UInt64
+
+    init(_ reading: N60StereoMeterReading) {
+        peakLeft = reading.peakLeft
+        peakRight = reading.peakRight
+        rmsLeft = reading.rmsLeft
+        rmsRight = reading.rmsRight
+        overRangeSamples = reading.overRangeSamples
+    }
+}
+
 struct RenderKernelDiagnostics: Equatable, Sendable {
     let renderedFrames: UInt64
     let sanitizedNonFiniteSamples: UInt64
@@ -8,8 +24,14 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
     let sampleRate: Double
     let channelCount: UInt32
     let bypassed: Bool
+    let inputGainLinear: Float
+    let headroomGainLinear: Float
+    let outputGainLinear: Float
     let eqBypassed: Bool
     let eqBandCount: UInt32
+    let inputMeter: StereoMeterReading
+    let postEQMeter: StereoMeterReading
+    let outputMeter: StereoMeterReading
 
     init(_ diagnostics: N60RenderKernelDiagnostics) {
         renderedFrames = diagnostics.renderedFrames
@@ -21,8 +43,14 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
         sampleRate = diagnostics.sampleRate
         channelCount = diagnostics.channelCount
         bypassed = diagnostics.bypassed
+        inputGainLinear = diagnostics.inputGainLinear
+        headroomGainLinear = diagnostics.headroomGainLinear
+        outputGainLinear = diagnostics.outputGainLinear
         eqBypassed = diagnostics.eqBypassed
         eqBandCount = diagnostics.eqBandCount
+        inputMeter = StereoMeterReading(diagnostics.inputMeter)
+        postEQMeter = StereoMeterReading(diagnostics.postEQMeter)
+        outputMeter = StereoMeterReading(diagnostics.outputMeter)
     }
 }
 
