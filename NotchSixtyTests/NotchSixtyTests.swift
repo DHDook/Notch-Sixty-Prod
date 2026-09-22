@@ -426,7 +426,7 @@ final class NotchSixtyTests: XCTestCase {
         XCTAssertEqual(diagnostics.snapshotReadMisses, 0)
         XCTAssertTrue(diagnostics.crossoverEnabled)
         XCTAssertEqual(diagnostics.crossoverSectionCount, 4)
-        XCTAssertEqual(diagnostics.eqBandCount, N60_MAX_EQ_BANDS)
+        XCTAssertEqual(diagnostics.eqBandCount, UInt32(N60_MAX_EQ_BANDS))
     }
 
     @MainActor
