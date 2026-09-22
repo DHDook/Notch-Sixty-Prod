@@ -36,6 +36,15 @@ void N60RealtimeAudioBridgeConfigureOutputGate(
     uint32_t minimumBufferedFrames,
     uint32_t fadeInFrames
 );
+bool N60RealtimeAudioBridgePrepareConvolutionProgram(
+    N60RealtimeAudioBridge * _Nonnull bridge,
+    uint32_t slot,
+    const float * _Nonnull leftTaps,
+    const float * _Nullable rightTaps,
+    uint32_t tapCount,
+    uint32_t declaredLatencyFrames,
+    N60ConvolutionProgramInfo * _Nullable programInfoOut
+);
 bool N60RealtimeAudioBridgePublishDSPGraph(
     N60RealtimeAudioBridge * _Nonnull bridge,
     N60DSPGraphSnapshot snapshot

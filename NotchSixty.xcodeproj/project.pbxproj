@@ -11,6 +11,7 @@
 		A10000000000000000000011 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000021 /* ContentView.swift */; };
 		A10000000000000000000012 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000022 /* Assets.xcassets */; };
 		A10000000000000000000013 /* NotchSixtyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000024 /* NotchSixtyTests.swift */; };
+		A10000000000000000000014 /* ConvolutionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000027 /* ConvolutionTests.swift */; };
 		A20000000000000000000010 /* AudioIOEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000020 /* AudioIOEngine.swift */; };
 		A20000000000000000000011 /* CoreAudioError.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000021 /* CoreAudioError.swift */; };
 		A20000000000000000000012 /* AudioOutputDevice.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000022 /* AudioOutputDevice.swift */; };
@@ -20,6 +21,7 @@
 		A20000000000000000000016 /* AudioDiagnosticsSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000026 /* AudioDiagnosticsSnapshot.swift */; };
 		A30000000000000000000010 /* N60RealtimeAudioBridge.c in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000020 /* N60RealtimeAudioBridge.c */; };
 		A30000000000000000000011 /* N60RenderKernel.c in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000021 /* N60RenderKernel.c */; };
+		A30000000000000000000012 /* N60Convolution.c in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000023 /* N60Convolution.c */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -40,6 +42,7 @@
 		A10000000000000000000024 /* NotchSixtyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchSixtyTests.swift; sourceTree = "<group>"; };
 		A10000000000000000000025 /* Notch Sixty.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Notch Sixty.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000026 /* NotchSixtyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = NotchSixtyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10000000000000000000027 /* ConvolutionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConvolutionTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000020 /* AudioIOEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioIOEngine.swift; sourceTree = "<group>"; };
 		A20000000000000000000021 /* CoreAudioError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudioError.swift; sourceTree = "<group>"; };
 		A20000000000000000000022 /* AudioOutputDevice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioOutputDevice.swift; sourceTree = "<group>"; };
@@ -50,23 +53,13 @@
 		A30000000000000000000020 /* N60RealtimeAudioBridge.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = N60RealtimeAudioBridge.c; sourceTree = "<group>"; };
 		A30000000000000000000021 /* N60RenderKernel.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = N60RenderKernel.c; sourceTree = "<group>"; };
 		A30000000000000000000022 /* N60RenderKernel.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60RenderKernel.h; sourceTree = "<group>"; };
+		A30000000000000000000023 /* N60Convolution.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = N60Convolution.c; sourceTree = "<group>"; };
+		A30000000000000000000024 /* N60Convolution.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60Convolution.h; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		A10000000000000000000040 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		A10000000000000000000041 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
+		A10000000000000000000040 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		A10000000000000000000041 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -97,6 +90,7 @@
 			isa = PBXGroup;
 			children = (
 				A10000000000000000000024 /* NotchSixtyTests.swift */,
+				A10000000000000000000027 /* ConvolutionTests.swift */,
 			);
 			path = NotchSixtyTests;
 			sourceTree = "<group>";
@@ -122,53 +116,19 @@
 			path = Audio;
 			sourceTree = "<group>";
 		};
-		A20000000000000000000051 /* CoreAudio */ = {
-			isa = PBXGroup;
-			children = (
-				A20000000000000000000021 /* CoreAudioError.swift */,
-			);
-			path = CoreAudio;
-			sourceTree = "<group>";
-		};
-		A20000000000000000000052 /* Devices */ = {
-			isa = PBXGroup;
-			children = (
-				A20000000000000000000022 /* AudioOutputDevice.swift */,
-				A20000000000000000000023 /* OutputDeviceCatalog.swift */,
-			);
-			path = Devices;
-			sourceTree = "<group>";
-		};
-		A20000000000000000000053 /* Routing */ = {
-			isa = PBXGroup;
-			children = (
-				A20000000000000000000024 /* AudioRouteConfiguration.swift */,
-			);
-			path = Routing;
-			sourceTree = "<group>";
-		};
-		A20000000000000000000054 /* State */ = {
-			isa = PBXGroup;
-			children = (
-				A20000000000000000000025 /* AudioLifecycleState.swift */,
-			);
-			path = State;
-			sourceTree = "<group>";
-		};
-		A20000000000000000000055 /* Diagnostics */ = {
-			isa = PBXGroup;
-			children = (
-				A20000000000000000000026 /* AudioDiagnosticsSnapshot.swift */,
-			);
-			path = Diagnostics;
-			sourceTree = "<group>";
-		};
+		A20000000000000000000051 /* CoreAudio */ = {isa = PBXGroup; children = (A20000000000000000000021 /* CoreAudioError.swift */,); path = CoreAudio; sourceTree = "<group>"; };
+		A20000000000000000000052 /* Devices */ = {isa = PBXGroup; children = (A20000000000000000000022 /* AudioOutputDevice.swift */, A20000000000000000000023 /* OutputDeviceCatalog.swift */,); path = Devices; sourceTree = "<group>"; };
+		A20000000000000000000053 /* Routing */ = {isa = PBXGroup; children = (A20000000000000000000024 /* AudioRouteConfiguration.swift */,); path = Routing; sourceTree = "<group>"; };
+		A20000000000000000000054 /* State */ = {isa = PBXGroup; children = (A20000000000000000000025 /* AudioLifecycleState.swift */,); path = State; sourceTree = "<group>"; };
+		A20000000000000000000055 /* Diagnostics */ = {isa = PBXGroup; children = (A20000000000000000000026 /* AudioDiagnosticsSnapshot.swift */,); path = Diagnostics; sourceTree = "<group>"; };
 		A30000000000000000000050 /* Realtime */ = {
 			isa = PBXGroup;
 			children = (
 				A30000000000000000000020 /* N60RealtimeAudioBridge.c */,
 				A30000000000000000000021 /* N60RenderKernel.c */,
 				A30000000000000000000022 /* N60RenderKernel.h */,
+				A30000000000000000000023 /* N60Convolution.c */,
+				A30000000000000000000024 /* N60Convolution.h */,
 			);
 			path = Realtime;
 			sourceTree = "<group>";
@@ -179,15 +139,9 @@
 		A10000000000000000000002 /* NotchSixty */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = A10000000000000000000070 /* Build configuration list for PBXNativeTarget "NotchSixty" */;
-			buildPhases = (
-				A10000000000000000000042 /* Sources */,
-				A10000000000000000000040 /* Frameworks */,
-				A10000000000000000000044 /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
+			buildPhases = (A10000000000000000000042 /* Sources */, A10000000000000000000040 /* Frameworks */, A10000000000000000000044 /* Resources */,);
+			buildRules = ();
+			dependencies = ();
 			name = NotchSixty;
 			productName = "Notch Sixty";
 			productReference = A10000000000000000000025 /* Notch Sixty.app */;
@@ -196,16 +150,9 @@
 		A10000000000000000000003 /* NotchSixtyTests */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = A10000000000000000000071 /* Build configuration list for PBXNativeTarget "NotchSixtyTests" */;
-			buildPhases = (
-				A10000000000000000000043 /* Sources */,
-				A10000000000000000000041 /* Frameworks */,
-				A10000000000000000000045 /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-				A10000000000000000000031 /* PBXTargetDependency */,
-			);
+			buildPhases = (A10000000000000000000043 /* Sources */, A10000000000000000000041 /* Frameworks */, A10000000000000000000045 /* Resources */,);
+			buildRules = ();
+			dependencies = (A10000000000000000000031 /* PBXTargetDependency */,);
 			name = NotchSixtyTests;
 			productName = NotchSixtyTests;
 			productReference = A10000000000000000000026 /* NotchSixtyTests.xctest */;
@@ -221,50 +168,26 @@
 				LastSwiftUpdateCheck = 1600;
 				LastUpgradeCheck = 1600;
 				TargetAttributes = {
-					A10000000000000000000002 = {
-						CreatedOnToolsVersion = 16.0;
-					};
-					A10000000000000000000003 = {
-						CreatedOnToolsVersion = 16.0;
-						TestTargetID = A10000000000000000000002;
-					};
+					A10000000000000000000002 = {CreatedOnToolsVersion = 16.0;};
+					A10000000000000000000003 = {CreatedOnToolsVersion = 16.0; TestTargetID = A10000000000000000000002;};
 				};
 			};
 			buildConfigurationList = A10000000000000000000072 /* Build configuration list for PBXProject "NotchSixty" */;
 			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
-			knownRegions = (
-				en,
-				Base,
-			);
+			knownRegions = (en, Base,);
 			mainGroup = A10000000000000000000050;
 			productRefGroup = A10000000000000000000053 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
-			targets = (
-				A10000000000000000000002 /* NotchSixty */,
-				A10000000000000000000003 /* NotchSixtyTests */,
-			);
+			targets = (A10000000000000000000002 /* NotchSixty */, A10000000000000000000003 /* NotchSixtyTests */,);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		A10000000000000000000044 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				A10000000000000000000012 /* Assets.xcassets in Resources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		A10000000000000000000045 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
+		A10000000000000000000044 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000012 /* Assets.xcassets in Resources */,); runOnlyForDeploymentPostprocessing = 0; };
+		A10000000000000000000045 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -283,6 +206,7 @@
 				A20000000000000000000016 /* AudioDiagnosticsSnapshot.swift in Sources */,
 				A30000000000000000000010 /* N60RealtimeAudioBridge.c in Sources */,
 				A30000000000000000000011 /* N60RenderKernel.c in Sources */,
+				A30000000000000000000012 /* N60Convolution.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -291,17 +215,14 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10000000000000000000013 /* NotchSixtyTests.swift in Sources */,
+				A10000000000000000000014 /* ConvolutionTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
-		A10000000000000000000031 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = A10000000000000000000002 /* NotchSixty */;
-			targetProxy = A10000000000000000000030 /* PBXContainerItemProxy */;
-		};
+		A10000000000000000000031 /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = A10000000000000000000002 /* NotchSixty */; targetProxy = A10000000000000000000030 /* PBXContainerItemProxy */; };
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
@@ -405,33 +326,9 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		A10000000000000000000070 /* Build configuration list for PBXNativeTarget "NotchSixty" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				A10000000000000000000060 /* Debug */,
-				A10000000000000000000061 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		A10000000000000000000071 /* Build configuration list for PBXNativeTarget "NotchSixtyTests" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				A10000000000000000000062 /* Debug */,
-				A10000000000000000000063 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		A10000000000000000000072 /* Build configuration list for PBXProject "NotchSixty" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				A10000000000000000000064 /* Debug */,
-				A10000000000000000000065 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
+		A10000000000000000000070 /* Build configuration list for PBXNativeTarget "NotchSixty" */ = {isa = XCConfigurationList; buildConfigurations = (A10000000000000000000060 /* Debug */, A10000000000000000000061 /* Release */,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		A10000000000000000000071 /* Build configuration list for PBXNativeTarget "NotchSixtyTests" */ = {isa = XCConfigurationList; buildConfigurations = (A10000000000000000000062 /* Debug */, A10000000000000000000063 /* Release */,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		A10000000000000000000072 /* Build configuration list for PBXProject "NotchSixty" */ = {isa = XCConfigurationList; buildConfigurations = (A10000000000000000000064 /* Debug */, A10000000000000000000065 /* Release */,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 /* End XCConfigurationList section */
 	};
 	rootObject = A10000000000000000000001 /* Project object */;
