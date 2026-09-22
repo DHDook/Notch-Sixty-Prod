@@ -266,6 +266,56 @@ final class NotchSixtyTests: XCTestCase {
         XCTAssertGreaterThan(highPassHighTone, -0.5)
     }
 
+    func testParametricEQShelvesAndNotchHaveExpectedResponse() {
+        let lowShelfBass = measuredEQGainDB(
+            sampleRate: 48_000,
+            toneFrequency: 100,
+            filterType: N60BiquadFilterTypeLowShelf,
+            filterFrequency: 1_000,
+            gainDB: 6,
+            q: 0.707
+        )
+        let lowShelfTreble = measuredEQGainDB(
+            sampleRate: 48_000,
+            toneFrequency: 10_000,
+            filterType: N60BiquadFilterTypeLowShelf,
+            filterFrequency: 1_000,
+            gainDB: 6,
+            q: 0.707
+        )
+        XCTAssertGreaterThan(lowShelfBass, 5.0)
+        XCTAssertLessThan(abs(lowShelfTreble), 0.5)
+
+        let highShelfBass = measuredEQGainDB(
+            sampleRate: 48_000,
+            toneFrequency: 100,
+            filterType: N60BiquadFilterTypeHighShelf,
+            filterFrequency: 1_000,
+            gainDB: 6,
+            q: 0.707
+        )
+        let highShelfTreble = measuredEQGainDB(
+            sampleRate: 48_000,
+            toneFrequency: 10_000,
+            filterType: N60BiquadFilterTypeHighShelf,
+            filterFrequency: 1_000,
+            gainDB: 6,
+            q: 0.707
+        )
+        XCTAssertLessThan(abs(highShelfBass), 0.5)
+        XCTAssertGreaterThan(highShelfTreble, 5.0)
+
+        let notchCenter = measuredEQGainDB(
+            sampleRate: 48_000,
+            toneFrequency: 1_000,
+            filterType: N60BiquadFilterTypeNotch,
+            filterFrequency: 1_000,
+            gainDB: 0,
+            q: 2.0
+        )
+        XCTAssertLessThan(notchCenter, -30)
+    }
+
     func testParametricEQRejectsInvalidBandDesigns() {
         var graph = N60DSPGraphSnapshotMakeUnity(48_000)
         XCTAssertFalse(
