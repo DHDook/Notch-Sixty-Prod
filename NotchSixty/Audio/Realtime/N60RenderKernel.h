@@ -10,7 +10,7 @@
 extern "C" {
 #endif
 
-#define N60_MAX_EQ_BANDS 16
+#define N60_MAX_EQ_BANDS 64
 
 typedef struct N60RenderKernel N60RenderKernel;
 

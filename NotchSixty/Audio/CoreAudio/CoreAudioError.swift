@@ -155,7 +155,7 @@ enum CoreAudioTransportError: Error, LocalizedError, Equatable {
         case .realtimeBridgeAllocationFailed:
             return "Unable to allocate the preallocated realtime audio bridge."
         case .dspGraphPublicationFailed:
-            return "Unable to publish the render-ready unity DSP graph."
+            return "Unable to publish the render-ready DSP graph."
         case .ioProcUnavailable(let role):
             return "Core Audio created the \(role) IOProc without returning a usable callback identifier."
         case .outputBufferExceedsBridgeCapacity(let bufferFrames, let capacityFrames):
@@ -323,6 +323,12 @@ final class CoreAudioTransportSession {
     func renderDiagnostics() -> RenderKernelDiagnostics? {
         guard let bridge else { return nil }
         return RenderKernelDiagnostics(N60RealtimeAudioBridgeGetRenderDiagnostics(bridge))
+    }
+
+    func publishDSPGraph(_ snapshot: N60DSPGraphSnapshot) throws {
+        guard let bridge, N60RealtimeAudioBridgePublishDSPGraph(bridge, snapshot) else {
+            throw CoreAudioTransportError.dspGraphPublicationFailed
+        }
     }
 
     func stop(fadeOut: Bool) {
