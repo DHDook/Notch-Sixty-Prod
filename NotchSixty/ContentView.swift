@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import Foundation
 import SwiftUI
 
 struct ContentView: View {
@@ -105,6 +106,9 @@ struct ContentView: View {
                     try? engine.addEQBand()
                 }
                 .disabled(engine.eqConfiguration.bands.count >= EQConfiguration.maximumBandCount)
+                Button("Load 64-Band Stress") {
+                    load64BandStressConfiguration()
+                }
             }
 
             if engine.eqConfiguration.bands.isEmpty {
@@ -173,6 +177,25 @@ struct ContentView: View {
                 try? engine.updateEQBand(updated)
             }
         )
+    }
+
+    private func load64BandStressConfiguration() {
+        let count = EQConfiguration.maximumBandCount
+        let minimumFrequency = 30.0
+        let maximumFrequency = 18_000.0
+        let ratio = maximumFrequency / minimumFrequency
+        let bands = (0..<count).map { index -> EQBand in
+            let position = count > 1 ? Double(index) / Double(count - 1) : 0
+            let frequency = minimumFrequency * pow(ratio, position)
+            return EQBand(
+                enabled: true,
+                type: .peaking,
+                frequencyHz: frequency,
+                gainDB: index.isMultiple(of: 2) ? 0.25 : -0.25,
+                q: 1.0
+            )
+        }
+        try? engine.replaceEQConfiguration(EQConfiguration(bypassed: false, bands: bands))
     }
 
     @ViewBuilder
