@@ -1,3 +1,4 @@
+import Combine
 import XCTest
 @testable import NotchSixty
 
@@ -172,5 +173,64 @@ final class LiveLinearPhaseTests: XCTestCase {
         let configuration = RoomCorrectionConfiguration()
         XCTAssertFalse(configuration.enabled)
         XCTAssertNil(configuration.filter)
+    }
+
+    @MainActor
+    func testProductConfigurationSnapshotsAllCurrentDSPDomains() throws {
+        let engine = AudioIOEngine()
+        let product = ProductController(audioEngine: engine)
+
+        try engine.replaceEQConfiguration(
+            EQConfiguration(
+                phaseMode: .linearPhase,
+                bypassed: true,
+                bands: [EQBand(frequencyHz: 1_500, gainDB: 2.5, q: 1.2)]
+            )
+        )
+        try engine.setInputPreampDB(-2.0)
+        try engine.setHeadroomAttenuationDB(-4.0)
+        try engine.setOutputGainDB(1.0)
+        try engine.replaceBassManagementConfiguration(
+            BassManagementConfiguration(
+                enabled: true,
+                frequencyHz: 90,
+                topology: .linkwitzRiley48,
+                monitorMode: .recombined,
+                subGainDB: -1.5,
+                subPolarityInverted: true
+            )
+        )
+        try engine.replaceRoomCorrectionConfiguration(
+            RoomCorrectionConfiguration(enabled: false, filter: .validation)
+        )
+
+        let snapshot = product.configuration
+        XCTAssertEqual(snapshot.schemaVersion, ProductConfiguration.currentSchemaVersion)
+        XCTAssertEqual(snapshot.selectedOutputUID, engine.routeConfiguration.selectedOutputUID)
+        XCTAssertEqual(snapshot.dsp.eq, engine.eqConfiguration)
+        XCTAssertEqual(snapshot.dsp.gain, engine.gainConfiguration)
+        XCTAssertEqual(snapshot.dsp.bassManagement, engine.bassManagementConfiguration)
+        XCTAssertEqual(snapshot.dsp.roomCorrection, engine.roomCorrectionConfiguration)
+    }
+
+    @MainActor
+    func testProductControllerForwardsAudioEngineChanges() throws {
+        let engine = AudioIOEngine()
+        let product = ProductController(audioEngine: engine)
+        var notificationCount = 0
+        let observation = product.objectWillChange.sink {
+            notificationCount += 1
+        }
+
+        try engine.setOutputGainDB(-3.0)
+
+        XCTAssertGreaterThan(notificationCount, 0)
+        XCTAssertEqual(product.configuration.dsp.gain.outputGainDB, -3.0)
+        withExtendedLifetime(observation) {}
+    }
+
+    func testProductConfigurationSchemaStartsAtVersionOne() {
+        XCTAssertEqual(ProductConfiguration.currentSchemaVersion, 1)
+        XCTAssertEqual(ProductConfiguration().schemaVersion, 1)
     }
 }
