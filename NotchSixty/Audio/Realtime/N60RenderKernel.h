@@ -42,7 +42,12 @@ typedef struct {
     N60BiquadBandSnapshot eqBands[N60_MAX_EQ_BANDS];
     uint32_t crossoverTransitionFrames;
     N60CrossoverSnapshot crossover;
+    // Linear-phase EQ FIR stage. Kept under the existing convolution name for
+    // source compatibility with PR #19.
     N60ConvolutionGraphState convolution;
+    // Independent room-correction FIR stage. This owns a separate convolver
+    // and program-slot namespace from linear-phase EQ.
+    N60ConvolutionGraphState roomCorrection;
 } N60DSPGraphSnapshot;
 
 typedef struct {
@@ -85,6 +90,7 @@ typedef struct {
     uint64_t flushedDenormalSamples;
     uint64_t snapshotReadMisses;
     uint64_t convolutionProgramMisses;
+    uint64_t roomCorrectionProgramMisses;
     uint64_t publishedGeneration;
     uint32_t latencyFrames;
     double sampleRate;
@@ -109,6 +115,13 @@ typedef struct {
     uint32_t convolutionPartitionCount;
     uint32_t convolutionEngineLatencyFrames;
     uint32_t convolutionDeclaredLatencyFrames;
+    bool roomCorrectionEnabled;
+    uint32_t roomCorrectionProgramSlot;
+    uint64_t roomCorrectionProgramGeneration;
+    uint32_t roomCorrectionTapCount;
+    uint32_t roomCorrectionPartitionCount;
+    uint32_t roomCorrectionEngineLatencyFrames;
+    uint32_t roomCorrectionDeclaredLatencyFrames;
     N60StereoMeterReading inputMeter;
     N60StereoMeterReading postEQMeter;
     N60StereoMeterReading outputMeter;
@@ -143,6 +156,12 @@ bool N60DSPGraphSnapshotSetConvolutionProgram(
     N60ConvolutionProgramInfo programInfo,
     bool enabled
 );
+bool N60DSPGraphSnapshotSetRoomCorrectionProgram(
+    N60DSPGraphSnapshot * _Nonnull snapshot,
+    uint32_t programSlot,
+    N60ConvolutionProgramInfo programInfo,
+    bool enabled
+);
 
 N60RenderKernel * _Nullable N60RenderKernelCreate(void);
 void N60RenderKernelDestroy(N60RenderKernel * _Nonnull kernel);
@@ -151,6 +170,15 @@ void N60RenderKernelReset(N60RenderKernel * _Nonnull kernel);
 // Control-plane only. Programs are transformed into preallocated frequency-
 // domain partitions before a graph is allowed to reference them.
 bool N60RenderKernelPrepareConvolutionProgram(
+    N60RenderKernel * _Nonnull kernel,
+    uint32_t slot,
+    const float * _Nonnull leftTaps,
+    const float * _Nullable rightTaps,
+    uint32_t tapCount,
+    uint32_t declaredLatencyFrames,
+    N60ConvolutionProgramInfo * _Nullable programInfoOut
+);
+bool N60RenderKernelPrepareRoomCorrectionProgram(
     N60RenderKernel * _Nonnull kernel,
     uint32_t slot,
     const float * _Nonnull leftTaps,
