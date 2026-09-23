@@ -139,6 +139,33 @@ final class LiveLinearPhaseTests: XCTestCase {
         XCTAssertNil(filter.rightTaps)
         XCTAssertEqual(filter.declaredLatencyFrames, 1)
         XCTAssertTrue(filter.leftTaps.allSatisfy { $0.isFinite })
+        XCTAssertNoThrow(try filter.validateSampleRate(forOutputSampleRate: 384_000))
+    }
+
+    func testRoomCorrectionSampleRateValidationRejectsNonFiniteMetadata() {
+        for invalidRate in [Double.nan, Double.infinity, -Double.infinity] {
+            var filter = RoomCorrectionFilter.validation
+            filter.sampleRate = invalidRate
+
+            XCTAssertThrowsError(try filter.validateSampleRate(forOutputSampleRate: 96_000)) { error in
+                guard case RoomCorrectionConfigurationError.sampleRateMismatch = error else {
+                    return XCTFail("Expected sampleRateMismatch, got \(error)")
+                }
+            }
+        }
+    }
+
+    func testRoomCorrectionSampleRateValidationRejectsMismatchAndAcceptsMatchingRate() {
+        var filter = RoomCorrectionFilter.validation
+        filter.sampleRate = 96_000
+        XCTAssertNoThrow(try filter.validateSampleRate(forOutputSampleRate: 96_000))
+        XCTAssertNoThrow(try filter.validateSampleRate(forOutputSampleRate: 96_000.49))
+
+        XCTAssertThrowsError(try filter.validateSampleRate(forOutputSampleRate: 48_000)) { error in
+            guard case RoomCorrectionConfigurationError.sampleRateMismatch = error else {
+                return XCTFail("Expected sampleRateMismatch, got \(error)")
+            }
+        }
     }
 
     func testRoomCorrectionStartsBypassedWithoutLoadedFilter() {
