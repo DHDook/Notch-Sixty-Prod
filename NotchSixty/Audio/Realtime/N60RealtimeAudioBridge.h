@@ -56,6 +56,15 @@ bool N60RealtimeAudioBridgePrepareConvolutionProgram(
     uint32_t declaredLatencyFrames,
     N60ConvolutionProgramInfo * _Nullable programInfoOut
 );
+bool N60RealtimeAudioBridgePrepareRoomCorrectionProgram(
+    N60RealtimeAudioBridge * _Nonnull bridge,
+    uint32_t slot,
+    const float * _Nonnull leftTaps,
+    const float * _Nullable rightTaps,
+    uint32_t tapCount,
+    uint32_t declaredLatencyFrames,
+    N60ConvolutionProgramInfo * _Nullable programInfoOut
+);
 bool N60RealtimeAudioBridgePublishDSPGraph(
     N60RealtimeAudioBridge * _Nonnull bridge,
     N60DSPGraphSnapshot snapshot
