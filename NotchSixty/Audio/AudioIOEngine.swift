@@ -199,6 +199,70 @@ enum BassManagementConfigurationError: Error, LocalizedError, Equatable {
     }
 }
 
+struct RoomCorrectionFilter: Equatable, Sendable {
+    var name: String
+    var sampleRate: Double?
+    var leftTaps: [Float]
+    var rightTaps: [Float]?
+    var declaredLatencyFrames: UInt32
+
+    static let validation = RoomCorrectionFilter(
+        name: "Deterministic 3-tap validation",
+        sampleRate: nil,
+        leftTaps: [0.25, 0.5, 0.25],
+        rightTaps: nil,
+        declaredLatencyFrames: 1
+    )
+
+    func validateSampleRate(forOutputSampleRate outputSampleRate: Double) throws {
+        guard let sampleRate else { return }
+        guard sampleRate.isFinite,
+              abs(sampleRate - outputSampleRate) < 0.5 else {
+            throw RoomCorrectionConfigurationError.sampleRateMismatch(
+                filter: sampleRate,
+                output: outputSampleRate
+            )
+        }
+    }
+}
+
+struct RoomCorrectionConfiguration: Equatable, Sendable {
+    var enabled = false
+    var filter: RoomCorrectionFilter?
+}
+
+enum RoomCorrectionConfigurationError: Error, LocalizedError, Equatable {
+    case filterRequired
+    case invalidTapCount(Int)
+    case mismatchedStereoTapCount(left: Int, right: Int)
+    case nonFiniteTap
+    case sampleRateMismatch(filter: Double, output: Double)
+    case invalidDeclaredLatency(UInt32)
+    case convolutionProgramUnavailable
+    case graphAttachmentFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .filterRequired:
+            return "Room correction cannot be enabled until a correction filter is loaded."
+        case .invalidTapCount(let count):
+            return "Room-correction FIR tap count \(count) is outside the supported 1...\(Int(N60_CONVOLUTION_MAX_TAPS)) range."
+        case .mismatchedStereoTapCount(let left, let right):
+            return "Room-correction left/right FIR lengths must match (left \(left), right \(right))."
+        case .nonFiniteTap:
+            return "Room-correction FIR coefficients must all be finite."
+        case .sampleRateMismatch(let filter, let output):
+            return "Room-correction filter rate \(filter) Hz does not match the active output rate \(output) Hz."
+        case .invalidDeclaredLatency(let frames):
+            return "Room-correction declared filter latency \(frames) frames exceeds the FIR length."
+        case .convolutionProgramUnavailable:
+            return "No safe room-correction FIR program slot is currently available."
+        case .graphAttachmentFailed:
+            return "Unable to attach the prepared room-correction FIR to the DSP graph."
+        }
+    }
+}
+
 struct EQConfiguration: Equatable, Sendable {
     static let maximumBandCount = Int(N60_MAX_EQ_BANDS)
 
@@ -316,6 +380,11 @@ private struct PreparedLinearPhaseProgram {
     let designInfo: N60LinearPhaseEQDesignInfo
 }
 
+private struct PreparedRoomCorrectionProgram {
+    let slot: UInt32
+    let programInfo: N60ConvolutionProgramInfo
+}
+
 @MainActor
 final class AudioIOEngine: ObservableObject {
     private let deviceCatalog: any OutputDeviceCataloging
@@ -331,6 +400,8 @@ final class AudioIOEngine: ObservableObject {
     private var prepared = false
     private var activeLinearPhaseProgram: PreparedLinearPhaseProgram?
     private var nextLinearPhaseProgramSlot: UInt32 = 0
+    private var activeRoomCorrectionProgram: PreparedRoomCorrectionProgram?
+    private var nextRoomCorrectionProgramSlot: UInt32 = 0
 
     private(set) var sampleRateChangesHandled: UInt64 = 0
     private(set) var recoveryAttempts: UInt64 = 0
@@ -342,6 +413,7 @@ final class AudioIOEngine: ObservableObject {
     @Published private(set) var eqConfiguration = EQConfiguration()
     @Published private(set) var gainConfiguration = DSPGainConfiguration()
     @Published private(set) var bassManagementConfiguration = BassManagementConfiguration()
+    @Published private(set) var roomCorrectionConfiguration = RoomCorrectionConfiguration()
     @Published private(set) var linearPhaseDesignInfo: N60LinearPhaseEQDesignInfo?
     @Published private(set) var lastErrorDescription: String?
     @Published private(set) var lifecycleState: AudioLifecycleState
@@ -489,10 +561,27 @@ final class AudioIOEngine: ObservableObject {
                 bassManagementConfiguration: configuration
             )
             try attachActiveLinearPhaseProgramIfNeeded(to: &graph)
+            try attachActiveRoomCorrectionProgramIfNeeded(to: &graph)
             try session.publishDSPGraph(graph)
         }
         bassManagementConfiguration = configuration
         lastErrorDescription = nil
+    }
+
+    func loadRoomCorrectionValidationFilter() throws {
+        var updated = roomCorrectionConfiguration
+        updated.filter = .validation
+        try applyRoomCorrectionConfiguration(updated)
+    }
+
+    func setRoomCorrectionEnabled(_ enabled: Bool) throws {
+        var updated = roomCorrectionConfiguration
+        updated.enabled = enabled
+        try applyRoomCorrectionConfiguration(updated)
+    }
+
+    func replaceRoomCorrectionConfiguration(_ configuration: RoomCorrectionConfiguration) throws {
+        try applyRoomCorrectionConfiguration(configuration)
     }
 
     func start() throws {
@@ -575,11 +664,13 @@ final class AudioIOEngine: ObservableObject {
                 ) else {
                     throw EQConfigurationError.linearPhaseDesignFailed
                 }
+                try attachActiveRoomCorrectionProgramIfNeeded(to: &graph)
                 try session.transitionDSPGraph(graph)
                 activeLinearPhaseProgram = preparedProgram
                 linearPhaseDesignInfo = preparedProgram.designInfo
             } else {
                 let leavingLinearPhase = activeLinearPhaseProgram != nil
+                try attachActiveRoomCorrectionProgramIfNeeded(to: &graph)
                 if leavingLinearPhase {
                     try session.transitionDSPGraph(graph)
                 } else {
@@ -605,9 +696,47 @@ final class AudioIOEngine: ObservableObject {
                 bassManagementConfiguration: bassManagementConfiguration
             )
             try attachActiveLinearPhaseProgramIfNeeded(to: &graph)
+            try attachActiveRoomCorrectionProgramIfNeeded(to: &graph)
             try session.publishDSPGraph(graph)
         }
         gainConfiguration = configuration
+        lastErrorDescription = nil
+    }
+
+    private func applyRoomCorrectionConfiguration(_ configuration: RoomCorrectionConfiguration) throws {
+        if configuration.enabled && configuration.filter == nil {
+            throw RoomCorrectionConfigurationError.filterRequired
+        }
+
+        if let session = transportSession {
+            var graph = try eqConfiguration.makeGraphSnapshot(
+                sampleRate: session.outputFormat.sampleRate,
+                gainConfiguration: gainConfiguration,
+                bassManagementConfiguration: bassManagementConfiguration
+            )
+            try attachActiveLinearPhaseProgramIfNeeded(to: &graph)
+
+            if configuration.enabled {
+                guard let filter = configuration.filter else {
+                    throw RoomCorrectionConfigurationError.filterRequired
+                }
+                let preparedProgram = try prepareRoomCorrectionProgram(filter, for: session)
+                try attachRoomCorrectionProgram(preparedProgram, to: &graph)
+                try session.transitionDSPGraph(graph)
+                activeRoomCorrectionProgram = preparedProgram
+            } else {
+                if activeRoomCorrectionProgram != nil {
+                    try session.transitionDSPGraph(graph)
+                } else {
+                    try session.publishDSPGraph(graph)
+                }
+                activeRoomCorrectionProgram = nil
+            }
+        } else {
+            activeRoomCorrectionProgram = nil
+        }
+
+        roomCorrectionConfiguration = configuration
         lastErrorDescription = nil
     }
 
@@ -663,6 +792,42 @@ final class AudioIOEngine: ObservableObject {
         return PreparedLinearPhaseProgram(slot: slot, programInfo: programInfo, designInfo: designInfo)
     }
 
+    private func prepareRoomCorrectionProgram(
+        _ filter: RoomCorrectionFilter,
+        for session: CoreAudioTransportSession
+    ) throws -> PreparedRoomCorrectionProgram {
+        let tapCount = filter.leftTaps.count
+        guard tapCount > 0, tapCount <= Int(N60_CONVOLUTION_MAX_TAPS) else {
+            throw RoomCorrectionConfigurationError.invalidTapCount(tapCount)
+        }
+        if let rightTaps = filter.rightTaps, rightTaps.count != tapCount {
+            throw RoomCorrectionConfigurationError.mismatchedStereoTapCount(left: tapCount, right: rightTaps.count)
+        }
+        guard filter.leftTaps.allSatisfy(\.isFinite),
+              filter.rightTaps?.allSatisfy(\.isFinite) ?? true else {
+            throw RoomCorrectionConfigurationError.nonFiniteTap
+        }
+        try filter.validateSampleRate(forOutputSampleRate: session.outputFormat.sampleRate)
+        guard filter.declaredLatencyFrames < UInt32(tapCount) else {
+            throw RoomCorrectionConfigurationError.invalidDeclaredLatency(filter.declaredLatencyFrames)
+        }
+
+        let slot = nextRoomCorrectionProgramSlot % UInt32(N60_CONVOLUTION_PROGRAM_SLOTS)
+        let programInfo: N60ConvolutionProgramInfo
+        do {
+            programInfo = try session.prepareRoomCorrectionProgram(
+                slot: slot,
+                leftTaps: filter.leftTaps,
+                rightTaps: filter.rightTaps,
+                declaredLatencyFrames: filter.declaredLatencyFrames
+            )
+        } catch {
+            throw RoomCorrectionConfigurationError.convolutionProgramUnavailable
+        }
+        nextRoomCorrectionProgramSlot = (slot + 1) % UInt32(N60_CONVOLUTION_PROGRAM_SLOTS)
+        return PreparedRoomCorrectionProgram(slot: slot, programInfo: programInfo)
+    }
+
     private func attachActiveLinearPhaseProgramIfNeeded(to graph: inout N60DSPGraphSnapshot) throws {
         guard eqConfiguration.phaseMode == .linearPhase, !eqConfiguration.bypassed else { return }
         guard let activeLinearPhaseProgram else {
@@ -676,6 +841,28 @@ final class AudioIOEngine: ObservableObject {
         ) else {
             throw EQConfigurationError.linearPhaseDesignFailed
         }
+    }
+
+    private func attachRoomCorrectionProgram(
+        _ program: PreparedRoomCorrectionProgram,
+        to graph: inout N60DSPGraphSnapshot
+    ) throws {
+        guard N60DSPGraphSnapshotSetRoomCorrectionProgram(
+            &graph,
+            program.slot,
+            program.programInfo,
+            true
+        ) else {
+            throw RoomCorrectionConfigurationError.graphAttachmentFailed
+        }
+    }
+
+    private func attachActiveRoomCorrectionProgramIfNeeded(to graph: inout N60DSPGraphSnapshot) throws {
+        guard roomCorrectionConfiguration.enabled else { return }
+        guard let activeRoomCorrectionProgram else {
+            throw RoomCorrectionConfigurationError.convolutionProgramUnavailable
+        }
+        try attachRoomCorrectionProgram(activeRoomCorrectionProgram, to: &graph)
     }
 
     private func start(resetProcessingSessionCounters: Bool) throws {
@@ -717,6 +904,8 @@ final class AudioIOEngine: ObservableObject {
         let session = try CoreAudioTransportSession(selectedOutput: output)
         activeLinearPhaseProgram = nil
         nextLinearPhaseProgramSlot = 0
+        activeRoomCorrectionProgram = nil
+        nextRoomCorrectionProgramSlot = 0
         var graph = try eqConfiguration.makeGraphSnapshot(
             sampleRate: session.outputFormat.sampleRate,
             gainConfiguration: gainConfiguration,
@@ -737,6 +926,16 @@ final class AudioIOEngine: ObservableObject {
         } else {
             linearPhaseDesignInfo = nil
         }
+
+        if roomCorrectionConfiguration.enabled {
+            guard let filter = roomCorrectionConfiguration.filter else {
+                throw RoomCorrectionConfigurationError.filterRequired
+            }
+            let preparedProgram = try prepareRoomCorrectionProgram(filter, for: session)
+            try attachRoomCorrectionProgram(preparedProgram, to: &graph)
+            activeRoomCorrectionProgram = preparedProgram
+        }
+
         try session.publishDSPGraph(graph)
         transportSession = session
     }
@@ -752,6 +951,7 @@ final class AudioIOEngine: ObservableObject {
             transportSession = nil
         }
         activeLinearPhaseProgram = nil
+        activeRoomCorrectionProgram = nil
     }
 
     private func forceFailedState(_ error: Error) {

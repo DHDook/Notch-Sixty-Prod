@@ -140,6 +140,7 @@ enum CoreAudioTransportError: Error, LocalizedError, Equatable {
     case realtimeBridgeAllocationFailed
     case dspGraphPublicationFailed
     case convolutionProgramPreparationFailed
+    case roomCorrectionProgramPreparationFailed
     case ioProcUnavailable(role: String)
     case outputBufferExceedsBridgeCapacity(bufferFrames: UInt32, capacityFrames: UInt32)
 
@@ -159,6 +160,8 @@ enum CoreAudioTransportError: Error, LocalizedError, Equatable {
             return "Unable to publish the render-ready DSP graph."
         case .convolutionProgramPreparationFailed:
             return "Unable to prepare an inactive convolution program slot."
+        case .roomCorrectionProgramPreparationFailed:
+            return "Unable to prepare an inactive room-correction FIR program slot."
         case .ioProcUnavailable(let role):
             return "Core Audio created the \(role) IOProc without returning a usable callback identifier."
         case .outputBufferExceedsBridgeCapacity(let bufferFrames, let capacityFrames):
@@ -345,6 +348,48 @@ final class CoreAudioTransportSession {
             )
         }
         guard prepared else { throw CoreAudioTransportError.convolutionProgramPreparationFailed }
+        return info
+    }
+
+    func prepareRoomCorrectionProgram(
+        slot: UInt32,
+        leftTaps: [Float],
+        rightTaps: [Float]? = nil,
+        declaredLatencyFrames: UInt32
+    ) throws -> N60ConvolutionProgramInfo {
+        guard let bridge, !leftTaps.isEmpty else {
+            throw CoreAudioTransportError.roomCorrectionProgramPreparationFailed
+        }
+        guard rightTaps == nil || rightTaps?.count == leftTaps.count else {
+            throw CoreAudioTransportError.roomCorrectionProgramPreparationFailed
+        }
+
+        var info = N60ConvolutionProgramInfo()
+        let prepared = leftTaps.withUnsafeBufferPointer { leftBuffer in
+            if let rightTaps {
+                return rightTaps.withUnsafeBufferPointer { rightBuffer in
+                    N60RealtimeAudioBridgePrepareRoomCorrectionProgram(
+                        bridge,
+                        slot,
+                        leftBuffer.baseAddress!,
+                        rightBuffer.baseAddress!,
+                        UInt32(leftBuffer.count),
+                        declaredLatencyFrames,
+                        &info
+                    )
+                }
+            }
+            return N60RealtimeAudioBridgePrepareRoomCorrectionProgram(
+                bridge,
+                slot,
+                leftBuffer.baseAddress!,
+                nil,
+                UInt32(leftBuffer.count),
+                declaredLatencyFrames,
+                &info
+            )
+        }
+        guard prepared else { throw CoreAudioTransportError.roomCorrectionProgramPreparationFailed }
         return info
     }
 
