@@ -12,7 +12,14 @@
 extern "C" {
 #endif
 
+// User-facing EQ remains capped at 64 bands per channel. Independent stereo
+// mode can therefore compile up to 128 render slots, with each slot explicitly
+// scoped to left, right, or both channels.
 #define N60_MAX_EQ_BANDS 64
+#define N60_MAX_EQ_RENDER_SLOTS (N60_MAX_EQ_BANDS * 2)
+#define N60_EQ_CHANNEL_LEFT 0x1u
+#define N60_EQ_CHANNEL_RIGHT 0x2u
+#define N60_EQ_CHANNEL_STEREO (N60_EQ_CHANNEL_LEFT | N60_EQ_CHANNEL_RIGHT)
 
 typedef struct N60RenderKernel N60RenderKernel;
 
@@ -27,11 +34,19 @@ typedef struct {
 } N60ConvolutionGraphState;
 
 typedef struct {
+    N60BiquadBandSnapshot band;
+    uint8_t channelMask;
+} N60EQBandGraphState;
+
+typedef struct {
     double sampleRate;
     uint32_t channelCount;
     float inputGainLinear;
     float headroomGainLinear;
     float outputGainLinear;
+    // Channel balance is attenuation-only: 1/1 at center, never > unity.
+    float balanceGainLeftLinear;
+    float balanceGainRightLinear;
     bool bypassed;
     uint32_t latencyFrames;
     uint64_t generation;
@@ -39,7 +54,7 @@ typedef struct {
     bool eqBypassed;
     uint32_t eqBandCount;
     uint32_t eqTransitionFrames;
-    N60BiquadBandSnapshot eqBands[N60_MAX_EQ_BANDS];
+    N60EQBandGraphState eqBands[N60_MAX_EQ_RENDER_SLOTS];
     uint32_t crossoverTransitionFrames;
     N60CrossoverSnapshot crossover;
     // Linear-phase EQ FIR stage. Kept under the existing convolution name for
@@ -99,8 +114,12 @@ typedef struct {
     float inputGainLinear;
     float headroomGainLinear;
     float outputGainLinear;
+    float balanceGainLeftLinear;
+    float balanceGainRightLinear;
     bool eqBypassed;
     uint32_t eqBandCount;
+    uint32_t eqLeftBandCount;
+    uint32_t eqRightBandCount;
     bool crossoverEnabled;
     double crossoverFrequencyHz;
     N60CrossoverTopology crossoverTopology;
@@ -132,6 +151,8 @@ N60DSPGraphSnapshot N60DSPGraphSnapshotMakeUnity(double sampleRate);
 // Control-plane graph helpers. Coefficients/programs are prepared before
 // publication; no filter construction or FFT setup occurs in the callback.
 void N60DSPGraphSnapshotClearEQ(N60DSPGraphSnapshot * _Nonnull snapshot);
+
+// Backward-compatible linked-stereo helper: applies the same band to L+R.
 bool N60DSPGraphSnapshotSetEQBand(
     N60DSPGraphSnapshot * _Nonnull snapshot,
     uint32_t bandIndex,
@@ -141,6 +162,19 @@ bool N60DSPGraphSnapshotSetEQBand(
     double q,
     bool enabled
 );
+
+// Stereo-aware helper. `channelMask` must contain left, right, or both bits.
+bool N60DSPGraphSnapshotSetEQBandForChannels(
+    N60DSPGraphSnapshot * _Nonnull snapshot,
+    uint32_t bandIndex,
+    uint8_t channelMask,
+    N60BiquadFilterType type,
+    double frequencyHz,
+    double gainDB,
+    double q,
+    bool enabled
+);
+
 bool N60DSPGraphSnapshotSetCrossover(
     N60DSPGraphSnapshot * _Nonnull snapshot,
     double frequencyHz,
