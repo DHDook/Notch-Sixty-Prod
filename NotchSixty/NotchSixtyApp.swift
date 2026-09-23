@@ -47,7 +47,11 @@ struct ProductConfiguration: Equatable, Sendable {
 final class ProductController: ObservableObject {
     let audioEngine: AudioIOEngine
 
-    init(audioEngine: AudioIOEngine = AudioIOEngine()) {
+    init() {
+        self.audioEngine = AudioIOEngine()
+    }
+
+    init(audioEngine: AudioIOEngine) {
         self.audioEngine = audioEngine
     }
 
