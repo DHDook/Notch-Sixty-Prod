@@ -290,10 +290,10 @@ final class CoreAudioTransportSession {
                 operation: "create output IOProc"
             )
 
-            guard let captureIOProcID else {
+            guard captureIOProcID != nil else {
                 throw CoreAudioTransportError.ioProcUnavailable(role: "capture")
             }
-            guard let outputIOProcID else {
+            guard outputIOProcID != nil else {
                 throw CoreAudioTransportError.ioProcUnavailable(role: "output")
             }
 
@@ -304,12 +304,6 @@ final class CoreAudioTransportSession {
                 gatePolicy.activationBufferedFrames,
                 gatePolicy.fadeInFrames
             )
-
-            try Self.check(AudioDeviceStart(selectedOutput.deviceID, outputIOProcID), operation: "start physical output")
-            isOutputStarted = true
-
-            try Self.check(AudioDeviceStart(aggregateDeviceID, captureIOProcID), operation: "start tap capture")
-            isCaptureStarted = true
         } catch {
             stop(fadeOut: false)
             throw error
@@ -358,14 +352,19 @@ final class CoreAudioTransportSession {
         guard let bridge, N60RealtimeAudioBridgePublishDSPGraph(bridge, snapshot) else {
             throw CoreAudioTransportError.dspGraphPublicationFailed
         }
+        if !isOutputStarted || !isCaptureStarted {
+            try startIO()
+        }
     }
 
     func transitionDSPGraph(_ snapshot: N60DSPGraphSnapshot) throws {
         guard let bridge else { throw CoreAudioTransportError.dspGraphPublicationFailed }
 
-        // This short control-plane fade deliberately crosses silence rather than
-        // crossfading paths with different algorithmic latencies. It is bounded,
-        // does not block the audio callback, and also works when program audio is idle.
+        if !isOutputStarted || !isCaptureStarted {
+            try publishDSPGraph(snapshot)
+            return
+        }
+
         for step in stride(from: Int(Self.fadeStepCount) - 1, through: 0, by: -1) {
             N60RealtimeAudioBridgeSetTransitionGainImmediate(
                 bridge,
@@ -423,6 +422,48 @@ final class CoreAudioTransportSession {
         if let bridge {
             N60RealtimeAudioBridgeDestroy(bridge)
             self.bridge = nil
+        }
+    }
+
+    private func startIO() throws {
+        guard !stopped else { throw CoreAudioTransportError.dspGraphPublicationFailed }
+        if isOutputStarted && isCaptureStarted { return }
+
+        guard let outputIOProcID else {
+            throw CoreAudioTransportError.ioProcUnavailable(role: "output")
+        }
+        guard let captureIOProcID else {
+            throw CoreAudioTransportError.ioProcUnavailable(role: "capture")
+        }
+        guard aggregateDeviceID != AudioDeviceID(kAudioObjectUnknown) else {
+            throw CoreAudioTransportError.ioProcUnavailable(role: "capture")
+        }
+
+        if isCaptureStarted {
+            AudioDeviceStop(aggregateDeviceID, captureIOProcID)
+            isCaptureStarted = false
+        }
+        if isOutputStarted {
+            AudioDeviceStop(selectedOutput.deviceID, outputIOProcID)
+            isOutputStarted = false
+        }
+
+        try Self.check(
+            AudioDeviceStart(selectedOutput.deviceID, outputIOProcID),
+            operation: "start physical output"
+        )
+        isOutputStarted = true
+
+        do {
+            try Self.check(
+                AudioDeviceStart(aggregateDeviceID, captureIOProcID),
+                operation: "start tap capture"
+            )
+            isCaptureStarted = true
+        } catch {
+            AudioDeviceStop(selectedOutput.deviceID, outputIOProcID)
+            isOutputStarted = false
+            throw error
         }
     }
 
