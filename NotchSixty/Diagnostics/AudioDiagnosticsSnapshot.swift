@@ -20,6 +20,7 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
     let flushedDenormalSamples: UInt64
     let snapshotReadMisses: UInt64
     let convolutionProgramMisses: UInt64
+    let roomCorrectionProgramMisses: UInt64
     let publishedGeneration: UInt64
     let latencyFrames: UInt32
     let sampleRate: Double
@@ -44,6 +45,13 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
     let convolutionPartitionCount: UInt32
     let convolutionEngineLatencyFrames: UInt32
     let convolutionDeclaredLatencyFrames: UInt32
+    let roomCorrectionEnabled: Bool
+    let roomCorrectionProgramSlot: UInt32
+    let roomCorrectionProgramGeneration: UInt64
+    let roomCorrectionTapCount: UInt32
+    let roomCorrectionPartitionCount: UInt32
+    let roomCorrectionEngineLatencyFrames: UInt32
+    let roomCorrectionDeclaredLatencyFrames: UInt32
     let inputMeter: StereoMeterReading
     let postEQMeter: StereoMeterReading
     let outputMeter: StereoMeterReading
@@ -54,6 +62,7 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
         flushedDenormalSamples = diagnostics.flushedDenormalSamples
         snapshotReadMisses = diagnostics.snapshotReadMisses
         convolutionProgramMisses = diagnostics.convolutionProgramMisses
+        roomCorrectionProgramMisses = diagnostics.roomCorrectionProgramMisses
         publishedGeneration = diagnostics.publishedGeneration
         latencyFrames = diagnostics.latencyFrames
         sampleRate = diagnostics.sampleRate
@@ -78,6 +87,13 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
         convolutionPartitionCount = diagnostics.convolutionPartitionCount
         convolutionEngineLatencyFrames = diagnostics.convolutionEngineLatencyFrames
         convolutionDeclaredLatencyFrames = diagnostics.convolutionDeclaredLatencyFrames
+        roomCorrectionEnabled = diagnostics.roomCorrectionEnabled
+        roomCorrectionProgramSlot = diagnostics.roomCorrectionProgramSlot
+        roomCorrectionProgramGeneration = diagnostics.roomCorrectionProgramGeneration
+        roomCorrectionTapCount = diagnostics.roomCorrectionTapCount
+        roomCorrectionPartitionCount = diagnostics.roomCorrectionPartitionCount
+        roomCorrectionEngineLatencyFrames = diagnostics.roomCorrectionEngineLatencyFrames
+        roomCorrectionDeclaredLatencyFrames = diagnostics.roomCorrectionDeclaredLatencyFrames
         inputMeter = StereoMeterReading(diagnostics.inputMeter)
         postEQMeter = StereoMeterReading(diagnostics.postEQMeter)
         outputMeter = StereoMeterReading(diagnostics.outputMeter)
