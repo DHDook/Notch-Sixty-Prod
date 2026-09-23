@@ -12,6 +12,7 @@
 		A10000000000000000000012 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000022 /* Assets.xcassets */; };
 		A10000000000000000000013 /* NotchSixtyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000024 /* NotchSixtyTests.swift */; };
 		A10000000000000000000014 /* ConvolutionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000027 /* ConvolutionTests.swift */; };
+		A10000000000000000000015 /* LiveLinearPhaseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000028 /* LiveLinearPhaseTests.swift */; };
 		A20000000000000000000010 /* AudioIOEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000020 /* AudioIOEngine.swift */; };
 		A20000000000000000000011 /* CoreAudioError.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000021 /* CoreAudioError.swift */; };
 		A20000000000000000000012 /* AudioOutputDevice.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000022 /* AudioOutputDevice.swift */; };
@@ -43,6 +44,7 @@
 		A10000000000000000000025 /* Notch Sixty.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Notch Sixty.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000026 /* NotchSixtyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = NotchSixtyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000027 /* ConvolutionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConvolutionTests.swift; sourceTree = "<group>"; };
+		A10000000000000000000028 /* LiveLinearPhaseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveLinearPhaseTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000020 /* AudioIOEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioIOEngine.swift; sourceTree = "<group>"; };
 		A20000000000000000000021 /* CoreAudioError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudioError.swift; sourceTree = "<group>"; };
 		A20000000000000000000022 /* AudioOutputDevice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioOutputDevice.swift; sourceTree = "<group>"; };
@@ -91,6 +93,7 @@
 			children = (
 				A10000000000000000000024 /* NotchSixtyTests.swift */,
 				A10000000000000000000027 /* ConvolutionTests.swift */,
+				A10000000000000000000028 /* LiveLinearPhaseTests.swift */,
 			);
 			path = NotchSixtyTests;
 			sourceTree = "<group>";
@@ -216,6 +219,7 @@
 			files = (
 				A10000000000000000000013 /* NotchSixtyTests.swift in Sources */,
 				A10000000000000000000014 /* ConvolutionTests.swift in Sources */,
+				A10000000000000000000015 /* LiveLinearPhaseTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

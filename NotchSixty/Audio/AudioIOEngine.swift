@@ -35,6 +35,20 @@ enum EQFilterType: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+enum EQPhaseMode: String, CaseIterable, Identifiable, Sendable {
+    case minimumPhase
+    case linearPhase
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .minimumPhase: return "Minimum phase"
+        case .linearPhase: return "Linear phase"
+        }
+    }
+}
+
 struct EQBand: Identifiable, Equatable, Sendable {
     let id: UUID
     var enabled: Bool
@@ -63,6 +77,8 @@ struct EQBand: Identifiable, Equatable, Sendable {
 enum EQConfigurationError: Error, LocalizedError, Equatable {
     case tooManyBands(Int)
     case invalidBand(index: Int)
+    case linearPhaseDesignFailed
+    case convolutionProgramUnavailable
 
     var errorDescription: String? {
         switch self {
@@ -70,6 +86,10 @@ enum EQConfigurationError: Error, LocalizedError, Equatable {
             return "Parametric EQ supports at most \(Int(N60_MAX_EQ_BANDS)) bands; configuration contains \(count)."
         case .invalidBand(let index):
             return "EQ band \(index + 1) is invalid for the current output sample rate."
+        case .linearPhaseDesignFailed:
+            return "Unable to design the linear-phase FIR for the current EQ configuration."
+        case .convolutionProgramUnavailable:
+            return "No safe FIR program slot is currently available."
         }
     }
 }
@@ -182,13 +202,35 @@ enum BassManagementConfigurationError: Error, LocalizedError, Equatable {
 struct EQConfiguration: Equatable, Sendable {
     static let maximumBandCount = Int(N60_MAX_EQ_BANDS)
 
-    var bypassed = false
-    var bands: [EQBand] = []
+    var phaseMode: EQPhaseMode
+    var bypassed: Bool
+    var bands: [EQBand]
+
+    init(
+        phaseMode: EQPhaseMode = .minimumPhase,
+        bypassed: Bool = false,
+        bands: [EQBand] = []
+    ) {
+        self.phaseMode = phaseMode
+        self.bypassed = bypassed
+        self.bands = bands
+    }
 
     var enabledBandCount: Int {
         bands.reduce(into: 0) { count, band in
             if band.enabled { count += 1 }
         }
+    }
+
+    private func validateBand(_ band: EQBand, index: Int, sampleRate: Double) throws -> Bool {
+        guard band.frequencyHz.isFinite,
+              band.frequencyHz > 0,
+              band.gainDB.isFinite,
+              band.q.isFinite,
+              band.q > 0 else {
+            throw EQConfigurationError.invalidBand(index: index)
+        }
+        return band.frequencyHz < sampleRate * 0.5
     }
 
     func makeGraphSnapshot(
@@ -215,20 +257,23 @@ struct EQConfiguration: Equatable, Sendable {
         graph.eqBypassed = bypassed
         N60DSPGraphSnapshotClearEQ(&graph)
 
-        var renderIndex: UInt32 = 0
-        for (modelIndex, band) in bands.enumerated() where band.enabled {
-            guard N60DSPGraphSnapshotSetEQBand(
-                &graph,
-                renderIndex,
-                band.type.cType,
-                band.frequencyHz,
-                band.gainDB,
-                band.q,
-                true
-            ) else {
-                throw EQConfigurationError.invalidBand(index: modelIndex)
+        if phaseMode == .minimumPhase && !bypassed {
+            var renderIndex: UInt32 = 0
+            for (modelIndex, band) in bands.enumerated() where band.enabled {
+                guard try validateBand(band, index: modelIndex, sampleRate: sampleRate) else { continue }
+                guard N60DSPGraphSnapshotSetEQBand(
+                    &graph,
+                    renderIndex,
+                    band.type.cType,
+                    band.frequencyHz,
+                    band.gainDB,
+                    band.q,
+                    true
+                ) else {
+                    throw EQConfigurationError.invalidBand(index: modelIndex)
+                }
+                renderIndex += 1
             }
-            renderIndex += 1
         }
 
         guard N60DSPGraphSnapshotSetCrossover(
@@ -244,6 +289,31 @@ struct EQConfiguration: Equatable, Sendable {
         }
         return graph
     }
+
+    func linearPhaseBands(sampleRate: Double) throws -> [N60LinearPhaseEQBand] {
+        guard bands.count <= Self.maximumBandCount else {
+            throw EQConfigurationError.tooManyBands(bands.count)
+        }
+        var result: [N60LinearPhaseEQBand] = []
+        result.reserveCapacity(enabledBandCount)
+        for (index, band) in bands.enumerated() where band.enabled {
+            guard try validateBand(band, index: index, sampleRate: sampleRate) else { continue }
+            var cBand = N60LinearPhaseEQBand()
+            cBand.enabled = true
+            cBand.type = band.type.cType
+            cBand.frequencyHz = band.frequencyHz
+            cBand.gainDB = band.gainDB
+            cBand.q = band.q
+            result.append(cBand)
+        }
+        return result
+    }
+}
+
+private struct PreparedLinearPhaseProgram {
+    let slot: UInt32
+    let programInfo: N60ConvolutionProgramInfo
+    let designInfo: N60LinearPhaseEQDesignInfo
 }
 
 @MainActor
@@ -259,6 +329,8 @@ final class AudioIOEngine: ObservableObject {
     private var recoveryGeneration: UInt64 = 0
     private var resumeAfterWake = false
     private var prepared = false
+    private var activeLinearPhaseProgram: PreparedLinearPhaseProgram?
+    private var nextLinearPhaseProgramSlot: UInt32 = 0
 
     private(set) var sampleRateChangesHandled: UInt64 = 0
     private(set) var recoveryAttempts: UInt64 = 0
@@ -270,6 +342,7 @@ final class AudioIOEngine: ObservableObject {
     @Published private(set) var eqConfiguration = EQConfiguration()
     @Published private(set) var gainConfiguration = DSPGainConfiguration()
     @Published private(set) var bassManagementConfiguration = BassManagementConfiguration()
+    @Published private(set) var linearPhaseDesignInfo: N60LinearPhaseEQDesignInfo?
     @Published private(set) var lastErrorDescription: String?
     @Published private(set) var lifecycleState: AudioLifecycleState
 
@@ -362,6 +435,13 @@ final class AudioIOEngine: ObservableObject {
         try applyEQConfiguration(updated)
     }
 
+    func setEQPhaseMode(_ mode: EQPhaseMode) throws {
+        guard mode != eqConfiguration.phaseMode else { return }
+        var updated = eqConfiguration
+        updated.phaseMode = mode
+        try applyEQConfiguration(updated)
+    }
+
     func replaceEQConfiguration(_ configuration: EQConfiguration) throws {
         try applyEQConfiguration(configuration)
     }
@@ -403,11 +483,12 @@ final class AudioIOEngine: ObservableObject {
             throw BassManagementConfigurationError.invalidSubGain(configuration.subGainDB)
         }
         if let session = transportSession {
-            let graph = try eqConfiguration.makeGraphSnapshot(
+            var graph = try eqConfiguration.makeGraphSnapshot(
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
                 bassManagementConfiguration: configuration
             )
+            try attachActiveLinearPhaseProgramIfNeeded(to: &graph)
             try session.publishDSPGraph(graph)
         }
         bassManagementConfiguration = configuration
@@ -478,28 +559,123 @@ final class AudioIOEngine: ObservableObject {
         }
 
         if let session = transportSession {
-            let graph = try configuration.makeGraphSnapshot(
+            var graph = try configuration.makeGraphSnapshot(
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
                 bassManagementConfiguration: bassManagementConfiguration
             )
-            try session.publishDSPGraph(graph)
+
+            if configuration.phaseMode == .linearPhase && !configuration.bypassed {
+                let preparedProgram = try prepareLinearPhaseProgram(configuration, for: session)
+                guard N60DSPGraphSnapshotSetConvolutionProgram(
+                    &graph,
+                    preparedProgram.slot,
+                    preparedProgram.programInfo,
+                    true
+                ) else {
+                    throw EQConfigurationError.linearPhaseDesignFailed
+                }
+                try session.transitionDSPGraph(graph)
+                activeLinearPhaseProgram = preparedProgram
+                linearPhaseDesignInfo = preparedProgram.designInfo
+            } else {
+                let leavingLinearPhase = activeLinearPhaseProgram != nil
+                if leavingLinearPhase {
+                    try session.transitionDSPGraph(graph)
+                } else {
+                    try session.publishDSPGraph(graph)
+                }
+                activeLinearPhaseProgram = nil
+                linearPhaseDesignInfo = nil
+            }
+        } else {
+            activeLinearPhaseProgram = nil
+            linearPhaseDesignInfo = nil
         }
+
         eqConfiguration = configuration
         lastErrorDescription = nil
     }
 
     private func applyGainConfiguration(_ configuration: DSPGainConfiguration) throws {
         if let session = transportSession {
-            let graph = try eqConfiguration.makeGraphSnapshot(
+            var graph = try eqConfiguration.makeGraphSnapshot(
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: configuration,
                 bassManagementConfiguration: bassManagementConfiguration
             )
+            try attachActiveLinearPhaseProgramIfNeeded(to: &graph)
             try session.publishDSPGraph(graph)
         }
         gainConfiguration = configuration
         lastErrorDescription = nil
+    }
+
+    private func prepareLinearPhaseProgram(
+        _ configuration: EQConfiguration,
+        for session: CoreAudioTransportSession
+    ) throws -> PreparedLinearPhaseProgram {
+        let sampleRate = session.outputFormat.sampleRate
+        let tapCount = Int(N60LinearPhaseEQRecommendedTapCount(sampleRate))
+        guard tapCount > 0, tapCount <= Int(N60_CONVOLUTION_MAX_TAPS) else {
+            throw EQConfigurationError.linearPhaseDesignFailed
+        }
+
+        let bands = try configuration.linearPhaseBands(sampleRate: sampleRate)
+        var taps = [Float](repeating: 0, count: tapCount)
+        var designInfo = N60LinearPhaseEQDesignInfo()
+        let designed = taps.withUnsafeMutableBufferPointer { tapBuffer -> Bool in
+            if bands.isEmpty {
+                return N60LinearPhaseEQDesign(
+                    sampleRate,
+                    nil,
+                    0,
+                    tapBuffer.baseAddress!,
+                    UInt32(tapBuffer.count),
+                    &designInfo
+                )
+            }
+            return bands.withUnsafeBufferPointer { bandBuffer in
+                N60LinearPhaseEQDesign(
+                    sampleRate,
+                    bandBuffer.baseAddress!,
+                    UInt32(bandBuffer.count),
+                    tapBuffer.baseAddress!,
+                    UInt32(tapBuffer.count),
+                    &designInfo
+                )
+            }
+        }
+        guard designed else { throw EQConfigurationError.linearPhaseDesignFailed }
+
+        let slot = nextLinearPhaseProgramSlot % UInt32(N60_CONVOLUTION_PROGRAM_SLOTS)
+        let programInfo: N60ConvolutionProgramInfo
+        do {
+            programInfo = try session.prepareConvolutionProgram(
+                slot: slot,
+                taps: taps,
+                declaredLatencyFrames: designInfo.groupDelayFrames
+            )
+        } catch {
+            throw EQConfigurationError.convolutionProgramUnavailable
+        }
+        nextLinearPhaseProgramSlot = (slot + 1) % UInt32(N60_CONVOLUTION_PROGRAM_SLOTS)
+        return PreparedLinearPhaseProgram(slot: slot, programInfo: programInfo, designInfo: designInfo)
+    }
+
+    private func attachActiveLinearPhaseProgramIfNeeded(to graph: inout N60DSPGraphSnapshot) throws {
+        guard eqConfiguration.phaseMode == .linearPhase, !eqConfiguration.bypassed else { return }
+        guard let activeLinearPhaseProgram else {
+            throw EQConfigurationError.convolutionProgramUnavailable
+        }
+        guard N60DSPGraphSnapshotSetConvolutionProgram(
+            &graph,
+            activeLinearPhaseProgram.slot,
+            activeLinearPhaseProgram.programInfo,
+            true
+        ) else {
+            throw EQConfigurationError.linearPhaseDesignFailed
+        }
     }
 
     private func start(resetProcessingSessionCounters: Bool) throws {
@@ -539,11 +715,28 @@ final class AudioIOEngine: ObservableObject {
 
     private func buildTransport(output: AudioOutputDevice) throws {
         let session = try CoreAudioTransportSession(selectedOutput: output)
-        let graph = try eqConfiguration.makeGraphSnapshot(
+        activeLinearPhaseProgram = nil
+        nextLinearPhaseProgramSlot = 0
+        var graph = try eqConfiguration.makeGraphSnapshot(
             sampleRate: session.outputFormat.sampleRate,
             gainConfiguration: gainConfiguration,
             bassManagementConfiguration: bassManagementConfiguration
         )
+        if eqConfiguration.phaseMode == .linearPhase && !eqConfiguration.bypassed {
+            let preparedProgram = try prepareLinearPhaseProgram(eqConfiguration, for: session)
+            guard N60DSPGraphSnapshotSetConvolutionProgram(
+                &graph,
+                preparedProgram.slot,
+                preparedProgram.programInfo,
+                true
+            ) else {
+                throw EQConfigurationError.linearPhaseDesignFailed
+            }
+            activeLinearPhaseProgram = preparedProgram
+            linearPhaseDesignInfo = preparedProgram.designInfo
+        } else {
+            linearPhaseDesignInfo = nil
+        }
         try session.publishDSPGraph(graph)
         transportSession = session
     }
@@ -558,6 +751,7 @@ final class AudioIOEngine: ObservableObject {
             session.stop(fadeOut: fadeOut)
             transportSession = nil
         }
+        activeLinearPhaseProgram = nil
     }
 
     private func forceFailedState(_ error: Error) {
@@ -585,18 +779,26 @@ final class AudioIOEngine: ObservableObject {
 
     private func scheduleSampleRateReconfiguration() {
         guard lifecycle.state == .running else { return }
+
         reconfigurationWorkItem?.cancel()
+        do {
+            try setLifecycle(.reconfiguring)
+            eventMonitor.removeSelectedOutputSampleRateMonitor()
+            tearDownTransport(fadeOut: false)
+        } catch {
+            tearDownTransport(fadeOut: false)
+            forceFailedState(error)
+            return
+        }
+
         let workItem = DispatchWorkItem { [weak self] in self?.performSampleRateReconfiguration() }
         reconfigurationWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: workItem)
     }
 
     private func performSampleRateReconfiguration() {
-        guard lifecycle.state == .running else { return }
+        guard lifecycle.state == .reconfiguring else { return }
         do {
-            try setLifecycle(.reconfiguring)
-            eventMonitor.removeSelectedOutputSampleRateMonitor()
-            tearDownTransport(fadeOut: false)
             try refreshOutputDevices()
             guard let output = selectedOutputDevice else {
                 beginOutputRecovery()
@@ -605,6 +807,7 @@ final class AudioIOEngine: ObservableObject {
             try buildTransport(output: output)
             try eventMonitor.monitorSampleRate(of: output.deviceID)
             sampleRateChangesHandled &+= 1
+            reconfigurationWorkItem = nil
             try setLifecycle(.running)
             lastErrorDescription = nil
         } catch {
@@ -626,9 +829,7 @@ final class AudioIOEngine: ObservableObject {
     private func scheduleRecoveryAttempt(generation: UInt64, delay: TimeInterval) {
         guard generation == recoveryGeneration, lifecycle.state == .recoveringOutput else { return }
         recoveryWorkItem?.cancel()
-        let workItem = DispatchWorkItem { [weak self] in
-            self?.performRecoveryAttempt(generation: generation)
-        }
+        let workItem = DispatchWorkItem { [weak self] in self?.performRecoveryAttempt(generation: generation) }
         recoveryWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
     }

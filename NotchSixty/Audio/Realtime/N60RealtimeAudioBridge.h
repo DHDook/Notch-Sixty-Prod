@@ -25,12 +25,23 @@ typedef struct {
     uint64_t gatedOutputFrames;
     uint32_t bufferedFrames;
     bool outputGateOpen;
+    float transitionGain;
+    uint32_t transitionFramesRemaining;
 } N60RealtimeAudioBridgeSnapshot;
 
 N60RealtimeAudioBridge * _Nullable N60RealtimeAudioBridgeCreate(uint32_t capacityFrames);
 void N60RealtimeAudioBridgeDestroy(N60RealtimeAudioBridge * _Nonnull bridge);
 void N60RealtimeAudioBridgeReset(N60RealtimeAudioBridge * _Nonnull bridge);
 void N60RealtimeAudioBridgeSetOutputGain(N60RealtimeAudioBridge * _Nonnull bridge, float gain);
+void N60RealtimeAudioBridgeSetTransitionGainImmediate(
+    N60RealtimeAudioBridge * _Nonnull bridge,
+    float gain
+);
+void N60RealtimeAudioBridgeRampTransitionGain(
+    N60RealtimeAudioBridge * _Nonnull bridge,
+    float targetGain,
+    uint32_t transitionFrames
+);
 void N60RealtimeAudioBridgeConfigureOutputGate(
     N60RealtimeAudioBridge * _Nonnull bridge,
     uint32_t minimumBufferedFrames,

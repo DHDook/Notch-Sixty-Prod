@@ -771,9 +771,9 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
             advance_eq_transitions(kernel);
         }
 
-        meter_sample(left, right, &context->postEQPeakLeft, &context->postEQPeakRight, &context->postEQSquareSumLeft, &context->postEQSquareSumRight, &context->postEQOverRangeSamples);
-        process_crossover(&kernel->crossoverRuntime, left, right, &left, &right);
-
+        // FIR convolution is the linear-phase EQ path in the current graph.
+        // It therefore occupies the same logical stage as the minimum-phase
+        // biquads: before post-EQ metering and before bass management.
         if (context->snapshot.convolution.enabled) {
             float convolvedLeft = left;
             float convolvedRight = right;
@@ -791,6 +791,9 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
                 atomic_fetch_add_explicit(&kernel->convolutionProgramMisses, 1, memory_order_relaxed);
             }
         }
+
+        meter_sample(left, right, &context->postEQPeakLeft, &context->postEQPeakRight, &context->postEQSquareSumLeft, &context->postEQSquareSumRight, &context->postEQOverRangeSamples);
+        process_crossover(&kernel->crossoverRuntime, left, right, &left, &right);
 
         float outputGain = next_gain_value(&kernel->outputGain);
         left *= outputGain;
