@@ -256,6 +256,27 @@ bool N60RealtimeAudioBridgePrepareConvolutionProgram(
     );
 }
 
+bool N60RealtimeAudioBridgePrepareRoomCorrectionProgram(
+    N60RealtimeAudioBridge *bridge,
+    uint32_t slot,
+    const float *leftTaps,
+    const float *rightTaps,
+    uint32_t tapCount,
+    uint32_t declaredLatencyFrames,
+    N60ConvolutionProgramInfo *programInfoOut
+) {
+    if (bridge == NULL || bridge->renderKernel == NULL) return false;
+    return N60RenderKernelPrepareRoomCorrectionProgram(
+        bridge->renderKernel,
+        slot,
+        leftTaps,
+        rightTaps,
+        tapCount,
+        declaredLatencyFrames,
+        programInfoOut
+    );
+}
+
 bool N60RealtimeAudioBridgePublishDSPGraph(N60RealtimeAudioBridge *bridge, N60DSPGraphSnapshot snapshot) {
     if (bridge == NULL || bridge->renderKernel == NULL) return false;
     return N60RenderKernelPublishSnapshot(bridge->renderKernel, snapshot);
