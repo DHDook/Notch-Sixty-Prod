@@ -648,12 +648,6 @@ final class AudioIOEngine: ObservableObject {
         }
         guard designed else { throw EQConfigurationError.linearPhaseDesignFailed }
 
-        // There are three FIR program slots and only two immutable graph
-        // snapshot slots. Rotating one slot per prepared generation guarantees
-        // that this candidate is not referenced by either currently reachable
-        // graph generation. If the convolver's conservative last-processed
-        // guard still rejects it briefly, fail this edit rather than falling
-        // through to a potentially referenced newer slot.
         let slot = nextLinearPhaseProgramSlot % UInt32(N60_CONVOLUTION_PROGRAM_SLOTS)
         let programInfo: N60ConvolutionProgramInfo
         do {
@@ -666,16 +660,10 @@ final class AudioIOEngine: ObservableObject {
             throw EQConfigurationError.convolutionProgramUnavailable
         }
         nextLinearPhaseProgramSlot = (slot + 1) % UInt32(N60_CONVOLUTION_PROGRAM_SLOTS)
-        return PreparedLinearPhaseProgram(
-            slot: slot,
-            programInfo: programInfo,
-            designInfo: designInfo
-        )
+        return PreparedLinearPhaseProgram(slot: slot, programInfo: programInfo, designInfo: designInfo)
     }
 
-    private func attachActiveLinearPhaseProgramIfNeeded(
-        to graph: inout N60DSPGraphSnapshot
-    ) throws {
+    private func attachActiveLinearPhaseProgramIfNeeded(to graph: inout N60DSPGraphSnapshot) throws {
         guard eqConfiguration.phaseMode == .linearPhase, !eqConfiguration.bypassed else { return }
         guard let activeLinearPhaseProgram else {
             throw EQConfigurationError.convolutionProgramUnavailable
@@ -791,18 +779,26 @@ final class AudioIOEngine: ObservableObject {
 
     private func scheduleSampleRateReconfiguration() {
         guard lifecycle.state == .running else { return }
+
         reconfigurationWorkItem?.cancel()
+        do {
+            try setLifecycle(.reconfiguring)
+            eventMonitor.removeSelectedOutputSampleRateMonitor()
+            tearDownTransport(fadeOut: false)
+        } catch {
+            tearDownTransport(fadeOut: false)
+            forceFailedState(error)
+            return
+        }
+
         let workItem = DispatchWorkItem { [weak self] in self?.performSampleRateReconfiguration() }
         reconfigurationWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: workItem)
     }
 
     private func performSampleRateReconfiguration() {
-        guard lifecycle.state == .running else { return }
+        guard lifecycle.state == .reconfiguring else { return }
         do {
-            try setLifecycle(.reconfiguring)
-            eventMonitor.removeSelectedOutputSampleRateMonitor()
-            tearDownTransport(fadeOut: false)
             try refreshOutputDevices()
             guard let output = selectedOutputDevice else {
                 beginOutputRecovery()
@@ -811,6 +807,7 @@ final class AudioIOEngine: ObservableObject {
             try buildTransport(output: output)
             try eventMonitor.monitorSampleRate(of: output.deviceID)
             sampleRateChangesHandled &+= 1
+            reconfigurationWorkItem = nil
             try setLifecycle(.running)
             lastErrorDescription = nil
         } catch {
@@ -832,9 +829,7 @@ final class AudioIOEngine: ObservableObject {
     private func scheduleRecoveryAttempt(generation: UInt64, delay: TimeInterval) {
         guard generation == recoveryGeneration, lifecycle.state == .recoveringOutput else { return }
         recoveryWorkItem?.cancel()
-        let workItem = DispatchWorkItem { [weak self] in
-            self?.performRecoveryAttempt(generation: generation)
-        }
+        let workItem = DispatchWorkItem { [weak self] in self?.performRecoveryAttempt(generation: generation) }
         recoveryWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
     }
