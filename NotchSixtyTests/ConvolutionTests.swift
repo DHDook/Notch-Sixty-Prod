@@ -451,3 +451,195 @@ final class ConvolutionTests: XCTestCase {
         return 20.0 * log10(magnitude)
     }
 }
+
+extension ConvolutionTests {
+    func testRoomCorrectionUsesIndependentProgramNamespaceAndAddsLatency() {
+        guard let kernel = N60RenderKernelCreate() else {
+            return XCTFail("Unable to allocate render kernel")
+        }
+        defer { N60RenderKernelDestroy(kernel) }
+
+        var linearTaps: [Float] = [1.0]
+        var roomTaps: [Float] = [0.25, 0.5, 0.25]
+        var linearInfo = N60ConvolutionProgramInfo()
+        var roomInfo = N60ConvolutionProgramInfo()
+
+        XCTAssertTrue(
+            linearTaps.withUnsafeBufferPointer { buffer in
+                N60RenderKernelPrepareConvolutionProgram(
+                    kernel, 0, buffer.baseAddress!, nil, UInt32(buffer.count), 0, &linearInfo
+                )
+            }
+        )
+        XCTAssertTrue(
+            roomTaps.withUnsafeBufferPointer { buffer in
+                N60RenderKernelPrepareRoomCorrectionProgram(
+                    kernel, 0, buffer.baseAddress!, nil, UInt32(buffer.count), 1, &roomInfo
+                )
+            }
+        )
+
+        XCTAssertNotEqual(linearInfo.generation, 0)
+        XCTAssertNotEqual(roomInfo.generation, 0)
+
+        var graph = N60DSPGraphSnapshotMakeUnity(96_000)
+        XCTAssertTrue(N60DSPGraphSnapshotSetConvolutionProgram(&graph, 0, linearInfo, true))
+        XCTAssertTrue(N60DSPGraphSnapshotSetRoomCorrectionProgram(&graph, 0, roomInfo, true))
+        XCTAssertEqual(
+            graph.latencyFrames,
+            UInt32(N60_CONVOLUTION_PARTITION_FRAMES * 2) + 1
+        )
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+
+        var left: Float = 0
+        var right: Float = 0
+        var output: [Float] = []
+        let start = Int(N60_CONVOLUTION_PARTITION_FRAMES * 2)
+        for frame in 0..<(start + 5) {
+            let input: Float = frame == 0 ? 1 : 0
+            N60RenderKernelProcessStereoFrame(kernel, input, input, &left, &right)
+            output.append(left)
+        }
+
+        XCTAssertEqual(output[start], 0.25, accuracy: 0.000_01)
+        XCTAssertEqual(output[start + 1], 0.5, accuracy: 0.000_01)
+        XCTAssertEqual(output[start + 2], 0.25, accuracy: 0.000_01)
+
+        let diagnostics = N60RenderKernelGetDiagnostics(kernel)
+        XCTAssertTrue(diagnostics.convolutionEnabled)
+        XCTAssertTrue(diagnostics.roomCorrectionEnabled)
+        XCTAssertEqual(diagnostics.convolutionProgramSlot, 0)
+        XCTAssertEqual(diagnostics.roomCorrectionProgramSlot, 0)
+        XCTAssertEqual(diagnostics.roomCorrectionTapCount, 3)
+        XCTAssertEqual(diagnostics.roomCorrectionPartitionCount, 1)
+        XCTAssertEqual(diagnostics.roomCorrectionDeclaredLatencyFrames, 1)
+        XCTAssertEqual(diagnostics.convolutionProgramMisses, 0)
+        XCTAssertEqual(diagnostics.roomCorrectionProgramMisses, 0)
+    }
+
+    func testRoomCorrectionRejectsProgramPreparedOnlyForLinearEQConvolver() {
+        guard let kernel = N60RenderKernelCreate() else {
+            return XCTFail("Unable to allocate render kernel")
+        }
+        defer { N60RenderKernelDestroy(kernel) }
+
+        var taps: [Float] = [1.0]
+        var linearInfo = N60ConvolutionProgramInfo()
+        XCTAssertTrue(
+            taps.withUnsafeBufferPointer { buffer in
+                N60RenderKernelPrepareConvolutionProgram(
+                    kernel, 1, buffer.baseAddress!, nil, UInt32(buffer.count), 0, &linearInfo
+                )
+            }
+        )
+
+        var graph = N60DSPGraphSnapshotMakeUnity(48_000)
+        XCTAssertTrue(N60DSPGraphSnapshotSetRoomCorrectionProgram(&graph, 1, linearInfo, true))
+        XCTAssertFalse(N60RenderKernelPublishSnapshot(kernel, graph))
+    }
+
+    func testRoomCorrectionBypassDoesNotAddLatencyOrAlterUnityPath() {
+        guard let kernel = N60RenderKernelCreate() else {
+            return XCTFail("Unable to allocate render kernel")
+        }
+        defer { N60RenderKernelDestroy(kernel) }
+
+        var graph = N60DSPGraphSnapshotMakeUnity(192_000)
+        XCTAssertEqual(graph.latencyFrames, 0)
+        XCTAssertFalse(graph.roomCorrection.enabled)
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+
+        var left: Float = 0
+        var right: Float = 0
+        N60RenderKernelProcessStereoFrame(kernel, 0.125, -0.25, &left, &right)
+        XCTAssertEqual(left, 0.125, accuracy: 0.000_001)
+        XCTAssertEqual(right, -0.25, accuracy: 0.000_001)
+
+        let diagnostics = N60RenderKernelGetDiagnostics(kernel)
+        XCTAssertFalse(diagnostics.roomCorrectionEnabled)
+        XCTAssertEqual(diagnostics.roomCorrectionProgramMisses, 0)
+        XCTAssertEqual(diagnostics.latencyFrames, 0)
+    }
+
+    func test384KHzLinearEQAndRoomCorrectionConvolutionRemainFiniteTogether() {
+        guard let kernel = N60RenderKernelCreate() else {
+            return XCTFail("Unable to allocate render kernel")
+        }
+        defer { N60RenderKernelDestroy(kernel) }
+
+        let tapCount = 4_096
+        var linearTaps = [Float](repeating: 0, count: tapCount)
+        var roomTaps = [Float](repeating: 0, count: tapCount)
+        linearTaps[2_047] = 1.0
+        roomTaps[2_047] = 0.95
+        roomTaps[2_046] = 0.025
+        roomTaps[2_048] = 0.025
+
+        var linearInfo = N60ConvolutionProgramInfo()
+        var roomInfo = N60ConvolutionProgramInfo()
+        XCTAssertTrue(
+            linearTaps.withUnsafeBufferPointer { buffer in
+                N60RenderKernelPrepareConvolutionProgram(
+                    kernel, 0, buffer.baseAddress!, nil, UInt32(buffer.count), 2_047, &linearInfo
+                )
+            }
+        )
+        XCTAssertTrue(
+            roomTaps.withUnsafeBufferPointer { buffer in
+                N60RenderKernelPrepareRoomCorrectionProgram(
+                    kernel, 0, buffer.baseAddress!, nil, UInt32(buffer.count), 2_047, &roomInfo
+                )
+            }
+        )
+
+        var graph = N60DSPGraphSnapshotMakeUnity(384_000)
+        for index in 0..<Int(N60_MAX_EQ_BANDS) {
+            let position = Double(index) / Double(Int(N60_MAX_EQ_BANDS) - 1)
+            let frequency = 30.0 * pow(18_000.0 / 30.0, position)
+            XCTAssertTrue(
+                N60DSPGraphSnapshotSetEQBand(
+                    &graph,
+                    UInt32(index),
+                    N60BiquadFilterTypePeaking,
+                    frequency,
+                    index.isMultiple(of: 2) ? 0.25 : -0.25,
+                    1.0,
+                    true
+                )
+            )
+        }
+        XCTAssertTrue(
+            N60DSPGraphSnapshotSetCrossover(
+                &graph,
+                80,
+                N60CrossoverTopologyLinkwitzRiley48,
+                N60CrossoverMonitorModeRecombined,
+                1,
+                false,
+                true
+            )
+        )
+        XCTAssertTrue(N60DSPGraphSnapshotSetConvolutionProgram(&graph, 0, linearInfo, true))
+        XCTAssertTrue(N60DSPGraphSnapshotSetRoomCorrectionProgram(&graph, 0, roomInfo, true))
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+
+        var left: Float = 0
+        var right: Float = 0
+        for frame in 0..<32_768 {
+            let input = Float(sin(2.0 * Double.pi * 1_000.0 * Double(frame) / 384_000.0) * 0.05)
+            N60RenderKernelProcessStereoFrame(kernel, input, input, &left, &right)
+            XCTAssertTrue(left.isFinite)
+            XCTAssertTrue(right.isFinite)
+        }
+
+        let diagnostics = N60RenderKernelGetDiagnostics(kernel)
+        XCTAssertEqual(diagnostics.sanitizedNonFiniteSamples, 0)
+        XCTAssertEqual(diagnostics.snapshotReadMisses, 0)
+        XCTAssertEqual(diagnostics.convolutionProgramMisses, 0)
+        XCTAssertEqual(diagnostics.roomCorrectionProgramMisses, 0)
+        XCTAssertTrue(diagnostics.convolutionEnabled)
+        XCTAssertTrue(diagnostics.roomCorrectionEnabled)
+        XCTAssertTrue(diagnostics.crossoverEnabled)
+        XCTAssertEqual(diagnostics.eqBandCount, UInt32(N60_MAX_EQ_BANDS))
+    }
+}

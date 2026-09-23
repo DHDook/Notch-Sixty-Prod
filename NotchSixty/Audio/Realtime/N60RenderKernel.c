@@ -67,6 +67,7 @@ struct N60RenderKernel {
     N60EQBandRuntime eqRuntime[N60_MAX_EQ_BANDS];
     N60CrossoverRuntime crossoverRuntime;
     N60PartitionedConvolver *convolver;
+    N60PartitionedConvolver *roomCorrectionConvolver;
     N60SmoothedGain inputGain;
     N60SmoothedGain headroomGain;
     N60SmoothedGain outputGain;
@@ -80,6 +81,7 @@ struct N60RenderKernel {
     _Atomic uint64_t flushedDenormalSamples;
     _Atomic uint64_t snapshotReadMisses;
     _Atomic uint64_t convolutionProgramMisses;
+    _Atomic uint64_t roomCorrectionProgramMisses;
 
     _Atomic uint32_t inputPeakLeftBits;
     _Atomic uint32_t inputPeakRightBits;
@@ -194,7 +196,8 @@ static bool snapshot_is_valid(N60DSPGraphSnapshot snapshot) {
         || snapshot.outputGainLinear < 0.0f
         || snapshot.eqBandCount > N60_MAX_EQ_BANDS
         || !crossover_snapshot_is_valid(snapshot.crossover, snapshot.sampleRate)
-        || !convolution_snapshot_is_valid(snapshot.convolution)) {
+        || !convolution_snapshot_is_valid(snapshot.convolution)
+        || !convolution_snapshot_is_valid(snapshot.roomCorrection)) {
         return false;
     }
 
@@ -538,6 +541,95 @@ static N60RenderKernelRenderContext acquire_render_context(N60RenderKernel *kern
     return context;
 }
 
+static uint64_t convolution_state_latency(N60ConvolutionGraphState state) {
+    return state.enabled
+        ? (uint64_t)state.engineLatencyFrames + state.declaredLatencyFrames
+        : 0;
+}
+
+static bool set_convolution_graph_state(
+    N60DSPGraphSnapshot *snapshot,
+    N60ConvolutionGraphState *stateDestination,
+    uint32_t programSlot,
+    N60ConvolutionProgramInfo programInfo,
+    bool enabled
+) {
+    if (snapshot == NULL || stateDestination == NULL) return false;
+
+    uint64_t previousLatency = convolution_state_latency(*stateDestination);
+    uint64_t baseLatency = snapshot->latencyFrames >= previousLatency
+        ? (uint64_t)snapshot->latencyFrames - previousLatency
+        : 0;
+
+    N60ConvolutionGraphState state = {0};
+    state.enabled = enabled;
+    state.programSlot = programSlot;
+    state.programGeneration = programInfo.generation;
+    state.tapCount = programInfo.tapCount;
+    state.partitionCount = programInfo.partitionCount;
+    state.engineLatencyFrames = programInfo.engineLatencyFrames;
+    state.declaredLatencyFrames = programInfo.declaredLatencyFrames;
+
+    if (enabled && (!programInfo.prepared
+        || programSlot >= N60_CONVOLUTION_PROGRAM_SLOTS
+        || programInfo.generation == 0
+        || programInfo.tapCount == 0
+        || programInfo.engineLatencyFrames != N60_CONVOLUTION_PARTITION_FRAMES)) {
+        return false;
+    }
+
+    uint64_t newLatency = enabled
+        ? (uint64_t)programInfo.engineLatencyFrames + programInfo.declaredLatencyFrames
+        : 0;
+    if (baseLatency + newLatency > UINT32_MAX) return false;
+    *stateDestination = state;
+    snapshot->latencyFrames = (uint32_t)(baseLatency + newLatency);
+    return true;
+}
+
+static bool prepared_program_matches_graph_state(
+    const N60PartitionedConvolver *convolver,
+    N60ConvolutionGraphState state
+) {
+    if (!state.enabled) return true;
+    if (convolver == NULL
+        || !N60PartitionedConvolverProgramMatches(convolver, state.programSlot, state.programGeneration)) {
+        return false;
+    }
+    N60ConvolutionProgramInfo info = N60PartitionedConvolverProgramInfo(convolver, state.programSlot);
+    return info.tapCount == state.tapCount
+        && info.partitionCount == state.partitionCount
+        && info.engineLatencyFrames == state.engineLatencyFrames
+        && info.declaredLatencyFrames == state.declaredLatencyFrames;
+}
+
+static bool prepare_program(
+    N60PartitionedConvolver *convolver,
+    uint32_t slot,
+    const float *leftTaps,
+    const float *rightTaps,
+    uint32_t tapCount,
+    uint32_t declaredLatencyFrames,
+    N60ConvolutionProgramInfo *programInfoOut
+) {
+    if (convolver == NULL) return false;
+    uint64_t generation = 0;
+    if (!N60PartitionedConvolverPrepareProgram(
+            convolver,
+            slot,
+            leftTaps,
+            rightTaps,
+            tapCount,
+            declaredLatencyFrames,
+            &generation)) {
+        return false;
+    }
+    N60ConvolutionProgramInfo info = N60PartitionedConvolverProgramInfo(convolver, slot);
+    if (info.generation != generation) return false;
+    if (programInfoOut != NULL) *programInfoOut = info;
+    return true;
+}
+
 N60DSPGraphSnapshot N60DSPGraphSnapshotMakeUnity(double sampleRate) {
     N60DSPGraphSnapshot snapshot = {0};
     snapshot.sampleRate = sampleRate;
@@ -556,6 +648,8 @@ N60DSPGraphSnapshot N60DSPGraphSnapshotMakeUnity(double sampleRate) {
     snapshot.crossover = N60CrossoverSnapshotMakeBypassed();
     snapshot.convolution.enabled = false;
     snapshot.convolution.programSlot = N60_CONVOLUTION_NO_PROGRAM;
+    snapshot.roomCorrection.enabled = false;
+    snapshot.roomCorrection.programSlot = N60_CONVOLUTION_NO_PROGRAM;
     return snapshot;
 }
 
@@ -589,38 +683,29 @@ bool N60DSPGraphSnapshotSetConvolutionProgram(
     bool enabled
 ) {
     if (snapshot == NULL) return false;
+    return set_convolution_graph_state(
+        snapshot,
+        &snapshot->convolution,
+        programSlot,
+        programInfo,
+        enabled
+    );
+}
 
-    uint64_t previousLatency = snapshot->convolution.enabled
-        ? (uint64_t)snapshot->convolution.engineLatencyFrames + snapshot->convolution.declaredLatencyFrames
-        : 0;
-    uint64_t baseLatency = snapshot->latencyFrames >= previousLatency
-        ? (uint64_t)snapshot->latencyFrames - previousLatency
-        : 0;
-
-    N60ConvolutionGraphState state = {0};
-    state.enabled = enabled;
-    state.programSlot = programSlot;
-    state.programGeneration = programInfo.generation;
-    state.tapCount = programInfo.tapCount;
-    state.partitionCount = programInfo.partitionCount;
-    state.engineLatencyFrames = programInfo.engineLatencyFrames;
-    state.declaredLatencyFrames = programInfo.declaredLatencyFrames;
-
-    if (enabled && (!programInfo.prepared
-        || programSlot >= N60_CONVOLUTION_PROGRAM_SLOTS
-        || programInfo.generation == 0
-        || programInfo.tapCount == 0
-        || programInfo.engineLatencyFrames != N60_CONVOLUTION_PARTITION_FRAMES)) {
-        return false;
-    }
-
-    uint64_t convolutionLatency = enabled
-        ? (uint64_t)programInfo.engineLatencyFrames + programInfo.declaredLatencyFrames
-        : 0;
-    if (baseLatency + convolutionLatency > UINT32_MAX) return false;
-    snapshot->convolution = state;
-    snapshot->latencyFrames = (uint32_t)(baseLatency + convolutionLatency);
-    return true;
+bool N60DSPGraphSnapshotSetRoomCorrectionProgram(
+    N60DSPGraphSnapshot *snapshot,
+    uint32_t programSlot,
+    N60ConvolutionProgramInfo programInfo,
+    bool enabled
+) {
+    if (snapshot == NULL) return false;
+    return set_convolution_graph_state(
+        snapshot,
+        &snapshot->roomCorrection,
+        programSlot,
+        programInfo,
+        enabled
+    );
 }
 
 N60RenderKernel *N60RenderKernelCreate(void) {
@@ -628,6 +713,12 @@ N60RenderKernel *N60RenderKernelCreate(void) {
     if (kernel == NULL) return NULL;
     kernel->convolver = N60PartitionedConvolverCreate();
     if (kernel->convolver == NULL) {
+        free(kernel);
+        return NULL;
+    }
+    kernel->roomCorrectionConvolver = N60PartitionedConvolverCreate();
+    if (kernel->roomCorrectionConvolver == NULL) {
+        N60PartitionedConvolverDestroy(kernel->convolver);
         free(kernel);
         return NULL;
     }
@@ -647,6 +738,7 @@ N60RenderKernel *N60RenderKernelCreate(void) {
 
 void N60RenderKernelDestroy(N60RenderKernel *kernel) {
     if (kernel == NULL) return;
+    N60PartitionedConvolverDestroy(kernel->roomCorrectionConvolver);
     N60PartitionedConvolverDestroy(kernel->convolver);
     free(kernel);
 }
@@ -656,6 +748,7 @@ void N60RenderKernelReset(N60RenderKernel *kernel) {
     reset_eq_runtime(kernel);
     reset_crossover_runtime(&kernel->crossoverRuntime, N60CrossoverSnapshotMakeBypassed());
     N60PartitionedConvolverReset(kernel->convolver);
+    N60PartitionedConvolverReset(kernel->roomCorrectionConvolver);
     reset_smoothed_gain(&kernel->inputGain, 1.0f);
     reset_smoothed_gain(&kernel->headroomGain, 1.0f);
     reset_smoothed_gain(&kernel->outputGain, 1.0f);
@@ -668,6 +761,7 @@ void N60RenderKernelReset(N60RenderKernel *kernel) {
     atomic_store_explicit(&kernel->flushedDenormalSamples, 0, memory_order_relaxed);
     atomic_store_explicit(&kernel->snapshotReadMisses, 0, memory_order_relaxed);
     atomic_store_explicit(&kernel->convolutionProgramMisses, 0, memory_order_relaxed);
+    atomic_store_explicit(&kernel->roomCorrectionProgramMisses, 0, memory_order_relaxed);
     atomic_store_explicit(&kernel->inputPeakLeftBits, 0, memory_order_relaxed);
     atomic_store_explicit(&kernel->inputPeakRightBits, 0, memory_order_relaxed);
     atomic_store_explicit(&kernel->inputRMSLeftBits, 0, memory_order_relaxed);
@@ -694,43 +788,44 @@ bool N60RenderKernelPrepareConvolutionProgram(
     uint32_t declaredLatencyFrames,
     N60ConvolutionProgramInfo *programInfoOut
 ) {
-    if (kernel == NULL || kernel->convolver == NULL) return false;
-    uint64_t generation = 0;
-    if (!N60PartitionedConvolverPrepareProgram(
-            kernel->convolver,
-            slot,
-            leftTaps,
-            rightTaps,
-            tapCount,
-            declaredLatencyFrames,
-            &generation)) {
-        return false;
-    }
-    N60ConvolutionProgramInfo info = N60PartitionedConvolverProgramInfo(kernel->convolver, slot);
-    if (info.generation != generation) return false;
-    if (programInfoOut != NULL) *programInfoOut = info;
-    return true;
+    if (kernel == NULL) return false;
+    return prepare_program(
+        kernel->convolver,
+        slot,
+        leftTaps,
+        rightTaps,
+        tapCount,
+        declaredLatencyFrames,
+        programInfoOut
+    );
+}
+
+bool N60RenderKernelPrepareRoomCorrectionProgram(
+    N60RenderKernel *kernel,
+    uint32_t slot,
+    const float *leftTaps,
+    const float *rightTaps,
+    uint32_t tapCount,
+    uint32_t declaredLatencyFrames,
+    N60ConvolutionProgramInfo *programInfoOut
+) {
+    if (kernel == NULL) return false;
+    return prepare_program(
+        kernel->roomCorrectionConvolver,
+        slot,
+        leftTaps,
+        rightTaps,
+        tapCount,
+        declaredLatencyFrames,
+        programInfoOut
+    );
 }
 
 bool N60RenderKernelPublishSnapshot(N60RenderKernel *kernel, N60DSPGraphSnapshot snapshot) {
     if (kernel == NULL || !snapshot_is_valid(snapshot)) return false;
-    if (snapshot.convolution.enabled) {
-        if (!N60PartitionedConvolverProgramMatches(
-                kernel->convolver,
-                snapshot.convolution.programSlot,
-                snapshot.convolution.programGeneration)) {
-            return false;
-        }
-        N60ConvolutionProgramInfo info = N60PartitionedConvolverProgramInfo(
-            kernel->convolver,
-            snapshot.convolution.programSlot
-        );
-        if (info.tapCount != snapshot.convolution.tapCount
-            || info.partitionCount != snapshot.convolution.partitionCount
-            || info.engineLatencyFrames != snapshot.convolution.engineLatencyFrames
-            || info.declaredLatencyFrames != snapshot.convolution.declaredLatencyFrames) {
-            return false;
-        }
+    if (!prepared_program_matches_graph_state(kernel->convolver, snapshot.convolution)
+        || !prepared_program_matches_graph_state(kernel->roomCorrectionConvolver, snapshot.roomCorrection)) {
+        return false;
     }
     uint32_t active = atomic_load_explicit(&kernel->activeSlot, memory_order_acquire);
     uint32_t inactive = active == 0 ? 1 : 0;
@@ -794,6 +889,27 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
 
         meter_sample(left, right, &context->postEQPeakLeft, &context->postEQPeakRight, &context->postEQSquareSumLeft, &context->postEQSquareSumRight, &context->postEQOverRangeSamples);
         process_crossover(&kernel->crossoverRuntime, left, right, &left, &right);
+
+        // Room correction is a separate logical FIR stage with independent
+        // program ownership. It operates on the post-bass-management stereo
+        // signal and precedes the final DSP output gain.
+        if (context->snapshot.roomCorrection.enabled) {
+            float correctedLeft = left;
+            float correctedRight = right;
+            if (N60PartitionedConvolverProcessSample(
+                    kernel->roomCorrectionConvolver,
+                    context->snapshot.roomCorrection.programSlot,
+                    context->snapshot.roomCorrection.programGeneration,
+                    left,
+                    right,
+                    &correctedLeft,
+                    &correctedRight)) {
+                left = correctedLeft;
+                right = correctedRight;
+            } else {
+                atomic_fetch_add_explicit(&kernel->roomCorrectionProgramMisses, 1, memory_order_relaxed);
+            }
+        }
 
         float outputGain = next_gain_value(&kernel->outputGain);
         left *= outputGain;
@@ -870,6 +986,13 @@ N60RenderKernelDiagnostics N60RenderKernelGetDiagnostics(const N60RenderKernel *
         diagnostics.convolutionPartitionCount = context.snapshot.convolution.partitionCount;
         diagnostics.convolutionEngineLatencyFrames = context.snapshot.convolution.engineLatencyFrames;
         diagnostics.convolutionDeclaredLatencyFrames = context.snapshot.convolution.declaredLatencyFrames;
+        diagnostics.roomCorrectionEnabled = context.snapshot.roomCorrection.enabled;
+        diagnostics.roomCorrectionProgramSlot = context.snapshot.roomCorrection.programSlot;
+        diagnostics.roomCorrectionProgramGeneration = context.snapshot.roomCorrection.programGeneration;
+        diagnostics.roomCorrectionTapCount = context.snapshot.roomCorrection.tapCount;
+        diagnostics.roomCorrectionPartitionCount = context.snapshot.roomCorrection.partitionCount;
+        diagnostics.roomCorrectionEngineLatencyFrames = context.snapshot.roomCorrection.engineLatencyFrames;
+        diagnostics.roomCorrectionDeclaredLatencyFrames = context.snapshot.roomCorrection.declaredLatencyFrames;
         N60RenderKernelEndRender(mutableKernel, &context, 0);
     }
 
@@ -878,6 +1001,7 @@ N60RenderKernelDiagnostics N60RenderKernelGetDiagnostics(const N60RenderKernel *
     diagnostics.flushedDenormalSamples = atomic_load_explicit(&kernel->flushedDenormalSamples, memory_order_relaxed);
     diagnostics.snapshotReadMisses = atomic_load_explicit(&kernel->snapshotReadMisses, memory_order_relaxed);
     diagnostics.convolutionProgramMisses = atomic_load_explicit(&kernel->convolutionProgramMisses, memory_order_relaxed);
+    diagnostics.roomCorrectionProgramMisses = atomic_load_explicit(&kernel->roomCorrectionProgramMisses, memory_order_relaxed);
     diagnostics.inputMeter = load_meter_reading(&kernel->inputPeakLeftBits, &kernel->inputPeakRightBits, &kernel->inputRMSLeftBits, &kernel->inputRMSRightBits, &kernel->inputOverRangeSamples);
     diagnostics.postEQMeter = load_meter_reading(&kernel->postEQPeakLeftBits, &kernel->postEQPeakRightBits, &kernel->postEQRMSLeftBits, &kernel->postEQRMSRightBits, &kernel->postEQOverRangeSamples);
     diagnostics.outputMeter = load_meter_reading(&kernel->outputPeakLeftBits, &kernel->outputPeakRightBits, &kernel->outputRMSLeftBits, &kernel->outputRMSRightBits, &kernel->outputOverRangeSamples);
