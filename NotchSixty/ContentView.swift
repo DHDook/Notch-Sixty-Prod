@@ -40,12 +40,19 @@ struct ContentView: View {
     private var subGainBinding: Binding<Double> { crossoverBinding(\.subGainDB) }
     private var subPolarityBinding: Binding<Bool> { crossoverBinding(\.subPolarityInverted) }
 
+    private var roomCorrectionEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { engine.roomCorrectionConfiguration.enabled },
+            set: { try? engine.setRoomCorrectionEnabled($0) }
+        )
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Notch Sixty")
                 .font(.title.bold())
 
-            Text("Production transport + minimum/linear EQ + gain/headroom + crossover validation")
+            Text("Production transport + minimum/linear EQ + gain/headroom + crossover + room-correction runtime validation")
                 .foregroundStyle(.secondary)
 
             Picker("Output", selection: selectedUIDBinding) {
@@ -73,6 +80,7 @@ struct ContentView: View {
 
             gainValidationView
             crossoverValidationView
+            roomCorrectionValidationView
             eqValidationView
 
             Divider()
@@ -91,7 +99,7 @@ struct ContentView: View {
             }
         }
         .padding(20)
-        .frame(minWidth: 880, minHeight: 940)
+        .frame(minWidth: 880, minHeight: 1_040)
         .onAppear { engine.prepareForUse() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
             engine.shutdownForTermination()
@@ -185,6 +193,38 @@ struct ContentView: View {
                 try? engine.replaceBassManagementConfiguration(updated)
             }
         )
+    }
+
+    @ViewBuilder
+    private var roomCorrectionValidationView: some View {
+        let filter = engine.roomCorrectionConfiguration.filter
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Room correction runtime validation").font(.headline)
+                Spacer()
+                Button("Load 3-Tap Validation FIR") {
+                    try? engine.loadRoomCorrectionValidationFilter()
+                }
+                Toggle("Enable", isOn: roomCorrectionEnabledBinding)
+                    .toggleStyle(.switch)
+                    .disabled(filter == nil)
+            }
+
+            if let filter {
+                Text("Loaded: \(filter.name) — \(filter.leftTaps.count) taps / declared latency \(filter.declaredLatencyFrames) frame\(filter.declaredLatencyFrames == 1 ? "" : "s")")
+                    .font(.caption)
+            } else {
+                Text("No room-correction FIR loaded. The PR #20 runtime remains bypassed.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text("The validation FIR [0.25, 0.50, 0.25] is deliberately not an acoustic correction. It provides an audible, deterministic end-to-end hardware check of the dedicated room-correction control and convolution path before measurement/filter design exists.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(10)
+        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
     }
 
     @ViewBuilder
@@ -345,6 +385,18 @@ struct ContentView: View {
                 )
                 diagnosticRow("Sub polarity", render.crossoverSubPolarityInverted ? "inverted" : "normal")
                 diagnosticRow("Sub gain", formattedGain(render.crossoverSubGainLinear))
+                diagnosticRow(
+                    "Room FIR",
+                    render.roomCorrectionEnabled
+                        ? "active / slot \(render.roomCorrectionProgramSlot) / gen \(render.roomCorrectionProgramGeneration) / \(render.roomCorrectionTapCount) taps / \(render.roomCorrectionPartitionCount) partitions"
+                        : "bypassed"
+                )
+                if render.roomCorrectionEnabled {
+                    diagnosticRow(
+                        "Room FIR latency",
+                        "engine \(formattedDSPTime(frames: render.roomCorrectionEngineLatencyFrames, sampleRate: render.sampleRate)) / filter \(formattedDSPTime(frames: render.roomCorrectionDeclaredLatencyFrames, sampleRate: render.sampleRate))"
+                    )
+                }
                 meterRow("Input meter", render.inputMeter)
                 meterRow("Post-EQ meter", render.postEQMeter)
                 meterRow("DSP output meter", render.outputMeter)
@@ -353,6 +405,7 @@ struct ContentView: View {
                 diagnosticRow("DSP denormals flushed", "\(render.flushedDenormalSamples)")
                 diagnosticRow("DSP snapshot read misses", "\(render.snapshotReadMisses)")
                 diagnosticRow("FIR program misses", "\(render.convolutionProgramMisses)")
+                diagnosticRow("Room FIR program misses", "\(render.roomCorrectionProgramMisses)")
             }
 
             diagnosticRow("Counter scope", "current processing session")
