@@ -90,4 +90,60 @@ final class LiveLinearPhaseTests: XCTestCase {
         )
         XCTAssertNotEqual(generation1, generation2)
     }
+
+    func testRealtimeBridgeKeepsLinearAndRoomCorrectionProgramNamespacesIndependent() {
+        guard let bridge = N60RealtimeAudioBridgeCreate(1_024) else {
+            return XCTFail("Unable to allocate realtime bridge")
+        }
+        defer { N60RealtimeAudioBridgeDestroy(bridge) }
+
+        var linearTaps: [Float] = [1]
+        var roomTaps: [Float] = [0.25, 0.5, 0.25]
+        var linearInfo = N60ConvolutionProgramInfo()
+        var roomInfo = N60ConvolutionProgramInfo()
+
+        XCTAssertTrue(
+            linearTaps.withUnsafeBufferPointer { buffer in
+                N60RealtimeAudioBridgePrepareConvolutionProgram(
+                    bridge, 0, buffer.baseAddress!, nil, UInt32(buffer.count), 0, &linearInfo
+                )
+            }
+        )
+        XCTAssertTrue(
+            roomTaps.withUnsafeBufferPointer { buffer in
+                N60RealtimeAudioBridgePrepareRoomCorrectionProgram(
+                    bridge, 0, buffer.baseAddress!, nil, UInt32(buffer.count), 1, &roomInfo
+                )
+            }
+        )
+
+        var graph = N60DSPGraphSnapshotMakeUnity(96_000)
+        XCTAssertTrue(N60DSPGraphSnapshotSetConvolutionProgram(&graph, 0, linearInfo, true))
+        XCTAssertTrue(N60DSPGraphSnapshotSetRoomCorrectionProgram(&graph, 0, roomInfo, true))
+        XCTAssertEqual(graph.latencyFrames, UInt32(N60_CONVOLUTION_PARTITION_FRAMES * 2) + 1)
+        XCTAssertTrue(N60RealtimeAudioBridgePublishDSPGraph(bridge, graph))
+
+        let diagnostics = N60RealtimeAudioBridgeGetRenderDiagnostics(bridge)
+        XCTAssertTrue(diagnostics.convolutionEnabled)
+        XCTAssertTrue(diagnostics.roomCorrectionEnabled)
+        XCTAssertEqual(diagnostics.convolutionProgramSlot, 0)
+        XCTAssertEqual(diagnostics.roomCorrectionProgramSlot, 0)
+        XCTAssertEqual(diagnostics.roomCorrectionTapCount, 3)
+        XCTAssertEqual(diagnostics.roomCorrectionDeclaredLatencyFrames, 1)
+    }
+
+    func testRoomCorrectionValidationFilterIsFiniteAndRateIndependent() {
+        let filter = RoomCorrectionFilter.validation
+        XCTAssertNil(filter.sampleRate)
+        XCTAssertEqual(filter.leftTaps, [0.25, 0.5, 0.25])
+        XCTAssertNil(filter.rightTaps)
+        XCTAssertEqual(filter.declaredLatencyFrames, 1)
+        XCTAssertTrue(filter.leftTaps.allSatisfy { $0.isFinite })
+    }
+
+    func testRoomCorrectionStartsBypassedWithoutLoadedFilter() {
+        let configuration = RoomCorrectionConfiguration()
+        XCTAssertFalse(configuration.enabled)
+        XCTAssertNil(configuration.filter)
+    }
 }
