@@ -1,3 +1,4 @@
+import Combine
 import XCTest
 @testable import NotchSixty
 
@@ -210,6 +211,22 @@ final class LiveLinearPhaseTests: XCTestCase {
         XCTAssertEqual(snapshot.dsp.gain, engine.gainConfiguration)
         XCTAssertEqual(snapshot.dsp.bassManagement, engine.bassManagementConfiguration)
         XCTAssertEqual(snapshot.dsp.roomCorrection, engine.roomCorrectionConfiguration)
+    }
+
+    @MainActor
+    func testProductControllerForwardsAudioEngineChanges() throws {
+        let engine = AudioIOEngine()
+        let product = ProductController(audioEngine: engine)
+        var notificationCount = 0
+        let observation = product.objectWillChange.sink {
+            notificationCount += 1
+        }
+
+        try engine.setOutputGainDB(-3.0)
+
+        XCTAssertGreaterThan(notificationCount, 0)
+        XCTAssertEqual(product.configuration.dsp.gain.outputGainDB, -3.0)
+        withExtendedLifetime(observation) {}
     }
 
     func testProductConfigurationSchemaStartsAtVersionOne() {
