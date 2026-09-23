@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 struct ProductDSPConfiguration: Equatable, Sendable {
@@ -45,14 +46,19 @@ struct ProductConfiguration: Equatable, Sendable {
 /// replacement for the historical monolithic application store.
 @MainActor
 final class ProductController: ObservableObject {
+    nonisolated let objectWillChange = ObservableObjectPublisher()
+
     let audioEngine: AudioIOEngine
+    private var audioEngineObservation: AnyCancellable?
 
     init() {
         self.audioEngine = AudioIOEngine()
+        observeAudioEngine()
     }
 
     init(audioEngine: AudioIOEngine) {
         self.audioEngine = audioEngine
+        observeAudioEngine()
     }
 
     var configuration: ProductConfiguration {
@@ -73,6 +79,12 @@ final class ProductController: ObservableObject {
 
     func shutdownForTermination() {
         audioEngine.shutdownForTermination()
+    }
+
+    private func observeAudioEngine() {
+        audioEngineObservation = audioEngine.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
     }
 }
 
