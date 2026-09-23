@@ -213,6 +213,17 @@ struct RoomCorrectionFilter: Equatable, Sendable {
         rightTaps: nil,
         declaredLatencyFrames: 1
     )
+
+    func validateSampleRate(forOutputSampleRate outputSampleRate: Double) throws {
+        guard let sampleRate else { return }
+        guard sampleRate.isFinite,
+              abs(sampleRate - outputSampleRate) < 0.5 else {
+            throw RoomCorrectionConfigurationError.sampleRateMismatch(
+                filter: sampleRate,
+                output: outputSampleRate
+            )
+        }
+    }
 }
 
 struct RoomCorrectionConfiguration: Equatable, Sendable {
@@ -796,13 +807,7 @@ final class AudioIOEngine: ObservableObject {
               filter.rightTaps?.allSatisfy(\.isFinite) ?? true else {
             throw RoomCorrectionConfigurationError.nonFiniteTap
         }
-        if let filterRate = filter.sampleRate,
-           abs(filterRate - session.outputFormat.sampleRate) >= 0.5 {
-            throw RoomCorrectionConfigurationError.sampleRateMismatch(
-                filter: filterRate,
-                output: session.outputFormat.sampleRate
-            )
-        }
+        try filter.validateSampleRate(forOutputSampleRate: session.outputFormat.sampleRate)
         guard filter.declaredLatencyFrames < UInt32(tapCount) else {
             throw RoomCorrectionConfigurationError.invalidDeclaredLatency(filter.declaredLatencyFrames)
         }
