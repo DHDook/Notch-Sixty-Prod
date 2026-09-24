@@ -29,8 +29,12 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
     let inputGainLinear: Float
     let headroomGainLinear: Float
     let outputGainLinear: Float
+    let balanceGainLeftLinear: Float
+    let balanceGainRightLinear: Float
     let eqBypassed: Bool
     let eqBandCount: UInt32
+    let eqLeftBandCount: UInt32
+    let eqRightBandCount: UInt32
     let crossoverEnabled: Bool
     let crossoverFrequencyHz: Double
     let crossoverTopology: N60CrossoverTopology
@@ -71,8 +75,12 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
         inputGainLinear = diagnostics.inputGainLinear
         headroomGainLinear = diagnostics.headroomGainLinear
         outputGainLinear = diagnostics.outputGainLinear
+        balanceGainLeftLinear = diagnostics.balanceGainLeftLinear
+        balanceGainRightLinear = diagnostics.balanceGainRightLinear
         eqBypassed = diagnostics.eqBypassed
         eqBandCount = diagnostics.eqBandCount
+        eqLeftBandCount = diagnostics.eqLeftBandCount
+        eqRightBandCount = diagnostics.eqRightBandCount
         crossoverEnabled = diagnostics.crossoverEnabled
         crossoverFrequencyHz = diagnostics.crossoverFrequencyHz
         crossoverTopology = diagnostics.crossoverTopology
