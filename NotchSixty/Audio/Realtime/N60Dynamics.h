@@ -20,6 +20,29 @@ typedef enum {
     N60InfrasonicSlope96DBPerOctave = 2,
 } N60InfrasonicSlope;
 
+typedef enum {
+    N60StereoModeStereo = 0,
+    N60StereoModeWideMono = 1,
+    N60StereoModeTrueMono = 2,
+} N60StereoMode;
+
+typedef struct {
+    N60StereoMode mode;
+} N60StereoModeSnapshot;
+
+typedef struct {
+    bool enabled;
+    bool monoLowBand;
+    double lowMidFrequencyHz;
+    double midHighFrequencyHz;
+    float lowWidth;
+    float midWidth;
+    float highWidth;
+    uint32_t sectionCount;
+    N60BiquadCoefficients lowPass[N60_MAX_CROSSOVER_SECTIONS];
+    N60BiquadCoefficients highPass[N60_MAX_CROSSOVER_SECTIONS];
+} N60StereoWidenerSnapshot;
+
 typedef struct {
     bool enabled;
     float poleCoefficient;
@@ -35,7 +58,21 @@ typedef struct {
 
 typedef struct {
     bool enabled;
+    bool dialogueGateEnabled;
+    float targetLUFS;
+    float maxCorrectionDB;
+    float attackCoefficient;
+    float releaseCoefficient;
+    float measurementCoefficient;
+    N60BiquadCoefficients kWeightHighPass;
+    N60BiquadCoefficients kWeightShelf;
+} N60LoudnessMatchSnapshot;
+
+typedef struct {
+    bool enabled;
     float strength;
+    float fullContourMasterGainLinear;
+    float flatContourMasterGainLinear;
     N60BiquadCoefficients lowShelf;
     N60BiquadCoefficients highShelf;
 } N60LoudnessContourSnapshot;
@@ -98,8 +135,11 @@ typedef struct {
 } N60PauseGateSnapshot;
 
 typedef struct {
+    N60StereoModeSnapshot stereoMode;
+    N60StereoWidenerSnapshot stereoWidener;
     N60DCOffsetFilterSnapshot dcOffsetFilter;
     N60InfrasonicFilterSnapshot infrasonicFilter;
+    N60LoudnessMatchSnapshot loudnessMatch;
     N60LoudnessContourSnapshot loudnessContour;
     N60DeEsserSnapshot deEsser;
     N60MultibandCompressorSnapshot multibandCompressor;
@@ -110,6 +150,15 @@ typedef struct {
 } N60DynamicsSnapshot;
 
 typedef struct {
+    float stereoMatrixLL;
+    float stereoMatrixLR;
+    float stereoMatrixRL;
+    float stereoMatrixRR;
+    float widenerLowWidth;
+    float widenerMidWidth;
+    float widenerHighWidth;
+    N60BiquadState widenerLowPass[N60_MAX_CROSSOVER_SECTIONS];
+    N60BiquadState widenerHighPass[N60_MAX_CROSSOVER_SECTIONS];
     float dcPreviousInputLeft;
     float dcPreviousInputRight;
     float dcPreviousOutputLeft;
@@ -118,6 +167,13 @@ typedef struct {
     N60BiquadState infrasonicLeft[N60_MAX_INFRASONIC_SECTIONS];
     N60BiquadState infrasonicRight[N60_MAX_INFRASONIC_SECTIONS];
     float infrasonicMix;
+    N60BiquadState loudnessKWeightHighPassLeft;
+    N60BiquadState loudnessKWeightHighPassRight;
+    N60BiquadState loudnessKWeightShelfLeft;
+    N60BiquadState loudnessKWeightShelfRight;
+    float loudnessMeanSquare;
+    float loudnessMatchGainDB;
+    bool loudnessMeasurementPrimed;
     N60BiquadState loudnessLowShelfLeft;
     N60BiquadState loudnessLowShelfRight;
     N60BiquadState loudnessHighShelfLeft;
@@ -146,6 +202,9 @@ typedef struct {
     float multibandLowGainReductionDB;
     float multibandMidGainReductionDB;
     float multibandHighGainReductionDB;
+    float loudnessShortTermLUFS;
+    float loudnessMatchGainDB;
+    float loudnessContourScale;
     float compressorGainReductionDB;
     float expanderAttenuationDB;
     float pauseGateGain;
@@ -153,6 +212,23 @@ typedef struct {
 } N60DynamicsTelemetry;
 
 N60DynamicsSnapshot N60DynamicsSnapshotMakeBypassed(double sampleRate);
+
+bool N60DynamicsSnapshotSetStereoMode(
+    N60DynamicsSnapshot * _Nonnull snapshot,
+    N60StereoMode mode
+);
+
+bool N60DynamicsSnapshotSetStereoWidener(
+    N60DynamicsSnapshot * _Nonnull snapshot,
+    double sampleRate,
+    bool enabled,
+    bool monoLowBand,
+    double lowMidFrequencyHz,
+    double midHighFrequencyHz,
+    float lowWidth,
+    float midWidth,
+    float highWidth
+);
 
 bool N60DynamicsSnapshotSetDCOffsetFilter(
     N60DynamicsSnapshot * _Nonnull snapshot,
@@ -166,6 +242,17 @@ bool N60DynamicsSnapshotSetInfrasonicFilter(
     bool enabled,
     double cutoffHz,
     N60InfrasonicSlope slope
+);
+
+bool N60DynamicsSnapshotSetLoudnessMatch(
+    N60DynamicsSnapshot * _Nonnull snapshot,
+    double sampleRate,
+    bool enabled,
+    bool dialogueGateEnabled,
+    float targetLUFS,
+    float maxCorrectionDB,
+    float attackSeconds,
+    float releaseSeconds
 );
 
 bool N60DynamicsSnapshotSetLoudnessContour(
@@ -241,6 +328,13 @@ void N60DynamicsProcessPreEQStereoFrame(
 void N60DynamicsProcessCoreStereoFrame(
     N60DynamicsRuntime * _Nonnull runtime,
     N60DynamicsSnapshot snapshot,
+    float * _Nonnull left,
+    float * _Nonnull right
+);
+void N60DynamicsProcessCoreStereoFrameWithMasterGain(
+    N60DynamicsRuntime * _Nonnull runtime,
+    N60DynamicsSnapshot snapshot,
+    float masterGainLinear,
     float * _Nonnull left,
     float * _Nonnull right
 );

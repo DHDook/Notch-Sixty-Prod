@@ -143,6 +143,9 @@ typedef struct {
     float multibandLowGainReductionDB;
     float multibandMidGainReductionDB;
     float multibandHighGainReductionDB;
+    float loudnessShortTermLUFS;
+    float loudnessMatchGainDB;
+    float loudnessContourScale;
     bool compressorEnabled;
     bool expanderEnabled;
     bool pauseGateEnabled;

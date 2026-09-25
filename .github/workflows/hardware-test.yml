@@ -16,8 +16,13 @@ jobs:
   package:
     runs-on: xcode-27
     steps:
-      - name: Check out repository
+      - name: Check out exact test revision
         uses: actions/checkout@v7
+        with:
+          # pull_request normally checks out GitHub's synthetic merge ref. For
+          # hardware acceptance we want the exact PR head that will be recorded
+          # as the tested revision; workflow_dispatch falls back to github.sha.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Show toolchain
         run: |
