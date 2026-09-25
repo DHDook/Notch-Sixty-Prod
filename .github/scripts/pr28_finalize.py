@@ -34,3 +34,11 @@ new = '''    // Exact even-order Butterworth pole-pair Q values. For order N and
 if old not in text:
     raise RuntimeError("missing infrasonic Q block")
 path.write_text(text.replace(old, new, 1))
+
+# pr28_expand.py uses a raw Python string for the generated Swift view, so its
+# format specifier quotes need one final normalization pass after generation.
+path = Path("NotchSixty/NotchSixtyApp.swift")
+text = path.read_text()
+text = text.replace('specifier: \\"%.0f\\"', 'specifier: "%.0f"')
+text = text.replace('specifier: \\"%.2f\\"', 'specifier: "%.2f"')
+path.write_text(text)
