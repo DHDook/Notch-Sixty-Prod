@@ -1,0 +1,123 @@
+name: PR27 Protection Core
+
+on:
+  push:
+    branches: [feature/overload-protection-oversampling]
+    paths:
+      - NotchSixty/Audio/Realtime/N60Protection.c
+      - NotchSixty/Audio/Realtime/N60Protection.h
+      - .github/workflows/pr27-protection-core.yml
+
+jobs:
+  protection-core:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - name: Compile and run independent protection tests
+        shell: bash
+        run: |
+          cat > "$RUNNER_TEMP/protection_test.c" <<'EOF'
+          #include <assert.h>
+          #include <math.h>
+          #include <stdio.h>
+          #include "N60Protection.h"
+
+          static void test_unity(N60OversamplingFactor factor, uint32_t latency) {
+              N60ProtectionSnapshot s = N60ProtectionSnapshotMakeBypassed(96000.0);
+              assert(N60ProtectionSnapshotSetOversamplingFactor(&s, factor));
+              assert(s.latencyFrames == latency);
+              N60ProtectionRuntime *r = N60ProtectionRuntimeCreate();
+              assert(r);
+              double in2 = 0.0, out2 = 0.0, err2 = 0.0;
+              const int frames = 24000;
+              float history[256] = {0};
+              for (int i = 0; i < frames; ++i) {
+                  float input = 0.45f * sinf(2.0f * 3.14159265358979323846f * 1000.0f * (float)i / 96000.0f);
+                  history[i % 256] = input;
+                  float l = input, rr = -input * 0.7f;
+                  N60ProtectionProcessStereoFrame(r, &s, &l, &rr);
+                  if (i > (int)latency + 400) {
+                      float expected = history[(i - (int)latency) % 256];
+                      in2 += expected * expected;
+                      out2 += l * l;
+                      float e = l - expected;
+                      err2 += e * e;
+                  }
+              }
+              double gainDB = 10.0 * log10(out2 / in2);
+              double errorDB = 10.0 * log10(err2 / in2);
+              printf("factor=%d gain=%f dB residual=%f dB\n", factor, gainDB, errorDB);
+              assert(fabs(gainDB) < 0.01);
+              assert(errorDB < -45.0);
+              N60ProtectionRuntimeDestroy(r);
+          }
+
+          static void test_true_peak(void) {
+              N60ProtectionSnapshot s = N60ProtectionSnapshotMakeBypassed(48000.0);
+              assert(N60ProtectionSnapshotSetOversamplingFactor(&s, N60OversamplingFactor4x));
+              N60ProtectionRuntime *r = N60ProtectionRuntimeCreate();
+              assert(r);
+              N60ProtectionRuntimeBeginBuffer(r);
+              float pattern[] = {1.0f, -1.0f, -1.0f, 1.0f};
+              for (int pad = 0; pad < 100; ++pad) { float l=0,rch=0; N60ProtectionProcessStereoFrame(r,&s,&l,&rch); }
+              for (int i = 0; i < 4; ++i) { float l=pattern[i],rch=pattern[i]; N60ProtectionProcessStereoFrame(r,&s,&l,&rch); }
+              for (int pad = 0; pad < 100; ++pad) { float l=0,rch=0; N60ProtectionProcessStereoFrame(r,&s,&l,&rch); }
+              N60ProtectionTelemetry t = N60ProtectionRuntimeTelemetry(r);
+              printf("true peak=%f\n", t.inputTruePeakLinear);
+              assert(t.inputTruePeakLinear > 1.2f);
+              N60ProtectionRuntimeDestroy(r);
+          }
+
+          static void test_limiter(void) {
+              N60ProtectionSnapshot s = N60ProtectionSnapshotMakeBypassed(48000.0);
+              assert(N60ProtectionSnapshotSetLimiter(&s, true, -1.0f, 0.1f, 50.0f, 2.0f));
+              assert(s.effectiveFactor == N60OversamplingFactor4x);
+              assert(s.latencyFrames == 144u);
+              N60ProtectionRuntime *r = N60ProtectionRuntimeCreate();
+              assert(r);
+              N60ProtectionRuntimeBeginBuffer(r);
+              float ceiling = powf(10.0f, -1.0f / 20.0f);
+              float maxBase = 0.0f;
+              for (int i = 0; i < 12000; ++i) {
+                  float input = 1.35f * sinf(2.0f * 3.14159265358979323846f * 997.0f * (float)i / 48000.0f);
+                  float l=input,rch=-input;
+                  N60ProtectionProcessStereoFrame(r,&s,&l,&rch);
+                  maxBase = fmaxf(maxBase, fmaxf(fabsf(l),fabsf(rch)));
+              }
+              N60ProtectionTelemetry t = N60ProtectionRuntimeTelemetry(r);
+              printf("ceiling=%f base=%f high=%f GR=%f clamps=%llu\n", ceiling, maxBase, t.outputTruePeakLinear, t.limiterGainReductionDB, (unsigned long long)t.limiterSafetyClampSamples);
+              assert(t.outputTruePeakLinear <= ceiling + 0.00001f);
+              assert(maxBase <= ceiling + 0.0005f);
+              assert(t.limiterGainReductionDB > 0.1f);
+              N60ProtectionRuntimeDestroy(r);
+          }
+
+          static void test_clipper(void) {
+              N60ProtectionSnapshot s = N60ProtectionSnapshotMakeBypassed(96000.0);
+              assert(N60ProtectionSnapshotSetSoftClipper(&s, true, 6.0f, -1.5f, 0.7f, N60ClipperCurveSine, false));
+              N60ProtectionRuntime *r = N60ProtectionRuntimeCreate();
+              assert(r);
+              for (int i = 0; i < 1000; ++i) {
+                  float l = (i & 1) ? 2.0f : -2.0f, rr = l;
+                  N60ProtectionProcessStereoFrame(r,&s,&l,&rr);
+                  assert(fabsf(l) <= 1.000001f);
+                  assert(fabsf(rr) <= 1.000001f);
+              }
+              N60ProtectionRuntimeDestroy(r);
+          }
+
+          int main(void) {
+              test_unity(N60OversamplingFactor2x, 32u);
+              test_unity(N60OversamplingFactor4x, 48u);
+              test_true_peak();
+              test_limiter();
+              test_clipper();
+              puts("PR27 protection core tests passed");
+              return 0;
+          }
+          EOF
+          clang -std=c11 -O2 -Wall -Wextra -Werror \
+            -I NotchSixty/Audio/Realtime \
+            NotchSixty/Audio/Realtime/N60Protection.c \
+            "$RUNNER_TEMP/protection_test.c" -lm -o "$RUNNER_TEMP/protection_test"
+          "$RUNNER_TEMP/protection_test"
