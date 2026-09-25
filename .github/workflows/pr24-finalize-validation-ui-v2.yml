@@ -1,0 +1,103 @@
+name: PR24 Finalize Validation UI V2
+
+on:
+  push:
+    branches:
+      - feature/master-volume-mute-sync
+    paths:
+      - .github/workflows/pr24-finalize-validation-ui-v2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add minimal master playback validation controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path('NotchSixty/ContentView.swift')
+          text = p.read_text()
+
+          # Insert bindings immediately after balanceBinding using a regex so
+          # indentation changes in the engineering UI do not matter.
+          pattern = re.compile(
+              r'(\n\s*private var balanceBinding: Binding<Double> \{\n'
+              r'\s*Binding\(get: \{ engine\.playbackControlConfiguration\.balance \}, '
+              r'set: \{ try\? engine\.setChannelBalance\(\$0\) \}\)\n\s*\}\n)'
+          )
+          match = pattern.search(text)
+          if not match:
+              raise SystemExit('balance binding not found')
+          indent = re.match(r'\n(\s*)private', match.group(1)).group(1)
+          addition = match.group(1) + f'''\n{indent}private var masterVolumeBinding: Binding<Double> {{
+          {indent}    Binding(get: {{ engine.masterVolumeConfiguration.level }}, set: {{ try? engine.setMasterVolumeLevel($0) }})
+          {indent}}}
+
+          {indent}private var masterMuteBinding: Binding<Bool> {{
+          {indent}    Binding(get: {{ engine.masterVolumeConfiguration.muted }}, set: {{ try? engine.setMasterMuted($0) }})
+          {indent}}}
+          '''
+          text = text[:match.start()] + addition + text[match.end():]
+
+          # Insert one compact validation row immediately before the Balance row.
+          pattern = re.compile(
+              r'(?m)^(\s*)HStack\(spacing: 12\) \{\n\1\s+Text\("Balance"\)\.frame\(width: 90, alignment: \.leading\)'
+          )
+          match = pattern.search(text)
+          if not match:
+              raise SystemExit('Balance row not found')
+          indent = match.group(1)
+          row = f'''{indent}HStack(spacing: 12) {{
+          {indent}    Text("Master").frame(width: 90, alignment: .leading)
+          {indent}    Slider(value: masterVolumeBinding, in: MasterVolumeConfiguration.levelRange, step: 0.01)
+          {indent}    Text("\\(Int((engine.masterVolumeConfiguration.level * 100).rounded()))%")
+          {indent}        .monospacedDigit()
+          {indent}        .frame(width: 48, alignment: .trailing)
+          {indent}    Toggle("Mute", isOn: masterMuteBinding).toggleStyle(.switch)
+          {indent}    Text(engine.masterVolumeCapabilities.controlMode == .device ? "Device" : "Software DSP")
+          {indent}        .font(.caption)
+          {indent}        .foregroundStyle(.secondary)
+          {indent}}}
+          '''
+          text = text[:match.start()] + row + text[match.start():]
+          p.write_text(text)
+          PY
+
+      - name: Run full test suite
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          test
+
+      - name: Commit controls and remove temporary PR24 helpers
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f \
+            .github/workflows/pr24-sync-hardening.yml \
+            .github/workflows/pr24-sync-hardening-v2.yml \
+            .github/workflows/pr24-sync-hardening-v3.yml \
+            .github/workflows/pr24-finalize-validation-ui.yml \
+            .github/workflows/pr24-finalize-validation-ui-v2.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Add master volume hardware validation controls'
+          git push origin HEAD:feature/master-volume-mute-sync
