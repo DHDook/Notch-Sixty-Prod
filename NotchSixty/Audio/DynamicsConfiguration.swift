@@ -1,6 +1,8 @@
 import Foundation
 
 enum DynamicsConfigurationError: Error, LocalizedError, Equatable {
+    case invalidDeEsser
+    case invalidMultibandCompressor
     case invalidCompressor
     case invalidExpander
     case invalidPauseGate
@@ -10,6 +12,10 @@ enum DynamicsConfigurationError: Error, LocalizedError, Equatable {
 
     var errorDescription: String? {
         switch self {
+        case .invalidDeEsser:
+            return "De-Esser parameters are outside the supported production range."
+        case .invalidMultibandCompressor:
+            return "Multiband Compressor parameters are outside the supported production range."
         case .invalidCompressor:
             return "Compressor parameters are outside the supported production range."
         case .invalidExpander:
@@ -22,6 +28,70 @@ enum DynamicsConfigurationError: Error, LocalizedError, Equatable {
             return "Limiter parameters are outside the supported production range."
         case .invalidOversampling:
             return "Oversampling configuration is invalid."
+        }
+    }
+}
+
+struct DeEsserConfiguration: Equatable, Sendable {
+    static let frequencyRange = 2_000.0...10_000.0
+    static let thresholdRange = -60.0...0.0
+
+    var enabled = false
+    var frequencyHz = 6_500.0
+    var thresholdDB = -24.0
+    var dynamicEQMode = true
+
+    func validate() throws {
+        guard frequencyHz.isFinite, Self.frequencyRange.contains(frequencyHz),
+              thresholdDB.isFinite, Self.thresholdRange.contains(thresholdDB) else {
+            throw DynamicsConfigurationError.invalidDeEsser
+        }
+    }
+}
+
+enum MultibandSlope: String, CaseIterable, Identifiable, Sendable {
+    case gentle
+    case steep
+
+    var id: String { rawValue }
+    var displayName: String {
+        switch self {
+        case .gentle: return "Gentle (LR4)"
+        case .steep: return "Steep (LR8)"
+        }
+    }
+
+    var cType: N60CrossoverTopology {
+        switch self {
+        case .gentle: return N60CrossoverTopologyLinkwitzRiley24
+        case .steep: return N60CrossoverTopologyLinkwitzRiley48
+        }
+    }
+}
+
+struct MultibandCompressorConfiguration: Equatable, Sendable {
+    static let lowMidFrequencyRange = 40.0...250.0
+    static let midHighFrequencyRange = 1_000.0...8_000.0
+    static let thresholdRange = -60.0...0.0
+
+    var enabled = false
+    var lowMidFrequencyHz = 120.0
+    var midHighFrequencyHz = 3_500.0
+    var slope: MultibandSlope = .gentle
+    var lowThresholdDB = -18.0
+    var midThresholdDB = -18.0
+    var highThresholdDB = -18.0
+
+    func validate() throws {
+        guard lowMidFrequencyHz.isFinite,
+              Self.lowMidFrequencyRange.contains(lowMidFrequencyHz),
+              midHighFrequencyHz.isFinite,
+              Self.midHighFrequencyRange.contains(midHighFrequencyHz),
+              lowMidFrequencyHz < midHighFrequencyHz,
+              lowThresholdDB.isFinite, Self.thresholdRange.contains(lowThresholdDB),
+              midThresholdDB.isFinite, Self.thresholdRange.contains(midThresholdDB),
+              highThresholdDB.isFinite, Self.thresholdRange.contains(highThresholdDB) else {
+            throw DynamicsConfigurationError.invalidMultibandCompressor
         }
     }
 }
@@ -195,6 +265,8 @@ struct LimiterConfiguration: Equatable, Sendable {
 }
 
 struct DynamicsConfiguration: Equatable, Sendable {
+    var deEsser = DeEsserConfiguration()
+    var multibandCompressor = MultibandCompressorConfiguration()
     var compressor = CompressorConfiguration()
     var expander = ExpanderConfiguration()
     var softClipper = SoftClipperConfiguration()
@@ -203,11 +275,32 @@ struct DynamicsConfiguration: Equatable, Sendable {
     var pauseGate = PauseGateConfiguration()
 
     func makeSnapshot(sampleRate: Double) throws -> N60DynamicsSnapshot {
+        try deEsser.validate()
+        try multibandCompressor.validate()
         try compressor.validate()
         try expander.validate()
         try pauseGate.validate()
 
         var snapshot = N60DynamicsSnapshotMakeBypassed(sampleRate)
+        guard N60DynamicsSnapshotSetDeEsser(
+            &snapshot,
+            sampleRate,
+            deEsser.enabled,
+            deEsser.frequencyHz,
+            Float(deEsser.thresholdDB),
+            deEsser.dynamicEQMode
+        ) else { throw DynamicsConfigurationError.invalidDeEsser }
+        guard N60DynamicsSnapshotSetMultibandCompressor(
+            &snapshot,
+            sampleRate,
+            multibandCompressor.enabled,
+            multibandCompressor.lowMidFrequencyHz,
+            multibandCompressor.midHighFrequencyHz,
+            multibandCompressor.slope.cType,
+            Float(multibandCompressor.lowThresholdDB),
+            Float(multibandCompressor.midThresholdDB),
+            Float(multibandCompressor.highThresholdDB)
+        ) else { throw DynamicsConfigurationError.invalidMultibandCompressor }
         guard N60DynamicsSnapshotSetCompressor(
             &snapshot,
             sampleRate,
