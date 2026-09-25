@@ -1,0 +1,43 @@
+name: PR30 Fractional Delay Integration
+
+on:
+  push:
+    branches:
+      - feature/phase-time-alignment-foundation
+    paths:
+      - '.github/scripts/pr30_fractional_delay.py'
+      - '.github/workflows/pr30-fractional-delay-integrate.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feature/phase-time-alignment-foundation
+
+      - name: Apply PR30 fractional-delay integration
+        run: python3 .github/scripts/pr30_fractional_delay.py
+
+      - name: Run full test suite
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          test
+
+      - name: Commit PR30 fractional delay and clean helpers
+        run: |
+          rm -f .github/scripts/pr30_fractional_delay.py .github/workflows/pr30-fractional-delay-integrate.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Add fractional inter-channel time alignment'
+          git push origin HEAD:feature/phase-time-alignment-foundation
