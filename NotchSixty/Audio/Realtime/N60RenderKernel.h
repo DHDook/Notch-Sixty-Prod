@@ -17,6 +17,13 @@ extern "C" {
 #define N60_EQ_CHANNEL_LEFT 0x1u
 #define N60_EQ_CHANNEL_RIGHT 0x2u
 #define N60_EQ_CHANNEL_STEREO (N60_EQ_CHANNEL_LEFT | N60_EQ_CHANNEL_RIGHT)
+#define N60_MAX_AUDITION_DELAY_FRAMES 131072u
+
+typedef enum {
+    N60AuditionModeProcessed = 0,
+    N60AuditionModeReference = 1,
+    N60AuditionModeDelta = 2,
+} N60AuditionMode;
 
 typedef struct N60RenderKernel N60RenderKernel;
 
@@ -40,6 +47,7 @@ typedef struct {
     float balanceGainLeftLinear;
     float balanceGainRightLinear;
     bool bypassed;
+    N60AuditionMode auditionMode;
     uint32_t latencyFrames;
     uint64_t generation;
     uint32_t gainTransitionFrames;
@@ -102,6 +110,7 @@ typedef struct {
     double sampleRate;
     uint32_t channelCount;
     bool bypassed;
+    N60AuditionMode auditionMode;
     float inputGainLinear;
     float headroomGainLinear;
     float outputGainLinear;
