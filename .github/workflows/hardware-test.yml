@@ -1,4 +1,3 @@
-# PR23 hardware-validation trigger; remove after the workflow starts.
 name: Hardware Test DMG
 
 on:
