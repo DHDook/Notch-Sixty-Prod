@@ -49,15 +49,3 @@ jobs:
           CODE_SIGNING_ALLOWED=NO
           ENABLE_TESTABILITY=YES
           test
-
-      - name: Package source snapshot
-        if: always()
-        run: tar -czf /tmp/notch-sixty-source.tgz NotchSixty NotchSixtyTests NotchSixty.xcodeproj docs AGENTS.md
-
-      - name: Upload source snapshot
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: pr23-source-snapshot
-          path: /tmp/notch-sixty-source.tgz
-          retention-days: 1
