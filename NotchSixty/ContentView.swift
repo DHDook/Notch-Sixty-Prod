@@ -59,6 +59,14 @@ struct ContentView: View {
 
     }
 
+    private var globalVolumeKeyStatus: String {
+        switch engine.globalVolumeKeyMonitoringState {
+        case .stopped: return "Keys: Stopped"
+        case .permissionRequired: return "Keys: Permission Required"
+        case .active: return "Keys: Active"
+        }
+    }
+
     private var globalBypassBinding: Binding<Bool> {
         Binding(get: { engine.playbackControlConfiguration.globalBypassed }, set: { try? engine.setGlobalDSPBypassed($0) })
     }
@@ -158,6 +166,9 @@ struct ContentView: View {
                     .frame(width: 48, alignment: .trailing)
                 Toggle("Mute", isOn: masterMuteBinding).toggleStyle(.switch)
                 Text(engine.masterVolumeCapabilities.controlMode == .device ? "Device" : "Software DSP")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(globalVolumeKeyStatus)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

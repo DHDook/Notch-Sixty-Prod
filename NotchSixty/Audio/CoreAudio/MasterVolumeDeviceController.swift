@@ -1,6 +1,7 @@
+import AppKit
 import CoreAudio
+import CoreGraphics
 import Foundation
-import IOKit.hid
 
 struct MasterVolumeDeviceSnapshot: Equatable, Sendable {
     var capabilities: MasterVolumeDeviceCapabilities
@@ -309,14 +310,14 @@ enum GlobalVolumeKeyMonitoringState: Equatable, Sendable {
 
 enum GlobalVolumeKeyMonitorError: Error, LocalizedError, Equatable {
     case permissionRequired
-    case openFailed(IOReturn)
+    case eventTapUnavailable
 
     var errorDescription: String? {
         switch self {
         case .permissionRequired:
             return "Keyboard volume control requires Input Monitoring permission in System Settings > Privacy & Security > Input Monitoring."
-        case .openFailed(let status):
-            return "Unable to open the keyboard volume-key monitor (IOKit status \(status))."
+        case .eventTapUnavailable:
+            return "Unable to create the listen-only system volume-key event tap."
         }
     }
 }
@@ -330,80 +331,126 @@ protocol GlobalVolumeKeyMonitoring: AnyObject {
     func stop()
 }
 
-/// Passive public HID listener for fixed-volume outputs. It observes Consumer
-/// Control volume usages but never seizes, suppresses, synthesizes, or reposts
-/// keyboard events.
-final class CoreHIDGlobalVolumeKeyMonitor: GlobalVolumeKeyMonitoring {
+enum GlobalVolumeKeyAction: Equatable, Sendable {
+    case increment
+    case decrement
+}
+
+/// Listen-only public Core Graphics event tap for fixed-volume outputs. macOS
+/// handles hardware volume keys below ordinary AppKit key delivery; the event
+/// tap observes their system-defined auxiliary-control events without seizing,
+/// suppressing, synthesizing, or reposting input.
+final class CoreGraphicsGlobalVolumeKeyMonitor: GlobalVolumeKeyMonitoring {
     var onVolumeIncrement: (() -> Void)?
     var onVolumeDecrement: (() -> Void)?
     private(set) var state: GlobalVolumeKeyMonitoringState = .stopped
 
-    private var manager: IOHIDManager?
+    private static let auxiliaryControlButtonSubtype: Int16 = 8
+    private static let soundUpKeyCode = 0
+    private static let soundDownKeyCode = 1
+    private static let keyDownState = 0xA
+
+    private var eventTap: CFMachPort?
+    private var runLoopSource: CFRunLoopSource?
+
+    static func action(subtype: Int16, data1: Int) -> GlobalVolumeKeyAction? {
+        guard subtype == auxiliaryControlButtonSubtype else { return nil }
+        let keyCode = (data1 & 0xFFFF0000) >> 16
+        let keyState = (data1 & 0x0000FF00) >> 8
+        guard keyState == keyDownState else { return nil }
+
+        switch keyCode {
+        case soundUpKeyCode:
+            return .increment
+        case soundDownKeyCode:
+            return .decrement
+        default:
+            return nil
+        }
+    }
 
     func start() throws {
-        guard manager == nil else { return }
+        guard eventTap == nil else { return }
 
-        let access = IOHIDCheckAccess(kIOHIDRequestTypeListenEvent)
-        if access != kIOHIDAccessTypeGranted {
-            if access == kIOHIDAccessTypeUnknown {
-                _ = IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
-            }
+        guard CGPreflightListenEventAccess() else {
+            _ = CGRequestListenEventAccess()
             state = .permissionRequired
             throw GlobalVolumeKeyMonitorError.permissionRequired
         }
 
-        let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
-        let deviceMatching: [String: Any] = [
-            kIOHIDDeviceUsagePageKey as String: NSNumber(value: kHIDPage_Consumer),
-            kIOHIDDeviceUsageKey as String: NSNumber(value: kHIDUsage_Csmr_ConsumerControl),
-        ]
-        let inputMatching: [String: Any] = [
-            kIOHIDElementUsagePageKey as String: NSNumber(value: kHIDPage_Consumer),
-        ]
-        IOHIDManagerSetDeviceMatching(manager, deviceMatching as CFDictionary)
-        IOHIDManagerSetInputValueMatching(manager, inputMatching as CFDictionary)
-
-        let context = Unmanaged.passUnretained(self).toOpaque()
-        IOHIDManagerRegisterInputValueCallback(
-            manager,
-            { context, result, _, value in
-                guard result == kIOReturnSuccess,
-                      let context,
-                      IOHIDValueGetIntegerValue(value) != 0 else { return }
-                let monitor = Unmanaged<CoreHIDGlobalVolumeKeyMonitor>.fromOpaque(context).takeUnretainedValue()
-                let element = IOHIDValueGetElement(value)
-                guard IOHIDElementGetUsagePage(element) == kHIDPage_Consumer else { return }
-                switch IOHIDElementGetUsage(element) {
-                case UInt32(kHIDUsage_Csmr_VolumeIncrement):
-                    monitor.onVolumeIncrement?()
-                case UInt32(kHIDUsage_Csmr_VolumeDecrement):
-                    monitor.onVolumeDecrement?()
-                default:
-                    break
-                }
-            },
-            context
-        )
-        IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
-        let status = IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
-        guard status == kIOReturnSuccess else {
-            IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
+        guard let systemDefinedType = CGEventType(
+            rawValue: UInt32(NSEvent.EventType.systemDefined.rawValue)
+        ) else {
             state = .stopped
-            throw GlobalVolumeKeyMonitorError.openFailed(status)
+            throw GlobalVolumeKeyMonitorError.eventTapUnavailable
+        }
+        let eventMask = CGEventMask(1) << systemDefinedType.rawValue
+        let context = Unmanaged.passUnretained(self).toOpaque()
+
+        guard let tap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: .listenOnly,
+            eventsOfInterest: eventMask,
+            callback: { _, type, event, context in
+                guard let context else { return Unmanaged.passUnretained(event) }
+                let monitor = Unmanaged<CoreGraphicsGlobalVolumeKeyMonitor>
+                    .fromOpaque(context)
+                    .takeUnretainedValue()
+
+                if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+                    if let tap = monitor.eventTap {
+                        CGEvent.tapEnable(tap: tap, enable: true)
+                    }
+                    return Unmanaged.passUnretained(event)
+                }
+
+                guard type.rawValue == UInt32(NSEvent.EventType.systemDefined.rawValue),
+                      let nsEvent = NSEvent(cgEvent: event),
+                      let action = CoreGraphicsGlobalVolumeKeyMonitor.action(
+                        subtype: nsEvent.subtype.rawValue,
+                        data1: nsEvent.data1
+                      ) else {
+                    return Unmanaged.passUnretained(event)
+                }
+
+                switch action {
+                case .increment:
+                    monitor.onVolumeIncrement?()
+                case .decrement:
+                    monitor.onVolumeDecrement?()
+                }
+                return Unmanaged.passUnretained(event)
+            },
+            userInfo: context
+        ) else {
+            state = .stopped
+            throw GlobalVolumeKeyMonitorError.eventTapUnavailable
         }
 
-        self.manager = manager
+        guard let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else {
+            CFMachPortInvalidate(tap)
+            state = .stopped
+            throw GlobalVolumeKeyMonitorError.eventTapUnavailable
+        }
+
+        self.eventTap = tap
+        self.runLoopSource = source
+        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: true)
         state = .active
     }
 
     func stop() {
-        guard let manager else {
-            state = .stopped
-            return
+        if let source = runLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
+            runLoopSource = nil
         }
-        IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
-        IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))
-        self.manager = nil
+        if let tap = eventTap {
+            CGEvent.tapEnable(tap: tap, enable: false)
+            CFMachPortInvalidate(tap)
+            eventTap = nil
+        }
         state = .stopped
     }
 

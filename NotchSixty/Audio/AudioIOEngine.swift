@@ -431,7 +431,7 @@ final class AudioIOEngine: ObservableObject {
         initialRouteConfiguration: AudioRouteConfiguration = AudioRouteConfiguration(),
         eventMonitor: AudioHardwareEventMonitor = AudioHardwareEventMonitor(),
         masterVolumeController: any MasterVolumeDeviceControlling = CoreAudioMasterVolumeController(),
-        globalVolumeKeyMonitor: any GlobalVolumeKeyMonitoring = CoreHIDGlobalVolumeKeyMonitor()
+        globalVolumeKeyMonitor: any GlobalVolumeKeyMonitoring = CoreGraphicsGlobalVolumeKeyMonitor()
     ) {
         self.deviceCatalog = deviceCatalog
         self.routeConfiguration = initialRouteConfiguration

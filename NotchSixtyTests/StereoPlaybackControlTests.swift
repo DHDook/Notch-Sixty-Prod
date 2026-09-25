@@ -128,6 +128,25 @@ final class StereoPlaybackControlTests: XCTestCase {
         XCTAssertEqual(muted.softwareGain(for: software), 0.0)
     }
 
+    func testSystemDefinedVolumeKeyDecodingUsesKeyDownOnly() {
+        let volumeUpDownEvent = (0 << 16) | (0xA << 8)
+        let volumeDownDownEvent = (1 << 16) | (0xA << 8)
+        let volumeUpReleaseEvent = (0 << 16) | (0xB << 8)
+        let muteDownEvent = (7 << 16) | (0xA << 8)
+
+        XCTAssertEqual(
+            CoreGraphicsGlobalVolumeKeyMonitor.action(subtype: 8, data1: volumeUpDownEvent),
+            .increment
+        )
+        XCTAssertEqual(
+            CoreGraphicsGlobalVolumeKeyMonitor.action(subtype: 8, data1: volumeDownDownEvent),
+            .decrement
+        )
+        XCTAssertNil(CoreGraphicsGlobalVolumeKeyMonitor.action(subtype: 8, data1: volumeUpReleaseEvent))
+        XCTAssertNil(CoreGraphicsGlobalVolumeKeyMonitor.action(subtype: 8, data1: muteDownEvent))
+        XCTAssertNil(CoreGraphicsGlobalVolumeKeyMonitor.action(subtype: 7, data1: volumeUpDownEvent))
+    }
+
     func testFixedVolumeDeviceUsesSoftwareMasterGainForKeyboardFallback() {
         let fixedVolume = MasterVolumeDeviceCapabilities(
             volumeReadable: false,
