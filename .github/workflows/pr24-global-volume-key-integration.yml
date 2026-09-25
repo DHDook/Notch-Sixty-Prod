@@ -1,0 +1,158 @@
+name: PR24 Global Volume Key Integration
+
+on:
+  push:
+    branches:
+      - feature/master-volume-mute-sync
+    paths:
+      - .github/workflows/pr24-global-volume-key-integration.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Wire fixed-volume global key fallback
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              if old not in text:
+                  raise SystemExit(f"pattern not found in {path}: {old[:100]!r}")
+              p.write_text(text.replace(old, new, 1))
+
+          engine = "NotchSixty/Audio/AudioIOEngine.swift"
+
+          replace(engine,
+              "    private let masterVolumeController: any MasterVolumeDeviceControlling\n    private var lifecycle: AudioLifecycleStateMachine",
+              "    private let masterVolumeController: any MasterVolumeDeviceControlling\n    private let globalVolumeKeyMonitor: any GlobalVolumeKeyMonitoring\n    private var lifecycle: AudioLifecycleStateMachine")
+
+          replace(engine,
+              "    @Published private(set) var masterVolumeCapabilities = MasterVolumeDeviceCapabilities.softwareOnly\n    @Published private(set) var gainConfiguration",
+              "    @Published private(set) var masterVolumeCapabilities = MasterVolumeDeviceCapabilities.softwareOnly\n    @Published private(set) var globalVolumeKeyMonitoringState: GlobalVolumeKeyMonitoringState = .stopped\n    @Published private(set) var gainConfiguration")
+
+          replace(engine,
+              "        eventMonitor: AudioHardwareEventMonitor = AudioHardwareEventMonitor(),\n        masterVolumeController: any MasterVolumeDeviceControlling = CoreAudioMasterVolumeController()\n    ) {\n        self.deviceCatalog = deviceCatalog\n        self.routeConfiguration = initialRouteConfiguration\n        self.eventMonitor = eventMonitor\n        self.masterVolumeController = masterVolumeController",
+              "        eventMonitor: AudioHardwareEventMonitor = AudioHardwareEventMonitor(),\n        masterVolumeController: any MasterVolumeDeviceControlling = CoreAudioMasterVolumeController(),\n        globalVolumeKeyMonitor: any GlobalVolumeKeyMonitoring = CoreHIDGlobalVolumeKeyMonitor()\n    ) {\n        self.deviceCatalog = deviceCatalog\n        self.routeConfiguration = initialRouteConfiguration\n        self.eventMonitor = eventMonitor\n        self.masterVolumeController = masterVolumeController\n        self.globalVolumeKeyMonitor = globalVolumeKeyMonitor")
+
+          replace(engine,
+              "        masterVolumeController.onExternalChange = { [weak self] in self?.handleMasterVolumeDeviceChange() }\n    }",
+              "        masterVolumeController.onExternalChange = { [weak self] in self?.handleMasterVolumeDeviceChange() }\n        globalVolumeKeyMonitor.onVolumeIncrement = { [weak self] in self?.handleGlobalVolumeKey(delta: 1.0 / 16.0) }\n        globalVolumeKeyMonitor.onVolumeDecrement = { [weak self] in self?.handleGlobalVolumeKey(delta: -1.0 / 16.0) }\n    }")
+
+          replace(engine,
+              "            masterVolumeController.stopMonitoring()\n            masterVolumeCapabilities = .softwareOnly\n            return",
+              "            masterVolumeController.stopMonitoring()\n            globalVolumeKeyMonitor.stop()\n            globalVolumeKeyMonitoringState = .stopped\n            masterVolumeCapabilities = .softwareOnly\n            return")
+
+          replace(engine,
+              "        masterVolumeController.stopMonitoring()\n        eventMonitor.stop()",
+              "        masterVolumeController.stopMonitoring()\n        globalVolumeKeyMonitor.stop()\n        globalVolumeKeyMonitoringState = .stopped\n        eventMonitor.stop()")
+
+          replace(engine,
+              "    private func syncMasterVolumeMonitorToSelectedOutput() throws {\n        guard let output = selectedOutputDevice else {\n            masterVolumeController.stopMonitoring()\n            masterVolumeCapabilities = .softwareOnly\n            return\n        }\n        try masterVolumeController.monitor(deviceID: output.deviceID)\n        try synchronizeMasterVolumeFromSelectedDevice()\n    }",
+              "    private func syncMasterVolumeMonitorToSelectedOutput() throws {\n        guard let output = selectedOutputDevice else {\n            masterVolumeController.stopMonitoring()\n            globalVolumeKeyMonitor.stop()\n            globalVolumeKeyMonitoringState = .stopped\n            masterVolumeCapabilities = .softwareOnly\n            return\n        }\n        try masterVolumeController.monitor(deviceID: output.deviceID)\n        try synchronizeMasterVolumeFromSelectedDevice()\n        try syncGlobalVolumeKeyMonitor()\n    }")
+
+          replace(engine,
+              "    private func handleMasterVolumeDeviceChange() {\n        do {\n            try synchronizeMasterVolumeFromSelectedDevice()\n            lastErrorDescription = nil\n        } catch {\n            lastErrorDescription = error.localizedDescription\n        }\n    }",
+              '''    private func handleMasterVolumeDeviceChange() {
+        do {
+            try synchronizeMasterVolumeFromSelectedDevice()
+            lastErrorDescription = nil
+        } catch {
+            lastErrorDescription = error.localizedDescription
+        }
+    }
+
+    private func syncGlobalVolumeKeyMonitor() throws {
+        globalVolumeKeyMonitor.stop()
+        globalVolumeKeyMonitoringState = .stopped
+        guard masterVolumeCapabilities.controlMode == .softwareDSP else { return }
+        do {
+            try globalVolumeKeyMonitor.start()
+            globalVolumeKeyMonitoringState = globalVolumeKeyMonitor.state
+        } catch {
+            globalVolumeKeyMonitoringState = globalVolumeKeyMonitor.state
+            throw error
+        }
+    }
+
+    private func handleGlobalVolumeKey(delta: Double) {
+        guard masterVolumeCapabilities.controlMode == .softwareDSP else { return }
+        let level = min(
+            max(masterVolumeConfiguration.level + delta, MasterVolumeConfiguration.levelRange.lowerBound),
+            MasterVolumeConfiguration.levelRange.upperBound
+        )
+        guard abs(level - masterVolumeConfiguration.level) > 0.000_001 else { return }
+        var updated = masterVolumeConfiguration
+        updated.level = level
+        do {
+            try applyMasterVolumeConfiguration(updated, writeDevice: false)
+            lastErrorDescription = nil
+        } catch {
+            lastErrorDescription = error.localizedDescription
+        }
+    }''')
+
+          # Regression coverage for the fixed-output policy itself; HID delivery is
+          # validated on hardware because CI has no keyboard/Input Monitoring grant.
+          tests = "NotchSixtyTests/StereoPlaybackControlTests.swift"
+          replace(tests,
+              "    func testMasterMuteFallsBackToSoftwareWhenDeviceHasNoWritableMute() {",
+              '''    func testFixedVolumeDeviceUsesSoftwareMasterGainForKeyboardFallback() {
+        let fixedVolume = MasterVolumeDeviceCapabilities(
+            volumeReadable: false,
+            volumeWritable: false,
+            muteReadable: true,
+            muteWritable: true
+        )
+        XCTAssertEqual(fixedVolume.controlMode, .softwareDSP)
+        XCTAssertEqual(
+            MasterVolumeConfiguration(level: 0.375, muted: false).softwareGain(for: fixedVolume),
+            0.375,
+            accuracy: 0.000_001
+        )
+    }
+
+    func testMasterMuteFallsBackToSoftwareWhenDeviceHasNoWritableMute() {''')
+
+          doc = Path("docs/MASTER_VOLUME_CONTROL.md")
+          doc.write_text(doc.read_text() + '''
+
+## Fixed-volume output keyboard fallback
+
+When the selected physical output exposes no writable device volume (for example a fixed-output USB DAC), Notch Sixty keeps the physical device selected and uses the existing smoothed software master gain as the volume authority. A passive public IOKit HID listener observes Consumer Control Volume Increment/Decrement usages and maps them to 1/16-scale master-volume steps. The listener is active only in software-DSP volume mode, never seizes or suppresses keyboard events, and requires the user's macOS Input Monitoring permission. Native writable device volume remains preferred when available. The legacy virtual/HAL driver architecture is not reintroduced.
+''')
+          PY
+
+      - name: Build and test
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          test
+
+      - name: Commit integration and remove helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/pr24-global-volume-key-integration.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add NotchSixty/Audio/AudioIOEngine.swift NotchSixtyTests/StereoPlaybackControlTests.swift docs/MASTER_VOLUME_CONTROL.md .github/workflows/pr24-global-volume-key-integration.yml
+          git commit -m 'Route global volume keys to software master fallback'
+          git push origin HEAD:feature/master-volume-mute-sync
