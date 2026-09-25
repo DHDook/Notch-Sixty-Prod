@@ -11,6 +11,7 @@ PR #23 extends the proprietary realtime DSP graph from linked stereo EQ to expli
 - Linear-phase EQ designs equal-length left/right FIRs and uses the existing stereo partitioned convolver.
 - Balance is attenuation-only: center is exact unity, and neither channel can exceed unity because of balance.
 - Global Bypass and Flat audition preserve all configured state while rendering the untreated captured stereo signal.
+- Per-band EQ gain is limited to -24...+24 dB in the product model and portable biquad designer.
 
 ## Realtime contract
 
@@ -22,7 +23,11 @@ Minimum-phase coefficient/channel changes use the existing short EQ crossfade. B
 
 ## Validation
 
-Deterministic tests cover linked equality, left-only channel isolation, attenuation-only balance, raw bypass identity, non-destructive linked/independent round-trips, and 64-band-per-channel graph compilation at 384 kHz. Both the stereo control model and its dedicated test suite are explicitly included in their Xcode target source phases so CI validates the shipping target configuration rather than loose source files. Hardware acceptance additionally checks audible channel isolation, balance, minimum/linear phase, Flat/Bypass transitions, repeated switching, and realtime diagnostics.
+Deterministic tests cover linked equality, left-only channel isolation, attenuation-only balance, raw bypass identity, non-destructive linked/independent round-trips, 64-band-per-channel graph compilation at 384 kHz, rejection of extreme/non-finite EQ gain values, and acceptance of the -24/+24 dB boundaries. Both the stereo control model and its dedicated test suite are explicitly included in their Xcode target source phases so CI validates the shipping target configuration rather than loose source files. Hardware acceptance additionally checks audible channel isolation, balance, minimum/linear phase, Flat/Bypass transitions, repeated switching, and realtime diagnostics.
+
+## Hardware safety hardening
+
+The first PR #23 hardware acceptance pass exposed that free-form EQ gain entry could accept pathological values such as +300 dB, producing a dangerously loud output event. PR #23 now rejects per-band gains outside -24...+24 dB before graph publication, and the portable C biquad designer independently rejects the same range violations as defense in depth. The broader automatic-headroom and true-peak protection work remains planned for the later dynamics/protection stage.
 
 ## Provenance
 
