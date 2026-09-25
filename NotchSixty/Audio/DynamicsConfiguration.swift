@@ -1,6 +1,11 @@
 import Foundation
 
 enum DynamicsConfigurationError: Error, LocalizedError, Equatable {
+    case invalidDCOffsetFilter
+    case invalidInfrasonicFilter
+    case invalidLoudnessContour
+    case invalidDeEsser
+    case invalidMultibandCompressor
     case invalidCompressor
     case invalidExpander
     case invalidPauseGate
@@ -10,6 +15,16 @@ enum DynamicsConfigurationError: Error, LocalizedError, Equatable {
 
     var errorDescription: String? {
         switch self {
+        case .invalidDCOffsetFilter:
+            return "DC Offset Filter configuration is invalid."
+        case .invalidInfrasonicFilter:
+            return "Infrasonic Filter parameters are outside the supported production range."
+        case .invalidLoudnessContour:
+            return "Loudness Contour parameters are outside the supported production range."
+        case .invalidDeEsser:
+            return "De-Esser parameters are outside the supported production range."
+        case .invalidMultibandCompressor:
+            return "Multiband Compressor parameters are outside the supported production range."
         case .invalidCompressor:
             return "Compressor parameters are outside the supported production range."
         case .invalidExpander:
@@ -22,6 +37,122 @@ enum DynamicsConfigurationError: Error, LocalizedError, Equatable {
             return "Limiter parameters are outside the supported production range."
         case .invalidOversampling:
             return "Oversampling configuration is invalid."
+        }
+    }
+}
+
+
+struct DCOffsetFilterConfiguration: Equatable, Sendable {
+    var enabled = false
+}
+
+enum InfrasonicSlope: String, CaseIterable, Identifiable, Sendable {
+    case db24
+    case db48
+    case db96
+
+    var id: String { rawValue }
+    var displayName: String {
+        switch self {
+        case .db24: return "24 dB/oct"
+        case .db48: return "48 dB/oct"
+        case .db96: return "96 dB/oct"
+        }
+    }
+    var cType: N60InfrasonicSlope {
+        switch self {
+        case .db24: return N60InfrasonicSlope24DBPerOctave
+        case .db48: return N60InfrasonicSlope48DBPerOctave
+        case .db96: return N60InfrasonicSlope96DBPerOctave
+        }
+    }
+}
+
+struct InfrasonicFilterConfiguration: Equatable, Sendable {
+    static let cutoffRange = 10.0...30.0
+    var enabled = false
+    var cutoffHz = 18.0
+    var slope: InfrasonicSlope = .db48
+
+    func validate() throws {
+        guard cutoffHz.isFinite, Self.cutoffRange.contains(cutoffHz) else {
+            throw DynamicsConfigurationError.invalidInfrasonicFilter
+        }
+    }
+}
+
+struct LoudnessContourConfiguration: Equatable, Sendable {
+    static let strengthRange = 0.0...1.0
+    var enabled = false
+    var strength = 1.0
+
+    func validate() throws {
+        guard strength.isFinite, Self.strengthRange.contains(strength) else {
+            throw DynamicsConfigurationError.invalidLoudnessContour
+        }
+    }
+}
+
+struct DeEsserConfiguration: Equatable, Sendable {
+    static let frequencyRange = 2_000.0...10_000.0
+    static let thresholdRange = -60.0...0.0
+
+    var enabled = false
+    var frequencyHz = 6_500.0
+    var thresholdDB = -24.0
+    var dynamicEQMode = true
+
+    func validate() throws {
+        guard frequencyHz.isFinite, Self.frequencyRange.contains(frequencyHz),
+              thresholdDB.isFinite, Self.thresholdRange.contains(thresholdDB) else {
+            throw DynamicsConfigurationError.invalidDeEsser
+        }
+    }
+}
+
+enum MultibandSlope: String, CaseIterable, Identifiable, Sendable {
+    case gentle
+    case steep
+
+    var id: String { rawValue }
+    var displayName: String {
+        switch self {
+        case .gentle: return "Gentle (LR4)"
+        case .steep: return "Steep (LR8)"
+        }
+    }
+
+    var cType: N60CrossoverTopology {
+        switch self {
+        case .gentle: return N60CrossoverTopologyLinkwitzRiley24
+        case .steep: return N60CrossoverTopologyLinkwitzRiley48
+        }
+    }
+}
+
+struct MultibandCompressorConfiguration: Equatable, Sendable {
+    static let lowMidFrequencyRange = 40.0...250.0
+    static let midHighFrequencyRange = 1_000.0...8_000.0
+    static let thresholdRange = -60.0...0.0
+
+    var enabled = false
+    var lowMidFrequencyHz = 120.0
+    var midHighFrequencyHz = 3_500.0
+    var slope: MultibandSlope = .gentle
+    var lowThresholdDB = -18.0
+    var midThresholdDB = -18.0
+    var highThresholdDB = -18.0
+
+    func validate() throws {
+        guard lowMidFrequencyHz.isFinite,
+              Self.lowMidFrequencyRange.contains(lowMidFrequencyHz),
+              midHighFrequencyHz.isFinite,
+              Self.midHighFrequencyRange.contains(midHighFrequencyHz),
+              lowMidFrequencyHz < midHighFrequencyHz,
+              lowThresholdDB.isFinite, Self.thresholdRange.contains(lowThresholdDB),
+              midThresholdDB.isFinite, Self.thresholdRange.contains(midThresholdDB),
+              highThresholdDB.isFinite, Self.thresholdRange.contains(highThresholdDB) else {
+            throw DynamicsConfigurationError.invalidMultibandCompressor
         }
     }
 }
@@ -195,6 +326,11 @@ struct LimiterConfiguration: Equatable, Sendable {
 }
 
 struct DynamicsConfiguration: Equatable, Sendable {
+    var dcOffsetFilter = DCOffsetFilterConfiguration()
+    var infrasonicFilter = InfrasonicFilterConfiguration()
+    var loudnessContour = LoudnessContourConfiguration()
+    var deEsser = DeEsserConfiguration()
+    var multibandCompressor = MultibandCompressorConfiguration()
     var compressor = CompressorConfiguration()
     var expander = ExpanderConfiguration()
     var softClipper = SoftClipperConfiguration()
@@ -203,11 +339,37 @@ struct DynamicsConfiguration: Equatable, Sendable {
     var pauseGate = PauseGateConfiguration()
 
     func makeSnapshot(sampleRate: Double) throws -> N60DynamicsSnapshot {
+        try infrasonicFilter.validate()
+        try loudnessContour.validate()
+        try deEsser.validate()
+        try multibandCompressor.validate()
         try compressor.validate()
         try expander.validate()
         try pauseGate.validate()
 
         var snapshot = N60DynamicsSnapshotMakeBypassed(sampleRate)
+        guard N60DynamicsSnapshotSetDCOffsetFilter(&snapshot, sampleRate, dcOffsetFilter.enabled) else { throw DynamicsConfigurationError.invalidDCOffsetFilter }
+        guard N60DynamicsSnapshotSetInfrasonicFilter(&snapshot, sampleRate, infrasonicFilter.enabled, infrasonicFilter.cutoffHz, infrasonicFilter.slope.cType) else { throw DynamicsConfigurationError.invalidInfrasonicFilter }
+        guard N60DynamicsSnapshotSetLoudnessContour(&snapshot, sampleRate, loudnessContour.enabled, Float(loudnessContour.strength)) else { throw DynamicsConfigurationError.invalidLoudnessContour }
+        guard N60DynamicsSnapshotSetDeEsser(
+            &snapshot,
+            sampleRate,
+            deEsser.enabled,
+            deEsser.frequencyHz,
+            Float(deEsser.thresholdDB),
+            deEsser.dynamicEQMode
+        ) else { throw DynamicsConfigurationError.invalidDeEsser }
+        guard N60DynamicsSnapshotSetMultibandCompressor(
+            &snapshot,
+            sampleRate,
+            multibandCompressor.enabled,
+            multibandCompressor.lowMidFrequencyHz,
+            multibandCompressor.midHighFrequencyHz,
+            multibandCompressor.slope.cType,
+            Float(multibandCompressor.lowThresholdDB),
+            Float(multibandCompressor.midThresholdDB),
+            Float(multibandCompressor.highThresholdDB)
+        ) else { throw DynamicsConfigurationError.invalidMultibandCompressor }
         guard N60DynamicsSnapshotSetCompressor(
             &snapshot,
             sampleRate,

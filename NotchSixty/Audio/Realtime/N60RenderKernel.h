@@ -132,6 +132,17 @@ typedef struct {
     float crossoverSubGainLinear;
     bool crossoverSubPolarityInverted;
     uint32_t crossoverSectionCount;
+    bool deEsserEnabled;
+    bool deEsserDynamicEQMode;
+    double deEsserFrequencyHz;
+    bool multibandCompressorEnabled;
+    double multibandLowMidFrequencyHz;
+    double multibandMidHighFrequencyHz;
+    N60CrossoverTopology multibandTopology;
+    float deEsserGainReductionDB;
+    float multibandLowGainReductionDB;
+    float multibandMidGainReductionDB;
+    float multibandHighGainReductionDB;
     bool compressorEnabled;
     bool expanderEnabled;
     bool pauseGateEnabled;

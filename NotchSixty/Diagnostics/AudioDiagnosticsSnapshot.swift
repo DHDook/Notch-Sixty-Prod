@@ -42,6 +42,17 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
     let crossoverSubGainLinear: Float
     let crossoverSubPolarityInverted: Bool
     let crossoverSectionCount: UInt32
+    let deEsserEnabled: Bool
+    let deEsserDynamicEQMode: Bool
+    let deEsserFrequencyHz: Double
+    let multibandCompressorEnabled: Bool
+    let multibandLowMidFrequencyHz: Double
+    let multibandMidHighFrequencyHz: Double
+    let multibandTopology: N60CrossoverTopology
+    let deEsserGainReductionDB: Float
+    let multibandLowGainReductionDB: Float
+    let multibandMidGainReductionDB: Float
+    let multibandHighGainReductionDB: Float
     let compressorEnabled: Bool
     let expanderEnabled: Bool
     let pauseGateEnabled: Bool
@@ -103,6 +114,17 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
         crossoverSubGainLinear = diagnostics.crossoverSubGainLinear
         crossoverSubPolarityInverted = diagnostics.crossoverSubPolarityInverted
         crossoverSectionCount = diagnostics.crossoverSectionCount
+        deEsserEnabled = diagnostics.deEsserEnabled
+        deEsserDynamicEQMode = diagnostics.deEsserDynamicEQMode
+        deEsserFrequencyHz = diagnostics.deEsserFrequencyHz
+        multibandCompressorEnabled = diagnostics.multibandCompressorEnabled
+        multibandLowMidFrequencyHz = diagnostics.multibandLowMidFrequencyHz
+        multibandMidHighFrequencyHz = diagnostics.multibandMidHighFrequencyHz
+        multibandTopology = diagnostics.multibandTopology
+        deEsserGainReductionDB = diagnostics.deEsserGainReductionDB
+        multibandLowGainReductionDB = diagnostics.multibandLowGainReductionDB
+        multibandMidGainReductionDB = diagnostics.multibandMidGainReductionDB
+        multibandHighGainReductionDB = diagnostics.multibandHighGainReductionDB
         compressorEnabled = diagnostics.compressorEnabled
         expanderEnabled = diagnostics.expanderEnabled
         pauseGateEnabled = diagnostics.pauseGateEnabled
