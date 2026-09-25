@@ -42,3 +42,21 @@ text = path.read_text()
 text = text.replace('specifier: \\"%.0f\\"', 'specifier: "%.0f"')
 text = text.replace('specifier: \\"%.2f\\"', 'specifier: "%.2f"')
 path.write_text(text)
+
+# PR28 advances the persisted product schema from v5 (PR27 protection state)
+# to v6. Update both stale assertions and the test name generated from main.
+path = Path("NotchSixtyTests/LiveLinearPhaseTests.swift")
+text = path.read_text()
+text = text.replace(
+    "func testProductConfigurationSchemaIsVersionFiveForProtectionState()",
+    "func testProductConfigurationSchemaIsVersionSixForAdvancedDynamicsState()"
+)
+text = text.replace(
+    "XCTAssertEqual(ProductConfiguration.currentSchemaVersion, 5)",
+    "XCTAssertEqual(ProductConfiguration.currentSchemaVersion, 6)"
+)
+text = text.replace(
+    "XCTAssertEqual(ProductConfiguration().schemaVersion, 5)",
+    "XCTAssertEqual(ProductConfiguration().schemaVersion, 6)"
+)
+path.write_text(text)
