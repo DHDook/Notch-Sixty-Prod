@@ -391,6 +391,7 @@ final class AudioIOEngine: ObservableObject {
     private let deviceCatalog: any OutputDeviceCataloging
     private let eventMonitor: AudioHardwareEventMonitor
     private let masterVolumeController: any MasterVolumeDeviceControlling
+    private let globalVolumeKeyMonitor: any GlobalVolumeKeyMonitoring
     private var lifecycle: AudioLifecycleStateMachine
     private var transportSession: CoreAudioTransportSession?
     private var lifetimeArchivedCounters = AudioTransportCounters()
@@ -417,6 +418,7 @@ final class AudioIOEngine: ObservableObject {
     @Published private(set) var playbackControlConfiguration = PlaybackControlConfiguration()
     @Published private(set) var masterVolumeConfiguration = MasterVolumeConfiguration()
     @Published private(set) var masterVolumeCapabilities = MasterVolumeDeviceCapabilities.softwareOnly
+    @Published private(set) var globalVolumeKeyMonitoringState: GlobalVolumeKeyMonitoringState = .stopped
     @Published private(set) var gainConfiguration = DSPGainConfiguration()
     @Published private(set) var bassManagementConfiguration = BassManagementConfiguration()
     @Published private(set) var roomCorrectionConfiguration = RoomCorrectionConfiguration()
@@ -428,12 +430,14 @@ final class AudioIOEngine: ObservableObject {
         deviceCatalog: any OutputDeviceCataloging = CoreAudioOutputDeviceCatalog(),
         initialRouteConfiguration: AudioRouteConfiguration = AudioRouteConfiguration(),
         eventMonitor: AudioHardwareEventMonitor = AudioHardwareEventMonitor(),
-        masterVolumeController: any MasterVolumeDeviceControlling = CoreAudioMasterVolumeController()
+        masterVolumeController: any MasterVolumeDeviceControlling = CoreAudioMasterVolumeController(),
+        globalVolumeKeyMonitor: any GlobalVolumeKeyMonitoring = CoreHIDGlobalVolumeKeyMonitor()
     ) {
         self.deviceCatalog = deviceCatalog
         self.routeConfiguration = initialRouteConfiguration
         self.eventMonitor = eventMonitor
         self.masterVolumeController = masterVolumeController
+        self.globalVolumeKeyMonitor = globalVolumeKeyMonitor
         let lifecycle = AudioLifecycleStateMachine()
         self.lifecycle = lifecycle
         self.lifecycleState = lifecycle.state
@@ -443,6 +447,8 @@ final class AudioIOEngine: ObservableObject {
         eventMonitor.onWillSleep = { [weak self] in self?.handleWillSleep() }
         eventMonitor.onDidWake = { [weak self] in self?.handleDidWake() }
         masterVolumeController.onExternalChange = { [weak self] in self?.handleMasterVolumeDeviceChange() }
+        globalVolumeKeyMonitor.onVolumeIncrement = { [weak self] in self?.handleGlobalVolumeKey(delta: 1.0 / 16.0) }
+        globalVolumeKeyMonitor.onVolumeDecrement = { [weak self] in self?.handleGlobalVolumeKey(delta: -1.0 / 16.0) }
     }
 
     var selectedOutputDevice: AudioOutputDevice? {
@@ -479,6 +485,8 @@ final class AudioIOEngine: ObservableObject {
         guard let uid else {
             routeConfiguration.selectedOutputUID = nil
             masterVolumeController.stopMonitoring()
+            globalVolumeKeyMonitor.stop()
+            globalVolumeKeyMonitoringState = .stopped
             masterVolumeCapabilities = .softwareOnly
             return
         }
@@ -694,6 +702,8 @@ final class AudioIOEngine: ObservableObject {
             try? setLifecycle(.idle)
         }
         masterVolumeController.stopMonitoring()
+        globalVolumeKeyMonitor.stop()
+        globalVolumeKeyMonitoringState = .stopped
         eventMonitor.stop()
     }
 
@@ -913,11 +923,14 @@ final class AudioIOEngine: ObservableObject {
     private func syncMasterVolumeMonitorToSelectedOutput() throws {
         guard let output = selectedOutputDevice else {
             masterVolumeController.stopMonitoring()
+            globalVolumeKeyMonitor.stop()
+            globalVolumeKeyMonitoringState = .stopped
             masterVolumeCapabilities = .softwareOnly
             return
         }
         try masterVolumeController.monitor(deviceID: output.deviceID)
         try synchronizeMasterVolumeFromSelectedDevice()
+        syncGlobalVolumeKeyMonitor()
     }
 
     private func synchronizeMasterVolumeFromSelectedDevice() throws {
@@ -954,6 +967,38 @@ final class AudioIOEngine: ObservableObject {
     private func handleMasterVolumeDeviceChange() {
         do {
             try synchronizeMasterVolumeFromSelectedDevice()
+            lastErrorDescription = nil
+        } catch {
+            lastErrorDescription = error.localizedDescription
+        }
+    }
+
+    private func syncGlobalVolumeKeyMonitor() {
+        globalVolumeKeyMonitor.stop()
+        globalVolumeKeyMonitoringState = .stopped
+        guard masterVolumeCapabilities.controlMode == .softwareDSP else { return }
+        do {
+            try globalVolumeKeyMonitor.start()
+            globalVolumeKeyMonitoringState = globalVolumeKeyMonitor.state
+        } catch {
+            globalVolumeKeyMonitoringState = globalVolumeKeyMonitor.state
+            // Input Monitoring is a keyboard-control capability, not an audio-route
+            // requirement. Keep the selected output usable and surface permission
+            // state independently instead of failing refresh/recovery.
+        }
+    }
+
+    private func handleGlobalVolumeKey(delta: Double) {
+        guard masterVolumeCapabilities.controlMode == .softwareDSP else { return }
+        let level = min(
+            max(masterVolumeConfiguration.level + delta, MasterVolumeConfiguration.levelRange.lowerBound),
+            MasterVolumeConfiguration.levelRange.upperBound
+        )
+        guard abs(level - masterVolumeConfiguration.level) > 0.000_001 else { return }
+        var updated = masterVolumeConfiguration
+        updated.level = level
+        do {
+            try applyMasterVolumeConfiguration(updated, writeDevice: false)
             lastErrorDescription = nil
         } catch {
             lastErrorDescription = error.localizedDescription

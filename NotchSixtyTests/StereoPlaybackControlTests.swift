@@ -128,6 +128,21 @@ final class StereoPlaybackControlTests: XCTestCase {
         XCTAssertEqual(muted.softwareGain(for: software), 0.0)
     }
 
+    func testFixedVolumeDeviceUsesSoftwareMasterGainForKeyboardFallback() {
+        let fixedVolume = MasterVolumeDeviceCapabilities(
+            volumeReadable: false,
+            volumeWritable: false,
+            muteReadable: true,
+            muteWritable: true
+        )
+        XCTAssertEqual(fixedVolume.controlMode, .softwareDSP)
+        XCTAssertEqual(
+            MasterVolumeConfiguration(level: 0.375, muted: false).softwareGain(for: fixedVolume),
+            0.375,
+            accuracy: 0.000_001
+        )
+    }
+
     func testMasterMuteFallsBackToSoftwareWhenDeviceHasNoWritableMute() {
         let capability = MasterVolumeDeviceCapabilities(
             volumeReadable: true,
