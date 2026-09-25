@@ -108,6 +108,64 @@ final class StereoPlaybackControlTests: XCTestCase {
         }
     }
 
+
+    func testMasterVolumeCapabilityPolicyUsesHardwareVolumeWhenWritable() {
+        let hardware = MasterVolumeDeviceCapabilities(
+            volumeReadable: true,
+            volumeWritable: true,
+            muteReadable: true,
+            muteWritable: true
+        )
+        let software = MasterVolumeDeviceCapabilities.softwareOnly
+        let normal = MasterVolumeConfiguration(level: 0.25, muted: false)
+        let muted = MasterVolumeConfiguration(level: 0.25, muted: true)
+
+        XCTAssertEqual(hardware.controlMode, .device)
+        XCTAssertEqual(normal.softwareGain(for: hardware), 1.0)
+        XCTAssertEqual(muted.softwareGain(for: hardware), 1.0)
+        XCTAssertEqual(software.controlMode, .softwareDSP)
+        XCTAssertEqual(normal.softwareGain(for: software), 0.25, accuracy: 0.000_001)
+        XCTAssertEqual(muted.softwareGain(for: software), 0.0)
+    }
+
+    func testMasterMuteFallsBackToSoftwareWhenDeviceHasNoWritableMute() {
+        let capability = MasterVolumeDeviceCapabilities(
+            volumeReadable: true,
+            volumeWritable: true,
+            muteReadable: false,
+            muteWritable: false
+        )
+        XCTAssertEqual(
+            MasterVolumeConfiguration(level: 0.7, muted: true).softwareGain(for: capability),
+            0.0
+        )
+        XCTAssertEqual(
+            MasterVolumeConfiguration(level: 0.7, muted: false).softwareGain(for: capability),
+            1.0
+        )
+    }
+
+    func testRealtimeMasterGainIsIndependentAndSmoothed() {
+        guard let kernel = N60RenderKernelCreate() else {
+            return XCTFail("Unable to create render kernel")
+        }
+        defer { N60RenderKernelDestroy(kernel) }
+
+        var graph = N60DSPGraphSnapshotMakeUnity(96_000)
+        graph.masterGainLinear = 0.25
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+
+        for _ in 0..<2_000 {
+            var left: Float = 0
+            var right: Float = 0
+            N60RenderKernelProcessStereoFrame(kernel, 0.8, -0.4, &left, &right)
+            XCTAssertEqual(left, 0.2, accuracy: 0.000_01)
+            XCTAssertEqual(right, -0.1, accuracy: 0.000_01)
+        }
+        let diagnostics = N60RenderKernelGetDiagnostics(kernel)
+        XCTAssertEqual(diagnostics.masterGainLinear, 0.25, accuracy: 0.000_001)
+    }
+
     func testGraphBypassReturnsUntreatedStereoSamples() {
         guard let kernel = N60RenderKernelCreate() else {
             return XCTFail("Unable to create render kernel")

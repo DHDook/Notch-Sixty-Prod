@@ -151,7 +151,8 @@ struct StereoEQConfiguration: Equatable, Sendable {
         sampleRate: Double,
         gainConfiguration: DSPGainConfiguration,
         bassManagementConfiguration: BassManagementConfiguration,
-        playbackConfiguration: PlaybackControlConfiguration
+        playbackConfiguration: PlaybackControlConfiguration,
+        masterGainLinear: Float = 1.0
     ) throws -> N60DSPGraphSnapshot {
         guard bassManagementConfiguration.frequencyHz.isFinite,
               BassManagementConfiguration.frequencyRange.contains(bassManagementConfiguration.frequencyHz) else {
@@ -166,6 +167,7 @@ struct StereoEQConfiguration: Equatable, Sendable {
         graph.inputGainLinear = DSPGainConfiguration.linearGain(forDB: gainConfiguration.inputPreampDB)
         graph.headroomGainLinear = DSPGainConfiguration.linearGain(forDB: gainConfiguration.headroomAttenuationDB)
         graph.outputGainLinear = DSPGainConfiguration.linearGain(forDB: gainConfiguration.outputGainDB)
+        graph.masterGainLinear = masterGainLinear
         let balance = playbackConfiguration.balanceLinearGains
         graph.balanceGainLeftLinear = balance.left
         graph.balanceGainRightLinear = balance.right
@@ -279,6 +281,48 @@ enum FIRUpdatePolicy {
         playback: PlaybackControlConfiguration
     ) -> Bool {
         !isRawBypassed(playback) && roomCorrection.enabled
+    }
+}
+
+enum MasterVolumeControlMode: String, Equatable, Sendable {
+    case softwareDSP
+    case device
+}
+
+struct MasterVolumeDeviceCapabilities: Equatable, Sendable {
+    var volumeReadable = false
+    var volumeWritable = false
+    var muteReadable = false
+    var muteWritable = false
+
+    static let softwareOnly = MasterVolumeDeviceCapabilities()
+
+    var controlMode: MasterVolumeControlMode {
+        volumeWritable ? .device : .softwareDSP
+    }
+}
+
+struct MasterVolumeConfiguration: Equatable, Sendable {
+    static let levelRange = 0.0...1.0
+
+    var level: Double = 1.0
+    var muted = false
+
+    func softwareGain(for capabilities: MasterVolumeDeviceCapabilities) -> Float {
+        let volumeGain = capabilities.volumeWritable ? 1.0 : level
+        let muteGain = muted && !capabilities.muteWritable ? 0.0 : 1.0
+        return Float(volumeGain * muteGain)
+    }
+}
+
+enum MasterVolumeConfigurationError: Error, LocalizedError, Equatable {
+    case invalidLevel(Double)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidLevel(let level):
+            return "Master volume \(level) is outside the supported 0...1 range."
+        }
     }
 }
 

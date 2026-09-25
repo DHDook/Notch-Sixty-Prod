@@ -36,6 +36,7 @@ typedef struct {
     float inputGainLinear;
     float headroomGainLinear;
     float outputGainLinear;
+    float masterGainLinear;
     float balanceGainLeftLinear;
     float balanceGainRightLinear;
     bool bypassed;
@@ -104,6 +105,7 @@ typedef struct {
     float inputGainLinear;
     float headroomGainLinear;
     float outputGainLinear;
+    float masterGainLinear;
     float balanceGainLeftLinear;
     float balanceGainRightLinear;
     bool eqBypassed;
