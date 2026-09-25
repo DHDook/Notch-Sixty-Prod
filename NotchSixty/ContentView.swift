@@ -45,6 +45,20 @@ struct ContentView: View {
         Binding(get: { engine.playbackControlConfiguration.balance }, set: { try? engine.setChannelBalance($0) })
     }
 
+
+    private var masterVolumeBinding: Binding<Double> {
+
+        Binding(get: { engine.masterVolumeConfiguration.level }, set: { try? engine.setMasterVolumeLevel($0) })
+
+    }
+
+
+    private var masterMuteBinding: Binding<Bool> {
+
+        Binding(get: { engine.masterVolumeConfiguration.muted }, set: { try? engine.setMasterMuted($0) })
+
+    }
+
     private var globalBypassBinding: Binding<Bool> {
         Binding(get: { engine.playbackControlConfiguration.globalBypassed }, set: { try? engine.setGlobalDSPBypassed($0) })
     }
@@ -135,6 +149,17 @@ struct ContentView: View {
                 Spacer()
                 Toggle("Global Bypass", isOn: globalBypassBinding).toggleStyle(.switch)
                 Toggle("Flat", isOn: flatAuditionBinding).toggleStyle(.switch)
+            }
+            HStack(spacing: 12) {
+                Text("Master").frame(width: 90, alignment: .leading)
+                Slider(value: masterVolumeBinding, in: MasterVolumeConfiguration.levelRange, step: 0.01)
+                Text("\(Int((engine.masterVolumeConfiguration.level * 100).rounded()))%")
+                    .monospacedDigit()
+                    .frame(width: 48, alignment: .trailing)
+                Toggle("Mute", isOn: masterMuteBinding).toggleStyle(.switch)
+                Text(engine.masterVolumeCapabilities.controlMode == .device ? "Device" : "Software DSP")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             HStack(spacing: 12) {
                 Text("Balance").frame(width: 90, alignment: .leading)
