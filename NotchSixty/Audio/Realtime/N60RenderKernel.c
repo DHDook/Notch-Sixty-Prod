@@ -76,6 +76,9 @@ struct N60RenderKernel {
     N60SmoothedGain masterGain;
     N60SmoothedGain balanceGainLeft;
     N60SmoothedGain balanceGainRight;
+    float referenceDelayLeft[N60_MAX_AUDITION_DELAY_FRAMES];
+    float referenceDelayRight[N60_MAX_AUDITION_DELAY_FRAMES];
+    uint32_t referenceDelayWriteIndex;
     uint64_t preparedGeneration;
     double preparedSampleRate;
     bool preparedGraphBypassed;
@@ -212,6 +215,10 @@ static bool snapshot_is_valid(N60DSPGraphSnapshot snapshot) {
         || !isfinite(snapshot.balanceGainRightLinear)
         || snapshot.balanceGainRightLinear < 0.0f
         || snapshot.balanceGainRightLinear > 1.0f
+        || snapshot.auditionMode < N60AuditionModeProcessed
+        || snapshot.auditionMode > N60AuditionModeDelta
+        || (snapshot.auditionMode != N60AuditionModeProcessed
+            && snapshot.latencyFrames >= N60_MAX_AUDITION_DELAY_FRAMES)
         || snapshot.eqBandCount > N60_MAX_EQ_RENDER_SLOTS
         || !crossover_snapshot_is_valid(snapshot.crossover, snapshot.sampleRate)
         || !convolution_snapshot_is_valid(snapshot.convolution)
@@ -543,6 +550,30 @@ static float sanitize_sample(N60RenderKernel *kernel, float sample) {
     return sample;
 }
 
+static void process_reference_delay(
+    N60RenderKernel *kernel,
+    uint32_t delayFrames,
+    float inputLeft,
+    float inputRight,
+    float *referenceLeft,
+    float *referenceRight
+) {
+    if (delayFrames == 0) {
+        *referenceLeft = inputLeft;
+        *referenceRight = inputRight;
+    } else {
+        uint32_t readIndex = (kernel->referenceDelayWriteIndex
+            + N60_MAX_AUDITION_DELAY_FRAMES
+            - delayFrames) % N60_MAX_AUDITION_DELAY_FRAMES;
+        *referenceLeft = kernel->referenceDelayLeft[readIndex];
+        *referenceRight = kernel->referenceDelayRight[readIndex];
+    }
+
+    kernel->referenceDelayLeft[kernel->referenceDelayWriteIndex] = inputLeft;
+    kernel->referenceDelayRight[kernel->referenceDelayWriteIndex] = inputRight;
+    kernel->referenceDelayWriteIndex = (kernel->referenceDelayWriteIndex + 1u) % N60_MAX_AUDITION_DELAY_FRAMES;
+}
+
 static void meter_sample(float left, float right, float *peakLeft, float *peakRight, double *squareSumLeft, double *squareSumRight, uint64_t *overRangeSamples) {
     float absLeft = fabsf(left);
     float absRight = fabsf(right);
@@ -684,6 +715,7 @@ N60DSPGraphSnapshot N60DSPGraphSnapshotMakeUnity(double sampleRate) {
     snapshot.balanceGainLeftLinear = 1.0f;
     snapshot.balanceGainRightLinear = 1.0f;
     snapshot.bypassed = false;
+    snapshot.auditionMode = N60AuditionModeProcessed;
     snapshot.latencyFrames = 0;
     snapshot.generation = 0;
     snapshot.gainTransitionFrames = gain_transition_frames_for_sample_rate(sampleRate);
@@ -807,6 +839,7 @@ N60RenderKernel *N60RenderKernelCreate(void) {
     reset_smoothed_gain(&kernel->masterGain, 1.0f);
     reset_smoothed_gain(&kernel->balanceGainLeft, 1.0f);
     reset_smoothed_gain(&kernel->balanceGainRight, 1.0f);
+    kernel->referenceDelayWriteIndex = 0;
     return kernel;
 }
 
@@ -829,6 +862,9 @@ void N60RenderKernelReset(N60RenderKernel *kernel) {
     reset_smoothed_gain(&kernel->masterGain, 1.0f);
     reset_smoothed_gain(&kernel->balanceGainLeft, 1.0f);
     reset_smoothed_gain(&kernel->balanceGainRight, 1.0f);
+    memset(kernel->referenceDelayLeft, 0, sizeof(kernel->referenceDelayLeft));
+    memset(kernel->referenceDelayRight, 0, sizeof(kernel->referenceDelayRight));
+    kernel->referenceDelayWriteIndex = 0;
     kernel->preparedGeneration = 0;
     kernel->preparedSampleRate = 0.0;
     kernel->preparedGraphBypassed = false;
@@ -925,6 +961,10 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
 
     float left = sanitize_sample(kernel, inputLeft);
     float right = sanitize_sample(kernel, inputRight);
+    float referenceLeft = 0.0f;
+    float referenceRight = 0.0f;
+    uint32_t referenceDelayFrames = context->acquired ? context->snapshot.latencyFrames : 0;
+    process_reference_delay(kernel, referenceDelayFrames, left, right, &referenceLeft, &referenceRight);
     meter_sample(left, right, &context->inputPeakLeft, &context->inputPeakRight, &context->inputSquareSumLeft, &context->inputSquareSumRight, &context->inputOverRangeSamples);
 
     if (context->acquired && !context->snapshot.bypassed) {
@@ -987,6 +1027,20 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
         float outputGain = next_gain_value(&kernel->outputGain);
         left *= outputGain;
         right *= outputGain;
+
+        switch (context->snapshot.auditionMode) {
+        case N60AuditionModeReference:
+            left = referenceLeft;
+            right = referenceRight;
+            break;
+        case N60AuditionModeDelta:
+            left -= referenceLeft;
+            right -= referenceRight;
+            break;
+        case N60AuditionModeProcessed:
+        default:
+            break;
+        }
     } else {
         meter_sample(left, right, &context->postEQPeakLeft, &context->postEQPeakRight, &context->postEQSquareSumLeft, &context->postEQSquareSumRight, &context->postEQOverRangeSamples);
     }
@@ -1043,6 +1097,7 @@ N60RenderKernelDiagnostics N60RenderKernelGetDiagnostics(const N60RenderKernel *
         diagnostics.sampleRate = context.snapshot.sampleRate;
         diagnostics.channelCount = context.snapshot.channelCount;
         diagnostics.bypassed = context.snapshot.bypassed;
+        diagnostics.auditionMode = context.snapshot.auditionMode;
         diagnostics.inputGainLinear = context.snapshot.inputGainLinear;
         diagnostics.headroomGainLinear = context.snapshot.headroomGainLinear;
         diagnostics.outputGainLinear = context.snapshot.outputGainLinear;

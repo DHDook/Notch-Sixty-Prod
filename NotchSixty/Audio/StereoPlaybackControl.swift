@@ -171,7 +171,8 @@ struct StereoEQConfiguration: Equatable, Sendable {
         let balance = playbackConfiguration.balanceLinearGains
         graph.balanceGainLeftLinear = balance.left
         graph.balanceGainRightLinear = balance.right
-        graph.bypassed = playbackConfiguration.globalBypassed || playbackConfiguration.flatAuditionEnabled
+        graph.bypassed = playbackConfiguration.globalBypassed
+        graph.auditionMode = playbackConfiguration.auditionMode.cType
         graph.eqBypassed = bypassed
         N60DSPGraphSnapshotClearEQ(&graph)
 
@@ -264,7 +265,7 @@ struct StereoEQConfiguration: Equatable, Sendable {
 
 enum FIRUpdatePolicy {
     static func isRawBypassed(_ playback: PlaybackControlConfiguration) -> Bool {
-        playback.globalBypassed || playback.flatAuditionEnabled
+        playback.globalBypassed
     }
 
     static func shouldPrepareLinearPhase(
@@ -330,12 +331,52 @@ enum MasterVolumeConfigurationError: Error, LocalizedError, Equatable {
     }
 }
 
+enum AuditionMode: String, CaseIterable, Identifiable, Sendable {
+    case processed
+    case reference
+    case delta
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .processed: return "Processed"
+        case .reference: return "Reference"
+        case .delta: return "Delta"
+        }
+    }
+
+    var cType: N60AuditionMode {
+        switch self {
+        case .processed: return N60AuditionModeProcessed
+        case .reference: return N60AuditionModeReference
+        case .delta: return N60AuditionModeDelta
+        }
+    }
+}
+
 struct PlaybackControlConfiguration: Equatable, Sendable {
     static let balanceRange = -1.0...1.0
 
-    var balance: Double = 0
-    var globalBypassed = false
-    var flatAuditionEnabled = false
+    var balance: Double
+    var globalBypassed: Bool
+    var auditionMode: AuditionMode
+
+    init(
+        balance: Double = 0,
+        globalBypassed: Bool = false,
+        flatAuditionEnabled: Bool = false,
+        auditionMode: AuditionMode? = nil
+    ) {
+        self.balance = balance
+        self.globalBypassed = globalBypassed
+        self.auditionMode = auditionMode ?? (flatAuditionEnabled ? .reference : .processed)
+    }
+
+    var flatAuditionEnabled: Bool {
+        get { auditionMode == .reference }
+        set { auditionMode = newValue ? .reference : .processed }
+    }
 
     var balanceLinearGains: (left: Float, right: Float) {
         let clamped = min(max(balance, Self.balanceRange.lowerBound), Self.balanceRange.upperBound)

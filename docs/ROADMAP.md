@@ -71,23 +71,31 @@ The stages below are major delivery slices. Exact PR numbering may move if revie
 - left/right editing focus
 - channel balance
 - global bypass
-- processed/flat comparison
-- Delta monitoring
+- latency-matched Processed / Reference comparison
+- Delta monitoring (`Processed − latency-matched Reference`)
 - master volume and mute
 - macOS volume-key / external-volume synchronization
 - persistence hooks
 
-### Stage C — core dynamics + oversampling
+### Stage C — full legacy dynamics parity + oversampling
+The legacy application exposes roughly 30 dynamics-related capabilities. **Every one of them must be inventoried and reach PARITY, IMPROVED, PORT VERIFIED, or an explicit superseding implementation before parity closure.** This stage may span multiple implementation PRs for review and realtime-risk control; splitting the work does not reduce the parity requirement.
+
+Foundation and known capabilities include:
 - detector/envelope infrastructure
-- compressor
-- expander
-- pause gate
-- look-ahead/brickwall limiter
-- soft clipper
-- 1x / 2x / 4x oversampling
-- true-peak infrastructure
-- gain-reduction telemetry
-- automatic-headroom hooks
+- compressor and all legacy compressor variants/modes
+- expander and all legacy expander variants/modes
+- pause gate and related gate controls
+- look-ahead / brickwall limiting and all legacy limiter modes
+- soft clipping / clipping protection
+- de-essing and multiband dynamics
+- loudness/dynamics compensation features where classified as dynamics
+- true-peak infrastructure and legacy true-peak/clip trip behavior
+- stage gain-reduction telemetry and metering
+- automatic-headroom interactions
+- 1x / 2x / 4x oversampling and every legacy oversampling-dependent dynamics path
+- all additional legacy dynamics features discovered by the formal inventory, even if not named above
+
+For each legacy dynamics capability, apply the provenance gate: inherited/GPL-path implementations are independently recreated; demonstrably owner-authored post-fork implementations may be deliberately ported only after provenance and quality review; clean but weak/buggy implementations are reimplemented or improved.
 
 Pause gate semantics remain:
 - Attack = fade-out

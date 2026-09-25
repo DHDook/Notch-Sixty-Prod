@@ -71,8 +71,8 @@ struct ContentView: View {
         Binding(get: { engine.playbackControlConfiguration.globalBypassed }, set: { try? engine.setGlobalDSPBypassed($0) })
     }
 
-    private var flatAuditionBinding: Binding<Bool> {
-        Binding(get: { engine.playbackControlConfiguration.flatAuditionEnabled }, set: { try? engine.setFlatAuditionEnabled($0) })
+    private var auditionModeBinding: Binding<AuditionMode> {
+        Binding(get: { engine.playbackControlConfiguration.auditionMode }, set: { try? engine.setAuditionMode($0) })
     }
 
     private var crossoverEnabledBinding: Binding<Bool> { crossoverBinding(\.enabled) }
@@ -156,7 +156,13 @@ struct ContentView: View {
                 Text("Stereo / playback validation").font(.headline)
                 Spacer()
                 Toggle("Global Bypass", isOn: globalBypassBinding).toggleStyle(.switch)
-                Toggle("Flat", isOn: flatAuditionBinding).toggleStyle(.switch)
+                Picker("Audition", selection: auditionModeBinding) {
+                    ForEach(AuditionMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 300)
             }
             HStack(spacing: 12) {
                 Text("Master").frame(width: 90, alignment: .leading)
@@ -181,7 +187,7 @@ struct ContentView: View {
                     .monospacedDigit()
                     .frame(width: 55)
             }
-            Text("Balance is attenuation-only; center is exact unity. Global Bypass and Flat preserve all configured DSP state while auditioning the untreated input.")
+            Text("Processed runs the configured DSP. Reference is untreated input delayed to the processed-path latency. Delta is Processed − Reference. Global Bypass remains the true raw escape path.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

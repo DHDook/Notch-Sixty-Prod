@@ -219,6 +219,102 @@ final class StereoPlaybackControlTests: XCTestCase {
         XCTAssertEqual(right, -0.1, accuracy: 0.000_01)
     }
 
+    func testReferenceAuditionDelaysRawInputByPublishedLatency() {
+        guard let kernel = N60RenderKernelCreate() else {
+            return XCTFail("Unable to create render kernel")
+        }
+        defer { N60RenderKernelDestroy(kernel) }
+
+        var graph = N60DSPGraphSnapshotMakeUnity(96_000)
+        graph.auditionMode = N60AuditionModeReference
+        graph.latencyFrames = 3
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+
+        let inputs: [Float] = [1, 0.5, -0.25, 0, 0, 0]
+        var outputs: [Float] = []
+        for sample in inputs {
+            var left: Float = 0
+            var right: Float = 0
+            N60RenderKernelProcessStereoFrame(kernel, sample, sample, &left, &right)
+            outputs.append(left)
+            XCTAssertEqual(left, right, accuracy: 0.000_001)
+        }
+        XCTAssertEqual(outputs[0], 0, accuracy: 0.000_001)
+        XCTAssertEqual(outputs[1], 0, accuracy: 0.000_001)
+        XCTAssertEqual(outputs[2], 0, accuracy: 0.000_001)
+        XCTAssertEqual(outputs[3], 1, accuracy: 0.000_001)
+        XCTAssertEqual(outputs[4], 0.5, accuracy: 0.000_001)
+        XCTAssertEqual(outputs[5], -0.25, accuracy: 0.000_001)
+    }
+
+    func testDeltaAuditionNullsUnityConvolutionAgainstLatencyMatchedReference() {
+        guard let kernel = N60RenderKernelCreate() else {
+            return XCTFail("Unable to create render kernel")
+        }
+        defer { N60RenderKernelDestroy(kernel) }
+
+        var program = N60ConvolutionProgramInfo()
+        var taps: [Float] = [1]
+        XCTAssertTrue(taps.withUnsafeBufferPointer { buffer in
+            N60RenderKernelPrepareConvolutionProgram(
+                kernel,
+                0,
+                buffer.baseAddress!,
+                nil,
+                UInt32(buffer.count),
+                0,
+                &program
+            )
+        })
+
+        var graph = N60DSPGraphSnapshotMakeUnity(96_000)
+        XCTAssertTrue(N60DSPGraphSnapshotSetConvolutionProgram(&graph, 0, program, true))
+        graph.auditionMode = N60AuditionModeDelta
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+
+        var maxAbs: Float = 0
+        for frame in 0..<2_000 {
+            let sample = Float(sin(Double(frame) * 0.031) * 0.4)
+            var left: Float = 0
+            var right: Float = 0
+            N60RenderKernelProcessStereoFrame(kernel, sample, -sample, &left, &right)
+            if frame > Int(program.engineLatencyFrames) + 16 {
+                maxAbs = max(maxAbs, abs(left), abs(right))
+            }
+        }
+        XCTAssertLessThan(maxAbs, 0.000_01)
+    }
+
+    func testGlobalBypassOverridesAuditionModeAndStillAppliesMasterGain() {
+        guard let kernel = N60RenderKernelCreate() else {
+            return XCTFail("Unable to create render kernel")
+        }
+        defer { N60RenderKernelDestroy(kernel) }
+
+        var graph = N60DSPGraphSnapshotMakeUnity(96_000)
+        graph.bypassed = true
+        graph.auditionMode = N60AuditionModeDelta
+        graph.latencyFrames = 128
+        graph.masterGainLinear = 0.5
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+
+        var left: Float = 0
+        var right: Float = 0
+        N60RenderKernelProcessStereoFrame(kernel, 0.4, -0.2, &left, &right)
+        XCTAssertEqual(left, 0.2, accuracy: 0.000_001)
+        XCTAssertEqual(right, -0.1, accuracy: 0.000_001)
+    }
+
+    func testFlatCompatibilityAliasMapsToReferenceAudition() {
+        var playback = PlaybackControlConfiguration(flatAuditionEnabled: true)
+        XCTAssertEqual(playback.auditionMode, .reference)
+        XCTAssertTrue(playback.flatAuditionEnabled)
+        playback.flatAuditionEnabled = false
+        XCTAssertEqual(playback.auditionMode, .processed)
+        XCTAssertFalse(FIRUpdatePolicy.isRawBypassed(PlaybackControlConfiguration(auditionMode: .reference)))
+        XCTAssertTrue(FIRUpdatePolicy.isRawBypassed(PlaybackControlConfiguration(globalBypassed: true)))
+    }
+
     func testGraphBypassReturnsUntreatedStereoSamples() {
         guard let kernel = N60RenderKernelCreate() else {
             return XCTFail("Unable to create render kernel")
@@ -334,18 +430,29 @@ final class StereoPlaybackControlTests: XCTestCase {
     func testRawBypassDefersFIRPreparationPolicyAcrossRepeatedEdits() {
         let linearEQ = StereoEQConfiguration(phaseMode: .linearPhase)
         let room = RoomCorrectionConfiguration(enabled: true, filter: .validation)
-        let bypassStates = [
-            PlaybackControlConfiguration(balance: 0, globalBypassed: true, flatAuditionEnabled: false),
-            PlaybackControlConfiguration(balance: 0, globalBypassed: false, flatAuditionEnabled: true),
-            PlaybackControlConfiguration(balance: 0, globalBypassed: true, flatAuditionEnabled: true),
+        let globalBypassStates = [
+            PlaybackControlConfiguration(balance: 0, globalBypassed: true, auditionMode: .processed),
+            PlaybackControlConfiguration(balance: 0, globalBypassed: true, auditionMode: .reference),
+            PlaybackControlConfiguration(balance: 0, globalBypassed: true, auditionMode: .delta),
         ]
 
-        for playback in bypassStates {
+        for playback in globalBypassStates {
             for _ in 0..<32 {
                 XCTAssertTrue(FIRUpdatePolicy.isRawBypassed(playback))
                 XCTAssertFalse(FIRUpdatePolicy.shouldPrepareLinearPhase(stereoEQ: linearEQ, playback: playback))
                 XCTAssertFalse(FIRUpdatePolicy.shouldPrepareRoomCorrection(roomCorrection: room, playback: playback))
             }
+        }
+    }
+
+    func testReferenceAndDeltaKeepFIRStagesPrepared() {
+        let linearEQ = StereoEQConfiguration(phaseMode: .linearPhase)
+        let room = RoomCorrectionConfiguration(enabled: true, filter: .validation)
+        for mode in [AuditionMode.reference, .delta] {
+            let playback = PlaybackControlConfiguration(auditionMode: mode)
+            XCTAssertFalse(FIRUpdatePolicy.isRawBypassed(playback))
+            XCTAssertTrue(FIRUpdatePolicy.shouldPrepareLinearPhase(stereoEQ: linearEQ, playback: playback))
+            XCTAssertTrue(FIRUpdatePolicy.shouldPrepareRoomCorrection(roomCorrection: room, playback: playback))
         }
     }
 

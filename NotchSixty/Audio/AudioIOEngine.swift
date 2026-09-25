@@ -580,7 +580,13 @@ final class AudioIOEngine: ObservableObject {
 
     func setFlatAuditionEnabled(_ enabled: Bool) throws {
         var updated = playbackControlConfiguration
-        updated.flatAuditionEnabled = enabled
+        updated.auditionMode = enabled ? .reference : .processed
+        try applyPlaybackControlConfiguration(updated)
+    }
+
+    func setAuditionMode(_ mode: AuditionMode) throws {
+        var updated = playbackControlConfiguration
+        updated.auditionMode = mode
         try applyPlaybackControlConfiguration(updated)
     }
 
@@ -868,7 +874,8 @@ final class AudioIOEngine: ObservableObject {
                 }
             }
 
-            if wasBypassed != willBeBypassed {
+            let auditionModeChanged = playbackControlConfiguration.auditionMode != configuration.auditionMode
+            if wasBypassed != willBeBypassed || auditionModeChanged {
                 try session.transitionDSPGraph(graph)
             } else {
                 try session.publishDSPGraph(graph)
