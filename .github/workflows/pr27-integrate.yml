@@ -1,23 +1,31 @@
 name: PR27 Protection Integration
 
-# retrigger after restoring PR26 regression suite
 on:
   push:
     branches: [feature/overload-protection-oversampling]
     paths:
       - .github/workflows/pr27-integrate.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/pr27-integrate.yml'
+      - '.github/scripts/pr27_integrate.py'
+      - 'NotchSixty/**'
+      - 'NotchSixtyTests/**'
 
 permissions:
   contents: write
 
 jobs:
   integrate:
+    if: github.head_ref == '' || github.head_ref == 'feature/overload-protection-oversampling'
     runs-on: xcode-27
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
+          ref: feature/overload-protection-oversampling
       - name: Apply graph integration
         run: python3 .github/scripts/pr27_integrate.py
       - name: Run full test suite
