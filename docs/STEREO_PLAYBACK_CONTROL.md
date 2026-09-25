@@ -11,7 +11,7 @@ PR #23 extends the proprietary realtime DSP graph from linked stereo EQ to expli
 - Linear-phase EQ designs equal-length left/right FIRs and uses the existing stereo partitioned convolver.
 - Balance is attenuation-only: center is exact unity, and neither channel can exceed unity because of balance.
 - Global Bypass and Flat audition preserve all configured state while rendering the untreated captured stereo signal.
-- Per-band EQ gain is limited to -24...+24 dB in the product model and portable biquad designer.
+- Per-band EQ gain is limited to -24...+24 dB in the UI, product model, legacy compatibility path, and portable biquad designer.
 
 ## Realtime contract
 
@@ -27,7 +27,7 @@ Deterministic tests cover linked equality, left-only channel isolation, attenuat
 
 ## Hardware safety hardening
 
-The first PR #23 hardware acceptance pass exposed that free-form EQ gain entry could accept pathological values such as +300 dB, producing a dangerously loud output event. PR #23 now rejects per-band gains outside -24...+24 dB before graph publication, and the portable C biquad designer independently rejects the same range violations as defense in depth. The broader automatic-headroom and true-peak protection work remains planned for the later dynamics/protection stage.
+The first PR #23 hardware acceptance pass exposed that free-form EQ gain entry could accept pathological values such as +300 dB, producing a dangerously loud output event. PR #23 now clamps the engineering UI and rejects per-band gains outside -24...+24 dB before graph publication; the portable C biquad designer independently rejects the same range violations as defense in depth. The hardware pass also exposed that the fixed-height engineering layout could make lower diagnostics unreachable, so the validation surface is now vertically scrollable with a smaller minimum window height. The broader automatic-headroom and true-peak protection work remains planned for the later dynamics/protection stage.
 
 ## Provenance
 
