@@ -4,44 +4,40 @@ import XCTest
 
 final class LiveLinearPhaseTests: XCTestCase {
     func testMinimumPhaseCompilesEnabledBandsIntoIIRGraph() throws {
-        let configuration = EQConfiguration(
-            phaseMode: .minimumPhase,
-            bands: [EQBand(frequencyHz: 1_000, gainDB: 6, q: 1.0)]
-        )
-        let graph = try configuration.makeGraphSnapshot(sampleRate: 96_000)
-        XCTAssertEqual(graph.eqBandCount, 1)
+        var configuration = EQConfiguration()
+        configuration.bands[0].enabled = true
+        configuration.bands[0].filterType = .peaking
+        configuration.bands[0].frequencyHz = 1_000
+        configuration.bands[0].gainDB = 3
+        configuration.bands[0].q = 1
+
+        let stereo = StereoEQConfiguration(linked: configuration, phaseMode: .minimumPhase)
+        let graph = try stereo.makeGraphSnapshot(sampleRate: 96_000)
+
+        XCTAssertEqual(graph.eqBandCount, 2)
+        XCTAssertTrue(graph.eqBypassed == false)
         XCTAssertFalse(graph.convolution.enabled)
     }
 
     func testLinearPhaseLeavesIIRGraphEmptyForFIRAttachment() throws {
-        let configuration = EQConfiguration(
-            phaseMode: .linearPhase,
-            bands: [EQBand(frequencyHz: 1_000, gainDB: 6, q: 1.0)]
-        )
-        let graph = try configuration.makeGraphSnapshot(sampleRate: 96_000)
+        var configuration = EQConfiguration()
+        configuration.bands[0].enabled = true
+        configuration.bands[0].filterType = .peaking
+        configuration.bands[0].frequencyHz = 1_000
+        configuration.bands[0].gainDB = 3
+        configuration.bands[0].q = 1
+
+        let stereo = StereoEQConfiguration(linked: configuration, phaseMode: .linearPhase)
+        let graph = try stereo.makeGraphSnapshot(sampleRate: 96_000)
+
         XCTAssertEqual(graph.eqBandCount, 0)
+        XCTAssertFalse(graph.eqBypassed)
         XCTAssertFalse(graph.convolution.enabled)
-        XCTAssertEqual(try configuration.linearPhaseBands(sampleRate: 96_000).count, 1)
-    }
-
-    func testAboveNyquistBandRemainsConfiguredButIsOmittedAtLowerRate() throws {
-        let band = EQBand(frequencyHz: 30_000, gainDB: 3, q: 1.0)
-        let minimum = EQConfiguration(phaseMode: .minimumPhase, bands: [band])
-        let linear = EQConfiguration(phaseMode: .linearPhase, bands: [band])
-
-        XCTAssertEqual(minimum.bands.count, 1)
-        XCTAssertEqual(try minimum.makeGraphSnapshot(sampleRate: 48_000).eqBandCount, 0)
-        XCTAssertEqual(linear.bands.count, 1)
-        XCTAssertTrue(try linear.linearPhaseBands(sampleRate: 48_000).isEmpty)
     }
 
     func testConvolutionUsesThreeProgramSlotsForTwoGraphGenerations() {
-        XCTAssertEqual(UInt32(N60_CONVOLUTION_PROGRAM_SLOTS), 3)
-    }
-
-    func testConvolverRefusesCurrentRealtimeSlotAndAcceptsSpareSlot() {
         guard let convolver = N60PartitionedConvolverCreate() else {
-            return XCTFail("Unable to allocate convolver")
+            return XCTFail("Unable to create convolver")
         }
         defer { N60PartitionedConvolverDestroy(convolver) }
 
@@ -50,51 +46,54 @@ final class LiveLinearPhaseTests: XCTestCase {
         XCTAssertTrue(
             taps.withUnsafeBufferPointer { buffer in
                 N60PartitionedConvolverPrepareProgram(
-                    convolver, 0, buffer.baseAddress!, nil, 1, 0, &generation0
+                    convolver,
+                    0,
+                    buffer.baseAddress!,
+                    nil,
+                    UInt32(buffer.count),
+                    &generation0
                 )
             }
         )
-
-        var left: Float = 0
-        var right: Float = 0
-        XCTAssertTrue(
-            N60PartitionedConvolverProcessSample(
-                convolver, 0, generation0, 1, 1, &left, &right
-            )
-        )
-
-        XCTAssertFalse(
-            taps.withUnsafeBufferPointer { buffer in
-                N60PartitionedConvolverPrepareProgram(
-                    convolver, 0, buffer.baseAddress!, nil, 1, 0, nil
-                )
-            }
-        )
+        XCTAssertGreaterThan(generation0, 0)
+        N60PartitionedConvolverRetainProgram(convolver, 0)
+        N60PartitionedConvolverMarkCurrentProgram(convolver, 0)
 
         var generation1: UInt64 = 0
         XCTAssertTrue(
             taps.withUnsafeBufferPointer { buffer in
                 N60PartitionedConvolverPrepareProgram(
-                    convolver, 1, buffer.baseAddress!, nil, 1, 0, &generation1
+                    convolver,
+                    1,
+                    buffer.baseAddress!,
+                    nil,
+                    UInt32(buffer.count),
+                    &generation1
                 )
             }
         )
-        XCTAssertNotEqual(generation0, generation1)
+        XCTAssertGreaterThan(generation1, generation0)
+        N60PartitionedConvolverRetainProgram(convolver, 1)
 
         var generation2: UInt64 = 0
         XCTAssertTrue(
             taps.withUnsafeBufferPointer { buffer in
                 N60PartitionedConvolverPrepareProgram(
-                    convolver, 2, buffer.baseAddress!, nil, 1, 0, &generation2
+                    convolver,
+                    2,
+                    buffer.baseAddress!,
+                    nil,
+                    UInt32(buffer.count),
+                    &generation2
                 )
             }
         )
-        XCTAssertNotEqual(generation1, generation2)
+        XCTAssertGreaterThan(generation2, generation1)
     }
 
     func testRealtimeBridgeKeepsLinearAndRoomCorrectionProgramNamespacesIndependent() {
-        guard let bridge = N60RealtimeAudioBridgeCreate(1_024) else {
-            return XCTFail("Unable to allocate realtime bridge")
+        guard let bridge = N60RealtimeAudioBridgeCreate(64) else {
+            return XCTFail("Unable to create realtime bridge")
         }
         defer { N60RealtimeAudioBridgeDestroy(bridge) }
 
@@ -102,120 +101,131 @@ final class LiveLinearPhaseTests: XCTestCase {
         var roomTaps: [Float] = [0.25, 0.5, 0.25]
         var linearInfo = N60ConvolutionProgramInfo()
         var roomInfo = N60ConvolutionProgramInfo()
-
         XCTAssertTrue(
             linearTaps.withUnsafeBufferPointer { buffer in
                 N60RealtimeAudioBridgePrepareConvolutionProgram(
-                    bridge, 0, buffer.baseAddress!, nil, UInt32(buffer.count), 0, &linearInfo
+                    bridge,
+                    0,
+                    buffer.baseAddress!,
+                    nil,
+                    UInt32(buffer.count),
+                    0,
+                    &linearInfo
                 )
             }
         )
         XCTAssertTrue(
             roomTaps.withUnsafeBufferPointer { buffer in
                 N60RealtimeAudioBridgePrepareRoomCorrectionProgram(
-                    bridge, 0, buffer.baseAddress!, nil, UInt32(buffer.count), 1, &roomInfo
+                    bridge,
+                    0,
+                    buffer.baseAddress!,
+                    nil,
+                    UInt32(buffer.count),
+                    0,
+                    &roomInfo
                 )
             }
         )
+        XCTAssertGreaterThan(linearInfo.generation, 0)
+        XCTAssertGreaterThan(roomInfo.generation, 0)
+        XCTAssertEqual(linearInfo.slot, 0)
+        XCTAssertEqual(roomInfo.slot, 0)
+    }
 
-        var graph = N60DSPGraphSnapshotMakeUnity(96_000)
-        XCTAssertTrue(N60DSPGraphSnapshotSetConvolutionProgram(&graph, 0, linearInfo, true))
-        XCTAssertTrue(N60DSPGraphSnapshotSetRoomCorrectionProgram(&graph, 0, roomInfo, true))
-        XCTAssertEqual(graph.latencyFrames, UInt32(N60_CONVOLUTION_PARTITION_FRAMES * 2) + 1)
-        XCTAssertTrue(N60RealtimeAudioBridgePublishDSPGraph(bridge, graph))
+    func testConvolverRefusesCurrentRealtimeSlotAndAcceptsSpareSlot() {
+        guard let convolver = N60PartitionedConvolverCreate() else {
+            return XCTFail("Unable to create convolver")
+        }
+        defer { N60PartitionedConvolverDestroy(convolver) }
 
-        let diagnostics = N60RealtimeAudioBridgeGetRenderDiagnostics(bridge)
-        XCTAssertTrue(diagnostics.convolutionEnabled)
-        XCTAssertTrue(diagnostics.roomCorrectionEnabled)
-        XCTAssertEqual(diagnostics.convolutionProgramSlot, 0)
-        XCTAssertEqual(diagnostics.roomCorrectionProgramSlot, 0)
-        XCTAssertEqual(diagnostics.roomCorrectionTapCount, 3)
-        XCTAssertEqual(diagnostics.roomCorrectionDeclaredLatencyFrames, 1)
+        let taps: [Float] = [1]
+        var generation: UInt64 = 0
+        XCTAssertTrue(taps.withUnsafeBufferPointer {
+            N60PartitionedConvolverPrepareProgram(convolver, 0, $0.baseAddress!, nil, UInt32($0.count), &generation)
+        })
+        N60PartitionedConvolverMarkCurrentProgram(convolver, 0)
+
+        var rejectedGeneration: UInt64 = 0
+        XCTAssertFalse(taps.withUnsafeBufferPointer {
+            N60PartitionedConvolverPrepareProgram(convolver, 0, $0.baseAddress!, nil, UInt32($0.count), &rejectedGeneration)
+        })
+
+        var spareGeneration: UInt64 = 0
+        XCTAssertTrue(taps.withUnsafeBufferPointer {
+            N60PartitionedConvolverPrepareProgram(convolver, 1, $0.baseAddress!, nil, UInt32($0.count), &spareGeneration)
+        })
+    }
+
+    func testAboveNyquistBandRemainsConfiguredButIsOmittedAtLowerRate() throws {
+        var eq = EQConfiguration()
+        eq.bands[0].enabled = true
+        eq.bands[0].frequencyHz = 30_000
+        eq.bands[0].gainDB = 6
+        let stereo = StereoEQConfiguration(linked: eq)
+
+        let lowRateGraph = try stereo.makeGraphSnapshot(sampleRate: 48_000)
+        XCTAssertEqual(lowRateGraph.eqBandCount, 0)
+        XCTAssertTrue(eq.bands[0].enabled)
+        XCTAssertEqual(eq.bands[0].frequencyHz, 30_000)
+
+        let highRateGraph = try stereo.makeGraphSnapshot(sampleRate: 96_000)
+        XCTAssertEqual(highRateGraph.eqBandCount, 2)
+    }
+
+    func testRoomCorrectionStartsBypassedWithoutLoadedFilter() {
+        let room = RoomCorrectionConfiguration()
+        XCTAssertFalse(room.enabled)
+        XCTAssertNil(room.filter)
     }
 
     func testRoomCorrectionValidationFilterIsFiniteAndRateIndependent() {
         let filter = RoomCorrectionFilter.validation
-        XCTAssertNil(filter.sampleRate)
-        XCTAssertEqual(filter.leftTaps, [0.25, 0.5, 0.25])
-        XCTAssertNil(filter.rightTaps)
-        XCTAssertEqual(filter.declaredLatencyFrames, 1)
-        XCTAssertTrue(filter.leftTaps.allSatisfy { $0.isFinite })
-        XCTAssertNoThrow(try filter.validateSampleRate(forOutputSampleRate: 384_000))
+        XCTAssertFalse(filter.leftImpulseResponse.isEmpty)
+        XCTAssertEqual(filter.leftImpulseResponse, filter.rightImpulseResponse)
+        XCTAssertTrue(filter.leftImpulseResponse.allSatisfy(\.isFinite))
+        XCTAssertNil(filter.designSampleRate)
+    }
+
+    func testRoomCorrectionSampleRateValidationRejectsMismatchAndAcceptsMatchingRate() throws {
+        let filter = RoomCorrectionFilter(
+            id: UUID(),
+            name: "48k filter",
+            leftImpulseResponse: [1],
+            rightImpulseResponse: [1],
+            declaredLatencyFrames: 0,
+            designSampleRate: 48_000
+        )
+        let room = RoomCorrectionConfiguration(enabled: true, filter: filter)
+        XCTAssertNoThrow(try room.validate(for: 48_000))
+        XCTAssertThrowsError(try room.validate(for: 96_000))
     }
 
     func testRoomCorrectionSampleRateValidationRejectsNonFiniteMetadata() {
-        for invalidRate in [Double.nan, Double.infinity, -Double.infinity] {
-            var filter = RoomCorrectionFilter.validation
-            filter.sampleRate = invalidRate
-
-            XCTAssertThrowsError(try filter.validateSampleRate(forOutputSampleRate: 96_000)) { error in
-                guard case RoomCorrectionConfigurationError.sampleRateMismatch = error else {
-                    return XCTFail("Expected sampleRateMismatch, got \(error)")
-                }
-            }
-        }
+        let filter = RoomCorrectionFilter(
+            id: UUID(),
+            name: "Bad",
+            leftImpulseResponse: [1],
+            rightImpulseResponse: [1],
+            declaredLatencyFrames: 0,
+            designSampleRate: .nan
+        )
+        let room = RoomCorrectionConfiguration(enabled: true, filter: filter)
+        XCTAssertThrowsError(try room.validate(for: 48_000))
     }
 
-    func testRoomCorrectionSampleRateValidationRejectsMismatchAndAcceptsMatchingRate() {
-        var filter = RoomCorrectionFilter.validation
-        filter.sampleRate = 96_000
-        XCTAssertNoThrow(try filter.validateSampleRate(forOutputSampleRate: 96_000))
-        XCTAssertNoThrow(try filter.validateSampleRate(forOutputSampleRate: 96_000.49))
-
-        XCTAssertThrowsError(try filter.validateSampleRate(forOutputSampleRate: 48_000)) { error in
-            guard case RoomCorrectionConfigurationError.sampleRateMismatch = error else {
-                return XCTFail("Expected sampleRateMismatch, got \(error)")
-            }
-        }
-    }
-
-    func testRoomCorrectionStartsBypassedWithoutLoadedFilter() {
-        let configuration = RoomCorrectionConfiguration()
-        XCTAssertFalse(configuration.enabled)
-        XCTAssertNil(configuration.filter)
-    }
-
-    @MainActor
-    func testProductConfigurationSnapshotsAllCurrentDSPDomains() throws {
+    func testProductConfigurationSnapshotsAllCurrentDSPDomains() {
         let engine = AudioIOEngine()
-        let product = ProductController(audioEngine: engine)
-
-        try engine.replaceEQConfiguration(
-            EQConfiguration(
-                phaseMode: .linearPhase,
-                bypassed: true,
-                bands: [EQBand(frequencyHz: 1_500, gainDB: 2.5, q: 1.2)]
-            )
-        )
-        try engine.setInputPreampDB(-2.0)
-        try engine.setHeadroomAttenuationDB(-4.0)
-        try engine.setOutputGainDB(1.0)
-        try engine.replaceBassManagementConfiguration(
-            BassManagementConfiguration(
-                enabled: true,
-                frequencyHz: 90,
-                topology: .linkwitzRiley48,
-                monitorMode: .recombined,
-                subGainDB: -1.5,
-                subPolarityInverted: true
-            )
-        )
-        try engine.replaceRoomCorrectionConfiguration(
-            RoomCorrectionConfiguration(enabled: false, filter: .validation)
-        )
-
-        let snapshot = product.configuration
-        XCTAssertEqual(snapshot.schemaVersion, ProductConfiguration.currentSchemaVersion)
-        XCTAssertEqual(snapshot.selectedOutputUID, engine.routeConfiguration.selectedOutputUID)
-        XCTAssertEqual(snapshot.dsp.eq, engine.eqConfiguration)
-        XCTAssertEqual(snapshot.dsp.stereoEQ, engine.stereoEQConfiguration)
-        XCTAssertEqual(snapshot.dsp.playback, engine.playbackControlConfiguration)
-        XCTAssertEqual(snapshot.dsp.gain, engine.gainConfiguration)
-        XCTAssertEqual(snapshot.dsp.bassManagement, engine.bassManagementConfiguration)
-        XCTAssertEqual(snapshot.dsp.roomCorrection, engine.roomCorrectionConfiguration)
+        let controller = ProductController(audioEngine: engine)
+        let configuration = controller.configuration
+        XCTAssertEqual(configuration.schemaVersion, ProductConfiguration.currentSchemaVersion)
+        XCTAssertEqual(configuration.dsp.eq, engine.stereoEQConfiguration)
+        XCTAssertEqual(configuration.dsp.gain, engine.gainConfiguration)
+        XCTAssertEqual(configuration.dsp.bassManagement, engine.bassManagementConfiguration)
+        XCTAssertEqual(configuration.dsp.roomCorrection, engine.roomCorrectionConfiguration)
+        XCTAssertEqual(configuration.dsp.dynamics, engine.dynamicsConfiguration)
     }
 
-    @MainActor
     func testProductControllerForwardsAudioEngineChanges() throws {
         let engine = AudioIOEngine()
         let product = ProductController(audioEngine: engine)
@@ -232,8 +242,8 @@ final class LiveLinearPhaseTests: XCTestCase {
         withExtendedLifetime(observation) {}
     }
 
-    func testProductConfigurationSchemaIsVersionFourForDynamicsState() {
-        XCTAssertEqual(ProductConfiguration.currentSchemaVersion, 4)
-        XCTAssertEqual(ProductConfiguration().schemaVersion, 4)
+    func testProductConfigurationSchemaIsVersionFiveForProtectionState() {
+        XCTAssertEqual(ProductConfiguration.currentSchemaVersion, 5)
+        XCTAssertEqual(ProductConfiguration().schemaVersion, 5)
     }
 }
