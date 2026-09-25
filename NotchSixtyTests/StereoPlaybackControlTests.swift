@@ -165,6 +165,60 @@ final class StereoPlaybackControlTests: XCTestCase {
         XCTAssertEqual(configuration.rightBands[0].gainDB, 3)
     }
 
+    func testUnsafeEQGainIsRejectedBeforeGraphPublication() {
+        for gain in [300.0, -300.0, .infinity, -.infinity, .nan] {
+            let configuration = StereoEQConfiguration(
+                linkedBands: [EQBand(frequencyHz: 1_000, gainDB: gain, q: 1)]
+            )
+            XCTAssertThrowsError(
+                try configuration.makeGraphSnapshot(
+                    sampleRate: 96_000,
+                    gainConfiguration: DSPGainConfiguration(),
+                    bassManagementConfiguration: BassManagementConfiguration(),
+                    playbackConfiguration: PlaybackControlConfiguration()
+                ),
+                "gain \(gain) must not reach the realtime graph"
+            )
+        }
+    }
+
+    func testTwentyFourDBBoundaryIsAcceptedAndBeyondBoundaryIsRejected() throws {
+        for gain in [-24.0, 24.0] {
+            let configuration = StereoEQConfiguration(
+                linkedBands: [EQBand(frequencyHz: 1_000, gainDB: gain, q: 1)]
+            )
+            XCTAssertNoThrow(
+                try configuration.makeGraphSnapshot(
+                    sampleRate: 96_000,
+                    gainConfiguration: DSPGainConfiguration(),
+                    bassManagementConfiguration: BassManagementConfiguration(),
+                    playbackConfiguration: PlaybackControlConfiguration()
+                )
+            )
+        }
+
+        for gain in [-24.001, 24.001] {
+            let configuration = StereoEQConfiguration(
+                linkedBands: [EQBand(frequencyHz: 1_000, gainDB: gain, q: 1)]
+            )
+            XCTAssertThrowsError(
+                try configuration.makeGraphSnapshot(
+                    sampleRate: 96_000,
+                    gainConfiguration: DSPGainConfiguration(),
+                    bassManagementConfiguration: BassManagementConfiguration(),
+                    playbackConfiguration: PlaybackControlConfiguration()
+                )
+            )
+        }
+
+        var coefficients = N60BiquadCoefficients()
+        XCTAssertTrue(N60BiquadDesign(N60BiquadFilterTypePeaking, 96_000, 1_000, 24, 1, &coefficients))
+        XCTAssertTrue(N60BiquadDesign(N60BiquadFilterTypePeaking, 96_000, 1_000, -24, 1, &coefficients))
+        XCTAssertFalse(N60BiquadDesign(N60BiquadFilterTypePeaking, 96_000, 1_000, 24.001, 1, &coefficients))
+        XCTAssertFalse(N60BiquadDesign(N60BiquadFilterTypePeaking, 96_000, 1_000, -24.001, 1, &coefficients))
+        XCTAssertFalse(N60BiquadDesign(N60BiquadFilterTypePeaking, 96_000, 1_000, 300, 1, &coefficients))
+    }
+
     func testStereoGraphCompilesUpToSixtyFourBandsPerChannelAt384k() throws {
         let left = (0..<64).map { index in
             EQBand(
