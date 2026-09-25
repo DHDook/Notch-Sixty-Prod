@@ -3,17 +3,23 @@ import SwiftUI
 
 struct ProductDSPConfiguration: Equatable, Sendable {
     var eq: EQConfiguration
+    var stereoEQ: StereoEQConfiguration
+    var playback: PlaybackControlConfiguration
     var gain: DSPGainConfiguration
     var bassManagement: BassManagementConfiguration
     var roomCorrection: RoomCorrectionConfiguration
 
     init(
         eq: EQConfiguration = EQConfiguration(),
+        stereoEQ: StereoEQConfiguration = StereoEQConfiguration(),
+        playback: PlaybackControlConfiguration = PlaybackControlConfiguration(),
         gain: DSPGainConfiguration = DSPGainConfiguration(),
         bassManagement: BassManagementConfiguration = BassManagementConfiguration(),
         roomCorrection: RoomCorrectionConfiguration = RoomCorrectionConfiguration()
     ) {
         self.eq = eq
+        self.stereoEQ = stereoEQ
+        self.playback = playback
         self.gain = gain
         self.bassManagement = bassManagement
         self.roomCorrection = roomCorrection
@@ -21,7 +27,7 @@ struct ProductDSPConfiguration: Equatable, Sendable {
 }
 
 struct ProductConfiguration: Equatable, Sendable {
-    static let currentSchemaVersion = 1
+    static let currentSchemaVersion = 2
 
     var schemaVersion: Int
     var selectedOutputUID: String?
@@ -66,6 +72,8 @@ final class ProductController: ObservableObject {
             selectedOutputUID: audioEngine.routeConfiguration.selectedOutputUID,
             dsp: ProductDSPConfiguration(
                 eq: audioEngine.eqConfiguration,
+                stereoEQ: audioEngine.stereoEQConfiguration,
+                playback: audioEngine.playbackControlConfiguration,
                 gain: audioEngine.gainConfiguration,
                 bassManagement: audioEngine.bassManagementConfiguration,
                 roomCorrection: audioEngine.roomCorrectionConfiguration

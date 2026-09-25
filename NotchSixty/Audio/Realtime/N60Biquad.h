@@ -13,6 +13,9 @@
 extern "C" {
 #endif
 
+#define N60_EQ_MIN_GAIN_DB (-24.0)
+#define N60_EQ_MAX_GAIN_DB (24.0)
+
 typedef enum {
     N60BiquadFilterTypePeaking = 0,
     N60BiquadFilterTypeLowShelf = 1,
@@ -99,6 +102,7 @@ static inline bool N60BiquadDesign(
         || !isfinite(frequencyHz) || frequencyHz <= 0.0
         || frequencyHz >= sampleRate * 0.5
         || !isfinite(gainDB)
+        || gainDB < N60_EQ_MIN_GAIN_DB || gainDB > N60_EQ_MAX_GAIN_DB
         || !isfinite(q) || q <= 0.0) {
         return false;
     }

@@ -329,26 +329,57 @@ final class CoreAudioTransportSession {
 
     func prepareConvolutionProgram(
         slot: UInt32,
-        taps: [Float],
+        leftTaps: [Float],
+        rightTaps: [Float]? = nil,
         declaredLatencyFrames: UInt32
     ) throws -> N60ConvolutionProgramInfo {
-        guard let bridge, !taps.isEmpty else {
+        guard let bridge, !leftTaps.isEmpty else {
             throw CoreAudioTransportError.convolutionProgramPreparationFailed
         }
+        guard rightTaps == nil || rightTaps?.count == leftTaps.count else {
+            throw CoreAudioTransportError.convolutionProgramPreparationFailed
+        }
+
         var info = N60ConvolutionProgramInfo()
-        let prepared = taps.withUnsafeBufferPointer { buffer in
-            N60RealtimeAudioBridgePrepareConvolutionProgram(
+        let prepared = leftTaps.withUnsafeBufferPointer { leftBuffer in
+            if let rightTaps {
+                return rightTaps.withUnsafeBufferPointer { rightBuffer in
+                    N60RealtimeAudioBridgePrepareConvolutionProgram(
+                        bridge,
+                        slot,
+                        leftBuffer.baseAddress!,
+                        rightBuffer.baseAddress!,
+                        UInt32(leftBuffer.count),
+                        declaredLatencyFrames,
+                        &info
+                    )
+                }
+            }
+            return N60RealtimeAudioBridgePrepareConvolutionProgram(
                 bridge,
                 slot,
-                buffer.baseAddress!,
+                leftBuffer.baseAddress!,
                 nil,
-                UInt32(buffer.count),
+                UInt32(leftBuffer.count),
                 declaredLatencyFrames,
                 &info
             )
         }
         guard prepared else { throw CoreAudioTransportError.convolutionProgramPreparationFailed }
         return info
+    }
+
+    func prepareConvolutionProgram(
+        slot: UInt32,
+        taps: [Float],
+        declaredLatencyFrames: UInt32
+    ) throws -> N60ConvolutionProgramInfo {
+        try prepareConvolutionProgram(
+            slot: slot,
+            leftTaps: taps,
+            rightTaps: nil,
+            declaredLatencyFrames: declaredLatencyFrames
+        )
     }
 
     func prepareRoomCorrectionProgram(

@@ -290,6 +290,7 @@ struct EQConfiguration: Equatable, Sendable {
         guard band.frequencyHz.isFinite,
               band.frequencyHz > 0,
               band.gainDB.isFinite,
+              StereoEQConfiguration.bandGainRange.contains(band.gainDB),
               band.q.isFinite,
               band.q > 0 else {
             throw EQConfigurationError.invalidBand(index: index)
@@ -411,6 +412,8 @@ final class AudioIOEngine: ObservableObject {
     @Published private(set) var outputDevices: [AudioOutputDevice] = []
     @Published private(set) var routeConfiguration: AudioRouteConfiguration
     @Published private(set) var eqConfiguration = EQConfiguration()
+    @Published private(set) var stereoEQConfiguration = StereoEQConfiguration()
+    @Published private(set) var playbackControlConfiguration = PlaybackControlConfiguration()
     @Published private(set) var gainConfiguration = DSPGainConfiguration()
     @Published private(set) var bassManagementConfiguration = BassManagementConfiguration()
     @Published private(set) var roomCorrectionConfiguration = RoomCorrectionConfiguration()
@@ -480,42 +483,87 @@ final class AudioIOEngine: ObservableObject {
     }
 
     func addEQBand(_ band: EQBand = EQBand()) throws {
-        guard eqConfiguration.bands.count < EQConfiguration.maximumBandCount else {
-            throw EQConfigurationError.tooManyBands(eqConfiguration.bands.count + 1)
+        guard stereoEQConfiguration.editableBands.count < EQConfiguration.maximumBandCount else {
+            throw EQConfigurationError.tooManyBands(stereoEQConfiguration.editableBands.count + 1)
         }
-        var updated = eqConfiguration
-        updated.bands.append(band)
-        try applyEQConfiguration(updated)
+        var updated = stereoEQConfiguration
+        var bands = updated.editableBands
+        bands.append(band)
+        updated.replaceEditableBands(bands)
+        try applyStereoEQConfiguration(updated)
     }
 
     func updateEQBand(_ band: EQBand) throws {
-        guard let index = eqConfiguration.bands.firstIndex(where: { $0.id == band.id }) else { return }
-        var updated = eqConfiguration
-        updated.bands[index] = band
-        try applyEQConfiguration(updated)
+        var updated = stereoEQConfiguration
+        guard updated.editableBands.contains(where: { $0.id == band.id }) else { return }
+        updated.updateEditableBand(band)
+        try applyStereoEQConfiguration(updated)
     }
 
     func removeEQBand(id: UUID) throws {
-        var updated = eqConfiguration
-        updated.bands.removeAll { $0.id == id }
-        try applyEQConfiguration(updated)
+        var updated = stereoEQConfiguration
+        updated.removeEditableBand(id: id)
+        try applyStereoEQConfiguration(updated)
     }
 
     func setEQBypassed(_ bypassed: Bool) throws {
-        var updated = eqConfiguration
+        var updated = stereoEQConfiguration
         updated.bypassed = bypassed
-        try applyEQConfiguration(updated)
+        try applyStereoEQConfiguration(updated)
     }
 
     func setEQPhaseMode(_ mode: EQPhaseMode) throws {
-        guard mode != eqConfiguration.phaseMode else { return }
-        var updated = eqConfiguration
+        guard mode != stereoEQConfiguration.phaseMode else { return }
+        var updated = stereoEQConfiguration
         updated.phaseMode = mode
-        try applyEQConfiguration(updated)
+        try applyStereoEQConfiguration(updated)
+    }
+
+    func setEQChannelMode(_ mode: EQChannelMode) throws {
+        var updated = stereoEQConfiguration
+        updated.setChannelMode(mode)
+        try applyStereoEQConfiguration(updated)
+    }
+
+    func setEQEditChannel(_ channel: EQEditChannel) {
+        var updated = stereoEQConfiguration
+        updated.setEditChannel(channel)
+        stereoEQConfiguration = updated
+        eqConfiguration = legacyEQConfiguration(from: updated)
+        lastErrorDescription = nil
+    }
+
+    func replaceStereoEQConfiguration(_ configuration: StereoEQConfiguration) throws {
+        try applyStereoEQConfiguration(configuration)
     }
 
     func replaceEQConfiguration(_ configuration: EQConfiguration) throws {
-        try applyEQConfiguration(configuration)
+        var updated = stereoEQConfiguration
+        updated.phaseMode = configuration.phaseMode
+        updated.bypassed = configuration.bypassed
+        updated.replaceEditableBands(configuration.bands)
+        try applyStereoEQConfiguration(updated)
+    }
+
+    func setChannelBalance(_ value: Double) throws {
+        guard value.isFinite, PlaybackControlConfiguration.balanceRange.contains(value) else {
+            throw PlaybackControlConfigurationError.invalidBalance(value)
+        }
+        var updated = playbackControlConfiguration
+        updated.balance = value
+        try applyPlaybackControlConfiguration(updated)
+    }
+
+    func setGlobalDSPBypassed(_ bypassed: Bool) throws {
+        var updated = playbackControlConfiguration
+        updated.globalBypassed = bypassed
+        try applyPlaybackControlConfiguration(updated)
+    }
+
+    func setFlatAuditionEnabled(_ enabled: Bool) throws {
+        var updated = playbackControlConfiguration
+        updated.flatAuditionEnabled = enabled
+        try applyPlaybackControlConfiguration(updated)
     }
 
     func setInputPreampDB(_ value: Double) throws {
@@ -555,13 +603,21 @@ final class AudioIOEngine: ObservableObject {
             throw BassManagementConfigurationError.invalidSubGain(configuration.subGainDB)
         }
         if let session = transportSession {
-            var graph = try eqConfiguration.makeGraphSnapshot(
+            var graph = try stereoEQConfiguration.makeGraphSnapshot(
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
-                bassManagementConfiguration: configuration
+                bassManagementConfiguration: configuration,
+                playbackConfiguration: playbackControlConfiguration
             )
-            try attachActiveLinearPhaseProgramIfNeeded(to: &graph)
-            try attachActiveRoomCorrectionProgramIfNeeded(to: &graph)
+            try attachActiveLinearPhaseProgramIfNeeded(
+                to: &graph,
+                stereoConfiguration: stereoEQConfiguration,
+                playbackConfiguration: playbackControlConfiguration
+            )
+            try attachActiveRoomCorrectionProgramIfNeeded(
+                to: &graph,
+                playbackConfiguration: playbackControlConfiguration
+            )
             try session.publishDSPGraph(graph)
         }
         bassManagementConfiguration = configuration
@@ -642,61 +698,165 @@ final class AudioIOEngine: ObservableObject {
         )
     }
 
-    private func applyEQConfiguration(_ configuration: EQConfiguration) throws {
-        guard configuration.bands.count <= EQConfiguration.maximumBandCount else {
-            throw EQConfigurationError.tooManyBands(configuration.bands.count)
+    private func legacyEQConfiguration(from configuration: StereoEQConfiguration) -> EQConfiguration {
+        EQConfiguration(
+            phaseMode: configuration.phaseMode,
+            bypassed: configuration.bypassed,
+            bands: configuration.editableBands
+        )
+    }
+
+    private func processingIsBypassed(_ configuration: PlaybackControlConfiguration) -> Bool {
+        FIRUpdatePolicy.isRawBypassed(configuration)
+    }
+
+    private func validateStereoEQStorage(_ configuration: StereoEQConfiguration) throws {
+        for bands in [configuration.linkedBands, configuration.leftBands, configuration.rightBands] {
+            guard bands.count <= EQConfiguration.maximumBandCount else {
+                throw EQConfigurationError.tooManyBands(bands.count)
+            }
+            for (index, band) in bands.enumerated() where band.enabled {
+                guard band.frequencyHz.isFinite,
+                      band.frequencyHz > 0,
+                      band.gainDB.isFinite,
+                      StereoEQConfiguration.bandGainRange.contains(band.gainDB),
+                      band.q.isFinite,
+                      band.q > 0 else {
+                    throw EQConfigurationError.invalidBand(index: index)
+                }
+            }
         }
+    }
+
+    private func applyStereoEQConfiguration(_ configuration: StereoEQConfiguration) throws {
+        try validateStereoEQStorage(configuration)
 
         if let session = transportSession {
             var graph = try configuration.makeGraphSnapshot(
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
-                bassManagementConfiguration: bassManagementConfiguration
+                bassManagementConfiguration: bassManagementConfiguration,
+                playbackConfiguration: playbackControlConfiguration
             )
 
-            if configuration.phaseMode == .linearPhase && !configuration.bypassed {
-                let preparedProgram = try prepareLinearPhaseProgram(configuration, for: session)
-                guard N60DSPGraphSnapshotSetConvolutionProgram(
-                    &graph,
-                    preparedProgram.slot,
-                    preparedProgram.programInfo,
-                    true
-                ) else {
-                    throw EQConfigurationError.linearPhaseDesignFailed
-                }
-                try attachActiveRoomCorrectionProgramIfNeeded(to: &graph)
-                try session.transitionDSPGraph(graph)
-                activeLinearPhaseProgram = preparedProgram
-                linearPhaseDesignInfo = preparedProgram.designInfo
+            if processingIsBypassed(playbackControlConfiguration) {
+                // The raw path is already active. Update state without rotating FIR
+                // programs or fading an audibly identical raw graph.
+                try session.publishDSPGraph(graph)
+                activeLinearPhaseProgram = nil
+                linearPhaseDesignInfo = nil
             } else {
+                var preparedLinearProgram: PreparedLinearPhaseProgram?
+                if configuration.phaseMode == .linearPhase && !configuration.bypassed {
+                    let prepared = try prepareLinearPhaseProgram(configuration, for: session)
+                    preparedLinearProgram = prepared
+                    linearPhaseDesignInfo = prepared.designInfo
+                    try attachLinearPhaseProgram(prepared, to: &graph)
+                } else {
+                    linearPhaseDesignInfo = nil
+                }
+
+                try attachActiveRoomCorrectionProgramIfNeeded(
+                    to: &graph,
+                    playbackConfiguration: playbackControlConfiguration
+                )
+
                 let leavingLinearPhase = activeLinearPhaseProgram != nil
-                try attachActiveRoomCorrectionProgramIfNeeded(to: &graph)
-                if leavingLinearPhase {
+                    && (configuration.phaseMode != .linearPhase || configuration.bypassed)
+                let enteringOrReplacingLinearPhase = preparedLinearProgram != nil
+                if leavingLinearPhase || enteringOrReplacingLinearPhase {
                     try session.transitionDSPGraph(graph)
                 } else {
                     try session.publishDSPGraph(graph)
                 }
-                activeLinearPhaseProgram = nil
-                linearPhaseDesignInfo = nil
+                activeLinearPhaseProgram = preparedLinearProgram
             }
         } else {
             activeLinearPhaseProgram = nil
             linearPhaseDesignInfo = nil
         }
 
-        eqConfiguration = configuration
+        stereoEQConfiguration = configuration
+        eqConfiguration = legacyEQConfiguration(from: configuration)
+        lastErrorDescription = nil
+    }
+
+    private func applyPlaybackControlConfiguration(_ configuration: PlaybackControlConfiguration) throws {
+        guard configuration.balance.isFinite,
+              PlaybackControlConfiguration.balanceRange.contains(configuration.balance) else {
+            throw PlaybackControlConfigurationError.invalidBalance(configuration.balance)
+        }
+
+        if let session = transportSession {
+            var graph = try stereoEQConfiguration.makeGraphSnapshot(
+                sampleRate: session.outputFormat.sampleRate,
+                gainConfiguration: gainConfiguration,
+                bassManagementConfiguration: bassManagementConfiguration,
+                playbackConfiguration: configuration
+            )
+
+            let wasBypassed = processingIsBypassed(playbackControlConfiguration)
+            let willBeBypassed = processingIsBypassed(configuration)
+
+            if !willBeBypassed {
+                if FIRUpdatePolicy.shouldPrepareLinearPhase(
+                    stereoEQ: stereoEQConfiguration,
+                    playback: configuration
+                ) {
+                    if activeLinearPhaseProgram == nil {
+                        let prepared = try prepareLinearPhaseProgram(stereoEQConfiguration, for: session)
+                        activeLinearPhaseProgram = prepared
+                        linearPhaseDesignInfo = prepared.designInfo
+                    }
+                    try attachActiveLinearPhaseProgramIfNeeded(
+                        to: &graph,
+                        stereoConfiguration: stereoEQConfiguration,
+                        playbackConfiguration: configuration
+                    )
+                }
+
+                if roomCorrectionConfiguration.enabled {
+                    guard let filter = roomCorrectionConfiguration.filter else {
+                        throw RoomCorrectionConfigurationError.filterRequired
+                    }
+                    if activeRoomCorrectionProgram == nil {
+                        activeRoomCorrectionProgram = try prepareRoomCorrectionProgram(filter, for: session)
+                    }
+                    try attachActiveRoomCorrectionProgramIfNeeded(
+                        to: &graph,
+                        playbackConfiguration: configuration
+                    )
+                }
+            }
+
+            if wasBypassed != willBeBypassed {
+                try session.transitionDSPGraph(graph)
+            } else {
+                try session.publishDSPGraph(graph)
+            }
+        }
+
+        playbackControlConfiguration = configuration
         lastErrorDescription = nil
     }
 
     private func applyGainConfiguration(_ configuration: DSPGainConfiguration) throws {
         if let session = transportSession {
-            var graph = try eqConfiguration.makeGraphSnapshot(
+            var graph = try stereoEQConfiguration.makeGraphSnapshot(
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: configuration,
-                bassManagementConfiguration: bassManagementConfiguration
+                bassManagementConfiguration: bassManagementConfiguration,
+                playbackConfiguration: playbackControlConfiguration
             )
-            try attachActiveLinearPhaseProgramIfNeeded(to: &graph)
-            try attachActiveRoomCorrectionProgramIfNeeded(to: &graph)
+            try attachActiveLinearPhaseProgramIfNeeded(
+                to: &graph,
+                stereoConfiguration: stereoEQConfiguration,
+                playbackConfiguration: playbackControlConfiguration
+            )
+            try attachActiveRoomCorrectionProgramIfNeeded(
+                to: &graph,
+                playbackConfiguration: playbackControlConfiguration
+            )
             try session.publishDSPGraph(graph)
         }
         gainConfiguration = configuration
@@ -709,14 +869,30 @@ final class AudioIOEngine: ObservableObject {
         }
 
         if let session = transportSession {
-            var graph = try eqConfiguration.makeGraphSnapshot(
+            var graph = try stereoEQConfiguration.makeGraphSnapshot(
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
-                bassManagementConfiguration: bassManagementConfiguration
+                bassManagementConfiguration: bassManagementConfiguration,
+                playbackConfiguration: playbackControlConfiguration
             )
-            try attachActiveLinearPhaseProgramIfNeeded(to: &graph)
+            try attachActiveLinearPhaseProgramIfNeeded(
+                to: &graph,
+                stereoConfiguration: stereoEQConfiguration,
+                playbackConfiguration: playbackControlConfiguration
+            )
 
-            if configuration.enabled {
+            if processingIsBypassed(playbackControlConfiguration) {
+                if let filter = configuration.filter {
+                    try validateRoomCorrectionFilter(
+                        filter,
+                        outputSampleRate: session.outputFormat.sampleRate
+                    )
+                }
+                // Stay on the untreated path without rotating a stale FIR slot or
+                // invoking a fade-through-silence transition.
+                try session.publishDSPGraph(graph)
+                activeRoomCorrectionProgram = nil
+            } else if configuration.enabled {
                 guard let filter = configuration.filter else {
                     throw RoomCorrectionConfigurationError.filterRequired
                 }
@@ -740,17 +916,13 @@ final class AudioIOEngine: ObservableObject {
         lastErrorDescription = nil
     }
 
-    private func prepareLinearPhaseProgram(
-        _ configuration: EQConfiguration,
-        for session: CoreAudioTransportSession
-    ) throws -> PreparedLinearPhaseProgram {
-        let sampleRate = session.outputFormat.sampleRate
-        let tapCount = Int(N60LinearPhaseEQRecommendedTapCount(sampleRate))
-        guard tapCount > 0, tapCount <= Int(N60_CONVOLUTION_MAX_TAPS) else {
-            throw EQConfigurationError.linearPhaseDesignFailed
-        }
-
-        let bands = try configuration.linearPhaseBands(sampleRate: sampleRate)
+    private func designLinearPhaseTaps(
+        _ configuration: StereoEQConfiguration,
+        channel: EQEditChannel,
+        sampleRate: Double,
+        tapCount: Int
+    ) throws -> (taps: [Float], info: N60LinearPhaseEQDesignInfo) {
+        let bands = try configuration.linearPhaseBands(for: channel, sampleRate: sampleRate)
         var taps = [Float](repeating: 0, count: tapCount)
         var designInfo = N60LinearPhaseEQDesignInfo()
         let designed = taps.withUnsafeMutableBufferPointer { tapBuffer -> Bool in
@@ -776,26 +948,66 @@ final class AudioIOEngine: ObservableObject {
             }
         }
         guard designed else { throw EQConfigurationError.linearPhaseDesignFailed }
+        return (taps, designInfo)
+    }
+
+    private func prepareLinearPhaseProgram(
+        _ configuration: StereoEQConfiguration,
+        for session: CoreAudioTransportSession
+    ) throws -> PreparedLinearPhaseProgram {
+        let sampleRate = session.outputFormat.sampleRate
+        let tapCount = Int(N60LinearPhaseEQRecommendedTapCount(sampleRate))
+        guard tapCount > 0, tapCount <= Int(N60_CONVOLUTION_MAX_TAPS) else {
+            throw EQConfigurationError.linearPhaseDesignFailed
+        }
+
+        let leftDesign = try designLinearPhaseTaps(
+            configuration,
+            channel: configuration.channelMode == .linked ? .linked : .left,
+            sampleRate: sampleRate,
+            tapCount: tapCount
+        )
+
+        let rightTaps: [Float]?
+        if configuration.channelMode == .independent {
+            let rightDesign = try designLinearPhaseTaps(
+                configuration,
+                channel: .right,
+                sampleRate: sampleRate,
+                tapCount: tapCount
+            )
+            guard rightDesign.info.groupDelayFrames == leftDesign.info.groupDelayFrames else {
+                throw EQConfigurationError.linearPhaseDesignFailed
+            }
+            rightTaps = rightDesign.taps
+        } else {
+            rightTaps = nil
+        }
 
         let slot = nextLinearPhaseProgramSlot % UInt32(N60_CONVOLUTION_PROGRAM_SLOTS)
         let programInfo: N60ConvolutionProgramInfo
         do {
             programInfo = try session.prepareConvolutionProgram(
                 slot: slot,
-                taps: taps,
-                declaredLatencyFrames: designInfo.groupDelayFrames
+                leftTaps: leftDesign.taps,
+                rightTaps: rightTaps,
+                declaredLatencyFrames: leftDesign.info.groupDelayFrames
             )
         } catch {
             throw EQConfigurationError.convolutionProgramUnavailable
         }
         nextLinearPhaseProgramSlot = (slot + 1) % UInt32(N60_CONVOLUTION_PROGRAM_SLOTS)
-        return PreparedLinearPhaseProgram(slot: slot, programInfo: programInfo, designInfo: designInfo)
+        return PreparedLinearPhaseProgram(
+            slot: slot,
+            programInfo: programInfo,
+            designInfo: leftDesign.info
+        )
     }
 
-    private func prepareRoomCorrectionProgram(
+    private func validateRoomCorrectionFilter(
         _ filter: RoomCorrectionFilter,
-        for session: CoreAudioTransportSession
-    ) throws -> PreparedRoomCorrectionProgram {
+        outputSampleRate: Double
+    ) throws {
         let tapCount = filter.leftTaps.count
         guard tapCount > 0, tapCount <= Int(N60_CONVOLUTION_MAX_TAPS) else {
             throw RoomCorrectionConfigurationError.invalidTapCount(tapCount)
@@ -807,10 +1019,17 @@ final class AudioIOEngine: ObservableObject {
               filter.rightTaps?.allSatisfy(\.isFinite) ?? true else {
             throw RoomCorrectionConfigurationError.nonFiniteTap
         }
-        try filter.validateSampleRate(forOutputSampleRate: session.outputFormat.sampleRate)
+        try filter.validateSampleRate(forOutputSampleRate: outputSampleRate)
         guard filter.declaredLatencyFrames < UInt32(tapCount) else {
             throw RoomCorrectionConfigurationError.invalidDeclaredLatency(filter.declaredLatencyFrames)
         }
+    }
+
+    private func prepareRoomCorrectionProgram(
+        _ filter: RoomCorrectionFilter,
+        for session: CoreAudioTransportSession
+    ) throws -> PreparedRoomCorrectionProgram {
+        try validateRoomCorrectionFilter(filter, outputSampleRate: session.outputFormat.sampleRate)
 
         let slot = nextRoomCorrectionProgramSlot % UInt32(N60_CONVOLUTION_PROGRAM_SLOTS)
         let programInfo: N60ConvolutionProgramInfo
@@ -828,19 +1047,32 @@ final class AudioIOEngine: ObservableObject {
         return PreparedRoomCorrectionProgram(slot: slot, programInfo: programInfo)
     }
 
-    private func attachActiveLinearPhaseProgramIfNeeded(to graph: inout N60DSPGraphSnapshot) throws {
-        guard eqConfiguration.phaseMode == .linearPhase, !eqConfiguration.bypassed else { return }
-        guard let activeLinearPhaseProgram else {
-            throw EQConfigurationError.convolutionProgramUnavailable
-        }
+    private func attachLinearPhaseProgram(
+        _ program: PreparedLinearPhaseProgram,
+        to graph: inout N60DSPGraphSnapshot
+    ) throws {
         guard N60DSPGraphSnapshotSetConvolutionProgram(
             &graph,
-            activeLinearPhaseProgram.slot,
-            activeLinearPhaseProgram.programInfo,
+            program.slot,
+            program.programInfo,
             true
         ) else {
             throw EQConfigurationError.linearPhaseDesignFailed
         }
+    }
+
+    private func attachActiveLinearPhaseProgramIfNeeded(
+        to graph: inout N60DSPGraphSnapshot,
+        stereoConfiguration: StereoEQConfiguration,
+        playbackConfiguration: PlaybackControlConfiguration
+    ) throws {
+        guard !processingIsBypassed(playbackConfiguration),
+              stereoConfiguration.phaseMode == .linearPhase,
+              !stereoConfiguration.bypassed else { return }
+        guard let activeLinearPhaseProgram else {
+            throw EQConfigurationError.convolutionProgramUnavailable
+        }
+        try attachLinearPhaseProgram(activeLinearPhaseProgram, to: &graph)
     }
 
     private func attachRoomCorrectionProgram(
@@ -857,8 +1089,12 @@ final class AudioIOEngine: ObservableObject {
         }
     }
 
-    private func attachActiveRoomCorrectionProgramIfNeeded(to graph: inout N60DSPGraphSnapshot) throws {
-        guard roomCorrectionConfiguration.enabled else { return }
+    private func attachActiveRoomCorrectionProgramIfNeeded(
+        to graph: inout N60DSPGraphSnapshot,
+        playbackConfiguration: PlaybackControlConfiguration
+    ) throws {
+        guard !processingIsBypassed(playbackConfiguration),
+              roomCorrectionConfiguration.enabled else { return }
         guard let activeRoomCorrectionProgram else {
             throw RoomCorrectionConfigurationError.convolutionProgramUnavailable
         }
@@ -906,23 +1142,21 @@ final class AudioIOEngine: ObservableObject {
         nextLinearPhaseProgramSlot = 0
         activeRoomCorrectionProgram = nil
         nextRoomCorrectionProgramSlot = 0
-        var graph = try eqConfiguration.makeGraphSnapshot(
+        var graph = try stereoEQConfiguration.makeGraphSnapshot(
             sampleRate: session.outputFormat.sampleRate,
             gainConfiguration: gainConfiguration,
-            bassManagementConfiguration: bassManagementConfiguration
+            bassManagementConfiguration: bassManagementConfiguration,
+            playbackConfiguration: playbackControlConfiguration
         )
-        if eqConfiguration.phaseMode == .linearPhase && !eqConfiguration.bypassed {
-            let preparedProgram = try prepareLinearPhaseProgram(eqConfiguration, for: session)
-            guard N60DSPGraphSnapshotSetConvolutionProgram(
-                &graph,
-                preparedProgram.slot,
-                preparedProgram.programInfo,
-                true
-            ) else {
-                throw EQConfigurationError.linearPhaseDesignFailed
-            }
+
+        if FIRUpdatePolicy.shouldPrepareLinearPhase(
+            stereoEQ: stereoEQConfiguration,
+            playback: playbackControlConfiguration
+        ) {
+            let preparedProgram = try prepareLinearPhaseProgram(stereoEQConfiguration, for: session)
             activeLinearPhaseProgram = preparedProgram
             linearPhaseDesignInfo = preparedProgram.designInfo
+            try attachLinearPhaseProgram(preparedProgram, to: &graph)
         } else {
             linearPhaseDesignInfo = nil
         }
@@ -931,9 +1165,15 @@ final class AudioIOEngine: ObservableObject {
             guard let filter = roomCorrectionConfiguration.filter else {
                 throw RoomCorrectionConfigurationError.filterRequired
             }
-            let preparedProgram = try prepareRoomCorrectionProgram(filter, for: session)
-            try attachRoomCorrectionProgram(preparedProgram, to: &graph)
-            activeRoomCorrectionProgram = preparedProgram
+            try validateRoomCorrectionFilter(filter, outputSampleRate: session.outputFormat.sampleRate)
+            if FIRUpdatePolicy.shouldPrepareRoomCorrection(
+                roomCorrection: roomCorrectionConfiguration,
+                playback: playbackControlConfiguration
+            ) {
+                let preparedProgram = try prepareRoomCorrectionProgram(filter, for: session)
+                activeRoomCorrectionProgram = preparedProgram
+                try attachRoomCorrectionProgram(preparedProgram, to: &graph)
+            }
         }
 
         try session.publishDSPGraph(graph)
