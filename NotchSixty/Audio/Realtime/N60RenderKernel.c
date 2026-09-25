@@ -68,6 +68,7 @@ struct N60RenderKernel {
 
     N60EQBandRuntime eqRuntime[N60_MAX_EQ_RENDER_SLOTS];
     N60CrossoverRuntime crossoverRuntime;
+    N60DynamicsRuntime dynamicsRuntime;
     N60PartitionedConvolver *convolver;
     N60PartitionedConvolver *roomCorrectionConvolver;
     N60SmoothedGain inputGain;
@@ -90,6 +91,11 @@ struct N60RenderKernel {
     _Atomic uint64_t snapshotReadMisses;
     _Atomic uint64_t convolutionProgramMisses;
     _Atomic uint64_t roomCorrectionProgramMisses;
+
+    _Atomic uint32_t compressorGainReductionBits;
+    _Atomic uint32_t expanderAttenuationBits;
+    _Atomic uint32_t pauseGateGainBits;
+    _Atomic bool pauseGateOpen;
 
     _Atomic uint32_t inputPeakLeftBits;
     _Atomic uint32_t inputPeakRightBits;
@@ -221,6 +227,7 @@ static bool snapshot_is_valid(N60DSPGraphSnapshot snapshot) {
             && snapshot.latencyFrames >= N60_MAX_AUDITION_DELAY_FRAMES)
         || snapshot.eqBandCount > N60_MAX_EQ_RENDER_SLOTS
         || !crossover_snapshot_is_valid(snapshot.crossover, snapshot.sampleRate)
+        || !N60DynamicsSnapshotIsValid(snapshot.dynamics)
         || !convolution_snapshot_is_valid(snapshot.convolution)
         || !convolution_snapshot_is_valid(snapshot.roomCorrection)) {
         return false;
@@ -427,6 +434,7 @@ static void prepare_runtime_for_snapshot(N60RenderKernel *kernel, const N60DSPGr
 
     if (firstPreparation || sampleRateChanged || leavingGraphBypass) {
         reset_crossover_runtime(&kernel->crossoverRuntime, snapshot->crossover);
+        N60DynamicsRuntimeReset(&kernel->dynamicsRuntime);
     } else {
         uint32_t crossoverFrames = snapshot->crossoverTransitionFrames > 0
             ? snapshot->crossoverTransitionFrames
@@ -724,6 +732,7 @@ N60DSPGraphSnapshot N60DSPGraphSnapshotMakeUnity(double sampleRate) {
     snapshot.eqTransitionFrames = eq_transition_frames_for_sample_rate(sampleRate);
     snapshot.crossoverTransitionFrames = crossover_transition_frames_for_sample_rate(sampleRate);
     snapshot.crossover = N60CrossoverSnapshotMakeBypassed();
+    snapshot.dynamics = N60DynamicsSnapshotMakeBypassed(sampleRate);
     snapshot.convolution.enabled = false;
     snapshot.convolution.programSlot = N60_CONVOLUTION_NO_PROGRAM;
     snapshot.roomCorrection.enabled = false;
@@ -833,6 +842,7 @@ N60RenderKernel *N60RenderKernelCreate(void) {
     atomic_store_explicit(&kernel->nextGeneration, 1, memory_order_relaxed);
     reset_eq_runtime(kernel);
     reset_crossover_runtime(&kernel->crossoverRuntime, initial.crossover);
+    N60DynamicsRuntimeReset(&kernel->dynamicsRuntime);
     reset_smoothed_gain(&kernel->inputGain, 1.0f);
     reset_smoothed_gain(&kernel->headroomGain, 1.0f);
     reset_smoothed_gain(&kernel->outputGain, 1.0f);
@@ -854,6 +864,7 @@ void N60RenderKernelReset(N60RenderKernel *kernel) {
     if (kernel == NULL) return;
     reset_eq_runtime(kernel);
     reset_crossover_runtime(&kernel->crossoverRuntime, N60CrossoverSnapshotMakeBypassed());
+    N60DynamicsRuntimeReset(&kernel->dynamicsRuntime);
     N60PartitionedConvolverReset(kernel->convolver);
     N60PartitionedConvolverReset(kernel->roomCorrectionConvolver);
     reset_smoothed_gain(&kernel->inputGain, 1.0f);
@@ -1022,11 +1033,20 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
             }
         }
 
+        N60DynamicsProcessCoreStereoFrame(&kernel->dynamicsRuntime, context->snapshot.dynamics, &left, &right);
+
         left *= next_gain_value(&kernel->balanceGainLeft);
         right *= next_gain_value(&kernel->balanceGainRight);
         float outputGain = next_gain_value(&kernel->outputGain);
         left *= outputGain;
         right *= outputGain;
+
+        N60DynamicsProcessPauseGateStereoFrame(
+            &kernel->dynamicsRuntime,
+            context->snapshot.dynamics,
+            &left,
+            &right
+        );
 
         switch (context->snapshot.auditionMode) {
         case N60AuditionModeReference:
@@ -1061,6 +1081,13 @@ void N60RenderKernelEndRender(N60RenderKernel *kernel, N60RenderKernelRenderCont
     publish_meter(&kernel->inputPeakLeftBits, &kernel->inputPeakRightBits, &kernel->inputRMSLeftBits, &kernel->inputRMSRightBits, &kernel->inputOverRangeSamples, context->inputPeakLeft, context->inputPeakRight, context->inputSquareSumLeft, context->inputSquareSumRight, context->inputOverRangeSamples, context->meteredFrames);
     publish_meter(&kernel->postEQPeakLeftBits, &kernel->postEQPeakRightBits, &kernel->postEQRMSLeftBits, &kernel->postEQRMSRightBits, &kernel->postEQOverRangeSamples, context->postEQPeakLeft, context->postEQPeakRight, context->postEQSquareSumLeft, context->postEQSquareSumRight, context->postEQOverRangeSamples, context->meteredFrames);
     publish_meter(&kernel->outputPeakLeftBits, &kernel->outputPeakRightBits, &kernel->outputRMSLeftBits, &kernel->outputRMSRightBits, &kernel->outputOverRangeSamples, context->outputPeakLeft, context->outputPeakRight, context->outputSquareSumLeft, context->outputSquareSumRight, context->outputOverRangeSamples, context->meteredFrames);
+    if (renderedFrames > 0) {
+        N60DynamicsTelemetry telemetry = N60DynamicsRuntimeTelemetry(&kernel->dynamicsRuntime);
+        atomic_store_explicit(&kernel->compressorGainReductionBits, float_to_bits(telemetry.compressorGainReductionDB), memory_order_relaxed);
+        atomic_store_explicit(&kernel->expanderAttenuationBits, float_to_bits(telemetry.expanderAttenuationDB), memory_order_relaxed);
+        atomic_store_explicit(&kernel->pauseGateGainBits, float_to_bits(telemetry.pauseGateGain), memory_order_relaxed);
+        atomic_store_explicit(&kernel->pauseGateOpen, telemetry.pauseGateOpen, memory_order_relaxed);
+    }
     if (context->acquired && context->slotIndex < N60_SNAPSHOT_SLOT_COUNT) {
         atomic_fetch_sub_explicit(&kernel->slots[context->slotIndex].readers, 1, memory_order_release);
         context->acquired = false;
@@ -1119,6 +1146,9 @@ N60RenderKernelDiagnostics N60RenderKernelGetDiagnostics(const N60RenderKernel *
         diagnostics.crossoverSubGainLinear = context.snapshot.crossover.subGainLinear;
         diagnostics.crossoverSubPolarityInverted = context.snapshot.crossover.subPolarityInverted;
         diagnostics.crossoverSectionCount = context.snapshot.crossover.sectionCount;
+        diagnostics.compressorEnabled = context.snapshot.dynamics.compressor.enabled;
+        diagnostics.expanderEnabled = context.snapshot.dynamics.expander.enabled;
+        diagnostics.pauseGateEnabled = context.snapshot.dynamics.pauseGate.enabled;
         diagnostics.convolutionEnabled = context.snapshot.convolution.enabled;
         diagnostics.convolutionProgramSlot = context.snapshot.convolution.programSlot;
         diagnostics.convolutionProgramGeneration = context.snapshot.convolution.programGeneration;
@@ -1142,6 +1172,10 @@ N60RenderKernelDiagnostics N60RenderKernelGetDiagnostics(const N60RenderKernel *
     diagnostics.snapshotReadMisses = atomic_load_explicit(&kernel->snapshotReadMisses, memory_order_relaxed);
     diagnostics.convolutionProgramMisses = atomic_load_explicit(&kernel->convolutionProgramMisses, memory_order_relaxed);
     diagnostics.roomCorrectionProgramMisses = atomic_load_explicit(&kernel->roomCorrectionProgramMisses, memory_order_relaxed);
+    diagnostics.compressorGainReductionDB = bits_to_float(atomic_load_explicit(&kernel->compressorGainReductionBits, memory_order_relaxed));
+    diagnostics.expanderAttenuationDB = bits_to_float(atomic_load_explicit(&kernel->expanderAttenuationBits, memory_order_relaxed));
+    diagnostics.pauseGateGain = bits_to_float(atomic_load_explicit(&kernel->pauseGateGainBits, memory_order_relaxed));
+    diagnostics.pauseGateOpen = atomic_load_explicit(&kernel->pauseGateOpen, memory_order_relaxed);
     diagnostics.inputMeter = load_meter_reading(&kernel->inputPeakLeftBits, &kernel->inputPeakRightBits, &kernel->inputRMSLeftBits, &kernel->inputRMSRightBits, &kernel->inputOverRangeSamples);
     diagnostics.postEQMeter = load_meter_reading(&kernel->postEQPeakLeftBits, &kernel->postEQPeakRightBits, &kernel->postEQRMSLeftBits, &kernel->postEQRMSRightBits, &kernel->postEQOverRangeSamples);
     diagnostics.outputMeter = load_meter_reading(&kernel->outputPeakLeftBits, &kernel->outputPeakRightBits, &kernel->outputRMSLeftBits, &kernel->outputRMSRightBits, &kernel->outputOverRangeSamples);

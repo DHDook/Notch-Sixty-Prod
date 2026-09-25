@@ -151,6 +151,7 @@ struct StereoEQConfiguration: Equatable, Sendable {
         sampleRate: Double,
         gainConfiguration: DSPGainConfiguration,
         bassManagementConfiguration: BassManagementConfiguration,
+        dynamicsConfiguration: DynamicsConfiguration = DynamicsConfiguration(),
         playbackConfiguration: PlaybackControlConfiguration,
         masterGainLinear: Float = 1.0
     ) throws -> N60DSPGraphSnapshot {
@@ -239,6 +240,7 @@ struct StereoEQConfiguration: Equatable, Sendable {
         ) else {
             throw BassManagementConfigurationError.graphDesignFailed
         }
+        graph.dynamics = try dynamicsConfiguration.makeSnapshot(sampleRate: sampleRate)
         return graph
     }
 

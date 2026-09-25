@@ -7,6 +7,7 @@
 #include "N60Biquad.h"
 #include "N60Convolution.h"
 #include "N60Crossover.h"
+#include "N60Dynamics.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -60,6 +61,7 @@ typedef struct {
     uint8_t eqBandChannelMasks[N60_MAX_EQ_RENDER_SLOTS];
     uint32_t crossoverTransitionFrames;
     N60CrossoverSnapshot crossover;
+    N60DynamicsSnapshot dynamics;
     N60ConvolutionGraphState convolution;
     N60ConvolutionGraphState roomCorrection;
 } N60DSPGraphSnapshot;
@@ -128,6 +130,13 @@ typedef struct {
     float crossoverSubGainLinear;
     bool crossoverSubPolarityInverted;
     uint32_t crossoverSectionCount;
+    bool compressorEnabled;
+    bool expanderEnabled;
+    bool pauseGateEnabled;
+    float compressorGainReductionDB;
+    float expanderAttenuationDB;
+    float pauseGateGain;
+    bool pauseGateOpen;
     bool convolutionEnabled;
     uint32_t convolutionProgramSlot;
     uint64_t convolutionProgramGeneration;

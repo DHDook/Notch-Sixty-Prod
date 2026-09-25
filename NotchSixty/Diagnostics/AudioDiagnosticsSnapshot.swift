@@ -42,6 +42,13 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
     let crossoverSubGainLinear: Float
     let crossoverSubPolarityInverted: Bool
     let crossoverSectionCount: UInt32
+    let compressorEnabled: Bool
+    let expanderEnabled: Bool
+    let pauseGateEnabled: Bool
+    let compressorGainReductionDB: Float
+    let expanderAttenuationDB: Float
+    let pauseGateGain: Float
+    let pauseGateOpen: Bool
     let convolutionEnabled: Bool
     let convolutionProgramSlot: UInt32
     let convolutionProgramGeneration: UInt64
@@ -88,6 +95,13 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
         crossoverSubGainLinear = diagnostics.crossoverSubGainLinear
         crossoverSubPolarityInverted = diagnostics.crossoverSubPolarityInverted
         crossoverSectionCount = diagnostics.crossoverSectionCount
+        compressorEnabled = diagnostics.compressorEnabled
+        expanderEnabled = diagnostics.expanderEnabled
+        pauseGateEnabled = diagnostics.pauseGateEnabled
+        compressorGainReductionDB = diagnostics.compressorGainReductionDB
+        expanderAttenuationDB = diagnostics.expanderAttenuationDB
+        pauseGateGain = diagnostics.pauseGateGain
+        pauseGateOpen = diagnostics.pauseGateOpen
         convolutionEnabled = diagnostics.convolutionEnabled
         convolutionProgramSlot = diagnostics.convolutionProgramSlot
         convolutionProgramGeneration = diagnostics.convolutionProgramGeneration
