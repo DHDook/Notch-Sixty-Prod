@@ -231,8 +231,8 @@ final class LiveLinearPhaseTests: XCTestCase {
         withExtendedLifetime(observation) {}
     }
 
-    func testProductConfigurationSchemaIsVersionTwoForStereoPlaybackState() {
-        XCTAssertEqual(ProductConfiguration.currentSchemaVersion, 2)
-        XCTAssertEqual(ProductConfiguration().schemaVersion, 2)
+    func testProductConfigurationSchemaIsVersionThreeForMasterPlaybackState() {
+        XCTAssertEqual(ProductConfiguration.currentSchemaVersion, 3)
+        XCTAssertEqual(ProductConfiguration().schemaVersion, 3)
     }
 }

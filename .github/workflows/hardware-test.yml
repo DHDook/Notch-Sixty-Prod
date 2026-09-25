@@ -95,7 +95,6 @@ jobs:
           mkdir -p "$STAGE"
           cp -R "$APP" "$STAGE/"
           ln -s /Applications "$STAGE/Applications"
-
           hdiutil create \
             -volname 'Notch Sixty Hardware Test' \
             -srcfolder "$STAGE" \

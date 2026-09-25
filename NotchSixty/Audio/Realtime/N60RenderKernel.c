@@ -73,6 +73,7 @@ struct N60RenderKernel {
     N60SmoothedGain inputGain;
     N60SmoothedGain headroomGain;
     N60SmoothedGain outputGain;
+    N60SmoothedGain masterGain;
     N60SmoothedGain balanceGainLeft;
     N60SmoothedGain balanceGainRight;
     uint64_t preparedGeneration;
@@ -202,6 +203,9 @@ static bool snapshot_is_valid(N60DSPGraphSnapshot snapshot) {
         || snapshot.headroomGainLinear < 0.0f
         || !isfinite(snapshot.outputGainLinear)
         || snapshot.outputGainLinear < 0.0f
+        || !isfinite(snapshot.masterGainLinear)
+        || snapshot.masterGainLinear < 0.0f
+        || snapshot.masterGainLinear > 1.0f
         || !isfinite(snapshot.balanceGainLeftLinear)
         || snapshot.balanceGainLeftLinear < 0.0f
         || snapshot.balanceGainLeftLinear > 1.0f
@@ -384,12 +388,14 @@ static void prepare_runtime_for_snapshot(N60RenderKernel *kernel, const N60DSPGr
         reset_smoothed_gain(&kernel->inputGain, snapshot->inputGainLinear);
         reset_smoothed_gain(&kernel->headroomGain, snapshot->headroomGainLinear);
         reset_smoothed_gain(&kernel->outputGain, snapshot->outputGainLinear);
+        reset_smoothed_gain(&kernel->masterGain, snapshot->masterGainLinear);
         reset_smoothed_gain(&kernel->balanceGainLeft, snapshot->balanceGainLeftLinear);
         reset_smoothed_gain(&kernel->balanceGainRight, snapshot->balanceGainRightLinear);
     } else {
         schedule_gain_transition(&kernel->inputGain, snapshot->inputGainLinear, gainFrames);
         schedule_gain_transition(&kernel->headroomGain, snapshot->headroomGainLinear, gainFrames);
         schedule_gain_transition(&kernel->outputGain, snapshot->outputGainLinear, gainFrames);
+        schedule_gain_transition(&kernel->masterGain, snapshot->masterGainLinear, gainFrames);
         schedule_gain_transition(&kernel->balanceGainLeft, snapshot->balanceGainLeftLinear, gainFrames);
         schedule_gain_transition(&kernel->balanceGainRight, snapshot->balanceGainRightLinear, gainFrames);
     }
@@ -674,6 +680,7 @@ N60DSPGraphSnapshot N60DSPGraphSnapshotMakeUnity(double sampleRate) {
     snapshot.inputGainLinear = 1.0f;
     snapshot.headroomGainLinear = 1.0f;
     snapshot.outputGainLinear = 1.0f;
+    snapshot.masterGainLinear = 1.0f;
     snapshot.balanceGainLeftLinear = 1.0f;
     snapshot.balanceGainRightLinear = 1.0f;
     snapshot.bypassed = false;
@@ -797,6 +804,7 @@ N60RenderKernel *N60RenderKernelCreate(void) {
     reset_smoothed_gain(&kernel->inputGain, 1.0f);
     reset_smoothed_gain(&kernel->headroomGain, 1.0f);
     reset_smoothed_gain(&kernel->outputGain, 1.0f);
+    reset_smoothed_gain(&kernel->masterGain, 1.0f);
     reset_smoothed_gain(&kernel->balanceGainLeft, 1.0f);
     reset_smoothed_gain(&kernel->balanceGainRight, 1.0f);
     return kernel;
@@ -818,6 +826,7 @@ void N60RenderKernelReset(N60RenderKernel *kernel) {
     reset_smoothed_gain(&kernel->inputGain, 1.0f);
     reset_smoothed_gain(&kernel->headroomGain, 1.0f);
     reset_smoothed_gain(&kernel->outputGain, 1.0f);
+    reset_smoothed_gain(&kernel->masterGain, 1.0f);
     reset_smoothed_gain(&kernel->balanceGainLeft, 1.0f);
     reset_smoothed_gain(&kernel->balanceGainRight, 1.0f);
     kernel->preparedGeneration = 0;
@@ -982,6 +991,9 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
         meter_sample(left, right, &context->postEQPeakLeft, &context->postEQPeakRight, &context->postEQSquareSumLeft, &context->postEQSquareSumRight, &context->postEQOverRangeSamples);
     }
 
+    float masterGain = next_gain_value(&kernel->masterGain);
+    left *= masterGain;
+    right *= masterGain;
     left = sanitize_sample(kernel, left);
     right = sanitize_sample(kernel, right);
     meter_sample(left, right, &context->outputPeakLeft, &context->outputPeakRight, &context->outputSquareSumLeft, &context->outputSquareSumRight, &context->outputOverRangeSamples);
@@ -1034,6 +1046,7 @@ N60RenderKernelDiagnostics N60RenderKernelGetDiagnostics(const N60RenderKernel *
         diagnostics.inputGainLinear = context.snapshot.inputGainLinear;
         diagnostics.headroomGainLinear = context.snapshot.headroomGainLinear;
         diagnostics.outputGainLinear = context.snapshot.outputGainLinear;
+        diagnostics.masterGainLinear = context.snapshot.masterGainLinear;
         diagnostics.balanceGainLeftLinear = context.snapshot.balanceGainLeftLinear;
         diagnostics.balanceGainRightLinear = context.snapshot.balanceGainRightLinear;
         diagnostics.eqBypassed = context.snapshot.eqBypassed;

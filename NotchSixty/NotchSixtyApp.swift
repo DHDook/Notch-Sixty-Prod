@@ -27,19 +27,22 @@ struct ProductDSPConfiguration: Equatable, Sendable {
 }
 
 struct ProductConfiguration: Equatable, Sendable {
-    static let currentSchemaVersion = 2
+    static let currentSchemaVersion = 3
 
     var schemaVersion: Int
     var selectedOutputUID: String?
+    var masterVolume: MasterVolumeConfiguration
     var dsp: ProductDSPConfiguration
 
     init(
         schemaVersion: Int = ProductConfiguration.currentSchemaVersion,
         selectedOutputUID: String? = nil,
+        masterVolume: MasterVolumeConfiguration = MasterVolumeConfiguration(),
         dsp: ProductDSPConfiguration = ProductDSPConfiguration()
     ) {
         self.schemaVersion = schemaVersion
         self.selectedOutputUID = selectedOutputUID
+        self.masterVolume = masterVolume
         self.dsp = dsp
     }
 }
@@ -70,6 +73,7 @@ final class ProductController: ObservableObject {
     var configuration: ProductConfiguration {
         ProductConfiguration(
             selectedOutputUID: audioEngine.routeConfiguration.selectedOutputUID,
+            masterVolume: audioEngine.masterVolumeConfiguration,
             dsp: ProductDSPConfiguration(
                 eq: audioEngine.eqConfiguration,
                 stereoEQ: audioEngine.stereoEQConfiguration,
