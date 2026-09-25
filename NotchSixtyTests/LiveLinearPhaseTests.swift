@@ -232,8 +232,8 @@ final class LiveLinearPhaseTests: XCTestCase {
         withExtendedLifetime(observation) {}
     }
 
-    func testProductConfigurationSchemaIsVersionFourForDynamicsState() {
-        XCTAssertEqual(ProductConfiguration.currentSchemaVersion, 4)
-        XCTAssertEqual(ProductConfiguration().schemaVersion, 4)
+    func testProductConfigurationSchemaIsVersionFiveForProtectionState() {
+        XCTAssertEqual(ProductConfiguration.currentSchemaVersion, 5)
+        XCTAssertEqual(ProductConfiguration().schemaVersion, 5)
     }
 }

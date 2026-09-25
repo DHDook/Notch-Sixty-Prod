@@ -667,8 +667,11 @@ final class AudioIOEngine: ObservableObject {
     }
 
     func replaceDynamicsConfiguration(_ configuration: DynamicsConfiguration) throws {
-        _ = try configuration.makeSnapshot(sampleRate: transportSession?.outputFormat.sampleRate ?? 48_000)
+        let validationRate = transportSession?.outputFormat.sampleRate ?? 48_000
+        _ = try configuration.makeSnapshot(sampleRate: validationRate)
+        let newProtection = try configuration.makeProtectionSnapshot(sampleRate: validationRate)
         if let session = transportSession {
+            let oldProtection = try dynamicsConfiguration.makeProtectionSnapshot(sampleRate: session.outputFormat.sampleRate)
             var graph = try stereoEQConfiguration.makeGraphSnapshot(
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
@@ -686,7 +689,15 @@ final class AudioIOEngine: ObservableObject {
                 to: &graph,
                 playbackConfiguration: playbackControlConfiguration
             )
-            try session.publishDSPGraph(graph)
+            let protectionStructureChanged = oldProtection.latencyFrames != newProtection.latencyFrames
+                || oldProtection.effectiveFactor != newProtection.effectiveFactor
+                || oldProtection.limiterEnabled != newProtection.limiterEnabled
+                || dynamicsConfiguration.softClipper.enabled != configuration.softClipper.enabled
+            if protectionStructureChanged {
+                try session.transitionDSPGraph(graph)
+            } else {
+                try session.publishDSPGraph(graph)
+            }
         }
         dynamicsConfiguration = configuration
         lastErrorDescription = nil
@@ -1355,6 +1366,7 @@ final class AudioIOEngine: ObservableObject {
             sampleRate: session.outputFormat.sampleRate,
             gainConfiguration: gainConfiguration,
             bassManagementConfiguration: bassManagementConfiguration,
+            dynamicsConfiguration: dynamicsConfiguration,
             playbackConfiguration: playbackControlConfiguration
         )
 
