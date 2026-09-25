@@ -39,3 +39,5 @@ jobs:
           git add -A
           git commit -m 'Integrate Advanced Dynamics I parity'
           git push origin HEAD:feature/advanced-dynamics-parity-1
+
+# rerun-marker: swift-generation-fix
