@@ -23,7 +23,7 @@ Minimum-phase coefficient/channel changes use the existing short EQ crossfade. B
 
 ## Validation
 
-Deterministic tests cover linked equality, left-only channel isolation, attenuation-only balance, raw bypass identity, non-destructive linked/independent round-trips, 64-band-per-channel graph compilation at 384 kHz, rejection of extreme/non-finite EQ gain values, and acceptance of the -24/+24 dB boundaries. Both the stereo control model and its dedicated test suite are explicitly included in their Xcode target source phases so CI validates the shipping target configuration rather than loose source files. Hardware acceptance additionally checks audible channel isolation, balance, minimum/linear phase, Flat/Bypass transitions, repeated switching, and realtime diagnostics.
+Deterministic tests cover linked equality, left-only channel isolation, attenuation-only balance, raw bypass identity, non-destructive linked/independent round-trips, 64-band-per-channel graph compilation at 384 kHz, rejection of extreme/non-finite EQ gain values, acceptance of the -24/+24 dB boundaries, and repeated FIR-edit policy checks while Global Bypass or Flat is active. Both the stereo control model and its dedicated test suite are explicitly included in their Xcode target source phases so CI validates the shipping target configuration rather than loose source files. Hardware acceptance additionally checks audible channel isolation, balance, minimum/linear phase, Flat/Bypass transitions, repeated switching, and realtime diagnostics.
 
 ## Hardware safety hardening
 
@@ -32,7 +32,6 @@ The first PR #23 hardware acceptance pass exposed that free-form EQ gain entry c
 ## Provenance
 
 This implementation is original commercial work derived from current product requirements, the proprietary PR #13–22 architecture, standard DSP equations/behavior, and independently written tests. Historical GPL Notch Sixty / Equaliser implementation, tests, project files, presets, and assets were not used as implementation references.
-
 
 ## Raw-bypass FIR update policy
 
