@@ -1,0 +1,33 @@
+name: PR25 Validation Surface
+
+on:
+  push:
+    branches: [feature/latency-matched-audition-delta]
+    paths:
+      - .github/workflows/pr25-validation-surface.yml
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Apply validation UI and docs
+        run: python3 .github/scripts/pr25_validation_surface.py
+      - name: Run full test suite
+        run: xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES test
+      - name: Commit and clean helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/pr25-validation-surface.yml .github/scripts/pr25_validation_surface.py
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Expose audition validation controls and document parity scope'
+          git push origin HEAD:feature/latency-matched-audition-delta
