@@ -23,7 +23,7 @@ jobs:
         run: |
           set -euo pipefail
           test -f .pr23-integration.patch.gz.b64 || exit 0
-          base64 --decode .pr23-integration.patch.gz.b64 | gunzip > /tmp/pr23-integration.patch
+          base64 -D -i .pr23-integration.patch.gz.b64 | gunzip > /tmp/pr23-integration.patch
           git apply --check /tmp/pr23-integration.patch
           git apply /tmp/pr23-integration.patch
           git rm .pr23-integration.patch.gz.b64
