@@ -290,6 +290,7 @@ struct EQConfiguration: Equatable, Sendable {
         guard band.frequencyHz.isFinite,
               band.frequencyHz > 0,
               band.gainDB.isFinite,
+              StereoEQConfiguration.bandGainRange.contains(band.gainDB),
               band.q.isFinite,
               band.q > 0 else {
             throw EQConfigurationError.invalidBand(index: index)

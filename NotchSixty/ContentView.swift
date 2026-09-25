@@ -68,7 +68,8 @@ struct ContentView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
             Text("Notch Sixty")
                 .font(.title.bold())
 
@@ -106,10 +107,8 @@ struct ContentView: View {
 
             Divider()
 
-            ScrollView {
-                TimelineView(.periodic(from: .now, by: 0.25)) { _ in
-                    diagnosticsView(engine.diagnosticsSnapshot())
-                }
+            TimelineView(.periodic(from: .now, by: 0.25)) { _ in
+                diagnosticsView(engine.diagnosticsSnapshot())
             }
 
             if let error = engine.lastErrorDescription {
@@ -118,9 +117,10 @@ struct ContentView: View {
                     .foregroundStyle(.red)
                     .textSelection(.enabled)
             }
+            }
+            .padding(20)
         }
-        .padding(20)
-        .frame(minWidth: 880, minHeight: 1_040)
+        .frame(minWidth: 880, minHeight: 700)
         .onAppear { engine.prepareForUse() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
             engine.shutdownForTermination()
@@ -360,7 +360,7 @@ struct ContentView: View {
             TextField("Hz", value: binding.frequencyHz, format: .number.precision(.fractionLength(0...1))).frame(width: 85)
             Text("Hz").foregroundStyle(.secondary)
             TextField("dB", value: binding.gainDB, format: .number.precision(.fractionLength(1))).frame(width: 65)
-            Text("dB").foregroundStyle(.secondary)
+            Text("dB (±24 max)").font(.caption).foregroundStyle(.secondary)
             TextField("Q", value: binding.q, format: .number.precision(.fractionLength(2...3))).frame(width: 65)
             Text("Q").foregroundStyle(.secondary)
             Spacer()
@@ -372,7 +372,15 @@ struct ContentView: View {
     private func eqBandBinding(for id: UUID) -> Binding<EQBand> {
         Binding(
             get: { engine.eqConfiguration.bands.first(where: { $0.id == id }) ?? EQBand(id: id, enabled: false) },
-            set: { updated in try? engine.updateEQBand(updated) }
+            set: { updated in
+                guard updated.gainDB.isFinite else { return }
+                var sanitized = updated
+                sanitized.gainDB = min(
+                    max(updated.gainDB, StereoEQConfiguration.bandGainRange.lowerBound),
+                    StereoEQConfiguration.bandGainRange.upperBound
+                )
+                try? engine.updateEQBand(sanitized)
+            }
         )
     }
 
