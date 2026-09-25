@@ -4,6 +4,7 @@ enum DynamicsConfigurationError: Error, LocalizedError, Equatable {
     case invalidStereoWidener
     case invalidDCOffsetFilter
     case invalidInfrasonicFilter
+    case invalidLoudnessMatch
     case invalidLoudnessContour
     case invalidDeEsser
     case invalidMultibandCompressor
@@ -22,6 +23,8 @@ enum DynamicsConfigurationError: Error, LocalizedError, Equatable {
             return "DC Offset Filter configuration is invalid."
         case .invalidInfrasonicFilter:
             return "Infrasonic Filter parameters are outside the supported production range."
+        case .invalidLoudnessMatch:
+            return "LUFS Loudness Match parameters are outside the supported production range."
         case .invalidLoudnessContour:
             return "Loudness Contour parameters are outside the supported production range."
         case .invalidDeEsser:
@@ -129,6 +132,29 @@ struct InfrasonicFilterConfiguration: Equatable, Sendable {
     func validate() throws {
         guard cutoffHz.isFinite, Self.cutoffRange.contains(cutoffHz) else {
             throw DynamicsConfigurationError.invalidInfrasonicFilter
+        }
+    }
+}
+
+struct LoudnessMatchConfiguration: Equatable, Sendable {
+    static let targetRange = -24.0 ... -10.0
+    static let maxCorrectionRange = 3.0...20.0
+    static let attackRange = 0.3...5.0
+    static let releaseRange = 1.0...10.0
+
+    var enabled = false
+    var dialogueGateEnabled = false
+    var targetLUFS = -16.0
+    var maxCorrectionDB = 12.0
+    var attackSeconds = 1.0
+    var releaseSeconds = 3.0
+
+    func validate() throws {
+        guard targetLUFS.isFinite, Self.targetRange.contains(targetLUFS),
+              maxCorrectionDB.isFinite, Self.maxCorrectionRange.contains(maxCorrectionDB),
+              attackSeconds.isFinite, Self.attackRange.contains(attackSeconds),
+              releaseSeconds.isFinite, Self.releaseRange.contains(releaseSeconds) else {
+            throw DynamicsConfigurationError.invalidLoudnessMatch
         }
     }
 }
@@ -382,6 +408,7 @@ struct DynamicsConfiguration: Equatable, Sendable {
     var stereoWidener = StereoWidenerConfiguration()
     var dcOffsetFilter = DCOffsetFilterConfiguration()
     var infrasonicFilter = InfrasonicFilterConfiguration()
+    var loudnessMatch = LoudnessMatchConfiguration()
     var loudnessContour = LoudnessContourConfiguration()
     var deEsser = DeEsserConfiguration()
     var multibandCompressor = MultibandCompressorConfiguration()
@@ -395,6 +422,7 @@ struct DynamicsConfiguration: Equatable, Sendable {
     func makeSnapshot(sampleRate: Double) throws -> N60DynamicsSnapshot {
         try stereoWidener.validate()
         try infrasonicFilter.validate()
+        try loudnessMatch.validate()
         try loudnessContour.validate()
         try deEsser.validate()
         try multibandCompressor.validate()
@@ -417,6 +445,16 @@ struct DynamicsConfiguration: Equatable, Sendable {
         ) else { throw DynamicsConfigurationError.invalidStereoWidener }
         guard N60DynamicsSnapshotSetDCOffsetFilter(&snapshot, sampleRate, dcOffsetFilter.enabled) else { throw DynamicsConfigurationError.invalidDCOffsetFilter }
         guard N60DynamicsSnapshotSetInfrasonicFilter(&snapshot, sampleRate, infrasonicFilter.enabled, infrasonicFilter.cutoffHz, infrasonicFilter.slope.cType) else { throw DynamicsConfigurationError.invalidInfrasonicFilter }
+        guard N60DynamicsSnapshotSetLoudnessMatch(
+            &snapshot,
+            sampleRate,
+            loudnessMatch.enabled,
+            loudnessMatch.dialogueGateEnabled,
+            Float(loudnessMatch.targetLUFS),
+            Float(loudnessMatch.maxCorrectionDB),
+            Float(loudnessMatch.attackSeconds),
+            Float(loudnessMatch.releaseSeconds)
+        ) else { throw DynamicsConfigurationError.invalidLoudnessMatch }
         guard N60DynamicsSnapshotSetLoudnessContour(&snapshot, sampleRate, loudnessContour.enabled, Float(loudnessContour.strength)) else { throw DynamicsConfigurationError.invalidLoudnessContour }
         guard N60DynamicsSnapshotSetDeEsser(
             &snapshot,

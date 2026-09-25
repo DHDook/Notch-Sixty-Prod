@@ -1074,7 +1074,7 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
             }
         }
 
-        N60DynamicsProcessCoreStereoFrame(&kernel->dynamicsRuntime, context->snapshot.dynamics, &left, &right);
+        N60DynamicsProcessCoreStereoFrameWithMasterGain(&kernel->dynamicsRuntime, context->snapshot.dynamics, context->snapshot.masterGainLinear, &left, &right);
 
         left *= next_gain_value(&kernel->balanceGainLeft);
         right *= next_gain_value(&kernel->balanceGainRight);
