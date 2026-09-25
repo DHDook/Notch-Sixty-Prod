@@ -1,0 +1,30 @@
+name: PR24 Event Tap Integration
+
+on:
+  push:
+    branches: [feature/master-volume-mute-sync]
+    paths:
+      - .github/workflows/pr24-eventtap-integration.yml
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - run: python3 .github/scripts/pr24_eventtap_patch.py
+      - run: xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES test
+      - shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/pr24-eventtap-integration.yml .github/scripts/pr24_eventtap_patch.py
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add NotchSixty/Audio/CoreAudio/MasterVolumeDeviceController.swift NotchSixty/Audio/AudioIOEngine.swift NotchSixtyTests/StereoPlaybackControlTests.swift NotchSixty/ContentView.swift docs/MASTER_VOLUME_CONTROL.md docs/PROVENANCE.md .github/workflows/pr24-eventtap-integration.yml .github/scripts/pr24_eventtap_patch.py
+          git commit -m 'Replace HID fallback with listen-only event tap'
+          git push origin HEAD:feature/master-volume-mute-sync
