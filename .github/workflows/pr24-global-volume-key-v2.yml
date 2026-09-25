@@ -27,3 +27,4 @@ jobs:
           git add NotchSixty/Audio/AudioIOEngine.swift NotchSixtyTests/StereoPlaybackControlTests.swift docs/MASTER_VOLUME_CONTROL.md .github/workflows/pr24-global-volume-key-v2.yml .github/scripts/pr24_global_volume_patch.py
           git commit -m 'Route global volume keys to software master fallback'
           git push origin HEAD:feature/master-volume-mute-sync
+# retry after adding the public HID monitor source
