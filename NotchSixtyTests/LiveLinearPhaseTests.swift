@@ -228,11 +228,12 @@ final class LiveLinearPhaseTests: XCTestCase {
 
         XCTAssertGreaterThan(notificationCount, 0)
         XCTAssertEqual(product.configuration.dsp.gain.outputGainDB, -3.0)
+        XCTAssertEqual(product.configuration.dsp.dynamics, engine.dynamicsConfiguration)
         withExtendedLifetime(observation) {}
     }
 
-    func testProductConfigurationSchemaIsVersionThreeForMasterPlaybackState() {
-        XCTAssertEqual(ProductConfiguration.currentSchemaVersion, 3)
-        XCTAssertEqual(ProductConfiguration().schemaVersion, 3)
+    func testProductConfigurationSchemaIsVersionFourForDynamicsState() {
+        XCTAssertEqual(ProductConfiguration.currentSchemaVersion, 4)
+        XCTAssertEqual(ProductConfiguration().schemaVersion, 4)
     }
 }

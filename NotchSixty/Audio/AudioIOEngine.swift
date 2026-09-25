@@ -421,6 +421,7 @@ final class AudioIOEngine: ObservableObject {
     @Published private(set) var globalVolumeKeyMonitoringState: GlobalVolumeKeyMonitoringState = .stopped
     @Published private(set) var gainConfiguration = DSPGainConfiguration()
     @Published private(set) var bassManagementConfiguration = BassManagementConfiguration()
+    @Published private(set) var dynamicsConfiguration = DynamicsConfiguration()
     @Published private(set) var roomCorrectionConfiguration = RoomCorrectionConfiguration()
     @Published private(set) var linearPhaseDesignInfo: N60LinearPhaseEQDesignInfo?
     @Published private(set) var lastErrorDescription: String?
@@ -646,6 +647,7 @@ final class AudioIOEngine: ObservableObject {
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
                 bassManagementConfiguration: configuration,
+                dynamicsConfiguration: dynamicsConfiguration,
                 playbackConfiguration: playbackControlConfiguration,
                 masterGainLinear: currentMasterSoftwareGain
             )
@@ -661,6 +663,32 @@ final class AudioIOEngine: ObservableObject {
             try session.publishDSPGraph(graph)
         }
         bassManagementConfiguration = configuration
+        lastErrorDescription = nil
+    }
+
+    func replaceDynamicsConfiguration(_ configuration: DynamicsConfiguration) throws {
+        _ = try configuration.makeSnapshot(sampleRate: transportSession?.outputFormat.sampleRate ?? 48_000)
+        if let session = transportSession {
+            var graph = try stereoEQConfiguration.makeGraphSnapshot(
+                sampleRate: session.outputFormat.sampleRate,
+                gainConfiguration: gainConfiguration,
+                bassManagementConfiguration: bassManagementConfiguration,
+                dynamicsConfiguration: configuration,
+                playbackConfiguration: playbackControlConfiguration,
+                masterGainLinear: currentMasterSoftwareGain
+            )
+            try attachActiveLinearPhaseProgramIfNeeded(
+                to: &graph,
+                stereoConfiguration: stereoEQConfiguration,
+                playbackConfiguration: playbackControlConfiguration
+            )
+            try attachActiveRoomCorrectionProgramIfNeeded(
+                to: &graph,
+                playbackConfiguration: playbackControlConfiguration
+            )
+            try session.publishDSPGraph(graph)
+        }
+        dynamicsConfiguration = configuration
         lastErrorDescription = nil
     }
 
@@ -779,6 +807,7 @@ final class AudioIOEngine: ObservableObject {
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
                 bassManagementConfiguration: bassManagementConfiguration,
+                dynamicsConfiguration: dynamicsConfiguration,
                 playbackConfiguration: playbackControlConfiguration,
                 masterGainLinear: currentMasterSoftwareGain
             )
@@ -836,6 +865,7 @@ final class AudioIOEngine: ObservableObject {
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
                 bassManagementConfiguration: bassManagementConfiguration,
+                dynamicsConfiguration: dynamicsConfiguration,
                 playbackConfiguration: configuration,
                 masterGainLinear: currentMasterSoftwareGain
             )
@@ -915,6 +945,7 @@ final class AudioIOEngine: ObservableObject {
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
                 bassManagementConfiguration: bassManagementConfiguration,
+                dynamicsConfiguration: dynamicsConfiguration,
                 playbackConfiguration: playbackControlConfiguration,
                 masterGainLinear: newSoftwareGain
             )
@@ -961,6 +992,7 @@ final class AudioIOEngine: ObservableObject {
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
                 bassManagementConfiguration: bassManagementConfiguration,
+                dynamicsConfiguration: dynamicsConfiguration,
                 playbackConfiguration: playbackControlConfiguration,
                 masterGainLinear: newGain
             )
@@ -1018,6 +1050,7 @@ final class AudioIOEngine: ObservableObject {
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: configuration,
                 bassManagementConfiguration: bassManagementConfiguration,
+                dynamicsConfiguration: dynamicsConfiguration,
                 playbackConfiguration: playbackControlConfiguration,
                 masterGainLinear: currentMasterSoftwareGain
             )
@@ -1046,6 +1079,7 @@ final class AudioIOEngine: ObservableObject {
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
                 bassManagementConfiguration: bassManagementConfiguration,
+                dynamicsConfiguration: dynamicsConfiguration,
                 playbackConfiguration: playbackControlConfiguration,
                 masterGainLinear: currentMasterSoftwareGain
             )

@@ -79,7 +79,7 @@ N60DynamicsSnapshot N60DynamicsSnapshotMakeBypassed(double sampleRate) {
     snapshot.pauseGate.fadeOutCoefficient = coefficient_for_time_ms(sampleRate, 10.0f);
     snapshot.pauseGate.fadeInCoefficient = coefficient_for_time_ms(sampleRate, 200.0f);
     snapshot.pauseGate.detectorAttackCoefficient = coefficient_for_time_ms(sampleRate, 1.0f);
-    snapshot.pauseGate.detectorReleaseCoefficient = coefficient_for_time_ms(sampleRate, 50.0f);
+    snapshot.pauseGate.detectorReleaseCoefficient = coefficient_for_time_ms(sampleRate, 10.0f);
     snapshot.bypassTransitionCoefficient = coefficient_for_time_ms(sampleRate, 5.0f);
     return snapshot;
 }
@@ -176,7 +176,7 @@ bool N60DynamicsSnapshotSetPauseGate(
     configured.fadeOutCoefficient = coefficient_for_time_ms(sampleRate, fadeOutAttackMs);
     configured.fadeInCoefficient = coefficient_for_time_ms(sampleRate, fadeInReleaseMs);
     configured.detectorAttackCoefficient = coefficient_for_time_ms(sampleRate, 1.0f);
-    configured.detectorReleaseCoefficient = coefficient_for_time_ms(sampleRate, 50.0f);
+    configured.detectorReleaseCoefficient = coefficient_for_time_ms(sampleRate, 10.0f);
     if (!valid_coefficient(configured.fadeOutCoefficient)
         || !valid_coefficient(configured.fadeInCoefficient)
         || !valid_coefficient(configured.detectorAttackCoefficient)
@@ -219,7 +219,7 @@ void N60DynamicsRuntimeReset(N60DynamicsRuntime *runtime) {
     runtime->gateOpen = true;
 }
 
-void N60DynamicsProcessStereoFrame(
+void N60DynamicsProcessCoreStereoFrame(
     N60DynamicsRuntime *runtime,
     N60DynamicsSnapshot snapshot,
     float *left,
@@ -239,7 +239,11 @@ void N60DynamicsProcessStereoFrame(
             ? snapshot.compressor.attackCoefficient
             : snapshot.compressor.releaseCoefficient;
     }
-    runtime->compressorGainDB = smooth_toward(runtime->compressorGainDB, compressorTargetDB, compressorCoefficient);
+    runtime->compressorGainDB = smooth_toward(
+        runtime->compressorGainDB,
+        compressorTargetDB,
+        compressorCoefficient
+    );
     float compressorGain = db_to_linear(runtime->compressorGainDB);
     *left *= compressorGain;
     *right *= compressorGain;
@@ -255,16 +259,33 @@ void N60DynamicsProcessStereoFrame(
             ? snapshot.expander.attackCoefficient
             : snapshot.expander.releaseCoefficient;
     }
-    runtime->expanderGainDB = smooth_toward(runtime->expanderGainDB, expanderTargetDB, expanderCoefficient);
+    runtime->expanderGainDB = smooth_toward(
+        runtime->expanderGainDB,
+        expanderTargetDB,
+        expanderCoefficient
+    );
     float expanderGain = db_to_linear(runtime->expanderGainDB);
     *left *= expanderGain;
     *right *= expanderGain;
+}
+
+void N60DynamicsProcessPauseGateStereoFrame(
+    N60DynamicsRuntime *runtime,
+    N60DynamicsSnapshot snapshot,
+    float *left,
+    float *right
+) {
+    if (runtime == NULL || left == NULL || right == NULL) return;
 
     float gateDetectorInput = fmaxf(fabsf(*left), fabsf(*right));
     float detectorCoefficient = gateDetectorInput > runtime->gateDetectorEnvelope
         ? snapshot.pauseGate.detectorAttackCoefficient
         : snapshot.pauseGate.detectorReleaseCoefficient;
-    runtime->gateDetectorEnvelope = smooth_toward(runtime->gateDetectorEnvelope, gateDetectorInput, detectorCoefficient);
+    runtime->gateDetectorEnvelope = smooth_toward(
+        runtime->gateDetectorEnvelope,
+        gateDetectorInput,
+        detectorCoefficient
+    );
 
     float gateTarget = 1.0f;
     float gateCoefficient = snapshot.bypassTransitionCoefficient;
@@ -280,7 +301,9 @@ void N60DynamicsProcessStereoFrame(
             if (runtime->gateBelowThresholdFrames < snapshot.pauseGate.holdFrames) {
                 runtime->gateBelowThresholdFrames += 1;
             }
-            if (runtime->gateBelowThresholdFrames >= snapshot.pauseGate.holdFrames) runtime->gateOpen = false;
+            if (runtime->gateBelowThresholdFrames >= snapshot.pauseGate.holdFrames) {
+                runtime->gateOpen = false;
+            }
         } else {
             runtime->gateBelowThresholdFrames = 0;
         }
@@ -298,6 +321,16 @@ void N60DynamicsProcessStereoFrame(
     runtime->pauseGateGain = smooth_toward(runtime->pauseGateGain, gateTarget, gateCoefficient);
     *left *= runtime->pauseGateGain;
     *right *= runtime->pauseGateGain;
+}
+
+void N60DynamicsProcessStereoFrame(
+    N60DynamicsRuntime *runtime,
+    N60DynamicsSnapshot snapshot,
+    float *left,
+    float *right
+) {
+    N60DynamicsProcessCoreStereoFrame(runtime, snapshot, left, right);
+    N60DynamicsProcessPauseGateStereoFrame(runtime, snapshot, left, right);
 }
 
 N60DynamicsTelemetry N60DynamicsRuntimeTelemetry(const N60DynamicsRuntime *runtime) {

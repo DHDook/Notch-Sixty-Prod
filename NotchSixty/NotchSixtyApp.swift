@@ -7,6 +7,7 @@ struct ProductDSPConfiguration: Equatable, Sendable {
     var playback: PlaybackControlConfiguration
     var gain: DSPGainConfiguration
     var bassManagement: BassManagementConfiguration
+    var dynamics: DynamicsConfiguration
     var roomCorrection: RoomCorrectionConfiguration
 
     init(
@@ -15,6 +16,7 @@ struct ProductDSPConfiguration: Equatable, Sendable {
         playback: PlaybackControlConfiguration = PlaybackControlConfiguration(),
         gain: DSPGainConfiguration = DSPGainConfiguration(),
         bassManagement: BassManagementConfiguration = BassManagementConfiguration(),
+        dynamics: DynamicsConfiguration = DynamicsConfiguration(),
         roomCorrection: RoomCorrectionConfiguration = RoomCorrectionConfiguration()
     ) {
         self.eq = eq
@@ -22,12 +24,13 @@ struct ProductDSPConfiguration: Equatable, Sendable {
         self.playback = playback
         self.gain = gain
         self.bassManagement = bassManagement
+        self.dynamics = dynamics
         self.roomCorrection = roomCorrection
     }
 }
 
 struct ProductConfiguration: Equatable, Sendable {
-    static let currentSchemaVersion = 3
+    static let currentSchemaVersion = 4
 
     var schemaVersion: Int
     var selectedOutputUID: String?
@@ -80,6 +83,7 @@ final class ProductController: ObservableObject {
                 playback: audioEngine.playbackControlConfiguration,
                 gain: audioEngine.gainConfiguration,
                 bassManagement: audioEngine.bassManagementConfiguration,
+                dynamics: audioEngine.dynamicsConfiguration,
                 roomCorrection: audioEngine.roomCorrectionConfiguration
             )
         )
