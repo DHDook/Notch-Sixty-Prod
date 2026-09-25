@@ -33,6 +33,8 @@ typedef struct {
     N60BiquadState pendingRight;
     bool currentEnabled;
     bool pendingEnabled;
+    uint8_t currentChannelMask;
+    uint8_t pendingChannelMask;
     uint32_t transitionFramesTotal;
     uint32_t transitionFramesRemaining;
 } N60EQBandRuntime;
@@ -64,13 +66,15 @@ struct N60RenderKernel {
     _Atomic uint32_t activeSlot;
     _Atomic uint64_t nextGeneration;
 
-    N60EQBandRuntime eqRuntime[N60_MAX_EQ_BANDS];
+    N60EQBandRuntime eqRuntime[N60_MAX_EQ_RENDER_SLOTS];
     N60CrossoverRuntime crossoverRuntime;
     N60PartitionedConvolver *convolver;
     N60PartitionedConvolver *roomCorrectionConvolver;
     N60SmoothedGain inputGain;
     N60SmoothedGain headroomGain;
     N60SmoothedGain outputGain;
+    N60SmoothedGain balanceGainLeft;
+    N60SmoothedGain balanceGainRight;
     uint64_t preparedGeneration;
     double preparedSampleRate;
     bool preparedGraphBypassed;
@@ -124,6 +128,10 @@ static bool coefficients_equal(N60BiquadCoefficients lhs, N60BiquadCoefficients 
         && lhs.b2 == rhs.b2
         && lhs.a1 == rhs.a1
         && lhs.a2 == rhs.a2;
+}
+
+static bool channel_mask_is_valid(uint8_t channelMask) {
+    return channelMask != 0 && (channelMask & ~N60_EQ_CHANNEL_STEREO) == 0;
 }
 
 static bool band_snapshot_is_valid(N60BiquadBandSnapshot band, double sampleRate) {
@@ -194,7 +202,13 @@ static bool snapshot_is_valid(N60DSPGraphSnapshot snapshot) {
         || snapshot.headroomGainLinear < 0.0f
         || !isfinite(snapshot.outputGainLinear)
         || snapshot.outputGainLinear < 0.0f
-        || snapshot.eqBandCount > N60_MAX_EQ_BANDS
+        || !isfinite(snapshot.balanceGainLeftLinear)
+        || snapshot.balanceGainLeftLinear < 0.0f
+        || snapshot.balanceGainLeftLinear > 1.0f
+        || !isfinite(snapshot.balanceGainRightLinear)
+        || snapshot.balanceGainRightLinear < 0.0f
+        || snapshot.balanceGainRightLinear > 1.0f
+        || snapshot.eqBandCount > N60_MAX_EQ_RENDER_SLOTS
         || !crossover_snapshot_is_valid(snapshot.crossover, snapshot.sampleRate)
         || !convolution_snapshot_is_valid(snapshot.convolution)
         || !convolution_snapshot_is_valid(snapshot.roomCorrection)) {
@@ -203,6 +217,7 @@ static bool snapshot_is_valid(N60DSPGraphSnapshot snapshot) {
 
     for (uint32_t index = 0; index < snapshot.eqBandCount; ++index) {
         if (!band_snapshot_is_valid(snapshot.eqBands[index], snapshot.sampleRate)) return false;
+        if (snapshot.eqBands[index].enabled && !channel_mask_is_valid(snapshot.eqBandChannelMasks[index])) return false;
     }
     return true;
 }
@@ -240,12 +255,14 @@ static void reset_band_runtime(N60EQBandRuntime *runtime) {
     clear_state(&runtime->pendingRight);
     runtime->currentEnabled = false;
     runtime->pendingEnabled = false;
+    runtime->currentChannelMask = 0;
+    runtime->pendingChannelMask = 0;
     runtime->transitionFramesTotal = 0;
     runtime->transitionFramesRemaining = 0;
 }
 
 static void reset_eq_runtime(N60RenderKernel *kernel) {
-    for (uint32_t index = 0; index < N60_MAX_EQ_BANDS; ++index) reset_band_runtime(&kernel->eqRuntime[index]);
+    for (uint32_t index = 0; index < N60_MAX_EQ_RENDER_SLOTS; ++index) reset_band_runtime(&kernel->eqRuntime[index]);
 }
 
 static void reset_smoothed_gain(N60SmoothedGain *gain, float value) {
@@ -283,14 +300,26 @@ static void promote_pending_filter(N60EQBandRuntime *runtime) {
     runtime->currentLeft = runtime->pendingLeft;
     runtime->currentRight = runtime->pendingRight;
     runtime->currentEnabled = runtime->pendingEnabled;
+    runtime->currentChannelMask = runtime->pendingChannelMask;
     runtime->transitionFramesTotal = 0;
     runtime->transitionFramesRemaining = 0;
 }
 
-static void schedule_band_transition(N60EQBandRuntime *runtime, bool enabled, N60BiquadCoefficients coefficients, uint32_t transitionFrames) {
+static void schedule_band_transition(
+    N60EQBandRuntime *runtime,
+    bool enabled,
+    uint8_t channelMask,
+    N60BiquadCoefficients coefficients,
+    uint32_t transitionFrames
+) {
     promote_pending_filter(runtime);
-    if (runtime->currentEnabled == enabled && (!enabled || coefficients_equal(runtime->currentCoefficients, coefficients))) return;
+    if (runtime->currentEnabled == enabled
+        && runtime->currentChannelMask == channelMask
+        && (!enabled || coefficients_equal(runtime->currentCoefficients, coefficients))) {
+        return;
+    }
     runtime->pendingEnabled = enabled;
+    runtime->pendingChannelMask = enabled ? channelMask : 0;
     runtime->pendingCoefficients = enabled ? coefficients : N60BiquadCoefficientsMakeIdentity();
     runtime->pendingLeft = runtime->currentLeft;
     runtime->pendingRight = runtime->currentRight;
@@ -355,23 +384,29 @@ static void prepare_runtime_for_snapshot(N60RenderKernel *kernel, const N60DSPGr
         reset_smoothed_gain(&kernel->inputGain, snapshot->inputGainLinear);
         reset_smoothed_gain(&kernel->headroomGain, snapshot->headroomGainLinear);
         reset_smoothed_gain(&kernel->outputGain, snapshot->outputGainLinear);
+        reset_smoothed_gain(&kernel->balanceGainLeft, snapshot->balanceGainLeftLinear);
+        reset_smoothed_gain(&kernel->balanceGainRight, snapshot->balanceGainRightLinear);
     } else {
         schedule_gain_transition(&kernel->inputGain, snapshot->inputGainLinear, gainFrames);
         schedule_gain_transition(&kernel->headroomGain, snapshot->headroomGainLinear, gainFrames);
         schedule_gain_transition(&kernel->outputGain, snapshot->outputGainLinear, gainFrames);
+        schedule_gain_transition(&kernel->balanceGainLeft, snapshot->balanceGainLeftLinear, gainFrames);
+        schedule_gain_transition(&kernel->balanceGainRight, snapshot->balanceGainRightLinear, gainFrames);
     }
 
     if (sampleRateChanged || leavingGraphBypass || leavingEQBypass) reset_eq_runtime(kernel);
     if (!snapshot->bypassed && !snapshot->eqBypassed) {
         uint32_t eqFrames = snapshot->eqTransitionFrames > 0 ? snapshot->eqTransitionFrames : eq_transition_frames_for_sample_rate(snapshot->sampleRate);
-        for (uint32_t index = 0; index < N60_MAX_EQ_BANDS; ++index) {
+        for (uint32_t index = 0; index < N60_MAX_EQ_RENDER_SLOTS; ++index) {
             bool enabled = false;
+            uint8_t channelMask = 0;
             N60BiquadCoefficients coefficients = N60BiquadCoefficientsMakeIdentity();
             if (index < snapshot->eqBandCount) {
                 enabled = snapshot->eqBands[index].enabled;
+                channelMask = snapshot->eqBandChannelMasks[index];
                 coefficients = snapshot->eqBands[index].coefficients;
             }
-            schedule_band_transition(&kernel->eqRuntime[index], enabled, coefficients, eqFrames);
+            schedule_band_transition(&kernel->eqRuntime[index], enabled, channelMask, coefficients, eqFrames);
         }
     } else {
         reset_eq_runtime(kernel);
@@ -392,19 +427,22 @@ static void prepare_runtime_for_snapshot(N60RenderKernel *kernel, const N60DSPGr
     kernel->preparedEQBypassed = snapshot->eqBypassed;
 }
 
-static float process_eq_band(N60EQBandRuntime *runtime, float input, bool leftChannel) {
+static float process_eq_band(N60EQBandRuntime *runtime, float input, uint8_t channelBit) {
+    bool leftChannel = channelBit == N60_EQ_CHANNEL_LEFT;
     N60BiquadState *currentState = leftChannel ? &runtime->currentLeft : &runtime->currentRight;
     N60BiquadState *pendingState = leftChannel ? &runtime->pendingLeft : &runtime->pendingRight;
-    float currentOutput = runtime->currentEnabled ? N60BiquadProcessSample(runtime->currentCoefficients, currentState, input) : input;
+    bool currentApplies = runtime->currentEnabled && (runtime->currentChannelMask & channelBit) != 0;
+    bool pendingApplies = runtime->pendingEnabled && (runtime->pendingChannelMask & channelBit) != 0;
+    float currentOutput = currentApplies ? N60BiquadProcessSample(runtime->currentCoefficients, currentState, input) : input;
     if (runtime->transitionFramesRemaining == 0) return currentOutput;
-    float pendingOutput = runtime->pendingEnabled ? N60BiquadProcessSample(runtime->pendingCoefficients, pendingState, input) : input;
+    float pendingOutput = pendingApplies ? N60BiquadProcessSample(runtime->pendingCoefficients, pendingState, input) : input;
     uint32_t completed = runtime->transitionFramesTotal - runtime->transitionFramesRemaining + 1;
     float mix = (float)completed / (float)runtime->transitionFramesTotal;
     return currentOutput + (pendingOutput - currentOutput) * mix;
 }
 
 static void advance_eq_transitions(N60RenderKernel *kernel) {
-    for (uint32_t index = 0; index < N60_MAX_EQ_BANDS; ++index) {
+    for (uint32_t index = 0; index < N60_MAX_EQ_RENDER_SLOTS; ++index) {
         N60EQBandRuntime *runtime = &kernel->eqRuntime[index];
         if (runtime->transitionFramesRemaining == 0) continue;
         runtime->transitionFramesRemaining -= 1;
@@ -413,11 +451,10 @@ static void advance_eq_transitions(N60RenderKernel *kernel) {
             runtime->currentLeft = runtime->pendingLeft;
             runtime->currentRight = runtime->pendingRight;
             runtime->currentEnabled = runtime->pendingEnabled;
+            runtime->currentChannelMask = runtime->pendingChannelMask;
             runtime->transitionFramesTotal = 0;
-            if (!runtime->currentEnabled) {
-                clear_state(&runtime->currentLeft);
-                clear_state(&runtime->currentRight);
-            }
+            if (!runtime->currentEnabled || (runtime->currentChannelMask & N60_EQ_CHANNEL_LEFT) == 0) clear_state(&runtime->currentLeft);
+            if (!runtime->currentEnabled || (runtime->currentChannelMask & N60_EQ_CHANNEL_RIGHT) == 0) clear_state(&runtime->currentRight);
         }
     }
 }
@@ -637,6 +674,8 @@ N60DSPGraphSnapshot N60DSPGraphSnapshotMakeUnity(double sampleRate) {
     snapshot.inputGainLinear = 1.0f;
     snapshot.headroomGainLinear = 1.0f;
     snapshot.outputGainLinear = 1.0f;
+    snapshot.balanceGainLeftLinear = 1.0f;
+    snapshot.balanceGainRightLinear = 1.0f;
     snapshot.bypassed = false;
     snapshot.latencyFrames = 0;
     snapshot.generation = 0;
@@ -656,16 +695,41 @@ N60DSPGraphSnapshot N60DSPGraphSnapshotMakeUnity(double sampleRate) {
 void N60DSPGraphSnapshotClearEQ(N60DSPGraphSnapshot *snapshot) {
     if (snapshot == NULL) return;
     memset(snapshot->eqBands, 0, sizeof(snapshot->eqBands));
+    memset(snapshot->eqBandChannelMasks, 0, sizeof(snapshot->eqBandChannelMasks));
     snapshot->eqBandCount = 0;
 }
 
-bool N60DSPGraphSnapshotSetEQBand(N60DSPGraphSnapshot *snapshot, uint32_t bandIndex, N60BiquadFilterType type, double frequencyHz, double gainDB, double q, bool enabled) {
-    if (snapshot == NULL || bandIndex >= N60_MAX_EQ_BANDS) return false;
+bool N60DSPGraphSnapshotSetEQBandForChannels(
+    N60DSPGraphSnapshot *snapshot,
+    uint32_t bandIndex,
+    uint8_t channelMask,
+    N60BiquadFilterType type,
+    double frequencyHz,
+    double gainDB,
+    double q,
+    bool enabled
+) {
+    if (snapshot == NULL || bandIndex >= N60_MAX_EQ_RENDER_SLOTS) return false;
+    if (enabled && !channel_mask_is_valid(channelMask)) return false;
     N60BiquadBandSnapshot band = {0};
     if (!N60BiquadBandSnapshotMake(type, snapshot->sampleRate, frequencyHz, gainDB, q, enabled, &band)) return false;
     snapshot->eqBands[bandIndex] = band;
+    snapshot->eqBandChannelMasks[bandIndex] = enabled ? channelMask : 0;
     if (snapshot->eqBandCount <= bandIndex) snapshot->eqBandCount = bandIndex + 1;
     return true;
+}
+
+bool N60DSPGraphSnapshotSetEQBand(N60DSPGraphSnapshot *snapshot, uint32_t bandIndex, N60BiquadFilterType type, double frequencyHz, double gainDB, double q, bool enabled) {
+    return N60DSPGraphSnapshotSetEQBandForChannels(
+        snapshot,
+        bandIndex,
+        N60_EQ_CHANNEL_STEREO,
+        type,
+        frequencyHz,
+        gainDB,
+        q,
+        enabled
+    );
 }
 
 bool N60DSPGraphSnapshotSetCrossover(N60DSPGraphSnapshot *snapshot, double frequencyHz, N60CrossoverTopology topology, N60CrossoverMonitorMode monitorMode, float subGainLinear, bool subPolarityInverted, bool enabled) {
@@ -733,6 +797,8 @@ N60RenderKernel *N60RenderKernelCreate(void) {
     reset_smoothed_gain(&kernel->inputGain, 1.0f);
     reset_smoothed_gain(&kernel->headroomGain, 1.0f);
     reset_smoothed_gain(&kernel->outputGain, 1.0f);
+    reset_smoothed_gain(&kernel->balanceGainLeft, 1.0f);
+    reset_smoothed_gain(&kernel->balanceGainRight, 1.0f);
     return kernel;
 }
 
@@ -752,6 +818,8 @@ void N60RenderKernelReset(N60RenderKernel *kernel) {
     reset_smoothed_gain(&kernel->inputGain, 1.0f);
     reset_smoothed_gain(&kernel->headroomGain, 1.0f);
     reset_smoothed_gain(&kernel->outputGain, 1.0f);
+    reset_smoothed_gain(&kernel->balanceGainLeft, 1.0f);
+    reset_smoothed_gain(&kernel->balanceGainRight, 1.0f);
     kernel->preparedGeneration = 0;
     kernel->preparedSampleRate = 0.0;
     kernel->preparedGraphBypassed = false;
@@ -857,18 +925,15 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
         right *= inputGain * headroomGain;
 
         if (!context->snapshot.eqBypassed) {
-            for (uint32_t index = 0; index < N60_MAX_EQ_BANDS; ++index) {
+            for (uint32_t index = 0; index < N60_MAX_EQ_RENDER_SLOTS; ++index) {
                 N60EQBandRuntime *runtime = &kernel->eqRuntime[index];
                 if (!runtime->currentEnabled && runtime->transitionFramesRemaining == 0) continue;
-                left = process_eq_band(runtime, left, true);
-                right = process_eq_band(runtime, right, false);
+                left = process_eq_band(runtime, left, N60_EQ_CHANNEL_LEFT);
+                right = process_eq_band(runtime, right, N60_EQ_CHANNEL_RIGHT);
             }
             advance_eq_transitions(kernel);
         }
 
-        // FIR convolution is the linear-phase EQ path in the current graph.
-        // It therefore occupies the same logical stage as the minimum-phase
-        // biquads: before post-EQ metering and before bass management.
         if (context->snapshot.convolution.enabled) {
             float convolvedLeft = left;
             float convolvedRight = right;
@@ -890,9 +955,6 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
         meter_sample(left, right, &context->postEQPeakLeft, &context->postEQPeakRight, &context->postEQSquareSumLeft, &context->postEQSquareSumRight, &context->postEQOverRangeSamples);
         process_crossover(&kernel->crossoverRuntime, left, right, &left, &right);
 
-        // Room correction is a separate logical FIR stage with independent
-        // program ownership. It operates on the post-bass-management stereo
-        // signal and precedes the final DSP output gain.
         if (context->snapshot.roomCorrection.enabled) {
             float correctedLeft = left;
             float correctedRight = right;
@@ -911,6 +973,8 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
             }
         }
 
+        left *= next_gain_value(&kernel->balanceGainLeft);
+        right *= next_gain_value(&kernel->balanceGainRight);
         float outputGain = next_gain_value(&kernel->outputGain);
         left *= outputGain;
         right *= outputGain;
@@ -970,8 +1034,16 @@ N60RenderKernelDiagnostics N60RenderKernelGetDiagnostics(const N60RenderKernel *
         diagnostics.inputGainLinear = context.snapshot.inputGainLinear;
         diagnostics.headroomGainLinear = context.snapshot.headroomGainLinear;
         diagnostics.outputGainLinear = context.snapshot.outputGainLinear;
+        diagnostics.balanceGainLeftLinear = context.snapshot.balanceGainLeftLinear;
+        diagnostics.balanceGainRightLinear = context.snapshot.balanceGainRightLinear;
         diagnostics.eqBypassed = context.snapshot.eqBypassed;
         diagnostics.eqBandCount = context.snapshot.eqBandCount;
+        for (uint32_t index = 0; index < context.snapshot.eqBandCount; ++index) {
+            if (!context.snapshot.eqBands[index].enabled) continue;
+            uint8_t mask = context.snapshot.eqBandChannelMasks[index];
+            if ((mask & N60_EQ_CHANNEL_LEFT) != 0) diagnostics.eqLeftBandCount += 1;
+            if ((mask & N60_EQ_CHANNEL_RIGHT) != 0) diagnostics.eqRightBandCount += 1;
+        }
         diagnostics.crossoverEnabled = context.snapshot.crossover.enabled;
         diagnostics.crossoverFrequencyHz = context.snapshot.crossover.frequencyHz;
         diagnostics.crossoverTopology = context.snapshot.crossover.topology;

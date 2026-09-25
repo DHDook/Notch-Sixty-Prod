@@ -13,6 +13,7 @@
 		A10000000000000000000013 /* NotchSixtyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000024 /* NotchSixtyTests.swift */; };
 		A10000000000000000000014 /* ConvolutionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000027 /* ConvolutionTests.swift */; };
 		A10000000000000000000015 /* LiveLinearPhaseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000028 /* LiveLinearPhaseTests.swift */; };
+		A10000000000000000000016 /* StereoPlaybackControlTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000029 /* StereoPlaybackControlTests.swift */; };
 		A20000000000000000000010 /* AudioIOEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000020 /* AudioIOEngine.swift */; };
 		A20000000000000000000011 /* CoreAudioError.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000021 /* CoreAudioError.swift */; };
 		A20000000000000000000012 /* AudioOutputDevice.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000022 /* AudioOutputDevice.swift */; };
@@ -20,6 +21,7 @@
 		A20000000000000000000014 /* AudioRouteConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000024 /* AudioRouteConfiguration.swift */; };
 		A20000000000000000000015 /* AudioLifecycleState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000025 /* AudioLifecycleState.swift */; };
 		A20000000000000000000016 /* AudioDiagnosticsSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000026 /* AudioDiagnosticsSnapshot.swift */; };
+		A20000000000000000000017 /* StereoPlaybackControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000027 /* StereoPlaybackControl.swift */; };
 		A30000000000000000000010 /* N60RealtimeAudioBridge.c in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000020 /* N60RealtimeAudioBridge.c */; };
 		A30000000000000000000011 /* N60RenderKernel.c in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000021 /* N60RenderKernel.c */; };
 		A30000000000000000000012 /* N60Convolution.c in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000023 /* N60Convolution.c */; };
@@ -45,6 +47,7 @@
 		A10000000000000000000026 /* NotchSixtyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = NotchSixtyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000027 /* ConvolutionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConvolutionTests.swift; sourceTree = "<group>"; };
 		A10000000000000000000028 /* LiveLinearPhaseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveLinearPhaseTests.swift; sourceTree = "<group>"; };
+		A10000000000000000000029 /* StereoPlaybackControlTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StereoPlaybackControlTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000020 /* AudioIOEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioIOEngine.swift; sourceTree = "<group>"; };
 		A20000000000000000000021 /* CoreAudioError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudioError.swift; sourceTree = "<group>"; };
 		A20000000000000000000022 /* AudioOutputDevice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioOutputDevice.swift; sourceTree = "<group>"; };
@@ -52,6 +55,7 @@
 		A20000000000000000000024 /* AudioRouteConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRouteConfiguration.swift; sourceTree = "<group>"; };
 		A20000000000000000000025 /* AudioLifecycleState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioLifecycleState.swift; sourceTree = "<group>"; };
 		A20000000000000000000026 /* AudioDiagnosticsSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioDiagnosticsSnapshot.swift; sourceTree = "<group>"; };
+		A20000000000000000000027 /* StereoPlaybackControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StereoPlaybackControl.swift; sourceTree = "<group>"; };
 		A30000000000000000000020 /* N60RealtimeAudioBridge.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = N60RealtimeAudioBridge.c; sourceTree = "<group>"; };
 		A30000000000000000000021 /* N60RenderKernel.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = N60RenderKernel.c; sourceTree = "<group>"; };
 		A30000000000000000000022 /* N60RenderKernel.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60RenderKernel.h; sourceTree = "<group>"; };
@@ -94,6 +98,7 @@
 				A10000000000000000000024 /* NotchSixtyTests.swift */,
 				A10000000000000000000027 /* ConvolutionTests.swift */,
 				A10000000000000000000028 /* LiveLinearPhaseTests.swift */,
+				A10000000000000000000029 /* StereoPlaybackControlTests.swift */,
 			);
 			path = NotchSixtyTests;
 			sourceTree = "<group>";
@@ -115,6 +120,7 @@
 				A20000000000000000000053 /* Routing */,
 				A30000000000000000000050 /* Realtime */,
 				A20000000000000000000020 /* AudioIOEngine.swift */,
+				A20000000000000000000027 /* StereoPlaybackControl.swift */,
 			);
 			path = Audio;
 			sourceTree = "<group>";
@@ -207,6 +213,7 @@
 				A20000000000000000000014 /* AudioRouteConfiguration.swift in Sources */,
 				A20000000000000000000015 /* AudioLifecycleState.swift in Sources */,
 				A20000000000000000000016 /* AudioDiagnosticsSnapshot.swift in Sources */,
+				A20000000000000000000017 /* StereoPlaybackControl.swift in Sources */,
 				A30000000000000000000010 /* N60RealtimeAudioBridge.c in Sources */,
 				A30000000000000000000011 /* N60RenderKernel.c in Sources */,
 				A30000000000000000000012 /* N60Convolution.c in Sources */,
@@ -220,6 +227,7 @@
 				A10000000000000000000013 /* NotchSixtyTests.swift in Sources */,
 				A10000000000000000000014 /* ConvolutionTests.swift in Sources */,
 				A10000000000000000000015 /* LiveLinearPhaseTests.swift in Sources */,
+				A10000000000000000000016 /* StereoPlaybackControlTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

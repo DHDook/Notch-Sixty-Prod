@@ -33,6 +33,26 @@ struct ContentView: View {
         Binding(get: { engine.gainConfiguration.outputGainDB }, set: { try? engine.setOutputGainDB($0) })
     }
 
+    private var eqChannelModeBinding: Binding<EQChannelMode> {
+        Binding(get: { engine.stereoEQConfiguration.channelMode }, set: { try? engine.setEQChannelMode($0) })
+    }
+
+    private var eqEditChannelBinding: Binding<EQEditChannel> {
+        Binding(get: { engine.stereoEQConfiguration.editChannel }, set: { engine.setEQEditChannel($0) })
+    }
+
+    private var balanceBinding: Binding<Double> {
+        Binding(get: { engine.playbackControlConfiguration.balance }, set: { try? engine.setChannelBalance($0) })
+    }
+
+    private var globalBypassBinding: Binding<Bool> {
+        Binding(get: { engine.playbackControlConfiguration.globalBypassed }, set: { try? engine.setGlobalDSPBypassed($0) })
+    }
+
+    private var flatAuditionBinding: Binding<Bool> {
+        Binding(get: { engine.playbackControlConfiguration.flatAuditionEnabled }, set: { try? engine.setFlatAuditionEnabled($0) })
+    }
+
     private var crossoverEnabledBinding: Binding<Bool> { crossoverBinding(\.enabled) }
     private var crossoverFrequencyBinding: Binding<Double> { crossoverBinding(\.frequencyHz) }
     private var crossoverTopologyBinding: Binding<CrossoverTopology> { crossoverBinding(\.topology) }
@@ -78,6 +98,7 @@ struct ContentView: View {
                 }
             }
 
+            playbackValidationView
             gainValidationView
             crossoverValidationView
             roomCorrectionValidationView
@@ -104,6 +125,32 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
             engine.shutdownForTermination()
         }
+    }
+
+    @ViewBuilder
+    private var playbackValidationView: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Stereo / playback validation").font(.headline)
+                Spacer()
+                Toggle("Global Bypass", isOn: globalBypassBinding).toggleStyle(.switch)
+                Toggle("Flat", isOn: flatAuditionBinding).toggleStyle(.switch)
+            }
+            HStack(spacing: 12) {
+                Text("Balance").frame(width: 90, alignment: .leading)
+                Text("L").foregroundStyle(.secondary)
+                Slider(value: balanceBinding, in: PlaybackControlConfiguration.balanceRange, step: 0.01)
+                Text("R").foregroundStyle(.secondary)
+                Text(engine.playbackControlConfiguration.balance.formatted(.number.precision(.fractionLength(2))))
+                    .monospacedDigit()
+                    .frame(width: 55)
+            }
+            Text("Balance is attenuation-only; center is exact unity. Global Bypass and Flat preserve all configured DSP state while auditioning the untreated input.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(10)
+        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
     }
 
     @ViewBuilder
@@ -235,6 +282,21 @@ struct ContentView: View {
                 Text("\(engine.eqConfiguration.enabledBandCount) active / \(engine.eqConfiguration.bands.count) configured / \(EQConfiguration.maximumBandCount) max")
                     .foregroundStyle(.secondary)
                 Spacer()
+                Picker("Channels", selection: eqChannelModeBinding) {
+                    ForEach(EQChannelMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 180)
+                if engine.stereoEQConfiguration.channelMode == .independent {
+                    Picker("Edit", selection: eqEditChannelBinding) {
+                        Text("Left").tag(EQEditChannel.left)
+                        Text("Right").tag(EQEditChannel.right)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 150)
+                }
                 Picker("Phase", selection: eqPhaseModeBinding) {
                     ForEach(EQPhaseMode.allCases) { mode in
                         Text(mode.displayName).tag(mode)
@@ -363,7 +425,9 @@ struct ContentView: View {
                 diagnosticRow("Input preamp", formattedGain(render.inputGainLinear))
                 diagnosticRow("Headroom stage", formattedGain(render.headroomGainLinear))
                 diagnosticRow("Output gain", formattedGain(render.outputGainLinear))
-                diagnosticRow("EQ mode", engine.eqConfiguration.phaseMode.displayName)
+                diagnosticRow("Balance gains", "L \(formattedGain(render.balanceGainLeftLinear)) / R \(formattedGain(render.balanceGainRightLinear))")
+                diagnosticRow("EQ mode", engine.stereoEQConfiguration.phaseMode.displayName)
+                diagnosticRow("EQ channels", "\(engine.stereoEQConfiguration.channelMode.displayName) / L \(render.eqLeftBandCount) / R \(render.eqRightBandCount)")
                 diagnosticRow("EQ stage", "\(render.eqBypassed ? "bypassed" : "active") / \(render.eqBandCount) IIR bands")
                 diagnosticRow(
                     "Linear FIR",

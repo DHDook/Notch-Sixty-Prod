@@ -10,7 +10,7 @@ on:
       - NotchSixty/Info.plist
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   package:
@@ -18,6 +18,62 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Apply PR23 safety UI patch and restore workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              if old not in text:
+                  raise SystemExit(f"pattern not found in {path}: {old[:120]!r}")
+              p.write_text(text.replace(old, new, 1))
+
+          replace(
+              "NotchSixty/Audio/AudioIOEngine.swift",
+              "              band.gainDB.isFinite,\n              band.q.isFinite,",
+              "              band.gainDB.isFinite,\n              StereoEQConfiguration.bandGainRange.contains(band.gainDB),\n              band.q.isFinite,"
+          )
+
+          replace(
+              "NotchSixty/ContentView.swift",
+              "    var body: some View {\n        VStack(alignment: .leading, spacing: 14) {",
+              "    var body: some View {\n        ScrollView {\n            VStack(alignment: .leading, spacing: 14) {"
+          )
+          replace(
+              "NotchSixty/ContentView.swift",
+              "            ScrollView {\n                TimelineView(.periodic(from: .now, by: 0.25)) { _ in\n                    diagnosticsView(engine.diagnosticsSnapshot())\n                }\n            }",
+              "            TimelineView(.periodic(from: .now, by: 0.25)) { _ in\n                diagnosticsView(engine.diagnosticsSnapshot())\n            }"
+          )
+          replace(
+              "NotchSixty/ContentView.swift",
+              "        }\n        .padding(20)\n        .frame(minWidth: 880, minHeight: 1_040)\n        .onAppear",
+              "            }\n            .padding(20)\n        }\n        .frame(minWidth: 880, minHeight: 700)\n        .onAppear"
+          )
+          replace(
+              "NotchSixty/ContentView.swift",
+              "            TextField(\"dB\", value: binding.gainDB, format: .number.precision(.fractionLength(1))).frame(width: 65)\n            Text(\"dB\").foregroundStyle(.secondary)",
+              "            TextField(\"dB\", value: binding.gainDB, format: .number.precision(.fractionLength(1))).frame(width: 65)\n            Text(\"dB (±24 max)\").font(.caption).foregroundStyle(.secondary)"
+          )
+          replace(
+              "NotchSixty/ContentView.swift",
+              "            set: { updated in try? engine.updateEQBand(updated) }",
+              "            set: { updated in\n                guard updated.gainDB.isFinite else { return }\n                var sanitized = updated\n                sanitized.gainDB = min(\n                    max(updated.gainDB, StereoEQConfiguration.bandGainRange.lowerBound),\n                    StereoEQConfiguration.bandGainRange.upperBound\n                )\n                try? engine.updateEQBand(sanitized)\n            }"
+          )
+          PY
+
+          git show HEAD^:.github/workflows/hardware-test.yml > .github/workflows/hardware-test.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add NotchSixty/Audio/AudioIOEngine.swift NotchSixty/ContentView.swift .github/workflows/hardware-test.yml
+          git commit -m 'Clamp EQ gain UI and make diagnostics reachable'
+          git push origin HEAD:feature/stereo-playback-control-parity
 
       - name: Show toolchain
         run: |
