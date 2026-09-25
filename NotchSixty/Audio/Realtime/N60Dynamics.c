@@ -105,6 +105,20 @@ static float dynamics_compression_target(
 N60DynamicsSnapshot N60DynamicsSnapshotMakeBypassed(double sampleRate) {
     N60DynamicsSnapshot snapshot = {0};
 
+    snapshot.stereoMode.mode = N60StereoModeStereo;
+    snapshot.stereoWidener.enabled = false;
+    snapshot.stereoWidener.monoLowBand = true;
+    snapshot.stereoWidener.lowMidFrequencyHz = 200.0;
+    snapshot.stereoWidener.midHighFrequencyHz = 4000.0;
+    snapshot.stereoWidener.lowWidth = 0.0f;
+    snapshot.stereoWidener.midWidth = 1.0f;
+    snapshot.stereoWidener.highWidth = 1.0f;
+    snapshot.stereoWidener.sectionCount = 0;
+    for (uint32_t index = 0; index < N60_MAX_CROSSOVER_SECTIONS; ++index) {
+        snapshot.stereoWidener.lowPass[index] = N60BiquadCoefficientsMakeIdentity();
+        snapshot.stereoWidener.highPass[index] = N60BiquadCoefficientsMakeIdentity();
+    }
+
     snapshot.dcOffsetFilter.enabled = false;
     snapshot.dcOffsetFilter.poleCoefficient = (float)exp(-2.0 * M_PI * N60_DC_CUTOFF_HZ / sampleRate);
 
@@ -170,6 +184,62 @@ N60DynamicsSnapshot N60DynamicsSnapshotMakeBypassed(double sampleRate) {
     return snapshot;
 }
 
+
+bool N60DynamicsSnapshotSetStereoMode(
+    N60DynamicsSnapshot *snapshot,
+    N60StereoMode mode
+) {
+    if (snapshot == NULL) return false;
+    if (mode != N60StereoModeStereo
+        && mode != N60StereoModeWideMono
+        && mode != N60StereoModeTrueMono) return false;
+    snapshot->stereoMode.mode = mode;
+    return true;
+}
+
+bool N60DynamicsSnapshotSetStereoWidener(
+    N60DynamicsSnapshot *snapshot,
+    double sampleRate,
+    bool enabled,
+    bool monoLowBand,
+    double lowMidFrequencyHz,
+    double midHighFrequencyHz,
+    float lowWidth,
+    float midWidth,
+    float highWidth
+) {
+    if (snapshot == NULL || !isfinite(sampleRate) || sampleRate <= 0.0
+        || !isfinite(lowMidFrequencyHz) || lowMidFrequencyHz < 80.0 || lowMidFrequencyHz > 500.0
+        || !isfinite(midHighFrequencyHz) || midHighFrequencyHz < 1500.0 || midHighFrequencyHz > 8000.0
+        || lowMidFrequencyHz >= midHighFrequencyHz || midHighFrequencyHz >= sampleRate * 0.45
+        || !isfinite(lowWidth) || lowWidth < 0.0f || lowWidth > 1.0f
+        || !isfinite(midWidth) || midWidth < 1.0f || midWidth > 2.0f
+        || !isfinite(highWidth) || highWidth < 1.0f || highWidth > 2.0f) return false;
+
+    double qValues[N60_MAX_CROSSOVER_SECTIONS] = {0};
+    uint32_t sectionCount = 0;
+    if (!N60CrossoverTopologyQValues(N60CrossoverTopologyLinkwitzRiley24, qValues, &sectionCount)) return false;
+
+    N60StereoWidenerSnapshot configured = {0};
+    configured.enabled = enabled;
+    configured.monoLowBand = monoLowBand;
+    configured.lowMidFrequencyHz = lowMidFrequencyHz;
+    configured.midHighFrequencyHz = midHighFrequencyHz;
+    configured.lowWidth = lowWidth;
+    configured.midWidth = midWidth;
+    configured.highWidth = highWidth;
+    configured.sectionCount = sectionCount;
+    for (uint32_t index = 0; index < N60_MAX_CROSSOVER_SECTIONS; ++index) {
+        configured.lowPass[index] = N60BiquadCoefficientsMakeIdentity();
+        configured.highPass[index] = N60BiquadCoefficientsMakeIdentity();
+    }
+    for (uint32_t index = 0; index < sectionCount; ++index) {
+        if (!N60BiquadDesign(N60BiquadFilterTypeLowPass, sampleRate, lowMidFrequencyHz, 0.0, qValues[index], &configured.lowPass[index])
+            || !N60BiquadDesign(N60BiquadFilterTypeHighPass, sampleRate, midHighFrequencyHz, 0.0, qValues[index], &configured.highPass[index])) return false;
+    }
+    snapshot->stereoWidener = configured;
+    return true;
+}
 
 bool N60DynamicsSnapshotSetDCOffsetFilter(
     N60DynamicsSnapshot *snapshot,
@@ -461,6 +531,22 @@ bool N60DynamicsSnapshotSetPauseGate(
 
 bool N60DynamicsSnapshotIsValid(N60DynamicsSnapshot snapshot) {
     if (!valid_coefficient(snapshot.bypassTransitionCoefficient)) return false;
+    if (snapshot.stereoMode.mode != N60StereoModeStereo
+        && snapshot.stereoMode.mode != N60StereoModeWideMono
+        && snapshot.stereoMode.mode != N60StereoModeTrueMono) return false;
+    if (!isfinite(snapshot.stereoWidener.lowMidFrequencyHz)
+        || snapshot.stereoWidener.lowMidFrequencyHz < 80.0 || snapshot.stereoWidener.lowMidFrequencyHz > 500.0
+        || !isfinite(snapshot.stereoWidener.midHighFrequencyHz)
+        || snapshot.stereoWidener.midHighFrequencyHz < 1500.0 || snapshot.stereoWidener.midHighFrequencyHz > 8000.0
+        || snapshot.stereoWidener.lowMidFrequencyHz >= snapshot.stereoWidener.midHighFrequencyHz
+        || !isfinite(snapshot.stereoWidener.lowWidth) || snapshot.stereoWidener.lowWidth < 0.0f || snapshot.stereoWidener.lowWidth > 1.0f
+        || !isfinite(snapshot.stereoWidener.midWidth) || snapshot.stereoWidener.midWidth < 1.0f || snapshot.stereoWidener.midWidth > 2.0f
+        || !isfinite(snapshot.stereoWidener.highWidth) || snapshot.stereoWidener.highWidth < 1.0f || snapshot.stereoWidener.highWidth > 2.0f
+        || snapshot.stereoWidener.sectionCount > N60_MAX_CROSSOVER_SECTIONS) return false;
+    for (uint32_t index = 0; index < snapshot.stereoWidener.sectionCount; ++index) {
+        if (!N60BiquadCoefficientsAreFinite(snapshot.stereoWidener.lowPass[index])
+            || !N60BiquadCoefficientsAreFinite(snapshot.stereoWidener.highPass[index])) return false;
+    }
     if (!isfinite(snapshot.dcOffsetFilter.poleCoefficient) || snapshot.dcOffsetFilter.poleCoefficient <= 0.0f || snapshot.dcOffsetFilter.poleCoefficient >= 1.0f) return false;
     if (!isfinite(snapshot.infrasonicFilter.cutoffHz) || snapshot.infrasonicFilter.cutoffHz < 10.0 || snapshot.infrasonicFilter.cutoffHz > 30.0 || snapshot.infrasonicFilter.sectionCount > N60_MAX_INFRASONIC_SECTIONS) return false;
     for (uint32_t index = 0; index < snapshot.infrasonicFilter.sectionCount; ++index) {
@@ -523,6 +609,11 @@ bool N60DynamicsSnapshotIsValid(N60DynamicsSnapshot snapshot) {
 void N60DynamicsRuntimeReset(N60DynamicsRuntime *runtime) {
     if (runtime == NULL) return;
     memset(runtime, 0, sizeof(*runtime));
+    runtime->stereoMatrixLL = 1.0f;
+    runtime->stereoMatrixRR = 1.0f;
+    runtime->widenerLowWidth = 1.0f;
+    runtime->widenerMidWidth = 1.0f;
+    runtime->widenerHighWidth = 1.0f;
     runtime->pauseGateGain = 1.0f;
     runtime->gateOpen = true;
 }
@@ -557,6 +648,58 @@ void N60DynamicsProcessPreEQStereoFrame(
     runtime->infrasonicMix = smooth_toward(runtime->infrasonicMix, infrasonicTarget, snapshot.bypassTransitionCoefficient);
     *left = dryLeft + (hpLeft - dryLeft) * runtime->infrasonicMix;
     *right = dryRight + (hpRight - dryRight) * runtime->infrasonicMix;
+}
+
+static void process_stereo_mode(
+    N60DynamicsRuntime *runtime,
+    N60DynamicsSnapshot snapshot,
+    float *left,
+    float *right
+) {
+    float targetLL = 1.0f, targetLR = 0.0f, targetRL = 0.0f, targetRR = 1.0f;
+    if (snapshot.stereoMode.mode == N60StereoModeWideMono) {
+        const float equalPower = 0.7071067811865476f;
+        targetLL = targetLR = targetRL = targetRR = equalPower;
+    } else if (snapshot.stereoMode.mode == N60StereoModeTrueMono) {
+        targetLL = targetLR = targetRL = targetRR = 0.5f;
+    }
+    runtime->stereoMatrixLL = smooth_toward(runtime->stereoMatrixLL, targetLL, snapshot.bypassTransitionCoefficient);
+    runtime->stereoMatrixLR = smooth_toward(runtime->stereoMatrixLR, targetLR, snapshot.bypassTransitionCoefficient);
+    runtime->stereoMatrixRL = smooth_toward(runtime->stereoMatrixRL, targetRL, snapshot.bypassTransitionCoefficient);
+    runtime->stereoMatrixRR = smooth_toward(runtime->stereoMatrixRR, targetRR, snapshot.bypassTransitionCoefficient);
+    float inputLeft = *left;
+    float inputRight = *right;
+    *left = inputLeft * runtime->stereoMatrixLL + inputRight * runtime->stereoMatrixLR;
+    *right = inputLeft * runtime->stereoMatrixRL + inputRight * runtime->stereoMatrixRR;
+}
+
+static void process_stereo_widener(
+    N60DynamicsRuntime *runtime,
+    N60DynamicsSnapshot snapshot,
+    float *left,
+    float *right
+) {
+    N60StereoWidenerSnapshot widener = snapshot.stereoWidener;
+    if (widener.sectionCount == 0) return;
+
+    float mid = 0.5f * (*left + *right);
+    float side = 0.5f * (*left - *right);
+    float lowSide = process_filter_cascade(widener.lowPass, runtime->widenerLowPass, widener.sectionCount, side);
+    float highSide = process_filter_cascade(widener.highPass, runtime->widenerHighPass, widener.sectionCount, side);
+    float midSide = side - lowSide - highSide;
+
+    float lowTarget = widener.enabled ? (widener.monoLowBand ? 0.0f : widener.lowWidth) : 1.0f;
+    float midTarget = widener.enabled ? widener.midWidth : 1.0f;
+    float highTarget = widener.enabled ? widener.highWidth : 1.0f;
+    runtime->widenerLowWidth = smooth_toward(runtime->widenerLowWidth, lowTarget, snapshot.bypassTransitionCoefficient);
+    runtime->widenerMidWidth = smooth_toward(runtime->widenerMidWidth, midTarget, snapshot.bypassTransitionCoefficient);
+    runtime->widenerHighWidth = smooth_toward(runtime->widenerHighWidth, highTarget, snapshot.bypassTransitionCoefficient);
+
+    float processedSide = lowSide * runtime->widenerLowWidth
+        + midSide * runtime->widenerMidWidth
+        + highSide * runtime->widenerHighWidth;
+    *left = mid + processedSide;
+    *right = mid - processedSide;
 }
 
 static void process_loudness_contour(
@@ -712,6 +855,8 @@ void N60DynamicsProcessCoreStereoFrame(
 ) {
     if (runtime == NULL || left == NULL || right == NULL) return;
 
+    process_stereo_mode(runtime, snapshot, left, right);
+    process_stereo_widener(runtime, snapshot, left, right);
     process_loudness_contour(runtime, snapshot, left, right);
     process_de_esser(runtime, snapshot, left, right);
     process_multiband_compressor(runtime, snapshot, left, right);

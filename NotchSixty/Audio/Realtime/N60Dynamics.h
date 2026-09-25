@@ -20,6 +20,29 @@ typedef enum {
     N60InfrasonicSlope96DBPerOctave = 2,
 } N60InfrasonicSlope;
 
+typedef enum {
+    N60StereoModeStereo = 0,
+    N60StereoModeWideMono = 1,
+    N60StereoModeTrueMono = 2,
+} N60StereoMode;
+
+typedef struct {
+    N60StereoMode mode;
+} N60StereoModeSnapshot;
+
+typedef struct {
+    bool enabled;
+    bool monoLowBand;
+    double lowMidFrequencyHz;
+    double midHighFrequencyHz;
+    float lowWidth;
+    float midWidth;
+    float highWidth;
+    uint32_t sectionCount;
+    N60BiquadCoefficients lowPass[N60_MAX_CROSSOVER_SECTIONS];
+    N60BiquadCoefficients highPass[N60_MAX_CROSSOVER_SECTIONS];
+} N60StereoWidenerSnapshot;
+
 typedef struct {
     bool enabled;
     float poleCoefficient;
@@ -98,6 +121,8 @@ typedef struct {
 } N60PauseGateSnapshot;
 
 typedef struct {
+    N60StereoModeSnapshot stereoMode;
+    N60StereoWidenerSnapshot stereoWidener;
     N60DCOffsetFilterSnapshot dcOffsetFilter;
     N60InfrasonicFilterSnapshot infrasonicFilter;
     N60LoudnessContourSnapshot loudnessContour;
@@ -110,6 +135,15 @@ typedef struct {
 } N60DynamicsSnapshot;
 
 typedef struct {
+    float stereoMatrixLL;
+    float stereoMatrixLR;
+    float stereoMatrixRL;
+    float stereoMatrixRR;
+    float widenerLowWidth;
+    float widenerMidWidth;
+    float widenerHighWidth;
+    N60BiquadState widenerLowPass[N60_MAX_CROSSOVER_SECTIONS];
+    N60BiquadState widenerHighPass[N60_MAX_CROSSOVER_SECTIONS];
     float dcPreviousInputLeft;
     float dcPreviousInputRight;
     float dcPreviousOutputLeft;
@@ -153,6 +187,23 @@ typedef struct {
 } N60DynamicsTelemetry;
 
 N60DynamicsSnapshot N60DynamicsSnapshotMakeBypassed(double sampleRate);
+
+bool N60DynamicsSnapshotSetStereoMode(
+    N60DynamicsSnapshot * _Nonnull snapshot,
+    N60StereoMode mode
+);
+
+bool N60DynamicsSnapshotSetStereoWidener(
+    N60DynamicsSnapshot * _Nonnull snapshot,
+    double sampleRate,
+    bool enabled,
+    bool monoLowBand,
+    double lowMidFrequencyHz,
+    double midHighFrequencyHz,
+    float lowWidth,
+    float midWidth,
+    float highWidth
+);
 
 bool N60DynamicsSnapshotSetDCOffsetFilter(
     N60DynamicsSnapshot * _Nonnull snapshot,

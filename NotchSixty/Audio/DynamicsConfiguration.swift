@@ -1,6 +1,7 @@
 import Foundation
 
 enum DynamicsConfigurationError: Error, LocalizedError, Equatable {
+    case invalidStereoWidener
     case invalidDCOffsetFilter
     case invalidInfrasonicFilter
     case invalidLoudnessContour
@@ -15,6 +16,8 @@ enum DynamicsConfigurationError: Error, LocalizedError, Equatable {
 
     var errorDescription: String? {
         switch self {
+        case .invalidStereoWidener:
+            return "Stereo Widener parameters are outside the supported production range."
         case .invalidDCOffsetFilter:
             return "DC Offset Filter configuration is invalid."
         case .invalidInfrasonicFilter:
@@ -41,6 +44,55 @@ enum DynamicsConfigurationError: Error, LocalizedError, Equatable {
     }
 }
 
+
+enum StereoProcessingMode: String, CaseIterable, Identifiable, Sendable {
+    case stereo
+    case wideMono
+    case trueMono
+
+    var id: String { rawValue }
+    var displayName: String {
+        switch self {
+        case .stereo: return "Stereo"
+        case .wideMono: return "Wide Mono"
+        case .trueMono: return "True Mono"
+        }
+    }
+    var cType: N60StereoMode {
+        switch self {
+        case .stereo: return N60StereoModeStereo
+        case .wideMono: return N60StereoModeWideMono
+        case .trueMono: return N60StereoModeTrueMono
+        }
+    }
+}
+
+struct StereoWidenerConfiguration: Equatable, Sendable {
+    static let lowWidthRange = 0.0...1.0
+    static let midWidthRange = 1.0...2.0
+    static let highWidthRange = 1.0...2.0
+    static let lowMidFrequencyRange = 80.0...500.0
+    static let midHighFrequencyRange = 1_500.0...8_000.0
+
+    var enabled = false
+    var monoLowBand = true
+    var lowWidth = 0.0
+    var midWidth = 1.0
+    var highWidth = 1.0
+    var lowMidFrequencyHz = 200.0
+    var midHighFrequencyHz = 4_000.0
+
+    func validate() throws {
+        guard lowWidth.isFinite, Self.lowWidthRange.contains(lowWidth),
+              midWidth.isFinite, Self.midWidthRange.contains(midWidth),
+              highWidth.isFinite, Self.highWidthRange.contains(highWidth),
+              lowMidFrequencyHz.isFinite, Self.lowMidFrequencyRange.contains(lowMidFrequencyHz),
+              midHighFrequencyHz.isFinite, Self.midHighFrequencyRange.contains(midHighFrequencyHz),
+              lowMidFrequencyHz < midHighFrequencyHz else {
+            throw DynamicsConfigurationError.invalidStereoWidener
+        }
+    }
+}
 
 struct DCOffsetFilterConfiguration: Equatable, Sendable {
     var enabled = false
@@ -326,6 +378,8 @@ struct LimiterConfiguration: Equatable, Sendable {
 }
 
 struct DynamicsConfiguration: Equatable, Sendable {
+    var stereoMode: StereoProcessingMode = .stereo
+    var stereoWidener = StereoWidenerConfiguration()
     var dcOffsetFilter = DCOffsetFilterConfiguration()
     var infrasonicFilter = InfrasonicFilterConfiguration()
     var loudnessContour = LoudnessContourConfiguration()
@@ -339,6 +393,7 @@ struct DynamicsConfiguration: Equatable, Sendable {
     var pauseGate = PauseGateConfiguration()
 
     func makeSnapshot(sampleRate: Double) throws -> N60DynamicsSnapshot {
+        try stereoWidener.validate()
         try infrasonicFilter.validate()
         try loudnessContour.validate()
         try deEsser.validate()
@@ -348,6 +403,18 @@ struct DynamicsConfiguration: Equatable, Sendable {
         try pauseGate.validate()
 
         var snapshot = N60DynamicsSnapshotMakeBypassed(sampleRate)
+        guard N60DynamicsSnapshotSetStereoMode(&snapshot, stereoMode.cType) else { throw DynamicsConfigurationError.invalidStereoWidener }
+        guard N60DynamicsSnapshotSetStereoWidener(
+            &snapshot,
+            sampleRate,
+            stereoWidener.enabled,
+            stereoWidener.monoLowBand,
+            stereoWidener.lowMidFrequencyHz,
+            stereoWidener.midHighFrequencyHz,
+            Float(stereoWidener.lowWidth),
+            Float(stereoWidener.midWidth),
+            Float(stereoWidener.highWidth)
+        ) else { throw DynamicsConfigurationError.invalidStereoWidener }
         guard N60DynamicsSnapshotSetDCOffsetFilter(&snapshot, sampleRate, dcOffsetFilter.enabled) else { throw DynamicsConfigurationError.invalidDCOffsetFilter }
         guard N60DynamicsSnapshotSetInfrasonicFilter(&snapshot, sampleRate, infrasonicFilter.enabled, infrasonicFilter.cutoffHz, infrasonicFilter.slope.cType) else { throw DynamicsConfigurationError.invalidInfrasonicFilter }
         guard N60DynamicsSnapshotSetLoudnessContour(&snapshot, sampleRate, loudnessContour.enabled, Float(loudnessContour.strength)) else { throw DynamicsConfigurationError.invalidLoudnessContour }
