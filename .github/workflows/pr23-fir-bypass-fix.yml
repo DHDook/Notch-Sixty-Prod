@@ -1,0 +1,420 @@
+name: PR23 FIR Bypass Fix
+
+on:
+  push:
+    branches:
+      - feature/stereo-playback-control-parity
+    paths:
+      - .github/workflows/pr23-fir-bypass-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Apply bypassed FIR policy fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              if old not in text:
+                  raise SystemExit(f"pattern not found in {path}: {old[:120]!r}")
+              p.write_text(text.replace(old, new, 1))
+
+          # Make the raw-bypass FIR policy explicit and directly testable.
+          replace(
+              "NotchSixty/Audio/StereoPlaybackControl.swift",
+              "struct PlaybackControlConfiguration: Equatable, Sendable {",
+              '''enum FIRUpdatePolicy {
+              static func isRawBypassed(_ playback: PlaybackControlConfiguration) -> Bool {
+                  playback.globalBypassed || playback.flatAuditionEnabled
+              }
+
+              static func shouldPrepareLinearPhase(
+                  stereoEQ: StereoEQConfiguration,
+                  playback: PlaybackControlConfiguration
+              ) -> Bool {
+                  !isRawBypassed(playback)
+                      && stereoEQ.phaseMode == .linearPhase
+                      && !stereoEQ.bypassed
+              }
+
+              static func shouldPrepareRoomCorrection(
+                  roomCorrection: RoomCorrectionConfiguration,
+                  playback: PlaybackControlConfiguration
+              ) -> Bool {
+                  !isRawBypassed(playback) && roomCorrection.enabled
+              }
+
+              static func shouldTransitionFIRUpdate(playback: PlaybackControlConfiguration) -> Bool {
+                  !isRawBypassed(playback)
+              }
+          }
+
+          struct PlaybackControlConfiguration: Equatable, Sendable {'''
+          )
+
+          # Keep structural EQ validation active even while the raw graph is bypassed.
+          replace(
+              "NotchSixty/Audio/AudioIOEngine.swift",
+              '''    private func processingIsBypassed(_ configuration: PlaybackControlConfiguration) -> Bool {
+                  configuration.globalBypassed || configuration.flatAuditionEnabled
+              }
+
+              private func validateStereoEQStorage(_ configuration: StereoEQConfiguration) throws {
+                  for bands in [configuration.linkedBands, configuration.leftBands, configuration.rightBands] {
+                      guard bands.count <= EQConfiguration.maximumBandCount else {
+                          throw EQConfigurationError.tooManyBands(bands.count)
+                      }
+                  }
+              }''',
+              '''    private func processingIsBypassed(_ configuration: PlaybackControlConfiguration) -> Bool {
+                  FIRUpdatePolicy.isRawBypassed(configuration)
+              }
+
+              private func validateStereoEQStorage(_ configuration: StereoEQConfiguration) throws {
+                  for bands in [configuration.linkedBands, configuration.leftBands, configuration.rightBands] {
+                      guard bands.count <= EQConfiguration.maximumBandCount else {
+                          throw EQConfigurationError.tooManyBands(bands.count)
+                      }
+                      for (index, band) in bands.enumerated() where band.enabled {
+                          guard band.frequencyHz.isFinite,
+                                band.frequencyHz > 0,
+                                band.gainDB.isFinite,
+                                StereoEQConfiguration.bandGainRange.contains(band.gainDB),
+                                band.q.isFinite,
+                                band.q > 0 else {
+                              throw EQConfigurationError.invalidBand(index: index)
+                          }
+                      }
+                  }
+              }'''
+          )
+
+          # Defer linear FIR preparation and all FIR transition fades while raw-bypassed.
+          old_eq = '''            var preparedLinearProgram: PreparedLinearPhaseProgram?
+                      if configuration.phaseMode == .linearPhase && !configuration.bypassed {
+                          let prepared = try prepareLinearPhaseProgram(configuration, for: session)
+                          preparedLinearProgram = prepared
+                          linearPhaseDesignInfo = prepared.designInfo
+                          if !processingIsBypassed(playbackControlConfiguration) {
+                              try attachLinearPhaseProgram(prepared, to: &graph)
+                          }
+                      } else {
+                          linearPhaseDesignInfo = nil
+                      }
+
+                      if !processingIsBypassed(playbackControlConfiguration) {
+                          try attachActiveRoomCorrectionProgramIfNeeded(
+                              to: &graph,
+                              playbackConfiguration: playbackControlConfiguration
+                          )
+                      }
+
+                      let leavingLinearPhase = activeLinearPhaseProgram != nil
+                          && (configuration.phaseMode != .linearPhase || configuration.bypassed)
+                      let enteringOrReplacingLinearPhase = preparedLinearProgram != nil
+                      if leavingLinearPhase || enteringOrReplacingLinearPhase {
+                          try session.transitionDSPGraph(graph)
+                      } else {
+                          try session.publishDSPGraph(graph)
+                      }
+                      activeLinearPhaseProgram = preparedLinearProgram'''
+          new_eq = '''            let rawBypassed = processingIsBypassed(playbackControlConfiguration)
+                      var preparedLinearProgram: PreparedLinearPhaseProgram?
+                      if FIRUpdatePolicy.shouldPrepareLinearPhase(
+                          stereoEQ: configuration,
+                          playback: playbackControlConfiguration
+                      ) {
+                          let prepared = try prepareLinearPhaseProgram(configuration, for: session)
+                          preparedLinearProgram = prepared
+                          linearPhaseDesignInfo = prepared.designInfo
+                          try attachLinearPhaseProgram(prepared, to: &graph)
+                      } else {
+                          // A raw-bypassed edit deliberately invalidates the old program.
+                          // The current configuration is prepared lazily when bypass exits.
+                          linearPhaseDesignInfo = nil
+                      }
+
+                      if !rawBypassed {
+                          try attachActiveRoomCorrectionProgramIfNeeded(
+                              to: &graph,
+                              playbackConfiguration: playbackControlConfiguration
+                          )
+                      }
+
+                      if rawBypassed {
+                          try session.publishDSPGraph(graph)
+                      } else {
+                          let leavingLinearPhase = activeLinearPhaseProgram != nil
+                              && (configuration.phaseMode != .linearPhase || configuration.bypassed)
+                          let enteringOrReplacingLinearPhase = preparedLinearProgram != nil
+                          if leavingLinearPhase || enteringOrReplacingLinearPhase {
+                              try session.transitionDSPGraph(graph)
+                          } else {
+                              try session.publishDSPGraph(graph)
+                          }
+                      }
+                      activeLinearPhaseProgram = preparedLinearProgram'''
+          replace("NotchSixty/Audio/AudioIOEngine.swift", old_eq, new_eq)
+
+          # When bypass exits, lazily prepare whichever FIR stages were invalidated by bypassed edits.
+          replace(
+              "NotchSixty/Audio/AudioIOEngine.swift",
+              '''                try attachActiveRoomCorrectionProgramIfNeeded(
+                          to: &graph,
+                          playbackConfiguration: configuration
+                      )''',
+              '''                if roomCorrectionConfiguration.enabled {
+                          guard let filter = roomCorrectionConfiguration.filter else {
+                              throw RoomCorrectionConfigurationError.filterRequired
+                          }
+                          if activeRoomCorrectionProgram == nil {
+                              activeRoomCorrectionProgram = try prepareRoomCorrectionProgram(filter, for: session)
+                          }
+                          try attachActiveRoomCorrectionProgramIfNeeded(
+                              to: &graph,
+                              playbackConfiguration: configuration
+                          )
+                      }'''
+          )
+
+          # Room-correction edits while raw-bypassed validate state, publish raw without a fade,
+          # and invalidate any stale prepared program for lazy re-preparation on bypass exit.
+          old_room = '''            if configuration.enabled {
+                          guard let filter = configuration.filter else {
+                              throw RoomCorrectionConfigurationError.filterRequired
+                          }
+                          let preparedProgram = try prepareRoomCorrectionProgram(filter, for: session)
+                          if !processingIsBypassed(playbackControlConfiguration) {
+                              try attachRoomCorrectionProgram(preparedProgram, to: &graph)
+                          }
+                          try session.transitionDSPGraph(graph)
+                          activeRoomCorrectionProgram = preparedProgram
+                      } else {
+                          if activeRoomCorrectionProgram != nil {
+                              try session.transitionDSPGraph(graph)
+                          } else {
+                              try session.publishDSPGraph(graph)
+                          }
+                          activeRoomCorrectionProgram = nil
+                      }'''
+          new_room = '''            let rawBypassed = processingIsBypassed(playbackControlConfiguration)
+                      if configuration.enabled {
+                          guard let filter = configuration.filter else {
+                              throw RoomCorrectionConfigurationError.filterRequired
+                          }
+                          try validateRoomCorrectionFilter(
+                              filter,
+                              outputSampleRate: session.outputFormat.sampleRate
+                          )
+                          if FIRUpdatePolicy.shouldPrepareRoomCorrection(
+                              roomCorrection: configuration,
+                              playback: playbackControlConfiguration
+                          ) {
+                              let preparedProgram = try prepareRoomCorrectionProgram(filter, for: session)
+                              try attachRoomCorrectionProgram(preparedProgram, to: &graph)
+                              try session.transitionDSPGraph(graph)
+                              activeRoomCorrectionProgram = preparedProgram
+                          } else {
+                              try session.publishDSPGraph(graph)
+                              activeRoomCorrectionProgram = nil
+                          }
+                      } else {
+                          if FIRUpdatePolicy.shouldTransitionFIRUpdate(playback: playbackControlConfiguration),
+                             activeRoomCorrectionProgram != nil {
+                              try session.transitionDSPGraph(graph)
+                          } else {
+                              try session.publishDSPGraph(graph)
+                          }
+                          activeRoomCorrectionProgram = nil
+                      }'''
+          replace("NotchSixty/Audio/AudioIOEngine.swift", old_room, new_room)
+
+          # Split validation from preparation so bypassed room-correction edits can be checked
+          # without consuming or rotating a convolution slot.
+          old_prepare_room = '''    private func prepareRoomCorrectionProgram(
+                  _ filter: RoomCorrectionFilter,
+                  for session: CoreAudioTransportSession
+              ) throws -> PreparedRoomCorrectionProgram {
+                  let tapCount = filter.leftTaps.count
+                  guard tapCount > 0, tapCount <= Int(N60_CONVOLUTION_MAX_TAPS) else {
+                      throw RoomCorrectionConfigurationError.invalidTapCount(tapCount)
+                  }
+                  if let rightTaps = filter.rightTaps, rightTaps.count != tapCount {
+                      throw RoomCorrectionConfigurationError.mismatchedStereoTapCount(left: tapCount, right: rightTaps.count)
+                  }
+                  guard filter.leftTaps.allSatisfy(\\.isFinite),
+                        filter.rightTaps?.allSatisfy(\\.isFinite) ?? true else {
+                      throw RoomCorrectionConfigurationError.nonFiniteTap
+                  }
+                  try filter.validateSampleRate(forOutputSampleRate: session.outputFormat.sampleRate)
+                  guard filter.declaredLatencyFrames < UInt32(tapCount) else {
+                      throw RoomCorrectionConfigurationError.invalidDeclaredLatency(filter.declaredLatencyFrames)
+                  }
+
+                  let slot = nextRoomCorrectionProgramSlot % UInt32(N60_CONVOLUTION_PROGRAM_SLOTS)'''
+          new_prepare_room = '''    private func validateRoomCorrectionFilter(
+                  _ filter: RoomCorrectionFilter,
+                  outputSampleRate: Double
+              ) throws {
+                  let tapCount = filter.leftTaps.count
+                  guard tapCount > 0, tapCount <= Int(N60_CONVOLUTION_MAX_TAPS) else {
+                      throw RoomCorrectionConfigurationError.invalidTapCount(tapCount)
+                  }
+                  if let rightTaps = filter.rightTaps, rightTaps.count != tapCount {
+                      throw RoomCorrectionConfigurationError.mismatchedStereoTapCount(left: tapCount, right: rightTaps.count)
+                  }
+                  guard filter.leftTaps.allSatisfy(\\.isFinite),
+                        filter.rightTaps?.allSatisfy(\\.isFinite) ?? true else {
+                      throw RoomCorrectionConfigurationError.nonFiniteTap
+                  }
+                  try filter.validateSampleRate(forOutputSampleRate: outputSampleRate)
+                  guard filter.declaredLatencyFrames < UInt32(tapCount) else {
+                      throw RoomCorrectionConfigurationError.invalidDeclaredLatency(filter.declaredLatencyFrames)
+                  }
+              }
+
+              private func prepareRoomCorrectionProgram(
+                  _ filter: RoomCorrectionFilter,
+                  for session: CoreAudioTransportSession
+              ) throws -> PreparedRoomCorrectionProgram {
+                  try validateRoomCorrectionFilter(filter, outputSampleRate: session.outputFormat.sampleRate)
+
+                  let slot = nextRoomCorrectionProgramSlot % UInt32(N60_CONVOLUTION_PROGRAM_SLOTS)'''
+          replace("NotchSixty/Audio/AudioIOEngine.swift", old_prepare_room, new_prepare_room)
+
+          # Startup while raw-bypassed also defers FIR preparation; unbypass uses the same lazy path.
+          old_build = '''        if stereoEQConfiguration.phaseMode == .linearPhase && !stereoEQConfiguration.bypassed {
+                      let preparedProgram = try prepareLinearPhaseProgram(stereoEQConfiguration, for: session)
+                      activeLinearPhaseProgram = preparedProgram
+                      linearPhaseDesignInfo = preparedProgram.designInfo
+                      if !processingIsBypassed(playbackControlConfiguration) {
+                          try attachLinearPhaseProgram(preparedProgram, to: &graph)
+                      }
+                  } else {
+                      linearPhaseDesignInfo = nil
+                  }
+
+                  if roomCorrectionConfiguration.enabled {
+                      guard let filter = roomCorrectionConfiguration.filter else {
+                          throw RoomCorrectionConfigurationError.filterRequired
+                      }
+                      let preparedProgram = try prepareRoomCorrectionProgram(filter, for: session)
+                      activeRoomCorrectionProgram = preparedProgram
+                      if !processingIsBypassed(playbackControlConfiguration) {
+                          try attachRoomCorrectionProgram(preparedProgram, to: &graph)
+                      }
+                  }'''
+          new_build = '''        if FIRUpdatePolicy.shouldPrepareLinearPhase(
+                      stereoEQ: stereoEQConfiguration,
+                      playback: playbackControlConfiguration
+                  ) {
+                      let preparedProgram = try prepareLinearPhaseProgram(stereoEQConfiguration, for: session)
+                      activeLinearPhaseProgram = preparedProgram
+                      linearPhaseDesignInfo = preparedProgram.designInfo
+                      try attachLinearPhaseProgram(preparedProgram, to: &graph)
+                  } else {
+                      activeLinearPhaseProgram = nil
+                      linearPhaseDesignInfo = nil
+                  }
+
+                  if roomCorrectionConfiguration.enabled {
+                      guard let filter = roomCorrectionConfiguration.filter else {
+                          throw RoomCorrectionConfigurationError.filterRequired
+                      }
+                      try validateRoomCorrectionFilter(filter, outputSampleRate: session.outputFormat.sampleRate)
+                      if FIRUpdatePolicy.shouldPrepareRoomCorrection(
+                          roomCorrection: roomCorrectionConfiguration,
+                          playback: playbackControlConfiguration
+                      ) {
+                          let preparedProgram = try prepareRoomCorrectionProgram(filter, for: session)
+                          activeRoomCorrectionProgram = preparedProgram
+                          try attachRoomCorrectionProgram(preparedProgram, to: &graph)
+                      } else {
+                          activeRoomCorrectionProgram = nil
+                      }
+                  }'''
+          replace("NotchSixty/Audio/AudioIOEngine.swift", old_build, new_build)
+
+          # Policy regression tests: raw bypass/Flat never prepare FIRs or request a fade,
+          # while processed mode still does.
+          tests = Path("NotchSixtyTests/StereoPlaybackControlTests.swift")
+          text = tests.read_text()
+          marker = "\n    func testStereoGraphCompilesUpToSixtyFourBandsPerChannelAt384k() throws {"
+          insert = '''
+
+              func testRawBypassDefersFIRPreparationAndFIRTransitionFades() {
+                  let linearEQ = StereoEQConfiguration(phaseMode: .linearPhase)
+                  let room = RoomCorrectionConfiguration(enabled: true, filter: .validation)
+
+                  for playback in [
+                      PlaybackControlConfiguration(balance: 0, globalBypassed: true, flatAuditionEnabled: false),
+                      PlaybackControlConfiguration(balance: 0, globalBypassed: false, flatAuditionEnabled: true),
+                      PlaybackControlConfiguration(balance: 0, globalBypassed: true, flatAuditionEnabled: true),
+                  ] {
+                      for _ in 0..<16 {
+                          XCTAssertFalse(FIRUpdatePolicy.shouldPrepareLinearPhase(stereoEQ: linearEQ, playback: playback))
+                          XCTAssertFalse(FIRUpdatePolicy.shouldPrepareRoomCorrection(roomCorrection: room, playback: playback))
+                          XCTAssertFalse(FIRUpdatePolicy.shouldTransitionFIRUpdate(playback: playback))
+                      }
+                  }
+              }
+
+              func testProcessedModePreparesFIRStagesAndAllowsFIRTransitions() {
+                  let playback = PlaybackControlConfiguration()
+                  let linearEQ = StereoEQConfiguration(phaseMode: .linearPhase)
+                  let room = RoomCorrectionConfiguration(enabled: true, filter: .validation)
+
+                  XCTAssertTrue(FIRUpdatePolicy.shouldPrepareLinearPhase(stereoEQ: linearEQ, playback: playback))
+                  XCTAssertTrue(FIRUpdatePolicy.shouldPrepareRoomCorrection(roomCorrection: room, playback: playback))
+                  XCTAssertTrue(FIRUpdatePolicy.shouldTransitionFIRUpdate(playback: playback))
+              }
+          '''
+          if marker not in text:
+              raise SystemExit("test insertion marker not found")
+          tests.write_text(text.replace(marker, insert + marker, 1))
+
+          # Record the resolved control-plane invariant.
+          doc = Path("docs/STEREO_PLAYBACK_CONTROL.md")
+          doc.write_text(doc.read_text() + '''
+
+          ## Raw-bypass FIR update policy
+
+          When Global Bypass or Flat is active, linear-EQ and room-correction edits update product state but do not prepare or rotate convolution programs and do not request fade-through-silence graph transitions. Any previously prepared FIR invalidated by such an edit is discarded. Leaving raw bypass lazily prepares and attaches the current FIR configuration before processed audio resumes. This prevents stale-slot exhaustion and unnecessary audible dips while the signal is already on the untreated path.
+          ''')
+          PY
+
+      - name: Run test suite
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          test
+
+      - name: Commit fix and remove helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/pr23-fir-bypass-fix.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add NotchSixty/Audio/AudioIOEngine.swift NotchSixty/Audio/StereoPlaybackControl.swift NotchSixtyTests/StereoPlaybackControlTests.swift docs/STEREO_PLAYBACK_CONTROL.md .github/workflows/pr23-fir-bypass-fix.yml
+          git commit -m 'Defer FIR updates while raw bypass is active'
+          git push origin HEAD:feature/stereo-playback-control-parity
