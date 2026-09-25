@@ -1,0 +1,114 @@
+name: PR24 Finalize Validation UI
+
+on:
+  push:
+    branches:
+      - feature/master-volume-mute-sync
+    paths:
+      - .github/workflows/pr24-finalize-validation-ui.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add minimal master playback validation controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          p = Path('NotchSixty/ContentView.swift')
+          text = p.read_text()
+          old_binding = '''    private var balanceBinding: Binding<Double> {
+              Binding(get: { engine.playbackControlConfiguration.balance }, set: { try? engine.setChannelBalance($0) })
+          }
+
+          private var globalBypassBinding: Binding<Bool> {'''
+          new_binding = '''    private var balanceBinding: Binding<Double> {
+              Binding(get: { engine.playbackControlConfiguration.balance }, set: { try? engine.setChannelBalance($0) })
+          }
+
+          private var masterVolumeBinding: Binding<Double> {
+              Binding(get: { engine.masterVolumeConfiguration.level }, set: { try? engine.setMasterVolumeLevel($0) })
+          }
+
+          private var masterMuteBinding: Binding<Bool> {
+              Binding(get: { engine.masterVolumeConfiguration.muted }, set: { try? engine.setMasterMuted($0) })
+          }
+
+          private var globalBypassBinding: Binding<Bool> {'''
+          if old_binding not in text:
+              raise SystemExit('binding insertion point not found')
+          text = text.replace(old_binding, new_binding, 1)
+
+          old_ui = '''            HStack(spacing: 12) {
+                  Text("Balance").frame(width: 90, alignment: .leading)
+                  Text("L").foregroundStyle(.secondary)
+                  Slider(value: balanceBinding, in: PlaybackControlConfiguration.balanceRange, step: 0.01)
+                  Text("R").foregroundStyle(.secondary)
+                  Text(engine.playbackControlConfiguration.balance.formatted(.number.precision(.fractionLength(2))))
+                      .monospacedDigit()
+                      .frame(width: 55)
+              }
+              Text("Balance is attenuation-only; center is exact unity. Global Bypass and Flat preserve all configured DSP state while auditioning the untreated input.")'''
+          new_ui = '''            HStack(spacing: 12) {
+                  Text("Master").frame(width: 90, alignment: .leading)
+                  Slider(value: masterVolumeBinding, in: MasterVolumeConfiguration.levelRange, step: 0.01)
+                  Text("\\(Int((engine.masterVolumeConfiguration.level * 100).rounded()))%")
+                      .monospacedDigit()
+                      .frame(width: 48, alignment: .trailing)
+                  Toggle("Mute", isOn: masterMuteBinding).toggleStyle(.switch)
+                  Text(engine.masterVolumeCapabilities.controlMode == .device ? "Device" : "Software DSP")
+                      .font(.caption)
+                      .foregroundStyle(.secondary)
+                      .frame(width: 95, alignment: .leading)
+              }
+              HStack(spacing: 12) {
+                  Text("Balance").frame(width: 90, alignment: .leading)
+                  Text("L").foregroundStyle(.secondary)
+                  Slider(value: balanceBinding, in: PlaybackControlConfiguration.balanceRange, step: 0.01)
+                  Text("R").foregroundStyle(.secondary)
+                  Text(engine.playbackControlConfiguration.balance.formatted(.number.precision(.fractionLength(2))))
+                      .monospacedDigit()
+                      .frame(width: 55)
+              }
+              Text("Master shows whether the selected physical output uses device volume or the software-DSP fallback. Balance is attenuation-only; center is exact unity. Global Bypass and Flat preserve DSP state while still obeying master volume and mute.")'''
+          if old_ui not in text:
+              raise SystemExit('playback validation insertion point not found')
+          p.write_text(text.replace(old_ui, new_ui, 1))
+          PY
+
+      - name: Run full test suite
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          test
+
+      - name: Commit controls and remove all temporary PR24 helpers
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f \
+            .github/workflows/pr24-sync-hardening.yml \
+            .github/workflows/pr24-sync-hardening-v2.yml \
+            .github/workflows/pr24-sync-hardening-v3.yml \
+            .github/workflows/pr24-finalize-validation-ui.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Add master volume hardware validation controls'
+          git push origin HEAD:feature/master-volume-mute-sync
