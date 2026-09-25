@@ -582,6 +582,15 @@ final class AudioIOEngine: ObservableObject {
         try applyPlaybackControlConfiguration(updated)
     }
 
+    func setInterChannelDelayMs(_ value: Double) throws {
+        guard value.isFinite, PlaybackControlConfiguration.interChannelDelayRange.contains(value) else {
+            throw PlaybackControlConfigurationError.invalidInterChannelDelay(value)
+        }
+        var updated = playbackControlConfiguration
+        updated.interChannelDelayMs = value
+        try applyPlaybackControlConfiguration(updated)
+    }
+
     func setGlobalDSPBypassed(_ bypassed: Bool) throws {
         var updated = playbackControlConfiguration
         updated.globalBypassed = bypassed
@@ -878,6 +887,10 @@ final class AudioIOEngine: ObservableObject {
         guard configuration.balance.isFinite,
               PlaybackControlConfiguration.balanceRange.contains(configuration.balance) else {
             throw PlaybackControlConfigurationError.invalidBalance(configuration.balance)
+        }
+        guard configuration.interChannelDelayMs.isFinite,
+              PlaybackControlConfiguration.interChannelDelayRange.contains(configuration.interChannelDelayMs) else {
+            throw PlaybackControlConfigurationError.invalidInterChannelDelay(configuration.interChannelDelayMs)
         }
 
         if let session = transportSession {

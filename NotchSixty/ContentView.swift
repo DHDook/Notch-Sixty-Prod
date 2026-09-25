@@ -45,6 +45,12 @@ struct ContentView: View {
         Binding(get: { engine.playbackControlConfiguration.balance }, set: { try? engine.setChannelBalance($0) })
     }
 
+    private var interChannelDelayBinding: Binding<Double> {
+        Binding(
+            get: { engine.playbackControlConfiguration.interChannelDelayMs },
+            set: { try? engine.setInterChannelDelayMs($0) }
+        )
+    }
 
     private var masterVolumeBinding: Binding<Double> {
 
@@ -189,6 +195,18 @@ struct ContentView: View {
                     .monospacedDigit()
                     .frame(width: 55)
             }
+            HStack(spacing: 12) {
+                Text("L/R delay").frame(width: 90, alignment: .leading)
+                Text("Delay L").foregroundStyle(.secondary)
+                Slider(value: interChannelDelayBinding, in: PlaybackControlConfiguration.interChannelDelayRange, step: 0.01)
+                Text("Delay R").foregroundStyle(.secondary)
+                Text("\(engine.playbackControlConfiguration.interChannelDelayMs, specifier: "%+.2f") ms")
+                    .monospacedDigit()
+                    .frame(width: 84, alignment: .trailing)
+            }
+            Text("Signed speaker-alignment delay: negative delays Left; positive delays Right. Zero is transparent. Non-zero alignment uses a 2-frame common interpolation latency and fractional-sample phase-preserving timing.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             Text("Processed runs the configured DSP. Reference is untreated input delayed to the processed-path latency. Delta is Processed − Reference. Global Bypass remains the true raw escape path.")
                 .font(.caption)
                 .foregroundStyle(.secondary)

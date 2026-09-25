@@ -26,6 +26,8 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
     let sampleRate: Double
     let channelCount: UInt32
     let bypassed: Bool
+    let interChannelDelayMs: Double
+    let interChannelAlignmentLatencyFrames: UInt32
     let inputGainLinear: Float
     let headroomGainLinear: Float
     let outputGainLinear: Float
@@ -101,6 +103,8 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
         sampleRate = diagnostics.sampleRate
         channelCount = diagnostics.channelCount
         bypassed = diagnostics.bypassed
+        interChannelDelayMs = diagnostics.interChannelDelayMs
+        interChannelAlignmentLatencyFrames = diagnostics.interChannelAlignmentLatencyFrames
         inputGainLinear = diagnostics.inputGainLinear
         headroomGainLinear = diagnostics.headroomGainLinear
         outputGainLinear = diagnostics.outputGainLinear

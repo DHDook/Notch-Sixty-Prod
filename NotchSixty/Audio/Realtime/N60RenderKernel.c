@@ -78,6 +78,7 @@ struct N60RenderKernel {
     N60SmoothedGain masterGain;
     N60SmoothedGain balanceGainLeft;
     N60SmoothedGain balanceGainRight;
+    N60InterChannelDelayRuntime interChannelDelayRuntime;
     float referenceDelayLeft[N60_MAX_AUDITION_DELAY_FRAMES];
     float referenceDelayRight[N60_MAX_AUDITION_DELAY_FRAMES];
     uint32_t referenceDelayWriteIndex;
@@ -238,6 +239,7 @@ static bool snapshot_is_valid(N60DSPGraphSnapshot snapshot) {
         || snapshot.balanceGainRightLinear > 1.0f
         || snapshot.auditionMode < N60AuditionModeProcessed
         || snapshot.auditionMode > N60AuditionModeDelta
+        || !N60InterChannelDelaySnapshotIsValid(snapshot.interChannelDelay, snapshot.sampleRate)
         || (snapshot.auditionMode != N60AuditionModeProcessed
             && snapshot.latencyFrames >= N60_MAX_AUDITION_DELAY_FRAMES)
         || snapshot.eqBandCount > N60_MAX_EQ_RENDER_SLOTS
@@ -421,6 +423,7 @@ static void prepare_runtime_for_snapshot(N60RenderKernel *kernel, const N60DSPGr
         reset_smoothed_gain(&kernel->masterGain, snapshot->masterGainLinear);
         reset_smoothed_gain(&kernel->balanceGainLeft, snapshot->balanceGainLeftLinear);
         reset_smoothed_gain(&kernel->balanceGainRight, snapshot->balanceGainRightLinear);
+        N60InterChannelDelayRuntimeReset(&kernel->interChannelDelayRuntime, snapshot->interChannelDelay);
     } else {
         schedule_gain_transition(&kernel->inputGain, snapshot->inputGainLinear, gainFrames);
         schedule_gain_transition(&kernel->headroomGain, snapshot->headroomGainLinear, gainFrames);
@@ -428,6 +431,7 @@ static void prepare_runtime_for_snapshot(N60RenderKernel *kernel, const N60DSPGr
         schedule_gain_transition(&kernel->masterGain, snapshot->masterGainLinear, gainFrames);
         schedule_gain_transition(&kernel->balanceGainLeft, snapshot->balanceGainLeftLinear, gainFrames);
         schedule_gain_transition(&kernel->balanceGainRight, snapshot->balanceGainRightLinear, gainFrames);
+        N60InterChannelDelayRuntimeSchedule(&kernel->interChannelDelayRuntime, snapshot->interChannelDelay, gainFrames);
     }
 
     if (sampleRateChanged || leavingGraphBypass || leavingEQBypass) reset_eq_runtime(kernel);
@@ -750,6 +754,7 @@ N60DSPGraphSnapshot N60DSPGraphSnapshotMakeUnity(double sampleRate) {
     snapshot.balanceGainRightLinear = 1.0f;
     snapshot.bypassed = false;
     snapshot.auditionMode = N60AuditionModeProcessed;
+    snapshot.interChannelDelay = N60InterChannelDelaySnapshotMakeBypassed();
     snapshot.latencyFrames = 0;
     snapshot.generation = 0;
     snapshot.gainTransitionFrames = gain_transition_frames_for_sample_rate(sampleRate);
@@ -772,6 +777,17 @@ void N60DSPGraphSnapshotClearEQ(N60DSPGraphSnapshot *snapshot) {
     memset(snapshot->eqBands, 0, sizeof(snapshot->eqBands));
     memset(snapshot->eqBandChannelMasks, 0, sizeof(snapshot->eqBandChannelMasks));
     snapshot->eqBandCount = 0;
+}
+
+bool N60DSPGraphSnapshotSetInterChannelDelay(
+    N60DSPGraphSnapshot *snapshot,
+    double signedDelayMs
+) {
+    if (snapshot == NULL) return false;
+    N60InterChannelDelaySnapshot delay = {0};
+    if (!N60InterChannelDelaySnapshotMake(snapshot->sampleRate, signedDelayMs, &delay)) return false;
+    snapshot->interChannelDelay = delay;
+    return true;
 }
 
 bool N60DSPGraphSnapshotSetEQBandForChannels(
@@ -883,6 +899,7 @@ N60RenderKernel *N60RenderKernelCreate(void) {
     reset_smoothed_gain(&kernel->masterGain, 1.0f);
     reset_smoothed_gain(&kernel->balanceGainLeft, 1.0f);
     reset_smoothed_gain(&kernel->balanceGainRight, 1.0f);
+    N60InterChannelDelayRuntimeReset(&kernel->interChannelDelayRuntime, initial.interChannelDelay);
     kernel->referenceDelayWriteIndex = 0;
     return kernel;
 }
@@ -909,6 +926,7 @@ void N60RenderKernelReset(N60RenderKernel *kernel) {
     reset_smoothed_gain(&kernel->masterGain, 1.0f);
     reset_smoothed_gain(&kernel->balanceGainLeft, 1.0f);
     reset_smoothed_gain(&kernel->balanceGainRight, 1.0f);
+    N60InterChannelDelayRuntimeReset(&kernel->interChannelDelayRuntime, N60InterChannelDelaySnapshotMakeBypassed());
     memset(kernel->referenceDelayLeft, 0, sizeof(kernel->referenceDelayLeft));
     memset(kernel->referenceDelayRight, 0, sizeof(kernel->referenceDelayRight));
     kernel->referenceDelayWriteIndex = 0;
@@ -1116,6 +1134,20 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
         meter_sample(left, right, &context->postEQPeakLeft, &context->postEQPeakRight, &context->postEQSquareSumLeft, &context->postEQSquareSumRight, &context->postEQOverRangeSamples);
     }
 
+    // Keep the alignment history warm even during Global Bypass, but discard the
+    // aligned copy while bypassed so Global Bypass remains the true raw escape path.
+    // Processed / Reference / Delta all receive the same speaker-alignment stage.
+    if (context->acquired) {
+        float alignedLeft = left;
+        float alignedRight = right;
+        N60InterChannelDelayRuntimeProcess(
+            &kernel->interChannelDelayRuntime, left, right, &alignedLeft, &alignedRight);
+        if (!context->snapshot.bypassed) {
+            left = alignedLeft;
+            right = alignedRight;
+        }
+    }
+
     float masterGain = next_gain_value(&kernel->masterGain);
     left *= masterGain;
     right *= masterGain;
@@ -1188,6 +1220,8 @@ N60RenderKernelDiagnostics N60RenderKernelGetDiagnostics(const N60RenderKernel *
         diagnostics.channelCount = context.snapshot.channelCount;
         diagnostics.bypassed = context.snapshot.bypassed;
         diagnostics.auditionMode = context.snapshot.auditionMode;
+        diagnostics.interChannelDelayMs = context.snapshot.interChannelDelay.signedDelayMs;
+        diagnostics.interChannelAlignmentLatencyFrames = context.snapshot.interChannelDelay.commonLatencyFrames;
         diagnostics.inputGainLinear = context.snapshot.inputGainLinear;
         diagnostics.headroomGainLinear = context.snapshot.headroomGainLinear;
         diagnostics.outputGainLinear = context.snapshot.outputGainLinear;
