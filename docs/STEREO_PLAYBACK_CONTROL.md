@@ -32,3 +32,8 @@ The first PR #23 hardware acceptance pass exposed that free-form EQ gain entry c
 ## Provenance
 
 This implementation is original commercial work derived from current product requirements, the proprietary PR #13–22 architecture, standard DSP equations/behavior, and independently written tests. Historical GPL Notch Sixty / Equaliser implementation, tests, project files, presets, and assets were not used as implementation references.
+
+
+## Raw-bypass FIR update policy
+
+Global Bypass and Flat keep the engine on the untreated path. While either is active, linear-EQ and room-correction edits update and validate product state without preparing or rotating convolution programs and without requesting an audibly redundant fade-through-silence transition. FIR state invalidated by a bypassed edit is lazily prepared from the current configuration when processed audio resumes.

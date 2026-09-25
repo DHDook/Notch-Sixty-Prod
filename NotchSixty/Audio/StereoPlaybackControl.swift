@@ -260,6 +260,28 @@ struct StereoEQConfiguration: Equatable, Sendable {
     }
 }
 
+enum FIRUpdatePolicy {
+    static func isRawBypassed(_ playback: PlaybackControlConfiguration) -> Bool {
+        playback.globalBypassed || playback.flatAuditionEnabled
+    }
+
+    static func shouldPrepareLinearPhase(
+        stereoEQ: StereoEQConfiguration,
+        playback: PlaybackControlConfiguration
+    ) -> Bool {
+        !isRawBypassed(playback)
+            && stereoEQ.phaseMode == .linearPhase
+            && !stereoEQ.bypassed
+    }
+
+    static func shouldPrepareRoomCorrection(
+        roomCorrection: RoomCorrectionConfiguration,
+        playback: PlaybackControlConfiguration
+    ) -> Bool {
+        !isRawBypassed(playback) && roomCorrection.enabled
+    }
+}
+
 struct PlaybackControlConfiguration: Equatable, Sendable {
     static let balanceRange = -1.0...1.0
 

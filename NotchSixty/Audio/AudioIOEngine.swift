@@ -707,13 +707,23 @@ final class AudioIOEngine: ObservableObject {
     }
 
     private func processingIsBypassed(_ configuration: PlaybackControlConfiguration) -> Bool {
-        configuration.globalBypassed || configuration.flatAuditionEnabled
+        FIRUpdatePolicy.isRawBypassed(configuration)
     }
 
     private func validateStereoEQStorage(_ configuration: StereoEQConfiguration) throws {
         for bands in [configuration.linkedBands, configuration.leftBands, configuration.rightBands] {
             guard bands.count <= EQConfiguration.maximumBandCount else {
                 throw EQConfigurationError.tooManyBands(bands.count)
+            }
+            for (index, band) in bands.enumerated() where band.enabled {
+                guard band.frequencyHz.isFinite,
+                      band.frequencyHz > 0,
+                      band.gainDB.isFinite,
+                      StereoEQConfiguration.bandGainRange.contains(band.gainDB),
+                      band.q.isFinite,
+                      band.q > 0 else {
+                    throw EQConfigurationError.invalidBand(index: index)
+                }
             }
         }
     }
@@ -729,34 +739,38 @@ final class AudioIOEngine: ObservableObject {
                 playbackConfiguration: playbackControlConfiguration
             )
 
-            var preparedLinearProgram: PreparedLinearPhaseProgram?
-            if configuration.phaseMode == .linearPhase && !configuration.bypassed {
-                let prepared = try prepareLinearPhaseProgram(configuration, for: session)
-                preparedLinearProgram = prepared
-                linearPhaseDesignInfo = prepared.designInfo
-                if !processingIsBypassed(playbackControlConfiguration) {
-                    try attachLinearPhaseProgram(prepared, to: &graph)
-                }
-            } else {
+            if processingIsBypassed(playbackControlConfiguration) {
+                // The raw path is already active. Update state without rotating FIR
+                // programs or fading an audibly identical raw graph.
+                try session.publishDSPGraph(graph)
+                activeLinearPhaseProgram = nil
                 linearPhaseDesignInfo = nil
-            }
+            } else {
+                var preparedLinearProgram: PreparedLinearPhaseProgram?
+                if configuration.phaseMode == .linearPhase && !configuration.bypassed {
+                    let prepared = try prepareLinearPhaseProgram(configuration, for: session)
+                    preparedLinearProgram = prepared
+                    linearPhaseDesignInfo = prepared.designInfo
+                    try attachLinearPhaseProgram(prepared, to: &graph)
+                } else {
+                    linearPhaseDesignInfo = nil
+                }
 
-            if !processingIsBypassed(playbackControlConfiguration) {
                 try attachActiveRoomCorrectionProgramIfNeeded(
                     to: &graph,
                     playbackConfiguration: playbackControlConfiguration
                 )
-            }
 
-            let leavingLinearPhase = activeLinearPhaseProgram != nil
-                && (configuration.phaseMode != .linearPhase || configuration.bypassed)
-            let enteringOrReplacingLinearPhase = preparedLinearProgram != nil
-            if leavingLinearPhase || enteringOrReplacingLinearPhase {
-                try session.transitionDSPGraph(graph)
-            } else {
-                try session.publishDSPGraph(graph)
+                let leavingLinearPhase = activeLinearPhaseProgram != nil
+                    && (configuration.phaseMode != .linearPhase || configuration.bypassed)
+                let enteringOrReplacingLinearPhase = preparedLinearProgram != nil
+                if leavingLinearPhase || enteringOrReplacingLinearPhase {
+                    try session.transitionDSPGraph(graph)
+                } else {
+                    try session.publishDSPGraph(graph)
+                }
+                activeLinearPhaseProgram = preparedLinearProgram
             }
-            activeLinearPhaseProgram = preparedLinearProgram
         } else {
             activeLinearPhaseProgram = nil
             linearPhaseDesignInfo = nil
@@ -785,7 +799,10 @@ final class AudioIOEngine: ObservableObject {
             let willBeBypassed = processingIsBypassed(configuration)
 
             if !willBeBypassed {
-                if stereoEQConfiguration.phaseMode == .linearPhase && !stereoEQConfiguration.bypassed {
+                if FIRUpdatePolicy.shouldPrepareLinearPhase(
+                    stereoEQ: stereoEQConfiguration,
+                    playback: configuration
+                ) {
                     if activeLinearPhaseProgram == nil {
                         let prepared = try prepareLinearPhaseProgram(stereoEQConfiguration, for: session)
                         activeLinearPhaseProgram = prepared
@@ -797,10 +814,19 @@ final class AudioIOEngine: ObservableObject {
                         playbackConfiguration: configuration
                     )
                 }
-                try attachActiveRoomCorrectionProgramIfNeeded(
-                    to: &graph,
-                    playbackConfiguration: configuration
-                )
+
+                if roomCorrectionConfiguration.enabled {
+                    guard let filter = roomCorrectionConfiguration.filter else {
+                        throw RoomCorrectionConfigurationError.filterRequired
+                    }
+                    if activeRoomCorrectionProgram == nil {
+                        activeRoomCorrectionProgram = try prepareRoomCorrectionProgram(filter, for: session)
+                    }
+                    try attachActiveRoomCorrectionProgramIfNeeded(
+                        to: &graph,
+                        playbackConfiguration: configuration
+                    )
+                }
             }
 
             if wasBypassed != willBeBypassed {
@@ -855,14 +881,23 @@ final class AudioIOEngine: ObservableObject {
                 playbackConfiguration: playbackControlConfiguration
             )
 
-            if configuration.enabled {
+            if processingIsBypassed(playbackControlConfiguration) {
+                if let filter = configuration.filter {
+                    try validateRoomCorrectionFilter(
+                        filter,
+                        outputSampleRate: session.outputFormat.sampleRate
+                    )
+                }
+                // Stay on the untreated path without rotating a stale FIR slot or
+                // invoking a fade-through-silence transition.
+                try session.publishDSPGraph(graph)
+                activeRoomCorrectionProgram = nil
+            } else if configuration.enabled {
                 guard let filter = configuration.filter else {
                     throw RoomCorrectionConfigurationError.filterRequired
                 }
                 let preparedProgram = try prepareRoomCorrectionProgram(filter, for: session)
-                if !processingIsBypassed(playbackControlConfiguration) {
-                    try attachRoomCorrectionProgram(preparedProgram, to: &graph)
-                }
+                try attachRoomCorrectionProgram(preparedProgram, to: &graph)
                 try session.transitionDSPGraph(graph)
                 activeRoomCorrectionProgram = preparedProgram
             } else {
@@ -969,10 +1004,10 @@ final class AudioIOEngine: ObservableObject {
         )
     }
 
-    private func prepareRoomCorrectionProgram(
+    private func validateRoomCorrectionFilter(
         _ filter: RoomCorrectionFilter,
-        for session: CoreAudioTransportSession
-    ) throws -> PreparedRoomCorrectionProgram {
+        outputSampleRate: Double
+    ) throws {
         let tapCount = filter.leftTaps.count
         guard tapCount > 0, tapCount <= Int(N60_CONVOLUTION_MAX_TAPS) else {
             throw RoomCorrectionConfigurationError.invalidTapCount(tapCount)
@@ -984,10 +1019,17 @@ final class AudioIOEngine: ObservableObject {
               filter.rightTaps?.allSatisfy(\.isFinite) ?? true else {
             throw RoomCorrectionConfigurationError.nonFiniteTap
         }
-        try filter.validateSampleRate(forOutputSampleRate: session.outputFormat.sampleRate)
+        try filter.validateSampleRate(forOutputSampleRate: outputSampleRate)
         guard filter.declaredLatencyFrames < UInt32(tapCount) else {
             throw RoomCorrectionConfigurationError.invalidDeclaredLatency(filter.declaredLatencyFrames)
         }
+    }
+
+    private func prepareRoomCorrectionProgram(
+        _ filter: RoomCorrectionFilter,
+        for session: CoreAudioTransportSession
+    ) throws -> PreparedRoomCorrectionProgram {
+        try validateRoomCorrectionFilter(filter, outputSampleRate: session.outputFormat.sampleRate)
 
         let slot = nextRoomCorrectionProgramSlot % UInt32(N60_CONVOLUTION_PROGRAM_SLOTS)
         let programInfo: N60ConvolutionProgramInfo
@@ -1107,13 +1149,14 @@ final class AudioIOEngine: ObservableObject {
             playbackConfiguration: playbackControlConfiguration
         )
 
-        if stereoEQConfiguration.phaseMode == .linearPhase && !stereoEQConfiguration.bypassed {
+        if FIRUpdatePolicy.shouldPrepareLinearPhase(
+            stereoEQ: stereoEQConfiguration,
+            playback: playbackControlConfiguration
+        ) {
             let preparedProgram = try prepareLinearPhaseProgram(stereoEQConfiguration, for: session)
             activeLinearPhaseProgram = preparedProgram
             linearPhaseDesignInfo = preparedProgram.designInfo
-            if !processingIsBypassed(playbackControlConfiguration) {
-                try attachLinearPhaseProgram(preparedProgram, to: &graph)
-            }
+            try attachLinearPhaseProgram(preparedProgram, to: &graph)
         } else {
             linearPhaseDesignInfo = nil
         }
@@ -1122,9 +1165,13 @@ final class AudioIOEngine: ObservableObject {
             guard let filter = roomCorrectionConfiguration.filter else {
                 throw RoomCorrectionConfigurationError.filterRequired
             }
-            let preparedProgram = try prepareRoomCorrectionProgram(filter, for: session)
-            activeRoomCorrectionProgram = preparedProgram
-            if !processingIsBypassed(playbackControlConfiguration) {
+            try validateRoomCorrectionFilter(filter, outputSampleRate: session.outputFormat.sampleRate)
+            if FIRUpdatePolicy.shouldPrepareRoomCorrection(
+                roomCorrection: roomCorrectionConfiguration,
+                playback: playbackControlConfiguration
+            ) {
+                let preparedProgram = try prepareRoomCorrectionProgram(filter, for: session)
+                activeRoomCorrectionProgram = preparedProgram
                 try attachRoomCorrectionProgram(preparedProgram, to: &graph)
             }
         }

@@ -219,6 +219,34 @@ final class StereoPlaybackControlTests: XCTestCase {
         XCTAssertFalse(N60BiquadDesign(N60BiquadFilterTypePeaking, 96_000, 1_000, 300, 1, &coefficients))
     }
 
+
+    func testRawBypassDefersFIRPreparationPolicyAcrossRepeatedEdits() {
+        let linearEQ = StereoEQConfiguration(phaseMode: .linearPhase)
+        let room = RoomCorrectionConfiguration(enabled: true, filter: .validation)
+        let bypassStates = [
+            PlaybackControlConfiguration(balance: 0, globalBypassed: true, flatAuditionEnabled: false),
+            PlaybackControlConfiguration(balance: 0, globalBypassed: false, flatAuditionEnabled: true),
+            PlaybackControlConfiguration(balance: 0, globalBypassed: true, flatAuditionEnabled: true),
+        ]
+
+        for playback in bypassStates {
+            for _ in 0..<32 {
+                XCTAssertTrue(FIRUpdatePolicy.isRawBypassed(playback))
+                XCTAssertFalse(FIRUpdatePolicy.shouldPrepareLinearPhase(stereoEQ: linearEQ, playback: playback))
+                XCTAssertFalse(FIRUpdatePolicy.shouldPrepareRoomCorrection(roomCorrection: room, playback: playback))
+            }
+        }
+    }
+
+    func testProcessedModePreparesFIRStages() {
+        let playback = PlaybackControlConfiguration()
+        let linearEQ = StereoEQConfiguration(phaseMode: .linearPhase)
+        let room = RoomCorrectionConfiguration(enabled: true, filter: .validation)
+        XCTAssertFalse(FIRUpdatePolicy.isRawBypassed(playback))
+        XCTAssertTrue(FIRUpdatePolicy.shouldPrepareLinearPhase(stereoEQ: linearEQ, playback: playback))
+        XCTAssertTrue(FIRUpdatePolicy.shouldPrepareRoomCorrection(roomCorrection: room, playback: playback))
+    }
+
     func testStereoGraphCompilesUpToSixtyFourBandsPerChannelAt384k() throws {
         let left = (0..<64).map { index in
             EQBand(
