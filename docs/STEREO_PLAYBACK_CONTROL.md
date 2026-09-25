@@ -22,7 +22,7 @@ Minimum-phase coefficient/channel changes use the existing short EQ crossfade. B
 
 ## Validation
 
-Deterministic tests cover linked equality, left-only channel isolation, attenuation-only balance, raw bypass identity, non-destructive linked/independent round-trips, and 64-band-per-channel graph compilation at 384 kHz. Hardware acceptance additionally checks audible channel isolation, balance, minimum/linear phase, Flat/Bypass transitions, repeated switching, and realtime diagnostics.
+Deterministic tests cover linked equality, left-only channel isolation, attenuation-only balance, raw bypass identity, non-destructive linked/independent round-trips, and 64-band-per-channel graph compilation at 384 kHz. Both the stereo control model and its dedicated test suite are explicitly included in their Xcode target source phases so CI validates the shipping target configuration rather than loose source files. Hardware acceptance additionally checks audible channel isolation, balance, minimum/linear phase, Flat/Bypass transitions, repeated switching, and realtime diagnostics.
 
 ## Provenance
 
