@@ -1,0 +1,33 @@
+name: PR28 Advanced Dynamics Integration
+
+on:
+  push:
+    branches: [feature/advanced-dynamics-parity-1]
+    paths:
+      - .github/workflows/pr28-integrate.yml
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Apply PR28 integration
+        run: python3 .github/scripts/pr28_integrate.py
+      - name: Run full test suite
+        run: xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES test
+      - name: Commit integrated PR28 changes and clean helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/pr28-integrate.yml .github/scripts/pr28_integrate.py
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Integrate de-esser and multiband dynamics parity'
+          git push origin HEAD:feature/advanced-dynamics-parity-1
