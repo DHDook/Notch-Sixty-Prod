@@ -1,0 +1,33 @@
+name: PR26 Dynamics Foundation
+
+on:
+  push:
+    branches: [feature/dynamics-parity-foundation]
+    paths:
+      - .github/workflows/pr26-dynamics-foundation.yml
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Apply graph integration
+        run: python3 .github/scripts/pr26_integrate_dynamics.py
+      - name: Run full test suite
+        run: xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES test
+      - name: Commit implementation and remove helpers
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/pr26-dynamics-foundation.yml .github/scripts/pr26_integrate_dynamics.py
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Integrate compressor expander and pause gate foundation'
+          git push origin HEAD:feature/dynamics-parity-foundation
