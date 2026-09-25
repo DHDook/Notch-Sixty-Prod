@@ -241,6 +241,13 @@ struct StereoEQConfiguration: Equatable, Sendable {
             throw BassManagementConfigurationError.graphDesignFailed
         }
         graph.dynamics = try dynamicsConfiguration.makeSnapshot(sampleRate: sampleRate)
+        graph.protection = try dynamicsConfiguration.makeProtectionSnapshot(sampleRate: sampleRate)
+        let protectionLatency = UInt64(graph.protection.latencyFrames)
+        let totalLatency = UInt64(graph.latencyFrames) + protectionLatency
+        guard totalLatency < UInt64(N60_MAX_AUDITION_DELAY_FRAMES) else {
+            throw DynamicsConfigurationError.invalidOversampling
+        }
+        graph.latencyFrames = UInt32(totalLatency)
         return graph
     }
 

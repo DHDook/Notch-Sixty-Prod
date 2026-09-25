@@ -30,7 +30,7 @@ struct ProductDSPConfiguration: Equatable, Sendable {
 }
 
 struct ProductConfiguration: Equatable, Sendable {
-    static let currentSchemaVersion = 4
+    static let currentSchemaVersion = 5
 
     var schemaVersion: Int
     var selectedOutputUID: String?

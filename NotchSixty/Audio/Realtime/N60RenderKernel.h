@@ -8,6 +8,7 @@
 #include "N60Convolution.h"
 #include "N60Crossover.h"
 #include "N60Dynamics.h"
+#include "N60Protection.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -62,6 +63,7 @@ typedef struct {
     uint32_t crossoverTransitionFrames;
     N60CrossoverSnapshot crossover;
     N60DynamicsSnapshot dynamics;
+    N60ProtectionSnapshot protection;
     N60ConvolutionGraphState convolution;
     N60ConvolutionGraphState roomCorrection;
 } N60DSPGraphSnapshot;
@@ -137,6 +139,14 @@ typedef struct {
     float expanderAttenuationDB;
     float pauseGateGain;
     bool pauseGateOpen;
+    bool softClipperEnabled;
+    bool limiterEnabled;
+    N60OversamplingFactor oversamplingFactor;
+    N60OversamplingFactor effectiveOversamplingFactor;
+    float inputTruePeakLinear;
+    float outputTruePeakLinear;
+    float limiterGainReductionDB;
+    uint64_t limiterSafetyClampSamples;
     bool convolutionEnabled;
     uint32_t convolutionProgramSlot;
     uint64_t convolutionProgramGeneration;

@@ -69,6 +69,7 @@ struct N60RenderKernel {
     N60EQBandRuntime eqRuntime[N60_MAX_EQ_RENDER_SLOTS];
     N60CrossoverRuntime crossoverRuntime;
     N60DynamicsRuntime dynamicsRuntime;
+    N60ProtectionRuntime *protectionRuntime;
     N60PartitionedConvolver *convolver;
     N60PartitionedConvolver *roomCorrectionConvolver;
     N60SmoothedGain inputGain;
@@ -84,6 +85,9 @@ struct N60RenderKernel {
     double preparedSampleRate;
     bool preparedGraphBypassed;
     bool preparedEQBypassed;
+    N60OversamplingFactor preparedProtectionFactor;
+    bool preparedLimiterEnabled;
+    uint32_t preparedLimiterLookAheadHighSamples;
 
     _Atomic uint64_t renderedFrames;
     _Atomic uint64_t sanitizedNonFiniteSamples;
@@ -96,6 +100,10 @@ struct N60RenderKernel {
     _Atomic uint32_t expanderAttenuationBits;
     _Atomic uint32_t pauseGateGainBits;
     _Atomic bool pauseGateOpen;
+    _Atomic uint32_t inputTruePeakBits;
+    _Atomic uint32_t outputTruePeakBits;
+    _Atomic uint32_t limiterGainReductionBits;
+    _Atomic uint64_t limiterSafetyClampSamples;
 
     _Atomic uint32_t inputPeakLeftBits;
     _Atomic uint32_t inputPeakRightBits;
@@ -228,6 +236,7 @@ static bool snapshot_is_valid(N60DSPGraphSnapshot snapshot) {
         || snapshot.eqBandCount > N60_MAX_EQ_RENDER_SLOTS
         || !crossover_snapshot_is_valid(snapshot.crossover, snapshot.sampleRate)
         || !N60DynamicsSnapshotIsValid(snapshot.dynamics)
+        || !N60ProtectionSnapshotIsValid(&snapshot.protection)
         || !convolution_snapshot_is_valid(snapshot.convolution)
         || !convolution_snapshot_is_valid(snapshot.roomCorrection)) {
         return false;
@@ -432,6 +441,9 @@ static void prepare_runtime_for_snapshot(N60RenderKernel *kernel, const N60DSPGr
         reset_eq_runtime(kernel);
     }
 
+    bool protectionStructureChanged = kernel->preparedProtectionFactor != snapshot->protection.effectiveFactor
+        || kernel->preparedLimiterEnabled != snapshot->protection.limiterEnabled
+        || kernel->preparedLimiterLookAheadHighSamples != snapshot->protection.limiterLookAheadHighSamples;
     if (firstPreparation || sampleRateChanged || leavingGraphBypass) {
         reset_crossover_runtime(&kernel->crossoverRuntime, snapshot->crossover);
         N60DynamicsRuntimeReset(&kernel->dynamicsRuntime);
@@ -441,6 +453,13 @@ static void prepare_runtime_for_snapshot(N60RenderKernel *kernel, const N60DSPGr
             : crossover_transition_frames_for_sample_rate(snapshot->sampleRate);
         schedule_crossover_transition(&kernel->crossoverRuntime, snapshot->crossover, crossoverFrames);
     }
+
+    if (firstPreparation || sampleRateChanged || leavingGraphBypass || protectionStructureChanged) {
+        N60ProtectionRuntimeReset(kernel->protectionRuntime);
+    }
+    kernel->preparedProtectionFactor = snapshot->protection.effectiveFactor;
+    kernel->preparedLimiterEnabled = snapshot->protection.limiterEnabled;
+    kernel->preparedLimiterLookAheadHighSamples = snapshot->protection.limiterLookAheadHighSamples;
 
     kernel->preparedGeneration = snapshot->generation;
     kernel->preparedSampleRate = snapshot->sampleRate;
@@ -733,6 +752,7 @@ N60DSPGraphSnapshot N60DSPGraphSnapshotMakeUnity(double sampleRate) {
     snapshot.crossoverTransitionFrames = crossover_transition_frames_for_sample_rate(sampleRate);
     snapshot.crossover = N60CrossoverSnapshotMakeBypassed();
     snapshot.dynamics = N60DynamicsSnapshotMakeBypassed(sampleRate);
+    snapshot.protection = N60ProtectionSnapshotMakeBypassed(sampleRate);
     snapshot.convolution.enabled = false;
     snapshot.convolution.programSlot = N60_CONVOLUTION_NO_PROGRAM;
     snapshot.roomCorrection.enabled = false;
@@ -834,6 +854,13 @@ N60RenderKernel *N60RenderKernelCreate(void) {
         free(kernel);
         return NULL;
     }
+    kernel->protectionRuntime = N60ProtectionRuntimeCreate();
+    if (kernel->protectionRuntime == NULL) {
+        N60PartitionedConvolverDestroy(kernel->roomCorrectionConvolver);
+        N60PartitionedConvolverDestroy(kernel->convolver);
+        free(kernel);
+        return NULL;
+    }
     N60DSPGraphSnapshot initial = N60DSPGraphSnapshotMakeUnity(48000.0);
     initial.generation = 1;
     kernel->slots[0].snapshot = initial;
@@ -855,6 +882,7 @@ N60RenderKernel *N60RenderKernelCreate(void) {
 
 void N60RenderKernelDestroy(N60RenderKernel *kernel) {
     if (kernel == NULL) return;
+    N60ProtectionRuntimeDestroy(kernel->protectionRuntime);
     N60PartitionedConvolverDestroy(kernel->roomCorrectionConvolver);
     N60PartitionedConvolverDestroy(kernel->convolver);
     free(kernel);
@@ -865,6 +893,7 @@ void N60RenderKernelReset(N60RenderKernel *kernel) {
     reset_eq_runtime(kernel);
     reset_crossover_runtime(&kernel->crossoverRuntime, N60CrossoverSnapshotMakeBypassed());
     N60DynamicsRuntimeReset(&kernel->dynamicsRuntime);
+    N60ProtectionRuntimeReset(kernel->protectionRuntime);
     N60PartitionedConvolverReset(kernel->convolver);
     N60PartitionedConvolverReset(kernel->roomCorrectionConvolver);
     reset_smoothed_gain(&kernel->inputGain, 1.0f);
@@ -880,6 +909,9 @@ void N60RenderKernelReset(N60RenderKernel *kernel) {
     kernel->preparedSampleRate = 0.0;
     kernel->preparedGraphBypassed = false;
     kernel->preparedEQBypassed = false;
+    kernel->preparedProtectionFactor = N60OversamplingFactor1x;
+    kernel->preparedLimiterEnabled = false;
+    kernel->preparedLimiterLookAheadHighSamples = 0;
     atomic_store_explicit(&kernel->renderedFrames, 0, memory_order_relaxed);
     atomic_store_explicit(&kernel->sanitizedNonFiniteSamples, 0, memory_order_relaxed);
     atomic_store_explicit(&kernel->flushedDenormalSamples, 0, memory_order_relaxed);
@@ -963,7 +995,10 @@ bool N60RenderKernelPublishSnapshot(N60RenderKernel *kernel, N60DSPGraphSnapshot
 
 N60RenderKernelRenderContext N60RenderKernelBeginRender(N60RenderKernel *kernel) {
     N60RenderKernelRenderContext context = acquire_render_context(kernel);
-    if (context.acquired) prepare_runtime_for_snapshot(kernel, &context.snapshot);
+    if (context.acquired) {
+        prepare_runtime_for_snapshot(kernel, &context.snapshot);
+        N60ProtectionRuntimeBeginBuffer(kernel->protectionRuntime);
+    }
     return context;
 }
 
@@ -1041,6 +1076,13 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
         left *= outputGain;
         right *= outputGain;
 
+        N60ProtectionProcessStereoFrame(
+            kernel->protectionRuntime,
+            &context->snapshot.protection,
+            &left,
+            &right
+        );
+
         N60DynamicsProcessPauseGateStereoFrame(
             &kernel->dynamicsRuntime,
             context->snapshot.dynamics,
@@ -1087,6 +1129,11 @@ void N60RenderKernelEndRender(N60RenderKernel *kernel, N60RenderKernelRenderCont
         atomic_store_explicit(&kernel->expanderAttenuationBits, float_to_bits(telemetry.expanderAttenuationDB), memory_order_relaxed);
         atomic_store_explicit(&kernel->pauseGateGainBits, float_to_bits(telemetry.pauseGateGain), memory_order_relaxed);
         atomic_store_explicit(&kernel->pauseGateOpen, telemetry.pauseGateOpen, memory_order_relaxed);
+        N60ProtectionTelemetry protection = N60ProtectionRuntimeTelemetry(kernel->protectionRuntime);
+        atomic_store_explicit(&kernel->inputTruePeakBits, float_to_bits(protection.inputTruePeakLinear), memory_order_relaxed);
+        atomic_store_explicit(&kernel->outputTruePeakBits, float_to_bits(protection.outputTruePeakLinear), memory_order_relaxed);
+        atomic_store_explicit(&kernel->limiterGainReductionBits, float_to_bits(protection.limiterGainReductionDB), memory_order_relaxed);
+        atomic_fetch_add_explicit(&kernel->limiterSafetyClampSamples, protection.limiterSafetyClampSamples, memory_order_relaxed);
     }
     if (context->acquired && context->slotIndex < N60_SNAPSHOT_SLOT_COUNT) {
         atomic_fetch_sub_explicit(&kernel->slots[context->slotIndex].readers, 1, memory_order_release);
@@ -1149,6 +1196,10 @@ N60RenderKernelDiagnostics N60RenderKernelGetDiagnostics(const N60RenderKernel *
         diagnostics.compressorEnabled = context.snapshot.dynamics.compressor.enabled;
         diagnostics.expanderEnabled = context.snapshot.dynamics.expander.enabled;
         diagnostics.pauseGateEnabled = context.snapshot.dynamics.pauseGate.enabled;
+        diagnostics.softClipperEnabled = context.snapshot.protection.softClipperEnabled;
+        diagnostics.limiterEnabled = context.snapshot.protection.limiterEnabled;
+        diagnostics.oversamplingFactor = context.snapshot.protection.oversamplingFactor;
+        diagnostics.effectiveOversamplingFactor = context.snapshot.protection.effectiveFactor;
         diagnostics.convolutionEnabled = context.snapshot.convolution.enabled;
         diagnostics.convolutionProgramSlot = context.snapshot.convolution.programSlot;
         diagnostics.convolutionProgramGeneration = context.snapshot.convolution.programGeneration;
@@ -1176,6 +1227,10 @@ N60RenderKernelDiagnostics N60RenderKernelGetDiagnostics(const N60RenderKernel *
     diagnostics.expanderAttenuationDB = bits_to_float(atomic_load_explicit(&kernel->expanderAttenuationBits, memory_order_relaxed));
     diagnostics.pauseGateGain = bits_to_float(atomic_load_explicit(&kernel->pauseGateGainBits, memory_order_relaxed));
     diagnostics.pauseGateOpen = atomic_load_explicit(&kernel->pauseGateOpen, memory_order_relaxed);
+    diagnostics.inputTruePeakLinear = bits_to_float(atomic_load_explicit(&kernel->inputTruePeakBits, memory_order_relaxed));
+    diagnostics.outputTruePeakLinear = bits_to_float(atomic_load_explicit(&kernel->outputTruePeakBits, memory_order_relaxed));
+    diagnostics.limiterGainReductionDB = bits_to_float(atomic_load_explicit(&kernel->limiterGainReductionBits, memory_order_relaxed));
+    diagnostics.limiterSafetyClampSamples = atomic_load_explicit(&kernel->limiterSafetyClampSamples, memory_order_relaxed);
     diagnostics.inputMeter = load_meter_reading(&kernel->inputPeakLeftBits, &kernel->inputPeakRightBits, &kernel->inputRMSLeftBits, &kernel->inputRMSRightBits, &kernel->inputOverRangeSamples);
     diagnostics.postEQMeter = load_meter_reading(&kernel->postEQPeakLeftBits, &kernel->postEQPeakRightBits, &kernel->postEQRMSLeftBits, &kernel->postEQRMSRightBits, &kernel->postEQOverRangeSamples);
     diagnostics.outputMeter = load_meter_reading(&kernel->outputPeakLeftBits, &kernel->outputPeakRightBits, &kernel->outputRMSLeftBits, &kernel->outputRMSRightBits, &kernel->outputOverRangeSamples);
