@@ -19,6 +19,15 @@ jobs:
         with:
           ref: feature/advanced-dynamics-parity-2
 
+      - name: Normalize generated Swift interpolation quotes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('.github/scripts/pr29_validation_ui.py')
+          text = p.read_text()
+          p.write_text(text.replace(r'\"', '"'))
+          PY
+
       - name: Apply PR29 validation UI integration
         run: python3 .github/scripts/pr29_validation_ui.py
 
