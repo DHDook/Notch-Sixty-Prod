@@ -50,7 +50,7 @@ replace(
 replace(
     engine,
     "    private func syncMasterVolumeMonitorToSelectedOutput() throws {\n        guard let output = selectedOutputDevice else {\n            masterVolumeController.stopMonitoring()\n            masterVolumeCapabilities = .softwareOnly\n            return\n        }\n        try masterVolumeController.monitor(deviceID: output.deviceID)\n        try synchronizeMasterVolumeFromSelectedDevice()\n    }",
-    "    private func syncMasterVolumeMonitorToSelectedOutput() throws {\n        guard let output = selectedOutputDevice else {\n            masterVolumeController.stopMonitoring()\n            globalVolumeKeyMonitor.stop()\n            globalVolumeKeyMonitoringState = .stopped\n            masterVolumeCapabilities = .softwareOnly\n            return\n        }\n        try masterVolumeController.monitor(deviceID: output.deviceID)\n        try synchronizeMasterVolumeFromSelectedDevice()\n        try syncGlobalVolumeKeyMonitor()\n    }",
+    "    private func syncMasterVolumeMonitorToSelectedOutput() throws {\n        guard let output = selectedOutputDevice else {\n            masterVolumeController.stopMonitoring()\n            globalVolumeKeyMonitor.stop()\n            globalVolumeKeyMonitoringState = .stopped\n            masterVolumeCapabilities = .softwareOnly\n            return\n        }\n        try masterVolumeController.monitor(deviceID: output.deviceID)\n        try synchronizeMasterVolumeFromSelectedDevice()\n        syncGlobalVolumeKeyMonitor()\n    }",
 )
 
 replace(
@@ -65,7 +65,7 @@ replace(
         }
     }
 
-    private func syncGlobalVolumeKeyMonitor() throws {
+    private func syncGlobalVolumeKeyMonitor() {
         globalVolumeKeyMonitor.stop()
         globalVolumeKeyMonitoringState = .stopped
         guard masterVolumeCapabilities.controlMode == .softwareDSP else { return }
@@ -74,7 +74,9 @@ replace(
             globalVolumeKeyMonitoringState = globalVolumeKeyMonitor.state
         } catch {
             globalVolumeKeyMonitoringState = globalVolumeKeyMonitor.state
-            throw error
+            // Input Monitoring is a keyboard-control capability, not an audio-route
+            // requirement. Keep the selected output usable and surface permission
+            // state independently instead of failing refresh/recovery.
         }
     }
 
@@ -125,6 +127,6 @@ doc.write_text(
 
 ## Fixed-volume output keyboard fallback
 
-When the selected physical output exposes no writable device volume (for example a fixed-output USB DAC), Notch Sixty keeps the physical device selected and uses the existing smoothed software master gain as the volume authority. A passive public IOKit HID listener observes Consumer Control Volume Increment/Decrement usages and maps them to 1/16-scale master-volume steps. The listener is active only in software-DSP volume mode, never seizes or suppresses keyboard events, and requires the user's macOS Input Monitoring permission. Native writable device volume remains preferred when available. The legacy virtual/HAL driver architecture is not reintroduced.
+When the selected physical output exposes no writable device volume (for example a fixed-output USB DAC), Notch Sixty keeps the physical device selected and uses the existing smoothed software master gain as the volume authority. A passive public IOKit HID listener observes Consumer Control Volume Increment/Decrement usages and maps them to 1/16-scale master-volume steps. The listener is active only in software-DSP volume mode, never seizes or suppresses keyboard events, and requires the user's macOS Input Monitoring permission. Missing permission does not invalidate the audio route; it is tracked as a separate keyboard-control capability. Native writable device volume remains preferred when available. The legacy virtual/HAL driver architecture is not reintroduced.
 """
 )
