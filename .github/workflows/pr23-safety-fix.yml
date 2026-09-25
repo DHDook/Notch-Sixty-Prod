@@ -1,0 +1,143 @@
+name: PR23 EQ Safety Fix
+
+on:
+  push:
+    branches:
+      - feature/stereo-playback-control-parity
+    paths:
+      - .github/workflows/pr23-safety-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Apply safety and diagnostics UX patch
+        shell: python3 {0}
+        run: |
+          from pathlib import Path
+
+          def replace(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              if old not in text:
+                  raise SystemExit(f"pattern not found in {path}: {old[:100]!r}")
+              p.write_text(text.replace(old, new, 1))
+
+          # Portable DSP guard: reject unsafe EQ boosts/cuts even if a future caller
+          # bypasses the Swift product model.
+          replace(
+              "NotchSixty/Audio/Realtime/N60Biquad.h",
+              "#ifdef __cplusplus\nextern \"C\" {\n#endif\n",
+              "#ifdef __cplusplus\nextern \"C\" {\n#endif\n\n#define N60_EQ_MIN_GAIN_DB (-12.0)\n#define N60_EQ_MAX_GAIN_DB (12.0)\n"
+          )
+          replace(
+              "NotchSixty/Audio/Realtime/N60Biquad.h",
+              "        || !isfinite(gainDB)\n        || !isfinite(q) || q <= 0.0) {",
+              "        || !isfinite(gainDB)\n        || gainDB < N60_EQ_MIN_GAIN_DB || gainDB > N60_EQ_MAX_GAIN_DB\n        || !isfinite(q) || q <= 0.0) {"
+          )
+
+          # Product-model guard shared by linked and independent EQ.
+          replace(
+              "NotchSixty/Audio/AudioIOEngine.swift",
+              "struct EQBand: Identifiable, Equatable, Sendable {\n    let id: UUID",
+              "struct EQBand: Identifiable, Equatable, Sendable {\n    static let gainRange = -12.0...12.0\n\n    let id: UUID"
+          )
+          replace(
+              "NotchSixty/Audio/AudioIOEngine.swift",
+              "              band.gainDB.isFinite,\n              band.q.isFinite,",
+              "              band.gainDB.isFinite,\n              EQBand.gainRange.contains(band.gainDB),\n              band.q.isFinite,"
+          )
+          replace(
+              "NotchSixty/Audio/StereoPlaybackControl.swift",
+              "                  band.gainDB.isFinite,\n                  band.q.isFinite,",
+              "                  band.gainDB.isFinite,\n                  EQBand.gainRange.contains(band.gainDB),\n                  band.q.isFinite,"
+          )
+
+          # Clamp the engineering UI before publication. The model/C layers still
+          # reject invalid values independently.
+          replace(
+              "NotchSixty/ContentView.swift",
+              "            Text(\"dB\").foregroundStyle(.secondary)\n            TextField(\"Q\", value: binding.q, format: .number.precision(.fractionLength(2...3))).frame(width: 65)",
+              "            Text(\"dB\").foregroundStyle(.secondary)\n            Text(\"±12 max\").font(.caption2).foregroundStyle(.secondary)\n            TextField(\"Q\", value: binding.q, format: .number.precision(.fractionLength(2...3))).frame(width: 65)"
+          )
+          replace(
+              "NotchSixty/ContentView.swift",
+              "            set: { updated in try? engine.updateEQBand(updated) }",
+              "            set: { updated in\n                guard updated.gainDB.isFinite else { return }\n                var sanitized = updated\n                sanitized.gainDB = min(max(updated.gainDB, EQBand.gainRange.lowerBound), EQBand.gainRange.upperBound)\n                try? engine.updateEQBand(sanitized)\n            }"
+          )
+
+          # Make the entire engineering surface vertically scrollable so all
+          # diagnostics remain reachable on smaller displays/windows.
+          replace(
+              "    var body: some View {\n        VStack(alignment: .leading, spacing: 14) {",
+              "    var body: some View {\n        ScrollView {\n            VStack(alignment: .leading, spacing: 14) {"
+          )
+          replace(
+              "            ScrollView {\n                TimelineView(.periodic(from: .now, by: 0.25)) { _ in\n                    diagnosticsView(engine.diagnosticsSnapshot())\n                }\n            }",
+              "            TimelineView(.periodic(from: .now, by: 0.25)) { _ in\n                diagnosticsView(engine.diagnosticsSnapshot())\n            }"
+          )
+          replace(
+              "        }\n        .padding(20)\n        .frame(minWidth: 880, minHeight: 1_040)\n        .onAppear",
+              "            }\n            .padding(20)\n        }\n        .frame(minWidth: 880, minHeight: 700)\n        .onAppear"
+          )
+
+          # Regression coverage for the exact hardware-discovered failure mode.
+          tests = Path("NotchSixtyTests/StereoPlaybackControlTests.swift")
+          text = tests.read_text()
+          marker = "\n    func testStereoGraphCompilesUpToSixtyFourBandsPerChannelAt384k() throws {"
+          insert = r'''
+
+    func testUnsafeEQGainIsRejectedBeforeGraphPublication() {
+        for gain in [300.0, -300.0, .infinity, -.infinity, .nan] {
+            let configuration = StereoEQConfiguration(
+                linkedBands: [EQBand(frequencyHz: 1_000, gainDB: gain, q: 1)]
+            )
+            XCTAssertThrowsError(
+                try configuration.makeGraphSnapshot(
+                    sampleRate: 96_000,
+                    gainConfiguration: DSPGainConfiguration(),
+                    bassManagementConfiguration: BassManagementConfiguration(),
+                    playbackConfiguration: PlaybackControlConfiguration()
+                ),
+                "gain \(gain) must not reach the realtime graph"
+            )
+        }
+    }
+
+    func testEQGainBoundaryIsAcceptedAndBeyondBoundaryIsRejectedByPortableDesigner() {
+        var coefficients = N60BiquadCoefficients()
+        XCTAssertTrue(N60BiquadDesign(N60BiquadFilterTypePeaking, 96_000, 1_000, 12, 1, &coefficients))
+        XCTAssertTrue(N60BiquadDesign(N60BiquadFilterTypePeaking, 96_000, 1_000, -12, 1, &coefficients))
+        XCTAssertFalse(N60BiquadDesign(N60BiquadFilterTypePeaking, 96_000, 1_000, 12.001, 1, &coefficients))
+        XCTAssertFalse(N60BiquadDesign(N60BiquadFilterTypePeaking, 96_000, 1_000, -12.001, 1, &coefficients))
+        XCTAssertFalse(N60BiquadDesign(N60BiquadFilterTypePeaking, 96_000, 1_000, 300, 1, &coefficients))
+    }
+'''
+          if marker not in text:
+              raise SystemExit("test insertion marker not found")
+          tests.write_text(text.replace(marker, insert + marker, 1))
+
+          # Record the hardware finding in the feature note.
+          doc = Path("docs/STEREO_PLAYBACK_CONTROL.md")
+          d = doc.read_text()
+          d += "\n## Hardware safety hardening\n\nHardware acceptance exposed that free-form EQ gain entry could previously accept extreme values (for example +300 dB). PR #23 now enforces a -12...+12 dB per-band range in both the Swift product model and the portable C biquad designer, clamps the engineering UI to the same range, and regression-tests extreme/non-finite inputs. This is a temporary conservative ceiling pending later automatic-headroom and true-peak protection work.\n"
+          doc.write_text(d)
+
+      - name: Commit patch and remove helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/pr23-safety-fix.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add NotchSixty/Audio/Realtime/N60Biquad.h NotchSixty/Audio/AudioIOEngine.swift NotchSixty/Audio/StereoPlaybackControl.swift NotchSixty/ContentView.swift NotchSixtyTests/StereoPlaybackControlTests.swift docs/STEREO_PLAYBACK_CONTROL.md .github/workflows/pr23-safety-fix.yml
+          git commit -m 'Harden EQ gain safety after hardware validation'
+          git push origin HEAD:feature/stereo-playback-control-parity
