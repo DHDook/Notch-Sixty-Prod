@@ -1,0 +1,43 @@
+name: PR30 All-Pass Foundation Integration
+
+on:
+  push:
+    branches:
+      - feature/phase-time-alignment-foundation
+    paths:
+      - '.github/scripts/pr30_allpass_foundation.py'
+      - '.github/workflows/pr30-allpass-integrate.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feature/phase-time-alignment-foundation
+
+      - name: Apply PR30 all-pass foundation
+        run: python3 .github/scripts/pr30_allpass_foundation.py
+
+      - name: Run full test suite
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          test
+
+      - name: Commit PR30 all-pass foundation and clean helpers
+        run: |
+          rm -f .github/scripts/pr30_allpass_foundation.py .github/workflows/pr30-allpass-integrate.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Add all-pass EQ phase-alignment foundation'
+          git push origin HEAD:feature/phase-time-alignment-foundation
