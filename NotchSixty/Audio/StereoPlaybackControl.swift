@@ -31,6 +31,8 @@ enum EQEditChannel: String, CaseIterable, Identifiable, Sendable {
 }
 
 struct StereoEQConfiguration: Equatable, Sendable {
+    static let bandGainRange = -24.0...24.0
+
     var channelMode: EQChannelMode
     var editChannel: EQEditChannel
     var phaseMode: EQPhaseMode
@@ -133,6 +135,7 @@ struct StereoEQConfiguration: Equatable, Sendable {
             guard band.frequencyHz.isFinite,
                   band.frequencyHz > 0,
                   band.gainDB.isFinite,
+                  Self.bandGainRange.contains(band.gainDB),
                   band.q.isFinite,
                   band.q > 0 else {
                 throw EQConfigurationError.invalidBand(index: index)
