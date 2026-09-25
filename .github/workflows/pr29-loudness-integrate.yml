@@ -6,6 +6,7 @@ on:
       - feature/advanced-dynamics-parity-2
     paths:
       - '.github/scripts/pr29_loudness.py'
+      - '.github/scripts/pr29_loudness_tests.py'
       - '.github/workflows/pr29-loudness-integrate.yml'
 
 permissions:
@@ -20,7 +21,9 @@ jobs:
           ref: feature/advanced-dynamics-parity-2
 
       - name: Apply PR29 loudness integration
-        run: python3 .github/scripts/pr29_loudness.py
+        run: |
+          python3 .github/scripts/pr29_loudness.py
+          python3 .github/scripts/pr29_loudness_tests.py
 
       - name: Run full test suite
         run: >-
@@ -35,7 +38,7 @@ jobs:
 
       - name: Commit integrated PR29 changes and clean helpers
         run: |
-          rm -f .github/scripts/pr29_loudness.py .github/workflows/pr29-loudness-integrate.yml
+          rm -f .github/scripts/pr29_loudness.py .github/scripts/pr29_loudness_tests.py .github/workflows/pr29-loudness-integrate.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
