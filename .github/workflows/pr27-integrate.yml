@@ -1,5 +1,6 @@
 name: PR27 Protection Integration
 
+# retrigger after schema v5 alignment
 on:
   push:
     branches: [feature/overload-protection-oversampling]
