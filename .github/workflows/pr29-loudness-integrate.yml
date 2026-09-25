@@ -1,0 +1,43 @@
+name: PR29 Loudness Management Integration
+
+on:
+  push:
+    branches:
+      - feature/advanced-dynamics-parity-2
+    paths:
+      - '.github/scripts/pr29_loudness.py'
+      - '.github/workflows/pr29-loudness-integrate.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feature/advanced-dynamics-parity-2
+
+      - name: Apply PR29 loudness integration
+        run: python3 .github/scripts/pr29_loudness.py
+
+      - name: Run full test suite
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          test
+
+      - name: Commit integrated PR29 changes and clean helpers
+        run: |
+          rm -f .github/scripts/pr29_loudness.py .github/workflows/pr29-loudness-integrate.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Add LUFS matching and volume-aware loudness contour'
+          git push origin HEAD:feature/advanced-dynamics-parity-2
