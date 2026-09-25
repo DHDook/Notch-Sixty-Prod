@@ -1,5 +1,6 @@
 import CoreAudio
 import Foundation
+import IOKit.hid
 
 struct MasterVolumeDeviceSnapshot: Equatable, Sendable {
     var capabilities: MasterVolumeDeviceCapabilities
@@ -21,10 +22,6 @@ enum MasterVolumeDeviceError: Error, LocalizedError, Equatable {
     }
 }
 
-// AudioIOEngine owns this controller on the main actor. HAL listeners are
-// explicitly delivered on DispatchQueue.main, so the controller itself does
-// not need global-actor isolation (which also keeps its initializer usable as
-// a dependency default and its deinit deterministic).
 protocol MasterVolumeDeviceControlling: AnyObject {
     var onExternalChange: (() -> Void)? { get set }
 
@@ -107,9 +104,7 @@ final class CoreAudioMasterVolumeController: MasterVolumeDeviceControlling {
 
     func setMuted(_ muted: Bool, deviceID: AudioDeviceID) throws {
         var address = Self.muteAddress
-        guard try Self.isSettable(deviceID: deviceID, address: address) else {
-            return
-        }
+        guard try Self.isSettable(deviceID: deviceID, address: address) else { return }
         var value: UInt32 = muted ? 1 : 0
         let status = AudioObjectSetPropertyData(
             deviceID,
@@ -137,16 +132,9 @@ final class CoreAudioMasterVolumeController: MasterVolumeDeviceControlling {
                     let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
                         self?.onExternalChange?()
                     }
-                    let status = AudioObjectAddPropertyListenerBlock(
-                        deviceID,
-                        &address,
-                        DispatchQueue.main,
-                        listener
-                    )
+                    let status = AudioObjectAddPropertyListenerBlock(deviceID, &address, DispatchQueue.main, listener)
                     try Self.check(status, operation: "install output-volume listener")
-                    volumeListeners.append(
-                        ListenerRegistration(address: candidate, listener: listener)
-                    )
+                    volumeListeners.append(ListenerRegistration(address: candidate, listener: listener))
                 }
             } catch {
                 removeVolumeListeners(deviceID: deviceID)
@@ -193,12 +181,7 @@ final class CoreAudioMasterVolumeController: MasterVolumeDeviceControlling {
     private func removeVolumeListeners(deviceID: AudioDeviceID) {
         for registration in volumeListeners {
             var address = registration.address
-            AudioObjectRemovePropertyListenerBlock(
-                deviceID,
-                &address,
-                DispatchQueue.main,
-                registration.listener
-            )
+            AudioObjectRemovePropertyListenerBlock(deviceID, &address, DispatchQueue.main, registration.listener)
         }
         volumeListeners.removeAll(keepingCapacity: false)
     }
@@ -230,10 +213,6 @@ final class CoreAudioMasterVolumeController: MasterVolumeDeviceControlling {
         )
     }
 
-    /// Prefer one writable main-element volume control. If a device does not
-    /// expose one, use the volume controls on its preferred stereo channel
-    /// elements. This matches the HAL topology used by many USB devices and by
-    /// macOS's own volume-key path without introducing media-key interception.
     private static func preferredVolumeAddresses(deviceID: AudioDeviceID) throws -> [AudioObjectPropertyAddress] {
         let main = mainVolumeAddress
         if hasProperty(deviceID: deviceID, address: main),
@@ -241,21 +220,12 @@ final class CoreAudioMasterVolumeController: MasterVolumeDeviceControlling {
             return [main]
         }
 
-        let stereoElements = preferredStereoChannelElements(deviceID: deviceID)
-        let channelAddresses = stereoElements
+        let channelAddresses = preferredStereoChannelElements(deviceID: deviceID)
             .map { volumeAddress(element: $0) }
             .filter { hasProperty(deviceID: deviceID, address: $0) }
+        if !channelAddresses.isEmpty { return channelAddresses }
 
-        if !channelAddresses.isEmpty {
-            return channelAddresses
-        }
-
-        // Preserve readable main-element observation even when it is not
-        // writable; AudioIOEngine will correctly choose its software-DSP
-        // volume fallback because volumeWritable remains false.
-        if hasProperty(deviceID: deviceID, address: main) {
-            return [main]
-        }
+        if hasProperty(deviceID: deviceID, address: main) { return [main] }
         return []
     }
 
@@ -271,28 +241,20 @@ final class CoreAudioMasterVolumeController: MasterVolumeDeviceControlling {
         if AudioObjectHasProperty(deviceID, &address) {
             let status = channels.withUnsafeMutableBytes { buffer -> OSStatus in
                 guard let baseAddress = buffer.baseAddress else { return noErr }
-                return AudioObjectGetPropertyData(
-                    deviceID,
-                    &address,
-                    0,
-                    nil,
-                    &dataSize,
-                    baseAddress
-                )
+                return AudioObjectGetPropertyData(deviceID, &address, 0, nil, &dataSize, baseAddress)
             }
-            if status != noErr || channels.count < 2 {
+            if status != noErr || channels.contains(kAudioObjectPropertyElementMain) {
                 channels = [1, 2]
             }
         }
 
         var seen = Set<UInt32>()
-        return channels.compactMap { channel in
+        let result = channels.compactMap { channel -> AudioObjectPropertyElement? in
             guard channel != kAudioObjectPropertyElementMain,
-                  seen.insert(channel).inserted else {
-                return nil
-            }
+                  seen.insert(channel).inserted else { return nil }
             return AudioObjectPropertyElement(channel)
         }
+        return result.isEmpty ? [1, 2] : result
     }
 
     private static func hasProperty(deviceID: AudioDeviceID, address: AudioObjectPropertyAddress) -> Bool {
@@ -309,10 +271,7 @@ final class CoreAudioMasterVolumeController: MasterVolumeDeviceControlling {
         return settable.boolValue
     }
 
-    private static func readVolume(
-        deviceID: AudioDeviceID,
-        addresses: [AudioObjectPropertyAddress]
-    ) throws -> Double {
+    private static func readVolume(deviceID: AudioDeviceID, addresses: [AudioObjectPropertyAddress]) throws -> Double {
         guard !addresses.isEmpty else { return 1.0 }
         var sum = 0.0
         for candidate in addresses {
@@ -339,5 +298,116 @@ final class CoreAudioMasterVolumeController: MasterVolumeDeviceControlling {
         guard status == noErr else {
             throw MasterVolumeDeviceError.operationFailed(operation: operation, status: status)
         }
+    }
+}
+
+enum GlobalVolumeKeyMonitoringState: Equatable, Sendable {
+    case stopped
+    case permissionRequired
+    case active
+}
+
+enum GlobalVolumeKeyMonitorError: Error, LocalizedError, Equatable {
+    case permissionRequired
+    case openFailed(IOReturn)
+
+    var errorDescription: String? {
+        switch self {
+        case .permissionRequired:
+            return "Keyboard volume control requires Input Monitoring permission in System Settings > Privacy & Security > Input Monitoring."
+        case .openFailed(let status):
+            return "Unable to open the keyboard volume-key monitor (IOKit status \(status))."
+        }
+    }
+}
+
+protocol GlobalVolumeKeyMonitoring: AnyObject {
+    var onVolumeIncrement: (() -> Void)? { get set }
+    var onVolumeDecrement: (() -> Void)? { get set }
+    var state: GlobalVolumeKeyMonitoringState { get }
+
+    func start() throws
+    func stop()
+}
+
+/// Passive public HID listener for fixed-volume outputs. It observes Consumer
+/// Control volume usages but never seizes, suppresses, synthesizes, or reposts
+/// keyboard events.
+final class CoreHIDGlobalVolumeKeyMonitor: GlobalVolumeKeyMonitoring {
+    var onVolumeIncrement: (() -> Void)?
+    var onVolumeDecrement: (() -> Void)?
+    private(set) var state: GlobalVolumeKeyMonitoringState = .stopped
+
+    private var manager: IOHIDManager?
+
+    func start() throws {
+        guard manager == nil else { return }
+
+        let access = IOHIDCheckAccess(kIOHIDRequestTypeListenEvent)
+        if access != kIOHIDAccessTypeGranted {
+            if access == kIOHIDAccessTypeUnknown {
+                _ = IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
+            }
+            state = .permissionRequired
+            throw GlobalVolumeKeyMonitorError.permissionRequired
+        }
+
+        let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
+        let deviceMatching: [String: Any] = [
+            kIOHIDDeviceUsagePageKey as String: NSNumber(value: kHIDPage_Consumer),
+            kIOHIDDeviceUsageKey as String: NSNumber(value: kHIDUsage_Csmr_ConsumerControl),
+        ]
+        let inputMatching: [String: Any] = [
+            kIOHIDElementUsagePageKey as String: NSNumber(value: kHIDPage_Consumer),
+        ]
+        IOHIDManagerSetDeviceMatching(manager, deviceMatching as CFDictionary)
+        IOHIDManagerSetInputValueMatching(manager, inputMatching as CFDictionary)
+
+        let context = Unmanaged.passUnretained(self).toOpaque()
+        IOHIDManagerRegisterInputValueCallback(
+            manager,
+            { context, result, _, value in
+                guard result == kIOReturnSuccess,
+                      let context,
+                      IOHIDValueGetIntegerValue(value) != 0 else { return }
+                let monitor = Unmanaged<CoreHIDGlobalVolumeKeyMonitor>.fromOpaque(context).takeUnretainedValue()
+                let element = IOHIDValueGetElement(value)
+                guard IOHIDElementGetUsagePage(element) == kHIDPage_Consumer else { return }
+                switch IOHIDElementGetUsage(element) {
+                case UInt32(kHIDUsage_Csmr_VolumeIncrement):
+                    monitor.onVolumeIncrement?()
+                case UInt32(kHIDUsage_Csmr_VolumeDecrement):
+                    monitor.onVolumeDecrement?()
+                default:
+                    break
+                }
+            },
+            context
+        )
+        IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
+        let status = IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
+        guard status == kIOReturnSuccess else {
+            IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
+            state = .stopped
+            throw GlobalVolumeKeyMonitorError.openFailed(status)
+        }
+
+        self.manager = manager
+        state = .active
+    }
+
+    func stop() {
+        guard let manager else {
+            state = .stopped
+            return
+        }
+        IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
+        IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))
+        self.manager = nil
+        state = .stopped
+    }
+
+    deinit {
+        stop()
     }
 }
