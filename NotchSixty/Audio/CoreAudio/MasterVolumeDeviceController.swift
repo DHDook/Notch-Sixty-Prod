@@ -21,7 +21,10 @@ enum MasterVolumeDeviceError: Error, LocalizedError, Equatable {
     }
 }
 
-@MainActor
+// AudioIOEngine owns this controller on the main actor. HAL listeners are
+// explicitly delivered on DispatchQueue.main, so the controller itself does
+// not need global-actor isolation (which also keeps its initializer usable as
+// a dependency default and its deinit deterministic).
 protocol MasterVolumeDeviceControlling: AnyObject {
     var onExternalChange: (() -> Void)? { get set }
 
@@ -32,7 +35,6 @@ protocol MasterVolumeDeviceControlling: AnyObject {
     func stopMonitoring()
 }
 
-@MainActor
 final class CoreAudioMasterVolumeController: MasterVolumeDeviceControlling {
     var onExternalChange: (() -> Void)?
 
@@ -45,9 +47,20 @@ final class CoreAudioMasterVolumeController: MasterVolumeDeviceControlling {
         let muteAddress = Self.muteAddress
 
         let volumeReadable = Self.hasProperty(deviceID: deviceID, address: volumeAddress)
-        let volumeWritable = volumeReadable && (try Self.isSettable(deviceID: deviceID, address: volumeAddress))
+        let volumeWritable: Bool
+        if volumeReadable {
+            volumeWritable = try Self.isSettable(deviceID: deviceID, address: volumeAddress)
+        } else {
+            volumeWritable = false
+        }
+
         let muteReadable = Self.hasProperty(deviceID: deviceID, address: muteAddress)
-        let muteWritable = muteReadable && (try Self.isSettable(deviceID: deviceID, address: muteAddress))
+        let muteWritable: Bool
+        if muteReadable {
+            muteWritable = try Self.isSettable(deviceID: deviceID, address: muteAddress)
+        } else {
+            muteWritable = false
+        }
 
         let capabilities = MasterVolumeDeviceCapabilities(
             volumeReadable: volumeReadable,
