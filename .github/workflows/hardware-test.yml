@@ -119,5 +119,3 @@ jobs:
           path: ${{ runner.temp }}/NotchSixty-hardware-test.dmg
           if-no-files-found: error
           retention-days: 14
-
-# PR24 fixed-volume keyboard validation trigger
