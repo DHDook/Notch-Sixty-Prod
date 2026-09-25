@@ -260,6 +260,9 @@ struct StereoEQConfiguration: Equatable, Sendable {
             source = channel == .right ? rightBands : leftBands
         }
         let bands = try validatedEnabledBands(source, sampleRate: sampleRate)
+        guard !bands.contains(where: { $0.type == .allPass }) else {
+            throw EQConfigurationError.allPassRequiresMinimumPhase
+        }
         return bands.map { band in
             var cBand = N60LinearPhaseEQBand()
             cBand.enabled = true

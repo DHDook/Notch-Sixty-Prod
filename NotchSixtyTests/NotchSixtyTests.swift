@@ -254,6 +254,32 @@ final class NotchSixtyTests: XCTestCase {
         XCTAssertLessThan(notchCenter, -30)
     }
 
+    func testAllPassMaintainsUnityMagnitudeAcrossSupportedRates() {
+        for rate in [44_100.0, 48_000.0, 96_000.0, 192_000.0, 384_000.0] {
+            for tone in [100.0, 1_000.0, min(10_000.0, rate * 0.20)] {
+                let gain = measuredEQGainDB(
+                    sampleRate: rate,
+                    toneFrequency: tone,
+                    filterType: N60BiquadFilterTypeAllPass,
+                    filterFrequency: min(2_000.0, rate * 0.10),
+                    gainDB: 0,
+                    q: 0.707
+                )
+                XCTAssertEqual(gain, 0.0, accuracy: 0.08, "All-pass magnitude drift at \(rate) Hz / \(tone) Hz")
+            }
+        }
+    }
+
+    func testAllPassIsRejectedByLinearPhaseProjection() {
+        let configuration = EQConfiguration(
+            phaseMode: .linearPhase,
+            bands: [EQBand(type: .allPass, frequencyHz: 1_000, gainDB: 0, q: 0.707)]
+        )
+        XCTAssertThrowsError(try configuration.linearPhaseBands(sampleRate: 48_000)) { error in
+            XCTAssertEqual(error as? EQConfigurationError, .allPassRequiresMinimumPhase)
+        }
+    }
+
     func testParametricEQRejectsInvalidBandDesigns() {
         var graph = N60DSPGraphSnapshotMakeUnity(48_000)
         XCTAssertFalse(N60DSPGraphSnapshotSetEQBand(&graph, 0, N60BiquadFilterTypePeaking, 24_000, 6, 0.707, true))

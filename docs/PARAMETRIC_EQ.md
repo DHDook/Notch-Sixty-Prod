@@ -73,3 +73,10 @@ Platform-specific routing, device/session APIs, media-server transport, and UI m
 ## Provenance
 
 This implementation was written independently for the commercial repository from standard public digital-filter equations and the documented Notch Sixty architecture/realtime requirements. It does not copy or adapt historical GPL Notch Sixty, Equaliser, BlackHole, or CoreAudioTapPOC source.
+
+
+## PR30 All-Pass extension
+
+The minimum-phase EQ engine also supports a second-order **All-Pass** band. Frequency and Q control the phase-rotation region while magnitude remains at unity. All-Pass is intentionally unavailable in Linear phase mode because the current FIR EQ designer is a magnitude-response equaliser; silently discarding a phase-only request would be misleading.
+
+The coefficient design uses the standard public-domain/RBJ second-order digital all-pass form and is prepared on the control plane. The realtime callback consumes only precomputed coefficients and fixed filter state.
