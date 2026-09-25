@@ -1,6 +1,6 @@
 name: PR27 Protection Integration
 
-# retrigger after schema v5 alignment
+# retrigger after restoring PR26 regression suite
 on:
   push:
     branches: [feature/overload-protection-oversampling]
