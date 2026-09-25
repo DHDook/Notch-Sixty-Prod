@@ -1,0 +1,33 @@
+name: PR29 Advanced Dynamics II Integration
+
+on:
+  push:
+    branches:
+      - feature/advanced-dynamics-parity-2
+    paths:
+      - '.github/scripts/pr29_integrate_stereo.py'
+      - '.github/workflows/pr29-integrate.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feature/advanced-dynamics-parity-2
+          fetch-depth: 0
+      - name: Apply PR29 stereo integration
+        run: python3 .github/scripts/pr29_integrate_stereo.py
+      - name: Run full test suite
+        run: xcodebuild test -project NotchSixty.xcodeproj -scheme NotchSixty -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO
+      - name: Commit integrated PR29 changes and clean helpers
+        run: |
+          rm -f .github/scripts/pr29_integrate_stereo.py .github/workflows/pr29-integrate.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Add stereo mode and three-band widener foundation'
+          git push origin HEAD:feature/advanced-dynamics-parity-2
