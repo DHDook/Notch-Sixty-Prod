@@ -49,6 +49,14 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
     let expanderAttenuationDB: Float
     let pauseGateGain: Float
     let pauseGateOpen: Bool
+    let softClipperEnabled: Bool
+    let limiterEnabled: Bool
+    let oversamplingFactor: N60OversamplingFactor
+    let effectiveOversamplingFactor: N60OversamplingFactor
+    let inputTruePeakLinear: Float
+    let outputTruePeakLinear: Float
+    let limiterGainReductionDB: Float
+    let limiterSafetyClampSamples: UInt64
     let convolutionEnabled: Bool
     let convolutionProgramSlot: UInt32
     let convolutionProgramGeneration: UInt64
@@ -102,6 +110,14 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
         expanderAttenuationDB = diagnostics.expanderAttenuationDB
         pauseGateGain = diagnostics.pauseGateGain
         pauseGateOpen = diagnostics.pauseGateOpen
+        softClipperEnabled = diagnostics.softClipperEnabled
+        limiterEnabled = diagnostics.limiterEnabled
+        oversamplingFactor = diagnostics.oversamplingFactor
+        effectiveOversamplingFactor = diagnostics.effectiveOversamplingFactor
+        inputTruePeakLinear = diagnostics.inputTruePeakLinear
+        outputTruePeakLinear = diagnostics.outputTruePeakLinear
+        limiterGainReductionDB = diagnostics.limiterGainReductionDB
+        limiterSafetyClampSamples = diagnostics.limiterSafetyClampSamples
         convolutionEnabled = diagnostics.convolutionEnabled
         convolutionProgramSlot = diagnostics.convolutionProgramSlot
         convolutionProgramGeneration = diagnostics.convolutionProgramGeneration
