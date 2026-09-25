@@ -208,6 +208,8 @@ final class LiveLinearPhaseTests: XCTestCase {
         XCTAssertEqual(snapshot.schemaVersion, ProductConfiguration.currentSchemaVersion)
         XCTAssertEqual(snapshot.selectedOutputUID, engine.routeConfiguration.selectedOutputUID)
         XCTAssertEqual(snapshot.dsp.eq, engine.eqConfiguration)
+        XCTAssertEqual(snapshot.dsp.stereoEQ, engine.stereoEQConfiguration)
+        XCTAssertEqual(snapshot.dsp.playback, engine.playbackControlConfiguration)
         XCTAssertEqual(snapshot.dsp.gain, engine.gainConfiguration)
         XCTAssertEqual(snapshot.dsp.bassManagement, engine.bassManagementConfiguration)
         XCTAssertEqual(snapshot.dsp.roomCorrection, engine.roomCorrectionConfiguration)
@@ -229,8 +231,8 @@ final class LiveLinearPhaseTests: XCTestCase {
         withExtendedLifetime(observation) {}
     }
 
-    func testProductConfigurationSchemaStartsAtVersionOne() {
-        XCTAssertEqual(ProductConfiguration.currentSchemaVersion, 1)
-        XCTAssertEqual(ProductConfiguration().schemaVersion, 1)
+    func testProductConfigurationSchemaIsVersionTwoForStereoPlaybackState() {
+        XCTAssertEqual(ProductConfiguration.currentSchemaVersion, 2)
+        XCTAssertEqual(ProductConfiguration().schemaVersion, 2)
     }
 }
