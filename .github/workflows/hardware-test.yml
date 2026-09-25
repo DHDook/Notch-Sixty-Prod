@@ -1,5 +1,4 @@
 name: Hardware Test DMG
-# PR25 hardware package trigger
 
 on:
   workflow_dispatch:
