@@ -298,7 +298,11 @@ struct MasterVolumeDeviceCapabilities: Equatable, Sendable {
     static let softwareOnly = MasterVolumeDeviceCapabilities()
 
     var controlMode: MasterVolumeControlMode {
-        volumeWritable ? .device : .softwareDSP
+        volumeReadable && volumeWritable ? .device : .softwareDSP
+    }
+
+    var usesDeviceMute: Bool {
+        muteReadable && muteWritable
     }
 }
 
@@ -309,8 +313,8 @@ struct MasterVolumeConfiguration: Equatable, Sendable {
     var muted = false
 
     func softwareGain(for capabilities: MasterVolumeDeviceCapabilities) -> Float {
-        let volumeGain = capabilities.volumeWritable ? 1.0 : level
-        let muteGain = muted && !capabilities.muteWritable ? 0.0 : 1.0
+        let volumeGain = capabilities.controlMode == .device ? 1.0 : level
+        let muteGain = muted && !capabilities.usesDeviceMute ? 0.0 : 1.0
         return Float(volumeGain * muteGain)
     }
 }

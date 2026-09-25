@@ -390,6 +390,7 @@ private struct PreparedRoomCorrectionProgram {
 final class AudioIOEngine: ObservableObject {
     private let deviceCatalog: any OutputDeviceCataloging
     private let eventMonitor: AudioHardwareEventMonitor
+    private let masterVolumeController: any MasterVolumeDeviceControlling
     private var lifecycle: AudioLifecycleStateMachine
     private var transportSession: CoreAudioTransportSession?
     private var lifetimeArchivedCounters = AudioTransportCounters()
@@ -414,6 +415,8 @@ final class AudioIOEngine: ObservableObject {
     @Published private(set) var eqConfiguration = EQConfiguration()
     @Published private(set) var stereoEQConfiguration = StereoEQConfiguration()
     @Published private(set) var playbackControlConfiguration = PlaybackControlConfiguration()
+    @Published private(set) var masterVolumeConfiguration = MasterVolumeConfiguration()
+    @Published private(set) var masterVolumeCapabilities = MasterVolumeDeviceCapabilities.softwareOnly
     @Published private(set) var gainConfiguration = DSPGainConfiguration()
     @Published private(set) var bassManagementConfiguration = BassManagementConfiguration()
     @Published private(set) var roomCorrectionConfiguration = RoomCorrectionConfiguration()
@@ -424,11 +427,13 @@ final class AudioIOEngine: ObservableObject {
     init(
         deviceCatalog: any OutputDeviceCataloging = CoreAudioOutputDeviceCatalog(),
         initialRouteConfiguration: AudioRouteConfiguration = AudioRouteConfiguration(),
-        eventMonitor: AudioHardwareEventMonitor = AudioHardwareEventMonitor()
+        eventMonitor: AudioHardwareEventMonitor = AudioHardwareEventMonitor(),
+        masterVolumeController: any MasterVolumeDeviceControlling = CoreAudioMasterVolumeController()
     ) {
         self.deviceCatalog = deviceCatalog
         self.routeConfiguration = initialRouteConfiguration
         self.eventMonitor = eventMonitor
+        self.masterVolumeController = masterVolumeController
         let lifecycle = AudioLifecycleStateMachine()
         self.lifecycle = lifecycle
         self.lifecycleState = lifecycle.state
@@ -437,6 +442,7 @@ final class AudioIOEngine: ObservableObject {
         eventMonitor.onSelectedOutputSampleRateChanged = { [weak self] in self?.scheduleSampleRateReconfiguration() }
         eventMonitor.onWillSleep = { [weak self] in self?.handleWillSleep() }
         eventMonitor.onDidWake = { [weak self] in self?.handleDidWake() }
+        masterVolumeController.onExternalChange = { [weak self] in self?.handleMasterVolumeDeviceChange() }
     }
 
     var selectedOutputDevice: AudioOutputDevice? {
@@ -450,6 +456,7 @@ final class AudioIOEngine: ObservableObject {
         do {
             try refreshOutputDevices()
             try eventMonitor.start()
+            try syncMasterVolumeMonitorToSelectedOutput()
         } catch {
             lastErrorDescription = error.localizedDescription
         }
@@ -471,6 +478,8 @@ final class AudioIOEngine: ObservableObject {
         guard lifecycle.state == .idle else { return }
         guard let uid else {
             routeConfiguration.selectedOutputUID = nil
+            masterVolumeController.stopMonitoring()
+            masterVolumeCapabilities = .softwareOnly
             return
         }
         guard outputDevices.contains(where: { $0.uid == uid }) else {
@@ -479,6 +488,7 @@ final class AudioIOEngine: ObservableObject {
             throw error
         }
         routeConfiguration.selectedOutputUID = uid
+        try syncMasterVolumeMonitorToSelectedOutput()
         lastErrorDescription = nil
     }
 
@@ -566,6 +576,21 @@ final class AudioIOEngine: ObservableObject {
         try applyPlaybackControlConfiguration(updated)
     }
 
+    func setMasterVolumeLevel(_ level: Double) throws {
+        guard level.isFinite, MasterVolumeConfiguration.levelRange.contains(level) else {
+            throw MasterVolumeConfigurationError.invalidLevel(level)
+        }
+        var updated = masterVolumeConfiguration
+        updated.level = level
+        try applyMasterVolumeConfiguration(updated, writeDevice: true)
+    }
+
+    func setMasterMuted(_ muted: Bool) throws {
+        var updated = masterVolumeConfiguration
+        updated.muted = muted
+        try applyMasterVolumeConfiguration(updated, writeDevice: true)
+    }
+
     func setInputPreampDB(_ value: Double) throws {
         guard value.isFinite, DSPGainConfiguration.inputPreampRange.contains(value) else {
             throw DSPGainConfigurationError.invalidInputPreamp(value)
@@ -607,7 +632,8 @@ final class AudioIOEngine: ObservableObject {
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
                 bassManagementConfiguration: configuration,
-                playbackConfiguration: playbackControlConfiguration
+                playbackConfiguration: playbackControlConfiguration,
+                masterGainLinear: currentMasterSoftwareGain
             )
             try attachActiveLinearPhaseProgramIfNeeded(
                 to: &graph,
@@ -667,6 +693,7 @@ final class AudioIOEngine: ObservableObject {
             tearDownTransport(fadeOut: true)
             try? setLifecycle(.idle)
         }
+        masterVolumeController.stopMonitoring()
         eventMonitor.stop()
     }
 
@@ -736,7 +763,8 @@ final class AudioIOEngine: ObservableObject {
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
                 bassManagementConfiguration: bassManagementConfiguration,
-                playbackConfiguration: playbackControlConfiguration
+                playbackConfiguration: playbackControlConfiguration,
+                masterGainLinear: currentMasterSoftwareGain
             )
 
             if processingIsBypassed(playbackControlConfiguration) {
@@ -792,7 +820,8 @@ final class AudioIOEngine: ObservableObject {
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
                 bassManagementConfiguration: bassManagementConfiguration,
-                playbackConfiguration: configuration
+                playbackConfiguration: configuration,
+                masterGainLinear: currentMasterSoftwareGain
             )
 
             let wasBypassed = processingIsBypassed(playbackControlConfiguration)
@@ -840,13 +869,105 @@ final class AudioIOEngine: ObservableObject {
         lastErrorDescription = nil
     }
 
+    private var currentMasterSoftwareGain: Float {
+        masterVolumeConfiguration.softwareGain(for: masterVolumeCapabilities)
+    }
+
+    private func applyMasterVolumeConfiguration(
+        _ configuration: MasterVolumeConfiguration,
+        writeDevice: Bool
+    ) throws {
+        guard configuration.level.isFinite,
+              MasterVolumeConfiguration.levelRange.contains(configuration.level) else {
+            throw MasterVolumeConfigurationError.invalidLevel(configuration.level)
+        }
+
+        if writeDevice, let output = selectedOutputDevice {
+            if masterVolumeCapabilities.controlMode == .device {
+                try masterVolumeController.setVolume(configuration.level, deviceID: output.deviceID)
+            }
+            if masterVolumeCapabilities.usesDeviceMute {
+                try masterVolumeController.setMuted(configuration.muted, deviceID: output.deviceID)
+            }
+        }
+
+        let oldSoftwareGain = currentMasterSoftwareGain
+        let newSoftwareGain = configuration.softwareGain(for: masterVolumeCapabilities)
+        if let session = transportSession, abs(oldSoftwareGain - newSoftwareGain) > 0.000_001 {
+            var graph = try stereoEQConfiguration.makeGraphSnapshot(
+                sampleRate: session.outputFormat.sampleRate,
+                gainConfiguration: gainConfiguration,
+                bassManagementConfiguration: bassManagementConfiguration,
+                playbackConfiguration: playbackControlConfiguration,
+                masterGainLinear: newSoftwareGain
+            )
+            try attachActiveLinearPhaseProgramIfNeeded(to: &graph, stereoConfiguration: stereoEQConfiguration, playbackConfiguration: playbackControlConfiguration)
+            try attachActiveRoomCorrectionProgramIfNeeded(to: &graph, playbackConfiguration: playbackControlConfiguration)
+            try session.publishDSPGraph(graph)
+        }
+
+        masterVolumeConfiguration = configuration
+        lastErrorDescription = nil
+    }
+
+    private func syncMasterVolumeMonitorToSelectedOutput() throws {
+        guard let output = selectedOutputDevice else {
+            masterVolumeController.stopMonitoring()
+            masterVolumeCapabilities = .softwareOnly
+            return
+        }
+        try masterVolumeController.monitor(deviceID: output.deviceID)
+        try synchronizeMasterVolumeFromSelectedDevice()
+    }
+
+    private func synchronizeMasterVolumeFromSelectedDevice() throws {
+        guard let output = selectedOutputDevice else { return }
+        let previousCapabilities = masterVolumeCapabilities
+        let snapshot = try masterVolumeController.inspect(deviceID: output.deviceID)
+        masterVolumeCapabilities = snapshot.capabilities
+
+        var updated = masterVolumeConfiguration
+        if snapshot.capabilities.controlMode == .device, let level = snapshot.level {
+            updated.level = min(max(level, 0), 1)
+        }
+        if snapshot.capabilities.usesDeviceMute, let muted = snapshot.muted {
+            updated.muted = muted
+        }
+
+        let oldGain = masterVolumeConfiguration.softwareGain(for: previousCapabilities)
+        let newGain = updated.softwareGain(for: snapshot.capabilities)
+        if let session = transportSession, abs(oldGain - newGain) > 0.000_001 {
+            var graph = try stereoEQConfiguration.makeGraphSnapshot(
+                sampleRate: session.outputFormat.sampleRate,
+                gainConfiguration: gainConfiguration,
+                bassManagementConfiguration: bassManagementConfiguration,
+                playbackConfiguration: playbackControlConfiguration,
+                masterGainLinear: newGain
+            )
+            try attachActiveLinearPhaseProgramIfNeeded(to: &graph, stereoConfiguration: stereoEQConfiguration, playbackConfiguration: playbackControlConfiguration)
+            try attachActiveRoomCorrectionProgramIfNeeded(to: &graph, playbackConfiguration: playbackControlConfiguration)
+            try session.publishDSPGraph(graph)
+        }
+        masterVolumeConfiguration = updated
+    }
+
+    private func handleMasterVolumeDeviceChange() {
+        do {
+            try synchronizeMasterVolumeFromSelectedDevice()
+            lastErrorDescription = nil
+        } catch {
+            lastErrorDescription = error.localizedDescription
+        }
+    }
+
     private func applyGainConfiguration(_ configuration: DSPGainConfiguration) throws {
         if let session = transportSession {
             var graph = try stereoEQConfiguration.makeGraphSnapshot(
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: configuration,
                 bassManagementConfiguration: bassManagementConfiguration,
-                playbackConfiguration: playbackControlConfiguration
+                playbackConfiguration: playbackControlConfiguration,
+                masterGainLinear: currentMasterSoftwareGain
             )
             try attachActiveLinearPhaseProgramIfNeeded(
                 to: &graph,
@@ -873,7 +994,8 @@ final class AudioIOEngine: ObservableObject {
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
                 bassManagementConfiguration: bassManagementConfiguration,
-                playbackConfiguration: playbackControlConfiguration
+                playbackConfiguration: playbackControlConfiguration,
+                masterGainLinear: currentMasterSoftwareGain
             )
             try attachActiveLinearPhaseProgramIfNeeded(
                 to: &graph,
@@ -1123,6 +1245,7 @@ final class AudioIOEngine: ObservableObject {
             try setLifecycle(.starting)
             try setLifecycle(.running)
             try eventMonitor.monitorSampleRate(of: output.deviceID)
+            try syncMasterVolumeMonitorToSelectedOutput()
             lastErrorDescription = nil
         } catch {
             tearDownTransport(fadeOut: false)
@@ -1207,6 +1330,13 @@ final class AudioIOEngine: ObservableObject {
         guard let selectedUID = routeConfiguration.selectedOutputUID else { return }
         let selectedIsPresent = outputDevices.contains { $0.uid == selectedUID }
 
+        if !selectedIsPresent {
+            masterVolumeController.stopMonitoring()
+            masterVolumeCapabilities = .softwareOnly
+        } else {
+            try? syncMasterVolumeMonitorToSelectedOutput()
+        }
+
         if !selectedIsPresent && (lifecycle.state == .running || lifecycle.state == .reconfiguring) {
             beginOutputRecovery()
             return
@@ -1246,6 +1376,7 @@ final class AudioIOEngine: ObservableObject {
             }
             try buildTransport(output: output)
             try eventMonitor.monitorSampleRate(of: output.deviceID)
+            try syncMasterVolumeMonitorToSelectedOutput()
             sampleRateChangesHandled &+= 1
             reconfigurationWorkItem = nil
             try setLifecycle(.running)
@@ -1289,6 +1420,7 @@ final class AudioIOEngine: ObservableObject {
             do {
                 try buildTransport(output: output)
                 try eventMonitor.monitorSampleRate(of: output.deviceID)
+                try syncMasterVolumeMonitorToSelectedOutput()
                 recoverySuccesses &+= 1
                 try setLifecycle(.running)
                 lastErrorDescription = nil
@@ -1313,6 +1445,7 @@ final class AudioIOEngine: ObservableObject {
         }
         resumeAfterWake = true
         eventMonitor.removeSelectedOutputSampleRateMonitor()
+        masterVolumeController.stopMonitoring()
         try? setLifecycle(.stopping)
         tearDownTransport(fadeOut: true)
         try? setLifecycle(.idle)

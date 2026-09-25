@@ -985,13 +985,15 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
         left *= next_gain_value(&kernel->balanceGainLeft);
         right *= next_gain_value(&kernel->balanceGainRight);
         float outputGain = next_gain_value(&kernel->outputGain);
-        float masterGain = next_gain_value(&kernel->masterGain);
-        left *= outputGain * masterGain;
-        right *= outputGain * masterGain;
+        left *= outputGain;
+        right *= outputGain;
     } else {
         meter_sample(left, right, &context->postEQPeakLeft, &context->postEQPeakRight, &context->postEQSquareSumLeft, &context->postEQSquareSumRight, &context->postEQOverRangeSamples);
     }
 
+    float masterGain = next_gain_value(&kernel->masterGain);
+    left *= masterGain;
+    right *= masterGain;
     left = sanitize_sample(kernel, left);
     right = sanitize_sample(kernel, right);
     meter_sample(left, right, &context->outputPeakLeft, &context->outputPeakRight, &context->outputSquareSumLeft, &context->outputSquareSumRight, &context->outputOverRangeSamples);

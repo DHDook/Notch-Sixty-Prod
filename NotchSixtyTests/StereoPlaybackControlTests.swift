@@ -166,6 +166,25 @@ final class StereoPlaybackControlTests: XCTestCase {
         XCTAssertEqual(diagnostics.masterGainLinear, 0.25, accuracy: 0.000_001)
     }
 
+
+    func testMasterGainStillAppliesDuringGlobalGraphBypass() {
+        guard let kernel = N60RenderKernelCreate() else {
+            return XCTFail("Unable to create render kernel")
+        }
+        defer { N60RenderKernelDestroy(kernel) }
+        var graph = N60DSPGraphSnapshotMakeUnity(96_000)
+        graph.bypassed = true
+        graph.masterGainLinear = 0.25
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        var left: Float = 0
+        var right: Float = 0
+        for _ in 0..<2_000 {
+            N60RenderKernelProcessStereoFrame(kernel, 0.8, -0.4, &left, &right)
+        }
+        XCTAssertEqual(left, 0.2, accuracy: 0.000_01)
+        XCTAssertEqual(right, -0.1, accuracy: 0.000_01)
+    }
+
     func testGraphBypassReturnsUntreatedStereoSamples() {
         guard let kernel = N60RenderKernelCreate() else {
             return XCTFail("Unable to create render kernel")
