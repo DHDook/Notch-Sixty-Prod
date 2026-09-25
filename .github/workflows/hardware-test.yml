@@ -1,6 +1,5 @@
 name: Hardware Test DMG
 
-# Temporary PR24 packaging trigger; reverted after the run starts.
 on:
   workflow_dispatch:
   pull_request:
