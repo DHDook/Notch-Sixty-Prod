@@ -96,6 +96,10 @@ struct N60RenderKernel {
     _Atomic uint64_t convolutionProgramMisses;
     _Atomic uint64_t roomCorrectionProgramMisses;
 
+    _Atomic uint32_t deEsserGainReductionBits;
+    _Atomic uint32_t multibandLowGainReductionBits;
+    _Atomic uint32_t multibandMidGainReductionBits;
+    _Atomic uint32_t multibandHighGainReductionBits;
     _Atomic uint32_t compressorGainReductionBits;
     _Atomic uint32_t expanderAttenuationBits;
     _Atomic uint32_t pauseGateGainBits;
@@ -1019,6 +1023,8 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
         left *= inputGain * headroomGain;
         right *= inputGain * headroomGain;
 
+        N60DynamicsProcessPreEQStereoFrame(&kernel->dynamicsRuntime, context->snapshot.dynamics, &left, &right);
+
         if (!context->snapshot.eqBypassed) {
             for (uint32_t index = 0; index < N60_MAX_EQ_RENDER_SLOTS; ++index) {
                 N60EQBandRuntime *runtime = &kernel->eqRuntime[index];
@@ -1125,6 +1131,10 @@ void N60RenderKernelEndRender(N60RenderKernel *kernel, N60RenderKernelRenderCont
     publish_meter(&kernel->outputPeakLeftBits, &kernel->outputPeakRightBits, &kernel->outputRMSLeftBits, &kernel->outputRMSRightBits, &kernel->outputOverRangeSamples, context->outputPeakLeft, context->outputPeakRight, context->outputSquareSumLeft, context->outputSquareSumRight, context->outputOverRangeSamples, context->meteredFrames);
     if (renderedFrames > 0) {
         N60DynamicsTelemetry telemetry = N60DynamicsRuntimeTelemetry(&kernel->dynamicsRuntime);
+        atomic_store_explicit(&kernel->deEsserGainReductionBits, float_to_bits(telemetry.deEsserGainReductionDB), memory_order_relaxed);
+        atomic_store_explicit(&kernel->multibandLowGainReductionBits, float_to_bits(telemetry.multibandLowGainReductionDB), memory_order_relaxed);
+        atomic_store_explicit(&kernel->multibandMidGainReductionBits, float_to_bits(telemetry.multibandMidGainReductionDB), memory_order_relaxed);
+        atomic_store_explicit(&kernel->multibandHighGainReductionBits, float_to_bits(telemetry.multibandHighGainReductionDB), memory_order_relaxed);
         atomic_store_explicit(&kernel->compressorGainReductionBits, float_to_bits(telemetry.compressorGainReductionDB), memory_order_relaxed);
         atomic_store_explicit(&kernel->expanderAttenuationBits, float_to_bits(telemetry.expanderAttenuationDB), memory_order_relaxed);
         atomic_store_explicit(&kernel->pauseGateGainBits, float_to_bits(telemetry.pauseGateGain), memory_order_relaxed);
@@ -1193,6 +1203,13 @@ N60RenderKernelDiagnostics N60RenderKernelGetDiagnostics(const N60RenderKernel *
         diagnostics.crossoverSubGainLinear = context.snapshot.crossover.subGainLinear;
         diagnostics.crossoverSubPolarityInverted = context.snapshot.crossover.subPolarityInverted;
         diagnostics.crossoverSectionCount = context.snapshot.crossover.sectionCount;
+        diagnostics.deEsserEnabled = context.snapshot.dynamics.deEsser.enabled;
+        diagnostics.deEsserDynamicEQMode = context.snapshot.dynamics.deEsser.dynamicEQMode;
+        diagnostics.deEsserFrequencyHz = context.snapshot.dynamics.deEsser.frequencyHz;
+        diagnostics.multibandCompressorEnabled = context.snapshot.dynamics.multibandCompressor.enabled;
+        diagnostics.multibandLowMidFrequencyHz = context.snapshot.dynamics.multibandCompressor.lowMidFrequencyHz;
+        diagnostics.multibandMidHighFrequencyHz = context.snapshot.dynamics.multibandCompressor.midHighFrequencyHz;
+        diagnostics.multibandTopology = context.snapshot.dynamics.multibandCompressor.topology;
         diagnostics.compressorEnabled = context.snapshot.dynamics.compressor.enabled;
         diagnostics.expanderEnabled = context.snapshot.dynamics.expander.enabled;
         diagnostics.pauseGateEnabled = context.snapshot.dynamics.pauseGate.enabled;
@@ -1223,6 +1240,10 @@ N60RenderKernelDiagnostics N60RenderKernelGetDiagnostics(const N60RenderKernel *
     diagnostics.snapshotReadMisses = atomic_load_explicit(&kernel->snapshotReadMisses, memory_order_relaxed);
     diagnostics.convolutionProgramMisses = atomic_load_explicit(&kernel->convolutionProgramMisses, memory_order_relaxed);
     diagnostics.roomCorrectionProgramMisses = atomic_load_explicit(&kernel->roomCorrectionProgramMisses, memory_order_relaxed);
+    diagnostics.deEsserGainReductionDB = bits_to_float(atomic_load_explicit(&kernel->deEsserGainReductionBits, memory_order_relaxed));
+    diagnostics.multibandLowGainReductionDB = bits_to_float(atomic_load_explicit(&kernel->multibandLowGainReductionBits, memory_order_relaxed));
+    diagnostics.multibandMidGainReductionDB = bits_to_float(atomic_load_explicit(&kernel->multibandMidGainReductionBits, memory_order_relaxed));
+    diagnostics.multibandHighGainReductionDB = bits_to_float(atomic_load_explicit(&kernel->multibandHighGainReductionBits, memory_order_relaxed));
     diagnostics.compressorGainReductionDB = bits_to_float(atomic_load_explicit(&kernel->compressorGainReductionBits, memory_order_relaxed));
     diagnostics.expanderAttenuationDB = bits_to_float(atomic_load_explicit(&kernel->expanderAttenuationBits, memory_order_relaxed));
     diagnostics.pauseGateGain = bits_to_float(atomic_load_explicit(&kernel->pauseGateGainBits, memory_order_relaxed));

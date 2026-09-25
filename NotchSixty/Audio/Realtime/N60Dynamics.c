@@ -14,6 +14,11 @@
 #define N60_MULTIBAND_KNEE_DB 6.0f
 #define N60_MULTIBAND_ATTACK_MS 10.0f
 #define N60_MULTIBAND_RELEASE_MS 150.0f
+#define N60_DC_CUTOFF_HZ 0.5
+#define N60_LOUDNESS_LOW_SHELF_HZ 120.0
+#define N60_LOUDNESS_HIGH_SHELF_HZ 8000.0
+#define N60_LOUDNESS_MAX_BASS_DB 6.0
+#define N60_LOUDNESS_MAX_TREBLE_DB 3.0
 
 static float clampf(float value, float minimum, float maximum) {
     return fminf(fmaxf(value, minimum), maximum);
@@ -100,6 +105,22 @@ static float dynamics_compression_target(
 N60DynamicsSnapshot N60DynamicsSnapshotMakeBypassed(double sampleRate) {
     N60DynamicsSnapshot snapshot = {0};
 
+    snapshot.dcOffsetFilter.enabled = false;
+    snapshot.dcOffsetFilter.poleCoefficient = (float)exp(-2.0 * M_PI * N60_DC_CUTOFF_HZ / sampleRate);
+
+    snapshot.infrasonicFilter.enabled = false;
+    snapshot.infrasonicFilter.cutoffHz = 18.0;
+    snapshot.infrasonicFilter.slope = N60InfrasonicSlope48DBPerOctave;
+    snapshot.infrasonicFilter.sectionCount = 0;
+    for (uint32_t index = 0; index < N60_MAX_INFRASONIC_SECTIONS; ++index) {
+        snapshot.infrasonicFilter.highPass[index] = N60BiquadCoefficientsMakeIdentity();
+    }
+
+    snapshot.loudnessContour.enabled = false;
+    snapshot.loudnessContour.strength = 1.0f;
+    snapshot.loudnessContour.lowShelf = N60BiquadCoefficientsMakeIdentity();
+    snapshot.loudnessContour.highShelf = N60BiquadCoefficientsMakeIdentity();
+
     snapshot.deEsser.enabled = false;
     snapshot.deEsser.dynamicEQMode = true;
     snapshot.deEsser.frequencyHz = 6500.0;
@@ -147,6 +168,89 @@ N60DynamicsSnapshot N60DynamicsSnapshotMakeBypassed(double sampleRate) {
     snapshot.pauseGate.detectorReleaseCoefficient = coefficient_for_time_ms(sampleRate, 10.0f);
     snapshot.bypassTransitionCoefficient = coefficient_for_time_ms(sampleRate, 5.0f);
     return snapshot;
+}
+
+
+bool N60DynamicsSnapshotSetDCOffsetFilter(
+    N60DynamicsSnapshot *snapshot,
+    double sampleRate,
+    bool enabled
+) {
+    if (snapshot == NULL || !isfinite(sampleRate) || sampleRate <= 0.0) return false;
+    N60DCOffsetFilterSnapshot configured = {0};
+    configured.enabled = enabled;
+    configured.poleCoefficient = (float)exp(-2.0 * M_PI * N60_DC_CUTOFF_HZ / sampleRate);
+    if (!isfinite(configured.poleCoefficient) || configured.poleCoefficient <= 0.0f || configured.poleCoefficient >= 1.0f) return false;
+    snapshot->dcOffsetFilter = configured;
+    return true;
+}
+
+bool N60DynamicsSnapshotSetInfrasonicFilter(
+    N60DynamicsSnapshot *snapshot,
+    double sampleRate,
+    bool enabled,
+    double cutoffHz,
+    N60InfrasonicSlope slope
+) {
+    if (snapshot == NULL || !isfinite(sampleRate) || sampleRate <= 0.0
+        || !isfinite(cutoffHz) || cutoffHz < 10.0 || cutoffHz > 30.0
+        || cutoffHz >= sampleRate * 0.45) return false;
+
+    uint32_t sectionCount = 0;
+    switch (slope) {
+    case N60InfrasonicSlope24DBPerOctave: sectionCount = 2; break;
+    case N60InfrasonicSlope48DBPerOctave: sectionCount = 4; break;
+    case N60InfrasonicSlope96DBPerOctave: sectionCount = 8; break;
+    default: return false;
+    }
+
+    N60InfrasonicFilterSnapshot configured = {0};
+    configured.enabled = enabled;
+    configured.cutoffHz = cutoffHz;
+    configured.slope = slope;
+    configured.sectionCount = sectionCount;
+    for (uint32_t index = 0; index < N60_MAX_INFRASONIC_SECTIONS; ++index) {
+        configured.highPass[index] = N60BiquadCoefficientsMakeIdentity();
+    }
+
+    // Exact even-order Butterworth pole-pair Q values. For order N and
+    // section k, Q = 1 / (2*cos((2k+1)*pi/(2N))). Coefficients are prepared
+    // on the control plane; the realtime callback only consumes them.
+    uint32_t order = sectionCount * 2;
+    for (uint32_t index = 0; index < sectionCount; ++index) {
+        double angle = ((2.0 * (double)index + 1.0) * M_PI) / (2.0 * (double)order);
+        double q = 1.0 / (2.0 * cos(angle));
+        if (!isfinite(q) || q <= 0.0
+            || !N60BiquadDesign(
+                N60BiquadFilterTypeHighPass,
+                sampleRate,
+                cutoffHz,
+                0.0,
+                q,
+                &configured.highPass[index])) return false;
+    }
+    snapshot->infrasonicFilter = configured;
+    return true;
+}
+
+bool N60DynamicsSnapshotSetLoudnessContour(
+    N60DynamicsSnapshot *snapshot,
+    double sampleRate,
+    bool enabled,
+    float strength
+) {
+    if (snapshot == NULL || !isfinite(sampleRate) || sampleRate <= 0.0
+        || !isfinite(strength) || strength < 0.0f || strength > 1.0f
+        || N60_LOUDNESS_HIGH_SHELF_HZ >= sampleRate * 0.45) return false;
+    N60LoudnessContourSnapshot configured = {0};
+    configured.enabled = enabled;
+    configured.strength = strength;
+    double bassDB = N60_LOUDNESS_MAX_BASS_DB * strength;
+    double trebleDB = N60_LOUDNESS_MAX_TREBLE_DB * strength;
+    if (!N60BiquadDesign(N60BiquadFilterTypeLowShelf, sampleRate, N60_LOUDNESS_LOW_SHELF_HZ, bassDB, 0.7071067811865476, &configured.lowShelf)
+        || !N60BiquadDesign(N60BiquadFilterTypeHighShelf, sampleRate, N60_LOUDNESS_HIGH_SHELF_HZ, trebleDB, 0.7071067811865476, &configured.highShelf)) return false;
+    snapshot->loudnessContour = configured;
+    return true;
 }
 
 bool N60DynamicsSnapshotSetDeEsser(
@@ -357,6 +461,14 @@ bool N60DynamicsSnapshotSetPauseGate(
 
 bool N60DynamicsSnapshotIsValid(N60DynamicsSnapshot snapshot) {
     if (!valid_coefficient(snapshot.bypassTransitionCoefficient)) return false;
+    if (!isfinite(snapshot.dcOffsetFilter.poleCoefficient) || snapshot.dcOffsetFilter.poleCoefficient <= 0.0f || snapshot.dcOffsetFilter.poleCoefficient >= 1.0f) return false;
+    if (!isfinite(snapshot.infrasonicFilter.cutoffHz) || snapshot.infrasonicFilter.cutoffHz < 10.0 || snapshot.infrasonicFilter.cutoffHz > 30.0 || snapshot.infrasonicFilter.sectionCount > N60_MAX_INFRASONIC_SECTIONS) return false;
+    for (uint32_t index = 0; index < snapshot.infrasonicFilter.sectionCount; ++index) {
+        if (!N60BiquadCoefficientsAreFinite(snapshot.infrasonicFilter.highPass[index])) return false;
+    }
+    if (!isfinite(snapshot.loudnessContour.strength) || snapshot.loudnessContour.strength < 0.0f || snapshot.loudnessContour.strength > 1.0f
+        || !N60BiquadCoefficientsAreFinite(snapshot.loudnessContour.lowShelf)
+        || !N60BiquadCoefficientsAreFinite(snapshot.loudnessContour.highShelf)) return false;
 
     if (!isfinite(snapshot.deEsser.frequencyHz)
         || snapshot.deEsser.frequencyHz < 2000.0 || snapshot.deEsser.frequencyHz > 10000.0
@@ -413,6 +525,56 @@ void N60DynamicsRuntimeReset(N60DynamicsRuntime *runtime) {
     memset(runtime, 0, sizeof(*runtime));
     runtime->pauseGateGain = 1.0f;
     runtime->gateOpen = true;
+}
+
+
+void N60DynamicsProcessPreEQStereoFrame(
+    N60DynamicsRuntime *runtime,
+    N60DynamicsSnapshot snapshot,
+    float *left,
+    float *right
+) {
+    if (runtime == NULL || left == NULL || right == NULL) return;
+
+    float dryLeft = *left;
+    float dryRight = *right;
+    float dcLeft = dryLeft - runtime->dcPreviousInputLeft + snapshot.dcOffsetFilter.poleCoefficient * runtime->dcPreviousOutputLeft;
+    float dcRight = dryRight - runtime->dcPreviousInputRight + snapshot.dcOffsetFilter.poleCoefficient * runtime->dcPreviousOutputRight;
+    runtime->dcPreviousInputLeft = dryLeft;
+    runtime->dcPreviousInputRight = dryRight;
+    runtime->dcPreviousOutputLeft = dcLeft;
+    runtime->dcPreviousOutputRight = dcRight;
+    float dcTarget = snapshot.dcOffsetFilter.enabled ? 1.0f : 0.0f;
+    runtime->dcMix = smooth_toward(runtime->dcMix, dcTarget, snapshot.bypassTransitionCoefficient);
+    *left = dryLeft + (dcLeft - dryLeft) * runtime->dcMix;
+    *right = dryRight + (dcRight - dryRight) * runtime->dcMix;
+
+    dryLeft = *left;
+    dryRight = *right;
+    float hpLeft = process_filter_cascade(snapshot.infrasonicFilter.highPass, runtime->infrasonicLeft, snapshot.infrasonicFilter.sectionCount, dryLeft);
+    float hpRight = process_filter_cascade(snapshot.infrasonicFilter.highPass, runtime->infrasonicRight, snapshot.infrasonicFilter.sectionCount, dryRight);
+    float infrasonicTarget = snapshot.infrasonicFilter.enabled ? 1.0f : 0.0f;
+    runtime->infrasonicMix = smooth_toward(runtime->infrasonicMix, infrasonicTarget, snapshot.bypassTransitionCoefficient);
+    *left = dryLeft + (hpLeft - dryLeft) * runtime->infrasonicMix;
+    *right = dryRight + (hpRight - dryRight) * runtime->infrasonicMix;
+}
+
+static void process_loudness_contour(
+    N60DynamicsRuntime *runtime,
+    N60DynamicsSnapshot snapshot,
+    float *left,
+    float *right
+) {
+    float dryLeft = *left;
+    float dryRight = *right;
+    float wetLeft = N60BiquadProcessSample(snapshot.loudnessContour.lowShelf, &runtime->loudnessLowShelfLeft, dryLeft);
+    wetLeft = N60BiquadProcessSample(snapshot.loudnessContour.highShelf, &runtime->loudnessHighShelfLeft, wetLeft);
+    float wetRight = N60BiquadProcessSample(snapshot.loudnessContour.lowShelf, &runtime->loudnessLowShelfRight, dryRight);
+    wetRight = N60BiquadProcessSample(snapshot.loudnessContour.highShelf, &runtime->loudnessHighShelfRight, wetRight);
+    float target = snapshot.loudnessContour.enabled ? 1.0f : 0.0f;
+    runtime->loudnessMix = smooth_toward(runtime->loudnessMix, target, snapshot.bypassTransitionCoefficient);
+    *left = dryLeft + (wetLeft - dryLeft) * runtime->loudnessMix;
+    *right = dryRight + (wetRight - dryRight) * runtime->loudnessMix;
 }
 
 static void process_de_esser(
@@ -550,6 +712,7 @@ void N60DynamicsProcessCoreStereoFrame(
 ) {
     if (runtime == NULL || left == NULL || right == NULL) return;
 
+    process_loudness_contour(runtime, snapshot, left, right);
     process_de_esser(runtime, snapshot, left, right);
     process_multiband_compressor(runtime, snapshot, left, right);
 

@@ -30,7 +30,7 @@ struct ProductDSPConfiguration: Equatable, Sendable {
 }
 
 struct ProductConfiguration: Equatable, Sendable {
-    static let currentSchemaVersion = 5
+    static let currentSchemaVersion = 6
 
     var schemaVersion: Int
     var selectedOutputUID: String?
@@ -285,6 +285,166 @@ private struct PR27ProtectionValidationView: View {
     }
 }
 
+
+private struct PR28AdvancedDynamicsValidationView: View {
+    @ObservedObject var engine: AudioIOEngine
+
+    private func dynamicsBinding<Value>(_ keyPath: WritableKeyPath<DynamicsConfiguration, Value>) -> Binding<Value> {
+        Binding(
+            get: { engine.dynamicsConfiguration[keyPath: keyPath] },
+            set: { value in
+                var updated = engine.dynamicsConfiguration
+                updated[keyPath: keyPath] = value
+                try? engine.replaceDynamicsConfiguration(updated)
+            }
+        )
+    }
+
+    var body: some View {
+        let dcEnabled = dynamicsBinding(\.dcOffsetFilter.enabled)
+        let infrasonicEnabled = dynamicsBinding(\.infrasonicFilter.enabled)
+        let infrasonicCutoff = dynamicsBinding(\.infrasonicFilter.cutoffHz)
+        let infrasonicSlope = dynamicsBinding(\.infrasonicFilter.slope)
+        let contourEnabled = dynamicsBinding(\.loudnessContour.enabled)
+        let contourStrength = dynamicsBinding(\.loudnessContour.strength)
+        let deEsserEnabled = dynamicsBinding(\.deEsser.enabled)
+        let deEsserFrequency = dynamicsBinding(\.deEsser.frequencyHz)
+        let deEsserThreshold = dynamicsBinding(\.deEsser.thresholdDB)
+        let deEsserDynamicEQ = dynamicsBinding(\.deEsser.dynamicEQMode)
+        let multibandEnabled = dynamicsBinding(\.multibandCompressor.enabled)
+        let lowMid = dynamicsBinding(\.multibandCompressor.lowMidFrequencyHz)
+        let midHigh = dynamicsBinding(\.multibandCompressor.midHighFrequencyHz)
+        let slope = dynamicsBinding(\.multibandCompressor.slope)
+        let lowThreshold = dynamicsBinding(\.multibandCompressor.lowThresholdDB)
+        let midThreshold = dynamicsBinding(\.multibandCompressor.midThresholdDB)
+        let highThreshold = dynamicsBinding(\.multibandCompressor.highThresholdDB)
+
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("PR28 Advanced Dynamics Validation")
+                    .font(.title2.bold())
+                Text("Clean-room validation surface for De-Esser and three-band Multiband Compressor parity.")
+                    .foregroundStyle(.secondary)
+
+
+                GroupBox("Signal Conditioning") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Toggle("DC Offset Filter (0.5 Hz)", isOn: dcEnabled).toggleStyle(.switch)
+                        Toggle("Infrasonic Filter", isOn: infrasonicEnabled).toggleStyle(.switch)
+                        HStack(spacing: 12) {
+                            Text("Cutoff").frame(width: 90, alignment: .leading)
+                            Slider(value: infrasonicCutoff, in: InfrasonicFilterConfiguration.cutoffRange, step: 1)
+                            Text("\(engine.dynamicsConfiguration.infrasonicFilter.cutoffHz, specifier: "%.0f") Hz")
+                                .monospacedDigit().frame(width: 80)
+                        }
+                        Picker("Slope", selection: infrasonicSlope) {
+                            ForEach(InfrasonicSlope.allCases) { value in Text(value.displayName).tag(value) }
+                        }.frame(maxWidth: 320)
+                        Divider()
+                        Toggle("Loudness Contour", isOn: contourEnabled).toggleStyle(.switch)
+                        HStack(spacing: 12) {
+                            Text("Strength").frame(width: 90, alignment: .leading)
+                            Slider(value: contourStrength, in: LoudnessContourConfiguration.strengthRange, step: 0.05)
+                            Text("\(engine.dynamicsConfiguration.loudnessContour.strength, specifier: "%.2f")")
+                                .monospacedDigit().frame(width: 70)
+                        }
+                    }.padding(6)
+                }
+
+                GroupBox("De-Esser") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Toggle("Enable De-Esser", isOn: deEsserEnabled).toggleStyle(.switch)
+                        HStack(spacing: 12) {
+                            Text("Frequency").frame(width: 90, alignment: .leading)
+                            Slider(value: deEsserFrequency, in: DeEsserConfiguration.frequencyRange, step: 50)
+                            Text("\(engine.dynamicsConfiguration.deEsser.frequencyHz, specifier: "%.0f") Hz")
+                                .monospacedDigit().frame(width: 90)
+                        }
+                        HStack(spacing: 12) {
+                            Text("Threshold").frame(width: 90, alignment: .leading)
+                            Slider(value: deEsserThreshold, in: DeEsserConfiguration.thresholdRange, step: 0.5)
+                            Text("\(engine.dynamicsConfiguration.deEsser.thresholdDB, specifier: "%.1f") dB")
+                                .monospacedDigit().frame(width: 80)
+                        }
+                        Toggle("Dynamic EQ Mode — attenuate only the sibilance band", isOn: deEsserDynamicEQ)
+                            .toggleStyle(.switch)
+                    }
+                    .padding(6)
+                }
+
+                GroupBox("3-Band Multiband Compressor") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Toggle("Enable Multiband Compressor", isOn: multibandEnabled).toggleStyle(.switch)
+                        HStack(spacing: 12) {
+                            Text("Low / Mid").frame(width: 90, alignment: .leading)
+                            Slider(value: lowMid, in: MultibandCompressorConfiguration.lowMidFrequencyRange, step: 1)
+                            Text("\(engine.dynamicsConfiguration.multibandCompressor.lowMidFrequencyHz, specifier: "%.0f") Hz")
+                                .monospacedDigit().frame(width: 80)
+                        }
+                        HStack(spacing: 12) {
+                            Text("Mid / High").frame(width: 90, alignment: .leading)
+                            Slider(value: midHigh, in: MultibandCompressorConfiguration.midHighFrequencyRange, step: 25)
+                            Text("\(engine.dynamicsConfiguration.multibandCompressor.midHighFrequencyHz, specifier: "%.0f") Hz")
+                                .monospacedDigit().frame(width: 80)
+                        }
+                        Picker("Slope", selection: slope) {
+                            ForEach(MultibandSlope.allCases) { value in
+                                Text(value.displayName).tag(value)
+                            }
+                        }
+                        .frame(maxWidth: 320)
+                        thresholdRow("Low threshold", binding: lowThreshold, value: engine.dynamicsConfiguration.multibandCompressor.lowThresholdDB)
+                        thresholdRow("Mid threshold", binding: midThreshold, value: engine.dynamicsConfiguration.multibandCompressor.midThresholdDB)
+                        thresholdRow("High threshold", binding: highThreshold, value: engine.dynamicsConfiguration.multibandCompressor.highThresholdDB)
+                    }
+                    .padding(6)
+                }
+
+                GroupBox("Realtime Gain Reduction") {
+                    TimelineView(.periodic(from: .now, by: 0.1)) { _ in
+                        let diagnostics = engine.diagnosticsSnapshot().renderKernelDiagnostics
+                        Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 7) {
+                            telemetryRow("De-Esser GR", diagnostics?.deEsserGainReductionDB ?? 0)
+                            telemetryRow("Multiband Low GR", diagnostics?.multibandLowGainReductionDB ?? 0)
+                            telemetryRow("Multiband Mid GR", diagnostics?.multibandMidGainReductionDB ?? 0)
+                            telemetryRow("Multiband High GR", diagnostics?.multibandHighGainReductionDB ?? 0)
+                            GridRow {
+                                Text("Total DSP latency").foregroundStyle(.secondary)
+                                Text("\(diagnostics?.latencyFrames ?? 0) frames")
+                            }
+                        }
+                        .font(.system(.body, design: .monospaced))
+                    }
+                    .padding(6)
+                }
+
+                Text("Acceptance focus: bypass transparency, sibilance-selective reduction, independent band triggering, linked-stereo image stability, click-free toggling, and no change to Reference / Delta / Global Bypass semantics.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(20)
+        }
+        .frame(minWidth: 880, minHeight: 700)
+    }
+
+    @ViewBuilder
+    private func thresholdRow(_ label: String, binding: Binding<Double>, value: Double) -> some View {
+        HStack(spacing: 12) {
+            Text(label).frame(width: 110, alignment: .leading)
+            Slider(value: binding, in: MultibandCompressorConfiguration.thresholdRange, step: 0.5)
+            Text("\(value, specifier: "%.1f") dB").monospacedDigit().frame(width: 80)
+        }
+    }
+
+    @ViewBuilder
+    private func telemetryRow(_ label: String, _ value: Float) -> some View {
+        GridRow {
+            Text(label).foregroundStyle(.secondary)
+            Text("\(value, specifier: "%.2f") dB")
+        }
+    }
+}
+
 @main
 struct NotchSixtyApp: App {
     @StateObject private var product = ProductController()
@@ -297,6 +457,9 @@ struct NotchSixtyApp: App {
 
                 PR27ProtectionValidationView(engine: product.audioEngine)
                     .tabItem { Label("PR27 Protection", systemImage: "waveform.path.ecg") }
+
+                PR28AdvancedDynamicsValidationView(engine: product.audioEngine)
+                    .tabItem { Label("PR28 Advanced Dynamics", systemImage: "waveform.badge.plus") }
             }
         }
     }

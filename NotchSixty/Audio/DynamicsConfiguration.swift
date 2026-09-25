@@ -1,6 +1,9 @@
 import Foundation
 
 enum DynamicsConfigurationError: Error, LocalizedError, Equatable {
+    case invalidDCOffsetFilter
+    case invalidInfrasonicFilter
+    case invalidLoudnessContour
     case invalidDeEsser
     case invalidMultibandCompressor
     case invalidCompressor
@@ -12,6 +15,12 @@ enum DynamicsConfigurationError: Error, LocalizedError, Equatable {
 
     var errorDescription: String? {
         switch self {
+        case .invalidDCOffsetFilter:
+            return "DC Offset Filter configuration is invalid."
+        case .invalidInfrasonicFilter:
+            return "Infrasonic Filter parameters are outside the supported production range."
+        case .invalidLoudnessContour:
+            return "Loudness Contour parameters are outside the supported production range."
         case .invalidDeEsser:
             return "De-Esser parameters are outside the supported production range."
         case .invalidMultibandCompressor:
@@ -28,6 +37,58 @@ enum DynamicsConfigurationError: Error, LocalizedError, Equatable {
             return "Limiter parameters are outside the supported production range."
         case .invalidOversampling:
             return "Oversampling configuration is invalid."
+        }
+    }
+}
+
+
+struct DCOffsetFilterConfiguration: Equatable, Sendable {
+    var enabled = false
+}
+
+enum InfrasonicSlope: String, CaseIterable, Identifiable, Sendable {
+    case db24
+    case db48
+    case db96
+
+    var id: String { rawValue }
+    var displayName: String {
+        switch self {
+        case .db24: return "24 dB/oct"
+        case .db48: return "48 dB/oct"
+        case .db96: return "96 dB/oct"
+        }
+    }
+    var cType: N60InfrasonicSlope {
+        switch self {
+        case .db24: return N60InfrasonicSlope24DBPerOctave
+        case .db48: return N60InfrasonicSlope48DBPerOctave
+        case .db96: return N60InfrasonicSlope96DBPerOctave
+        }
+    }
+}
+
+struct InfrasonicFilterConfiguration: Equatable, Sendable {
+    static let cutoffRange = 10.0...30.0
+    var enabled = false
+    var cutoffHz = 18.0
+    var slope: InfrasonicSlope = .db48
+
+    func validate() throws {
+        guard cutoffHz.isFinite, Self.cutoffRange.contains(cutoffHz) else {
+            throw DynamicsConfigurationError.invalidInfrasonicFilter
+        }
+    }
+}
+
+struct LoudnessContourConfiguration: Equatable, Sendable {
+    static let strengthRange = 0.0...1.0
+    var enabled = false
+    var strength = 1.0
+
+    func validate() throws {
+        guard strength.isFinite, Self.strengthRange.contains(strength) else {
+            throw DynamicsConfigurationError.invalidLoudnessContour
         }
     }
 }
@@ -265,6 +326,9 @@ struct LimiterConfiguration: Equatable, Sendable {
 }
 
 struct DynamicsConfiguration: Equatable, Sendable {
+    var dcOffsetFilter = DCOffsetFilterConfiguration()
+    var infrasonicFilter = InfrasonicFilterConfiguration()
+    var loudnessContour = LoudnessContourConfiguration()
     var deEsser = DeEsserConfiguration()
     var multibandCompressor = MultibandCompressorConfiguration()
     var compressor = CompressorConfiguration()
@@ -275,6 +339,8 @@ struct DynamicsConfiguration: Equatable, Sendable {
     var pauseGate = PauseGateConfiguration()
 
     func makeSnapshot(sampleRate: Double) throws -> N60DynamicsSnapshot {
+        try infrasonicFilter.validate()
+        try loudnessContour.validate()
         try deEsser.validate()
         try multibandCompressor.validate()
         try compressor.validate()
@@ -282,6 +348,9 @@ struct DynamicsConfiguration: Equatable, Sendable {
         try pauseGate.validate()
 
         var snapshot = N60DynamicsSnapshotMakeBypassed(sampleRate)
+        guard N60DynamicsSnapshotSetDCOffsetFilter(&snapshot, sampleRate, dcOffsetFilter.enabled) else { throw DynamicsConfigurationError.invalidDCOffsetFilter }
+        guard N60DynamicsSnapshotSetInfrasonicFilter(&snapshot, sampleRate, infrasonicFilter.enabled, infrasonicFilter.cutoffHz, infrasonicFilter.slope.cType) else { throw DynamicsConfigurationError.invalidInfrasonicFilter }
+        guard N60DynamicsSnapshotSetLoudnessContour(&snapshot, sampleRate, loudnessContour.enabled, Float(loudnessContour.strength)) else { throw DynamicsConfigurationError.invalidLoudnessContour }
         guard N60DynamicsSnapshotSetDeEsser(
             &snapshot,
             sampleRate,

@@ -48,3 +48,13 @@ If code is intentionally reused from the POC, add:
 - reviewer/date
 
 Do not treat architectural similarity by itself as source reuse.
+
+## PR28 — De-Esser and Multiband Compressor
+
+- **Classification:** independent commercial rewrite.
+- **Behavioral references:** documented user-visible legacy control names/ranges and observable stage ordering only.
+- **Implementation sources:** current proprietary `N60Dynamics`, `N60Biquad`, and `N60Crossover` primitives; standard feed-forward dynamics and digital-filter mathematics independently implemented for this repository.
+- **Legacy implementation reuse:** none. No legacy DSP source, inherited test vectors, or historical implementation structure was copied or adapted.
+- **Architecture review:** fixed-size realtime state, control-plane coefficient preparation, zero added algorithmic latency, linked-stereo detection, exact-unity residual multiband recombination at 0 dB band gains.
+- **Validation:** deterministic tests plus focused hardware/listening acceptance before merge.
+
