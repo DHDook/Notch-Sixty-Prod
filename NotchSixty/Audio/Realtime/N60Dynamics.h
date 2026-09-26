@@ -662,6 +662,12 @@ void N60DynamicsProcessPreEQStereoFrame(
     float * _Nonnull left,
     float * _Nonnull right
 );
+void N60DynamicsProcessDynamicEQStereoFrame(
+    N60DynamicsRuntime * _Nonnull runtime,
+    N60DynamicsSnapshot snapshot,
+    float * _Nonnull left,
+    float * _Nonnull right
+);
 void N60DynamicsProcessCoreStereoFrame(
     N60DynamicsRuntime * _Nonnull runtime,
     N60DynamicsSnapshot snapshot,

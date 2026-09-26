@@ -8,7 +8,7 @@
 extern "C" {
 #endif
 
-#define N60_DYNAMIC_EQ_MAX_BANDS 16u
+#define N60_DYNAMIC_EQ_MAX_BANDS 64u
 
 typedef enum {
     N60DynamicEQDirectionCutOnly = 0,

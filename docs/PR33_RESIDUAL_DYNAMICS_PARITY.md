@@ -57,13 +57,13 @@ Configuration/state inventory establishes:
 - detector mode: Peak / RMS
 - RMS detector window, default 50 ms, observable range 5…200 ms
 
-The legacy state default direction is Cut Only and default detector mode is Peak.
+The legacy state default direction is Cut Only and default detector mode is Peak. The historical state exposed up to 16 Dynamic EQ bands. The commercial product deliberately improves this: Dynamic is a capability of the normal EQ-band model and may be enabled on any supported linked minimum-phase Peak band, up to the commercial 64-band EQ capacity. The standalone `N60DynamicEQ` engine remains an internal realtime implementation detail.
 
 ### Commercial implementation contract
 
 - independently authored portable C realtime processor
 - Swift configuration / validation / immutable snapshot publication
-- maximum 16 fixed/preallocated band runtimes
+- maximum 64 fixed/preallocated band runtimes, matching the commercial main-EQ capacity
 - linked-stereo detector decisions unless a verified observable contract requires otherwise
 - precomputed filter coefficients only; no realtime coefficient design
 - zero intentional algorithmic look-ahead latency
@@ -92,7 +92,7 @@ At minimum:
 - longer RMS windows respond more slowly than shorter windows
 - attack/release behavior is monotonic
 - linked-stereo image/ratio remains stable
-- 16-band worst case remains finite through supported high sample rates
+- 64-dynamic-band worst case remains finite through supported high sample rates
 - live snapshot changes remain finite/click-bounded
 - no regression to PR25–32 audition/bypass behavior
 

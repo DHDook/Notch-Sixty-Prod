@@ -14,7 +14,7 @@ This audit closes the residual dynamics inventory identified after PR32. “Clos
 - Predictive EQ/DSP automatic headroom compensation.
 - De-Esser with ratio/range/Q/attack/release and Dynamic-EQ mode.
 - Three-band multiband compressor with independent crossover slopes and per-band ratio/timing/knee/sidechain/makeup.
-- General Dynamic EQ up to 16 bands with cut/boost/both, Peak/RMS detection, RMS window, timing and bounded range.
+- General Dynamic EQ integrated into the normal EQ-band model, with cut/boost/both, Peak/RMS detection, RMS window, timing and bounded range. Commercial capacity is 64 supported dynamic Peak bands (improving the verified 16-band legacy state limit).
 - LUFS Loudness Match and Dialogue Gate.
 - Dialogue-Relative Leveler with optional voice-confidence gate.
 - Volume-aware loudness contour, superseded by PR33 Per-Band Loudness Compensation with reference phons, boost/cut caps, and System Volume / Integrated source.

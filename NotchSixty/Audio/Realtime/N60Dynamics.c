@@ -1925,6 +1925,16 @@ static void process_multiband_compressor(
     *right = outputRight;
 }
 
+void N60DynamicsProcessDynamicEQStereoFrame(
+    N60DynamicsRuntime *runtime,
+    N60DynamicsSnapshot snapshot,
+    float *left,
+    float *right
+) {
+    if (runtime == NULL || left == NULL || right == NULL) return;
+    N60DynamicEQProcessStereoFrame(&runtime->dynamicEQ, snapshot.dynamicEQ, left, right);
+}
+
 void N60DynamicsProcessCoreStereoFrameWithMasterGain(
     N60DynamicsRuntime *runtime,
     N60DynamicsSnapshot snapshot,
@@ -1940,7 +1950,6 @@ void N60DynamicsProcessCoreStereoFrameWithMasterGain(
     process_loudness_match(runtime, snapshot, left, right);
     process_loudness_contour(runtime, snapshot, masterGainLinear, left, right);
     process_dialogue_leveler(runtime, snapshot, left, right);
-    N60DynamicEQProcessStereoFrame(&runtime->dynamicEQ, snapshot.dynamicEQ, left, right);
     process_de_harsh(runtime, snapshot, left, right);
     process_de_esser(runtime, snapshot, left, right);
     process_multiband_compressor(runtime, snapshot, left, right);

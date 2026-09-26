@@ -254,35 +254,6 @@ struct ContentView: View {
         )
     }
 
-    private func dynamicEQBandBinding<Value>(
-        index: Int,
-        _ keyPath: WritableKeyPath<DynamicEQBandConfiguration, Value>
-    ) -> Binding<Value> {
-        Binding(
-            get: { engine.dynamicsConfiguration.dynamicEQ.bands[index][keyPath: keyPath] },
-            set: { value in
-                var updated = engine.dynamicsConfiguration
-                guard updated.dynamicEQ.bands.indices.contains(index) else { return }
-                updated.dynamicEQ.bands[index][keyPath: keyPath] = value
-                try? engine.replaceDynamicsConfiguration(updated)
-            }
-        )
-    }
-
-    private func addDynamicEQBand() {
-        var updated = engine.dynamicsConfiguration
-        guard updated.dynamicEQ.bands.count < DynamicEQConfiguration.maximumBandCount else { return }
-        updated.dynamicEQ.bands.append(DynamicEQBandConfiguration())
-        try? engine.replaceDynamicsConfiguration(updated)
-    }
-
-    private func removeDynamicEQBand(at index: Int) {
-        var updated = engine.dynamicsConfiguration
-        guard updated.dynamicEQ.bands.indices.contains(index) else { return }
-        updated.dynamicEQ.bands.remove(at: index)
-        try? engine.replaceDynamicsConfiguration(updated)
-    }
-
     @ViewBuilder
     private var dynamicsValidationView: some View {
         let compressorEnabled = dynamicsBinding(\.compressor.enabled)
@@ -766,7 +737,6 @@ struct ContentView: View {
 
     @ViewBuilder
     private var pr33ValidationView: some View {
-        let dynamicEQEnabled = dynamicsBinding(\.dynamicEQ.enabled)
         let oversampling = dynamicsBinding(\.oversampling)
         let softClipperEnabled = dynamicsBinding(\.softClipper.enabled)
         let clipperAsymmetry = dynamicsBinding(\.softClipper.asymmetryTrimDB)
@@ -797,96 +767,12 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }
 
-            GroupBox("General Dynamic EQ") {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 12) {
-                        Toggle("Dynamic EQ", isOn: dynamicEQEnabled).toggleStyle(.switch)
-                        Button("Add Band", action: addDynamicEQBand)
-                            .disabled(engine.dynamicsConfiguration.dynamicEQ.bands.count >= DynamicEQConfiguration.maximumBandCount)
-                        Text("\(engine.dynamicsConfiguration.dynamicEQ.bands.count) / \(DynamicEQConfiguration.maximumBandCount) bands")
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if engine.dynamicsConfiguration.dynamicEQ.bands.isEmpty {
-                        Text("Add a band to exercise the PR33 Dynamic EQ processor.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    ForEach(engine.dynamicsConfiguration.dynamicEQ.bands.indices, id: \.self) { index in
-                        let bandEnabled = dynamicEQBandBinding(index: index, \.enabled)
-                        let frequency = dynamicEQBandBinding(index: index, \.frequencyHz)
-                        let q = dynamicEQBandBinding(index: index, \.q)
-                        let staticGain = dynamicEQBandBinding(index: index, \.staticGainDB)
-                        let direction = dynamicEQBandBinding(index: index, \.direction)
-                        let threshold = dynamicEQBandBinding(index: index, \.thresholdDB)
-                        let ratio = dynamicEQBandBinding(index: index, \.ratio)
-                        let range = dynamicEQBandBinding(index: index, \.rangeDB)
-                        let attack = dynamicEQBandBinding(index: index, \.attackMs)
-                        let release = dynamicEQBandBinding(index: index, \.releaseMs)
-                        let boostThreshold = dynamicEQBandBinding(index: index, \.boostThresholdDB)
-                        let boostRatio = dynamicEQBandBinding(index: index, \.boostRatio)
-                        let maxBoost = dynamicEQBandBinding(index: index, \.maxBoostDB)
-                        let detector = dynamicEQBandBinding(index: index, \.detectorMode)
-                        let rmsWindow = dynamicEQBandBinding(index: index, \.rmsWindowMs)
-
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack(spacing: 10) {
-                                Toggle("Band \(index + 1)", isOn: bandEnabled).toggleStyle(.switch)
-                                Text("Freq")
-                                Slider(value: frequency, in: DynamicEQBandConfiguration.frequencyRange, step: 10).frame(width: 150)
-                                Text("\(engine.dynamicsConfiguration.dynamicEQ.bands[index].frequencyHz, specifier: "%.0f") Hz")
-                                    .monospacedDigit().frame(width: 72)
-                                Text("Q")
-                                Slider(value: q, in: DynamicEQBandConfiguration.qRange, step: 0.1).frame(width: 105)
-                                Text("\(engine.dynamicsConfiguration.dynamicEQ.bands[index].q, specifier: "%.1f")")
-                                    .monospacedDigit().frame(width: 38)
-                                Button("Remove") { removeDynamicEQBand(at: index) }
-                            }
-                            HStack(spacing: 10) {
-                                Picker("Direction", selection: direction) {
-                                    ForEach(DynamicEQDirection.allCases) { value in Text(value.displayName).tag(value) }
-                                }.frame(width: 190)
-                                Text("Static")
-                                Slider(value: staticGain, in: DynamicEQBandConfiguration.staticGainRange, step: 0.5).frame(width: 110)
-                                Text("\(engine.dynamicsConfiguration.dynamicEQ.bands[index].staticGainDB, specifier: "%+.1f") dB").monospacedDigit().frame(width: 70)
-                                Text("Threshold")
-                                Slider(value: threshold, in: DynamicEQBandConfiguration.thresholdRange, step: 0.5).frame(width: 110)
-                                Text("\(engine.dynamicsConfiguration.dynamicEQ.bands[index].thresholdDB, specifier: "%.1f") dB").monospacedDigit().frame(width: 70)
-                                Text("Ratio")
-                                Slider(value: ratio, in: DynamicEQBandConfiguration.ratioRange, step: 0.1).frame(width: 90)
-                            }
-                            HStack(spacing: 10) {
-                                Text("Max cut")
-                                Slider(value: range, in: DynamicEQBandConfiguration.rangeRange, step: 0.5).frame(width: 110)
-                                Text("\(engine.dynamicsConfiguration.dynamicEQ.bands[index].rangeDB, specifier: "%.1f") dB").monospacedDigit().frame(width: 66)
-                                Text("Attack")
-                                Slider(value: attack, in: DynamicEQBandConfiguration.attackRange, step: 1).frame(width: 100)
-                                Text("Release")
-                                Slider(value: release, in: DynamicEQBandConfiguration.releaseRange, step: 5).frame(width: 100)
-                                Picker("Detector", selection: detector) {
-                                    ForEach(DynamicEQDetectorMode.allCases) { value in Text(value.displayName).tag(value) }
-                                }.frame(width: 150)
-                                if engine.dynamicsConfiguration.dynamicEQ.bands[index].detectorMode == .rms {
-                                    Text("RMS")
-                                    Slider(value: rmsWindow, in: DynamicEQBandConfiguration.rmsWindowRange, step: 5).frame(width: 90)
-                                }
-                            }
-                            HStack(spacing: 10) {
-                                Text("Boost threshold")
-                                Slider(value: boostThreshold, in: DynamicEQBandConfiguration.boostThresholdRange, step: 0.5).frame(width: 120)
-                                Text("\(engine.dynamicsConfiguration.dynamicEQ.bands[index].boostThresholdDB, specifier: "%.1f") dB").monospacedDigit().frame(width: 70)
-                                Text("Boost ratio")
-                                Slider(value: boostRatio, in: DynamicEQBandConfiguration.boostRatioRange, step: 0.1).frame(width: 95)
-                                Text("Max boost")
-                                Slider(value: maxBoost, in: DynamicEQBandConfiguration.maxBoostRange, step: 0.5).frame(width: 105)
-                                Text("\(engine.dynamicsConfiguration.dynamicEQ.bands[index].maxBoostDB, specifier: "%.1f") dB").monospacedDigit().frame(width: 66)
-                            }
-                        }
-                        .padding(.vertical, 4)
-                        if index != engine.dynamicsConfiguration.dynamicEQ.bands.indices.last { Divider() }
-                    }
+            GroupBox("Dynamic EQ integration") {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Dynamic EQ is now configured on the normal Parametric EQ bands below rather than in a separate band bank.")
+                    Text("Commercial capacity: up to \(EQConfiguration.maximumBandCount) EQ bands. Dynamic is available for linked, minimum-phase Peak bands; the standalone C detector/gain engine remains an internal implementation detail.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 .padding(.vertical, 4)
             }
@@ -1129,7 +1015,7 @@ struct ContentView: View {
                         }
                     }
                 }
-                .frame(maxHeight: 150)
+                .frame(maxHeight: 420)
             }
         }
         .padding(10)
@@ -1145,22 +1031,79 @@ struct ContentView: View {
     @ViewBuilder
     private func eqBandRow(index: Int, band: EQBand) -> some View {
         let binding = eqBandBinding(for: band.id)
-        HStack(spacing: 8) {
-            Text("\(index + 1)").frame(width: 24, alignment: .trailing).foregroundStyle(.secondary)
-            Toggle("", isOn: binding.enabled).labelsHidden()
-            Picker("", selection: binding.type) {
-                ForEach(EQFilterType.allCases) { type in Text(type.displayName).tag(type) }
+        let dynamicSupported = engine.eqConfiguration.phaseMode == .minimumPhase
+            && engine.stereoEQConfiguration.channelMode == .linked
+            && band.type == .peaking
+
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text("\(index + 1)").frame(width: 24, alignment: .trailing).foregroundStyle(.secondary)
+                Toggle("", isOn: binding.enabled).labelsHidden()
+                Picker("", selection: binding.type) {
+                    ForEach(EQFilterType.allCases) { type in Text(type.displayName).tag(type) }
+                }
+                .labelsHidden()
+                .frame(width: 115)
+                TextField("Hz", value: binding.frequencyHz, format: .number.precision(.fractionLength(0...1))).frame(width: 85)
+                Text("Hz").foregroundStyle(.secondary)
+                TextField("dB", value: binding.gainDB, format: .number.precision(.fractionLength(1))).frame(width: 65)
+                Text("dB").font(.caption).foregroundStyle(.secondary)
+                TextField("Q", value: binding.q, format: .number.precision(.fractionLength(2...3))).frame(width: 65)
+                Text("Q").foregroundStyle(.secondary)
+                Toggle("Dynamic", isOn: binding.dynamic.enabled)
+                    .toggleStyle(.switch)
+                    .disabled(!dynamicSupported)
+                Spacer()
+                Button("Remove") { try? engine.removeEQBand(id: band.id) }
             }
-            .labelsHidden()
-            .frame(width: 115)
-            TextField("Hz", value: binding.frequencyHz, format: .number.precision(.fractionLength(0...1))).frame(width: 85)
-            Text("Hz").foregroundStyle(.secondary)
-            TextField("dB", value: binding.gainDB, format: .number.precision(.fractionLength(1))).frame(width: 65)
-            Text("dB (±24 max)").font(.caption).foregroundStyle(.secondary)
-            TextField("Q", value: binding.q, format: .number.precision(.fractionLength(2...3))).frame(width: 65)
-            Text("Q").foregroundStyle(.secondary)
-            Spacer()
-            Button("Remove") { try? engine.removeEQBand(id: band.id) }
+
+            if binding.wrappedValue.dynamic.enabled && dynamicSupported {
+                HStack(spacing: 8) {
+                    Text("Dynamic").frame(width: 82, alignment: .leading).foregroundStyle(.secondary)
+                    Picker("Direction", selection: binding.dynamic.direction) {
+                        ForEach(DynamicEQDirection.allCases) { value in Text(value.displayName).tag(value) }
+                    }.frame(width: 165)
+                    Text("Threshold")
+                    Slider(value: binding.dynamic.thresholdDB, in: EQBandDynamicConfiguration.thresholdRange, step: 0.5).frame(width: 100)
+                    Text("\(binding.wrappedValue.dynamic.thresholdDB, specifier: "%.1f") dB").monospacedDigit().frame(width: 64)
+                    Text("Ratio")
+                    Slider(value: binding.dynamic.ratio, in: EQBandDynamicConfiguration.ratioRange, step: 0.1).frame(width: 80)
+                    Text("\(binding.wrappedValue.dynamic.ratio, specifier: "%.1f")")
+                    Text("Max cut")
+                    Slider(value: binding.dynamic.rangeDB, in: EQBandDynamicConfiguration.rangeRange, step: 0.5).frame(width: 90)
+                }
+                HStack(spacing: 8) {
+                    Text("Timing").frame(width: 82, alignment: .leading).foregroundStyle(.secondary)
+                    Text("Attack")
+                    Slider(value: binding.dynamic.attackMs, in: EQBandDynamicConfiguration.attackRange, step: 1).frame(width: 90)
+                    Text("Release")
+                    Slider(value: binding.dynamic.releaseMs, in: EQBandDynamicConfiguration.releaseRange, step: 5).frame(width: 100)
+                    Picker("Detector", selection: binding.dynamic.detectorMode) {
+                        ForEach(DynamicEQDetectorMode.allCases) { value in Text(value.displayName).tag(value) }
+                    }.frame(width: 145)
+                    if binding.wrappedValue.dynamic.detectorMode == .rms {
+                        Text("RMS window")
+                        Slider(value: binding.dynamic.rmsWindowMs, in: EQBandDynamicConfiguration.rmsWindowRange, step: 5).frame(width: 100)
+                    }
+                }
+                if binding.wrappedValue.dynamic.direction != .cutOnly {
+                    HStack(spacing: 8) {
+                        Text("Boost").frame(width: 82, alignment: .leading).foregroundStyle(.secondary)
+                        Text("Threshold")
+                        Slider(value: binding.dynamic.boostThresholdDB, in: EQBandDynamicConfiguration.boostThresholdRange, step: 0.5).frame(width: 110)
+                        Text("Ratio")
+                        Slider(value: binding.dynamic.boostRatio, in: EQBandDynamicConfiguration.boostRatioRange, step: 0.1).frame(width: 90)
+                        Text("Max")
+                        Slider(value: binding.dynamic.maxBoostDB, in: EQBandDynamicConfiguration.maxBoostRange, step: 0.5).frame(width: 100)
+                        Text("\(binding.wrappedValue.dynamic.maxBoostDB, specifier: "%.1f") dB").monospacedDigit().frame(width: 62)
+                    }
+                }
+            } else if band.dynamic.enabled {
+                Text("Dynamic is inactive for this band. Use Linked + Minimum phase + Peak to enable dynamic operation.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 40)
+            }
         }
         .textFieldStyle(.roundedBorder)
     }
@@ -1175,6 +1118,9 @@ struct ContentView: View {
                     max(updated.gainDB, StereoEQConfiguration.bandGainRange.lowerBound),
                     StereoEQConfiguration.bandGainRange.upperBound
                 )
+                if sanitized.type != .peaking {
+                    sanitized.dynamic.enabled = false
+                }
                 try? engine.updateEQBand(sanitized)
             }
         )

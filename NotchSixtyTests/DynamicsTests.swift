@@ -634,7 +634,7 @@ final class DynamicsTests: XCTestCase {
             let input = Float(0.4 * sin(2.0 * Double.pi * 1_000.0 * Double(frame) / sampleRate))
             var left = input
             var right = -input * 0.7
-            N60DynamicsProcessCoreStereoFrame(&runtime, snapshot, &left, &right)
+            N60DynamicsProcessDynamicEQStereoFrame(&runtime, snapshot, &left, &right)
             XCTAssertEqual(left, input, accuracy: 0.000_001)
             XCTAssertEqual(right, -input * 0.7, accuracy: 0.000_001)
         }
@@ -657,7 +657,7 @@ final class DynamicsTests: XCTestCase {
             let input = Float(0.35 * sin(2.0 * Double.pi * 1_000.0 * Double(frame) / sampleRate))
             var left = input
             var right = input * 0.5
-            N60DynamicsProcessCoreStereoFrame(&runtime, snapshot, &left, &right)
+            N60DynamicsProcessDynamicEQStereoFrame(&runtime, snapshot, &left, &right)
             if frame >= 48_000 {
                 inSq += Double(input * input)
                 outSq += Double(left * left)
@@ -683,14 +683,14 @@ final class DynamicsTests: XCTestCase {
             let input = Float(0.005 * sin(2.0 * Double.pi * 1_000.0 * Double(frame) / sampleRate))
             var left = input
             var right = input
-            N60DynamicsProcessCoreStereoFrame(&runtime, snapshot, &left, &right)
+            N60DynamicsProcessDynamicEQStereoFrame(&runtime, snapshot, &left, &right)
         }
         let telemetry = N60DynamicsRuntimeTelemetry(&runtime)
         XCTAssertGreaterThan(telemetry.dynamicEQMaxAbsGainDB, 1.0)
         XCTAssertLessThanOrEqual(telemetry.dynamicEQMaxAbsGainDB, 6.01)
     }
 
-    func testDynamicEQConfigurationRejectsInvalidBandAndSupportsSixteenBandsAt384k() throws {
+    func testDynamicEQConfigurationRejectsInvalidBandAndSupportsSixtyFourBandsAt384k() throws {
         var invalid = DynamicsConfiguration()
         invalid.dynamicEQ.enabled = true
         invalid.dynamicEQ.bands = [DynamicEQBandConfiguration()]
@@ -699,7 +699,7 @@ final class DynamicsTests: XCTestCase {
 
         var config = DynamicsConfiguration()
         config.dynamicEQ.enabled = true
-        config.dynamicEQ.bands = (0..<16).map { index in
+        config.dynamicEQ.bands = (0..<64).map { index in
             var band = DynamicEQBandConfiguration()
             band.frequencyHz = 40.0 * pow(1.35, Double(index))
             band.frequencyHz = min(band.frequencyHz, 18_000.0)
@@ -708,7 +708,7 @@ final class DynamicsTests: XCTestCase {
             return band
         }
         let snapshot = try config.makeSnapshot(sampleRate: 384_000)
-        XCTAssertEqual(snapshot.dynamicEQ.bandCount, 16)
+        XCTAssertEqual(snapshot.dynamicEQ.bandCount, 64)
         XCTAssertTrue(N60DynamicEQSnapshotIsValid(snapshot.dynamicEQ))
     }
 
