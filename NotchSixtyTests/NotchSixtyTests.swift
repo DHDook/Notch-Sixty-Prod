@@ -141,6 +141,58 @@ final class NotchSixtyTests: XCTestCase {
         XCTAssertTrue(graph.mixedPhaseEnabled)
     }
 
+    func testSubBassPhaseAlignmentPublishesAuditedDefaults() throws {
+        var bass = BassManagementConfiguration()
+        bass.enabled = true
+        bass.subPhaseAlignmentEnabled = true
+        let graph = try StereoEQConfiguration().makeGraphSnapshot(
+            sampleRate: 96_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: bass,
+            playbackConfiguration: PlaybackControlConfiguration()
+        )
+        XCTAssertTrue(graph.crossover.subPhaseAlignmentEnabled)
+        XCTAssertEqual(graph.crossover.subPhaseAlignmentFrequencyHz, 80, accuracy: 0.000_001)
+        XCTAssertEqual(graph.crossover.subPhaseAlignmentQ, 0.7, accuracy: 0.000_001)
+        XCTAssertTrue(N60BiquadCoefficientsAreFinite(graph.crossover.subPhaseAlignmentAllPass))
+    }
+
+    func testSubBassPhaseAlignmentDisabledIsIdentity() throws {
+        var bass = BassManagementConfiguration()
+        bass.enabled = true
+        bass.subPhaseAlignmentEnabled = false
+        let graph = try StereoEQConfiguration().makeGraphSnapshot(
+            sampleRate: 384_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: bass,
+            playbackConfiguration: PlaybackControlConfiguration()
+        )
+        XCTAssertFalse(graph.crossover.subPhaseAlignmentEnabled)
+        XCTAssertEqual(graph.crossover.subPhaseAlignmentAllPass.b0, 1, accuracy: 0.000_001)
+        XCTAssertEqual(graph.crossover.subPhaseAlignmentAllPass.b1, 0, accuracy: 0.000_001)
+        XCTAssertEqual(graph.crossover.subPhaseAlignmentAllPass.b2, 0, accuracy: 0.000_001)
+    }
+
+    func testSubBassPhaseAlignmentRejectsInvalidControls() throws {
+        var bass = BassManagementConfiguration()
+        bass.subPhaseAlignmentEnabled = true
+        bass.subPhaseAlignmentFrequencyHz = 10
+        XCTAssertThrowsError(try StereoEQConfiguration().makeGraphSnapshot(
+            sampleRate: 48_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: bass,
+            playbackConfiguration: PlaybackControlConfiguration()
+        ))
+        bass.subPhaseAlignmentFrequencyHz = 80
+        bass.subPhaseAlignmentQ = 0
+        XCTAssertThrowsError(try StereoEQConfiguration().makeGraphSnapshot(
+            sampleRate: 48_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: bass,
+            playbackConfiguration: PlaybackControlConfiguration()
+        ))
+    }
+
     func testCrosstalkCancellationGraphPublishesAuditedDefaults() throws {
         let playback = PlaybackControlConfiguration(crosstalkCancellationEnabled: true)
         let graph = try StereoEQConfiguration().makeGraphSnapshot(

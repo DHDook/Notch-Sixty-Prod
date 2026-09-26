@@ -136,6 +136,9 @@ struct ContentView: View {
     private var crossoverMonitorBinding: Binding<CrossoverMonitorMode> { crossoverBinding(\.monitorMode) }
     private var subGainBinding: Binding<Double> { crossoverBinding(\.subGainDB) }
     private var subPolarityBinding: Binding<Bool> { crossoverBinding(\.subPolarityInverted) }
+    private var subPhaseAlignmentEnabledBinding: Binding<Bool> { crossoverBinding(\.subPhaseAlignmentEnabled) }
+    private var subPhaseAlignmentFrequencyBinding: Binding<Double> { crossoverBinding(\.subPhaseAlignmentFrequencyHz) }
+    private var subPhaseAlignmentQBinding: Binding<Double> { crossoverBinding(\.subPhaseAlignmentQ) }
 
     private var roomCorrectionEnabledBinding: Binding<Bool> {
         Binding(
@@ -1011,6 +1014,32 @@ struct ContentView: View {
                 Toggle("Invert sub polarity", isOn: subPolarityBinding)
                     .toggleStyle(.switch)
             }
+
+            HStack(spacing: 12) {
+                Toggle("Sub phase alignment", isOn: subPhaseAlignmentEnabledBinding).toggleStyle(.switch)
+                Text("Center")
+                Slider(
+                    value: subPhaseAlignmentFrequencyBinding,
+                    in: BassManagementConfiguration.frequencyRange,
+                    step: 1
+                )
+                .disabled(!engine.bassManagementConfiguration.subPhaseAlignmentEnabled)
+                Text("\(Int(engine.bassManagementConfiguration.subPhaseAlignmentFrequencyHz.rounded())) Hz")
+                    .monospacedDigit().frame(width: 72)
+                Text("Q")
+                Slider(
+                    value: subPhaseAlignmentQBinding,
+                    in: BassManagementConfiguration.subPhaseAlignmentQRange,
+                    step: 0.1
+                )
+                .frame(width: 160)
+                .disabled(!engine.bassManagementConfiguration.subPhaseAlignmentEnabled)
+                Text(engine.bassManagementConfiguration.subPhaseAlignmentQ.formatted(.number.precision(.fractionLength(1))))
+                    .monospacedDigit().frame(width: 38)
+            }
+            Text("Sub phase alignment is a magnitude-transparent all-pass on the mono sub leg after low-pass filtering. It rotates phase near the selected center without changing sub gain, polarity, or the mains path.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             Text("PR #16 exposes logical mains and mono-sub buses through stereo audition modes. It does not yet create an independently routable physical sub output.")
                 .font(.caption)

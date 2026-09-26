@@ -310,6 +310,12 @@ bool N60DSPGraphSnapshotSetCrossover(
     bool subPolarityInverted,
     bool enabled
 );
+bool N60DSPGraphSnapshotSetSubPhaseAlignment(
+    N60DSPGraphSnapshot * _Nonnull snapshot,
+    double frequencyHz,
+    double q,
+    bool enabled
+);
 bool N60DSPGraphSnapshotSetConvolutionProgram(
     N60DSPGraphSnapshot * _Nonnull snapshot,
     uint32_t programSlot,

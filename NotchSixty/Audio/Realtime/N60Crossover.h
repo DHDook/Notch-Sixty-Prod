@@ -31,6 +31,10 @@ typedef struct {
     N60CrossoverMonitorMode monitorMode;
     float subGainLinear;
     bool subPolarityInverted;
+    bool subPhaseAlignmentEnabled;
+    double subPhaseAlignmentFrequencyHz;
+    double subPhaseAlignmentQ;
+    N60BiquadCoefficients subPhaseAlignmentAllPass;
     uint32_t sectionCount;
     N60BiquadCoefficients mainsHighPass[N60_MAX_CROSSOVER_SECTIONS];
     N60BiquadCoefficients subLowPass[N60_MAX_CROSSOVER_SECTIONS];
@@ -44,6 +48,10 @@ static inline N60CrossoverSnapshot N60CrossoverSnapshotMakeBypassed(void) {
     snapshot.monitorMode = N60CrossoverMonitorModeRecombined;
     snapshot.subGainLinear = 1.0f;
     snapshot.subPolarityInverted = false;
+    snapshot.subPhaseAlignmentEnabled = false;
+    snapshot.subPhaseAlignmentFrequencyHz = 80.0;
+    snapshot.subPhaseAlignmentQ = 0.7;
+    snapshot.subPhaseAlignmentAllPass = N60BiquadCoefficientsMakeIdentity();
     snapshot.sectionCount = 0;
     for (uint32_t index = 0; index < N60_MAX_CROSSOVER_SECTIONS; ++index) {
         snapshot.mainsHighPass[index] = N60BiquadCoefficientsMakeIdentity();
@@ -155,6 +163,39 @@ static inline bool N60CrossoverSnapshotMake(
     }
 
     *snapshot = designed;
+    return true;
+}
+
+
+static inline bool N60CrossoverSnapshotSetSubPhaseAlignment(
+    double sampleRate,
+    double frequencyHz,
+    double q,
+    bool enabled,
+    N60CrossoverSnapshot * _Nonnull snapshot
+) {
+    if (snapshot == NULL
+        || !isfinite(sampleRate) || sampleRate <= 0.0
+        || !isfinite(frequencyHz) || frequencyHz <= 0.0 || frequencyHz >= sampleRate * 0.5
+        || !isfinite(q) || q <= 0.0) {
+        return false;
+    }
+
+    N60BiquadCoefficients coefficients = N60BiquadCoefficientsMakeIdentity();
+    if (enabled && !N60BiquadDesign(
+            N60BiquadFilterTypeAllPass,
+            sampleRate,
+            frequencyHz,
+            0.0,
+            q,
+            &coefficients)) {
+        return false;
+    }
+
+    snapshot->subPhaseAlignmentEnabled = enabled;
+    snapshot->subPhaseAlignmentFrequencyHz = frequencyHz;
+    snapshot->subPhaseAlignmentQ = q;
+    snapshot->subPhaseAlignmentAllPass = coefficients;
     return true;
 }
 

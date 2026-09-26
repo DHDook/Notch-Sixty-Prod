@@ -490,6 +490,7 @@ enum CrossoverMonitorMode: String, CaseIterable, Identifiable, Sendable {
 struct BassManagementConfiguration: Equatable, Sendable {
     static let frequencyRange = 20.0...500.0
     static let subGainRange = -24.0...12.0
+    static let subPhaseAlignmentQRange = 0.1...10.0
 
     var enabled = false
     var frequencyHz: Double = 80
@@ -497,11 +498,16 @@ struct BassManagementConfiguration: Equatable, Sendable {
     var monitorMode: CrossoverMonitorMode = .recombined
     var subGainDB: Double = 0
     var subPolarityInverted = false
+    var subPhaseAlignmentEnabled = false
+    var subPhaseAlignmentFrequencyHz: Double = 80
+    var subPhaseAlignmentQ: Double = 0.7
 }
 
 enum BassManagementConfigurationError: Error, LocalizedError, Equatable {
     case invalidFrequency(Double)
     case invalidSubGain(Double)
+    case invalidSubPhaseAlignmentFrequency(Double)
+    case invalidSubPhaseAlignmentQ(Double)
     case graphDesignFailed
 
     var errorDescription: String? {
@@ -510,6 +516,10 @@ enum BassManagementConfigurationError: Error, LocalizedError, Equatable {
             return "Crossover frequency \(value) Hz is outside the supported 20...500 Hz range."
         case .invalidSubGain(let value):
             return "Sub gain \(value) dB is outside the supported -24...+12 dB range."
+        case .invalidSubPhaseAlignmentFrequency(let value):
+            return "Sub phase-alignment frequency \(value) Hz is outside the supported 20...500 Hz range."
+        case .invalidSubPhaseAlignmentQ(let value):
+            return "Sub phase-alignment Q \(value) is outside the supported 0.1...10 range."
         case .graphDesignFailed:
             return "Unable to design the crossover for the current output sample rate."
         }
@@ -653,6 +663,18 @@ struct EQConfiguration: Equatable, Sendable {
               BassManagementConfiguration.subGainRange.contains(bassManagementConfiguration.subGainDB) else {
             throw BassManagementConfigurationError.invalidSubGain(bassManagementConfiguration.subGainDB)
         }
+        guard bassManagementConfiguration.subPhaseAlignmentFrequencyHz.isFinite,
+              BassManagementConfiguration.frequencyRange.contains(bassManagementConfiguration.subPhaseAlignmentFrequencyHz) else {
+            throw BassManagementConfigurationError.invalidSubPhaseAlignmentFrequency(
+                bassManagementConfiguration.subPhaseAlignmentFrequencyHz
+            )
+        }
+        guard bassManagementConfiguration.subPhaseAlignmentQ.isFinite,
+              BassManagementConfiguration.subPhaseAlignmentQRange.contains(bassManagementConfiguration.subPhaseAlignmentQ) else {
+            throw BassManagementConfigurationError.invalidSubPhaseAlignmentQ(
+                bassManagementConfiguration.subPhaseAlignmentQ
+            )
+        }
 
         var graph = N60DSPGraphSnapshotMakeUnity(sampleRate)
         graph.inputGainLinear = DSPGainConfiguration.linearGain(forDB: gainConfiguration.inputPreampDB)
@@ -750,6 +772,14 @@ struct EQConfiguration: Equatable, Sendable {
             DSPGainConfiguration.linearGain(forDB: bassManagementConfiguration.subGainDB),
             bassManagementConfiguration.subPolarityInverted,
             bassManagementConfiguration.enabled
+        ) else {
+            throw BassManagementConfigurationError.graphDesignFailed
+        }
+        guard N60DSPGraphSnapshotSetSubPhaseAlignment(
+            &graph,
+            bassManagementConfiguration.subPhaseAlignmentFrequencyHz,
+            bassManagementConfiguration.subPhaseAlignmentQ,
+            bassManagementConfiguration.subPhaseAlignmentEnabled
         ) else {
             throw BassManagementConfigurationError.graphDesignFailed
         }
@@ -1113,6 +1143,16 @@ final class AudioIOEngine: ObservableObject {
         guard configuration.subGainDB.isFinite,
               BassManagementConfiguration.subGainRange.contains(configuration.subGainDB) else {
             throw BassManagementConfigurationError.invalidSubGain(configuration.subGainDB)
+        }
+        guard configuration.subPhaseAlignmentFrequencyHz.isFinite,
+              BassManagementConfiguration.frequencyRange.contains(configuration.subPhaseAlignmentFrequencyHz) else {
+            throw BassManagementConfigurationError.invalidSubPhaseAlignmentFrequency(
+                configuration.subPhaseAlignmentFrequencyHz
+            )
+        }
+        guard configuration.subPhaseAlignmentQ.isFinite,
+              BassManagementConfiguration.subPhaseAlignmentQRange.contains(configuration.subPhaseAlignmentQ) else {
+            throw BassManagementConfigurationError.invalidSubPhaseAlignmentQ(configuration.subPhaseAlignmentQ)
         }
         if let session = transportSession {
             var graph = try stereoEQConfiguration.makeGraphSnapshot(

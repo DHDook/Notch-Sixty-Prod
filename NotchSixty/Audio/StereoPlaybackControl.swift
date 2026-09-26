@@ -426,6 +426,18 @@ struct StereoEQConfiguration: Equatable, Sendable {
               BassManagementConfiguration.subGainRange.contains(bassManagementConfiguration.subGainDB) else {
             throw BassManagementConfigurationError.invalidSubGain(bassManagementConfiguration.subGainDB)
         }
+        guard bassManagementConfiguration.subPhaseAlignmentFrequencyHz.isFinite,
+              BassManagementConfiguration.frequencyRange.contains(bassManagementConfiguration.subPhaseAlignmentFrequencyHz) else {
+            throw BassManagementConfigurationError.invalidSubPhaseAlignmentFrequency(
+                bassManagementConfiguration.subPhaseAlignmentFrequencyHz
+            )
+        }
+        guard bassManagementConfiguration.subPhaseAlignmentQ.isFinite,
+              BassManagementConfiguration.subPhaseAlignmentQRange.contains(bassManagementConfiguration.subPhaseAlignmentQ) else {
+            throw BassManagementConfigurationError.invalidSubPhaseAlignmentQ(
+                bassManagementConfiguration.subPhaseAlignmentQ
+            )
+        }
 
         var compiledDynamics = dynamicsConfiguration
         try compileUnifiedDynamicEQ(into: &compiledDynamics, sampleRate: sampleRate)
@@ -584,6 +596,14 @@ struct StereoEQConfiguration: Equatable, Sendable {
             DSPGainConfiguration.linearGain(forDB: bassManagementConfiguration.subGainDB),
             bassManagementConfiguration.subPolarityInverted,
             bassManagementConfiguration.enabled
+        ) else {
+            throw BassManagementConfigurationError.graphDesignFailed
+        }
+        guard N60DSPGraphSnapshotSetSubPhaseAlignment(
+            &graph,
+            bassManagementConfiguration.subPhaseAlignmentFrequencyHz,
+            bassManagementConfiguration.subPhaseAlignmentQ,
+            bassManagementConfiguration.subPhaseAlignmentEnabled
         ) else {
             throw BassManagementConfigurationError.graphDesignFailed
         }

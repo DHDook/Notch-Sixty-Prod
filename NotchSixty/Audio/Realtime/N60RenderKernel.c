@@ -52,6 +52,7 @@ typedef struct {
     N60BiquadState mainsLeft[N60_MAX_CROSSOVER_SECTIONS];
     N60BiquadState mainsRight[N60_MAX_CROSSOVER_SECTIONS];
     N60BiquadState subMono[N60_MAX_CROSSOVER_SECTIONS];
+    N60BiquadState subPhaseAlignment;
 } N60CrossoverPathRuntime;
 
 typedef struct {
@@ -200,7 +201,13 @@ static bool crossover_snapshot_is_valid(N60CrossoverSnapshot crossover, double s
         || !isfinite(crossover.subGainLinear)
         || crossover.subGainLinear < 0.0f
         || crossover.monitorMode < N60CrossoverMonitorModeRecombined
-        || crossover.monitorMode > N60CrossoverMonitorModeSubOnly) {
+        || crossover.monitorMode > N60CrossoverMonitorModeSubOnly
+        || !isfinite(crossover.subPhaseAlignmentFrequencyHz)
+        || crossover.subPhaseAlignmentFrequencyHz <= 0.0
+        || crossover.subPhaseAlignmentFrequencyHz >= sampleRate * 0.5
+        || !isfinite(crossover.subPhaseAlignmentQ)
+        || crossover.subPhaseAlignmentQ <= 0.0
+        || !coefficients_are_finite(crossover.subPhaseAlignmentAllPass)) {
         return false;
     }
 
@@ -411,6 +418,10 @@ static bool crossover_snapshots_equal(N60CrossoverSnapshot lhs, N60CrossoverSnap
         || lhs.monitorMode != rhs.monitorMode
         || lhs.subGainLinear != rhs.subGainLinear
         || lhs.subPolarityInverted != rhs.subPolarityInverted
+        || lhs.subPhaseAlignmentEnabled != rhs.subPhaseAlignmentEnabled
+        || lhs.subPhaseAlignmentFrequencyHz != rhs.subPhaseAlignmentFrequencyHz
+        || lhs.subPhaseAlignmentQ != rhs.subPhaseAlignmentQ
+        || !coefficients_equal(lhs.subPhaseAlignmentAllPass, rhs.subPhaseAlignmentAllPass)
         || lhs.sectionCount != rhs.sectionCount) {
         return false;
     }
@@ -571,6 +582,13 @@ static void process_crossover_path(
         mainsLeft = N60BiquadProcessSample(path->snapshot.mainsHighPass[index], &path->mainsLeft[index], mainsLeft);
         mainsRight = N60BiquadProcessSample(path->snapshot.mainsHighPass[index], &path->mainsRight[index], mainsRight);
         subMono = N60BiquadProcessSample(path->snapshot.subLowPass[index], &path->subMono[index], subMono);
+    }
+    if (path->snapshot.subPhaseAlignmentEnabled) {
+        subMono = N60BiquadProcessSample(
+            path->snapshot.subPhaseAlignmentAllPass,
+            &path->subPhaseAlignment,
+            subMono
+        );
     }
     subMono *= path->snapshot.subGainLinear;
     if (path->snapshot.subPolarityInverted) subMono = -subMono;
@@ -967,6 +985,18 @@ bool N60DSPGraphSnapshotSetCrossover(N60DSPGraphSnapshot *snapshot, double frequ
     if (!N60CrossoverSnapshotMake(snapshot->sampleRate, frequencyHz, topology, monitorMode, subGainLinear, subPolarityInverted, enabled, &crossover)) return false;
     snapshot->crossover = crossover;
     return true;
+}
+
+bool N60DSPGraphSnapshotSetSubPhaseAlignment(
+    N60DSPGraphSnapshot *snapshot,
+    double frequencyHz,
+    double q,
+    bool enabled
+) {
+    if (snapshot == NULL) return false;
+    return N60CrossoverSnapshotSetSubPhaseAlignment(
+        snapshot->sampleRate, frequencyHz, q, enabled, &snapshot->crossover
+    );
 }
 
 bool N60DSPGraphSnapshotSetConvolutionProgram(
