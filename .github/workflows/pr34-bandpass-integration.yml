@@ -31,6 +31,7 @@ jobs:
           python3 ci/pr34_apply_phase_b.py
           python3 ci/pr34_fix_phase_b_linear_bound.py
           python3 ci/pr34_fix_phase_b_swift_bridge.py
+          python3 ci/pr34_fix_phase_b_test_bridge.py
 
       - name: Validate Band Pass DSP
         run: |
