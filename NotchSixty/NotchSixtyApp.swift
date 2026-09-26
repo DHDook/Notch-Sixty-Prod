@@ -627,6 +627,285 @@ private struct PR30PhaseTimeValidationView: View {
     }
 }
 
+
+private struct PR31NoiseHumValidationView: View {
+    @ObservedObject var engine: AudioIOEngine
+    @State private var mainsDiagnostics: RenderKernelDiagnostics?
+    private let trackingTimer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
+
+    private func mainsBinding<Value>(_ keyPath: WritableKeyPath<MainsNotchConfiguration, Value>) -> Binding<Value> {
+        Binding(
+            get: { engine.dynamicsConfiguration.mainsNotch[keyPath: keyPath] },
+            set: { value in
+                var updated = engine.dynamicsConfiguration
+                updated.mainsNotch[keyPath: keyPath] = value
+                try? engine.replaceDynamicsConfiguration(updated)
+            }
+        )
+    }
+
+    private var regionBinding: Binding<MainsRegion> {
+        Binding(
+            get: { engine.dynamicsConfiguration.mainsNotch.region },
+            set: { value in
+                var updated = engine.dynamicsConfiguration
+                updated.mainsNotch.selectRegion(value)
+                try? engine.replaceDynamicsConfiguration(updated)
+            }
+        )
+    }
+
+    private var trackingBinding: Binding<Bool> {
+        Binding(
+            get: { engine.dynamicsConfiguration.mainsNotch.continuousTracking },
+            set: { value in
+                var updated = engine.dynamicsConfiguration
+                updated.mainsNotch.continuousTracking = value
+                try? engine.replaceDynamicsConfiguration(updated)
+            }
+        )
+    }
+
+    private var harmonicCountBinding: Binding<Double> {
+        Binding(
+            get: { Double(engine.dynamicsConfiguration.mainsNotch.harmonicCount) },
+            set: { value in
+                var updated = engine.dynamicsConfiguration
+                updated.mainsNotch.harmonicCount = Int(value.rounded())
+                try? engine.replaceDynamicsConfiguration(updated)
+            }
+        )
+    }
+
+    private func harmonicDepthBinding(_ index: Int) -> Binding<Double> {
+        Binding(
+            get: { engine.dynamicsConfiguration.mainsNotch.harmonicDepthsDB[index] },
+            set: { value in
+                var updated = engine.dynamicsConfiguration
+                updated.mainsNotch.harmonicDepthsDB[index] = value
+                try? engine.replaceDynamicsConfiguration(updated)
+            }
+        )
+    }
+
+    private var denoiserEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { engine.dynamicsConfiguration.spectralDenoiser.enabled },
+            set: { value in
+                var updated = engine.dynamicsConfiguration
+                updated.spectralDenoiser.enabled = value
+                try? engine.replaceDynamicsConfiguration(updated)
+            }
+        )
+    }
+
+    private var denoiserPresetBinding: Binding<SpectralDenoiserPreset> {
+        Binding(
+            get: { engine.dynamicsConfiguration.spectralDenoiser.preset },
+            set: { value in try? engine.applySpectralDenoiserPreset(value) }
+        )
+    }
+
+    private func denoiserBinding<Value>(
+        _ keyPath: WritableKeyPath<SpectralDenoiserConfiguration, Value>,
+        marksCustom: Bool = true
+    ) -> Binding<Value> {
+        Binding(
+            get: { engine.dynamicsConfiguration.spectralDenoiser[keyPath: keyPath] },
+            set: { value in
+                var updated = engine.dynamicsConfiguration
+                updated.spectralDenoiser[keyPath: keyPath] = value
+                if marksCustom { updated.spectralDenoiser.markCustom() }
+                try? engine.replaceDynamicsConfiguration(updated)
+            }
+        )
+    }
+
+    var body: some View {
+        let enabled = mainsBinding(\.enabled)
+        let region = regionBinding
+        let q = mainsBinding(\.q)
+
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("PR31 Noise / Hum Validation")
+                    .font(.title2.bold())
+                Text("PR31 now includes mains-frequency detection/tracking plus the new clean-room spectral denoiser. The denoiser is deliberately conservative: linked-stereo WOLA processing, threshold-gated adaptive learning, explicit noise Capture, protected bands, and measurable latency.")
+                    .foregroundStyle(.secondary)
+
+                GroupBox("Mains Hum Notch") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Toggle("Enable Mains Hum Notch", isOn: enabled).toggleStyle(.switch)
+
+                        Picker("Region", selection: region) {
+                            ForEach(MainsRegion.allCases) { value in
+                                Text(value.displayName).tag(value)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(maxWidth: 320)
+
+                        HStack(spacing: 12) {
+                            Text("Harmonics").frame(width: 90, alignment: .leading)
+                            Slider(value: harmonicCountBinding, in: 1...16, step: 1)
+                            Text("\(engine.dynamicsConfiguration.mainsNotch.harmonicCount)")
+                                .monospacedDigit().frame(width: 36)
+                        }
+
+                        HStack(spacing: 12) {
+                            Text("Q").frame(width: 90, alignment: .leading)
+                            Slider(value: q, in: MainsNotchConfiguration.qRange, step: 1)
+                            Text("\(engine.dynamicsConfiguration.mainsNotch.q, specifier: "%.0f")")
+                                .monospacedDigit().frame(width: 48)
+                        }
+
+                        Divider()
+                        Text("Per-harmonic depth")
+                            .font(.subheadline.bold())
+                        ForEach(0..<engine.dynamicsConfiguration.mainsNotch.harmonicCount, id: \.self) { index in
+                            HStack(spacing: 12) {
+                                let frequency = engine.dynamicsConfiguration.mainsNotch.fundamentalHz * Double(index + 1)
+                                Text("H\(index + 1)  \(frequency, specifier: "%.0f") Hz")
+                                    .frame(width: 105, alignment: .leading)
+                                Slider(value: harmonicDepthBinding(index), in: MainsNotchConfiguration.depthRange, step: 1)
+                                Text("\(engine.dynamicsConfiguration.mainsNotch.harmonicDepthsDB[index], specifier: "%.0f") dB")
+                                    .monospacedDigit().frame(width: 70)
+                            }
+                        }
+                    }
+                    .padding(6)
+                }
+
+                GroupBox("Detection / Tracking") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 12) {
+                            Button("Detect") {
+                                _ = try? engine.applyDetectedMainsHum()
+                                mainsDiagnostics = engine.diagnosticsSnapshot().renderKernelDiagnostics
+                            }
+                            Toggle("Continuous Tracking", isOn: trackingBinding).toggleStyle(.switch)
+                        }
+                        let detected = mainsDiagnostics?.mainsDetectedFrequencyHz ?? 0
+                        let confidence = mainsDiagnostics?.mainsDetectionConfidence ?? 0
+                        Text("Detected: \(detected, specifier: "%.2f") Hz   Confidence: \(confidence * 100, specifier: "%.0f")%")
+                            .monospacedDigit()
+                        Text("Active notch fundamental: \(engine.dynamicsConfiguration.mainsNotch.fundamentalHz, specifier: "%.2f") Hz")
+                            .monospacedDigit()
+                        Text("Detector searches ±3 Hz around the selected 50/60 Hz region. One-shot Detect applies the latest confident estimate; Continuous Tracking only republishes bounded, confident changes and the realtime notch crossfades old/new coefficients.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(6)
+                }
+
+                GroupBox("Spectral Denoising") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Toggle("Enable Spectral Denoiser", isOn: denoiserEnabledBinding)
+                            .toggleStyle(.switch)
+
+                        Picker("Preset", selection: denoiserPresetBinding) {
+                            ForEach(SpectralDenoiserPreset.allCases) { value in
+                                Text(value.displayName).tag(value)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+
+                        HStack(spacing: 12) {
+                            Text("Reduction").frame(width: 105, alignment: .leading)
+                            Slider(value: denoiserBinding(\.reductionAmount), in: SpectralDenoiserConfiguration.reductionRange, step: 0.01)
+                            Text("\(engine.dynamicsConfiguration.spectralDenoiser.reductionAmount * 100, specifier: "%.0f")%")
+                                .monospacedDigit().frame(width: 58)
+                        }
+
+                        HStack(spacing: 12) {
+                            Text("Threshold").frame(width: 105, alignment: .leading)
+                            Slider(value: denoiserBinding(\.thresholdDBFS), in: SpectralDenoiserConfiguration.thresholdRange, step: 1)
+                            Text("\(engine.dynamicsConfiguration.spectralDenoiser.thresholdDBFS, specifier: "%.0f") dBFS")
+                                .monospacedDigit().frame(width: 78)
+                        }
+
+                        Picker("Quality", selection: denoiserBinding(\.quality)) {
+                            ForEach(SpectralDenoiserQuality.allCases) { value in
+                                Text(value.displayName).tag(value)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(maxWidth: 420)
+
+                        Toggle("Protect Frequency Range", isOn: denoiserBinding(\.protectedRangeEnabled))
+                            .toggleStyle(.switch)
+
+                        if engine.dynamicsConfiguration.spectralDenoiser.protectedRangeEnabled {
+                            let rate = mainsDiagnostics?.sampleRate ?? 48_000
+                            let maximum = max(200.0, min(20_000.0, rate * 0.5 - 1.0))
+                            HStack(spacing: 12) {
+                                Text("Protected Low").frame(width: 105, alignment: .leading)
+                                Slider(value: denoiserBinding(\.protectedLowHz), in: 0...maximum, step: 10)
+                                Text("\(engine.dynamicsConfiguration.spectralDenoiser.protectedLowHz, specifier: "%.0f") Hz")
+                                    .monospacedDigit().frame(width: 78)
+                            }
+                            HStack(spacing: 12) {
+                                Text("Protected High").frame(width: 105, alignment: .leading)
+                                Slider(value: denoiserBinding(\.protectedHighHz), in: 0...maximum, step: 10)
+                                Text("\(engine.dynamicsConfiguration.spectralDenoiser.protectedHighHz, specifier: "%.0f") Hz")
+                                    .monospacedDigit().frame(width: 78)
+                            }
+                        }
+
+                        Divider()
+                        HStack(spacing: 12) {
+                            Button("Capture Noise Profile") { try? engine.captureSpectralNoiseProfile() }
+                            Button("Reset Profile") { try? engine.resetSpectralNoiseProfile() }
+                        }
+                        Text("Capture listens for about one second. Use a noise-only passage if possible. Reset returns to conservative adaptive learning. Analysis remains warm while bypassed so enabling does not begin from a cold estimator.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(6)
+                }
+
+                GroupBox("Denoiser Telemetry") {
+                    let diagnostics = mainsDiagnostics
+                    let status: String = {
+                        if diagnostics?.denoiserCaptureActive == true { return "Capturing" }
+                        if diagnostics?.denoiserCapturedProfile == true { return "Captured Profile" }
+                        if diagnostics?.denoiserProfileReady == true { return "Adaptive Ready" }
+                        return "Learning"
+                    }()
+                    let rate = diagnostics?.sampleRate ?? 0
+                    let denoiserFrames = diagnostics?.denoiserLatencyFrames ?? 0
+                    let denoiserMS = rate > 0 ? Double(denoiserFrames) * 1000.0 / rate : 0
+                    Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 7) {
+                        GridRow { Text("Profile state").foregroundStyle(.secondary); Text(status) }
+                        GridRow { Text("Capture progress").foregroundStyle(.secondary); Text("\((diagnostics?.denoiserCaptureProgress ?? 0) * 100, specifier: "%.0f")%") }
+                        GridRow { Text("Estimated noise").foregroundStyle(.secondary); Text("\(diagnostics?.denoiserEstimatedNoiseDBFS ?? -120, specifier: "%.1f") dBFS") }
+                        GridRow { Text("Mean suppression").foregroundStyle(.secondary); Text("\(diagnostics?.denoiserMeanSuppressionDB ?? 0, specifier: "%.2f") dB") }
+                        GridRow { Text("Max suppression").foregroundStyle(.secondary); Text("\(diagnostics?.denoiserMaxSuppressionDB ?? 0, specifier: "%.2f") dB") }
+                        GridRow { Text("FFT / hop").foregroundStyle(.secondary); Text("\(diagnostics?.denoiserFFTSize ?? 0) / \(diagnostics?.denoiserHopSize ?? 0) frames") }
+                        GridRow { Text("Denoiser latency").foregroundStyle(.secondary); Text("\(denoiserFrames) frames  (\(denoiserMS, specifier: "%.2f") ms)") }
+                        GridRow { Text("Total DSP latency").foregroundStyle(.secondary); Text("\(diagnostics?.latencyFrames ?? 0) frames") }
+                        GridRow { Text("Spectral frames").foregroundStyle(.secondary); Text("\(diagnostics?.denoiserSpectralFramesProcessed ?? 0)") }
+                    }
+                    .font(.system(.body, design: .monospaced))
+                    .textSelection(.enabled)
+                    .padding(6)
+                }
+
+                Text("Denoiser acceptance focus: start with Natural or Standard. Listen for real noise-floor reduction without pumping, chirping/musical-noise artifacts, softened transients, vocal smearing, or stereo-image movement. Compare Capture against adaptive learning, exercise the protected range, and compare Quality / High / Ultra. Reference and Delta must remain latency aligned. Aggressive is intentionally the stress case, not the default recommendation.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(20)
+        }
+        .frame(minWidth: 880, minHeight: 700)
+        .onAppear { mainsDiagnostics = engine.diagnosticsSnapshot().renderKernelDiagnostics }
+        .onReceive(trackingTimer) { _ in
+            mainsDiagnostics = engine.diagnosticsSnapshot().renderKernelDiagnostics
+            engine.pollMainsHumTracking()
+        }
+    }
+}
+
 @main
 struct NotchSixtyApp: App {
     @StateObject private var product = ProductController()
@@ -645,6 +924,9 @@ struct NotchSixtyApp: App {
 
                 PR30PhaseTimeValidationView(engine: product.audioEngine)
                     .tabItem { Label("PR30 Phase / Time", systemImage: "timeline.selection") }
+
+                PR31NoiseHumValidationView(engine: product.audioEngine)
+                    .tabItem { Label("PR31 Noise / Hum", systemImage: "waveform.slash") }
             }
         }
     }

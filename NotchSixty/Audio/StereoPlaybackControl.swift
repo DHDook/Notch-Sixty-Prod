@@ -245,8 +245,11 @@ struct StereoEQConfiguration: Equatable, Sendable {
         }
         graph.dynamics = try dynamicsConfiguration.makeSnapshot(sampleRate: sampleRate)
         graph.protection = try dynamicsConfiguration.makeProtectionSnapshot(sampleRate: sampleRate)
+        let denoiserLatency = graph.dynamics.spectralDenoiser.enabled
+            ? UInt64(graph.dynamics.spectralDenoiser.latencyFrames)
+            : 0
         let protectionLatency = UInt64(graph.protection.latencyFrames)
-        let totalLatency = UInt64(graph.latencyFrames) + protectionLatency
+        let totalLatency = UInt64(graph.latencyFrames) + denoiserLatency + protectionLatency
         guard totalLatency < UInt64(N60_MAX_AUDITION_DELAY_FRAMES) else {
             throw DynamicsConfigurationError.invalidOversampling
         }

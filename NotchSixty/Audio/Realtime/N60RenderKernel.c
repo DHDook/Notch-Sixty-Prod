@@ -69,6 +69,7 @@ struct N60RenderKernel {
     N60EQBandRuntime eqRuntime[N60_MAX_EQ_RENDER_SLOTS];
     N60CrossoverRuntime crossoverRuntime;
     N60DynamicsRuntime dynamicsRuntime;
+    N60SpectralDenoiserRuntime *denoiserRuntime;
     N60ProtectionRuntime *protectionRuntime;
     N60PartitionedConvolver *convolver;
     N60PartitionedConvolver *roomCorrectionConvolver;
@@ -97,6 +98,16 @@ struct N60RenderKernel {
     _Atomic uint64_t convolutionProgramMisses;
     _Atomic uint64_t roomCorrectionProgramMisses;
 
+    _Atomic uint32_t mainsDetectedFrequencyBits;
+    _Atomic uint32_t mainsDetectionConfidenceBits;
+    _Atomic bool denoiserProfileReady;
+    _Atomic bool denoiserCapturedProfile;
+    _Atomic bool denoiserCaptureActive;
+    _Atomic uint32_t denoiserCaptureProgressBits;
+    _Atomic uint32_t denoiserEstimatedNoiseBits;
+    _Atomic uint32_t denoiserMeanSuppressionBits;
+    _Atomic uint32_t denoiserMaxSuppressionBits;
+    _Atomic uint64_t denoiserSpectralFramesProcessed;
     _Atomic uint32_t deEsserGainReductionBits;
     _Atomic uint32_t multibandLowGainReductionBits;
     _Atomic uint32_t multibandMidGainReductionBits;
@@ -245,6 +256,7 @@ static bool snapshot_is_valid(N60DSPGraphSnapshot snapshot) {
         || snapshot.eqBandCount > N60_MAX_EQ_RENDER_SLOTS
         || !crossover_snapshot_is_valid(snapshot.crossover, snapshot.sampleRate)
         || !N60DynamicsSnapshotIsValid(snapshot.dynamics)
+        || !N60SpectralDenoiserSnapshotIsValid(snapshot.dynamics.spectralDenoiser, snapshot.sampleRate)
         || !N60ProtectionSnapshotIsValid(&snapshot.protection)
         || !convolution_snapshot_is_valid(snapshot.convolution)
         || !convolution_snapshot_is_valid(snapshot.roomCorrection)) {
@@ -884,6 +896,14 @@ N60RenderKernel *N60RenderKernelCreate(void) {
         free(kernel);
         return NULL;
     }
+    kernel->denoiserRuntime = N60SpectralDenoiserCreate();
+    if (kernel->denoiserRuntime == NULL) {
+        N60ProtectionRuntimeDestroy(kernel->protectionRuntime);
+        N60PartitionedConvolverDestroy(kernel->roomCorrectionConvolver);
+        N60PartitionedConvolverDestroy(kernel->convolver);
+        free(kernel);
+        return NULL;
+    }
     N60DSPGraphSnapshot initial = N60DSPGraphSnapshotMakeUnity(48000.0);
     initial.generation = 1;
     kernel->slots[0].snapshot = initial;
@@ -906,6 +926,7 @@ N60RenderKernel *N60RenderKernelCreate(void) {
 
 void N60RenderKernelDestroy(N60RenderKernel *kernel) {
     if (kernel == NULL) return;
+    N60SpectralDenoiserDestroy(kernel->denoiserRuntime);
     N60ProtectionRuntimeDestroy(kernel->protectionRuntime);
     N60PartitionedConvolverDestroy(kernel->roomCorrectionConvolver);
     N60PartitionedConvolverDestroy(kernel->convolver);
@@ -917,6 +938,7 @@ void N60RenderKernelReset(N60RenderKernel *kernel) {
     reset_eq_runtime(kernel);
     reset_crossover_runtime(&kernel->crossoverRuntime, N60CrossoverSnapshotMakeBypassed());
     N60DynamicsRuntimeReset(&kernel->dynamicsRuntime);
+    N60SpectralDenoiserReset(kernel->denoiserRuntime);
     N60ProtectionRuntimeReset(kernel->protectionRuntime);
     N60PartitionedConvolverReset(kernel->convolver);
     N60PartitionedConvolverReset(kernel->roomCorrectionConvolver);
@@ -943,6 +965,14 @@ void N60RenderKernelReset(N60RenderKernel *kernel) {
     atomic_store_explicit(&kernel->snapshotReadMisses, 0, memory_order_relaxed);
     atomic_store_explicit(&kernel->convolutionProgramMisses, 0, memory_order_relaxed);
     atomic_store_explicit(&kernel->roomCorrectionProgramMisses, 0, memory_order_relaxed);
+    atomic_store_explicit(&kernel->denoiserProfileReady, false, memory_order_relaxed);
+    atomic_store_explicit(&kernel->denoiserCapturedProfile, false, memory_order_relaxed);
+    atomic_store_explicit(&kernel->denoiserCaptureActive, false, memory_order_relaxed);
+    atomic_store_explicit(&kernel->denoiserCaptureProgressBits, 0, memory_order_relaxed);
+    atomic_store_explicit(&kernel->denoiserEstimatedNoiseBits, float_to_bits(-120.0f), memory_order_relaxed);
+    atomic_store_explicit(&kernel->denoiserMeanSuppressionBits, 0, memory_order_relaxed);
+    atomic_store_explicit(&kernel->denoiserMaxSuppressionBits, 0, memory_order_relaxed);
+    atomic_store_explicit(&kernel->denoiserSpectralFramesProcessed, 0, memory_order_relaxed);
     atomic_store_explicit(&kernel->inputPeakLeftBits, 0, memory_order_relaxed);
     atomic_store_explicit(&kernel->inputPeakRightBits, 0, memory_order_relaxed);
     atomic_store_explicit(&kernel->inputRMSLeftBits, 0, memory_order_relaxed);
@@ -1045,6 +1075,16 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
         right *= inputGain * headroomGain;
 
         N60DynamicsProcessPreEQStereoFrame(&kernel->dynamicsRuntime, context->snapshot.dynamics, &left, &right);
+
+        N60SpectralDenoiserProcessStereoFrame(
+            kernel->denoiserRuntime,
+            context->snapshot.dynamics.spectralDenoiser,
+            context->snapshot.sampleRate,
+            left,
+            right,
+            &left,
+            &right
+        );
 
         if (!context->snapshot.eqBypassed) {
             for (uint32_t index = 0; index < N60_MAX_EQ_RENDER_SLOTS; ++index) {
@@ -1166,6 +1206,17 @@ void N60RenderKernelEndRender(N60RenderKernel *kernel, N60RenderKernelRenderCont
     publish_meter(&kernel->outputPeakLeftBits, &kernel->outputPeakRightBits, &kernel->outputRMSLeftBits, &kernel->outputRMSRightBits, &kernel->outputOverRangeSamples, context->outputPeakLeft, context->outputPeakRight, context->outputSquareSumLeft, context->outputSquareSumRight, context->outputOverRangeSamples, context->meteredFrames);
     if (renderedFrames > 0) {
         N60DynamicsTelemetry telemetry = N60DynamicsRuntimeTelemetry(&kernel->dynamicsRuntime);
+        atomic_store_explicit(&kernel->mainsDetectedFrequencyBits, float_to_bits(telemetry.mainsDetectedFrequencyHz), memory_order_relaxed);
+        atomic_store_explicit(&kernel->mainsDetectionConfidenceBits, float_to_bits(telemetry.mainsDetectionConfidence), memory_order_relaxed);
+        N60SpectralDenoiserTelemetry denoiser = N60SpectralDenoiserRuntimeTelemetry(kernel->denoiserRuntime);
+        atomic_store_explicit(&kernel->denoiserProfileReady, denoiser.profileReady, memory_order_relaxed);
+        atomic_store_explicit(&kernel->denoiserCapturedProfile, denoiser.capturedProfile, memory_order_relaxed);
+        atomic_store_explicit(&kernel->denoiserCaptureActive, denoiser.captureActive, memory_order_relaxed);
+        atomic_store_explicit(&kernel->denoiserCaptureProgressBits, float_to_bits(denoiser.captureProgress), memory_order_relaxed);
+        atomic_store_explicit(&kernel->denoiserEstimatedNoiseBits, float_to_bits(denoiser.estimatedNoiseDBFS), memory_order_relaxed);
+        atomic_store_explicit(&kernel->denoiserMeanSuppressionBits, float_to_bits(denoiser.meanSuppressionDB), memory_order_relaxed);
+        atomic_store_explicit(&kernel->denoiserMaxSuppressionBits, float_to_bits(denoiser.maxSuppressionDB), memory_order_relaxed);
+        atomic_store_explicit(&kernel->denoiserSpectralFramesProcessed, denoiser.spectralFramesProcessed, memory_order_relaxed);
         atomic_store_explicit(&kernel->deEsserGainReductionBits, float_to_bits(telemetry.deEsserGainReductionDB), memory_order_relaxed);
         atomic_store_explicit(&kernel->multibandLowGainReductionBits, float_to_bits(telemetry.multibandLowGainReductionDB), memory_order_relaxed);
         atomic_store_explicit(&kernel->multibandMidGainReductionBits, float_to_bits(telemetry.multibandMidGainReductionDB), memory_order_relaxed);
@@ -1243,6 +1294,15 @@ N60RenderKernelDiagnostics N60RenderKernelGetDiagnostics(const N60RenderKernel *
         diagnostics.crossoverSubGainLinear = context.snapshot.crossover.subGainLinear;
         diagnostics.crossoverSubPolarityInverted = context.snapshot.crossover.subPolarityInverted;
         diagnostics.crossoverSectionCount = context.snapshot.crossover.sectionCount;
+        diagnostics.mainsDetectedFrequencyHz = bits_to_float(atomic_load_explicit(&kernel->mainsDetectedFrequencyBits, memory_order_relaxed));
+        diagnostics.mainsDetectionConfidence = bits_to_float(atomic_load_explicit(&kernel->mainsDetectionConfidenceBits, memory_order_relaxed));
+        diagnostics.spectralDenoiserEnabled = context.snapshot.dynamics.spectralDenoiser.enabled;
+        diagnostics.spectralDenoiserTuning = context.snapshot.dynamics.spectralDenoiser.tuning;
+        diagnostics.spectralDenoiserQuality = context.snapshot.dynamics.spectralDenoiser.quality;
+        diagnostics.denoiserFFTSize = context.snapshot.dynamics.spectralDenoiser.fftSize;
+        diagnostics.denoiserHopSize = context.snapshot.dynamics.spectralDenoiser.hopSize;
+        diagnostics.denoiserLatencyFrames = context.snapshot.dynamics.spectralDenoiser.enabled
+            ? context.snapshot.dynamics.spectralDenoiser.latencyFrames : 0;
         diagnostics.deEsserEnabled = context.snapshot.dynamics.deEsser.enabled;
         diagnostics.deEsserDynamicEQMode = context.snapshot.dynamics.deEsser.dynamicEQMode;
         diagnostics.deEsserFrequencyHz = context.snapshot.dynamics.deEsser.frequencyHz;
@@ -1280,6 +1340,16 @@ N60RenderKernelDiagnostics N60RenderKernelGetDiagnostics(const N60RenderKernel *
     diagnostics.snapshotReadMisses = atomic_load_explicit(&kernel->snapshotReadMisses, memory_order_relaxed);
     diagnostics.convolutionProgramMisses = atomic_load_explicit(&kernel->convolutionProgramMisses, memory_order_relaxed);
     diagnostics.roomCorrectionProgramMisses = atomic_load_explicit(&kernel->roomCorrectionProgramMisses, memory_order_relaxed);
+    diagnostics.mainsDetectedFrequencyHz = bits_to_float(atomic_load_explicit(&kernel->mainsDetectedFrequencyBits, memory_order_relaxed));
+    diagnostics.mainsDetectionConfidence = bits_to_float(atomic_load_explicit(&kernel->mainsDetectionConfidenceBits, memory_order_relaxed));
+    diagnostics.denoiserProfileReady = atomic_load_explicit(&kernel->denoiserProfileReady, memory_order_relaxed);
+    diagnostics.denoiserCapturedProfile = atomic_load_explicit(&kernel->denoiserCapturedProfile, memory_order_relaxed);
+    diagnostics.denoiserCaptureActive = atomic_load_explicit(&kernel->denoiserCaptureActive, memory_order_relaxed);
+    diagnostics.denoiserCaptureProgress = bits_to_float(atomic_load_explicit(&kernel->denoiserCaptureProgressBits, memory_order_relaxed));
+    diagnostics.denoiserEstimatedNoiseDBFS = bits_to_float(atomic_load_explicit(&kernel->denoiserEstimatedNoiseBits, memory_order_relaxed));
+    diagnostics.denoiserMeanSuppressionDB = bits_to_float(atomic_load_explicit(&kernel->denoiserMeanSuppressionBits, memory_order_relaxed));
+    diagnostics.denoiserMaxSuppressionDB = bits_to_float(atomic_load_explicit(&kernel->denoiserMaxSuppressionBits, memory_order_relaxed));
+    diagnostics.denoiserSpectralFramesProcessed = atomic_load_explicit(&kernel->denoiserSpectralFramesProcessed, memory_order_relaxed);
     diagnostics.deEsserGainReductionDB = bits_to_float(atomic_load_explicit(&kernel->deEsserGainReductionBits, memory_order_relaxed));
     diagnostics.multibandLowGainReductionDB = bits_to_float(atomic_load_explicit(&kernel->multibandLowGainReductionBits, memory_order_relaxed));
     diagnostics.multibandMidGainReductionDB = bits_to_float(atomic_load_explicit(&kernel->multibandMidGainReductionBits, memory_order_relaxed));

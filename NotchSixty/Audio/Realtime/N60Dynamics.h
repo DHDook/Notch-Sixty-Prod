@@ -6,6 +6,7 @@
 
 #include "N60Biquad.h"
 #include "N60Crossover.h"
+#include "N60SpectralDenoiser.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -13,6 +14,8 @@ extern "C" {
 
 #define N60_MULTIBAND_BAND_COUNT 3
 #define N60_MAX_INFRASONIC_SECTIONS 8
+#define N60_MAX_MAINS_HARMONICS 16
+#define N60_MAINS_DETECTOR_BIN_COUNT 25
 
 typedef enum {
     N60InfrasonicSlope24DBPerOctave = 0,
@@ -55,6 +58,39 @@ typedef struct {
     uint32_t sectionCount;
     N60BiquadCoefficients highPass[N60_MAX_INFRASONIC_SECTIONS];
 } N60InfrasonicFilterSnapshot;
+
+typedef struct {
+    double b0;
+    double b1;
+    double b2;
+    double a1;
+    double a2;
+} N60MainsNotchCoefficients;
+
+typedef struct {
+    double z1;
+    double z2;
+} N60MainsNotchState;
+
+typedef struct {
+    bool enabled;
+    double fundamentalHz;
+    uint32_t harmonicCount;
+    float q;
+    float depthsDB[N60_MAX_MAINS_HARMONICS];
+    N60MainsNotchCoefficients filters[N60_MAX_MAINS_HARMONICS];
+} N60MainsNotchSnapshot;
+
+typedef struct {
+    bool enabled;
+    double searchCenterHz;
+    double searchStartHz;
+    double binSpacingHz;
+    uint32_t decimationFactor;
+    uint32_t windowSamples;
+    float oscillatorStepCos[N60_MAINS_DETECTOR_BIN_COUNT];
+    float oscillatorStepSin[N60_MAINS_DETECTOR_BIN_COUNT];
+} N60MainsHumDetectorSnapshot;
 
 typedef struct {
     bool enabled;
@@ -139,6 +175,9 @@ typedef struct {
     N60StereoWidenerSnapshot stereoWidener;
     N60DCOffsetFilterSnapshot dcOffsetFilter;
     N60InfrasonicFilterSnapshot infrasonicFilter;
+    N60MainsNotchSnapshot mainsNotch;
+    N60MainsHumDetectorSnapshot mainsHumDetector;
+    N60SpectralDenoiserSnapshot spectralDenoiser;
     N60LoudnessMatchSnapshot loudnessMatch;
     N60LoudnessContourSnapshot loudnessContour;
     N60DeEsserSnapshot deEsser;
@@ -167,6 +206,33 @@ typedef struct {
     N60BiquadState infrasonicLeft[N60_MAX_INFRASONIC_SECTIONS];
     N60BiquadState infrasonicRight[N60_MAX_INFRASONIC_SECTIONS];
     float infrasonicMix;
+    N60MainsNotchCoefficients mainsNotchCurrentFilters[N60_MAX_MAINS_HARMONICS];
+    N60MainsNotchCoefficients mainsNotchPendingFilters[N60_MAX_MAINS_HARMONICS];
+    N60MainsNotchState mainsNotchLeft[N60_MAX_MAINS_HARMONICS];
+    N60MainsNotchState mainsNotchRight[N60_MAX_MAINS_HARMONICS];
+    N60MainsNotchState mainsNotchPendingLeft[N60_MAX_MAINS_HARMONICS];
+    N60MainsNotchState mainsNotchPendingRight[N60_MAX_MAINS_HARMONICS];
+    double mainsNotchCurrentFundamentalHz;
+    double mainsNotchPendingFundamentalHz;
+    float mainsNotchCurrentQ;
+    float mainsNotchPendingQ;
+    uint32_t mainsNotchCurrentHarmonicCount;
+    uint32_t mainsNotchPendingHarmonicCount;
+    float mainsNotchCurrentDepthsDB[N60_MAX_MAINS_HARMONICS];
+    float mainsNotchPendingDepthsDB[N60_MAX_MAINS_HARMONICS];
+    uint32_t mainsNotchTransitionFramesTotal;
+    uint32_t mainsNotchTransitionFramesRemaining;
+    bool mainsNotchInitialized;
+    float mainsNotchMix;
+    uint32_t mainsDetectorDecimationCounter;
+    uint32_t mainsDetectorSampleCount;
+    double mainsDetectorOscCos[N60_MAINS_DETECTOR_BIN_COUNT];
+    double mainsDetectorOscSin[N60_MAINS_DETECTOR_BIN_COUNT];
+    double mainsDetectorReal[N60_MAINS_DETECTOR_BIN_COUNT];
+    double mainsDetectorImag[N60_MAINS_DETECTOR_BIN_COUNT];
+    double mainsDetectorWindowEnergy;
+    float mainsDetectedFrequencyHz;
+    float mainsDetectionConfidence;
     N60BiquadState loudnessKWeightHighPassLeft;
     N60BiquadState loudnessKWeightHighPassRight;
     N60BiquadState loudnessKWeightShelfLeft;
@@ -198,6 +264,8 @@ typedef struct {
 } N60DynamicsRuntime;
 
 typedef struct {
+    float mainsDetectedFrequencyHz;
+    float mainsDetectionConfidence;
     float deEsserGainReductionDB;
     float multibandLowGainReductionDB;
     float multibandMidGainReductionDB;
@@ -242,6 +310,39 @@ bool N60DynamicsSnapshotSetInfrasonicFilter(
     bool enabled,
     double cutoffHz,
     N60InfrasonicSlope slope
+);
+
+bool N60DynamicsSnapshotSetMainsNotch(
+    N60DynamicsSnapshot * _Nonnull snapshot,
+    double sampleRate,
+    bool enabled,
+    double fundamentalHz,
+    uint32_t harmonicCount,
+    float q,
+    const float * _Nonnull depthsDB,
+    uint32_t depthCount
+);
+
+bool N60DynamicsSnapshotSetMainsHumDetector(
+    N60DynamicsSnapshot * _Nonnull snapshot,
+    double sampleRate,
+    bool enabled,
+    double searchCenterHz
+);
+
+bool N60DynamicsSnapshotSetSpectralDenoiser(
+    N60DynamicsSnapshot * _Nonnull snapshot,
+    double sampleRate,
+    bool enabled,
+    N60DenoiserTuning tuning,
+    N60DenoiserQuality quality,
+    float reductionAmount,
+    float thresholdDBFS,
+    bool protectedRangeEnabled,
+    float protectedLowHz,
+    float protectedHighHz,
+    uint32_t profileRevision,
+    N60DenoiserProfileCommand profileCommand
 );
 
 bool N60DynamicsSnapshotSetLoudnessMatch(

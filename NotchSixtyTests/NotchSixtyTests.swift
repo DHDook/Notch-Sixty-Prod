@@ -632,3 +632,502 @@ private final class StubOutputDeviceCatalog: OutputDeviceCataloging {
     init(devices: [AudioOutputDevice]) { self.devices = devices }
     func outputDevices() throws -> [AudioOutputDevice] { devices }
 }
+
+
+extension NotchSixtyTests {
+    func testMainsNotchSuppressesConfiguredFundamentalAcrossRates() throws {
+        for rate in [48_000.0, 96_000.0, 384_000.0] {
+            let gainDB = try measuredMainsNotchGainDB(
+                sampleRate: rate,
+                toneFrequency: 60,
+                region: .hz60,
+                harmonic: 1,
+                depthDB: -24
+            )
+            XCTAssertLessThan(gainDB, -20.0, "Insufficient 60 Hz rejection at \(rate) Hz")
+        }
+    }
+
+    func testMainsNotchTargetsSelectedHarmonicWithoutBroadLevelLoss() throws {
+        let secondHarmonic = try measuredMainsNotchGainDB(
+            sampleRate: 96_000,
+            toneFrequency: 120,
+            region: .hz60,
+            harmonic: 2,
+            depthDB: -18
+        )
+        let offBand = try measuredMainsNotchGainDB(
+            sampleRate: 96_000,
+            toneFrequency: 1_000,
+            region: .hz60,
+            harmonic: 2,
+            depthDB: -18
+        )
+        XCTAssertLessThan(secondHarmonic, -14.0)
+        XCTAssertGreaterThan(offBand, -0.15)
+    }
+
+    func testMainsNotchDisabledIsTransparent() throws {
+        guard let kernel = N60RenderKernelCreate() else { return XCTFail("Unable to create render kernel") }
+        defer { N60RenderKernelDestroy(kernel) }
+        var dynamics = DynamicsConfiguration()
+        dynamics.mainsNotch.enabled = false
+        var graph = N60DSPGraphSnapshotMakeUnity(96_000)
+        graph.dynamics = try dynamics.makeSnapshot(sampleRate: 96_000)
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        for frame in 0..<4_000 {
+            let leftIn = Float(sin(Double(frame) * 0.071) * 0.35)
+            let rightIn = Float(cos(Double(frame) * 0.053) * 0.27)
+            var left: Float = 0
+            var right: Float = 0
+            N60RenderKernelProcessStereoFrame(kernel, leftIn, rightIn, &left, &right)
+            XCTAssertEqual(left, leftIn, accuracy: 0.000_001)
+            XCTAssertEqual(right, rightIn, accuracy: 0.000_001)
+        }
+    }
+
+    private func measuredMainsNotchGainDB(
+        sampleRate: Double,
+        toneFrequency: Double,
+        region: MainsRegion,
+        harmonic: Int,
+        depthDB: Double
+    ) throws -> Double {
+        guard let kernel = N60RenderKernelCreate() else {
+            XCTFail("Unable to create render kernel")
+            return 0
+        }
+        defer { N60RenderKernelDestroy(kernel) }
+
+        var dynamics = DynamicsConfiguration()
+        dynamics.mainsNotch.enabled = true
+        dynamics.mainsNotch.region = region
+        dynamics.mainsNotch.harmonicCount = max(1, harmonic)
+        dynamics.mainsNotch.q = 30
+        dynamics.mainsNotch.harmonicDepthsDB = Array(repeating: 0, count: MainsNotchConfiguration.maximumHarmonics)
+        dynamics.mainsNotch.harmonicDepthsDB[harmonic - 1] = depthDB
+
+        var graph = N60DSPGraphSnapshotMakeUnity(sampleRate)
+        graph.dynamics = try dynamics.makeSnapshot(sampleRate: sampleRate)
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+
+        // A 60 Hz, Q=30 cut has a long physical settling time. Give the
+        // realtime IIR enough time to reach steady state before evaluating the
+        // requested depth, especially at the 384 kHz validation rate.
+        let frameCount = max(Int(sampleRate * 1.25), 60_000)
+        let settleFrames = max(Int(sampleRate * 0.55), 24_000)
+        var inputEnergy = 0.0
+        var outputEnergy = 0.0
+        var measuredFrames = 0
+        for frame in 0..<frameCount {
+            let sample = Float(0.1 * sin(2.0 * Double.pi * toneFrequency * Double(frame) / sampleRate))
+            var left: Float = 0
+            var right: Float = 0
+            N60RenderKernelProcessStereoFrame(kernel, sample, sample, &left, &right)
+            if frame >= settleFrames {
+                inputEnergy += Double(sample * sample)
+                outputEnergy += Double(left * left)
+                measuredFrames += 1
+            }
+        }
+        let inputRMS = sqrt(inputEnergy / Double(measuredFrames))
+        let outputRMS = sqrt(outputEnergy / Double(measuredFrames))
+        return 20.0 * log10(max(outputRMS, 1.0e-12) / max(inputRMS, 1.0e-12))
+    }
+}
+
+
+extension NotchSixtyTests {
+    func testMainsHumDetectorFindsOffsetFundamental() throws {
+        guard let kernel = N60RenderKernelCreate() else { return XCTFail("Unable to create render kernel") }
+        defer { N60RenderKernelDestroy(kernel) }
+        let sampleRate = 48_000.0
+        var dynamics = DynamicsConfiguration()
+        dynamics.mainsNotch.enabled = false
+        dynamics.mainsNotch.region = .hz60
+        var graph = N60DSPGraphSnapshotMakeUnity(sampleRate)
+        graph.dynamics = try dynamics.makeSnapshot(sampleRate: sampleRate)
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        let frequency = 60.75
+        for frame in 0..<Int(sampleRate * 2.2) {
+            let sample = Float(0.08 * sin(2.0 * Double.pi * frequency * Double(frame) / sampleRate))
+            var left: Float = 0
+            var right: Float = 0
+            N60RenderKernelProcessStereoFrame(kernel, sample, sample, &left, &right)
+        }
+        let diagnostics = N60RenderKernelGetDiagnostics(kernel)
+        XCTAssertEqual(Double(diagnostics.mainsDetectedFrequencyHz), frequency, accuracy: 0.35)
+        XCTAssertGreaterThan(diagnostics.mainsDetectionConfidence, 0.70)
+    }
+
+    func testMainsHumDetectorRejectsOutOfBandTone() throws {
+        guard let kernel = N60RenderKernelCreate() else { return XCTFail("Unable to create render kernel") }
+        defer { N60RenderKernelDestroy(kernel) }
+        let sampleRate = 48_000.0
+        var dynamics = DynamicsConfiguration()
+        dynamics.mainsNotch.region = .hz60
+        var graph = N60DSPGraphSnapshotMakeUnity(sampleRate)
+        graph.dynamics = try dynamics.makeSnapshot(sampleRate: sampleRate)
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        for frame in 0..<Int(sampleRate * 1.2) {
+            let sample = Float(0.1 * sin(2.0 * Double.pi * 1_000.0 * Double(frame) / sampleRate))
+            var left: Float = 0
+            var right: Float = 0
+            N60RenderKernelProcessStereoFrame(kernel, sample, sample, &left, &right)
+        }
+        let diagnostics = N60RenderKernelGetDiagnostics(kernel)
+        XCTAssertLessThan(diagnostics.mainsDetectionConfidence, 0.25)
+    }
+
+    func testMainsNotchRetuneTransitionRemainsFiniteAndBounded() throws {
+        guard let kernel = N60RenderKernelCreate() else { return XCTFail("Unable to create render kernel") }
+        defer { N60RenderKernelDestroy(kernel) }
+        let sampleRate = 48_000.0
+        var dynamics = DynamicsConfiguration()
+        dynamics.mainsNotch.enabled = true
+        dynamics.mainsNotch.harmonicCount = 1
+        dynamics.mainsNotch.harmonicDepthsDB = Array(repeating: 0, count: MainsNotchConfiguration.maximumHarmonics)
+        dynamics.mainsNotch.harmonicDepthsDB[0] = -24
+        var graph = N60DSPGraphSnapshotMakeUnity(sampleRate)
+        graph.dynamics = try dynamics.makeSnapshot(sampleRate: sampleRate)
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        var previous: Float = 0
+        var maximumJump: Float = 0
+        for frame in 0..<12_000 {
+            if frame == 6_000 {
+                dynamics.mainsNotch.detectedFundamentalHz = 60.8
+                graph.dynamics = try dynamics.makeSnapshot(sampleRate: sampleRate)
+                XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+            }
+            let sample = Float(0.1 * sin(2.0 * Double.pi * 60.4 * Double(frame) / sampleRate))
+            var left: Float = 0
+            var right: Float = 0
+            N60RenderKernelProcessStereoFrame(kernel, sample, sample, &left, &right)
+            XCTAssertTrue(left.isFinite)
+            maximumJump = max(maximumJump, abs(left - previous))
+            previous = left
+        }
+        XCTAssertLessThan(maximumJump, 0.03)
+    }
+}
+
+
+extension NotchSixtyTests {
+    func testSpectralDenoiserQualityModesHaveExplicitPowerOfTwoContracts() throws {
+        for (quality, expected) in [
+            (N60DenoiserQualityQuality, UInt32(1024)),
+            (N60DenoiserQualityHigh, UInt32(2048)),
+            (N60DenoiserQualityUltra, UInt32(4096)),
+        ] {
+            var snapshot = N60SpectralDenoiserSnapshotMakeBypassed(96_000)
+            XCTAssertTrue(N60SpectralDenoiserSnapshotConfigure(
+                &snapshot, 96_000, true, N60DenoiserTuningStandard, quality,
+                0.5, -60, false, 0, 150, 0, N60DenoiserProfileCommandNone
+            ))
+            XCTAssertEqual(snapshot.fftSize, expected)
+            XCTAssertEqual(snapshot.hopSize, expected / 2)
+            XCTAssertEqual(snapshot.latencyFrames, expected)
+            XCTAssertTrue(N60SpectralDenoiserSnapshotIsValid(snapshot, 96_000))
+        }
+    }
+
+    func testSpectralDenoiserDisabledPathIsExactlyTransparent() throws {
+        guard let runtime = N60SpectralDenoiserCreate() else {
+            XCTFail("Unable to allocate spectral denoiser")
+            return
+        }
+        defer { N60SpectralDenoiserDestroy(runtime) }
+        var snapshot = N60SpectralDenoiserSnapshotMakeBypassed(48_000)
+        XCTAssertTrue(N60SpectralDenoiserSnapshotConfigure(
+            &snapshot, 48_000, false, N60DenoiserTuningNatural, N60DenoiserQualityHigh,
+            0.5, -72, false, 0, 150, 0, N60DenoiserProfileCommandNone
+        ))
+        for frame in 0..<12_000 {
+            let left = Float(sin(Double(frame) * 0.071)) * 0.37
+            let right = Float(cos(Double(frame) * 0.043)) * 0.29
+            var outputLeft: Float = 0
+            var outputRight: Float = 0
+            N60SpectralDenoiserProcessStereoFrame(runtime, snapshot, 48_000, left, right, &outputLeft, &outputRight)
+            XCTAssertEqual(outputLeft, left, accuracy: 0)
+            XCTAssertEqual(outputRight, right, accuracy: 0)
+        }
+    }
+
+    func testSpectralDenoiserCapturedProfileReducesStationaryNoiseWithLinkedStereoGain() throws {
+        guard let runtime = N60SpectralDenoiserCreate() else {
+            XCTFail("Unable to allocate spectral denoiser")
+            return
+        }
+        defer { N60SpectralDenoiserDestroy(runtime) }
+        var snapshot = N60SpectralDenoiserSnapshotMakeBypassed(48_000)
+        XCTAssertTrue(N60SpectralDenoiserSnapshotConfigure(
+            &snapshot, 48_000, true, N60DenoiserTuningStandard, N60DenoiserQualityHigh,
+            0.8, -48, false, 0, 150, 1, N60DenoiserProfileCommandCapture
+        ))
+
+        var state: UInt32 = 0x1234ABCD
+        var inputSquare = 0.0
+        var outputSquare = 0.0
+        var measured = 0
+        let totalFrames = 48_000 * 4
+        for frame in 0..<totalFrames {
+            state = state &* 1_664_525 &+ 1_013_904_223
+            let unit = Float(state & 0xFFFF) / 32_767.5 - 1.0
+            let left = unit * 0.045
+            let right = left * 0.5
+            var outputLeft: Float = 0
+            var outputRight: Float = 0
+            N60SpectralDenoiserProcessStereoFrame(runtime, snapshot, 48_000, left, right, &outputLeft, &outputRight)
+            if frame > 48_000 * 3 {
+                inputSquare += Double(left * left)
+                outputSquare += Double(outputLeft * outputLeft)
+                measured += 1
+                if abs(outputLeft) > 1.0e-5 {
+                    XCTAssertEqual(outputRight / outputLeft, 0.5, accuracy: 0.015)
+                }
+            }
+        }
+        let inputRMS = sqrt(inputSquare / Double(measured))
+        let outputRMS = sqrt(outputSquare / Double(measured))
+        XCTAssertLessThan(outputRMS, inputRMS * 0.75)
+        let telemetry = N60SpectralDenoiserRuntimeTelemetry(runtime)
+        XCTAssertTrue(telemetry.profileReady)
+        XCTAssertTrue(telemetry.capturedProfile)
+        XCTAssertFalse(telemetry.captureActive)
+        XCTAssertGreaterThan(telemetry.meanSuppressionDB, 1.0)
+        XCTAssertGreaterThan(telemetry.maxSuppressionDB, telemetry.meanSuppressionDB)
+    }
+
+    func testSpectralDenoiserProfileResetReturnsToAdaptiveLearning() throws {
+        guard let runtime = N60SpectralDenoiserCreate() else {
+            XCTFail("Unable to allocate spectral denoiser")
+            return
+        }
+        defer { N60SpectralDenoiserDestroy(runtime) }
+        var snapshot = N60SpectralDenoiserSnapshotMakeBypassed(48_000)
+        XCTAssertTrue(N60SpectralDenoiserSnapshotConfigure(
+            &snapshot, 48_000, false, N60DenoiserTuningStandard, N60DenoiserQualityQuality,
+            0.5, -60, false, 0, 150, 1, N60DenoiserProfileCommandCapture
+        ))
+        var left: Float = 0
+        var right: Float = 0
+        for frame in 0..<(48_000 + 2_048) {
+            let noise = Float(sin(Double(frame) * 0.713)) * 0.02
+            N60SpectralDenoiserProcessStereoFrame(runtime, snapshot, 48_000, noise, noise, &left, &right)
+        }
+        XCTAssertTrue(N60SpectralDenoiserRuntimeTelemetry(runtime).profileReady)
+
+        snapshot.profileRevision = 2
+        snapshot.profileCommand = N60DenoiserProfileCommandReset
+        N60SpectralDenoiserProcessStereoFrame(runtime, snapshot, 48_000, 0, 0, &left, &right)
+        let telemetry = N60SpectralDenoiserRuntimeTelemetry(runtime)
+        XCTAssertFalse(telemetry.profileReady)
+        XCTAssertFalse(telemetry.capturedProfile)
+        XCTAssertFalse(telemetry.captureActive)
+    }
+}
+
+
+extension NotchSixtyTests {
+    func testSpectralDenoiserGraphLatencyTracksQualityOnlyWhenEnabled() throws {
+        for (quality, expected) in [
+            (SpectralDenoiserQuality.quality, UInt32(1024)),
+            (.high, UInt32(2048)),
+            (.ultra, UInt32(4096)),
+        ] {
+            var dynamics = DynamicsConfiguration()
+            dynamics.spectralDenoiser.enabled = true
+            dynamics.spectralDenoiser.quality = quality
+            let graph = try StereoEQConfiguration().makeGraphSnapshot(
+                sampleRate: 96_000,
+                gainConfiguration: DSPGainConfiguration(),
+                bassManagementConfiguration: BassManagementConfiguration(),
+                dynamicsConfiguration: dynamics,
+                playbackConfiguration: PlaybackControlConfiguration()
+            )
+            XCTAssertEqual(graph.latencyFrames, expected)
+            XCTAssertEqual(graph.dynamics.spectralDenoiser.latencyFrames, expected)
+
+            dynamics.spectralDenoiser.enabled = false
+            let bypassed = try StereoEQConfiguration().makeGraphSnapshot(
+                sampleRate: 96_000,
+                gainConfiguration: DSPGainConfiguration(),
+                bassManagementConfiguration: BassManagementConfiguration(),
+                dynamicsConfiguration: dynamics,
+                playbackConfiguration: PlaybackControlConfiguration()
+            )
+            XCTAssertEqual(bypassed.latencyFrames, 0)
+        }
+    }
+
+    func testSpectralDenoiserGraphUnityBeforeProfileReadyMatchesLatencyReference() throws {
+        guard let processedKernel = N60RenderKernelCreate(), let referenceKernel = N60RenderKernelCreate() else {
+            XCTFail("Unable to allocate render kernels")
+            return
+        }
+        defer {
+            N60RenderKernelDestroy(processedKernel)
+            N60RenderKernelDestroy(referenceKernel)
+        }
+
+        var dynamics = DynamicsConfiguration()
+        dynamics.spectralDenoiser.enabled = true
+        dynamics.spectralDenoiser.quality = .quality
+        dynamics.spectralDenoiser.thresholdDBFS = -72
+        let processedGraph = try StereoEQConfiguration().makeGraphSnapshot(
+            sampleRate: 48_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            dynamicsConfiguration: dynamics,
+            playbackConfiguration: PlaybackControlConfiguration(auditionMode: .processed)
+        )
+        let referenceGraph = try StereoEQConfiguration().makeGraphSnapshot(
+            sampleRate: 48_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            dynamicsConfiguration: dynamics,
+            playbackConfiguration: PlaybackControlConfiguration(auditionMode: .reference)
+        )
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(processedKernel, processedGraph))
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(referenceKernel, referenceGraph))
+
+        let totalFrames = 22_000
+        var squaredError = 0.0
+        var squaredReference = 0.0
+        var measured = 0
+        for frame in 0..<totalFrames {
+            let source = Float(0.25 * sin(2.0 * Double.pi * 997.0 * Double(frame) / 48_000.0))
+            var processedLeft: Float = 0
+            var processedRight: Float = 0
+            var referenceLeft: Float = 0
+            var referenceRight: Float = 0
+            N60RenderKernelProcessStereoFrame(processedKernel, source, source * 0.7, &processedLeft, &processedRight)
+            N60RenderKernelProcessStereoFrame(referenceKernel, source, source * 0.7, &referenceLeft, &referenceRight)
+            if frame > Int(processedGraph.latencyFrames + processedGraph.dynamics.spectralDenoiser.hopSize + 256) {
+                let error = Double(processedLeft - referenceLeft)
+                squaredError += error * error
+                squaredReference += Double(referenceLeft * referenceLeft)
+                measured += 1
+            }
+        }
+        XCTAssertGreaterThan(measured, 1000)
+        let normalizedError = sqrt(squaredError / max(squaredReference, 1.0e-20))
+        XCTAssertLessThan(normalizedError, 0.0025, "WOLA unity path should track latency-matched Reference before adaptive profile becomes active")
+    }
+
+    func testSpectralDenoiserGraphStaysFiniteAt384k() throws {
+        guard let kernel = N60RenderKernelCreate() else {
+            XCTFail("Unable to allocate render kernel")
+            return
+        }
+        defer { N60RenderKernelDestroy(kernel) }
+        var dynamics = DynamicsConfiguration()
+        dynamics.spectralDenoiser.enabled = true
+        dynamics.spectralDenoiser.applyPreset(.natural)
+        dynamics.spectralDenoiser.quality = .ultra
+        let graph = try StereoEQConfiguration().makeGraphSnapshot(
+            sampleRate: 384_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            dynamicsConfiguration: dynamics,
+            playbackConfiguration: PlaybackControlConfiguration()
+        )
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        var state: UInt32 = 0xCAFEBABE
+        var maxMagnitude: Float = 0
+        for _ in 0..<30_000 {
+            state = state &* 1_664_525 &+ 1_013_904_223
+            let sample = (Float(state & 0xFFFF) / 32_767.5 - 1) * 0.1
+            var left: Float = 0
+            var right: Float = 0
+            N60RenderKernelProcessStereoFrame(kernel, sample, -sample * 0.8, &left, &right)
+            XCTAssertTrue(left.isFinite)
+            XCTAssertTrue(right.isFinite)
+            maxMagnitude = max(maxMagnitude, max(abs(left), abs(right)))
+        }
+        XCTAssertLessThan(maxMagnitude, 1.0)
+        XCTAssertEqual(N60RenderKernelGetDiagnostics(kernel).denoiserLatencyFrames, 4096)
+    }
+}
+
+
+extension NotchSixtyTests {
+    func testSpectralDenoiserAdaptiveLearningDoesNotTreatLoudToneAsNoise() throws {
+        guard let runtime = N60SpectralDenoiserCreate() else {
+            XCTFail("Unable to allocate spectral denoiser")
+            return
+        }
+        defer { N60SpectralDenoiserDestroy(runtime) }
+        var snapshot = N60SpectralDenoiserSnapshotMakeBypassed(48_000)
+        XCTAssertTrue(N60SpectralDenoiserSnapshotConfigure(
+            &snapshot, 48_000, true, N60DenoiserTuningAggressive, N60DenoiserQualityQuality,
+            1.0, -72, false, 0, 150, 0, N60DenoiserProfileCommandNone
+        ))
+
+        let frequency = 3_000.0
+        var inputDot = 0.0
+        var outputDot = 0.0
+        var referencePower = 0.0
+        let totalFrames = 48_000 * 4
+        for frame in 0..<totalFrames {
+            let phase = 2.0 * Double.pi * frequency * Double(frame) / 48_000.0
+            let source = Float(0.20 * sin(phase))
+            var left: Float = 0
+            var right: Float = 0
+            N60SpectralDenoiserProcessStereoFrame(runtime, snapshot, 48_000, source, source, &left, &right)
+            if frame > 48_000 * 3 {
+                let delayedPhase = 2.0 * Double.pi * frequency * Double(frame - Int(snapshot.latencyFrames)) / 48_000.0
+                let reference = sin(delayedPhase)
+                inputDot += 0.20 * reference * reference
+                outputDot += Double(left) * reference
+                referencePower += reference * reference
+            }
+        }
+        let inputAmplitude = inputDot / max(referencePower, 1.0e-20)
+        let outputAmplitude = outputDot / max(referencePower, 1.0e-20)
+        XCTAssertGreaterThan(outputAmplitude, inputAmplitude * 0.96,
+                             "Adaptive learning must not classify a clearly above-threshold program tone as stationary noise")
+    }
+
+    func testSpectralDenoiserProtectedRangeRemainsNearUnityWhileHighNoiseIsReduced() throws {
+        guard let runtime = N60SpectralDenoiserCreate() else {
+            XCTFail("Unable to allocate spectral denoiser")
+            return
+        }
+        defer { N60SpectralDenoiserDestroy(runtime) }
+        var snapshot = N60SpectralDenoiserSnapshotMakeBypassed(48_000)
+        XCTAssertTrue(N60SpectralDenoiserSnapshotConfigure(
+            &snapshot, 48_000, true, N60DenoiserTuningAggressive, N60DenoiserQualityQuality,
+            1.0, -42, true, 0, 200, 1, N60DenoiserProfileCommandCapture
+        ))
+
+        let lowHz = 93.75   // exact FFT bin for N=1024 at 48 kHz
+        let highHz = 6_000.0
+        let totalFrames = 48_000 * 4
+        var lowDot = 0.0
+        var highDot = 0.0
+        var basisPower = 0.0
+        for frame in 0..<totalFrames {
+            let low = 0.025 * sin(2.0 * Double.pi * lowHz * Double(frame) / 48_000.0)
+            let high = 0.025 * sin(2.0 * Double.pi * highHz * Double(frame) / 48_000.0)
+            let source = Float(low + high)
+            var left: Float = 0
+            var right: Float = 0
+            N60SpectralDenoiserProcessStereoFrame(runtime, snapshot, 48_000, source, source, &left, &right)
+            if frame > 48_000 * 3 {
+                let delayedFrame = Double(frame - Int(snapshot.latencyFrames))
+                let lowBasis = sin(2.0 * Double.pi * lowHz * delayedFrame / 48_000.0)
+                let highBasis = sin(2.0 * Double.pi * highHz * delayedFrame / 48_000.0)
+                lowDot += Double(left) * lowBasis
+                highDot += Double(left) * highBasis
+                basisPower += lowBasis * lowBasis
+            }
+        }
+        let lowAmplitude = lowDot / max(basisPower, 1.0e-20)
+        let highAmplitude = highDot / max(basisPower, 1.0e-20)
+        XCTAssertGreaterThan(lowAmplitude, 0.022,
+                             "The protected low-frequency band should remain close to unity")
+        XCTAssertLessThan(highAmplitude, lowAmplitude * 0.75,
+                          "An unprotected captured stationary component should be reduced relative to the protected band")
+    }
+}

@@ -77,3 +77,26 @@ Do not treat architectural similarity by itself as source reuse.
 - **Observable legacy contract used:** signed ±20 ms user-facing range and sign convention only (positive delays Right, negative delays Left).
 - **Commercial improvements:** higher-order fractional-delay approximation where possible, exact integer-delay bypass, queued click-safe transitions, explicit audition/Global-Bypass semantics, and deterministic 384 kHz-capable fixed storage.
 - **Legacy implementation reuse:** none. Historical fractional-delay source/tests were not used as implementation references.
+
+
+## PR31 — Noise / Hum suppression
+
+PR31 is a clean-room implementation. Historical Notch Sixty documentation, UI, and configuration state are used only to inventory observable behavior for Mains Hum Notch and spectral denoising. Historical `SpectralDenoiser`, `MainsHumDetector`, `GoertzelEstimator`, `MainsNotchCoefficients`, and DSP tests are explicitly excluded as implementation references.
+
+The first slice implements the static harmonic-notch signal path independently from standard parametric-biquad mathematics already present in the commercial engine. Mains-notch coefficients and states are intentionally double precision because 50/60 Hz high-Q filters at 384 kHz operate at numerically extreme low normalized frequencies; float coefficient quantization measurably reduces requested center depth. Nominal 50/60 Hz selection, harmonic count, Q, and per-harmonic attenuation are product controls; coefficients are designed on the control plane and consumed by fixed realtime state. Detector/tracker and spectral-denoising mathematics will be independently derived in later PR31 slices from public DSP references and synthetic test vectors.
+
+
+### PR31 Slice 2 — mains detector/tracker
+
+The mains detector/tracker is independently authored. It uses a conventional quadrature/correlation frequency-bank design derived from general Fourier analysis principles, with fixed precomputed oscillator increments, bounded decimation, synthetic test tones, and no reference to the excluded historical `MainsHumDetector` or `GoertzelEstimator` implementations/tests. Detector telemetry is observational; coefficient redesign remains on the Swift/control plane. Realtime notch retuning uses a proprietary dual-bank crossfade rather than coefficient construction in the render callback.
+
+
+### PR31 Slice 3 — spectral denoiser
+
+- **Classification:** specification-derived / original commercial implementation.
+- **Behavioral references:** legacy materials were used only to inventory the visible Natural / Standard / Aggressive / Dehiss / Custom workflow, Reduction Amount, Threshold, Quality modes, protected range, and Capture / Reset controls.
+- **Excluded implementation references:** historical `SpectralDenoiser` source, algorithms, tests, tuning internals, and implementation structure were not used as coding references.
+- **Independent technical basis:** general public short-time Fourier analysis/weighted overlap-add mathematics, Hann-family perfect-reconstruction windowing concepts, Wiener-style spectral gain estimation, decision-directed a-priori SNR estimation concepts, and conservative low-envelope/minimum-statistics noise estimation. The implementation is independently authored for the proprietary N60 realtime graph and does not reproduce a third-party codebase.
+- **Commercial design choices:** linked-stereo common gain, threshold-gated adaptive learning, explicit user-directed one-second Capture, bounded upward noise-floor adaptation, protected unity bands, Dehiss high-frequency weighting, preset-specific gain floors/smoothing, explicit Quality/High/Ultra FFT and latency contracts, and exact disabled passthrough with warm analysis.
+- **Realtime implementation:** all FFT/window/profile/OLA scratch is fixed and preallocated when the runtime is created; no allocation, locks, logging, file/device I/O, or plan construction occurs in the render callback.
+- **Validation:** synthetic deterministic tests cover exact disabled transparency, captured stationary-noise reduction, linked-stereo ratio, profile Reset, program-material resistance, protected-band behavior, latency-matched WOLA reconstruction, graph latency, and finite operation through 384 kHz. Hardware listening acceptance remains required before PR31 merge.
