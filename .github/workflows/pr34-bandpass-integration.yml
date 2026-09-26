@@ -19,8 +19,8 @@ jobs:
 
       # Earlier PR34 slices are committed source. Verify them; mutate only the
       # current Phase D slice so the gate stays deterministic and idempotent.
-      - name: Apply crosstalk cancellation integration
-        run: python3 ci/pr34_apply_phase_d_crosstalk.py
+      - name: Apply sub-bass phase alignment integration
+        run: python3 ci/pr34_apply_phase_d_sub_phase.py
 
       - name: Validate Band Pass DSP
         run: |
@@ -72,6 +72,11 @@ jobs:
           clang -std=c11 -Wall -Wextra -Werror ci/validate_pr34_crosstalk_cancellation.c -lm -o /tmp/validate-pr34-crosstalk
           /tmp/validate-pr34-crosstalk
 
+      - name: Validate sub-bass phase alignment DSP
+        run: |
+          clang -std=c11 -Wall -Wextra -Werror ci/validate_pr34_sub_phase_alignment.c -lm -o /tmp/validate-pr34-sub-phase
+          /tmp/validate-pr34-sub-phase
+
       - name: Build
         run: >-
           xcodebuild
@@ -94,7 +99,7 @@ jobs:
           ENABLE_TESTABILITY=YES
           test
 
-      - name: Commit Phase D crosstalk cancellation integration
+      - name: Commit Phase D sub-bass phase alignment integration
         run: |
           git diff --check
           if git diff --quiet; then
@@ -103,6 +108,6 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add NotchSixty/Audio/Realtime/N60Spatial.h NotchSixty/Audio/Realtime/N60RenderKernel.h NotchSixty/Audio/Realtime/N60RenderKernel.c NotchSixty/Audio/AudioIOEngine.swift NotchSixty/Audio/StereoPlaybackControl.swift NotchSixty/ContentView.swift NotchSixtyTests/NotchSixtyTests.swift
-          git commit -m "Close PR34 crosstalk cancellation parity"
+          git add NotchSixty/Audio/Realtime/N60Crossover.h NotchSixty/Audio/Realtime/N60RenderKernel.h NotchSixty/Audio/Realtime/N60RenderKernel.c NotchSixty/Audio/AudioIOEngine.swift NotchSixty/ContentView.swift NotchSixtyTests/NotchSixtyTests.swift
+          git commit -m "Close PR34 sub-bass phase alignment parity"
           git push origin HEAD:feature/dsp-optimization-parity-audit
