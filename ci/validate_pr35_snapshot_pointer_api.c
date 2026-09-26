@@ -1,3 +1,5 @@
+#include <stddef.h>
+
 #include "N60Dynamics.h"
 #include "N60DynamicEQ.h"
 
