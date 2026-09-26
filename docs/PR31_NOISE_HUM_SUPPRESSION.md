@@ -123,3 +123,49 @@ Minimum validation surface:
 The commercial detector is an independently authored fixed-bank quadrature estimator. The realtime path decimates to approximately 1 kHz, evaluates 25 frequencies at 0.25 Hz spacing across a ±3 Hz window around the selected 50/60 Hz region, and publishes the strongest-bin estimate plus a bounded spectral-prominence confidence value once per approximately one-second window. It does not copy or adapt the legacy detector implementation.
 
 One-shot **Detect** is a control-plane operation: it applies the latest estimate only above a confidence threshold. **Continuous Tracking** polls the same telemetry at a bounded cadence, requires a stronger confidence threshold, rejects negligible changes, and republishes coefficients on the control plane. The realtime notch owns dual old/new filter banks and crossfades coefficient retunes over roughly 10 ms so tracking never redesigns filters inside the render callback and does not hard-switch IIR coefficients/state.
+
+
+## Slice 3 — spectral denoiser implementation
+
+The commercial denoiser is an independent clean-room redesign. The legacy application supplies only the observable preset/control inventory; its `SpectralDenoiser` implementation and tests are not implementation references.
+
+### Signal architecture
+
+- Mains-notch cleanup runs first so coherent 50/60 Hz energy and selected harmonics do not contaminate broadband noise estimation.
+- The denoiser uses a 50%-overlapped weighted overlap-add (WOLA) STFT with a square-root Hann analysis/synthesis pair.
+- Linked stereo uses one common spectral gain per bin, derived from the larger L/R bin power, while preserving each channel's complex phase. This prevents independent-channel noise decisions from wandering the stereo image.
+- Suppression uses a conservative decision-directed Wiener-style gain estimate, bounded by a preset-specific gain floor, plus temporal and modest neighboring-bin smoothing to reduce musical-noise artifacts.
+- The protected-frequency range forces unity spectral gain inside the selected range.
+- Dehiss increases the noise estimate progressively above roughly 3 kHz rather than applying a broadband extra cut.
+
+### Noise profile behavior
+
+Two workflows exist deliberately:
+
+1. **Adaptive:** low-envelope/minimum statistics learn only bins at or below the Threshold safety ceiling. Clearly above-threshold program bins are not admitted into the adaptive noise model. Upward movement of the learned floor is bounded to approximately +1 dB per one-second estimator block.
+2. **Capture:** an explicit user request measures roughly one second and freezes that spectrum as the profile. Capture intentionally bypasses the adaptive threshold gate because the user is declaring the passage to be noise-only; the Threshold still caps suppression-time assumed noise power.
+
+Reset discards the captured profile and returns to conservative adaptive learning. Changing Quality changes the spectral grid and therefore resets the runtime profile.
+
+### Quality / latency contract
+
+| Mode | FFT | Hop | Added denoiser latency |
+|---|---:|---:|---:|
+| Quality | 1024 | 512 | 1024 frames |
+| High | 2048 | 1024 | 2048 frames |
+| Ultra | 4096 | 2048 | 4096 frames |
+
+At 96 kHz, those added latencies are approximately 10.67 ms, 21.33 ms, and 42.67 ms. The graph publishes the chosen latency so Processed / Reference / Delta remain aligned. Enabling/disabling the denoiser and changing Quality while active use the graph-transition path rather than a hard live latency change.
+
+### Realtime contract
+
+- portable C hot path
+- fixed/preallocated FFT, window, spectral, overlap-add, profile, and telemetry state
+- no heap allocation/free, locks, logging, device/file I/O, or filter/FFT-plan construction in the render callback
+- FFT/window tables are built at runtime creation on the control side
+- exact input passthrough when disabled; analysis/profile state remains warm
+- full graph tests include latency accounting, WOLA unity reconstruction against latency-matched Reference, linked-stereo behavior, program-content resistance, protected-band behavior, stationary-noise reduction, and finite 384 kHz operation
+
+### Validation intent
+
+The old denoiser's audible artifacts are not a parity target. Hardware acceptance prioritizes naturalness: noise reduction must not introduce pumping, chirping/musical noise, transient softening, vocal smearing, or stereo-image movement. Natural is the conservative baseline; Aggressive is a stress mode.

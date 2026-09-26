@@ -688,6 +688,39 @@ private struct PR31NoiseHumValidationView: View {
         )
     }
 
+    private var denoiserEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { engine.dynamicsConfiguration.spectralDenoiser.enabled },
+            set: { value in
+                var updated = engine.dynamicsConfiguration
+                updated.spectralDenoiser.enabled = value
+                try? engine.replaceDynamicsConfiguration(updated)
+            }
+        )
+    }
+
+    private var denoiserPresetBinding: Binding<SpectralDenoiserPreset> {
+        Binding(
+            get: { engine.dynamicsConfiguration.spectralDenoiser.preset },
+            set: { value in try? engine.applySpectralDenoiserPreset(value) }
+        )
+    }
+
+    private func denoiserBinding<Value>(
+        _ keyPath: WritableKeyPath<SpectralDenoiserConfiguration, Value>,
+        marksCustom: Bool = true
+    ) -> Binding<Value> {
+        Binding(
+            get: { engine.dynamicsConfiguration.spectralDenoiser[keyPath: keyPath] },
+            set: { value in
+                var updated = engine.dynamicsConfiguration
+                updated.spectralDenoiser[keyPath: keyPath] = value
+                if marksCustom { updated.spectralDenoiser.markCustom() }
+                try? engine.replaceDynamicsConfiguration(updated)
+            }
+        )
+    }
+
     var body: some View {
         let enabled = mainsBinding(\.enabled)
         let region = regionBinding
@@ -697,7 +730,7 @@ private struct PR31NoiseHumValidationView: View {
             VStack(alignment: .leading, spacing: 16) {
                 Text("PR31 Noise / Hum Validation")
                     .font(.title2.bold())
-                Text("PR31 Slice 2 adds independent mains-frequency detection, confidence telemetry, one-shot Detect, and bounded Continuous Tracking with click-safe notch retuning. Spectral denoising follows below in Slice 3.")
+                Text("PR31 now includes mains-frequency detection/tracking plus the new clean-room spectral denoiser. The denoiser is deliberately conservative: linked-stereo WOLA processing, threshold-gated adaptive learning, explicit noise Capture, protected bands, and measurable latency.")
                     .foregroundStyle(.secondary)
 
                 GroupBox("Mains Hum Notch") {
@@ -766,12 +799,99 @@ private struct PR31NoiseHumValidationView: View {
                 }
 
                 GroupBox("Spectral Denoising") {
-                    Text("Natural / Standard / Aggressive / Dehiss presets, profile Capture / Reset, protected-frequency range, and Quality / High / Ultra modes are the following PR31 slice.")
-                        .foregroundStyle(.secondary)
-                        .padding(6)
+                    VStack(alignment: .leading, spacing: 12) {
+                        Toggle("Enable Spectral Denoiser", isOn: denoiserEnabledBinding)
+                            .toggleStyle(.switch)
+
+                        Picker("Preset", selection: denoiserPresetBinding) {
+                            ForEach(SpectralDenoiserPreset.allCases) { value in
+                                Text(value.displayName).tag(value)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+
+                        HStack(spacing: 12) {
+                            Text("Reduction").frame(width: 105, alignment: .leading)
+                            Slider(value: denoiserBinding(\.reductionAmount), in: SpectralDenoiserConfiguration.reductionRange, step: 0.01)
+                            Text("\(engine.dynamicsConfiguration.spectralDenoiser.reductionAmount * 100, specifier: "%.0f")%")
+                                .monospacedDigit().frame(width: 58)
+                        }
+
+                        HStack(spacing: 12) {
+                            Text("Threshold").frame(width: 105, alignment: .leading)
+                            Slider(value: denoiserBinding(\.thresholdDBFS), in: SpectralDenoiserConfiguration.thresholdRange, step: 1)
+                            Text("\(engine.dynamicsConfiguration.spectralDenoiser.thresholdDBFS, specifier: "%.0f") dBFS")
+                                .monospacedDigit().frame(width: 78)
+                        }
+
+                        Picker("Quality", selection: denoiserBinding(\.quality)) {
+                            ForEach(SpectralDenoiserQuality.allCases) { value in
+                                Text(value.displayName).tag(value)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(maxWidth: 420)
+
+                        Toggle("Protect Frequency Range", isOn: denoiserBinding(\.protectedRangeEnabled))
+                            .toggleStyle(.switch)
+
+                        if engine.dynamicsConfiguration.spectralDenoiser.protectedRangeEnabled {
+                            let rate = mainsDiagnostics?.sampleRate ?? 48_000
+                            let maximum = max(200.0, min(20_000.0, rate * 0.5 - 1.0))
+                            HStack(spacing: 12) {
+                                Text("Protected Low").frame(width: 105, alignment: .leading)
+                                Slider(value: denoiserBinding(\.protectedLowHz), in: 0...maximum, step: 10)
+                                Text("\(engine.dynamicsConfiguration.spectralDenoiser.protectedLowHz, specifier: "%.0f") Hz")
+                                    .monospacedDigit().frame(width: 78)
+                            }
+                            HStack(spacing: 12) {
+                                Text("Protected High").frame(width: 105, alignment: .leading)
+                                Slider(value: denoiserBinding(\.protectedHighHz), in: 0...maximum, step: 10)
+                                Text("\(engine.dynamicsConfiguration.spectralDenoiser.protectedHighHz, specifier: "%.0f") Hz")
+                                    .monospacedDigit().frame(width: 78)
+                            }
+                        }
+
+                        Divider()
+                        HStack(spacing: 12) {
+                            Button("Capture Noise Profile") { try? engine.captureSpectralNoiseProfile() }
+                            Button("Reset Profile") { try? engine.resetSpectralNoiseProfile() }
+                        }
+                        Text("Capture listens for about one second. Use a noise-only passage if possible. Reset returns to conservative adaptive learning. Analysis remains warm while bypassed so enabling does not begin from a cold estimator.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(6)
                 }
 
-                Text("Acceptance focus for this slice: with the filter disabled the path must be transparent; with it enabled, a 50/60 Hz tone and selected harmonics should fall by the configured depth without broad tonal loss. Toggle and parameter changes must remain stable and click-free enough for interactive validation.")
+                GroupBox("Denoiser Telemetry") {
+                    let diagnostics = mainsDiagnostics
+                    let status: String = {
+                        if diagnostics?.denoiserCaptureActive == true { return "Capturing" }
+                        if diagnostics?.denoiserCapturedProfile == true { return "Captured Profile" }
+                        if diagnostics?.denoiserProfileReady == true { return "Adaptive Ready" }
+                        return "Learning"
+                    }()
+                    let rate = diagnostics?.sampleRate ?? 0
+                    let denoiserFrames = diagnostics?.denoiserLatencyFrames ?? 0
+                    let denoiserMS = rate > 0 ? Double(denoiserFrames) * 1000.0 / rate : 0
+                    Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 7) {
+                        GridRow { Text("Profile state").foregroundStyle(.secondary); Text(status) }
+                        GridRow { Text("Capture progress").foregroundStyle(.secondary); Text("\((diagnostics?.denoiserCaptureProgress ?? 0) * 100, specifier: "%.0f")%") }
+                        GridRow { Text("Estimated noise").foregroundStyle(.secondary); Text("\(diagnostics?.denoiserEstimatedNoiseDBFS ?? -120, specifier: "%.1f") dBFS") }
+                        GridRow { Text("Mean suppression").foregroundStyle(.secondary); Text("\(diagnostics?.denoiserMeanSuppressionDB ?? 0, specifier: "%.2f") dB") }
+                        GridRow { Text("Max suppression").foregroundStyle(.secondary); Text("\(diagnostics?.denoiserMaxSuppressionDB ?? 0, specifier: "%.2f") dB") }
+                        GridRow { Text("FFT / hop").foregroundStyle(.secondary); Text("\(diagnostics?.denoiserFFTSize ?? 0) / \(diagnostics?.denoiserHopSize ?? 0) frames") }
+                        GridRow { Text("Denoiser latency").foregroundStyle(.secondary); Text("\(denoiserFrames) frames  (\(denoiserMS, specifier: "%.2f") ms)") }
+                        GridRow { Text("Total DSP latency").foregroundStyle(.secondary); Text("\(diagnostics?.latencyFrames ?? 0) frames") }
+                        GridRow { Text("Spectral frames").foregroundStyle(.secondary); Text("\(diagnostics?.denoiserSpectralFramesProcessed ?? 0)") }
+                    }
+                    .font(.system(.body, design: .monospaced))
+                    .textSelection(.enabled)
+                    .padding(6)
+                }
+
+                Text("Denoiser acceptance focus: start with Natural or Standard. Listen for real noise-floor reduction without pumping, chirping/musical-noise artifacts, softened transients, vocal smearing, or stereo-image movement. Compare Capture against adaptive learning, exercise the protected range, and compare Quality / High / Ultra. Reference and Delta must remain latency aligned. Aggressive is intentionally the stress case, not the default recommendation.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
