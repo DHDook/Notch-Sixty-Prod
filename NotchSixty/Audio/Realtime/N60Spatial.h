@@ -15,6 +15,33 @@ typedef struct {
     float rightGainLinear;
 } N60SymmetryBalanceSnapshot;
 
+
+typedef struct {
+    bool enabled;
+    float amount;
+} N60SpeakerCrossfeedSnapshot;
+
+static inline bool N60SpeakerCrossfeedSnapshotIsValid(N60SpeakerCrossfeedSnapshot snapshot) {
+    return isfinite(snapshot.amount)
+        && snapshot.amount >= 0.0f
+        && snapshot.amount <= 0.5f;
+}
+
+static inline bool N60SpeakerCrossfeedDesign(
+    double amount,
+    bool enabled,
+    N60SpeakerCrossfeedSnapshot *snapshotOut
+) {
+    if (snapshotOut == NULL || !isfinite(amount) || amount < 0.0 || amount > 0.5) return false;
+    N60SpeakerCrossfeedSnapshot snapshot = {
+        .enabled = enabled,
+        .amount = (float)amount,
+    };
+    if (!N60SpeakerCrossfeedSnapshotIsValid(snapshot)) return false;
+    *snapshotOut = snapshot;
+    return true;
+}
+
 static inline bool N60SymmetryBalanceSnapshotIsValid(N60SymmetryBalanceSnapshot snapshot) {
     if (!isfinite(snapshot.position)
         || snapshot.position < -1.0

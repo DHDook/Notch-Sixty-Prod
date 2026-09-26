@@ -41,6 +41,20 @@ struct ContentView: View {
         Binding(get: { engine.stereoEQConfiguration.editChannel }, set: { engine.setEQEditChannel($0) })
     }
 
+    private var speakerCrossfeedEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { engine.playbackControlConfiguration.speakerCrossfeedEnabled },
+            set: { try? engine.setSpeakerCrossfeedEnabled($0) }
+        )
+    }
+
+    private var speakerCrossfeedAmountBinding: Binding<Double> {
+        Binding(
+            get: { engine.playbackControlConfiguration.speakerCrossfeedAmount },
+            set: { try? engine.setSpeakerCrossfeedAmount($0) }
+        )
+    }
+
     private var symmetryBalanceEnabledBinding: Binding<Bool> {
         Binding(
             get: { engine.playbackControlConfiguration.symmetryBalanceEnabled },
@@ -225,6 +239,21 @@ struct ContentView: View {
                     .frame(width: 55)
             }
             Text("Listening symmetry is constant-power compensation for an off-center listening position. It is separate from ordinary attenuation-style Balance; center is unity on both channels.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack(spacing: 12) {
+                Toggle("Speaker crossfeed", isOn: speakerCrossfeedEnabledBinding).toggleStyle(.switch)
+                Slider(
+                    value: speakerCrossfeedAmountBinding,
+                    in: PlaybackControlConfiguration.speakerCrossfeedRange,
+                    step: 0.01
+                )
+                .disabled(!engine.playbackControlConfiguration.speakerCrossfeedEnabled)
+                Text(engine.playbackControlConfiguration.speakerCrossfeedAmount.formatted(.number.precision(.fractionLength(2))))
+                    .monospacedDigit()
+                    .frame(width: 55)
+            }
+            Text("Crossfeed uses the speaker Panning Gain Matrix. 0.00 leaves stereo untouched; 0.50 collapses to exact mono. The legacy 0...1 display range is intentionally not reproduced.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             HStack(spacing: 12) {

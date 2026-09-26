@@ -450,6 +450,15 @@ struct StereoEQConfiguration: Equatable, Sendable {
                 playbackConfiguration.symmetryBalancePosition
             )
         }
+        guard N60DSPGraphSnapshotSetSpeakerCrossfeed(
+            &graph,
+            playbackConfiguration.speakerCrossfeedAmount,
+            playbackConfiguration.speakerCrossfeedEnabled
+        ) else {
+            throw PlaybackControlConfigurationError.invalidSpeakerCrossfeed(
+                playbackConfiguration.speakerCrossfeedAmount
+            )
+        }
         graph.bypassed = playbackConfiguration.globalBypassed
         graph.auditionMode = playbackConfiguration.auditionMode.cType
         guard N60DSPGraphSnapshotSetInterChannelDelay(&graph, playbackConfiguration.interChannelDelayMs) else {
@@ -707,11 +716,14 @@ enum AuditionMode: String, CaseIterable, Identifiable, Sendable {
 struct PlaybackControlConfiguration: Equatable, Sendable {
     static let balanceRange = -1.0...1.0
     static let symmetryBalanceRange = -1.0...1.0
+    static let speakerCrossfeedRange = 0.0...0.5
     static let interChannelDelayRange = -20.0...20.0
 
     var balance: Double
     var symmetryBalanceEnabled: Bool
     var symmetryBalancePosition: Double
+    var speakerCrossfeedEnabled: Bool
+    var speakerCrossfeedAmount: Double
     var interChannelDelayMs: Double
     var globalBypassed: Bool
     var auditionMode: AuditionMode
@@ -720,6 +732,8 @@ struct PlaybackControlConfiguration: Equatable, Sendable {
         balance: Double = 0,
         symmetryBalanceEnabled: Bool = false,
         symmetryBalancePosition: Double = 0,
+        speakerCrossfeedEnabled: Bool = false,
+        speakerCrossfeedAmount: Double = 0,
         interChannelDelayMs: Double = 0,
         globalBypassed: Bool = false,
         flatAuditionEnabled: Bool = false,
@@ -728,6 +742,8 @@ struct PlaybackControlConfiguration: Equatable, Sendable {
         self.balance = balance
         self.symmetryBalanceEnabled = symmetryBalanceEnabled
         self.symmetryBalancePosition = symmetryBalancePosition
+        self.speakerCrossfeedEnabled = speakerCrossfeedEnabled
+        self.speakerCrossfeedAmount = speakerCrossfeedAmount
         self.interChannelDelayMs = interChannelDelayMs
         self.globalBypassed = globalBypassed
         self.auditionMode = auditionMode ?? (flatAuditionEnabled ? .reference : .processed)
@@ -753,6 +769,7 @@ struct PlaybackControlConfiguration: Equatable, Sendable {
 enum PlaybackControlConfigurationError: Error, LocalizedError, Equatable {
     case invalidBalance(Double)
     case invalidSymmetryBalance(Double)
+    case invalidSpeakerCrossfeed(Double)
     case invalidInterChannelDelay(Double)
 
     var errorDescription: String? {
@@ -761,6 +778,8 @@ enum PlaybackControlConfigurationError: Error, LocalizedError, Equatable {
             return "Channel balance \(value) is outside the supported -1...+1 range."
         case .invalidSymmetryBalance(let value):
             return "Listening-position symmetry \(value) is outside the supported -1...+1 range."
+        case .invalidSpeakerCrossfeed(let value):
+            return "Speaker crossfeed \(value) is outside the supported 0...0.5 range."
         case .invalidInterChannelDelay(let value):
             return "Inter-channel delay \(value) ms is outside the supported -20...+20 ms range."
         }

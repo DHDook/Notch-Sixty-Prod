@@ -973,6 +973,21 @@ final class AudioIOEngine: ObservableObject {
         try applyStereoEQConfiguration(updated)
     }
 
+    func setSpeakerCrossfeedEnabled(_ enabled: Bool) throws {
+        var updated = playbackControlConfiguration
+        updated.speakerCrossfeedEnabled = enabled
+        try applyPlaybackControlConfiguration(updated)
+    }
+
+    func setSpeakerCrossfeedAmount(_ value: Double) throws {
+        guard value.isFinite, PlaybackControlConfiguration.speakerCrossfeedRange.contains(value) else {
+            throw PlaybackControlConfigurationError.invalidSpeakerCrossfeed(value)
+        }
+        var updated = playbackControlConfiguration
+        updated.speakerCrossfeedAmount = value
+        try applyPlaybackControlConfiguration(updated)
+    }
+
     func setSymmetryBalanceEnabled(_ enabled: Bool) throws {
         var updated = playbackControlConfiguration
         updated.symmetryBalanceEnabled = enabled

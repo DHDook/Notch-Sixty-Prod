@@ -141,6 +141,53 @@ final class NotchSixtyTests: XCTestCase {
         XCTAssertTrue(graph.mixedPhaseEnabled)
     }
 
+    func testSpeakerCrossfeedGraphPublishesAuditedRange() throws {
+        let playback = PlaybackControlConfiguration(
+            speakerCrossfeedEnabled: true,
+            speakerCrossfeedAmount: 0.25
+        )
+        let graph = try StereoEQConfiguration().makeGraphSnapshot(
+            sampleRate: 48_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: playback
+        )
+        XCTAssertTrue(graph.speakerCrossfeed.enabled)
+        XCTAssertEqual(graph.speakerCrossfeed.amount, 0.25, accuracy: 0.000_001)
+    }
+
+    func testSpeakerCrossfeedRealtimeMatrixAndMonoCollapse() {
+        guard let kernel = N60RenderKernelCreate() else {
+            XCTFail("Unable to allocate render kernel")
+            return
+        }
+        defer { N60RenderKernelDestroy(kernel) }
+
+        var graph = N60DSPGraphSnapshotMakeUnity(96_000)
+        XCTAssertTrue(N60DSPGraphSnapshotSetSpeakerCrossfeed(&graph, 0.5, true))
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        var left: Float = 0
+        var right: Float = 0
+        N60RenderKernelProcessStereoFrame(kernel, 0.8, -0.2, &left, &right)
+        XCTAssertEqual(left, 0.3, accuracy: 0.000_01)
+        XCTAssertEqual(right, 0.3, accuracy: 0.000_01)
+    }
+
+    func testSpeakerCrossfeedRejectsMisleadingLegacyUpperRange() throws {
+        let invalid = PlaybackControlConfiguration(
+            speakerCrossfeedEnabled: true,
+            speakerCrossfeedAmount: 0.75
+        )
+        XCTAssertThrowsError(try StereoEQConfiguration().makeGraphSnapshot(
+            sampleRate: 48_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: invalid
+        )) { error in
+            XCTAssertEqual(error as? PlaybackControlConfigurationError, .invalidSpeakerCrossfeed(0.75))
+        }
+    }
+
     func testSymmetryBalanceGraphUsesSeparateConstantPowerStage() throws {
         let playback = PlaybackControlConfiguration(
             balance: 0,
