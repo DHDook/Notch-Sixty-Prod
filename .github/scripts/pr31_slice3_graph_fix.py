@@ -7,11 +7,23 @@ c = Path('NotchSixty/Audio/Realtime/N60SpectralDenoiser.c')
 text = c.read_text().replace('runtime->runtime->linkedPower', 'runtime->linkedPower')
 c.write_text(text)
 
-# Swift max() is binary, not variadic.
+# Swift max() is binary, not variadic. Also apply a named preset before the
+# explicit Ultra override in the 384 kHz test; applyPreset intentionally restores
+# the named preset's High-quality default.
 tests = Path('NotchSixtyTests/NotchSixtyTests.swift')
 text = tests.read_text().replace(
     'maxMagnitude = max(maxMagnitude, abs(left), abs(right))',
     'maxMagnitude = max(maxMagnitude, max(abs(left), abs(right)))'
+)
+text = text.replace(
+    '''        dynamics.spectralDenoiser.enabled = true
+        dynamics.spectralDenoiser.quality = .ultra
+        dynamics.spectralDenoiser.applyPreset(.natural)
+''',
+    '''        dynamics.spectralDenoiser.enabled = true
+        dynamics.spectralDenoiser.applyPreset(.natural)
+        dynamics.spectralDenoiser.quality = .ultra
+'''
 )
 tests.write_text(text)
 
