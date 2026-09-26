@@ -130,3 +130,12 @@ Classification: **specification-derived / independently authored commercial impl
 Observable legacy configuration/UI state was used only to establish controls, ranges, defaults, labels, and intended user-facing semantics for Per-Band Loudness Compensation and De-Harsh. The historical `PerBandLoudnessCompensator` implementation, historical dynamics processor implementation, and historical DSP tests were not used as coding templates.
 
 Commercial Per-Band Loudness uses independently defined reference-point mapping, fixed precomputed low/high analysis bands, smoothed linked-stereo gain offsets, and explicit caps. De-Harsh uses public RBJ-style high-shelf biquad mathematics already used elsewhere in the clean-room commercial engine. Both remain zero-lookahead and fixed/preallocated in realtime.
+
+
+## PR33 Slice 1 — General Dynamic EQ
+
+Classification: **specification-derived / independently authored commercial implementation**.
+
+Observable legacy configuration/UI state was used only to establish the user-facing Dynamic EQ contract: up to 16 bands, center frequency/Q/static gain, threshold/ratio/range, attack/release, Cut Only / Boost Only / Both direction, boost threshold/ratio/max boost, Peak/RMS detector selection, and RMS window. Historical Dynamic EQ DSP implementation files and historical DSP tests were not used as implementation templates.
+
+The commercial processor is an independently authored fixed/preallocated C design using public peaking-biquad mathematics, linked-stereo detector decisions, precomputed analysis coefficients, bounded gain laws, one-pole timing, and immutable control-plane snapshots. It has zero intentional look-ahead latency and performs no allocation, locking, logging, I/O, or coefficient design in the render callback.
