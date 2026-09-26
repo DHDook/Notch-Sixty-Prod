@@ -17,8 +17,10 @@ jobs:
         with:
           ref: feature/dsp-optimization-parity-audit
 
-      - name: Apply active Phase C Mid Side integration
-        run: python3 ci/pr34_apply_phase_c_midside.py
+      - name: Verify Phase C Mid Side integration
+        run: |
+          python3 ci/pr34_apply_phase_c_midside.py
+          python3 ci/pr34_fix_midside_shared_dynamic.py
 
       - name: Validate Band Pass DSP
         run: |
@@ -77,5 +79,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add NotchSixty/Audio/Realtime/N60RenderKernel.h NotchSixty/Audio/Realtime/N60RenderKernel.c NotchSixty/Audio/AudioIOEngine.swift NotchSixty/Audio/StereoPlaybackControl.swift NotchSixty/ContentView.swift NotchSixtyTests/NotchSixtyTests.swift
-          git commit -m "Integrate PR34 Phase C Mid Side EQ"
+          git commit -m "Close PR34 Mid Side shared Dynamic EQ parity"
           git push origin HEAD:feature/dsp-optimization-parity-audit
