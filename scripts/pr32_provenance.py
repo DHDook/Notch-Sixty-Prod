@@ -19,5 +19,5 @@ append = r'''
 - **Validation:** deterministic coverage includes high-rate finite operation, new-parameter validation, feed-back compressor stability, bounded De-Esser attenuation, multiband independent controls, dialogue disabled transparency, program gating, relative-masking response, maximum-boost bounds, and voice-confidence bounds. Full integration suites were green before the hardware gate.
 - **Residual audit:** `docs/PR32_DYNAMICS_PARITY_AUDIT.md` explicitly routes remaining required observable items rather than silently omitting them. General Dynamic EQ, Dynamic Gain Rider/auto-headroom, explicit True-Peak Guard semantics, clipper asymmetry trim, per-band loudness, De-Harsh, and EQ/DSP automatic-headroom compensation are assigned to the immediately following parity PR before optimization.
 '''
-p.write_text(text.rstrip() + append + '\n')
+p.write_text(text.rstrip() + append.rstrip() + '\n')
 print('PR32 provenance appended')
