@@ -28,6 +28,12 @@
 #define N60_LOUDNESS_GATE_LUFS -60.0f
 #define N60_LOUDNESS_FULL_CONTOUR_DB -30.0f
 #define N60_LOUDNESS_FLAT_CONTOUR_DB -6.0f
+#define N60_LOUDNESS_INTEGRATED_REFERENCE_LUFS -16.0f
+#define N60_LOUDNESS_LOW_DB_PER_PHON 0.25f
+#define N60_LOUDNESS_HIGH_DB_PER_PHON 0.125f
+#define N60_LOUDNESS_LOW_CUT_DB_PER_PHON 0.15f
+#define N60_LOUDNESS_HIGH_CUT_DB_PER_PHON 0.075f
+#define N60_LOUDNESS_GAIN_RESPONSE_MS 50.0f
 #define N60_MAINS_DETECTOR_SPAN_HZ 3.0
 #define N60_MAINS_DETECTOR_BIN_SPACING_HZ 0.25
 #define N60_MAINS_DETECTOR_TARGET_RATE 1000.0
@@ -405,10 +411,18 @@ N60DynamicsSnapshot N60DynamicsSnapshotMakeBypassed(double sampleRate) {
 
     snapshot.loudnessContour.enabled = false;
     snapshot.loudnessContour.strength = 1.0f;
+    snapshot.loudnessContour.perBandMode = false;
     snapshot.loudnessContour.fullContourMasterGainLinear = db_to_linear(N60_LOUDNESS_FULL_CONTOUR_DB);
     snapshot.loudnessContour.flatContourMasterGainLinear = db_to_linear(N60_LOUDNESS_FLAT_CONTOUR_DB);
     snapshot.loudnessContour.lowShelf = N60BiquadCoefficientsMakeIdentity();
     snapshot.loudnessContour.highShelf = N60BiquadCoefficientsMakeIdentity();
+    snapshot.loudnessContour.levelSource = N60LoudnessLevelSourceSystemVolume;
+    snapshot.loudnessContour.referencePhons = 85.0f;
+    snapshot.loudnessContour.maxBoostDB = 12.0f;
+    snapshot.loudnessContour.maxCutDB = 6.0f;
+    snapshot.loudnessContour.responseCoefficient = coefficient_for_time_ms(sampleRate, N60_LOUDNESS_GAIN_RESPONSE_MS);
+    snapshot.loudnessContour.lowBandLowPass = N60BiquadCoefficientsMakeIdentity();
+    snapshot.loudnessContour.highBandHighPass = N60BiquadCoefficientsMakeIdentity();
 
     snapshot.dialogueLeveler.enabled = false;
     snapshot.dialogueLeveler.voiceGateEnabled = false;
@@ -432,6 +446,11 @@ N60DynamicsSnapshot N60DynamicsSnapshotMakeBypassed(double sampleRate) {
     snapshot.dialogueLeveler.bandLowPass = N60BiquadCoefficientsMakeIdentity();
 
     snapshot.dynamicEQ = N60DynamicEQSnapshotMakeBypassed(sampleRate);
+
+    snapshot.deHarsh.enabled = false;
+    snapshot.deHarsh.frequencyHz = 3500.0;
+    snapshot.deHarsh.amountDB = -1.5f;
+    snapshot.deHarsh.highShelf = N60BiquadCoefficientsMakeIdentity();
 
     snapshot.deEsser.enabled = false;
     snapshot.deEsser.dynamicEQMode = true;
@@ -767,12 +786,51 @@ bool N60DynamicsSnapshotSetLoudnessContour(
     N60LoudnessContourSnapshot configured = {0};
     configured.enabled = enabled;
     configured.strength = strength;
+    configured.perBandMode = false;
     configured.fullContourMasterGainLinear = db_to_linear(N60_LOUDNESS_FULL_CONTOUR_DB);
     configured.flatContourMasterGainLinear = db_to_linear(N60_LOUDNESS_FLAT_CONTOUR_DB);
     double bassDB = N60_LOUDNESS_MAX_BASS_DB * strength;
     double trebleDB = N60_LOUDNESS_MAX_TREBLE_DB * strength;
     if (!N60BiquadDesign(N60BiquadFilterTypeLowShelf, sampleRate, N60_LOUDNESS_LOW_SHELF_HZ, bassDB, 0.7071067811865476, &configured.lowShelf)
         || !N60BiquadDesign(N60BiquadFilterTypeHighShelf, sampleRate, N60_LOUDNESS_HIGH_SHELF_HZ, trebleDB, 0.7071067811865476, &configured.highShelf)) return false;
+    snapshot->loudnessContour = configured;
+    return true;
+}
+
+bool N60DynamicsSnapshotSetPerBandLoudness(
+    N60DynamicsSnapshot *snapshot,
+    double sampleRate,
+    bool enabled,
+    float strength,
+    float referencePhons,
+    float maxBoostDB,
+    float maxCutDB,
+    N60LoudnessLevelSource levelSource
+) {
+    if (snapshot == NULL || !isfinite(sampleRate) || sampleRate <= 0.0
+        || !isfinite(strength) || strength < 0.0f || strength > 1.0f
+        || !isfinite(referencePhons) || referencePhons < 60.0f || referencePhons > 95.0f
+        || !isfinite(maxBoostDB) || maxBoostDB < 6.0f || maxBoostDB > 20.0f
+        || !isfinite(maxCutDB) || maxCutDB < 0.0f || maxCutDB > 6.0f
+        || (levelSource != N60LoudnessLevelSourceSystemVolume && levelSource != N60LoudnessLevelSourceIntegrated)
+        || N60_LOUDNESS_HIGH_SHELF_HZ >= sampleRate * 0.45) return false;
+
+    N60LoudnessContourSnapshot configured = {0};
+    configured.enabled = enabled;
+    configured.strength = strength;
+    configured.perBandMode = true;
+    configured.fullContourMasterGainLinear = db_to_linear(N60_LOUDNESS_FULL_CONTOUR_DB);
+    configured.flatContourMasterGainLinear = db_to_linear(N60_LOUDNESS_FLAT_CONTOUR_DB);
+    configured.lowShelf = N60BiquadCoefficientsMakeIdentity();
+    configured.highShelf = N60BiquadCoefficientsMakeIdentity();
+    configured.levelSource = levelSource;
+    configured.referencePhons = referencePhons;
+    configured.maxBoostDB = maxBoostDB;
+    configured.maxCutDB = maxCutDB;
+    configured.responseCoefficient = coefficient_for_time_ms(sampleRate, N60_LOUDNESS_GAIN_RESPONSE_MS);
+    if (!valid_coefficient(configured.responseCoefficient)
+        || !N60BiquadDesign(N60BiquadFilterTypeLowPass, sampleRate, N60_LOUDNESS_LOW_SHELF_HZ, 0.0, 0.7071067811865476, &configured.lowBandLowPass)
+        || !N60BiquadDesign(N60BiquadFilterTypeHighPass, sampleRate, N60_LOUDNESS_HIGH_SHELF_HZ, 0.0, 0.7071067811865476, &configured.highBandHighPass)) return false;
     snapshot->loudnessContour = configured;
     return true;
 }
@@ -851,6 +909,26 @@ bool N60DynamicsSnapshotSetDialogueLeveler(
         || !N60BiquadDesign(N60BiquadFilterTypeHighPass, sampleRate, bandLowHz, 0.0, 0.7071067811865476, &configured.bandHighPass)
         || !N60BiquadDesign(N60BiquadFilterTypeLowPass, sampleRate, bandHighHz, 0.0, 0.7071067811865476, &configured.bandLowPass)) return false;
     snapshot->dialogueLeveler = configured;
+    return true;
+}
+
+bool N60DynamicsSnapshotSetDeHarsh(
+    N60DynamicsSnapshot *snapshot,
+    double sampleRate,
+    bool enabled,
+    float amountDB,
+    double frequencyHz
+) {
+    if (snapshot == NULL || !isfinite(sampleRate) || sampleRate <= 0.0
+        || !isfinite(amountDB) || amountDB < -6.0f || amountDB > 0.0f
+        || !isfinite(frequencyHz) || frequencyHz < 1500.0 || frequencyHz > 10000.0
+        || frequencyHz >= sampleRate * 0.45) return false;
+    N60DeHarshSnapshot configured = {0};
+    configured.enabled = enabled;
+    configured.frequencyHz = frequencyHz;
+    configured.amountDB = amountDB;
+    if (!N60BiquadDesign(N60BiquadFilterTypeHighShelf, sampleRate, frequencyHz, amountDB, 0.7071067811865476, &configured.highShelf)) return false;
+    snapshot->deHarsh = configured;
     return true;
 }
 
@@ -1281,7 +1359,14 @@ bool N60DynamicsSnapshotIsValid(N60DynamicsSnapshot snapshot) {
         || !isfinite(snapshot.loudnessContour.fullContourMasterGainLinear) || snapshot.loudnessContour.fullContourMasterGainLinear <= 0.0f
         || !isfinite(snapshot.loudnessContour.flatContourMasterGainLinear) || snapshot.loudnessContour.flatContourMasterGainLinear <= snapshot.loudnessContour.fullContourMasterGainLinear
         || !N60BiquadCoefficientsAreFinite(snapshot.loudnessContour.lowShelf)
-        || !N60BiquadCoefficientsAreFinite(snapshot.loudnessContour.highShelf)) return false;
+        || !N60BiquadCoefficientsAreFinite(snapshot.loudnessContour.highShelf)
+        || (snapshot.loudnessContour.levelSource != N60LoudnessLevelSourceSystemVolume && snapshot.loudnessContour.levelSource != N60LoudnessLevelSourceIntegrated)
+        || !isfinite(snapshot.loudnessContour.referencePhons) || snapshot.loudnessContour.referencePhons < 60.0f || snapshot.loudnessContour.referencePhons > 95.0f
+        || !isfinite(snapshot.loudnessContour.maxBoostDB) || snapshot.loudnessContour.maxBoostDB < 6.0f || snapshot.loudnessContour.maxBoostDB > 20.0f
+        || !isfinite(snapshot.loudnessContour.maxCutDB) || snapshot.loudnessContour.maxCutDB < 0.0f || snapshot.loudnessContour.maxCutDB > 6.0f
+        || !valid_coefficient(snapshot.loudnessContour.responseCoefficient)
+        || !N60BiquadCoefficientsAreFinite(snapshot.loudnessContour.lowBandLowPass)
+        || !N60BiquadCoefficientsAreFinite(snapshot.loudnessContour.highBandHighPass)) return false;
 
     if (!isfinite(snapshot.dialogueLeveler.bandLowHz) || !isfinite(snapshot.dialogueLeveler.bandHighHz)
         || snapshot.dialogueLeveler.bandLowHz < 100.0 || snapshot.dialogueLeveler.bandHighHz > 8000.0
@@ -1307,6 +1392,10 @@ bool N60DynamicsSnapshotIsValid(N60DynamicsSnapshot snapshot) {
         || !N60BiquadCoefficientsAreFinite(snapshot.dialogueLeveler.bandLowPass)) return false;
 
     if (!N60DynamicEQSnapshotIsValid(snapshot.dynamicEQ)) return false;
+
+    if (!isfinite(snapshot.deHarsh.frequencyHz) || snapshot.deHarsh.frequencyHz < 1500.0 || snapshot.deHarsh.frequencyHz > 10000.0
+        || !isfinite(snapshot.deHarsh.amountDB) || snapshot.deHarsh.amountDB < -6.0f || snapshot.deHarsh.amountDB > 0.0f
+        || !N60BiquadCoefficientsAreFinite(snapshot.deHarsh.highShelf)) return false;
 
     if (!isfinite(snapshot.deEsser.frequencyHz)
         || snapshot.deEsser.frequencyHz < 2000.0 || snapshot.deEsser.frequencyHz > 10000.0
@@ -1550,22 +1639,92 @@ static void process_loudness_contour(
 ) {
     float dryLeft = *left;
     float dryRight = *right;
-    float wetLeft = N60BiquadProcessSample(snapshot.loudnessContour.lowShelf, &runtime->loudnessLowShelfLeft, dryLeft);
-    wetLeft = N60BiquadProcessSample(snapshot.loudnessContour.highShelf, &runtime->loudnessHighShelfLeft, wetLeft);
-    float wetRight = N60BiquadProcessSample(snapshot.loudnessContour.lowShelf, &runtime->loudnessLowShelfRight, dryRight);
-    wetRight = N60BiquadProcessSample(snapshot.loudnessContour.highShelf, &runtime->loudnessHighShelfRight, wetRight);
-    float volumeScale = 0.0f;
-    if (masterGainLinear <= snapshot.loudnessContour.fullContourMasterGainLinear) {
-        volumeScale = 1.0f;
-    } else if (masterGainLinear < snapshot.loudnessContour.flatContourMasterGainLinear) {
-        float masterDB = linear_to_db(masterGainLinear);
-        volumeScale = (N60_LOUDNESS_FLAT_CONTOUR_DB - masterDB) / (N60_LOUDNESS_FLAT_CONTOUR_DB - N60_LOUDNESS_FULL_CONTOUR_DB);
-        volumeScale = clampf(volumeScale, 0.0f, 1.0f);
+    N60LoudnessContourSnapshot config = snapshot.loudnessContour;
+
+    if (!config.perBandMode) {
+        float wetLeft = N60BiquadProcessSample(config.lowShelf, &runtime->loudnessLowShelfLeft, dryLeft);
+        wetLeft = N60BiquadProcessSample(config.highShelf, &runtime->loudnessHighShelfLeft, wetLeft);
+        float wetRight = N60BiquadProcessSample(config.lowShelf, &runtime->loudnessLowShelfRight, dryRight);
+        wetRight = N60BiquadProcessSample(config.highShelf, &runtime->loudnessHighShelfRight, wetRight);
+        float volumeScale = 0.0f;
+        if (masterGainLinear <= config.fullContourMasterGainLinear) {
+            volumeScale = 1.0f;
+        } else if (masterGainLinear < config.flatContourMasterGainLinear) {
+            float masterDB = linear_to_db(masterGainLinear);
+            volumeScale = (N60_LOUDNESS_FLAT_CONTOUR_DB - masterDB)
+                / (N60_LOUDNESS_FLAT_CONTOUR_DB - N60_LOUDNESS_FULL_CONTOUR_DB);
+            volumeScale = clampf(volumeScale, 0.0f, 1.0f);
+        }
+        float target = config.enabled ? volumeScale : 0.0f;
+        runtime->loudnessMix = smooth_toward(runtime->loudnessMix, target, snapshot.bypassTransitionCoefficient);
+        runtime->loudnessLowGainDB = N60_LOUDNESS_MAX_BASS_DB * config.strength * runtime->loudnessMix;
+        runtime->loudnessHighGainDB = N60_LOUDNESS_MAX_TREBLE_DB * config.strength * runtime->loudnessMix;
+        runtime->loudnessEstimatedPhons = config.referencePhons;
+        *left = dryLeft + (wetLeft - dryLeft) * runtime->loudnessMix;
+        *right = dryRight + (wetRight - dryRight) * runtime->loudnessMix;
+        return;
     }
-    float target = snapshot.loudnessContour.enabled ? volumeScale : 0.0f;
-    runtime->loudnessMix = smooth_toward(runtime->loudnessMix, target, snapshot.bypassTransitionCoefficient);
-    *left = dryLeft + (wetLeft - dryLeft) * runtime->loudnessMix;
-    *right = dryRight + (wetRight - dryRight) * runtime->loudnessMix;
+
+    float lowLeft = N60BiquadProcessSample(config.lowBandLowPass, &runtime->loudnessLowBandLeft, dryLeft);
+    float lowRight = N60BiquadProcessSample(config.lowBandLowPass, &runtime->loudnessLowBandRight, dryRight);
+    float highLeft = N60BiquadProcessSample(config.highBandHighPass, &runtime->loudnessHighBandLeft, dryLeft);
+    float highRight = N60BiquadProcessSample(config.highBandHighPass, &runtime->loudnessHighBandRight, dryRight);
+
+    float measuredLUFS = -0.691f + 10.0f * log10f(fmaxf(runtime->loudnessMeanSquare, N60_DYNAMICS_EPSILON));
+    float estimatedPhons;
+    if (config.levelSource == N60LoudnessLevelSourceIntegrated) {
+        // Commercial calibration: -16 LUFS program level corresponds to the
+        // configured reference-phons point. This is intentionally explicit and
+        // deterministic rather than claiming to be a calibrated SPL meter.
+        estimatedPhons = config.referencePhons + (measuredLUFS - N60_LOUDNESS_INTEGRATED_REFERENCE_LUFS);
+    } else {
+        // Preserve PR29's useful anchor points: master -6 dB is flat/reference;
+        // master -30 dB is 24 phons below reference and therefore reaches the
+        // historical +6/+3 dB contour with the default psychoacoustic slopes.
+        float masterDB = linear_to_db(fmaxf(masterGainLinear, N60_DYNAMICS_EPSILON));
+        estimatedPhons = config.referencePhons + (masterDB - N60_LOUDNESS_FLAT_CONTOUR_DB);
+    }
+    runtime->loudnessEstimatedPhons = estimatedPhons;
+
+    float phonDelta = config.referencePhons - estimatedPhons;
+    float lowTargetDB = 0.0f;
+    float highTargetDB = 0.0f;
+    if (config.enabled && phonDelta >= 0.0f) {
+        lowTargetDB = fminf(config.maxBoostDB, phonDelta * N60_LOUDNESS_LOW_DB_PER_PHON) * config.strength;
+        highTargetDB = fminf(config.maxBoostDB, phonDelta * N60_LOUDNESS_HIGH_DB_PER_PHON) * config.strength;
+    } else if (config.enabled) {
+        float surplus = -phonDelta;
+        lowTargetDB = -fminf(config.maxCutDB, surplus * N60_LOUDNESS_LOW_CUT_DB_PER_PHON) * config.strength;
+        highTargetDB = -fminf(config.maxCutDB, surplus * N60_LOUDNESS_HIGH_CUT_DB_PER_PHON) * config.strength;
+    }
+
+    float coefficient = config.enabled ? config.responseCoefficient : snapshot.bypassTransitionCoefficient;
+    runtime->loudnessLowGainDB = smooth_toward(runtime->loudnessLowGainDB, lowTargetDB, coefficient);
+    runtime->loudnessHighGainDB = smooth_toward(runtime->loudnessHighGainDB, highTargetDB, coefficient);
+    float lowGain = db_to_linear(runtime->loudnessLowGainDB);
+    float highGain = db_to_linear(runtime->loudnessHighGainDB);
+    // Residual-additive form is exact unity at 0 dB even though the band filters
+    // themselves are not complementary crossover pairs.
+    *left = dryLeft + lowLeft * (lowGain - 1.0f) + highLeft * (highGain - 1.0f);
+    *right = dryRight + lowRight * (lowGain - 1.0f) + highRight * (highGain - 1.0f);
+    float normalization = fmaxf(config.maxBoostDB, fmaxf(config.maxCutDB, 1.0f));
+    runtime->loudnessMix = clampf(fmaxf(fabsf(runtime->loudnessLowGainDB), fabsf(runtime->loudnessHighGainDB)) / normalization, 0.0f, 1.0f);
+}
+
+static void process_de_harsh(
+    N60DynamicsRuntime *runtime,
+    N60DynamicsSnapshot snapshot,
+    float *left,
+    float *right
+) {
+    float dryLeft = *left;
+    float dryRight = *right;
+    float wetLeft = N60BiquadProcessSample(snapshot.deHarsh.highShelf, &runtime->deHarshLeft, dryLeft);
+    float wetRight = N60BiquadProcessSample(snapshot.deHarsh.highShelf, &runtime->deHarshRight, dryRight);
+    float target = snapshot.deHarsh.enabled ? 1.0f : 0.0f;
+    runtime->deHarshMix = smooth_toward(runtime->deHarshMix, target, snapshot.bypassTransitionCoefficient);
+    *left = dryLeft + (wetLeft - dryLeft) * runtime->deHarshMix;
+    *right = dryRight + (wetRight - dryRight) * runtime->deHarshMix;
 }
 
 static void process_dialogue_leveler(
@@ -1782,6 +1941,7 @@ void N60DynamicsProcessCoreStereoFrameWithMasterGain(
     process_loudness_contour(runtime, snapshot, masterGainLinear, left, right);
     process_dialogue_leveler(runtime, snapshot, left, right);
     N60DynamicEQProcessStereoFrame(&runtime->dynamicEQ, snapshot.dynamicEQ, left, right);
+    process_de_harsh(runtime, snapshot, left, right);
     process_de_esser(runtime, snapshot, left, right);
     process_multiband_compressor(runtime, snapshot, left, right);
 
@@ -1918,6 +2078,10 @@ N60DynamicsTelemetry N60DynamicsRuntimeTelemetry(const N60DynamicsRuntime *runti
     telemetry.loudnessShortTermLUFS = -0.691f + 10.0f * log10f(fmaxf(runtime->loudnessMeanSquare, N60_DYNAMICS_EPSILON));
     telemetry.loudnessMatchGainDB = runtime->loudnessMatchGainDB;
     telemetry.loudnessContourScale = runtime->loudnessMix;
+    telemetry.loudnessLowCompensationDB = runtime->loudnessLowGainDB;
+    telemetry.loudnessHighCompensationDB = runtime->loudnessHighGainDB;
+    telemetry.loudnessEstimatedPhons = runtime->loudnessEstimatedPhons;
+    telemetry.deHarshMix = runtime->deHarshMix;
     telemetry.dialogueProgramLevelDBFS = runtime->dialogueProgramLevelDBFS;
     telemetry.dialogueBandLevelDBFS = runtime->dialogueBandLevelDBFS;
     telemetry.dialogueGapDB = runtime->dialogueGapDB;

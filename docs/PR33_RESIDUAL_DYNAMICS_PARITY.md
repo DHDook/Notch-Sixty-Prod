@@ -189,3 +189,14 @@ The gain/protection controls share a single ownership model:
 - **Clipper Asymmetry Trim** is an independent ±3 dB half-cycle drive trim around the existing clipper curve. Zero is sample-identical to the established clipper behavior.
 
 No new limiter or duplicate hidden master-gain stage is introduced.
+
+
+## Slice 3 commercial semantics
+
+### Per-band loudness compensation
+The commercial implementation supersedes the shallow PR29 volume-aware contour while retaining its useful anchor points and the old C setter for compatibility. The advanced Swift path exposes the legacy observable controls: reference phons (60–95), maximum boost (6–20 dB), maximum cut (0–6 dB), and System Volume / Integrated level source.
+
+The implementation is independently authored and does not claim calibrated SPL. In System Volume mode, master −6 dB is the configured reference-phons point and master −30 dB is 24 phons below reference. With the default response slopes this reproduces PR29's accepted +6 dB bass / +3 dB treble low-volume anchor. Integrated mode maps −16 LUFS to the configured reference-phons point. Low and high bands use fixed, precomputed filters with dynamically smoothed gains, so no coefficients are designed in the callback.
+
+### De-Harsh
+De-Harsh is an independently authored RBJ-style high-shelf conditioning stage. Observable contract: enable, amount −6…0 dB (default −1.5 dB), frequency 1.5–10 kHz (default 3.5 kHz). Coefficients are designed on the control plane, runtime state is fixed/preallocated, enable transitions are smoothed, and algorithmic latency is zero.

@@ -9,6 +9,7 @@ enum DynamicsConfigurationError: Error, LocalizedError, Equatable {
     case invalidSpectralDenoiser
     case invalidLoudnessMatch
     case invalidLoudnessContour
+    case invalidDeHarsh
     case invalidDialogueLeveler
     case invalidDynamicEQ
     case invalidDeEsser
@@ -39,7 +40,9 @@ enum DynamicsConfigurationError: Error, LocalizedError, Equatable {
         case .invalidLoudnessMatch:
             return "LUFS Loudness Match parameters are outside the supported production range."
         case .invalidLoudnessContour:
-            return "Loudness Contour parameters are outside the supported production range."
+            return "Per-Band Loudness parameters are outside the supported production range."
+        case .invalidDeHarsh:
+            return "De-Harsh parameters are outside the supported production range."
         case .invalidDialogueLeveler:
             return "Dialogue Relative Leveler parameters are outside the supported production range."
         case .invalidDynamicEQ:
@@ -377,14 +380,51 @@ struct LoudnessMatchConfiguration: Equatable, Sendable {
     }
 }
 
+enum LoudnessLevelSource: String, CaseIterable, Identifiable, Sendable {
+    case systemVolume
+    case integrated
+    var id: String { rawValue }
+    var displayName: String { self == .systemVolume ? "System Volume" : "Integrated" }
+    var cType: N60LoudnessLevelSource {
+        self == .systemVolume ? N60LoudnessLevelSourceSystemVolume : N60LoudnessLevelSourceIntegrated
+    }
+}
+
 struct LoudnessContourConfiguration: Equatable, Sendable {
     static let strengthRange = 0.0...1.0
+    static let referencePhonsRange = 60.0...95.0
+    static let maxBoostRange = 6.0...20.0
+    static let maxCutRange = 0.0...6.0
+
     var enabled = false
     var strength = 1.0
+    var referencePhons = 85.0
+    var maxBoostDB = 12.0
+    var maxCutDB = 6.0
+    var levelSource: LoudnessLevelSource = .systemVolume
 
     func validate() throws {
-        guard strength.isFinite, Self.strengthRange.contains(strength) else {
+        guard strength.isFinite, Self.strengthRange.contains(strength),
+              referencePhons.isFinite, Self.referencePhonsRange.contains(referencePhons),
+              maxBoostDB.isFinite, Self.maxBoostRange.contains(maxBoostDB),
+              maxCutDB.isFinite, Self.maxCutRange.contains(maxCutDB) else {
             throw DynamicsConfigurationError.invalidLoudnessContour
+        }
+    }
+}
+
+struct DeHarshConfiguration: Equatable, Sendable {
+    static let amountRange = -6.0...0.0
+    static let frequencyRange = 1_500.0...10_000.0
+    var enabled = false
+    var amountDB = -1.5
+    var frequencyHz = 3_500.0
+
+    func validate(sampleRate: Double) throws {
+        guard amountDB.isFinite, Self.amountRange.contains(amountDB),
+              frequencyHz.isFinite, Self.frequencyRange.contains(frequencyHz),
+              frequencyHz < sampleRate * 0.45 else {
+            throw DynamicsConfigurationError.invalidDeHarsh
         }
     }
 }
@@ -912,6 +952,7 @@ struct DynamicsConfiguration: Equatable, Sendable {
     var spectralDenoiser = SpectralDenoiserConfiguration()
     var loudnessMatch = LoudnessMatchConfiguration()
     var loudnessContour = LoudnessContourConfiguration()
+    var deHarsh = DeHarshConfiguration()
     var dialogueRelativeLeveler = DialogueRelativeLevelerConfiguration()
     var dynamicEQ = DynamicEQConfiguration()
     var deEsser = DeEsserConfiguration()
@@ -932,6 +973,7 @@ struct DynamicsConfiguration: Equatable, Sendable {
         try spectralDenoiser.validate(sampleRate: sampleRate)
         try loudnessMatch.validate()
         try loudnessContour.validate()
+        try deHarsh.validate(sampleRate: sampleRate)
         try dialogueRelativeLeveler.validate(sampleRate: sampleRate)
         try dynamicEQ.validate(sampleRate: sampleRate)
         try deEsser.validate()
@@ -999,7 +1041,14 @@ struct DynamicsConfiguration: Equatable, Sendable {
             Float(loudnessMatch.attackSeconds),
             Float(loudnessMatch.releaseSeconds)
         ) else { throw DynamicsConfigurationError.invalidLoudnessMatch }
-        guard N60DynamicsSnapshotSetLoudnessContour(&snapshot, sampleRate, loudnessContour.enabled, Float(loudnessContour.strength)) else { throw DynamicsConfigurationError.invalidLoudnessContour }
+        guard N60DynamicsSnapshotSetPerBandLoudness(
+            &snapshot, sampleRate, loudnessContour.enabled, Float(loudnessContour.strength),
+            Float(loudnessContour.referencePhons), Float(loudnessContour.maxBoostDB),
+            Float(loudnessContour.maxCutDB), loudnessContour.levelSource.cType
+        ) else { throw DynamicsConfigurationError.invalidLoudnessContour }
+        guard N60DynamicsSnapshotSetDeHarsh(
+            &snapshot, sampleRate, deHarsh.enabled, Float(deHarsh.amountDB), deHarsh.frequencyHz
+        ) else { throw DynamicsConfigurationError.invalidDeHarsh }
         guard N60DynamicsSnapshotSetDialogueLeveler(
             &snapshot,
             sampleRate,
