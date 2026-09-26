@@ -26,6 +26,9 @@ jobs:
       - name: Apply Symmetry Balance integration
         run: python3 ci/pr34_apply_phase_d_symmetry.py
 
+      - name: Fix Symmetry Balance Swift test bridge
+        run: python3 ci/pr34_fix_symmetry_test_bridge.py
+
       - name: Validate Band Pass DSP
         run: |
           clang -std=c11 -Wall -Wextra -Werror ci/validate_pr34_bandpass.c -o /tmp/validate-pr34-bandpass
