@@ -1,0 +1,112 @@
+name: PR34 Domain-Aware Dynamic EQ Integration
+
+on:
+  push:
+    branches:
+      - feature/dsp-optimization-parity-audit
+
+permissions:
+  contents: write
+
+jobs:
+  integrate-and-verify:
+    runs-on: xcode-27
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v7
+        with:
+          ref: feature/dsp-optimization-parity-audit
+          fetch-depth: 0
+
+      - name: Normalize integration helper
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('ci/pr34_apply_dynamic_domain_eq.py')
+          text = p.read_text()
+          old = "    path.write_text(text[:a] + replacement + text[b:])"
+          new = "    tail = b + len(end) if replacement.endswith(end) else b\n    path.write_text(text[:a] + replacement + text[tail:])"
+          if old in text:
+              text = text.replace(old, new, 1)
+
+          old = '''        case .independent:\\n            count = try compileLane(leftBands, lane: N60DynamicEQLanePrimary)\\n                + compileLane(rightBands, lane: N60DynamicEQLaneSecondary)\\n        case .midSide:\\n            count = try compileLane(midBands, lane: N60DynamicEQLanePrimary)\\n                + compileLane(sideBands, lane: N60DynamicEQLaneSecondary)\\n'''
+          new = '''        case .independent:\\n            let primaryCount = try compileLane(leftBands, lane: N60DynamicEQLanePrimary)\\n            let secondaryCount = try compileLane(rightBands, lane: N60DynamicEQLaneSecondary)\\n            count = primaryCount + secondaryCount\\n        case .midSide:\\n            let primaryCount = try compileLane(midBands, lane: N60DynamicEQLanePrimary)\\n            let secondaryCount = try compileLane(sideBands, lane: N60DynamicEQLaneSecondary)\\n            count = primaryCount + secondaryCount\\n'''
+          if old in text:
+              text = text.replace(old, new, 1)
+          p.write_text(text)
+          PY
+
+      - name: Apply domain-aware Dynamic EQ architecture
+        run: python3 ci/pr34_apply_dynamic_domain_eq.py
+
+      - name: Verify source cleanliness
+        run: git diff --check
+
+      - name: Validate Dynamic domains through 384 kHz
+        shell: bash
+        run: |
+          clang -std=c11 -Wall -Wextra -Werror \
+            -I NotchSixty/Audio/Realtime \
+            ci/validate_pr34_dynamic_domains.c \
+            NotchSixty/Audio/Realtime/N60DynamicEQ.c \
+            -lm -o /tmp/validate_pr34_dynamic_domains
+          /tmp/validate_pr34_dynamic_domains
+
+      - name: Build
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          build
+
+      - name: Focused domain-aware Dynamic EQ regressions
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          -only-testing:NotchSixtyTests/NotchSixtyTests/testMidSideDynamicEQUsesIndependentMidAndSideLanes
+          -only-testing:NotchSixtyTests/NotchSixtyTests/testIndependentDynamicEQUsesSeparateLeftAndRightLanes
+          -only-testing:NotchSixtyTests/NotchSixtyTests/testLinearPhaseRetainsDynamicAsPostFIRMinimumPhaseLayer
+          -only-testing:NotchSixtyTests/NotchSixtyTests/testDynamicEQFilterCoverageAndStructuralRestrictions
+          -only-testing:NotchSixtyTests/NotchSixtyTests/testMixedPhaseKeepsSharedDynamicEQActive
+          test
+
+      - name: Full test suite
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          test
+
+      - name: Commit verified domain-aware Dynamic EQ
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "Domain-aware Dynamic EQ already applied; nothing to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            ci/pr34_apply_dynamic_domain_eq.py \
+            NotchSixty/Audio/Realtime/N60DynamicEQ.h \
+            NotchSixty/Audio/Realtime/N60DynamicEQ.c \
+            NotchSixty/Audio/AudioIOEngine.swift \
+            NotchSixty/Audio/StereoPlaybackControl.swift \
+            NotchSixty/ContentView.swift \
+            NotchSixtyTests/NotchSixtyTests.swift
+          git commit -m "Bake in domain-aware Dynamic EQ"
+          git push origin HEAD:feature/dsp-optimization-parity-audit
