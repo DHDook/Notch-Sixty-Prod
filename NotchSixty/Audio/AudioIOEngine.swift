@@ -99,6 +99,7 @@ struct EQBand: Identifiable, Equatable, Sendable {
     var frequencyHz: Double
     var gainDB: Double
     var q: Double
+    var constantQ: Bool
     var dynamic: EQBandDynamicConfiguration
 
     init(
@@ -108,6 +109,7 @@ struct EQBand: Identifiable, Equatable, Sendable {
         frequencyHz: Double = 1_000,
         gainDB: Double = 0,
         q: Double = 0.707,
+        constantQ: Bool = false,
         dynamic: EQBandDynamicConfiguration = EQBandDynamicConfiguration()
     ) {
         self.id = id
@@ -116,7 +118,15 @@ struct EQBand: Identifiable, Equatable, Sendable {
         self.frequencyHz = frequencyHz
         self.gainDB = gainDB
         self.q = q
+        self.constantQ = constantQ
         self.dynamic = dynamic
+    }
+
+    var compiledCType: N60BiquadFilterType {
+        if type == .peaking && constantQ {
+            return N60BiquadFilterTypePeakingConstantQ
+        }
+        return type.cType
     }
 }
 
@@ -386,7 +396,7 @@ struct EQConfiguration: Equatable, Sendable {
                 guard N60DSPGraphSnapshotSetEQBand(
                     &graph,
                     renderIndex,
-                    band.type.cType,
+                    band.compiledCType,
                     band.frequencyHz,
                     band.gainDB,
                     band.q,
@@ -459,7 +469,7 @@ struct EQConfiguration: Equatable, Sendable {
             }
             var cBand = N60LinearPhaseEQBand()
             cBand.enabled = true
-            cBand.type = band.type.cType
+            cBand.type = band.compiledCType
             cBand.frequencyHz = band.frequencyHz
             cBand.gainDB = band.gainDB
             cBand.q = band.q

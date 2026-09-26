@@ -25,6 +25,7 @@ typedef enum {
     N60BiquadFilterTypeNotch = 5,
     N60BiquadFilterTypeAllPass = 6,
     N60BiquadFilterTypeBandPass = 7,
+    N60BiquadFilterTypePeakingConstantQ = 8,
 } N60BiquadFilterType;
 
 typedef struct {
@@ -129,6 +130,21 @@ static inline bool N60BiquadDesign(
         a0 = 1.0 + alpha / A;
         a1 = -2.0 * cosOmega;
         a2 = 1.0 - alpha / A;
+        break;
+    }
+    case N60BiquadFilterTypePeakingConstantQ: {
+        // W3C Audio EQ Cookbook defines peaking-EQ Q such that A*Q is the
+        // classic electrical-engineering Q. The product's Constant-Q control
+        // exposes that classic Q directly, so hold it fixed by using
+        // Qcookbook = Qclassic / A. This is control-plane coefficient design.
+        double A = pow(10.0, gainDB / 40.0);
+        double constantAlpha = A * sinOmega / (2.0 * q);
+        b0 = 1.0 + constantAlpha * A;
+        b1 = -2.0 * cosOmega;
+        b2 = 1.0 - constantAlpha * A;
+        a0 = 1.0 + constantAlpha / A;
+        a1 = -2.0 * cosOmega;
+        a2 = 1.0 - constantAlpha / A;
         break;
     }
     case N60BiquadFilterTypeLowShelf: {

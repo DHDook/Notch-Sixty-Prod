@@ -270,6 +270,20 @@ final class NotchSixtyTests: XCTestCase {
         XCTAssertEqual(projected[0].q, 0.707, accuracy: 0.000_001)
     }
 
+    func testConstantQIsTypedPerPeakAndProjectsIntoLinearPhase() throws {
+        let ordinary = EQBand(type: .peaking, frequencyHz: 1_000, gainDB: 6, q: 2.0)
+        let constant = EQBand(type: .peaking, frequencyHz: 1_000, gainDB: 6, q: 2.0, constantQ: true)
+        XCTAssertEqual(ordinary.compiledCType, N60BiquadFilterTypePeaking)
+        XCTAssertEqual(constant.compiledCType, N60BiquadFilterTypePeakingConstantQ)
+
+        let configuration = EQConfiguration(phaseMode: .linearPhase, bands: [constant])
+        let projected = try configuration.linearPhaseBands(sampleRate: 48_000)
+        XCTAssertEqual(projected.count, 1)
+        XCTAssertEqual(projected[0].type, N60BiquadFilterTypePeakingConstantQ)
+        XCTAssertEqual(projected[0].frequencyHz, 1_000, accuracy: 0.001)
+        XCTAssertEqual(projected[0].q, 2.0, accuracy: 0.000_001)
+    }
+
     func testAllPassMaintainsUnityMagnitudeAcrossSupportedRates() {
         for rate in [44_100.0, 48_000.0, 96_000.0, 192_000.0, 384_000.0] {
             for tone in [100.0, 1_000.0, min(10_000.0, rate * 0.20)] {

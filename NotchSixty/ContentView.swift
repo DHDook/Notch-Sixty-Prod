@@ -1050,6 +1050,9 @@ struct ContentView: View {
                 Text("dB").font(.caption).foregroundStyle(.secondary)
                 TextField("Q", value: binding.q, format: .number.precision(.fractionLength(2...3))).frame(width: 65)
                 Text("Q").foregroundStyle(.secondary)
+                Toggle("Constant Q", isOn: binding.constantQ)
+                    .toggleStyle(.switch)
+                    .disabled(band.type != .peaking)
                 Toggle("Dynamic", isOn: binding.dynamic.enabled)
                     .toggleStyle(.switch)
                     .disabled(!dynamicSupported)
@@ -1119,6 +1122,7 @@ struct ContentView: View {
                     StereoEQConfiguration.bandGainRange.upperBound
                 )
                 if sanitized.type != .peaking {
+                    sanitized.constantQ = false
                     sanitized.dynamic.enabled = false
                 }
                 try? engine.updateEQBand(sanitized)
