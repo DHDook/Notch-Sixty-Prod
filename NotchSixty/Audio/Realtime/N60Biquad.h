@@ -23,6 +23,7 @@ typedef enum {
     N60BiquadFilterTypeLowPass = 3,
     N60BiquadFilterTypeHighPass = 4,
     N60BiquadFilterTypeNotch = 5,
+    N60BiquadFilterTypeAllPass = 6,
 } N60BiquadFilterType;
 
 typedef struct {
@@ -171,6 +172,17 @@ static inline bool N60BiquadDesign(
         b0 = 1.0;
         b1 = -2.0 * cosOmega;
         b2 = 1.0;
+        a0 = 1.0 + alpha;
+        a1 = -2.0 * cosOmega;
+        a2 = 1.0 - alpha;
+        break;
+    case N60BiquadFilterTypeAllPass:
+        // RBJ-style second-order all-pass. Magnitude is unity; frequency and Q
+        // control the phase-rotation region. Coefficients are designed only on
+        // the control plane and consumed as immutable snapshots in realtime.
+        b0 = 1.0 - alpha;
+        b1 = -2.0 * cosOmega;
+        b2 = 1.0 + alpha;
         a0 = 1.0 + alpha;
         a1 = -2.0 * cosOmega;
         a2 = 1.0 - alpha;

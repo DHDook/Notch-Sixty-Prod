@@ -86,6 +86,127 @@ final class StereoPlaybackControlTests: XCTestCase {
         XCTAssertEqual(diagnostics.eqRightBandCount, 1)
     }
 
+    func testZeroInterChannelDelayIsTransparent() {
+        guard let kernel = N60RenderKernelCreate() else {
+            return XCTFail("Unable to create render kernel")
+        }
+        defer { N60RenderKernelDestroy(kernel) }
+        var graph = N60DSPGraphSnapshotMakeUnity(96_000)
+        XCTAssertTrue(N60DSPGraphSnapshotSetInterChannelDelay(&graph, 0))
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+
+        for frame in 0..<2_000 {
+            let leftInput = Float(sin(Double(frame) * 0.031) * 0.6)
+            let rightInput = Float(cos(Double(frame) * 0.027) * 0.4)
+            var left: Float = 0
+            var right: Float = 0
+            N60RenderKernelProcessStereoFrame(kernel, leftInput, rightInput, &left, &right)
+            XCTAssertEqual(left, leftInput, accuracy: 0.000_001)
+            XCTAssertEqual(right, rightInput, accuracy: 0.000_001)
+        }
+    }
+
+    func testSignedInterChannelDelaySelectsCorrectChannelAndExactIntegerTiming() {
+        for signedDelay in [5.0, -5.0] {
+            guard let kernel = N60RenderKernelCreate() else {
+                return XCTFail("Unable to create render kernel")
+            }
+            defer { N60RenderKernelDestroy(kernel) }
+            var graph = N60DSPGraphSnapshotMakeUnity(48_000)
+            XCTAssertTrue(N60DSPGraphSnapshotSetInterChannelDelay(&graph, signedDelay))
+            XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+
+            var leftImpulseIndex: Int?
+            var rightImpulseIndex: Int?
+            for frame in 0..<300 {
+                let input: Float = frame == 0 ? 1 : 0
+                var left: Float = 0
+                var right: Float = 0
+                N60RenderKernelProcessStereoFrame(kernel, input, input, &left, &right)
+                if leftImpulseIndex == nil && abs(left) > 0.99 { leftImpulseIndex = frame }
+                if rightImpulseIndex == nil && abs(right) > 0.99 { rightImpulseIndex = frame }
+            }
+
+            if signedDelay > 0 {
+                XCTAssertEqual(leftImpulseIndex, 2)
+                XCTAssertEqual(rightImpulseIndex, 242)
+            } else {
+                XCTAssertEqual(leftImpulseIndex, 242)
+                XCTAssertEqual(rightImpulseIndex, 2)
+            }
+            let diagnostics = N60RenderKernelGetDiagnostics(kernel)
+            XCTAssertEqual(diagnostics.interChannelDelayMs, signedDelay, accuracy: 0.000_001)
+            XCTAssertEqual(diagnostics.interChannelAlignmentLatencyFrames, 2)
+        }
+    }
+
+    func testFractionalInterChannelDelayTracksHalfSampleTimingWithUnityMagnitude() {
+        let sampleRate = 48_000.0
+        let relativeDelayFrames = 240.5
+        let signedDelayMs = relativeDelayFrames / sampleRate * 1_000.0
+        let frequency = 10_000.0
+        guard let kernel = N60RenderKernelCreate() else {
+            return XCTFail("Unable to create render kernel")
+        }
+        defer { N60RenderKernelDestroy(kernel) }
+        var graph = N60DSPGraphSnapshotMakeUnity(sampleRate)
+        XCTAssertTrue(N60DSPGraphSnapshotSetInterChannelDelay(&graph, signedDelayMs))
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+
+        var inputSquare = 0.0
+        var rightSquare = 0.0
+        var errorSquare = 0.0
+        var measured = 0
+        for frame in 0..<30_000 {
+            let phase = 2.0 * Double.pi * frequency * Double(frame) / sampleRate
+            let sample = Float(0.4 * sin(phase))
+            var left: Float = 0
+            var right: Float = 0
+            N60RenderKernelProcessStereoFrame(kernel, sample, sample, &left, &right)
+            if frame > 5_000 {
+                let expectedPhase = 2.0 * Double.pi * frequency
+                    * (Double(frame) - relativeDelayFrames - 2.0) / sampleRate
+                let expected = 0.4 * sin(expectedPhase)
+                inputSquare += Double(sample * sample)
+                rightSquare += Double(right * right)
+                let error = Double(right) - expected
+                errorSquare += error * error
+                measured += 1
+            }
+        }
+        let inputRMS = sqrt(inputSquare / Double(measured))
+        let rightRMS = sqrt(rightSquare / Double(measured))
+        let errorRMS = sqrt(errorSquare / Double(measured))
+        XCTAssertEqual(rightRMS, inputRMS, accuracy: 0.000_2)
+        XCTAssertLessThan(errorRMS, 0.002)
+    }
+
+    func testGlobalBypassRemainsRawWithInterChannelDelayConfigured() {
+        guard let kernel = N60RenderKernelCreate() else {
+            return XCTFail("Unable to create render kernel")
+        }
+        defer { N60RenderKernelDestroy(kernel) }
+        var graph = N60DSPGraphSnapshotMakeUnity(96_000)
+        XCTAssertTrue(N60DSPGraphSnapshotSetInterChannelDelay(&graph, 12.34))
+        graph.bypassed = true
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+
+        for frame in 0..<4_000 {
+            let leftInput = Float(sin(Double(frame) * 0.019) * 0.55)
+            let rightInput = Float(cos(Double(frame) * 0.023) * 0.45)
+            var left: Float = 0
+            var right: Float = 0
+            N60RenderKernelProcessStereoFrame(kernel, leftInput, rightInput, &left, &right)
+            XCTAssertEqual(left, leftInput, accuracy: 0.000_001)
+            XCTAssertEqual(right, rightInput, accuracy: 0.000_001)
+        }
+    }
+
+    func testInterChannelDelayRangeIsPartOfPlaybackConfiguration() {
+        XCTAssertEqual(PlaybackControlConfiguration.interChannelDelayRange, -20.0...20.0)
+        XCTAssertEqual(PlaybackControlConfiguration(interChannelDelayMs: 3.25).interChannelDelayMs, 3.25)
+    }
+
     func testBalanceIsAttenuationOnlyAndCenterIsUnity() {
         let centered = PlaybackControlConfiguration(balance: 0).balanceLinearGains
         XCTAssertEqual(centered.left, 1.0)

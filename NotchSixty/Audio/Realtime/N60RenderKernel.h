@@ -8,6 +8,7 @@
 #include "N60Convolution.h"
 #include "N60Crossover.h"
 #include "N60Dynamics.h"
+#include "N60FractionalDelay.h"
 #include "N60Protection.h"
 
 #ifdef __cplusplus
@@ -50,6 +51,7 @@ typedef struct {
     float balanceGainRightLinear;
     bool bypassed;
     N60AuditionMode auditionMode;
+    N60InterChannelDelaySnapshot interChannelDelay;
     uint32_t latencyFrames;
     uint64_t generation;
     uint32_t gainTransitionFrames;
@@ -115,6 +117,8 @@ typedef struct {
     uint32_t channelCount;
     bool bypassed;
     N60AuditionMode auditionMode;
+    double interChannelDelayMs;
+    uint32_t interChannelAlignmentLatencyFrames;
     float inputGainLinear;
     float headroomGainLinear;
     float outputGainLinear;
@@ -182,6 +186,10 @@ typedef struct {
 
 N60DSPGraphSnapshot N60DSPGraphSnapshotMakeUnity(double sampleRate);
 void N60DSPGraphSnapshotClearEQ(N60DSPGraphSnapshot * _Nonnull snapshot);
+bool N60DSPGraphSnapshotSetInterChannelDelay(
+    N60DSPGraphSnapshot * _Nonnull snapshot,
+    double signedDelayMs
+);
 bool N60DSPGraphSnapshotSetEQBand(
     N60DSPGraphSnapshot * _Nonnull snapshot,
     uint32_t bandIndex,

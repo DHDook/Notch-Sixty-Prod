@@ -58,3 +58,22 @@ Do not treat architectural similarity by itself as source reuse.
 - **Architecture review:** fixed-size realtime state, control-plane coefficient preparation, zero added algorithmic latency, linked-stereo detection, exact-unity residual multiband recombination at 0 dB band gains.
 - **Validation:** deterministic tests plus focused hardware/listening acceptance before merge.
 
+
+
+## PR30 — Phase & Time Alignment Foundation
+
+- **Classification:** specification-derived / original commercial implementation.
+- **Behavioral references:** legacy user-facing inventory establishes that All-Pass is an EQ filter type used for phase alignment/group-delay correction and that inter-channel timing alignment is a supported product need. Legacy DSP implementation source and tests are not implementation references.
+- **Implementation sources:** standard second-order digital all-pass equations from public DSP literature plus the proprietary `N60Biquad`/render-graph architecture.
+- **All-Pass contract:** unity magnitude, phase rotation controlled by frequency and Q, minimum-phase/IIR mode only.
+- **Realtime contract:** coefficient design remains off the render callback; fixed-size state only; no allocation, locks, logging, file/device I/O, or coefficient construction in realtime.
+- **Follow-on in this PR:** independently designed signed fractional inter-channel delay with click-safe transitions. Excess-phase room correction remains deferred to the measurement/room-correction milestone because it requires phase-resolved measurements.
+
+
+### PR30 fractional inter-channel delay
+
+- **Classification:** specification-derived / original commercial implementation.
+- **Implementation source:** standard Thiran maximally-flat group-delay all-pass mathematics, independently implemented around the proprietary render snapshot/runtime architecture.
+- **Observable legacy contract used:** signed ±20 ms user-facing range and sign convention only (positive delays Right, negative delays Left).
+- **Commercial improvements:** higher-order fractional-delay approximation where possible, exact integer-delay bypass, queued click-safe transitions, explicit audition/Global-Bypass semantics, and deterministic 384 kHz-capable fixed storage.
+- **Legacy implementation reuse:** none. Historical fractional-delay source/tests were not used as implementation references.

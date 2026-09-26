@@ -9,6 +9,7 @@ enum EQFilterType: String, CaseIterable, Identifiable, Sendable {
     case lowPass
     case highPass
     case notch
+    case allPass
 
     var id: String { rawValue }
 
@@ -20,6 +21,7 @@ enum EQFilterType: String, CaseIterable, Identifiable, Sendable {
         case .lowPass: return "Low Pass"
         case .highPass: return "High Pass"
         case .notch: return "Notch"
+        case .allPass: return "All-Pass"
         }
     }
 
@@ -31,6 +33,7 @@ enum EQFilterType: String, CaseIterable, Identifiable, Sendable {
         case .lowPass: return N60BiquadFilterTypeLowPass
         case .highPass: return N60BiquadFilterTypeHighPass
         case .notch: return N60BiquadFilterTypeNotch
+        case .allPass: return N60BiquadFilterTypeAllPass
         }
     }
 }
@@ -77,6 +80,7 @@ struct EQBand: Identifiable, Equatable, Sendable {
 enum EQConfigurationError: Error, LocalizedError, Equatable {
     case tooManyBands(Int)
     case invalidBand(index: Int)
+    case allPassRequiresMinimumPhase
     case linearPhaseDesignFailed
     case convolutionProgramUnavailable
 
@@ -86,6 +90,8 @@ enum EQConfigurationError: Error, LocalizedError, Equatable {
             return "Parametric EQ supports at most \(Int(N60_MAX_EQ_BANDS)) bands; configuration contains \(count)."
         case .invalidBand(let index):
             return "EQ band \(index + 1) is invalid for the current output sample rate."
+        case .allPassRequiresMinimumPhase:
+            return "All-Pass bands are phase-only IIR filters and require Minimum phase EQ mode."
         case .linearPhaseDesignFailed:
             return "Unable to design the linear-phase FIR for the current EQ configuration."
         case .convolutionProgramUnavailable:
@@ -363,6 +369,9 @@ struct EQConfiguration: Equatable, Sendable {
         result.reserveCapacity(enabledBandCount)
         for (index, band) in bands.enumerated() where band.enabled {
             guard try validateBand(band, index: index, sampleRate: sampleRate) else { continue }
+            guard band.type != .allPass else {
+                throw EQConfigurationError.allPassRequiresMinimumPhase
+            }
             var cBand = N60LinearPhaseEQBand()
             cBand.enabled = true
             cBand.type = band.type.cType
@@ -570,6 +579,15 @@ final class AudioIOEngine: ObservableObject {
         }
         var updated = playbackControlConfiguration
         updated.balance = value
+        try applyPlaybackControlConfiguration(updated)
+    }
+
+    func setInterChannelDelayMs(_ value: Double) throws {
+        guard value.isFinite, PlaybackControlConfiguration.interChannelDelayRange.contains(value) else {
+            throw PlaybackControlConfigurationError.invalidInterChannelDelay(value)
+        }
+        var updated = playbackControlConfiguration
+        updated.interChannelDelayMs = value
         try applyPlaybackControlConfiguration(updated)
     }
 
@@ -869,6 +887,10 @@ final class AudioIOEngine: ObservableObject {
         guard configuration.balance.isFinite,
               PlaybackControlConfiguration.balanceRange.contains(configuration.balance) else {
             throw PlaybackControlConfigurationError.invalidBalance(configuration.balance)
+        }
+        guard configuration.interChannelDelayMs.isFinite,
+              PlaybackControlConfiguration.interChannelDelayRange.contains(configuration.interChannelDelayMs) else {
+            throw PlaybackControlConfigurationError.invalidInterChannelDelay(configuration.interChannelDelayMs)
         }
 
         if let session = transportSession {

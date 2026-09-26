@@ -174,6 +174,9 @@ struct StereoEQConfiguration: Equatable, Sendable {
         graph.balanceGainRightLinear = balance.right
         graph.bypassed = playbackConfiguration.globalBypassed
         graph.auditionMode = playbackConfiguration.auditionMode.cType
+        guard N60DSPGraphSnapshotSetInterChannelDelay(&graph, playbackConfiguration.interChannelDelayMs) else {
+            throw PlaybackControlConfigurationError.invalidInterChannelDelay(playbackConfiguration.interChannelDelayMs)
+        }
         graph.eqBypassed = bypassed
         N60DSPGraphSnapshotClearEQ(&graph)
 
@@ -260,6 +263,9 @@ struct StereoEQConfiguration: Equatable, Sendable {
             source = channel == .right ? rightBands : leftBands
         }
         let bands = try validatedEnabledBands(source, sampleRate: sampleRate)
+        guard !bands.contains(where: { $0.type == .allPass }) else {
+            throw EQConfigurationError.allPassRequiresMinimumPhase
+        }
         return bands.map { band in
             var cBand = N60LinearPhaseEQBand()
             cBand.enabled = true
@@ -366,18 +372,22 @@ enum AuditionMode: String, CaseIterable, Identifiable, Sendable {
 
 struct PlaybackControlConfiguration: Equatable, Sendable {
     static let balanceRange = -1.0...1.0
+    static let interChannelDelayRange = -20.0...20.0
 
     var balance: Double
+    var interChannelDelayMs: Double
     var globalBypassed: Bool
     var auditionMode: AuditionMode
 
     init(
         balance: Double = 0,
+        interChannelDelayMs: Double = 0,
         globalBypassed: Bool = false,
         flatAuditionEnabled: Bool = false,
         auditionMode: AuditionMode? = nil
     ) {
         self.balance = balance
+        self.interChannelDelayMs = interChannelDelayMs
         self.globalBypassed = globalBypassed
         self.auditionMode = auditionMode ?? (flatAuditionEnabled ? .reference : .processed)
     }
@@ -401,11 +411,14 @@ struct PlaybackControlConfiguration: Equatable, Sendable {
 
 enum PlaybackControlConfigurationError: Error, LocalizedError, Equatable {
     case invalidBalance(Double)
+    case invalidInterChannelDelay(Double)
 
     var errorDescription: String? {
         switch self {
         case .invalidBalance(let value):
             return "Channel balance \(value) is outside the supported -1...+1 range."
+        case .invalidInterChannelDelay(let value):
+            return "Inter-channel delay \(value) ms is outside the supported -20...+20 ms range."
         }
     }
 }
