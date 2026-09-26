@@ -17,13 +17,12 @@ jobs:
         with:
           ref: feature/dsp-optimization-parity-audit
 
-      # Earlier PR34 slices are committed source. Verify them; mutate only the
-      # current Phase D slice so the gate stays deterministic and idempotent.
-      - name: Apply sub-bass phase alignment integration
+      # Phase A-C and the first four Phase D slices are committed source.
+      # Mutate only the final Speaker IR slice; everything else is regression-only.
+      - name: Apply Speaker IR integration
         run: |
-          python3 ci/pr34_apply_phase_d_sub_phase.py
-          python3 ci/pr34_fix_phase_d_sub_phase_stereo.py
-          python3 ci/pr34_fix_phase_d_sub_phase_tests.py
+          python3 ci/pr34_apply_phase_d_speaker_ir_c.py
+          python3 ci/pr34_apply_phase_d_speaker_ir_swift.py
 
       - name: Validate Band Pass DSP
         run: |
@@ -91,7 +90,7 @@ jobs:
           ENABLE_TESTABILITY=YES
           build
 
-      - name: Test sub-phase defaults
+      - name: Test independent Speaker IR slots
         run: >-
           xcodebuild
           -project NotchSixty.xcodeproj
@@ -100,31 +99,9 @@ jobs:
           -destination 'platform=macOS,arch=arm64'
           CODE_SIGNING_ALLOWED=NO
           ENABLE_TESTABILITY=YES
-          -only-testing:NotchSixtyTests/NotchSixtyTests/testSubBassPhaseAlignmentPublishesAuditedDefaults
-          test
-
-      - name: Test sub-phase disabled identity
-        run: >-
-          xcodebuild
-          -project NotchSixty.xcodeproj
-          -scheme NotchSixty
-          -configuration Debug
-          -destination 'platform=macOS,arch=arm64'
-          CODE_SIGNING_ALLOWED=NO
-          ENABLE_TESTABILITY=YES
-          -only-testing:NotchSixtyTests/NotchSixtyTests/testSubBassPhaseAlignmentDisabledIsIdentity
-          test
-
-      - name: Test sub-phase invalid controls
-        run: >-
-          xcodebuild
-          -project NotchSixty.xcodeproj
-          -scheme NotchSixty
-          -configuration Debug
-          -destination 'platform=macOS,arch=arm64'
-          CODE_SIGNING_ALLOWED=NO
-          ENABLE_TESTABILITY=YES
-          -only-testing:NotchSixtyTests/NotchSixtyTests/testSubBassPhaseAlignmentRejectsInvalidControls
+          -only-testing:NotchSixtyTests/NotchSixtyTests/testSpeakerIRIsThirdIndependentGlobalConvolutionSlot
+          -only-testing:NotchSixtyTests/NotchSixtyTests/testSpeakerIRPublishRejectsUnpreparedGeneration
+          -only-testing:NotchSixtyTests/NotchSixtyTests/testSpeakerIRPolicyKeepsRawBypassRaw
           test
 
       - name: Test
@@ -138,7 +115,7 @@ jobs:
           ENABLE_TESTABILITY=YES
           test
 
-      - name: Commit Phase D sub-bass phase alignment integration
+      - name: Commit Phase D Speaker IR integration
         run: |
           git diff --check
           if git diff --quiet; then
@@ -147,6 +124,6 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add NotchSixty/Audio/Realtime/N60Crossover.h NotchSixty/Audio/Realtime/N60RenderKernel.h NotchSixty/Audio/Realtime/N60RenderKernel.c NotchSixty/Audio/AudioIOEngine.swift NotchSixty/Audio/StereoPlaybackControl.swift NotchSixty/ContentView.swift NotchSixtyTests/NotchSixtyTests.swift
-          git commit -m "Close PR34 sub-bass phase alignment parity"
+          git add NotchSixty/Audio/Realtime/N60RenderKernel.h NotchSixty/Audio/Realtime/N60RenderKernel.c NotchSixty/Audio/Realtime/N60RealtimeAudioBridge.h NotchSixty/Audio/Realtime/N60RealtimeAudioBridge.c NotchSixty/Audio/CoreAudio/CoreAudioError.swift NotchSixty/Audio/StereoPlaybackControl.swift NotchSixty/Audio/AudioIOEngine.swift NotchSixty/Diagnostics/AudioDiagnosticsSnapshot.swift NotchSixty/NotchSixtyApp.swift NotchSixty/ContentView.swift NotchSixtyTests/NotchSixtyTests.swift
+          git commit -m "Close PR34 Speaker IR parity"
           git push origin HEAD:feature/dsp-optimization-parity-audit
