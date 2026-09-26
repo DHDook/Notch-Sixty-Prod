@@ -76,6 +76,7 @@ typedef struct {
     float balanceGainRightLinear;
     N60SymmetryBalanceSnapshot symmetryBalance;
     N60SpeakerCrossfeedSnapshot speakerCrossfeed;
+    N60CrosstalkCancellationSnapshot crosstalkCancellation;
     bool bypassed;
     N60AuditionMode auditionMode;
     N60InterChannelDelaySnapshot interChannelDelay;
@@ -248,6 +249,12 @@ bool N60DSPGraphSnapshotSetSymmetryBalance(
 bool N60DSPGraphSnapshotSetSpeakerCrossfeed(
     N60DSPGraphSnapshot * _Nonnull snapshot,
     double amount,
+    bool enabled
+);
+bool N60DSPGraphSnapshotSetCrosstalkCancellation(
+    N60DSPGraphSnapshot * _Nonnull snapshot,
+    double amount,
+    double headShadowFrequencyHz,
     bool enabled
 );
 bool N60DSPGraphSnapshotSetInterChannelDelay(

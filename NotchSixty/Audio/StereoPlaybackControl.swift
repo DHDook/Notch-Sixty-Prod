@@ -459,6 +459,30 @@ struct StereoEQConfiguration: Equatable, Sendable {
                 playbackConfiguration.speakerCrossfeedAmount
             )
         }
+        guard PlaybackControlConfiguration.crosstalkCancellationAmountRange.contains(
+            playbackConfiguration.crosstalkCancellationAmount
+        ) else {
+            throw PlaybackControlConfigurationError.invalidCrosstalkCancellationAmount(
+                playbackConfiguration.crosstalkCancellationAmount
+            )
+        }
+        guard PlaybackControlConfiguration.crosstalkHeadShadowFrequencyRange.contains(
+            playbackConfiguration.crosstalkHeadShadowFrequencyHz
+        ) else {
+            throw PlaybackControlConfigurationError.invalidCrosstalkHeadShadowFrequency(
+                playbackConfiguration.crosstalkHeadShadowFrequencyHz
+            )
+        }
+        guard N60DSPGraphSnapshotSetCrosstalkCancellation(
+            &graph,
+            playbackConfiguration.crosstalkCancellationAmount,
+            playbackConfiguration.crosstalkHeadShadowFrequencyHz,
+            playbackConfiguration.crosstalkCancellationEnabled
+        ) else {
+            throw PlaybackControlConfigurationError.invalidCrosstalkHeadShadowFrequency(
+                playbackConfiguration.crosstalkHeadShadowFrequencyHz
+            )
+        }
         graph.bypassed = playbackConfiguration.globalBypassed
         graph.auditionMode = playbackConfiguration.auditionMode.cType
         guard N60DSPGraphSnapshotSetInterChannelDelay(&graph, playbackConfiguration.interChannelDelayMs) else {
@@ -717,6 +741,8 @@ struct PlaybackControlConfiguration: Equatable, Sendable {
     static let balanceRange = -1.0...1.0
     static let symmetryBalanceRange = -1.0...1.0
     static let speakerCrossfeedRange = 0.0...0.5
+    static let crosstalkCancellationAmountRange = 0.0...1.0
+    static let crosstalkHeadShadowFrequencyRange = 200.0...2000.0
     static let interChannelDelayRange = -20.0...20.0
 
     var balance: Double
@@ -724,6 +750,9 @@ struct PlaybackControlConfiguration: Equatable, Sendable {
     var symmetryBalancePosition: Double
     var speakerCrossfeedEnabled: Bool
     var speakerCrossfeedAmount: Double
+    var crosstalkCancellationEnabled: Bool
+    var crosstalkCancellationAmount: Double
+    var crosstalkHeadShadowFrequencyHz: Double
     var interChannelDelayMs: Double
     var globalBypassed: Bool
     var auditionMode: AuditionMode
@@ -734,6 +763,9 @@ struct PlaybackControlConfiguration: Equatable, Sendable {
         symmetryBalancePosition: Double = 0,
         speakerCrossfeedEnabled: Bool = false,
         speakerCrossfeedAmount: Double = 0,
+        crosstalkCancellationEnabled: Bool = false,
+        crosstalkCancellationAmount: Double = 0.5,
+        crosstalkHeadShadowFrequencyHz: Double = 700,
         interChannelDelayMs: Double = 0,
         globalBypassed: Bool = false,
         flatAuditionEnabled: Bool = false,
@@ -744,6 +776,9 @@ struct PlaybackControlConfiguration: Equatable, Sendable {
         self.symmetryBalancePosition = symmetryBalancePosition
         self.speakerCrossfeedEnabled = speakerCrossfeedEnabled
         self.speakerCrossfeedAmount = speakerCrossfeedAmount
+        self.crosstalkCancellationEnabled = crosstalkCancellationEnabled
+        self.crosstalkCancellationAmount = crosstalkCancellationAmount
+        self.crosstalkHeadShadowFrequencyHz = crosstalkHeadShadowFrequencyHz
         self.interChannelDelayMs = interChannelDelayMs
         self.globalBypassed = globalBypassed
         self.auditionMode = auditionMode ?? (flatAuditionEnabled ? .reference : .processed)
@@ -770,6 +805,8 @@ enum PlaybackControlConfigurationError: Error, LocalizedError, Equatable {
     case invalidBalance(Double)
     case invalidSymmetryBalance(Double)
     case invalidSpeakerCrossfeed(Double)
+    case invalidCrosstalkCancellationAmount(Double)
+    case invalidCrosstalkHeadShadowFrequency(Double)
     case invalidInterChannelDelay(Double)
 
     var errorDescription: String? {
@@ -780,6 +817,10 @@ enum PlaybackControlConfigurationError: Error, LocalizedError, Equatable {
             return "Listening-position symmetry \(value) is outside the supported -1...+1 range."
         case .invalidSpeakerCrossfeed(let value):
             return "Speaker crossfeed \(value) is outside the supported 0...0.5 range."
+        case .invalidCrosstalkCancellationAmount(let value):
+            return "Crosstalk cancellation amount \(value) is outside the supported 0...1 range."
+        case .invalidCrosstalkHeadShadowFrequency(let value):
+            return "Crosstalk head-shadow frequency \(value) Hz is outside the supported 200...2000 Hz range."
         case .invalidInterChannelDelay(let value):
             return "Inter-channel delay \(value) ms is outside the supported -20...+20 ms range."
         }

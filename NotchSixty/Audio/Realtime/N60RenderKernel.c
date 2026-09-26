@@ -82,6 +82,10 @@ struct N60RenderKernel {
     N60SmoothedGain symmetryBalanceGainLeft;
     N60SmoothedGain symmetryBalanceGainRight;
     N60SmoothedGain speakerCrossfeedAmount;
+    N60SmoothedGain crosstalkCancellationAmount;
+    N60SmoothedGain crosstalkHeadShadowAlpha;
+    float crosstalkShadowLeft;
+    float crosstalkShadowRight;
     N60InterChannelDelayRuntime interChannelDelayRuntime;
     float referenceDelayLeft[N60_MAX_AUDITION_DELAY_FRAMES];
     float referenceDelayRight[N60_MAX_AUDITION_DELAY_FRAMES];
@@ -258,6 +262,7 @@ static bool snapshot_is_valid(N60DSPGraphSnapshot snapshot) {
         || snapshot.balanceGainRightLinear > 1.0f
         || !N60SymmetryBalanceSnapshotIsValid(snapshot.symmetryBalance)
         || !N60SpeakerCrossfeedSnapshotIsValid(snapshot.speakerCrossfeed)
+        || !N60CrosstalkCancellationSnapshotIsValid(snapshot.crosstalkCancellation)
         || snapshot.auditionMode < N60AuditionModeProcessed
         || snapshot.auditionMode > N60AuditionModeDelta
         || !N60InterChannelDelaySnapshotIsValid(snapshot.interChannelDelay, snapshot.sampleRate)
@@ -450,6 +455,10 @@ static void prepare_runtime_for_snapshot(N60RenderKernel *kernel, const N60DSPGr
         reset_smoothed_gain(&kernel->symmetryBalanceGainLeft, snapshot->symmetryBalance.leftGainLinear);
         reset_smoothed_gain(&kernel->symmetryBalanceGainRight, snapshot->symmetryBalance.rightGainLinear);
         reset_smoothed_gain(&kernel->speakerCrossfeedAmount, snapshot->speakerCrossfeed.enabled ? snapshot->speakerCrossfeed.amount : 0.0f);
+        reset_smoothed_gain(&kernel->crosstalkCancellationAmount, snapshot->crosstalkCancellation.enabled ? snapshot->crosstalkCancellation.amount : 0.0f);
+        reset_smoothed_gain(&kernel->crosstalkHeadShadowAlpha, snapshot->crosstalkCancellation.headShadowAlpha);
+        kernel->crosstalkShadowLeft = 0.0f;
+        kernel->crosstalkShadowRight = 0.0f;
         N60InterChannelDelayRuntimeReset(&kernel->interChannelDelayRuntime, snapshot->interChannelDelay);
     } else {
         schedule_gain_transition(&kernel->inputGain, snapshot->inputGainLinear, gainFrames);
@@ -461,6 +470,8 @@ static void prepare_runtime_for_snapshot(N60RenderKernel *kernel, const N60DSPGr
         schedule_gain_transition(&kernel->symmetryBalanceGainLeft, snapshot->symmetryBalance.leftGainLinear, gainFrames);
         schedule_gain_transition(&kernel->symmetryBalanceGainRight, snapshot->symmetryBalance.rightGainLinear, gainFrames);
         schedule_gain_transition(&kernel->speakerCrossfeedAmount, snapshot->speakerCrossfeed.enabled ? snapshot->speakerCrossfeed.amount : 0.0f, gainFrames);
+        schedule_gain_transition(&kernel->crosstalkCancellationAmount, snapshot->crosstalkCancellation.enabled ? snapshot->crosstalkCancellation.amount : 0.0f, gainFrames);
+        schedule_gain_transition(&kernel->crosstalkHeadShadowAlpha, snapshot->crosstalkCancellation.headShadowAlpha, gainFrames);
         N60InterChannelDelayRuntimeSchedule(&kernel->interChannelDelayRuntime, snapshot->interChannelDelay, gainFrames);
     }
 
@@ -788,6 +799,7 @@ N60DSPGraphSnapshot N60DSPGraphSnapshotMakeUnity(double sampleRate) {
     snapshot.symmetryBalance.rightGainLinear = 1.0f;
     snapshot.speakerCrossfeed.enabled = false;
     snapshot.speakerCrossfeed.amount = 0.0f;
+    (void)N60CrosstalkCancellationDesign(sampleRate, 0.5, 700.0, false, &snapshot.crosstalkCancellation);
     snapshot.bypassed = false;
     snapshot.auditionMode = N60AuditionModeProcessed;
     snapshot.interChannelDelay = N60InterChannelDelaySnapshotMakeBypassed();
@@ -838,6 +850,20 @@ bool N60DSPGraphSnapshotSetSpeakerCrossfeed(
     N60SpeakerCrossfeedSnapshot crossfeed = {0};
     if (!N60SpeakerCrossfeedDesign(amount, enabled, &crossfeed)) return false;
     snapshot->speakerCrossfeed = crossfeed;
+    return true;
+}
+
+bool N60DSPGraphSnapshotSetCrosstalkCancellation(
+    N60DSPGraphSnapshot *snapshot,
+    double amount,
+    double headShadowFrequencyHz,
+    bool enabled
+) {
+    if (snapshot == NULL) return false;
+    N60CrosstalkCancellationSnapshot cancellation = {0};
+    if (!N60CrosstalkCancellationDesign(
+            snapshot->sampleRate, amount, headShadowFrequencyHz, enabled, &cancellation)) return false;
+    snapshot->crosstalkCancellation = cancellation;
     return true;
 }
 
@@ -1284,6 +1310,18 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
         const float spatialRight = right;
         left = direct * spatialLeft + crossfeed * spatialRight;
         right = direct * spatialRight + crossfeed * spatialLeft;
+
+        // Gentle feed-forward speaker crosstalk cancellation. The opposite-channel
+        // cancellation signal is frequency-shaped by a first-order far-ear/head-
+        // shadow model; there is no recursive feedback loop in the realtime path.
+        const float shadowAlpha = next_gain_value(&kernel->crosstalkHeadShadowAlpha);
+        kernel->crosstalkShadowLeft += shadowAlpha * (left - kernel->crosstalkShadowLeft);
+        kernel->crosstalkShadowRight += shadowAlpha * (right - kernel->crosstalkShadowRight);
+        const float cancellationAmount = next_gain_value(&kernel->crosstalkCancellationAmount);
+        const float cancellationLeft = left;
+        const float cancellationRight = right;
+        left = cancellationLeft - cancellationAmount * kernel->crosstalkShadowRight;
+        right = cancellationRight - cancellationAmount * kernel->crosstalkShadowLeft;
 
         left *= next_gain_value(&kernel->balanceGainLeft);
         right *= next_gain_value(&kernel->balanceGainRight);

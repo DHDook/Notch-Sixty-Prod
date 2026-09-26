@@ -141,6 +141,60 @@ final class NotchSixtyTests: XCTestCase {
         XCTAssertTrue(graph.mixedPhaseEnabled)
     }
 
+    func testCrosstalkCancellationGraphPublishesAuditedDefaults() throws {
+        let playback = PlaybackControlConfiguration(crosstalkCancellationEnabled: true)
+        let graph = try StereoEQConfiguration().makeGraphSnapshot(
+            sampleRate: 48_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: playback
+        )
+        XCTAssertTrue(graph.crosstalkCancellation.enabled)
+        XCTAssertEqual(graph.crosstalkCancellation.amount, 0.5, accuracy: 0.000_001)
+        XCTAssertEqual(graph.crosstalkCancellation.headShadowFrequencyHz, 700, accuracy: 0.000_001)
+        XCTAssertGreaterThan(graph.crosstalkCancellation.headShadowAlpha, 0)
+        XCTAssertLessThan(graph.crosstalkCancellation.headShadowAlpha, 1)
+    }
+
+    func testCrosstalkCancellationFeedForwardStageRemainsBounded() {
+        guard let kernel = N60RenderKernelCreate() else {
+            XCTFail("Unable to allocate render kernel")
+            return
+        }
+        defer { N60RenderKernelDestroy(kernel) }
+
+        var graph = N60DSPGraphSnapshotMakeUnity(48_000)
+        XCTAssertTrue(N60DSPGraphSnapshotSetCrosstalkCancellation(&graph, 0.5, 700, true))
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        var left: Float = 0
+        var right: Float = 0
+        for _ in 0..<4096 {
+            N60RenderKernelProcessStereoFrame(kernel, 0, 1, &left, &right)
+            XCTAssertTrue(left.isFinite && right.isFinite)
+            XCTAssertLessThanOrEqual(abs(left), 1.000_01)
+            XCTAssertLessThanOrEqual(abs(right), 1.000_01)
+        }
+        XCTAssertEqual(left, -0.5, accuracy: 0.001)
+        XCTAssertEqual(right, 1.0, accuracy: 0.001)
+    }
+
+    func testCrosstalkCancellationRejectsOutOfRangeControls() throws {
+        let invalidAmount = PlaybackControlConfiguration(crosstalkCancellationAmount: 1.1)
+        XCTAssertThrowsError(try StereoEQConfiguration().makeGraphSnapshot(
+            sampleRate: 48_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: invalidAmount
+        ))
+        let invalidShadow = PlaybackControlConfiguration(crosstalkHeadShadowFrequencyHz: 199)
+        XCTAssertThrowsError(try StereoEQConfiguration().makeGraphSnapshot(
+            sampleRate: 48_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: invalidShadow
+        ))
+    }
+
     func testSpeakerCrossfeedGraphPublishesAuditedRange() throws {
         let playback = PlaybackControlConfiguration(
             speakerCrossfeedEnabled: true,

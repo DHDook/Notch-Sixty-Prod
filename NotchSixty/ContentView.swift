@@ -41,6 +41,27 @@ struct ContentView: View {
         Binding(get: { engine.stereoEQConfiguration.editChannel }, set: { engine.setEQEditChannel($0) })
     }
 
+    private var crosstalkCancellationEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { engine.playbackControlConfiguration.crosstalkCancellationEnabled },
+            set: { try? engine.setCrosstalkCancellationEnabled($0) }
+        )
+    }
+
+    private var crosstalkCancellationAmountBinding: Binding<Double> {
+        Binding(
+            get: { engine.playbackControlConfiguration.crosstalkCancellationAmount },
+            set: { try? engine.setCrosstalkCancellationAmount($0) }
+        )
+    }
+
+    private var crosstalkHeadShadowFrequencyBinding: Binding<Double> {
+        Binding(
+            get: { engine.playbackControlConfiguration.crosstalkHeadShadowFrequencyHz },
+            set: { try? engine.setCrosstalkHeadShadowFrequency($0) }
+        )
+    }
+
     private var speakerCrossfeedEnabledBinding: Binding<Bool> {
         Binding(
             get: { engine.playbackControlConfiguration.speakerCrossfeedEnabled },
@@ -254,6 +275,32 @@ struct ContentView: View {
                     .frame(width: 55)
             }
             Text("Crossfeed uses the speaker Panning Gain Matrix. 0.00 leaves stereo untouched; 0.50 collapses to exact mono. The legacy 0...1 display range is intentionally not reproduced.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack(spacing: 12) {
+                Toggle("Crosstalk cancellation", isOn: crosstalkCancellationEnabledBinding).toggleStyle(.switch)
+                Text("Amount").frame(width: 60, alignment: .leading)
+                Slider(
+                    value: crosstalkCancellationAmountBinding,
+                    in: PlaybackControlConfiguration.crosstalkCancellationAmountRange,
+                    step: 0.01
+                )
+                .disabled(!engine.playbackControlConfiguration.crosstalkCancellationEnabled)
+                Text(engine.playbackControlConfiguration.crosstalkCancellationAmount.formatted(.number.precision(.fractionLength(2))))
+                    .monospacedDigit().frame(width: 55)
+            }
+            HStack(spacing: 12) {
+                Text("Head shadow").frame(width: 90, alignment: .leading)
+                Slider(
+                    value: crosstalkHeadShadowFrequencyBinding,
+                    in: PlaybackControlConfiguration.crosstalkHeadShadowFrequencyRange,
+                    step: 10
+                )
+                .disabled(!engine.playbackControlConfiguration.crosstalkCancellationEnabled)
+                Text("\(Int(engine.playbackControlConfiguration.crosstalkHeadShadowFrequencyHz.rounded())) Hz")
+                    .monospacedDigit().frame(width: 75)
+            }
+            Text("A stable feed-forward opposite-channel cancellation signal is shaped by the Head Shadow low-pass model. 700 Hz is the audited default associated with conventional ~60° speaker spacing.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             HStack(spacing: 12) {

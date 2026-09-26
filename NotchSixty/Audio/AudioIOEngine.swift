@@ -973,6 +973,30 @@ final class AudioIOEngine: ObservableObject {
         try applyStereoEQConfiguration(updated)
     }
 
+    func setCrosstalkCancellationEnabled(_ enabled: Bool) throws {
+        var updated = playbackControlConfiguration
+        updated.crosstalkCancellationEnabled = enabled
+        try applyPlaybackControlConfiguration(updated)
+    }
+
+    func setCrosstalkCancellationAmount(_ value: Double) throws {
+        guard value.isFinite, PlaybackControlConfiguration.crosstalkCancellationAmountRange.contains(value) else {
+            throw PlaybackControlConfigurationError.invalidCrosstalkCancellationAmount(value)
+        }
+        var updated = playbackControlConfiguration
+        updated.crosstalkCancellationAmount = value
+        try applyPlaybackControlConfiguration(updated)
+    }
+
+    func setCrosstalkHeadShadowFrequency(_ value: Double) throws {
+        guard value.isFinite, PlaybackControlConfiguration.crosstalkHeadShadowFrequencyRange.contains(value) else {
+            throw PlaybackControlConfigurationError.invalidCrosstalkHeadShadowFrequency(value)
+        }
+        var updated = playbackControlConfiguration
+        updated.crosstalkHeadShadowFrequencyHz = value
+        try applyPlaybackControlConfiguration(updated)
+    }
+
     func setSpeakerCrossfeedEnabled(_ enabled: Bool) throws {
         var updated = playbackControlConfiguration
         updated.speakerCrossfeedEnabled = enabled
