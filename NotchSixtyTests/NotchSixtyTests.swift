@@ -426,6 +426,109 @@ final class NotchSixtyTests: XCTestCase {
         XCTAssertTrue(projected.allSatisfy(\.usesPreparedCoefficients))
     }
 
+    func testMidSideModelPublishesDedicatedLanesInMinimumAndLinearPhase() throws {
+        let midBand = EQBand(type: .peaking, frequencyHz: 700, gainDB: 3, q: 1.0)
+        let sideBand = EQBand(type: .highShelf, frequencyHz: 4_000, gainDB: -2, q: 0.707)
+        let configuration = StereoEQConfiguration(
+            channelMode: .midSide,
+            editChannel: .mid,
+            phaseMode: .minimumPhase,
+            midBands: [midBand],
+            sideBands: [sideBand],
+            midSideSeeded: true
+        )
+        let graph = try configuration.makeGraphSnapshot(
+            sampleRate: 96_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: PlaybackControlConfiguration()
+        )
+        XCTAssertTrue(graph.eqMidSideMode)
+        XCTAssertEqual(graph.eqBandCount, 2)
+        XCTAssertEqual(graph.eqBandChannelMasks.0, UInt8(N60_EQ_CHANNEL_LEFT))
+        XCTAssertEqual(graph.eqBandChannelMasks.1, UInt8(N60_EQ_CHANNEL_RIGHT))
+
+        var linear = configuration
+        linear.phaseMode = .linearPhase
+        XCTAssertEqual(try linear.linearPhaseBands(for: .mid, sampleRate: 96_000).count, 1)
+        XCTAssertEqual(try linear.linearPhaseBands(for: .side, sampleRate: 96_000).count, 1)
+    }
+
+    func testMidSideRealtimeIdentityAndAuditionContracts() throws {
+        guard let kernel = N60RenderKernelCreate() else {
+            XCTFail("Unable to allocate render kernel")
+            return
+        }
+        defer { N60RenderKernelDestroy(kernel) }
+
+        let pairs: [(Float, Float)] = [(0.25, -0.5), (0.4, 0.4), (0.4, -0.4)]
+        var graph = N60DSPGraphSnapshotMakeUnity(96_000)
+        graph.eqMidSideMode = true
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        for pair in pairs {
+            var left: Float = 0
+            var right: Float = 0
+            N60RenderKernelProcessStereoFrame(kernel, pair.0, pair.1, &left, &right)
+            XCTAssertEqual(left, pair.0, accuracy: 0.000_001)
+            XCTAssertEqual(right, pair.1, accuracy: 0.000_001)
+        }
+
+        graph.auditionMode = N60AuditionModeReference
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        var left: Float = 0
+        var right: Float = 0
+        N60RenderKernelProcessStereoFrame(kernel, 0.3, -0.2, &left, &right)
+        XCTAssertEqual(left, 0.3, accuracy: 0.000_001)
+        XCTAssertEqual(right, -0.2, accuracy: 0.000_001)
+
+        graph.auditionMode = N60AuditionModeDelta
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        N60RenderKernelProcessStereoFrame(kernel, 0.3, -0.2, &left, &right)
+        XCTAssertEqual(left, 0.0, accuracy: 0.000_001)
+        XCTAssertEqual(right, 0.0, accuracy: 0.000_001)
+    }
+
+    func testMidSideMinimumPhaseRoutesMidAndSideIndependently() throws {
+        func settledOutput(channelMask: UInt8, inputLeft: Float, inputRight: Float) throws -> (Float, Float) {
+            guard let kernel = N60RenderKernelCreate() else {
+                XCTFail("Unable to allocate render kernel")
+                return (0, 0)
+            }
+            defer { N60RenderKernelDestroy(kernel) }
+            var graph = N60DSPGraphSnapshotMakeUnity(48_000)
+            graph.eqMidSideMode = true
+            XCTAssertTrue(N60DSPGraphSnapshotSetEQBandForChannels(
+                &graph, 0, channelMask, N60BiquadFilterTypeLowShelf,
+                500, 6, 0.707, true
+            ))
+            XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+            var left: Float = 0
+            var right: Float = 0
+            for _ in 0..<4_096 {
+                N60RenderKernelProcessStereoFrame(kernel, inputLeft, inputRight, &left, &right)
+            }
+            return (left, right)
+        }
+
+        let midOnly = try settledOutput(
+            channelMask: UInt8(N60_EQ_CHANNEL_LEFT), inputLeft: 0.1, inputRight: 0.1
+        )
+        XCTAssertEqual(midOnly.0, midOnly.1, accuracy: 0.000_01)
+        XCTAssertGreaterThan(abs(midOnly.0), 0.15)
+
+        let midFilterOnPureSide = try settledOutput(
+            channelMask: UInt8(N60_EQ_CHANNEL_LEFT), inputLeft: 0.1, inputRight: -0.1
+        )
+        XCTAssertEqual(midFilterOnPureSide.0, 0.1, accuracy: 0.000_01)
+        XCTAssertEqual(midFilterOnPureSide.1, -0.1, accuracy: 0.000_01)
+
+        let sideOnly = try settledOutput(
+            channelMask: UInt8(N60_EQ_CHANNEL_RIGHT), inputLeft: 0.1, inputRight: -0.1
+        )
+        XCTAssertEqual(sideOnly.0, -sideOnly.1, accuracy: 0.000_01)
+        XCTAssertGreaterThan(abs(sideOnly.0), 0.15)
+    }
+
     func testAllPassMaintainsUnityMagnitudeAcrossSupportedRates() {
         for rate in [44_100.0, 48_000.0, 96_000.0, 192_000.0, 384_000.0] {
             for tone in [100.0, 1_000.0, min(10_000.0, rate * 0.20)] {

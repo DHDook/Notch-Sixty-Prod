@@ -970,11 +970,18 @@ struct ContentView: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 180)
+                .frame(width: 260)
                 if engine.stereoEQConfiguration.channelMode == .independent {
                     Picker("Edit", selection: eqEditChannelBinding) {
                         Text("Left").tag(EQEditChannel.left)
                         Text("Right").tag(EQEditChannel.right)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 150)
+                } else if engine.stereoEQConfiguration.channelMode == .midSide {
+                    Picker("Edit", selection: eqEditChannelBinding) {
+                        Text("Mid").tag(EQEditChannel.mid)
+                        Text("Side").tag(EQEditChannel.side)
                     }
                     .pickerStyle(.segmented)
                     .frame(width: 150)

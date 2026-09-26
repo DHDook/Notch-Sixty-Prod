@@ -3,6 +3,7 @@ import Foundation
 enum EQChannelMode: String, CaseIterable, Identifiable, Sendable {
     case linked
     case independent
+    case midSide
 
     var id: String { rawValue }
 
@@ -10,6 +11,7 @@ enum EQChannelMode: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .linked: return "Linked"
         case .independent: return "Independent"
+        case .midSide: return "Mid/Side"
         }
     }
 }
@@ -18,6 +20,8 @@ enum EQEditChannel: String, CaseIterable, Identifiable, Sendable {
     case linked
     case left
     case right
+    case mid
+    case side
 
     var id: String { rawValue }
 
@@ -26,6 +30,8 @@ enum EQEditChannel: String, CaseIterable, Identifiable, Sendable {
         case .linked: return "Linked"
         case .left: return "Left"
         case .right: return "Right"
+        case .mid: return "Mid"
+        case .side: return "Side"
         }
     }
 }
@@ -40,7 +46,10 @@ struct StereoEQConfiguration: Equatable, Sendable {
     var linkedBands: [EQBand]
     var leftBands: [EQBand]
     var rightBands: [EQBand]
+    var midBands: [EQBand]
+    var sideBands: [EQBand]
     var independentSeeded: Bool
+    var midSideSeeded: Bool
 
     init(
         channelMode: EQChannelMode = .linked,
@@ -50,16 +59,29 @@ struct StereoEQConfiguration: Equatable, Sendable {
         linkedBands: [EQBand] = [],
         leftBands: [EQBand] = [],
         rightBands: [EQBand] = [],
-        independentSeeded: Bool = false
+        midBands: [EQBand] = [],
+        sideBands: [EQBand] = [],
+        independentSeeded: Bool = false,
+        midSideSeeded: Bool = false
     ) {
         self.channelMode = channelMode
-        self.editChannel = channelMode == .linked ? .linked : editChannel
+        switch channelMode {
+        case .linked:
+            self.editChannel = .linked
+        case .independent:
+            self.editChannel = editChannel == .right ? .right : .left
+        case .midSide:
+            self.editChannel = editChannel == .side ? .side : .mid
+        }
         self.phaseMode = phaseMode
         self.bypassed = bypassed
         self.linkedBands = linkedBands
         self.leftBands = leftBands
         self.rightBands = rightBands
+        self.midBands = midBands
+        self.sideBands = sideBands
         self.independentSeeded = independentSeeded
+        self.midSideSeeded = midSideSeeded
     }
 
     var editableBands: [EQBand] {
@@ -68,6 +90,8 @@ struct StereoEQConfiguration: Equatable, Sendable {
             return linkedBands
         case .independent:
             return editChannel == .right ? rightBands : leftBands
+        case .midSide:
+            return editChannel == .side ? sideBands : midBands
         }
     }
 
@@ -77,6 +101,8 @@ struct StereoEQConfiguration: Equatable, Sendable {
             return linkedBands.lazy.filter(\.enabled).count
         case .independent:
             return leftBands.lazy.filter(\.enabled).count + rightBands.lazy.filter(\.enabled).count
+        case .midSide:
+            return midBands.lazy.filter(\.enabled).count + sideBands.lazy.filter(\.enabled).count
         }
     }
 
@@ -87,16 +113,28 @@ struct StereoEQConfiguration: Equatable, Sendable {
             rightBands = linkedBands
             independentSeeded = true
         }
+        if mode == .midSide && !midSideSeeded {
+            midBands = linkedBands
+            sideBands = linkedBands
+            midSideSeeded = true
+        }
         channelMode = mode
-        editChannel = mode == .linked ? .linked : (editChannel == .right ? .right : .left)
+        switch mode {
+        case .linked: editChannel = .linked
+        case .independent: editChannel = editChannel == .right ? .right : .left
+        case .midSide: editChannel = editChannel == .side ? .side : .mid
+        }
     }
 
     mutating func setEditChannel(_ channel: EQEditChannel) {
-        guard channelMode == .independent else {
+        switch channelMode {
+        case .linked:
             editChannel = .linked
-            return
+        case .independent:
+            editChannel = channel == .right ? .right : .left
+        case .midSide:
+            editChannel = channel == .side ? .side : .mid
         }
-        editChannel = channel == .right ? .right : .left
     }
 
     mutating func replaceEditableBands(_ bands: [EQBand]) {
@@ -108,6 +146,12 @@ struct StereoEQConfiguration: Equatable, Sendable {
                 rightBands = bands
             } else {
                 leftBands = bands
+            }
+        case .midSide:
+            if editChannel == .side {
+                sideBands = bands
+            } else {
+                midBands = bands
             }
         }
     }
@@ -181,6 +225,7 @@ struct StereoEQConfiguration: Equatable, Sendable {
             switch channelMode {
             case .linked: staticBoost = channelBoost(linkedBands)
             case .independent: staticBoost = max(channelBoost(leftBands), channelBoost(rightBands))
+            case .midSide: staticBoost = max(channelBoost(midBands), channelBoost(sideBands))
             }
         }
 
@@ -309,6 +354,7 @@ struct StereoEQConfiguration: Equatable, Sendable {
             throw PlaybackControlConfigurationError.invalidInterChannelDelay(playbackConfiguration.interChannelDelayMs)
         }
         graph.eqBypassed = bypassed
+        graph.eqMidSideMode = channelMode == .midSide
         N60DSPGraphSnapshotClearEQ(&graph)
 
         if phaseMode == .minimumPhase && !bypassed && !graph.bypassed {
@@ -326,6 +372,19 @@ struct StereoEQConfiguration: Equatable, Sendable {
                     )
                 }
                 for band in try validatedEnabledBands(rightBands, sampleRate: sampleRate) {
+                    try publishMinimumPhaseBand(
+                        band, into: &graph, renderIndex: &renderIndex,
+                        channelMask: UInt8(N60_EQ_CHANNEL_RIGHT)
+                    )
+                }
+            case .midSide:
+                for band in try validatedEnabledBands(midBands, sampleRate: sampleRate) {
+                    try publishMinimumPhaseBand(
+                        band, into: &graph, renderIndex: &renderIndex,
+                        channelMask: UInt8(N60_EQ_CHANNEL_LEFT)
+                    )
+                }
+                for band in try validatedEnabledBands(sideBands, sampleRate: sampleRate) {
                     try publishMinimumPhaseBand(
                         band, into: &graph, renderIndex: &renderIndex,
                         channelMask: UInt8(N60_EQ_CHANNEL_RIGHT)
@@ -366,6 +425,8 @@ struct StereoEQConfiguration: Equatable, Sendable {
             source = linkedBands
         case .independent:
             source = channel == .right ? rightBands : leftBands
+        case .midSide:
+            source = channel == .side ? sideBands : midBands
         }
         let bands = try validatedEnabledBands(source, sampleRate: sampleRate)
         guard !bands.contains(where: { $0.type == .allPass }) else {

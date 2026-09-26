@@ -1146,6 +1146,15 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
             &right
         );
 
+        bool midSideEQ = !context->snapshot.eqBypassed && context->snapshot.eqMidSideMode;
+        if (midSideEQ) {
+            float mid = 0.0f;
+            float side = 0.0f;
+            N60MidSideEncode(left, right, &mid, &side);
+            left = mid;
+            right = side;
+        }
+
         if (!context->snapshot.eqBypassed) {
             for (uint32_t index = 0; index < N60_MAX_EQ_RENDER_SLOTS; ++index) {
                 N60EQBandRuntime *runtime = &kernel->eqRuntime[index];
@@ -1154,16 +1163,6 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
                 right = process_eq_band(runtime, right, N60_EQ_CHANNEL_RIGHT);
             }
             advance_eq_transitions(kernel);
-            // Dynamic EQ is a capability of the main parametric-EQ stage. Its
-            // detector/gain engine remains independently implemented, but it is
-            // evaluated here so enabling Dynamic does not move a band into the
-            // later dynamics section of the graph.
-            N60DynamicsProcessDynamicEQStereoFrame(
-                &kernel->dynamicsRuntime,
-                context->snapshot.dynamics,
-                &left,
-                &right
-            );
         }
 
         if (context->snapshot.convolution.enabled) {
@@ -1182,6 +1181,25 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
             } else {
                 atomic_fetch_add_explicit(&kernel->convolutionProgramMisses, 1, memory_order_relaxed);
             }
+        }
+
+        if (midSideEQ) {
+            float physicalLeft = 0.0f;
+            float physicalRight = 0.0f;
+            N60MidSideDecode(left, right, &physicalLeft, &physicalRight);
+            left = physicalLeft;
+            right = physicalRight;
+        }
+
+        if (!context->snapshot.eqBypassed) {
+            // Dynamic EQ remains a linked physical-stereo stage. Mid/Side does
+            // not create independent M/S dynamic detectors.
+            N60DynamicsProcessDynamicEQStereoFrame(
+                &kernel->dynamicsRuntime,
+                context->snapshot.dynamics,
+                &left,
+                &right
+            );
         }
 
         meter_sample(left, right, &context->postEQPeakLeft, &context->postEQPeakRight, &context->postEQSquareSumLeft, &context->postEQSquareSumRight, &context->postEQOverRangeSamples);
@@ -1355,6 +1373,7 @@ N60RenderKernelDiagnostics N60RenderKernelGetDiagnostics(const N60RenderKernel *
         diagnostics.balanceGainLeftLinear = context.snapshot.balanceGainLeftLinear;
         diagnostics.balanceGainRightLinear = context.snapshot.balanceGainRightLinear;
         diagnostics.eqBypassed = context.snapshot.eqBypassed;
+        diagnostics.eqMidSideMode = context.snapshot.eqMidSideMode;
         diagnostics.eqBandCount = context.snapshot.eqBandCount;
         for (uint32_t index = 0; index < context.snapshot.eqBandCount; ++index) {
             if (!context.snapshot.eqBands[index].enabled) continue;

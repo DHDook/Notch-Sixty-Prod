@@ -23,6 +23,26 @@ extern "C" {
 #define N60_EQ_CHANNEL_STEREO (N60_EQ_CHANNEL_LEFT | N60_EQ_CHANNEL_RIGHT)
 #define N60_MAX_AUDITION_DELAY_FRAMES 131072u
 
+static inline void N60MidSideEncode(
+    float left,
+    float right,
+    float * _Nonnull mid,
+    float * _Nonnull side
+) {
+    *mid = 0.5f * (left + right);
+    *side = 0.5f * (left - right);
+}
+
+static inline void N60MidSideDecode(
+    float mid,
+    float side,
+    float * _Nonnull left,
+    float * _Nonnull right
+) {
+    *left = mid + side;
+    *right = mid - side;
+}
+
 typedef enum {
     N60AuditionModeProcessed = 0,
     N60AuditionModeReference = 1,
@@ -57,6 +77,7 @@ typedef struct {
     uint64_t generation;
     uint32_t gainTransitionFrames;
     bool eqBypassed;
+    bool eqMidSideMode;
     uint32_t eqBandCount;
     uint32_t eqTransitionFrames;
     // Keep the pre-PR23 band array representation intact; channel scope is a
@@ -127,6 +148,7 @@ typedef struct {
     float balanceGainLeftLinear;
     float balanceGainRightLinear;
     bool eqBypassed;
+    bool eqMidSideMode;
     uint32_t eqBandCount;
     uint32_t eqLeftBandCount;
     uint32_t eqRightBandCount;

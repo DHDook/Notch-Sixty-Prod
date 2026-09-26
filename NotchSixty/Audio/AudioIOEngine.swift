@@ -1112,7 +1112,7 @@ final class AudioIOEngine: ObservableObject {
     }
 
     private func validateStereoEQStorage(_ configuration: StereoEQConfiguration) throws {
-        for bands in [configuration.linkedBands, configuration.leftBands, configuration.rightBands] {
+        for bands in [configuration.linkedBands, configuration.leftBands, configuration.rightBands, configuration.midBands, configuration.sideBands] {
             guard bands.count <= EQConfiguration.maximumBandCount else {
                 throw EQConfigurationError.tooManyBands(bands.count)
             }
@@ -1519,18 +1519,25 @@ final class AudioIOEngine: ObservableObject {
             throw EQConfigurationError.linearPhaseDesignFailed
         }
 
+        let primaryChannel: EQEditChannel
+        switch configuration.channelMode {
+        case .linked: primaryChannel = .linked
+        case .independent: primaryChannel = .left
+        case .midSide: primaryChannel = .mid
+        }
         let leftDesign = try designLinearPhaseTaps(
             configuration,
-            channel: configuration.channelMode == .linked ? .linked : .left,
+            channel: primaryChannel,
             sampleRate: sampleRate,
             tapCount: tapCount
         )
 
         let rightTaps: [Float]?
-        if configuration.channelMode == .independent {
+        if configuration.channelMode != .linked {
+            let secondaryChannel: EQEditChannel = configuration.channelMode == .midSide ? .side : .right
             let rightDesign = try designLinearPhaseTaps(
                 configuration,
-                channel: .right,
+                channel: secondaryChannel,
                 sampleRate: sampleRate,
                 tapCount: tapCount
             )
