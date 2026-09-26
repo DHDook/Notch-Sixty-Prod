@@ -5,6 +5,7 @@ enum DynamicsConfigurationError: Error, LocalizedError, Equatable {
     case invalidDCOffsetFilter
     case invalidInfrasonicFilter
     case invalidMainsNotch
+    case invalidMainsHumDetector
     case invalidLoudnessMatch
     case invalidLoudnessContour
     case invalidDeEsser
@@ -26,6 +27,8 @@ enum DynamicsConfigurationError: Error, LocalizedError, Equatable {
             return "Infrasonic Filter parameters are outside the supported production range."
         case .invalidMainsNotch:
             return "Mains Hum Notch parameters are outside the supported production range."
+        case .invalidMainsHumDetector:
+            return "Mains Hum detector parameters are outside the supported production range."
         case .invalidLoudnessMatch:
             return "LUFS Loudness Match parameters are outside the supported production range."
         case .invalidLoudnessContour:
@@ -152,10 +155,13 @@ struct MainsNotchConfiguration: Equatable, Sendable {
     static let harmonicCountRange = 1...16
     static let qRange = 5.0...60.0
     static let depthRange = -40.0...0.0
+    static let detectedFrequencyRange = 40.0...70.0
     static let maximumHarmonics = 16
 
     var enabled = false
     var region: MainsRegion = .hz60
+    var detectedFundamentalHz: Double? = nil
+    var continuousTracking = false
     var harmonicCount = 8
     var q = 30.0
     var harmonicDepthsDB: [Double] = [
@@ -163,11 +169,17 @@ struct MainsNotchConfiguration: Equatable, Sendable {
         0, 0, 0, 0, 0, 0, 0, 0,
     ]
 
-    var fundamentalHz: Double { region.fundamentalHz }
+    var fundamentalHz: Double { detectedFundamentalHz ?? region.fundamentalHz }
+
+    mutating func selectRegion(_ newRegion: MainsRegion) {
+        region = newRegion
+        detectedFundamentalHz = nil
+    }
 
     func validate() throws {
         guard Self.harmonicCountRange.contains(harmonicCount),
               q.isFinite, Self.qRange.contains(q),
+              detectedFundamentalHz.map({ $0.isFinite && Self.detectedFrequencyRange.contains($0) }) ?? true,
               harmonicDepthsDB.count == Self.maximumHarmonics,
               harmonicDepthsDB.allSatisfy({ $0.isFinite && Self.depthRange.contains($0) }) else {
             throw DynamicsConfigurationError.invalidMainsNotch
@@ -500,6 +512,12 @@ struct DynamicsConfiguration: Equatable, Sendable {
             )
         }
         guard mainsConfigured else { throw DynamicsConfigurationError.invalidMainsNotch }
+        guard N60DynamicsSnapshotSetMainsHumDetector(
+            &snapshot,
+            sampleRate,
+            true,
+            mainsNotch.region.fundamentalHz
+        ) else { throw DynamicsConfigurationError.invalidMainsHumDetector }
         guard N60DynamicsSnapshotSetLoudnessMatch(
             &snapshot,
             sampleRate,

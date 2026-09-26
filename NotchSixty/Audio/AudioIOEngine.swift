@@ -684,6 +684,33 @@ final class AudioIOEngine: ObservableObject {
         lastErrorDescription = nil
     }
 
+    @discardableResult
+    func applyDetectedMainsHum(minimumConfidence: Float = 0.55) throws -> Bool {
+        guard let diagnostics = diagnosticsSnapshot().renderKernelDiagnostics,
+              diagnostics.mainsDetectedFrequencyHz.isFinite,
+              diagnostics.mainsDetectionConfidence >= minimumConfidence,
+              MainsNotchConfiguration.detectedFrequencyRange.contains(Double(diagnostics.mainsDetectedFrequencyHz)) else {
+            return false
+        }
+        var updated = dynamicsConfiguration
+        updated.mainsNotch.detectedFundamentalHz = Double(diagnostics.mainsDetectedFrequencyHz)
+        try replaceDynamicsConfiguration(updated)
+        return true
+    }
+
+    func pollMainsHumTracking(minimumConfidence: Float = 0.70) {
+        guard dynamicsConfiguration.mainsNotch.continuousTracking,
+              let diagnostics = diagnosticsSnapshot().renderKernelDiagnostics,
+              diagnostics.mainsDetectionConfidence >= minimumConfidence else { return }
+        let detected = Double(diagnostics.mainsDetectedFrequencyHz)
+        guard detected.isFinite,
+              MainsNotchConfiguration.detectedFrequencyRange.contains(detected),
+              abs(detected - dynamicsConfiguration.mainsNotch.fundamentalHz) >= 0.03 else { return }
+        var updated = dynamicsConfiguration
+        updated.mainsNotch.detectedFundamentalHz = detected
+        try? replaceDynamicsConfiguration(updated)
+    }
+
     func replaceDynamicsConfiguration(_ configuration: DynamicsConfiguration) throws {
         let validationRate = transportSession?.outputFormat.sampleRate ?? 48_000
         _ = try configuration.makeSnapshot(sampleRate: validationRate)

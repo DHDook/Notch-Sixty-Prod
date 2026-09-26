@@ -136,6 +136,8 @@ typedef struct {
     float crossoverSubGainLinear;
     bool crossoverSubPolarityInverted;
     uint32_t crossoverSectionCount;
+    float mainsDetectedFrequencyHz;
+    float mainsDetectionConfidence;
     bool deEsserEnabled;
     bool deEsserDynamicEQMode;
     double deEsserFrequencyHz;

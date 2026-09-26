@@ -735,3 +735,78 @@ extension NotchSixtyTests {
         return 20.0 * log10(max(outputRMS, 1.0e-12) / max(inputRMS, 1.0e-12))
     }
 }
+
+
+extension NotchSixtyTests {
+    func testMainsHumDetectorFindsOffsetFundamental() throws {
+        guard let kernel = N60RenderKernelCreate() else { return XCTFail("Unable to create render kernel") }
+        defer { N60RenderKernelDestroy(kernel) }
+        let sampleRate = 48_000.0
+        var dynamics = DynamicsConfiguration()
+        dynamics.mainsNotch.enabled = false
+        dynamics.mainsNotch.region = .hz60
+        var graph = N60DSPGraphSnapshotMakeUnity(sampleRate)
+        graph.dynamics = try dynamics.makeSnapshot(sampleRate: sampleRate)
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        let frequency = 60.75
+        for frame in 0..<Int(sampleRate * 2.2) {
+            let sample = Float(0.08 * sin(2.0 * Double.pi * frequency * Double(frame) / sampleRate))
+            var left: Float = 0
+            var right: Float = 0
+            N60RenderKernelProcessStereoFrame(kernel, sample, sample, &left, &right)
+        }
+        let diagnostics = N60RenderKernelGetDiagnostics(kernel)
+        XCTAssertEqual(Double(diagnostics.mainsDetectedFrequencyHz), frequency, accuracy: 0.35)
+        XCTAssertGreaterThan(diagnostics.mainsDetectionConfidence, 0.70)
+    }
+
+    func testMainsHumDetectorRejectsOutOfBandTone() throws {
+        guard let kernel = N60RenderKernelCreate() else { return XCTFail("Unable to create render kernel") }
+        defer { N60RenderKernelDestroy(kernel) }
+        let sampleRate = 48_000.0
+        var dynamics = DynamicsConfiguration()
+        dynamics.mainsNotch.region = .hz60
+        var graph = N60DSPGraphSnapshotMakeUnity(sampleRate)
+        graph.dynamics = try dynamics.makeSnapshot(sampleRate: sampleRate)
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        for frame in 0..<Int(sampleRate * 1.2) {
+            let sample = Float(0.1 * sin(2.0 * Double.pi * 1_000.0 * Double(frame) / sampleRate))
+            var left: Float = 0
+            var right: Float = 0
+            N60RenderKernelProcessStereoFrame(kernel, sample, sample, &left, &right)
+        }
+        let diagnostics = N60RenderKernelGetDiagnostics(kernel)
+        XCTAssertLessThan(diagnostics.mainsDetectionConfidence, 0.25)
+    }
+
+    func testMainsNotchRetuneTransitionRemainsFiniteAndBounded() throws {
+        guard let kernel = N60RenderKernelCreate() else { return XCTFail("Unable to create render kernel") }
+        defer { N60RenderKernelDestroy(kernel) }
+        let sampleRate = 48_000.0
+        var dynamics = DynamicsConfiguration()
+        dynamics.mainsNotch.enabled = true
+        dynamics.mainsNotch.harmonicCount = 1
+        dynamics.mainsNotch.harmonicDepthsDB = Array(repeating: 0, count: MainsNotchConfiguration.maximumHarmonics)
+        dynamics.mainsNotch.harmonicDepthsDB[0] = -24
+        var graph = N60DSPGraphSnapshotMakeUnity(sampleRate)
+        graph.dynamics = try dynamics.makeSnapshot(sampleRate: sampleRate)
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        var previous: Float = 0
+        var maximumJump: Float = 0
+        for frame in 0..<12_000 {
+            if frame == 6_000 {
+                dynamics.mainsNotch.detectedFundamentalHz = 60.8
+                graph.dynamics = try dynamics.makeSnapshot(sampleRate: sampleRate)
+                XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+            }
+            let sample = Float(0.1 * sin(2.0 * Double.pi * 60.4 * Double(frame) / sampleRate))
+            var left: Float = 0
+            var right: Float = 0
+            N60RenderKernelProcessStereoFrame(kernel, sample, sample, &left, &right)
+            XCTAssertTrue(left.isFinite)
+            maximumJump = max(maximumJump, abs(left - previous))
+            previous = left
+        }
+        XCTAssertLessThan(maximumJump, 0.03)
+    }
+}

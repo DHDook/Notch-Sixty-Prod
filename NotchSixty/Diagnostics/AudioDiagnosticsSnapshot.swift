@@ -44,6 +44,8 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
     let crossoverSubGainLinear: Float
     let crossoverSubPolarityInverted: Bool
     let crossoverSectionCount: UInt32
+    let mainsDetectedFrequencyHz: Float
+    let mainsDetectionConfidence: Float
     let deEsserEnabled: Bool
     let deEsserDynamicEQMode: Bool
     let deEsserFrequencyHz: Double
@@ -121,6 +123,8 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
         crossoverSubGainLinear = diagnostics.crossoverSubGainLinear
         crossoverSubPolarityInverted = diagnostics.crossoverSubPolarityInverted
         crossoverSectionCount = diagnostics.crossoverSectionCount
+        mainsDetectedFrequencyHz = diagnostics.mainsDetectedFrequencyHz
+        mainsDetectionConfidence = diagnostics.mainsDetectionConfidence
         deEsserEnabled = diagnostics.deEsserEnabled
         deEsserDynamicEQMode = diagnostics.deEsserDynamicEQMode
         deEsserFrequencyHz = diagnostics.deEsserFrequencyHz

@@ -630,6 +630,8 @@ private struct PR30PhaseTimeValidationView: View {
 
 private struct PR31NoiseHumValidationView: View {
     @ObservedObject var engine: AudioIOEngine
+    @State private var mainsDiagnostics: RenderKernelDiagnostics?
+    private let trackingTimer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
 
     private func mainsBinding<Value>(_ keyPath: WritableKeyPath<MainsNotchConfiguration, Value>) -> Binding<Value> {
         Binding(
@@ -637,6 +639,28 @@ private struct PR31NoiseHumValidationView: View {
             set: { value in
                 var updated = engine.dynamicsConfiguration
                 updated.mainsNotch[keyPath: keyPath] = value
+                try? engine.replaceDynamicsConfiguration(updated)
+            }
+        )
+    }
+
+    private var regionBinding: Binding<MainsRegion> {
+        Binding(
+            get: { engine.dynamicsConfiguration.mainsNotch.region },
+            set: { value in
+                var updated = engine.dynamicsConfiguration
+                updated.mainsNotch.selectRegion(value)
+                try? engine.replaceDynamicsConfiguration(updated)
+            }
+        )
+    }
+
+    private var trackingBinding: Binding<Bool> {
+        Binding(
+            get: { engine.dynamicsConfiguration.mainsNotch.continuousTracking },
+            set: { value in
+                var updated = engine.dynamicsConfiguration
+                updated.mainsNotch.continuousTracking = value
                 try? engine.replaceDynamicsConfiguration(updated)
             }
         )
@@ -666,14 +690,14 @@ private struct PR31NoiseHumValidationView: View {
 
     var body: some View {
         let enabled = mainsBinding(\.enabled)
-        let region = mainsBinding(\.region)
+        let region = regionBinding
         let q = mainsBinding(\.q)
 
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 Text("PR31 Noise / Hum Validation")
                     .font(.title2.bold())
-                Text("First PR31 slice: independently authored static mains-hum harmonic suppression. Detection/tracking and spectral denoising follow in the same PR.")
+                Text("PR31 Slice 2 adds independent mains-frequency detection, confidence telemetry, one-shot Detect, and bounded Continuous Tracking with click-safe notch retuning. Spectral denoising follows below in Slice 3.")
                     .foregroundStyle(.secondary)
 
                 GroupBox("Mains Hum Notch") {
@@ -720,9 +744,25 @@ private struct PR31NoiseHumValidationView: View {
                 }
 
                 GroupBox("Detection / Tracking") {
-                    Text("One-shot Detect and Continuous Tracking are the next PR31 slice. The static 50/60 Hz processor is intentionally validated first so detector behavior cannot hide filter-path errors.")
-                        .foregroundStyle(.secondary)
-                        .padding(6)
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 12) {
+                            Button("Detect") {
+                                _ = try? engine.applyDetectedMainsHum()
+                                mainsDiagnostics = engine.diagnosticsSnapshot().renderKernelDiagnostics
+                            }
+                            Toggle("Continuous Tracking", isOn: trackingBinding).toggleStyle(.switch)
+                        }
+                        let detected = mainsDiagnostics?.mainsDetectedFrequencyHz ?? 0
+                        let confidence = mainsDiagnostics?.mainsDetectionConfidence ?? 0
+                        Text("Detected: \(detected, specifier: "%.2f") Hz   Confidence: \(confidence * 100, specifier: "%.0f")%")
+                            .monospacedDigit()
+                        Text("Active notch fundamental: \(engine.dynamicsConfiguration.mainsNotch.fundamentalHz, specifier: "%.2f") Hz")
+                            .monospacedDigit()
+                        Text("Detector searches ±3 Hz around the selected 50/60 Hz region. One-shot Detect applies the latest confident estimate; Continuous Tracking only republishes bounded, confident changes and the realtime notch crossfades old/new coefficients.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(6)
                 }
 
                 GroupBox("Spectral Denoising") {
@@ -738,6 +778,11 @@ private struct PR31NoiseHumValidationView: View {
             .padding(20)
         }
         .frame(minWidth: 880, minHeight: 700)
+        .onAppear { mainsDiagnostics = engine.diagnosticsSnapshot().renderKernelDiagnostics }
+        .onReceive(trackingTimer) { _ in
+            mainsDiagnostics = engine.diagnosticsSnapshot().renderKernelDiagnostics
+            engine.pollMainsHumTracking()
+        }
     }
 }
 

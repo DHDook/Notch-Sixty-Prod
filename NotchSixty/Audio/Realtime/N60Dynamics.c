@@ -28,6 +28,12 @@
 #define N60_LOUDNESS_GATE_LUFS -60.0f
 #define N60_LOUDNESS_FULL_CONTOUR_DB -30.0f
 #define N60_LOUDNESS_FLAT_CONTOUR_DB -6.0f
+#define N60_MAINS_DETECTOR_SPAN_HZ 3.0
+#define N60_MAINS_DETECTOR_BIN_SPACING_HZ 0.25
+#define N60_MAINS_DETECTOR_TARGET_RATE 1000.0
+#define N60_MAINS_DETECTOR_WINDOW_SECONDS 1.0
+#define N60_MAINS_DETECTOR_MIN_LEVEL_DBFS -78.0
+#define N60_MAINS_NOTCH_RETUNE_SECONDS 0.010
 
 static float clampf(float value, float minimum, float maximum) {
     return fminf(fmaxf(value, minimum), maximum);
@@ -168,6 +174,159 @@ static float process_mains_notch_cascade(
     return (float)output;
 }
 
+static bool mains_notch_runtime_matches_snapshot(const N60DynamicsRuntime *runtime, N60MainsNotchSnapshot snapshot) {
+    if (!runtime->mainsNotchInitialized
+        || runtime->mainsNotchCurrentFundamentalHz != snapshot.fundamentalHz
+        || runtime->mainsNotchCurrentQ != snapshot.q
+        || runtime->mainsNotchCurrentHarmonicCount != snapshot.harmonicCount) return false;
+    for (uint32_t index = 0; index < snapshot.harmonicCount; ++index) {
+        if (runtime->mainsNotchCurrentDepthsDB[index] != snapshot.depthsDB[index]) return false;
+    }
+    return true;
+}
+
+static void copy_mains_notch_snapshot_to_current(N60DynamicsRuntime *runtime, N60MainsNotchSnapshot snapshot) {
+    runtime->mainsNotchCurrentFundamentalHz = snapshot.fundamentalHz;
+    runtime->mainsNotchCurrentQ = snapshot.q;
+    runtime->mainsNotchCurrentHarmonicCount = snapshot.harmonicCount;
+    for (uint32_t index = 0; index < N60_MAX_MAINS_HARMONICS; ++index) {
+        runtime->mainsNotchCurrentFilters[index] = snapshot.filters[index];
+        runtime->mainsNotchCurrentDepthsDB[index] = snapshot.depthsDB[index];
+        runtime->mainsNotchLeft[index].z1 = 0.0;
+        runtime->mainsNotchLeft[index].z2 = 0.0;
+        runtime->mainsNotchRight[index].z1 = 0.0;
+        runtime->mainsNotchRight[index].z2 = 0.0;
+    }
+    runtime->mainsNotchInitialized = true;
+}
+
+static void promote_pending_mains_notch(N60DynamicsRuntime *runtime) {
+    runtime->mainsNotchCurrentFundamentalHz = runtime->mainsNotchPendingFundamentalHz;
+    runtime->mainsNotchCurrentQ = runtime->mainsNotchPendingQ;
+    runtime->mainsNotchCurrentHarmonicCount = runtime->mainsNotchPendingHarmonicCount;
+    for (uint32_t index = 0; index < N60_MAX_MAINS_HARMONICS; ++index) {
+        runtime->mainsNotchCurrentFilters[index] = runtime->mainsNotchPendingFilters[index];
+        runtime->mainsNotchCurrentDepthsDB[index] = runtime->mainsNotchPendingDepthsDB[index];
+        runtime->mainsNotchLeft[index] = runtime->mainsNotchPendingLeft[index];
+        runtime->mainsNotchRight[index] = runtime->mainsNotchPendingRight[index];
+    }
+    runtime->mainsNotchTransitionFramesTotal = 0;
+    runtime->mainsNotchTransitionFramesRemaining = 0;
+}
+
+static void schedule_mains_notch_retune(N60DynamicsRuntime *runtime, N60MainsNotchSnapshot snapshot, uint32_t transitionFrames) {
+    if (!runtime->mainsNotchInitialized) {
+        copy_mains_notch_snapshot_to_current(runtime, snapshot);
+        return;
+    }
+    if (runtime->mainsNotchTransitionFramesRemaining > 0) promote_pending_mains_notch(runtime);
+    if (mains_notch_runtime_matches_snapshot(runtime, snapshot)) return;
+    runtime->mainsNotchPendingFundamentalHz = snapshot.fundamentalHz;
+    runtime->mainsNotchPendingQ = snapshot.q;
+    runtime->mainsNotchPendingHarmonicCount = snapshot.harmonicCount;
+    for (uint32_t index = 0; index < N60_MAX_MAINS_HARMONICS; ++index) {
+        runtime->mainsNotchPendingFilters[index] = snapshot.filters[index];
+        runtime->mainsNotchPendingDepthsDB[index] = snapshot.depthsDB[index];
+        runtime->mainsNotchPendingLeft[index] = runtime->mainsNotchLeft[index];
+        runtime->mainsNotchPendingRight[index] = runtime->mainsNotchRight[index];
+    }
+    runtime->mainsNotchTransitionFramesTotal = transitionFrames > 0 ? transitionFrames : 1;
+    runtime->mainsNotchTransitionFramesRemaining = runtime->mainsNotchTransitionFramesTotal;
+}
+
+static void reset_mains_detector_window(N60DynamicsRuntime *runtime) {
+    runtime->mainsDetectorSampleCount = 0;
+    runtime->mainsDetectorWindowEnergy = 0.0;
+    for (uint32_t index = 0; index < N60_MAINS_DETECTOR_BIN_COUNT; ++index) {
+        runtime->mainsDetectorOscCos[index] = 1.0;
+        runtime->mainsDetectorOscSin[index] = 0.0;
+        runtime->mainsDetectorReal[index] = 0.0;
+        runtime->mainsDetectorImag[index] = 0.0;
+    }
+}
+
+static void process_mains_hum_detector(
+    N60DynamicsRuntime *runtime,
+    N60MainsHumDetectorSnapshot snapshot,
+    float left,
+    float right
+) {
+    if (!snapshot.enabled || snapshot.decimationFactor == 0 || snapshot.windowSamples == 0) return;
+    runtime->mainsDetectorDecimationCounter += 1;
+    if (runtime->mainsDetectorDecimationCounter < snapshot.decimationFactor) return;
+    runtime->mainsDetectorDecimationCounter = 0;
+
+    double mono = 0.5 * ((double)left + (double)right);
+    runtime->mainsDetectorWindowEnergy += mono * mono;
+    for (uint32_t index = 0; index < N60_MAINS_DETECTOR_BIN_COUNT; ++index) {
+        double oscCos = runtime->mainsDetectorOscCos[index];
+        double oscSin = runtime->mainsDetectorOscSin[index];
+        runtime->mainsDetectorReal[index] += mono * oscCos;
+        runtime->mainsDetectorImag[index] += mono * oscSin;
+        double stepCos = (double)snapshot.oscillatorStepCos[index];
+        double stepSin = (double)snapshot.oscillatorStepSin[index];
+        runtime->mainsDetectorOscCos[index] = oscCos * stepCos - oscSin * stepSin;
+        runtime->mainsDetectorOscSin[index] = oscSin * stepCos + oscCos * stepSin;
+    }
+    runtime->mainsDetectorSampleCount += 1;
+    if (runtime->mainsDetectorSampleCount < snapshot.windowSamples) return;
+
+    double powers[N60_MAINS_DETECTOR_BIN_COUNT];
+    uint32_t bestIndex = 0;
+    double bestPower = 0.0;
+    for (uint32_t index = 0; index < N60_MAINS_DETECTOR_BIN_COUNT; ++index) {
+        double re = runtime->mainsDetectorReal[index];
+        double im = runtime->mainsDetectorImag[index];
+        powers[index] = re * re + im * im;
+        if (powers[index] > bestPower) {
+            bestPower = powers[index];
+            bestIndex = index;
+        }
+    }
+
+    double background = 0.0;
+    uint32_t backgroundCount = 0;
+    for (uint32_t index = 0; index < N60_MAINS_DETECTOR_BIN_COUNT; ++index) {
+        int distance = (int)index - (int)bestIndex;
+        if (distance >= -2 && distance <= 2) continue;
+        background += powers[index];
+        backgroundCount += 1;
+    }
+    double backgroundMean = backgroundCount > 0 ? background / (double)backgroundCount : 0.0;
+    double n = (double)runtime->mainsDetectorSampleCount;
+    // A relative spectral peak alone is not enough evidence of mains hum: an
+    // out-of-band coherent tone can create a locally prominent leakage bin.
+    // Require the candidate sinusoid to explain meaningful time-domain energy
+    // in the detector window as well as standing above neighboring bins.
+    double candidateMeanSquare = 2.0 * bestPower / fmax(n * n, 1.0);
+    double totalMeanSquare = runtime->mainsDetectorWindowEnergy / fmax(n, 1.0);
+    double levelDBFS = 10.0 * log10(fmax(candidateMeanSquare, 1.0e-20));
+    double prominence = bestPower > 1.0e-20 ? 1.0 - backgroundMean / bestPower : 0.0;
+    prominence = fmin(fmax(prominence, 0.0), 1.0);
+    double toneEnergyFraction = candidateMeanSquare / fmax(totalMeanSquare, 1.0e-20);
+    toneEnergyFraction = fmin(fmax(toneEnergyFraction, 0.0), 1.0);
+    double confidence = prominence * toneEnergyFraction;
+    if (levelDBFS < N60_MAINS_DETECTOR_MIN_LEVEL_DBFS) confidence = 0.0;
+
+    double fractionalBin = 0.0;
+    if (bestIndex > 0 && bestIndex + 1 < N60_MAINS_DETECTOR_BIN_COUNT) {
+        double leftPower = powers[bestIndex - 1];
+        double centerPower = powers[bestIndex];
+        double rightPower = powers[bestIndex + 1];
+        double denominator = leftPower - 2.0 * centerPower + rightPower;
+        if (fabs(denominator) > 1.0e-20) {
+            fractionalBin = 0.5 * (leftPower - rightPower) / denominator;
+            fractionalBin = fmin(fmax(fractionalBin, -0.5), 0.5);
+        }
+    }
+    runtime->mainsDetectedFrequencyHz = (float)(
+        snapshot.searchStartHz
+        + ((double)bestIndex + fractionalBin) * snapshot.binSpacingHz
+    );
+    runtime->mainsDetectionConfidence = (float)confidence;
+    reset_mains_detector_window(runtime);
+}
+
 static float dynamics_compression_target(
     float detector,
     bool enabled,
@@ -219,6 +378,17 @@ N60DynamicsSnapshot N60DynamicsSnapshotMakeBypassed(double sampleRate) {
     for (uint32_t index = 0; index < N60_MAX_MAINS_HARMONICS; ++index) {
         snapshot.mainsNotch.depthsDB[index] = 0.0f;
         snapshot.mainsNotch.filters[index] = mains_notch_identity();
+    }
+
+    snapshot.mainsHumDetector.enabled = false;
+    snapshot.mainsHumDetector.searchCenterHz = 60.0;
+    snapshot.mainsHumDetector.searchStartHz = 57.0;
+    snapshot.mainsHumDetector.binSpacingHz = N60_MAINS_DETECTOR_BIN_SPACING_HZ;
+    snapshot.mainsHumDetector.decimationFactor = 48;
+    snapshot.mainsHumDetector.windowSamples = 1000;
+    for (uint32_t index = 0; index < N60_MAINS_DETECTOR_BIN_COUNT; ++index) {
+        snapshot.mainsHumDetector.oscillatorStepCos[index] = 1.0f;
+        snapshot.mainsHumDetector.oscillatorStepSin[index] = 0.0f;
     }
 
     snapshot.loudnessMatch.enabled = false;
@@ -448,6 +618,37 @@ bool N60DynamicsSnapshotSetMainsNotch(
     }
 
     snapshot->mainsNotch = configured;
+    return true;
+}
+
+bool N60DynamicsSnapshotSetMainsHumDetector(
+    N60DynamicsSnapshot *snapshot,
+    double sampleRate,
+    bool enabled,
+    double searchCenterHz
+) {
+    if (snapshot == NULL || !isfinite(sampleRate) || sampleRate <= 0.0
+        || !isfinite(searchCenterHz) || searchCenterHz < 47.0 || searchCenterHz > 63.0) return false;
+    uint32_t decimation = (uint32_t)llround(sampleRate / N60_MAINS_DETECTOR_TARGET_RATE);
+    if (decimation < 1) decimation = 1;
+    double detectorRate = sampleRate / (double)decimation;
+    uint32_t windowSamples = (uint32_t)llround(detectorRate * N60_MAINS_DETECTOR_WINDOW_SECONDS);
+    if (windowSamples < 128) windowSamples = 128;
+
+    N60MainsHumDetectorSnapshot configured = {0};
+    configured.enabled = enabled;
+    configured.searchCenterHz = searchCenterHz;
+    configured.searchStartHz = searchCenterHz - N60_MAINS_DETECTOR_SPAN_HZ;
+    configured.binSpacingHz = N60_MAINS_DETECTOR_BIN_SPACING_HZ;
+    configured.decimationFactor = decimation;
+    configured.windowSamples = windowSamples;
+    for (uint32_t index = 0; index < N60_MAINS_DETECTOR_BIN_COUNT; ++index) {
+        double frequency = configured.searchStartHz + (double)index * configured.binSpacingHz;
+        double step = 2.0 * M_PI * frequency / detectorRate;
+        configured.oscillatorStepCos[index] = (float)cos(step);
+        configured.oscillatorStepSin[index] = (float)sin(step);
+    }
+    snapshot->mainsHumDetector = configured;
     return true;
 }
 
@@ -745,6 +946,17 @@ bool N60DynamicsSnapshotIsValid(N60DynamicsSnapshot snapshot) {
             || snapshot.mainsNotch.depthsDB[index] < -40.0f || snapshot.mainsNotch.depthsDB[index] > 0.0f
             || !mains_notch_coefficients_are_finite(snapshot.mainsNotch.filters[index])) return false;
     }
+    if (!isfinite(snapshot.mainsHumDetector.searchCenterHz)
+        || snapshot.mainsHumDetector.searchCenterHz < 47.0 || snapshot.mainsHumDetector.searchCenterHz > 63.0
+        || !isfinite(snapshot.mainsHumDetector.searchStartHz)
+        || !isfinite(snapshot.mainsHumDetector.binSpacingHz)
+        || snapshot.mainsHumDetector.binSpacingHz <= 0.0
+        || snapshot.mainsHumDetector.decimationFactor == 0
+        || snapshot.mainsHumDetector.windowSamples == 0) return false;
+    for (uint32_t index = 0; index < N60_MAINS_DETECTOR_BIN_COUNT; ++index) {
+        if (!isfinite(snapshot.mainsHumDetector.oscillatorStepCos[index])
+            || !isfinite(snapshot.mainsHumDetector.oscillatorStepSin[index])) return false;
+    }
     if (!isfinite(snapshot.loudnessMatch.targetLUFS) || snapshot.loudnessMatch.targetLUFS < -24.0f || snapshot.loudnessMatch.targetLUFS > -10.0f
         || !isfinite(snapshot.loudnessMatch.maxCorrectionDB) || snapshot.loudnessMatch.maxCorrectionDB < 3.0f || snapshot.loudnessMatch.maxCorrectionDB > 20.0f
         || !valid_coefficient(snapshot.loudnessMatch.attackCoefficient)
@@ -818,6 +1030,7 @@ void N60DynamicsRuntimeReset(N60DynamicsRuntime *runtime) {
     runtime->widenerHighWidth = 1.0f;
     runtime->pauseGateGain = 1.0f;
     runtime->gateOpen = true;
+    reset_mains_detector_window(runtime);
 }
 
 
@@ -853,18 +1066,42 @@ void N60DynamicsProcessPreEQStereoFrame(
 
     dryLeft = *left;
     dryRight = *right;
+    process_mains_hum_detector(runtime, snapshot.mainsHumDetector, dryLeft, dryRight);
+
+    uint32_t retuneFrames = (uint32_t)fmax(32.0, snapshot.mainsHumDetector.decimationFactor * N60_MAINS_DETECTOR_TARGET_RATE * N60_MAINS_NOTCH_RETUNE_SECONDS);
+    schedule_mains_notch_retune(runtime, snapshot.mainsNotch, retuneFrames);
     float notchLeft = process_mains_notch_cascade(
-        snapshot.mainsNotch.filters,
+        runtime->mainsNotchCurrentFilters,
         runtime->mainsNotchLeft,
-        snapshot.mainsNotch.harmonicCount,
+        runtime->mainsNotchCurrentHarmonicCount,
         dryLeft
     );
     float notchRight = process_mains_notch_cascade(
-        snapshot.mainsNotch.filters,
+        runtime->mainsNotchCurrentFilters,
         runtime->mainsNotchRight,
-        snapshot.mainsNotch.harmonicCount,
+        runtime->mainsNotchCurrentHarmonicCount,
         dryRight
     );
+    if (runtime->mainsNotchTransitionFramesRemaining > 0) {
+        float pendingLeft = process_mains_notch_cascade(
+            runtime->mainsNotchPendingFilters,
+            runtime->mainsNotchPendingLeft,
+            runtime->mainsNotchPendingHarmonicCount,
+            dryLeft
+        );
+        float pendingRight = process_mains_notch_cascade(
+            runtime->mainsNotchPendingFilters,
+            runtime->mainsNotchPendingRight,
+            runtime->mainsNotchPendingHarmonicCount,
+            dryRight
+        );
+        uint32_t completed = runtime->mainsNotchTransitionFramesTotal - runtime->mainsNotchTransitionFramesRemaining + 1;
+        float mix = (float)completed / (float)runtime->mainsNotchTransitionFramesTotal;
+        notchLeft += (pendingLeft - notchLeft) * mix;
+        notchRight += (pendingRight - notchRight) * mix;
+        runtime->mainsNotchTransitionFramesRemaining -= 1;
+        if (runtime->mainsNotchTransitionFramesRemaining == 0) promote_pending_mains_notch(runtime);
+    }
     float mainsTarget = snapshot.mainsNotch.enabled ? 1.0f : 0.0f;
     runtime->mainsNotchMix = smooth_toward(runtime->mainsNotchMix, mainsTarget, snapshot.bypassTransitionCoefficient);
     *left = dryLeft + (notchLeft - dryLeft) * runtime->mainsNotchMix;
@@ -1244,6 +1481,8 @@ void N60DynamicsProcessStereoFrame(
 N60DynamicsTelemetry N60DynamicsRuntimeTelemetry(const N60DynamicsRuntime *runtime) {
     N60DynamicsTelemetry telemetry = {0};
     if (runtime == NULL) return telemetry;
+    telemetry.mainsDetectedFrequencyHz = runtime->mainsDetectedFrequencyHz;
+    telemetry.mainsDetectionConfidence = runtime->mainsDetectionConfidence;
     telemetry.loudnessShortTermLUFS = -0.691f + 10.0f * log10f(fmaxf(runtime->loudnessMeanSquare, N60_DYNAMICS_EPSILON));
     telemetry.loudnessMatchGainDB = runtime->loudnessMatchGainDB;
     telemetry.loudnessContourScale = runtime->loudnessMix;

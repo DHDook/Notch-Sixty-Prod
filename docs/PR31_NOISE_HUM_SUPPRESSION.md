@@ -116,3 +116,10 @@ Minimum validation surface:
 - mixed/excess-phase correction remains in the room-correction milestone because it requires phase-resolved measurements;
 - independent sub/driver phase alignment remains dependent on physical routing;
 - explicit SRC remains subject to later parity/product classification.
+
+
+## Slice 2 implementation — mains detection and tracking
+
+The commercial detector is an independently authored fixed-bank quadrature estimator. The realtime path decimates to approximately 1 kHz, evaluates 25 frequencies at 0.25 Hz spacing across a ±3 Hz window around the selected 50/60 Hz region, and publishes the strongest-bin estimate plus a bounded spectral-prominence confidence value once per approximately one-second window. It does not copy or adapt the legacy detector implementation.
+
+One-shot **Detect** is a control-plane operation: it applies the latest estimate only above a confidence threshold. **Continuous Tracking** polls the same telemetry at a bounded cadence, requires a stronger confidence threshold, rejects negligible changes, and republishes coefficients on the control plane. The realtime notch owns dual old/new filter banks and crossfades coefficient retunes over roughly 10 ms so tracking never redesigns filters inside the render callback and does not hard-switch IIR coefficients/state.
