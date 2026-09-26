@@ -17,18 +17,9 @@ jobs:
         with:
           ref: feature/dsp-optimization-parity-audit
 
-      - name: Apply Mixed Phase integration
-        run: python3 ci/pr34_apply_phase_c_mixed.py
-
-      - name: Fix Mixed Phase diagnostics bridge
-        run: python3 ci/pr34_fix_mixed_diagnostics_bridge.py
-
-      - name: Apply Symmetry Balance integration
-        run: python3 ci/pr34_apply_phase_d_symmetry.py
-
-      - name: Fix Symmetry Balance Swift test bridge
-        run: python3 ci/pr34_fix_symmetry_test_bridge.py
-
+      # Phase A-C and Symmetry Balance are committed source now. Do not re-apply
+      # historical mutation scripts here; verify those slices with their dedicated
+      # validators and the full build/test suite instead.
       - name: Apply speaker crossfeed integration
         run: python3 ci/pr34_apply_phase_d_crossfeed.py
 
