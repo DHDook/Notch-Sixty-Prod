@@ -46,6 +46,20 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
     let crossoverSectionCount: UInt32
     let mainsDetectedFrequencyHz: Float
     let mainsDetectionConfidence: Float
+    let spectralDenoiserEnabled: Bool
+    let spectralDenoiserTuning: N60DenoiserTuning
+    let spectralDenoiserQuality: N60DenoiserQuality
+    let denoiserFFTSize: UInt32
+    let denoiserHopSize: UInt32
+    let denoiserLatencyFrames: UInt32
+    let denoiserProfileReady: Bool
+    let denoiserCapturedProfile: Bool
+    let denoiserCaptureActive: Bool
+    let denoiserCaptureProgress: Float
+    let denoiserEstimatedNoiseDBFS: Float
+    let denoiserMeanSuppressionDB: Float
+    let denoiserMaxSuppressionDB: Float
+    let denoiserSpectralFramesProcessed: UInt64
     let deEsserEnabled: Bool
     let deEsserDynamicEQMode: Bool
     let deEsserFrequencyHz: Double
@@ -125,6 +139,20 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
         crossoverSectionCount = diagnostics.crossoverSectionCount
         mainsDetectedFrequencyHz = diagnostics.mainsDetectedFrequencyHz
         mainsDetectionConfidence = diagnostics.mainsDetectionConfidence
+        spectralDenoiserEnabled = diagnostics.spectralDenoiserEnabled
+        spectralDenoiserTuning = diagnostics.spectralDenoiserTuning
+        spectralDenoiserQuality = diagnostics.spectralDenoiserQuality
+        denoiserFFTSize = diagnostics.denoiserFFTSize
+        denoiserHopSize = diagnostics.denoiserHopSize
+        denoiserLatencyFrames = diagnostics.denoiserLatencyFrames
+        denoiserProfileReady = diagnostics.denoiserProfileReady
+        denoiserCapturedProfile = diagnostics.denoiserCapturedProfile
+        denoiserCaptureActive = diagnostics.denoiserCaptureActive
+        denoiserCaptureProgress = diagnostics.denoiserCaptureProgress
+        denoiserEstimatedNoiseDBFS = diagnostics.denoiserEstimatedNoiseDBFS
+        denoiserMeanSuppressionDB = diagnostics.denoiserMeanSuppressionDB
+        denoiserMaxSuppressionDB = diagnostics.denoiserMaxSuppressionDB
+        denoiserSpectralFramesProcessed = diagnostics.denoiserSpectralFramesProcessed
         deEsserEnabled = diagnostics.deEsserEnabled
         deEsserDynamicEQMode = diagnostics.deEsserDynamicEQMode
         deEsserFrequencyHz = diagnostics.deEsserFrequencyHz

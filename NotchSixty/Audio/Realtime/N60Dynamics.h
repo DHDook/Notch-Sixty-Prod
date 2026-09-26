@@ -6,6 +6,7 @@
 
 #include "N60Biquad.h"
 #include "N60Crossover.h"
+#include "N60SpectralDenoiser.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -176,6 +177,7 @@ typedef struct {
     N60InfrasonicFilterSnapshot infrasonicFilter;
     N60MainsNotchSnapshot mainsNotch;
     N60MainsHumDetectorSnapshot mainsHumDetector;
+    N60SpectralDenoiserSnapshot spectralDenoiser;
     N60LoudnessMatchSnapshot loudnessMatch;
     N60LoudnessContourSnapshot loudnessContour;
     N60DeEsserSnapshot deEsser;
@@ -326,6 +328,21 @@ bool N60DynamicsSnapshotSetMainsHumDetector(
     double sampleRate,
     bool enabled,
     double searchCenterHz
+);
+
+bool N60DynamicsSnapshotSetSpectralDenoiser(
+    N60DynamicsSnapshot * _Nonnull snapshot,
+    double sampleRate,
+    bool enabled,
+    N60DenoiserTuning tuning,
+    N60DenoiserQuality quality,
+    float reductionAmount,
+    float thresholdDBFS,
+    bool protectedRangeEnabled,
+    float protectedLowHz,
+    float protectedHighHz,
+    uint32_t profileRevision,
+    N60DenoiserProfileCommand profileCommand
 );
 
 bool N60DynamicsSnapshotSetLoudnessMatch(

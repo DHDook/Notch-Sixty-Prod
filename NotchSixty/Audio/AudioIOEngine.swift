@@ -711,6 +711,24 @@ final class AudioIOEngine: ObservableObject {
         try? replaceDynamicsConfiguration(updated)
     }
 
+    func applySpectralDenoiserPreset(_ preset: SpectralDenoiserPreset) throws {
+        var updated = dynamicsConfiguration
+        updated.spectralDenoiser.applyPreset(preset)
+        try replaceDynamicsConfiguration(updated)
+    }
+
+    func captureSpectralNoiseProfile() throws {
+        var updated = dynamicsConfiguration
+        updated.spectralDenoiser.requestProfileCapture()
+        try replaceDynamicsConfiguration(updated)
+    }
+
+    func resetSpectralNoiseProfile() throws {
+        var updated = dynamicsConfiguration
+        updated.spectralDenoiser.resetProfile()
+        try replaceDynamicsConfiguration(updated)
+    }
+
     func replaceDynamicsConfiguration(_ configuration: DynamicsConfiguration) throws {
         let validationRate = transportSession?.outputFormat.sampleRate ?? 48_000
         _ = try configuration.makeSnapshot(sampleRate: validationRate)
@@ -738,7 +756,10 @@ final class AudioIOEngine: ObservableObject {
                 || oldProtection.effectiveFactor != newProtection.effectiveFactor
                 || oldProtection.limiterEnabled != newProtection.limiterEnabled
                 || dynamicsConfiguration.softClipper.enabled != configuration.softClipper.enabled
-            if protectionStructureChanged {
+            let denoiserStructureChanged = dynamicsConfiguration.spectralDenoiser.enabled != configuration.spectralDenoiser.enabled
+                || (configuration.spectralDenoiser.enabled
+                    && dynamicsConfiguration.spectralDenoiser.quality != configuration.spectralDenoiser.quality)
+            if protectionStructureChanged || denoiserStructureChanged {
                 try session.transitionDSPGraph(graph)
             } else {
                 try session.publishDSPGraph(graph)

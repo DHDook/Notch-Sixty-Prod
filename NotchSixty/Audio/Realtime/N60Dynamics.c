@@ -391,6 +391,8 @@ N60DynamicsSnapshot N60DynamicsSnapshotMakeBypassed(double sampleRate) {
         snapshot.mainsHumDetector.oscillatorStepSin[index] = 0.0f;
     }
 
+    snapshot.spectralDenoiser = N60SpectralDenoiserSnapshotMakeBypassed(sampleRate);
+
     snapshot.loudnessMatch.enabled = false;
     snapshot.loudnessMatch.dialogueGateEnabled = false;
     snapshot.loudnessMatch.targetLUFS = -16.0f;
@@ -649,6 +651,39 @@ bool N60DynamicsSnapshotSetMainsHumDetector(
         configured.oscillatorStepSin[index] = (float)sin(step);
     }
     snapshot->mainsHumDetector = configured;
+    return true;
+}
+
+bool N60DynamicsSnapshotSetSpectralDenoiser(
+    N60DynamicsSnapshot *snapshot,
+    double sampleRate,
+    bool enabled,
+    N60DenoiserTuning tuning,
+    N60DenoiserQuality quality,
+    float reductionAmount,
+    float thresholdDBFS,
+    bool protectedRangeEnabled,
+    float protectedLowHz,
+    float protectedHighHz,
+    uint32_t profileRevision,
+    N60DenoiserProfileCommand profileCommand
+) {
+    if (snapshot == NULL) return false;
+    N60SpectralDenoiserSnapshot configured = N60SpectralDenoiserSnapshotMakeBypassed(sampleRate);
+    if (!N60SpectralDenoiserSnapshotConfigure(
+            &configured,
+            sampleRate,
+            enabled,
+            tuning,
+            quality,
+            reductionAmount,
+            thresholdDBFS,
+            protectedRangeEnabled,
+            protectedLowHz,
+            protectedHighHz,
+            profileRevision,
+            profileCommand)) return false;
+    snapshot->spectralDenoiser = configured;
     return true;
 }
 
@@ -957,6 +992,7 @@ bool N60DynamicsSnapshotIsValid(N60DynamicsSnapshot snapshot) {
         if (!isfinite(snapshot.mainsHumDetector.oscillatorStepCos[index])
             || !isfinite(snapshot.mainsHumDetector.oscillatorStepSin[index])) return false;
     }
+    if (!N60SpectralDenoiserSnapshotIsValid(snapshot.spectralDenoiser, snapshot.spectralDenoiser.sampleRate)) return false;
     if (!isfinite(snapshot.loudnessMatch.targetLUFS) || snapshot.loudnessMatch.targetLUFS < -24.0f || snapshot.loudnessMatch.targetLUFS > -10.0f
         || !isfinite(snapshot.loudnessMatch.maxCorrectionDB) || snapshot.loudnessMatch.maxCorrectionDB < 3.0f || snapshot.loudnessMatch.maxCorrectionDB > 20.0f
         || !valid_coefficient(snapshot.loudnessMatch.attackCoefficient)

@@ -45,6 +45,7 @@ struct N60SpectralDenoiserRuntime {
     float adaptiveMinimum[N60_DENOISER_MAX_BINS];
     float captureSum[N60_DENOISER_MAX_BINS];
     float previousEnhancedPower[N60_DENOISER_MAX_BINS];
+    float linkedPower[N60_DENOISER_MAX_BINS];
     float targetGain[N60_DENOISER_MAX_BINS];
     float smoothedGain[N60_DENOISER_MAX_BINS];
     uint32_t adaptiveFramesInBlock;
@@ -130,6 +131,7 @@ static void apply_tuning_defaults(N60SpectralDenoiserSnapshot *snapshot) {
 
 N60SpectralDenoiserSnapshot N60SpectralDenoiserSnapshotMakeBypassed(double sampleRate) {
     N60SpectralDenoiserSnapshot snapshot = {0};
+    snapshot.sampleRate = sampleRate;
     snapshot.enabled = false;
     snapshot.tuning = N60DenoiserTuningStandard;
     snapshot.quality = N60DenoiserQualityHigh;
@@ -174,6 +176,7 @@ bool N60SpectralDenoiserSnapshotConfigure(
     }
 
     N60SpectralDenoiserSnapshot configured = {0};
+    configured.sampleRate = sampleRate;
     configured.enabled = enabled;
     configured.tuning = tuning;
     configured.quality = quality;
@@ -194,6 +197,7 @@ bool N60SpectralDenoiserSnapshotConfigure(
 
 bool N60SpectralDenoiserSnapshotIsValid(N60SpectralDenoiserSnapshot snapshot, double sampleRate) {
     if (!isfinite(sampleRate) || sampleRate < 8000.0 || sampleRate > 384000.0
+        || !isfinite(snapshot.sampleRate) || fabs(snapshot.sampleRate - sampleRate) > 0.5
         || !quality_is_valid(snapshot.quality) || !tuning_is_valid(snapshot.tuning)
         || !command_is_valid(snapshot.profileCommand)
         || !isfinite(snapshot.reductionAmount) || snapshot.reductionAmount < 0.0f || snapshot.reductionAmount > 1.0f
@@ -236,6 +240,7 @@ static void clear_processing_state(N60SpectralDenoiserRuntime *runtime) {
     memset(runtime->noisePower, 0, sizeof(runtime->noisePower));
     memset(runtime->captureSum, 0, sizeof(runtime->captureSum));
     memset(runtime->previousEnhancedPower, 0, sizeof(runtime->previousEnhancedPower));
+    memset(runtime->linkedPower, 0, sizeof(runtime->linkedPower));
     memset(runtime->targetGain, 0, sizeof(runtime->targetGain));
     runtime->inputWrite = 0;
     runtime->samplesAvailable = 0;
@@ -499,14 +504,13 @@ static void process_spectral_frame(
     transform(runtime, runtime->fftLeft, size, false);
     transform(runtime, runtime->fftRight, size, false);
 
-    float linkedPower[N60_DENOISER_MAX_BINS];
     for (uint32_t bin = 0; bin < binCount; ++bin) {
         float leftPower = bin_power(runtime->fftLeft[bin], bin, nyquistBin, windowSum);
         float rightPower = bin_power(runtime->fftRight[bin], bin, nyquistBin, windowSum);
-        linkedPower[bin] = fmaxf(leftPower, rightPower);
+        runtime->linkedPower[bin] = fmaxf(leftPower, rightPower);
     }
 
-    update_profile(runtime, linkedPower, binCount, sampleRate, snapshot.hopSize);
+    update_profile(runtime, runtime->linkedPower, binCount, sampleRate, snapshot.hopSize);
     update_noise_telemetry(runtime, binCount);
 
     float thresholdPower = powf(10.0f, snapshot.thresholdDBFS / 10.0f);
@@ -527,7 +531,7 @@ static void process_spectral_frame(
                     : 0.0f;
                 noise *= 1.0f + 1.5f * snapshot.dehissStrength * highWeight;
             }
-            float power = fmaxf(linkedPower[bin], N60_DENOISER_EPSILON);
+            float power = fmaxf(runtime->linkedPower[bin], N60_DENOISER_EPSILON);
             float posterior = power / fmaxf(noise, N60_DENOISER_EPSILON);
             float instantaneousPrior = fmaxf(posterior - 1.0f, 0.0f);
             float previousPrior = runtime->previousEnhancedPower[bin] / fmaxf(noise, N60_DENOISER_EPSILON);
@@ -564,7 +568,7 @@ static void process_spectral_frame(
         float gain = target + coefficient * (previous - target);
         gain = clampf(gain, snapshot.minimumGain, 1.0f);
         runtime->smoothedGain[bin] = gain;
-        runtime->previousEnhancedPower[bin] = linkedPower[bin] * gain * gain;
+        runtime->previousEnhancedPower[bin] = runtime->linkedPower[bin] * gain * gain;
 
         runtime->fftLeft[bin].real *= gain;
         runtime->fftLeft[bin].imag *= gain;
@@ -580,7 +584,7 @@ static void process_spectral_frame(
 
         float suppressionDB = -20.0f * log10f(fmaxf(gain, N60_DENOISER_EPSILON));
         maximumSuppression = fmaxf(maximumSuppression, suppressionDB);
-        double weight = (double)linkedPower[bin];
+        double weight = (double)runtime->linkedPower[bin];
         weightedSuppression += (double)suppressionDB * weight;
         weightedPower += weight;
     }

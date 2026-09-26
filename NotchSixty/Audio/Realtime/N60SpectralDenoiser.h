@@ -32,6 +32,7 @@ typedef enum {
 } N60DenoiserProfileCommand;
 
 typedef struct {
+    double sampleRate;
     bool enabled;
     N60DenoiserTuning tuning;
     N60DenoiserQuality quality;

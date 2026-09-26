@@ -6,6 +6,7 @@ enum DynamicsConfigurationError: Error, LocalizedError, Equatable {
     case invalidInfrasonicFilter
     case invalidMainsNotch
     case invalidMainsHumDetector
+    case invalidSpectralDenoiser
     case invalidLoudnessMatch
     case invalidLoudnessContour
     case invalidDeEsser
@@ -29,6 +30,8 @@ enum DynamicsConfigurationError: Error, LocalizedError, Equatable {
             return "Mains Hum Notch parameters are outside the supported production range."
         case .invalidMainsHumDetector:
             return "Mains Hum detector parameters are outside the supported production range."
+        case .invalidSpectralDenoiser:
+            return "Spectral Denoiser parameters are outside the supported production range."
         case .invalidLoudnessMatch:
             return "LUFS Loudness Match parameters are outside the supported production range."
         case .invalidLoudnessContour:
@@ -183,6 +186,158 @@ struct MainsNotchConfiguration: Equatable, Sendable {
               harmonicDepthsDB.count == Self.maximumHarmonics,
               harmonicDepthsDB.allSatisfy({ $0.isFinite && Self.depthRange.contains($0) }) else {
             throw DynamicsConfigurationError.invalidMainsNotch
+        }
+    }
+}
+
+enum SpectralDenoiserPreset: String, CaseIterable, Identifiable, Sendable {
+    case natural
+    case standard
+    case aggressive
+    case dehiss
+    case custom
+
+    var id: String { rawValue }
+    var displayName: String {
+        switch self {
+        case .natural: return "Natural"
+        case .standard: return "Standard"
+        case .aggressive: return "Aggressive"
+        case .dehiss: return "Dehiss"
+        case .custom: return "Custom"
+        }
+    }
+
+    var cType: N60DenoiserTuning {
+        switch self {
+        case .natural: return N60DenoiserTuningNatural
+        case .aggressive: return N60DenoiserTuningAggressive
+        case .dehiss: return N60DenoiserTuningDehiss
+        case .custom: return N60DenoiserTuningCustom
+        case .standard: return N60DenoiserTuningStandard
+        }
+    }
+}
+
+enum SpectralDenoiserQuality: String, CaseIterable, Identifiable, Sendable {
+    case quality
+    case high
+    case ultra
+
+    var id: String { rawValue }
+    var displayName: String {
+        switch self {
+        case .quality: return "Quality"
+        case .high: return "High"
+        case .ultra: return "Ultra"
+        }
+    }
+    var cType: N60DenoiserQuality {
+        switch self {
+        case .quality: return N60DenoiserQualityQuality
+        case .high: return N60DenoiserQualityHigh
+        case .ultra: return N60DenoiserQualityUltra
+        }
+    }
+}
+
+enum SpectralDenoiserProfileCommand: Equatable, Sendable {
+    case none
+    case capture
+    case reset
+
+    var cType: N60DenoiserProfileCommand {
+        switch self {
+        case .capture: return N60DenoiserProfileCommandCapture
+        case .reset: return N60DenoiserProfileCommandReset
+        case .none: return N60DenoiserProfileCommandNone
+        }
+    }
+}
+
+struct SpectralDenoiserConfiguration: Equatable, Sendable {
+    static let reductionRange = 0.0...1.0
+    static let thresholdRange = -96.0 ... -30.0
+    static let protectedFrequencyRange = 0.0...20_000.0
+
+    var enabled = false
+    var preset: SpectralDenoiserPreset = .natural
+    // Custom means visible user values have been edited. Preserve the last
+    // named algorithm tuning so a tiny manual edit does not silently change
+    // artifact-management behavior (especially Dehiss).
+    var customBasePreset: SpectralDenoiserPreset = .natural
+    var reductionAmount = 0.50
+    var thresholdDBFS = -72.0
+    var quality: SpectralDenoiserQuality = .high
+    var protectedRangeEnabled = false
+    var protectedLowHz = 0.0
+    var protectedHighHz = 150.0
+    var profileRevision: UInt32 = 0
+    var profileCommand: SpectralDenoiserProfileCommand = .none
+
+    var algorithmPreset: SpectralDenoiserPreset {
+        preset == .custom ? customBasePreset : preset
+    }
+
+    mutating func applyPreset(_ value: SpectralDenoiserPreset) {
+        guard value != .custom else {
+            markCustom()
+            return
+        }
+        preset = value
+        customBasePreset = value
+        quality = .high
+        protectedLowHz = 0
+        protectedHighHz = 150
+        switch value {
+        case .natural:
+            thresholdDBFS = -72
+            reductionAmount = 0.50
+            protectedRangeEnabled = false
+        case .standard:
+            thresholdDBFS = -60
+            reductionAmount = 0.50
+            protectedRangeEnabled = false
+        case .aggressive:
+            thresholdDBFS = -48
+            reductionAmount = 0.50
+            protectedRangeEnabled = false
+        case .dehiss:
+            thresholdDBFS = -58
+            reductionAmount = 0.40
+            protectedRangeEnabled = true
+        case .custom:
+            break
+        }
+    }
+
+    mutating func markCustom() {
+        if preset != .custom {
+            customBasePreset = preset
+            preset = .custom
+        }
+    }
+
+    mutating func requestProfileCapture() {
+        profileRevision &+= 1
+        profileCommand = .capture
+    }
+
+    mutating func resetProfile() {
+        profileRevision &+= 1
+        profileCommand = .reset
+    }
+
+    func validate(sampleRate: Double) throws {
+        let nyquist = sampleRate * 0.5
+        guard sampleRate.isFinite, sampleRate >= 8_000, sampleRate <= 384_000,
+              reductionAmount.isFinite, Self.reductionRange.contains(reductionAmount),
+              thresholdDBFS.isFinite, Self.thresholdRange.contains(thresholdDBFS),
+              protectedLowHz.isFinite, Self.protectedFrequencyRange.contains(protectedLowHz),
+              protectedHighHz.isFinite, Self.protectedFrequencyRange.contains(protectedHighHz),
+              protectedLowHz <= protectedHighHz,
+              protectedHighHz < nyquist else {
+            throw DynamicsConfigurationError.invalidSpectralDenoiser
         }
     }
 }
@@ -460,6 +615,7 @@ struct DynamicsConfiguration: Equatable, Sendable {
     var dcOffsetFilter = DCOffsetFilterConfiguration()
     var infrasonicFilter = InfrasonicFilterConfiguration()
     var mainsNotch = MainsNotchConfiguration()
+    var spectralDenoiser = SpectralDenoiserConfiguration()
     var loudnessMatch = LoudnessMatchConfiguration()
     var loudnessContour = LoudnessContourConfiguration()
     var deEsser = DeEsserConfiguration()
@@ -475,6 +631,7 @@ struct DynamicsConfiguration: Equatable, Sendable {
         try stereoWidener.validate()
         try infrasonicFilter.validate()
         try mainsNotch.validate()
+        try spectralDenoiser.validate(sampleRate: sampleRate)
         try loudnessMatch.validate()
         try loudnessContour.validate()
         try deEsser.validate()
@@ -518,6 +675,20 @@ struct DynamicsConfiguration: Equatable, Sendable {
             true,
             mainsNotch.region.fundamentalHz
         ) else { throw DynamicsConfigurationError.invalidMainsHumDetector }
+        guard N60DynamicsSnapshotSetSpectralDenoiser(
+            &snapshot,
+            sampleRate,
+            spectralDenoiser.enabled,
+            spectralDenoiser.algorithmPreset.cType,
+            spectralDenoiser.quality.cType,
+            Float(spectralDenoiser.reductionAmount),
+            Float(spectralDenoiser.thresholdDBFS),
+            spectralDenoiser.protectedRangeEnabled,
+            Float(spectralDenoiser.protectedLowHz),
+            Float(spectralDenoiser.protectedHighHz),
+            spectralDenoiser.profileRevision,
+            spectralDenoiser.profileCommand.cType
+        ) else { throw DynamicsConfigurationError.invalidSpectralDenoiser }
         guard N60DynamicsSnapshotSetLoudnessMatch(
             &snapshot,
             sampleRate,
