@@ -29,6 +29,18 @@ typedef struct {
     uint32_t declaredLatencyFrames;
 } N60ConvolutionProgramInfo;
 
+// Control-plane only. Cascades two FIR kernels using an allocation-backed FFT.
+// The result length is lhsCount + rhsCount - 1 and must not exceed the realtime
+// convolver's fixed maximum tap budget.
+bool N60FIRConvolveControlPlane(
+    const float * _Nonnull lhs,
+    uint32_t lhsCount,
+    const float * _Nonnull rhs,
+    uint32_t rhsCount,
+    float * _Nonnull output,
+    uint32_t outputCapacity
+);
+
 N60PartitionedConvolver * _Nullable N60PartitionedConvolverCreate(void);
 void N60PartitionedConvolverDestroy(N60PartitionedConvolver * _Nonnull convolver);
 void N60PartitionedConvolverReset(N60PartitionedConvolver * _Nonnull convolver);

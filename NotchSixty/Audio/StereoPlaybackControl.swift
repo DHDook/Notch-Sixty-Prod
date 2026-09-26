@@ -176,6 +176,12 @@ struct StereoEQConfiguration: Equatable, Sendable {
         var result: [EQBand] = []
         result.reserveCapacity(bands.count)
         for (index, band) in bands.enumerated() where band.enabled {
+            if band.type == .fir {
+                guard let kernel = band.firKernel else { throw EQConfigurationError.firKernelRequired }
+                try kernel.validate(for: sampleRate)
+                result.append(band)
+                continue
+            }
             guard band.frequencyHz.isFinite,
                   band.frequencyHz > 0,
                   band.gainDB.isFinite,
@@ -215,7 +221,10 @@ struct StereoEQConfiguration: Equatable, Sendable {
 
         func channelBoost(_ bands: [EQBand]) -> Double {
             bands.lazy.filter(\.enabled).reduce(0.0) { partial, band in
-                partial + max(0.0, band.gainDB)
+                if band.type == .fir {
+                    return partial + (band.firKernel?.conservativeBoostDB ?? 0.0)
+                }
+                return partial + max(0.0, band.gainDB)
             }
         }
         let staticBoost: Double
@@ -295,6 +304,7 @@ struct StereoEQConfiguration: Equatable, Sendable {
         renderIndex: inout UInt32,
         channelMask: UInt8? = nil
     ) throws {
+        if band.type == .fir { return }
         for section in try band.compiledSections(sampleRate: graph.sampleRate) {
             let compiledCapacity = UInt32(EQConfiguration.maximumBandCount * 2 * Int(N60_MAX_EQ_COMPILED_SECTIONS_PER_BAND))
             guard renderIndex < compiledCapacity else {
@@ -316,6 +326,36 @@ struct StereoEQConfiguration: Equatable, Sendable {
             }
             guard ok else { throw EQConfigurationError.invalidBand(index: Int(renderIndex)) }
             renderIndex += 1
+        }
+    }
+
+    var requiresEQFIRProgram: Bool {
+        guard !bypassed else { return false }
+        if phaseMode == .linearPhase { return true }
+        let activeBanks: [[EQBand]]
+        switch channelMode {
+        case .linked: activeBanks = [linkedBands]
+        case .independent: activeBanks = [leftBands, rightBands]
+        case .midSide: activeBanks = [midBands, sideBands]
+        }
+        return activeBanks.contains { bands in
+            bands.contains { $0.enabled && $0.type == .fir }
+        }
+    }
+
+    func firKernels(for channel: EQEditChannel, sampleRate: Double) throws -> [EQFIRKernel] {
+        let source: [EQBand]
+        switch channelMode {
+        case .linked: source = linkedBands
+        case .independent: source = channel == .right ? rightBands : leftBands
+        case .midSide: source = channel == .side ? sideBands : midBands
+        }
+        let bands = try validatedEnabledBands(source, sampleRate: sampleRate)
+        return try bands.compactMap { band in
+            guard band.type == .fir else { return nil }
+            guard let kernel = band.firKernel else { throw EQConfigurationError.firKernelRequired }
+            try kernel.validate(for: sampleRate)
+            return kernel
         }
     }
 
@@ -469,6 +509,13 @@ enum FIRUpdatePolicy {
         !isRawBypassed(playback)
             && stereoEQ.phaseMode == .linearPhase
             && !stereoEQ.bypassed
+    }
+
+    static func shouldPrepareEQFIR(
+        stereoEQ: StereoEQConfiguration,
+        playback: PlaybackControlConfiguration
+    ) -> Bool {
+        !isRawBypassed(playback) && stereoEQ.requiresEQFIRProgram
     }
 
     static func shouldPrepareRoomCorrection(

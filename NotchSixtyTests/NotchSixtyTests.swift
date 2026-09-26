@@ -426,6 +426,84 @@ final class NotchSixtyTests: XCTestCase {
         XCTAssertTrue(projected.allSatisfy(\.usesPreparedCoefficients))
     }
 
+    func testPerBandFIRKernelValidationAndCascade() throws {
+        let first = EQFIRKernel(name: "First", taps: [1, 1])
+        let second = EQFIRKernel(name: "Second", taps: [1, -1])
+        try first.validate(for: 384_000)
+        try second.validate(for: 384_000)
+        let combined = try EQFIRCompiler.cascade(kernels: [first, second])
+        XCTAssertEqual(combined.count, 3)
+        XCTAssertEqual(combined[0], 1, accuracy: 0.000_01)
+        XCTAssertEqual(combined[1], 0, accuracy: 0.000_01)
+        XCTAssertEqual(combined[2], -1, accuracy: 0.000_01)
+    }
+
+    func testPerBandFIRRequiresKernelAndHonorsSampleRate() throws {
+        let missing = EQBand(type: .fir, firKernel: nil)
+        let missingConfiguration = StereoEQConfiguration(linkedBands: [missing])
+        XCTAssertThrowsError(
+            try missingConfiguration.makeGraphSnapshot(
+                sampleRate: 96_000,
+                gainConfiguration: DSPGainConfiguration(),
+                bassManagementConfiguration: BassManagementConfiguration(),
+                playbackConfiguration: PlaybackControlConfiguration()
+            )
+        )
+
+        let mismatched = EQBand(
+            type: .fir,
+            firKernel: EQFIRKernel(name: "48k", sampleRate: 48_000, taps: [1])
+        )
+        let mismatchedConfiguration = StereoEQConfiguration(linkedBands: [mismatched])
+        XCTAssertThrowsError(try mismatchedConfiguration.firKernels(for: .linked, sampleRate: 96_000))
+    }
+
+    func testPerBandFIRUsesEQConvolutionPolicyInMinimumPhaseAndAllChannelModes() throws {
+        let fir = EQBand(type: .fir, firKernel: .validation())
+        let playback = PlaybackControlConfiguration()
+
+        let linked = StereoEQConfiguration(phaseMode: .minimumPhase, linkedBands: [fir])
+        XCTAssertTrue(linked.requiresEQFIRProgram)
+        XCTAssertTrue(FIRUpdatePolicy.shouldPrepareEQFIR(stereoEQ: linked, playback: playback))
+        XCTAssertEqual(try linked.firKernels(for: .linked, sampleRate: 384_000).count, 1)
+
+        let independent = StereoEQConfiguration(
+            channelMode: .independent,
+            editChannel: .left,
+            phaseMode: .minimumPhase,
+            leftBands: [fir],
+            rightBands: [],
+            independentSeeded: true
+        )
+        XCTAssertTrue(independent.requiresEQFIRProgram)
+        XCTAssertEqual(try independent.firKernels(for: .left, sampleRate: 192_000).count, 1)
+        XCTAssertEqual(try independent.firKernels(for: .right, sampleRate: 192_000).count, 0)
+
+        let midSide = StereoEQConfiguration(
+            channelMode: .midSide,
+            editChannel: .mid,
+            phaseMode: .minimumPhase,
+            midBands: [fir],
+            sideBands: [],
+            midSideSeeded: true
+        )
+        XCTAssertTrue(midSide.requiresEQFIRProgram)
+        XCTAssertEqual(try midSide.firKernels(for: .mid, sampleRate: 96_000).count, 1)
+        XCTAssertEqual(try midSide.firKernels(for: .side, sampleRate: 96_000).count, 0)
+    }
+
+    func testLinearPhaseProjectionExcludesPerBandFIRBecauseItIsCascadedSeparately() throws {
+        let peak = EQBand(type: .peaking, frequencyHz: 1_000, gainDB: 3, q: 1)
+        let fir = EQBand(type: .fir, firKernel: .validation())
+        let configuration = StereoEQConfiguration(
+            phaseMode: .linearPhase,
+            linkedBands: [peak, fir]
+        )
+        let projected = try configuration.linearPhaseBands(for: .linked, sampleRate: 96_000)
+        XCTAssertEqual(projected.count, 1)
+        XCTAssertTrue(configuration.requiresEQFIRProgram)
+    }
+
     func testMidSideModelPublishesDedicatedLanesInMinimumAndLinearPhase() throws {
         let midBand = EQBand(type: .peaking, frequencyHz: 700, gainDB: 3, q: 1.0)
         let sideBand = EQBand(type: .highShelf, frequencyHz: 4_000, gainDB: -2, q: 0.707)

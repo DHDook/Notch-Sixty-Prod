@@ -11,6 +11,7 @@ enum EQFilterType: String, CaseIterable, Identifiable, Sendable {
     case bandPass
     case linkwitzTransform
     case tilt
+    case fir
     case notch
     case allPass
 
@@ -26,6 +27,7 @@ enum EQFilterType: String, CaseIterable, Identifiable, Sendable {
         case .bandPass: return "Band Pass"
         case .linkwitzTransform: return "Linkwitz Transform"
         case .tilt: return "Tilt"
+        case .fir: return "FIR"
         case .notch: return "Notch"
         case .allPass: return "All-Pass"
         }
@@ -49,6 +51,8 @@ enum EQFilterType: String, CaseIterable, Identifiable, Sendable {
         case .bandPass: return N60BiquadFilterTypeBandPass
         case .linkwitzTransform: return N60BiquadFilterTypeLinkwitzTransform
         case .tilt: return N60BiquadFilterTypeTilt
+        case .fir:
+            preconditionFailure("FIR EQ bands are convolution assets, not biquad filter types.")
         case .notch: return N60BiquadFilterTypeNotch
         case .allPass: return N60BiquadFilterTypeAllPass
         }
@@ -123,6 +127,73 @@ struct EQBandDynamicConfiguration: Equatable, Sendable {
     }
 }
 
+struct EQFIRKernel: Equatable, Sendable {
+    var name: String
+    var sampleRate: Double?
+    var taps: [Float]
+
+    init(name: String, sampleRate: Double? = nil, taps: [Float]) {
+        self.name = name
+        self.sampleRate = sampleRate
+        self.taps = taps
+    }
+
+    func validate(for outputSampleRate: Double) throws {
+        guard !taps.isEmpty, taps.count <= Int(N60_CONVOLUTION_MAX_TAPS) else {
+            throw EQConfigurationError.invalidFIRTapCount(taps.count)
+        }
+        guard taps.allSatisfy(\.isFinite) else {
+            throw EQConfigurationError.nonFiniteFIRTap
+        }
+        if let sampleRate {
+            guard sampleRate.isFinite, sampleRate > 0, abs(sampleRate - outputSampleRate) < 0.5 else {
+                throw EQConfigurationError.firSampleRateMismatch(filter: sampleRate, output: outputSampleRate)
+            }
+        }
+    }
+
+    var conservativeBoostDB: Double {
+        let l1 = taps.reduce(0.0) { $0 + abs(Double($1)) }
+        guard l1 > 1.0 else { return 0.0 }
+        return 20.0 * log10(l1)
+    }
+
+    static func validation(sampleRate: Double? = nil) -> EQFIRKernel {
+        EQFIRKernel(name: "Validation FIR", sampleRate: sampleRate, taps: [0.25, 0.5, 0.25])
+    }
+}
+
+enum EQFIRCompiler {
+    static func cascade(base: [Float] = [1.0], kernels: [EQFIRKernel]) throws -> [Float] {
+        guard !base.isEmpty, base.allSatisfy(\.isFinite) else {
+            throw EQConfigurationError.nonFiniteFIRTap
+        }
+        var combined = base
+        for kernel in kernels {
+            let outputCount64 = UInt64(combined.count) + UInt64(kernel.taps.count) - 1
+            guard outputCount64 <= UInt64(N60_CONVOLUTION_MAX_TAPS) else {
+                throw EQConfigurationError.firTapBudgetExceeded(Int(outputCount64))
+            }
+            let outputCount = Int(outputCount64)
+            var output = [Float](repeating: 0, count: outputCount)
+            let ok = combined.withUnsafeBufferPointer { lhs in
+                kernel.taps.withUnsafeBufferPointer { rhs in
+                    output.withUnsafeMutableBufferPointer { destination in
+                        N60FIRConvolveControlPlane(
+                            lhs.baseAddress!, UInt32(lhs.count),
+                            rhs.baseAddress!, UInt32(rhs.count),
+                            destination.baseAddress!, UInt32(destination.count)
+                        )
+                    }
+                }
+            }
+            guard ok else { throw EQConfigurationError.firCascadeFailed }
+            combined = output
+        }
+        return combined
+    }
+}
+
 struct EQBand: Identifiable, Equatable, Sendable {
     let id: UUID
     var enabled: Bool
@@ -134,6 +205,7 @@ struct EQBand: Identifiable, Equatable, Sendable {
     var constantQ: Bool
     var linkwitzTargetHz: Double
     var linkwitzTargetQ: Double
+    var firKernel: EQFIRKernel?
     var dynamic: EQBandDynamicConfiguration
 
     init(
@@ -147,6 +219,7 @@ struct EQBand: Identifiable, Equatable, Sendable {
         constantQ: Bool = false,
         linkwitzTargetHz: Double = 40.0,
         linkwitzTargetQ: Double = 0.707,
+        firKernel: EQFIRKernel? = nil,
         dynamic: EQBandDynamicConfiguration = EQBandDynamicConfiguration()
     ) {
         self.id = id
@@ -159,6 +232,7 @@ struct EQBand: Identifiable, Equatable, Sendable {
         self.constantQ = constantQ
         self.linkwitzTargetHz = linkwitzTargetHz
         self.linkwitzTargetQ = linkwitzTargetQ
+        self.firKernel = firKernel
         self.dynamic = dynamic
     }
 
@@ -198,6 +272,10 @@ struct EQBand: Identifiable, Equatable, Sendable {
             result.q = q
             result.coefficients = coefficients
             return result
+        }
+
+        if type == .fir {
+            return []
         }
 
         if type == .linkwitzTransform {
@@ -282,6 +360,12 @@ enum EQConfigurationError: Error, LocalizedError, Equatable {
     case allPassRequiresMinimumPhase
     case linearPhaseDesignFailed
     case convolutionProgramUnavailable
+    case firKernelRequired
+    case invalidFIRTapCount(Int)
+    case nonFiniteFIRTap
+    case firSampleRateMismatch(filter: Double, output: Double)
+    case firTapBudgetExceeded(Int)
+    case firCascadeFailed
 
     var errorDescription: String? {
         switch self {
@@ -295,6 +379,18 @@ enum EQConfigurationError: Error, LocalizedError, Equatable {
             return "Unable to design the linear-phase FIR for the current EQ configuration."
         case .convolutionProgramUnavailable:
             return "No safe FIR program slot is currently available."
+        case .firKernelRequired:
+            return "FIR EQ bands require an impulse-response kernel before they can be enabled."
+        case .invalidFIRTapCount(let count):
+            return "FIR EQ tap count \(count) is outside the supported 1...\(Int(N60_CONVOLUTION_MAX_TAPS)) range."
+        case .nonFiniteFIRTap:
+            return "FIR EQ coefficients must all be finite."
+        case .firSampleRateMismatch(let filter, let output):
+            return "FIR EQ kernel rate \(filter) Hz does not match the active output rate \(output) Hz."
+        case .firTapBudgetExceeded(let count):
+            return "The cascaded EQ FIR would require \(count) taps, exceeding the \(Int(N60_CONVOLUTION_MAX_TAPS))-tap realtime budget."
+        case .firCascadeFailed:
+            return "Unable to compile the active per-band FIR kernels into the EQ convolution program."
         }
     }
 }
@@ -492,6 +588,11 @@ struct EQConfiguration: Equatable, Sendable {
     }
 
     private func validateBand(_ band: EQBand, index: Int, sampleRate: Double) throws -> Bool {
+        if band.type == .fir {
+            guard let kernel = band.firKernel else { throw EQConfigurationError.firKernelRequired }
+            try kernel.validate(for: sampleRate)
+            return true
+        }
         guard band.frequencyHz.isFinite,
               band.frequencyHz > 0,
               band.gainDB.isFinite,
@@ -621,6 +722,7 @@ struct EQConfiguration: Equatable, Sendable {
             guard band.type != .allPass else {
                 throw EQConfigurationError.allPassRequiresMinimumPhase
             }
+            if band.type == .fir { continue }
             for section in try band.compiledSections(sampleRate: sampleRate) {
                 var cBand = N60LinearPhaseEQBand()
                 cBand.enabled = true
@@ -637,10 +739,10 @@ struct EQConfiguration: Equatable, Sendable {
     }
 }
 
-private struct PreparedLinearPhaseProgram {
+private struct PreparedEQFIRProgram {
     let slot: UInt32
     let programInfo: N60ConvolutionProgramInfo
-    let designInfo: N60LinearPhaseEQDesignInfo
+    let designInfo: N60LinearPhaseEQDesignInfo?
 }
 
 private struct PreparedRoomCorrectionProgram {
@@ -663,8 +765,8 @@ final class AudioIOEngine: ObservableObject {
     private var recoveryGeneration: UInt64 = 0
     private var resumeAfterWake = false
     private var prepared = false
-    private var activeLinearPhaseProgram: PreparedLinearPhaseProgram?
-    private var nextLinearPhaseProgramSlot: UInt32 = 0
+    private var activeEQFIRProgram: PreparedEQFIRProgram?
+    private var nextEQFIRProgramSlot: UInt32 = 0
     private var activeRoomCorrectionProgram: PreparedRoomCorrectionProgram?
     private var nextRoomCorrectionProgramSlot: UInt32 = 0
 
@@ -922,7 +1024,7 @@ final class AudioIOEngine: ObservableObject {
                 playbackConfiguration: playbackControlConfiguration,
                 masterGainLinear: currentMasterSoftwareGain
             )
-            try attachActiveLinearPhaseProgramIfNeeded(
+            try attachActiveEQFIRProgramIfNeeded(
                 to: &graph,
                 stereoConfiguration: stereoEQConfiguration,
                 playbackConfiguration: playbackControlConfiguration
@@ -996,7 +1098,7 @@ final class AudioIOEngine: ObservableObject {
                 playbackConfiguration: playbackControlConfiguration,
                 masterGainLinear: currentMasterSoftwareGain
             )
-            try attachActiveLinearPhaseProgramIfNeeded(
+            try attachActiveEQFIRProgramIfNeeded(
                 to: &graph,
                 stereoConfiguration: stereoEQConfiguration,
                 playbackConfiguration: playbackControlConfiguration
@@ -1117,6 +1219,11 @@ final class AudioIOEngine: ObservableObject {
                 throw EQConfigurationError.tooManyBands(bands.count)
             }
             for (index, band) in bands.enumerated() where band.enabled {
+                if band.type == .fir {
+                    guard let kernel = band.firKernel else { throw EQConfigurationError.firKernelRequired }
+                    try kernel.validate(for: transportSession?.outputFormat.sampleRate ?? 48_000)
+                    continue
+                }
                 guard band.frequencyHz.isFinite,
                       band.frequencyHz > 0,
                       band.gainDB.isFinite,
@@ -1162,15 +1269,15 @@ final class AudioIOEngine: ObservableObject {
                 // The raw path is already active. Update state without rotating FIR
                 // programs or fading an audibly identical raw graph.
                 try session.publishDSPGraph(graph)
-                activeLinearPhaseProgram = nil
+                activeEQFIRProgram = nil
                 linearPhaseDesignInfo = nil
             } else {
-                var preparedLinearProgram: PreparedLinearPhaseProgram?
-                if configuration.phaseMode == .linearPhase && !configuration.bypassed {
-                    let prepared = try prepareLinearPhaseProgram(configuration, for: session)
-                    preparedLinearProgram = prepared
+                var preparedEQFIRProgram: PreparedEQFIRProgram?
+                if configuration.requiresEQFIRProgram && !configuration.bypassed {
+                    let prepared = try prepareEQFIRProgram(configuration, for: session)
+                    preparedEQFIRProgram = prepared
                     linearPhaseDesignInfo = prepared.designInfo
-                    try attachLinearPhaseProgram(prepared, to: &graph)
+                    try attachEQFIRProgram(prepared, to: &graph)
                 } else {
                     linearPhaseDesignInfo = nil
                 }
@@ -1180,18 +1287,18 @@ final class AudioIOEngine: ObservableObject {
                     playbackConfiguration: playbackControlConfiguration
                 )
 
-                let leavingLinearPhase = activeLinearPhaseProgram != nil
-                    && (configuration.phaseMode != .linearPhase || configuration.bypassed)
-                let enteringOrReplacingLinearPhase = preparedLinearProgram != nil
-                if leavingLinearPhase || enteringOrReplacingLinearPhase {
+                let leavingEQFIR = activeEQFIRProgram != nil
+                    && (!configuration.requiresEQFIRProgram || configuration.bypassed)
+                let enteringOrReplacingEQFIR = preparedEQFIRProgram != nil
+                if leavingEQFIR || enteringOrReplacingEQFIR {
                     try session.transitionDSPGraph(graph)
                 } else {
                     try session.publishDSPGraph(graph)
                 }
-                activeLinearPhaseProgram = preparedLinearProgram
+                activeEQFIRProgram = preparedEQFIRProgram
             }
         } else {
-            activeLinearPhaseProgram = nil
+            activeEQFIRProgram = nil
             linearPhaseDesignInfo = nil
         }
 
@@ -1224,16 +1331,16 @@ final class AudioIOEngine: ObservableObject {
             let willBeBypassed = processingIsBypassed(configuration)
 
             if !willBeBypassed {
-                if FIRUpdatePolicy.shouldPrepareLinearPhase(
+                if FIRUpdatePolicy.shouldPrepareEQFIR(
                     stereoEQ: stereoEQConfiguration,
                     playback: configuration
                 ) {
-                    if activeLinearPhaseProgram == nil {
-                        let prepared = try prepareLinearPhaseProgram(stereoEQConfiguration, for: session)
-                        activeLinearPhaseProgram = prepared
+                    if activeEQFIRProgram == nil {
+                        let prepared = try prepareEQFIRProgram(stereoEQConfiguration, for: session)
+                        activeEQFIRProgram = prepared
                         linearPhaseDesignInfo = prepared.designInfo
                     }
-                    try attachActiveLinearPhaseProgramIfNeeded(
+                    try attachActiveEQFIRProgramIfNeeded(
                         to: &graph,
                         stereoConfiguration: stereoEQConfiguration,
                         playbackConfiguration: configuration
@@ -1299,7 +1406,7 @@ final class AudioIOEngine: ObservableObject {
                 playbackConfiguration: playbackControlConfiguration,
                 masterGainLinear: newSoftwareGain
             )
-            try attachActiveLinearPhaseProgramIfNeeded(to: &graph, stereoConfiguration: stereoEQConfiguration, playbackConfiguration: playbackControlConfiguration)
+            try attachActiveEQFIRProgramIfNeeded(to: &graph, stereoConfiguration: stereoEQConfiguration, playbackConfiguration: playbackControlConfiguration)
             try attachActiveRoomCorrectionProgramIfNeeded(to: &graph, playbackConfiguration: playbackControlConfiguration)
             try session.publishDSPGraph(graph)
         }
@@ -1346,7 +1453,7 @@ final class AudioIOEngine: ObservableObject {
                 playbackConfiguration: playbackControlConfiguration,
                 masterGainLinear: newGain
             )
-            try attachActiveLinearPhaseProgramIfNeeded(to: &graph, stereoConfiguration: stereoEQConfiguration, playbackConfiguration: playbackControlConfiguration)
+            try attachActiveEQFIRProgramIfNeeded(to: &graph, stereoConfiguration: stereoEQConfiguration, playbackConfiguration: playbackControlConfiguration)
             try attachActiveRoomCorrectionProgramIfNeeded(to: &graph, playbackConfiguration: playbackControlConfiguration)
             try session.publishDSPGraph(graph)
         }
@@ -1404,7 +1511,7 @@ final class AudioIOEngine: ObservableObject {
                 playbackConfiguration: playbackControlConfiguration,
                 masterGainLinear: currentMasterSoftwareGain
             )
-            try attachActiveLinearPhaseProgramIfNeeded(
+            try attachActiveEQFIRProgramIfNeeded(
                 to: &graph,
                 stereoConfiguration: stereoEQConfiguration,
                 playbackConfiguration: playbackControlConfiguration
@@ -1433,7 +1540,7 @@ final class AudioIOEngine: ObservableObject {
                 playbackConfiguration: playbackControlConfiguration,
                 masterGainLinear: currentMasterSoftwareGain
             )
-            try attachActiveLinearPhaseProgramIfNeeded(
+            try attachActiveEQFIRProgramIfNeeded(
                 to: &graph,
                 stereoConfiguration: stereoEQConfiguration,
                 playbackConfiguration: playbackControlConfiguration
@@ -1509,63 +1616,97 @@ final class AudioIOEngine: ObservableObject {
         return (taps, designInfo)
     }
 
-    private func prepareLinearPhaseProgram(
+    private func prepareLaneEQFIRTaps(
         _ configuration: StereoEQConfiguration,
-        for session: CoreAudioTransportSession
-    ) throws -> PreparedLinearPhaseProgram {
-        let sampleRate = session.outputFormat.sampleRate
-        let tapCount = Int(N60LinearPhaseEQRecommendedTapCount(sampleRate))
-        guard tapCount > 0, tapCount <= Int(N60_CONVOLUTION_MAX_TAPS) else {
-            throw EQConfigurationError.linearPhaseDesignFailed
+        channel: EQEditChannel,
+        sampleRate: Double
+    ) throws -> (taps: [Float], declaredLatencyFrames: UInt32, designInfo: N60LinearPhaseEQDesignInfo?) {
+        let baseTaps: [Float]
+        let declaredLatency: UInt32
+        let designInfo: N60LinearPhaseEQDesignInfo?
+        if configuration.phaseMode == .linearPhase {
+            let tapCount = Int(N60LinearPhaseEQRecommendedTapCount(sampleRate))
+            guard tapCount > 0, tapCount <= Int(N60_CONVOLUTION_MAX_TAPS) else {
+                throw EQConfigurationError.linearPhaseDesignFailed
+            }
+            let design = try designLinearPhaseTaps(
+                configuration,
+                channel: channel,
+                sampleRate: sampleRate,
+                tapCount: tapCount
+            )
+            baseTaps = design.taps
+            declaredLatency = design.info.groupDelayFrames
+            designInfo = design.info
+        } else {
+            baseTaps = [1.0]
+            declaredLatency = 0
+            designInfo = nil
         }
 
+        let kernels = try configuration.firKernels(for: channel, sampleRate: sampleRate)
+        return (
+            try EQFIRCompiler.cascade(base: baseTaps, kernels: kernels),
+            declaredLatency,
+            designInfo
+        )
+    }
+
+    private func prepareEQFIRProgram(
+        _ configuration: StereoEQConfiguration,
+        for session: CoreAudioTransportSession
+    ) throws -> PreparedEQFIRProgram {
+        let sampleRate = session.outputFormat.sampleRate
         let primaryChannel: EQEditChannel
         switch configuration.channelMode {
         case .linked: primaryChannel = .linked
         case .independent: primaryChannel = .left
         case .midSide: primaryChannel = .mid
         }
-        let leftDesign = try designLinearPhaseTaps(
+        var primary = try prepareLaneEQFIRTaps(
             configuration,
             channel: primaryChannel,
-            sampleRate: sampleRate,
-            tapCount: tapCount
+            sampleRate: sampleRate
         )
 
-        let rightTaps: [Float]?
+        var secondaryTaps: [Float]?
         if configuration.channelMode != .linked {
             let secondaryChannel: EQEditChannel = configuration.channelMode == .midSide ? .side : .right
-            let rightDesign = try designLinearPhaseTaps(
+            var secondary = try prepareLaneEQFIRTaps(
                 configuration,
                 channel: secondaryChannel,
-                sampleRate: sampleRate,
-                tapCount: tapCount
+                sampleRate: sampleRate
             )
-            guard rightDesign.info.groupDelayFrames == leftDesign.info.groupDelayFrames else {
+            guard secondary.declaredLatencyFrames == primary.declaredLatencyFrames else {
                 throw EQConfigurationError.linearPhaseDesignFailed
             }
-            rightTaps = rightDesign.taps
-        } else {
-            rightTaps = nil
+            let commonCount = max(primary.taps.count, secondary.taps.count)
+            if primary.taps.count < commonCount {
+                primary.taps.append(contentsOf: repeatElement(0, count: commonCount - primary.taps.count))
+            }
+            if secondary.taps.count < commonCount {
+                secondary.taps.append(contentsOf: repeatElement(0, count: commonCount - secondary.taps.count))
+            }
+            secondaryTaps = secondary.taps
         }
 
-        let slot = nextLinearPhaseProgramSlot % UInt32(N60_CONVOLUTION_PROGRAM_SLOTS)
+        let slot = nextEQFIRProgramSlot % UInt32(N60_CONVOLUTION_PROGRAM_SLOTS)
         let programInfo: N60ConvolutionProgramInfo
         do {
             programInfo = try session.prepareConvolutionProgram(
                 slot: slot,
-                leftTaps: leftDesign.taps,
-                rightTaps: rightTaps,
-                declaredLatencyFrames: leftDesign.info.groupDelayFrames
+                leftTaps: primary.taps,
+                rightTaps: secondaryTaps,
+                declaredLatencyFrames: primary.declaredLatencyFrames
             )
         } catch {
             throw EQConfigurationError.convolutionProgramUnavailable
         }
-        nextLinearPhaseProgramSlot = (slot + 1) % UInt32(N60_CONVOLUTION_PROGRAM_SLOTS)
-        return PreparedLinearPhaseProgram(
+        nextEQFIRProgramSlot = (slot + 1) % UInt32(N60_CONVOLUTION_PROGRAM_SLOTS)
+        return PreparedEQFIRProgram(
             slot: slot,
             programInfo: programInfo,
-            designInfo: leftDesign.info
+            designInfo: primary.designInfo
         )
     }
 
@@ -1612,8 +1753,8 @@ final class AudioIOEngine: ObservableObject {
         return PreparedRoomCorrectionProgram(slot: slot, programInfo: programInfo)
     }
 
-    private func attachLinearPhaseProgram(
-        _ program: PreparedLinearPhaseProgram,
+    private func attachEQFIRProgram(
+        _ program: PreparedEQFIRProgram,
         to graph: inout N60DSPGraphSnapshot
     ) throws {
         guard N60DSPGraphSnapshotSetConvolutionProgram(
@@ -1626,18 +1767,18 @@ final class AudioIOEngine: ObservableObject {
         }
     }
 
-    private func attachActiveLinearPhaseProgramIfNeeded(
+    private func attachActiveEQFIRProgramIfNeeded(
         to graph: inout N60DSPGraphSnapshot,
         stereoConfiguration: StereoEQConfiguration,
         playbackConfiguration: PlaybackControlConfiguration
     ) throws {
         guard !processingIsBypassed(playbackConfiguration),
-              stereoConfiguration.phaseMode == .linearPhase,
+              stereoConfiguration.requiresEQFIRProgram,
               !stereoConfiguration.bypassed else { return }
-        guard let activeLinearPhaseProgram else {
+        guard let activeEQFIRProgram else {
             throw EQConfigurationError.convolutionProgramUnavailable
         }
-        try attachLinearPhaseProgram(activeLinearPhaseProgram, to: &graph)
+        try attachEQFIRProgram(activeEQFIRProgram, to: &graph)
     }
 
     private func attachRoomCorrectionProgram(
@@ -1704,8 +1845,8 @@ final class AudioIOEngine: ObservableObject {
 
     private func buildTransport(output: AudioOutputDevice) throws {
         let session = try CoreAudioTransportSession(selectedOutput: output)
-        activeLinearPhaseProgram = nil
-        nextLinearPhaseProgramSlot = 0
+        activeEQFIRProgram = nil
+        nextEQFIRProgramSlot = 0
         activeRoomCorrectionProgram = nil
         nextRoomCorrectionProgramSlot = 0
         var graph = try stereoEQConfiguration.makeGraphSnapshot(
@@ -1716,14 +1857,14 @@ final class AudioIOEngine: ObservableObject {
             playbackConfiguration: playbackControlConfiguration
         )
 
-        if FIRUpdatePolicy.shouldPrepareLinearPhase(
+        if FIRUpdatePolicy.shouldPrepareEQFIR(
             stereoEQ: stereoEQConfiguration,
             playback: playbackControlConfiguration
         ) {
-            let preparedProgram = try prepareLinearPhaseProgram(stereoEQConfiguration, for: session)
-            activeLinearPhaseProgram = preparedProgram
+            let preparedProgram = try prepareEQFIRProgram(stereoEQConfiguration, for: session)
+            activeEQFIRProgram = preparedProgram
             linearPhaseDesignInfo = preparedProgram.designInfo
-            try attachLinearPhaseProgram(preparedProgram, to: &graph)
+            try attachEQFIRProgram(preparedProgram, to: &graph)
         } else {
             linearPhaseDesignInfo = nil
         }
@@ -1757,7 +1898,7 @@ final class AudioIOEngine: ObservableObject {
             session.stop(fadeOut: fadeOut)
             transportSession = nil
         }
-        activeLinearPhaseProgram = nil
+        activeEQFIRProgram = nil
         activeRoomCorrectionProgram = nil
     }
 

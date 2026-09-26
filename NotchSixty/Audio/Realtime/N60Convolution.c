@@ -88,6 +88,53 @@ static void transform(N60PartitionedConvolver *convolver, N60Complex *values, bo
     }
 }
 
+static uint32_t next_power_of_two(uint32_t value) {
+    uint32_t result = 1u;
+    while (result < value) {
+        if (result > UINT32_MAX / 2u) return 0u;
+        result <<= 1u;
+    }
+    return result;
+}
+
+static void transform_dynamic(N60Complex *values, uint32_t count, bool inverse) {
+    for (uint32_t index = 1u, reversed = 0u; index < count; ++index) {
+        uint32_t bit = count >> 1u;
+        for (; reversed & bit; bit >>= 1u) reversed ^= bit;
+        reversed ^= bit;
+        if (index < reversed) {
+            N60Complex temporary = values[index];
+            values[index] = values[reversed];
+            values[reversed] = temporary;
+        }
+    }
+
+    for (uint32_t length = 2u; length <= count; length <<= 1u) {
+        double angle = (inverse ? 2.0 : -2.0) * N60_PI / (double)length;
+        N60Complex step = {(float)cos(angle), (float)sin(angle)};
+        uint32_t half = length >> 1u;
+        for (uint32_t base = 0u; base < count; base += length) {
+            N60Complex twiddle = {1.0f, 0.0f};
+            for (uint32_t offset = 0u; offset < half; ++offset) {
+                N60Complex even = values[base + offset];
+                N60Complex odd = complex_multiply(values[base + offset + half], twiddle);
+                values[base + offset] = (N60Complex){even.real + odd.real, even.imag + odd.imag};
+                values[base + offset + half] = (N60Complex){even.real - odd.real, even.imag - odd.imag};
+                twiddle = complex_multiply(twiddle, step);
+            }
+        }
+        if (length == count) break;
+    }
+
+    if (inverse) {
+        float scale = 1.0f / (float)count;
+        for (uint32_t index = 0u; index < count; ++index) {
+            values[index].real *= scale;
+            values[index].imag *= scale;
+        }
+    }
+}
+
 static size_t spectrum_storage_count(void) {
     return (size_t)N60_CONVOLUTION_MAX_PARTITIONS * (size_t)N60_CONVOLUTION_FFT_SIZE;
 }
@@ -121,6 +168,48 @@ static bool allocate_slot(N60PartitionedConvolver *convolver, uint32_t slot) {
         && convolver->programs[slot].kernelRight != NULL
         && convolver->runtimes[slot].historyLeft != NULL
         && convolver->runtimes[slot].historyRight != NULL;
+}
+
+bool N60FIRConvolveControlPlane(
+    const float *lhs,
+    uint32_t lhsCount,
+    const float *rhs,
+    uint32_t rhsCount,
+    float *output,
+    uint32_t outputCapacity
+) {
+    if (lhs == NULL || rhs == NULL || output == NULL || lhsCount == 0u || rhsCount == 0u) return false;
+    uint64_t required64 = (uint64_t)lhsCount + (uint64_t)rhsCount - 1u;
+    if (required64 == 0u || required64 > N60_CONVOLUTION_MAX_TAPS || required64 > outputCapacity) return false;
+    uint32_t required = (uint32_t)required64;
+    for (uint32_t index = 0u; index < lhsCount; ++index) if (!isfinite(lhs[index])) return false;
+    for (uint32_t index = 0u; index < rhsCount; ++index) if (!isfinite(rhs[index])) return false;
+
+    uint32_t fftCount = next_power_of_two(required);
+    if (fftCount == 0u) return false;
+    N60Complex *left = calloc(fftCount, sizeof(N60Complex));
+    N60Complex *right = calloc(fftCount, sizeof(N60Complex));
+    if (left == NULL || right == NULL) {
+        free(left);
+        free(right);
+        return false;
+    }
+
+    for (uint32_t index = 0u; index < lhsCount; ++index) left[index].real = lhs[index];
+    for (uint32_t index = 0u; index < rhsCount; ++index) right[index].real = rhs[index];
+    transform_dynamic(left, fftCount, false);
+    transform_dynamic(right, fftCount, false);
+    for (uint32_t index = 0u; index < fftCount; ++index) left[index] = complex_multiply(left[index], right[index]);
+    transform_dynamic(left, fftCount, true);
+
+    bool valid = true;
+    for (uint32_t index = 0u; index < required; ++index) {
+        output[index] = left[index].real;
+        if (!isfinite(output[index])) valid = false;
+    }
+    free(left);
+    free(right);
+    return valid;
 }
 
 N60PartitionedConvolver *N60PartitionedConvolverCreate(void) {

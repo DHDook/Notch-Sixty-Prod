@@ -1051,15 +1051,15 @@ struct ContentView: View {
                 }
                 .labelsHidden()
                 .frame(width: 115)
-                TextField("Hz", value: binding.frequencyHz, format: .number.precision(.fractionLength(0...1))).frame(width: 85)
+                TextField("Hz", value: binding.frequencyHz, format: .number.precision(.fractionLength(0...1))).frame(width: 85).disabled(band.type == .fir)
                 Text("Hz").foregroundStyle(.secondary)
                 TextField("dB", value: binding.gainDB, format: .number.precision(.fractionLength(1)))
                     .frame(width: 65)
-                    .disabled(band.type == .linkwitzTransform)
+                    .disabled(band.type == .linkwitzTransform || band.type == .fir)
                 Text("dB").font(.caption).foregroundStyle(.secondary)
                 TextField("Q", value: binding.q, format: .number.precision(.fractionLength(2...3)))
                     .frame(width: 65)
-                    .disabled(band.type == .tilt)
+                    .disabled(band.type == .tilt || band.type == .fir)
                 Text("Q").foregroundStyle(.secondary)
                 Toggle("Constant Q", isOn: binding.constantQ)
                     .toggleStyle(.switch)
@@ -1085,6 +1085,33 @@ struct ContentView: View {
             }
             if band.type == .tilt {
                 Text("Tilt amount is the total low-to-high differential around the pivot: positive brightens highs and attenuates lows symmetrically.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 40)
+            }
+
+            if band.type == .fir {
+                HStack(spacing: 8) {
+                    Text("FIR kernel").frame(width: 82, alignment: .leading).foregroundStyle(.secondary)
+                    if let kernel = band.firKernel {
+                        Text("\(kernel.name) / \(kernel.taps.count) taps")
+                            .monospacedDigit()
+                    } else {
+                        Text("No kernel loaded").foregroundStyle(.secondary)
+                    }
+                    Button("Load Validation FIR") {
+                        var updated = binding.wrappedValue
+                        updated.firKernel = .validation(sampleRate: engine.diagnosticsSnapshot().outputSampleRate)
+                        binding.wrappedValue = updated
+                    }
+                    Button("Clear") {
+                        var updated = binding.wrappedValue
+                        updated.firKernel = nil
+                        binding.wrappedValue = updated
+                    }
+                    .disabled(band.firKernel == nil)
+                }
+                Text("Per-band FIR is compiled off the realtime thread into the dedicated EQ convolution stage; room correction remains a separate FIR stage.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .padding(.leading, 40)
@@ -1170,6 +1197,10 @@ struct ContentView: View {
                     sanitized.constantQ = false
                     sanitized.dynamic.enabled = false
                 }
+                if sanitized.type != .fir {
+                    // Keep a loaded FIR asset attached to the band so switching
+                    // types for comparison does not destroy user state.
+                }
                 try? engine.updateEQBand(sanitized)
             }
         )
@@ -1229,7 +1260,7 @@ struct ContentView: View {
                 diagnosticRow("EQ channels", "\(engine.stereoEQConfiguration.channelMode.displayName) / L \(render.eqLeftBandCount) / R \(render.eqRightBandCount)")
                 diagnosticRow("EQ stage", "\(render.eqBypassed ? "bypassed" : "active") / \(render.eqBandCount) IIR bands")
                 diagnosticRow(
-                    "Linear FIR",
+                    "EQ FIR",
                     render.convolutionEnabled
                         ? "active / slot \(render.convolutionProgramSlot) / gen \(render.convolutionProgramGeneration) / \(render.convolutionTapCount) taps / \(render.convolutionPartitionCount) partitions"
                         : "bypassed"
