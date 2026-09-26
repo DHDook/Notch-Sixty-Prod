@@ -619,4 +619,90 @@ final class StereoPlaybackControlTests: XCTestCase {
 
         XCTAssertEqual(graph.eqBandCount, 128)
     }
+
+    func testAutomaticHeadroomAddsPredictiveAttenuationAndRespectsCap() throws {
+        var eq = StereoEQConfiguration()
+        eq.linkedBands = [
+            EQBand(enabled: true, type: .peaking, frequencyHz: 1_000, gainDB: 6, q: 1),
+            EQBand(enabled: true, type: .peaking, frequencyHz: 3_000, gainDB: 6, q: 1),
+        ]
+        var dynamics = DynamicsConfiguration()
+        dynamics.automaticHeadroom.enabled = true
+        dynamics.automaticHeadroom.maxAttenuationDB = 8
+        let graph = try eq.makeGraphSnapshot(
+            sampleRate: 96_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            dynamicsConfiguration: dynamics,
+            playbackConfiguration: PlaybackControlConfiguration())
+        let expected = Float(pow(10.0, -8.0 / 20.0))
+        XCTAssertEqual(graph.headroomGainLinear, expected, accuracy: 0.000_001)
+    }
+
+
+    func testUnifiedDynamicEQCompilesFromMainEQBandsAtFullCapacity() throws {
+        let count = EQConfiguration.maximumBandCount
+        XCTAssertEqual(count, 64)
+        let minimumFrequency = 30.0
+        let maximumFrequency = 18_000.0
+        let ratio = maximumFrequency / minimumFrequency
+        let bands = (0..<count).map { index -> EQBand in
+            let position = count > 1 ? Double(index) / Double(count - 1) : 0
+            var dynamic = EQBandDynamicConfiguration()
+            dynamic.enabled = true
+            dynamic.direction = index.isMultiple(of: 2) ? .cutOnly : .both
+            dynamic.maxBoostDB = 3
+            return EQBand(
+                enabled: true,
+                type: .peaking,
+                frequencyHz: minimumFrequency * pow(ratio, position),
+                gainDB: index.isMultiple(of: 2) ? 0.25 : -0.25,
+                q: 1.0,
+                dynamic: dynamic
+            )
+        }
+        let config = StereoEQConfiguration(linkedBands: bands)
+        let graph = try config.makeGraphSnapshot(
+            sampleRate: 384_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            dynamicsConfiguration: DynamicsConfiguration(),
+            playbackConfiguration: PlaybackControlConfiguration()
+        )
+        XCTAssertEqual(graph.eqBandCount, 64)
+        XCTAssertEqual(graph.dynamics.dynamicEQ.bandCount, 64)
+        XCTAssertTrue(graph.dynamics.dynamicEQ.enabled)
+        XCTAssertTrue(N60DynamicEQSnapshotIsValid(graph.dynamics.dynamicEQ))
+    }
+
+    func testUnifiedDynamicEQIsAnEQStageCapabilityNotASeparateConfiguredBank() throws {
+        var dynamic = EQBandDynamicConfiguration()
+        dynamic.enabled = true
+        dynamic.thresholdDB = -30
+        dynamic.ratio = 4
+        let band = EQBand(
+            type: .peaking,
+            frequencyHz: 1_000,
+            gainDB: 3,
+            q: 1.0,
+            dynamic: dynamic
+        )
+        var staleDynamics = DynamicsConfiguration()
+        staleDynamics.dynamicEQ.enabled = true
+        var staleBand = DynamicEQBandConfiguration()
+        staleBand.frequencyHz = 8_000
+        staleDynamics.dynamicEQ.bands = [staleBand]
+        let config = StereoEQConfiguration(linkedBands: [band])
+        let graph = try config.makeGraphSnapshot(
+            sampleRate: 96_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            dynamicsConfiguration: staleDynamics,
+            playbackConfiguration: PlaybackControlConfiguration()
+        )
+        XCTAssertEqual(graph.eqBandCount, 1)
+        XCTAssertEqual(graph.dynamics.dynamicEQ.bandCount, 1)
+        XCTAssertTrue(graph.dynamics.dynamicEQ.enabled)
+    }
+
 }

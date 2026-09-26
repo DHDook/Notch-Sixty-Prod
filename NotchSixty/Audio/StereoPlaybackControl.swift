@@ -140,11 +140,96 @@ struct StereoEQConfiguration: Equatable, Sendable {
                   band.q > 0 else {
                 throw EQConfigurationError.invalidBand(index: index)
             }
+            if band.dynamic.enabled {
+                guard band.type == .peaking,
+                      DynamicEQBandConfiguration.frequencyRange.contains(band.frequencyHz),
+                      DynamicEQBandConfiguration.qRange.contains(band.q),
+                      band.dynamic.isValid else {
+                    throw EQConfigurationError.invalidBand(index: index)
+                }
+            }
             if band.frequencyHz < sampleRate * 0.5 {
                 result.append(band)
             }
         }
         return result
+    }
+
+    private func conservativeAutomaticHeadroomDB(
+        dynamics: DynamicsConfiguration
+    ) -> Double {
+        guard dynamics.automaticHeadroom.enabled else { return 0 }
+
+        func channelBoost(_ bands: [EQBand]) -> Double {
+            bands.lazy.filter(\.enabled).reduce(0.0) { partial, band in
+                partial + max(0.0, band.gainDB)
+            }
+        }
+        let staticBoost: Double
+        if bypassed {
+            staticBoost = 0
+        } else {
+            switch channelMode {
+            case .linked: staticBoost = channelBoost(linkedBands)
+            case .independent: staticBoost = max(channelBoost(leftBands), channelBoost(rightBands))
+            }
+        }
+
+        let dynamicBoost: Double
+        if phaseMode == .minimumPhase && !bypassed && channelMode == .linked {
+            dynamicBoost = linkedBands.lazy
+                .filter { $0.enabled && $0.type == .peaking && $0.dynamic.enabled }
+                .reduce(0.0) { partial, band in
+                    let dynamicPart = band.dynamic.direction == .cutOnly ? 0.0 : max(0.0, band.dynamic.maxBoostDB)
+                    return partial + dynamicPart
+                }
+        } else {
+            dynamicBoost = 0
+        }
+        return min(dynamics.automaticHeadroom.maxAttenuationDB, staticBoost + dynamicBoost)
+    }
+
+    private func compileUnifiedDynamicEQ(
+        into dynamics: inout DynamicsConfiguration,
+        sampleRate: Double
+    ) throws {
+        // Product state is owned by the normal EQ bands. Keep the standalone C
+        // Dynamic EQ engine as an implementation detail and compile only the
+        // linked minimum-phase peaking bands that have Dynamic enabled.
+        dynamics.dynamicEQ = DynamicEQConfiguration()
+        guard phaseMode == .minimumPhase,
+              !bypassed,
+              channelMode == .linked else { return }
+
+        let dynamicBands = try validatedEnabledBands(linkedBands, sampleRate: sampleRate)
+            .filter { $0.type == .peaking && $0.dynamic.enabled }
+        guard dynamicBands.count <= DynamicEQConfiguration.maximumBandCount else {
+            throw EQConfigurationError.tooManyBands(dynamicBands.count)
+        }
+        dynamics.dynamicEQ.enabled = !dynamicBands.isEmpty
+        dynamics.dynamicEQ.bands = dynamicBands.map { band in
+            let dynamic = band.dynamic
+            var compiled = DynamicEQBandConfiguration()
+            compiled.enabled = true
+            compiled.frequencyHz = band.frequencyHz
+            compiled.q = band.q
+            // Static gain remains in the normal EQ biquad. The Dynamic engine
+            // contributes only the time-varying delta, so enabling Dynamic does
+            // not change the band's static response at the neutral operating point.
+            compiled.staticGainDB = 0
+            compiled.thresholdDB = dynamic.thresholdDB
+            compiled.ratio = dynamic.ratio
+            compiled.rangeDB = dynamic.rangeDB
+            compiled.attackMs = dynamic.attackMs
+            compiled.releaseMs = dynamic.releaseMs
+            compiled.direction = dynamic.direction
+            compiled.boostThresholdDB = dynamic.boostThresholdDB
+            compiled.boostRatio = dynamic.boostRatio
+            compiled.maxBoostDB = dynamic.maxBoostDB
+            compiled.detectorMode = dynamic.detectorMode
+            compiled.rmsWindowMs = dynamic.rmsWindowMs
+            return compiled
+        }
     }
 
     func makeGraphSnapshot(
@@ -164,9 +249,15 @@ struct StereoEQConfiguration: Equatable, Sendable {
             throw BassManagementConfigurationError.invalidSubGain(bassManagementConfiguration.subGainDB)
         }
 
+        var compiledDynamics = dynamicsConfiguration
+        try compileUnifiedDynamicEQ(into: &compiledDynamics, sampleRate: sampleRate)
+
         var graph = N60DSPGraphSnapshotMakeUnity(sampleRate)
         graph.inputGainLinear = DSPGainConfiguration.linearGain(forDB: gainConfiguration.inputPreampDB)
-        graph.headroomGainLinear = DSPGainConfiguration.linearGain(forDB: gainConfiguration.headroomAttenuationDB)
+        let automaticHeadroomDB = playbackConfiguration.globalBypassed
+            ? 0.0 : conservativeAutomaticHeadroomDB(dynamics: dynamicsConfiguration)
+        graph.headroomGainLinear = DSPGainConfiguration.linearGain(
+            forDB: gainConfiguration.headroomAttenuationDB - automaticHeadroomDB)
         graph.outputGainLinear = DSPGainConfiguration.linearGain(forDB: gainConfiguration.outputGainDB)
         graph.masterGainLinear = masterGainLinear
         let balance = playbackConfiguration.balanceLinearGains
@@ -243,8 +334,8 @@ struct StereoEQConfiguration: Equatable, Sendable {
         ) else {
             throw BassManagementConfigurationError.graphDesignFailed
         }
-        graph.dynamics = try dynamicsConfiguration.makeSnapshot(sampleRate: sampleRate)
-        graph.protection = try dynamicsConfiguration.makeProtectionSnapshot(sampleRate: sampleRate)
+        graph.dynamics = try compiledDynamics.makeSnapshot(sampleRate: sampleRate)
+        graph.protection = try compiledDynamics.makeProtectionSnapshot(sampleRate: sampleRate)
         let denoiserLatency = graph.dynamics.spectralDenoiser.enabled
             ? UInt64(graph.dynamics.spectralDenoiser.latencyFrames)
             : 0

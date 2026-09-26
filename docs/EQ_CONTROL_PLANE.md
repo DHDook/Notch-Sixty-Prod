@@ -51,3 +51,10 @@ The 64-band stress case is a capacity/performance test, not a recommended listen
 ## Portability
 
 The control model is Swift in the current macOS frontend, but the render snapshot remains a C ABI. Future Windows, iOS, and Android frontends may implement their own control models and compile them into the same portable graph representation.
+
+
+## PR33 Dynamic EQ integration
+
+PR33 keeps the independently authored `N60DynamicEQ` detector/gain engine but makes Dynamic a capability of the normal EQ-band product model rather than a second user-visible band bank. Supported linked minimum-phase Peak bands can enable Dynamic controls directly. Static gain continues to be rendered by the established parametric-EQ biquad; the Dynamic engine contributes only the time-varying correction delta at the EQ stage, preserving the band's neutral static response when no dynamic correction is active.
+
+The realtime Dynamic EQ capacity is 64 bands to match `N60_MAX_EQ_BANDS`. Disabled/non-dynamic EQ bands incur no Dynamic-EQ per-band processing. The 64-dynamic-band / 384 kHz case is a capacity stress target for the bounded optimization pass, not a recommended ordinary preset.

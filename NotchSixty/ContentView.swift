@@ -131,6 +131,7 @@ struct ContentView: View {
             gainValidationView
             dynamicsValidationView
             advancedDynamicsValidationView
+            pr33ValidationView
             crossoverValidationView
             roomCorrectionValidationView
             eqValidationView
@@ -733,6 +734,134 @@ struct ContentView: View {
         .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
     }
 
+
+    @ViewBuilder
+    private var pr33ValidationView: some View {
+        let oversampling = dynamicsBinding(\.oversampling)
+        let softClipperEnabled = dynamicsBinding(\.softClipper.enabled)
+        let clipperAsymmetry = dynamicsBinding(\.softClipper.asymmetryTrimDB)
+        let limiterEnabled = dynamicsBinding(\.limiter.enabled)
+        let truePeakGuard = dynamicsBinding(\.limiter.truePeakGuardEnabled)
+        let gainRiderEnabled = dynamicsBinding(\.gainRider.enabled)
+        let gainRiderTarget = dynamicsBinding(\.gainRider.targetGainReductionDB)
+        let gainRiderMax = dynamicsBinding(\.gainRider.maxReductionDB)
+        let gainRiderSpeed = dynamicsBinding(\.gainRider.speed)
+        let autoHeadroomEnabled = dynamicsBinding(\.automaticHeadroom.enabled)
+        let autoHeadroomMax = dynamicsBinding(\.automaticHeadroom.maxAttenuationDB)
+        let loudnessEnabled = dynamicsBinding(\.loudnessContour.enabled)
+        let loudnessStrength = dynamicsBinding(\.loudnessContour.strength)
+        let loudnessReference = dynamicsBinding(\.loudnessContour.referencePhons)
+        let loudnessMaxBoost = dynamicsBinding(\.loudnessContour.maxBoostDB)
+        let loudnessMaxCut = dynamicsBinding(\.loudnessContour.maxCutDB)
+        let loudnessLevelSource = dynamicsBinding(\.loudnessContour.levelSource)
+        let deHarshEnabled = dynamicsBinding(\.deHarsh.enabled)
+        let deHarshAmount = dynamicsBinding(\.deHarsh.amountDB)
+        let deHarshFrequency = dynamicsBinding(\.deHarsh.frequencyHz)
+
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("PR33 residual dynamics validation").font(.headline)
+                Spacer()
+                Text("Dynamic EQ + gain/protection + perceptual conditioning")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            GroupBox("Dynamic EQ integration") {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Dynamic EQ is now configured on the normal Parametric EQ bands below rather than in a separate band bank.")
+                    Text("Commercial capacity: up to \(EQConfiguration.maximumBandCount) EQ bands. Dynamic is available for linked, minimum-phase Peak bands; the standalone C detector/gain engine remains an internal implementation detail.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+            }
+
+            GroupBox("Gain / protection integration") {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 12) {
+                        Picker("Oversampling", selection: oversampling) {
+                            ForEach(OversamplingFactor.allCases) { factor in Text(factor.displayName).tag(factor) }
+                        }.frame(width: 170)
+                        Toggle("Soft Clipper", isOn: softClipperEnabled).toggleStyle(.switch)
+                        Text("Asymmetry")
+                        Slider(value: clipperAsymmetry, in: SoftClipperConfiguration.asymmetryTrimRange, step: 0.1).frame(width: 140)
+                        Text("\(engine.dynamicsConfiguration.softClipper.asymmetryTrimDB, specifier: "%+.1f") dB")
+                            .monospacedDigit().frame(width: 72)
+                    }
+                    HStack(spacing: 12) {
+                        Toggle("Limiter", isOn: limiterEnabled).toggleStyle(.switch)
+                        Toggle("True-Peak Guard", isOn: truePeakGuard).toggleStyle(.switch)
+                        Text("Guard ON forces the accepted PR27 4× reconstruction path; OFF follows selected oversampling.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    HStack(spacing: 12) {
+                        Toggle("Dynamic Gain Rider", isOn: gainRiderEnabled).toggleStyle(.switch)
+                        Text("Target GR")
+                        Slider(value: gainRiderTarget, in: GainRiderConfiguration.targetRange, step: 0.25).frame(width: 120)
+                        Text("\(engine.dynamicsConfiguration.gainRider.targetGainReductionDB, specifier: "%.2f") dB").monospacedDigit().frame(width: 72)
+                        Text("Max cut")
+                        Slider(value: gainRiderMax, in: GainRiderConfiguration.maxReductionRange, step: 0.5).frame(width: 110)
+                        Picker("Speed", selection: gainRiderSpeed) {
+                            ForEach(GainRiderSpeed.allCases) { speed in Text(speed.displayName).tag(speed) }
+                        }.frame(width: 145)
+                    }
+                    HStack(spacing: 12) {
+                        Toggle("Automatic Headroom", isOn: autoHeadroomEnabled).toggleStyle(.switch)
+                        Text("Max attenuation")
+                        Slider(value: autoHeadroomMax, in: AutomaticHeadroomConfiguration.maxAttenuationRange, step: 0.5).frame(width: 180)
+                        Text("\(engine.dynamicsConfiguration.automaticHeadroom.maxAttenuationDB, specifier: "%.1f") dB").monospacedDigit().frame(width: 72)
+                        Text("Predictive pre-EQ headroom; raw Global Bypass remains untouched.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+
+            GroupBox("Per-Band Loudness / De-Harsh") {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 12) {
+                        Toggle("Per-Band Loudness", isOn: loudnessEnabled).toggleStyle(.switch)
+                        Picker("Level source", selection: loudnessLevelSource) {
+                            ForEach(LoudnessLevelSource.allCases) { source in Text(source.displayName).tag(source) }
+                        }.frame(width: 200)
+                        Text("Strength")
+                        Slider(value: loudnessStrength, in: LoudnessContourConfiguration.strengthRange, step: 0.05).frame(width: 120)
+                        Text("\(engine.dynamicsConfiguration.loudnessContour.strength, specifier: "%.2f")").monospacedDigit().frame(width: 44)
+                    }
+                    HStack(spacing: 12) {
+                        Text("Reference")
+                        Slider(value: loudnessReference, in: LoudnessContourConfiguration.referencePhonsRange, step: 1).frame(width: 140)
+                        Text("\(engine.dynamicsConfiguration.loudnessContour.referencePhons, specifier: "%.0f") phons").monospacedDigit().frame(width: 76)
+                        Text("Max boost")
+                        Slider(value: loudnessMaxBoost, in: LoudnessContourConfiguration.maxBoostRange, step: 1).frame(width: 120)
+                        Text("\(engine.dynamicsConfiguration.loudnessContour.maxBoostDB, specifier: "%.0f") dB").monospacedDigit().frame(width: 58)
+                        Text("Max cut")
+                        Slider(value: loudnessMaxCut, in: LoudnessContourConfiguration.maxCutRange, step: 0.5).frame(width: 110)
+                        Text("\(engine.dynamicsConfiguration.loudnessContour.maxCutDB, specifier: "%.1f") dB").monospacedDigit().frame(width: 62)
+                    }
+                    HStack(spacing: 12) {
+                        Toggle("De-Harsh", isOn: deHarshEnabled).toggleStyle(.switch)
+                        Text("Amount")
+                        Slider(value: deHarshAmount, in: DeHarshConfiguration.amountRange, step: 0.1).frame(width: 160)
+                        Text("\(engine.dynamicsConfiguration.deHarsh.amountDB, specifier: "%.1f") dB").monospacedDigit().frame(width: 66)
+                        Text("Frequency")
+                        Slider(value: deHarshFrequency, in: DeHarshConfiguration.frequencyRange, step: 100).frame(width: 180)
+                        Text("\(engine.dynamicsConfiguration.deHarsh.frequencyHz, specifier: "%.0f") Hz").monospacedDigit().frame(width: 76)
+                    }
+                    Text("Per-Band Loudness supersedes the shallow PR29 contour in the Swift path. The System Volume mapping is a relative reference model, not a calibrated SPL measurement.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+            }
+        }
+        .padding(10)
+        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
+    }
+
     @ViewBuilder
     private var crossoverValidationView: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -886,7 +1015,7 @@ struct ContentView: View {
                         }
                     }
                 }
-                .frame(maxHeight: 150)
+                .frame(maxHeight: 420)
             }
         }
         .padding(10)
@@ -902,22 +1031,79 @@ struct ContentView: View {
     @ViewBuilder
     private func eqBandRow(index: Int, band: EQBand) -> some View {
         let binding = eqBandBinding(for: band.id)
-        HStack(spacing: 8) {
-            Text("\(index + 1)").frame(width: 24, alignment: .trailing).foregroundStyle(.secondary)
-            Toggle("", isOn: binding.enabled).labelsHidden()
-            Picker("", selection: binding.type) {
-                ForEach(EQFilterType.allCases) { type in Text(type.displayName).tag(type) }
+        let dynamicSupported = engine.eqConfiguration.phaseMode == .minimumPhase
+            && engine.stereoEQConfiguration.channelMode == .linked
+            && band.type == .peaking
+
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text("\(index + 1)").frame(width: 24, alignment: .trailing).foregroundStyle(.secondary)
+                Toggle("", isOn: binding.enabled).labelsHidden()
+                Picker("", selection: binding.type) {
+                    ForEach(EQFilterType.allCases) { type in Text(type.displayName).tag(type) }
+                }
+                .labelsHidden()
+                .frame(width: 115)
+                TextField("Hz", value: binding.frequencyHz, format: .number.precision(.fractionLength(0...1))).frame(width: 85)
+                Text("Hz").foregroundStyle(.secondary)
+                TextField("dB", value: binding.gainDB, format: .number.precision(.fractionLength(1))).frame(width: 65)
+                Text("dB").font(.caption).foregroundStyle(.secondary)
+                TextField("Q", value: binding.q, format: .number.precision(.fractionLength(2...3))).frame(width: 65)
+                Text("Q").foregroundStyle(.secondary)
+                Toggle("Dynamic", isOn: binding.dynamic.enabled)
+                    .toggleStyle(.switch)
+                    .disabled(!dynamicSupported)
+                Spacer()
+                Button("Remove") { try? engine.removeEQBand(id: band.id) }
             }
-            .labelsHidden()
-            .frame(width: 115)
-            TextField("Hz", value: binding.frequencyHz, format: .number.precision(.fractionLength(0...1))).frame(width: 85)
-            Text("Hz").foregroundStyle(.secondary)
-            TextField("dB", value: binding.gainDB, format: .number.precision(.fractionLength(1))).frame(width: 65)
-            Text("dB (±24 max)").font(.caption).foregroundStyle(.secondary)
-            TextField("Q", value: binding.q, format: .number.precision(.fractionLength(2...3))).frame(width: 65)
-            Text("Q").foregroundStyle(.secondary)
-            Spacer()
-            Button("Remove") { try? engine.removeEQBand(id: band.id) }
+
+            if binding.wrappedValue.dynamic.enabled && dynamicSupported {
+                HStack(spacing: 8) {
+                    Text("Dynamic").frame(width: 82, alignment: .leading).foregroundStyle(.secondary)
+                    Picker("Direction", selection: binding.dynamic.direction) {
+                        ForEach(DynamicEQDirection.allCases) { value in Text(value.displayName).tag(value) }
+                    }.frame(width: 165)
+                    Text("Threshold")
+                    Slider(value: binding.dynamic.thresholdDB, in: EQBandDynamicConfiguration.thresholdRange, step: 0.5).frame(width: 100)
+                    Text("\(binding.wrappedValue.dynamic.thresholdDB, specifier: "%.1f") dB").monospacedDigit().frame(width: 64)
+                    Text("Ratio")
+                    Slider(value: binding.dynamic.ratio, in: EQBandDynamicConfiguration.ratioRange, step: 0.1).frame(width: 80)
+                    Text("\(binding.wrappedValue.dynamic.ratio, specifier: "%.1f")")
+                    Text("Max cut")
+                    Slider(value: binding.dynamic.rangeDB, in: EQBandDynamicConfiguration.rangeRange, step: 0.5).frame(width: 90)
+                }
+                HStack(spacing: 8) {
+                    Text("Timing").frame(width: 82, alignment: .leading).foregroundStyle(.secondary)
+                    Text("Attack")
+                    Slider(value: binding.dynamic.attackMs, in: EQBandDynamicConfiguration.attackRange, step: 1).frame(width: 90)
+                    Text("Release")
+                    Slider(value: binding.dynamic.releaseMs, in: EQBandDynamicConfiguration.releaseRange, step: 5).frame(width: 100)
+                    Picker("Detector", selection: binding.dynamic.detectorMode) {
+                        ForEach(DynamicEQDetectorMode.allCases) { value in Text(value.displayName).tag(value) }
+                    }.frame(width: 145)
+                    if binding.wrappedValue.dynamic.detectorMode == .rms {
+                        Text("RMS window")
+                        Slider(value: binding.dynamic.rmsWindowMs, in: EQBandDynamicConfiguration.rmsWindowRange, step: 5).frame(width: 100)
+                    }
+                }
+                if binding.wrappedValue.dynamic.direction != .cutOnly {
+                    HStack(spacing: 8) {
+                        Text("Boost").frame(width: 82, alignment: .leading).foregroundStyle(.secondary)
+                        Text("Threshold")
+                        Slider(value: binding.dynamic.boostThresholdDB, in: EQBandDynamicConfiguration.boostThresholdRange, step: 0.5).frame(width: 110)
+                        Text("Ratio")
+                        Slider(value: binding.dynamic.boostRatio, in: EQBandDynamicConfiguration.boostRatioRange, step: 0.1).frame(width: 90)
+                        Text("Max")
+                        Slider(value: binding.dynamic.maxBoostDB, in: EQBandDynamicConfiguration.maxBoostRange, step: 0.5).frame(width: 100)
+                        Text("\(binding.wrappedValue.dynamic.maxBoostDB, specifier: "%.1f") dB").monospacedDigit().frame(width: 62)
+                    }
+                }
+            } else if band.dynamic.enabled {
+                Text("Dynamic is inactive for this band. Use Linked + Minimum phase + Peak to enable dynamic operation.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 40)
+            }
         }
         .textFieldStyle(.roundedBorder)
     }
@@ -932,6 +1118,9 @@ struct ContentView: View {
                     max(updated.gainDB, StereoEQConfiguration.bandGainRange.lowerBound),
                     StereoEQConfiguration.bandGainRange.upperBound
                 )
+                if sanitized.type != .peaking {
+                    sanitized.dynamic.enabled = false
+                }
                 try? engine.updateEQBand(sanitized)
             }
         )

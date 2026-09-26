@@ -1104,6 +1104,16 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
                 right = process_eq_band(runtime, right, N60_EQ_CHANNEL_RIGHT);
             }
             advance_eq_transitions(kernel);
+            // Dynamic EQ is a capability of the main parametric-EQ stage. Its
+            // detector/gain engine remains independently implemented, but it is
+            // evaluated here so enabling Dynamic does not move a band into the
+            // later dynamics section of the graph.
+            N60DynamicsProcessDynamicEQStereoFrame(
+                &kernel->dynamicsRuntime,
+                context->snapshot.dynamics,
+                &left,
+                &right
+            );
         }
 
         if (context->snapshot.convolution.enabled) {

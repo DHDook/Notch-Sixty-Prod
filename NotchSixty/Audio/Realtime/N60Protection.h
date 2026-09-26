@@ -19,6 +19,12 @@ typedef enum {
 } N60OversamplingFactor;
 
 typedef enum {
+    N60GainRiderSpeedFast = 0,
+    N60GainRiderSpeedMedium = 1,
+    N60GainRiderSpeedSlow = 2,
+} N60GainRiderSpeed;
+
+typedef enum {
     N60ClipperCurveQuadratic = 0,
     N60ClipperCurveCubic = 1,
     N60ClipperCurveSine = 2,
@@ -37,6 +43,7 @@ typedef struct {
     float clipperKneeSmooth;
     N60ClipperCurveType clipperCurve;
     float clipperCompensationLinear;
+    float clipperAsymmetryTrimDB;
 
     bool limiterEnabled;
     float limiterCeilingLinear;
@@ -47,6 +54,14 @@ typedef struct {
     uint32_t limiterLookAheadHighSamples;
     uint32_t limiterAttackHighSamples;
     float limiterReleaseCoefficientHigh;
+    bool truePeakGuardEnabled;
+
+    bool gainRiderEnabled;
+    float gainRiderTargetGRDB;
+    float gainRiderMaxReductionDB;
+    N60GainRiderSpeed gainRiderSpeed;
+    float gainRiderMeasurementCoefficient;
+    float gainRiderResponseCoefficient;
 } N60ProtectionSnapshot;
 
 typedef struct N60ProtectionRuntime N60ProtectionRuntime;
@@ -56,6 +71,9 @@ typedef struct {
     float outputTruePeakLinear;
     float limiterGainReductionDB;
     uint64_t limiterSafetyClampSamples;
+    float gainRiderAttenuationDB;
+    float sustainedLimiterGainReductionDB;
+    bool truePeakGuardActive;
 } N60ProtectionTelemetry;
 
 N60ProtectionSnapshot N60ProtectionSnapshotMakeBypassed(double sampleRate);
@@ -75,6 +93,17 @@ bool N60ProtectionSnapshotSetSoftClipper(
     bool autoCompensateGain
 );
 
+bool N60ProtectionSnapshotSetSoftClipperAdvanced(
+    N60ProtectionSnapshot *snapshot,
+    bool enabled,
+    float driveDB,
+    float thresholdDB,
+    float kneeSmooth,
+    N60ClipperCurveType curve,
+    bool autoCompensateGain,
+    float asymmetryTrimDB
+);
+
 bool N60ProtectionSnapshotSetLimiter(
     N60ProtectionSnapshot *snapshot,
     bool enabled,
@@ -82,6 +111,24 @@ bool N60ProtectionSnapshotSetLimiter(
     float attackMs,
     float releaseMs,
     float lookAheadMs
+);
+
+bool N60ProtectionSnapshotSetLimiterAdvanced(
+    N60ProtectionSnapshot *snapshot,
+    bool enabled,
+    float ceilingDB,
+    float attackMs,
+    float releaseMs,
+    float lookAheadMs,
+    bool truePeakGuardEnabled
+);
+
+bool N60ProtectionSnapshotSetGainRider(
+    N60ProtectionSnapshot *snapshot,
+    bool enabled,
+    float targetGainReductionDB,
+    float maxReductionDB,
+    N60GainRiderSpeed speed
 );
 
 bool N60ProtectionSnapshotIsValid(const N60ProtectionSnapshot *snapshot);

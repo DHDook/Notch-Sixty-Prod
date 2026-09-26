@@ -9,7 +9,9 @@ enum DynamicsConfigurationError: Error, LocalizedError, Equatable {
     case invalidSpectralDenoiser
     case invalidLoudnessMatch
     case invalidLoudnessContour
+    case invalidDeHarsh
     case invalidDialogueLeveler
+    case invalidDynamicEQ
     case invalidDeEsser
     case invalidMultibandCompressor
     case invalidCompressor
@@ -17,6 +19,8 @@ enum DynamicsConfigurationError: Error, LocalizedError, Equatable {
     case invalidPauseGate
     case invalidSoftClipper
     case invalidLimiter
+    case invalidGainRider
+    case invalidAutomaticHeadroom
     case invalidOversampling
 
     var errorDescription: String? {
@@ -36,9 +40,13 @@ enum DynamicsConfigurationError: Error, LocalizedError, Equatable {
         case .invalidLoudnessMatch:
             return "LUFS Loudness Match parameters are outside the supported production range."
         case .invalidLoudnessContour:
-            return "Loudness Contour parameters are outside the supported production range."
+            return "Per-Band Loudness parameters are outside the supported production range."
+        case .invalidDeHarsh:
+            return "De-Harsh parameters are outside the supported production range."
         case .invalidDialogueLeveler:
             return "Dialogue Relative Leveler parameters are outside the supported production range."
+        case .invalidDynamicEQ:
+            return "Dynamic EQ parameters are outside the supported production range."
         case .invalidDeEsser:
             return "De-Esser parameters are outside the supported production range."
         case .invalidMultibandCompressor:
@@ -53,6 +61,10 @@ enum DynamicsConfigurationError: Error, LocalizedError, Equatable {
             return "Soft Clipper parameters are outside the supported production range."
         case .invalidLimiter:
             return "Limiter parameters are outside the supported production range."
+        case .invalidGainRider:
+            return "Dynamic Gain Rider parameters are outside the supported production range."
+        case .invalidAutomaticHeadroom:
+            return "Automatic Headroom parameters are outside the supported production range."
         case .invalidOversampling:
             return "Oversampling configuration is invalid."
         }
@@ -368,14 +380,51 @@ struct LoudnessMatchConfiguration: Equatable, Sendable {
     }
 }
 
+enum LoudnessLevelSource: String, CaseIterable, Identifiable, Sendable {
+    case systemVolume
+    case integrated
+    var id: String { rawValue }
+    var displayName: String { self == .systemVolume ? "System Volume" : "Integrated" }
+    var cType: N60LoudnessLevelSource {
+        self == .systemVolume ? N60LoudnessLevelSourceSystemVolume : N60LoudnessLevelSourceIntegrated
+    }
+}
+
 struct LoudnessContourConfiguration: Equatable, Sendable {
     static let strengthRange = 0.0...1.0
+    static let referencePhonsRange = 60.0...95.0
+    static let maxBoostRange = 6.0...20.0
+    static let maxCutRange = 0.0...6.0
+
     var enabled = false
     var strength = 1.0
+    var referencePhons = 85.0
+    var maxBoostDB = 12.0
+    var maxCutDB = 6.0
+    var levelSource: LoudnessLevelSource = .systemVolume
 
     func validate() throws {
-        guard strength.isFinite, Self.strengthRange.contains(strength) else {
+        guard strength.isFinite, Self.strengthRange.contains(strength),
+              referencePhons.isFinite, Self.referencePhonsRange.contains(referencePhons),
+              maxBoostDB.isFinite, Self.maxBoostRange.contains(maxBoostDB),
+              maxCutDB.isFinite, Self.maxCutRange.contains(maxCutDB) else {
             throw DynamicsConfigurationError.invalidLoudnessContour
+        }
+    }
+}
+
+struct DeHarshConfiguration: Equatable, Sendable {
+    static let amountRange = -6.0...0.0
+    static let frequencyRange = 1_500.0...10_000.0
+    var enabled = false
+    var amountDB = -1.5
+    var frequencyHz = 3_500.0
+
+    func validate(sampleRate: Double) throws {
+        guard amountDB.isFinite, Self.amountRange.contains(amountDB),
+              frequencyHz.isFinite, Self.frequencyRange.contains(frequencyHz),
+              frequencyHz < sampleRate * 0.45 else {
+            throw DynamicsConfigurationError.invalidDeHarsh
         }
     }
 }
@@ -447,6 +496,100 @@ struct DialogueRelativeLevelerConfiguration: Equatable, Sendable {
               programGateThresholdDB.isFinite, Self.programGateRange.contains(programGateThresholdDB) else {
             throw DynamicsConfigurationError.invalidDialogueLeveler
         }
+    }
+}
+
+enum DynamicEQDirection: String, CaseIterable, Identifiable, Sendable {
+    case cutOnly
+    case boostOnly
+    case both
+
+    var id: String { rawValue }
+    var displayName: String {
+        switch self {
+        case .cutOnly: return "Cut Only"
+        case .boostOnly: return "Boost Only"
+        case .both: return "Both"
+        }
+    }
+    var cType: N60DynamicEQDirection {
+        switch self {
+        case .cutOnly: return N60DynamicEQDirectionCutOnly
+        case .boostOnly: return N60DynamicEQDirectionBoostOnly
+        case .both: return N60DynamicEQDirectionBoth
+        }
+    }
+}
+
+enum DynamicEQDetectorMode: String, CaseIterable, Identifiable, Sendable {
+    case peak
+    case rms
+
+    var id: String { rawValue }
+    var displayName: String { self == .peak ? "Peak" : "RMS" }
+    var cType: N60DynamicEQDetectorMode {
+        self == .peak ? N60DynamicEQDetectorPeak : N60DynamicEQDetectorRMS
+    }
+}
+
+struct DynamicEQBandConfiguration: Equatable, Sendable {
+    static let frequencyRange = 20.0...20_000.0
+    static let qRange = 0.4...8.0
+    static let staticGainRange = -18.0...6.0
+    static let thresholdRange = -60.0...0.0
+    static let ratioRange = 1.0...10.0
+    static let rangeRange = -24.0...0.0
+    static let attackRange = 1.0...100.0
+    static let releaseRange = 10.0...1_000.0
+    static let boostThresholdRange = -60.0...0.0
+    static let boostRatioRange = 1.0...10.0
+    static let maxBoostRange = 0.0...12.0
+    static let rmsWindowRange = 5.0...200.0
+
+    var enabled = true
+    var frequencyHz = 1_000.0
+    var q = 1.0
+    var staticGainDB = 0.0
+    var thresholdDB = -24.0
+    var ratio = 2.0
+    var rangeDB = -24.0
+    var attackMs = 10.0
+    var releaseMs = 100.0
+    var direction: DynamicEQDirection = .cutOnly
+    var boostThresholdDB = -40.0
+    var boostRatio = 2.0
+    var maxBoostDB = 6.0
+    var detectorMode: DynamicEQDetectorMode = .peak
+    var rmsWindowMs = 50.0
+
+    func validate(sampleRate: Double) throws {
+        guard frequencyHz.isFinite, Self.frequencyRange.contains(frequencyHz), frequencyHz < sampleRate * 0.5,
+              q.isFinite, Self.qRange.contains(q),
+              staticGainDB.isFinite, Self.staticGainRange.contains(staticGainDB),
+              thresholdDB.isFinite, Self.thresholdRange.contains(thresholdDB),
+              ratio.isFinite, Self.ratioRange.contains(ratio),
+              rangeDB.isFinite, Self.rangeRange.contains(rangeDB),
+              attackMs.isFinite, Self.attackRange.contains(attackMs),
+              releaseMs.isFinite, Self.releaseRange.contains(releaseMs),
+              boostThresholdDB.isFinite, Self.boostThresholdRange.contains(boostThresholdDB),
+              boostRatio.isFinite, Self.boostRatioRange.contains(boostRatio),
+              maxBoostDB.isFinite, Self.maxBoostRange.contains(maxBoostDB),
+              rmsWindowMs.isFinite, Self.rmsWindowRange.contains(rmsWindowMs) else {
+            throw DynamicsConfigurationError.invalidDynamicEQ
+        }
+    }
+}
+
+struct DynamicEQConfiguration: Equatable, Sendable {
+    static let maximumBandCount = Int(N60_DYNAMIC_EQ_MAX_BANDS)
+    var enabled = false
+    var bands: [DynamicEQBandConfiguration] = []
+
+    func validate(sampleRate: Double) throws {
+        guard sampleRate.isFinite, sampleRate > 0, bands.count <= Self.maximumBandCount else {
+            throw DynamicsConfigurationError.invalidDynamicEQ
+        }
+        try bands.forEach { try $0.validate(sampleRate: sampleRate) }
     }
 }
 
@@ -709,6 +852,7 @@ struct SoftClipperConfiguration: Equatable, Sendable {
     static let driveRange = 0.0...12.0
     static let thresholdRange = -6.0...0.0
     static let kneeRange = 0.0...1.0
+    static let asymmetryTrimRange = -3.0...3.0
 
     var enabled = false
     var driveDB = 0.0
@@ -716,11 +860,13 @@ struct SoftClipperConfiguration: Equatable, Sendable {
     var kneeSmooth = 0.5
     var curve: SoftClipperCurve = .quadratic
     var autoCompensateGain = true
+    var asymmetryTrimDB = 0.0
 
     func validate() throws {
         guard driveDB.isFinite, Self.driveRange.contains(driveDB),
               thresholdDB.isFinite, Self.thresholdRange.contains(thresholdDB),
-              kneeSmooth.isFinite, Self.kneeRange.contains(kneeSmooth) else {
+              kneeSmooth.isFinite, Self.kneeRange.contains(kneeSmooth),
+              asymmetryTrimDB.isFinite, Self.asymmetryTrimRange.contains(asymmetryTrimDB) else {
             throw DynamicsConfigurationError.invalidSoftClipper
         }
     }
@@ -739,6 +885,8 @@ struct LimiterConfiguration: Equatable, Sendable {
     var attackMs = 0.1
     var releaseMs = 20.0
     var lookAheadMs = 2.0
+    // True preserves the accepted PR27 behavior: limiter reconstruction is 4x.
+    var truePeakGuardEnabled = true
 
     func validate() throws {
         guard ceilingDB.isFinite, Self.ceilingRange.contains(ceilingDB),
@@ -746,6 +894,51 @@ struct LimiterConfiguration: Equatable, Sendable {
               releaseMs.isFinite, Self.releaseRange.contains(releaseMs),
               lookAheadMs.isFinite, Self.lookAheadRange.contains(lookAheadMs) else {
             throw DynamicsConfigurationError.invalidLimiter
+        }
+    }
+}
+
+enum GainRiderSpeed: String, CaseIterable, Identifiable, Sendable {
+    case fast
+    case medium
+    case slow
+    var id: String { rawValue }
+    var displayName: String { rawValue.capitalized }
+    var cType: N60GainRiderSpeed {
+        switch self {
+        case .fast: return N60GainRiderSpeedFast
+        case .medium: return N60GainRiderSpeedMedium
+        case .slow: return N60GainRiderSpeedSlow
+        }
+    }
+}
+
+struct GainRiderConfiguration: Equatable, Sendable {
+    static let targetRange = 0.5...6.0
+    static let maxReductionRange = 3.0...12.0
+    var enabled = false
+    var targetGainReductionDB = 3.0
+    var maxReductionDB = 6.0
+    var speed: GainRiderSpeed = .medium
+
+    func validate() throws {
+        guard targetGainReductionDB.isFinite, Self.targetRange.contains(targetGainReductionDB),
+              maxReductionDB.isFinite, Self.maxReductionRange.contains(maxReductionDB) else {
+            throw DynamicsConfigurationError.invalidGainRider
+        }
+    }
+}
+
+struct AutomaticHeadroomConfiguration: Equatable, Sendable {
+    static let maxAttenuationRange = 3.0...24.0
+    // Disabled by default in the commercial validation build so accepted PR25–32
+    // listening baselines are not silently attenuated; production presets can opt in.
+    var enabled = false
+    var maxAttenuationDB = 12.0
+
+    func validate() throws {
+        guard maxAttenuationDB.isFinite, Self.maxAttenuationRange.contains(maxAttenuationDB) else {
+            throw DynamicsConfigurationError.invalidAutomaticHeadroom
         }
     }
 }
@@ -759,13 +952,17 @@ struct DynamicsConfiguration: Equatable, Sendable {
     var spectralDenoiser = SpectralDenoiserConfiguration()
     var loudnessMatch = LoudnessMatchConfiguration()
     var loudnessContour = LoudnessContourConfiguration()
+    var deHarsh = DeHarshConfiguration()
     var dialogueRelativeLeveler = DialogueRelativeLevelerConfiguration()
+    var dynamicEQ = DynamicEQConfiguration()
     var deEsser = DeEsserConfiguration()
     var multibandCompressor = MultibandCompressorConfiguration()
     var compressor = CompressorConfiguration()
     var expander = ExpanderConfiguration()
     var softClipper = SoftClipperConfiguration()
     var limiter = LimiterConfiguration()
+    var gainRider = GainRiderConfiguration()
+    var automaticHeadroom = AutomaticHeadroomConfiguration()
     var oversampling: OversamplingFactor = .one
     var pauseGate = PauseGateConfiguration()
 
@@ -776,7 +973,9 @@ struct DynamicsConfiguration: Equatable, Sendable {
         try spectralDenoiser.validate(sampleRate: sampleRate)
         try loudnessMatch.validate()
         try loudnessContour.validate()
+        try deHarsh.validate(sampleRate: sampleRate)
         try dialogueRelativeLeveler.validate(sampleRate: sampleRate)
+        try dynamicEQ.validate(sampleRate: sampleRate)
         try deEsser.validate()
         try multibandCompressor.validate()
         try compressor.validate()
@@ -842,7 +1041,14 @@ struct DynamicsConfiguration: Equatable, Sendable {
             Float(loudnessMatch.attackSeconds),
             Float(loudnessMatch.releaseSeconds)
         ) else { throw DynamicsConfigurationError.invalidLoudnessMatch }
-        guard N60DynamicsSnapshotSetLoudnessContour(&snapshot, sampleRate, loudnessContour.enabled, Float(loudnessContour.strength)) else { throw DynamicsConfigurationError.invalidLoudnessContour }
+        guard N60DynamicsSnapshotSetPerBandLoudness(
+            &snapshot, sampleRate, loudnessContour.enabled, Float(loudnessContour.strength),
+            Float(loudnessContour.referencePhons), Float(loudnessContour.maxBoostDB),
+            Float(loudnessContour.maxCutDB), loudnessContour.levelSource.cType
+        ) else { throw DynamicsConfigurationError.invalidLoudnessContour }
+        guard N60DynamicsSnapshotSetDeHarsh(
+            &snapshot, sampleRate, deHarsh.enabled, Float(deHarsh.amountDB), deHarsh.frequencyHz
+        ) else { throw DynamicsConfigurationError.invalidDeHarsh }
         guard N60DynamicsSnapshotSetDialogueLeveler(
             &snapshot,
             sampleRate,
@@ -865,6 +1071,31 @@ struct DynamicsConfiguration: Equatable, Sendable {
             Float(dialogueRelativeLeveler.voiceGate.confidenceCeilingIndex),
             Float(dialogueRelativeLeveler.voiceGate.minConfidence)
         ) else { throw DynamicsConfigurationError.invalidDialogueLeveler }
+        guard N60DynamicsSnapshotSetDynamicEQEnabled(&snapshot, dynamicEQ.enabled) else {
+            throw DynamicsConfigurationError.invalidDynamicEQ
+        }
+        for (index, band) in dynamicEQ.bands.enumerated() {
+            guard N60DynamicsSnapshotSetDynamicEQBand(
+                &snapshot,
+                sampleRate,
+                UInt32(index),
+                band.enabled,
+                band.frequencyHz,
+                Float(band.q),
+                Float(band.staticGainDB),
+                Float(band.thresholdDB),
+                Float(band.ratio),
+                Float(band.rangeDB),
+                Float(band.attackMs),
+                Float(band.releaseMs),
+                band.direction.cType,
+                Float(band.boostThresholdDB),
+                Float(band.boostRatio),
+                Float(band.maxBoostDB),
+                band.detectorMode.cType,
+                Float(band.rmsWindowMs)
+            ) else { throw DynamicsConfigurationError.invalidDynamicEQ }
+        }
         guard N60DynamicsSnapshotSetDeEsserAdvanced(
             &snapshot,
             sampleRate,
@@ -934,6 +1165,8 @@ struct DynamicsConfiguration: Equatable, Sendable {
     func makeProtectionSnapshot(sampleRate: Double) throws -> N60ProtectionSnapshot {
         try softClipper.validate()
         try limiter.validate()
+        try gainRider.validate()
+        try automaticHeadroom.validate()
         guard sampleRate.isFinite, sampleRate > 0, sampleRate <= N60_PROTECTION_MAX_SAMPLE_RATE else {
             throw DynamicsConfigurationError.invalidOversampling
         }
@@ -942,23 +1175,32 @@ struct DynamicsConfiguration: Equatable, Sendable {
         guard N60ProtectionSnapshotSetOversamplingFactor(&snapshot, oversampling.cType) else {
             throw DynamicsConfigurationError.invalidOversampling
         }
-        guard N60ProtectionSnapshotSetSoftClipper(
+        guard N60ProtectionSnapshotSetSoftClipperAdvanced(
             &snapshot,
             softClipper.enabled,
             Float(softClipper.driveDB),
             Float(softClipper.thresholdDB),
             Float(softClipper.kneeSmooth),
             softClipper.curve.cType,
-            softClipper.autoCompensateGain
+            softClipper.autoCompensateGain,
+            Float(softClipper.asymmetryTrimDB)
         ) else { throw DynamicsConfigurationError.invalidSoftClipper }
-        guard N60ProtectionSnapshotSetLimiter(
+        guard N60ProtectionSnapshotSetLimiterAdvanced(
             &snapshot,
             limiter.enabled,
             Float(limiter.ceilingDB),
             Float(limiter.attackMs),
             Float(limiter.releaseMs),
-            Float(limiter.lookAheadMs)
+            Float(limiter.lookAheadMs),
+            limiter.truePeakGuardEnabled
         ) else { throw DynamicsConfigurationError.invalidLimiter }
+        guard N60ProtectionSnapshotSetGainRider(
+            &snapshot,
+            gainRider.enabled,
+            Float(gainRider.targetGainReductionDB),
+            Float(gainRider.maxReductionDB),
+            gainRider.speed.cType
+        ) else { throw DynamicsConfigurationError.invalidGainRider }
         return snapshot
     }
 }

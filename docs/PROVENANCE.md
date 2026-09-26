@@ -112,3 +112,35 @@ The mains detector/tracker is independently authored. It uses a conventional qua
 - **Realtime contract:** fixed/preallocated state; immutable/precomputed snapshots; no allocation/free, locks, logging, file/device/UI access, filter design, or coefficient construction in the render callback; zero added algorithmic latency for PR32 stages.
 - **Validation:** deterministic coverage includes high-rate finite operation, new-parameter validation, feed-back compressor stability, bounded De-Esser attenuation, multiband independent controls, dialogue disabled transparency, program gating, relative-masking response, maximum-boost bounds, and voice-confidence bounds. Full integration suites were green before the hardware gate.
 - **Residual audit:** `docs/PR32_DYNAMICS_PARITY_AUDIT.md` explicitly routes remaining required observable items rather than silently omitting them. General Dynamic EQ, Dynamic Gain Rider/auto-headroom, explicit True-Peak Guard semantics, clipper asymmetry trim, per-band loudness, De-Harsh, and EQ/DSP automatic-headroom compensation are assigned to the immediately following parity PR before optimization.
+
+
+## PR33 Slice 2 — gain/protection integration
+
+Classification: **specification-derived / independently authored commercial implementation**.
+
+Behavioral inventory references are limited to observable legacy configuration/UI state: Dynamic Gain Rider enable/target/max-cut/Fast-Medium-Slow controls; the distinct TP Guard toggle; ±3 dB clipper asymmetry trim; and EQ Headroom Compensation enable/3–24 dB maximum attenuation. Historical gain-rider, limiter, clipper, or EQ-headroom DSP implementations and historical DSP tests are not implementation references.
+
+The commercial algorithms are derived independently from standard level/envelope smoothing, oversampled peak protection, bounded gain-riding, and pre-EQ gain-staging principles. The realtime path remains fixed/preallocated and performs no allocation, locking, logging, file/device/UI access, or coefficient/filter design.
+
+
+## PR33 Slice 3 — per-band loudness and De-Harsh
+
+Classification: **specification-derived / independently authored commercial implementation**.
+
+Observable legacy configuration/UI state was used only to establish controls, ranges, defaults, labels, and intended user-facing semantics for Per-Band Loudness Compensation and De-Harsh. The historical `PerBandLoudnessCompensator` implementation, historical dynamics processor implementation, and historical DSP tests were not used as coding templates.
+
+Commercial Per-Band Loudness uses independently defined reference-point mapping, fixed precomputed low/high analysis bands, smoothed linked-stereo gain offsets, and explicit caps. De-Harsh uses public RBJ-style high-shelf biquad mathematics already used elsewhere in the clean-room commercial engine. Both remain zero-lookahead and fixed/preallocated in realtime.
+
+
+## PR33 Slice 1 — General Dynamic EQ
+
+Classification: **specification-derived / independently authored commercial implementation**.
+
+Observable legacy configuration/UI state was used only to establish the user-facing Dynamic EQ contract: up to 16 bands, center frequency/Q/static gain, threshold/ratio/range, attack/release, Cut Only / Boost Only / Both direction, boost threshold/ratio/max boost, Peak/RMS detector selection, and RMS window. Historical Dynamic EQ DSP implementation files and historical DSP tests were not used as implementation templates.
+
+The commercial processor is an independently authored fixed/preallocated C design using public peaking-biquad mathematics, linked-stereo detector decisions, precomputed analysis coefficients, bounded gain laws, one-pole timing, and immutable control-plane snapshots. It has zero intentional look-ahead latency and performs no allocation, locking, logging, I/O, or coefficient design in the render callback.
+
+
+### PR33 Dynamic EQ integration refinement
+
+After hardware acceptance of the initial PR33 processor, the commercial product model was refined so Dynamic EQ is enabled on ordinary EQ bands rather than exposed as a separate user-facing band bank. The verified historical 16-band limit remains recorded only as an observable legacy-state fact; the commercial implementation intentionally extends fixed capacity to 64 to match the proprietary main-EQ engine. The standalone `N60DynamicEQ` C detector/gain engine remains independently authored and is now invoked in the EQ portion of the commercial render graph. Static EQ gain remains in the proprietary main biquad stage and the Dynamic engine contributes only time-varying correction. This integration decision is product/architecture work authored in the commercial repository and does not reuse historical DSP implementation expression.

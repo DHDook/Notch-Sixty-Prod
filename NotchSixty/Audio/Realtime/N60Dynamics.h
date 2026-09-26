@@ -6,6 +6,7 @@
 
 #include "N60Biquad.h"
 #include "N60Crossover.h"
+#include "N60DynamicEQ.h"
 #include "N60SpectralDenoiser.h"
 
 #ifdef __cplusplus
@@ -104,14 +105,37 @@ typedef struct {
     N60BiquadCoefficients kWeightShelf;
 } N60LoudnessMatchSnapshot;
 
+typedef enum {
+    N60LoudnessLevelSourceSystemVolume = 0,
+    N60LoudnessLevelSourceIntegrated = 1,
+} N60LoudnessLevelSource;
+
 typedef struct {
     bool enabled;
     float strength;
+    // Legacy PR29 contour state retained so the original setter stays source-
+    // and behavior-compatible. Swift now publishes per-band mode below.
+    bool perBandMode;
     float fullContourMasterGainLinear;
     float flatContourMasterGainLinear;
     N60BiquadCoefficients lowShelf;
     N60BiquadCoefficients highShelf;
+
+    N60LoudnessLevelSource levelSource;
+    float referencePhons;
+    float maxBoostDB;
+    float maxCutDB;
+    float responseCoefficient;
+    N60BiquadCoefficients lowBandLowPass;
+    N60BiquadCoefficients highBandHighPass;
 } N60LoudnessContourSnapshot;
+
+typedef struct {
+    bool enabled;
+    double frequencyHz;
+    float amountDB;
+    N60BiquadCoefficients highShelf;
+} N60DeHarshSnapshot;
 
 typedef struct {
     bool enabled;
@@ -220,6 +244,8 @@ typedef struct {
     N60LoudnessMatchSnapshot loudnessMatch;
     N60LoudnessContourSnapshot loudnessContour;
     N60DialogueLevelerSnapshot dialogueLeveler;
+    N60DynamicEQSnapshot dynamicEQ;
+    N60DeHarshSnapshot deHarsh;
     N60DeEsserSnapshot deEsser;
     N60MultibandCompressorSnapshot multibandCompressor;
     N60CompressorSnapshot compressor;
@@ -285,6 +311,13 @@ typedef struct {
     N60BiquadState loudnessHighShelfLeft;
     N60BiquadState loudnessHighShelfRight;
     float loudnessMix;
+    N60BiquadState loudnessLowBandLeft;
+    N60BiquadState loudnessLowBandRight;
+    N60BiquadState loudnessHighBandLeft;
+    N60BiquadState loudnessHighBandRight;
+    float loudnessLowGainDB;
+    float loudnessHighGainDB;
+    float loudnessEstimatedPhons;
     N60BiquadState dialogueHighPassLeft;
     N60BiquadState dialogueHighPassRight;
     N60BiquadState dialogueLowPassLeft;
@@ -301,6 +334,10 @@ typedef struct {
     float dialogueBandLevelDBFS;
     float dialogueGapDB;
     float dialogueVoiceConfidence;
+    N60DynamicEQRuntime dynamicEQ;
+    N60BiquadState deHarshLeft;
+    N60BiquadState deHarshRight;
+    float deHarshMix;
     float deEsserGainDB;
     N60BiquadState deEsserHighPassLeft;
     N60BiquadState deEsserHighPassRight;
@@ -333,11 +370,17 @@ typedef struct {
     float loudnessShortTermLUFS;
     float loudnessMatchGainDB;
     float loudnessContourScale;
+    float loudnessLowCompensationDB;
+    float loudnessHighCompensationDB;
+    float loudnessEstimatedPhons;
+    float deHarshMix;
     float dialogueProgramLevelDBFS;
     float dialogueBandLevelDBFS;
     float dialogueGapDB;
     float dialogueVoiceConfidence;
     float dialogueBoostDB;
+    uint32_t dynamicEQActiveBandCount;
+    float dynamicEQMaxAbsGainDB;
     float compressorGainReductionDB;
     float expanderAttenuationDB;
     float pauseGateGain;
@@ -428,6 +471,17 @@ bool N60DynamicsSnapshotSetLoudnessContour(
     float strength
 );
 
+bool N60DynamicsSnapshotSetPerBandLoudness(
+    N60DynamicsSnapshot * _Nonnull snapshot,
+    double sampleRate,
+    bool enabled,
+    float strength,
+    float referencePhons,
+    float maxBoostDB,
+    float maxCutDB,
+    N60LoudnessLevelSource levelSource
+);
+
 bool N60DynamicsSnapshotSetDialogueLeveler(
     N60DynamicsSnapshot * _Nonnull snapshot,
     double sampleRate,
@@ -449,6 +503,40 @@ bool N60DynamicsSnapshotSetDialogueLeveler(
     float confidenceFloorIndex,
     float confidenceCeilingIndex,
     float minConfidence
+);
+
+bool N60DynamicsSnapshotSetDynamicEQEnabled(
+    N60DynamicsSnapshot * _Nonnull snapshot,
+    bool enabled
+);
+
+bool N60DynamicsSnapshotSetDeHarsh(
+    N60DynamicsSnapshot * _Nonnull snapshot,
+    double sampleRate,
+    bool enabled,
+    float amountDB,
+    double frequencyHz
+);
+
+bool N60DynamicsSnapshotSetDynamicEQBand(
+    N60DynamicsSnapshot * _Nonnull snapshot,
+    double sampleRate,
+    uint32_t index,
+    bool enabled,
+    double frequencyHz,
+    float q,
+    float staticGainDB,
+    float thresholdDB,
+    float ratio,
+    float rangeDB,
+    float attackMs,
+    float releaseMs,
+    N60DynamicEQDirection direction,
+    float boostThresholdDB,
+    float boostRatio,
+    float maxBoostDB,
+    N60DynamicEQDetectorMode detectorMode,
+    float rmsWindowMs
 );
 
 bool N60DynamicsSnapshotSetDeEsser(
@@ -569,6 +657,12 @@ bool N60DynamicsSnapshotSetPauseGate(
 bool N60DynamicsSnapshotIsValid(N60DynamicsSnapshot snapshot);
 void N60DynamicsRuntimeReset(N60DynamicsRuntime * _Nonnull runtime);
 void N60DynamicsProcessPreEQStereoFrame(
+    N60DynamicsRuntime * _Nonnull runtime,
+    N60DynamicsSnapshot snapshot,
+    float * _Nonnull left,
+    float * _Nonnull right
+);
+void N60DynamicsProcessDynamicEQStereoFrame(
     N60DynamicsRuntime * _Nonnull runtime,
     N60DynamicsSnapshot snapshot,
     float * _Nonnull left,

@@ -120,4 +120,106 @@ final class ProtectionTests: XCTestCase {
         config.limiter.lookAheadMs = 21
         XCTAssertThrowsError(try config.makeProtectionSnapshot(sampleRate: 96_000))
     }
+
+    func testTruePeakGuardControlsForcedFourTimesPath() {
+        var guarded = N60ProtectionSnapshotMakeBypassed(48_000)
+        XCTAssertTrue(N60ProtectionSnapshotSetOversamplingFactor(&guarded, N60OversamplingFactor1x))
+        XCTAssertTrue(N60ProtectionSnapshotSetLimiterAdvanced(&guarded, true, -1, 0.1, 50, 2, true))
+        XCTAssertEqual(guarded.effectiveFactor, N60OversamplingFactor4x)
+
+        var unguarded = N60ProtectionSnapshotMakeBypassed(48_000)
+        XCTAssertTrue(N60ProtectionSnapshotSetOversamplingFactor(&unguarded, N60OversamplingFactor2x))
+        XCTAssertTrue(N60ProtectionSnapshotSetLimiterAdvanced(&unguarded, true, -1, 0.1, 50, 2, false))
+        XCTAssertEqual(unguarded.effectiveFactor, N60OversamplingFactor2x)
+    }
+
+    func testClipperAsymmetryTrimIsBoundedAndZeroTrimPreservesSymmetry() {
+        for trim: Float in [0, 3, -3] {
+            var snapshot = N60ProtectionSnapshotMakeBypassed(96_000)
+            XCTAssertTrue(N60ProtectionSnapshotSetSoftClipperAdvanced(
+                &snapshot, true, 6, -2, 1, N60ClipperCurveQuadratic, false, trim))
+            guard let runtime = N60ProtectionRuntimeCreate() else { return XCTFail("runtime") }
+            defer { N60ProtectionRuntimeDestroy(runtime) }
+            var positive: Float = 0.3
+            var positiveRight = positive
+            N60ProtectionProcessStereoFrame(runtime, &snapshot, &positive, &positiveRight)
+            N60ProtectionRuntimeReset(runtime)
+            var negative: Float = -0.3
+            var negativeRight = negative
+            N60ProtectionProcessStereoFrame(runtime, &snapshot, &negative, &negativeRight)
+            XCTAssertTrue(positive.isFinite && negative.isFinite)
+            XCTAssertLessThanOrEqual(abs(positive), 1.000_001)
+            XCTAssertLessThanOrEqual(abs(negative), 1.000_001)
+            if trim == 0 {
+                XCTAssertEqual(abs(positive), abs(negative), accuracy: 0.000_001)
+            } else {
+                XCTAssertGreaterThan(abs(abs(positive) - abs(negative)), 0.005)
+            }
+        }
+    }
+
+    func testGainRiderIgnoresTransientButRespondsToSustainedLimiting() {
+        var snapshot = N60ProtectionSnapshotMakeBypassed(48_000)
+        XCTAssertTrue(N60ProtectionSnapshotSetLimiterAdvanced(&snapshot, true, -1, 0.1, 20, 1, true))
+        XCTAssertTrue(N60ProtectionSnapshotSetGainRider(&snapshot, true, 1.0, 6.0, N60GainRiderSpeedFast))
+        guard let runtime = N60ProtectionRuntimeCreate() else { return XCTFail("runtime") }
+        defer { N60ProtectionRuntimeDestroy(runtime) }
+
+        for frame in 0..<48_000 {
+            let amp: Float = frame < 240 ? 1.4 : 0.2
+            var left = amp * Float(sin(2 * Double.pi * 997 * Double(frame) / 48_000))
+            var right = -left
+            N60ProtectionProcessStereoFrame(runtime, &snapshot, &left, &right)
+        }
+        let afterTransient = N60ProtectionRuntimeTelemetry(runtime).gainRiderAttenuationDB
+        XCTAssertLessThan(afterTransient, 0.15)
+
+        for frame in 0..<(48_000 * 5) {
+            var left = Float(1.5 * sin(2 * Double.pi * 997 * Double(frame) / 48_000))
+            var right = -left
+            N60ProtectionProcessStereoFrame(runtime, &snapshot, &left, &right)
+        }
+        let telemetry = N60ProtectionRuntimeTelemetry(runtime)
+        XCTAssertGreaterThan(telemetry.gainRiderAttenuationDB, 0.25)
+        XCTAssertLessThanOrEqual(telemetry.gainRiderAttenuationDB, 6.001)
+        XCTAssertGreaterThan(telemetry.sustainedLimiterGainReductionDB, 0)
+    }
+
+    func testGainRiderSpeedOrdering() {
+        func attenuation(_ speed: N60GainRiderSpeed) -> Float {
+            var snapshot = N60ProtectionSnapshotMakeBypassed(48_000)
+            XCTAssertTrue(N60ProtectionSnapshotSetLimiterAdvanced(&snapshot, true, -1, 0.1, 20, 0.5, false))
+            XCTAssertTrue(N60ProtectionSnapshotSetGainRider(&snapshot, true, 0.5, 6.0, speed))
+            guard let runtime = N60ProtectionRuntimeCreate() else { return -1 }
+            defer { N60ProtectionRuntimeDestroy(runtime) }
+            for frame in 0..<(48_000 * 3) {
+                var left = Float(1.5 * sin(2 * Double.pi * 997 * Double(frame) / 48_000))
+                var right = -left
+                N60ProtectionProcessStereoFrame(runtime, &snapshot, &left, &right)
+            }
+            return N60ProtectionRuntimeTelemetry(runtime).gainRiderAttenuationDB
+        }
+        let fast = attenuation(N60GainRiderSpeedFast)
+        let medium = attenuation(N60GainRiderSpeedMedium)
+        let slow = attenuation(N60GainRiderSpeedSlow)
+        XCTAssertGreaterThan(fast, medium)
+        XCTAssertGreaterThan(medium, slow)
+    }
+
+    func testGainProtectionConfigurationValidAt384k() throws {
+        var config = DynamicsConfiguration()
+        config.softClipper.asymmetryTrimDB = 3
+        config.limiter.enabled = true
+        config.limiter.truePeakGuardEnabled = true
+        config.gainRider.enabled = true
+        config.gainRider.targetGainReductionDB = 3
+        config.gainRider.maxReductionDB = 6
+        config.gainRider.speed = .slow
+        config.automaticHeadroom.enabled = true
+        config.automaticHeadroom.maxAttenuationDB = 24
+        var snapshot = try config.makeProtectionSnapshot(sampleRate: 384_000)
+        XCTAssertTrue(N60ProtectionSnapshotIsValid(&snapshot))
+        XCTAssertEqual(snapshot.effectiveFactor, N60OversamplingFactor4x)
+    }
+
 }

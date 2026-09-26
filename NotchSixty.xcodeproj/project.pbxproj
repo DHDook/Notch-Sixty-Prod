@@ -32,6 +32,7 @@
 		A30000000000000000000013 /* N60Dynamics.c in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000025 /* N60Dynamics.c */; };
 		A30000000000000000000014 /* N60Protection.c in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000027 /* N60Protection.c */; };
 		A30000000000000000000015 /* N60SpectralDenoiser.c in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000029 /* N60SpectralDenoiser.c */; };
+		A30000000000000000000016 /* N60DynamicEQ.c in Sources */ = {isa = PBXBuildFile; fileRef = A3000000000000000000002B /* N60DynamicEQ.c */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -78,6 +79,8 @@
 		A30000000000000000000028 /* N60Protection.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60Protection.h; sourceTree = "<group>"; };
 		A30000000000000000000029 /* N60SpectralDenoiser.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = N60SpectralDenoiser.c; sourceTree = "<group>"; };
 		A3000000000000000000002A /* N60SpectralDenoiser.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60SpectralDenoiser.h; sourceTree = "<group>"; };
+		A3000000000000000000002B /* N60DynamicEQ.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = N60DynamicEQ.c; sourceTree = "<group>"; };
+		A3000000000000000000002C /* N60DynamicEQ.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60DynamicEQ.h; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -164,6 +167,8 @@
 				A30000000000000000000028 /* N60Protection.h */,
 				A30000000000000000000029 /* N60SpectralDenoiser.c */,
 				A3000000000000000000002A /* N60SpectralDenoiser.h */,
+				A3000000000000000000002B /* N60DynamicEQ.c */,
+				A3000000000000000000002C /* N60DynamicEQ.h */,
 			);
 			path = Realtime;
 			sourceTree = "<group>";
@@ -248,6 +253,7 @@
 				A30000000000000000000013 /* N60Dynamics.c in Sources */,
 				A30000000000000000000014 /* N60Protection.c in Sources */,
 				A30000000000000000000015 /* N60SpectralDenoiser.c in Sources */,
+				A30000000000000000000016 /* N60DynamicEQ.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -618,4 +618,244 @@ final class DynamicsTests: XCTestCase {
         }
     }
 
+
+    func testDynamicEQDisabledIsTransparentWithConfiguredBand() {
+        let sampleRate = 96_000.0
+        var snapshot = N60DynamicsSnapshotMakeBypassed(sampleRate)
+        XCTAssertTrue(N60DynamicsSnapshotSetDynamicEQEnabled(&snapshot, false))
+        XCTAssertTrue(N60DynamicsSnapshotSetDynamicEQBand(
+            &snapshot, sampleRate, 0, true, 1_000, 1.0, 3.0, -30, 4.0, -12, 5, 100,
+            N60DynamicEQDirectionCutOnly, -40, 2.0, 6.0, N60DynamicEQDetectorPeak, 50
+        ))
+        var runtime = N60DynamicsRuntime()
+        N60DynamicsRuntimeReset(&runtime)
+
+        for frame in 0..<20_000 {
+            let input = Float(0.4 * sin(2.0 * Double.pi * 1_000.0 * Double(frame) / sampleRate))
+            var left = input
+            var right = -input * 0.7
+            N60DynamicsProcessDynamicEQStereoFrame(&runtime, snapshot, &left, &right)
+            XCTAssertEqual(left, input, accuracy: 0.000_001)
+            XCTAssertEqual(right, -input * 0.7, accuracy: 0.000_001)
+        }
+    }
+
+    func testDynamicEQCutOnlyAttenuatesInBandAndStaysLinked() {
+        let sampleRate = 48_000.0
+        var snapshot = N60DynamicsSnapshotMakeBypassed(sampleRate)
+        XCTAssertTrue(N60DynamicsSnapshotSetDynamicEQEnabled(&snapshot, true))
+        XCTAssertTrue(N60DynamicsSnapshotSetDynamicEQBand(
+            &snapshot, sampleRate, 0, true, 1_000, 2.0, 0.0, -30, 4.0, -12, 2, 80,
+            N60DynamicEQDirectionCutOnly, -50, 2.0, 6.0, N60DynamicEQDetectorPeak, 50
+        ))
+        var runtime = N60DynamicsRuntime()
+        N60DynamicsRuntimeReset(&runtime)
+        var inSq = 0.0
+        var outSq = 0.0
+        var ratioSamples: [Double] = []
+        for frame in 0..<96_000 {
+            let input = Float(0.35 * sin(2.0 * Double.pi * 1_000.0 * Double(frame) / sampleRate))
+            var left = input
+            var right = input * 0.5
+            N60DynamicsProcessDynamicEQStereoFrame(&runtime, snapshot, &left, &right)
+            if frame >= 48_000 {
+                inSq += Double(input * input)
+                outSq += Double(left * left)
+                if abs(right) > 0.0001 { ratioSamples.append(Double(left / right)) }
+            }
+        }
+        XCTAssertLessThan(sqrt(outSq / 48_000.0), sqrt(inSq / 48_000.0) * 0.9)
+        XCTAssertGreaterThan(N60DynamicsRuntimeTelemetry(&runtime).dynamicEQMaxAbsGainDB, 2.0)
+        if let ratio = ratioSamples.last { XCTAssertEqual(ratio, 2.0, accuracy: 0.02) }
+    }
+
+    func testDynamicEQBoostIsBounded() {
+        let sampleRate = 48_000.0
+        var snapshot = N60DynamicsSnapshotMakeBypassed(sampleRate)
+        XCTAssertTrue(N60DynamicsSnapshotSetDynamicEQEnabled(&snapshot, true))
+        XCTAssertTrue(N60DynamicsSnapshotSetDynamicEQBand(
+            &snapshot, sampleRate, 0, true, 1_000, 2.0, 0.0, -10, 1.0, -24, 2, 80,
+            N60DynamicEQDirectionBoostOnly, -30, 4.0, 6.0, N60DynamicEQDetectorPeak, 50
+        ))
+        var runtime = N60DynamicsRuntime()
+        N60DynamicsRuntimeReset(&runtime)
+        for frame in 0..<96_000 {
+            let input = Float(0.005 * sin(2.0 * Double.pi * 1_000.0 * Double(frame) / sampleRate))
+            var left = input
+            var right = input
+            N60DynamicsProcessDynamicEQStereoFrame(&runtime, snapshot, &left, &right)
+        }
+        let telemetry = N60DynamicsRuntimeTelemetry(&runtime)
+        XCTAssertGreaterThan(telemetry.dynamicEQMaxAbsGainDB, 1.0)
+        XCTAssertLessThanOrEqual(telemetry.dynamicEQMaxAbsGainDB, 6.01)
+    }
+
+    func testDynamicEQConfigurationRejectsInvalidBandAndSupportsSixtyFourBandsAt384k() throws {
+        var invalid = DynamicsConfiguration()
+        invalid.dynamicEQ.enabled = true
+        invalid.dynamicEQ.bands = [DynamicEQBandConfiguration()]
+        invalid.dynamicEQ.bands[0].q = 9.0
+        XCTAssertThrowsError(try invalid.makeSnapshot(sampleRate: 96_000))
+
+        var config = DynamicsConfiguration()
+        config.dynamicEQ.enabled = true
+        config.dynamicEQ.bands = (0..<64).map { index in
+            var band = DynamicEQBandConfiguration()
+            band.frequencyHz = 40.0 * pow(1.35, Double(index))
+            band.frequencyHz = min(band.frequencyHz, 18_000.0)
+            band.q = 1.2
+            band.thresholdDB = -24
+            return band
+        }
+        let snapshot = try config.makeSnapshot(sampleRate: 384_000)
+        XCTAssertEqual(snapshot.dynamicEQ.bandCount, 64)
+        XCTAssertTrue(N60DynamicEQSnapshotIsValid(snapshot.dynamicEQ))
+    }
+
+
+    func testPerBandLoudnessIsFlatAtSystemReferencePoint() {
+        let rate = 48_000.0
+        var snapshot = N60DynamicsSnapshotMakeBypassed(rate)
+        XCTAssertTrue(N60DynamicsSnapshotSetPerBandLoudness(
+            &snapshot, rate, true, 1, 85, 12, 6, N60LoudnessLevelSourceSystemVolume))
+        var runtime = N60DynamicsRuntime()
+        N60DynamicsRuntimeReset(&runtime)
+        let master = Float(pow(10.0, -6.0 / 20.0))
+        for frame in 0..<48_000 {
+            let input = Float(0.2 * sin(2 * Double.pi * 1_000 * Double(frame) / rate))
+            var left = input
+            var right = -input * 0.5
+            N60DynamicsProcessCoreStereoFrameWithMasterGain(&runtime, snapshot, master, &left, &right)
+            if frame > 20_000 {
+                XCTAssertEqual(left, input, accuracy: 0.000_01)
+                XCTAssertEqual(right, -input * 0.5, accuracy: 0.000_01)
+            }
+        }
+        let t = N60DynamicsRuntimeTelemetry(&runtime)
+        XCTAssertEqual(t.loudnessLowCompensationDB, 0, accuracy: 0.02)
+        XCTAssertEqual(t.loudnessHighCompensationDB, 0, accuracy: 0.02)
+        XCTAssertEqual(t.loudnessEstimatedPhons, 85, accuracy: 0.05)
+    }
+
+    func testPerBandLoudnessLowVolumeReachesHistoricalSixAndThreeDBAnchors() {
+        let rate = 48_000.0
+        var snapshot = N60DynamicsSnapshotMakeBypassed(rate)
+        XCTAssertTrue(N60DynamicsSnapshotSetPerBandLoudness(
+            &snapshot, rate, true, 1, 85, 12, 6, N60LoudnessLevelSourceSystemVolume))
+        var runtime = N60DynamicsRuntime()
+        N60DynamicsRuntimeReset(&runtime)
+        let master = Float(pow(10.0, -30.0 / 20.0))
+        for frame in 0..<(48_000 / 2) {
+            var left = Float(0.15 * sin(2 * Double.pi * 200 * Double(frame) / rate))
+            var right = left
+            N60DynamicsProcessCoreStereoFrameWithMasterGain(&runtime, snapshot, master, &left, &right)
+        }
+        let t = N60DynamicsRuntimeTelemetry(&runtime)
+        XCTAssertEqual(t.loudnessLowCompensationDB, 6.0, accuracy: 0.05)
+        XCTAssertEqual(t.loudnessHighCompensationDB, 3.0, accuracy: 0.05)
+        XCTAssertEqual(t.loudnessEstimatedPhons, 61.0, accuracy: 0.05)
+    }
+
+    func testPerBandLoudnessAboveReferenceUsesBoundedCut() {
+        let rate = 48_000.0
+        var snapshot = N60DynamicsSnapshotMakeBypassed(rate)
+        XCTAssertTrue(N60DynamicsSnapshotSetPerBandLoudness(
+            &snapshot, rate, true, 1, 85, 12, 0.5, N60LoudnessLevelSourceSystemVolume))
+        var runtime = N60DynamicsRuntime()
+        N60DynamicsRuntimeReset(&runtime)
+        for frame in 0..<(48_000 / 2) {
+            var left = Float(0.1 * sin(2 * Double.pi * 1_000 * Double(frame) / rate))
+            var right = left
+            N60DynamicsProcessCoreStereoFrameWithMasterGain(&runtime, snapshot, 1.0, &left, &right)
+        }
+        let t = N60DynamicsRuntimeTelemetry(&runtime)
+        XCTAssertLessThan(t.loudnessLowCompensationDB, 0)
+        XCTAssertGreaterThanOrEqual(t.loudnessLowCompensationDB, -0.501)
+        XCTAssertLessThan(t.loudnessHighCompensationDB, 0)
+        XCTAssertGreaterThanOrEqual(t.loudnessHighCompensationDB, -0.501)
+    }
+
+    func testPerBandLoudnessIntegratedSourceRespondsToProgramLevel() {
+        let rate = 48_000.0
+        var snapshot = N60DynamicsSnapshotMakeBypassed(rate)
+        XCTAssertTrue(N60DynamicsSnapshotSetPerBandLoudness(
+            &snapshot, rate, true, 1, 85, 12, 6, N60LoudnessLevelSourceIntegrated))
+        var runtime = N60DynamicsRuntime()
+        N60DynamicsRuntimeReset(&runtime)
+        for frame in 0..<(48_000 * 4) {
+            var left = Float(0.01 * sin(2 * Double.pi * 1_000 * Double(frame) / rate))
+            var right = left
+            N60DynamicsProcessCoreStereoFrameWithMasterGain(&runtime, snapshot, 1.0, &left, &right)
+        }
+        let t = N60DynamicsRuntimeTelemetry(&runtime)
+        XCTAssertLessThan(t.loudnessEstimatedPhons, 85)
+        XCTAssertGreaterThan(t.loudnessLowCompensationDB, 0)
+        XCTAssertGreaterThan(t.loudnessHighCompensationDB, 0)
+        XCTAssertLessThanOrEqual(t.loudnessLowCompensationDB, 12.01)
+    }
+
+    func testDeHarshDisabledIsTransparentAndEnabledReducesHighFrequencyMoreThanLow() {
+        let rate = 48_000.0
+        var disabled = N60DynamicsSnapshotMakeBypassed(rate)
+        XCTAssertTrue(N60DynamicsSnapshotSetDeHarsh(&disabled, rate, false, -6, 3_500))
+        var dryRuntime = N60DynamicsRuntime()
+        N60DynamicsRuntimeReset(&dryRuntime)
+        for frame in 0..<20_000 {
+            let input = Float(0.3 * sin(2 * Double.pi * 8_000 * Double(frame) / rate))
+            var left = input
+            var right = -input
+            N60DynamicsProcessCoreStereoFrame(&dryRuntime, disabled, &left, &right)
+            XCTAssertEqual(left, input, accuracy: 0.000_001)
+            XCTAssertEqual(right, -input, accuracy: 0.000_001)
+        }
+
+        func measuredGain(frequency: Double) -> Double {
+            var snapshot = N60DynamicsSnapshotMakeBypassed(rate)
+            XCTAssertTrue(N60DynamicsSnapshotSetDeHarsh(&snapshot, rate, true, -6, 3_500))
+            var runtime = N60DynamicsRuntime()
+            N60DynamicsRuntimeReset(&runtime)
+            var inputSq = 0.0, outputSq = 0.0
+            for frame in 0..<48_000 {
+                let input = Float(0.25 * sin(2 * Double.pi * frequency * Double(frame) / rate))
+                var left = input
+                var right = input
+                N60DynamicsProcessCoreStereoFrame(&runtime, snapshot, &left, &right)
+                if frame >= 24_000 {
+                    inputSq += Double(input * input)
+                    outputSq += Double(left * left)
+                }
+            }
+            return 20 * log10(sqrt(outputSq / inputSq))
+        }
+        let lowDB = measuredGain(frequency: 1_000)
+        let highDB = measuredGain(frequency: 8_000)
+        XCTAssertGreaterThan(lowDB, -1.5)
+        XCTAssertLessThan(highDB, -3.5)
+        XCTAssertLessThan(highDB, lowDB - 2.5)
+    }
+
+    func testPR33PerBandLoudnessAndDeHarshValidThrough384k() throws {
+        for rate in [48_000.0, 96_000.0, 192_000.0, 384_000.0] {
+            var config = DynamicsConfiguration()
+            config.loudnessContour.enabled = true
+            config.loudnessContour.levelSource = .integrated
+            config.loudnessContour.referencePhons = 90
+            config.loudnessContour.maxBoostDB = 20
+            config.loudnessContour.maxCutDB = 6
+            config.deHarsh.enabled = true
+            config.deHarsh.amountDB = -6
+            config.deHarsh.frequencyHz = 3_500
+            var snapshot = try config.makeSnapshot(sampleRate: rate)
+            XCTAssertTrue(N60DynamicsSnapshotIsValid(snapshot))
+            var runtime = N60DynamicsRuntime()
+            N60DynamicsRuntimeReset(&runtime)
+            for frame in 0..<10_000 {
+                var left = Float(0.1 * sin(2 * Double.pi * 1_000 * Double(frame) / rate))
+                var right = left * 0.7
+                N60DynamicsProcessCoreStereoFrameWithMasterGain(&runtime, snapshot, 0.25, &left, &right)
+                XCTAssertTrue(left.isFinite && right.isFinite)
+            }
+        }
+    }
+
 }

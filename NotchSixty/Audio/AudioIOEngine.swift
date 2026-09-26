@@ -52,6 +52,43 @@ enum EQPhaseMode: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+struct EQBandDynamicConfiguration: Equatable, Sendable {
+    static let thresholdRange = -60.0...0.0
+    static let ratioRange = 1.0...10.0
+    static let rangeRange = -24.0...0.0
+    static let attackRange = 1.0...100.0
+    static let releaseRange = 10.0...1_000.0
+    static let boostThresholdRange = -60.0...0.0
+    static let boostRatioRange = 1.0...10.0
+    static let maxBoostRange = 0.0...12.0
+    static let rmsWindowRange = 5.0...200.0
+
+    var enabled = false
+    var thresholdDB = -24.0
+    var ratio = 2.0
+    var rangeDB = -24.0
+    var attackMs = 10.0
+    var releaseMs = 100.0
+    var direction: DynamicEQDirection = .cutOnly
+    var boostThresholdDB = -40.0
+    var boostRatio = 2.0
+    var maxBoostDB = 6.0
+    var detectorMode: DynamicEQDetectorMode = .peak
+    var rmsWindowMs = 50.0
+
+    var isValid: Bool {
+        thresholdDB.isFinite && Self.thresholdRange.contains(thresholdDB)
+            && ratio.isFinite && Self.ratioRange.contains(ratio)
+            && rangeDB.isFinite && Self.rangeRange.contains(rangeDB)
+            && attackMs.isFinite && Self.attackRange.contains(attackMs)
+            && releaseMs.isFinite && Self.releaseRange.contains(releaseMs)
+            && boostThresholdDB.isFinite && Self.boostThresholdRange.contains(boostThresholdDB)
+            && boostRatio.isFinite && Self.boostRatioRange.contains(boostRatio)
+            && maxBoostDB.isFinite && Self.maxBoostRange.contains(maxBoostDB)
+            && rmsWindowMs.isFinite && Self.rmsWindowRange.contains(rmsWindowMs)
+    }
+}
+
 struct EQBand: Identifiable, Equatable, Sendable {
     let id: UUID
     var enabled: Bool
@@ -59,6 +96,7 @@ struct EQBand: Identifiable, Equatable, Sendable {
     var frequencyHz: Double
     var gainDB: Double
     var q: Double
+    var dynamic: EQBandDynamicConfiguration
 
     init(
         id: UUID = UUID(),
@@ -66,7 +104,8 @@ struct EQBand: Identifiable, Equatable, Sendable {
         type: EQFilterType = .peaking,
         frequencyHz: Double = 1_000,
         gainDB: Double = 0,
-        q: Double = 0.707
+        q: Double = 0.707,
+        dynamic: EQBandDynamicConfiguration = EQBandDynamicConfiguration()
     ) {
         self.id = id
         self.enabled = enabled
@@ -74,6 +113,7 @@ struct EQBand: Identifiable, Equatable, Sendable {
         self.frequencyHz = frequencyHz
         self.gainDB = gainDB
         self.q = q
+        self.dynamic = dynamic
     }
 }
 
@@ -301,6 +341,14 @@ struct EQConfiguration: Equatable, Sendable {
               band.q > 0 else {
             throw EQConfigurationError.invalidBand(index: index)
         }
+        if band.dynamic.enabled {
+            guard band.type == .peaking,
+                  DynamicEQBandConfiguration.frequencyRange.contains(band.frequencyHz),
+                  DynamicEQBandConfiguration.qRange.contains(band.q),
+                  band.dynamic.isValid else {
+                throw EQConfigurationError.invalidBand(index: index)
+            }
+        }
         return band.frequencyHz < sampleRate * 0.5
     }
 
@@ -344,6 +392,40 @@ struct EQConfiguration: Equatable, Sendable {
                     throw EQConfigurationError.invalidBand(index: modelIndex)
                 }
                 renderIndex += 1
+            }
+        }
+
+        if phaseMode == .minimumPhase && !bypassed {
+            let dynamicBands = bands.filter { $0.enabled && $0.type == .peaking && $0.dynamic.enabled }
+            if !dynamicBands.isEmpty {
+                guard N60DynamicsSnapshotSetDynamicEQEnabled(&graph.dynamics, true) else {
+                    throw DynamicsConfigurationError.invalidDynamicEQ
+                }
+                for (index, band) in dynamicBands.enumerated() {
+                    let dynamic = band.dynamic
+                    guard N60DynamicsSnapshotSetDynamicEQBand(
+                        &graph.dynamics,
+                        sampleRate,
+                        UInt32(index),
+                        true,
+                        band.frequencyHz,
+                        Float(band.q),
+                        0.0,
+                        Float(dynamic.thresholdDB),
+                        Float(dynamic.ratio),
+                        Float(dynamic.rangeDB),
+                        Float(dynamic.attackMs),
+                        Float(dynamic.releaseMs),
+                        dynamic.direction.cType,
+                        Float(dynamic.boostThresholdDB),
+                        Float(dynamic.boostRatio),
+                        Float(dynamic.maxBoostDB),
+                        dynamic.detectorMode.cType,
+                        Float(dynamic.rmsWindowMs)
+                    ) else {
+                        throw EQConfigurationError.invalidBand(index: index)
+                    }
+                }
             }
         }
 
@@ -871,6 +953,14 @@ final class AudioIOEngine: ObservableObject {
                       band.q.isFinite,
                       band.q > 0 else {
                     throw EQConfigurationError.invalidBand(index: index)
+                }
+                if band.dynamic.enabled {
+                    guard band.type == .peaking,
+                          DynamicEQBandConfiguration.frequencyRange.contains(band.frequencyHz),
+                          DynamicEQBandConfiguration.qRange.contains(band.q),
+                          band.dynamic.isValid else {
+                        throw EQConfigurationError.invalidBand(index: index)
+                    }
                 }
             }
         }
