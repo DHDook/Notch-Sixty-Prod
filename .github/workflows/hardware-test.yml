@@ -1,4 +1,5 @@
 name: Hardware Test DMG
+# PR34 Phase E hardware-acceptance trigger. Workflow-only change; no product source modification.
 
 on:
   workflow_dispatch:
