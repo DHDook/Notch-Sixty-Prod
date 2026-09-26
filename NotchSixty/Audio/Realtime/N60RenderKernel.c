@@ -1309,7 +1309,7 @@ N60RenderKernelDiagnostics N60RenderKernelGetDiagnostics(const N60RenderKernel *
         diagnostics.multibandCompressorEnabled = context.snapshot.dynamics.multibandCompressor.enabled;
         diagnostics.multibandLowMidFrequencyHz = context.snapshot.dynamics.multibandCompressor.lowMidFrequencyHz;
         diagnostics.multibandMidHighFrequencyHz = context.snapshot.dynamics.multibandCompressor.midHighFrequencyHz;
-        diagnostics.multibandTopology = context.snapshot.dynamics.multibandCompressor.topology;
+        diagnostics.multibandTopology = context.snapshot.dynamics.multibandCompressor.lowTopology;
         diagnostics.compressorEnabled = context.snapshot.dynamics.compressor.enabled;
         diagnostics.expanderEnabled = context.snapshot.dynamics.expander.enabled;
         diagnostics.pauseGateEnabled = context.snapshot.dynamics.pauseGate.enabled;

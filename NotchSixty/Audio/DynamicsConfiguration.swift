@@ -380,15 +380,30 @@ struct LoudnessContourConfiguration: Equatable, Sendable {
 struct DeEsserConfiguration: Equatable, Sendable {
     static let frequencyRange = 2_000.0...10_000.0
     static let thresholdRange = -60.0...0.0
+    static let ratioRange = 1.0...20.0
+    static let rangeRange = -24.0...0.0
+    static let detectionQRange = 0.5...8.0
+    static let attackRange = 0.1...100.0
+    static let releaseRange = 10.0...1_000.0
 
     var enabled = false
     var frequencyHz = 6_500.0
     var thresholdDB = -24.0
+    var ratio = 4.0
+    var rangeDB = -24.0
+    var detectionQ = 2.0
+    var attackMs = 1.0
+    var releaseMs = 50.0
     var dynamicEQMode = true
 
     func validate() throws {
         guard frequencyHz.isFinite, Self.frequencyRange.contains(frequencyHz),
-              thresholdDB.isFinite, Self.thresholdRange.contains(thresholdDB) else {
+              thresholdDB.isFinite, Self.thresholdRange.contains(thresholdDB),
+              ratio.isFinite, Self.ratioRange.contains(ratio),
+              rangeDB.isFinite, Self.rangeRange.contains(rangeDB),
+              detectionQ.isFinite, Self.detectionQRange.contains(detectionQ),
+              attackMs.isFinite, Self.attackRange.contains(attackMs),
+              releaseMs.isFinite, Self.releaseRange.contains(releaseMs) else {
             throw DynamicsConfigurationError.invalidDeEsser
         }
     }
@@ -418,27 +433,75 @@ struct MultibandCompressorConfiguration: Equatable, Sendable {
     static let lowMidFrequencyRange = 40.0...250.0
     static let midHighFrequencyRange = 1_000.0...8_000.0
     static let thresholdRange = -60.0...0.0
+    static let ratioRange = 1.0...20.0
+    static let attackRange = 1.0...200.0
+    static let releaseRange = 10.0...1_000.0
+    static let kneeRange = 0.0...20.0
+    static let sidechainRange = 0.0...300.0
+    static let makeupRange = -12.0...12.0
 
     var enabled = false
     var lowMidFrequencyHz = 120.0
     var midHighFrequencyHz = 3_500.0
-    var slope: MultibandSlope = .gentle
+    var lowMidSlope: MultibandSlope = .gentle
+    var midHighSlope: MultibandSlope = .gentle
     var lowThresholdDB = -18.0
     var midThresholdDB = -18.0
     var highThresholdDB = -18.0
+    var lowRatio = 3.0
+    var midRatio = 3.0
+    var highRatio = 3.0
+    var lowAttackMs = 10.0
+    var midAttackMs = 10.0
+    var highAttackMs = 10.0
+    var lowReleaseMs = 150.0
+    var midReleaseMs = 150.0
+    var highReleaseMs = 150.0
+    var lowKneeDB = 6.0
+    var midKneeDB = 6.0
+    var highKneeDB = 6.0
+    var lowSidechainHighPassHz = 0.0
+    var midSidechainHighPassHz = 0.0
+    var highSidechainHighPassHz = 0.0
+    var lowMakeupGainDB = 0.0
+    var midMakeupGainDB = 0.0
+    var highMakeupGainDB = 0.0
+
+    // Compatibility convenience for the previous shared slope control.
+    var slope: MultibandSlope {
+        get { lowMidSlope }
+        set { lowMidSlope = newValue; midHighSlope = newValue }
+    }
 
     func validate() throws {
-        guard lowMidFrequencyHz.isFinite,
-              Self.lowMidFrequencyRange.contains(lowMidFrequencyHz),
-              midHighFrequencyHz.isFinite,
-              Self.midHighFrequencyRange.contains(midHighFrequencyHz),
+        let thresholds = [lowThresholdDB, midThresholdDB, highThresholdDB]
+        let ratios = [lowRatio, midRatio, highRatio]
+        let attacks = [lowAttackMs, midAttackMs, highAttackMs]
+        let releases = [lowReleaseMs, midReleaseMs, highReleaseMs]
+        let knees = [lowKneeDB, midKneeDB, highKneeDB]
+        let sidechains = [lowSidechainHighPassHz, midSidechainHighPassHz, highSidechainHighPassHz]
+        let makeups = [lowMakeupGainDB, midMakeupGainDB, highMakeupGainDB]
+        guard lowMidFrequencyHz.isFinite, Self.lowMidFrequencyRange.contains(lowMidFrequencyHz),
+              midHighFrequencyHz.isFinite, Self.midHighFrequencyRange.contains(midHighFrequencyHz),
               lowMidFrequencyHz < midHighFrequencyHz,
-              lowThresholdDB.isFinite, Self.thresholdRange.contains(lowThresholdDB),
-              midThresholdDB.isFinite, Self.thresholdRange.contains(midThresholdDB),
-              highThresholdDB.isFinite, Self.thresholdRange.contains(highThresholdDB) else {
+              thresholds.allSatisfy({ $0.isFinite && Self.thresholdRange.contains($0) }),
+              ratios.allSatisfy({ $0.isFinite && Self.ratioRange.contains($0) }),
+              attacks.allSatisfy({ $0.isFinite && Self.attackRange.contains($0) }),
+              releases.allSatisfy({ $0.isFinite && Self.releaseRange.contains($0) }),
+              knees.allSatisfy({ $0.isFinite && Self.kneeRange.contains($0) }),
+              sidechains.allSatisfy({ $0.isFinite && Self.sidechainRange.contains($0) }),
+              makeups.allSatisfy({ $0.isFinite && Self.makeupRange.contains($0) }) else {
             throw DynamicsConfigurationError.invalidMultibandCompressor
         }
     }
+}
+
+enum CompressorTopology: String, CaseIterable, Identifiable, Sendable {
+    case feedForward
+    case feedBack
+    var id: String { rawValue }
+    var displayName: String { self == .feedForward ? "Feed-Forward" : "Feed-Back" }
+    var cType: N60CompressorTopology { self == .feedForward ? N60CompressorTopologyFeedForward : N60CompressorTopologyFeedBack }
 }
 
 struct CompressorConfiguration: Equatable, Sendable {
@@ -448,6 +511,7 @@ struct CompressorConfiguration: Equatable, Sendable {
     static let attackRange = 0.05...1_000.0
     static let releaseRange = 1.0...5_000.0
     static let makeupRange = -24.0...24.0
+    static let sidechainHighPassRange = 0.0...300.0
 
     var enabled = false
     var thresholdDB = -16.0
@@ -456,6 +520,9 @@ struct CompressorConfiguration: Equatable, Sendable {
     var attackMs = 25.0
     var releaseMs = 150.0
     var makeupGainDB = 0.0
+    var topology: CompressorTopology = .feedForward
+    var programDependentRelease = false
+    var sidechainHighPassHz = 0.0
 
     func validate() throws {
         guard thresholdDB.isFinite, Self.thresholdRange.contains(thresholdDB),
@@ -463,7 +530,8 @@ struct CompressorConfiguration: Equatable, Sendable {
               kneeWidthDB.isFinite, Self.kneeRange.contains(kneeWidthDB),
               attackMs.isFinite, Self.attackRange.contains(attackMs),
               releaseMs.isFinite, Self.releaseRange.contains(releaseMs),
-              makeupGainDB.isFinite, Self.makeupRange.contains(makeupGainDB) else {
+              makeupGainDB.isFinite, Self.makeupRange.contains(makeupGainDB),
+              sidechainHighPassHz.isFinite, Self.sidechainHighPassRange.contains(sidechainHighPassHz) else {
             throw DynamicsConfigurationError.invalidCompressor
         }
     }
@@ -700,26 +768,36 @@ struct DynamicsConfiguration: Equatable, Sendable {
             Float(loudnessMatch.releaseSeconds)
         ) else { throw DynamicsConfigurationError.invalidLoudnessMatch }
         guard N60DynamicsSnapshotSetLoudnessContour(&snapshot, sampleRate, loudnessContour.enabled, Float(loudnessContour.strength)) else { throw DynamicsConfigurationError.invalidLoudnessContour }
-        guard N60DynamicsSnapshotSetDeEsser(
+        guard N60DynamicsSnapshotSetDeEsserAdvanced(
             &snapshot,
             sampleRate,
             deEsser.enabled,
             deEsser.frequencyHz,
             Float(deEsser.thresholdDB),
+            Float(deEsser.ratio),
+            Float(deEsser.rangeDB),
+            Float(deEsser.detectionQ),
+            Float(deEsser.attackMs),
+            Float(deEsser.releaseMs),
             deEsser.dynamicEQMode
         ) else { throw DynamicsConfigurationError.invalidDeEsser }
-        guard N60DynamicsSnapshotSetMultibandCompressor(
+        guard N60DynamicsSnapshotSetMultibandCompressorAdvanced(
             &snapshot,
             sampleRate,
             multibandCompressor.enabled,
             multibandCompressor.lowMidFrequencyHz,
             multibandCompressor.midHighFrequencyHz,
-            multibandCompressor.slope.cType,
-            Float(multibandCompressor.lowThresholdDB),
-            Float(multibandCompressor.midThresholdDB),
-            Float(multibandCompressor.highThresholdDB)
+            multibandCompressor.lowMidSlope.cType,
+            multibandCompressor.midHighSlope.cType,
+            Float(multibandCompressor.lowThresholdDB), Float(multibandCompressor.midThresholdDB), Float(multibandCompressor.highThresholdDB),
+            Float(multibandCompressor.lowRatio), Float(multibandCompressor.midRatio), Float(multibandCompressor.highRatio),
+            Float(multibandCompressor.lowAttackMs), Float(multibandCompressor.midAttackMs), Float(multibandCompressor.highAttackMs),
+            Float(multibandCompressor.lowReleaseMs), Float(multibandCompressor.midReleaseMs), Float(multibandCompressor.highReleaseMs),
+            Float(multibandCompressor.lowKneeDB), Float(multibandCompressor.midKneeDB), Float(multibandCompressor.highKneeDB),
+            Float(multibandCompressor.lowSidechainHighPassHz), Float(multibandCompressor.midSidechainHighPassHz), Float(multibandCompressor.highSidechainHighPassHz),
+            Float(multibandCompressor.lowMakeupGainDB), Float(multibandCompressor.midMakeupGainDB), Float(multibandCompressor.highMakeupGainDB)
         ) else { throw DynamicsConfigurationError.invalidMultibandCompressor }
-        guard N60DynamicsSnapshotSetCompressor(
+        guard N60DynamicsSnapshotSetCompressorAdvanced(
             &snapshot,
             sampleRate,
             compressor.enabled,
@@ -728,7 +806,10 @@ struct DynamicsConfiguration: Equatable, Sendable {
             Float(compressor.kneeWidthDB),
             Float(compressor.attackMs),
             Float(compressor.releaseMs),
-            Float(compressor.makeupGainDB)
+            Float(compressor.makeupGainDB),
+            compressor.topology.cType,
+            compressor.programDependentRelease,
+            Float(compressor.sidechainHighPassHz)
         ) else { throw DynamicsConfigurationError.invalidCompressor }
         guard N60DynamicsSnapshotSetExpander(
             &snapshot,

@@ -113,14 +113,24 @@ typedef struct {
     N60BiquadCoefficients highShelf;
 } N60LoudnessContourSnapshot;
 
+typedef enum {
+    N60CompressorTopologyFeedForward = 0,
+    N60CompressorTopologyFeedBack = 1,
+} N60CompressorTopology;
+
 typedef struct {
     bool enabled;
+    N60CompressorTopology topology;
+    bool programDependentRelease;
     float thresholdDB;
     float ratio;
     float kneeWidthDB;
     float makeupGainDB;
     float attackCoefficient;
     float releaseCoefficient;
+    float releaseFastCoefficient;
+    float releaseSlowCoefficient;
+    N60BiquadCoefficients sidechainHighPass;
 } N60CompressorSnapshot;
 
 typedef struct {
@@ -138,6 +148,8 @@ typedef struct {
     double frequencyHz;
     float thresholdDB;
     float ratio;
+    float rangeDB;
+    float detectionQ;
     float attackCoefficient;
     float releaseCoefficient;
     N60BiquadCoefficients sidechainHighPass;
@@ -148,13 +160,17 @@ typedef struct {
     bool enabled;
     double lowMidFrequencyHz;
     double midHighFrequencyHz;
-    N60CrossoverTopology topology;
-    uint32_t sectionCount;
+    N60CrossoverTopology lowTopology;
+    N60CrossoverTopology highTopology;
+    uint32_t lowSectionCount;
+    uint32_t highSectionCount;
     float thresholdDB[N60_MULTIBAND_BAND_COUNT];
-    float ratio;
-    float kneeWidthDB;
-    float attackCoefficient;
-    float releaseCoefficient;
+    float ratio[N60_MULTIBAND_BAND_COUNT];
+    float kneeWidthDB[N60_MULTIBAND_BAND_COUNT];
+    float makeupGainDB[N60_MULTIBAND_BAND_COUNT];
+    float attackCoefficient[N60_MULTIBAND_BAND_COUNT];
+    float releaseCoefficient[N60_MULTIBAND_BAND_COUNT];
+    N60BiquadCoefficients sidechainHighPass[N60_MULTIBAND_BAND_COUNT];
     N60BiquadCoefficients lowPass[N60_MAX_CROSSOVER_SECTIONS];
     N60BiquadCoefficients highPass[N60_MAX_CROSSOVER_SECTIONS];
 } N60MultibandCompressorSnapshot;
@@ -251,10 +267,14 @@ typedef struct {
     N60BiquadState deEsserLowPassLeft;
     N60BiquadState deEsserLowPassRight;
     float multibandGainDB[N60_MULTIBAND_BAND_COUNT];
+    N60BiquadState multibandSidechainLeft[N60_MULTIBAND_BAND_COUNT];
+    N60BiquadState multibandSidechainRight[N60_MULTIBAND_BAND_COUNT];
     N60BiquadState multibandLowPassLeft[N60_MAX_CROSSOVER_SECTIONS];
     N60BiquadState multibandLowPassRight[N60_MAX_CROSSOVER_SECTIONS];
     N60BiquadState multibandHighPassLeft[N60_MAX_CROSSOVER_SECTIONS];
     N60BiquadState multibandHighPassRight[N60_MAX_CROSSOVER_SECTIONS];
+    N60BiquadState compressorSidechainLeft;
+    N60BiquadState compressorSidechainRight;
     float compressorGainDB;
     float expanderGainDB;
     float pauseGateGain;
@@ -372,6 +392,20 @@ bool N60DynamicsSnapshotSetDeEsser(
     bool dynamicEQMode
 );
 
+bool N60DynamicsSnapshotSetDeEsserAdvanced(
+    N60DynamicsSnapshot * _Nonnull snapshot,
+    double sampleRate,
+    bool enabled,
+    double frequencyHz,
+    float thresholdDB,
+    float ratio,
+    float rangeDB,
+    float detectionQ,
+    float attackMs,
+    float releaseMs,
+    bool dynamicEQMode
+);
+
 bool N60DynamicsSnapshotSetMultibandCompressor(
     N60DynamicsSnapshot * _Nonnull snapshot,
     double sampleRate,
@@ -384,6 +418,37 @@ bool N60DynamicsSnapshotSetMultibandCompressor(
     float highThresholdDB
 );
 
+bool N60DynamicsSnapshotSetMultibandCompressorAdvanced(
+    N60DynamicsSnapshot * _Nonnull snapshot,
+    double sampleRate,
+    bool enabled,
+    double lowMidFrequencyHz,
+    double midHighFrequencyHz,
+    N60CrossoverTopology lowTopology,
+    N60CrossoverTopology highTopology,
+    float lowThresholdDB,
+    float midThresholdDB,
+    float highThresholdDB,
+    float lowRatio,
+    float midRatio,
+    float highRatio,
+    float lowAttackMs,
+    float midAttackMs,
+    float highAttackMs,
+    float lowReleaseMs,
+    float midReleaseMs,
+    float highReleaseMs,
+    float lowKneeDB,
+    float midKneeDB,
+    float highKneeDB,
+    float lowSidechainHPFHz,
+    float midSidechainHPFHz,
+    float highSidechainHPFHz,
+    float lowMakeupDB,
+    float midMakeupDB,
+    float highMakeupDB
+);
+
 bool N60DynamicsSnapshotSetCompressor(
     N60DynamicsSnapshot * _Nonnull snapshot,
     double sampleRate,
@@ -394,6 +459,21 @@ bool N60DynamicsSnapshotSetCompressor(
     float attackMs,
     float releaseMs,
     float makeupGainDB
+);
+
+bool N60DynamicsSnapshotSetCompressorAdvanced(
+    N60DynamicsSnapshot * _Nonnull snapshot,
+    double sampleRate,
+    bool enabled,
+    float thresholdDB,
+    float ratio,
+    float kneeWidthDB,
+    float attackMs,
+    float releaseMs,
+    float makeupGainDB,
+    N60CompressorTopology topology,
+    bool programDependentRelease,
+    float sidechainHighPassHz
 );
 
 bool N60DynamicsSnapshotSetExpander(

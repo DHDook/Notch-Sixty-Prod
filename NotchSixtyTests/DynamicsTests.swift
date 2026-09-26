@@ -447,4 +447,78 @@ final class DynamicsTests: XCTestCase {
         XCTAssertLessThan(telemetry.loudnessShortTermLUFS, -60.0)
     }
 
+
+    func testPR32AdvancedCompressorSidechainAndTopologyAreFinite() {
+        for rate in [48_000.0, 96_000.0, 384_000.0] {
+            for topology in [N60CompressorTopologyFeedForward, N60CompressorTopologyFeedBack] {
+                var snapshot = N60DynamicsSnapshotMakeBypassed(rate)
+                XCTAssertTrue(N60DynamicsSnapshotSetCompressorAdvanced(
+                    &snapshot, rate, true, -24, 4, 6, 5, 200, 0,
+                    topology, true, 120
+                ))
+                var runtime = N60DynamicsRuntime()
+                N60DynamicsRuntimeReset(&runtime)
+                for frame in 0..<Int(rate * 0.1) {
+                    var left = Float(0.55 * sin(2 * Double.pi * 1000 * Double(frame) / rate))
+                    var right = left * 0.5
+                    N60DynamicsProcessStereoFrame(&runtime, snapshot, &left, &right)
+                    XCTAssertTrue(left.isFinite && right.isFinite)
+                }
+            }
+        }
+    }
+
+    func testPR32DeEsserRangeBoundsReduction() {
+        let rate = 48_000.0
+        var snapshot = N60DynamicsSnapshotMakeBypassed(rate)
+        XCTAssertTrue(N60DynamicsSnapshotSetDeEsserAdvanced(
+            &snapshot, rate, true, 6_500, -50, 20, -6, 2, 1, 50, false
+        ))
+        var runtime = N60DynamicsRuntime()
+        N60DynamicsRuntimeReset(&runtime)
+        for frame in 0..<48_000 {
+            var left = Float(0.7 * sin(2 * Double.pi * 6500 * Double(frame) / rate))
+            var right = left
+            N60DynamicsProcessStereoFrame(&runtime, snapshot, &left, &right)
+        }
+        XCTAssertLessThanOrEqual(N60DynamicsRuntimeTelemetry(&runtime).deEsserGainReductionDB, 6.05)
+    }
+
+    func testPR32MultibandIndependentControlsStayFiniteAndLinked() {
+        let rate = 96_000.0
+        var snapshot = N60DynamicsSnapshotMakeBypassed(rate)
+        XCTAssertTrue(N60DynamicsSnapshotSetMultibandCompressorAdvanced(
+            &snapshot, rate, true, 120, 3_500,
+            N60CrossoverTopologyLinkwitzRiley24, N60CrossoverTopologyLinkwitzRiley48,
+            -24, -20, -18,
+            2, 4, 8,
+            40, 20, 5,
+            300, 150, 50,
+            3, 6, 9,
+            0, 80, 150,
+            0, 1, -1
+        ))
+        var runtime = N60DynamicsRuntime()
+        N60DynamicsRuntimeReset(&runtime)
+        for frame in 0..<48_000 {
+            let x = Float(0.25 * sin(2 * Double.pi * 6000 * Double(frame) / rate))
+            var left = x
+            var right = x * 0.5
+            N60DynamicsProcessStereoFrame(&runtime, snapshot, &left, &right)
+            XCTAssertTrue(left.isFinite && right.isFinite)
+        }
+    }
+
+    func testPR32ControlRangesRejectInvalidValues() {
+        var config = DynamicsConfiguration()
+        config.compressor.sidechainHighPassHz = 301
+        XCTAssertThrowsError(try config.makeSnapshot(sampleRate: 96_000))
+        config = DynamicsConfiguration()
+        config.deEsser.detectionQ = 8.1
+        XCTAssertThrowsError(try config.makeSnapshot(sampleRate: 96_000))
+        config = DynamicsConfiguration()
+        config.multibandCompressor.highRatio = 21
+        XCTAssertThrowsError(try config.makeSnapshot(sampleRate: 96_000))
+    }
+
 }
