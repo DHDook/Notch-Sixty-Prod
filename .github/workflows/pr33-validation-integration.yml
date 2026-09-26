@@ -1,0 +1,43 @@
+name: PR33 Validation Integration
+
+on:
+  push:
+    branches:
+      - feature/residual-dynamics-parity
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: xcode-27
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v7
+        with:
+          ref: feature/residual-dynamics-parity
+          fetch-depth: 0
+
+      - name: Apply PR33 validation UI
+        run: python3 .github/scripts/pr33_validation_ui.py
+
+      - name: Run full test suite
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          test
+
+      - name: Commit validation UI and clean temporary helpers
+        run: |
+          rm -f .github/scripts/pr33_validation_ui.py
+          rm -f .github/workflows/pr33-validation-integration.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Add PR33 validation UI and provenance closure"
+          git push origin HEAD:feature/residual-dynamics-parity
