@@ -20,6 +20,9 @@ jobs:
       - name: Apply Mixed Phase integration
         run: python3 ci/pr34_apply_phase_c_mixed.py
 
+      - name: Fix Mixed Phase diagnostics bridge
+        run: python3 ci/pr34_fix_mixed_diagnostics_bridge.py
+
       - name: Validate Band Pass DSP
         run: |
           clang -std=c11 -Wall -Wextra -Werror ci/validate_pr34_bandpass.c -o /tmp/validate-pr34-bandpass
