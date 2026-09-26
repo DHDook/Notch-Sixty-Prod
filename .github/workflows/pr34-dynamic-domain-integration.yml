@@ -37,9 +37,7 @@ jobs:
               text = text.replace(old, new, 1)
 
           old = "replace_once(stereo, old_validation, new_validation)"
-          new = '''stereo_old_validation = "".join(("    " + line if line.strip() else line) for line in old_validation.splitlines(keepends=True))
-stereo_new_validation = "".join(("    " + line if line.strip() else line) for line in new_validation.splitlines(keepends=True))
-replace_once(stereo, stereo_old_validation, stereo_new_validation)'''
+          new = "stereo_old_validation = ''.join(('    ' + line if line.strip() else line) for line in old_validation.splitlines(keepends=True))\nstereo_new_validation = ''.join(('    ' + line if line.strip() else line) for line in new_validation.splitlines(keepends=True))\nreplace_once(stereo, stereo_old_validation, stereo_new_validation)"
           if old in text:
               text = text.replace(old, new, 1)
 
