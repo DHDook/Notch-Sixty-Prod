@@ -17,8 +17,8 @@ jobs:
         with:
           ref: feature/dsp-optimization-parity-audit
 
-      - name: Apply final per-band FIR validation cleanup
-        run: python3 ci/pr34_fix_fir_pretransport_validation.py
+      - name: Apply Mixed Phase integration
+        run: python3 ci/pr34_apply_phase_c_mixed.py
 
       - name: Validate Band Pass DSP
         run: |
@@ -50,6 +50,11 @@ jobs:
           clang -std=c11 -Wall -Wextra -Werror ci/validate_pr34_per_band_fir.c NotchSixty/Audio/Realtime/N60Convolution.c -lm -o /tmp/validate-pr34-per-band-fir
           /tmp/validate-pr34-per-band-fir
 
+      - name: Validate Mixed Phase DSP
+        run: |
+          clang -std=c11 -Wall -Wextra -Werror ci/validate_pr34_mixed_phase.c -lm -o /tmp/validate-pr34-mixed-phase
+          /tmp/validate-pr34-mixed-phase
+
       - name: Build
         run: >-
           xcodebuild
@@ -72,7 +77,7 @@ jobs:
           ENABLE_TESTABILITY=YES
           test
 
-      - name: Commit validated FIR cleanup
+      - name: Commit Mixed Phase integration
         run: |
           git diff --check
           if git diff --quiet; then
@@ -81,6 +86,6 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add NotchSixty/Audio/AudioIOEngine.swift NotchSixtyTests/NotchSixtyTests.swift
-          git commit -m "Close PR34 per-band FIR validation parity"
+          git add NotchSixty/Audio/Realtime/N60MixedPhase.h NotchSixty/Audio/Realtime/N60RenderKernel.h NotchSixty/Audio/Realtime/N60RenderKernel.c NotchSixty/Audio/AudioIOEngine.swift NotchSixty/Audio/StereoPlaybackControl.swift NotchSixty/ContentView.swift NotchSixtyTests/NotchSixtyTests.swift
+          git commit -m "Close PR34 Mixed Phase EQ parity"
           git push origin HEAD:feature/dsp-optimization-parity-audit
