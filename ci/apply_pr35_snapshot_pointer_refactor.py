@@ -134,7 +134,24 @@ def dynamics_dynamic_extra(region: str) -> str:
 def patch_dynamics_source() -> None:
     path = ROOT / "NotchSixty/Audio/Realtime/N60Dynamics.c"
     text = path.read_text()
-    names = (
+
+    # These helpers are invoked by the public per-frame core stage. Keeping them
+    # by-value would continue copying the complete Dynamics snapshot several
+    # times per rendered frame even after the public ABI became pointer-based.
+    internal_helpers = (
+        "process_stereo_mode",
+        "process_stereo_widener",
+        "process_loudness_match",
+        "process_loudness_contour",
+        "process_dialogue_leveler",
+        "process_de_harsh",
+        "process_de_esser",
+        "process_multiband_compressor",
+    )
+    for name in internal_helpers:
+        text = transform_function(text, name, "N60DynamicsSnapshot")
+
+    public_names = (
         "N60DynamicsProcessPreEQStereoFrame",
         "N60DynamicsProcessDynamicEQStereoFrame",
         "N60DynamicsProcessCoreStereoFrame",
@@ -142,7 +159,7 @@ def patch_dynamics_source() -> None:
         "N60DynamicsProcessPauseGateStereoFrame",
         "N60DynamicsProcessStereoFrame",
     )
-    for name in names:
+    for name in public_names:
         text = transform_function(
             text,
             name,
@@ -182,6 +199,16 @@ def patch_render_kernel() -> None:
     path.write_text(text)
 
 
+def patch_dynamic_domain_validator() -> None:
+    path = ROOT / "ci/validate_pr34_dynamic_domains.c"
+    text = path.read_text()
+    old = "N60DynamicEQProcessStereoFrame(runtime, snapshot, &left, &right);"
+    new = "N60DynamicEQProcessStereoFrame(runtime, &snapshot, &left, &right);"
+    if new not in text:
+        text = replace_once(text, old, new, "PR34 dynamic domain validator call")
+    path.write_text(text)
+
+
 def patch_swift_tests() -> None:
     tests = ROOT / "NotchSixtyTests"
     function_names = (
@@ -211,6 +238,7 @@ def main() -> None:
     patch_dynamics_header()
     patch_dynamics_source()
     patch_render_kernel()
+    patch_dynamic_domain_validator()
     patch_swift_tests()
 
 
