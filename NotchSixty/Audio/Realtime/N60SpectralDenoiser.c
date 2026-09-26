@@ -420,7 +420,8 @@ static void update_profile(
     const float *power,
     uint32_t binCount,
     double sampleRate,
-    uint32_t hopSize
+    uint32_t hopSize,
+    float adaptiveCeilingPower
 ) {
     if (runtime->adaptiveBlockTargetFrames == 0u) {
         runtime->adaptiveBlockTargetFrames = (uint32_t)ceil(sampleRate * N60_DENOISER_ADAPTIVE_BLOCK_SECONDS / (double)hopSize);
@@ -445,13 +446,22 @@ static void update_profile(
 
     if (runtime->capturedProfile) return;
 
+    // Adaptive learning is deliberately conservative: bins above the user-visible
+    // threshold are treated as likely program content and are never promoted into
+    // the noise model. Explicit Capture is the opt-in path for learning a known
+    // noise-only passage and intentionally does not use this gate.
     for (uint32_t bin = 0; bin < binCount; ++bin) {
-        runtime->adaptiveMinimum[bin] = fminf(runtime->adaptiveMinimum[bin], power[bin]);
+        if (power[bin] <= adaptiveCeilingPower) {
+            runtime->adaptiveMinimum[bin] = fminf(runtime->adaptiveMinimum[bin], power[bin]);
+        }
     }
     runtime->adaptiveFramesInBlock += 1u;
     if (runtime->adaptiveFramesInBlock < runtime->adaptiveBlockTargetFrames) return;
 
+    bool learnedAnyBin = false;
     for (uint32_t bin = 0; bin < binCount; ++bin) {
+        if (runtime->adaptiveMinimum[bin] == FLT_MAX) continue;
+        learnedAnyBin = true;
         float candidate = fmaxf(runtime->adaptiveMinimum[bin], N60_DENOISER_EPSILON);
         if (runtime->adaptiveBlocksCompleted == 0u || runtime->noisePower[bin] <= 0.0f) {
             runtime->noisePower[bin] = candidate;
@@ -462,8 +472,10 @@ static void update_profile(
             runtime->noisePower[bin] = coefficient * previous + (1.0f - coefficient) * candidate;
         }
     }
-    runtime->adaptiveBlocksCompleted += 1u;
-    if (runtime->adaptiveBlocksCompleted >= N60_DENOISER_ADAPTIVE_READY_BLOCKS) runtime->profileReady = true;
+    if (learnedAnyBin) {
+        runtime->adaptiveBlocksCompleted += 1u;
+        if (runtime->adaptiveBlocksCompleted >= N60_DENOISER_ADAPTIVE_READY_BLOCKS) runtime->profileReady = true;
+    }
     reset_adaptive_minimum(runtime, binCount);
 }
 
@@ -510,10 +522,10 @@ static void process_spectral_frame(
         runtime->linkedPower[bin] = fmaxf(leftPower, rightPower);
     }
 
-    update_profile(runtime, runtime->linkedPower, binCount, sampleRate, snapshot.hopSize);
+    float thresholdPower = powf(10.0f, snapshot.thresholdDBFS / 10.0f);
+    update_profile(runtime, runtime->linkedPower, binCount, sampleRate, snapshot.hopSize, thresholdPower);
     update_noise_telemetry(runtime, binCount);
 
-    float thresholdPower = powf(10.0f, snapshot.thresholdDBFS / 10.0f);
     double weightedSuppression = 0.0;
     double weightedPower = 0.0;
     float maximumSuppression = 0.0f;

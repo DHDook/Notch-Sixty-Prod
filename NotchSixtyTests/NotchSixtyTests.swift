@@ -1049,3 +1049,85 @@ extension NotchSixtyTests {
         XCTAssertEqual(N60RenderKernelGetDiagnostics(kernel).denoiserLatencyFrames, 4096)
     }
 }
+
+
+extension NotchSixtyTests {
+    func testSpectralDenoiserAdaptiveLearningDoesNotTreatLoudToneAsNoise() throws {
+        guard let runtime = N60SpectralDenoiserCreate() else {
+            XCTFail("Unable to allocate spectral denoiser")
+            return
+        }
+        defer { N60SpectralDenoiserDestroy(runtime) }
+        var snapshot = N60SpectralDenoiserSnapshotMakeBypassed(48_000)
+        XCTAssertTrue(N60SpectralDenoiserSnapshotConfigure(
+            &snapshot, 48_000, true, N60DenoiserTuningAggressive, N60DenoiserQualityQuality,
+            1.0, -72, false, 0, 150, 0, N60DenoiserProfileCommandNone
+        ))
+
+        let frequency = 3_000.0
+        var inputDot = 0.0
+        var outputDot = 0.0
+        var referencePower = 0.0
+        let totalFrames = 48_000 * 4
+        for frame in 0..<totalFrames {
+            let phase = 2.0 * Double.pi * frequency * Double(frame) / 48_000.0
+            let source = Float(0.20 * sin(phase))
+            var left: Float = 0
+            var right: Float = 0
+            N60SpectralDenoiserProcessStereoFrame(runtime, snapshot, 48_000, source, source, &left, &right)
+            if frame > 48_000 * 3 {
+                let delayedPhase = 2.0 * Double.pi * frequency * Double(frame - Int(snapshot.latencyFrames)) / 48_000.0
+                let reference = sin(delayedPhase)
+                inputDot += 0.20 * reference * reference
+                outputDot += Double(left) * reference
+                referencePower += reference * reference
+            }
+        }
+        let inputAmplitude = inputDot / max(referencePower, 1.0e-20)
+        let outputAmplitude = outputDot / max(referencePower, 1.0e-20)
+        XCTAssertGreaterThan(outputAmplitude, inputAmplitude * 0.96,
+                             "Adaptive learning must not classify a clearly above-threshold program tone as stationary noise")
+    }
+
+    func testSpectralDenoiserProtectedRangeRemainsNearUnityWhileHighNoiseIsReduced() throws {
+        guard let runtime = N60SpectralDenoiserCreate() else {
+            XCTFail("Unable to allocate spectral denoiser")
+            return
+        }
+        defer { N60SpectralDenoiserDestroy(runtime) }
+        var snapshot = N60SpectralDenoiserSnapshotMakeBypassed(48_000)
+        XCTAssertTrue(N60SpectralDenoiserSnapshotConfigure(
+            &snapshot, 48_000, true, N60DenoiserTuningAggressive, N60DenoiserQualityQuality,
+            1.0, -42, true, 0, 200, 1, N60DenoiserProfileCommandCapture
+        ))
+
+        let lowHz = 93.75   // exact FFT bin for N=1024 at 48 kHz
+        let highHz = 6_000.0
+        let totalFrames = 48_000 * 4
+        var lowDot = 0.0
+        var highDot = 0.0
+        var basisPower = 0.0
+        for frame in 0..<totalFrames {
+            let low = 0.025 * sin(2.0 * Double.pi * lowHz * Double(frame) / 48_000.0)
+            let high = 0.025 * sin(2.0 * Double.pi * highHz * Double(frame) / 48_000.0)
+            let source = Float(low + high)
+            var left: Float = 0
+            var right: Float = 0
+            N60SpectralDenoiserProcessStereoFrame(runtime, snapshot, 48_000, source, source, &left, &right)
+            if frame > 48_000 * 3 {
+                let delayedFrame = Double(frame - Int(snapshot.latencyFrames))
+                let lowBasis = sin(2.0 * Double.pi * lowHz * delayedFrame / 48_000.0)
+                let highBasis = sin(2.0 * Double.pi * highHz * delayedFrame / 48_000.0)
+                lowDot += Double(left) * lowBasis
+                highDot += Double(left) * highBasis
+                basisPower += lowBasis * lowBasis
+            }
+        }
+        let lowAmplitude = lowDot / max(basisPower, 1.0e-20)
+        let highAmplitude = highDot / max(basisPower, 1.0e-20)
+        XCTAssertGreaterThan(lowAmplitude, 0.022,
+                             "The protected low-frequency band should remain close to unity")
+        XCTAssertLessThan(highAmplitude, lowAmplitude * 0.75,
+                          "An unprotected captured stationary component should be reduced relative to the protected band")
+    }
+}
