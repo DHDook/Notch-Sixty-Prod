@@ -1,4 +1,4 @@
-name: PR34 Band Pass Integration
+name: PR34 Integration Gate
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  integrate-band-pass:
+  integrate-pr34-slice:
     runs-on: xcode-27
     steps:
       - name: Check out branch
@@ -17,7 +17,7 @@ jobs:
         with:
           ref: feature/dsp-optimization-parity-audit
 
-      - name: Apply deterministic Swift integration
+      - name: Apply deterministic PR34 source edit
         run: python3 ci/pr34_apply_bandpass_integration.py
 
       - name: Validate Band Pass DSP
@@ -56,6 +56,6 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add NotchSixty/Audio/AudioIOEngine.swift NotchSixtyTests/NotchSixtyTests.swift
-          git commit -m "Integrate PR34 Band Pass through Swift EQ model"
+          git add NotchSixty/Audio/Realtime/N60Biquad.h NotchSixty/Audio/AudioIOEngine.swift NotchSixtyTests/NotchSixtyTests.swift
+          git commit -m "Integrate next PR34 parity slice"
           git push origin HEAD:feature/dsp-optimization-parity-audit
