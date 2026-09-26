@@ -20,7 +20,18 @@ jobs:
           fetch-depth: 0
 
       - name: Apply PR33 Slice 2
-        run: python3 .github/scripts/pr33_slice2.py
+        run: |
+          python3 .github/scripts/pr33_slice2.py
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('NotchSixtyTests/ProtectionTests.swift')
+          text = path.read_text()
+          old = 'let snapshot = try config.makeProtectionSnapshot(sampleRate: 384_000)\n        XCTAssertTrue(N60ProtectionSnapshotIsValid(&snapshot))'
+          new = 'var snapshot = try config.makeProtectionSnapshot(sampleRate: 384_000)\n        XCTAssertTrue(N60ProtectionSnapshotIsValid(&snapshot))'
+          if old not in text:
+              raise SystemExit('PR33 Slice 2 mutability-fix anchor not found')
+          path.write_text(text.replace(old, new, 1))
+          PY
 
       - name: Validate patch
         run: |
