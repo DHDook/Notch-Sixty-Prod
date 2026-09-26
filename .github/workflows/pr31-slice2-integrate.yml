@@ -6,6 +6,7 @@ on:
       - feature/noise-hum-suppression
     paths:
       - '.github/scripts/pr31_slice2.py'
+      - '.github/scripts/pr31_slice2_fix.py'
       - '.github/workflows/pr31-slice2-integrate.yml'
 
 permissions:
@@ -22,6 +23,9 @@ jobs:
       - name: Apply PR31 Slice 2
         run: python3 .github/scripts/pr31_slice2.py
 
+      - name: Apply diagnostics bridge fix
+        run: python3 .github/scripts/pr31_slice2_fix.py
+
       - name: Run full test suite
         run: >-
           xcodebuild
@@ -35,7 +39,7 @@ jobs:
 
       - name: Commit PR31 Slice 2 and clean helpers
         run: |
-          rm -f .github/scripts/pr31_slice2.py .github/workflows/pr31-slice2-integrate.yml
+          rm -f .github/scripts/pr31_slice2.py .github/scripts/pr31_slice2_fix.py .github/workflows/pr31-slice2-integrate.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
