@@ -26,6 +26,7 @@ typedef enum {
     N60BiquadFilterTypeAllPass = 6,
     N60BiquadFilterTypeBandPass = 7,
     N60BiquadFilterTypePeakingConstantQ = 8,
+    N60BiquadFilterTypeLinkwitzTransform = 9,
 } N60BiquadFilterType;
 
 typedef struct {
@@ -224,6 +225,49 @@ static inline bool N60BiquadDesign(
     if (!N60BiquadCoefficientsAreFinite(normalized)) {
         return false;
     }
+    *coefficients = normalized;
+    return true;
+}
+
+static inline bool N60BiquadDesignLinkwitzTransform(
+    double sampleRate,
+    double f0Hz,
+    double q0,
+    double fpHz,
+    double qp,
+    N60BiquadCoefficients * _Nonnull coefficients
+) {
+    if (coefficients == NULL
+        || !isfinite(sampleRate) || sampleRate <= 0.0
+        || !isfinite(f0Hz) || f0Hz <= 0.0 || f0Hz >= sampleRate * 0.5
+        || !isfinite(fpHz) || fpHz <= 0.0 || fpHz >= sampleRate * 0.5
+        || !isfinite(q0) || q0 <= 0.0
+        || !isfinite(qp) || qp <= 0.0) {
+        return false;
+    }
+
+    // Linkwitz's published transform cancels the original sealed-box pole pair
+    // (f0,Q0) with zeros and installs a target pole pair (fp,Qp). Pre-warp both
+    // natural frequencies, then apply the bilinear transform. The leading s^2
+    // terms are equal, preserving unity gain at high frequency.
+    double k = 2.0 * sampleRate;
+    double w0 = k * tan(M_PI * f0Hz / sampleRate);
+    double wp = k * tan(M_PI * fpHz / sampleRate);
+    double k2 = k * k;
+    double w02 = w0 * w0;
+    double wp2 = wp * wp;
+    double numeratorDamping = (w0 / q0) * k;
+    double denominatorDamping = (wp / qp) * k;
+
+    N60BiquadCoefficients normalized = N60BiquadNormalize(
+        k2 + numeratorDamping + w02,
+        2.0 * (w02 - k2),
+        k2 - numeratorDamping + w02,
+        k2 + denominatorDamping + wp2,
+        2.0 * (wp2 - k2),
+        k2 - denominatorDamping + wp2
+    );
+    if (!N60BiquadCoefficientsAreFinite(normalized)) return false;
     *coefficients = normalized;
     return true;
 }

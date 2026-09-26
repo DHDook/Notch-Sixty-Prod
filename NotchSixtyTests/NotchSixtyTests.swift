@@ -284,6 +284,38 @@ final class NotchSixtyTests: XCTestCase {
         XCTAssertEqual(projected[0].q, 2.0, accuracy: 0.000_001)
     }
 
+    func testLinkwitzTransformUsesAllFourPhysicalParametersInMinimumAndLinearPhase() throws {
+        let band = EQBand(
+            type: .linkwitzTransform,
+            frequencyHz: 50,
+            gainDB: 0,
+            q: 0.7,
+            linkwitzTargetHz: 32,
+            linkwitzTargetQ: 0.577
+        )
+        XCTAssertEqual(band.compiledCType, N60BiquadFilterTypeLinkwitzTransform)
+        XCTAssertNotNil(band.linkwitzCoefficients(sampleRate: 48_000))
+
+        let minimum = EQConfiguration(phaseMode: .minimumPhase, bands: [band])
+        let graph = try minimum.makeGraphSnapshot(sampleRate: 48_000)
+        XCTAssertEqual(graph.eqBandCount, 1)
+        XCTAssertEqual(graph.eqBands.0.type, N60BiquadFilterTypeLinkwitzTransform)
+        XCTAssertTrue(N60BiquadCoefficientsAreFinite(graph.eqBands.0.coefficients))
+
+        let linear = EQConfiguration(phaseMode: .linearPhase, bands: [band])
+        let projected = try linear.linearPhaseBands(sampleRate: 48_000)
+        XCTAssertEqual(projected.count, 1)
+        XCTAssertEqual(projected[0].type, N60BiquadFilterTypeLinkwitzTransform)
+        XCTAssertTrue(projected[0].usesPreparedCoefficients)
+        XCTAssertTrue(N60BiquadCoefficientsAreFinite(projected[0].preparedCoefficients))
+
+        var changedTarget = band
+        changedTarget.linkwitzTargetHz = 40
+        let first = band.linkwitzCoefficients(sampleRate: 48_000)!
+        let second = changedTarget.linkwitzCoefficients(sampleRate: 48_000)!
+        XCTAssertNotEqual(first.b0, second.b0)
+    }
+
     func testAllPassMaintainsUnityMagnitudeAcrossSupportedRates() {
         for rate in [44_100.0, 48_000.0, 96_000.0, 192_000.0, 384_000.0] {
             for tone in [100.0, 1_000.0, min(10_000.0, rate * 0.20)] {

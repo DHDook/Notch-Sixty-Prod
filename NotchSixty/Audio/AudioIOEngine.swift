@@ -9,6 +9,7 @@ enum EQFilterType: String, CaseIterable, Identifiable, Sendable {
     case lowPass
     case highPass
     case bandPass
+    case linkwitzTransform
     case notch
     case allPass
 
@@ -22,6 +23,7 @@ enum EQFilterType: String, CaseIterable, Identifiable, Sendable {
         case .lowPass: return "Low Pass"
         case .highPass: return "High Pass"
         case .bandPass: return "Band Pass"
+        case .linkwitzTransform: return "Linkwitz Transform"
         case .notch: return "Notch"
         case .allPass: return "All-Pass"
         }
@@ -35,6 +37,7 @@ enum EQFilterType: String, CaseIterable, Identifiable, Sendable {
         case .lowPass: return N60BiquadFilterTypeLowPass
         case .highPass: return N60BiquadFilterTypeHighPass
         case .bandPass: return N60BiquadFilterTypeBandPass
+        case .linkwitzTransform: return N60BiquadFilterTypeLinkwitzTransform
         case .notch: return N60BiquadFilterTypeNotch
         case .allPass: return N60BiquadFilterTypeAllPass
         }
@@ -100,6 +103,8 @@ struct EQBand: Identifiable, Equatable, Sendable {
     var gainDB: Double
     var q: Double
     var constantQ: Bool
+    var linkwitzTargetHz: Double
+    var linkwitzTargetQ: Double
     var dynamic: EQBandDynamicConfiguration
 
     init(
@@ -110,6 +115,8 @@ struct EQBand: Identifiable, Equatable, Sendable {
         gainDB: Double = 0,
         q: Double = 0.707,
         constantQ: Bool = false,
+        linkwitzTargetHz: Double = 40.0,
+        linkwitzTargetQ: Double = 0.707,
         dynamic: EQBandDynamicConfiguration = EQBandDynamicConfiguration()
     ) {
         self.id = id
@@ -119,6 +126,8 @@ struct EQBand: Identifiable, Equatable, Sendable {
         self.gainDB = gainDB
         self.q = q
         self.constantQ = constantQ
+        self.linkwitzTargetHz = linkwitzTargetHz
+        self.linkwitzTargetQ = linkwitzTargetQ
         self.dynamic = dynamic
     }
 
@@ -127,6 +136,20 @@ struct EQBand: Identifiable, Equatable, Sendable {
             return N60BiquadFilterTypePeakingConstantQ
         }
         return type.cType
+    }
+
+    func linkwitzCoefficients(sampleRate: Double) -> N60BiquadCoefficients? {
+        guard type == .linkwitzTransform else { return nil }
+        var coefficients = N60BiquadCoefficients()
+        guard N60BiquadDesignLinkwitzTransform(
+            sampleRate,
+            frequencyHz,
+            q,
+            linkwitzTargetHz,
+            linkwitzTargetQ,
+            &coefficients
+        ) else { return nil }
+        return coefficients
     }
 }
 
@@ -354,6 +377,15 @@ struct EQConfiguration: Equatable, Sendable {
               band.q > 0 else {
             throw EQConfigurationError.invalidBand(index: index)
         }
+        if band.type == .linkwitzTransform {
+            guard band.linkwitzTargetHz.isFinite,
+                  band.linkwitzTargetHz > 0,
+                  band.linkwitzTargetHz < sampleRate * 0.5,
+                  band.linkwitzTargetQ.isFinite,
+                  band.linkwitzTargetQ > 0 else {
+                throw EQConfigurationError.invalidBand(index: index)
+            }
+        }
         if band.dynamic.enabled {
             guard band.type == .peaking,
                   DynamicEQBandConfiguration.frequencyRange.contains(band.frequencyHz),
@@ -393,16 +425,32 @@ struct EQConfiguration: Equatable, Sendable {
             var renderIndex: UInt32 = 0
             for (modelIndex, band) in bands.enumerated() where band.enabled {
                 guard try validateBand(band, index: modelIndex, sampleRate: sampleRate) else { continue }
-                guard N60DSPGraphSnapshotSetEQBand(
-                    &graph,
-                    renderIndex,
-                    band.compiledCType,
-                    band.frequencyHz,
-                    band.gainDB,
-                    band.q,
-                    true
-                ) else {
-                    throw EQConfigurationError.invalidBand(index: modelIndex)
+                if band.type == .linkwitzTransform {
+                    guard let coefficients = band.linkwitzCoefficients(sampleRate: sampleRate),
+                          N60DSPGraphSnapshotSetEQPreparedBand(
+                            &graph,
+                            renderIndex,
+                            band.compiledCType,
+                            band.frequencyHz,
+                            0.0,
+                            band.q,
+                            coefficients,
+                            true
+                          ) else {
+                        throw EQConfigurationError.invalidBand(index: modelIndex)
+                    }
+                } else {
+                    guard N60DSPGraphSnapshotSetEQBand(
+                        &graph,
+                        renderIndex,
+                        band.compiledCType,
+                        band.frequencyHz,
+                        band.gainDB,
+                        band.q,
+                        true
+                    ) else {
+                        throw EQConfigurationError.invalidBand(index: modelIndex)
+                    }
                 }
                 renderIndex += 1
             }
@@ -471,8 +519,15 @@ struct EQConfiguration: Equatable, Sendable {
             cBand.enabled = true
             cBand.type = band.compiledCType
             cBand.frequencyHz = band.frequencyHz
-            cBand.gainDB = band.gainDB
+            cBand.gainDB = band.type == .linkwitzTransform ? 0.0 : band.gainDB
             cBand.q = band.q
+            if band.type == .linkwitzTransform {
+                guard let coefficients = band.linkwitzCoefficients(sampleRate: sampleRate) else {
+                    throw EQConfigurationError.invalidBand(index: index)
+                }
+                cBand.usesPreparedCoefficients = true
+                cBand.preparedCoefficients = coefficients
+            }
             result.append(cBand)
         }
         return result
