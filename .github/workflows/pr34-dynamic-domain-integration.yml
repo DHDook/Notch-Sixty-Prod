@@ -25,6 +25,7 @@ jobs:
           from pathlib import Path
           p = Path('ci/pr34_apply_dynamic_domain_eq.py')
           text = p.read_text()
+
           old = "    path.write_text(text[:a] + replacement + text[b:])"
           new = "    tail = b + len(end) if replacement.endswith(end) else b\n    path.write_text(text[:a] + replacement + text[tail:])"
           if old in text:
@@ -34,6 +35,14 @@ jobs:
           new = '''        case .independent:\\n            let primaryCount = try compileLane(leftBands, lane: N60DynamicEQLanePrimary)\\n            let secondaryCount = try compileLane(rightBands, lane: N60DynamicEQLaneSecondary)\\n            count = primaryCount + secondaryCount\\n        case .midSide:\\n            let primaryCount = try compileLane(midBands, lane: N60DynamicEQLanePrimary)\\n            let secondaryCount = try compileLane(sideBands, lane: N60DynamicEQLaneSecondary)\\n            count = primaryCount + secondaryCount\\n'''
           if old in text:
               text = text.replace(old, new, 1)
+
+          old = "replace_once(stereo, old_validation, new_validation)"
+          new = '''stereo_old_validation = "".join(("    " + line if line.strip() else line) for line in old_validation.splitlines(keepends=True))
+stereo_new_validation = "".join(("    " + line if line.strip() else line) for line in new_validation.splitlines(keepends=True))
+replace_once(stereo, stereo_old_validation, stereo_new_validation)'''
+          if old in text:
+              text = text.replace(old, new, 1)
+
           p.write_text(text)
           PY
 
