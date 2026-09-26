@@ -179,6 +179,7 @@ The audit still must verify all legacy parameter ranges/defaults where they are 
 - `DynamicsInlineView` exposes a reachable `FIR IR` control described as a user-supplied impulse response slot distinct from `FIR Correction`.
 - `AdvancedProcessingConfig.firImpulseResponse` persists its own IR state.
 - The same UI separately exposes `FIR Correction` later in the chain.
+- `DynamicsProcessorTests.testApplyConfigChangeDetection()` configures `firImpulseResponse`, applies it to the live processor, records the convolution delay, changes the IR, and verifies that the live convolution program changes only when the FIR config changes. This confirms the raw FIR IR slot is not dead state.
 
 **Commercial**
 - Has general convolution infrastructure and a room-correction runtime FIR slot, but the audit has not yet established two separately user-addressable raw-IR/correction workflows matching this legacy surface.
@@ -213,17 +214,19 @@ The audit still must verify all legacy parameter ranges/defaults where they are 
 **Legacy evidence**
 - Legacy has ordinary `channelBalance` and, separately, `symmetryBalanceEnabled` using `stereoBalancePosition`.
 - Reachable `Sym. Bal.` control is described as correction for asymmetric listening positions.
+- `DynamicsProcessor` confirms the two paths have different observable laws: ordinary channel balance linearly attenuates the opposite channel, while enabled Symmetry Balance applies a separate constant-power sine/cosine L/R law with unity gain at centre.
 
 **Commercial**
-- Has normal channel balance, but source evidence shows that cannot automatically be treated as the same legacy feature because legacy exposed both independently.
+- `PlaybackControlConfiguration.balanceLinearGains` implements the ordinary linear balance law, not the separate constant-power legacy symmetry mode.
 
-**Classification:** **AUDIT PENDING / likely MISSING.** Determine whether the legacy symmetry mode has observable behavior beyond a conventional L/R balance law before implementation disposition.
+**Classification:** **MISSING / BLOCKER.** Ordinary channel balance does not satisfy this separate reachable legacy capability.
 
 ## Panning Gain Matrix
 
 **Legacy evidence**
 - Reachable `Panning` control and `panningCrossfeedAmount`.
 - UI describes a bilinear cross-channel blend.
+- `DynamicsProcessor` reads the enable flag on the render path and conditionally executes `processPanningMatrix` after true-peak measurement and before Crosstalk Cancellation / Pause Gate.
 
 **Commercial**
 - No corresponding control is presently identified in `DynamicsConfiguration`.
@@ -235,39 +238,56 @@ The audit still must verify all legacy parameter ranges/defaults where they are 
 **Legacy evidence**
 - Reachable `Crosstalk` toggle/settings.
 - Persisted amount and head-shadow frequency controls.
-- UI describes inter-speaker acoustic-leakage cancellation.
+- UI describes a recursive binaural inversion filter for reducing **inter-speaker acoustic leakage**.
+- `DynamicsProcessor` reads the enable flag on the render path and executes `processCrosstalkCancellation` after the Panning Matrix.
 
 **Commercial**
 - No corresponding current production configuration has been identified.
 
 **Classification:** **MISSING / BLOCKER pending product-scope decision.** This is source-reachable and speaker-oriented, not automatically excluded by the no-headphone directive.
 
+### Correction to the earlier PR33 audit
+
+`PR33_FINAL_DYNAMICS_PARITY_AUDIT.md` grouped “headphone-only spatial/crossfeed/crosstalk features” as out of current scope. The source-level PR34 audit supersedes that blanket classification for the reachable Panning Gain Matrix and Crosstalk Cancellation controls: the actual UI describes speaker-oriented behavior and the render path executes both. They therefore require an explicit commercial disposition.
+
 ## Hi-Res Coefficient Decoupling
 
 **Legacy evidence**
 - Reachable `Hi-Res Coef` toggle; persisted `coefficientDecouplingEnabled` and runtime active status.
+- Legacy processing stores the setting and uses it when designing/staging high-rate coefficients.
 
 **Commercial**
-- Current C biquad engine has been validated through 384 kHz, but no equivalent user-visible coefficient-decoupling mode has yet been identified.
+- Current C filter engine has deterministic coverage through 384 kHz and independently authored high-rate numerical handling, but no equivalent user-visible decoupling switch.
 
-**Classification:** **AUDIT PENDING.** First determine whether this was a necessary user capability or a legacy workaround superseded by the commercial filter design. If the commercial design is demonstrably robust at high rates without a mode switch, classify IMPROVED rather than recreate a workaround.
+**Classification:** **AUDIT PENDING, likely IMPLEMENTED / IMPROVED if the PR34 high-rate accuracy baseline demonstrates no need for the legacy workaround.** Do not recreate a compatibility toggle solely because the legacy implementation needed one.
 
 ## Hardware Sync Buffer
 
 **Legacy evidence**
 - Reachable `Sync Buffer` toggle through `hardwareSyncBufferEnabled`.
+- In `DynamicsProcessor`, the setting is declared, initialised, and written by a setter, but the audit has not found a read or render-path use of `_syncBufferEnabled`.
 
-**Classification:** **AUDIT PENDING.** Exact observable role and whether current transport lifecycle/latency handling supersedes it still need source-path verification.
+**Classification:** **AUDIT PENDING — likely LEGACY-DEAD / NO-AUDIO-EFFECT.** Complete repo-wide search before making the dead-code classification final.
+
+## Latency Mode: Music / Movie
+
+**Legacy evidence**
+- Reachable segmented `Latency Mode` picker with Music and Movie values.
+- `DynamicsProcessor` declares, initialises, and sets `_latencyModeBits`, but no render-path read has yet been identified.
+
+**Classification:** **AUDIT PENDING — likely LEGACY-DEAD / NO-AUDIO-EFFECT.** Complete repo-wide search before final disposition.
 
 ## Dither
 
 **Legacy evidence**
-- `AdvancedProcessingConfig.ditherMode` is persisted and the dynamics UI exposes a dither-mode picker.
+- Reachable picker exposes Off / TPDF / Shape / 5th.
+- `DynamicsProcessor` reads `ditherMode` every callback and executes the dither stage on the live signal before Delta Solo / active-crossover splitting.
+- Legacy source identifies the modes as flat TPDF, first-order noise-shaped, and fifth-order noise-shaped dither at a 24-bit LSB scale.
 
 **Commercial**
 - No equivalent current product control has yet been identified.
 
-**Classification:** **AUDIT PENDING / likely gap.** Need verify actual render-path reachability and output-format relevance before making it a blocker.
+**Classification:** **LATER MILESTONE — final output-format / hardening.** Dither is confirmed live legacy behavior, but the commercial disposition should be made against the final device/output format architecture rather than inserted blindly into the current floating-point graph.
 
 ## EQ Headroom Compensation
 
@@ -314,6 +334,23 @@ The later milestone must account for the source/target matrix itself, not just c
 - pre/post-limiter channel metering
 
 **Classification:** **LATER MILESTONE — Active Crossover Matrix / driver-processing parity.**
+
+## Output-channel EQ capability matrix
+
+**Legacy evidence**
+- `OutputChannelEQView` is reachable from each matrix output row.
+- Stereo-capable outputs expose EQ / Linear / Mixed / Flat / Delta and Linked / Stereo / Mid-Side channel modes.
+- Band-split mono-per-side outputs suppress channel modes but retain advanced phase and Delta capability.
+- Sub Mono is deliberately restricted to 16 bands and suppresses advanced phase / Delta.
+- Output EQ exposes input/output gain, global bypass/flatten, and optional 2× EQ oversampling for advanced-phase-capable outputs.
+
+**Important dead/unimplemented nuance**
+- `OutputChannelEQConfig.preRingingBlend` exists in model state, but the actual `OutputChannelEQView` phase-shaping slider is hard-coded to `0.0`, disabled, ignores writes, and explicitly states that minimum-phase blending is not implemented.
+
+**Classification:**
+- Output-channel EQ feature family: **LATER MILESTONE — Active Crossover Matrix.**
+- Adjustable output-EQ pre-ringing blend: **LEGACY-DEAD / UNIMPLEMENTED CONTROL; not a parity requirement.**
+- Exact per-output filter-type/slope UI parity remains **AUDIT PENDING** because comments claim full mains-EQ reuse while the current view body must still be checked against the actual controls rendered.
 
 ## Active crossover topology
 
@@ -529,12 +566,40 @@ Initial state audit confirms persistence/reachability for:
 
 Driver-specific mechanics should not automatically be reproduced if the commercial App Store architecture supersedes them; equivalent user-facing routing capability, permissions, recovery, and migration still require explicit disposition.
 
+# Wave I — Legacy test-suite behavioral inventory
+
+The repository contains a substantial root `tests/` tree; parity must therefore not be audited from UI/state alone. Tests are used only to establish observable contracts and known failure modes, never as implementation templates.
+
+Confirmed test families include:
+- application/store snapshot and dynamic-band merge behavior
+- device change detection, output-device history, and device enumeration
+- Active Crossover config decoding and engine behavior
+- Baffle Step and resonance behavior
+- Bass Management crossover
+- Crossover Group Delay
+- DC blocker
+- Diaphragm Resonance detection
+- Dynamics processor
+- EQ coefficient-stager consistency
+- Excursion Protection limiter
+- FFT round-trip
+- Infrasonic change/race/stability behavior
+- Look-Ahead Limiter
+- Loudness Contour
+- main-chain limiter regressions
+- oversampling
+- all-pass chain
+- biquad design/filter/math, including Linkwitz-specific tests
+
+The remaining test subtrees still need a complete inventory for room correction, meters, routing/pipeline, presets/interchange, and any legacy-dead feature evidence.
+
 # Known source areas still to inspect before declaring the audit complete
 
 - complete parameter-by-parameter comparison of the legacy dynamics chain against PR28–33 commercial controls
-- actual render-path reachability and semantics of Dither, Hi-Res Coefficient Decoupling, Hardware Sync Buffer, Symmetry Balance, Panning Matrix, and Crosstalk Cancellation
+- repo-wide confirmation that Hardware Sync Buffer and Music/Movie Latency Mode are setter-only/no-op state
+- exact output-format/release disposition for confirmed-live Dither
 - standalone FIR IR slot vs FIR Correction vs per-band FIR distinctions
-- full `OutputChannelEQView` parity: output-channel phase modes, pre-ringing blend, band limits, Delta, and FIR crossover interaction
+- full `OutputChannelEQView` parity: verify actual rendered filter-type/slope controls rather than relying on comments/spec text
 - crossover optimiser parameters/results and exact apply semantics
 - driver time-alignment / polarity / crossover-refinement exact observable contracts
 - baffle-step and diaphragm-resonance acceptance semantics
@@ -543,7 +608,7 @@ Driver-specific mechanics should not automatically be reproduced if the commerci
 - native preset managers, migrations, factory presets, and every import/export adapter’s supported subset
 - automatic/manual routing orchestration, sample-rate changes, sleep/wake, default-device changes, disconnect/reconnect, volume/mute synchronization
 - Aggregate Device path vs Software PLL path end-to-end reachability
-- repository test-suite inventory for observable behavior that is not obvious from UI/state
+- complete repository test-suite inventory for observable behavior that is not obvious from UI/state
 - any dead/experimental source that should be classified LEGACY-DEAD rather than treated as parity debt
 
 # Current blocker ledger
@@ -558,13 +623,14 @@ The source audit has already established these core parity items as unresolved b
 6. 6–96 dB/oct main-EQ slope control.
 7. Constant-Q parametric mode.
 8. General Mixed-Phase EQ mode.
-9. Panning Gain Matrix unless explicitly superseded/out-scoped by product decision.
-10. Crosstalk Cancellation unless explicitly superseded/out-scoped by product decision.
+9. Symmetry Balance.
+10. Panning Gain Matrix unless explicitly superseded/out-scoped by product decision.
+11. Crosstalk Cancellation unless explicitly superseded/out-scoped by product decision.
 
 Additional likely gaps remain under AUDIT PENDING and must not be silently treated as parity.
 
 # Preliminary conclusion
 
-**We should not claim comprehensive parity yet.** The source-level audit has already uncovered reachable legacy behavior that was not captured in the previous user-guide-driven inventory. It has also clarified that several major systems already belong cleanly to later roadmap milestones: metering/analysis, persistence/interchange, room correction, and the Active Crossover Matrix.
+**We should not claim comprehensive parity yet.** The source-level audit has already uncovered reachable legacy behavior that was not captured in the previous user-guide-driven inventory. It has also clarified that several major systems already belong cleanly to later roadmap milestones: metering/analysis, persistence/interchange, room correction, Active Crossover Matrix, and final output-format/hardening work.
 
 PR34 optimization work remains behind this audit until the remaining source domains are dispositioned. Core-EQ and other reachable DSP gaps that do not belong to an existing later milestone should be closed before the project treats advanced DSP parity as complete. Missing work must not be silently relabeled as “superseded” without an explicit product rationale and equivalent observable behavior where parity requires it.
