@@ -618,4 +618,98 @@ final class DynamicsTests: XCTestCase {
         }
     }
 
+
+    func testDynamicEQDisabledIsTransparentWithConfiguredBand() {
+        let sampleRate = 96_000.0
+        var snapshot = N60DynamicsSnapshotMakeBypassed(sampleRate)
+        XCTAssertTrue(N60DynamicsSnapshotSetDynamicEQEnabled(&snapshot, false))
+        XCTAssertTrue(N60DynamicsSnapshotSetDynamicEQBand(
+            &snapshot, sampleRate, 0, true, 1_000, 1.0, 3.0, -30, 4.0, -12, 5, 100,
+            N60DynamicEQDirectionCutOnly, -40, 2.0, 6.0, N60DynamicEQDetectorPeak, 50
+        ))
+        var runtime = N60DynamicsRuntime()
+        N60DynamicsRuntimeReset(&runtime)
+
+        for frame in 0..<20_000 {
+            let input = Float(0.4 * sin(2.0 * Double.pi * 1_000.0 * Double(frame) / sampleRate))
+            var left = input
+            var right = -input * 0.7
+            N60DynamicsProcessCoreStereoFrame(&runtime, snapshot, &left, &right)
+            XCTAssertEqual(left, input, accuracy: 0.000_001)
+            XCTAssertEqual(right, -input * 0.7, accuracy: 0.000_001)
+        }
+    }
+
+    func testDynamicEQCutOnlyAttenuatesInBandAndStaysLinked() {
+        let sampleRate = 48_000.0
+        var snapshot = N60DynamicsSnapshotMakeBypassed(sampleRate)
+        XCTAssertTrue(N60DynamicsSnapshotSetDynamicEQEnabled(&snapshot, true))
+        XCTAssertTrue(N60DynamicsSnapshotSetDynamicEQBand(
+            &snapshot, sampleRate, 0, true, 1_000, 2.0, 0.0, -30, 4.0, -12, 2, 80,
+            N60DynamicEQDirectionCutOnly, -50, 2.0, 6.0, N60DynamicEQDetectorPeak, 50
+        ))
+        var runtime = N60DynamicsRuntime()
+        N60DynamicsRuntimeReset(&runtime)
+        var inSq = 0.0
+        var outSq = 0.0
+        var ratioSamples: [Double] = []
+        for frame in 0..<96_000 {
+            let input = Float(0.35 * sin(2.0 * Double.pi * 1_000.0 * Double(frame) / sampleRate))
+            var left = input
+            var right = input * 0.5
+            N60DynamicsProcessCoreStereoFrame(&runtime, snapshot, &left, &right)
+            if frame >= 48_000 {
+                inSq += Double(input * input)
+                outSq += Double(left * left)
+                if abs(right) > 0.0001 { ratioSamples.append(Double(left / right)) }
+            }
+        }
+        XCTAssertLessThan(sqrt(outSq / 48_000.0), sqrt(inSq / 48_000.0) * 0.9)
+        XCTAssertGreaterThan(N60DynamicsRuntimeTelemetry(&runtime).dynamicEQMaxAbsGainDB, 2.0)
+        if let ratio = ratioSamples.last { XCTAssertEqual(ratio, 2.0, accuracy: 0.02) }
+    }
+
+    func testDynamicEQBoostIsBounded() {
+        let sampleRate = 48_000.0
+        var snapshot = N60DynamicsSnapshotMakeBypassed(sampleRate)
+        XCTAssertTrue(N60DynamicsSnapshotSetDynamicEQEnabled(&snapshot, true))
+        XCTAssertTrue(N60DynamicsSnapshotSetDynamicEQBand(
+            &snapshot, sampleRate, 0, true, 1_000, 2.0, 0.0, -10, 1.0, -24, 2, 80,
+            N60DynamicEQDirectionBoostOnly, -30, 4.0, 6.0, N60DynamicEQDetectorPeak, 50
+        ))
+        var runtime = N60DynamicsRuntime()
+        N60DynamicsRuntimeReset(&runtime)
+        for frame in 0..<96_000 {
+            let input = Float(0.005 * sin(2.0 * Double.pi * 1_000.0 * Double(frame) / sampleRate))
+            var left = input
+            var right = input
+            N60DynamicsProcessCoreStereoFrame(&runtime, snapshot, &left, &right)
+        }
+        let telemetry = N60DynamicsRuntimeTelemetry(&runtime)
+        XCTAssertGreaterThan(telemetry.dynamicEQMaxAbsGainDB, 1.0)
+        XCTAssertLessThanOrEqual(telemetry.dynamicEQMaxAbsGainDB, 6.01)
+    }
+
+    func testDynamicEQConfigurationRejectsInvalidBandAndSupportsSixteenBandsAt384k() throws {
+        var invalid = DynamicsConfiguration()
+        invalid.dynamicEQ.enabled = true
+        invalid.dynamicEQ.bands = [DynamicEQBandConfiguration()]
+        invalid.dynamicEQ.bands[0].q = 9.0
+        XCTAssertThrowsError(try invalid.makeSnapshot(sampleRate: 96_000))
+
+        var config = DynamicsConfiguration()
+        config.dynamicEQ.enabled = true
+        config.dynamicEQ.bands = (0..<16).map { index in
+            var band = DynamicEQBandConfiguration()
+            band.frequencyHz = 40.0 * pow(1.35, Double(index))
+            band.frequencyHz = min(band.frequencyHz, 18_000.0)
+            band.q = 1.2
+            band.thresholdDB = -24
+            return band
+        }
+        let snapshot = try config.makeSnapshot(sampleRate: 384_000)
+        XCTAssertEqual(snapshot.dynamicEQ.bandCount, 16)
+        XCTAssertTrue(N60DynamicEQSnapshotIsValid(snapshot.dynamicEQ))
+    }
+
 }

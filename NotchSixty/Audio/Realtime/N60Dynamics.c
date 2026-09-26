@@ -431,6 +431,8 @@ N60DynamicsSnapshot N60DynamicsSnapshotMakeBypassed(double sampleRate) {
     snapshot.dialogueLeveler.bandHighPass = N60BiquadCoefficientsMakeIdentity();
     snapshot.dialogueLeveler.bandLowPass = N60BiquadCoefficientsMakeIdentity();
 
+    snapshot.dynamicEQ = N60DynamicEQSnapshotMakeBypassed(sampleRate);
+
     snapshot.deEsser.enabled = false;
     snapshot.deEsser.dynamicEQMode = true;
     snapshot.deEsser.frequencyHz = 6500.0;
@@ -852,6 +854,57 @@ bool N60DynamicsSnapshotSetDialogueLeveler(
     return true;
 }
 
+bool N60DynamicsSnapshotSetDynamicEQEnabled(
+    N60DynamicsSnapshot *snapshot,
+    bool enabled
+) {
+    if (snapshot == NULL) return false;
+    return N60DynamicEQSnapshotSetEnabled(&snapshot->dynamicEQ, enabled);
+}
+
+bool N60DynamicsSnapshotSetDynamicEQBand(
+    N60DynamicsSnapshot *snapshot,
+    double sampleRate,
+    uint32_t index,
+    bool enabled,
+    double frequencyHz,
+    float q,
+    float staticGainDB,
+    float thresholdDB,
+    float ratio,
+    float rangeDB,
+    float attackMs,
+    float releaseMs,
+    N60DynamicEQDirection direction,
+    float boostThresholdDB,
+    float boostRatio,
+    float maxBoostDB,
+    N60DynamicEQDetectorMode detectorMode,
+    float rmsWindowMs
+) {
+    if (snapshot == NULL) return false;
+    return N60DynamicEQSnapshotSetBand(
+        &snapshot->dynamicEQ,
+        sampleRate,
+        index,
+        enabled,
+        frequencyHz,
+        q,
+        staticGainDB,
+        thresholdDB,
+        ratio,
+        rangeDB,
+        attackMs,
+        releaseMs,
+        direction,
+        boostThresholdDB,
+        boostRatio,
+        maxBoostDB,
+        detectorMode,
+        rmsWindowMs
+    );
+}
+
 bool N60DynamicsSnapshotSetDeEsser(
     N60DynamicsSnapshot *snapshot,
     double sampleRate,
@@ -1253,6 +1306,8 @@ bool N60DynamicsSnapshotIsValid(N60DynamicsSnapshot snapshot) {
         || !N60BiquadCoefficientsAreFinite(snapshot.dialogueLeveler.bandHighPass)
         || !N60BiquadCoefficientsAreFinite(snapshot.dialogueLeveler.bandLowPass)) return false;
 
+    if (!N60DynamicEQSnapshotIsValid(snapshot.dynamicEQ)) return false;
+
     if (!isfinite(snapshot.deEsser.frequencyHz)
         || snapshot.deEsser.frequencyHz < 2000.0 || snapshot.deEsser.frequencyHz > 10000.0
         || !isfinite(snapshot.deEsser.thresholdDB)
@@ -1323,6 +1378,7 @@ void N60DynamicsRuntimeReset(N60DynamicsRuntime *runtime) {
     runtime->widenerHighWidth = 1.0f;
     runtime->pauseGateGain = 1.0f;
     runtime->gateOpen = true;
+    N60DynamicEQRuntimeReset(&runtime->dynamicEQ);
     reset_mains_detector_window(runtime);
 }
 
@@ -1725,6 +1781,7 @@ void N60DynamicsProcessCoreStereoFrameWithMasterGain(
     process_loudness_match(runtime, snapshot, left, right);
     process_loudness_contour(runtime, snapshot, masterGainLinear, left, right);
     process_dialogue_leveler(runtime, snapshot, left, right);
+    N60DynamicEQProcessStereoFrame(&runtime->dynamicEQ, snapshot.dynamicEQ, left, right);
     process_de_esser(runtime, snapshot, left, right);
     process_multiband_compressor(runtime, snapshot, left, right);
 
@@ -1866,6 +1923,9 @@ N60DynamicsTelemetry N60DynamicsRuntimeTelemetry(const N60DynamicsRuntime *runti
     telemetry.dialogueGapDB = runtime->dialogueGapDB;
     telemetry.dialogueVoiceConfidence = runtime->dialogueVoiceConfidence;
     telemetry.dialogueBoostDB = runtime->dialogueBoostDB;
+    N60DynamicEQTelemetry dynamicEQ = N60DynamicEQRuntimeTelemetry(&runtime->dynamicEQ);
+    telemetry.dynamicEQActiveBandCount = dynamicEQ.activeBandCount;
+    telemetry.dynamicEQMaxAbsGainDB = dynamicEQ.maxAbsDynamicGainDB;
     telemetry.deEsserGainReductionDB = fmaxf(0.0f, -runtime->deEsserGainDB);
     telemetry.multibandLowGainReductionDB = fmaxf(0.0f, -runtime->multibandGainDB[0]);
     telemetry.multibandMidGainReductionDB = fmaxf(0.0f, -runtime->multibandGainDB[1]);

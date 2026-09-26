@@ -10,6 +10,7 @@ enum DynamicsConfigurationError: Error, LocalizedError, Equatable {
     case invalidLoudnessMatch
     case invalidLoudnessContour
     case invalidDialogueLeveler
+    case invalidDynamicEQ
     case invalidDeEsser
     case invalidMultibandCompressor
     case invalidCompressor
@@ -39,6 +40,8 @@ enum DynamicsConfigurationError: Error, LocalizedError, Equatable {
             return "Loudness Contour parameters are outside the supported production range."
         case .invalidDialogueLeveler:
             return "Dialogue Relative Leveler parameters are outside the supported production range."
+        case .invalidDynamicEQ:
+            return "Dynamic EQ parameters are outside the supported production range."
         case .invalidDeEsser:
             return "De-Esser parameters are outside the supported production range."
         case .invalidMultibandCompressor:
@@ -450,6 +453,100 @@ struct DialogueRelativeLevelerConfiguration: Equatable, Sendable {
     }
 }
 
+enum DynamicEQDirection: String, CaseIterable, Identifiable, Sendable {
+    case cutOnly
+    case boostOnly
+    case both
+
+    var id: String { rawValue }
+    var displayName: String {
+        switch self {
+        case .cutOnly: return "Cut Only"
+        case .boostOnly: return "Boost Only"
+        case .both: return "Both"
+        }
+    }
+    var cType: N60DynamicEQDirection {
+        switch self {
+        case .cutOnly: return N60DynamicEQDirectionCutOnly
+        case .boostOnly: return N60DynamicEQDirectionBoostOnly
+        case .both: return N60DynamicEQDirectionBoth
+        }
+    }
+}
+
+enum DynamicEQDetectorMode: String, CaseIterable, Identifiable, Sendable {
+    case peak
+    case rms
+
+    var id: String { rawValue }
+    var displayName: String { self == .peak ? "Peak" : "RMS" }
+    var cType: N60DynamicEQDetectorMode {
+        self == .peak ? N60DynamicEQDetectorPeak : N60DynamicEQDetectorRMS
+    }
+}
+
+struct DynamicEQBandConfiguration: Equatable, Sendable {
+    static let frequencyRange = 20.0...20_000.0
+    static let qRange = 0.4...8.0
+    static let staticGainRange = -18.0...6.0
+    static let thresholdRange = -60.0...0.0
+    static let ratioRange = 1.0...10.0
+    static let rangeRange = -24.0...0.0
+    static let attackRange = 1.0...100.0
+    static let releaseRange = 10.0...1_000.0
+    static let boostThresholdRange = -60.0...0.0
+    static let boostRatioRange = 1.0...10.0
+    static let maxBoostRange = 0.0...12.0
+    static let rmsWindowRange = 5.0...200.0
+
+    var enabled = true
+    var frequencyHz = 1_000.0
+    var q = 1.0
+    var staticGainDB = 0.0
+    var thresholdDB = -24.0
+    var ratio = 2.0
+    var rangeDB = -24.0
+    var attackMs = 10.0
+    var releaseMs = 100.0
+    var direction: DynamicEQDirection = .cutOnly
+    var boostThresholdDB = -40.0
+    var boostRatio = 2.0
+    var maxBoostDB = 6.0
+    var detectorMode: DynamicEQDetectorMode = .peak
+    var rmsWindowMs = 50.0
+
+    func validate(sampleRate: Double) throws {
+        guard frequencyHz.isFinite, Self.frequencyRange.contains(frequencyHz), frequencyHz < sampleRate * 0.5,
+              q.isFinite, Self.qRange.contains(q),
+              staticGainDB.isFinite, Self.staticGainRange.contains(staticGainDB),
+              thresholdDB.isFinite, Self.thresholdRange.contains(thresholdDB),
+              ratio.isFinite, Self.ratioRange.contains(ratio),
+              rangeDB.isFinite, Self.rangeRange.contains(rangeDB),
+              attackMs.isFinite, Self.attackRange.contains(attackMs),
+              releaseMs.isFinite, Self.releaseRange.contains(releaseMs),
+              boostThresholdDB.isFinite, Self.boostThresholdRange.contains(boostThresholdDB),
+              boostRatio.isFinite, Self.boostRatioRange.contains(boostRatio),
+              maxBoostDB.isFinite, Self.maxBoostRange.contains(maxBoostDB),
+              rmsWindowMs.isFinite, Self.rmsWindowRange.contains(rmsWindowMs) else {
+            throw DynamicsConfigurationError.invalidDynamicEQ
+        }
+    }
+}
+
+struct DynamicEQConfiguration: Equatable, Sendable {
+    static let maximumBandCount = Int(N60_DYNAMIC_EQ_MAX_BANDS)
+    var enabled = false
+    var bands: [DynamicEQBandConfiguration] = []
+
+    func validate(sampleRate: Double) throws {
+        guard sampleRate.isFinite, sampleRate > 0, bands.count <= Self.maximumBandCount else {
+            throw DynamicsConfigurationError.invalidDynamicEQ
+        }
+        try bands.forEach { try $0.validate(sampleRate: sampleRate) }
+    }
+}
+
 struct DeEsserConfiguration: Equatable, Sendable {
     static let frequencyRange = 2_000.0...10_000.0
     static let thresholdRange = -60.0...0.0
@@ -760,6 +857,7 @@ struct DynamicsConfiguration: Equatable, Sendable {
     var loudnessMatch = LoudnessMatchConfiguration()
     var loudnessContour = LoudnessContourConfiguration()
     var dialogueRelativeLeveler = DialogueRelativeLevelerConfiguration()
+    var dynamicEQ = DynamicEQConfiguration()
     var deEsser = DeEsserConfiguration()
     var multibandCompressor = MultibandCompressorConfiguration()
     var compressor = CompressorConfiguration()
@@ -777,6 +875,7 @@ struct DynamicsConfiguration: Equatable, Sendable {
         try loudnessMatch.validate()
         try loudnessContour.validate()
         try dialogueRelativeLeveler.validate(sampleRate: sampleRate)
+        try dynamicEQ.validate(sampleRate: sampleRate)
         try deEsser.validate()
         try multibandCompressor.validate()
         try compressor.validate()
@@ -865,6 +964,31 @@ struct DynamicsConfiguration: Equatable, Sendable {
             Float(dialogueRelativeLeveler.voiceGate.confidenceCeilingIndex),
             Float(dialogueRelativeLeveler.voiceGate.minConfidence)
         ) else { throw DynamicsConfigurationError.invalidDialogueLeveler }
+        guard N60DynamicsSnapshotSetDynamicEQEnabled(&snapshot, dynamicEQ.enabled) else {
+            throw DynamicsConfigurationError.invalidDynamicEQ
+        }
+        for (index, band) in dynamicEQ.bands.enumerated() {
+            guard N60DynamicsSnapshotSetDynamicEQBand(
+                &snapshot,
+                sampleRate,
+                UInt32(index),
+                band.enabled,
+                band.frequencyHz,
+                Float(band.q),
+                Float(band.staticGainDB),
+                Float(band.thresholdDB),
+                Float(band.ratio),
+                Float(band.rangeDB),
+                Float(band.attackMs),
+                Float(band.releaseMs),
+                band.direction.cType,
+                Float(band.boostThresholdDB),
+                Float(band.boostRatio),
+                Float(band.maxBoostDB),
+                band.detectorMode.cType,
+                Float(band.rmsWindowMs)
+            ) else { throw DynamicsConfigurationError.invalidDynamicEQ }
+        }
         guard N60DynamicsSnapshotSetDeEsserAdvanced(
             &snapshot,
             sampleRate,

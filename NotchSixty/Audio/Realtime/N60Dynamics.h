@@ -6,6 +6,7 @@
 
 #include "N60Biquad.h"
 #include "N60Crossover.h"
+#include "N60DynamicEQ.h"
 #include "N60SpectralDenoiser.h"
 
 #ifdef __cplusplus
@@ -220,6 +221,7 @@ typedef struct {
     N60LoudnessMatchSnapshot loudnessMatch;
     N60LoudnessContourSnapshot loudnessContour;
     N60DialogueLevelerSnapshot dialogueLeveler;
+    N60DynamicEQSnapshot dynamicEQ;
     N60DeEsserSnapshot deEsser;
     N60MultibandCompressorSnapshot multibandCompressor;
     N60CompressorSnapshot compressor;
@@ -301,6 +303,7 @@ typedef struct {
     float dialogueBandLevelDBFS;
     float dialogueGapDB;
     float dialogueVoiceConfidence;
+    N60DynamicEQRuntime dynamicEQ;
     float deEsserGainDB;
     N60BiquadState deEsserHighPassLeft;
     N60BiquadState deEsserHighPassRight;
@@ -338,6 +341,8 @@ typedef struct {
     float dialogueGapDB;
     float dialogueVoiceConfidence;
     float dialogueBoostDB;
+    uint32_t dynamicEQActiveBandCount;
+    float dynamicEQMaxAbsGainDB;
     float compressorGainReductionDB;
     float expanderAttenuationDB;
     float pauseGateGain;
@@ -449,6 +454,32 @@ bool N60DynamicsSnapshotSetDialogueLeveler(
     float confidenceFloorIndex,
     float confidenceCeilingIndex,
     float minConfidence
+);
+
+bool N60DynamicsSnapshotSetDynamicEQEnabled(
+    N60DynamicsSnapshot * _Nonnull snapshot,
+    bool enabled
+);
+
+bool N60DynamicsSnapshotSetDynamicEQBand(
+    N60DynamicsSnapshot * _Nonnull snapshot,
+    double sampleRate,
+    uint32_t index,
+    bool enabled,
+    double frequencyHz,
+    float q,
+    float staticGainDB,
+    float thresholdDB,
+    float ratio,
+    float rangeDB,
+    float attackMs,
+    float releaseMs,
+    N60DynamicEQDirection direction,
+    float boostThresholdDB,
+    float boostRatio,
+    float maxBoostDB,
+    N60DynamicEQDetectorMode detectorMode,
+    float rmsWindowMs
 );
 
 bool N60DynamicsSnapshotSetDeEsser(
