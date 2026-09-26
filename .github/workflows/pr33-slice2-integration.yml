@@ -1,0 +1,51 @@
+name: PR33 Slice 2 Integration
+
+on:
+  push:
+    branches:
+      - feature/residual-dynamics-parity
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: xcode-27
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: feature/residual-dynamics-parity
+          fetch-depth: 0
+
+      - name: Apply PR33 Slice 2
+        run: python3 .github/scripts/pr33_slice2.py
+
+      - name: Validate patch
+        run: |
+          git diff --check
+          grep -q 'N60ProtectionSnapshotSetGainRider' NotchSixty/Audio/Realtime/N60Protection.c
+          grep -q 'automaticHeadroom' NotchSixty/Audio/DynamicsConfiguration.swift
+          grep -q 'testGainRiderSpeedOrdering' NotchSixtyTests/ProtectionTests.swift
+
+      - name: Run full test suite
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          test
+
+      - name: Commit Slice 2 and clean helpers
+        run: |
+          rm -f .github/scripts/pr33_slice2.py
+          rm -f .github/workflows/pr33-slice2-integration.yml
+          git add -A
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Add coherent gain and protection integration'
+          git push origin HEAD:feature/residual-dynamics-parity
