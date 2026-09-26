@@ -426,6 +426,18 @@ final class NotchSixtyTests: XCTestCase {
         XCTAssertTrue(projected.allSatisfy(\.usesPreparedCoefficients))
     }
 
+    func testFIRMetadataCanBeStoredBeforeTransportWithoutAssuming48k() throws {
+        let kernel96k = EQFIRKernel(name: "96k FIR", sampleRate: 96_000, taps: [1])
+        try kernel96k.validateMetadata()
+        XCTAssertNoThrow(try kernel96k.validate(for: 96_000))
+        XCTAssertThrowsError(try kernel96k.validate(for: 48_000))
+
+        let untied = EQFIRKernel(name: "Untied FIR", taps: [1])
+        try untied.validateMetadata()
+        XCTAssertNoThrow(try untied.validate(for: 48_000))
+        XCTAssertNoThrow(try untied.validate(for: 384_000))
+    }
+
     func testPerBandFIRKernelValidationAndCascade() throws {
         let first = EQFIRKernel(name: "First", taps: [1, 1])
         let second = EQFIRKernel(name: "Second", taps: [1, -1])

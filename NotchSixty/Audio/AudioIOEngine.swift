@@ -138,7 +138,7 @@ struct EQFIRKernel: Equatable, Sendable {
         self.taps = taps
     }
 
-    func validate(for outputSampleRate: Double) throws {
+    func validateMetadata() throws {
         guard !taps.isEmpty, taps.count <= Int(N60_CONVOLUTION_MAX_TAPS) else {
             throw EQConfigurationError.invalidFIRTapCount(taps.count)
         }
@@ -146,7 +146,18 @@ struct EQFIRKernel: Equatable, Sendable {
             throw EQConfigurationError.nonFiniteFIRTap
         }
         if let sampleRate {
-            guard sampleRate.isFinite, sampleRate > 0, abs(sampleRate - outputSampleRate) < 0.5 else {
+            guard sampleRate.isFinite, sampleRate > 0 else {
+                throw EQConfigurationError.firSampleRateMismatch(filter: sampleRate, output: 0)
+            }
+        }
+    }
+
+    func validate(for outputSampleRate: Double) throws {
+        try validateMetadata()
+        if let sampleRate {
+            guard outputSampleRate.isFinite,
+                  outputSampleRate > 0,
+                  abs(sampleRate - outputSampleRate) < 0.5 else {
                 throw EQConfigurationError.firSampleRateMismatch(filter: sampleRate, output: outputSampleRate)
             }
         }
@@ -1221,7 +1232,10 @@ final class AudioIOEngine: ObservableObject {
             for (index, band) in bands.enumerated() where band.enabled {
                 if band.type == .fir {
                     guard let kernel = band.firKernel else { throw EQConfigurationError.firKernelRequired }
-                    try kernel.validate(for: transportSession?.outputFormat.sampleRate ?? 48_000)
+                    try kernel.validateMetadata()
+                    if let activeSampleRate = transportSession?.outputFormat.sampleRate {
+                        try kernel.validate(for: activeSampleRate)
+                    }
                     continue
                 }
                 guard band.frequencyHz.isFinite,
