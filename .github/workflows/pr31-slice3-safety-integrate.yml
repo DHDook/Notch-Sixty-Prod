@@ -1,0 +1,43 @@
+name: PR31 Slice 3 Safety Integration
+
+on:
+  push:
+    branches:
+      - feature/noise-hum-suppression
+    paths:
+      - '.github/scripts/pr31_slice3_safety.py'
+      - '.github/workflows/pr31-slice3-safety-integrate.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feature/noise-hum-suppression
+
+      - name: Apply PR31 Slice 3 safety safeguards
+        run: python3 .github/scripts/pr31_slice3_safety.py
+
+      - name: Run full test suite
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          test
+
+      - name: Commit denoiser safeguards and clean helpers
+        run: |
+          rm -f .github/scripts/pr31_slice3_safety.py .github/workflows/pr31-slice3-safety-integrate.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Harden spectral denoiser adaptive noise learning'
+          git push origin HEAD:feature/noise-hum-suppression
