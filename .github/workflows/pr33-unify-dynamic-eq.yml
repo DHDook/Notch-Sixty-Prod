@@ -1,0 +1,48 @@
+name: PR33 Dynamic EQ Unification Integration
+
+on:
+  push:
+    branches:
+      - feature/residual-dynamics-parity
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: xcode-27
+    steps:
+      - name: Check out PR33 branch
+        uses: actions/checkout@v7
+        with:
+          ref: feature/residual-dynamics-parity
+          fetch-depth: 0
+
+      - name: Apply Dynamic EQ unification patch
+        run: python3 .github/scripts/pr33-unify-dynamic-eq.py
+
+      - name: Run full Xcode test suite
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          test
+
+      - name: Commit integrated source and clean temporary helpers
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'notch-sixty-integration'
+          git config user.email 'actions@users.noreply.github.com'
+          git rm .github/scripts/pr33-unify-dynamic-eq.py .github/workflows/pr33-unify-dynamic-eq.yml
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'No source changes to commit.'
+            exit 0
+          fi
+          git commit -m 'Unify Dynamic EQ with main EQ bands'
+          git push origin HEAD:feature/residual-dynamics-parity
