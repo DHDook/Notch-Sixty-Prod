@@ -410,11 +410,34 @@ N60DynamicsSnapshot N60DynamicsSnapshotMakeBypassed(double sampleRate) {
     snapshot.loudnessContour.lowShelf = N60BiquadCoefficientsMakeIdentity();
     snapshot.loudnessContour.highShelf = N60BiquadCoefficientsMakeIdentity();
 
+    snapshot.dialogueLeveler.enabled = false;
+    snapshot.dialogueLeveler.voiceGateEnabled = false;
+    snapshot.dialogueLeveler.bandLowHz = 300.0;
+    snapshot.dialogueLeveler.bandHighHz = 3500.0;
+    snapshot.dialogueLeveler.targetGapDB = 10.0f;
+    snapshot.dialogueLeveler.boostRatio = 2.0f;
+    snapshot.dialogueLeveler.maxBoostDB = 8.0f;
+    snapshot.dialogueLeveler.programGateThresholdDB = -50.0f;
+    snapshot.dialogueLeveler.detectorCoefficient = coefficient_for_time_ms(sampleRate, 300.0f);
+    snapshot.dialogueLeveler.attackCoefficient = coefficient_for_time_ms(sampleRate, 150.0f);
+    snapshot.dialogueLeveler.releaseCoefficient = coefficient_for_time_ms(sampleRate, 900.0f);
+    snapshot.dialogueLeveler.voiceEnvelopeCoefficient = coefficient_for_time_ms(sampleRate, 15.0f);
+    snapshot.dialogueLeveler.voiceMeasurementCoefficient = coefficient_for_time_ms(sampleRate, 700.0f);
+    snapshot.dialogueLeveler.modulationHighPassPole = (float)exp(-2.0 * M_PI * 2.5 / sampleRate);
+    snapshot.dialogueLeveler.modulationLowPassPole = (float)exp(-2.0 * M_PI * 7.5 / sampleRate);
+    snapshot.dialogueLeveler.confidenceFloorIndex = 0.15f;
+    snapshot.dialogueLeveler.confidenceCeilingIndex = 0.45f;
+    snapshot.dialogueLeveler.minConfidence = 0.2f;
+    snapshot.dialogueLeveler.bandHighPass = N60BiquadCoefficientsMakeIdentity();
+    snapshot.dialogueLeveler.bandLowPass = N60BiquadCoefficientsMakeIdentity();
+
     snapshot.deEsser.enabled = false;
     snapshot.deEsser.dynamicEQMode = true;
     snapshot.deEsser.frequencyHz = 6500.0;
     snapshot.deEsser.thresholdDB = -24.0f;
     snapshot.deEsser.ratio = N60_DEESSER_RATIO;
+    snapshot.deEsser.rangeDB = -24.0f;
+    snapshot.deEsser.detectionQ = 2.0f;
     snapshot.deEsser.attackCoefficient = coefficient_for_time_ms(sampleRate, N60_DEESSER_ATTACK_MS);
     snapshot.deEsser.releaseCoefficient = coefficient_for_time_ms(sampleRate, N60_DEESSER_RELEASE_MS);
     snapshot.deEsser.sidechainHighPass = N60BiquadCoefficientsMakeIdentity();
@@ -423,24 +446,33 @@ N60DynamicsSnapshot N60DynamicsSnapshotMakeBypassed(double sampleRate) {
     snapshot.multibandCompressor.enabled = false;
     snapshot.multibandCompressor.lowMidFrequencyHz = 120.0;
     snapshot.multibandCompressor.midHighFrequencyHz = 3500.0;
-    snapshot.multibandCompressor.topology = N60CrossoverTopologyLinkwitzRiley24;
-    snapshot.multibandCompressor.sectionCount = 0;
-    snapshot.multibandCompressor.thresholdDB[0] = -18.0f;
-    snapshot.multibandCompressor.thresholdDB[1] = -18.0f;
-    snapshot.multibandCompressor.thresholdDB[2] = -18.0f;
-    snapshot.multibandCompressor.ratio = N60_MULTIBAND_RATIO;
-    snapshot.multibandCompressor.kneeWidthDB = N60_MULTIBAND_KNEE_DB;
-    snapshot.multibandCompressor.attackCoefficient = coefficient_for_time_ms(sampleRate, N60_MULTIBAND_ATTACK_MS);
-    snapshot.multibandCompressor.releaseCoefficient = coefficient_for_time_ms(sampleRate, N60_MULTIBAND_RELEASE_MS);
+    snapshot.multibandCompressor.lowTopology = N60CrossoverTopologyLinkwitzRiley24;
+    snapshot.multibandCompressor.highTopology = N60CrossoverTopologyLinkwitzRiley24;
+    snapshot.multibandCompressor.lowSectionCount = 0;
+    snapshot.multibandCompressor.highSectionCount = 0;
+    for (uint32_t band = 0; band < N60_MULTIBAND_BAND_COUNT; ++band) {
+        snapshot.multibandCompressor.thresholdDB[band] = -18.0f;
+        snapshot.multibandCompressor.ratio[band] = N60_MULTIBAND_RATIO;
+        snapshot.multibandCompressor.kneeWidthDB[band] = N60_MULTIBAND_KNEE_DB;
+        snapshot.multibandCompressor.makeupGainDB[band] = 0.0f;
+        snapshot.multibandCompressor.attackCoefficient[band] = coefficient_for_time_ms(sampleRate, N60_MULTIBAND_ATTACK_MS);
+        snapshot.multibandCompressor.releaseCoefficient[band] = coefficient_for_time_ms(sampleRate, N60_MULTIBAND_RELEASE_MS);
+        snapshot.multibandCompressor.sidechainHighPass[band] = N60BiquadCoefficientsMakeIdentity();
+    }
     for (uint32_t index = 0; index < N60_MAX_CROSSOVER_SECTIONS; ++index) {
         snapshot.multibandCompressor.lowPass[index] = N60BiquadCoefficientsMakeIdentity();
         snapshot.multibandCompressor.highPass[index] = N60BiquadCoefficientsMakeIdentity();
     }
 
     snapshot.compressor.enabled = false;
+    snapshot.compressor.topology = N60CompressorTopologyFeedForward;
+    snapshot.compressor.programDependentRelease = false;
     snapshot.compressor.ratio = 1.0f;
     snapshot.compressor.attackCoefficient = coefficient_for_time_ms(sampleRate, 10.0f);
     snapshot.compressor.releaseCoefficient = coefficient_for_time_ms(sampleRate, 100.0f);
+    snapshot.compressor.releaseFastCoefficient = coefficient_for_time_ms(sampleRate, 50.0f);
+    snapshot.compressor.releaseSlowCoefficient = coefficient_for_time_ms(sampleRate, 200.0f);
+    snapshot.compressor.sidechainHighPass = N60BiquadCoefficientsMakeIdentity();
 
     snapshot.expander.enabled = false;
     snapshot.expander.ratio = 1.0f;
@@ -743,6 +775,83 @@ bool N60DynamicsSnapshotSetLoudnessContour(
     return true;
 }
 
+bool N60DynamicsSnapshotSetDialogueLeveler(
+    N60DynamicsSnapshot *snapshot,
+    double sampleRate,
+    bool enabled,
+    double bandLowHz,
+    double bandHighHz,
+    float targetGapDB,
+    float boostRatio,
+    float maxBoostDB,
+    float detectorWindowMs,
+    float attackMs,
+    float releaseMs,
+    float programGateThresholdDB,
+    bool voiceGateEnabled,
+    float modulationCenterHz,
+    float modulationBandwidthHz,
+    float voiceEnvelopeWindowMs,
+    float voiceMeasurementWindowMs,
+    float confidenceFloorIndex,
+    float confidenceCeilingIndex,
+    float minConfidence
+) {
+    if (snapshot == NULL || !isfinite(sampleRate) || sampleRate <= 0.0
+        || !isfinite(bandLowHz) || !isfinite(bandHighHz)
+        || bandLowHz < 100.0 || bandLowHz > 8000.0 || bandHighHz < 100.0 || bandHighHz > 8000.0
+        || bandLowHz >= bandHighHz || bandHighHz >= sampleRate * 0.45
+        || !isfinite(targetGapDB) || targetGapDB < 3.0f || targetGapDB > 20.0f
+        || !isfinite(boostRatio) || boostRatio < 1.0f || boostRatio > 6.0f
+        || !isfinite(maxBoostDB) || maxBoostDB < 0.0f || maxBoostDB > 15.0f
+        || !isfinite(detectorWindowMs) || detectorWindowMs < 50.0f || detectorWindowMs > 500.0f
+        || !isfinite(attackMs) || attackMs < 10.0f || attackMs > 1000.0f
+        || !isfinite(releaseMs) || releaseMs < 50.0f || releaseMs > 3000.0f
+        || !isfinite(programGateThresholdDB) || programGateThresholdDB < -70.0f || programGateThresholdDB > -30.0f
+        || !isfinite(modulationCenterHz) || modulationCenterHz < 2.0f || modulationCenterHz > 10.0f
+        || !isfinite(modulationBandwidthHz) || modulationBandwidthHz < 2.0f || modulationBandwidthHz > 8.0f
+        || !isfinite(voiceEnvelopeWindowMs) || voiceEnvelopeWindowMs < 5.0f || voiceEnvelopeWindowMs > 30.0f
+        || !isfinite(voiceMeasurementWindowMs) || voiceMeasurementWindowMs < 300.0f || voiceMeasurementWindowMs > 1500.0f
+        || !isfinite(confidenceFloorIndex) || confidenceFloorIndex < 0.0f || confidenceFloorIndex > 1.0f
+        || !isfinite(confidenceCeilingIndex) || confidenceCeilingIndex <= confidenceFloorIndex || confidenceCeilingIndex > 1.0f
+        || !isfinite(minConfidence) || minConfidence < 0.0f || minConfidence > 1.0f) return false;
+
+    float modulationLowHz = fmaxf(0.5f, modulationCenterHz - 0.5f * modulationBandwidthHz);
+    float modulationHighHz = modulationCenterHz + 0.5f * modulationBandwidthHz;
+    if (modulationHighHz >= sampleRate * 0.45f) return false;
+
+    N60DialogueLevelerSnapshot configured = {0};
+    configured.enabled = enabled;
+    configured.voiceGateEnabled = voiceGateEnabled;
+    configured.bandLowHz = bandLowHz;
+    configured.bandHighHz = bandHighHz;
+    configured.targetGapDB = targetGapDB;
+    configured.boostRatio = boostRatio;
+    configured.maxBoostDB = maxBoostDB;
+    configured.programGateThresholdDB = programGateThresholdDB;
+    configured.detectorCoefficient = coefficient_for_time_ms(sampleRate, detectorWindowMs);
+    configured.attackCoefficient = coefficient_for_time_ms(sampleRate, attackMs);
+    configured.releaseCoefficient = coefficient_for_time_ms(sampleRate, releaseMs);
+    configured.voiceEnvelopeCoefficient = coefficient_for_time_ms(sampleRate, voiceEnvelopeWindowMs);
+    configured.voiceMeasurementCoefficient = coefficient_for_time_ms(sampleRate, voiceMeasurementWindowMs);
+    configured.modulationHighPassPole = (float)exp(-2.0 * M_PI * (double)modulationLowHz / sampleRate);
+    configured.modulationLowPassPole = (float)exp(-2.0 * M_PI * (double)modulationHighHz / sampleRate);
+    configured.confidenceFloorIndex = confidenceFloorIndex;
+    configured.confidenceCeilingIndex = confidenceCeilingIndex;
+    configured.minConfidence = minConfidence;
+    if (!valid_coefficient(configured.detectorCoefficient)
+        || !valid_coefficient(configured.attackCoefficient)
+        || !valid_coefficient(configured.releaseCoefficient)
+        || !valid_coefficient(configured.voiceEnvelopeCoefficient)
+        || !valid_coefficient(configured.voiceMeasurementCoefficient)
+        || !valid_coefficient(configured.modulationHighPassPole)
+        || !valid_coefficient(configured.modulationLowPassPole)
+        || !N60BiquadDesign(N60BiquadFilterTypeHighPass, sampleRate, bandLowHz, 0.0, 0.7071067811865476, &configured.bandHighPass)
+        || !N60BiquadDesign(N60BiquadFilterTypeLowPass, sampleRate, bandHighHz, 0.0, 0.7071067811865476, &configured.bandLowPass)) return false;
+    snapshot->dialogueLeveler = configured;
+    return true;
+}
+
 bool N60DynamicsSnapshotSetDeEsser(
     N60DynamicsSnapshot *snapshot,
     double sampleRate,
@@ -751,15 +860,43 @@ bool N60DynamicsSnapshotSetDeEsser(
     float thresholdDB,
     bool dynamicEQMode
 ) {
+    return N60DynamicsSnapshotSetDeEsserAdvanced(
+        snapshot, sampleRate, enabled, frequencyHz, thresholdDB,
+        N60_DEESSER_RATIO, -24.0f, 2.0f,
+        N60_DEESSER_ATTACK_MS, N60_DEESSER_RELEASE_MS, dynamicEQMode
+    );
+}
+
+bool N60DynamicsSnapshotSetDeEsserAdvanced(
+    N60DynamicsSnapshot *snapshot,
+    double sampleRate,
+    bool enabled,
+    double frequencyHz,
+    float thresholdDB,
+    float ratio,
+    float rangeDB,
+    float detectionQ,
+    float attackMs,
+    float releaseMs,
+    bool dynamicEQMode
+) {
     if (snapshot == NULL || !isfinite(sampleRate) || sampleRate <= 0.0
         || !isfinite(frequencyHz) || frequencyHz < 2000.0 || frequencyHz > 10000.0
         || frequencyHz >= sampleRate * 0.45
-        || !isfinite(thresholdDB) || thresholdDB < -60.0f || thresholdDB > 0.0f) {
+        || !isfinite(thresholdDB) || thresholdDB < -60.0f || thresholdDB > 0.0f
+        || !isfinite(ratio) || ratio < 1.0f || ratio > 20.0f
+        || !isfinite(rangeDB) || rangeDB < -24.0f || rangeDB > 0.0f
+        || !isfinite(detectionQ) || detectionQ < 0.5f || detectionQ > 8.0f
+        || !isfinite(attackMs) || attackMs < 0.1f || attackMs > 100.0f
+        || !isfinite(releaseMs) || releaseMs < 10.0f || releaseMs > 1000.0f) {
         return false;
     }
 
-    double lowerFrequency = frequencyHz / sqrt(2.0);
-    double upperFrequency = frequencyHz * sqrt(2.0);
+    // Detection-Q is expressed as inverse octave half-bandwidth. Q=2.0 yields
+    // the accepted PR28 band (centre / sqrt(2) ... centre * sqrt(2)).
+    double octaveHalfWidth = 1.0 / (double)detectionQ;
+    double lowerFrequency = frequencyHz * pow(2.0, -octaveHalfWidth);
+    double upperFrequency = frequencyHz * pow(2.0, octaveHalfWidth);
     upperFrequency = fmin(upperFrequency, sampleRate * 0.45);
     if (lowerFrequency <= 0.0 || upperFrequency <= lowerFrequency) return false;
 
@@ -768,9 +905,11 @@ bool N60DynamicsSnapshotSetDeEsser(
     configured.dynamicEQMode = dynamicEQMode;
     configured.frequencyHz = frequencyHz;
     configured.thresholdDB = thresholdDB;
-    configured.ratio = N60_DEESSER_RATIO;
-    configured.attackCoefficient = coefficient_for_time_ms(sampleRate, N60_DEESSER_ATTACK_MS);
-    configured.releaseCoefficient = coefficient_for_time_ms(sampleRate, N60_DEESSER_RELEASE_MS);
+    configured.ratio = ratio;
+    configured.rangeDB = rangeDB;
+    configured.detectionQ = detectionQ;
+    configured.attackCoefficient = coefficient_for_time_ms(sampleRate, attackMs);
+    configured.releaseCoefficient = coefficient_for_time_ms(sampleRate, releaseMs);
     if (!valid_coefficient(configured.attackCoefficient)
         || !valid_coefficient(configured.releaseCoefficient)
         || !N60BiquadDesign(N60BiquadFilterTypeHighPass, sampleRate, lowerFrequency, 0.0, 0.7071067811865476, &configured.sidechainHighPass)
@@ -792,58 +931,109 @@ bool N60DynamicsSnapshotSetMultibandCompressor(
     float midThresholdDB,
     float highThresholdDB
 ) {
+    return N60DynamicsSnapshotSetMultibandCompressorAdvanced(
+        snapshot, sampleRate, enabled, lowMidFrequencyHz, midHighFrequencyHz,
+        topology, topology,
+        lowThresholdDB, midThresholdDB, highThresholdDB,
+        N60_MULTIBAND_RATIO, N60_MULTIBAND_RATIO, N60_MULTIBAND_RATIO,
+        N60_MULTIBAND_ATTACK_MS, N60_MULTIBAND_ATTACK_MS, N60_MULTIBAND_ATTACK_MS,
+        N60_MULTIBAND_RELEASE_MS, N60_MULTIBAND_RELEASE_MS, N60_MULTIBAND_RELEASE_MS,
+        N60_MULTIBAND_KNEE_DB, N60_MULTIBAND_KNEE_DB, N60_MULTIBAND_KNEE_DB,
+        0.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 0.0f
+    );
+}
+
+bool N60DynamicsSnapshotSetMultibandCompressorAdvanced(
+    N60DynamicsSnapshot *snapshot,
+    double sampleRate,
+    bool enabled,
+    double lowMidFrequencyHz,
+    double midHighFrequencyHz,
+    N60CrossoverTopology lowTopology,
+    N60CrossoverTopology highTopology,
+    float lowThresholdDB,
+    float midThresholdDB,
+    float highThresholdDB,
+    float lowRatio,
+    float midRatio,
+    float highRatio,
+    float lowAttackMs,
+    float midAttackMs,
+    float highAttackMs,
+    float lowReleaseMs,
+    float midReleaseMs,
+    float highReleaseMs,
+    float lowKneeDB,
+    float midKneeDB,
+    float highKneeDB,
+    float lowSidechainHPFHz,
+    float midSidechainHPFHz,
+    float highSidechainHPFHz,
+    float lowMakeupDB,
+    float midMakeupDB,
+    float highMakeupDB
+) {
+    const float thresholds[3] = {lowThresholdDB, midThresholdDB, highThresholdDB};
+    const float ratios[3] = {lowRatio, midRatio, highRatio};
+    const float attacks[3] = {lowAttackMs, midAttackMs, highAttackMs};
+    const float releases[3] = {lowReleaseMs, midReleaseMs, highReleaseMs};
+    const float knees[3] = {lowKneeDB, midKneeDB, highKneeDB};
+    const float sidechainHPF[3] = {lowSidechainHPFHz, midSidechainHPFHz, highSidechainHPFHz};
+    const float makeup[3] = {lowMakeupDB, midMakeupDB, highMakeupDB};
     if (snapshot == NULL || !isfinite(sampleRate) || sampleRate <= 0.0
         || !isfinite(lowMidFrequencyHz) || lowMidFrequencyHz < 40.0 || lowMidFrequencyHz > 250.0
         || !isfinite(midHighFrequencyHz) || midHighFrequencyHz < 1000.0 || midHighFrequencyHz > 8000.0
-        || lowMidFrequencyHz >= midHighFrequencyHz || midHighFrequencyHz >= sampleRate * 0.45
-        || !isfinite(lowThresholdDB) || lowThresholdDB < -60.0f || lowThresholdDB > 0.0f
-        || !isfinite(midThresholdDB) || midThresholdDB < -60.0f || midThresholdDB > 0.0f
-        || !isfinite(highThresholdDB) || highThresholdDB < -60.0f || highThresholdDB > 0.0f) {
-        return false;
+        || lowMidFrequencyHz >= midHighFrequencyHz || midHighFrequencyHz >= sampleRate * 0.45) return false;
+    for (uint32_t band = 0; band < 3; ++band) {
+        if (!isfinite(thresholds[band]) || thresholds[band] < -60.0f || thresholds[band] > 0.0f
+            || !isfinite(ratios[band]) || ratios[band] < 1.0f || ratios[band] > 20.0f
+            || !isfinite(attacks[band]) || attacks[band] < 1.0f || attacks[band] > 200.0f
+            || !isfinite(releases[band]) || releases[band] < 10.0f || releases[band] > 1000.0f
+            || !isfinite(knees[band]) || knees[band] < 0.0f || knees[band] > 20.0f
+            || !isfinite(sidechainHPF[band]) || sidechainHPF[band] < 0.0f || sidechainHPF[band] > 300.0f
+            || !isfinite(makeup[band]) || makeup[band] < -12.0f || makeup[band] > 12.0f) return false;
     }
 
-    double qValues[N60_MAX_CROSSOVER_SECTIONS] = {0};
-    uint32_t sectionCount = 0;
-    if (!N60CrossoverTopologyQValues(topology, qValues, &sectionCount)) return false;
+    double lowQ[N60_MAX_CROSSOVER_SECTIONS] = {0};
+    double highQ[N60_MAX_CROSSOVER_SECTIONS] = {0};
+    uint32_t lowCount = 0, highCount = 0;
+    if (!N60CrossoverTopologyQValues(lowTopology, lowQ, &lowCount)
+        || !N60CrossoverTopologyQValues(highTopology, highQ, &highCount)) return false;
 
     N60MultibandCompressorSnapshot configured = {0};
     configured.enabled = enabled;
     configured.lowMidFrequencyHz = lowMidFrequencyHz;
     configured.midHighFrequencyHz = midHighFrequencyHz;
-    configured.topology = topology;
-    configured.sectionCount = sectionCount;
-    configured.thresholdDB[0] = lowThresholdDB;
-    configured.thresholdDB[1] = midThresholdDB;
-    configured.thresholdDB[2] = highThresholdDB;
-    configured.ratio = N60_MULTIBAND_RATIO;
-    configured.kneeWidthDB = N60_MULTIBAND_KNEE_DB;
-    configured.attackCoefficient = coefficient_for_time_ms(sampleRate, N60_MULTIBAND_ATTACK_MS);
-    configured.releaseCoefficient = coefficient_for_time_ms(sampleRate, N60_MULTIBAND_RELEASE_MS);
-    if (!valid_coefficient(configured.attackCoefficient) || !valid_coefficient(configured.releaseCoefficient)) return false;
-
-    for (uint32_t index = 0; index < N60_MAX_CROSSOVER_SECTIONS; ++index) {
-        configured.lowPass[index] = N60BiquadCoefficientsMakeIdentity();
-        configured.highPass[index] = N60BiquadCoefficientsMakeIdentity();
-    }
-    for (uint32_t index = 0; index < sectionCount; ++index) {
-        if (!N60BiquadDesign(
-                N60BiquadFilterTypeLowPass,
-                sampleRate,
-                lowMidFrequencyHz,
-                0.0,
-                qValues[index],
-                &configured.lowPass[index])
-            || !N60BiquadDesign(
-                N60BiquadFilterTypeHighPass,
-                sampleRate,
-                midHighFrequencyHz,
-                0.0,
-                qValues[index],
-                &configured.highPass[index])) {
-            return false;
+    configured.lowTopology = lowTopology;
+    configured.highTopology = highTopology;
+    configured.lowSectionCount = lowCount;
+    configured.highSectionCount = highCount;
+    for (uint32_t band = 0; band < 3; ++band) {
+        configured.thresholdDB[band] = thresholds[band];
+        configured.ratio[band] = ratios[band];
+        configured.kneeWidthDB[band] = knees[band];
+        configured.makeupGainDB[band] = makeup[band];
+        configured.attackCoefficient[band] = coefficient_for_time_ms(sampleRate, attacks[band]);
+        configured.releaseCoefficient[band] = coefficient_for_time_ms(sampleRate, releases[band]);
+        configured.sidechainHighPass[band] = N60BiquadCoefficientsMakeIdentity();
+        if (!valid_coefficient(configured.attackCoefficient[band])
+            || !valid_coefficient(configured.releaseCoefficient[band])) return false;
+        if (sidechainHPF[band] > 0.0f) {
+            if (sidechainHPF[band] >= sampleRate * 0.45
+                || !N60BiquadDesign(N60BiquadFilterTypeHighPass, sampleRate, sidechainHPF[band], 0.0, 0.7071067811865476, &configured.sidechainHighPass[band])) return false;
         }
     }
-
+    for (uint32_t i = 0; i < N60_MAX_CROSSOVER_SECTIONS; ++i) {
+        configured.lowPass[i] = N60BiquadCoefficientsMakeIdentity();
+        configured.highPass[i] = N60BiquadCoefficientsMakeIdentity();
+    }
+    for (uint32_t i = 0; i < lowCount; ++i) {
+        if (!N60BiquadDesign(N60BiquadFilterTypeLowPass, sampleRate, lowMidFrequencyHz, 0.0, lowQ[i], &configured.lowPass[i])) return false;
+    }
+    for (uint32_t i = 0; i < highCount; ++i) {
+        if (!N60BiquadDesign(N60BiquadFilterTypeHighPass, sampleRate, midHighFrequencyHz, 0.0, highQ[i], &configured.highPass[i])) return false;
+    }
     snapshot->multibandCompressor = configured;
     return true;
 }
@@ -859,24 +1049,58 @@ bool N60DynamicsSnapshotSetCompressor(
     float releaseMs,
     float makeupGainDB
 ) {
+    return N60DynamicsSnapshotSetCompressorAdvanced(
+        snapshot, sampleRate, enabled, thresholdDB, ratio, kneeWidthDB,
+        attackMs, releaseMs, makeupGainDB,
+        N60CompressorTopologyFeedForward, false, 0.0f
+    );
+}
+
+bool N60DynamicsSnapshotSetCompressorAdvanced(
+    N60DynamicsSnapshot *snapshot,
+    double sampleRate,
+    bool enabled,
+    float thresholdDB,
+    float ratio,
+    float kneeWidthDB,
+    float attackMs,
+    float releaseMs,
+    float makeupGainDB,
+    N60CompressorTopology topology,
+    bool programDependentRelease,
+    float sidechainHighPassHz
+) {
     if (snapshot == NULL || !isfinite(sampleRate) || sampleRate <= 0.0
         || !isfinite(thresholdDB) || thresholdDB < -96.0f || thresholdDB > 0.0f
         || !isfinite(ratio) || ratio < 1.0f || ratio > 100.0f
         || !isfinite(kneeWidthDB) || kneeWidthDB < 0.0f || kneeWidthDB > 24.0f
         || !isfinite(attackMs) || attackMs < 0.05f || attackMs > 1000.0f
         || !isfinite(releaseMs) || releaseMs < 1.0f || releaseMs > 5000.0f
-        || !isfinite(makeupGainDB) || makeupGainDB < -24.0f || makeupGainDB > 24.0f) {
-        return false;
-    }
+        || !isfinite(makeupGainDB) || makeupGainDB < -24.0f || makeupGainDB > 24.0f
+        || (topology != N60CompressorTopologyFeedForward && topology != N60CompressorTopologyFeedBack)
+        || !isfinite(sidechainHighPassHz) || sidechainHighPassHz < 0.0f || sidechainHighPassHz > 300.0f) return false;
+
     N60CompressorSnapshot configured = {0};
     configured.enabled = enabled;
+    configured.topology = topology;
+    configured.programDependentRelease = programDependentRelease;
     configured.thresholdDB = thresholdDB;
     configured.ratio = ratio;
     configured.kneeWidthDB = kneeWidthDB;
     configured.makeupGainDB = makeupGainDB;
     configured.attackCoefficient = coefficient_for_time_ms(sampleRate, attackMs);
     configured.releaseCoefficient = coefficient_for_time_ms(sampleRate, releaseMs);
-    if (!valid_coefficient(configured.attackCoefficient) || !valid_coefficient(configured.releaseCoefficient)) return false;
+    configured.releaseFastCoefficient = coefficient_for_time_ms(sampleRate, fmaxf(releaseMs * 0.5f, 1.0f));
+    configured.releaseSlowCoefficient = coefficient_for_time_ms(sampleRate, fminf(releaseMs * 2.0f, 5000.0f));
+    configured.sidechainHighPass = N60BiquadCoefficientsMakeIdentity();
+    if (!valid_coefficient(configured.attackCoefficient)
+        || !valid_coefficient(configured.releaseCoefficient)
+        || !valid_coefficient(configured.releaseFastCoefficient)
+        || !valid_coefficient(configured.releaseSlowCoefficient)) return false;
+    if (sidechainHighPassHz > 0.0f) {
+        if (sidechainHighPassHz >= sampleRate * 0.45
+            || !N60BiquadDesign(N60BiquadFilterTypeHighPass, sampleRate, sidechainHighPassHz, 0.0, 0.7071067811865476, &configured.sidechainHighPass)) return false;
+    }
     snapshot->compressor = configured;
     return true;
 }
@@ -1006,11 +1230,36 @@ bool N60DynamicsSnapshotIsValid(N60DynamicsSnapshot snapshot) {
         || !N60BiquadCoefficientsAreFinite(snapshot.loudnessContour.lowShelf)
         || !N60BiquadCoefficientsAreFinite(snapshot.loudnessContour.highShelf)) return false;
 
+    if (!isfinite(snapshot.dialogueLeveler.bandLowHz) || !isfinite(snapshot.dialogueLeveler.bandHighHz)
+        || snapshot.dialogueLeveler.bandLowHz < 100.0 || snapshot.dialogueLeveler.bandHighHz > 8000.0
+        || snapshot.dialogueLeveler.bandLowHz >= snapshot.dialogueLeveler.bandHighHz
+        || !isfinite(snapshot.dialogueLeveler.targetGapDB) || snapshot.dialogueLeveler.targetGapDB < 3.0f || snapshot.dialogueLeveler.targetGapDB > 20.0f
+        || !isfinite(snapshot.dialogueLeveler.boostRatio) || snapshot.dialogueLeveler.boostRatio < 1.0f || snapshot.dialogueLeveler.boostRatio > 6.0f
+        || !isfinite(snapshot.dialogueLeveler.maxBoostDB) || snapshot.dialogueLeveler.maxBoostDB < 0.0f || snapshot.dialogueLeveler.maxBoostDB > 15.0f
+        || !isfinite(snapshot.dialogueLeveler.programGateThresholdDB) || snapshot.dialogueLeveler.programGateThresholdDB < -70.0f || snapshot.dialogueLeveler.programGateThresholdDB > -30.0f
+        || !valid_coefficient(snapshot.dialogueLeveler.detectorCoefficient)
+        || !valid_coefficient(snapshot.dialogueLeveler.attackCoefficient)
+        || !valid_coefficient(snapshot.dialogueLeveler.releaseCoefficient)
+        || !valid_coefficient(snapshot.dialogueLeveler.voiceEnvelopeCoefficient)
+        || !valid_coefficient(snapshot.dialogueLeveler.voiceMeasurementCoefficient)
+        || !valid_coefficient(snapshot.dialogueLeveler.modulationHighPassPole)
+        || !valid_coefficient(snapshot.dialogueLeveler.modulationLowPassPole)
+        || !isfinite(snapshot.dialogueLeveler.confidenceFloorIndex)
+        || !isfinite(snapshot.dialogueLeveler.confidenceCeilingIndex)
+        || snapshot.dialogueLeveler.confidenceFloorIndex < 0.0f
+        || snapshot.dialogueLeveler.confidenceCeilingIndex <= snapshot.dialogueLeveler.confidenceFloorIndex
+        || snapshot.dialogueLeveler.confidenceCeilingIndex > 1.0f
+        || !isfinite(snapshot.dialogueLeveler.minConfidence) || snapshot.dialogueLeveler.minConfidence < 0.0f || snapshot.dialogueLeveler.minConfidence > 1.0f
+        || !N60BiquadCoefficientsAreFinite(snapshot.dialogueLeveler.bandHighPass)
+        || !N60BiquadCoefficientsAreFinite(snapshot.dialogueLeveler.bandLowPass)) return false;
+
     if (!isfinite(snapshot.deEsser.frequencyHz)
         || snapshot.deEsser.frequencyHz < 2000.0 || snapshot.deEsser.frequencyHz > 10000.0
         || !isfinite(snapshot.deEsser.thresholdDB)
         || snapshot.deEsser.thresholdDB < -60.0f || snapshot.deEsser.thresholdDB > 0.0f
-        || snapshot.deEsser.ratio < 1.0f
+        || snapshot.deEsser.ratio < 1.0f || snapshot.deEsser.ratio > 20.0f
+        || !isfinite(snapshot.deEsser.rangeDB) || snapshot.deEsser.rangeDB < -24.0f || snapshot.deEsser.rangeDB > 0.0f
+        || !isfinite(snapshot.deEsser.detectionQ) || snapshot.deEsser.detectionQ < 0.5f || snapshot.deEsser.detectionQ > 8.0f
         || !valid_coefficient(snapshot.deEsser.attackCoefficient)
         || !valid_coefficient(snapshot.deEsser.releaseCoefficient)
         || !N60BiquadCoefficientsAreFinite(snapshot.deEsser.sidechainHighPass)
@@ -1019,27 +1268,35 @@ bool N60DynamicsSnapshotIsValid(N60DynamicsSnapshot snapshot) {
     if (!isfinite(snapshot.multibandCompressor.lowMidFrequencyHz)
         || !isfinite(snapshot.multibandCompressor.midHighFrequencyHz)
         || snapshot.multibandCompressor.lowMidFrequencyHz >= snapshot.multibandCompressor.midHighFrequencyHz
-        || snapshot.multibandCompressor.sectionCount > N60_MAX_CROSSOVER_SECTIONS
-        || snapshot.multibandCompressor.ratio < 1.0f
-        || !isfinite(snapshot.multibandCompressor.kneeWidthDB)
-        || !valid_coefficient(snapshot.multibandCompressor.attackCoefficient)
-        || !valid_coefficient(snapshot.multibandCompressor.releaseCoefficient)) return false;
+        || snapshot.multibandCompressor.lowSectionCount > N60_MAX_CROSSOVER_SECTIONS
+        || snapshot.multibandCompressor.highSectionCount > N60_MAX_CROSSOVER_SECTIONS) return false;
     for (uint32_t band = 0; band < N60_MULTIBAND_BAND_COUNT; ++band) {
         if (!isfinite(snapshot.multibandCompressor.thresholdDB[band])
-            || snapshot.multibandCompressor.thresholdDB[band] < -60.0f
-            || snapshot.multibandCompressor.thresholdDB[band] > 0.0f) return false;
+            || snapshot.multibandCompressor.thresholdDB[band] < -60.0f || snapshot.multibandCompressor.thresholdDB[band] > 0.0f
+            || !isfinite(snapshot.multibandCompressor.ratio[band]) || snapshot.multibandCompressor.ratio[band] < 1.0f || snapshot.multibandCompressor.ratio[band] > 20.0f
+            || !isfinite(snapshot.multibandCompressor.kneeWidthDB[band]) || snapshot.multibandCompressor.kneeWidthDB[band] < 0.0f || snapshot.multibandCompressor.kneeWidthDB[band] > 20.0f
+            || !isfinite(snapshot.multibandCompressor.makeupGainDB[band]) || snapshot.multibandCompressor.makeupGainDB[band] < -12.0f || snapshot.multibandCompressor.makeupGainDB[band] > 12.0f
+            || !valid_coefficient(snapshot.multibandCompressor.attackCoefficient[band])
+            || !valid_coefficient(snapshot.multibandCompressor.releaseCoefficient[band])
+            || !N60BiquadCoefficientsAreFinite(snapshot.multibandCompressor.sidechainHighPass[band])) return false;
     }
-    for (uint32_t index = 0; index < snapshot.multibandCompressor.sectionCount; ++index) {
-        if (!N60BiquadCoefficientsAreFinite(snapshot.multibandCompressor.lowPass[index])
-            || !N60BiquadCoefficientsAreFinite(snapshot.multibandCompressor.highPass[index])) return false;
+    for (uint32_t index = 0; index < snapshot.multibandCompressor.lowSectionCount; ++index) {
+        if (!N60BiquadCoefficientsAreFinite(snapshot.multibandCompressor.lowPass[index])) return false;
+    }
+    for (uint32_t index = 0; index < snapshot.multibandCompressor.highSectionCount; ++index) {
+        if (!N60BiquadCoefficientsAreFinite(snapshot.multibandCompressor.highPass[index])) return false;
     }
 
     if (snapshot.compressor.ratio < 1.0f || snapshot.compressor.ratio > 100.0f
+        || (snapshot.compressor.topology != N60CompressorTopologyFeedForward && snapshot.compressor.topology != N60CompressorTopologyFeedBack)
         || !isfinite(snapshot.compressor.thresholdDB)
         || !isfinite(snapshot.compressor.kneeWidthDB)
         || !isfinite(snapshot.compressor.makeupGainDB)
         || !valid_coefficient(snapshot.compressor.attackCoefficient)
-        || !valid_coefficient(snapshot.compressor.releaseCoefficient)) return false;
+        || !valid_coefficient(snapshot.compressor.releaseCoefficient)
+        || !valid_coefficient(snapshot.compressor.releaseFastCoefficient)
+        || !valid_coefficient(snapshot.compressor.releaseSlowCoefficient)
+        || !N60BiquadCoefficientsAreFinite(snapshot.compressor.sidechainHighPass)) return false;
     if (snapshot.expander.ratio < 1.0f || snapshot.expander.ratio > 20.0f
         || snapshot.expander.rangeDB > 0.0f
         || !isfinite(snapshot.expander.thresholdDB)
@@ -1255,6 +1512,73 @@ static void process_loudness_contour(
     *right = dryRight + (wetRight - dryRight) * runtime->loudnessMix;
 }
 
+static void process_dialogue_leveler(
+    N60DynamicsRuntime *runtime,
+    N60DynamicsSnapshot snapshot,
+    float *left,
+    float *right
+) {
+    N60DialogueLevelerSnapshot config = snapshot.dialogueLeveler;
+    float dryLeft = *left;
+    float dryRight = *right;
+
+    float dialogueLeft = N60BiquadProcessSample(config.bandHighPass, &runtime->dialogueHighPassLeft, dryLeft);
+    dialogueLeft = N60BiquadProcessSample(config.bandLowPass, &runtime->dialogueLowPassLeft, dialogueLeft);
+    float dialogueRight = N60BiquadProcessSample(config.bandHighPass, &runtime->dialogueHighPassRight, dryRight);
+    dialogueRight = N60BiquadProcessSample(config.bandLowPass, &runtime->dialogueLowPassRight, dialogueRight);
+
+    float programPower = 0.5f * (dryLeft * dryLeft + dryRight * dryRight);
+    float dialoguePower = 0.5f * (dialogueLeft * dialogueLeft + dialogueRight * dialogueRight);
+    runtime->dialogueProgramMeanSquare = smooth_toward(runtime->dialogueProgramMeanSquare, programPower, config.detectorCoefficient);
+    runtime->dialogueBandMeanSquare = smooth_toward(runtime->dialogueBandMeanSquare, dialoguePower, config.detectorCoefficient);
+    runtime->dialogueProgramLevelDBFS = 10.0f * log10f(fmaxf(runtime->dialogueProgramMeanSquare, N60_DYNAMICS_EPSILON));
+    runtime->dialogueBandLevelDBFS = 10.0f * log10f(fmaxf(runtime->dialogueBandMeanSquare, N60_DYNAMICS_EPSILON));
+    runtime->dialogueGapDB = runtime->dialogueProgramLevelDBFS - runtime->dialogueBandLevelDBFS;
+
+    // Independently authored speech-likeness confidence: measure normalized
+    // syllabic-rate modulation energy in the dialogue-band envelope. All filter
+    // coefficients are prepared in the snapshot; the render path is fixed state.
+    float dialogueEnvelopeInput = sqrtf(fmaxf(dialoguePower, 0.0f));
+    runtime->dialogueVoiceEnvelope = smooth_toward(
+        runtime->dialogueVoiceEnvelope, dialogueEnvelopeInput, config.voiceEnvelopeCoefficient);
+    float modulationHP = runtime->dialogueVoiceEnvelope - runtime->dialogueModulationPreviousInput
+        + config.modulationHighPassPole * runtime->dialogueModulationHighPassOutput;
+    runtime->dialogueModulationPreviousInput = runtime->dialogueVoiceEnvelope;
+    runtime->dialogueModulationHighPassOutput = modulationHP;
+    float modulationLP = (1.0f - config.modulationLowPassPole) * modulationHP
+        + config.modulationLowPassPole * runtime->dialogueModulationLowPassOutput;
+    runtime->dialogueModulationLowPassOutput = modulationLP;
+    float modulationPower = modulationLP * modulationLP;
+    runtime->dialogueModulationMeanSquare = smooth_toward(
+        runtime->dialogueModulationMeanSquare, modulationPower, config.voiceMeasurementCoefficient);
+    float modulationIndex = sqrtf(fmaxf(runtime->dialogueModulationMeanSquare, 0.0f))
+        / fmaxf(runtime->dialogueVoiceEnvelope, 1.0e-6f);
+    float mappedConfidence = (modulationIndex - config.confidenceFloorIndex)
+        / fmaxf(config.confidenceCeilingIndex - config.confidenceFloorIndex, 1.0e-6f);
+    mappedConfidence = clampf(mappedConfidence, 0.0f, 1.0f);
+    runtime->dialogueVoiceConfidence = config.voiceGateEnabled
+        ? config.minConfidence + (1.0f - config.minConfidence) * mappedConfidence
+        : 1.0f;
+
+    float targetBoostDB = 0.0f;
+    if (config.enabled && runtime->dialogueProgramLevelDBFS >= config.programGateThresholdDB) {
+        float excessGap = fmaxf(0.0f, runtime->dialogueGapDB - config.targetGapDB);
+        float correctionFraction = config.boostRatio > 1.0f ? (1.0f - 1.0f / config.boostRatio) : 0.0f;
+        targetBoostDB = fminf(config.maxBoostDB, excessGap * correctionFraction);
+        targetBoostDB *= runtime->dialogueVoiceConfidence;
+    }
+    float coefficient = !config.enabled
+        ? snapshot.bypassTransitionCoefficient
+        : (targetBoostDB > runtime->dialogueBoostDB ? config.attackCoefficient : config.releaseCoefficient);
+    runtime->dialogueBoostDB = smooth_toward(runtime->dialogueBoostDB, targetBoostDB, coefficient);
+
+    // Boost only the extracted dialogue band, not the full program. The same
+    // correction is applied to L/R, preserving the stereo image of the band.
+    float bandGain = db_to_linear(runtime->dialogueBoostDB);
+    *left = dryLeft + dialogueLeft * (bandGain - 1.0f);
+    *right = dryRight + dialogueRight * (bandGain - 1.0f);
+}
+
 static void process_de_esser(
     N60DynamicsRuntime *runtime,
     N60DynamicsSnapshot snapshot,
@@ -1292,6 +1616,7 @@ static void process_de_esser(
         snapshot.deEsser.ratio,
         3.0f
     );
+    targetDB = fmaxf(targetDB, snapshot.deEsser.rangeDB);
     float coefficient = !snapshot.deEsser.enabled
         ? snapshot.bypassTransitionCoefficient
         : (targetDB < runtime->deEsserGainDB
@@ -1316,32 +1641,32 @@ static void process_multiband_compressor(
     float *right
 ) {
     N60MultibandCompressorSnapshot multiband = snapshot.multibandCompressor;
-    if (multiband.sectionCount == 0) return;
+    if (multiband.lowSectionCount == 0 || multiband.highSectionCount == 0) return;
 
     float dryLeft = *left;
     float dryRight = *right;
     float lowLeft = process_filter_cascade(
         multiband.lowPass,
         runtime->multibandLowPassLeft,
-        multiband.sectionCount,
+        multiband.lowSectionCount,
         dryLeft
     );
     float lowRight = process_filter_cascade(
         multiband.lowPass,
         runtime->multibandLowPassRight,
-        multiband.sectionCount,
+        multiband.lowSectionCount,
         dryRight
     );
     float highLeft = process_filter_cascade(
         multiband.highPass,
         runtime->multibandHighPassLeft,
-        multiband.sectionCount,
+        multiband.highSectionCount,
         dryLeft
     );
     float highRight = process_filter_cascade(
         multiband.highPass,
         runtime->multibandHighPassRight,
-        multiband.sectionCount,
+        multiband.highSectionCount,
         dryRight
     );
 
@@ -1355,19 +1680,22 @@ static void process_multiband_compressor(
     float outputRight = 0.0f;
 
     for (uint32_t band = 0; band < N60_MULTIBAND_BAND_COUNT; ++band) {
-        float detector = fmaxf(fabsf(bandLeft[band]), fabsf(bandRight[band]));
+        float detectorLeft = N60BiquadProcessSample(multiband.sidechainHighPass[band], &runtime->multibandSidechainLeft[band], bandLeft[band]);
+        float detectorRight = N60BiquadProcessSample(multiband.sidechainHighPass[band], &runtime->multibandSidechainRight[band], bandRight[band]);
+        float detector = fmaxf(fabsf(detectorLeft), fabsf(detectorRight));
         float targetDB = dynamics_compression_target(
             detector,
             multiband.enabled,
             multiband.thresholdDB[band],
-            multiband.ratio,
-            multiband.kneeWidthDB
+            multiband.ratio[band],
+            multiband.kneeWidthDB[band]
         );
+        if (multiband.enabled) targetDB += multiband.makeupGainDB[band];
         float coefficient = !multiband.enabled
             ? snapshot.bypassTransitionCoefficient
             : (targetDB < runtime->multibandGainDB[band]
-                ? multiband.attackCoefficient
-                : multiband.releaseCoefficient);
+                ? multiband.attackCoefficient[band]
+                : multiband.releaseCoefficient[band]);
         runtime->multibandGainDB[band] = smooth_toward(
             runtime->multibandGainDB[band],
             targetDB,
@@ -1396,20 +1724,31 @@ void N60DynamicsProcessCoreStereoFrameWithMasterGain(
     process_stereo_widener(runtime, snapshot, left, right);
     process_loudness_match(runtime, snapshot, left, right);
     process_loudness_contour(runtime, snapshot, masterGainLinear, left, right);
+    process_dialogue_leveler(runtime, snapshot, left, right);
     process_de_esser(runtime, snapshot, left, right);
     process_multiband_compressor(runtime, snapshot, left, right);
 
-    float detector = fmaxf(fabsf(*left), fabsf(*right));
+    float detectorFeedGain = snapshot.compressor.topology == N60CompressorTopologyFeedBack
+        ? db_to_linear(runtime->compressorGainDB) : 1.0f;
+    float compressorDetectorLeft = N60BiquadProcessSample(
+        snapshot.compressor.sidechainHighPass, &runtime->compressorSidechainLeft, *left * detectorFeedGain);
+    float compressorDetectorRight = N60BiquadProcessSample(
+        snapshot.compressor.sidechainHighPass, &runtime->compressorSidechainRight, *right * detectorFeedGain);
+    float detector = fmaxf(fabsf(compressorDetectorLeft), fabsf(compressorDetectorRight));
     float detectorDB = linear_to_db(detector);
 
     float compressorTargetDB = compressor_target_gain_db(detectorDB, snapshot.compressor);
     float compressorCoefficient;
     if (!snapshot.compressor.enabled) {
         compressorCoefficient = snapshot.bypassTransitionCoefficient;
+    } else if (compressorTargetDB < runtime->compressorGainDB) {
+        compressorCoefficient = snapshot.compressor.attackCoefficient;
+    } else if (snapshot.compressor.programDependentRelease) {
+        float depth = clampf(-runtime->compressorGainDB / 12.0f, 0.0f, 1.0f);
+        compressorCoefficient = snapshot.compressor.releaseFastCoefficient
+            + depth * (snapshot.compressor.releaseSlowCoefficient - snapshot.compressor.releaseFastCoefficient);
     } else {
-        compressorCoefficient = compressorTargetDB < runtime->compressorGainDB
-            ? snapshot.compressor.attackCoefficient
-            : snapshot.compressor.releaseCoefficient;
+        compressorCoefficient = snapshot.compressor.releaseCoefficient;
     }
     runtime->compressorGainDB = smooth_toward(
         runtime->compressorGainDB,
@@ -1522,6 +1861,11 @@ N60DynamicsTelemetry N60DynamicsRuntimeTelemetry(const N60DynamicsRuntime *runti
     telemetry.loudnessShortTermLUFS = -0.691f + 10.0f * log10f(fmaxf(runtime->loudnessMeanSquare, N60_DYNAMICS_EPSILON));
     telemetry.loudnessMatchGainDB = runtime->loudnessMatchGainDB;
     telemetry.loudnessContourScale = runtime->loudnessMix;
+    telemetry.dialogueProgramLevelDBFS = runtime->dialogueProgramLevelDBFS;
+    telemetry.dialogueBandLevelDBFS = runtime->dialogueBandLevelDBFS;
+    telemetry.dialogueGapDB = runtime->dialogueGapDB;
+    telemetry.dialogueVoiceConfidence = runtime->dialogueVoiceConfidence;
+    telemetry.dialogueBoostDB = runtime->dialogueBoostDB;
     telemetry.deEsserGainReductionDB = fmaxf(0.0f, -runtime->deEsserGainDB);
     telemetry.multibandLowGainReductionDB = fmaxf(0.0f, -runtime->multibandGainDB[0]);
     telemetry.multibandMidGainReductionDB = fmaxf(0.0f, -runtime->multibandGainDB[1]);

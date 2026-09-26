@@ -166,6 +166,11 @@ typedef struct {
     float loudnessShortTermLUFS;
     float loudnessMatchGainDB;
     float loudnessContourScale;
+    float dialogueProgramLevelDBFS;
+    float dialogueBandLevelDBFS;
+    float dialogueGapDB;
+    float dialogueVoiceConfidence;
+    float dialogueBoostDB;
     bool compressorEnabled;
     bool expanderEnabled;
     bool pauseGateEnabled;

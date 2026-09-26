@@ -74,6 +74,11 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
     let loudnessShortTermLUFS: Float
     let loudnessMatchGainDB: Float
     let loudnessContourScale: Float
+    let dialogueProgramLevelDBFS: Float
+    let dialogueBandLevelDBFS: Float
+    let dialogueGapDB: Float
+    let dialogueVoiceConfidence: Float
+    let dialogueBoostDB: Float
     let compressorEnabled: Bool
     let expanderEnabled: Bool
     let pauseGateEnabled: Bool
@@ -167,6 +172,11 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
         loudnessShortTermLUFS = diagnostics.loudnessShortTermLUFS
         loudnessMatchGainDB = diagnostics.loudnessMatchGainDB
         loudnessContourScale = diagnostics.loudnessContourScale
+        dialogueProgramLevelDBFS = diagnostics.dialogueProgramLevelDBFS
+        dialogueBandLevelDBFS = diagnostics.dialogueBandLevelDBFS
+        dialogueGapDB = diagnostics.dialogueGapDB
+        dialogueVoiceConfidence = diagnostics.dialogueVoiceConfidence
+        dialogueBoostDB = diagnostics.dialogueBoostDB
         compressorEnabled = diagnostics.compressorEnabled
         expanderEnabled = diagnostics.expanderEnabled
         pauseGateEnabled = diagnostics.pauseGateEnabled

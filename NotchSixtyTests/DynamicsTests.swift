@@ -447,4 +447,175 @@ final class DynamicsTests: XCTestCase {
         XCTAssertLessThan(telemetry.loudnessShortTermLUFS, -60.0)
     }
 
+
+    func testPR32AdvancedCompressorSidechainAndTopologyAreFinite() {
+        for rate in [48_000.0, 96_000.0, 384_000.0] {
+            for topology in [N60CompressorTopologyFeedForward, N60CompressorTopologyFeedBack] {
+                var snapshot = N60DynamicsSnapshotMakeBypassed(rate)
+                XCTAssertTrue(N60DynamicsSnapshotSetCompressorAdvanced(
+                    &snapshot, rate, true, -24, 4, 6, 5, 200, 0,
+                    topology, true, 120
+                ))
+                var runtime = N60DynamicsRuntime()
+                N60DynamicsRuntimeReset(&runtime)
+                for frame in 0..<Int(rate * 0.1) {
+                    var left = Float(0.55 * sin(2 * Double.pi * 1000 * Double(frame) / rate))
+                    var right = left * 0.5
+                    N60DynamicsProcessStereoFrame(&runtime, snapshot, &left, &right)
+                    XCTAssertTrue(left.isFinite && right.isFinite)
+                }
+            }
+        }
+    }
+
+    func testPR32DeEsserRangeBoundsReduction() {
+        let rate = 48_000.0
+        var snapshot = N60DynamicsSnapshotMakeBypassed(rate)
+        XCTAssertTrue(N60DynamicsSnapshotSetDeEsserAdvanced(
+            &snapshot, rate, true, 6_500, -50, 20, -6, 2, 1, 50, false
+        ))
+        var runtime = N60DynamicsRuntime()
+        N60DynamicsRuntimeReset(&runtime)
+        for frame in 0..<48_000 {
+            var left = Float(0.7 * sin(2 * Double.pi * 6500 * Double(frame) / rate))
+            var right = left
+            N60DynamicsProcessStereoFrame(&runtime, snapshot, &left, &right)
+        }
+        XCTAssertLessThanOrEqual(N60DynamicsRuntimeTelemetry(&runtime).deEsserGainReductionDB, 6.05)
+    }
+
+    func testPR32MultibandIndependentControlsStayFiniteAndLinked() {
+        let rate = 96_000.0
+        var snapshot = N60DynamicsSnapshotMakeBypassed(rate)
+        XCTAssertTrue(N60DynamicsSnapshotSetMultibandCompressorAdvanced(
+            &snapshot, rate, true, 120, 3_500,
+            N60CrossoverTopologyLinkwitzRiley24, N60CrossoverTopologyLinkwitzRiley48,
+            -24, -20, -18,
+            2, 4, 8,
+            40, 20, 5,
+            300, 150, 50,
+            3, 6, 9,
+            0, 80, 150,
+            0, 1, -1
+        ))
+        var runtime = N60DynamicsRuntime()
+        N60DynamicsRuntimeReset(&runtime)
+        for frame in 0..<48_000 {
+            let x = Float(0.25 * sin(2 * Double.pi * 6000 * Double(frame) / rate))
+            var left = x
+            var right = x * 0.5
+            N60DynamicsProcessStereoFrame(&runtime, snapshot, &left, &right)
+            XCTAssertTrue(left.isFinite && right.isFinite)
+        }
+    }
+
+    func testPR32ControlRangesRejectInvalidValues() {
+        var config = DynamicsConfiguration()
+        config.compressor.sidechainHighPassHz = 301
+        XCTAssertThrowsError(try config.makeSnapshot(sampleRate: 96_000))
+        config = DynamicsConfiguration()
+        config.deEsser.detectionQ = 8.1
+        XCTAssertThrowsError(try config.makeSnapshot(sampleRate: 96_000))
+        config = DynamicsConfiguration()
+        config.multibandCompressor.highRatio = 21
+        XCTAssertThrowsError(try config.makeSnapshot(sampleRate: 96_000))
+    }
+
+
+    func testPR32DialogueLevelerDisabledIsTransparent() throws {
+        let rate = 96_000.0
+        let snapshot = try DynamicsConfiguration().makeSnapshot(sampleRate: rate)
+        var runtime = N60DynamicsRuntime()
+        N60DynamicsRuntimeReset(&runtime)
+        for frame in 0..<20_000 {
+            let sourceL = Float(0.22 * sin(2 * Double.pi * 997 * Double(frame) / rate))
+            let sourceR = Float(0.13 * sin(2 * Double.pi * 1511 * Double(frame) / rate))
+            var left = sourceL
+            var right = sourceR
+            N60DynamicsProcessCoreStereoFrame(&runtime, snapshot, &left, &right)
+            XCTAssertEqual(left, sourceL, accuracy: 2e-5)
+            XCTAssertEqual(right, sourceR, accuracy: 2e-5)
+        }
+    }
+
+    func testPR32DialogueLevelerProgramGatePreventsBoost() {
+        let rate = 48_000.0
+        var snapshot = N60DynamicsSnapshotMakeBypassed(rate)
+        XCTAssertTrue(N60DynamicsSnapshotSetDialogueLeveler(
+            &snapshot, rate, true, 300, 3500, 3, 6, 12, 50, 10, 100, -30,
+            false, 5, 5, 15, 700, 0.15, 0.45, 0.2
+        ))
+        var runtime = N60DynamicsRuntime()
+        N60DynamicsRuntimeReset(&runtime)
+        for frame in 0..<96_000 {
+            var left = Float(0.002 * sin(2 * Double.pi * 1000 * Double(frame) / rate))
+            var right = left
+            N60DynamicsProcessCoreStereoFrame(&runtime, snapshot, &left, &right)
+        }
+        XCTAssertLessThan(abs(N60DynamicsRuntimeTelemetry(&runtime).dialogueBoostDB), 0.05)
+    }
+
+    func testPR32DialogueLevelerRespondsToRelativeMaskingAndIsBounded() {
+        let rate = 48_000.0
+        var snapshot = N60DynamicsSnapshotMakeBypassed(rate)
+        XCTAssertTrue(N60DynamicsSnapshotSetDialogueLeveler(
+            &snapshot, rate, true, 300, 3500, 3, 6, 6, 50, 10, 100, -70,
+            false, 5, 5, 15, 700, 0.15, 0.45, 0.2
+        ))
+        var runtime = N60DynamicsRuntime()
+        N60DynamicsRuntimeReset(&runtime)
+        for frame in 0..<96_000 {
+            // Strong out-of-band program plus quieter dialogue-band content.
+            let t = Double(frame) / rate
+            let x = 0.45 * sin(2 * Double.pi * 9000 * t) + 0.035 * sin(2 * Double.pi * 1000 * t)
+            var left = Float(x)
+            var right = Float(x * 0.5)
+            N60DynamicsProcessCoreStereoFrame(&runtime, snapshot, &left, &right)
+        }
+        let telemetry = N60DynamicsRuntimeTelemetry(&runtime)
+        XCTAssertGreaterThan(telemetry.dialogueGapDB, 3)
+        XCTAssertGreaterThan(telemetry.dialogueBoostDB, 0.1)
+        XCTAssertLessThanOrEqual(telemetry.dialogueBoostDB, 6.05)
+    }
+
+    func testPR32DialogueLevelerVoiceGateConfidenceHasFloor() {
+        let rate = 48_000.0
+        var snapshot = N60DynamicsSnapshotMakeBypassed(rate)
+        XCTAssertTrue(N60DynamicsSnapshotSetDialogueLeveler(
+            &snapshot, rate, true, 300, 3500, 3, 4, 8, 50, 10, 100, -70,
+            true, 5, 5, 15, 300, 0.15, 0.45, 0.25
+        ))
+        var runtime = N60DynamicsRuntime()
+        N60DynamicsRuntimeReset(&runtime)
+        for frame in 0..<96_000 {
+            let t = Double(frame) / rate
+            let x = 0.45 * sin(2 * Double.pi * 9000 * t) + 0.03 * sin(2 * Double.pi * 1000 * t)
+            var left = Float(x)
+            var right = left
+            N60DynamicsProcessCoreStereoFrame(&runtime, snapshot, &left, &right)
+        }
+        let telemetry = N60DynamicsRuntimeTelemetry(&runtime)
+        XCTAssertGreaterThanOrEqual(telemetry.dialogueVoiceConfidence, 0.249)
+        XCTAssertLessThanOrEqual(telemetry.dialogueVoiceConfidence, 1.001)
+        XCTAssertTrue(telemetry.dialogueBoostDB.isFinite)
+    }
+
+    func testPR32DialogueLevelerFiniteThrough384k() throws {
+        for rate in [48_000.0, 96_000.0, 192_000.0, 384_000.0] {
+            var config = DynamicsConfiguration()
+            config.dialogueRelativeLeveler.enabled = true
+            config.dialogueRelativeLeveler.voiceGate.enabled = true
+            let snapshot = try config.makeSnapshot(sampleRate: rate)
+            var runtime = N60DynamicsRuntime()
+            N60DynamicsRuntimeReset(&runtime)
+            for frame in 0..<Int(min(rate * 0.2, 30_000)) {
+                let t = Double(frame) / rate
+                var left = Float(0.1 * sin(2 * Double.pi * 1000 * t))
+                var right = left * 0.7
+                N60DynamicsProcessCoreStereoFrame(&runtime, snapshot, &left, &right)
+                XCTAssertTrue(left.isFinite && right.isFinite)
+            }
+        }
+    }
+
 }

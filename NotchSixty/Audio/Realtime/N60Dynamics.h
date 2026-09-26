@@ -115,12 +115,45 @@ typedef struct {
 
 typedef struct {
     bool enabled;
+    bool voiceGateEnabled;
+    double bandLowHz;
+    double bandHighHz;
+    float targetGapDB;
+    float boostRatio;
+    float maxBoostDB;
+    float programGateThresholdDB;
+    float detectorCoefficient;
+    float attackCoefficient;
+    float releaseCoefficient;
+    float voiceEnvelopeCoefficient;
+    float voiceMeasurementCoefficient;
+    float modulationHighPassPole;
+    float modulationLowPassPole;
+    float confidenceFloorIndex;
+    float confidenceCeilingIndex;
+    float minConfidence;
+    N60BiquadCoefficients bandHighPass;
+    N60BiquadCoefficients bandLowPass;
+} N60DialogueLevelerSnapshot;
+
+typedef enum {
+    N60CompressorTopologyFeedForward = 0,
+    N60CompressorTopologyFeedBack = 1,
+} N60CompressorTopology;
+
+typedef struct {
+    bool enabled;
+    N60CompressorTopology topology;
+    bool programDependentRelease;
     float thresholdDB;
     float ratio;
     float kneeWidthDB;
     float makeupGainDB;
     float attackCoefficient;
     float releaseCoefficient;
+    float releaseFastCoefficient;
+    float releaseSlowCoefficient;
+    N60BiquadCoefficients sidechainHighPass;
 } N60CompressorSnapshot;
 
 typedef struct {
@@ -138,6 +171,8 @@ typedef struct {
     double frequencyHz;
     float thresholdDB;
     float ratio;
+    float rangeDB;
+    float detectionQ;
     float attackCoefficient;
     float releaseCoefficient;
     N60BiquadCoefficients sidechainHighPass;
@@ -148,13 +183,17 @@ typedef struct {
     bool enabled;
     double lowMidFrequencyHz;
     double midHighFrequencyHz;
-    N60CrossoverTopology topology;
-    uint32_t sectionCount;
+    N60CrossoverTopology lowTopology;
+    N60CrossoverTopology highTopology;
+    uint32_t lowSectionCount;
+    uint32_t highSectionCount;
     float thresholdDB[N60_MULTIBAND_BAND_COUNT];
-    float ratio;
-    float kneeWidthDB;
-    float attackCoefficient;
-    float releaseCoefficient;
+    float ratio[N60_MULTIBAND_BAND_COUNT];
+    float kneeWidthDB[N60_MULTIBAND_BAND_COUNT];
+    float makeupGainDB[N60_MULTIBAND_BAND_COUNT];
+    float attackCoefficient[N60_MULTIBAND_BAND_COUNT];
+    float releaseCoefficient[N60_MULTIBAND_BAND_COUNT];
+    N60BiquadCoefficients sidechainHighPass[N60_MULTIBAND_BAND_COUNT];
     N60BiquadCoefficients lowPass[N60_MAX_CROSSOVER_SECTIONS];
     N60BiquadCoefficients highPass[N60_MAX_CROSSOVER_SECTIONS];
 } N60MultibandCompressorSnapshot;
@@ -180,6 +219,7 @@ typedef struct {
     N60SpectralDenoiserSnapshot spectralDenoiser;
     N60LoudnessMatchSnapshot loudnessMatch;
     N60LoudnessContourSnapshot loudnessContour;
+    N60DialogueLevelerSnapshot dialogueLeveler;
     N60DeEsserSnapshot deEsser;
     N60MultibandCompressorSnapshot multibandCompressor;
     N60CompressorSnapshot compressor;
@@ -245,16 +285,36 @@ typedef struct {
     N60BiquadState loudnessHighShelfLeft;
     N60BiquadState loudnessHighShelfRight;
     float loudnessMix;
+    N60BiquadState dialogueHighPassLeft;
+    N60BiquadState dialogueHighPassRight;
+    N60BiquadState dialogueLowPassLeft;
+    N60BiquadState dialogueLowPassRight;
+    float dialogueProgramMeanSquare;
+    float dialogueBandMeanSquare;
+    float dialogueVoiceEnvelope;
+    float dialogueModulationPreviousInput;
+    float dialogueModulationHighPassOutput;
+    float dialogueModulationLowPassOutput;
+    float dialogueModulationMeanSquare;
+    float dialogueBoostDB;
+    float dialogueProgramLevelDBFS;
+    float dialogueBandLevelDBFS;
+    float dialogueGapDB;
+    float dialogueVoiceConfidence;
     float deEsserGainDB;
     N60BiquadState deEsserHighPassLeft;
     N60BiquadState deEsserHighPassRight;
     N60BiquadState deEsserLowPassLeft;
     N60BiquadState deEsserLowPassRight;
     float multibandGainDB[N60_MULTIBAND_BAND_COUNT];
+    N60BiquadState multibandSidechainLeft[N60_MULTIBAND_BAND_COUNT];
+    N60BiquadState multibandSidechainRight[N60_MULTIBAND_BAND_COUNT];
     N60BiquadState multibandLowPassLeft[N60_MAX_CROSSOVER_SECTIONS];
     N60BiquadState multibandLowPassRight[N60_MAX_CROSSOVER_SECTIONS];
     N60BiquadState multibandHighPassLeft[N60_MAX_CROSSOVER_SECTIONS];
     N60BiquadState multibandHighPassRight[N60_MAX_CROSSOVER_SECTIONS];
+    N60BiquadState compressorSidechainLeft;
+    N60BiquadState compressorSidechainRight;
     float compressorGainDB;
     float expanderGainDB;
     float pauseGateGain;
@@ -273,6 +333,11 @@ typedef struct {
     float loudnessShortTermLUFS;
     float loudnessMatchGainDB;
     float loudnessContourScale;
+    float dialogueProgramLevelDBFS;
+    float dialogueBandLevelDBFS;
+    float dialogueGapDB;
+    float dialogueVoiceConfidence;
+    float dialogueBoostDB;
     float compressorGainReductionDB;
     float expanderAttenuationDB;
     float pauseGateGain;
@@ -363,12 +428,49 @@ bool N60DynamicsSnapshotSetLoudnessContour(
     float strength
 );
 
+bool N60DynamicsSnapshotSetDialogueLeveler(
+    N60DynamicsSnapshot * _Nonnull snapshot,
+    double sampleRate,
+    bool enabled,
+    double bandLowHz,
+    double bandHighHz,
+    float targetGapDB,
+    float boostRatio,
+    float maxBoostDB,
+    float detectorWindowMs,
+    float attackMs,
+    float releaseMs,
+    float programGateThresholdDB,
+    bool voiceGateEnabled,
+    float modulationCenterHz,
+    float modulationBandwidthHz,
+    float voiceEnvelopeWindowMs,
+    float voiceMeasurementWindowMs,
+    float confidenceFloorIndex,
+    float confidenceCeilingIndex,
+    float minConfidence
+);
+
 bool N60DynamicsSnapshotSetDeEsser(
     N60DynamicsSnapshot * _Nonnull snapshot,
     double sampleRate,
     bool enabled,
     double frequencyHz,
     float thresholdDB,
+    bool dynamicEQMode
+);
+
+bool N60DynamicsSnapshotSetDeEsserAdvanced(
+    N60DynamicsSnapshot * _Nonnull snapshot,
+    double sampleRate,
+    bool enabled,
+    double frequencyHz,
+    float thresholdDB,
+    float ratio,
+    float rangeDB,
+    float detectionQ,
+    float attackMs,
+    float releaseMs,
     bool dynamicEQMode
 );
 
@@ -384,6 +486,37 @@ bool N60DynamicsSnapshotSetMultibandCompressor(
     float highThresholdDB
 );
 
+bool N60DynamicsSnapshotSetMultibandCompressorAdvanced(
+    N60DynamicsSnapshot * _Nonnull snapshot,
+    double sampleRate,
+    bool enabled,
+    double lowMidFrequencyHz,
+    double midHighFrequencyHz,
+    N60CrossoverTopology lowTopology,
+    N60CrossoverTopology highTopology,
+    float lowThresholdDB,
+    float midThresholdDB,
+    float highThresholdDB,
+    float lowRatio,
+    float midRatio,
+    float highRatio,
+    float lowAttackMs,
+    float midAttackMs,
+    float highAttackMs,
+    float lowReleaseMs,
+    float midReleaseMs,
+    float highReleaseMs,
+    float lowKneeDB,
+    float midKneeDB,
+    float highKneeDB,
+    float lowSidechainHPFHz,
+    float midSidechainHPFHz,
+    float highSidechainHPFHz,
+    float lowMakeupDB,
+    float midMakeupDB,
+    float highMakeupDB
+);
+
 bool N60DynamicsSnapshotSetCompressor(
     N60DynamicsSnapshot * _Nonnull snapshot,
     double sampleRate,
@@ -394,6 +527,21 @@ bool N60DynamicsSnapshotSetCompressor(
     float attackMs,
     float releaseMs,
     float makeupGainDB
+);
+
+bool N60DynamicsSnapshotSetCompressorAdvanced(
+    N60DynamicsSnapshot * _Nonnull snapshot,
+    double sampleRate,
+    bool enabled,
+    float thresholdDB,
+    float ratio,
+    float kneeWidthDB,
+    float attackMs,
+    float releaseMs,
+    float makeupGainDB,
+    N60CompressorTopology topology,
+    bool programDependentRelease,
+    float sidechainHighPassHz
 );
 
 bool N60DynamicsSnapshotSetExpander(

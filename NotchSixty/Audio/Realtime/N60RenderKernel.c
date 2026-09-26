@@ -115,6 +115,11 @@ struct N60RenderKernel {
     _Atomic uint32_t loudnessShortTermLUFSBits;
     _Atomic uint32_t loudnessMatchGainBits;
     _Atomic uint32_t loudnessContourScaleBits;
+    _Atomic uint32_t dialogueProgramLevelBits;
+    _Atomic uint32_t dialogueBandLevelBits;
+    _Atomic uint32_t dialogueGapBits;
+    _Atomic uint32_t dialogueVoiceConfidenceBits;
+    _Atomic uint32_t dialogueBoostBits;
     _Atomic uint32_t compressorGainReductionBits;
     _Atomic uint32_t expanderAttenuationBits;
     _Atomic uint32_t pauseGateGainBits;
@@ -973,6 +978,11 @@ void N60RenderKernelReset(N60RenderKernel *kernel) {
     atomic_store_explicit(&kernel->denoiserMeanSuppressionBits, 0, memory_order_relaxed);
     atomic_store_explicit(&kernel->denoiserMaxSuppressionBits, 0, memory_order_relaxed);
     atomic_store_explicit(&kernel->denoiserSpectralFramesProcessed, 0, memory_order_relaxed);
+    atomic_store_explicit(&kernel->dialogueProgramLevelBits, float_to_bits(-120.0f), memory_order_relaxed);
+    atomic_store_explicit(&kernel->dialogueBandLevelBits, float_to_bits(-120.0f), memory_order_relaxed);
+    atomic_store_explicit(&kernel->dialogueGapBits, 0, memory_order_relaxed);
+    atomic_store_explicit(&kernel->dialogueVoiceConfidenceBits, float_to_bits(1.0f), memory_order_relaxed);
+    atomic_store_explicit(&kernel->dialogueBoostBits, 0, memory_order_relaxed);
     atomic_store_explicit(&kernel->inputPeakLeftBits, 0, memory_order_relaxed);
     atomic_store_explicit(&kernel->inputPeakRightBits, 0, memory_order_relaxed);
     atomic_store_explicit(&kernel->inputRMSLeftBits, 0, memory_order_relaxed);
@@ -1224,6 +1234,11 @@ void N60RenderKernelEndRender(N60RenderKernel *kernel, N60RenderKernelRenderCont
         atomic_store_explicit(&kernel->loudnessShortTermLUFSBits, float_to_bits(telemetry.loudnessShortTermLUFS), memory_order_relaxed);
         atomic_store_explicit(&kernel->loudnessMatchGainBits, float_to_bits(telemetry.loudnessMatchGainDB), memory_order_relaxed);
         atomic_store_explicit(&kernel->loudnessContourScaleBits, float_to_bits(telemetry.loudnessContourScale), memory_order_relaxed);
+        atomic_store_explicit(&kernel->dialogueProgramLevelBits, float_to_bits(telemetry.dialogueProgramLevelDBFS), memory_order_relaxed);
+        atomic_store_explicit(&kernel->dialogueBandLevelBits, float_to_bits(telemetry.dialogueBandLevelDBFS), memory_order_relaxed);
+        atomic_store_explicit(&kernel->dialogueGapBits, float_to_bits(telemetry.dialogueGapDB), memory_order_relaxed);
+        atomic_store_explicit(&kernel->dialogueVoiceConfidenceBits, float_to_bits(telemetry.dialogueVoiceConfidence), memory_order_relaxed);
+        atomic_store_explicit(&kernel->dialogueBoostBits, float_to_bits(telemetry.dialogueBoostDB), memory_order_relaxed);
         atomic_store_explicit(&kernel->compressorGainReductionBits, float_to_bits(telemetry.compressorGainReductionDB), memory_order_relaxed);
         atomic_store_explicit(&kernel->expanderAttenuationBits, float_to_bits(telemetry.expanderAttenuationDB), memory_order_relaxed);
         atomic_store_explicit(&kernel->pauseGateGainBits, float_to_bits(telemetry.pauseGateGain), memory_order_relaxed);
@@ -1309,7 +1324,7 @@ N60RenderKernelDiagnostics N60RenderKernelGetDiagnostics(const N60RenderKernel *
         diagnostics.multibandCompressorEnabled = context.snapshot.dynamics.multibandCompressor.enabled;
         diagnostics.multibandLowMidFrequencyHz = context.snapshot.dynamics.multibandCompressor.lowMidFrequencyHz;
         diagnostics.multibandMidHighFrequencyHz = context.snapshot.dynamics.multibandCompressor.midHighFrequencyHz;
-        diagnostics.multibandTopology = context.snapshot.dynamics.multibandCompressor.topology;
+        diagnostics.multibandTopology = context.snapshot.dynamics.multibandCompressor.lowTopology;
         diagnostics.compressorEnabled = context.snapshot.dynamics.compressor.enabled;
         diagnostics.expanderEnabled = context.snapshot.dynamics.expander.enabled;
         diagnostics.pauseGateEnabled = context.snapshot.dynamics.pauseGate.enabled;
@@ -1357,6 +1372,11 @@ N60RenderKernelDiagnostics N60RenderKernelGetDiagnostics(const N60RenderKernel *
     diagnostics.loudnessShortTermLUFS = bits_to_float(atomic_load_explicit(&kernel->loudnessShortTermLUFSBits, memory_order_relaxed));
     diagnostics.loudnessMatchGainDB = bits_to_float(atomic_load_explicit(&kernel->loudnessMatchGainBits, memory_order_relaxed));
     diagnostics.loudnessContourScale = bits_to_float(atomic_load_explicit(&kernel->loudnessContourScaleBits, memory_order_relaxed));
+    diagnostics.dialogueProgramLevelDBFS = bits_to_float(atomic_load_explicit(&kernel->dialogueProgramLevelBits, memory_order_relaxed));
+    diagnostics.dialogueBandLevelDBFS = bits_to_float(atomic_load_explicit(&kernel->dialogueBandLevelBits, memory_order_relaxed));
+    diagnostics.dialogueGapDB = bits_to_float(atomic_load_explicit(&kernel->dialogueGapBits, memory_order_relaxed));
+    diagnostics.dialogueVoiceConfidence = bits_to_float(atomic_load_explicit(&kernel->dialogueVoiceConfidenceBits, memory_order_relaxed));
+    diagnostics.dialogueBoostDB = bits_to_float(atomic_load_explicit(&kernel->dialogueBoostBits, memory_order_relaxed));
     diagnostics.compressorGainReductionDB = bits_to_float(atomic_load_explicit(&kernel->compressorGainReductionBits, memory_order_relaxed));
     diagnostics.expanderAttenuationDB = bits_to_float(atomic_load_explicit(&kernel->expanderAttenuationBits, memory_order_relaxed));
     diagnostics.pauseGateGain = bits_to_float(atomic_load_explicit(&kernel->pauseGateGainBits, memory_order_relaxed));
