@@ -214,6 +214,14 @@ struct StereoEQConfiguration: Equatable, Sendable {
         return result
     }
 
+    private var sharedDynamicSourceBands: [EQBand] {
+        switch channelMode {
+        case .linked: return linkedBands
+        case .independent: return leftBands
+        case .midSide: return midBands
+        }
+    }
+
     private func conservativeAutomaticHeadroomDB(
         dynamics: DynamicsConfiguration
     ) -> Double {
@@ -240,9 +248,9 @@ struct StereoEQConfiguration: Equatable, Sendable {
 
         let dynamicBoost: Double
         if phaseMode != .linearPhase && !bypassed {
-            // Dynamic EQ is a shared physical-stereo layer. The Linked bank owns
-            // its settings even while static EQ editing is Independent or Mid/Side.
-            dynamicBoost = linkedBands.lazy
+            // Dynamic EQ remains one physical-stereo layer. Its controls follow
+            // the audited source-of-truth bank: Linked, Left, or Mid.
+            dynamicBoost = sharedDynamicSourceBands.lazy
                 .filter { $0.enabled && $0.type == .peaking && $0.dynamic.enabled }
                 .reduce(0.0) { partial, band in
                     let dynamicPart = band.dynamic.direction == .cutOnly ? 0.0 : max(0.0, band.dynamic.maxBoostDB)
@@ -259,14 +267,15 @@ struct StereoEQConfiguration: Equatable, Sendable {
         sampleRate: Double
     ) throws {
         // Dynamic EQ is intentionally shared across channel-editing modes.
-        // The Linked bank owns the detector/gain settings; the realtime engine
-        // applies that one physical-stereo dynamic layer after any Mid/Side
-        // decode so no independent M/S or L/R detector behavior is invented.
+        // Linked owns its controls in Linked mode, Left in Independent mode, and
+        // Mid in Mid/Side mode. The realtime engine still applies exactly one
+        // physical-stereo layer after any Mid/Side decode; no asymmetric detector
+        // behavior is implied or created by the static channel editor.
         dynamics.dynamicEQ = DynamicEQConfiguration()
         guard phaseMode != .linearPhase,
               !bypassed else { return }
 
-        let dynamicBands = try validatedEnabledBands(linkedBands, sampleRate: sampleRate)
+        let dynamicBands = try validatedEnabledBands(sharedDynamicSourceBands, sampleRate: sampleRate)
             .filter { $0.type == .peaking && $0.dynamic.enabled }
         guard dynamicBands.count <= DynamicEQConfiguration.maximumBandCount else {
             throw EQConfigurationError.tooManyBands(dynamicBands.count)

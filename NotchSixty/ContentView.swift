@@ -888,7 +888,7 @@ struct ContentView: View {
             GroupBox("Dynamic EQ integration") {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Dynamic EQ is now configured on the normal Parametric EQ bands below rather than in a separate band bank.")
-                    Text("Commercial capacity: up to \(EQConfiguration.maximumBandCount) EQ bands. Dynamic settings are owned by Linked minimum-phase Peak bands and remain active as one identical physical-stereo layer while static EQ editing is Independent or Mid/Side.")
+                    Text("Commercial capacity: up to \(EQConfiguration.maximumBandCount) EQ bands. Dynamic settings are owned by Linked, Left (Independent), or Mid (Mid/Side) Peak bands in Minimum/Mixed Phase and render as one identical physical-stereo layer.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -1230,8 +1230,18 @@ struct ContentView: View {
     @ViewBuilder
     private func eqBandRow(index: Int, band: EQBand) -> some View {
         let binding = eqBandBinding(for: band.id)
+        let dynamicOwnerChannel: Bool = {
+            switch engine.stereoEQConfiguration.channelMode {
+            case .linked:
+                return true
+            case .independent:
+                return engine.stereoEQConfiguration.editChannel == .left
+            case .midSide:
+                return engine.stereoEQConfiguration.editChannel == .mid
+            }
+        }()
         let dynamicSupported = engine.eqConfiguration.phaseMode != .linearPhase
-            && engine.stereoEQConfiguration.channelMode == .linked
+            && dynamicOwnerChannel
             && band.type == .peaking
 
         VStack(alignment: .leading, spacing: 6) {
@@ -1261,6 +1271,14 @@ struct ContentView: View {
                     .disabled(!dynamicSupported)
                 Spacer()
                 Button("Remove") { try? engine.removeEQBand(id: band.id) }
+            }
+
+            if engine.eqConfiguration.phaseMode != .linearPhase && band.type == .peaking && !dynamicOwnerChannel {
+                Text(engine.stereoEQConfiguration.channelMode == .midSide
+                     ? "Dynamic EQ is shared across physical L/R; edit Dynamic settings from Mid."
+                     : "Dynamic EQ is shared across physical L/R; edit Dynamic settings from Left.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
 
             if band.type.supportsSlope {

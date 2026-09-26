@@ -994,29 +994,28 @@ final class NotchSixtyTests: XCTestCase {
         XCTAssertEqual(try linear.linearPhaseBands(for: .side, sampleRate: 96_000).count, 1)
     }
 
-    func testMidSideKeepsLinkedDynamicEQAsOneSharedPhysicalStereoLayer() throws {
+    func testMidSideUsesMidBankForSharedDynamicEQ() throws {
         var dynamic = EQBandDynamicConfiguration()
         dynamic.enabled = true
         dynamic.thresholdDB = -30
         dynamic.ratio = 2
         dynamic.rangeDB = -6
 
-        let sharedDynamicBand = EQBand(
+        let midDynamicBand = EQBand(
             type: .peaking,
             frequencyHz: 1_000,
             gainDB: 0,
             q: 1.0,
             dynamic: dynamic
         )
-        let midStaticBand = EQBand(type: .peaking, frequencyHz: 700, gainDB: 2, q: 1.0)
         let sideStaticBand = EQBand(type: .peaking, frequencyHz: 4_000, gainDB: -2, q: 1.0)
 
         let configuration = StereoEQConfiguration(
             channelMode: .midSide,
             editChannel: .mid,
             phaseMode: .minimumPhase,
-            linkedBands: [sharedDynamicBand],
-            midBands: [midStaticBand],
+            linkedBands: [],
+            midBands: [midDynamicBand],
             sideBands: [sideStaticBand],
             midSideSeeded: true
         )
@@ -1029,6 +1028,72 @@ final class NotchSixtyTests: XCTestCase {
         XCTAssertTrue(graph.eqMidSideMode)
         XCTAssertTrue(graph.dynamics.dynamicEQ.enabled)
         XCTAssertEqual(graph.dynamics.dynamicEQ.bandCount, 1)
+
+        let sideOnly = StereoEQConfiguration(
+            channelMode: .midSide,
+            editChannel: .side,
+            phaseMode: .minimumPhase,
+            linkedBands: [],
+            midBands: [],
+            sideBands: [midDynamicBand],
+            midSideSeeded: true
+        )
+        let sideOnlyGraph = try sideOnly.makeGraphSnapshot(
+            sampleRate: 96_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: PlaybackControlConfiguration()
+        )
+        XCTAssertFalse(sideOnlyGraph.dynamics.dynamicEQ.enabled)
+        XCTAssertEqual(sideOnlyGraph.dynamics.dynamicEQ.bandCount, 0)
+    }
+
+    func testIndependentUsesLeftBankForSharedDynamicEQ() throws {
+        var dynamic = EQBandDynamicConfiguration()
+        dynamic.enabled = true
+        let leftDynamicBand = EQBand(
+            type: .peaking,
+            frequencyHz: 1_600,
+            gainDB: 0,
+            q: 1.2,
+            dynamic: dynamic
+        )
+
+        let leftOwned = StereoEQConfiguration(
+            channelMode: .independent,
+            editChannel: .left,
+            phaseMode: .mixedPhase,
+            linkedBands: [],
+            leftBands: [leftDynamicBand],
+            rightBands: [],
+            independentSeeded: true
+        )
+        let leftGraph = try leftOwned.makeGraphSnapshot(
+            sampleRate: 192_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: PlaybackControlConfiguration()
+        )
+        XCTAssertTrue(leftGraph.dynamics.dynamicEQ.enabled)
+        XCTAssertEqual(leftGraph.dynamics.dynamicEQ.bandCount, 1)
+
+        let rightOnly = StereoEQConfiguration(
+            channelMode: .independent,
+            editChannel: .right,
+            phaseMode: .mixedPhase,
+            linkedBands: [],
+            leftBands: [],
+            rightBands: [leftDynamicBand],
+            independentSeeded: true
+        )
+        let rightGraph = try rightOnly.makeGraphSnapshot(
+            sampleRate: 192_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: PlaybackControlConfiguration()
+        )
+        XCTAssertFalse(rightGraph.dynamics.dynamicEQ.enabled)
+        XCTAssertEqual(rightGraph.dynamics.dynamicEQ.bandCount, 0)
     }
 
     func testMidSideRealtimeIdentityAndAuditionContracts() throws {
