@@ -138,7 +138,7 @@ The commercial convolution/room-correction runtime is an **IMPLEMENTED / IMPROVE
 - phase correlation
 - explicitly located crest-factor telemetry
 - gain-structure meters
-- continuous true-peak/dBTP display
+- continuous true peak/dBTP display
 - stereo goniometer
 - per-output matrix/protection telemetry when the matrix exists
 - honest processing-format/sample-rate display
