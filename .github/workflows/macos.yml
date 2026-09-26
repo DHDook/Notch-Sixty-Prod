@@ -28,6 +28,11 @@ jobs:
       - name: List project
         run: xcodebuild -project NotchSixty.xcodeproj -list
 
+      - name: Validate PR34 Band Pass DSP
+        run: |
+          clang -std=c11 -Wall -Wextra -Werror ci/validate_pr34_bandpass.c -o /tmp/validate-pr34-bandpass
+          /tmp/validate-pr34-bandpass
+
       - name: Build
         run: >-
           xcodebuild
