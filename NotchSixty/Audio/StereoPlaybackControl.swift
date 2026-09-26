@@ -3,6 +3,7 @@ import Foundation
 enum EQChannelMode: String, CaseIterable, Identifiable, Sendable {
     case linked
     case independent
+    case midSide
 
     var id: String { rawValue }
 
@@ -10,6 +11,7 @@ enum EQChannelMode: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .linked: return "Linked"
         case .independent: return "Independent"
+        case .midSide: return "Mid/Side"
         }
     }
 }
@@ -18,6 +20,8 @@ enum EQEditChannel: String, CaseIterable, Identifiable, Sendable {
     case linked
     case left
     case right
+    case mid
+    case side
 
     var id: String { rawValue }
 
@@ -26,6 +30,8 @@ enum EQEditChannel: String, CaseIterable, Identifiable, Sendable {
         case .linked: return "Linked"
         case .left: return "Left"
         case .right: return "Right"
+        case .mid: return "Mid"
+        case .side: return "Side"
         }
     }
 }
@@ -40,7 +46,10 @@ struct StereoEQConfiguration: Equatable, Sendable {
     var linkedBands: [EQBand]
     var leftBands: [EQBand]
     var rightBands: [EQBand]
+    var midBands: [EQBand]
+    var sideBands: [EQBand]
     var independentSeeded: Bool
+    var midSideSeeded: Bool
 
     init(
         channelMode: EQChannelMode = .linked,
@@ -50,16 +59,29 @@ struct StereoEQConfiguration: Equatable, Sendable {
         linkedBands: [EQBand] = [],
         leftBands: [EQBand] = [],
         rightBands: [EQBand] = [],
-        independentSeeded: Bool = false
+        midBands: [EQBand] = [],
+        sideBands: [EQBand] = [],
+        independentSeeded: Bool = false,
+        midSideSeeded: Bool = false
     ) {
         self.channelMode = channelMode
-        self.editChannel = channelMode == .linked ? .linked : editChannel
+        switch channelMode {
+        case .linked:
+            self.editChannel = .linked
+        case .independent:
+            self.editChannel = editChannel == .right ? .right : .left
+        case .midSide:
+            self.editChannel = editChannel == .side ? .side : .mid
+        }
         self.phaseMode = phaseMode
         self.bypassed = bypassed
         self.linkedBands = linkedBands
         self.leftBands = leftBands
         self.rightBands = rightBands
+        self.midBands = midBands
+        self.sideBands = sideBands
         self.independentSeeded = independentSeeded
+        self.midSideSeeded = midSideSeeded
     }
 
     var editableBands: [EQBand] {
@@ -68,6 +90,8 @@ struct StereoEQConfiguration: Equatable, Sendable {
             return linkedBands
         case .independent:
             return editChannel == .right ? rightBands : leftBands
+        case .midSide:
+            return editChannel == .side ? sideBands : midBands
         }
     }
 
@@ -77,6 +101,8 @@ struct StereoEQConfiguration: Equatable, Sendable {
             return linkedBands.lazy.filter(\.enabled).count
         case .independent:
             return leftBands.lazy.filter(\.enabled).count + rightBands.lazy.filter(\.enabled).count
+        case .midSide:
+            return midBands.lazy.filter(\.enabled).count + sideBands.lazy.filter(\.enabled).count
         }
     }
 
@@ -87,16 +113,28 @@ struct StereoEQConfiguration: Equatable, Sendable {
             rightBands = linkedBands
             independentSeeded = true
         }
+        if mode == .midSide && !midSideSeeded {
+            midBands = linkedBands
+            sideBands = linkedBands
+            midSideSeeded = true
+        }
         channelMode = mode
-        editChannel = mode == .linked ? .linked : (editChannel == .right ? .right : .left)
+        switch mode {
+        case .linked: editChannel = .linked
+        case .independent: editChannel = editChannel == .right ? .right : .left
+        case .midSide: editChannel = editChannel == .side ? .side : .mid
+        }
     }
 
     mutating func setEditChannel(_ channel: EQEditChannel) {
-        guard channelMode == .independent else {
+        switch channelMode {
+        case .linked:
             editChannel = .linked
-            return
+        case .independent:
+            editChannel = channel == .right ? .right : .left
+        case .midSide:
+            editChannel = channel == .side ? .side : .mid
         }
-        editChannel = channel == .right ? .right : .left
     }
 
     mutating func replaceEditableBands(_ bands: [EQBand]) {
@@ -108,6 +146,12 @@ struct StereoEQConfiguration: Equatable, Sendable {
                 rightBands = bands
             } else {
                 leftBands = bands
+            }
+        case .midSide:
+            if editChannel == .side {
+                sideBands = bands
+            } else {
+                midBands = bands
             }
         }
     }
@@ -132,6 +176,12 @@ struct StereoEQConfiguration: Equatable, Sendable {
         var result: [EQBand] = []
         result.reserveCapacity(bands.count)
         for (index, band) in bands.enumerated() where band.enabled {
+            if band.type == .fir {
+                guard let kernel = band.firKernel else { throw EQConfigurationError.firKernelRequired }
+                try kernel.validate(for: sampleRate)
+                result.append(band)
+                continue
+            }
             guard band.frequencyHz.isFinite,
                   band.frequencyHz > 0,
                   band.gainDB.isFinite,
@@ -140,11 +190,21 @@ struct StereoEQConfiguration: Equatable, Sendable {
                   band.q > 0 else {
                 throw EQConfigurationError.invalidBand(index: index)
             }
+            if band.type == .linkwitzTransform {
+                guard band.linkwitzTargetHz.isFinite,
+                      band.linkwitzTargetHz > 0,
+                      band.linkwitzTargetHz < sampleRate * 0.5,
+                      band.linkwitzTargetQ.isFinite,
+                      band.linkwitzTargetQ > 0 else {
+                    throw EQConfigurationError.invalidBand(index: index)
+                }
+            }
             if band.dynamic.enabled {
-                guard band.type == .peaking,
+                guard band.type.supportsDynamicEQ,
                       DynamicEQBandConfiguration.frequencyRange.contains(band.frequencyHz),
                       DynamicEQBandConfiguration.qRange.contains(band.q),
-                      band.dynamic.isValid else {
+                      band.dynamic.isValid,
+                      !(band.type == .notch && band.dynamic.direction != .cutOnly) else {
                     throw EQConfigurationError.invalidBand(index: index)
                 }
             }
@@ -155,6 +215,16 @@ struct StereoEQConfiguration: Equatable, Sendable {
         return result
     }
 
+    private func dynamicBoostDB(in bands: [EQBand]) -> Double {
+        bands.lazy
+            .filter { $0.enabled && $0.type.supportsDynamicEQ && $0.dynamic.enabled }
+            .reduce(0.0) { partial, band in
+                let dynamic = band.dynamic
+                let boost = dynamic.direction == .cutOnly ? 0.0 : max(0.0, dynamic.maxBoostDB)
+                return partial + boost
+            }
+    }
+
     private func conservativeAutomaticHeadroomDB(
         dynamics: DynamicsConfiguration
     ) -> Double {
@@ -162,7 +232,10 @@ struct StereoEQConfiguration: Equatable, Sendable {
 
         func channelBoost(_ bands: [EQBand]) -> Double {
             bands.lazy.filter(\.enabled).reduce(0.0) { partial, band in
-                partial + max(0.0, band.gainDB)
+                if band.type == .fir {
+                    return partial + (band.firKernel?.conservativeBoostDB ?? 0.0)
+                }
+                return partial + max(0.0, band.gainDB)
             }
         }
         let staticBoost: Double
@@ -172,63 +245,190 @@ struct StereoEQConfiguration: Equatable, Sendable {
             switch channelMode {
             case .linked: staticBoost = channelBoost(linkedBands)
             case .independent: staticBoost = max(channelBoost(leftBands), channelBoost(rightBands))
+            case .midSide: staticBoost = max(channelBoost(midBands), channelBoost(sideBands))
             }
         }
 
         let dynamicBoost: Double
-        if phaseMode == .minimumPhase && !bypassed && channelMode == .linked {
-            dynamicBoost = linkedBands.lazy
-                .filter { $0.enabled && $0.type == .peaking && $0.dynamic.enabled }
-                .reduce(0.0) { partial, band in
-                    let dynamicPart = band.dynamic.direction == .cutOnly ? 0.0 : max(0.0, band.dynamic.maxBoostDB)
-                    return partial + dynamicPart
-                }
-        } else {
+        if bypassed {
             dynamicBoost = 0
+        } else {
+            switch channelMode {
+            case .linked:
+                dynamicBoost = dynamicBoostDB(in: linkedBands)
+            case .independent:
+                dynamicBoost = max(dynamicBoostDB(in: leftBands), dynamicBoostDB(in: rightBands))
+            case .midSide:
+                dynamicBoost = max(dynamicBoostDB(in: midBands), dynamicBoostDB(in: sideBands))
+            }
         }
         return min(dynamics.automaticHeadroom.maxAttenuationDB, staticBoost + dynamicBoost)
     }
 
-    private func compileUnifiedDynamicEQ(
-        into dynamics: inout DynamicsConfiguration,
-        sampleRate: Double
-    ) throws {
-        // Product state is owned by the normal EQ bands. Keep the standalone C
-        // Dynamic EQ engine as an implementation detail and compile only the
-        // linked minimum-phase peaking bands that have Dynamic enabled.
-        dynamics.dynamicEQ = DynamicEQConfiguration()
-        guard phaseMode == .minimumPhase,
-              !bypassed,
-              channelMode == .linked else { return }
-
-        let dynamicBands = try validatedEnabledBands(linkedBands, sampleRate: sampleRate)
-            .filter { $0.type == .peaking && $0.dynamic.enabled }
-        guard dynamicBands.count <= DynamicEQConfiguration.maximumBandCount else {
-            throw EQConfigurationError.tooManyBands(dynamicBands.count)
+    private func makeDomainDynamicEQSnapshot(sampleRate: Double) throws -> N60DynamicEQSnapshot {
+        var snapshot = N60DynamicEQSnapshotMakeBypassed(sampleRate)
+        let domain: N60DynamicEQDomain
+        switch channelMode {
+        case .linked: domain = N60DynamicEQDomainLinkedStereo
+        case .independent: domain = N60DynamicEQDomainDualMono
+        case .midSide: domain = N60DynamicEQDomainMidSide
         }
-        dynamics.dynamicEQ.enabled = !dynamicBands.isEmpty
-        dynamics.dynamicEQ.bands = dynamicBands.map { band in
-            let dynamic = band.dynamic
-            var compiled = DynamicEQBandConfiguration()
-            compiled.enabled = true
-            compiled.frequencyHz = band.frequencyHz
-            compiled.q = band.q
-            // Static gain remains in the normal EQ biquad. The Dynamic engine
-            // contributes only the time-varying delta, so enabling Dynamic does
-            // not change the band's static response at the neutral operating point.
-            compiled.staticGainDB = 0
-            compiled.thresholdDB = dynamic.thresholdDB
-            compiled.ratio = dynamic.ratio
-            compiled.rangeDB = dynamic.rangeDB
-            compiled.attackMs = dynamic.attackMs
-            compiled.releaseMs = dynamic.releaseMs
-            compiled.direction = dynamic.direction
-            compiled.boostThresholdDB = dynamic.boostThresholdDB
-            compiled.boostRatio = dynamic.boostRatio
-            compiled.maxBoostDB = dynamic.maxBoostDB
-            compiled.detectorMode = dynamic.detectorMode
-            compiled.rmsWindowMs = dynamic.rmsWindowMs
-            return compiled
+        guard N60DynamicEQSnapshotSetDomain(&snapshot, domain) else {
+            throw DynamicsConfigurationError.invalidDynamicEQ
+        }
+
+        func compileLane(_ source: [EQBand], lane: N60DynamicEQLane) throws -> Int {
+            let validated = try validatedEnabledBands(source, sampleRate: sampleRate)
+            let dynamicBands = validated.filter { $0.dynamic.enabled }
+            var outputIndex: UInt32 = 0
+            for (sourceIndex, band) in dynamicBands.enumerated() {
+                guard let shape = band.type.dynamicEQShape else {
+                    throw EQConfigurationError.invalidBand(index: sourceIndex)
+                }
+                let dynamic = band.dynamic
+                guard N60DynamicEQSnapshotSetBandForLane(
+                    &snapshot, sampleRate, lane, outputIndex, true, shape,
+                    band.frequencyHz, Float(band.q), 0,
+                    Float(dynamic.thresholdDB), Float(dynamic.ratio), Float(dynamic.rangeDB),
+                    Float(dynamic.attackMs), Float(dynamic.releaseMs), dynamic.direction.cType,
+                    Float(dynamic.boostThresholdDB), Float(dynamic.boostRatio), Float(dynamic.maxBoostDB),
+                    dynamic.detectorMode.cType, Float(dynamic.rmsWindowMs)
+                ) else {
+                    throw EQConfigurationError.invalidBand(index: sourceIndex)
+                }
+                outputIndex += 1
+            }
+            return Int(outputIndex)
+        }
+
+        let count: Int
+        switch channelMode {
+        case .linked:
+            count = try compileLane(linkedBands, lane: N60DynamicEQLanePrimary)
+        case .independent:
+            let primaryCount = try compileLane(leftBands, lane: N60DynamicEQLanePrimary)
+            let secondaryCount = try compileLane(rightBands, lane: N60DynamicEQLaneSecondary)
+            count = primaryCount + secondaryCount
+        case .midSide:
+            let primaryCount = try compileLane(midBands, lane: N60DynamicEQLanePrimary)
+            let secondaryCount = try compileLane(sideBands, lane: N60DynamicEQLaneSecondary)
+            count = primaryCount + secondaryCount
+        }
+        guard N60DynamicEQSnapshotSetEnabled(&snapshot, !bypassed && count > 0) else {
+            throw DynamicsConfigurationError.invalidDynamicEQ
+        }
+        return snapshot
+    }
+
+    private func publishMinimumPhaseBand(
+        _ band: EQBand,
+        into graph: inout N60DSPGraphSnapshot,
+        renderIndex: inout UInt32,
+        channelMask: UInt8? = nil
+    ) throws {
+        if band.type == .fir { return }
+        for section in try band.compiledSections(sampleRate: graph.sampleRate) {
+            let compiledCapacity = UInt32(EQConfiguration.maximumBandCount * 2 * Int(N60_MAX_EQ_COMPILED_SECTIONS_PER_BAND))
+            guard renderIndex < compiledCapacity else {
+                throw EQConfigurationError.invalidBand(index: Int(renderIndex))
+            }
+            let ok: Bool
+            if let channelMask {
+                ok = N60DSPGraphSnapshotSetEQPreparedBandForChannels(
+                    &graph, renderIndex, channelMask, section.type,
+                    section.frequencyHz, section.gainDB, section.q,
+                    section.coefficients, true
+                )
+            } else {
+                ok = N60DSPGraphSnapshotSetEQPreparedBand(
+                    &graph, renderIndex, section.type,
+                    section.frequencyHz, section.gainDB, section.q,
+                    section.coefficients, true
+                )
+            }
+            guard ok else { throw EQConfigurationError.invalidBand(index: Int(renderIndex)) }
+            renderIndex += 1
+        }
+    }
+
+    private func mixedPhaseSourceSections(
+        _ bands: [EQBand],
+        sampleRate: Double
+    ) throws -> [N60BiquadBandSnapshot] {
+        var source: [N60BiquadBandSnapshot] = []
+        for band in try validatedEnabledBands(bands, sampleRate: sampleRate) {
+            if band.type == .fir { continue }
+            if band.type == .allPass { throw EQConfigurationError.allPassRequiresMinimumPhase }
+            source.append(contentsOf: try band.compiledSections(sampleRate: sampleRate))
+        }
+        return source
+    }
+
+    private func appendMixedPhaseCorrection(
+        for bands: [EQBand],
+        sampleRate: Double,
+        into graph: inout N60DSPGraphSnapshot,
+        renderIndex: inout UInt32,
+        channelMask: UInt8? = nil
+    ) throws {
+        let source = try mixedPhaseSourceSections(bands, sampleRate: sampleRate)
+        var design = N60MixedPhaseDesignInfo()
+        let designed = source.withUnsafeBufferPointer { buffer in
+            N60MixedPhaseDesign(sampleRate, buffer.baseAddress, UInt32(buffer.count), &design)
+        }
+        guard designed else { throw EQConfigurationError.mixedPhaseDesignFailed }
+        let userCapacity = EQConfiguration.maximumBandCount * 2 * Int(N60_MAX_EQ_COMPILED_SECTIONS_PER_BAND)
+        let totalCapacity = UInt32(userCapacity + 12)
+        for correctionIndex in 0..<design.sectionCount {
+            let section = N60MixedPhaseDesignSectionAt(&design, correctionIndex)
+            guard renderIndex < totalCapacity else { throw EQConfigurationError.mixedPhaseDesignFailed }
+            let ok: Bool
+            if let channelMask {
+                ok = N60DSPGraphSnapshotSetEQPreparedBandForChannels(
+                    &graph, renderIndex, channelMask, section.type,
+                    section.frequencyHz, section.gainDB, section.q,
+                    section.coefficients, true
+                )
+            } else {
+                ok = N60DSPGraphSnapshotSetEQPreparedBand(
+                    &graph, renderIndex, section.type,
+                    section.frequencyHz, section.gainDB, section.q,
+                    section.coefficients, true
+                )
+            }
+            guard ok else { throw EQConfigurationError.mixedPhaseDesignFailed }
+            renderIndex += 1
+        }
+        graph.mixedPhaseCorrectionSectionCount += design.sectionCount
+    }
+
+    var requiresEQFIRProgram: Bool {
+        guard !bypassed else { return false }
+        if phaseMode == .linearPhase { return true }
+        let activeBanks: [[EQBand]]
+        switch channelMode {
+        case .linked: activeBanks = [linkedBands]
+        case .independent: activeBanks = [leftBands, rightBands]
+        case .midSide: activeBanks = [midBands, sideBands]
+        }
+        return activeBanks.contains { bands in
+            bands.contains { $0.enabled && $0.type == .fir }
+        }
+    }
+
+    func firKernels(for channel: EQEditChannel, sampleRate: Double) throws -> [EQFIRKernel] {
+        let source: [EQBand]
+        switch channelMode {
+        case .linked: source = linkedBands
+        case .independent: source = channel == .right ? rightBands : leftBands
+        case .midSide: source = channel == .side ? sideBands : midBands
+        }
+        let bands = try validatedEnabledBands(source, sampleRate: sampleRate)
+        return try bands.compactMap { band in
+            guard band.type == .fir else { return nil }
+            guard let kernel = band.firKernel else { throw EQConfigurationError.firKernelRequired }
+            try kernel.validate(for: sampleRate)
+            return kernel
         }
     }
 
@@ -248,9 +448,24 @@ struct StereoEQConfiguration: Equatable, Sendable {
               BassManagementConfiguration.subGainRange.contains(bassManagementConfiguration.subGainDB) else {
             throw BassManagementConfigurationError.invalidSubGain(bassManagementConfiguration.subGainDB)
         }
+        guard bassManagementConfiguration.subPhaseAlignmentFrequencyHz.isFinite,
+              BassManagementConfiguration.frequencyRange.contains(bassManagementConfiguration.subPhaseAlignmentFrequencyHz) else {
+            throw BassManagementConfigurationError.invalidSubPhaseAlignmentFrequency(
+                bassManagementConfiguration.subPhaseAlignmentFrequencyHz
+            )
+        }
+        guard bassManagementConfiguration.subPhaseAlignmentQ.isFinite,
+              BassManagementConfiguration.subPhaseAlignmentQRange.contains(bassManagementConfiguration.subPhaseAlignmentQ) else {
+            throw BassManagementConfigurationError.invalidSubPhaseAlignmentQ(
+                bassManagementConfiguration.subPhaseAlignmentQ
+            )
+        }
 
         var compiledDynamics = dynamicsConfiguration
-        try compileUnifiedDynamicEQ(into: &compiledDynamics, sampleRate: sampleRate)
+        // EQ-band dynamics are compiled below into a domain-aware realtime snapshot.
+        // Keep the older standalone DynamicEQConfiguration empty so it cannot
+        // accidentally create a second shared layer.
+        compiledDynamics.dynamicEQ = DynamicEQConfiguration()
 
         var graph = N60DSPGraphSnapshotMakeUnity(sampleRate)
         graph.inputGainLinear = DSPGainConfiguration.linearGain(forDB: gainConfiguration.inputPreampDB)
@@ -263,62 +478,137 @@ struct StereoEQConfiguration: Equatable, Sendable {
         let balance = playbackConfiguration.balanceLinearGains
         graph.balanceGainLeftLinear = balance.left
         graph.balanceGainRightLinear = balance.right
+        guard N60DSPGraphSnapshotSetSymmetryBalance(
+            &graph,
+            playbackConfiguration.symmetryBalancePosition,
+            playbackConfiguration.symmetryBalanceEnabled
+        ) else {
+            throw PlaybackControlConfigurationError.invalidSymmetryBalance(
+                playbackConfiguration.symmetryBalancePosition
+            )
+        }
+        guard N60DSPGraphSnapshotSetSpeakerCrossfeed(
+            &graph,
+            playbackConfiguration.speakerCrossfeedAmount,
+            playbackConfiguration.speakerCrossfeedEnabled
+        ) else {
+            throw PlaybackControlConfigurationError.invalidSpeakerCrossfeed(
+                playbackConfiguration.speakerCrossfeedAmount
+            )
+        }
+        guard PlaybackControlConfiguration.crosstalkCancellationAmountRange.contains(
+            playbackConfiguration.crosstalkCancellationAmount
+        ) else {
+            throw PlaybackControlConfigurationError.invalidCrosstalkCancellationAmount(
+                playbackConfiguration.crosstalkCancellationAmount
+            )
+        }
+        guard PlaybackControlConfiguration.crosstalkHeadShadowFrequencyRange.contains(
+            playbackConfiguration.crosstalkHeadShadowFrequencyHz
+        ) else {
+            throw PlaybackControlConfigurationError.invalidCrosstalkHeadShadowFrequency(
+                playbackConfiguration.crosstalkHeadShadowFrequencyHz
+            )
+        }
+        guard N60DSPGraphSnapshotSetCrosstalkCancellation(
+            &graph,
+            playbackConfiguration.crosstalkCancellationAmount,
+            playbackConfiguration.crosstalkHeadShadowFrequencyHz,
+            playbackConfiguration.crosstalkCancellationEnabled
+        ) else {
+            throw PlaybackControlConfigurationError.invalidCrosstalkHeadShadowFrequency(
+                playbackConfiguration.crosstalkHeadShadowFrequencyHz
+            )
+        }
         graph.bypassed = playbackConfiguration.globalBypassed
         graph.auditionMode = playbackConfiguration.auditionMode.cType
         guard N60DSPGraphSnapshotSetInterChannelDelay(&graph, playbackConfiguration.interChannelDelayMs) else {
             throw PlaybackControlConfigurationError.invalidInterChannelDelay(playbackConfiguration.interChannelDelayMs)
         }
         graph.eqBypassed = bypassed
+        graph.eqMidSideMode = channelMode == .midSide
         N60DSPGraphSnapshotClearEQ(&graph)
 
-        if phaseMode == .minimumPhase && !bypassed && !graph.bypassed {
+        if phaseMode != .linearPhase && !bypassed && !graph.bypassed {
             var renderIndex: UInt32 = 0
             switch channelMode {
             case .linked:
                 for band in try validatedEnabledBands(linkedBands, sampleRate: sampleRate) {
-                    guard N60DSPGraphSnapshotSetEQBand(
-                        &graph,
-                        renderIndex,
-                        band.type.cType,
-                        band.frequencyHz,
-                        band.gainDB,
-                        band.q,
-                        true
-                    ) else {
-                        throw EQConfigurationError.invalidBand(index: Int(renderIndex))
+                    if phaseMode == .mixedPhase && band.type == .allPass {
+                        throw EQConfigurationError.allPassRequiresMinimumPhase
                     }
-                    renderIndex += 1
+                    try publishMinimumPhaseBand(band, into: &graph, renderIndex: &renderIndex)
+                }
+                if phaseMode == .mixedPhase {
+                    graph.mixedPhaseEnabled = true
+                    try appendMixedPhaseCorrection(
+                        for: linkedBands, sampleRate: sampleRate,
+                        into: &graph, renderIndex: &renderIndex
+                    )
                 }
             case .independent:
                 for band in try validatedEnabledBands(leftBands, sampleRate: sampleRate) {
-                    guard N60DSPGraphSnapshotSetEQBandForChannels(
-                        &graph,
-                        renderIndex,
-                        UInt8(N60_EQ_CHANNEL_LEFT),
-                        band.type.cType,
-                        band.frequencyHz,
-                        band.gainDB,
-                        band.q,
-                        true
-                    ) else {
-                        throw EQConfigurationError.invalidBand(index: Int(renderIndex))
+                    if phaseMode == .mixedPhase && band.type == .allPass {
+                        throw EQConfigurationError.allPassRequiresMinimumPhase
                     }
-                    renderIndex += 1
+                    try publishMinimumPhaseBand(
+                        band, into: &graph, renderIndex: &renderIndex,
+                        channelMask: UInt8(N60_EQ_CHANNEL_LEFT)
+                    )
                 }
                 for band in try validatedEnabledBands(rightBands, sampleRate: sampleRate) {
-                    guard N60DSPGraphSnapshotSetEQBandForChannels(
-                        &graph,
-                        renderIndex,
-                        UInt8(N60_EQ_CHANNEL_RIGHT),
-                        band.type.cType,
-                        band.frequencyHz,
-                        band.gainDB,
-                        band.q,
-                        true
-                    ) else {
-                        throw EQConfigurationError.invalidBand(index: Int(renderIndex))
+                    if phaseMode == .mixedPhase && band.type == .allPass {
+                        throw EQConfigurationError.allPassRequiresMinimumPhase
                     }
-                    renderIndex += 1
+                    try publishMinimumPhaseBand(
+                        band, into: &graph, renderIndex: &renderIndex,
+                        channelMask: UInt8(N60_EQ_CHANNEL_RIGHT)
+                    )
+                }
+                if phaseMode == .mixedPhase {
+                    graph.mixedPhaseEnabled = true
+                    try appendMixedPhaseCorrection(
+                        for: leftBands, sampleRate: sampleRate,
+                        into: &graph, renderIndex: &renderIndex,
+                        channelMask: UInt8(N60_EQ_CHANNEL_LEFT)
+                    )
+                    try appendMixedPhaseCorrection(
+                        for: rightBands, sampleRate: sampleRate,
+                        into: &graph, renderIndex: &renderIndex,
+                        channelMask: UInt8(N60_EQ_CHANNEL_RIGHT)
+                    )
+                }
+            case .midSide:
+                for band in try validatedEnabledBands(midBands, sampleRate: sampleRate) {
+                    if phaseMode == .mixedPhase && band.type == .allPass {
+                        throw EQConfigurationError.allPassRequiresMinimumPhase
+                    }
+                    try publishMinimumPhaseBand(
+                        band, into: &graph, renderIndex: &renderIndex,
+                        channelMask: UInt8(N60_EQ_CHANNEL_LEFT)
+                    )
+                }
+                for band in try validatedEnabledBands(sideBands, sampleRate: sampleRate) {
+                    if phaseMode == .mixedPhase && band.type == .allPass {
+                        throw EQConfigurationError.allPassRequiresMinimumPhase
+                    }
+                    try publishMinimumPhaseBand(
+                        band, into: &graph, renderIndex: &renderIndex,
+                        channelMask: UInt8(N60_EQ_CHANNEL_RIGHT)
+                    )
+                }
+                if phaseMode == .mixedPhase {
+                    graph.mixedPhaseEnabled = true
+                    try appendMixedPhaseCorrection(
+                        for: midBands, sampleRate: sampleRate,
+                        into: &graph, renderIndex: &renderIndex,
+                        channelMask: UInt8(N60_EQ_CHANNEL_LEFT)
+                    )
+                    try appendMixedPhaseCorrection(
+                        for: sideBands, sampleRate: sampleRate,
+                        into: &graph, renderIndex: &renderIndex,
+                        channelMask: UInt8(N60_EQ_CHANNEL_RIGHT)
+                    )
                 }
             }
         }
@@ -334,7 +624,16 @@ struct StereoEQConfiguration: Equatable, Sendable {
         ) else {
             throw BassManagementConfigurationError.graphDesignFailed
         }
+        guard N60DSPGraphSnapshotSetSubPhaseAlignment(
+            &graph,
+            bassManagementConfiguration.subPhaseAlignmentFrequencyHz,
+            bassManagementConfiguration.subPhaseAlignmentQ,
+            bassManagementConfiguration.subPhaseAlignmentEnabled
+        ) else {
+            throw BassManagementConfigurationError.graphDesignFailed
+        }
         graph.dynamics = try compiledDynamics.makeSnapshot(sampleRate: sampleRate)
+        graph.dynamics.dynamicEQ = try makeDomainDynamicEQSnapshot(sampleRate: sampleRate)
         graph.protection = try compiledDynamics.makeProtectionSnapshot(sampleRate: sampleRate)
         let denoiserLatency = graph.dynamics.spectralDenoiser.enabled
             ? UInt64(graph.dynamics.spectralDenoiser.latencyFrames)
@@ -355,20 +654,33 @@ struct StereoEQConfiguration: Equatable, Sendable {
             source = linkedBands
         case .independent:
             source = channel == .right ? rightBands : leftBands
+        case .midSide:
+            source = channel == .side ? sideBands : midBands
         }
         let bands = try validatedEnabledBands(source, sampleRate: sampleRate)
         guard !bands.contains(where: { $0.type == .allPass }) else {
             throw EQConfigurationError.allPassRequiresMinimumPhase
         }
-        return bands.map { band in
-            var cBand = N60LinearPhaseEQBand()
-            cBand.enabled = true
-            cBand.type = band.type.cType
-            cBand.frequencyHz = band.frequencyHz
-            cBand.gainDB = band.gainDB
-            cBand.q = band.q
-            return cBand
+        var result: [N60LinearPhaseEQBand] = []
+        result.reserveCapacity(bands.count * 2)
+        for (index, band) in bands.enumerated() {
+            do {
+                for section in try band.compiledSections(sampleRate: sampleRate) {
+                    var cBand = N60LinearPhaseEQBand()
+                    cBand.enabled = true
+                    cBand.type = section.type
+                    cBand.frequencyHz = section.frequencyHz
+                    cBand.gainDB = section.gainDB
+                    cBand.q = section.q
+                    cBand.usesPreparedCoefficients = true
+                    cBand.preparedCoefficients = section.coefficients
+                    result.append(cBand)
+                }
+            } catch {
+                throw EQConfigurationError.invalidBand(index: index)
+            }
         }
+        return result
     }
 }
 
@@ -386,11 +698,25 @@ enum FIRUpdatePolicy {
             && !stereoEQ.bypassed
     }
 
+    static func shouldPrepareEQFIR(
+        stereoEQ: StereoEQConfiguration,
+        playback: PlaybackControlConfiguration
+    ) -> Bool {
+        !isRawBypassed(playback) && stereoEQ.requiresEQFIRProgram
+    }
+
     static func shouldPrepareRoomCorrection(
         roomCorrection: RoomCorrectionConfiguration,
         playback: PlaybackControlConfiguration
     ) -> Bool {
         !isRawBypassed(playback) && roomCorrection.enabled
+    }
+
+    static func shouldPrepareSpeakerIR(
+        speakerIR: SpeakerIRConfiguration,
+        playback: PlaybackControlConfiguration
+    ) -> Bool {
+        !isRawBypassed(playback) && speakerIR.enabled
     }
 }
 
@@ -466,21 +792,46 @@ enum AuditionMode: String, CaseIterable, Identifiable, Sendable {
 
 struct PlaybackControlConfiguration: Equatable, Sendable {
     static let balanceRange = -1.0...1.0
+    static let symmetryBalanceRange = -1.0...1.0
+    static let speakerCrossfeedRange = 0.0...0.5
+    static let crosstalkCancellationAmountRange = 0.0...1.0
+    static let crosstalkHeadShadowFrequencyRange = 200.0...2000.0
     static let interChannelDelayRange = -20.0...20.0
 
     var balance: Double
+    var symmetryBalanceEnabled: Bool
+    var symmetryBalancePosition: Double
+    var speakerCrossfeedEnabled: Bool
+    var speakerCrossfeedAmount: Double
+    var crosstalkCancellationEnabled: Bool
+    var crosstalkCancellationAmount: Double
+    var crosstalkHeadShadowFrequencyHz: Double
     var interChannelDelayMs: Double
     var globalBypassed: Bool
     var auditionMode: AuditionMode
 
     init(
         balance: Double = 0,
+        symmetryBalanceEnabled: Bool = false,
+        symmetryBalancePosition: Double = 0,
+        speakerCrossfeedEnabled: Bool = false,
+        speakerCrossfeedAmount: Double = 0,
+        crosstalkCancellationEnabled: Bool = false,
+        crosstalkCancellationAmount: Double = 0.5,
+        crosstalkHeadShadowFrequencyHz: Double = 700,
         interChannelDelayMs: Double = 0,
         globalBypassed: Bool = false,
         flatAuditionEnabled: Bool = false,
         auditionMode: AuditionMode? = nil
     ) {
         self.balance = balance
+        self.symmetryBalanceEnabled = symmetryBalanceEnabled
+        self.symmetryBalancePosition = symmetryBalancePosition
+        self.speakerCrossfeedEnabled = speakerCrossfeedEnabled
+        self.speakerCrossfeedAmount = speakerCrossfeedAmount
+        self.crosstalkCancellationEnabled = crosstalkCancellationEnabled
+        self.crosstalkCancellationAmount = crosstalkCancellationAmount
+        self.crosstalkHeadShadowFrequencyHz = crosstalkHeadShadowFrequencyHz
         self.interChannelDelayMs = interChannelDelayMs
         self.globalBypassed = globalBypassed
         self.auditionMode = auditionMode ?? (flatAuditionEnabled ? .reference : .processed)
@@ -505,12 +856,24 @@ struct PlaybackControlConfiguration: Equatable, Sendable {
 
 enum PlaybackControlConfigurationError: Error, LocalizedError, Equatable {
     case invalidBalance(Double)
+    case invalidSymmetryBalance(Double)
+    case invalidSpeakerCrossfeed(Double)
+    case invalidCrosstalkCancellationAmount(Double)
+    case invalidCrosstalkHeadShadowFrequency(Double)
     case invalidInterChannelDelay(Double)
 
     var errorDescription: String? {
         switch self {
         case .invalidBalance(let value):
             return "Channel balance \(value) is outside the supported -1...+1 range."
+        case .invalidSymmetryBalance(let value):
+            return "Listening-position symmetry \(value) is outside the supported -1...+1 range."
+        case .invalidSpeakerCrossfeed(let value):
+            return "Speaker crossfeed \(value) is outside the supported 0...0.5 range."
+        case .invalidCrosstalkCancellationAmount(let value):
+            return "Crosstalk cancellation amount \(value) is outside the supported 0...1 range."
+        case .invalidCrosstalkHeadShadowFrequency(let value):
+            return "Crosstalk head-shadow frequency \(value) Hz is outside the supported 200...2000 Hz range."
         case .invalidInterChannelDelay(let value):
             return "Inter-channel delay \(value) ms is outside the supported -20...+20 ms range."
         }

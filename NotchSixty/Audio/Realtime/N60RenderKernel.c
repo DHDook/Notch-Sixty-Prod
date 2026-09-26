@@ -52,6 +52,7 @@ typedef struct {
     N60BiquadState mainsLeft[N60_MAX_CROSSOVER_SECTIONS];
     N60BiquadState mainsRight[N60_MAX_CROSSOVER_SECTIONS];
     N60BiquadState subMono[N60_MAX_CROSSOVER_SECTIONS];
+    N60BiquadState subPhaseAlignment;
 } N60CrossoverPathRuntime;
 
 typedef struct {
@@ -73,12 +74,20 @@ struct N60RenderKernel {
     N60ProtectionRuntime *protectionRuntime;
     N60PartitionedConvolver *convolver;
     N60PartitionedConvolver *roomCorrectionConvolver;
+    N60PartitionedConvolver *speakerIRConvolver;
     N60SmoothedGain inputGain;
     N60SmoothedGain headroomGain;
     N60SmoothedGain outputGain;
     N60SmoothedGain masterGain;
     N60SmoothedGain balanceGainLeft;
     N60SmoothedGain balanceGainRight;
+    N60SmoothedGain symmetryBalanceGainLeft;
+    N60SmoothedGain symmetryBalanceGainRight;
+    N60SmoothedGain speakerCrossfeedAmount;
+    N60SmoothedGain crosstalkCancellationAmount;
+    N60SmoothedGain crosstalkHeadShadowAlpha;
+    float crosstalkShadowLeft;
+    float crosstalkShadowRight;
     N60InterChannelDelayRuntime interChannelDelayRuntime;
     float referenceDelayLeft[N60_MAX_AUDITION_DELAY_FRAMES];
     float referenceDelayRight[N60_MAX_AUDITION_DELAY_FRAMES];
@@ -97,6 +106,7 @@ struct N60RenderKernel {
     _Atomic uint64_t snapshotReadMisses;
     _Atomic uint64_t convolutionProgramMisses;
     _Atomic uint64_t roomCorrectionProgramMisses;
+    _Atomic uint64_t speakerIRProgramMisses;
 
     _Atomic uint32_t mainsDetectedFrequencyBits;
     _Atomic uint32_t mainsDetectionConfidenceBits;
@@ -193,7 +203,13 @@ static bool crossover_snapshot_is_valid(N60CrossoverSnapshot crossover, double s
         || !isfinite(crossover.subGainLinear)
         || crossover.subGainLinear < 0.0f
         || crossover.monitorMode < N60CrossoverMonitorModeRecombined
-        || crossover.monitorMode > N60CrossoverMonitorModeSubOnly) {
+        || crossover.monitorMode > N60CrossoverMonitorModeSubOnly
+        || !isfinite(crossover.subPhaseAlignmentFrequencyHz)
+        || crossover.subPhaseAlignmentFrequencyHz <= 0.0
+        || crossover.subPhaseAlignmentFrequencyHz >= sampleRate * 0.5
+        || !isfinite(crossover.subPhaseAlignmentQ)
+        || crossover.subPhaseAlignmentQ <= 0.0
+        || !coefficients_are_finite(crossover.subPhaseAlignmentAllPass)) {
         return false;
     }
 
@@ -253,18 +269,24 @@ static bool snapshot_is_valid(N60DSPGraphSnapshot snapshot) {
         || !isfinite(snapshot.balanceGainRightLinear)
         || snapshot.balanceGainRightLinear < 0.0f
         || snapshot.balanceGainRightLinear > 1.0f
+        || !N60SymmetryBalanceSnapshotIsValid(snapshot.symmetryBalance)
+        || !N60SpeakerCrossfeedSnapshotIsValid(snapshot.speakerCrossfeed)
+        || !N60CrosstalkCancellationSnapshotIsValid(snapshot.crosstalkCancellation)
         || snapshot.auditionMode < N60AuditionModeProcessed
         || snapshot.auditionMode > N60AuditionModeDelta
         || !N60InterChannelDelaySnapshotIsValid(snapshot.interChannelDelay, snapshot.sampleRate)
         || (snapshot.auditionMode != N60AuditionModeProcessed
             && snapshot.latencyFrames >= N60_MAX_AUDITION_DELAY_FRAMES)
         || snapshot.eqBandCount > N60_MAX_EQ_RENDER_SLOTS
+        || snapshot.mixedPhaseCorrectionSectionCount > N60_MAX_EQ_MIXED_PHASE_RENDER_SLOTS
+        || (!snapshot.mixedPhaseEnabled && snapshot.mixedPhaseCorrectionSectionCount != 0u)
         || !crossover_snapshot_is_valid(snapshot.crossover, snapshot.sampleRate)
         || !N60DynamicsSnapshotIsValid(snapshot.dynamics)
         || !N60SpectralDenoiserSnapshotIsValid(snapshot.dynamics.spectralDenoiser, snapshot.sampleRate)
         || !N60ProtectionSnapshotIsValid(&snapshot.protection)
         || !convolution_snapshot_is_valid(snapshot.convolution)
-        || !convolution_snapshot_is_valid(snapshot.roomCorrection)) {
+        || !convolution_snapshot_is_valid(snapshot.roomCorrection)
+        || !convolution_snapshot_is_valid(snapshot.speakerIR)) {
         return false;
     }
 
@@ -399,6 +421,10 @@ static bool crossover_snapshots_equal(N60CrossoverSnapshot lhs, N60CrossoverSnap
         || lhs.monitorMode != rhs.monitorMode
         || lhs.subGainLinear != rhs.subGainLinear
         || lhs.subPolarityInverted != rhs.subPolarityInverted
+        || lhs.subPhaseAlignmentEnabled != rhs.subPhaseAlignmentEnabled
+        || lhs.subPhaseAlignmentFrequencyHz != rhs.subPhaseAlignmentFrequencyHz
+        || lhs.subPhaseAlignmentQ != rhs.subPhaseAlignmentQ
+        || !coefficients_equal(lhs.subPhaseAlignmentAllPass, rhs.subPhaseAlignmentAllPass)
         || lhs.sectionCount != rhs.sectionCount) {
         return false;
     }
@@ -440,6 +466,13 @@ static void prepare_runtime_for_snapshot(N60RenderKernel *kernel, const N60DSPGr
         reset_smoothed_gain(&kernel->masterGain, snapshot->masterGainLinear);
         reset_smoothed_gain(&kernel->balanceGainLeft, snapshot->balanceGainLeftLinear);
         reset_smoothed_gain(&kernel->balanceGainRight, snapshot->balanceGainRightLinear);
+        reset_smoothed_gain(&kernel->symmetryBalanceGainLeft, snapshot->symmetryBalance.leftGainLinear);
+        reset_smoothed_gain(&kernel->symmetryBalanceGainRight, snapshot->symmetryBalance.rightGainLinear);
+        reset_smoothed_gain(&kernel->speakerCrossfeedAmount, snapshot->speakerCrossfeed.enabled ? snapshot->speakerCrossfeed.amount : 0.0f);
+        reset_smoothed_gain(&kernel->crosstalkCancellationAmount, snapshot->crosstalkCancellation.enabled ? snapshot->crosstalkCancellation.amount : 0.0f);
+        reset_smoothed_gain(&kernel->crosstalkHeadShadowAlpha, snapshot->crosstalkCancellation.headShadowAlpha);
+        kernel->crosstalkShadowLeft = 0.0f;
+        kernel->crosstalkShadowRight = 0.0f;
         N60InterChannelDelayRuntimeReset(&kernel->interChannelDelayRuntime, snapshot->interChannelDelay);
     } else {
         schedule_gain_transition(&kernel->inputGain, snapshot->inputGainLinear, gainFrames);
@@ -448,6 +481,11 @@ static void prepare_runtime_for_snapshot(N60RenderKernel *kernel, const N60DSPGr
         schedule_gain_transition(&kernel->masterGain, snapshot->masterGainLinear, gainFrames);
         schedule_gain_transition(&kernel->balanceGainLeft, snapshot->balanceGainLeftLinear, gainFrames);
         schedule_gain_transition(&kernel->balanceGainRight, snapshot->balanceGainRightLinear, gainFrames);
+        schedule_gain_transition(&kernel->symmetryBalanceGainLeft, snapshot->symmetryBalance.leftGainLinear, gainFrames);
+        schedule_gain_transition(&kernel->symmetryBalanceGainRight, snapshot->symmetryBalance.rightGainLinear, gainFrames);
+        schedule_gain_transition(&kernel->speakerCrossfeedAmount, snapshot->speakerCrossfeed.enabled ? snapshot->speakerCrossfeed.amount : 0.0f, gainFrames);
+        schedule_gain_transition(&kernel->crosstalkCancellationAmount, snapshot->crosstalkCancellation.enabled ? snapshot->crosstalkCancellation.amount : 0.0f, gainFrames);
+        schedule_gain_transition(&kernel->crosstalkHeadShadowAlpha, snapshot->crosstalkCancellation.headShadowAlpha, gainFrames);
         N60InterChannelDelayRuntimeSchedule(&kernel->interChannelDelayRuntime, snapshot->interChannelDelay, gainFrames);
     }
 
@@ -547,6 +585,13 @@ static void process_crossover_path(
         mainsLeft = N60BiquadProcessSample(path->snapshot.mainsHighPass[index], &path->mainsLeft[index], mainsLeft);
         mainsRight = N60BiquadProcessSample(path->snapshot.mainsHighPass[index], &path->mainsRight[index], mainsRight);
         subMono = N60BiquadProcessSample(path->snapshot.subLowPass[index], &path->subMono[index], subMono);
+    }
+    if (path->snapshot.subPhaseAlignmentEnabled) {
+        subMono = N60BiquadProcessSample(
+            path->snapshot.subPhaseAlignmentAllPass,
+            &path->subPhaseAlignment,
+            subMono
+        );
     }
     subMono *= path->snapshot.subGainLinear;
     if (path->snapshot.subPolarityInverted) subMono = -subMono;
@@ -769,6 +814,13 @@ N60DSPGraphSnapshot N60DSPGraphSnapshotMakeUnity(double sampleRate) {
     snapshot.masterGainLinear = 1.0f;
     snapshot.balanceGainLeftLinear = 1.0f;
     snapshot.balanceGainRightLinear = 1.0f;
+    snapshot.symmetryBalance.enabled = false;
+    snapshot.symmetryBalance.position = 0.0;
+    snapshot.symmetryBalance.leftGainLinear = 1.0f;
+    snapshot.symmetryBalance.rightGainLinear = 1.0f;
+    snapshot.speakerCrossfeed.enabled = false;
+    snapshot.speakerCrossfeed.amount = 0.0f;
+    (void)N60CrosstalkCancellationDesign(sampleRate, 0.5, 700.0, false, &snapshot.crosstalkCancellation);
     snapshot.bypassed = false;
     snapshot.auditionMode = N60AuditionModeProcessed;
     snapshot.interChannelDelay = N60InterChannelDelaySnapshotMakeBypassed();
@@ -776,6 +828,8 @@ N60DSPGraphSnapshot N60DSPGraphSnapshotMakeUnity(double sampleRate) {
     snapshot.generation = 0;
     snapshot.gainTransitionFrames = gain_transition_frames_for_sample_rate(sampleRate);
     snapshot.eqBypassed = false;
+    snapshot.mixedPhaseEnabled = false;
+    snapshot.mixedPhaseCorrectionSectionCount = 0;
     snapshot.eqBandCount = 0;
     snapshot.eqTransitionFrames = eq_transition_frames_for_sample_rate(sampleRate);
     snapshot.crossoverTransitionFrames = crossover_transition_frames_for_sample_rate(sampleRate);
@@ -786,6 +840,8 @@ N60DSPGraphSnapshot N60DSPGraphSnapshotMakeUnity(double sampleRate) {
     snapshot.convolution.programSlot = N60_CONVOLUTION_NO_PROGRAM;
     snapshot.roomCorrection.enabled = false;
     snapshot.roomCorrection.programSlot = N60_CONVOLUTION_NO_PROGRAM;
+    snapshot.speakerIR.enabled = false;
+    snapshot.speakerIR.programSlot = N60_CONVOLUTION_NO_PROGRAM;
     return snapshot;
 }
 
@@ -794,6 +850,44 @@ void N60DSPGraphSnapshotClearEQ(N60DSPGraphSnapshot *snapshot) {
     memset(snapshot->eqBands, 0, sizeof(snapshot->eqBands));
     memset(snapshot->eqBandChannelMasks, 0, sizeof(snapshot->eqBandChannelMasks));
     snapshot->eqBandCount = 0;
+}
+
+bool N60DSPGraphSnapshotSetSymmetryBalance(
+    N60DSPGraphSnapshot *snapshot,
+    double position,
+    bool enabled
+) {
+    if (snapshot == NULL) return false;
+    N60SymmetryBalanceSnapshot symmetry = {0};
+    if (!N60SymmetryBalanceDesign(position, enabled, &symmetry)) return false;
+    snapshot->symmetryBalance = symmetry;
+    return true;
+}
+
+bool N60DSPGraphSnapshotSetSpeakerCrossfeed(
+    N60DSPGraphSnapshot *snapshot,
+    double amount,
+    bool enabled
+) {
+    if (snapshot == NULL) return false;
+    N60SpeakerCrossfeedSnapshot crossfeed = {0};
+    if (!N60SpeakerCrossfeedDesign(amount, enabled, &crossfeed)) return false;
+    snapshot->speakerCrossfeed = crossfeed;
+    return true;
+}
+
+bool N60DSPGraphSnapshotSetCrosstalkCancellation(
+    N60DSPGraphSnapshot *snapshot,
+    double amount,
+    double headShadowFrequencyHz,
+    bool enabled
+) {
+    if (snapshot == NULL) return false;
+    N60CrosstalkCancellationSnapshot cancellation = {0};
+    if (!N60CrosstalkCancellationDesign(
+            snapshot->sampleRate, amount, headShadowFrequencyHz, enabled, &cancellation)) return false;
+    snapshot->crosstalkCancellation = cancellation;
+    return true;
 }
 
 bool N60DSPGraphSnapshotSetInterChannelDelay(
@@ -805,6 +899,56 @@ bool N60DSPGraphSnapshotSetInterChannelDelay(
     if (!N60InterChannelDelaySnapshotMake(snapshot->sampleRate, signedDelayMs, &delay)) return false;
     snapshot->interChannelDelay = delay;
     return true;
+}
+
+bool N60DSPGraphSnapshotSetEQPreparedBandForChannels(
+    N60DSPGraphSnapshot *snapshot,
+    uint32_t bandIndex,
+    uint8_t channelMask,
+    N60BiquadFilterType type,
+    double frequencyHz,
+    double gainDB,
+    double q,
+    N60BiquadCoefficients coefficients,
+    bool enabled
+) {
+    if (snapshot == NULL || bandIndex >= N60_MAX_EQ_RENDER_SLOTS) return false;
+    if (enabled && !channel_mask_is_valid(channelMask)) return false;
+    if (enabled && (!isfinite(frequencyHz) || frequencyHz <= 0.0
+        || frequencyHz >= snapshot->sampleRate * 0.5
+        || !isfinite(gainDB)
+        || !isfinite(q) || q <= 0.0
+        || !N60BiquadCoefficientsAreFinite(coefficients))) {
+        return false;
+    }
+
+    N60BiquadBandSnapshot band = {0};
+    band.enabled = enabled;
+    band.type = type;
+    band.frequencyHz = frequencyHz;
+    band.gainDB = gainDB;
+    band.q = q;
+    band.coefficients = enabled ? coefficients : N60BiquadCoefficientsMakeIdentity();
+    snapshot->eqBands[bandIndex] = band;
+    snapshot->eqBandChannelMasks[bandIndex] = enabled ? channelMask : 0;
+    if (snapshot->eqBandCount <= bandIndex) snapshot->eqBandCount = bandIndex + 1;
+    return true;
+}
+
+bool N60DSPGraphSnapshotSetEQPreparedBand(
+    N60DSPGraphSnapshot *snapshot,
+    uint32_t bandIndex,
+    N60BiquadFilterType type,
+    double frequencyHz,
+    double gainDB,
+    double q,
+    N60BiquadCoefficients coefficients,
+    bool enabled
+) {
+    return N60DSPGraphSnapshotSetEQPreparedBandForChannels(
+        snapshot, bandIndex, N60_EQ_CHANNEL_STEREO, type,
+        frequencyHz, gainDB, q, coefficients, enabled
+    );
 }
 
 bool N60DSPGraphSnapshotSetEQBandForChannels(
@@ -848,6 +992,18 @@ bool N60DSPGraphSnapshotSetCrossover(N60DSPGraphSnapshot *snapshot, double frequ
     return true;
 }
 
+bool N60DSPGraphSnapshotSetSubPhaseAlignment(
+    N60DSPGraphSnapshot *snapshot,
+    double frequencyHz,
+    double q,
+    bool enabled
+) {
+    if (snapshot == NULL) return false;
+    return N60CrossoverSnapshotSetSubPhaseAlignment(
+        snapshot->sampleRate, frequencyHz, q, enabled, &snapshot->crossover
+    );
+}
+
 bool N60DSPGraphSnapshotSetConvolutionProgram(
     N60DSPGraphSnapshot *snapshot,
     uint32_t programSlot,
@@ -874,6 +1030,22 @@ bool N60DSPGraphSnapshotSetRoomCorrectionProgram(
     return set_convolution_graph_state(
         snapshot,
         &snapshot->roomCorrection,
+        programSlot,
+        programInfo,
+        enabled
+    );
+}
+
+bool N60DSPGraphSnapshotSetSpeakerIRProgram(
+    N60DSPGraphSnapshot *snapshot,
+    uint32_t programSlot,
+    N60ConvolutionProgramInfo programInfo,
+    bool enabled
+) {
+    if (snapshot == NULL) return false;
+    return set_convolution_graph_state(
+        snapshot,
+        &snapshot->speakerIR,
         programSlot,
         programInfo,
         enabled
@@ -909,6 +1081,15 @@ N60RenderKernel *N60RenderKernelCreate(void) {
         free(kernel);
         return NULL;
     }
+    kernel->speakerIRConvolver = N60PartitionedConvolverCreate();
+    if (kernel->speakerIRConvolver == NULL) {
+        N60SpectralDenoiserDestroy(kernel->denoiserRuntime);
+        N60ProtectionRuntimeDestroy(kernel->protectionRuntime);
+        N60PartitionedConvolverDestroy(kernel->roomCorrectionConvolver);
+        N60PartitionedConvolverDestroy(kernel->convolver);
+        free(kernel);
+        return NULL;
+    }
     N60DSPGraphSnapshot initial = N60DSPGraphSnapshotMakeUnity(48000.0);
     initial.generation = 1;
     kernel->slots[0].snapshot = initial;
@@ -933,6 +1114,7 @@ void N60RenderKernelDestroy(N60RenderKernel *kernel) {
     if (kernel == NULL) return;
     N60SpectralDenoiserDestroy(kernel->denoiserRuntime);
     N60ProtectionRuntimeDestroy(kernel->protectionRuntime);
+    N60PartitionedConvolverDestroy(kernel->speakerIRConvolver);
     N60PartitionedConvolverDestroy(kernel->roomCorrectionConvolver);
     N60PartitionedConvolverDestroy(kernel->convolver);
     free(kernel);
@@ -947,6 +1129,7 @@ void N60RenderKernelReset(N60RenderKernel *kernel) {
     N60ProtectionRuntimeReset(kernel->protectionRuntime);
     N60PartitionedConvolverReset(kernel->convolver);
     N60PartitionedConvolverReset(kernel->roomCorrectionConvolver);
+    N60PartitionedConvolverReset(kernel->speakerIRConvolver);
     reset_smoothed_gain(&kernel->inputGain, 1.0f);
     reset_smoothed_gain(&kernel->headroomGain, 1.0f);
     reset_smoothed_gain(&kernel->outputGain, 1.0f);
@@ -970,6 +1153,7 @@ void N60RenderKernelReset(N60RenderKernel *kernel) {
     atomic_store_explicit(&kernel->snapshotReadMisses, 0, memory_order_relaxed);
     atomic_store_explicit(&kernel->convolutionProgramMisses, 0, memory_order_relaxed);
     atomic_store_explicit(&kernel->roomCorrectionProgramMisses, 0, memory_order_relaxed);
+    atomic_store_explicit(&kernel->speakerIRProgramMisses, 0, memory_order_relaxed);
     atomic_store_explicit(&kernel->denoiserProfileReady, false, memory_order_relaxed);
     atomic_store_explicit(&kernel->denoiserCapturedProfile, false, memory_order_relaxed);
     atomic_store_explicit(&kernel->denoiserCaptureActive, false, memory_order_relaxed);
@@ -1042,10 +1226,32 @@ bool N60RenderKernelPrepareRoomCorrectionProgram(
     );
 }
 
+bool N60RenderKernelPrepareSpeakerIRProgram(
+    N60RenderKernel *kernel,
+    uint32_t slot,
+    const float *leftTaps,
+    const float *rightTaps,
+    uint32_t tapCount,
+    uint32_t declaredLatencyFrames,
+    N60ConvolutionProgramInfo *programInfoOut
+) {
+    if (kernel == NULL) return false;
+    return prepare_program(
+        kernel->speakerIRConvolver,
+        slot,
+        leftTaps,
+        rightTaps,
+        tapCount,
+        declaredLatencyFrames,
+        programInfoOut
+    );
+}
+
 bool N60RenderKernelPublishSnapshot(N60RenderKernel *kernel, N60DSPGraphSnapshot snapshot) {
     if (kernel == NULL || !snapshot_is_valid(snapshot)) return false;
     if (!prepared_program_matches_graph_state(kernel->convolver, snapshot.convolution)
-        || !prepared_program_matches_graph_state(kernel->roomCorrectionConvolver, snapshot.roomCorrection)) {
+        || !prepared_program_matches_graph_state(kernel->roomCorrectionConvolver, snapshot.roomCorrection)
+        || !prepared_program_matches_graph_state(kernel->speakerIRConvolver, snapshot.speakerIR)) {
         return false;
     }
     uint32_t active = atomic_load_explicit(&kernel->activeSlot, memory_order_acquire);
@@ -1096,6 +1302,15 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
             &right
         );
 
+        bool midSideEQ = !context->snapshot.eqBypassed && context->snapshot.eqMidSideMode;
+        if (midSideEQ) {
+            float mid = 0.0f;
+            float side = 0.0f;
+            N60MidSideEncode(left, right, &mid, &side);
+            left = mid;
+            right = side;
+        }
+
         if (!context->snapshot.eqBypassed) {
             for (uint32_t index = 0; index < N60_MAX_EQ_RENDER_SLOTS; ++index) {
                 N60EQBandRuntime *runtime = &kernel->eqRuntime[index];
@@ -1104,16 +1319,6 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
                 right = process_eq_band(runtime, right, N60_EQ_CHANNEL_RIGHT);
             }
             advance_eq_transitions(kernel);
-            // Dynamic EQ is a capability of the main parametric-EQ stage. Its
-            // detector/gain engine remains independently implemented, but it is
-            // evaluated here so enabling Dynamic does not move a band into the
-            // later dynamics section of the graph.
-            N60DynamicsProcessDynamicEQStereoFrame(
-                &kernel->dynamicsRuntime,
-                context->snapshot.dynamics,
-                &left,
-                &right
-            );
         }
 
         if (context->snapshot.convolution.enabled) {
@@ -1132,6 +1337,25 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
             } else {
                 atomic_fetch_add_explicit(&kernel->convolutionProgramMisses, 1, memory_order_relaxed);
             }
+        }
+
+        if (midSideEQ) {
+            float physicalLeft = 0.0f;
+            float physicalRight = 0.0f;
+            N60MidSideDecode(left, right, &physicalLeft, &physicalRight);
+            left = physicalLeft;
+            right = physicalRight;
+        }
+
+        if (!context->snapshot.eqBypassed) {
+            // Dynamic EQ remains a linked physical-stereo stage. Mid/Side does
+            // not create independent M/S dynamic detectors.
+            N60DynamicsProcessDynamicEQStereoFrame(
+                &kernel->dynamicsRuntime,
+                context->snapshot.dynamics,
+                &left,
+                &right
+            );
         }
 
         meter_sample(left, right, &context->postEQPeakLeft, &context->postEQPeakRight, &context->postEQSquareSumLeft, &context->postEQSquareSumRight, &context->postEQOverRangeSamples);
@@ -1155,7 +1379,55 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
             }
         }
 
+        // Independent global speaker impulse-response slot. This deliberately
+        // remains separate from main-EQ FIR and room correction so all three
+        // audited FIR workflows can coexist in the current stereo graph.
+        if (context->snapshot.speakerIR.enabled) {
+            float convolvedLeft = left;
+            float convolvedRight = right;
+            if (N60PartitionedConvolverProcessSample(
+                    kernel->speakerIRConvolver,
+                    context->snapshot.speakerIR.programSlot,
+                    context->snapshot.speakerIR.programGeneration,
+                    left,
+                    right,
+                    &convolvedLeft,
+                    &convolvedRight)) {
+                left = convolvedLeft;
+                right = convolvedRight;
+            } else {
+                atomic_fetch_add_explicit(&kernel->speakerIRProgramMisses, 1, memory_order_relaxed);
+            }
+        }
+
         N60DynamicsProcessCoreStereoFrameWithMasterGain(&kernel->dynamicsRuntime, context->snapshot.dynamics, context->snapshot.masterGainLinear, &left, &right);
+
+        // Listening-position symmetry compensation is intentionally separate
+        // from ordinary attenuation-style Balance. It feeds the speaker-spatial
+        // chain and is gain-smoothed so live position changes remain click-free.
+        left *= next_gain_value(&kernel->symmetryBalanceGainLeft);
+        right *= next_gain_value(&kernel->symmetryBalanceGainRight);
+
+        // Speaker crossfeed / Panning Gain Matrix. The audited effective range
+        // is 0...0.5: zero is identity and 0.5 is exact mono.
+        const float crossfeed = next_gain_value(&kernel->speakerCrossfeedAmount);
+        const float direct = 1.0f - crossfeed;
+        const float spatialLeft = left;
+        const float spatialRight = right;
+        left = direct * spatialLeft + crossfeed * spatialRight;
+        right = direct * spatialRight + crossfeed * spatialLeft;
+
+        // Gentle feed-forward speaker crosstalk cancellation. The opposite-channel
+        // cancellation signal is frequency-shaped by a first-order far-ear/head-
+        // shadow model; there is no recursive feedback loop in the realtime path.
+        const float shadowAlpha = next_gain_value(&kernel->crosstalkHeadShadowAlpha);
+        kernel->crosstalkShadowLeft += shadowAlpha * (left - kernel->crosstalkShadowLeft);
+        kernel->crosstalkShadowRight += shadowAlpha * (right - kernel->crosstalkShadowRight);
+        const float cancellationAmount = next_gain_value(&kernel->crosstalkCancellationAmount);
+        const float cancellationLeft = left;
+        const float cancellationRight = right;
+        left = cancellationLeft - cancellationAmount * kernel->crosstalkShadowRight;
+        right = cancellationRight - cancellationAmount * kernel->crosstalkShadowLeft;
 
         left *= next_gain_value(&kernel->balanceGainLeft);
         right *= next_gain_value(&kernel->balanceGainRight);
@@ -1305,6 +1577,9 @@ N60RenderKernelDiagnostics N60RenderKernelGetDiagnostics(const N60RenderKernel *
         diagnostics.balanceGainLeftLinear = context.snapshot.balanceGainLeftLinear;
         diagnostics.balanceGainRightLinear = context.snapshot.balanceGainRightLinear;
         diagnostics.eqBypassed = context.snapshot.eqBypassed;
+        diagnostics.eqMidSideMode = context.snapshot.eqMidSideMode;
+        diagnostics.mixedPhaseEnabled = context.snapshot.mixedPhaseEnabled;
+        diagnostics.mixedPhaseCorrectionSectionCount = context.snapshot.mixedPhaseCorrectionSectionCount;
         diagnostics.eqBandCount = context.snapshot.eqBandCount;
         for (uint32_t index = 0; index < context.snapshot.eqBandCount; ++index) {
             if (!context.snapshot.eqBands[index].enabled) continue;
@@ -1356,6 +1631,13 @@ N60RenderKernelDiagnostics N60RenderKernelGetDiagnostics(const N60RenderKernel *
         diagnostics.roomCorrectionPartitionCount = context.snapshot.roomCorrection.partitionCount;
         diagnostics.roomCorrectionEngineLatencyFrames = context.snapshot.roomCorrection.engineLatencyFrames;
         diagnostics.roomCorrectionDeclaredLatencyFrames = context.snapshot.roomCorrection.declaredLatencyFrames;
+        diagnostics.speakerIREnabled = context.snapshot.speakerIR.enabled;
+        diagnostics.speakerIRProgramSlot = context.snapshot.speakerIR.programSlot;
+        diagnostics.speakerIRProgramGeneration = context.snapshot.speakerIR.programGeneration;
+        diagnostics.speakerIRTapCount = context.snapshot.speakerIR.tapCount;
+        diagnostics.speakerIRPartitionCount = context.snapshot.speakerIR.partitionCount;
+        diagnostics.speakerIREngineLatencyFrames = context.snapshot.speakerIR.engineLatencyFrames;
+        diagnostics.speakerIRDeclaredLatencyFrames = context.snapshot.speakerIR.declaredLatencyFrames;
         N60RenderKernelEndRender(mutableKernel, &context, 0);
     }
 
@@ -1365,6 +1647,7 @@ N60RenderKernelDiagnostics N60RenderKernelGetDiagnostics(const N60RenderKernel *
     diagnostics.snapshotReadMisses = atomic_load_explicit(&kernel->snapshotReadMisses, memory_order_relaxed);
     diagnostics.convolutionProgramMisses = atomic_load_explicit(&kernel->convolutionProgramMisses, memory_order_relaxed);
     diagnostics.roomCorrectionProgramMisses = atomic_load_explicit(&kernel->roomCorrectionProgramMisses, memory_order_relaxed);
+    diagnostics.speakerIRProgramMisses = atomic_load_explicit(&kernel->speakerIRProgramMisses, memory_order_relaxed);
     diagnostics.mainsDetectedFrequencyHz = bits_to_float(atomic_load_explicit(&kernel->mainsDetectedFrequencyBits, memory_order_relaxed));
     diagnostics.mainsDetectionConfidence = bits_to_float(atomic_load_explicit(&kernel->mainsDetectionConfidenceBits, memory_order_relaxed));
     diagnostics.denoiserProfileReady = atomic_load_explicit(&kernel->denoiserProfileReady, memory_order_relaxed);

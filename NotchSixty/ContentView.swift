@@ -41,6 +41,55 @@ struct ContentView: View {
         Binding(get: { engine.stereoEQConfiguration.editChannel }, set: { engine.setEQEditChannel($0) })
     }
 
+    private var crosstalkCancellationEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { engine.playbackControlConfiguration.crosstalkCancellationEnabled },
+            set: { try? engine.setCrosstalkCancellationEnabled($0) }
+        )
+    }
+
+    private var crosstalkCancellationAmountBinding: Binding<Double> {
+        Binding(
+            get: { engine.playbackControlConfiguration.crosstalkCancellationAmount },
+            set: { try? engine.setCrosstalkCancellationAmount($0) }
+        )
+    }
+
+    private var crosstalkHeadShadowFrequencyBinding: Binding<Double> {
+        Binding(
+            get: { engine.playbackControlConfiguration.crosstalkHeadShadowFrequencyHz },
+            set: { try? engine.setCrosstalkHeadShadowFrequency($0) }
+        )
+    }
+
+    private var speakerCrossfeedEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { engine.playbackControlConfiguration.speakerCrossfeedEnabled },
+            set: { try? engine.setSpeakerCrossfeedEnabled($0) }
+        )
+    }
+
+    private var speakerCrossfeedAmountBinding: Binding<Double> {
+        Binding(
+            get: { engine.playbackControlConfiguration.speakerCrossfeedAmount },
+            set: { try? engine.setSpeakerCrossfeedAmount($0) }
+        )
+    }
+
+    private var symmetryBalanceEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { engine.playbackControlConfiguration.symmetryBalanceEnabled },
+            set: { try? engine.setSymmetryBalanceEnabled($0) }
+        )
+    }
+
+    private var symmetryBalancePositionBinding: Binding<Double> {
+        Binding(
+            get: { engine.playbackControlConfiguration.symmetryBalancePosition },
+            set: { try? engine.setSymmetryBalancePosition($0) }
+        )
+    }
+
     private var balanceBinding: Binding<Double> {
         Binding(get: { engine.playbackControlConfiguration.balance }, set: { try? engine.setChannelBalance($0) })
     }
@@ -87,11 +136,21 @@ struct ContentView: View {
     private var crossoverMonitorBinding: Binding<CrossoverMonitorMode> { crossoverBinding(\.monitorMode) }
     private var subGainBinding: Binding<Double> { crossoverBinding(\.subGainDB) }
     private var subPolarityBinding: Binding<Bool> { crossoverBinding(\.subPolarityInverted) }
+    private var subPhaseAlignmentEnabledBinding: Binding<Bool> { crossoverBinding(\.subPhaseAlignmentEnabled) }
+    private var subPhaseAlignmentFrequencyBinding: Binding<Double> { crossoverBinding(\.subPhaseAlignmentFrequencyHz) }
+    private var subPhaseAlignmentQBinding: Binding<Double> { crossoverBinding(\.subPhaseAlignmentQ) }
 
     private var roomCorrectionEnabledBinding: Binding<Bool> {
         Binding(
             get: { engine.roomCorrectionConfiguration.enabled },
             set: { try? engine.setRoomCorrectionEnabled($0) }
+        )
+    }
+
+    private var speakerIREnabledBinding: Binding<Bool> {
+        Binding(
+            get: { engine.speakerIRConfiguration.enabled },
+            set: { try? engine.setSpeakerIREnabled($0) }
         )
     }
 
@@ -134,6 +193,7 @@ struct ContentView: View {
             pr33ValidationView
             crossoverValidationView
             roomCorrectionValidationView
+            speakerIRValidationView
             eqValidationView
 
             Divider()
@@ -196,6 +256,64 @@ struct ContentView: View {
                     .monospacedDigit()
                     .frame(width: 55)
             }
+            HStack(spacing: 12) {
+                Toggle("Listening symmetry", isOn: symmetryBalanceEnabledBinding).toggleStyle(.switch)
+                Text("L").foregroundStyle(.secondary)
+                Slider(
+                    value: symmetryBalancePositionBinding,
+                    in: PlaybackControlConfiguration.symmetryBalanceRange,
+                    step: 0.01
+                )
+                .disabled(!engine.playbackControlConfiguration.symmetryBalanceEnabled)
+                Text("R").foregroundStyle(.secondary)
+                Text(engine.playbackControlConfiguration.symmetryBalancePosition.formatted(.number.precision(.fractionLength(2))))
+                    .monospacedDigit()
+                    .frame(width: 55)
+            }
+            Text("Listening symmetry is constant-power compensation for an off-center listening position. It is separate from ordinary attenuation-style Balance; center is unity on both channels.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack(spacing: 12) {
+                Toggle("Speaker crossfeed", isOn: speakerCrossfeedEnabledBinding).toggleStyle(.switch)
+                Slider(
+                    value: speakerCrossfeedAmountBinding,
+                    in: PlaybackControlConfiguration.speakerCrossfeedRange,
+                    step: 0.01
+                )
+                .disabled(!engine.playbackControlConfiguration.speakerCrossfeedEnabled)
+                Text(engine.playbackControlConfiguration.speakerCrossfeedAmount.formatted(.number.precision(.fractionLength(2))))
+                    .monospacedDigit()
+                    .frame(width: 55)
+            }
+            Text("Crossfeed uses the speaker Panning Gain Matrix. 0.00 leaves stereo untouched; 0.50 collapses to exact mono. The legacy 0...1 display range is intentionally not reproduced.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack(spacing: 12) {
+                Toggle("Crosstalk cancellation", isOn: crosstalkCancellationEnabledBinding).toggleStyle(.switch)
+                Text("Amount").frame(width: 60, alignment: .leading)
+                Slider(
+                    value: crosstalkCancellationAmountBinding,
+                    in: PlaybackControlConfiguration.crosstalkCancellationAmountRange,
+                    step: 0.01
+                )
+                .disabled(!engine.playbackControlConfiguration.crosstalkCancellationEnabled)
+                Text(engine.playbackControlConfiguration.crosstalkCancellationAmount.formatted(.number.precision(.fractionLength(2))))
+                    .monospacedDigit().frame(width: 55)
+            }
+            HStack(spacing: 12) {
+                Text("Head shadow").frame(width: 90, alignment: .leading)
+                Slider(
+                    value: crosstalkHeadShadowFrequencyBinding,
+                    in: PlaybackControlConfiguration.crosstalkHeadShadowFrequencyRange,
+                    step: 10
+                )
+                .disabled(!engine.playbackControlConfiguration.crosstalkCancellationEnabled)
+                Text("\(Int(engine.playbackControlConfiguration.crosstalkHeadShadowFrequencyHz.rounded())) Hz")
+                    .monospacedDigit().frame(width: 75)
+            }
+            Text("A stable feed-forward opposite-channel cancellation signal is shaped by the Head Shadow low-pass model. 700 Hz is the audited default associated with conventional ~60° speaker spacing.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             HStack(spacing: 12) {
                 Text("L/R delay").frame(width: 90, alignment: .leading)
                 Text("Delay L").foregroundStyle(.secondary)
@@ -770,7 +888,7 @@ struct ContentView: View {
             GroupBox("Dynamic EQ integration") {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Dynamic EQ is now configured on the normal Parametric EQ bands below rather than in a separate band bank.")
-                    Text("Commercial capacity: up to \(EQConfiguration.maximumBandCount) EQ bands. Dynamic is available for linked, minimum-phase Peak bands; the standalone C detector/gain engine remains an internal implementation detail.")
+                    Text("Commercial capacity: up to \(EQConfiguration.maximumBandCount) EQ bands. Dynamic EQ follows the active band domain: Linked is stereo-linked, Independent uses separate Left/Right lanes, and Mid/Side uses separate Mid/Side lanes. Peak, shelves, Tilt, Notch, and Band Pass support dynamics in Minimum, Mixed, and Linear phase modes.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -905,6 +1023,32 @@ struct ContentView: View {
                     .toggleStyle(.switch)
             }
 
+            HStack(spacing: 12) {
+                Toggle("Sub phase alignment", isOn: subPhaseAlignmentEnabledBinding).toggleStyle(.switch)
+                Text("Center")
+                Slider(
+                    value: subPhaseAlignmentFrequencyBinding,
+                    in: BassManagementConfiguration.frequencyRange,
+                    step: 1
+                )
+                .disabled(!engine.bassManagementConfiguration.subPhaseAlignmentEnabled)
+                Text("\(Int(engine.bassManagementConfiguration.subPhaseAlignmentFrequencyHz.rounded())) Hz")
+                    .monospacedDigit().frame(width: 72)
+                Text("Q")
+                Slider(
+                    value: subPhaseAlignmentQBinding,
+                    in: BassManagementConfiguration.subPhaseAlignmentQRange,
+                    step: 0.1
+                )
+                .frame(width: 160)
+                .disabled(!engine.bassManagementConfiguration.subPhaseAlignmentEnabled)
+                Text(engine.bassManagementConfiguration.subPhaseAlignmentQ.formatted(.number.precision(.fractionLength(1))))
+                    .monospacedDigit().frame(width: 38)
+            }
+            Text("Sub phase alignment is a magnitude-transparent all-pass on the mono sub leg after low-pass filtering. It rotates phase near the selected center without changing sub gain, polarity, or the mains path.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
             Text("PR #16 exposes logical mains and mono-sub buses through stereo audition modes. It does not yet create an independently routable physical sub output.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -957,6 +1101,47 @@ struct ContentView: View {
     }
 
     @ViewBuilder
+    private var speakerIRValidationView: some View {
+        let filter = engine.speakerIRConfiguration.filter
+        let diagnostics = engine.diagnosticsSnapshot().renderKernelDiagnostics
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Speaker IR runtime validation").font(.headline)
+                Spacer()
+                Button("Load Validation IR") {
+                    try? engine.loadSpeakerIRValidationFilter()
+                }
+                Button("Clear") {
+                    try? engine.clearSpeakerIRFilter()
+                }
+                .disabled(filter == nil)
+                Toggle("Enable", isOn: speakerIREnabledBinding)
+                    .toggleStyle(.switch)
+                    .disabled(filter == nil)
+            }
+
+            if let filter {
+                Text("Loaded: \(filter.name) — \(filter.leftTaps.count) taps / declared latency \(filter.declaredLatencyFrames) frame\(filter.declaredLatencyFrames == 1 ? "" : "s")")
+                    .font(.caption)
+            } else {
+                Text("No Speaker IR loaded. The independent global Speaker IR slot is bypassed.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text("Realtime: \(diagnostics?.speakerIREnabled == true ? "enabled" : "bypassed") • \(diagnostics?.speakerIRTapCount ?? 0) taps • program generation \(diagnostics?.speakerIRProgramGeneration ?? 0)")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+
+            Text("Speaker IR is a third independent global convolution workflow, separate from main-EQ/per-band FIR and room correction. This PR validates the current stereo runtime contract; WAV/AIFF import and resource persistence remain in the later persistence milestone.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(10)
+        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    @ViewBuilder
     private var eqValidationView: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -970,11 +1155,18 @@ struct ContentView: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 180)
+                .frame(width: 260)
                 if engine.stereoEQConfiguration.channelMode == .independent {
                     Picker("Edit", selection: eqEditChannelBinding) {
                         Text("Left").tag(EQEditChannel.left)
                         Text("Right").tag(EQEditChannel.right)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 150)
+                } else if engine.stereoEQConfiguration.channelMode == .midSide {
+                    Picker("Edit", selection: eqEditChannelBinding) {
+                        Text("Mid").tag(EQEditChannel.mid)
+                        Text("Side").tag(EQEditChannel.side)
                     }
                     .pickerStyle(.segmented)
                     .frame(width: 150)
@@ -990,6 +1182,13 @@ struct ContentView: View {
                 Button("Add Band") { try? engine.addEQBand() }
                     .disabled(engine.eqConfiguration.bands.count >= EQConfiguration.maximumBandCount)
                 Button("Load 64-Band Stress") { load64BandStressConfiguration() }
+            }
+
+            if engine.eqConfiguration.phaseMode == .mixedPhase {
+                let diagnostics = engine.diagnosticsSnapshot().renderKernelDiagnostics
+                Text("Mixed Phase: static biquad EQ plus bounded all-pass phase correction • no FIR pre-ringing • no added fixed/buffer latency • \(diagnostics?.mixedPhaseCorrectionSectionCount ?? 0) internal correction sections")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             if engine.eqConfiguration.phaseMode == .linearPhase {
@@ -1031,9 +1230,7 @@ struct ContentView: View {
     @ViewBuilder
     private func eqBandRow(index: Int, band: EQBand) -> some View {
         let binding = eqBandBinding(for: band.id)
-        let dynamicSupported = engine.eqConfiguration.phaseMode == .minimumPhase
-            && engine.stereoEQConfiguration.channelMode == .linked
-            && band.type == .peaking
+        let dynamicSupported = band.type.supportsDynamicEQ
 
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
@@ -1044,12 +1241,19 @@ struct ContentView: View {
                 }
                 .labelsHidden()
                 .frame(width: 115)
-                TextField("Hz", value: binding.frequencyHz, format: .number.precision(.fractionLength(0...1))).frame(width: 85)
+                TextField("Hz", value: binding.frequencyHz, format: .number.precision(.fractionLength(0...1))).frame(width: 85).disabled(band.type == .fir)
                 Text("Hz").foregroundStyle(.secondary)
-                TextField("dB", value: binding.gainDB, format: .number.precision(.fractionLength(1))).frame(width: 65)
+                TextField("dB", value: binding.gainDB, format: .number.precision(.fractionLength(1)))
+                    .frame(width: 65)
+                    .disabled(band.type == .linkwitzTransform || band.type == .fir)
                 Text("dB").font(.caption).foregroundStyle(.secondary)
-                TextField("Q", value: binding.q, format: .number.precision(.fractionLength(2...3))).frame(width: 65)
+                TextField("Q", value: binding.q, format: .number.precision(.fractionLength(2...3)))
+                    .frame(width: 65)
+                    .disabled(band.type == .tilt || band.type == .fir)
                 Text("Q").foregroundStyle(.secondary)
+                Toggle("Constant Q", isOn: binding.constantQ)
+                    .toggleStyle(.switch)
+                    .disabled(band.type != .peaking)
                 Toggle("Dynamic", isOn: binding.dynamic.enabled)
                     .toggleStyle(.switch)
                     .disabled(!dynamicSupported)
@@ -1057,12 +1261,83 @@ struct ContentView: View {
                 Button("Remove") { try? engine.removeEQBand(id: band.id) }
             }
 
+            if !dynamicSupported {
+                Text("Dynamic EQ is not available for HP/LP, Linkwitz Transform, FIR, or All-Pass bands.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            if band.type.supportsSlope {
+                HStack(spacing: 8) {
+                    Text("Slope").frame(width: 82, alignment: .leading).foregroundStyle(.secondary)
+                    Picker("Slope", selection: binding.slope) {
+                        ForEach(EQFilterSlope.allCases) { slope in
+                            Text(slope.displayName).tag(slope)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 130)
+                }
+            }
+            if band.type == .tilt {
+                Text("Tilt amount is the total low-to-high differential around the pivot: positive brightens highs and attenuates lows symmetrically.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 40)
+            }
+
+            if band.type == .fir {
+                HStack(spacing: 8) {
+                    Text("FIR kernel").frame(width: 82, alignment: .leading).foregroundStyle(.secondary)
+                    if let kernel = band.firKernel {
+                        Text("\(kernel.name) / \(kernel.taps.count) taps")
+                            .monospacedDigit()
+                    } else {
+                        Text("No kernel loaded").foregroundStyle(.secondary)
+                    }
+                    Button("Load Validation FIR") {
+                        var updated = binding.wrappedValue
+                        updated.firKernel = .validation(sampleRate: engine.diagnosticsSnapshot().outputSampleRate)
+                        binding.wrappedValue = updated
+                    }
+                    Button("Clear") {
+                        var updated = binding.wrappedValue
+                        updated.firKernel = nil
+                        binding.wrappedValue = updated
+                    }
+                    .disabled(band.firKernel == nil)
+                }
+                Text("Per-band FIR is compiled off the realtime thread into the dedicated EQ convolution stage; room correction remains a separate FIR stage.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 40)
+            }
+
+            if band.type == .linkwitzTransform {
+                HStack(spacing: 8) {
+                    Text("Linkwitz").frame(width: 82, alignment: .leading).foregroundStyle(.secondary)
+                    Text("Resonance f0")
+                    Text("\(band.frequencyHz, specifier: "%.1f") Hz").monospacedDigit()
+                    Text("Box Q0")
+                    Text("\(band.q, specifier: "%.3f")").monospacedDigit()
+                    Text("Target fp")
+                    TextField("Hz", value: binding.linkwitzTargetHz, format: .number.precision(.fractionLength(0...1))).frame(width: 85)
+                    Text("Hz").foregroundStyle(.secondary)
+                    Text("Target Qp")
+                    TextField("Q", value: binding.linkwitzTargetQ, format: .number.precision(.fractionLength(2...3))).frame(width: 70)
+                }
+            }
+
             if binding.wrappedValue.dynamic.enabled && dynamicSupported {
                 HStack(spacing: 8) {
                     Text("Dynamic").frame(width: 82, alignment: .leading).foregroundStyle(.secondary)
-                    Picker("Direction", selection: binding.dynamic.direction) {
-                        ForEach(DynamicEQDirection.allCases) { value in Text(value.displayName).tag(value) }
-                    }.frame(width: 165)
+                    if band.type == .notch {
+                        Text("Cut Only").frame(width: 165, alignment: .leading)
+                    } else {
+                        Picker("Direction", selection: binding.dynamic.direction) {
+                            ForEach(DynamicEQDirection.allCases) { value in Text(value.displayName).tag(value) }
+                        }.frame(width: 165)
+                    }
                     Text("Threshold")
                     Slider(value: binding.dynamic.thresholdDB, in: EQBandDynamicConfiguration.thresholdRange, step: 0.5).frame(width: 100)
                     Text("\(binding.wrappedValue.dynamic.thresholdDB, specifier: "%.1f") dB").monospacedDigit().frame(width: 64)
@@ -1098,11 +1373,12 @@ struct ContentView: View {
                         Text("\(binding.wrappedValue.dynamic.maxBoostDB, specifier: "%.1f") dB").monospacedDigit().frame(width: 62)
                     }
                 }
-            } else if band.dynamic.enabled {
-                Text("Dynamic is inactive for this band. Use Linked + Minimum phase + Peak to enable dynamic operation.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.leading, 40)
+                if engine.eqConfiguration.phaseMode == .linearPhase {
+                    Text("Linear Phase keeps the static FIR linear-phase; the time-varying Dynamic correction runs as a minimum-phase layer after the FIR.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 40)
+                }
             }
         }
         .textFieldStyle(.roundedBorder)
@@ -1119,7 +1395,17 @@ struct ContentView: View {
                     StereoEQConfiguration.bandGainRange.upperBound
                 )
                 if sanitized.type != .peaking {
+                    sanitized.constantQ = false
+                }
+                if !sanitized.type.supportsDynamicEQ {
                     sanitized.dynamic.enabled = false
+                }
+                if sanitized.type == .notch {
+                    sanitized.dynamic.direction = .cutOnly
+                }
+                if sanitized.type != .fir {
+                    // Keep a loaded FIR asset attached to the band so switching
+                    // types for comparison does not destroy user state.
                 }
                 try? engine.updateEQBand(sanitized)
             }
@@ -1180,7 +1466,7 @@ struct ContentView: View {
                 diagnosticRow("EQ channels", "\(engine.stereoEQConfiguration.channelMode.displayName) / L \(render.eqLeftBandCount) / R \(render.eqRightBandCount)")
                 diagnosticRow("EQ stage", "\(render.eqBypassed ? "bypassed" : "active") / \(render.eqBandCount) IIR bands")
                 diagnosticRow(
-                    "Linear FIR",
+                    "EQ FIR",
                     render.convolutionEnabled
                         ? "active / slot \(render.convolutionProgramSlot) / gen \(render.convolutionProgramGeneration) / \(render.convolutionTapCount) taps / \(render.convolutionPartitionCount) partitions"
                         : "bypassed"

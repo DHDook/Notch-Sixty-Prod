@@ -8,6 +8,10 @@ enum EQFilterType: String, CaseIterable, Identifiable, Sendable {
     case highShelf
     case lowPass
     case highPass
+    case bandPass
+    case linkwitzTransform
+    case tilt
+    case fir
     case notch
     case allPass
 
@@ -20,10 +24,36 @@ enum EQFilterType: String, CaseIterable, Identifiable, Sendable {
         case .highShelf: return "High Shelf"
         case .lowPass: return "Low Pass"
         case .highPass: return "High Pass"
+        case .bandPass: return "Band Pass"
+        case .linkwitzTransform: return "Linkwitz Transform"
+        case .tilt: return "Tilt"
+        case .fir: return "FIR"
         case .notch: return "Notch"
         case .allPass: return "All-Pass"
         }
     }
+
+
+    var supportsSlope: Bool {
+        switch self {
+        case .lowShelf, .highShelf, .lowPass, .highPass: return true
+        default: return false
+        }
+    }
+
+    var dynamicEQShape: N60DynamicEQShape? {
+        switch self {
+        case .peaking: return N60DynamicEQShapePeak
+        case .lowShelf: return N60DynamicEQShapeLowShelf
+        case .highShelf: return N60DynamicEQShapeHighShelf
+        case .bandPass: return N60DynamicEQShapeBandPass
+        case .tilt: return N60DynamicEQShapeTilt
+        case .notch: return N60DynamicEQShapeNotch
+        case .lowPass, .highPass, .linkwitzTransform, .fir, .allPass: return nil
+        }
+    }
+
+    var supportsDynamicEQ: Bool { dynamicEQShape != nil }
 
     var cType: N60BiquadFilterType {
         switch self {
@@ -32,14 +62,37 @@ enum EQFilterType: String, CaseIterable, Identifiable, Sendable {
         case .highShelf: return N60BiquadFilterTypeHighShelf
         case .lowPass: return N60BiquadFilterTypeLowPass
         case .highPass: return N60BiquadFilterTypeHighPass
+        case .bandPass: return N60BiquadFilterTypeBandPass
+        case .linkwitzTransform: return N60BiquadFilterTypeLinkwitzTransform
+        case .tilt: return N60BiquadFilterTypeTilt
+        case .fir:
+            preconditionFailure("FIR EQ bands are convolution assets, not biquad filter types.")
         case .notch: return N60BiquadFilterTypeNotch
         case .allPass: return N60BiquadFilterTypeAllPass
         }
     }
 }
 
+enum EQFilterSlope: Int, CaseIterable, Identifiable, Sendable {
+    case db6 = 6
+    case db12 = 12
+    case db18 = 18
+    case db24 = 24
+    case db36 = 36
+    case db48 = 48
+    case db60 = 60
+    case db72 = 72
+    case db84 = 84
+    case db96 = 96
+
+    var id: Int { rawValue }
+    var displayName: String { "\(rawValue) dB/oct" }
+    var order: Int { rawValue / 6 }
+}
+
 enum EQPhaseMode: String, CaseIterable, Identifiable, Sendable {
     case minimumPhase
+    case mixedPhase
     case linearPhase
 
     var id: String { rawValue }
@@ -47,6 +100,7 @@ enum EQPhaseMode: String, CaseIterable, Identifiable, Sendable {
     var displayName: String {
         switch self {
         case .minimumPhase: return "Minimum phase"
+        case .mixedPhase: return "Mixed phase"
         case .linearPhase: return "Linear phase"
         }
     }
@@ -89,6 +143,84 @@ struct EQBandDynamicConfiguration: Equatable, Sendable {
     }
 }
 
+struct EQFIRKernel: Equatable, Sendable {
+    var name: String
+    var sampleRate: Double?
+    var taps: [Float]
+
+    init(name: String, sampleRate: Double? = nil, taps: [Float]) {
+        self.name = name
+        self.sampleRate = sampleRate
+        self.taps = taps
+    }
+
+    func validateMetadata() throws {
+        guard !taps.isEmpty, taps.count <= Int(N60_CONVOLUTION_MAX_TAPS) else {
+            throw EQConfigurationError.invalidFIRTapCount(taps.count)
+        }
+        guard taps.allSatisfy(\.isFinite) else {
+            throw EQConfigurationError.nonFiniteFIRTap
+        }
+        if let sampleRate {
+            guard sampleRate.isFinite, sampleRate > 0 else {
+                throw EQConfigurationError.firSampleRateMismatch(filter: sampleRate, output: 0)
+            }
+        }
+    }
+
+    func validate(for outputSampleRate: Double) throws {
+        try validateMetadata()
+        if let sampleRate {
+            guard outputSampleRate.isFinite,
+                  outputSampleRate > 0,
+                  abs(sampleRate - outputSampleRate) < 0.5 else {
+                throw EQConfigurationError.firSampleRateMismatch(filter: sampleRate, output: outputSampleRate)
+            }
+        }
+    }
+
+    var conservativeBoostDB: Double {
+        let l1 = taps.reduce(0.0) { $0 + abs(Double($1)) }
+        guard l1 > 1.0 else { return 0.0 }
+        return 20.0 * log10(l1)
+    }
+
+    static func validation(sampleRate: Double? = nil) -> EQFIRKernel {
+        EQFIRKernel(name: "Validation FIR", sampleRate: sampleRate, taps: [0.25, 0.5, 0.25])
+    }
+}
+
+enum EQFIRCompiler {
+    static func cascade(base: [Float] = [1.0], kernels: [EQFIRKernel]) throws -> [Float] {
+        guard !base.isEmpty, base.allSatisfy(\.isFinite) else {
+            throw EQConfigurationError.nonFiniteFIRTap
+        }
+        var combined = base
+        for kernel in kernels {
+            let outputCount64 = UInt64(combined.count) + UInt64(kernel.taps.count) - 1
+            guard outputCount64 <= UInt64(N60_CONVOLUTION_MAX_TAPS) else {
+                throw EQConfigurationError.firTapBudgetExceeded(Int(outputCount64))
+            }
+            let outputCount = Int(outputCount64)
+            var output = [Float](repeating: 0, count: outputCount)
+            let ok = combined.withUnsafeBufferPointer { lhs in
+                kernel.taps.withUnsafeBufferPointer { rhs in
+                    output.withUnsafeMutableBufferPointer { destination in
+                        N60FIRConvolveControlPlane(
+                            lhs.baseAddress!, UInt32(lhs.count),
+                            rhs.baseAddress!, UInt32(rhs.count),
+                            destination.baseAddress!, UInt32(destination.count)
+                        )
+                    }
+                }
+            }
+            guard ok else { throw EQConfigurationError.firCascadeFailed }
+            combined = output
+        }
+        return combined
+    }
+}
+
 struct EQBand: Identifiable, Equatable, Sendable {
     let id: UUID
     var enabled: Bool
@@ -96,6 +228,11 @@ struct EQBand: Identifiable, Equatable, Sendable {
     var frequencyHz: Double
     var gainDB: Double
     var q: Double
+    var slope: EQFilterSlope
+    var constantQ: Bool
+    var linkwitzTargetHz: Double
+    var linkwitzTargetQ: Double
+    var firKernel: EQFIRKernel?
     var dynamic: EQBandDynamicConfiguration
 
     init(
@@ -105,6 +242,11 @@ struct EQBand: Identifiable, Equatable, Sendable {
         frequencyHz: Double = 1_000,
         gainDB: Double = 0,
         q: Double = 0.707,
+        slope: EQFilterSlope = .db12,
+        constantQ: Bool = false,
+        linkwitzTargetHz: Double = 40.0,
+        linkwitzTargetQ: Double = 0.707,
+        firKernel: EQFIRKernel? = nil,
         dynamic: EQBandDynamicConfiguration = EQBandDynamicConfiguration()
     ) {
         self.id = id
@@ -113,7 +255,129 @@ struct EQBand: Identifiable, Equatable, Sendable {
         self.frequencyHz = frequencyHz
         self.gainDB = gainDB
         self.q = q
+        self.slope = slope
+        self.constantQ = constantQ
+        self.linkwitzTargetHz = linkwitzTargetHz
+        self.linkwitzTargetQ = linkwitzTargetQ
+        self.firKernel = firKernel
         self.dynamic = dynamic
+    }
+
+    var compiledCType: N60BiquadFilterType {
+        if type == .peaking && constantQ {
+            return N60BiquadFilterTypePeakingConstantQ
+        }
+        return type.cType
+    }
+
+    func linkwitzCoefficients(sampleRate: Double) -> N60BiquadCoefficients? {
+        guard type == .linkwitzTransform else { return nil }
+        var coefficients = N60BiquadCoefficients()
+        guard N60BiquadDesignLinkwitzTransform(
+            sampleRate,
+            frequencyHz,
+            q,
+            linkwitzTargetHz,
+            linkwitzTargetQ,
+            &coefficients
+        ) else { return nil }
+        return coefficients
+    }
+
+    func compiledSections(sampleRate: Double) throws -> [N60BiquadBandSnapshot] {
+        func snapshot(
+            type: N60BiquadFilterType,
+            gainDB: Double,
+            q: Double,
+            coefficients: N60BiquadCoefficients
+        ) -> N60BiquadBandSnapshot {
+            var result = N60BiquadBandSnapshot()
+            result.enabled = true
+            result.type = type
+            result.frequencyHz = frequencyHz
+            result.gainDB = gainDB
+            result.q = q
+            result.coefficients = coefficients
+            return result
+        }
+
+        if type == .fir {
+            return []
+        }
+
+        if type == .linkwitzTransform {
+            guard let coefficients = linkwitzCoefficients(sampleRate: sampleRate) else {
+                throw EQConfigurationError.invalidBand(index: 0)
+            }
+            return [snapshot(type: compiledCType, gainDB: 0, q: q, coefficients: coefficients)]
+        }
+
+        if type == .tilt {
+            // Commercial convention: gainDB is the total low-to-high differential.
+            // Positive tilt raises highs and lowers lows symmetrically by half.
+            var low = N60BiquadCoefficients()
+            var high = N60BiquadCoefficients()
+            let half = gainDB * 0.5
+            guard N60BiquadDesign(N60BiquadFilterTypeLowShelf, sampleRate, frequencyHz, -half, 0.707, &low),
+                  N60BiquadDesign(N60BiquadFilterTypeHighShelf, sampleRate, frequencyHz, half, 0.707, &high) else {
+                throw EQConfigurationError.invalidBand(index: 0)
+            }
+            return [
+                snapshot(type: N60BiquadFilterTypeLowShelf, gainDB: -half, q: 0.707, coefficients: low),
+                snapshot(type: N60BiquadFilterTypeHighShelf, gainDB: half, q: 0.707, coefficients: high),
+            ]
+        }
+
+        if type == .lowPass || type == .highPass {
+            let order = UInt32(slope.order)
+            let count = N60BiquadButterworthSectionCount(order)
+            guard count > 0, count <= UInt32(N60_MAX_EQ_COMPILED_SECTIONS_PER_BAND) else {
+                throw EQConfigurationError.invalidBand(index: 0)
+            }
+            return try (0..<count).map { sectionIndex in
+                var coefficients = N60BiquadCoefficients()
+                guard N60BiquadDesignButterworthSection(
+                    type.cType, sampleRate, frequencyHz, order, sectionIndex, &coefficients
+                ) else { throw EQConfigurationError.invalidBand(index: Int(sectionIndex)) }
+                return snapshot(type: type.cType, gainDB: 0, q: q, coefficients: coefficients)
+            }
+        }
+
+        if type == .lowShelf || type == .highShelf {
+            let order = slope.order
+            let pairCount = order / 2
+            let hasFirst = order.isMultiple(of: 2) == false
+            var result: [N60BiquadBandSnapshot] = []
+            result.reserveCapacity((order + 1) / 2)
+            if hasFirst {
+                var coefficients = N60BiquadCoefficients()
+                let sectionGain = gainDB / Double(order)
+                guard N60BiquadDesignFirstOrderShelf(
+                    type.cType, sampleRate, frequencyHz, sectionGain, &coefficients
+                ) else { throw EQConfigurationError.invalidBand(index: 0) }
+                result.append(snapshot(type: type.cType, gainDB: sectionGain, q: q, coefficients: coefficients))
+            }
+            if pairCount > 0 {
+                let sectionGain = gainDB * 2.0 / Double(order)
+                for pair in 0..<pairCount {
+                    var coefficients = N60BiquadCoefficients()
+                    guard N60BiquadDesign(type.cType, sampleRate, frequencyHz, sectionGain, q, &coefficients) else {
+                        throw EQConfigurationError.invalidBand(index: pair)
+                    }
+                    result.append(snapshot(type: type.cType, gainDB: sectionGain, q: q, coefficients: coefficients))
+                }
+            }
+            guard result.count <= Int(N60_MAX_EQ_COMPILED_SECTIONS_PER_BAND) else {
+                throw EQConfigurationError.invalidBand(index: 0)
+            }
+            return result
+        }
+
+        var coefficients = N60BiquadCoefficients()
+        guard N60BiquadDesign(compiledCType, sampleRate, frequencyHz, gainDB, q, &coefficients) else {
+            throw EQConfigurationError.invalidBand(index: 0)
+        }
+        return [snapshot(type: compiledCType, gainDB: gainDB, q: q, coefficients: coefficients)]
     }
 }
 
@@ -122,7 +386,14 @@ enum EQConfigurationError: Error, LocalizedError, Equatable {
     case invalidBand(index: Int)
     case allPassRequiresMinimumPhase
     case linearPhaseDesignFailed
+    case mixedPhaseDesignFailed
     case convolutionProgramUnavailable
+    case firKernelRequired
+    case invalidFIRTapCount(Int)
+    case nonFiniteFIRTap
+    case firSampleRateMismatch(filter: Double, output: Double)
+    case firTapBudgetExceeded(Int)
+    case firCascadeFailed
 
     var errorDescription: String? {
         switch self {
@@ -131,11 +402,25 @@ enum EQConfigurationError: Error, LocalizedError, Equatable {
         case .invalidBand(let index):
             return "EQ band \(index + 1) is invalid for the current output sample rate."
         case .allPassRequiresMinimumPhase:
-            return "All-Pass bands are phase-only IIR filters and require Minimum phase EQ mode."
+            return "User All-Pass bands require Minimum phase EQ mode; Mixed Phase owns its correction all-pass sections internally."
         case .linearPhaseDesignFailed:
             return "Unable to design the linear-phase FIR for the current EQ configuration."
+        case .mixedPhaseDesignFailed:
+            return "Unable to design the bounded all-pass correction for the current Mixed Phase EQ configuration."
         case .convolutionProgramUnavailable:
             return "No safe FIR program slot is currently available."
+        case .firKernelRequired:
+            return "FIR EQ bands require an impulse-response kernel before they can be enabled."
+        case .invalidFIRTapCount(let count):
+            return "FIR EQ tap count \(count) is outside the supported 1...\(Int(N60_CONVOLUTION_MAX_TAPS)) range."
+        case .nonFiniteFIRTap:
+            return "FIR EQ coefficients must all be finite."
+        case .firSampleRateMismatch(let filter, let output):
+            return "FIR EQ kernel rate \(filter) Hz does not match the active output rate \(output) Hz."
+        case .firTapBudgetExceeded(let count):
+            return "The cascaded EQ FIR would require \(count) taps, exceeding the \(Int(N60_CONVOLUTION_MAX_TAPS))-tap realtime budget."
+        case .firCascadeFailed:
+            return "Unable to compile the active per-band FIR kernels into the EQ convolution program."
         }
     }
 }
@@ -219,6 +504,7 @@ enum CrossoverMonitorMode: String, CaseIterable, Identifiable, Sendable {
 struct BassManagementConfiguration: Equatable, Sendable {
     static let frequencyRange = 20.0...500.0
     static let subGainRange = -24.0...12.0
+    static let subPhaseAlignmentQRange = 0.1...10.0
 
     var enabled = false
     var frequencyHz: Double = 80
@@ -226,11 +512,16 @@ struct BassManagementConfiguration: Equatable, Sendable {
     var monitorMode: CrossoverMonitorMode = .recombined
     var subGainDB: Double = 0
     var subPolarityInverted = false
+    var subPhaseAlignmentEnabled = false
+    var subPhaseAlignmentFrequencyHz: Double = 80
+    var subPhaseAlignmentQ: Double = 0.7
 }
 
 enum BassManagementConfigurationError: Error, LocalizedError, Equatable {
     case invalidFrequency(Double)
     case invalidSubGain(Double)
+    case invalidSubPhaseAlignmentFrequency(Double)
+    case invalidSubPhaseAlignmentQ(Double)
     case graphDesignFailed
 
     var errorDescription: String? {
@@ -239,6 +530,10 @@ enum BassManagementConfigurationError: Error, LocalizedError, Equatable {
             return "Crossover frequency \(value) Hz is outside the supported 20...500 Hz range."
         case .invalidSubGain(let value):
             return "Sub gain \(value) dB is outside the supported -24...+12 dB range."
+        case .invalidSubPhaseAlignmentFrequency(let value):
+            return "Sub phase-alignment frequency \(value) Hz is outside the supported 20...500 Hz range."
+        case .invalidSubPhaseAlignmentQ(let value):
+            return "Sub phase-alignment Q \(value) is outside the supported 0.1...10 range."
         case .graphDesignFailed:
             return "Unable to design the crossover for the current output sample rate."
         }
@@ -309,6 +604,71 @@ enum RoomCorrectionConfigurationError: Error, LocalizedError, Equatable {
     }
 }
 
+
+struct SpeakerIRFilter: Equatable, Sendable {
+    var name: String
+    var sampleRate: Double?
+    var leftTaps: [Float]
+    var rightTaps: [Float]?
+    var declaredLatencyFrames: UInt32
+
+    static let validation = SpeakerIRFilter(
+        name: "Deterministic Speaker IR validation",
+        sampleRate: nil,
+        leftTaps: [0.20, 0.60, 0.20],
+        rightTaps: nil,
+        declaredLatencyFrames: 1
+    )
+
+    func validateSampleRate(forOutputSampleRate outputSampleRate: Double) throws {
+        guard let sampleRate else { return }
+        guard sampleRate.isFinite,
+              abs(sampleRate - outputSampleRate) < 0.5 else {
+            throw SpeakerIRConfigurationError.sampleRateMismatch(
+                filter: sampleRate,
+                output: outputSampleRate
+            )
+        }
+    }
+}
+
+struct SpeakerIRConfiguration: Equatable, Sendable {
+    var enabled = false
+    var filter: SpeakerIRFilter?
+}
+
+enum SpeakerIRConfigurationError: Error, LocalizedError, Equatable {
+    case filterRequired
+    case invalidTapCount(Int)
+    case mismatchedStereoTapCount(left: Int, right: Int)
+    case nonFiniteTap
+    case sampleRateMismatch(filter: Double, output: Double)
+    case invalidDeclaredLatency(UInt32)
+    case convolutionProgramUnavailable
+    case graphAttachmentFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .filterRequired:
+            return "Speaker IR cannot be enabled until an impulse response is loaded."
+        case .invalidTapCount(let count):
+            return "Speaker IR tap count \(count) is outside the supported 1...\(Int(N60_CONVOLUTION_MAX_TAPS)) range."
+        case .mismatchedStereoTapCount(let left, let right):
+            return "Speaker IR left/right FIR lengths must match (left \(left), right \(right))."
+        case .nonFiniteTap:
+            return "Speaker IR coefficients must all be finite."
+        case .sampleRateMismatch(let filter, let output):
+            return "Speaker IR rate \(filter) Hz does not match the active output rate \(output) Hz."
+        case .invalidDeclaredLatency(let frames):
+            return "Speaker IR declared filter latency \(frames) frames exceeds the FIR length."
+        case .convolutionProgramUnavailable:
+            return "No safe Speaker IR FIR program slot is currently available."
+        case .graphAttachmentFailed:
+            return "Unable to attach the prepared Speaker IR to the DSP graph."
+        }
+    }
+}
+
 struct EQConfiguration: Equatable, Sendable {
     static let maximumBandCount = Int(N60_MAX_EQ_BANDS)
 
@@ -333,6 +693,11 @@ struct EQConfiguration: Equatable, Sendable {
     }
 
     private func validateBand(_ band: EQBand, index: Int, sampleRate: Double) throws -> Bool {
+        if band.type == .fir {
+            guard let kernel = band.firKernel else { throw EQConfigurationError.firKernelRequired }
+            try kernel.validate(for: sampleRate)
+            return true
+        }
         guard band.frequencyHz.isFinite,
               band.frequencyHz > 0,
               band.gainDB.isFinite,
@@ -341,11 +706,21 @@ struct EQConfiguration: Equatable, Sendable {
               band.q > 0 else {
             throw EQConfigurationError.invalidBand(index: index)
         }
+        if band.type == .linkwitzTransform {
+            guard band.linkwitzTargetHz.isFinite,
+                  band.linkwitzTargetHz > 0,
+                  band.linkwitzTargetHz < sampleRate * 0.5,
+                  band.linkwitzTargetQ.isFinite,
+                  band.linkwitzTargetQ > 0 else {
+                throw EQConfigurationError.invalidBand(index: index)
+            }
+        }
         if band.dynamic.enabled {
-            guard band.type == .peaking,
+            guard band.type.supportsDynamicEQ,
                   DynamicEQBandConfiguration.frequencyRange.contains(band.frequencyHz),
                   DynamicEQBandConfiguration.qRange.contains(band.q),
-                  band.dynamic.isValid else {
+                  band.dynamic.isValid,
+                  !(band.type == .notch && band.dynamic.direction != .cutOnly) else {
                 throw EQConfigurationError.invalidBand(index: index)
             }
         }
@@ -368,6 +743,18 @@ struct EQConfiguration: Equatable, Sendable {
               BassManagementConfiguration.subGainRange.contains(bassManagementConfiguration.subGainDB) else {
             throw BassManagementConfigurationError.invalidSubGain(bassManagementConfiguration.subGainDB)
         }
+        guard bassManagementConfiguration.subPhaseAlignmentFrequencyHz.isFinite,
+              BassManagementConfiguration.frequencyRange.contains(bassManagementConfiguration.subPhaseAlignmentFrequencyHz) else {
+            throw BassManagementConfigurationError.invalidSubPhaseAlignmentFrequency(
+                bassManagementConfiguration.subPhaseAlignmentFrequencyHz
+            )
+        }
+        guard bassManagementConfiguration.subPhaseAlignmentQ.isFinite,
+              BassManagementConfiguration.subPhaseAlignmentQRange.contains(bassManagementConfiguration.subPhaseAlignmentQ) else {
+            throw BassManagementConfigurationError.invalidSubPhaseAlignmentQ(
+                bassManagementConfiguration.subPhaseAlignmentQ
+            )
+        }
 
         var graph = N60DSPGraphSnapshotMakeUnity(sampleRate)
         graph.inputGainLinear = DSPGainConfiguration.linearGain(forDB: gainConfiguration.inputPreampDB)
@@ -376,26 +763,54 @@ struct EQConfiguration: Equatable, Sendable {
         graph.eqBypassed = bypassed
         N60DSPGraphSnapshotClearEQ(&graph)
 
-        if phaseMode == .minimumPhase && !bypassed {
+        if phaseMode != .linearPhase && !bypassed {
             var renderIndex: UInt32 = 0
+            var mixedSource: [N60BiquadBandSnapshot] = []
             for (modelIndex, band) in bands.enumerated() where band.enabled {
-                guard try validateBand(band, index: modelIndex, sampleRate: sampleRate) else { continue }
-                guard N60DSPGraphSnapshotSetEQBand(
-                    &graph,
-                    renderIndex,
-                    band.type.cType,
-                    band.frequencyHz,
-                    band.gainDB,
-                    band.q,
-                    true
-                ) else {
-                    throw EQConfigurationError.invalidBand(index: modelIndex)
+                if phaseMode == .mixedPhase && band.type == .allPass {
+                    throw EQConfigurationError.allPassRequiresMinimumPhase
                 }
-                renderIndex += 1
+                guard try validateBand(band, index: modelIndex, sampleRate: sampleRate) else { continue }
+                for section in try band.compiledSections(sampleRate: sampleRate) {
+                    let compiledCapacity = UInt32(EQConfiguration.maximumBandCount * 2 * Int(N60_MAX_EQ_COMPILED_SECTIONS_PER_BAND))
+                    guard renderIndex < compiledCapacity,
+                          N60DSPGraphSnapshotSetEQPreparedBand(
+                            &graph, renderIndex, section.type, section.frequencyHz,
+                            section.gainDB, section.q, section.coefficients, true
+                          ) else {
+                        throw EQConfigurationError.invalidBand(index: modelIndex)
+                    }
+                    if phaseMode == .mixedPhase && section.type != N60BiquadFilterTypeAllPass {
+                        mixedSource.append(section)
+                    }
+                    renderIndex += 1
+                }
+            }
+
+            if phaseMode == .mixedPhase {
+                var design = N60MixedPhaseDesignInfo()
+                let designed = mixedSource.withUnsafeBufferPointer { buffer in
+                    N60MixedPhaseDesign(sampleRate, buffer.baseAddress, UInt32(buffer.count), &design)
+                }
+                guard designed else { throw EQConfigurationError.mixedPhaseDesignFailed }
+                graph.mixedPhaseEnabled = true
+                graph.mixedPhaseCorrectionSectionCount = design.sectionCount
+                let totalCapacity = UInt32(EQConfiguration.maximumBandCount * 2 * Int(N60_MAX_EQ_COMPILED_SECTIONS_PER_BAND) + 12)
+                for correctionIndex in 0..<design.sectionCount {
+                    let section = N60MixedPhaseDesignSectionAt(&design, correctionIndex)
+                    guard renderIndex < totalCapacity,
+                          N60DSPGraphSnapshotSetEQPreparedBand(
+                            &graph, renderIndex, section.type, section.frequencyHz,
+                            section.gainDB, section.q, section.coefficients, true
+                          ) else {
+                        throw EQConfigurationError.mixedPhaseDesignFailed
+                    }
+                    renderIndex += 1
+                }
             }
         }
 
-        if phaseMode == .minimumPhase && !bypassed {
+        if phaseMode != .linearPhase && !bypassed {
             let dynamicBands = bands.filter { $0.enabled && $0.type == .peaking && $0.dynamic.enabled }
             if !dynamicBands.isEmpty {
                 guard N60DynamicsSnapshotSetDynamicEQEnabled(&graph.dynamics, true) else {
@@ -440,6 +855,14 @@ struct EQConfiguration: Equatable, Sendable {
         ) else {
             throw BassManagementConfigurationError.graphDesignFailed
         }
+        guard N60DSPGraphSnapshotSetSubPhaseAlignment(
+            &graph,
+            bassManagementConfiguration.subPhaseAlignmentFrequencyHz,
+            bassManagementConfiguration.subPhaseAlignmentQ,
+            bassManagementConfiguration.subPhaseAlignmentEnabled
+        ) else {
+            throw BassManagementConfigurationError.graphDesignFailed
+        }
         return graph
     }
 
@@ -454,25 +877,35 @@ struct EQConfiguration: Equatable, Sendable {
             guard band.type != .allPass else {
                 throw EQConfigurationError.allPassRequiresMinimumPhase
             }
-            var cBand = N60LinearPhaseEQBand()
-            cBand.enabled = true
-            cBand.type = band.type.cType
-            cBand.frequencyHz = band.frequencyHz
-            cBand.gainDB = band.gainDB
-            cBand.q = band.q
-            result.append(cBand)
+            if band.type == .fir { continue }
+            for section in try band.compiledSections(sampleRate: sampleRate) {
+                var cBand = N60LinearPhaseEQBand()
+                cBand.enabled = true
+                cBand.type = section.type
+                cBand.frequencyHz = section.frequencyHz
+                cBand.gainDB = section.gainDB
+                cBand.q = section.q
+                cBand.usesPreparedCoefficients = true
+                cBand.preparedCoefficients = section.coefficients
+                result.append(cBand)
+            }
         }
         return result
     }
 }
 
-private struct PreparedLinearPhaseProgram {
+private struct PreparedEQFIRProgram {
     let slot: UInt32
     let programInfo: N60ConvolutionProgramInfo
-    let designInfo: N60LinearPhaseEQDesignInfo
+    let designInfo: N60LinearPhaseEQDesignInfo?
 }
 
 private struct PreparedRoomCorrectionProgram {
+    let slot: UInt32
+    let programInfo: N60ConvolutionProgramInfo
+}
+
+private struct PreparedSpeakerIRProgram {
     let slot: UInt32
     let programInfo: N60ConvolutionProgramInfo
 }
@@ -492,10 +925,12 @@ final class AudioIOEngine: ObservableObject {
     private var recoveryGeneration: UInt64 = 0
     private var resumeAfterWake = false
     private var prepared = false
-    private var activeLinearPhaseProgram: PreparedLinearPhaseProgram?
-    private var nextLinearPhaseProgramSlot: UInt32 = 0
+    private var activeEQFIRProgram: PreparedEQFIRProgram?
+    private var nextEQFIRProgramSlot: UInt32 = 0
     private var activeRoomCorrectionProgram: PreparedRoomCorrectionProgram?
     private var nextRoomCorrectionProgramSlot: UInt32 = 0
+    private var activeSpeakerIRProgram: PreparedSpeakerIRProgram?
+    private var nextSpeakerIRProgramSlot: UInt32 = 0
 
     private(set) var sampleRateChangesHandled: UInt64 = 0
     private(set) var recoveryAttempts: UInt64 = 0
@@ -514,6 +949,7 @@ final class AudioIOEngine: ObservableObject {
     @Published private(set) var bassManagementConfiguration = BassManagementConfiguration()
     @Published private(set) var dynamicsConfiguration = DynamicsConfiguration()
     @Published private(set) var roomCorrectionConfiguration = RoomCorrectionConfiguration()
+    @Published private(set) var speakerIRConfiguration = SpeakerIRConfiguration()
     @Published private(set) var linearPhaseDesignInfo: N60LinearPhaseEQDesignInfo?
     @Published private(set) var lastErrorDescription: String?
     @Published private(set) var lifecycleState: AudioLifecycleState
@@ -655,6 +1091,60 @@ final class AudioIOEngine: ObservableObject {
         try applyStereoEQConfiguration(updated)
     }
 
+    func setCrosstalkCancellationEnabled(_ enabled: Bool) throws {
+        var updated = playbackControlConfiguration
+        updated.crosstalkCancellationEnabled = enabled
+        try applyPlaybackControlConfiguration(updated)
+    }
+
+    func setCrosstalkCancellationAmount(_ value: Double) throws {
+        guard value.isFinite, PlaybackControlConfiguration.crosstalkCancellationAmountRange.contains(value) else {
+            throw PlaybackControlConfigurationError.invalidCrosstalkCancellationAmount(value)
+        }
+        var updated = playbackControlConfiguration
+        updated.crosstalkCancellationAmount = value
+        try applyPlaybackControlConfiguration(updated)
+    }
+
+    func setCrosstalkHeadShadowFrequency(_ value: Double) throws {
+        guard value.isFinite, PlaybackControlConfiguration.crosstalkHeadShadowFrequencyRange.contains(value) else {
+            throw PlaybackControlConfigurationError.invalidCrosstalkHeadShadowFrequency(value)
+        }
+        var updated = playbackControlConfiguration
+        updated.crosstalkHeadShadowFrequencyHz = value
+        try applyPlaybackControlConfiguration(updated)
+    }
+
+    func setSpeakerCrossfeedEnabled(_ enabled: Bool) throws {
+        var updated = playbackControlConfiguration
+        updated.speakerCrossfeedEnabled = enabled
+        try applyPlaybackControlConfiguration(updated)
+    }
+
+    func setSpeakerCrossfeedAmount(_ value: Double) throws {
+        guard value.isFinite, PlaybackControlConfiguration.speakerCrossfeedRange.contains(value) else {
+            throw PlaybackControlConfigurationError.invalidSpeakerCrossfeed(value)
+        }
+        var updated = playbackControlConfiguration
+        updated.speakerCrossfeedAmount = value
+        try applyPlaybackControlConfiguration(updated)
+    }
+
+    func setSymmetryBalanceEnabled(_ enabled: Bool) throws {
+        var updated = playbackControlConfiguration
+        updated.symmetryBalanceEnabled = enabled
+        try applyPlaybackControlConfiguration(updated)
+    }
+
+    func setSymmetryBalancePosition(_ value: Double) throws {
+        guard value.isFinite, PlaybackControlConfiguration.symmetryBalanceRange.contains(value) else {
+            throw PlaybackControlConfigurationError.invalidSymmetryBalance(value)
+        }
+        var updated = playbackControlConfiguration
+        updated.symmetryBalancePosition = value
+        try applyPlaybackControlConfiguration(updated)
+    }
+
     func setChannelBalance(_ value: Double) throws {
         guard value.isFinite, PlaybackControlConfiguration.balanceRange.contains(value) else {
             throw PlaybackControlConfigurationError.invalidBalance(value)
@@ -742,6 +1232,16 @@ final class AudioIOEngine: ObservableObject {
               BassManagementConfiguration.subGainRange.contains(configuration.subGainDB) else {
             throw BassManagementConfigurationError.invalidSubGain(configuration.subGainDB)
         }
+        guard configuration.subPhaseAlignmentFrequencyHz.isFinite,
+              BassManagementConfiguration.frequencyRange.contains(configuration.subPhaseAlignmentFrequencyHz) else {
+            throw BassManagementConfigurationError.invalidSubPhaseAlignmentFrequency(
+                configuration.subPhaseAlignmentFrequencyHz
+            )
+        }
+        guard configuration.subPhaseAlignmentQ.isFinite,
+              BassManagementConfiguration.subPhaseAlignmentQRange.contains(configuration.subPhaseAlignmentQ) else {
+            throw BassManagementConfigurationError.invalidSubPhaseAlignmentQ(configuration.subPhaseAlignmentQ)
+        }
         if let session = transportSession {
             var graph = try stereoEQConfiguration.makeGraphSnapshot(
                 sampleRate: session.outputFormat.sampleRate,
@@ -751,12 +1251,16 @@ final class AudioIOEngine: ObservableObject {
                 playbackConfiguration: playbackControlConfiguration,
                 masterGainLinear: currentMasterSoftwareGain
             )
-            try attachActiveLinearPhaseProgramIfNeeded(
+            try attachActiveEQFIRProgramIfNeeded(
                 to: &graph,
                 stereoConfiguration: stereoEQConfiguration,
                 playbackConfiguration: playbackControlConfiguration
             )
             try attachActiveRoomCorrectionProgramIfNeeded(
+                to: &graph,
+                playbackConfiguration: playbackControlConfiguration
+            )
+            try attachActiveSpeakerIRProgramIfNeeded(
                 to: &graph,
                 playbackConfiguration: playbackControlConfiguration
             )
@@ -825,12 +1329,16 @@ final class AudioIOEngine: ObservableObject {
                 playbackConfiguration: playbackControlConfiguration,
                 masterGainLinear: currentMasterSoftwareGain
             )
-            try attachActiveLinearPhaseProgramIfNeeded(
+            try attachActiveEQFIRProgramIfNeeded(
                 to: &graph,
                 stereoConfiguration: stereoEQConfiguration,
                 playbackConfiguration: playbackControlConfiguration
             )
             try attachActiveRoomCorrectionProgramIfNeeded(
+                to: &graph,
+                playbackConfiguration: playbackControlConfiguration
+            )
+            try attachActiveSpeakerIRProgramIfNeeded(
                 to: &graph,
                 playbackConfiguration: playbackControlConfiguration
             )
@@ -865,6 +1373,29 @@ final class AudioIOEngine: ObservableObject {
 
     func replaceRoomCorrectionConfiguration(_ configuration: RoomCorrectionConfiguration) throws {
         try applyRoomCorrectionConfiguration(configuration)
+    }
+
+    func loadSpeakerIRValidationFilter() throws {
+        var updated = speakerIRConfiguration
+        updated.filter = .validation
+        try applySpeakerIRConfiguration(updated)
+    }
+
+    func setSpeakerIREnabled(_ enabled: Bool) throws {
+        var updated = speakerIRConfiguration
+        updated.enabled = enabled
+        try applySpeakerIRConfiguration(updated)
+    }
+
+    func clearSpeakerIRFilter() throws {
+        var updated = speakerIRConfiguration
+        updated.enabled = false
+        updated.filter = nil
+        try applySpeakerIRConfiguration(updated)
+    }
+
+    func replaceSpeakerIRConfiguration(_ configuration: SpeakerIRConfiguration) throws {
+        try applySpeakerIRConfiguration(configuration)
     }
 
     func start() throws {
@@ -941,11 +1472,19 @@ final class AudioIOEngine: ObservableObject {
     }
 
     private func validateStereoEQStorage(_ configuration: StereoEQConfiguration) throws {
-        for bands in [configuration.linkedBands, configuration.leftBands, configuration.rightBands] {
+        for bands in [configuration.linkedBands, configuration.leftBands, configuration.rightBands, configuration.midBands, configuration.sideBands] {
             guard bands.count <= EQConfiguration.maximumBandCount else {
                 throw EQConfigurationError.tooManyBands(bands.count)
             }
             for (index, band) in bands.enumerated() where band.enabled {
+                if band.type == .fir {
+                    guard let kernel = band.firKernel else { throw EQConfigurationError.firKernelRequired }
+                    try kernel.validateMetadata()
+                    if let activeSampleRate = transportSession?.outputFormat.sampleRate {
+                        try kernel.validate(for: activeSampleRate)
+                    }
+                    continue
+                }
                 guard band.frequencyHz.isFinite,
                       band.frequencyHz > 0,
                       band.gainDB.isFinite,
@@ -953,6 +1492,14 @@ final class AudioIOEngine: ObservableObject {
                       band.q.isFinite,
                       band.q > 0 else {
                     throw EQConfigurationError.invalidBand(index: index)
+                }
+                if band.type == .linkwitzTransform {
+                    guard band.linkwitzTargetHz.isFinite,
+                          band.linkwitzTargetHz > 0,
+                          band.linkwitzTargetQ.isFinite,
+                          band.linkwitzTargetQ > 0 else {
+                        throw EQConfigurationError.invalidBand(index: index)
+                    }
                 }
                 if band.dynamic.enabled {
                     guard band.type == .peaking,
@@ -983,15 +1530,15 @@ final class AudioIOEngine: ObservableObject {
                 // The raw path is already active. Update state without rotating FIR
                 // programs or fading an audibly identical raw graph.
                 try session.publishDSPGraph(graph)
-                activeLinearPhaseProgram = nil
+                activeEQFIRProgram = nil
                 linearPhaseDesignInfo = nil
             } else {
-                var preparedLinearProgram: PreparedLinearPhaseProgram?
-                if configuration.phaseMode == .linearPhase && !configuration.bypassed {
-                    let prepared = try prepareLinearPhaseProgram(configuration, for: session)
-                    preparedLinearProgram = prepared
+                var preparedEQFIRProgram: PreparedEQFIRProgram?
+                if configuration.requiresEQFIRProgram && !configuration.bypassed {
+                    let prepared = try prepareEQFIRProgram(configuration, for: session)
+                    preparedEQFIRProgram = prepared
                     linearPhaseDesignInfo = prepared.designInfo
-                    try attachLinearPhaseProgram(prepared, to: &graph)
+                    try attachEQFIRProgram(prepared, to: &graph)
                 } else {
                     linearPhaseDesignInfo = nil
                 }
@@ -1001,18 +1548,18 @@ final class AudioIOEngine: ObservableObject {
                     playbackConfiguration: playbackControlConfiguration
                 )
 
-                let leavingLinearPhase = activeLinearPhaseProgram != nil
-                    && (configuration.phaseMode != .linearPhase || configuration.bypassed)
-                let enteringOrReplacingLinearPhase = preparedLinearProgram != nil
-                if leavingLinearPhase || enteringOrReplacingLinearPhase {
+                let leavingEQFIR = activeEQFIRProgram != nil
+                    && (!configuration.requiresEQFIRProgram || configuration.bypassed)
+                let enteringOrReplacingEQFIR = preparedEQFIRProgram != nil
+                if leavingEQFIR || enteringOrReplacingEQFIR {
                     try session.transitionDSPGraph(graph)
                 } else {
                     try session.publishDSPGraph(graph)
                 }
-                activeLinearPhaseProgram = preparedLinearProgram
+                activeEQFIRProgram = preparedEQFIRProgram
             }
         } else {
-            activeLinearPhaseProgram = nil
+            activeEQFIRProgram = nil
             linearPhaseDesignInfo = nil
         }
 
@@ -1045,16 +1592,16 @@ final class AudioIOEngine: ObservableObject {
             let willBeBypassed = processingIsBypassed(configuration)
 
             if !willBeBypassed {
-                if FIRUpdatePolicy.shouldPrepareLinearPhase(
+                if FIRUpdatePolicy.shouldPrepareEQFIR(
                     stereoEQ: stereoEQConfiguration,
                     playback: configuration
                 ) {
-                    if activeLinearPhaseProgram == nil {
-                        let prepared = try prepareLinearPhaseProgram(stereoEQConfiguration, for: session)
-                        activeLinearPhaseProgram = prepared
+                    if activeEQFIRProgram == nil {
+                        let prepared = try prepareEQFIRProgram(stereoEQConfiguration, for: session)
+                        activeEQFIRProgram = prepared
                         linearPhaseDesignInfo = prepared.designInfo
                     }
-                    try attachActiveLinearPhaseProgramIfNeeded(
+                    try attachActiveEQFIRProgramIfNeeded(
                         to: &graph,
                         stereoConfiguration: stereoEQConfiguration,
                         playbackConfiguration: configuration
@@ -1069,6 +1616,19 @@ final class AudioIOEngine: ObservableObject {
                         activeRoomCorrectionProgram = try prepareRoomCorrectionProgram(filter, for: session)
                     }
                     try attachActiveRoomCorrectionProgramIfNeeded(
+                        to: &graph,
+                        playbackConfiguration: configuration
+                    )
+                }
+
+                if speakerIRConfiguration.enabled {
+                    guard let filter = speakerIRConfiguration.filter else {
+                        throw SpeakerIRConfigurationError.filterRequired
+                    }
+                    if activeSpeakerIRProgram == nil {
+                        activeSpeakerIRProgram = try prepareSpeakerIRProgram(filter, for: session)
+                    }
+                    try attachActiveSpeakerIRProgramIfNeeded(
                         to: &graph,
                         playbackConfiguration: configuration
                     )
@@ -1120,8 +1680,9 @@ final class AudioIOEngine: ObservableObject {
                 playbackConfiguration: playbackControlConfiguration,
                 masterGainLinear: newSoftwareGain
             )
-            try attachActiveLinearPhaseProgramIfNeeded(to: &graph, stereoConfiguration: stereoEQConfiguration, playbackConfiguration: playbackControlConfiguration)
+            try attachActiveEQFIRProgramIfNeeded(to: &graph, stereoConfiguration: stereoEQConfiguration, playbackConfiguration: playbackControlConfiguration)
             try attachActiveRoomCorrectionProgramIfNeeded(to: &graph, playbackConfiguration: playbackControlConfiguration)
+            try attachActiveSpeakerIRProgramIfNeeded(to: &graph, playbackConfiguration: playbackControlConfiguration)
             try session.publishDSPGraph(graph)
         }
 
@@ -1167,8 +1728,9 @@ final class AudioIOEngine: ObservableObject {
                 playbackConfiguration: playbackControlConfiguration,
                 masterGainLinear: newGain
             )
-            try attachActiveLinearPhaseProgramIfNeeded(to: &graph, stereoConfiguration: stereoEQConfiguration, playbackConfiguration: playbackControlConfiguration)
+            try attachActiveEQFIRProgramIfNeeded(to: &graph, stereoConfiguration: stereoEQConfiguration, playbackConfiguration: playbackControlConfiguration)
             try attachActiveRoomCorrectionProgramIfNeeded(to: &graph, playbackConfiguration: playbackControlConfiguration)
+            try attachActiveSpeakerIRProgramIfNeeded(to: &graph, playbackConfiguration: playbackControlConfiguration)
             try session.publishDSPGraph(graph)
         }
         masterVolumeConfiguration = updated
@@ -1225,12 +1787,16 @@ final class AudioIOEngine: ObservableObject {
                 playbackConfiguration: playbackControlConfiguration,
                 masterGainLinear: currentMasterSoftwareGain
             )
-            try attachActiveLinearPhaseProgramIfNeeded(
+            try attachActiveEQFIRProgramIfNeeded(
                 to: &graph,
                 stereoConfiguration: stereoEQConfiguration,
                 playbackConfiguration: playbackControlConfiguration
             )
             try attachActiveRoomCorrectionProgramIfNeeded(
+                to: &graph,
+                playbackConfiguration: playbackControlConfiguration
+            )
+            try attachActiveSpeakerIRProgramIfNeeded(
                 to: &graph,
                 playbackConfiguration: playbackControlConfiguration
             )
@@ -1254,9 +1820,13 @@ final class AudioIOEngine: ObservableObject {
                 playbackConfiguration: playbackControlConfiguration,
                 masterGainLinear: currentMasterSoftwareGain
             )
-            try attachActiveLinearPhaseProgramIfNeeded(
+            try attachActiveEQFIRProgramIfNeeded(
                 to: &graph,
                 stereoConfiguration: stereoEQConfiguration,
+                playbackConfiguration: playbackControlConfiguration
+            )
+            try attachActiveSpeakerIRProgramIfNeeded(
+                to: &graph,
                 playbackConfiguration: playbackControlConfiguration
             )
 
@@ -1295,6 +1865,63 @@ final class AudioIOEngine: ObservableObject {
         lastErrorDescription = nil
     }
 
+    private func applySpeakerIRConfiguration(_ configuration: SpeakerIRConfiguration) throws {
+        if configuration.enabled && configuration.filter == nil {
+            throw SpeakerIRConfigurationError.filterRequired
+        }
+
+        if let session = transportSession {
+            var graph = try stereoEQConfiguration.makeGraphSnapshot(
+                sampleRate: session.outputFormat.sampleRate,
+                gainConfiguration: gainConfiguration,
+                bassManagementConfiguration: bassManagementConfiguration,
+                dynamicsConfiguration: dynamicsConfiguration,
+                playbackConfiguration: playbackControlConfiguration,
+                masterGainLinear: currentMasterSoftwareGain
+            )
+            try attachActiveEQFIRProgramIfNeeded(
+                to: &graph,
+                stereoConfiguration: stereoEQConfiguration,
+                playbackConfiguration: playbackControlConfiguration
+            )
+            try attachActiveRoomCorrectionProgramIfNeeded(
+                to: &graph,
+                playbackConfiguration: playbackControlConfiguration
+            )
+
+            if processingIsBypassed(playbackControlConfiguration) {
+                if let filter = configuration.filter {
+                    try validateSpeakerIRFilter(
+                        filter,
+                        outputSampleRate: session.outputFormat.sampleRate
+                    )
+                }
+                try session.publishDSPGraph(graph)
+                activeSpeakerIRProgram = nil
+            } else if configuration.enabled {
+                guard let filter = configuration.filter else {
+                    throw SpeakerIRConfigurationError.filterRequired
+                }
+                let preparedProgram = try prepareSpeakerIRProgram(filter, for: session)
+                try attachSpeakerIRProgram(preparedProgram, to: &graph)
+                try session.transitionDSPGraph(graph)
+                activeSpeakerIRProgram = preparedProgram
+            } else {
+                if activeSpeakerIRProgram != nil {
+                    try session.transitionDSPGraph(graph)
+                } else {
+                    try session.publishDSPGraph(graph)
+                }
+                activeSpeakerIRProgram = nil
+            }
+        } else {
+            activeSpeakerIRProgram = nil
+        }
+
+        speakerIRConfiguration = configuration
+        lastErrorDescription = nil
+    }
+
     private func designLinearPhaseTaps(
         _ configuration: StereoEQConfiguration,
         channel: EQEditChannel,
@@ -1330,56 +1957,97 @@ final class AudioIOEngine: ObservableObject {
         return (taps, designInfo)
     }
 
-    private func prepareLinearPhaseProgram(
+    private func prepareLaneEQFIRTaps(
         _ configuration: StereoEQConfiguration,
-        for session: CoreAudioTransportSession
-    ) throws -> PreparedLinearPhaseProgram {
-        let sampleRate = session.outputFormat.sampleRate
-        let tapCount = Int(N60LinearPhaseEQRecommendedTapCount(sampleRate))
-        guard tapCount > 0, tapCount <= Int(N60_CONVOLUTION_MAX_TAPS) else {
-            throw EQConfigurationError.linearPhaseDesignFailed
-        }
-
-        let leftDesign = try designLinearPhaseTaps(
-            configuration,
-            channel: configuration.channelMode == .linked ? .linked : .left,
-            sampleRate: sampleRate,
-            tapCount: tapCount
-        )
-
-        let rightTaps: [Float]?
-        if configuration.channelMode == .independent {
-            let rightDesign = try designLinearPhaseTaps(
+        channel: EQEditChannel,
+        sampleRate: Double
+    ) throws -> (taps: [Float], declaredLatencyFrames: UInt32, designInfo: N60LinearPhaseEQDesignInfo?) {
+        let baseTaps: [Float]
+        let declaredLatency: UInt32
+        let designInfo: N60LinearPhaseEQDesignInfo?
+        if configuration.phaseMode == .linearPhase {
+            let tapCount = Int(N60LinearPhaseEQRecommendedTapCount(sampleRate))
+            guard tapCount > 0, tapCount <= Int(N60_CONVOLUTION_MAX_TAPS) else {
+                throw EQConfigurationError.linearPhaseDesignFailed
+            }
+            let design = try designLinearPhaseTaps(
                 configuration,
-                channel: .right,
+                channel: channel,
                 sampleRate: sampleRate,
                 tapCount: tapCount
             )
-            guard rightDesign.info.groupDelayFrames == leftDesign.info.groupDelayFrames else {
-                throw EQConfigurationError.linearPhaseDesignFailed
-            }
-            rightTaps = rightDesign.taps
+            baseTaps = design.taps
+            declaredLatency = design.info.groupDelayFrames
+            designInfo = design.info
         } else {
-            rightTaps = nil
+            baseTaps = [1.0]
+            declaredLatency = 0
+            designInfo = nil
         }
 
-        let slot = nextLinearPhaseProgramSlot % UInt32(N60_CONVOLUTION_PROGRAM_SLOTS)
+        let kernels = try configuration.firKernels(for: channel, sampleRate: sampleRate)
+        return (
+            try EQFIRCompiler.cascade(base: baseTaps, kernels: kernels),
+            declaredLatency,
+            designInfo
+        )
+    }
+
+    private func prepareEQFIRProgram(
+        _ configuration: StereoEQConfiguration,
+        for session: CoreAudioTransportSession
+    ) throws -> PreparedEQFIRProgram {
+        let sampleRate = session.outputFormat.sampleRate
+        let primaryChannel: EQEditChannel
+        switch configuration.channelMode {
+        case .linked: primaryChannel = .linked
+        case .independent: primaryChannel = .left
+        case .midSide: primaryChannel = .mid
+        }
+        var primary = try prepareLaneEQFIRTaps(
+            configuration,
+            channel: primaryChannel,
+            sampleRate: sampleRate
+        )
+
+        var secondaryTaps: [Float]?
+        if configuration.channelMode != .linked {
+            let secondaryChannel: EQEditChannel = configuration.channelMode == .midSide ? .side : .right
+            var secondary = try prepareLaneEQFIRTaps(
+                configuration,
+                channel: secondaryChannel,
+                sampleRate: sampleRate
+            )
+            guard secondary.declaredLatencyFrames == primary.declaredLatencyFrames else {
+                throw EQConfigurationError.linearPhaseDesignFailed
+            }
+            let commonCount = max(primary.taps.count, secondary.taps.count)
+            if primary.taps.count < commonCount {
+                primary.taps.append(contentsOf: repeatElement(0, count: commonCount - primary.taps.count))
+            }
+            if secondary.taps.count < commonCount {
+                secondary.taps.append(contentsOf: repeatElement(0, count: commonCount - secondary.taps.count))
+            }
+            secondaryTaps = secondary.taps
+        }
+
+        let slot = nextEQFIRProgramSlot % UInt32(N60_CONVOLUTION_PROGRAM_SLOTS)
         let programInfo: N60ConvolutionProgramInfo
         do {
             programInfo = try session.prepareConvolutionProgram(
                 slot: slot,
-                leftTaps: leftDesign.taps,
-                rightTaps: rightTaps,
-                declaredLatencyFrames: leftDesign.info.groupDelayFrames
+                leftTaps: primary.taps,
+                rightTaps: secondaryTaps,
+                declaredLatencyFrames: primary.declaredLatencyFrames
             )
         } catch {
             throw EQConfigurationError.convolutionProgramUnavailable
         }
-        nextLinearPhaseProgramSlot = (slot + 1) % UInt32(N60_CONVOLUTION_PROGRAM_SLOTS)
-        return PreparedLinearPhaseProgram(
+        nextEQFIRProgramSlot = (slot + 1) % UInt32(N60_CONVOLUTION_PROGRAM_SLOTS)
+        return PreparedEQFIRProgram(
             slot: slot,
             programInfo: programInfo,
-            designInfo: leftDesign.info
+            designInfo: primary.designInfo
         )
     }
 
@@ -1426,8 +2094,51 @@ final class AudioIOEngine: ObservableObject {
         return PreparedRoomCorrectionProgram(slot: slot, programInfo: programInfo)
     }
 
-    private func attachLinearPhaseProgram(
-        _ program: PreparedLinearPhaseProgram,
+    private func validateSpeakerIRFilter(
+        _ filter: SpeakerIRFilter,
+        outputSampleRate: Double
+    ) throws {
+        let tapCount = filter.leftTaps.count
+        guard tapCount > 0, tapCount <= Int(N60_CONVOLUTION_MAX_TAPS) else {
+            throw SpeakerIRConfigurationError.invalidTapCount(tapCount)
+        }
+        if let rightTaps = filter.rightTaps, rightTaps.count != tapCount {
+            throw SpeakerIRConfigurationError.mismatchedStereoTapCount(left: tapCount, right: rightTaps.count)
+        }
+        guard filter.leftTaps.allSatisfy(\.isFinite),
+              filter.rightTaps?.allSatisfy(\.isFinite) ?? true else {
+            throw SpeakerIRConfigurationError.nonFiniteTap
+        }
+        try filter.validateSampleRate(forOutputSampleRate: outputSampleRate)
+        guard filter.declaredLatencyFrames < UInt32(tapCount) else {
+            throw SpeakerIRConfigurationError.invalidDeclaredLatency(filter.declaredLatencyFrames)
+        }
+    }
+
+    private func prepareSpeakerIRProgram(
+        _ filter: SpeakerIRFilter,
+        for session: CoreAudioTransportSession
+    ) throws -> PreparedSpeakerIRProgram {
+        try validateSpeakerIRFilter(filter, outputSampleRate: session.outputFormat.sampleRate)
+
+        let slot = nextSpeakerIRProgramSlot % UInt32(N60_CONVOLUTION_PROGRAM_SLOTS)
+        let programInfo: N60ConvolutionProgramInfo
+        do {
+            programInfo = try session.prepareSpeakerIRProgram(
+                slot: slot,
+                leftTaps: filter.leftTaps,
+                rightTaps: filter.rightTaps,
+                declaredLatencyFrames: filter.declaredLatencyFrames
+            )
+        } catch {
+            throw SpeakerIRConfigurationError.convolutionProgramUnavailable
+        }
+        nextSpeakerIRProgramSlot = (slot + 1) % UInt32(N60_CONVOLUTION_PROGRAM_SLOTS)
+        return PreparedSpeakerIRProgram(slot: slot, programInfo: programInfo)
+    }
+
+    private func attachEQFIRProgram(
+        _ program: PreparedEQFIRProgram,
         to graph: inout N60DSPGraphSnapshot
     ) throws {
         guard N60DSPGraphSnapshotSetConvolutionProgram(
@@ -1440,18 +2151,18 @@ final class AudioIOEngine: ObservableObject {
         }
     }
 
-    private func attachActiveLinearPhaseProgramIfNeeded(
+    private func attachActiveEQFIRProgramIfNeeded(
         to graph: inout N60DSPGraphSnapshot,
         stereoConfiguration: StereoEQConfiguration,
         playbackConfiguration: PlaybackControlConfiguration
     ) throws {
         guard !processingIsBypassed(playbackConfiguration),
-              stereoConfiguration.phaseMode == .linearPhase,
+              stereoConfiguration.requiresEQFIRProgram,
               !stereoConfiguration.bypassed else { return }
-        guard let activeLinearPhaseProgram else {
+        guard let activeEQFIRProgram else {
             throw EQConfigurationError.convolutionProgramUnavailable
         }
-        try attachLinearPhaseProgram(activeLinearPhaseProgram, to: &graph)
+        try attachEQFIRProgram(activeEQFIRProgram, to: &graph)
     }
 
     private func attachRoomCorrectionProgram(
@@ -1478,6 +2189,32 @@ final class AudioIOEngine: ObservableObject {
             throw RoomCorrectionConfigurationError.convolutionProgramUnavailable
         }
         try attachRoomCorrectionProgram(activeRoomCorrectionProgram, to: &graph)
+    }
+
+    private func attachSpeakerIRProgram(
+        _ program: PreparedSpeakerIRProgram,
+        to graph: inout N60DSPGraphSnapshot
+    ) throws {
+        guard N60DSPGraphSnapshotSetSpeakerIRProgram(
+            &graph,
+            program.slot,
+            program.programInfo,
+            true
+        ) else {
+            throw SpeakerIRConfigurationError.graphAttachmentFailed
+        }
+    }
+
+    private func attachActiveSpeakerIRProgramIfNeeded(
+        to graph: inout N60DSPGraphSnapshot,
+        playbackConfiguration: PlaybackControlConfiguration
+    ) throws {
+        guard !processingIsBypassed(playbackConfiguration),
+              speakerIRConfiguration.enabled else { return }
+        guard let activeSpeakerIRProgram else {
+            throw SpeakerIRConfigurationError.convolutionProgramUnavailable
+        }
+        try attachSpeakerIRProgram(activeSpeakerIRProgram, to: &graph)
     }
 
     private func start(resetProcessingSessionCounters: Bool) throws {
@@ -1518,10 +2255,12 @@ final class AudioIOEngine: ObservableObject {
 
     private func buildTransport(output: AudioOutputDevice) throws {
         let session = try CoreAudioTransportSession(selectedOutput: output)
-        activeLinearPhaseProgram = nil
-        nextLinearPhaseProgramSlot = 0
+        activeEQFIRProgram = nil
+        nextEQFIRProgramSlot = 0
         activeRoomCorrectionProgram = nil
         nextRoomCorrectionProgramSlot = 0
+        activeSpeakerIRProgram = nil
+        nextSpeakerIRProgramSlot = 0
         var graph = try stereoEQConfiguration.makeGraphSnapshot(
             sampleRate: session.outputFormat.sampleRate,
             gainConfiguration: gainConfiguration,
@@ -1530,14 +2269,14 @@ final class AudioIOEngine: ObservableObject {
             playbackConfiguration: playbackControlConfiguration
         )
 
-        if FIRUpdatePolicy.shouldPrepareLinearPhase(
+        if FIRUpdatePolicy.shouldPrepareEQFIR(
             stereoEQ: stereoEQConfiguration,
             playback: playbackControlConfiguration
         ) {
-            let preparedProgram = try prepareLinearPhaseProgram(stereoEQConfiguration, for: session)
-            activeLinearPhaseProgram = preparedProgram
+            let preparedProgram = try prepareEQFIRProgram(stereoEQConfiguration, for: session)
+            activeEQFIRProgram = preparedProgram
             linearPhaseDesignInfo = preparedProgram.designInfo
-            try attachLinearPhaseProgram(preparedProgram, to: &graph)
+            try attachEQFIRProgram(preparedProgram, to: &graph)
         } else {
             linearPhaseDesignInfo = nil
         }
@@ -1557,6 +2296,21 @@ final class AudioIOEngine: ObservableObject {
             }
         }
 
+        if speakerIRConfiguration.enabled {
+            guard let filter = speakerIRConfiguration.filter else {
+                throw SpeakerIRConfigurationError.filterRequired
+            }
+            try validateSpeakerIRFilter(filter, outputSampleRate: session.outputFormat.sampleRate)
+            if FIRUpdatePolicy.shouldPrepareSpeakerIR(
+                speakerIR: speakerIRConfiguration,
+                playback: playbackControlConfiguration
+            ) {
+                let preparedProgram = try prepareSpeakerIRProgram(filter, for: session)
+                activeSpeakerIRProgram = preparedProgram
+                try attachSpeakerIRProgram(preparedProgram, to: &graph)
+            }
+        }
+
         try session.publishDSPGraph(graph)
         transportSession = session
     }
@@ -1571,8 +2325,9 @@ final class AudioIOEngine: ObservableObject {
             session.stop(fadeOut: fadeOut)
             transportSession = nil
         }
-        activeLinearPhaseProgram = nil
+        activeEQFIRProgram = nil
         activeRoomCorrectionProgram = nil
+        activeSpeakerIRProgram = nil
     }
 
     private func forceFailedState(_ error: Error) {

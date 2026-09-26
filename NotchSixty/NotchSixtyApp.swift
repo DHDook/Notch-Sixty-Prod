@@ -9,6 +9,7 @@ struct ProductDSPConfiguration: Equatable, Sendable {
     var bassManagement: BassManagementConfiguration
     var dynamics: DynamicsConfiguration
     var roomCorrection: RoomCorrectionConfiguration
+    var speakerIR: SpeakerIRConfiguration
 
     init(
         eq: EQConfiguration = EQConfiguration(),
@@ -17,7 +18,8 @@ struct ProductDSPConfiguration: Equatable, Sendable {
         gain: DSPGainConfiguration = DSPGainConfiguration(),
         bassManagement: BassManagementConfiguration = BassManagementConfiguration(),
         dynamics: DynamicsConfiguration = DynamicsConfiguration(),
-        roomCorrection: RoomCorrectionConfiguration = RoomCorrectionConfiguration()
+        roomCorrection: RoomCorrectionConfiguration = RoomCorrectionConfiguration(),
+        speakerIR: SpeakerIRConfiguration = SpeakerIRConfiguration()
     ) {
         self.eq = eq
         self.stereoEQ = stereoEQ
@@ -26,6 +28,7 @@ struct ProductDSPConfiguration: Equatable, Sendable {
         self.bassManagement = bassManagement
         self.dynamics = dynamics
         self.roomCorrection = roomCorrection
+        self.speakerIR = speakerIR
     }
 }
 
@@ -84,7 +87,8 @@ final class ProductController: ObservableObject {
                 gain: audioEngine.gainConfiguration,
                 bassManagement: audioEngine.bassManagementConfiguration,
                 dynamics: audioEngine.dynamicsConfiguration,
-                roomCorrection: audioEngine.roomCorrectionConfiguration
+                roomCorrection: audioEngine.roomCorrectionConfiguration,
+                speakerIR: audioEngine.speakerIRConfiguration
             )
         )
     }

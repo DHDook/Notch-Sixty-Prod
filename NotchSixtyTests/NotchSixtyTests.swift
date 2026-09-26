@@ -4,6 +4,456 @@ import XCTest
 @testable import NotchSixty
 
 final class NotchSixtyTests: XCTestCase {
+
+    func testMixedPhaseIsFixedThirdPhaseMode() {
+        XCTAssertTrue(EQPhaseMode.allCases.contains(.mixedPhase))
+        XCTAssertEqual(EQPhaseMode.mixedPhase.displayName, "Mixed phase")
+    }
+
+    func testMixedPhaseFlatGraphAddsNoCorrectionOrFixedLatency() throws {
+        let configuration = StereoEQConfiguration(phaseMode: .mixedPhase)
+        let graph = try configuration.makeGraphSnapshot(
+            sampleRate: 48_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: PlaybackControlConfiguration()
+        )
+        XCTAssertTrue(graph.mixedPhaseEnabled)
+        XCTAssertEqual(graph.mixedPhaseCorrectionSectionCount, 0)
+        XCTAssertEqual(graph.latencyFrames, 0)
+    }
+
+    func testMixedPhaseAddsOnlyUnityMagnitudeAllPassCorrectionThrough384k() throws {
+        for rate in [44_100.0, 48_000.0, 96_000.0, 192_000.0, 384_000.0] {
+            let bands = [
+                EQBand(type: .lowShelf, frequencyHz: 120, gainDB: 5, q: 0.707),
+                EQBand(type: .peaking, frequencyHz: 1_100, gainDB: 8, q: 2.0),
+                EQBand(type: .highShelf, frequencyHz: 7_000, gainDB: -4, q: 0.707),
+            ]
+            let minimum = StereoEQConfiguration(phaseMode: .minimumPhase, linkedBands: bands)
+            let mixed = StereoEQConfiguration(phaseMode: .mixedPhase, linkedBands: bands)
+            let minimumGraph = try minimum.makeGraphSnapshot(
+                sampleRate: rate,
+                gainConfiguration: DSPGainConfiguration(),
+                bassManagementConfiguration: BassManagementConfiguration(),
+                playbackConfiguration: PlaybackControlConfiguration()
+            )
+            let mixedGraph = try mixed.makeGraphSnapshot(
+                sampleRate: rate,
+                gainConfiguration: DSPGainConfiguration(),
+                bassManagementConfiguration: BassManagementConfiguration(),
+                playbackConfiguration: PlaybackControlConfiguration()
+            )
+            XCTAssertTrue(mixedGraph.mixedPhaseEnabled)
+            XCTAssertGreaterThan(mixedGraph.mixedPhaseCorrectionSectionCount, 0)
+            XCTAssertLessThanOrEqual(mixedGraph.mixedPhaseCorrectionSectionCount, 12)
+            XCTAssertEqual(mixedGraph.latencyFrames, minimumGraph.latencyFrames)
+            XCTAssertGreaterThan(mixedGraph.eqBandCount, minimumGraph.eqBandCount)
+            for index in Int(minimumGraph.eqBandCount)..<Int(mixedGraph.eqBandCount) {
+                let section = withUnsafePointer(to: mixedGraph.eqBands) { tuple in
+                    tuple.withMemoryRebound(to: N60BiquadBandSnapshot.self, capacity: Int(mixedGraph.eqBandCount)) { $0[index] }
+                }
+                XCTAssertEqual(section.type, N60BiquadFilterTypeAllPass)
+                XCTAssertTrue(N60BiquadCoefficientsAreFinite(section.coefficients))
+            }
+        }
+    }
+
+    func testMixedPhaseRejectsExplicitUserAllPassButKeepsFIRSeparate() throws {
+        let allPass = EQBand(type: .allPass, frequencyHz: 1_000, gainDB: 0, q: 1.0)
+        let invalid = StereoEQConfiguration(phaseMode: .mixedPhase, linkedBands: [allPass])
+        XCTAssertThrowsError(try invalid.makeGraphSnapshot(
+            sampleRate: 48_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: PlaybackControlConfiguration()
+        )) { error in
+            XCTAssertEqual(error as? EQConfigurationError, .allPassRequiresMinimumPhase)
+        }
+
+        let fir = EQBand(
+            type: .fir,
+            firKernel: EQFIRKernel(name: "User FIR", sampleRate: 48_000, taps: [0.25, 0.5, 0.25])
+        )
+        let mixedWithFIR = StereoEQConfiguration(
+            phaseMode: .mixedPhase,
+            linkedBands: [EQBand(type: .peaking, frequencyHz: 1_000, gainDB: 3, q: 1.0), fir]
+        )
+        XCTAssertTrue(mixedWithFIR.requiresEQFIRProgram)
+        let graph = try mixedWithFIR.makeGraphSnapshot(
+            sampleRate: 48_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: PlaybackControlConfiguration()
+        )
+        XCTAssertTrue(graph.mixedPhaseEnabled)
+    }
+
+    func testMixedPhaseUsesLaneSpecificCorrectionForIndependentAndMidSide() throws {
+        let leftOrMid = [
+            EQBand(type: .lowShelf, frequencyHz: 100, gainDB: 6, q: 0.707),
+            EQBand(type: .peaking, frequencyHz: 900, gainDB: 7, q: 2.0),
+        ]
+        let rightOrSide = [
+            EQBand(type: .highShelf, frequencyHz: 6_000, gainDB: -5, q: 0.707),
+            EQBand(type: .peaking, frequencyHz: 2_500, gainDB: -6, q: 1.4),
+        ]
+        for configuration in [
+            StereoEQConfiguration(
+                channelMode: .independent, editChannel: .left, phaseMode: .mixedPhase,
+                leftBands: leftOrMid, rightBands: rightOrSide, independentSeeded: true
+            ),
+            StereoEQConfiguration(
+                channelMode: .midSide, editChannel: .mid, phaseMode: .mixedPhase,
+                midBands: leftOrMid, sideBands: rightOrSide, midSideSeeded: true
+            ),
+        ] {
+            let graph = try configuration.makeGraphSnapshot(
+                sampleRate: 96_000,
+                gainConfiguration: DSPGainConfiguration(),
+                bassManagementConfiguration: BassManagementConfiguration(),
+                playbackConfiguration: PlaybackControlConfiguration()
+            )
+            XCTAssertTrue(graph.mixedPhaseEnabled)
+            XCTAssertGreaterThan(graph.mixedPhaseCorrectionSectionCount, 0)
+            XCTAssertEqual(graph.latencyFrames, 0)
+        }
+    }
+
+    func testMixedPhaseKeepsSharedDynamicEQActive() throws {
+        var dynamic = EQBandDynamicConfiguration()
+        dynamic.enabled = true
+        let dynamicBand = EQBand(
+            type: .peaking, frequencyHz: 1_500, gainDB: 2, q: 1.0, dynamic: dynamic
+        )
+        let configuration = StereoEQConfiguration(
+            channelMode: .linked,
+            phaseMode: .mixedPhase,
+            linkedBands: [dynamicBand]
+        )
+        let graph = try configuration.makeGraphSnapshot(
+            sampleRate: 48_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: PlaybackControlConfiguration()
+        )
+        XCTAssertTrue(graph.dynamics.dynamicEQ.enabled)
+        XCTAssertTrue(graph.mixedPhaseEnabled)
+    }
+
+    func testSubBassPhaseAlignmentPublishesAuditedDefaults() throws {
+        var bass = BassManagementConfiguration()
+        bass.enabled = true
+        bass.subPhaseAlignmentEnabled = true
+        let graph = try StereoEQConfiguration().makeGraphSnapshot(
+            sampleRate: 96_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: bass,
+            playbackConfiguration: PlaybackControlConfiguration()
+        )
+        XCTAssertTrue(graph.crossover.subPhaseAlignmentEnabled)
+        XCTAssertEqual(graph.crossover.subPhaseAlignmentFrequencyHz, 80, accuracy: 0.000_001)
+        XCTAssertEqual(graph.crossover.subPhaseAlignmentQ, 0.7, accuracy: 0.000_001)
+        XCTAssertTrue(N60BiquadCoefficientsAreFinite(graph.crossover.subPhaseAlignmentAllPass))
+    }
+
+    func testSubBassPhaseAlignmentDisabledIsIdentity() throws {
+        var bass = BassManagementConfiguration()
+        bass.enabled = true
+        bass.subPhaseAlignmentEnabled = false
+        let graph = try StereoEQConfiguration().makeGraphSnapshot(
+            sampleRate: 384_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: bass,
+            playbackConfiguration: PlaybackControlConfiguration()
+        )
+        XCTAssertFalse(graph.crossover.subPhaseAlignmentEnabled)
+        XCTAssertEqual(graph.crossover.subPhaseAlignmentAllPass.b0, 1, accuracy: 0.000_001)
+        XCTAssertEqual(graph.crossover.subPhaseAlignmentAllPass.b1, 0, accuracy: 0.000_001)
+        XCTAssertEqual(graph.crossover.subPhaseAlignmentAllPass.b2, 0, accuracy: 0.000_001)
+    }
+
+    func testSubBassPhaseAlignmentRejectsInvalidControls() throws {
+        var bass = BassManagementConfiguration()
+        bass.subPhaseAlignmentEnabled = true
+        bass.subPhaseAlignmentFrequencyHz = 10
+        XCTAssertThrowsError(try StereoEQConfiguration().makeGraphSnapshot(
+            sampleRate: 48_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: bass,
+            playbackConfiguration: PlaybackControlConfiguration()
+        ))
+        bass.subPhaseAlignmentFrequencyHz = 80
+        bass.subPhaseAlignmentQ = 0
+        XCTAssertThrowsError(try StereoEQConfiguration().makeGraphSnapshot(
+            sampleRate: 48_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: bass,
+            playbackConfiguration: PlaybackControlConfiguration()
+        ))
+    }
+
+    func testSpeakerIRIsThirdIndependentGlobalConvolutionSlot() {
+        guard let kernel = N60RenderKernelCreate() else {
+            XCTFail("Unable to allocate render kernel")
+            return
+        }
+        defer { N60RenderKernelDestroy(kernel) }
+
+        let eqTaps: [Float] = [0.25, 0.5, 0.25]
+        let roomTaps: [Float] = [0.2, 0.6, 0.2]
+        let speakerTaps: [Float] = [0.1, 0.4, 0.4, 0.1]
+        var eqInfo = N60ConvolutionProgramInfo()
+        var roomInfo = N60ConvolutionProgramInfo()
+        var speakerInfo = N60ConvolutionProgramInfo()
+
+        XCTAssertTrue(eqTaps.withUnsafeBufferPointer { taps in
+            N60RenderKernelPrepareConvolutionProgram(
+                kernel, 0, taps.baseAddress!, nil, UInt32(taps.count), 0, &eqInfo
+            )
+        })
+        XCTAssertTrue(roomTaps.withUnsafeBufferPointer { taps in
+            N60RenderKernelPrepareRoomCorrectionProgram(
+                kernel, 1, taps.baseAddress!, nil, UInt32(taps.count), 1, &roomInfo
+            )
+        })
+        XCTAssertTrue(speakerTaps.withUnsafeBufferPointer { taps in
+            N60RenderKernelPrepareSpeakerIRProgram(
+                kernel, 2, taps.baseAddress!, nil, UInt32(taps.count), 2, &speakerInfo
+            )
+        })
+
+        var graph = N60DSPGraphSnapshotMakeUnity(96_000)
+        XCTAssertTrue(N60DSPGraphSnapshotSetConvolutionProgram(&graph, 0, eqInfo, true))
+        XCTAssertTrue(N60DSPGraphSnapshotSetRoomCorrectionProgram(&graph, 1, roomInfo, true))
+        XCTAssertTrue(N60DSPGraphSnapshotSetSpeakerIRProgram(&graph, 2, speakerInfo, true))
+
+        let expectedLatency = eqInfo.engineLatencyFrames + eqInfo.declaredLatencyFrames
+            + roomInfo.engineLatencyFrames + roomInfo.declaredLatencyFrames
+            + speakerInfo.engineLatencyFrames + speakerInfo.declaredLatencyFrames
+        XCTAssertEqual(graph.latencyFrames, expectedLatency)
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+
+        let diagnostics = N60RenderKernelGetDiagnostics(kernel)
+        XCTAssertTrue(diagnostics.convolutionEnabled)
+        XCTAssertTrue(diagnostics.roomCorrectionEnabled)
+        XCTAssertTrue(diagnostics.speakerIREnabled)
+        XCTAssertEqual(diagnostics.convolutionProgramSlot, 0)
+        XCTAssertEqual(diagnostics.roomCorrectionProgramSlot, 1)
+        XCTAssertEqual(diagnostics.speakerIRProgramSlot, 2)
+        XCTAssertEqual(diagnostics.convolutionProgramGeneration, eqInfo.generation)
+        XCTAssertEqual(diagnostics.roomCorrectionProgramGeneration, roomInfo.generation)
+        XCTAssertEqual(diagnostics.speakerIRProgramGeneration, speakerInfo.generation)
+        XCTAssertEqual(diagnostics.latencyFrames, expectedLatency)
+        XCTAssertEqual(diagnostics.speakerIRProgramMisses, 0)
+    }
+
+    func testSpeakerIRPublishRejectsUnpreparedGeneration() {
+        guard let kernel = N60RenderKernelCreate() else {
+            XCTFail("Unable to allocate render kernel")
+            return
+        }
+        defer { N60RenderKernelDestroy(kernel) }
+
+        let taps: [Float] = [0.2, 0.6, 0.2]
+        var info = N60ConvolutionProgramInfo()
+        XCTAssertTrue(taps.withUnsafeBufferPointer { buffer in
+            N60RenderKernelPrepareSpeakerIRProgram(
+                kernel, 0, buffer.baseAddress!, nil, UInt32(buffer.count), 1, &info
+            )
+        })
+        var stale = info
+        stale.generation &+= 1
+        var graph = N60DSPGraphSnapshotMakeUnity(48_000)
+        XCTAssertTrue(N60DSPGraphSnapshotSetSpeakerIRProgram(&graph, 0, stale, true))
+        XCTAssertFalse(N60RenderKernelPublishSnapshot(kernel, graph))
+    }
+
+    func testSpeakerIRPolicyKeepsRawBypassRaw() {
+        var configuration = SpeakerIRConfiguration()
+        configuration.enabled = true
+        configuration.filter = .validation
+        XCTAssertTrue(FIRUpdatePolicy.shouldPrepareSpeakerIR(
+            speakerIR: configuration,
+            playback: PlaybackControlConfiguration()
+        ))
+        XCTAssertFalse(FIRUpdatePolicy.shouldPrepareSpeakerIR(
+            speakerIR: configuration,
+            playback: PlaybackControlConfiguration(globalBypassed: true)
+        ))
+    }
+
+    func testCrosstalkCancellationGraphPublishesAuditedDefaults() throws {
+        let playback = PlaybackControlConfiguration(crosstalkCancellationEnabled: true)
+        let graph = try StereoEQConfiguration().makeGraphSnapshot(
+            sampleRate: 48_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: playback
+        )
+        XCTAssertTrue(graph.crosstalkCancellation.enabled)
+        XCTAssertEqual(graph.crosstalkCancellation.amount, 0.5, accuracy: 0.000_001)
+        XCTAssertEqual(graph.crosstalkCancellation.headShadowFrequencyHz, 700, accuracy: 0.000_001)
+        XCTAssertGreaterThan(graph.crosstalkCancellation.headShadowAlpha, 0)
+        XCTAssertLessThan(graph.crosstalkCancellation.headShadowAlpha, 1)
+    }
+
+    func testCrosstalkCancellationFeedForwardStageRemainsBounded() {
+        guard let kernel = N60RenderKernelCreate() else {
+            XCTFail("Unable to allocate render kernel")
+            return
+        }
+        defer { N60RenderKernelDestroy(kernel) }
+
+        var graph = N60DSPGraphSnapshotMakeUnity(48_000)
+        XCTAssertTrue(N60DSPGraphSnapshotSetCrosstalkCancellation(&graph, 0.5, 700, true))
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        var left: Float = 0
+        var right: Float = 0
+        for _ in 0..<4096 {
+            N60RenderKernelProcessStereoFrame(kernel, 0, 1, &left, &right)
+            XCTAssertTrue(left.isFinite && right.isFinite)
+            XCTAssertLessThanOrEqual(abs(left), 1.000_01)
+            XCTAssertLessThanOrEqual(abs(right), 1.000_01)
+        }
+        XCTAssertEqual(left, -0.5, accuracy: 0.001)
+        XCTAssertEqual(right, 1.0, accuracy: 0.001)
+    }
+
+    func testCrosstalkCancellationRejectsOutOfRangeControls() throws {
+        let invalidAmount = PlaybackControlConfiguration(crosstalkCancellationAmount: 1.1)
+        XCTAssertThrowsError(try StereoEQConfiguration().makeGraphSnapshot(
+            sampleRate: 48_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: invalidAmount
+        ))
+        let invalidShadow = PlaybackControlConfiguration(crosstalkHeadShadowFrequencyHz: 199)
+        XCTAssertThrowsError(try StereoEQConfiguration().makeGraphSnapshot(
+            sampleRate: 48_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: invalidShadow
+        ))
+    }
+
+    func testSpeakerCrossfeedGraphPublishesAuditedRange() throws {
+        let playback = PlaybackControlConfiguration(
+            speakerCrossfeedEnabled: true,
+            speakerCrossfeedAmount: 0.25
+        )
+        let graph = try StereoEQConfiguration().makeGraphSnapshot(
+            sampleRate: 48_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: playback
+        )
+        XCTAssertTrue(graph.speakerCrossfeed.enabled)
+        XCTAssertEqual(graph.speakerCrossfeed.amount, 0.25, accuracy: 0.000_001)
+    }
+
+    func testSpeakerCrossfeedRealtimeMatrixAndMonoCollapse() {
+        guard let kernel = N60RenderKernelCreate() else {
+            XCTFail("Unable to allocate render kernel")
+            return
+        }
+        defer { N60RenderKernelDestroy(kernel) }
+
+        var graph = N60DSPGraphSnapshotMakeUnity(96_000)
+        XCTAssertTrue(N60DSPGraphSnapshotSetSpeakerCrossfeed(&graph, 0.5, true))
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        var left: Float = 0
+        var right: Float = 0
+        N60RenderKernelProcessStereoFrame(kernel, 0.8, -0.2, &left, &right)
+        XCTAssertEqual(left, 0.3, accuracy: 0.000_01)
+        XCTAssertEqual(right, 0.3, accuracy: 0.000_01)
+    }
+
+    func testSpeakerCrossfeedRejectsMisleadingLegacyUpperRange() throws {
+        let invalid = PlaybackControlConfiguration(
+            speakerCrossfeedEnabled: true,
+            speakerCrossfeedAmount: 0.75
+        )
+        XCTAssertThrowsError(try StereoEQConfiguration().makeGraphSnapshot(
+            sampleRate: 48_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: invalid
+        )) { error in
+            XCTAssertEqual(error as? PlaybackControlConfigurationError, .invalidSpeakerCrossfeed(0.75))
+        }
+    }
+
+    func testSymmetryBalanceGraphUsesSeparateConstantPowerStage() throws {
+        let playback = PlaybackControlConfiguration(
+            balance: 0,
+            symmetryBalanceEnabled: true,
+            symmetryBalancePosition: -1
+        )
+        let graph = try StereoEQConfiguration().makeGraphSnapshot(
+            sampleRate: 48_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: playback
+        )
+        XCTAssertTrue(graph.symmetryBalance.enabled)
+        XCTAssertEqual(graph.symmetryBalance.position, -1, accuracy: 0.000_001)
+        XCTAssertEqual(graph.symmetryBalance.leftGainLinear, Float(2).squareRoot(), accuracy: 0.000_01)
+        XCTAssertEqual(graph.symmetryBalance.rightGainLinear, 0, accuracy: 0.000_01)
+        XCTAssertEqual(graph.balanceGainLeftLinear, 1)
+        XCTAssertEqual(graph.balanceGainRightLinear, 1)
+    }
+
+    func testSymmetryBalanceCenterIsUnityAndDisabledPathIsTransparent() throws {
+        for enabled in [false, true] {
+            let playback = PlaybackControlConfiguration(
+                symmetryBalanceEnabled: enabled,
+                symmetryBalancePosition: 0
+            )
+            let graph = try StereoEQConfiguration().makeGraphSnapshot(
+                sampleRate: 384_000,
+                gainConfiguration: DSPGainConfiguration(),
+                bassManagementConfiguration: BassManagementConfiguration(),
+                playbackConfiguration: playback
+            )
+            XCTAssertEqual(graph.symmetryBalance.leftGainLinear, 1, accuracy: 0.000_01)
+            XCTAssertEqual(graph.symmetryBalance.rightGainLinear, 1, accuracy: 0.000_01)
+        }
+    }
+
+    func testSymmetryBalanceRealtimeExtremePreservesConstantPower() throws {
+        guard let kernel = N60RenderKernelCreate() else {
+            XCTFail("Unable to allocate render kernel")
+            return
+        }
+        defer { N60RenderKernelDestroy(kernel) }
+
+        var graph = N60DSPGraphSnapshotMakeUnity(96_000)
+        XCTAssertTrue(N60DSPGraphSnapshotSetSymmetryBalance(&graph, -1, true))
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+
+        var left: Float = 0
+        var right: Float = 0
+        N60RenderKernelProcessStereoFrame(kernel, 0.25, 0.25, &left, &right)
+        XCTAssertEqual(left, 0.25 * Float(2).squareRoot(), accuracy: 0.000_01)
+        XCTAssertEqual(right, 0, accuracy: 0.000_01)
+    }
+
+    func testSymmetryBalanceRejectsInvalidPosition() throws {
+        let invalid = PlaybackControlConfiguration(
+            symmetryBalanceEnabled: true,
+            symmetryBalancePosition: 1.1
+        )
+        XCTAssertThrowsError(try StereoEQConfiguration().makeGraphSnapshot(
+            sampleRate: 48_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: invalid
+        )) { error in
+            XCTAssertEqual(error as? PlaybackControlConfigurationError, .invalidSymmetryBalance(1.1))
+        }
+    }
+
     func testBootstrapTestBundleRuns() {
         XCTAssertTrue(true)
     }
@@ -252,6 +702,475 @@ final class NotchSixtyTests: XCTestCase {
 
         let notchCenter = measuredEQGainDB(sampleRate: 48_000, toneFrequency: 1_000, filterType: N60BiquadFilterTypeNotch, filterFrequency: 1_000, gainDB: 0, q: 2.0)
         XCTAssertLessThan(notchCenter, -30)
+    }
+
+    func testBandPassIsExposedBySwiftEQModelAndLinearPhaseProjection() throws {
+        XCTAssertTrue(EQFilterType.allCases.contains(.bandPass))
+        XCTAssertEqual(EQFilterType.bandPass.displayName, "Band Pass")
+        XCTAssertEqual(EQFilterType.bandPass.cType, N60BiquadFilterTypeBandPass)
+
+        let configuration = EQConfiguration(
+            phaseMode: .linearPhase,
+            bands: [EQBand(type: .bandPass, frequencyHz: 1_000, gainDB: 12, q: 0.707)]
+        )
+        let projected = try configuration.linearPhaseBands(sampleRate: 48_000)
+        XCTAssertEqual(projected.count, 1)
+        XCTAssertEqual(projected[0].type, N60BiquadFilterTypeBandPass)
+        XCTAssertEqual(projected[0].frequencyHz, 1_000, accuracy: 0.001)
+        XCTAssertEqual(projected[0].q, 0.707, accuracy: 0.000_001)
+    }
+
+    func testConstantQIsTypedPerPeakAndProjectsIntoLinearPhase() throws {
+        let ordinary = EQBand(type: .peaking, frequencyHz: 1_000, gainDB: 6, q: 2.0)
+        let constant = EQBand(type: .peaking, frequencyHz: 1_000, gainDB: 6, q: 2.0, constantQ: true)
+        XCTAssertEqual(ordinary.compiledCType, N60BiquadFilterTypePeaking)
+        XCTAssertEqual(constant.compiledCType, N60BiquadFilterTypePeakingConstantQ)
+
+        let configuration = EQConfiguration(phaseMode: .linearPhase, bands: [constant])
+        let projected = try configuration.linearPhaseBands(sampleRate: 48_000)
+        XCTAssertEqual(projected.count, 1)
+        XCTAssertEqual(projected[0].type, N60BiquadFilterTypePeakingConstantQ)
+        XCTAssertEqual(projected[0].frequencyHz, 1_000, accuracy: 0.001)
+        XCTAssertEqual(projected[0].q, 2.0, accuracy: 0.000_001)
+    }
+
+    func testLinkwitzTransformUsesAllFourPhysicalParametersInMinimumAndLinearPhase() throws {
+        let band = EQBand(
+            type: .linkwitzTransform,
+            frequencyHz: 50,
+            gainDB: 0,
+            q: 0.7,
+            linkwitzTargetHz: 32,
+            linkwitzTargetQ: 0.577
+        )
+        XCTAssertEqual(band.compiledCType, N60BiquadFilterTypeLinkwitzTransform)
+        XCTAssertNotNil(band.linkwitzCoefficients(sampleRate: 48_000))
+
+        let minimum = EQConfiguration(phaseMode: .minimumPhase, bands: [band])
+        let graph = try minimum.makeGraphSnapshot(sampleRate: 48_000)
+        XCTAssertEqual(graph.eqBandCount, 1)
+        XCTAssertEqual(graph.eqBands.0.type, N60BiquadFilterTypeLinkwitzTransform)
+        XCTAssertTrue(N60BiquadCoefficientsAreFinite(graph.eqBands.0.coefficients))
+
+        let linear = EQConfiguration(phaseMode: .linearPhase, bands: [band])
+        let projected = try linear.linearPhaseBands(sampleRate: 48_000)
+        XCTAssertEqual(projected.count, 1)
+        XCTAssertEqual(projected[0].type, N60BiquadFilterTypeLinkwitzTransform)
+        XCTAssertTrue(projected[0].usesPreparedCoefficients)
+        XCTAssertTrue(N60BiquadCoefficientsAreFinite(projected[0].preparedCoefficients))
+
+        var changedTarget = band
+        changedTarget.linkwitzTargetHz = 40
+        let first = band.linkwitzCoefficients(sampleRate: 48_000)!
+        let second = changedTarget.linkwitzCoefficients(sampleRate: 48_000)!
+        XCTAssertNotEqual(first.b0, second.b0)
+    }
+
+    func testLiveStereoCompilerPublishesConstantQAndLinkwitzInMinimumAndLinearPhase() throws {
+        let constant = EQBand(type: .peaking, frequencyHz: 1_000, gainDB: 6, q: 2.0, constantQ: true)
+        let linkwitz = EQBand(
+            type: .linkwitzTransform, frequencyHz: 50, gainDB: 0, q: 0.7,
+            linkwitzTargetHz: 32, linkwitzTargetQ: 0.577
+        )
+        let minimum = StereoEQConfiguration(
+            channelMode: .linked,
+            phaseMode: .minimumPhase,
+            linkedBands: [constant, linkwitz]
+        )
+        let graph = try minimum.makeGraphSnapshot(
+            sampleRate: 48_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: PlaybackControlConfiguration()
+        )
+        XCTAssertEqual(graph.eqBandCount, 2)
+        XCTAssertEqual(graph.eqBands.0.type, N60BiquadFilterTypePeakingConstantQ)
+        XCTAssertEqual(graph.eqBands.1.type, N60BiquadFilterTypeLinkwitzTransform)
+        XCTAssertTrue(N60BiquadCoefficientsAreFinite(graph.eqBands.1.coefficients))
+
+        var linear = minimum
+        linear.phaseMode = .linearPhase
+        let projected = try linear.linearPhaseBands(for: .linked, sampleRate: 48_000)
+        XCTAssertEqual(projected.count, 2)
+        XCTAssertEqual(projected[0].type, N60BiquadFilterTypePeakingConstantQ)
+        XCTAssertEqual(projected[1].type, N60BiquadFilterTypeLinkwitzTransform)
+        XCTAssertTrue(projected[1].usesPreparedCoefficients)
+    }
+
+    func testCompiledEQKeeps64UserBandLimitIndependentOfSectionCount() throws {
+        XCTAssertEqual(Int(N60_MAX_EQ_BANDS), 64)
+        XCTAssertEqual(Int(N60_MAX_EQ_COMPILED_SECTIONS_PER_BAND), 8)
+        let compiledCapacity = Int(N60_MAX_EQ_BANDS) * 2 * Int(N60_MAX_EQ_COMPILED_SECTIONS_PER_BAND)
+        XCTAssertGreaterThanOrEqual(compiledCapacity, 1_024)
+
+        let steep = EQBand(type: .lowPass, frequencyHz: 8_000, gainDB: 0, q: 0.707, slope: .db96)
+        XCTAssertEqual(try steep.compiledSections(sampleRate: 96_000).count, 8)
+
+        let linkedBands = (0..<64).map { index in
+            EQBand(type: .lowPass, frequencyHz: 4_000 + Double(index) * 20, gainDB: 0, q: 0.707, slope: .db96)
+        }
+        let linked = StereoEQConfiguration(channelMode: .linked, phaseMode: .minimumPhase, linkedBands: linkedBands)
+        let linkedGraph = try linked.makeGraphSnapshot(
+            sampleRate: 96_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: PlaybackControlConfiguration()
+        )
+        XCTAssertEqual(linkedGraph.eqBandCount, 512)
+
+        let independent = StereoEQConfiguration(
+            channelMode: .independent,
+            editChannel: .left,
+            phaseMode: .minimumPhase,
+            linkedBands: [],
+            leftBands: linkedBands,
+            rightBands: linkedBands,
+            independentSeeded: true
+        )
+        let independentGraph = try independent.makeGraphSnapshot(
+            sampleRate: 96_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: PlaybackControlConfiguration()
+        )
+        XCTAssertEqual(independentGraph.eqBandCount, 1_024)
+    }
+
+    func testSlopeSectionCountsAndTiltCompilation() throws {
+        let expectations: [(EQFilterSlope, Int)] = [
+            (.db6, 1), (.db12, 1), (.db18, 2), (.db24, 2),
+            (.db36, 3), (.db48, 4), (.db60, 5), (.db72, 6),
+            (.db84, 7), (.db96, 8),
+        ]
+        for (slope, count) in expectations {
+            let lowPass = EQBand(type: .lowPass, frequencyHz: 2_000, q: 0.707, slope: slope)
+            XCTAssertEqual(try lowPass.compiledSections(sampleRate: 48_000).count, count)
+        }
+
+        let shelf = EQBand(type: .lowShelf, frequencyHz: 1_000, gainDB: 6, q: 0.8, slope: .db12)
+        let shelfSections = try shelf.compiledSections(sampleRate: 48_000)
+        XCTAssertEqual(shelfSections.count, 1)
+        var legacyCoefficients = N60BiquadCoefficients()
+        XCTAssertTrue(N60BiquadDesign(N60BiquadFilterTypeLowShelf, 48_000, 1_000, 6, 0.8, &legacyCoefficients))
+        XCTAssertEqual(shelfSections[0].coefficients.b0, legacyCoefficients.b0, accuracy: 1e-7)
+        XCTAssertEqual(shelfSections[0].coefficients.a1, legacyCoefficients.a1, accuracy: 1e-7)
+
+        let tilt = EQBand(type: .tilt, frequencyHz: 1_000, gainDB: 8, q: 4.0)
+        let tiltSections = try tilt.compiledSections(sampleRate: 48_000)
+        XCTAssertEqual(tiltSections.count, 2)
+        XCTAssertEqual(tiltSections[0].type, N60BiquadFilterTypeLowShelf)
+        XCTAssertEqual(tiltSections[0].gainDB, -4, accuracy: 1e-12)
+        XCTAssertEqual(tiltSections[1].type, N60BiquadFilterTypeHighShelf)
+        XCTAssertEqual(tiltSections[1].gainDB, 4, accuracy: 1e-12)
+    }
+
+    func testLinearPhaseProjectsCompiledHighOrderSections() throws {
+        let band = EQBand(type: .highPass, frequencyHz: 80, q: 0.707, slope: .db96)
+        let configuration = StereoEQConfiguration(
+            channelMode: .linked,
+            phaseMode: .linearPhase,
+            linkedBands: [band]
+        )
+        let projected = try configuration.linearPhaseBands(for: .linked, sampleRate: 96_000)
+        XCTAssertEqual(projected.count, 8)
+        XCTAssertTrue(projected.allSatisfy(\.usesPreparedCoefficients))
+    }
+
+    func testFIRMetadataCanBeStoredBeforeTransportWithoutAssuming48k() throws {
+        let kernel96k = EQFIRKernel(name: "96k FIR", sampleRate: 96_000, taps: [1])
+        try kernel96k.validateMetadata()
+        XCTAssertNoThrow(try kernel96k.validate(for: 96_000))
+        XCTAssertThrowsError(try kernel96k.validate(for: 48_000))
+
+        let untied = EQFIRKernel(name: "Untied FIR", taps: [1])
+        try untied.validateMetadata()
+        XCTAssertNoThrow(try untied.validate(for: 48_000))
+        XCTAssertNoThrow(try untied.validate(for: 384_000))
+    }
+
+    func testPerBandFIRKernelValidationAndCascade() throws {
+        let first = EQFIRKernel(name: "First", taps: [1, 1])
+        let second = EQFIRKernel(name: "Second", taps: [1, -1])
+        try first.validate(for: 384_000)
+        try second.validate(for: 384_000)
+        let combined = try EQFIRCompiler.cascade(kernels: [first, second])
+        XCTAssertEqual(combined.count, 3)
+        XCTAssertEqual(combined[0], 1, accuracy: 0.000_01)
+        XCTAssertEqual(combined[1], 0, accuracy: 0.000_01)
+        XCTAssertEqual(combined[2], -1, accuracy: 0.000_01)
+    }
+
+    func testPerBandFIRRequiresKernelAndHonorsSampleRate() throws {
+        let missing = EQBand(type: .fir, firKernel: nil)
+        let missingConfiguration = StereoEQConfiguration(linkedBands: [missing])
+        XCTAssertThrowsError(
+            try missingConfiguration.makeGraphSnapshot(
+                sampleRate: 96_000,
+                gainConfiguration: DSPGainConfiguration(),
+                bassManagementConfiguration: BassManagementConfiguration(),
+                playbackConfiguration: PlaybackControlConfiguration()
+            )
+        )
+
+        let mismatched = EQBand(
+            type: .fir,
+            firKernel: EQFIRKernel(name: "48k", sampleRate: 48_000, taps: [1])
+        )
+        let mismatchedConfiguration = StereoEQConfiguration(linkedBands: [mismatched])
+        XCTAssertThrowsError(try mismatchedConfiguration.firKernels(for: .linked, sampleRate: 96_000))
+    }
+
+    func testPerBandFIRUsesEQConvolutionPolicyInMinimumPhaseAndAllChannelModes() throws {
+        let fir = EQBand(type: .fir, firKernel: .validation())
+        let playback = PlaybackControlConfiguration()
+
+        let linked = StereoEQConfiguration(phaseMode: .minimumPhase, linkedBands: [fir])
+        XCTAssertTrue(linked.requiresEQFIRProgram)
+        XCTAssertTrue(FIRUpdatePolicy.shouldPrepareEQFIR(stereoEQ: linked, playback: playback))
+        XCTAssertEqual(try linked.firKernels(for: .linked, sampleRate: 384_000).count, 1)
+
+        let independent = StereoEQConfiguration(
+            channelMode: .independent,
+            editChannel: .left,
+            phaseMode: .minimumPhase,
+            leftBands: [fir],
+            rightBands: [],
+            independentSeeded: true
+        )
+        XCTAssertTrue(independent.requiresEQFIRProgram)
+        XCTAssertEqual(try independent.firKernels(for: .left, sampleRate: 192_000).count, 1)
+        XCTAssertEqual(try independent.firKernels(for: .right, sampleRate: 192_000).count, 0)
+
+        let midSide = StereoEQConfiguration(
+            channelMode: .midSide,
+            editChannel: .mid,
+            phaseMode: .minimumPhase,
+            midBands: [fir],
+            sideBands: [],
+            midSideSeeded: true
+        )
+        XCTAssertTrue(midSide.requiresEQFIRProgram)
+        XCTAssertEqual(try midSide.firKernels(for: .mid, sampleRate: 96_000).count, 1)
+        XCTAssertEqual(try midSide.firKernels(for: .side, sampleRate: 96_000).count, 0)
+    }
+
+    func testLinearPhaseProjectionExcludesPerBandFIRBecauseItIsCascadedSeparately() throws {
+        let peak = EQBand(type: .peaking, frequencyHz: 1_000, gainDB: 3, q: 1)
+        let fir = EQBand(type: .fir, firKernel: .validation())
+        let configuration = StereoEQConfiguration(
+            phaseMode: .linearPhase,
+            linkedBands: [peak, fir]
+        )
+        let projected = try configuration.linearPhaseBands(for: .linked, sampleRate: 96_000)
+        XCTAssertEqual(projected.count, 1)
+        XCTAssertTrue(configuration.requiresEQFIRProgram)
+    }
+
+    func testMidSideModelPublishesDedicatedLanesInMinimumAndLinearPhase() throws {
+        let midBand = EQBand(type: .peaking, frequencyHz: 700, gainDB: 3, q: 1.0)
+        let sideBand = EQBand(type: .highShelf, frequencyHz: 4_000, gainDB: -2, q: 0.707)
+        let configuration = StereoEQConfiguration(
+            channelMode: .midSide,
+            editChannel: .mid,
+            phaseMode: .minimumPhase,
+            midBands: [midBand],
+            sideBands: [sideBand],
+            midSideSeeded: true
+        )
+        let graph = try configuration.makeGraphSnapshot(
+            sampleRate: 96_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: PlaybackControlConfiguration()
+        )
+        XCTAssertTrue(graph.eqMidSideMode)
+        XCTAssertEqual(graph.eqBandCount, 2)
+        XCTAssertEqual(graph.eqBandChannelMasks.0, UInt8(N60_EQ_CHANNEL_LEFT))
+        XCTAssertEqual(graph.eqBandChannelMasks.1, UInt8(N60_EQ_CHANNEL_RIGHT))
+
+        var linear = configuration
+        linear.phaseMode = .linearPhase
+        XCTAssertEqual(try linear.linearPhaseBands(for: .mid, sampleRate: 96_000).count, 1)
+        XCTAssertEqual(try linear.linearPhaseBands(for: .side, sampleRate: 96_000).count, 1)
+    }
+
+    func testMidSideDynamicEQUsesIndependentMidAndSideLanes() throws {
+        var dynamic = EQBandDynamicConfiguration()
+        dynamic.enabled = true
+        dynamic.thresholdDB = -30
+        dynamic.ratio = 2
+        dynamic.rangeDB = -6
+
+        let midBand = EQBand(type: .peaking, frequencyHz: 1_000, gainDB: 0, q: 1.0, dynamic: dynamic)
+        let sideBand = EQBand(type: .highShelf, frequencyHz: 4_000, gainDB: 0, q: 0.707, dynamic: dynamic)
+        let configuration = StereoEQConfiguration(
+            channelMode: .midSide, editChannel: .mid, phaseMode: .minimumPhase,
+            midBands: [midBand], sideBands: [sideBand], midSideSeeded: true
+        )
+        let graph = try configuration.makeGraphSnapshot(
+            sampleRate: 96_000, gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: PlaybackControlConfiguration()
+        )
+        XCTAssertTrue(graph.dynamics.dynamicEQ.enabled)
+        XCTAssertEqual(graph.dynamics.dynamicEQ.domain, N60DynamicEQDomainMidSide)
+        XCTAssertEqual(graph.dynamics.dynamicEQ.bandCount, 1)
+        XCTAssertEqual(graph.dynamics.dynamicEQ.secondaryBandCount, 1)
+        XCTAssertEqual(graph.dynamics.dynamicEQ.bands.0.shape, N60DynamicEQShapePeak)
+        XCTAssertEqual(graph.dynamics.dynamicEQ.secondaryBands.0.shape, N60DynamicEQShapeHighShelf)
+    }
+
+    func testIndependentDynamicEQUsesSeparateLeftAndRightLanes() throws {
+        var dynamic = EQBandDynamicConfiguration()
+        dynamic.enabled = true
+        let leftBand = EQBand(type: .lowShelf, frequencyHz: 120, gainDB: 0, q: 0.707, dynamic: dynamic)
+        let rightBand = EQBand(type: .peaking, frequencyHz: 1_600, gainDB: 0, q: 1.2, dynamic: dynamic)
+        let configuration = StereoEQConfiguration(
+            channelMode: .independent, editChannel: .right, phaseMode: .mixedPhase,
+            leftBands: [leftBand], rightBands: [rightBand], independentSeeded: true
+        )
+        let graph = try configuration.makeGraphSnapshot(
+            sampleRate: 192_000, gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: PlaybackControlConfiguration()
+        )
+        XCTAssertTrue(graph.dynamics.dynamicEQ.enabled)
+        XCTAssertEqual(graph.dynamics.dynamicEQ.domain, N60DynamicEQDomainDualMono)
+        XCTAssertEqual(graph.dynamics.dynamicEQ.bandCount, 1)
+        XCTAssertEqual(graph.dynamics.dynamicEQ.secondaryBandCount, 1)
+        XCTAssertEqual(graph.dynamics.dynamicEQ.bands.0.shape, N60DynamicEQShapeLowShelf)
+        XCTAssertEqual(graph.dynamics.dynamicEQ.secondaryBands.0.shape, N60DynamicEQShapePeak)
+    }
+
+    func testLinearPhaseRetainsDynamicAsPostFIRMinimumPhaseLayer() throws {
+        var dynamic = EQBandDynamicConfiguration()
+        dynamic.enabled = true
+        let band = EQBand(type: .tilt, frequencyHz: 1_000, gainDB: 2, q: 0.707, dynamic: dynamic)
+        let configuration = StereoEQConfiguration(phaseMode: .linearPhase, linkedBands: [band])
+        let graph = try configuration.makeGraphSnapshot(
+            sampleRate: 96_000, gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: PlaybackControlConfiguration()
+        )
+        XCTAssertTrue(graph.dynamics.dynamicEQ.enabled)
+        XCTAssertEqual(graph.dynamics.dynamicEQ.domain, N60DynamicEQDomainLinkedStereo)
+        XCTAssertEqual(graph.dynamics.dynamicEQ.bandCount, 1)
+        XCTAssertEqual(graph.dynamics.dynamicEQ.bands.0.shape, N60DynamicEQShapeTilt)
+    }
+
+    func testDynamicEQFilterCoverageAndStructuralRestrictions() throws {
+        var dynamic = EQBandDynamicConfiguration()
+        dynamic.enabled = true
+        var notchDynamic = dynamic
+        notchDynamic.direction = .cutOnly
+        let supported = [
+            EQBand(type: .peaking, frequencyHz: 1_000, gainDB: 0, q: 1, dynamic: dynamic),
+            EQBand(type: .lowShelf, frequencyHz: 120, gainDB: 0, q: 0.707, dynamic: dynamic),
+            EQBand(type: .highShelf, frequencyHz: 5_000, gainDB: 0, q: 0.707, dynamic: dynamic),
+            EQBand(type: .tilt, frequencyHz: 1_000, gainDB: 0, q: 0.707, dynamic: dynamic),
+            EQBand(type: .notch, frequencyHz: 2_000, gainDB: 0, q: 2, dynamic: notchDynamic),
+            EQBand(type: .bandPass, frequencyHz: 800, gainDB: 0, q: 1, dynamic: dynamic),
+        ]
+        let graph = try StereoEQConfiguration(linkedBands: supported).makeGraphSnapshot(
+            sampleRate: 48_000, gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: PlaybackControlConfiguration()
+        )
+        XCTAssertEqual(graph.dynamics.dynamicEQ.bandCount, 6)
+
+        for type in [EQFilterType.lowPass, .highPass, .linkwitzTransform, .fir, .allPass] {
+            var band = EQBand(type: type, dynamic: dynamic)
+            if type == .fir { band.firKernel = .validation() }
+            XCTAssertThrowsError(try StereoEQConfiguration(linkedBands: [band]).makeGraphSnapshot(
+                sampleRate: 48_000, gainConfiguration: DSPGainConfiguration(),
+                bassManagementConfiguration: BassManagementConfiguration(),
+                playbackConfiguration: PlaybackControlConfiguration()
+            ))
+        }
+
+        var invalidNotch = dynamic
+        invalidNotch.direction = .boostOnly
+        let notch = EQBand(type: .notch, frequencyHz: 2_000, gainDB: 0, q: 2, dynamic: invalidNotch)
+        XCTAssertThrowsError(try StereoEQConfiguration(linkedBands: [notch]).makeGraphSnapshot(
+            sampleRate: 48_000, gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: PlaybackControlConfiguration()
+        ))
+    }
+
+    func testMidSideRealtimeIdentityAndAuditionContracts() throws {
+        guard let kernel = N60RenderKernelCreate() else {
+            XCTFail("Unable to allocate render kernel")
+            return
+        }
+        defer { N60RenderKernelDestroy(kernel) }
+
+        let pairs: [(Float, Float)] = [(0.25, -0.5), (0.4, 0.4), (0.4, -0.4)]
+        var graph = N60DSPGraphSnapshotMakeUnity(96_000)
+        graph.eqMidSideMode = true
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        for pair in pairs {
+            var left: Float = 0
+            var right: Float = 0
+            N60RenderKernelProcessStereoFrame(kernel, pair.0, pair.1, &left, &right)
+            XCTAssertEqual(left, pair.0, accuracy: 0.000_001)
+            XCTAssertEqual(right, pair.1, accuracy: 0.000_001)
+        }
+
+        graph.auditionMode = N60AuditionModeReference
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        var left: Float = 0
+        var right: Float = 0
+        N60RenderKernelProcessStereoFrame(kernel, 0.3, -0.2, &left, &right)
+        XCTAssertEqual(left, 0.3, accuracy: 0.000_001)
+        XCTAssertEqual(right, -0.2, accuracy: 0.000_001)
+
+        graph.auditionMode = N60AuditionModeDelta
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        N60RenderKernelProcessStereoFrame(kernel, 0.3, -0.2, &left, &right)
+        XCTAssertEqual(left, 0.0, accuracy: 0.000_001)
+        XCTAssertEqual(right, 0.0, accuracy: 0.000_001)
+    }
+
+    func testMidSideMinimumPhaseRoutesMidAndSideIndependently() throws {
+        func settledOutput(channelMask: UInt8, inputLeft: Float, inputRight: Float) throws -> (Float, Float) {
+            guard let kernel = N60RenderKernelCreate() else {
+                XCTFail("Unable to allocate render kernel")
+                return (0, 0)
+            }
+            defer { N60RenderKernelDestroy(kernel) }
+            var graph = N60DSPGraphSnapshotMakeUnity(48_000)
+            graph.eqMidSideMode = true
+            XCTAssertTrue(N60DSPGraphSnapshotSetEQBandForChannels(
+                &graph, 0, channelMask, N60BiquadFilterTypeLowShelf,
+                500, 6, 0.707, true
+            ))
+            XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+            var left: Float = 0
+            var right: Float = 0
+            for _ in 0..<4_096 {
+                N60RenderKernelProcessStereoFrame(kernel, inputLeft, inputRight, &left, &right)
+            }
+            return (left, right)
+        }
+
+        let midOnly = try settledOutput(
+            channelMask: UInt8(N60_EQ_CHANNEL_LEFT), inputLeft: 0.1, inputRight: 0.1
+        )
+        XCTAssertEqual(midOnly.0, midOnly.1, accuracy: 0.000_01)
+        XCTAssertGreaterThan(abs(midOnly.0), 0.15)
+
+        let midFilterOnPureSide = try settledOutput(
+            channelMask: UInt8(N60_EQ_CHANNEL_LEFT), inputLeft: 0.1, inputRight: -0.1
+        )
+        XCTAssertEqual(midFilterOnPureSide.0, 0.1, accuracy: 0.000_01)
+        XCTAssertEqual(midFilterOnPureSide.1, -0.1, accuracy: 0.000_01)
+
+        let sideOnly = try settledOutput(
+            channelMask: UInt8(N60_EQ_CHANNEL_RIGHT), inputLeft: 0.1, inputRight: -0.1
+        )
+        XCTAssertEqual(sideOnly.0, -sideOnly.1, accuracy: 0.000_01)
+        XCTAssertGreaterThan(abs(sideOnly.0), 0.15)
     }
 
     func testAllPassMaintainsUnityMagnitudeAcrossSupportedRates() {

@@ -9,6 +9,8 @@
 #include "N60Crossover.h"
 #include "N60Dynamics.h"
 #include "N60FractionalDelay.h"
+#include "N60MixedPhase.h"
+#include "N60Spatial.h"
 #include "N60Protection.h"
 
 #ifdef __cplusplus
@@ -16,11 +18,34 @@ extern "C" {
 #endif
 
 #define N60_MAX_EQ_BANDS 64
-#define N60_MAX_EQ_RENDER_SLOTS (N60_MAX_EQ_BANDS * 2)
+#define N60_MAX_EQ_COMPILED_SECTIONS_PER_BAND 8
+#define N60_MAX_EQ_USER_RENDER_SLOTS (N60_MAX_EQ_BANDS * 2 * N60_MAX_EQ_COMPILED_SECTIONS_PER_BAND)
+#define N60_MAX_EQ_MIXED_PHASE_RENDER_SLOTS (2u * N60_MIXED_PHASE_MAX_SECTIONS_PER_LANE)
+#define N60_MAX_EQ_RENDER_SLOTS (N60_MAX_EQ_USER_RENDER_SLOTS + N60_MAX_EQ_MIXED_PHASE_RENDER_SLOTS)
 #define N60_EQ_CHANNEL_LEFT 0x1u
 #define N60_EQ_CHANNEL_RIGHT 0x2u
 #define N60_EQ_CHANNEL_STEREO (N60_EQ_CHANNEL_LEFT | N60_EQ_CHANNEL_RIGHT)
 #define N60_MAX_AUDITION_DELAY_FRAMES 131072u
+
+static inline void N60MidSideEncode(
+    float left,
+    float right,
+    float * _Nonnull mid,
+    float * _Nonnull side
+) {
+    *mid = 0.5f * (left + right);
+    *side = 0.5f * (left - right);
+}
+
+static inline void N60MidSideDecode(
+    float mid,
+    float side,
+    float * _Nonnull left,
+    float * _Nonnull right
+) {
+    *left = mid + side;
+    *right = mid - side;
+}
 
 typedef enum {
     N60AuditionModeProcessed = 0,
@@ -49,6 +74,9 @@ typedef struct {
     float masterGainLinear;
     float balanceGainLeftLinear;
     float balanceGainRightLinear;
+    N60SymmetryBalanceSnapshot symmetryBalance;
+    N60SpeakerCrossfeedSnapshot speakerCrossfeed;
+    N60CrosstalkCancellationSnapshot crosstalkCancellation;
     bool bypassed;
     N60AuditionMode auditionMode;
     N60InterChannelDelaySnapshot interChannelDelay;
@@ -56,6 +84,9 @@ typedef struct {
     uint64_t generation;
     uint32_t gainTransitionFrames;
     bool eqBypassed;
+    bool eqMidSideMode;
+    bool mixedPhaseEnabled;
+    uint32_t mixedPhaseCorrectionSectionCount;
     uint32_t eqBandCount;
     uint32_t eqTransitionFrames;
     // Keep the pre-PR23 band array representation intact; channel scope is a
@@ -68,6 +99,7 @@ typedef struct {
     N60ProtectionSnapshot protection;
     N60ConvolutionGraphState convolution;
     N60ConvolutionGraphState roomCorrection;
+    N60ConvolutionGraphState speakerIR;
 } N60DSPGraphSnapshot;
 
 typedef struct {
@@ -111,6 +143,7 @@ typedef struct {
     uint64_t snapshotReadMisses;
     uint64_t convolutionProgramMisses;
     uint64_t roomCorrectionProgramMisses;
+    uint64_t speakerIRProgramMisses;
     uint64_t publishedGeneration;
     uint32_t latencyFrames;
     double sampleRate;
@@ -126,6 +159,9 @@ typedef struct {
     float balanceGainLeftLinear;
     float balanceGainRightLinear;
     bool eqBypassed;
+    bool eqMidSideMode;
+    bool mixedPhaseEnabled;
+    uint32_t mixedPhaseCorrectionSectionCount;
     uint32_t eqBandCount;
     uint32_t eqLeftBandCount;
     uint32_t eqRightBandCount;
@@ -200,6 +236,13 @@ typedef struct {
     uint32_t roomCorrectionPartitionCount;
     uint32_t roomCorrectionEngineLatencyFrames;
     uint32_t roomCorrectionDeclaredLatencyFrames;
+    bool speakerIREnabled;
+    uint32_t speakerIRProgramSlot;
+    uint64_t speakerIRProgramGeneration;
+    uint32_t speakerIRTapCount;
+    uint32_t speakerIRPartitionCount;
+    uint32_t speakerIREngineLatencyFrames;
+    uint32_t speakerIRDeclaredLatencyFrames;
     N60StereoMeterReading inputMeter;
     N60StereoMeterReading postEQMeter;
     N60StereoMeterReading outputMeter;
@@ -207,6 +250,22 @@ typedef struct {
 
 N60DSPGraphSnapshot N60DSPGraphSnapshotMakeUnity(double sampleRate);
 void N60DSPGraphSnapshotClearEQ(N60DSPGraphSnapshot * _Nonnull snapshot);
+bool N60DSPGraphSnapshotSetSymmetryBalance(
+    N60DSPGraphSnapshot * _Nonnull snapshot,
+    double position,
+    bool enabled
+);
+bool N60DSPGraphSnapshotSetSpeakerCrossfeed(
+    N60DSPGraphSnapshot * _Nonnull snapshot,
+    double amount,
+    bool enabled
+);
+bool N60DSPGraphSnapshotSetCrosstalkCancellation(
+    N60DSPGraphSnapshot * _Nonnull snapshot,
+    double amount,
+    double headShadowFrequencyHz,
+    bool enabled
+);
 bool N60DSPGraphSnapshotSetInterChannelDelay(
     N60DSPGraphSnapshot * _Nonnull snapshot,
     double signedDelayMs
@@ -230,6 +289,27 @@ bool N60DSPGraphSnapshotSetEQBandForChannels(
     double q,
     bool enabled
 );
+bool N60DSPGraphSnapshotSetEQPreparedBandForChannels(
+    N60DSPGraphSnapshot * _Nonnull snapshot,
+    uint32_t bandIndex,
+    uint8_t channelMask,
+    N60BiquadFilterType type,
+    double frequencyHz,
+    double gainDB,
+    double q,
+    N60BiquadCoefficients coefficients,
+    bool enabled
+);
+bool N60DSPGraphSnapshotSetEQPreparedBand(
+    N60DSPGraphSnapshot * _Nonnull snapshot,
+    uint32_t bandIndex,
+    N60BiquadFilterType type,
+    double frequencyHz,
+    double gainDB,
+    double q,
+    N60BiquadCoefficients coefficients,
+    bool enabled
+);
 bool N60DSPGraphSnapshotSetCrossover(
     N60DSPGraphSnapshot * _Nonnull snapshot,
     double frequencyHz,
@@ -239,6 +319,12 @@ bool N60DSPGraphSnapshotSetCrossover(
     bool subPolarityInverted,
     bool enabled
 );
+bool N60DSPGraphSnapshotSetSubPhaseAlignment(
+    N60DSPGraphSnapshot * _Nonnull snapshot,
+    double frequencyHz,
+    double q,
+    bool enabled
+);
 bool N60DSPGraphSnapshotSetConvolutionProgram(
     N60DSPGraphSnapshot * _Nonnull snapshot,
     uint32_t programSlot,
@@ -246,6 +332,12 @@ bool N60DSPGraphSnapshotSetConvolutionProgram(
     bool enabled
 );
 bool N60DSPGraphSnapshotSetRoomCorrectionProgram(
+    N60DSPGraphSnapshot * _Nonnull snapshot,
+    uint32_t programSlot,
+    N60ConvolutionProgramInfo programInfo,
+    bool enabled
+);
+bool N60DSPGraphSnapshotSetSpeakerIRProgram(
     N60DSPGraphSnapshot * _Nonnull snapshot,
     uint32_t programSlot,
     N60ConvolutionProgramInfo programInfo,
@@ -265,6 +357,15 @@ bool N60RenderKernelPrepareConvolutionProgram(
     N60ConvolutionProgramInfo * _Nullable programInfoOut
 );
 bool N60RenderKernelPrepareRoomCorrectionProgram(
+    N60RenderKernel * _Nonnull kernel,
+    uint32_t slot,
+    const float * _Nonnull leftTaps,
+    const float * _Nullable rightTaps,
+    uint32_t tapCount,
+    uint32_t declaredLatencyFrames,
+    N60ConvolutionProgramInfo * _Nullable programInfoOut
+);
+bool N60RenderKernelPrepareSpeakerIRProgram(
     N60RenderKernel * _Nonnull kernel,
     uint32_t slot,
     const float * _Nonnull leftTaps,
