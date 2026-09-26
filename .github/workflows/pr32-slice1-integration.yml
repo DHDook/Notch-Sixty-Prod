@@ -18,6 +18,18 @@ jobs:
           fetch-depth: 0
       - name: Apply PR32 Slice 1
         run: python3 scripts/pr32_slice1.py
+      - name: Apply diagnostics compatibility fix
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('NotchSixty/Audio/Realtime/N60RenderKernel.c')
+          s = p.read_text()
+          old = 'diagnostics.multibandTopology = context.snapshot.dynamics.multibandCompressor.topology;'
+          new = 'diagnostics.multibandTopology = context.snapshot.dynamics.multibandCompressor.lowTopology;'
+          if old not in s:
+              raise SystemExit('multiband diagnostics reference not found')
+          p.write_text(s.replace(old, new, 1))
+          PY
       - name: Run full test suite
         run: |
           set -o pipefail
