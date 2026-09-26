@@ -25,6 +25,11 @@ jobs:
           clang -std=c11 -Wall -Wextra -Werror ci/validate_pr34_bandpass.c -o /tmp/validate-pr34-bandpass
           /tmp/validate-pr34-bandpass
 
+      - name: Validate Constant-Q DSP
+        run: |
+          clang -std=c11 -Wall -Wextra -Werror ci/validate_pr34_constantq.c -o /tmp/validate-pr34-constantq
+          /tmp/validate-pr34-constantq
+
       - name: Build
         run: >-
           xcodebuild
@@ -56,6 +61,6 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add NotchSixty/Audio/Realtime/N60Biquad.h NotchSixty/Audio/AudioIOEngine.swift NotchSixtyTests/NotchSixtyTests.swift
+          git add NotchSixty/Audio/Realtime/N60Biquad.h NotchSixty/Audio/AudioIOEngine.swift NotchSixty/ContentView.swift NotchSixtyTests/NotchSixtyTests.swift
           git commit -m "Integrate next PR34 parity slice"
           git push origin HEAD:feature/dsp-optimization-parity-audit
