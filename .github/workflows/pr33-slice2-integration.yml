@@ -24,6 +24,7 @@ jobs:
           python3 .github/scripts/pr33_slice2.py
           python3 - <<'PY'
           from pathlib import Path
+
           path = Path('NotchSixtyTests/ProtectionTests.swift')
           text = path.read_text()
           old = 'let snapshot = try config.makeProtectionSnapshot(sampleRate: 384_000)\n        XCTAssertTrue(N60ProtectionSnapshotIsValid(&snapshot))'
@@ -31,6 +32,20 @@ jobs:
           if old not in text:
               raise SystemExit('PR33 Slice 2 mutability-fix anchor not found')
           path.write_text(text.replace(old, new, 1))
+
+          path = Path('NotchSixtyTests/StereoPlaybackControlTests.swift')
+          text = path.read_text()
+          replacements = {
+              'EQBand(type: .peaking, frequencyHz: 1_000, gainDB: 6, q: 1, enabled: true)':
+                  'EQBand(enabled: true, type: .peaking, frequencyHz: 1_000, gainDB: 6, q: 1)',
+              'EQBand(type: .peaking, frequencyHz: 3_000, gainDB: 6, q: 1, enabled: true)':
+                  'EQBand(enabled: true, type: .peaking, frequencyHz: 3_000, gainDB: 6, q: 1)',
+          }
+          for old, new in replacements.items():
+              if old not in text:
+                  raise SystemExit(f'PR33 Slice 2 EQ constructor-fix anchor not found: {old}')
+              text = text.replace(old, new, 1)
+          path.write_text(text)
           PY
 
       - name: Validate patch
