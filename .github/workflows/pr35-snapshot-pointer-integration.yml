@@ -32,6 +32,7 @@ jobs:
 
       - name: Validate retained PR34 DSP contracts
         run: |
+          set -euo pipefail
           clang -std=c11 -Wall -Wextra -Werror ci/validate_pr34_bandpass.c -o /tmp/validate-pr34-bandpass && /tmp/validate-pr34-bandpass
           clang -std=c11 -Wall -Wextra -Werror ci/validate_pr34_constantq.c -o /tmp/validate-pr34-constantq && /tmp/validate-pr34-constantq
           clang -std=c11 -Wall -Wextra -Werror ci/validate_pr34_linkwitz.c -o /tmp/validate-pr34-linkwitz && /tmp/validate-pr34-linkwitz
@@ -74,6 +75,7 @@ jobs:
                   NotchSixty/Audio/Realtime/N60Dynamics.h \
                   NotchSixty/Audio/Realtime/N60Dynamics.c \
                   NotchSixty/Audio/Realtime/N60RenderKernel.c \
+                  ci/validate_pr34_dynamic_domains.c \
                   NotchSixtyTests
           if git diff --cached --quiet; then
             echo "Snapshot pointer refactor already committed; nothing to do."
