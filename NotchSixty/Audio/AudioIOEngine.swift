@@ -8,6 +8,7 @@ enum EQFilterType: String, CaseIterable, Identifiable, Sendable {
     case highShelf
     case lowPass
     case highPass
+    case bandPass
     case notch
     case allPass
 
@@ -20,6 +21,7 @@ enum EQFilterType: String, CaseIterable, Identifiable, Sendable {
         case .highShelf: return "High Shelf"
         case .lowPass: return "Low Pass"
         case .highPass: return "High Pass"
+        case .bandPass: return "Band Pass"
         case .notch: return "Notch"
         case .allPass: return "All-Pass"
         }
@@ -32,6 +34,7 @@ enum EQFilterType: String, CaseIterable, Identifiable, Sendable {
         case .highShelf: return N60BiquadFilterTypeHighShelf
         case .lowPass: return N60BiquadFilterTypeLowPass
         case .highPass: return N60BiquadFilterTypeHighPass
+        case .bandPass: return N60BiquadFilterTypeBandPass
         case .notch: return N60BiquadFilterTypeNotch
         case .allPass: return N60BiquadFilterTypeAllPass
         }
