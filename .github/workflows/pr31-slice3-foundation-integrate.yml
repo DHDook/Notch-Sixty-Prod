@@ -1,0 +1,43 @@
+name: PR31 Slice 3 Foundation Integration
+
+on:
+  push:
+    branches:
+      - feature/noise-hum-suppression
+    paths:
+      - '.github/scripts/pr31_slice3_foundation.py'
+      - '.github/workflows/pr31-slice3-foundation-integrate.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feature/noise-hum-suppression
+
+      - name: Apply PR31 Slice 3 denoiser foundation
+        run: python3 .github/scripts/pr31_slice3_foundation.py
+
+      - name: Run full test suite
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          test
+
+      - name: Commit denoiser foundation and clean helpers
+        run: |
+          rm -f .github/scripts/pr31_slice3_foundation.py .github/workflows/pr31-slice3-foundation-integrate.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Add spectral denoiser realtime foundation'
+          git push origin HEAD:feature/noise-hum-suppression
