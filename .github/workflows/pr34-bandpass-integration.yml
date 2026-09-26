@@ -29,6 +29,9 @@ jobs:
       - name: Fix Symmetry Balance Swift test bridge
         run: python3 ci/pr34_fix_symmetry_test_bridge.py
 
+      - name: Apply speaker crossfeed integration
+        run: python3 ci/pr34_apply_phase_d_crossfeed.py
+
       - name: Validate Band Pass DSP
         run: |
           clang -std=c11 -Wall -Wextra -Werror ci/validate_pr34_bandpass.c -o /tmp/validate-pr34-bandpass
@@ -69,6 +72,11 @@ jobs:
           clang -std=c11 -Wall -Wextra -Werror ci/validate_pr34_symmetry_balance.c -lm -o /tmp/validate-pr34-symmetry-balance
           /tmp/validate-pr34-symmetry-balance
 
+      - name: Validate speaker crossfeed DSP
+        run: |
+          clang -std=c11 -Wall -Wextra -Werror ci/validate_pr34_speaker_crossfeed.c -lm -o /tmp/validate-pr34-speaker-crossfeed
+          /tmp/validate-pr34-speaker-crossfeed
+
       - name: Build
         run: >-
           xcodebuild
@@ -91,7 +99,7 @@ jobs:
           ENABLE_TESTABILITY=YES
           test
 
-      - name: Commit Phase D Symmetry Balance integration
+      - name: Commit Phase D speaker crossfeed integration
         run: |
           git diff --check
           if git diff --quiet; then
@@ -101,5 +109,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add NotchSixty/Audio/Realtime/N60Spatial.h NotchSixty/Audio/Realtime/N60RenderKernel.h NotchSixty/Audio/Realtime/N60RenderKernel.c NotchSixty/Audio/AudioIOEngine.swift NotchSixty/Audio/StereoPlaybackControl.swift NotchSixty/ContentView.swift NotchSixtyTests/NotchSixtyTests.swift
-          git commit -m "Close PR34 Symmetry Balance parity"
+          git commit -m "Close PR34 speaker crossfeed parity"
           git push origin HEAD:feature/dsp-optimization-parity-audit
