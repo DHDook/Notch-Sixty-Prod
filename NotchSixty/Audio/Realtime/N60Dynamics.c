@@ -410,6 +410,27 @@ N60DynamicsSnapshot N60DynamicsSnapshotMakeBypassed(double sampleRate) {
     snapshot.loudnessContour.lowShelf = N60BiquadCoefficientsMakeIdentity();
     snapshot.loudnessContour.highShelf = N60BiquadCoefficientsMakeIdentity();
 
+    snapshot.dialogueLeveler.enabled = false;
+    snapshot.dialogueLeveler.voiceGateEnabled = false;
+    snapshot.dialogueLeveler.bandLowHz = 300.0;
+    snapshot.dialogueLeveler.bandHighHz = 3500.0;
+    snapshot.dialogueLeveler.targetGapDB = 10.0f;
+    snapshot.dialogueLeveler.boostRatio = 2.0f;
+    snapshot.dialogueLeveler.maxBoostDB = 8.0f;
+    snapshot.dialogueLeveler.programGateThresholdDB = -50.0f;
+    snapshot.dialogueLeveler.detectorCoefficient = coefficient_for_time_ms(sampleRate, 300.0f);
+    snapshot.dialogueLeveler.attackCoefficient = coefficient_for_time_ms(sampleRate, 150.0f);
+    snapshot.dialogueLeveler.releaseCoefficient = coefficient_for_time_ms(sampleRate, 900.0f);
+    snapshot.dialogueLeveler.voiceEnvelopeCoefficient = coefficient_for_time_ms(sampleRate, 15.0f);
+    snapshot.dialogueLeveler.voiceMeasurementCoefficient = coefficient_for_time_ms(sampleRate, 700.0f);
+    snapshot.dialogueLeveler.modulationHighPassPole = (float)exp(-2.0 * M_PI * 2.5 / sampleRate);
+    snapshot.dialogueLeveler.modulationLowPassPole = (float)exp(-2.0 * M_PI * 7.5 / sampleRate);
+    snapshot.dialogueLeveler.confidenceFloorIndex = 0.15f;
+    snapshot.dialogueLeveler.confidenceCeilingIndex = 0.45f;
+    snapshot.dialogueLeveler.minConfidence = 0.2f;
+    snapshot.dialogueLeveler.bandHighPass = N60BiquadCoefficientsMakeIdentity();
+    snapshot.dialogueLeveler.bandLowPass = N60BiquadCoefficientsMakeIdentity();
+
     snapshot.deEsser.enabled = false;
     snapshot.deEsser.dynamicEQMode = true;
     snapshot.deEsser.frequencyHz = 6500.0;
@@ -751,6 +772,83 @@ bool N60DynamicsSnapshotSetLoudnessContour(
     if (!N60BiquadDesign(N60BiquadFilterTypeLowShelf, sampleRate, N60_LOUDNESS_LOW_SHELF_HZ, bassDB, 0.7071067811865476, &configured.lowShelf)
         || !N60BiquadDesign(N60BiquadFilterTypeHighShelf, sampleRate, N60_LOUDNESS_HIGH_SHELF_HZ, trebleDB, 0.7071067811865476, &configured.highShelf)) return false;
     snapshot->loudnessContour = configured;
+    return true;
+}
+
+bool N60DynamicsSnapshotSetDialogueLeveler(
+    N60DynamicsSnapshot *snapshot,
+    double sampleRate,
+    bool enabled,
+    double bandLowHz,
+    double bandHighHz,
+    float targetGapDB,
+    float boostRatio,
+    float maxBoostDB,
+    float detectorWindowMs,
+    float attackMs,
+    float releaseMs,
+    float programGateThresholdDB,
+    bool voiceGateEnabled,
+    float modulationCenterHz,
+    float modulationBandwidthHz,
+    float voiceEnvelopeWindowMs,
+    float voiceMeasurementWindowMs,
+    float confidenceFloorIndex,
+    float confidenceCeilingIndex,
+    float minConfidence
+) {
+    if (snapshot == NULL || !isfinite(sampleRate) || sampleRate <= 0.0
+        || !isfinite(bandLowHz) || !isfinite(bandHighHz)
+        || bandLowHz < 100.0 || bandLowHz > 8000.0 || bandHighHz < 100.0 || bandHighHz > 8000.0
+        || bandLowHz >= bandHighHz || bandHighHz >= sampleRate * 0.45
+        || !isfinite(targetGapDB) || targetGapDB < 3.0f || targetGapDB > 20.0f
+        || !isfinite(boostRatio) || boostRatio < 1.0f || boostRatio > 6.0f
+        || !isfinite(maxBoostDB) || maxBoostDB < 0.0f || maxBoostDB > 15.0f
+        || !isfinite(detectorWindowMs) || detectorWindowMs < 50.0f || detectorWindowMs > 500.0f
+        || !isfinite(attackMs) || attackMs < 10.0f || attackMs > 1000.0f
+        || !isfinite(releaseMs) || releaseMs < 50.0f || releaseMs > 3000.0f
+        || !isfinite(programGateThresholdDB) || programGateThresholdDB < -70.0f || programGateThresholdDB > -30.0f
+        || !isfinite(modulationCenterHz) || modulationCenterHz < 2.0f || modulationCenterHz > 10.0f
+        || !isfinite(modulationBandwidthHz) || modulationBandwidthHz < 2.0f || modulationBandwidthHz > 8.0f
+        || !isfinite(voiceEnvelopeWindowMs) || voiceEnvelopeWindowMs < 5.0f || voiceEnvelopeWindowMs > 30.0f
+        || !isfinite(voiceMeasurementWindowMs) || voiceMeasurementWindowMs < 300.0f || voiceMeasurementWindowMs > 1500.0f
+        || !isfinite(confidenceFloorIndex) || confidenceFloorIndex < 0.0f || confidenceFloorIndex > 1.0f
+        || !isfinite(confidenceCeilingIndex) || confidenceCeilingIndex <= confidenceFloorIndex || confidenceCeilingIndex > 1.0f
+        || !isfinite(minConfidence) || minConfidence < 0.0f || minConfidence > 1.0f) return false;
+
+    float modulationLowHz = fmaxf(0.5f, modulationCenterHz - 0.5f * modulationBandwidthHz);
+    float modulationHighHz = modulationCenterHz + 0.5f * modulationBandwidthHz;
+    if (modulationHighHz >= sampleRate * 0.45f) return false;
+
+    N60DialogueLevelerSnapshot configured = {0};
+    configured.enabled = enabled;
+    configured.voiceGateEnabled = voiceGateEnabled;
+    configured.bandLowHz = bandLowHz;
+    configured.bandHighHz = bandHighHz;
+    configured.targetGapDB = targetGapDB;
+    configured.boostRatio = boostRatio;
+    configured.maxBoostDB = maxBoostDB;
+    configured.programGateThresholdDB = programGateThresholdDB;
+    configured.detectorCoefficient = coefficient_for_time_ms(sampleRate, detectorWindowMs);
+    configured.attackCoefficient = coefficient_for_time_ms(sampleRate, attackMs);
+    configured.releaseCoefficient = coefficient_for_time_ms(sampleRate, releaseMs);
+    configured.voiceEnvelopeCoefficient = coefficient_for_time_ms(sampleRate, voiceEnvelopeWindowMs);
+    configured.voiceMeasurementCoefficient = coefficient_for_time_ms(sampleRate, voiceMeasurementWindowMs);
+    configured.modulationHighPassPole = (float)exp(-2.0 * M_PI * (double)modulationLowHz / sampleRate);
+    configured.modulationLowPassPole = (float)exp(-2.0 * M_PI * (double)modulationHighHz / sampleRate);
+    configured.confidenceFloorIndex = confidenceFloorIndex;
+    configured.confidenceCeilingIndex = confidenceCeilingIndex;
+    configured.minConfidence = minConfidence;
+    if (!valid_coefficient(configured.detectorCoefficient)
+        || !valid_coefficient(configured.attackCoefficient)
+        || !valid_coefficient(configured.releaseCoefficient)
+        || !valid_coefficient(configured.voiceEnvelopeCoefficient)
+        || !valid_coefficient(configured.voiceMeasurementCoefficient)
+        || !valid_coefficient(configured.modulationHighPassPole)
+        || !valid_coefficient(configured.modulationLowPassPole)
+        || !N60BiquadDesign(N60BiquadFilterTypeHighPass, sampleRate, bandLowHz, 0.0, 0.7071067811865476, &configured.bandHighPass)
+        || !N60BiquadDesign(N60BiquadFilterTypeLowPass, sampleRate, bandHighHz, 0.0, 0.7071067811865476, &configured.bandLowPass)) return false;
+    snapshot->dialogueLeveler = configured;
     return true;
 }
 
@@ -1132,6 +1230,29 @@ bool N60DynamicsSnapshotIsValid(N60DynamicsSnapshot snapshot) {
         || !N60BiquadCoefficientsAreFinite(snapshot.loudnessContour.lowShelf)
         || !N60BiquadCoefficientsAreFinite(snapshot.loudnessContour.highShelf)) return false;
 
+    if (!isfinite(snapshot.dialogueLeveler.bandLowHz) || !isfinite(snapshot.dialogueLeveler.bandHighHz)
+        || snapshot.dialogueLeveler.bandLowHz < 100.0 || snapshot.dialogueLeveler.bandHighHz > 8000.0
+        || snapshot.dialogueLeveler.bandLowHz >= snapshot.dialogueLeveler.bandHighHz
+        || !isfinite(snapshot.dialogueLeveler.targetGapDB) || snapshot.dialogueLeveler.targetGapDB < 3.0f || snapshot.dialogueLeveler.targetGapDB > 20.0f
+        || !isfinite(snapshot.dialogueLeveler.boostRatio) || snapshot.dialogueLeveler.boostRatio < 1.0f || snapshot.dialogueLeveler.boostRatio > 6.0f
+        || !isfinite(snapshot.dialogueLeveler.maxBoostDB) || snapshot.dialogueLeveler.maxBoostDB < 0.0f || snapshot.dialogueLeveler.maxBoostDB > 15.0f
+        || !isfinite(snapshot.dialogueLeveler.programGateThresholdDB) || snapshot.dialogueLeveler.programGateThresholdDB < -70.0f || snapshot.dialogueLeveler.programGateThresholdDB > -30.0f
+        || !valid_coefficient(snapshot.dialogueLeveler.detectorCoefficient)
+        || !valid_coefficient(snapshot.dialogueLeveler.attackCoefficient)
+        || !valid_coefficient(snapshot.dialogueLeveler.releaseCoefficient)
+        || !valid_coefficient(snapshot.dialogueLeveler.voiceEnvelopeCoefficient)
+        || !valid_coefficient(snapshot.dialogueLeveler.voiceMeasurementCoefficient)
+        || !valid_coefficient(snapshot.dialogueLeveler.modulationHighPassPole)
+        || !valid_coefficient(snapshot.dialogueLeveler.modulationLowPassPole)
+        || !isfinite(snapshot.dialogueLeveler.confidenceFloorIndex)
+        || !isfinite(snapshot.dialogueLeveler.confidenceCeilingIndex)
+        || snapshot.dialogueLeveler.confidenceFloorIndex < 0.0f
+        || snapshot.dialogueLeveler.confidenceCeilingIndex <= snapshot.dialogueLeveler.confidenceFloorIndex
+        || snapshot.dialogueLeveler.confidenceCeilingIndex > 1.0f
+        || !isfinite(snapshot.dialogueLeveler.minConfidence) || snapshot.dialogueLeveler.minConfidence < 0.0f || snapshot.dialogueLeveler.minConfidence > 1.0f
+        || !N60BiquadCoefficientsAreFinite(snapshot.dialogueLeveler.bandHighPass)
+        || !N60BiquadCoefficientsAreFinite(snapshot.dialogueLeveler.bandLowPass)) return false;
+
     if (!isfinite(snapshot.deEsser.frequencyHz)
         || snapshot.deEsser.frequencyHz < 2000.0 || snapshot.deEsser.frequencyHz > 10000.0
         || !isfinite(snapshot.deEsser.thresholdDB)
@@ -1391,6 +1512,73 @@ static void process_loudness_contour(
     *right = dryRight + (wetRight - dryRight) * runtime->loudnessMix;
 }
 
+static void process_dialogue_leveler(
+    N60DynamicsRuntime *runtime,
+    N60DynamicsSnapshot snapshot,
+    float *left,
+    float *right
+) {
+    N60DialogueLevelerSnapshot config = snapshot.dialogueLeveler;
+    float dryLeft = *left;
+    float dryRight = *right;
+
+    float dialogueLeft = N60BiquadProcessSample(config.bandHighPass, &runtime->dialogueHighPassLeft, dryLeft);
+    dialogueLeft = N60BiquadProcessSample(config.bandLowPass, &runtime->dialogueLowPassLeft, dialogueLeft);
+    float dialogueRight = N60BiquadProcessSample(config.bandHighPass, &runtime->dialogueHighPassRight, dryRight);
+    dialogueRight = N60BiquadProcessSample(config.bandLowPass, &runtime->dialogueLowPassRight, dialogueRight);
+
+    float programPower = 0.5f * (dryLeft * dryLeft + dryRight * dryRight);
+    float dialoguePower = 0.5f * (dialogueLeft * dialogueLeft + dialogueRight * dialogueRight);
+    runtime->dialogueProgramMeanSquare = smooth_toward(runtime->dialogueProgramMeanSquare, programPower, config.detectorCoefficient);
+    runtime->dialogueBandMeanSquare = smooth_toward(runtime->dialogueBandMeanSquare, dialoguePower, config.detectorCoefficient);
+    runtime->dialogueProgramLevelDBFS = 10.0f * log10f(fmaxf(runtime->dialogueProgramMeanSquare, N60_DYNAMICS_EPSILON));
+    runtime->dialogueBandLevelDBFS = 10.0f * log10f(fmaxf(runtime->dialogueBandMeanSquare, N60_DYNAMICS_EPSILON));
+    runtime->dialogueGapDB = runtime->dialogueProgramLevelDBFS - runtime->dialogueBandLevelDBFS;
+
+    // Independently authored speech-likeness confidence: measure normalized
+    // syllabic-rate modulation energy in the dialogue-band envelope. All filter
+    // coefficients are prepared in the snapshot; the render path is fixed state.
+    float dialogueEnvelopeInput = sqrtf(fmaxf(dialoguePower, 0.0f));
+    runtime->dialogueVoiceEnvelope = smooth_toward(
+        runtime->dialogueVoiceEnvelope, dialogueEnvelopeInput, config.voiceEnvelopeCoefficient);
+    float modulationHP = runtime->dialogueVoiceEnvelope - runtime->dialogueModulationPreviousInput
+        + config.modulationHighPassPole * runtime->dialogueModulationHighPassOutput;
+    runtime->dialogueModulationPreviousInput = runtime->dialogueVoiceEnvelope;
+    runtime->dialogueModulationHighPassOutput = modulationHP;
+    float modulationLP = (1.0f - config.modulationLowPassPole) * modulationHP
+        + config.modulationLowPassPole * runtime->dialogueModulationLowPassOutput;
+    runtime->dialogueModulationLowPassOutput = modulationLP;
+    float modulationPower = modulationLP * modulationLP;
+    runtime->dialogueModulationMeanSquare = smooth_toward(
+        runtime->dialogueModulationMeanSquare, modulationPower, config.voiceMeasurementCoefficient);
+    float modulationIndex = sqrtf(fmaxf(runtime->dialogueModulationMeanSquare, 0.0f))
+        / fmaxf(runtime->dialogueVoiceEnvelope, 1.0e-6f);
+    float mappedConfidence = (modulationIndex - config.confidenceFloorIndex)
+        / fmaxf(config.confidenceCeilingIndex - config.confidenceFloorIndex, 1.0e-6f);
+    mappedConfidence = clampf(mappedConfidence, 0.0f, 1.0f);
+    runtime->dialogueVoiceConfidence = config.voiceGateEnabled
+        ? config.minConfidence + (1.0f - config.minConfidence) * mappedConfidence
+        : 1.0f;
+
+    float targetBoostDB = 0.0f;
+    if (config.enabled && runtime->dialogueProgramLevelDBFS >= config.programGateThresholdDB) {
+        float excessGap = fmaxf(0.0f, runtime->dialogueGapDB - config.targetGapDB);
+        float correctionFraction = config.boostRatio > 1.0f ? (1.0f - 1.0f / config.boostRatio) : 0.0f;
+        targetBoostDB = fminf(config.maxBoostDB, excessGap * correctionFraction);
+        targetBoostDB *= runtime->dialogueVoiceConfidence;
+    }
+    float coefficient = !config.enabled
+        ? snapshot.bypassTransitionCoefficient
+        : (targetBoostDB > runtime->dialogueBoostDB ? config.attackCoefficient : config.releaseCoefficient);
+    runtime->dialogueBoostDB = smooth_toward(runtime->dialogueBoostDB, targetBoostDB, coefficient);
+
+    // Boost only the extracted dialogue band, not the full program. The same
+    // correction is applied to L/R, preserving the stereo image of the band.
+    float bandGain = db_to_linear(runtime->dialogueBoostDB);
+    *left = dryLeft + dialogueLeft * (bandGain - 1.0f);
+    *right = dryRight + dialogueRight * (bandGain - 1.0f);
+}
+
 static void process_de_esser(
     N60DynamicsRuntime *runtime,
     N60DynamicsSnapshot snapshot,
@@ -1536,6 +1724,7 @@ void N60DynamicsProcessCoreStereoFrameWithMasterGain(
     process_stereo_widener(runtime, snapshot, left, right);
     process_loudness_match(runtime, snapshot, left, right);
     process_loudness_contour(runtime, snapshot, masterGainLinear, left, right);
+    process_dialogue_leveler(runtime, snapshot, left, right);
     process_de_esser(runtime, snapshot, left, right);
     process_multiband_compressor(runtime, snapshot, left, right);
 
@@ -1672,6 +1861,11 @@ N60DynamicsTelemetry N60DynamicsRuntimeTelemetry(const N60DynamicsRuntime *runti
     telemetry.loudnessShortTermLUFS = -0.691f + 10.0f * log10f(fmaxf(runtime->loudnessMeanSquare, N60_DYNAMICS_EPSILON));
     telemetry.loudnessMatchGainDB = runtime->loudnessMatchGainDB;
     telemetry.loudnessContourScale = runtime->loudnessMix;
+    telemetry.dialogueProgramLevelDBFS = runtime->dialogueProgramLevelDBFS;
+    telemetry.dialogueBandLevelDBFS = runtime->dialogueBandLevelDBFS;
+    telemetry.dialogueGapDB = runtime->dialogueGapDB;
+    telemetry.dialogueVoiceConfidence = runtime->dialogueVoiceConfidence;
+    telemetry.dialogueBoostDB = runtime->dialogueBoostDB;
     telemetry.deEsserGainReductionDB = fmaxf(0.0f, -runtime->deEsserGainDB);
     telemetry.multibandLowGainReductionDB = fmaxf(0.0f, -runtime->multibandGainDB[0]);
     telemetry.multibandMidGainReductionDB = fmaxf(0.0f, -runtime->multibandGainDB[1]);

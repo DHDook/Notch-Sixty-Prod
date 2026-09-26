@@ -113,6 +113,29 @@ typedef struct {
     N60BiquadCoefficients highShelf;
 } N60LoudnessContourSnapshot;
 
+typedef struct {
+    bool enabled;
+    bool voiceGateEnabled;
+    double bandLowHz;
+    double bandHighHz;
+    float targetGapDB;
+    float boostRatio;
+    float maxBoostDB;
+    float programGateThresholdDB;
+    float detectorCoefficient;
+    float attackCoefficient;
+    float releaseCoefficient;
+    float voiceEnvelopeCoefficient;
+    float voiceMeasurementCoefficient;
+    float modulationHighPassPole;
+    float modulationLowPassPole;
+    float confidenceFloorIndex;
+    float confidenceCeilingIndex;
+    float minConfidence;
+    N60BiquadCoefficients bandHighPass;
+    N60BiquadCoefficients bandLowPass;
+} N60DialogueLevelerSnapshot;
+
 typedef enum {
     N60CompressorTopologyFeedForward = 0,
     N60CompressorTopologyFeedBack = 1,
@@ -196,6 +219,7 @@ typedef struct {
     N60SpectralDenoiserSnapshot spectralDenoiser;
     N60LoudnessMatchSnapshot loudnessMatch;
     N60LoudnessContourSnapshot loudnessContour;
+    N60DialogueLevelerSnapshot dialogueLeveler;
     N60DeEsserSnapshot deEsser;
     N60MultibandCompressorSnapshot multibandCompressor;
     N60CompressorSnapshot compressor;
@@ -261,6 +285,22 @@ typedef struct {
     N60BiquadState loudnessHighShelfLeft;
     N60BiquadState loudnessHighShelfRight;
     float loudnessMix;
+    N60BiquadState dialogueHighPassLeft;
+    N60BiquadState dialogueHighPassRight;
+    N60BiquadState dialogueLowPassLeft;
+    N60BiquadState dialogueLowPassRight;
+    float dialogueProgramMeanSquare;
+    float dialogueBandMeanSquare;
+    float dialogueVoiceEnvelope;
+    float dialogueModulationPreviousInput;
+    float dialogueModulationHighPassOutput;
+    float dialogueModulationLowPassOutput;
+    float dialogueModulationMeanSquare;
+    float dialogueBoostDB;
+    float dialogueProgramLevelDBFS;
+    float dialogueBandLevelDBFS;
+    float dialogueGapDB;
+    float dialogueVoiceConfidence;
     float deEsserGainDB;
     N60BiquadState deEsserHighPassLeft;
     N60BiquadState deEsserHighPassRight;
@@ -293,6 +333,11 @@ typedef struct {
     float loudnessShortTermLUFS;
     float loudnessMatchGainDB;
     float loudnessContourScale;
+    float dialogueProgramLevelDBFS;
+    float dialogueBandLevelDBFS;
+    float dialogueGapDB;
+    float dialogueVoiceConfidence;
+    float dialogueBoostDB;
     float compressorGainReductionDB;
     float expanderAttenuationDB;
     float pauseGateGain;
@@ -381,6 +426,29 @@ bool N60DynamicsSnapshotSetLoudnessContour(
     double sampleRate,
     bool enabled,
     float strength
+);
+
+bool N60DynamicsSnapshotSetDialogueLeveler(
+    N60DynamicsSnapshot * _Nonnull snapshot,
+    double sampleRate,
+    bool enabled,
+    double bandLowHz,
+    double bandHighHz,
+    float targetGapDB,
+    float boostRatio,
+    float maxBoostDB,
+    float detectorWindowMs,
+    float attackMs,
+    float releaseMs,
+    float programGateThresholdDB,
+    bool voiceGateEnabled,
+    float modulationCenterHz,
+    float modulationBandwidthHz,
+    float voiceEnvelopeWindowMs,
+    float voiceMeasurementWindowMs,
+    float confidenceFloorIndex,
+    float confidenceCeilingIndex,
+    float minConfidence
 );
 
 bool N60DynamicsSnapshotSetDeEsser(

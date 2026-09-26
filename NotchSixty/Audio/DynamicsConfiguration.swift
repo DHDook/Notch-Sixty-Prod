@@ -9,6 +9,7 @@ enum DynamicsConfigurationError: Error, LocalizedError, Equatable {
     case invalidSpectralDenoiser
     case invalidLoudnessMatch
     case invalidLoudnessContour
+    case invalidDialogueLeveler
     case invalidDeEsser
     case invalidMultibandCompressor
     case invalidCompressor
@@ -36,6 +37,8 @@ enum DynamicsConfigurationError: Error, LocalizedError, Equatable {
             return "LUFS Loudness Match parameters are outside the supported production range."
         case .invalidLoudnessContour:
             return "Loudness Contour parameters are outside the supported production range."
+        case .invalidDialogueLeveler:
+            return "Dialogue Relative Leveler parameters are outside the supported production range."
         case .invalidDeEsser:
             return "De-Esser parameters are outside the supported production range."
         case .invalidMultibandCompressor:
@@ -377,6 +380,76 @@ struct LoudnessContourConfiguration: Equatable, Sendable {
     }
 }
 
+struct DialogueVoiceGateConfiguration: Equatable, Sendable {
+    static let centerRange = 2.0...10.0
+    static let bandwidthRange = 2.0...8.0
+    static let envelopeWindowRange = 5.0...30.0
+    static let measurementWindowRange = 300.0...1_500.0
+    static let confidenceRange = 0.0...1.0
+
+    var enabled = false
+    var modulationCenterHz = 5.0
+    var modulationBandwidthHz = 5.0
+    var envelopeWindowMs = 15.0
+    var measurementWindowMs = 700.0
+    var confidenceFloorIndex = 0.15
+    var confidenceCeilingIndex = 0.45
+    var minConfidence = 0.2
+
+    func validate() throws {
+        guard modulationCenterHz.isFinite, Self.centerRange.contains(modulationCenterHz),
+              modulationBandwidthHz.isFinite, Self.bandwidthRange.contains(modulationBandwidthHz),
+              envelopeWindowMs.isFinite, Self.envelopeWindowRange.contains(envelopeWindowMs),
+              measurementWindowMs.isFinite, Self.measurementWindowRange.contains(measurementWindowMs),
+              confidenceFloorIndex.isFinite, Self.confidenceRange.contains(confidenceFloorIndex),
+              confidenceCeilingIndex.isFinite, Self.confidenceRange.contains(confidenceCeilingIndex),
+              confidenceCeilingIndex > confidenceFloorIndex,
+              minConfidence.isFinite, Self.confidenceRange.contains(minConfidence) else {
+            throw DynamicsConfigurationError.invalidDialogueLeveler
+        }
+    }
+}
+
+struct DialogueRelativeLevelerConfiguration: Equatable, Sendable {
+    static let bandRange = 100.0...8_000.0
+    static let targetGapRange = 3.0...20.0
+    static let boostRatioRange = 1.0...6.0
+    static let maxBoostRange = 0.0...15.0
+    static let detectorWindowRange = 50.0...500.0
+    static let attackRange = 10.0...1_000.0
+    static let releaseRange = 50.0...3_000.0
+    static let programGateRange = -70.0 ... -30.0
+
+    var enabled = false
+    var bandLowHz = 300.0
+    var bandHighHz = 3_500.0
+    var targetGapDB = 10.0
+    var boostRatio = 2.0
+    var maxBoostDB = 8.0
+    var detectorWindowMs = 300.0
+    var attackMs = 150.0
+    var releaseMs = 900.0
+    var programGateThresholdDB = -50.0
+    var voiceGate = DialogueVoiceGateConfiguration()
+
+    func validate(sampleRate: Double) throws {
+        try voiceGate.validate()
+        guard sampleRate.isFinite, sampleRate > 0,
+              bandLowHz.isFinite, Self.bandRange.contains(bandLowHz),
+              bandHighHz.isFinite, Self.bandRange.contains(bandHighHz),
+              bandLowHz < bandHighHz, bandHighHz < sampleRate * 0.45,
+              targetGapDB.isFinite, Self.targetGapRange.contains(targetGapDB),
+              boostRatio.isFinite, Self.boostRatioRange.contains(boostRatio),
+              maxBoostDB.isFinite, Self.maxBoostRange.contains(maxBoostDB),
+              detectorWindowMs.isFinite, Self.detectorWindowRange.contains(detectorWindowMs),
+              attackMs.isFinite, Self.attackRange.contains(attackMs),
+              releaseMs.isFinite, Self.releaseRange.contains(releaseMs),
+              programGateThresholdDB.isFinite, Self.programGateRange.contains(programGateThresholdDB) else {
+            throw DynamicsConfigurationError.invalidDialogueLeveler
+        }
+    }
+}
+
 struct DeEsserConfiguration: Equatable, Sendable {
     static let frequencyRange = 2_000.0...10_000.0
     static let thresholdRange = -60.0...0.0
@@ -686,6 +759,7 @@ struct DynamicsConfiguration: Equatable, Sendable {
     var spectralDenoiser = SpectralDenoiserConfiguration()
     var loudnessMatch = LoudnessMatchConfiguration()
     var loudnessContour = LoudnessContourConfiguration()
+    var dialogueRelativeLeveler = DialogueRelativeLevelerConfiguration()
     var deEsser = DeEsserConfiguration()
     var multibandCompressor = MultibandCompressorConfiguration()
     var compressor = CompressorConfiguration()
@@ -702,6 +776,7 @@ struct DynamicsConfiguration: Equatable, Sendable {
         try spectralDenoiser.validate(sampleRate: sampleRate)
         try loudnessMatch.validate()
         try loudnessContour.validate()
+        try dialogueRelativeLeveler.validate(sampleRate: sampleRate)
         try deEsser.validate()
         try multibandCompressor.validate()
         try compressor.validate()
@@ -768,6 +843,28 @@ struct DynamicsConfiguration: Equatable, Sendable {
             Float(loudnessMatch.releaseSeconds)
         ) else { throw DynamicsConfigurationError.invalidLoudnessMatch }
         guard N60DynamicsSnapshotSetLoudnessContour(&snapshot, sampleRate, loudnessContour.enabled, Float(loudnessContour.strength)) else { throw DynamicsConfigurationError.invalidLoudnessContour }
+        guard N60DynamicsSnapshotSetDialogueLeveler(
+            &snapshot,
+            sampleRate,
+            dialogueRelativeLeveler.enabled,
+            dialogueRelativeLeveler.bandLowHz,
+            dialogueRelativeLeveler.bandHighHz,
+            Float(dialogueRelativeLeveler.targetGapDB),
+            Float(dialogueRelativeLeveler.boostRatio),
+            Float(dialogueRelativeLeveler.maxBoostDB),
+            Float(dialogueRelativeLeveler.detectorWindowMs),
+            Float(dialogueRelativeLeveler.attackMs),
+            Float(dialogueRelativeLeveler.releaseMs),
+            Float(dialogueRelativeLeveler.programGateThresholdDB),
+            dialogueRelativeLeveler.voiceGate.enabled,
+            Float(dialogueRelativeLeveler.voiceGate.modulationCenterHz),
+            Float(dialogueRelativeLeveler.voiceGate.modulationBandwidthHz),
+            Float(dialogueRelativeLeveler.voiceGate.envelopeWindowMs),
+            Float(dialogueRelativeLeveler.voiceGate.measurementWindowMs),
+            Float(dialogueRelativeLeveler.voiceGate.confidenceFloorIndex),
+            Float(dialogueRelativeLeveler.voiceGate.confidenceCeilingIndex),
+            Float(dialogueRelativeLeveler.voiceGate.minConfidence)
+        ) else { throw DynamicsConfigurationError.invalidDialogueLeveler }
         guard N60DynamicsSnapshotSetDeEsserAdvanced(
             &snapshot,
             sampleRate,
