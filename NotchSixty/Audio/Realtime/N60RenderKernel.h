@@ -230,6 +230,27 @@ bool N60DSPGraphSnapshotSetEQBandForChannels(
     double q,
     bool enabled
 );
+bool N60DSPGraphSnapshotSetEQPreparedBandForChannels(
+    N60DSPGraphSnapshot * _Nonnull snapshot,
+    uint32_t bandIndex,
+    uint8_t channelMask,
+    N60BiquadFilterType type,
+    double frequencyHz,
+    double gainDB,
+    double q,
+    N60BiquadCoefficients coefficients,
+    bool enabled
+);
+bool N60DSPGraphSnapshotSetEQPreparedBand(
+    N60DSPGraphSnapshot * _Nonnull snapshot,
+    uint32_t bandIndex,
+    N60BiquadFilterType type,
+    double frequencyHz,
+    double gainDB,
+    double q,
+    N60BiquadCoefficients coefficients,
+    bool enabled
+);
 bool N60DSPGraphSnapshotSetCrossover(
     N60DSPGraphSnapshot * _Nonnull snapshot,
     double frequencyHz,

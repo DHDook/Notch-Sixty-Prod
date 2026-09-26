@@ -1022,6 +1022,14 @@ final class AudioIOEngine: ObservableObject {
                       band.q > 0 else {
                     throw EQConfigurationError.invalidBand(index: index)
                 }
+                if band.type == .linkwitzTransform {
+                    guard band.linkwitzTargetHz.isFinite,
+                          band.linkwitzTargetHz > 0,
+                          band.linkwitzTargetQ.isFinite,
+                          band.linkwitzTargetQ > 0 else {
+                        throw EQConfigurationError.invalidBand(index: index)
+                    }
+                }
                 if band.dynamic.enabled {
                     guard band.type == .peaking,
                           DynamicEQBandConfiguration.frequencyRange.contains(band.frequencyHz),

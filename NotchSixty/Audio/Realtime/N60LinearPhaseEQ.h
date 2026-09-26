@@ -25,6 +25,8 @@ typedef struct {
     double frequencyHz;
     double gainDB;
     double q;
+    bool usesPreparedCoefficients;
+    N60BiquadCoefficients preparedCoefficients;
 } N60LinearPhaseEQBand;
 
 typedef struct {
@@ -177,7 +179,21 @@ static inline bool N60LinearPhaseEQDesign(
     for (uint32_t index = 0; index < bandCount; ++index) {
         if (!bands[index].enabled) continue;
         N60BiquadBandSnapshot snapshot = {0};
-        if (!N60BiquadBandSnapshotMake(
+        if (bands[index].usesPreparedCoefficients) {
+            if (!isfinite(bands[index].frequencyHz) || bands[index].frequencyHz <= 0.0
+                || bands[index].frequencyHz >= sampleRate * 0.5
+                || !isfinite(bands[index].gainDB)
+                || !isfinite(bands[index].q) || bands[index].q <= 0.0
+                || !N60BiquadCoefficientsAreFinite(bands[index].preparedCoefficients)) {
+                return false;
+            }
+            snapshot.enabled = true;
+            snapshot.type = bands[index].type;
+            snapshot.frequencyHz = bands[index].frequencyHz;
+            snapshot.gainDB = bands[index].gainDB;
+            snapshot.q = bands[index].q;
+            snapshot.coefficients = bands[index].preparedCoefficients;
+        } else if (!N60BiquadBandSnapshotMake(
                 bands[index].type,
                 sampleRate,
                 bands[index].frequencyHz,
