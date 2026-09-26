@@ -47,6 +47,29 @@ Every material finding is classified as one of:
 | ID | Component | Finding | Classification | Action / acceptance | Status |
 |---|---|---|---|---|---|
 | PR35-000 | Review framework | Establish explicit review taxonomy and preserve PR34 behavior as reference. | PREPARE NOW | This document governs PR35; no speculative performance claims. | COMPLETE |
+| PR35-001 | Dynamics / Dynamic EQ realtime API | `N60DynamicsSnapshot` (which embeds the two-lane 64-band Dynamic EQ snapshot) is passed by value through several realtime processing calls on every frame; Dynamic EQ is then copied by value again. | FIX NOW | Convert render-only processing APIs to `const` snapshot pointers, preserve control-plane value APIs, and run full behavior regression. | IN PROGRESS |
+| PR35-002 | Realtime output bridge | Startup and graph-transition ramps perform multiple atomic loads/stores per rendered sample even though ramp advancement is audio-callback-local work. | FIX NOW | Retain atomic command/publication state but latch/advance ramp runtime locally per callback; publish only bounded telemetry/state as needed. | OPEN |
+| PR35-003 | MainActor graph transitions | `AudioIOEngine` is `@MainActor`, while structural graph transitions synchronously step a fade-down with repeated `usleep` calls before publication. This can visibly stall future UI interaction. | FIX NOW | Remove caller-thread sleep choreography; schedule transitions through bounded realtime/control-plane state without changing audible transition semantics. | OPEN |
+| PR35-004 | Snapshot publication | The two-slot graph publisher waits with `sched_yield()` for the inactive slot's reader count. Safe for the audio thread, but synchronous UI/control-plane publication can block for a callback duration under rapid updates. | PREPARE NOW | Move/coalesce high-frequency publication off the MainActor; evaluate triple-buffer/nonblocking publication only if later measurements justify it. | OPEN |
+| PR35-005 | Meter / telemetry publication | Peak/RMS and processor telemetry are accumulated in the render context and atomically published at buffer end rather than atomically updated per sample. | NO ACTION | Preserve the buffer-aggregated architecture; later UI should poll bounded telemetry rather than request per-sample publication. | REVIEWED |
+| PR35-006 | Partitioned convolution | Realtime memory is preallocated and FIR preparation is off-thread; hot block work uses a scalar custom FFT and scalar complex partition MACs across up to three independent convolution engines. | BENCHMARK LATER | Profile production workload before choosing vDSP/Accelerate, SIMD MACs, shared-input-transform opportunities or partition-size changes. Preserve three independent workflows. | OPEN |
+| PR35-007 | Domain-aware Dynamic EQ math | Active bands perform detector biquads plus `log10f`, optional `sqrtf`, gain conversion `powf`, smoothing and basis filtering at audio rate; dual-lane modes can double band work. | BENCHMARK LATER | Keep current numerically accepted behavior in PR35; evaluate vector/block processing or equivalent fast math only against later measured profiles and strict regressions. | OPEN |
+| PR35-008 | Spectral denoiser | Runtime is preallocated but uses a custom scalar spectral engine up to 4096-point FFTs; likely high-value vector/Accelerate candidate. | BENCHMARK LATER | Complete architecture/realtime review now; defer transform/vectorization choices until the final production workload is profiled. | OPEN |
+| PR35-009 | Render-kernel documentation | A stale comment still describes Dynamic EQ as linked physical stereo and says Mid/Side does not have independent dynamic detectors, contradicting the accepted PR34 domain-aware design. | FIX NOW | Correct while touching the render API so maintenance decisions use the current contract. | IN PROGRESS |
+
+## Initial architectural observations
+
+### Realtime snapshot ownership
+
+The render kernel correctly acquires one graph snapshot per output callback and keeps that snapshot stable for the callback. The first review tranche found that downstream C processing APIs then pass large nested snapshots by value per frame. PR35-001 removes those redundant copies without changing graph ownership or DSP behavior.
+
+### Telemetry
+
+The existing meter design is appropriate for UI build-out: samples accumulate into callback-local peak/RMS state, and atomic publication occurs at render-buffer end. Production UI should consume this bounded telemetry model rather than introduce per-frame Swift/UI traffic.
+
+### Control/UI boundary
+
+The current double-buffer graph publication contract keeps the realtime reader lock-free, but `AudioIOEngine` is MainActor-isolated and structural transitions currently include caller-thread sleep choreography. This must be corrected before high-frequency production controls are layered on top; otherwise the DSP itself can remain glitch-free while the UI feels unresponsive.
 
 ## Deferred measured phase
 
