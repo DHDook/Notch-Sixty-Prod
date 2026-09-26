@@ -347,6 +347,85 @@ final class NotchSixtyTests: XCTestCase {
         XCTAssertTrue(projected[1].usesPreparedCoefficients)
     }
 
+    func testCompiledEQKeeps64UserBandLimitIndependentOfSectionCount() throws {
+        XCTAssertEqual(Int(N60_MAX_EQ_BANDS), 64)
+        XCTAssertEqual(Int(N60_MAX_EQ_COMPILED_SECTIONS_PER_BAND), 8)
+        let compiledCapacity = Int(N60_MAX_EQ_BANDS) * 2 * Int(N60_MAX_EQ_COMPILED_SECTIONS_PER_BAND)
+        XCTAssertGreaterThanOrEqual(compiledCapacity, 1_024)
+
+        let steep = EQBand(type: .lowPass, frequencyHz: 8_000, gainDB: 0, q: 0.707, slope: .db96)
+        XCTAssertEqual(try steep.compiledSections(sampleRate: 96_000).count, 8)
+
+        let linkedBands = (0..<64).map { index in
+            EQBand(type: .lowPass, frequencyHz: 4_000 + Double(index) * 20, gainDB: 0, q: 0.707, slope: .db96)
+        }
+        let linked = StereoEQConfiguration(channelMode: .linked, phaseMode: .minimumPhase, linkedBands: linkedBands)
+        let linkedGraph = try linked.makeGraphSnapshot(
+            sampleRate: 96_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: PlaybackControlConfiguration()
+        )
+        XCTAssertEqual(linkedGraph.eqBandCount, 512)
+
+        let independent = StereoEQConfiguration(
+            channelMode: .independent,
+            editChannel: .left,
+            phaseMode: .minimumPhase,
+            linkedBands: [],
+            leftBands: linkedBands,
+            rightBands: linkedBands,
+            independentSeeded: true
+        )
+        let independentGraph = try independent.makeGraphSnapshot(
+            sampleRate: 96_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: PlaybackControlConfiguration()
+        )
+        XCTAssertEqual(independentGraph.eqBandCount, 1_024)
+    }
+
+    func testSlopeSectionCountsAndTiltCompilation() throws {
+        let expectations: [(EQFilterSlope, Int)] = [
+            (.db6, 1), (.db12, 1), (.db18, 2), (.db24, 2),
+            (.db36, 3), (.db48, 4), (.db60, 5), (.db72, 6),
+            (.db84, 7), (.db96, 8),
+        ]
+        for (slope, count) in expectations {
+            let lowPass = EQBand(type: .lowPass, frequencyHz: 2_000, q: 0.707, slope: slope)
+            XCTAssertEqual(try lowPass.compiledSections(sampleRate: 48_000).count, count)
+        }
+
+        let shelf = EQBand(type: .lowShelf, frequencyHz: 1_000, gainDB: 6, q: 0.8, slope: .db12)
+        let shelfSections = try shelf.compiledSections(sampleRate: 48_000)
+        XCTAssertEqual(shelfSections.count, 1)
+        var legacyCoefficients = N60BiquadCoefficients()
+        XCTAssertTrue(N60BiquadDesign(N60BiquadFilterTypeLowShelf, 48_000, 1_000, 6, 0.8, &legacyCoefficients))
+        XCTAssertEqual(shelfSections[0].coefficients.b0, legacyCoefficients.b0, accuracy: 1e-7)
+        XCTAssertEqual(shelfSections[0].coefficients.a1, legacyCoefficients.a1, accuracy: 1e-7)
+
+        let tilt = EQBand(type: .tilt, frequencyHz: 1_000, gainDB: 8, q: 4.0)
+        let tiltSections = try tilt.compiledSections(sampleRate: 48_000)
+        XCTAssertEqual(tiltSections.count, 2)
+        XCTAssertEqual(tiltSections[0].type, N60BiquadFilterTypeLowShelf)
+        XCTAssertEqual(tiltSections[0].gainDB, -4, accuracy: 1e-12)
+        XCTAssertEqual(tiltSections[1].type, N60BiquadFilterTypeHighShelf)
+        XCTAssertEqual(tiltSections[1].gainDB, 4, accuracy: 1e-12)
+    }
+
+    func testLinearPhaseProjectsCompiledHighOrderSections() throws {
+        let band = EQBand(type: .highPass, frequencyHz: 80, q: 0.707, slope: .db96)
+        let configuration = StereoEQConfiguration(
+            channelMode: .linked,
+            phaseMode: .linearPhase,
+            linkedBands: [band]
+        )
+        let projected = try configuration.linearPhaseBands(for: .linked, sampleRate: 96_000)
+        XCTAssertEqual(projected.count, 8)
+        XCTAssertTrue(projected.allSatisfy(\.usesPreparedCoefficients))
+    }
+
     func testAllPassMaintainsUnityMagnitudeAcrossSupportedRates() {
         for rate in [44_100.0, 48_000.0, 96_000.0, 192_000.0, 384_000.0] {
             for tone in [100.0, 1_000.0, min(10_000.0, rate * 0.20)] {

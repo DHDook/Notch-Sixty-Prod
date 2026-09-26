@@ -1050,7 +1050,9 @@ struct ContentView: View {
                     .frame(width: 65)
                     .disabled(band.type == .linkwitzTransform)
                 Text("dB").font(.caption).foregroundStyle(.secondary)
-                TextField("Q", value: binding.q, format: .number.precision(.fractionLength(2...3))).frame(width: 65)
+                TextField("Q", value: binding.q, format: .number.precision(.fractionLength(2...3)))
+                    .frame(width: 65)
+                    .disabled(band.type == .tilt)
                 Text("Q").foregroundStyle(.secondary)
                 Toggle("Constant Q", isOn: binding.constantQ)
                     .toggleStyle(.switch)
@@ -1060,6 +1062,25 @@ struct ContentView: View {
                     .disabled(!dynamicSupported)
                 Spacer()
                 Button("Remove") { try? engine.removeEQBand(id: band.id) }
+            }
+
+            if band.type.supportsSlope {
+                HStack(spacing: 8) {
+                    Text("Slope").frame(width: 82, alignment: .leading).foregroundStyle(.secondary)
+                    Picker("Slope", selection: binding.slope) {
+                        ForEach(EQFilterSlope.allCases) { slope in
+                            Text(slope.displayName).tag(slope)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 130)
+                }
+            }
+            if band.type == .tilt {
+                Text("Tilt amount is the total low-to-high differential around the pivot: positive brightens highs and attenuates lows symmetrically.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 40)
             }
 
             if band.type == .linkwitzTransform {

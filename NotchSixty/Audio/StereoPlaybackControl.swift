@@ -245,37 +245,31 @@ struct StereoEQConfiguration: Equatable, Sendable {
     private func publishMinimumPhaseBand(
         _ band: EQBand,
         into graph: inout N60DSPGraphSnapshot,
-        renderIndex: UInt32,
+        renderIndex: inout UInt32,
         channelMask: UInt8? = nil
     ) throws {
-        let ok: Bool
-        if band.type == .linkwitzTransform {
-            guard let coefficients = band.linkwitzCoefficients(sampleRate: graph.sampleRate) else {
+        for section in try band.compiledSections(sampleRate: graph.sampleRate) {
+            let compiledCapacity = UInt32(EQConfiguration.maximumBandCount * 2 * Int(N60_MAX_EQ_COMPILED_SECTIONS_PER_BAND))
+            guard renderIndex < compiledCapacity else {
                 throw EQConfigurationError.invalidBand(index: Int(renderIndex))
             }
+            let ok: Bool
             if let channelMask {
                 ok = N60DSPGraphSnapshotSetEQPreparedBandForChannels(
-                    &graph, renderIndex, channelMask, band.compiledCType,
-                    band.frequencyHz, 0.0, band.q, coefficients, true
+                    &graph, renderIndex, channelMask, section.type,
+                    section.frequencyHz, section.gainDB, section.q,
+                    section.coefficients, true
                 )
             } else {
                 ok = N60DSPGraphSnapshotSetEQPreparedBand(
-                    &graph, renderIndex, band.compiledCType,
-                    band.frequencyHz, 0.0, band.q, coefficients, true
+                    &graph, renderIndex, section.type,
+                    section.frequencyHz, section.gainDB, section.q,
+                    section.coefficients, true
                 )
             }
-        } else if let channelMask {
-            ok = N60DSPGraphSnapshotSetEQBandForChannels(
-                &graph, renderIndex, channelMask, band.compiledCType,
-                band.frequencyHz, band.gainDB, band.q, true
-            )
-        } else {
-            ok = N60DSPGraphSnapshotSetEQBand(
-                &graph, renderIndex, band.compiledCType,
-                band.frequencyHz, band.gainDB, band.q, true
-            )
+            guard ok else { throw EQConfigurationError.invalidBand(index: Int(renderIndex)) }
+            renderIndex += 1
         }
-        guard ok else { throw EQConfigurationError.invalidBand(index: Int(renderIndex)) }
     }
 
     func makeGraphSnapshot(
@@ -322,23 +316,20 @@ struct StereoEQConfiguration: Equatable, Sendable {
             switch channelMode {
             case .linked:
                 for band in try validatedEnabledBands(linkedBands, sampleRate: sampleRate) {
-                    try publishMinimumPhaseBand(band, into: &graph, renderIndex: renderIndex)
-                    renderIndex += 1
+                    try publishMinimumPhaseBand(band, into: &graph, renderIndex: &renderIndex)
                 }
             case .independent:
                 for band in try validatedEnabledBands(leftBands, sampleRate: sampleRate) {
                     try publishMinimumPhaseBand(
-                        band, into: &graph, renderIndex: renderIndex,
+                        band, into: &graph, renderIndex: &renderIndex,
                         channelMask: UInt8(N60_EQ_CHANNEL_LEFT)
                     )
-                    renderIndex += 1
                 }
                 for band in try validatedEnabledBands(rightBands, sampleRate: sampleRate) {
                     try publishMinimumPhaseBand(
-                        band, into: &graph, renderIndex: renderIndex,
+                        band, into: &graph, renderIndex: &renderIndex,
                         channelMask: UInt8(N60_EQ_CHANNEL_RIGHT)
                     )
-                    renderIndex += 1
                 }
             }
         }
@@ -380,22 +371,26 @@ struct StereoEQConfiguration: Equatable, Sendable {
         guard !bands.contains(where: { $0.type == .allPass }) else {
             throw EQConfigurationError.allPassRequiresMinimumPhase
         }
-        return try bands.enumerated().map { index, band in
-            var cBand = N60LinearPhaseEQBand()
-            cBand.enabled = true
-            cBand.type = band.compiledCType
-            cBand.frequencyHz = band.frequencyHz
-            cBand.gainDB = band.type == .linkwitzTransform ? 0.0 : band.gainDB
-            cBand.q = band.q
-            if band.type == .linkwitzTransform {
-                guard let coefficients = band.linkwitzCoefficients(sampleRate: sampleRate) else {
-                    throw EQConfigurationError.invalidBand(index: index)
+        var result: [N60LinearPhaseEQBand] = []
+        result.reserveCapacity(bands.count * 2)
+        for (index, band) in bands.enumerated() {
+            do {
+                for section in try band.compiledSections(sampleRate: sampleRate) {
+                    var cBand = N60LinearPhaseEQBand()
+                    cBand.enabled = true
+                    cBand.type = section.type
+                    cBand.frequencyHz = section.frequencyHz
+                    cBand.gainDB = section.gainDB
+                    cBand.q = section.q
+                    cBand.usesPreparedCoefficients = true
+                    cBand.preparedCoefficients = section.coefficients
+                    result.append(cBand)
                 }
-                cBand.usesPreparedCoefficients = true
-                cBand.preparedCoefficients = coefficients
+            } catch {
+                throw EQConfigurationError.invalidBand(index: index)
             }
-            return cBand
         }
+        return result
     }
 }
 

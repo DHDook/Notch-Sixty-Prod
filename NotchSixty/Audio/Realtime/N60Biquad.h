@@ -27,6 +27,7 @@ typedef enum {
     N60BiquadFilterTypeBandPass = 7,
     N60BiquadFilterTypePeakingConstantQ = 8,
     N60BiquadFilterTypeLinkwitzTransform = 9,
+    N60BiquadFilterTypeTilt = 10,
 } N60BiquadFilterType;
 
 typedef struct {
@@ -225,6 +226,93 @@ static inline bool N60BiquadDesign(
     if (!N60BiquadCoefficientsAreFinite(normalized)) {
         return false;
     }
+    *coefficients = normalized;
+    return true;
+}
+
+static inline uint32_t N60BiquadButterworthSectionCount(uint32_t order) {
+    if (order < 1u || order > 16u) return 0u;
+    return (order + 1u) / 2u;
+}
+
+static inline bool N60BiquadDesignFirstOrderLowHighPass(
+    N60BiquadFilterType type,
+    double sampleRate,
+    double frequencyHz,
+    N60BiquadCoefficients * _Nonnull coefficients
+) {
+    if (coefficients == NULL
+        || (type != N60BiquadFilterTypeLowPass && type != N60BiquadFilterTypeHighPass)
+        || !isfinite(sampleRate) || sampleRate <= 0.0
+        || !isfinite(frequencyHz) || frequencyHz <= 0.0 || frequencyHz >= sampleRate * 0.5) {
+        return false;
+    }
+    double c = tan(M_PI * frequencyHz / sampleRate);
+    double a0 = 1.0 + c;
+    double b0 = type == N60BiquadFilterTypeLowPass ? c : 1.0;
+    double b1 = type == N60BiquadFilterTypeLowPass ? c : -1.0;
+    N60BiquadCoefficients normalized = N60BiquadNormalize(
+        b0, b1, 0.0, a0, c - 1.0, 0.0
+    );
+    if (!N60BiquadCoefficientsAreFinite(normalized)) return false;
+    *coefficients = normalized;
+    return true;
+}
+
+static inline bool N60BiquadDesignButterworthSection(
+    N60BiquadFilterType type,
+    double sampleRate,
+    double frequencyHz,
+    uint32_t order,
+    uint32_t sectionIndex,
+    N60BiquadCoefficients * _Nonnull coefficients
+) {
+    uint32_t sectionCount = N60BiquadButterworthSectionCount(order);
+    if (coefficients == NULL || sectionCount == 0u || sectionIndex >= sectionCount
+        || (type != N60BiquadFilterTypeLowPass && type != N60BiquadFilterTypeHighPass)) {
+        return false;
+    }
+
+    bool hasFirstOrder = (order & 1u) != 0u;
+    if (hasFirstOrder && sectionIndex == 0u) {
+        return N60BiquadDesignFirstOrderLowHighPass(type, sampleRate, frequencyHz, coefficients);
+    }
+
+    uint32_t pairIndex = sectionIndex - (hasFirstOrder ? 1u : 0u);
+    double angle = ((2.0 * (double)pairIndex) + 1.0) * M_PI / (2.0 * (double)order);
+    double q = 1.0 / (2.0 * sin(angle));
+    return N60BiquadDesign(type, sampleRate, frequencyHz, 0.0, q, coefficients);
+}
+
+static inline bool N60BiquadDesignFirstOrderShelf(
+    N60BiquadFilterType type,
+    double sampleRate,
+    double frequencyHz,
+    double gainDB,
+    N60BiquadCoefficients * _Nonnull coefficients
+) {
+    if (coefficients == NULL
+        || (type != N60BiquadFilterTypeLowShelf && type != N60BiquadFilterTypeHighShelf)
+        || !isfinite(sampleRate) || sampleRate <= 0.0
+        || !isfinite(frequencyHz) || frequencyHz <= 0.0 || frequencyHz >= sampleRate * 0.5
+        || !isfinite(gainDB) || gainDB < N60_EQ_MIN_GAIN_DB || gainDB > N60_EQ_MAX_GAIN_DB) {
+        return false;
+    }
+    double c = tan(M_PI * frequencyHz / sampleRate);
+    double gain = pow(10.0, gainDB / 20.0);
+    double b0;
+    double b1;
+    if (type == N60BiquadFilterTypeLowShelf) {
+        b0 = 1.0 + gain * c;
+        b1 = gain * c - 1.0;
+    } else {
+        b0 = gain + c;
+        b1 = c - gain;
+    }
+    N60BiquadCoefficients normalized = N60BiquadNormalize(
+        b0, b1, 0.0, 1.0 + c, c - 1.0, 0.0
+    );
+    if (!N60BiquadCoefficientsAreFinite(normalized)) return false;
     *coefficients = normalized;
     return true;
 }

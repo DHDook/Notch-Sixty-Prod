@@ -10,6 +10,7 @@ enum EQFilterType: String, CaseIterable, Identifiable, Sendable {
     case highPass
     case bandPass
     case linkwitzTransform
+    case tilt
     case notch
     case allPass
 
@@ -24,8 +25,17 @@ enum EQFilterType: String, CaseIterable, Identifiable, Sendable {
         case .highPass: return "High Pass"
         case .bandPass: return "Band Pass"
         case .linkwitzTransform: return "Linkwitz Transform"
+        case .tilt: return "Tilt"
         case .notch: return "Notch"
         case .allPass: return "All-Pass"
+        }
+    }
+
+
+    var supportsSlope: Bool {
+        switch self {
+        case .lowShelf, .highShelf, .lowPass, .highPass: return true
+        default: return false
         }
     }
 
@@ -38,10 +48,28 @@ enum EQFilterType: String, CaseIterable, Identifiable, Sendable {
         case .highPass: return N60BiquadFilterTypeHighPass
         case .bandPass: return N60BiquadFilterTypeBandPass
         case .linkwitzTransform: return N60BiquadFilterTypeLinkwitzTransform
+        case .tilt: return N60BiquadFilterTypeTilt
         case .notch: return N60BiquadFilterTypeNotch
         case .allPass: return N60BiquadFilterTypeAllPass
         }
     }
+}
+
+enum EQFilterSlope: Int, CaseIterable, Identifiable, Sendable {
+    case db6 = 6
+    case db12 = 12
+    case db18 = 18
+    case db24 = 24
+    case db36 = 36
+    case db48 = 48
+    case db60 = 60
+    case db72 = 72
+    case db84 = 84
+    case db96 = 96
+
+    var id: Int { rawValue }
+    var displayName: String { "\(rawValue) dB/oct" }
+    var order: Int { rawValue / 6 }
 }
 
 enum EQPhaseMode: String, CaseIterable, Identifiable, Sendable {
@@ -102,6 +130,7 @@ struct EQBand: Identifiable, Equatable, Sendable {
     var frequencyHz: Double
     var gainDB: Double
     var q: Double
+    var slope: EQFilterSlope
     var constantQ: Bool
     var linkwitzTargetHz: Double
     var linkwitzTargetQ: Double
@@ -114,6 +143,7 @@ struct EQBand: Identifiable, Equatable, Sendable {
         frequencyHz: Double = 1_000,
         gainDB: Double = 0,
         q: Double = 0.707,
+        slope: EQFilterSlope = .db12,
         constantQ: Bool = false,
         linkwitzTargetHz: Double = 40.0,
         linkwitzTargetQ: Double = 0.707,
@@ -125,6 +155,7 @@ struct EQBand: Identifiable, Equatable, Sendable {
         self.frequencyHz = frequencyHz
         self.gainDB = gainDB
         self.q = q
+        self.slope = slope
         self.constantQ = constantQ
         self.linkwitzTargetHz = linkwitzTargetHz
         self.linkwitzTargetQ = linkwitzTargetQ
@@ -150,6 +181,98 @@ struct EQBand: Identifiable, Equatable, Sendable {
             &coefficients
         ) else { return nil }
         return coefficients
+    }
+
+    func compiledSections(sampleRate: Double) throws -> [N60BiquadBandSnapshot] {
+        func snapshot(
+            type: N60BiquadFilterType,
+            gainDB: Double,
+            q: Double,
+            coefficients: N60BiquadCoefficients
+        ) -> N60BiquadBandSnapshot {
+            var result = N60BiquadBandSnapshot()
+            result.enabled = true
+            result.type = type
+            result.frequencyHz = frequencyHz
+            result.gainDB = gainDB
+            result.q = q
+            result.coefficients = coefficients
+            return result
+        }
+
+        if type == .linkwitzTransform {
+            guard let coefficients = linkwitzCoefficients(sampleRate: sampleRate) else {
+                throw EQConfigurationError.invalidBand(index: 0)
+            }
+            return [snapshot(type: compiledCType, gainDB: 0, q: q, coefficients: coefficients)]
+        }
+
+        if type == .tilt {
+            // Commercial convention: gainDB is the total low-to-high differential.
+            // Positive tilt raises highs and lowers lows symmetrically by half.
+            var low = N60BiquadCoefficients()
+            var high = N60BiquadCoefficients()
+            let half = gainDB * 0.5
+            guard N60BiquadDesign(N60BiquadFilterTypeLowShelf, sampleRate, frequencyHz, -half, 0.707, &low),
+                  N60BiquadDesign(N60BiquadFilterTypeHighShelf, sampleRate, frequencyHz, half, 0.707, &high) else {
+                throw EQConfigurationError.invalidBand(index: 0)
+            }
+            return [
+                snapshot(type: N60BiquadFilterTypeLowShelf, gainDB: -half, q: 0.707, coefficients: low),
+                snapshot(type: N60BiquadFilterTypeHighShelf, gainDB: half, q: 0.707, coefficients: high),
+            ]
+        }
+
+        if type == .lowPass || type == .highPass {
+            let order = UInt32(slope.order)
+            let count = N60BiquadButterworthSectionCount(order)
+            guard count > 0, count <= UInt32(N60_MAX_EQ_COMPILED_SECTIONS_PER_BAND) else {
+                throw EQConfigurationError.invalidBand(index: 0)
+            }
+            return try (0..<count).map { sectionIndex in
+                var coefficients = N60BiquadCoefficients()
+                guard N60BiquadDesignButterworthSection(
+                    type.cType, sampleRate, frequencyHz, order, sectionIndex, &coefficients
+                ) else { throw EQConfigurationError.invalidBand(index: Int(sectionIndex)) }
+                return snapshot(type: type.cType, gainDB: 0, q: q, coefficients: coefficients)
+            }
+        }
+
+        if type == .lowShelf || type == .highShelf {
+            let order = slope.order
+            let pairCount = order / 2
+            let hasFirst = order.isMultiple(of: 2) == false
+            var result: [N60BiquadBandSnapshot] = []
+            result.reserveCapacity((order + 1) / 2)
+            if hasFirst {
+                var coefficients = N60BiquadCoefficients()
+                let sectionGain = gainDB / Double(order)
+                guard N60BiquadDesignFirstOrderShelf(
+                    type.cType, sampleRate, frequencyHz, sectionGain, &coefficients
+                ) else { throw EQConfigurationError.invalidBand(index: 0) }
+                result.append(snapshot(type: type.cType, gainDB: sectionGain, q: q, coefficients: coefficients))
+            }
+            if pairCount > 0 {
+                let sectionGain = gainDB * 2.0 / Double(order)
+                for pair in 0..<pairCount {
+                    var coefficients = N60BiquadCoefficients()
+                    guard N60BiquadDesign(type.cType, sampleRate, frequencyHz, sectionGain, q, &coefficients) else {
+                        throw EQConfigurationError.invalidBand(index: pair)
+                    }
+                    result.append(snapshot(type: type.cType, gainDB: sectionGain, q: q, coefficients: coefficients))
+                }
+            }
+            guard result.count <= Int(N60_MAX_EQ_COMPILED_SECTIONS_PER_BAND) else {
+                throw EQConfigurationError.invalidBand(index: 0)
+            }
+            return result
+        }
+
+        var coefficients = N60BiquadCoefficients()
+        guard N60BiquadDesign(compiledCType, sampleRate, frequencyHz, gainDB, q, &coefficients) else {
+            throw EQConfigurationError.invalidBand(index: 0)
+        }
+        return [snapshot(type: compiledCType, gainDB: gainDB, q: q, coefficients: coefficients)]
     }
 }
 
@@ -425,34 +548,17 @@ struct EQConfiguration: Equatable, Sendable {
             var renderIndex: UInt32 = 0
             for (modelIndex, band) in bands.enumerated() where band.enabled {
                 guard try validateBand(band, index: modelIndex, sampleRate: sampleRate) else { continue }
-                if band.type == .linkwitzTransform {
-                    guard let coefficients = band.linkwitzCoefficients(sampleRate: sampleRate),
+                for section in try band.compiledSections(sampleRate: sampleRate) {
+                    let compiledCapacity = UInt32(EQConfiguration.maximumBandCount * 2 * Int(N60_MAX_EQ_COMPILED_SECTIONS_PER_BAND))
+                    guard renderIndex < compiledCapacity,
                           N60DSPGraphSnapshotSetEQPreparedBand(
-                            &graph,
-                            renderIndex,
-                            band.compiledCType,
-                            band.frequencyHz,
-                            0.0,
-                            band.q,
-                            coefficients,
-                            true
+                            &graph, renderIndex, section.type, section.frequencyHz,
+                            section.gainDB, section.q, section.coefficients, true
                           ) else {
                         throw EQConfigurationError.invalidBand(index: modelIndex)
                     }
-                } else {
-                    guard N60DSPGraphSnapshotSetEQBand(
-                        &graph,
-                        renderIndex,
-                        band.compiledCType,
-                        band.frequencyHz,
-                        band.gainDB,
-                        band.q,
-                        true
-                    ) else {
-                        throw EQConfigurationError.invalidBand(index: modelIndex)
-                    }
+                    renderIndex += 1
                 }
-                renderIndex += 1
             }
         }
 
@@ -515,20 +621,17 @@ struct EQConfiguration: Equatable, Sendable {
             guard band.type != .allPass else {
                 throw EQConfigurationError.allPassRequiresMinimumPhase
             }
-            var cBand = N60LinearPhaseEQBand()
-            cBand.enabled = true
-            cBand.type = band.compiledCType
-            cBand.frequencyHz = band.frequencyHz
-            cBand.gainDB = band.type == .linkwitzTransform ? 0.0 : band.gainDB
-            cBand.q = band.q
-            if band.type == .linkwitzTransform {
-                guard let coefficients = band.linkwitzCoefficients(sampleRate: sampleRate) else {
-                    throw EQConfigurationError.invalidBand(index: index)
-                }
+            for section in try band.compiledSections(sampleRate: sampleRate) {
+                var cBand = N60LinearPhaseEQBand()
+                cBand.enabled = true
+                cBand.type = section.type
+                cBand.frequencyHz = section.frequencyHz
+                cBand.gainDB = section.gainDB
+                cBand.q = section.q
                 cBand.usesPreparedCoefficients = true
-                cBand.preparedCoefficients = coefficients
+                cBand.preparedCoefficients = section.coefficients
+                result.append(cBand)
             }
-            result.append(cBand)
         }
         return result
     }
