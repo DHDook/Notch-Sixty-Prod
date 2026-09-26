@@ -2,7 +2,7 @@
 
 Status: **IN PROGRESS — do not claim full parity from this document yet.**
 
-This ledger is source-driven. The legacy user guide is supplementary evidence only. The audit uses the legacy source tree, configuration/state models, reachable UI wiring, routing/pipeline code, preset models, and tests as behavioral evidence while respecting the clean-room restriction against copying or translating historical DSP implementation expression.
+This ledger is source-driven. The legacy user guide is supplementary evidence only. The audit uses the legacy source tree, configuration/state models, reachable UI wiring, routing/pipeline code, preset models, measurement/metering modules, and tests as behavioral evidence while respecting the clean-room restriction against copying or translating historical DSP implementation expression.
 
 ## Classification
 
@@ -11,7 +11,7 @@ This ledger is source-driven. The legacy user guide is supplementary evidence on
 - **OUT OF CURRENT PRODUCT SCOPE** — excluded by current product directive.
 - **MISSING / BLOCKER** — required observable capability currently has neither equivalent commercial behavior nor an adequate later disposition.
 - **LEGACY-DEAD / UNREACHABLE** — source exists but is not reachable product behavior; requires source evidence.
-- **AUDIT PENDING** — evidence has not yet been sufficient to classify safely.
+- **AUDIT PENDING** — evidence is not yet sufficient to classify safely.
 
 # Wave A — Core EQ / phase / audition
 
@@ -147,7 +147,7 @@ This is separate from the stereo widener; the legacy app exposes a true Mid/Side
 - Flat / Delta comparison semantics: IMPLEMENTED / IMPROVED by Processed / Reference / Delta + raw Global Bypass.
 - **Mixed Phase EQ: MISSING / BLOCKER.**
 
-Important distinction: this legacy Mixed Phase mode is a user-selectable EQ processing mode and is not automatically the same thing as measurement-derived excess-phase room correction. The previous roadmap grouping of “mixed/excess phase” must be split during PR34 planning.
+Important distinction: this legacy Mixed Phase mode is a user-selectable EQ processing mode and is not automatically the same thing as measurement-derived excess-phase room correction. The previous roadmap grouping of “mixed/excess phase” must remain split.
 
 ## A/B/C/D snapshot compare
 
@@ -159,7 +159,127 @@ Important distinction: this legacy Mixed Phase mode is a user-selectable EQ proc
 
 **Classification:** **LATER MILESTONE — Persistence / Presets / Interchange + production UI.**
 
-# Wave B — Output matrix / crossover / speaker channel processing
+# Wave B — Advanced dynamics / conditioning / spatial controls
+
+A source-level pass through `AdvancedProcessingConfig` plus the reachable `DynamicsInlineView` shows that the legacy product surface is larger than the earlier user-guide inventory. This section distinguishes controls already rebuilt in PR28–33 from still-missing reachable behavior.
+
+## Already rebuilt / improved in the commercial engine
+
+Legacy UI contains reachable controls for Infrasonic Filter, Mains Hum Notch, Spectral Denoiser, DC Filter, Stereo Widener, LUFS Loudness Match, Loudness Contour, De-Esser, Multiband Compressor, Compressor, Expander, Dynamic Gain Rider, Soft Clipper, Limiter, De-Harsh, Dialogue-Relative Leveler, Pause Gate, and oversampling.
+
+Commercial `DynamicsConfiguration` and `N60Dynamics` currently carry corresponding production structures/runtime for these features, including De-Harsh, Dialogue Relative Leveler, Dynamic EQ, compressor topology/time constants, multiband makeup/sidechains, Gain Rider, Automatic Headroom, Mains Hum detection/tracking, Spectral Denoising, and linked stereo processing.
+
+**Classification:** **IMPLEMENTED / IMPROVED**, subject to the remaining parameter-by-parameter contract audit rather than feature-existence audit.
+
+The audit still must verify all legacy parameter ranges/defaults where they are product-visible. A differently named or improved control may satisfy parity only where its observable purpose is actually equivalent.
+
+## Standalone FIR Impulse Response vs FIR Correction
+
+**Legacy evidence**
+- `DynamicsInlineView` exposes a reachable `FIR IR` control described as a user-supplied impulse response slot distinct from `FIR Correction`.
+- `AdvancedProcessingConfig.firImpulseResponse` persists its own IR state.
+- The same UI separately exposes `FIR Correction` later in the chain.
+
+**Commercial**
+- Has general convolution infrastructure and a room-correction runtime FIR slot, but the audit has not yet established two separately user-addressable raw-IR/correction workflows matching this legacy surface.
+
+**Classification:** **AUDIT PENDING / likely gap.** This must be resolved together with per-band FIR and the Persistence/Interchange milestone so multiple legacy FIR workflows are not accidentally collapsed without an explicit product decision.
+
+## Speaker IR Alignment
+
+**Legacy evidence**
+- `AdvancedProcessingConfig.speakerIRAlignmentEnabled` and `speakerIRDelayMs`.
+- Reachable `IR Align` toggle/settings in `DynamicsInlineView`.
+- UI describes fractional-sample delay compensation for multi-driver speaker acoustic centres.
+
+**Commercial**
+- Has signed inter-channel fractional delay for L/R alignment, but not a verified independent per-driver physical path at present.
+
+**Classification:** **LATER MILESTONE — Active Crossover Matrix / driver time alignment**, where independent physical outputs make the feature meaningful.
+
+## Sub-Bass Phase Alignment
+
+**Legacy evidence**
+- Reachable `Sub Align` control.
+- Config exposes enable, target frequency, and Q for an all-pass sub-bass alignment network.
+
+**Commercial**
+- Current stereo transport cannot independently apply relative sub-path phase correction to a separate physical sub output.
+
+**Classification:** **LATER MILESTONE — Active Crossover Matrix / room-correction-assisted sub integration.**
+
+## Symmetry Balance
+
+**Legacy evidence**
+- Legacy has ordinary `channelBalance` and, separately, `symmetryBalanceEnabled` using `stereoBalancePosition`.
+- Reachable `Sym. Bal.` control is described as correction for asymmetric listening positions.
+
+**Commercial**
+- Has normal channel balance, but source evidence shows that cannot automatically be treated as the same legacy feature because legacy exposed both independently.
+
+**Classification:** **AUDIT PENDING / likely MISSING.** Determine whether the legacy symmetry mode has observable behavior beyond a conventional L/R balance law before implementation disposition.
+
+## Panning Gain Matrix
+
+**Legacy evidence**
+- Reachable `Panning` control and `panningCrossfeedAmount`.
+- UI describes a bilinear cross-channel blend.
+
+**Commercial**
+- No corresponding control is presently identified in `DynamicsConfiguration`.
+
+**Classification:** **MISSING / BLOCKER pending product-scope decision.** It is a reachable legacy speaker-processing feature; it must not be silently discarded merely because headphone crossfeed is out of scope.
+
+## Crosstalk Cancellation Matrix
+
+**Legacy evidence**
+- Reachable `Crosstalk` toggle/settings.
+- Persisted amount and head-shadow frequency controls.
+- UI describes inter-speaker acoustic-leakage cancellation.
+
+**Commercial**
+- No corresponding current production configuration has been identified.
+
+**Classification:** **MISSING / BLOCKER pending product-scope decision.** This is source-reachable and speaker-oriented, not automatically excluded by the no-headphone directive.
+
+## Hi-Res Coefficient Decoupling
+
+**Legacy evidence**
+- Reachable `Hi-Res Coef` toggle; persisted `coefficientDecouplingEnabled` and runtime active status.
+
+**Commercial**
+- Current C biquad engine has been validated through 384 kHz, but no equivalent user-visible coefficient-decoupling mode has yet been identified.
+
+**Classification:** **AUDIT PENDING.** First determine whether this was a necessary user capability or a legacy workaround superseded by the commercial filter design. If the commercial design is demonstrably robust at high rates without a mode switch, classify IMPROVED rather than recreate a workaround.
+
+## Hardware Sync Buffer
+
+**Legacy evidence**
+- Reachable `Sync Buffer` toggle through `hardwareSyncBufferEnabled`.
+
+**Classification:** **AUDIT PENDING.** Exact observable role and whether current transport lifecycle/latency handling supersedes it still need source-path verification.
+
+## Dither
+
+**Legacy evidence**
+- `AdvancedProcessingConfig.ditherMode` is persisted and the dynamics UI exposes a dither-mode picker.
+
+**Commercial**
+- No equivalent current product control has yet been identified.
+
+**Classification:** **AUDIT PENDING / likely gap.** Need verify actual render-path reachability and output-format relevance before making it a blocker.
+
+## EQ Headroom Compensation
+
+**Legacy evidence**
+- Reachable `EQ Headroom` toggle/settings, described as predictive static preamp attenuation based on EQ/correction boosts.
+
+**Commercial**
+- `AutomaticHeadroomConfiguration` plus conservative static headroom computation are present in the current commercial configuration, alongside the separate reactive Gain Rider.
+
+**Classification:** **IMPLEMENTED / IMPROVED**, pending final range/default comparison.
+
+# Wave C — Output matrix / crossover / speaker channel processing
 
 ## Output channel matrix
 
@@ -168,6 +288,7 @@ Important distinction: this legacy Mixed Phase mode is a user-selectable EQ proc
 - Each output channel has a named signal source and physical device/channel target.
 - `SignalSource` includes full-range mains, Left/Right Low/Mid/High, and Sub Mono.
 - Band-split sources depend on bi-amp/tri-amp Active Crossover state.
+- `SettingsView` directly embeds `OutputChannelMatrixView` as the reachable `Crossover` settings tab.
 
 **Classification:** **LATER MILESTONE — Active Crossover Matrix.**
 
@@ -175,35 +296,82 @@ The later milestone must account for the source/target matrix itself, not just c
 
 ## Per-output channel processing attached to matrix
 
-`OutputChannelConfig` includes observable state for:
+`OutputChannelRowView` and `OutputChannelConfig` expose reachable state for:
+- named channel and enable state
+- source assignment
+- physical output device/channel assignment
 - per-output EQ
 - pre-EQ gain trim ±24 dB
 - polarity inversion
-- user delay 0–100 ms
+- user delay
 - computed FIR compensation delay
-- per-output limiter with ceiling/attack/release/look-ahead
+- per-output limiter
 - fitted group-delay all-pass coefficients
 - optional 2× per-output EQ oversampling
-- excursion protection based on driver Fs/Qts and bounded protection amount/cutoff
+- excursion protection based on driver Fs/Qts and bounded protection amount
+- baffle-step compensation calculator/application
+- diaphragm resonance detection and one/all-notch application
+- pre/post-limiter channel metering
 
 **Classification:** **LATER MILESTONE — Active Crossover Matrix / driver-processing parity.**
-
-These must be explicit acceptance items for that milestone. The current simple stereo bass-management crossover is not equivalent.
 
 ## Active crossover topology
 
 **Legacy evidence**
-- `ActiveCrossoverConfig`: Full Range / Bi-Amp / Tri-Amp.
+- Full Range / Bi-Amp / Tri-Amp.
 - Lower and upper crossover points.
-- Independent LP/HP frequency, slope, and filter type per crossover point via asymmetric controls.
+- Configuration model permits independent LP/HP frequency, slope, and filter type per crossover point via asymmetric controls.
 - Crossover types include Linkwitz-Riley, Butterworth, and FIR Linear Phase.
 - `ActiveCrossoverEngine` produces Left/Right Low/Mid/High buses.
+- UI includes Single Amp, Vertical/Horizontal Bi-Amp, and Vertical/Horizontal Tri-Amp quick topology templates.
 
 **Classification:** **LATER MILESTONE — Active Crossover Matrix.**
 
-Note: the source also contains a placeholder/comment indicating FIR crossover kernel generation was not fully implemented in `ActiveCrossoverEngine` at that point. Reachability and final behavior must therefore be audited before assigning exact FIR-crossover parity requirements.
+**Audit caution:** the source also contains a placeholder/comment indicating FIR crossover kernel generation was not fully implemented at that point. Exact FIR-crossover parity requirement remains **AUDIT PENDING** until end-to-end reachability/behavior is confirmed.
 
-# Wave C — Multi-device routing / SRC
+## Multi-device synchronization
+
+**Legacy reachable UI evidence**
+- Device Synchronisation section appears when matrix channels target more than one physical device.
+- User can choose Aggregate Device or Software PLL.
+- Aggregate mode exposes clock-master choice.
+- Software PLL exposes primary-device choice and lock/status UI.
+
+**Classification:** **LATER MILESTONE — Active Crossover Matrix / physical multi-device routing.**
+
+## Crossover analysis suite
+
+`CrossoverAnalysisView` is embedded directly in the output matrix and exposes five analysis tabs:
+- Group Delay
+- Summation
+- Optimise
+- Time Alignment
+- Verification
+
+Reachable behaviors found so far include:
+- compute per-channel group-delay curves
+- detect adjacent-driver group-delay mismatch near crossover points
+- auto-correct group delay with persisted per-output all-pass coefficients
+- predicted acoustic summation
+- live microphone/RTA overlay on the summation display
+- crossover optimisation using measured transfer-function data
+- driver time alignment
+- polarity detection
+- crossover-frequency alignment refinement
+- combined multi-driver verification measurement
+
+**Classification:** **LATER MILESTONE — Active Crossover Matrix + Room Correction measurement infrastructure.** The crossover milestone must not be reduced to routing/filter creation alone.
+
+## Band-level calibration and system presets
+
+**Legacy reachable UI evidence**
+- Level Calibration workflow using pink noise/SPL measurement.
+- Speaker System Preset save/load controls.
+- Coordination warnings for overlap/notch/subwoofer conditions.
+
+**Classification:** **LATER MILESTONE — Active Crossover Matrix / Persistence.**
+
+# Wave D — Multi-device routing / SRC / device lifecycle
 
 ## Explicit sample-rate conversion
 
@@ -215,11 +383,32 @@ Note: the source also contains a placeholder/comment indicating FIR crossover ke
 **Commercial**
 - Current product transport handles its selected output route/sample-rate lifecycle, but no equivalent multi-device secondary-output PLL/SRC matrix has been established.
 
-**Classification:** **LATER MILESTONE — Active Crossover Matrix / physical multi-device routing**, subject to source reachability audit.
+**Classification:** **LATER MILESTONE — Active Crossover Matrix / physical multi-device routing.**
 
-This should not be confused with ordinary DSP oversampling.
+This must not be confused with DSP oversampling.
 
-# Wave D — Metering / analysis
+## Automatic vs Manual routing and capture modes
+
+**Legacy reachable Settings UI**
+- Automatic routing mode managed by the virtual driver.
+- Manual routing with explicit input/output selection.
+- Manual mode microphone-permission flow.
+- Automatic-driver capture supports `Shared Memory` and `HAL Input` modes.
+- Shared Memory is described as the preferred lock-free path without microphone indicator; HAL Input is the fallback and requires microphone permission.
+
+**Classification:** **AUDIT PENDING — commercial transport / App Store architecture.** The clean commercial product may intentionally replace legacy-driver mechanics, but equivalent end-user routing/recovery behavior must be accounted for explicitly rather than copied mechanically.
+
+## Device disconnect / replacement recovery
+
+**Legacy evidence**
+- `DeviceChangeCoordinator` monitors selected-output loss, maintains output-device history, and selects a replacement from history or currently valid devices.
+- Built-in-device add/remove behavior is separately handled for headphone switching.
+
+**Classification:**
+- General selected-output loss/replacement behavior: **LATER MILESTONE — hardening / device recovery**, subject to comparison with current `AudioIOEngine` recovery.
+- Headphone-specific automatic switching: **OUT OF CURRENT PRODUCT SCOPE** under the explicit no-headphone-feature directive, while retaining the non-headphone recovery semantics above.
+
+# Wave E — Metering / analysis
 
 **Legacy reachable UI evidence**
 `EQWindowView` exposes dedicated RTA, Levels, and Analytics windows. Analytics definitions include:
@@ -232,46 +421,80 @@ This should not be confused with ordinary DSP oversampling.
 - True Peak
 - Stereo Goniometer
 
-Other source modules include `RTAAnalyzer` and `GoniometerEngine`; persisted meter state includes RTA, level meters, VU meters, and source selection.
+Other source modules include `RTAAnalyzer`, `GoniometerEngine`, peak/RMS/VU views, and persisted VU source selection.
+
+The legacy RTA is not a generic single FFT display: source identifies a dual pre-EQ/post-processing 31-band ISO 1/3-octave analyzer with peak hold, standard/slow-average modes, multi-resolution FFT lanes, and analysis gating by window visibility/enabled state.
 
 **Classification:** **LATER MILESTONE — Metering / RTA / Analysis + production UI.**
 
-The current planned metering milestone must be expanded/audited for:
-- ISP latch
+The metering milestone must explicitly audit:
+- peak / RMS
+- dual pre/post RTA
+- 31-band 1/3-octave display contract
+- peak hold and slow averaging
+- true peak / ISP latch
+- phase correlation
+- crest factor
 - DR factor
 - bit-stream / effective bit-depth analysis
+- gain structure
+- stereo goniometer
 - VU meters and source selection
-in addition to peak/RMS, true peak, RTA/spectrum, phase correlation, crest factor, balance, GR, and goniometer.
+- per-stage / per-output GR and level telemetry where exposed elsewhere
 
-# Wave E — Room correction / measurement
+# Wave F — Room correction / measurement
 
-Source-level inventory confirms the later room-correction milestone includes significantly more than applying an FIR:
-- microphone capture/calibration
+Source-level inventory confirms the later room-correction milestone includes substantially more than applying an FIR:
+- microphone enumeration/selection and permission flow
+- microphone calibration
 - sweep generation/capture/deconvolution
 - impulse response
 - complex transfer function
+- magnitude response
 - SNR estimation / measurement quality
-- multi-position and multi-sweep averaging
 - individual output-channel measurement
 - combined-channel measurement
-- target curves
+- multi-position measurement with explicit microphone reposition prompts
+- multiple sweeps per position and averaging
+- transfer-function dataset state
+- reflection/time-window controls elsewhere in the room-correction flow
+- target-curve selection
 - parametric correction fitting
 - minimum-phase FIR correction
 - excess-phase correction
-- transfer-function dataset storage
 - band-level calibration
 - multi-channel correction presets
-- diaphragm resonance analysis
-- measurement displays including impulse, step, group delay, and energy decay
+- diaphragm resonance detection
+- measurement displays including impulse response, step response, group delay, and energy decay
 
-**Classification:** **LATER MILESTONE — Room Correction**, with exact contract still AUDIT PENDING.
+`MultiChannelMeasurementView` exposes:
+- Individual vs Combined measurement mode
+- Main Chain and individual output-channel selection
+- microphone selection
+- 1–5 mic positions
+- 1–5 sweeps per position
+- 5–30 second sweep duration
+- 20–50 dB minimum SNR control
+- result comparison/overlay and correction-preset controls
 
-# Wave F — Persistence / presets / interchange
+The legacy target library contains named targets:
+- Flat
+- Harman room
+- B&K house
+- Home theater
+- X-Curve (cinema)
+- Sub-only
 
-Initial source evidence confirms:
+**Classification:** **LATER MILESTONE — Room Correction**, with exact correction-generation and import/export contract still **AUDIT PENDING**.
+
+The commercial room-correction design may improve these algorithms, but the named user workflows and observable controls must be dispositioned.
+
+# Wave G — Persistence / presets / interchange
+
+Source evidence confirms:
 - versioned native preset model and migrations
 - `.eqpreset`
-- factory-preset metadata
+- factory-preset metadata / factory preset definitions
 - dynamics and compare-mode persistence
 - per-band slope / Dynamic state / constant-Q / Linkwitz state in presets
 - dedicated REW import/export
@@ -280,54 +503,68 @@ Initial source evidence confirms:
 - EasyEffects import/export
 - multi-channel correction presets
 - room-correction presets
+- Speaker System presets for the output matrix
 
 **Classification:** **LATER MILESTONE — Persistence / Presets / Interchange.**
 
-Exact round-trip semantics and legacy version compatibility remain AUDIT PENDING.
+Exact round-trip semantics, which legacy versions must import, factory-preset content, and FIR-kernel embedding behavior remain **AUDIT PENDING**.
 
-# Wave G — App state / settings
+# Wave H — App state / settings / shell behavior
 
-Initial state audit confirms persistence for:
+Initial state audit confirms persistence/reachability for:
 - input/output device choices
-- bandwidth display mode
+- bandwidth display mode (Q vs octaves)
 - appearance
-- interface style (Dock / menu-bar behavior)
-- manual/capture mode
+- interface style (Dock / menu-bar / both behavior)
+- automatic/manual routing mode
+- capture mode
 - meter-window state
 - VU source
 - channel mode/focus
 - EQ/dynamics state
 - corrupt-state recovery behavior
+- virtual-driver installation/update status and capture capability fallback
 
-**Classification:** mostly **LATER MILESTONE — Persistence / production UI / hardening**, with exact disposition AUDIT PENDING.
+**Classification:** mostly **LATER MILESTONE — Persistence / production UI / hardening**, with exact disposition **AUDIT PENDING**.
+
+Driver-specific mechanics should not automatically be reproduced if the commercial App Store architecture supersedes them; equivalent user-facing routing capability, permissions, recovery, and migration still require explicit disposition.
 
 # Known source areas still to inspect before declaring the audit complete
 
-- full `AdvancedProcessingConfig` field inventory and UI reachability
-- all crossover analysis utilities (acoustic summation, baffle-step, group delay, optimizer, path alignment, resonance detection, driver time alignment, excursion limiter)
-- full room-correction controls and target-curve library
-- `OutputChannelMatrixView` and routing coordinator reachability
-- per-output EQ phase modes, including pre-ringing blend
-- convolution configuration / standalone IR-loading workflow outside per-band FIR
-- RTA / meter implementation contracts and source selectors
-- native preset managers, migrations, factory presets, and import/export adapters
-- automatic/manual routing modes and capture modes
-- device-change / route-recovery / headphone-switch policies
-- secondary-output writer and cross-device clock synchronization reachability
-- test suite inventory for observable behavior that is not obvious from UI/state
+- complete parameter-by-parameter comparison of the legacy dynamics chain against PR28–33 commercial controls
+- actual render-path reachability and semantics of Dither, Hi-Res Coefficient Decoupling, Hardware Sync Buffer, Symmetry Balance, Panning Matrix, and Crosstalk Cancellation
+- standalone FIR IR slot vs FIR Correction vs per-band FIR distinctions
+- full `OutputChannelEQView` parity: output-channel phase modes, pre-ringing blend, band limits, Delta, and FIR crossover interaction
+- crossover optimiser parameters/results and exact apply semantics
+- driver time-alignment / polarity / crossover-refinement exact observable contracts
+- baffle-step and diaphragm-resonance acceptance semantics
+- full room-correction settings UI, microphone calibration file formats, time-windowing, target import/custom editing, correction range/smoothing/boost limits
+- `MeterStore` analytics equations, VU calibration/ballistics/source choices, ISP/DR/bitstream contracts
+- native preset managers, migrations, factory presets, and every import/export adapter’s supported subset
+- automatic/manual routing orchestration, sample-rate changes, sleep/wake, default-device changes, disconnect/reconnect, volume/mute synchronization
+- Aggregate Device path vs Software PLL path end-to-end reachability
+- repository test-suite inventory for observable behavior that is not obvious from UI/state
 - any dead/experimental source that should be classified LEGACY-DEAD rather than treated as parity debt
+
+# Current blocker ledger
+
+The source audit has already established these core parity items as unresolved blockers rather than later-milestone work:
+
+1. Mid-Side EQ editing/processing.
+2. Band-Pass main-EQ filter.
+3. Per-band FIR / loaded-IR main-EQ filter.
+4. Linkwitz Transform main-EQ filter.
+5. Tilt EQ main-EQ filter.
+6. 6–96 dB/oct main-EQ slope control.
+7. Constant-Q parametric mode.
+8. General Mixed-Phase EQ mode.
+9. Panning Gain Matrix unless explicitly superseded/out-scoped by product decision.
+10. Crosstalk Cancellation unless explicitly superseded/out-scoped by product decision.
+
+Additional likely gaps remain under AUDIT PENDING and must not be silently treated as parity.
 
 # Preliminary conclusion
 
-**We should not claim comprehensive parity yet.** The source-level audit has already uncovered reachable legacy behavior that was not captured in the previous user-guide-driven inventory, especially:
+**We should not claim comprehensive parity yet.** The source-level audit has already uncovered reachable legacy behavior that was not captured in the previous user-guide-driven inventory. It has also clarified that several major systems already belong cleanly to later roadmap milestones: metering/analysis, persistence/interchange, room correction, and the Active Crossover Matrix.
 
-1. Mid-Side EQ editing/processing.
-2. Band-Pass, per-band FIR, Linkwitz Transform, and Tilt EQ filter types.
-3. 6–96 dB/oct main-EQ slope control.
-4. Constant-Q parametric EQ.
-5. General Mixed-Phase EQ mode distinct from measurement-derived excess-phase correction.
-6. A richer output-channel matrix/driver-processing contract for the later Active Crossover milestone.
-7. Additional metering/analysis items such as ISP latch, DR Factor, Bit Stream, and VU behavior.
-8. Explicit multi-device PLL/SRC routing behavior.
-
-PR34 optimization work should remain behind this audit until these gaps are dispositioned. Core-EQ gaps that do not belong to an existing later milestone should be closed before the project treats advanced DSP parity as complete.
+PR34 optimization work remains behind this audit until the remaining source domains are dispositioned. Core-EQ and other reachable DSP gaps that do not belong to an existing later milestone should be closed before the project treats advanced DSP parity as complete. Missing work must not be silently relabeled as “superseded” without an explicit product rationale and equivalent observable behavior where parity requires it.
