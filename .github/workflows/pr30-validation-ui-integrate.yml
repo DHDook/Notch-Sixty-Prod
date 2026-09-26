@@ -19,6 +19,15 @@ jobs:
         with:
           ref: feature/phase-time-alignment-foundation
 
+      - name: Normalize generated Swift interpolation quotes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('.github/scripts/pr30_validation_ui.py')
+          text = p.read_text()
+          p.write_text(text.replace(r'\"', '"'))
+          PY
+
       - name: Apply PR30 validation UI
         run: python3 .github/scripts/pr30_validation_ui.py
 
