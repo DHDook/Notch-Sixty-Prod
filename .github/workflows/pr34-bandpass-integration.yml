@@ -33,6 +33,9 @@ jobs:
           python3 ci/pr34_fix_phase_b_swift_bridge.py
           python3 ci/pr34_fix_phase_b_test_bridge.py
 
+      - name: Apply Phase C Mid Side integration
+        run: python3 ci/pr34_apply_phase_c_midside.py
+
       - name: Validate Band Pass DSP
         run: |
           clang -std=c11 -Wall -Wextra -Werror ci/validate_pr34_bandpass.c -o /tmp/validate-pr34-bandpass
@@ -52,6 +55,11 @@ jobs:
         run: |
           clang -std=c11 -Wall -Wextra -Werror ci/validate_pr34_compiled_eq.c -o /tmp/validate-pr34-compiled-eq
           /tmp/validate-pr34-compiled-eq
+
+      - name: Validate Mid Side transform DSP
+        run: |
+          clang -std=c11 -Wall -Wextra -Werror ci/validate_pr34_midside.c -o /tmp/validate-pr34-midside
+          /tmp/validate-pr34-midside
 
       - name: Build
         run: >-
@@ -85,5 +93,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add NotchSixty/Audio/Realtime/N60Biquad.h NotchSixty/Audio/Realtime/N60RenderKernel.h NotchSixty/Audio/Realtime/N60RenderKernel.c NotchSixty/Audio/Realtime/N60LinearPhaseEQ.h NotchSixty/Audio/AudioIOEngine.swift NotchSixty/Audio/StereoPlaybackControl.swift NotchSixty/ContentView.swift NotchSixtyTests/NotchSixtyTests.swift
-          git commit -m "Integrate PR34 Phase B compiled EQ slopes and Tilt"
+          git commit -m "Integrate PR34 Phase C Mid Side EQ"
           git push origin HEAD:feature/dsp-optimization-parity-audit
