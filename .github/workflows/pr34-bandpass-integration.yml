@@ -17,8 +17,8 @@ jobs:
         with:
           ref: feature/dsp-optimization-parity-audit
 
-      # Phases A-D are committed source. Phase E is verification-only: no
-      # integration helper is allowed to mutate product source in this gate.
+      # Phases A-D and the Phase E Dynamic EQ correction are committed source.
+      # This gate is verification-only: no integration helper may mutate product source.
       - name: Validate Band Pass DSP
         run: |
           clang -std=c11 -Wall -Wextra -Werror ci/validate_pr34_bandpass.c -o /tmp/validate-pr34-bandpass
@@ -53,6 +53,15 @@ jobs:
         run: |
           clang -std=c11 -Wall -Wextra -Werror ci/validate_pr34_mixed_phase.c -lm -o /tmp/validate-pr34-mixed-phase
           /tmp/validate-pr34-mixed-phase
+
+      - name: Validate domain-aware Dynamic EQ DSP
+        run: |
+          clang -std=c11 -Wall -Wextra -Werror \
+            -I NotchSixty/Audio/Realtime \
+            ci/validate_pr34_dynamic_domains.c \
+            NotchSixty/Audio/Realtime/N60DynamicEQ.c \
+            -lm -o /tmp/validate-pr34-dynamic-domains
+          /tmp/validate-pr34-dynamic-domains
 
       - name: Validate Symmetry Balance DSP
         run: |
