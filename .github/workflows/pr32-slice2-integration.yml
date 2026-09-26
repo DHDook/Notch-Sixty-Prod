@@ -1,0 +1,32 @@
+name: PR32 Slice 2 Integration
+
+on:
+  push:
+    branches: [feature/dynamics-parity-closure]
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: xcode-27
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: feature/dynamics-parity-closure
+          fetch-depth: 0
+      - name: Apply PR32 Slice 2
+        run: python3 scripts/pr32_slice2.py
+      - name: Run full test suite
+        run: |
+          set -o pipefail
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty -destination 'platform=macOS' test CODE_SIGNING_ALLOWED=NO
+      - name: Commit PR32 Slice 2 and clean helpers
+        run: |
+          rm -f scripts/pr32_slice2.py .github/workflows/pr32-slice2-integration.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Add dialogue-relative leveler'
+          git push origin HEAD:feature/dynamics-parity-closure
