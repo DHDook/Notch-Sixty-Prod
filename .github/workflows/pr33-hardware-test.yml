@@ -1,0 +1,94 @@
+name: PR33 Hardware Test DMG
+
+on:
+  push:
+    branches:
+      - feature/residual-dynamics-parity
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: xcode-27
+    steps:
+      - name: Check out exact substantive revision
+        uses: actions/checkout@v7
+        with:
+          ref: 13e9b9611bc2f9729455f2e3efc9d387e7cf6d34
+
+      - name: Show exact revision
+        run: |
+          git rev-parse HEAD
+          test "$(git rev-parse HEAD)" = "13e9b9611bc2f9729455f2e3efc9d387e7cf6d34"
+
+      - name: Run unit tests
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          test
+
+      - name: Build Release app
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Release
+          -destination 'platform=macOS,arch=arm64'
+          -derivedDataPath "$RUNNER_TEMP/NotchSixtyDerivedData"
+          CODE_SIGNING_ALLOWED=NO
+          GENERATE_INFOPLIST_FILE=NO
+          INFOPLIST_FILE=NotchSixty/Info.plist
+          build
+
+      - name: Ad-hoc sign sandboxed test app
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/NotchSixtyDerivedData/Build/Products/Release/Notch Sixty.app"
+          test -d "$APP"
+          codesign --force --sign - --timestamp=none --entitlements NotchSixty/NotchSixty.entitlements "$APP"
+          codesign --verify --strict --verbose=2 "$APP"
+
+      - name: Validate test app
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/NotchSixtyDerivedData/Build/Products/Release/Notch Sixty.app"
+          EXECUTABLE="$APP/Contents/MacOS/Notch Sixty"
+          test "$(lipo -archs "$EXECUTABLE")" = "arm64"
+          CAPTURE_USAGE="$(/usr/libexec/PlistBuddy -c 'Print :NSAudioCaptureUsageDescription' "$APP/Contents/Info.plist")"
+          test -n "$CAPTURE_USAGE"
+          ENTITLEMENTS="$(codesign -d --entitlements :- "$APP" 2>&1)"
+          echo "$ENTITLEMENTS" | grep -q 'com.apple.security.app-sandbox'
+          echo "$ENTITLEMENTS" | grep -q '<true/>'
+
+      - name: Create DMG
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/NotchSixtyDerivedData/Build/Products/Release/Notch Sixty.app"
+          STAGE="$RUNNER_TEMP/NotchSixtyPR33HardwareTest"
+          DMG="$RUNNER_TEMP/NotchSixty-PR33-hardware-test.dmg"
+          rm -rf "$STAGE" "$DMG"
+          mkdir -p "$STAGE"
+          cp -R "$APP" "$STAGE/"
+          ln -s /Applications "$STAGE/Applications"
+          hdiutil create -volname 'Notch Sixty PR33 Hardware Test' -srcfolder "$STAGE" -ov -format UDZO "$DMG"
+          SHA256="$(shasum -a 256 "$DMG" | awk '{print $1}')"
+          echo "SHA256=$SHA256" >> "$GITHUB_ENV"
+          echo "PR33 exact source: 13e9b9611bc2f9729455f2e3efc9d387e7cf6d34" >> "$GITHUB_STEP_SUMMARY"
+          echo "SHA-256: $SHA256" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: NotchSixty-PR33-hardware-test
+          path: ${{ runner.temp }}/NotchSixty-PR33-hardware-test.dmg
+          if-no-files-found: error
+          retention-days: 14
