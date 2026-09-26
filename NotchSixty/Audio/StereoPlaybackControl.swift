@@ -230,7 +230,9 @@ struct StereoEQConfiguration: Equatable, Sendable {
         }
 
         let dynamicBoost: Double
-        if phaseMode == .minimumPhase && !bypassed && channelMode == .linked {
+        if phaseMode == .minimumPhase && !bypassed {
+            // Dynamic EQ is a shared physical-stereo layer. The Linked bank owns
+            // its settings even while static EQ editing is Independent or Mid/Side.
             dynamicBoost = linkedBands.lazy
                 .filter { $0.enabled && $0.type == .peaking && $0.dynamic.enabled }
                 .reduce(0.0) { partial, band in
@@ -247,13 +249,13 @@ struct StereoEQConfiguration: Equatable, Sendable {
         into dynamics: inout DynamicsConfiguration,
         sampleRate: Double
     ) throws {
-        // Product state is owned by the normal EQ bands. Keep the standalone C
-        // Dynamic EQ engine as an implementation detail and compile only the
-        // linked minimum-phase peaking bands that have Dynamic enabled.
+        // Dynamic EQ is intentionally shared across channel-editing modes.
+        // The Linked bank owns the detector/gain settings; the realtime engine
+        // applies that one physical-stereo dynamic layer after any Mid/Side
+        // decode so no independent M/S or L/R detector behavior is invented.
         dynamics.dynamicEQ = DynamicEQConfiguration()
         guard phaseMode == .minimumPhase,
-              !bypassed,
-              channelMode == .linked else { return }
+              !bypassed else { return }
 
         let dynamicBands = try validatedEnabledBands(linkedBands, sampleRate: sampleRate)
             .filter { $0.type == .peaking && $0.dynamic.enabled }

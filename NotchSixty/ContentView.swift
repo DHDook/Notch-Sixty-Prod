@@ -770,7 +770,7 @@ struct ContentView: View {
             GroupBox("Dynamic EQ integration") {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Dynamic EQ is now configured on the normal Parametric EQ bands below rather than in a separate band bank.")
-                    Text("Commercial capacity: up to \(EQConfiguration.maximumBandCount) EQ bands. Dynamic is available for linked, minimum-phase Peak bands; the standalone C detector/gain engine remains an internal implementation detail.")
+                    Text("Commercial capacity: up to \(EQConfiguration.maximumBandCount) EQ bands. Dynamic settings are owned by Linked minimum-phase Peak bands and remain active as one identical physical-stereo layer while static EQ editing is Independent or Mid/Side.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

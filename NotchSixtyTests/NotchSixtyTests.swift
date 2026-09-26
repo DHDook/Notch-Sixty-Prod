@@ -454,6 +454,43 @@ final class NotchSixtyTests: XCTestCase {
         XCTAssertEqual(try linear.linearPhaseBands(for: .side, sampleRate: 96_000).count, 1)
     }
 
+    func testMidSideKeepsLinkedDynamicEQAsOneSharedPhysicalStereoLayer() throws {
+        var dynamic = EQBandDynamicConfiguration()
+        dynamic.enabled = true
+        dynamic.thresholdDB = -30
+        dynamic.ratio = 2
+        dynamic.rangeDB = -6
+
+        let sharedDynamicBand = EQBand(
+            type: .peaking,
+            frequencyHz: 1_000,
+            gainDB: 0,
+            q: 1.0,
+            dynamic: dynamic
+        )
+        let midStaticBand = EQBand(type: .peaking, frequencyHz: 700, gainDB: 2, q: 1.0)
+        let sideStaticBand = EQBand(type: .peaking, frequencyHz: 4_000, gainDB: -2, q: 1.0)
+
+        let configuration = StereoEQConfiguration(
+            channelMode: .midSide,
+            editChannel: .mid,
+            phaseMode: .minimumPhase,
+            linkedBands: [sharedDynamicBand],
+            midBands: [midStaticBand],
+            sideBands: [sideStaticBand],
+            midSideSeeded: true
+        )
+        let graph = try configuration.makeGraphSnapshot(
+            sampleRate: 96_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: PlaybackControlConfiguration()
+        )
+        XCTAssertTrue(graph.eqMidSideMode)
+        XCTAssertTrue(graph.dynamics.dynamicEQ.enabled)
+        XCTAssertEqual(graph.dynamics.dynamicEQ.bandCount, 1)
+    }
+
     func testMidSideRealtimeIdentityAndAuditionContracts() throws {
         guard let kernel = N60RenderKernelCreate() else {
             XCTFail("Unable to allocate render kernel")
