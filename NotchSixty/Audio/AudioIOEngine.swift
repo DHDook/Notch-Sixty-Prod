@@ -973,6 +973,21 @@ final class AudioIOEngine: ObservableObject {
         try applyStereoEQConfiguration(updated)
     }
 
+    func setSymmetryBalanceEnabled(_ enabled: Bool) throws {
+        var updated = playbackControlConfiguration
+        updated.symmetryBalanceEnabled = enabled
+        try applyPlaybackControlConfiguration(updated)
+    }
+
+    func setSymmetryBalancePosition(_ value: Double) throws {
+        guard value.isFinite, PlaybackControlConfiguration.symmetryBalanceRange.contains(value) else {
+            throw PlaybackControlConfigurationError.invalidSymmetryBalance(value)
+        }
+        var updated = playbackControlConfiguration
+        updated.symmetryBalancePosition = value
+        try applyPlaybackControlConfiguration(updated)
+    }
+
     func setChannelBalance(_ value: Double) throws {
         guard value.isFinite, PlaybackControlConfiguration.balanceRange.contains(value) else {
             throw PlaybackControlConfigurationError.invalidBalance(value)

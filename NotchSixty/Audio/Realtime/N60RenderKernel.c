@@ -79,6 +79,8 @@ struct N60RenderKernel {
     N60SmoothedGain masterGain;
     N60SmoothedGain balanceGainLeft;
     N60SmoothedGain balanceGainRight;
+    N60SmoothedGain symmetryBalanceGainLeft;
+    N60SmoothedGain symmetryBalanceGainRight;
     N60InterChannelDelayRuntime interChannelDelayRuntime;
     float referenceDelayLeft[N60_MAX_AUDITION_DELAY_FRAMES];
     float referenceDelayRight[N60_MAX_AUDITION_DELAY_FRAMES];
@@ -253,6 +255,7 @@ static bool snapshot_is_valid(N60DSPGraphSnapshot snapshot) {
         || !isfinite(snapshot.balanceGainRightLinear)
         || snapshot.balanceGainRightLinear < 0.0f
         || snapshot.balanceGainRightLinear > 1.0f
+        || !N60SymmetryBalanceSnapshotIsValid(snapshot.symmetryBalance)
         || snapshot.auditionMode < N60AuditionModeProcessed
         || snapshot.auditionMode > N60AuditionModeDelta
         || !N60InterChannelDelaySnapshotIsValid(snapshot.interChannelDelay, snapshot.sampleRate)
@@ -442,6 +445,8 @@ static void prepare_runtime_for_snapshot(N60RenderKernel *kernel, const N60DSPGr
         reset_smoothed_gain(&kernel->masterGain, snapshot->masterGainLinear);
         reset_smoothed_gain(&kernel->balanceGainLeft, snapshot->balanceGainLeftLinear);
         reset_smoothed_gain(&kernel->balanceGainRight, snapshot->balanceGainRightLinear);
+        reset_smoothed_gain(&kernel->symmetryBalanceGainLeft, snapshot->symmetryBalance.leftGainLinear);
+        reset_smoothed_gain(&kernel->symmetryBalanceGainRight, snapshot->symmetryBalance.rightGainLinear);
         N60InterChannelDelayRuntimeReset(&kernel->interChannelDelayRuntime, snapshot->interChannelDelay);
     } else {
         schedule_gain_transition(&kernel->inputGain, snapshot->inputGainLinear, gainFrames);
@@ -450,6 +455,8 @@ static void prepare_runtime_for_snapshot(N60RenderKernel *kernel, const N60DSPGr
         schedule_gain_transition(&kernel->masterGain, snapshot->masterGainLinear, gainFrames);
         schedule_gain_transition(&kernel->balanceGainLeft, snapshot->balanceGainLeftLinear, gainFrames);
         schedule_gain_transition(&kernel->balanceGainRight, snapshot->balanceGainRightLinear, gainFrames);
+        schedule_gain_transition(&kernel->symmetryBalanceGainLeft, snapshot->symmetryBalance.leftGainLinear, gainFrames);
+        schedule_gain_transition(&kernel->symmetryBalanceGainRight, snapshot->symmetryBalance.rightGainLinear, gainFrames);
         N60InterChannelDelayRuntimeSchedule(&kernel->interChannelDelayRuntime, snapshot->interChannelDelay, gainFrames);
     }
 
@@ -771,6 +778,10 @@ N60DSPGraphSnapshot N60DSPGraphSnapshotMakeUnity(double sampleRate) {
     snapshot.masterGainLinear = 1.0f;
     snapshot.balanceGainLeftLinear = 1.0f;
     snapshot.balanceGainRightLinear = 1.0f;
+    snapshot.symmetryBalance.enabled = false;
+    snapshot.symmetryBalance.position = 0.0;
+    snapshot.symmetryBalance.leftGainLinear = 1.0f;
+    snapshot.symmetryBalance.rightGainLinear = 1.0f;
     snapshot.bypassed = false;
     snapshot.auditionMode = N60AuditionModeProcessed;
     snapshot.interChannelDelay = N60InterChannelDelaySnapshotMakeBypassed();
@@ -798,6 +809,18 @@ void N60DSPGraphSnapshotClearEQ(N60DSPGraphSnapshot *snapshot) {
     memset(snapshot->eqBands, 0, sizeof(snapshot->eqBands));
     memset(snapshot->eqBandChannelMasks, 0, sizeof(snapshot->eqBandChannelMasks));
     snapshot->eqBandCount = 0;
+}
+
+bool N60DSPGraphSnapshotSetSymmetryBalance(
+    N60DSPGraphSnapshot *snapshot,
+    double position,
+    bool enabled
+) {
+    if (snapshot == NULL) return false;
+    N60SymmetryBalanceSnapshot symmetry = {0};
+    if (!N60SymmetryBalanceDesign(position, enabled, &symmetry)) return false;
+    snapshot->symmetryBalance = symmetry;
+    return true;
 }
 
 bool N60DSPGraphSnapshotSetInterChannelDelay(
@@ -1228,6 +1251,12 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
         }
 
         N60DynamicsProcessCoreStereoFrameWithMasterGain(&kernel->dynamicsRuntime, context->snapshot.dynamics, context->snapshot.masterGainLinear, &left, &right);
+
+        // Listening-position symmetry compensation is intentionally separate
+        // from ordinary attenuation-style Balance. It feeds the speaker-spatial
+        // chain and is gain-smoothed so live position changes remain click-free.
+        left *= next_gain_value(&kernel->symmetryBalanceGainLeft);
+        right *= next_gain_value(&kernel->symmetryBalanceGainRight);
 
         left *= next_gain_value(&kernel->balanceGainLeft);
         right *= next_gain_value(&kernel->balanceGainRight);

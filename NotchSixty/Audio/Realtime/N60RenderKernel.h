@@ -10,6 +10,7 @@
 #include "N60Dynamics.h"
 #include "N60FractionalDelay.h"
 #include "N60MixedPhase.h"
+#include "N60Spatial.h"
 #include "N60Protection.h"
 
 #ifdef __cplusplus
@@ -73,6 +74,7 @@ typedef struct {
     float masterGainLinear;
     float balanceGainLeftLinear;
     float balanceGainRightLinear;
+    N60SymmetryBalanceSnapshot symmetryBalance;
     bool bypassed;
     N60AuditionMode auditionMode;
     N60InterChannelDelaySnapshot interChannelDelay;
@@ -237,6 +239,11 @@ typedef struct {
 
 N60DSPGraphSnapshot N60DSPGraphSnapshotMakeUnity(double sampleRate);
 void N60DSPGraphSnapshotClearEQ(N60DSPGraphSnapshot * _Nonnull snapshot);
+bool N60DSPGraphSnapshotSetSymmetryBalance(
+    N60DSPGraphSnapshot * _Nonnull snapshot,
+    double position,
+    bool enabled
+);
 bool N60DSPGraphSnapshotSetInterChannelDelay(
     N60DSPGraphSnapshot * _Nonnull snapshot,
     double signedDelayMs

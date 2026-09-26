@@ -441,6 +441,15 @@ struct StereoEQConfiguration: Equatable, Sendable {
         let balance = playbackConfiguration.balanceLinearGains
         graph.balanceGainLeftLinear = balance.left
         graph.balanceGainRightLinear = balance.right
+        guard N60DSPGraphSnapshotSetSymmetryBalance(
+            &graph,
+            playbackConfiguration.symmetryBalancePosition,
+            playbackConfiguration.symmetryBalanceEnabled
+        ) else {
+            throw PlaybackControlConfigurationError.invalidSymmetryBalance(
+                playbackConfiguration.symmetryBalancePosition
+            )
+        }
         graph.bypassed = playbackConfiguration.globalBypassed
         graph.auditionMode = playbackConfiguration.auditionMode.cType
         guard N60DSPGraphSnapshotSetInterChannelDelay(&graph, playbackConfiguration.interChannelDelayMs) else {
@@ -697,21 +706,28 @@ enum AuditionMode: String, CaseIterable, Identifiable, Sendable {
 
 struct PlaybackControlConfiguration: Equatable, Sendable {
     static let balanceRange = -1.0...1.0
+    static let symmetryBalanceRange = -1.0...1.0
     static let interChannelDelayRange = -20.0...20.0
 
     var balance: Double
+    var symmetryBalanceEnabled: Bool
+    var symmetryBalancePosition: Double
     var interChannelDelayMs: Double
     var globalBypassed: Bool
     var auditionMode: AuditionMode
 
     init(
         balance: Double = 0,
+        symmetryBalanceEnabled: Bool = false,
+        symmetryBalancePosition: Double = 0,
         interChannelDelayMs: Double = 0,
         globalBypassed: Bool = false,
         flatAuditionEnabled: Bool = false,
         auditionMode: AuditionMode? = nil
     ) {
         self.balance = balance
+        self.symmetryBalanceEnabled = symmetryBalanceEnabled
+        self.symmetryBalancePosition = symmetryBalancePosition
         self.interChannelDelayMs = interChannelDelayMs
         self.globalBypassed = globalBypassed
         self.auditionMode = auditionMode ?? (flatAuditionEnabled ? .reference : .processed)
@@ -736,12 +752,15 @@ struct PlaybackControlConfiguration: Equatable, Sendable {
 
 enum PlaybackControlConfigurationError: Error, LocalizedError, Equatable {
     case invalidBalance(Double)
+    case invalidSymmetryBalance(Double)
     case invalidInterChannelDelay(Double)
 
     var errorDescription: String? {
         switch self {
         case .invalidBalance(let value):
             return "Channel balance \(value) is outside the supported -1...+1 range."
+        case .invalidSymmetryBalance(let value):
+            return "Listening-position symmetry \(value) is outside the supported -1...+1 range."
         case .invalidInterChannelDelay(let value):
             return "Inter-channel delay \(value) ms is outside the supported -20...+20 ms range."
         }

@@ -141,6 +141,76 @@ final class NotchSixtyTests: XCTestCase {
         XCTAssertTrue(graph.mixedPhaseEnabled)
     }
 
+    func testSymmetryBalanceGraphUsesSeparateConstantPowerStage() throws {
+        let playback = PlaybackControlConfiguration(
+            balance: 0,
+            symmetryBalanceEnabled: true,
+            symmetryBalancePosition: -1
+        )
+        let graph = try StereoEQConfiguration().makeGraphSnapshot(
+            sampleRate: 48_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: playback
+        )
+        XCTAssertTrue(graph.symmetryBalance.enabled)
+        XCTAssertEqual(graph.symmetryBalance.position, -1, accuracy: 0.000_001)
+        XCTAssertEqual(graph.symmetryBalance.leftGainLinear, Float(2).squareRoot(), accuracy: 0.000_01)
+        XCTAssertEqual(graph.symmetryBalance.rightGainLinear, 0, accuracy: 0.000_01)
+        XCTAssertEqual(graph.balanceGainLeftLinear, 1)
+        XCTAssertEqual(graph.balanceGainRightLinear, 1)
+    }
+
+    func testSymmetryBalanceCenterIsUnityAndDisabledPathIsTransparent() throws {
+        for enabled in [false, true] {
+            let playback = PlaybackControlConfiguration(
+                symmetryBalanceEnabled: enabled,
+                symmetryBalancePosition: 0
+            )
+            let graph = try StereoEQConfiguration().makeGraphSnapshot(
+                sampleRate: 384_000,
+                gainConfiguration: DSPGainConfiguration(),
+                bassManagementConfiguration: BassManagementConfiguration(),
+                playbackConfiguration: playback
+            )
+            XCTAssertEqual(graph.symmetryBalance.leftGainLinear, 1, accuracy: 0.000_01)
+            XCTAssertEqual(graph.symmetryBalance.rightGainLinear, 1, accuracy: 0.000_01)
+        }
+    }
+
+    func testSymmetryBalanceRealtimeExtremePreservesConstantPower() throws {
+        guard let kernel = N60RenderKernelCreate() else {
+            XCTFail("Unable to allocate render kernel")
+            return
+        }
+        defer { N60RenderKernelDestroy(kernel) }
+
+        var graph = N60DSPGraphSnapshotMakeUnity(96_000)
+        XCTAssertTrue(N60DSPGraphSnapshotSetSymmetryBalance(&graph, -1, true))
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+
+        var left: Float = 0
+        var right: Float = 0
+        N60RenderKernelProcessStereoFrame(kernel, 0.25, 0.25, &left, &right)
+        XCTAssertEqual(left, 0.25 * Float(2).squareRoot(), accuracy: 0.000_01)
+        XCTAssertEqual(right, 0, accuracy: 0.000_01)
+    }
+
+    func testSymmetryBalanceRejectsInvalidPosition() throws {
+        let invalid = PlaybackControlConfiguration(
+            symmetryBalanceEnabled: true,
+            symmetryBalancePosition: 1.1
+        )
+        XCTAssertThrowsError(try StereoEQConfiguration().makeGraphSnapshot(
+            sampleRate: 48_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: invalid
+        )) { error in
+            XCTAssertEqual(error as? PlaybackControlConfigurationError, .invalidSymmetryBalance(1.1))
+        }
+    }
+
     func testBootstrapTestBundleRuns() {
         XCTAssertTrue(true)
     }

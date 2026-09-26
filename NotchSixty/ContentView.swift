@@ -41,6 +41,20 @@ struct ContentView: View {
         Binding(get: { engine.stereoEQConfiguration.editChannel }, set: { engine.setEQEditChannel($0) })
     }
 
+    private var symmetryBalanceEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { engine.playbackControlConfiguration.symmetryBalanceEnabled },
+            set: { try? engine.setSymmetryBalanceEnabled($0) }
+        )
+    }
+
+    private var symmetryBalancePositionBinding: Binding<Double> {
+        Binding(
+            get: { engine.playbackControlConfiguration.symmetryBalancePosition },
+            set: { try? engine.setSymmetryBalancePosition($0) }
+        )
+    }
+
     private var balanceBinding: Binding<Double> {
         Binding(get: { engine.playbackControlConfiguration.balance }, set: { try? engine.setChannelBalance($0) })
     }
@@ -196,6 +210,23 @@ struct ContentView: View {
                     .monospacedDigit()
                     .frame(width: 55)
             }
+            HStack(spacing: 12) {
+                Toggle("Listening symmetry", isOn: symmetryBalanceEnabledBinding).toggleStyle(.switch)
+                Text("L").foregroundStyle(.secondary)
+                Slider(
+                    value: symmetryBalancePositionBinding,
+                    in: PlaybackControlConfiguration.symmetryBalanceRange,
+                    step: 0.01
+                )
+                .disabled(!engine.playbackControlConfiguration.symmetryBalanceEnabled)
+                Text("R").foregroundStyle(.secondary)
+                Text(engine.playbackControlConfiguration.symmetryBalancePosition.formatted(.number.precision(.fractionLength(2))))
+                    .monospacedDigit()
+                    .frame(width: 55)
+            }
+            Text("Listening symmetry is constant-power compensation for an off-center listening position. It is separate from ordinary attenuation-style Balance; center is unity on both channels.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             HStack(spacing: 12) {
                 Text("L/R delay").frame(width: 90, alignment: .leading)
                 Text("Delay L").foregroundStyle(.secondary)
