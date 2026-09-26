@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import re
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -60,8 +61,6 @@ def patch_dynamic_eq_source() -> None:
     path = ROOT / "NotchSixty/Audio/Realtime/N60DynamicEQ.c"
     text = path.read_text()
     for name in ("process_linked_stereo", "process_primary_mono", "process_secondary_mono"):
-        # Static helpers use the same snapshot ownership rule even though the generic
-        # function locator keys on a void declaration.
         marker = f"static void {name}("
         start = text.find(marker)
         if start < 0:
@@ -70,7 +69,8 @@ def patch_dynamic_eq_source() -> None:
         depth = 0
         end = None
         for index in range(brace, len(text)):
-            if text[index] == "{": depth += 1
+            if text[index] == "{":
+                depth += 1
             elif text[index] == "}":
                 depth -= 1
                 if depth == 0:
@@ -112,6 +112,8 @@ def patch_dynamics_header() -> None:
         end += 2
         region = text[start:end]
         if "const N60DynamicsSnapshot * _Nonnull snapshot" not in region:
+            if region.count("N60DynamicsSnapshot snapshot") != 1:
+                raise RuntimeError(f"{name}: dynamics prototype signature mismatch")
             region = region.replace(
                 "N60DynamicsSnapshot snapshot",
                 "const N60DynamicsSnapshot * _Nonnull snapshot",
@@ -159,13 +161,20 @@ def patch_render_kernel() -> None:
         "N60DynamicsProcessCoreStereoFrameWithMasterGain",
         "N60DynamicsProcessPauseGateStereoFrame",
     ):
-        old = f"{name}(&kernel->dynamicsRuntime, context->snapshot.dynamics,"
-        new = f"{name}(&kernel->dynamicsRuntime, &context->snapshot.dynamics,"
-        if new not in text:
-            count = text.count(old)
-            if count != 1:
-                raise RuntimeError(f"N60RenderKernel.c {name}: expected one call, found {count}")
-            text = text.replace(old, new, 1)
+        already = re.compile(
+            rf"{name}\(\s*&kernel->dynamicsRuntime,\s*&context->snapshot\.dynamics\s*,",
+            re.MULTILINE,
+        )
+        if already.search(text):
+            continue
+        pattern = re.compile(
+            rf"({name}\(\s*&kernel->dynamicsRuntime,\s*)context->snapshot\.dynamics(\s*,)",
+            re.MULTILINE,
+        )
+        text, count = pattern.subn(r"\1&context->snapshot.dynamics\2", text, count=1)
+        if count != 1:
+            raise RuntimeError(f"N60RenderKernel.c {name}: expected one render call, found {count}")
+
     stale = """            // Dynamic EQ remains a linked physical-stereo stage. Mid/Side does\n            // not create independent M/S dynamic detectors."""
     current = """            // Dynamic EQ follows the active EQ channel domain: linked stereo,\n            // independent L/R, or independent Mid/Side lanes before decode."""
     if current not in text:
@@ -186,8 +195,6 @@ def patch_swift_tests() -> None:
     for path in tests.glob("*.swift"):
         text = path.read_text()
         original = text
-        # Existing tests conventionally name the C snapshot `snapshot`. Make those
-        # local values mutable so Swift can form a temporary pointer to them.
         if any(name in text for name in function_names):
             text = text.replace("let snapshot = N60DynamicsSnapshotMakeBypassed", "var snapshot = N60DynamicsSnapshotMakeBypassed")
             text = text.replace("let snapshot = try DynamicsConfiguration().makeSnapshot", "var snapshot = try DynamicsConfiguration().makeSnapshot")
