@@ -20,7 +20,9 @@ jobs:
       # Earlier PR34 slices are committed source. Verify them; mutate only the
       # current Phase D slice so the gate stays deterministic and idempotent.
       - name: Apply sub-bass phase alignment integration
-        run: python3 ci/pr34_apply_phase_d_sub_phase.py
+        run: |
+          python3 ci/pr34_apply_phase_d_sub_phase.py
+          python3 ci/pr34_fix_phase_d_sub_phase_tests.py
 
       - name: Validate Band Pass DSP
         run: |
