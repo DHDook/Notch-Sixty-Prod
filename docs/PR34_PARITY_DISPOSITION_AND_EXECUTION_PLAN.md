@@ -1,86 +1,83 @@
 # PR34 Parity Disposition and Execution Plan
 
-Status: **SOURCE DISCOVERY GATE SATISFIED FOR THE CURRENT STEREO PRODUCT; PARITY IMPLEMENTATION REMAINS ACTIVE.**
+Status: **SOURCE DISCOVERY GATE SATISFIED; PHASES A-D IMPLEMENTED; PHASE E PARITY RE-AUDIT / REGRESSION GATE ACTIVE.**
 
 This document consolidates the source-level audit performed in PR34 and defines the execution order before performance optimisation begins.
 
-It does **not** declare overall functional parity. It declares that the legacy source/test/UI inventory has been inspected deeply enough that the current stereo product's unexplained capability set is no longer open-ended. Known gaps are now either:
-
-- current PR34 blockers,
-- explicitly assigned to a later existing milestone,
-- intentionally outside current product scope,
-- proven legacy dead/no-op behavior,
-- or already implemented/improved in the commercial rewrite.
+It does **not yet declare overall functional parity**. The current stereo product's implementation blocker queue has been retired, but PR34 must still complete the Phase E behavior-ledger re-audit, deterministic high-rate regression, and focused hardware/listening validation before the functional-parity gate can be declared satisfied.
 
 The clean-room rule remains unchanged: legacy source establishes observable contracts and defects only. New production DSP is independently authored.
 
-# 1. Current PR34 parity blockers — implement before performance optimisation
+# 1. Current PR34 blocker queue — CLOSED through Phase D
 
-## Core EQ / phase architecture
+## Phase A — isolated EQ blockers: COMPLETE
 
-1. **Band Pass**
-   - simple one-section filter family
-   - clean-room implementation can use the public W3C/Web Audio Audio EQ Cookbook constant-0-dB-peak BPF definition
-   - lowest-risk first blocker
+1. **Band Pass — CLOSED**
+   - independently implemented constant-0-dB-peak band-pass behavior
+   - deterministic validator across supported sample rates
+   - available in Minimum- and Linear-Phase projection paths
 
-2. **Constant-Q Parametric**
-   - per-band mode distinct from current proportional-Q behavior
-   - requires independent transfer-function design and model/persistence state
+2. **Constant-Q Parametric — CLOSED**
+   - distinct from the retained proportional-Q/default Peak behavior
+   - dedicated independently authored transfer function
+   - model/UI projection and high-rate validation complete
 
-3. **Linkwitz Transform**
-   - four physical parameters: f0, Q0, fp, Qp
-   - requires typed model extension and independent digital design
+3. **Linkwitz Transform — CLOSED**
+   - typed f0, Q0, fp, Qp contract
+   - independently authored digital implementation and regression coverage
 
-4. **Compiled multi-section main-EQ program**
-   - structural prerequisite for high-order slopes and compound filters
-   - must preserve the 64-user-band product limit independently of compiled section count
-   - all coefficient design stays off the realtime thread
+## Phase B — compiled main-EQ architecture: COMPLETE
 
-5. **6–96 dB/oct main-EQ slope control**
-   - LP / HP / Low Shelf / High Shelf
-   - implemented on the compiled multi-section representation
+4. **Bounded compiled multi-section main-EQ program — CLOSED**
+   - user-band limit remains distinct from compiled section count
+   - coefficient design remains off the realtime thread
 
-6. **Tilt EQ**
-   - one logical user band compiling to complementary low/high shelving sections
+5. **6–96 dB/oct main-EQ slope control — CLOSED**
+   - LP / HP / Low Shelf / High Shelf supported through the compiled representation
 
-7. **Mid/Side EQ**
-   - independently editable Mid and Side EQ
-   - encode/decode must wrap both Minimum-Phase and Linear-Phase paths
-   - legacy Dynamic EQ remains linked/identical across M/S lanes; independent M/S dynamic detectors are not required
+6. **Tilt EQ — CLOSED**
+   - one logical band compiles to complementary low/high shelving sections
 
-8. **Per-band FIR**
-   - distinct user-band IR/kernel slot
-   - requires explicit kernel ownership, latency and transition contract
+## Phase C — channel / phase architecture: COMPLETE
 
-9. **Mixed Phase EQ**
-   - distinct from measurement-derived excess-phase room correction
-   - should be built only after the final compiled EQ representation is stable
+7. **Mid/Side EQ — CLOSED**
+   - independently editable Mid and Side lanes
+   - encode/decode wraps the static Minimum-/Linear-/Mixed-Phase EQ path
+   - Dynamic EQ remains one linked physical-stereo dynamics layer as audited
 
-## Current stereo spatial / alignment parity
+8. **Per-band FIR — CLOSED**
+   - user-band kernel contract integrated into the commercial convolution path
+   - explicit kernel ownership/latency validation retained
 
-10. **Symmetry Balance**
-    - distinct constant-power listening-position compensation
-    - does not replace the commercial ordinary Balance control
+9. **Mixed Phase EQ — CLOSED**
+   - distinct from room-correction excess phase
+   - bounded all-pass correction architecture with no hidden FIR substitution
 
-11. **Panning Gain Matrix / speaker crossfeed**
-    - confirmed speaker feature
-    - effective legacy crossfeed range is 0...0.5 despite a misleading 0...1 UI range
+## Phase D — current stereo spatial / alignment parity: COMPLETE
 
-12. **Speaker Crosstalk Cancellation**
-    - distinct speaker-processing stage with Amount and Head-Shadow controls
-    - must be independently designed with stability/headroom/mono-compatibility tests
+10. **Symmetry Balance — CLOSED**
+    - separate constant-power listening-position compensation
+    - center-normalized law; distinct from ordinary attenuation-style Balance
 
-13. **Sub-Bass Phase Alignment**
-    - tunable all-pass phase alignment near crossover
-    - distinct from polarity and ordinary time delay
+11. **Panning Gain Matrix / speaker crossfeed — CLOSED**
+    - speaker feature retained with the audited effective 0...0.5 range
+    - 0 = identity; 0.5 = mono collapse
 
-## FIR product disposition still required inside parity implementation
+12. **Speaker Crosstalk Cancellation — CLOSED**
+    - independently authored bounded feed-forward cancellation stage
+    - Amount and Head-Shadow controls retained without recursive instability
 
-14. **Advanced standalone FIR Impulse Response slot**
-    - confirmed separate legacy global convolution slot from FIR Correction
-    - headphone use is outside current scope; speaker raw-IR use is in scope
-    - implementation must decide whether the commercial product genuinely needs two simultaneously active global speaker-correction convolution slots or whether one coherent global correction architecture can preserve every in-scope workflow without loss
-    - this remains a product-disposition blocker until that mapping is demonstrated explicitly
+13. **Sub-Bass Phase Alignment — CLOSED**
+    - independent all-pass phase-alignment stage on the mono sub leg
+    - separate from polarity, sub gain and ordinary time delay
+
+14. **Advanced standalone FIR Impulse Response mapping — CLOSED**
+    - product disposition resolved as a third independent global **Speaker IR** convolution slot
+    - remains separate from the main-EQ/per-band FIR convolver and room-correction convolver
+    - all three FIR workflows can be active simultaneously
+    - additive latency and independent prepared-program generations are regression tested
+    - raw Global Bypass remains untreated
+    - production WAV/AIFF import and resource persistence remain assigned to the later persistence milestone rather than being falsely claimed in PR34
 
 # 2. Explicit later-milestone parity — not current stereo-core blockers
 
@@ -161,7 +158,7 @@ Legacy analytics defects intentionally excluded:
 - REW import
 - EasyEffects import/export
 - room-correction project/measurement persistence
-- resource-backed FIR persistence
+- resource-backed FIR / Speaker IR persistence
 - factory/product preset pack
 - advanced CamillaDSP export after output-matrix completion
 
@@ -174,7 +171,7 @@ Historical Constant-Q and Linkwitz target values cannot be assumed recoverable f
 
 # 3. Implemented / improved current-scope behavior
 
-The audit confirms the commercial rewrite already has implemented/improved foundations or complete current-scope behavior for:
+The audit confirms the commercial rewrite now has implemented/improved foundations or complete current-scope behavior for:
 
 - first-party stereo output lifecycle
 - output enumeration/selection by stable UID
@@ -186,10 +183,16 @@ The audit confirms the commercial rewrite already has implemented/improved found
 - broad dynamics/protection chain built through PR33
 - compressor/expander/de-esser/multiband/clipper/limiter processor capability
 - commercial Pause Gate convention with clearer Attack=fade-out and Release=fade-in semantics
-- global convolution/FIR correction runtime foundation
+- compiled multi-section EQ, high-order slopes, Tilt, Band Pass, Constant-Q and Linkwitz Transform
+- linked/independent/Mid-Side static EQ modes
+- Minimum-, Linear- and Mixed-Phase EQ architecture
+- per-band FIR plus independent global main-EQ convolution
 - room-correction runtime/convolution foundation
+- independent global Speaker IR convolution
 - true-peak protection/telemetry foundation
 - bass-management crossover/gain/polarity/time-alignment foundation
+- sub-bass all-pass phase alignment
+- Symmetry Balance, speaker crossfeed and speaker crosstalk cancellation
 - ordinary user Balance control
 - signed L/R speaker-alignment delay
 - current single-output transport and deterministic high-rate tests
@@ -226,55 +229,46 @@ Consistent with the speaker-focused Notch Sixty product definition:
 
 # 7. PR34 execution queue
 
-## Phase A — retire isolated parity blockers
+## Phase A — COMPLETE
 
-1. Band Pass
-2. Constant-Q Parametric
-3. Linkwitz Transform
+- Band Pass
+- Constant-Q Parametric
+- Linkwitz Transform
 
-Each slice requires:
+## Phase B — COMPLETE
 
-- independently sourced/designed DSP math,
-- control-plane validation,
-- Minimum-Phase tests,
-- Linear-Phase compatibility tests where applicable,
-- finite behavior at 44.1/48/88.2/96/176.4/192/352.8/384 kHz,
-- full macOS CI before moving on.
+- bounded compiled multi-section EQ program
+- 6–96 dB/oct slopes
+- Tilt EQ
 
-## Phase B — replace the main-EQ compiled representation once
+## Phase C — COMPLETE
 
-4. bounded compiled multi-section EQ program
-5. 6–96 dB/oct slopes
-6. Tilt EQ
+- Mid/Side EQ
+- per-band FIR
+- Mixed Phase EQ
 
-Do this once instead of layering temporary section-expansion hacks onto the current user-band representation.
+## Phase D — COMPLETE
 
-## Phase C — channel/phase extensions
+- Symmetry Balance
+- Panning Gain Matrix / speaker crossfeed
+- Crosstalk Cancellation
+- Sub-Bass Phase Alignment
+- independent global Speaker IR mapping
 
-7. Mid/Side EQ
-8. per-band FIR
-9. Mixed Phase EQ
+## Phase E — ACTIVE: parity re-audit / regression gate
 
-Focused hardware/listening validation becomes mandatory for these structural audio changes.
+Required before optimisation opens:
 
-## Phase D — remaining current stereo spatial parity
+- rerun the legacy behavior ledger against the current commercial graph
+- verify every current-scope audited capability is either implemented/improved or explicitly assigned to the correct later milestone
+- verify no current blocker remains unexplained
+- run the accumulated deterministic high-rate regression coverage through 384 kHz
+- verify the three FIR workflows remain simultaneously representable
+- verify Reference / Delta / Global Bypass latency alignment remains coherent with cumulative FIR/protection/denoiser latency
+- inspect realtime-safety properties for the newly structural paths: no render-thread allocation, coefficient design, blocking or unsafe graph mutation
+- run focused hardware/listening validation on the structural audio changes
 
-10. Symmetry Balance
-11. Panning Gain Matrix
-12. Crosstalk Cancellation
-13. Sub-Bass Phase Alignment
-14. resolve/implement the in-scope advanced FIR-IR product mapping
-
-## Phase E — parity re-audit / regression gate
-
-After the blockers above are implemented:
-
-- rerun the legacy behavior ledger against the commercial graph,
-- verify no current blocker remains unexplained,
-- run deterministic 384-kHz high-rate regression coverage,
-- run focused hardware/listening validation on structural audio changes.
-
-Only then does PR34 move to the optimisation phase.
+Only after those checks does PR34 move to performance optimisation.
 
 # 8. Performance optimisation gate
 
@@ -291,7 +285,7 @@ and for representative/worst-case combinations including:
 - high-order slopes
 - Linear Phase
 - Mixed Phase
-- FIR/per-band FIR/global convolution
+- per-band FIR + main-EQ/global convolution + room correction + Speaker IR
 - denoiser Quality/High/Ultra
 - 4x protection
 - bass management
@@ -303,8 +297,10 @@ Only measured hotspots should be changed. Every optimisation must retain sonic/f
 
 **PR34 source-discovery gate: SATISFIED for the current stereo product.**
 
-**PR34 functional-parity gate: NOT YET SATISFIED.**
+**PR34 implementation blocker gate (Phases A-D): SATISFIED.**
 
-**PR34 optimisation gate: CLOSED until the current blocker queue above is retired and re-audited.**
+**PR34 functional-parity gate: NOT YET SATISFIED — Phase E re-audit/regression/hardware validation is active.**
 
-The next production-code slice is **Band Pass parity**.
+**PR34 optimisation gate: CLOSED until Phase E passes.**
+
+The next PR34 work is **Phase E parity re-audit and regression validation**.
