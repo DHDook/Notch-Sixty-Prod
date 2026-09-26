@@ -17,23 +17,7 @@ jobs:
         with:
           ref: feature/dsp-optimization-parity-audit
 
-      - name: Apply Phase A core integration
-        run: python3 ci/pr34_apply_phase_a_core.py
-
-      - name: Apply live stereo Phase A integration
-        run: python3 ci/pr34_apply_stereo_phase_a.py
-
-      - name: Verify Phase A source integration
-        run: python3 ci/pr34_apply_bandpass_integration.py
-
-      - name: Apply Phase B compiled EQ integration
-        run: |
-          python3 ci/pr34_apply_phase_b.py
-          python3 ci/pr34_fix_phase_b_linear_bound.py
-          python3 ci/pr34_fix_phase_b_swift_bridge.py
-          python3 ci/pr34_fix_phase_b_test_bridge.py
-
-      - name: Apply Phase C Mid Side integration
+      - name: Apply active Phase C Mid Side integration
         run: python3 ci/pr34_apply_phase_c_midside.py
 
       - name: Validate Band Pass DSP
@@ -92,6 +76,6 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add NotchSixty/Audio/Realtime/N60Biquad.h NotchSixty/Audio/Realtime/N60RenderKernel.h NotchSixty/Audio/Realtime/N60RenderKernel.c NotchSixty/Audio/Realtime/N60LinearPhaseEQ.h NotchSixty/Audio/AudioIOEngine.swift NotchSixty/Audio/StereoPlaybackControl.swift NotchSixty/ContentView.swift NotchSixtyTests/NotchSixtyTests.swift
+          git add NotchSixty/Audio/Realtime/N60RenderKernel.h NotchSixty/Audio/Realtime/N60RenderKernel.c NotchSixty/Audio/AudioIOEngine.swift NotchSixty/Audio/StereoPlaybackControl.swift NotchSixty/ContentView.swift NotchSixtyTests/NotchSixtyTests.swift
           git commit -m "Integrate PR34 Phase C Mid Side EQ"
           git push origin HEAD:feature/dsp-optimization-parity-audit
