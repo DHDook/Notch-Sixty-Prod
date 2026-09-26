@@ -1,0 +1,274 @@
+xcodebuild_status=65
+--- compiler/test errors ---
+725- 11 |         var taps: [Float] = [1.0]
+726-    |             `- warning: variable 'taps' was never mutated; consider changing to 'let' constant [#VariableNeverMutated]
+727- 12 |         var generation: UInt64 = 0
+728: 13 |         XCTAssertTrue(
+729-
+730-/Users/runner/work/Notch-Sixty-Prod/Notch-Sixty-Prod/NotchSixtyTests/ConvolutionTests.swift:49:13: warning: variable 'taps' was never mutated; consider changing to 'let' constant [#VariableNeverMutated]
+731- 47 |         defer { N60PartitionedConvolverDestroy(convolver) }
+--
+733- 49 |         var taps: [Float] = [0.25, 0.5, 0.25]
+734-    |             `- warning: variable 'taps' was never mutated; consider changing to 'let' constant [#VariableNeverMutated]
+735- 50 |         var generation: UInt64 = 0
+736: 51 |         XCTAssertTrue(
+737-
+738-/Users/runner/work/Notch-Sixty-Prod/Notch-Sixty-Prod/NotchSixtyTests/ConvolutionTests.swift:83:13: warning: variable 'leftTaps' was never mutated; consider changing to 'let' constant [#VariableNeverMutated]
+739- 81 |         defer { N60PartitionedConvolverDestroy(convolver) }
+--
+757-154 |         var taps: [Float] = [0.25, 0.5, 0.25]
+758-    |             `- warning: variable 'taps' was never mutated; consider changing to 'let' constant [#VariableNeverMutated]
+759-155 |         var info = N60ConvolutionProgramInfo()
+760:156 |         XCTAssertTrue(
+761-
+762-/Users/runner/work/Notch-Sixty-Prod/Notch-Sixty-Prod/NotchSixtyTests/ConvolutionTests.swift:218:13: warning: variable 'taps' was never mutated; consider changing to 'let' constant [#VariableNeverMutated]
+763-216 | 
+--
+780-408 | 
+781-409 |         var bad: [Float] = [.nan]
+782-    |             `- warning: variable 'bad' was never mutated; consider changing to 'let' constant [#VariableNeverMutated]
+783:410 |         XCTAssertFalse(
+784-411 |             bad.withUnsafeBufferPointer { buffer in
+785-
+786-/Users/runner/work/Notch-Sixty-Prod/Notch-Sixty-Prod/NotchSixtyTests/ConvolutionTests.swift:416:13: warning: variable 'one' was never mutated; consider changing to 'let' constant [#VariableNeverMutated]
+--
+788-415 | 
+789-416 |         var one: [Float] = [1]
+790-    |             `- warning: variable 'one' was never mutated; consider changing to 'let' constant [#VariableNeverMutated]
+791:417 |         XCTAssertFalse(
+792-418 |             one.withUnsafeBufferPointer { buffer in
+793-
+794-/Users/runner/work/Notch-Sixty-Prod/Notch-Sixty-Prod/NotchSixtyTests/ConvolutionTests.swift:462:13: warning: variable 'linearTaps' was never mutated; consider changing to 'let' constant [#VariableNeverMutated]
+--
+813-526 |         var taps: [Float] = [1.0]
+814-    |             `- warning: variable 'taps' was never mutated; consider changing to 'let' constant [#VariableNeverMutated]
+815-527 |         var linearInfo = N60ConvolutionProgramInfo()
+816:528 |         XCTAssertTrue(
+817-
+818-/Users/runner/work/Notch-Sixty-Prod/Notch-Sixty-Prod/NotchSixtyTests/ConvolutionTests.swift:547:13: warning: variable 'graph' was never mutated; consider changing to 'let' constant [#VariableNeverMutated]
+819-545 |         defer { N60RenderKernelDestroy(kernel) }
+820-546 | 
+821-547 |         var graph = N60DSPGraphSnapshotMakeUnity(192_000)
+822-    |             `- warning: variable 'graph' was never mutated; consider changing to 'let' constant [#VariableNeverMutated]
+823:548 |         XCTAssertEqual(graph.latencyFrames, 0)
+824:549 |         XCTAssertFalse(graph.roomCorrection.enabled)
+825-
+826-[#VariableNeverMutated]: <https://docs.swift.org/compiler/documentation/diagnostics/variable-never-mutated>
+827-SwiftDriverJobDiscovery normal arm64 Emitting module for NotchSixtyTests (in target 'NotchSixtyTests' from project 'NotchSixty')
+--
+848- 48 |         var taps: [Float] = [1]
+849-    |             `- warning: variable 'taps' was never mutated; consider changing to 'let' constant [#VariableNeverMutated]
+850- 49 |         var generation0: UInt64 = 0
+851: 50 |         XCTAssertTrue(
+852-
+853-/Users/runner/work/Notch-Sixty-Prod/Notch-Sixty-Prod/NotchSixtyTests/LiveLinearPhaseTests.swift:101:13: warning: variable 'linearTaps' was never mutated; consider changing to 'let' constant [#VariableNeverMutated]
+854- 99 |         defer { N60RealtimeAudioBridgeDestroy(bridge) }
+--
+871-377 |         var program = N60ConvolutionProgramInfo()
+872-378 |         var taps: [Float] = [1]
+873-    |             `- warning: variable 'taps' was never mutated; consider changing to 'let' constant [#VariableNeverMutated]
+874:379 |         XCTAssertTrue(taps.withUnsafeBufferPointer { buffer in
+875-380 |             N60RenderKernelPrepareConvolutionProgram(
+876-
+877-[#VariableNeverMutated]: <https://docs.swift.org/compiler/documentation/diagnostics/variable-never-mutated>
+--
+983-PruneExplicitPrecompiledModules /Users/runner/Library/Developer/Xcode/DerivedData/NotchSixty-ggjxdobswfqdrpaphpnrjydcooof/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules
+984-
+985-note: Disabling hardened runtime with ad-hoc codesigning. (in target 'NotchSixty' from project 'NotchSixty')
+986:2026-09-26 02:14:40.907832+0000 Notch Sixty[4532:16499] [Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+987:2026-09-26 02:14:40.909401+0000 Notch Sixty[4532:16502] [Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+988:2026-09-26 02:14:40.909425+0000 Notch Sixty[4532:16502] [Connection] Unable to re-register with Process Instance Registry, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+989:2026-09-26 02:14:40.910128+0000 Notch Sixty[4532:16500] [Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+990:2026-09-26 02:14:40.913071+0000 Notch Sixty[4532:16500] [Connection] Unable to re-register with Process Instance Registry, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+991:2026-09-26 02:14:40.911544+0000 Notch Sixty[4532:16502] [Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+992:2026-09-26 02:14:40.913122+0000 Notch Sixty[4532:16502] [Connection] Unable to re-register with Process Instance Registry, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+993:2026-09-26 02:14:40.911978+0000 Notch Sixty[4532:16514] [Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+994:2026-09-26 02:14:40.912474+0000 Notch Sixty[4532:16515] [Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+995:2026-09-26 02:14:40.927610+0000 Notch Sixty[4532:16514] [Connection] Unable to re-register with Process Instance Registry, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+996:2026-09-26 02:14:40.913001+0000 Notch Sixty[4532:16509] [Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+997:2026-09-26 02:14:40.927616+0000 Notch Sixty[4532:16515] [Connection] Unable to re-register with Process Instance Registry, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+998-2026-09-26 02:14:40.913560+0000 Notch Sixty[4532:16500] [Connection] Will NOT re-try to establish the connection
+999:2026-09-26 02:14:40.930846+0000 Notch Sixty[4532:16509] [Connection] Unable to re-register with Process Instance Registry, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+1000-2026-09-26 02:14:40.908529+0000 Notch Sixty[4532:16499] [Application] Error registering app with intents framework: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+1001:2026-09-26 02:14:40.930886+0000 Notch Sixty[4532:16517] [Connection] Unable to get synchronousRemoteObjectProxy, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+1002:2026-09-26 02:14:40.932492+0000 Notch Sixty[4532:16517] [Connection] Unable to re-register with Process Instance Registry, error: Error Domain=NSCocoaErrorDomain Code=4097 "connection to service named com.apple.linkd.autoShortcut" UserInfo={NSDebugDescription=connection to service named com.apple.linkd.autoShortcut}
+1003-2026-09-26 02:14:41.312098+0000 Notch Sixty[4532:16430] ApplePersistenceIgnoreState: Existing state will not be touched. New state will be written to /var/folders/w7/5yrmw31j1jb2h8fg426nnw4c0000gn/T/com.dhdook.NotchSixty.savedState
+1004-2026-09-26 02:14:43.635975+0000 Notch Sixty[4532:16430] [plugin] AddInstanceForFactory: No factory registered for id <CFUUID 0x77a2319920> F8BB1C28-BAE8-11D6-9C31-00039315CD46
+1005-2026-09-26 02:14:44.545323+0000 Notch Sixty[4532:16499] [Common] Unable to obtain a task name port right for pid 166: (os/kern) failure (0x5)
+--
+1198-Test Case '-[NotchSixtyTests.NotchSixtyTests testSpectralDenoiserGraphLatencyTracksQualityOnlyWhenEnabled]' started.
+1199-Test Case '-[NotchSixtyTests.NotchSixtyTests testSpectralDenoiserGraphLatencyTracksQualityOnlyWhenEnabled]' passed (0.001 seconds).
+1200-Test Case '-[NotchSixtyTests.NotchSixtyTests testSpectralDenoiserGraphStaysFiniteAt384k]' started.
+1201:/Users/runner/work/Notch-Sixty-Prod/Notch-Sixty-Prod/NotchSixtyTests/NotchSixtyTests.swift:1049: error: -[NotchSixtyTests.NotchSixtyTests testSpectralDenoiserGraphStaysFiniteAt384k] : XCTAssertEqual failed: ("2048") is not equal to ("4096")
+1202:Test Case '-[NotchSixtyTests.NotchSixtyTests testSpectralDenoiserGraphStaysFiniteAt384k]' failed (0.875 seconds).
+1203-Test Case '-[NotchSixtyTests.NotchSixtyTests testSpectralDenoiserGraphUnityBeforeProfileReadyMatchesLatencyReference]' started.
+1204-Test Case '-[NotchSixtyTests.NotchSixtyTests testSpectralDenoiserGraphUnityBeforeProfileReadyMatchesLatencyReference]' passed (0.047 seconds).
+1205-Test Case '-[NotchSixtyTests.NotchSixtyTests testSpectralDenoiserProfileResetReturnsToAdaptiveLearning]' started.
+--
+1302-Failing tests:
+1303-	NotchSixtyTests.testSpectralDenoiserGraphStaysFiniteAt384k()
+1304-
+1305:** TEST FAILED **
+1306-
+1307-Testing started
+--- final 160 lines ---
+Test Case '-[NotchSixtyTests.NotchSixtyTests testParametricEQPeakingCenterGainAcrossSupportedRates]' started.
+Test Case '-[NotchSixtyTests.NotchSixtyTests testParametricEQPeakingCenterGainAcrossSupportedRates]' passed (0.115 seconds).
+Test Case '-[NotchSixtyTests.NotchSixtyTests testParametricEQPerBandAndStageBypassAreDry]' started.
+Test Case '-[NotchSixtyTests.NotchSixtyTests testParametricEQPerBandAndStageBypassAreDry]' passed (0.001 seconds).
+Test Case '-[NotchSixtyTests.NotchSixtyTests testParametricEQRejectsInvalidBandDesigns]' started.
+Test Case '-[NotchSixtyTests.NotchSixtyTests testParametricEQRejectsInvalidBandDesigns]' passed (0.001 seconds).
+Test Case '-[NotchSixtyTests.NotchSixtyTests testParametricEQShelvesAndNotchHaveExpectedResponse]' started.
+Test Case '-[NotchSixtyTests.NotchSixtyTests testParametricEQShelvesAndNotchHaveExpectedResponse]' passed (0.113 seconds).
+Test Case '-[NotchSixtyTests.NotchSixtyTests testRefreshPreservesSelectedUIDWhenHardwareDisappears]' started.
+2026-09-26 02:14:50.042556+0000 Notch Sixty[4532:16430] AudioHardware-mac-imp.cpp:439    AudioObjectHasProperty: no object with given ID 20
+2026-09-26 02:14:50.043989+0000 Notch Sixty[4532:16430] AudioHardware-mac-imp.cpp:439    AudioObjectHasProperty: no object with given ID 20
+2026-09-26 02:14:50.044115+0000 Notch Sixty[4532:16430] AudioHardware-mac-imp.cpp:439    AudioObjectHasProperty: no object with given ID 20
+2026-09-26 02:14:50.044138+0000 Notch Sixty[4532:16430] AudioHardware-mac-imp.cpp:439    AudioObjectHasProperty: no object with given ID 20
+2026-09-26 02:14:50.044161+0000 Notch Sixty[4532:16430] AudioHardware-mac-imp.cpp:439    AudioObjectHasProperty: no object with given ID 20
+2026-09-26 02:14:50.044184+0000 Notch Sixty[4532:16430] AudioHardware-mac-imp.cpp:439    AudioObjectHasProperty: no object with given ID 20
+2026-09-26 02:14:50.044211+0000 Notch Sixty[4532:16430] AudioHardware-mac-imp.cpp:439    AudioObjectHasProperty: no object with given ID 20
+2026-09-26 02:14:50.044228+0000 Notch Sixty[4532:16430] AudioHardware-mac-imp.cpp:439    AudioObjectHasProperty: no object with given ID 20
+2026-09-26 02:14:50.044243+0000 Notch Sixty[4532:16430] AudioHardware-mac-imp.cpp:439    AudioObjectHasProperty: no object with given ID 20
+2026-09-26 02:14:50.044256+0000 Notch Sixty[4532:16430] AudioHardware-mac-imp.cpp:439    AudioObjectHasProperty: no object with given ID 20
+2026-09-26 02:14:50.044268+0000 Notch Sixty[4532:16430] AudioHardware-mac-imp.cpp:439    AudioObjectHasProperty: no object with given ID 20
+2026-09-26 02:14:50.044279+0000 Notch Sixty[4532:16430] AudioHardware-mac-imp.cpp:439    AudioObjectHasProperty: no object with given ID 20
+Test Case '-[NotchSixtyTests.NotchSixtyTests testRefreshPreservesSelectedUIDWhenHardwareDisappears]' passed (0.005 seconds).
+Test Case '-[NotchSixtyTests.NotchSixtyTests testRenderKernelAppliesGainSnapshotAndBypass]' started.
+Test Case '-[NotchSixtyTests.NotchSixtyTests testRenderKernelAppliesGainSnapshotAndBypass]' passed (0.001 seconds).
+Test Case '-[NotchSixtyTests.NotchSixtyTests testRenderKernelSanitizesNonFiniteSamplesAndRejectsInvalidGraphs]' started.
+Test Case '-[NotchSixtyTests.NotchSixtyTests testRenderKernelSanitizesNonFiniteSamplesAndRejectsInvalidGraphs]' passed (0.001 seconds).
+Test Case '-[NotchSixtyTests.NotchSixtyTests testRenderKernelUnityIsTransparentAcrossSupportedRates]' started.
+Test Case '-[NotchSixtyTests.NotchSixtyTests testRenderKernelUnityIsTransparentAcrossSupportedRates]' passed (0.001 seconds).
+Test Case '-[NotchSixtyTests.NotchSixtyTests testSampleRateRangeNormalizesBoundsAndMatchesRates]' started.
+Test Case '-[NotchSixtyTests.NotchSixtyTests testSampleRateRangeNormalizesBoundsAndMatchesRates]' passed (0.001 seconds).
+Test Case '-[NotchSixtyTests.NotchSixtyTests testSelectingUnavailableOutputFailsWithoutChangingRoute]' started.
+Test Case '-[NotchSixtyTests.NotchSixtyTests testSelectingUnavailableOutputFailsWithoutChangingRoute]' passed (0.001 seconds).
+Test Case '-[NotchSixtyTests.NotchSixtyTests testSelectionFollowsStableUIDAcrossTransientDeviceIDChange]' started.
+2026-09-26 02:14:50.054799+0000 Notch Sixty[4532:16430] AudioHardware-mac-imp.cpp:439    AudioObjectHasProperty: no object with given ID 20
+2026-09-26 02:14:50.054841+0000 Notch Sixty[4532:16430] AudioHardware-mac-imp.cpp:439    AudioObjectHasProperty: no object with given ID 20
+2026-09-26 02:14:50.056169+0000 Notch Sixty[4532:16430] AudioHardware-mac-imp.cpp:439    AudioObjectHasProperty: no object with given ID 20
+2026-09-26 02:14:50.056189+0000 Notch Sixty[4532:16430] AudioHardware-mac-imp.cpp:439    AudioObjectHasProperty: no object with given ID 20
+2026-09-26 02:14:50.056200+0000 Notch Sixty[4532:16430] AudioHardware-mac-imp.cpp:439    AudioObjectHasProperty: no object with given ID 20
+2026-09-26 02:14:50.056212+0000 Notch Sixty[4532:16430] AudioHardware-mac-imp.cpp:439    AudioObjectHasProperty: no object with given ID 20
+2026-09-26 02:14:50.056232+0000 Notch Sixty[4532:16430] AudioHardware-mac-imp.cpp:439    AudioObjectHasProperty: no object with given ID 20
+2026-09-26 02:14:50.056244+0000 Notch Sixty[4532:16430] AudioHardware-mac-imp.cpp:439    AudioObjectHasProperty: no object with given ID 20
+2026-09-26 02:14:50.056257+0000 Notch Sixty[4532:16430] AudioHardware-mac-imp.cpp:439    AudioObjectHasProperty: no object with given ID 20
+2026-09-26 02:14:50.056637+0000 Notch Sixty[4532:16430] AudioHardware-mac-imp.cpp:439    AudioObjectHasProperty: no object with given ID 20
+2026-09-26 02:14:50.056653+0000 Notch Sixty[4532:16430] AudioHardware-mac-imp.cpp:439    AudioObjectHasProperty: no object with given ID 20
+2026-09-26 02:14:50.056663+0000 Notch Sixty[4532:16430] AudioHardware-mac-imp.cpp:439    AudioObjectHasProperty: no object with given ID 20
+Test Case '-[NotchSixtyTests.NotchSixtyTests testSelectionFollowsStableUIDAcrossTransientDeviceIDChange]' passed (0.003 seconds).
+Test Case '-[NotchSixtyTests.NotchSixtyTests testSpectralDenoiserCapturedProfileReducesStationaryNoiseWithLinkedStereoGain]' started.
+Test Case '-[NotchSixtyTests.NotchSixtyTests testSpectralDenoiserCapturedProfileReducesStationaryNoiseWithLinkedStereoGain]' passed (0.062 seconds).
+Test Case '-[NotchSixtyTests.NotchSixtyTests testSpectralDenoiserDisabledPathIsExactlyTransparent]' started.
+Test Case '-[NotchSixtyTests.NotchSixtyTests testSpectralDenoiserDisabledPathIsExactlyTransparent]' passed (0.011 seconds).
+Test Case '-[NotchSixtyTests.NotchSixtyTests testSpectralDenoiserGraphLatencyTracksQualityOnlyWhenEnabled]' started.
+Test Case '-[NotchSixtyTests.NotchSixtyTests testSpectralDenoiserGraphLatencyTracksQualityOnlyWhenEnabled]' passed (0.001 seconds).
+Test Case '-[NotchSixtyTests.NotchSixtyTests testSpectralDenoiserGraphStaysFiniteAt384k]' started.
+/Users/runner/work/Notch-Sixty-Prod/Notch-Sixty-Prod/NotchSixtyTests/NotchSixtyTests.swift:1049: error: -[NotchSixtyTests.NotchSixtyTests testSpectralDenoiserGraphStaysFiniteAt384k] : XCTAssertEqual failed: ("2048") is not equal to ("4096")
+Test Case '-[NotchSixtyTests.NotchSixtyTests testSpectralDenoiserGraphStaysFiniteAt384k]' failed (0.875 seconds).
+Test Case '-[NotchSixtyTests.NotchSixtyTests testSpectralDenoiserGraphUnityBeforeProfileReadyMatchesLatencyReference]' started.
+Test Case '-[NotchSixtyTests.NotchSixtyTests testSpectralDenoiserGraphUnityBeforeProfileReadyMatchesLatencyReference]' passed (0.047 seconds).
+Test Case '-[NotchSixtyTests.NotchSixtyTests testSpectralDenoiserProfileResetReturnsToAdaptiveLearning]' started.
+Test Case '-[NotchSixtyTests.NotchSixtyTests testSpectralDenoiserProfileResetReturnsToAdaptiveLearning]' passed (0.012 seconds).
+Test Case '-[NotchSixtyTests.NotchSixtyTests testSpectralDenoiserQualityModesHaveExplicitPowerOfTwoContracts]' started.
+Test Case '-[NotchSixtyTests.NotchSixtyTests testSpectralDenoiserQualityModesHaveExplicitPowerOfTwoContracts]' passed (0.001 seconds).
+Test Case '-[NotchSixtyTests.NotchSixtyTests testStartupGatePolicyAvoidsUInt32Overflow]' started.
+Test Case '-[NotchSixtyTests.NotchSixtyTests testStartupGatePolicyAvoidsUInt32Overflow]' passed (0.001 seconds).
+Test Case '-[NotchSixtyTests.NotchSixtyTests testStartupGatePolicyKeepsOneHardwareBufferQueuedAfterOpening]' started.
+Test Case '-[NotchSixtyTests.NotchSixtyTests testStartupGatePolicyKeepsOneHardwareBufferQueuedAfterOpening]' passed (0.001 seconds).
+Test Case '-[NotchSixtyTests.NotchSixtyTests testStartupGatePolicyNeverUsesZeroBufferOrFadeFrames]' started.
+Test Case '-[NotchSixtyTests.NotchSixtyTests testStartupGatePolicyNeverUsesZeroBufferOrFadeFrames]' passed (0.001 seconds).
+Test Case '-[NotchSixtyTests.NotchSixtyTests testStereoFloat32FormatIsAccepted]' started.
+Test Case '-[NotchSixtyTests.NotchSixtyTests testStereoFloat32FormatIsAccepted]' passed (0.001 seconds).
+Test Case '-[NotchSixtyTests.NotchSixtyTests testSubPolarityInversionFlipsSubOnlyOutput]' started.
+Test Case '-[NotchSixtyTests.NotchSixtyTests testSubPolarityInversionFlipsSubOnlyOutput]' passed (0.032 seconds).
+Test Case '-[NotchSixtyTests.NotchSixtyTests testTransportCountersAccumulateAndUseLatestBufferedDepth]' started.
+Test Case '-[NotchSixtyTests.NotchSixtyTests testTransportCountersAccumulateAndUseLatestBufferedDepth]' passed (0.001 seconds).
+Test Suite 'NotchSixtyTests' failed at 2026-09-26 02:14:51.107.
+	 Executed 43 tests, with 1 failure (0 unexpected) in 3.606 (3.622) seconds
+Test Suite 'ProtectionTests' started at 2026-09-26 02:14:51.107.
+Test Case '-[NotchSixtyTests.ProtectionTests testClipperCurvesRemainFiniteAndBounded]' started.
+Test Case '-[NotchSixtyTests.ProtectionTests testClipperCurvesRemainFiniteAndBounded]' passed (0.005 seconds).
+Test Case '-[NotchSixtyTests.ProtectionTests testFourTimesTruePeakDetectorFindsInterSamplePeak]' started.
+Test Case '-[NotchSixtyTests.ProtectionTests testFourTimesTruePeakDetectorFindsInterSamplePeak]' passed (0.001 seconds).
+Test Case '-[NotchSixtyTests.ProtectionTests testLimiterForcesFourTimesTruePeakPathAndRespectsCeiling]' started.
+Test Case '-[NotchSixtyTests.ProtectionTests testLimiterForcesFourTimesTruePeakPathAndRespectsCeiling]' passed (0.011 seconds).
+Test Case '-[NotchSixtyTests.ProtectionTests testProtectionConfigurationRejectsInvalidRanges]' started.
+Test Case '-[NotchSixtyTests.ProtectionTests testProtectionConfigurationRejectsInvalidRanges]' passed (0.001 seconds).
+Test Case '-[NotchSixtyTests.ProtectionTests testTwoAndFourTimesOversamplingPreserveUnityAfterDeclaredDelay]' started.
+Test Case '-[NotchSixtyTests.ProtectionTests testTwoAndFourTimesOversamplingPreserveUnityAfterDeclaredDelay]' passed (0.030 seconds).
+Test Suite 'ProtectionTests' passed at 2026-09-26 02:14:51.158.
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.048 (0.051) seconds
+Test Suite 'StereoPlaybackControlTests' started at 2026-09-26 02:14:51.158.
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testBalanceIsAttenuationOnlyAndCenterIsUnity]' started.
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testBalanceIsAttenuationOnlyAndCenterIsUnity]' passed (0.001 seconds).
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testDeltaAuditionNullsUnityConvolutionAgainstLatencyMatchedReference]' started.
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testDeltaAuditionNullsUnityConvolutionAgainstLatencyMatchedReference]' passed (0.005 seconds).
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testFirstSwitchToIndependentSeedsBothChannelsAndLaterRoundTripsPreserveEdits]' started.
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testFirstSwitchToIndependentSeedsBothChannelsAndLaterRoundTripsPreserveEdits]' passed (0.001 seconds).
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testFixedVolumeDeviceUsesSoftwareMasterGainForKeyboardFallback]' started.
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testFixedVolumeDeviceUsesSoftwareMasterGainForKeyboardFallback]' passed (0.001 seconds).
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testFlatCompatibilityAliasMapsToReferenceAudition]' started.
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testFlatCompatibilityAliasMapsToReferenceAudition]' passed (0.001 seconds).
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testFractionalInterChannelDelayTracksHalfSampleTimingWithUnityMagnitude]' started.
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testFractionalInterChannelDelayTracksHalfSampleTimingWithUnityMagnitude]' passed (0.035 seconds).
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testGlobalBypassOverridesAuditionModeAndStillAppliesMasterGain]' started.
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testGlobalBypassOverridesAuditionModeAndStillAppliesMasterGain]' passed (0.001 seconds).
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testGlobalBypassRemainsRawWithInterChannelDelayConfigured]' started.
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testGlobalBypassRemainsRawWithInterChannelDelayConfigured]' passed (0.006 seconds).
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testGraphBypassReturnsUntreatedStereoSamples]' started.
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testGraphBypassReturnsUntreatedStereoSamples]' passed (0.004 seconds).
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testIndependentLeftEQDoesNotProcessRightChannel]' started.
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testIndependentLeftEQDoesNotProcessRightChannel]' passed (0.036 seconds).
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testInterChannelDelayRangeIsPartOfPlaybackConfiguration]' started.
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testInterChannelDelayRangeIsPartOfPlaybackConfiguration]' passed (0.001 seconds).
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testLinkedEQProcessesBothChannelsEqually]' started.
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testLinkedEQProcessesBothChannelsEqually]' passed (0.011 seconds).
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testMasterGainStillAppliesDuringGlobalGraphBypass]' started.
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testMasterGainStillAppliesDuringGlobalGraphBypass]' passed (0.002 seconds).
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testMasterMuteFallsBackToSoftwareWhenDeviceHasNoWritableMute]' started.
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testMasterMuteFallsBackToSoftwareWhenDeviceHasNoWritableMute]' passed (0.001 seconds).
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testMasterVolumeCapabilityPolicyUsesHardwareVolumeWhenWritable]' started.
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testMasterVolumeCapabilityPolicyUsesHardwareVolumeWhenWritable]' passed (0.001 seconds).
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testProcessedModePreparesFIRStages]' started.
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testProcessedModePreparesFIRStages]' passed (0.001 seconds).
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testRawBypassDefersFIRPreparationPolicyAcrossRepeatedEdits]' started.
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testRawBypassDefersFIRPreparationPolicyAcrossRepeatedEdits]' passed (0.001 seconds).
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testRealtimeMasterGainIsIndependentAndSmoothed]' started.
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testRealtimeMasterGainIsIndependentAndSmoothed]' passed (0.005 seconds).
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testReferenceAndDeltaKeepFIRStagesPrepared]' started.
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testReferenceAndDeltaKeepFIRStagesPrepared]' passed (0.001 seconds).
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testReferenceAuditionDelaysRawInputByPublishedLatency]' started.
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testReferenceAuditionDelaysRawInputByPublishedLatency]' passed (0.001 seconds).
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testSignedInterChannelDelaySelectsCorrectChannelAndExactIntegerTiming]' started.
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testSignedInterChannelDelaySelectsCorrectChannelAndExactIntegerTiming]' passed (0.002 seconds).
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testStereoGraphCompilesUpToSixtyFourBandsPerChannelAt384k]' started.
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testStereoGraphCompilesUpToSixtyFourBandsPerChannelAt384k]' passed (0.001 seconds).
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testSystemDefinedVolumeKeyDecodingUsesKeyDownOnly]' started.
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testSystemDefinedVolumeKeyDecodingUsesKeyDownOnly]' passed (0.001 seconds).
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testTwentyFourDBBoundaryIsAcceptedAndBeyondBoundaryIsRejected]' started.
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testTwentyFourDBBoundaryIsAcceptedAndBeyondBoundaryIsRejected]' passed (0.001 seconds).
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testUnsafeEQGainIsRejectedBeforeGraphPublication]' started.
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testUnsafeEQGainIsRejectedBeforeGraphPublication]' passed (0.001 seconds).
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testZeroInterChannelDelayIsTransparent]' started.
+Test Case '-[NotchSixtyTests.StereoPlaybackControlTests testZeroInterChannelDelayIsTransparent]' passed (0.004 seconds).
+Test Suite 'StereoPlaybackControlTests' passed at 2026-09-26 02:14:51.294.
+	 Executed 26 tests, with 0 failures (0 unexpected) in 0.125 (0.135) seconds
+Test Suite 'NotchSixtyTests.xctest' failed at 2026-09-26 02:14:51.294.
+	 Executed 120 tests, with 1 failure (0 unexpected) in 4.521 (4.568) seconds
+Test Suite 'All tests' failed at 2026-09-26 02:14:51.294.
+	 Executed 120 tests, with 1 failure (0 unexpected) in 4.521 (4.569) seconds
+2026-09-26 02:14:55.581 xcodebuild[3689:13933] [MT] IDETestOperationsObserverDebug: 15.945 elapsed -- Testing started completed.
+2026-09-26 02:14:55.581 xcodebuild[3689:13933] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-09-26 02:14:55.581 xcodebuild[3689:13933] [MT] IDETestOperationsObserverDebug: 15.945 sec, +15.945 sec -- end
+
+Test session results, code coverage, and logs:
+	/Users/runner/Library/Developer/Xcode/DerivedData/NotchSixty-ggjxdobswfqdrpaphpnrjydcooof/Logs/Test/Test-NotchSixty-2026.09.26_02-14-15-+0000.xcresult
+
+Failing tests:
+	NotchSixtyTests.testSpectralDenoiserGraphStaysFiniteAt384k()
+
+** TEST FAILED **
+
+Testing started
