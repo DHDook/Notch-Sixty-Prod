@@ -89,6 +89,6 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add NotchSixty/Audio/Realtime/N60MixedPhase.h NotchSixty/Audio/Realtime/N60RenderKernel.h NotchSixty/Audio/Realtime/N60RenderKernel.c NotchSixty/Audio/AudioIOEngine.swift NotchSixty/Audio/StereoPlaybackControl.swift NotchSixty/ContentView.swift NotchSixtyTests/NotchSixtyTests.swift
+          git add NotchSixty/Audio/Realtime/N60MixedPhase.h NotchSixty/Audio/Realtime/N60RenderKernel.h NotchSixty/Audio/Realtime/N60RenderKernel.c NotchSixty/Audio/AudioIOEngine.swift NotchSixty/Audio/StereoPlaybackControl.swift NotchSixty/Diagnostics/AudioDiagnosticsSnapshot.swift NotchSixty/ContentView.swift NotchSixtyTests/NotchSixtyTests.swift
           git commit -m "Close PR34 Mixed Phase EQ parity"
           git push origin HEAD:feature/dsp-optimization-parity-audit
