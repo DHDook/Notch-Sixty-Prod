@@ -31,7 +31,12 @@ jobs:
           new = 'var snapshot = try config.makeProtectionSnapshot(sampleRate: 384_000)\n        XCTAssertTrue(N60ProtectionSnapshotIsValid(&snapshot))'
           if old not in text:
               raise SystemExit('PR33 Slice 2 mutability-fix anchor not found')
-          path.write_text(text.replace(old, new, 1))
+          text = text.replace(old, new, 1)
+          # Exercise asymmetry around the clipper knee instead of deep saturation,
+          # where both half-cycles intentionally converge toward the same bound.
+          text = text.replace('var positive: Float = 0.7', 'var positive: Float = 0.3', 1)
+          text = text.replace('var negative: Float = -0.7', 'var negative: Float = -0.3', 1)
+          path.write_text(text)
 
           path = Path('NotchSixtyTests/StereoPlaybackControlTests.swift')
           text = path.read_text()
