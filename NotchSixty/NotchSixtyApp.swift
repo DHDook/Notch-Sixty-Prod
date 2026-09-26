@@ -627,6 +627,120 @@ private struct PR30PhaseTimeValidationView: View {
     }
 }
 
+
+private struct PR31NoiseHumValidationView: View {
+    @ObservedObject var engine: AudioIOEngine
+
+    private func mainsBinding<Value>(_ keyPath: WritableKeyPath<MainsNotchConfiguration, Value>) -> Binding<Value> {
+        Binding(
+            get: { engine.dynamicsConfiguration.mainsNotch[keyPath: keyPath] },
+            set: { value in
+                var updated = engine.dynamicsConfiguration
+                updated.mainsNotch[keyPath: keyPath] = value
+                try? engine.replaceDynamicsConfiguration(updated)
+            }
+        )
+    }
+
+    private var harmonicCountBinding: Binding<Double> {
+        Binding(
+            get: { Double(engine.dynamicsConfiguration.mainsNotch.harmonicCount) },
+            set: { value in
+                var updated = engine.dynamicsConfiguration
+                updated.mainsNotch.harmonicCount = Int(value.rounded())
+                try? engine.replaceDynamicsConfiguration(updated)
+            }
+        )
+    }
+
+    private func harmonicDepthBinding(_ index: Int) -> Binding<Double> {
+        Binding(
+            get: { engine.dynamicsConfiguration.mainsNotch.harmonicDepthsDB[index] },
+            set: { value in
+                var updated = engine.dynamicsConfiguration
+                updated.mainsNotch.harmonicDepthsDB[index] = value
+                try? engine.replaceDynamicsConfiguration(updated)
+            }
+        )
+    }
+
+    var body: some View {
+        let enabled = mainsBinding(\.enabled)
+        let region = mainsBinding(\.region)
+        let q = mainsBinding(\.q)
+
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("PR31 Noise / Hum Validation")
+                    .font(.title2.bold())
+                Text("First PR31 slice: independently authored static mains-hum harmonic suppression. Detection/tracking and spectral denoising follow in the same PR.")
+                    .foregroundStyle(.secondary)
+
+                GroupBox("Mains Hum Notch") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Toggle("Enable Mains Hum Notch", isOn: enabled).toggleStyle(.switch)
+
+                        Picker("Region", selection: region) {
+                            ForEach(MainsRegion.allCases) { value in
+                                Text(value.displayName).tag(value)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(maxWidth: 320)
+
+                        HStack(spacing: 12) {
+                            Text("Harmonics").frame(width: 90, alignment: .leading)
+                            Slider(value: harmonicCountBinding, in: 1...16, step: 1)
+                            Text("\(engine.dynamicsConfiguration.mainsNotch.harmonicCount)")
+                                .monospacedDigit().frame(width: 36)
+                        }
+
+                        HStack(spacing: 12) {
+                            Text("Q").frame(width: 90, alignment: .leading)
+                            Slider(value: q, in: MainsNotchConfiguration.qRange, step: 1)
+                            Text("\(engine.dynamicsConfiguration.mainsNotch.q, specifier: "%.0f")")
+                                .monospacedDigit().frame(width: 48)
+                        }
+
+                        Divider()
+                        Text("Per-harmonic depth")
+                            .font(.subheadline.bold())
+                        ForEach(0..<engine.dynamicsConfiguration.mainsNotch.harmonicCount, id: \.self) { index in
+                            HStack(spacing: 12) {
+                                let frequency = engine.dynamicsConfiguration.mainsNotch.fundamentalHz * Double(index + 1)
+                                Text("H\(index + 1)  \(frequency, specifier: "%.0f") Hz")
+                                    .frame(width: 105, alignment: .leading)
+                                Slider(value: harmonicDepthBinding(index), in: MainsNotchConfiguration.depthRange, step: 1)
+                                Text("\(engine.dynamicsConfiguration.mainsNotch.harmonicDepthsDB[index], specifier: "%.0f") dB")
+                                    .monospacedDigit().frame(width: 70)
+                            }
+                        }
+                    }
+                    .padding(6)
+                }
+
+                GroupBox("Detection / Tracking") {
+                    Text("One-shot Detect and Continuous Tracking are the next PR31 slice. The static 50/60 Hz processor is intentionally validated first so detector behavior cannot hide filter-path errors.")
+                        .foregroundStyle(.secondary)
+                        .padding(6)
+                }
+
+                GroupBox("Spectral Denoising") {
+                    Text("Natural / Standard / Aggressive / Dehiss presets, profile Capture / Reset, protected-frequency range, and Quality / High / Ultra modes are the following PR31 slice.")
+                        .foregroundStyle(.secondary)
+                        .padding(6)
+                }
+
+                Text("Acceptance focus for this slice: with the filter disabled the path must be transparent; with it enabled, a 50/60 Hz tone and selected harmonics should fall by the configured depth without broad tonal loss. Toggle and parameter changes must remain stable and click-free enough for interactive validation.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(20)
+        }
+        .frame(minWidth: 880, minHeight: 700)
+    }
+}
+
 @main
 struct NotchSixtyApp: App {
     @StateObject private var product = ProductController()
@@ -645,6 +759,9 @@ struct NotchSixtyApp: App {
 
                 PR30PhaseTimeValidationView(engine: product.audioEngine)
                     .tabItem { Label("PR30 Phase / Time", systemImage: "timeline.selection") }
+
+                PR31NoiseHumValidationView(engine: product.audioEngine)
+                    .tabItem { Label("PR31 Noise / Hum", systemImage: "waveform.slash") }
             }
         }
     }

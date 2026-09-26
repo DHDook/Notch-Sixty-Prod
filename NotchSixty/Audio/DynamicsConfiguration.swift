@@ -4,6 +4,7 @@ enum DynamicsConfigurationError: Error, LocalizedError, Equatable {
     case invalidStereoWidener
     case invalidDCOffsetFilter
     case invalidInfrasonicFilter
+    case invalidMainsNotch
     case invalidLoudnessMatch
     case invalidLoudnessContour
     case invalidDeEsser
@@ -23,6 +24,8 @@ enum DynamicsConfigurationError: Error, LocalizedError, Equatable {
             return "DC Offset Filter configuration is invalid."
         case .invalidInfrasonicFilter:
             return "Infrasonic Filter parameters are outside the supported production range."
+        case .invalidMainsNotch:
+            return "Mains Hum Notch parameters are outside the supported production range."
         case .invalidLoudnessMatch:
             return "LUFS Loudness Match parameters are outside the supported production range."
         case .invalidLoudnessContour:
@@ -132,6 +135,42 @@ struct InfrasonicFilterConfiguration: Equatable, Sendable {
     func validate() throws {
         guard cutoffHz.isFinite, Self.cutoffRange.contains(cutoffHz) else {
             throw DynamicsConfigurationError.invalidInfrasonicFilter
+        }
+    }
+}
+
+enum MainsRegion: Int, CaseIterable, Identifiable, Sendable {
+    case hz50 = 50
+    case hz60 = 60
+
+    var id: Int { rawValue }
+    var displayName: String { "\(rawValue) Hz" }
+    var fundamentalHz: Double { Double(rawValue) }
+}
+
+struct MainsNotchConfiguration: Equatable, Sendable {
+    static let harmonicCountRange = 1...16
+    static let qRange = 5.0...60.0
+    static let depthRange = -40.0...0.0
+    static let maximumHarmonics = 16
+
+    var enabled = false
+    var region: MainsRegion = .hz60
+    var harmonicCount = 8
+    var q = 30.0
+    var harmonicDepthsDB: [Double] = [
+        -24, -18, -15, -12, -10, -8, -6, -6,
+        0, 0, 0, 0, 0, 0, 0, 0,
+    ]
+
+    var fundamentalHz: Double { region.fundamentalHz }
+
+    func validate() throws {
+        guard Self.harmonicCountRange.contains(harmonicCount),
+              q.isFinite, Self.qRange.contains(q),
+              harmonicDepthsDB.count == Self.maximumHarmonics,
+              harmonicDepthsDB.allSatisfy({ $0.isFinite && Self.depthRange.contains($0) }) else {
+            throw DynamicsConfigurationError.invalidMainsNotch
         }
     }
 }
@@ -408,6 +447,7 @@ struct DynamicsConfiguration: Equatable, Sendable {
     var stereoWidener = StereoWidenerConfiguration()
     var dcOffsetFilter = DCOffsetFilterConfiguration()
     var infrasonicFilter = InfrasonicFilterConfiguration()
+    var mainsNotch = MainsNotchConfiguration()
     var loudnessMatch = LoudnessMatchConfiguration()
     var loudnessContour = LoudnessContourConfiguration()
     var deEsser = DeEsserConfiguration()
@@ -422,6 +462,7 @@ struct DynamicsConfiguration: Equatable, Sendable {
     func makeSnapshot(sampleRate: Double) throws -> N60DynamicsSnapshot {
         try stereoWidener.validate()
         try infrasonicFilter.validate()
+        try mainsNotch.validate()
         try loudnessMatch.validate()
         try loudnessContour.validate()
         try deEsser.validate()
@@ -445,6 +486,20 @@ struct DynamicsConfiguration: Equatable, Sendable {
         ) else { throw DynamicsConfigurationError.invalidStereoWidener }
         guard N60DynamicsSnapshotSetDCOffsetFilter(&snapshot, sampleRate, dcOffsetFilter.enabled) else { throw DynamicsConfigurationError.invalidDCOffsetFilter }
         guard N60DynamicsSnapshotSetInfrasonicFilter(&snapshot, sampleRate, infrasonicFilter.enabled, infrasonicFilter.cutoffHz, infrasonicFilter.slope.cType) else { throw DynamicsConfigurationError.invalidInfrasonicFilter }
+        let mainsDepths = mainsNotch.harmonicDepthsDB.map(Float.init)
+        let mainsConfigured = mainsDepths.withUnsafeBufferPointer { depths in
+            N60DynamicsSnapshotSetMainsNotch(
+                &snapshot,
+                sampleRate,
+                mainsNotch.enabled,
+                mainsNotch.fundamentalHz,
+                UInt32(mainsNotch.harmonicCount),
+                Float(mainsNotch.q),
+                depths.baseAddress!,
+                UInt32(depths.count)
+            )
+        }
+        guard mainsConfigured else { throw DynamicsConfigurationError.invalidMainsNotch }
         guard N60DynamicsSnapshotSetLoudnessMatch(
             &snapshot,
             sampleRate,

@@ -77,3 +77,10 @@ Do not treat architectural similarity by itself as source reuse.
 - **Observable legacy contract used:** signed ±20 ms user-facing range and sign convention only (positive delays Right, negative delays Left).
 - **Commercial improvements:** higher-order fractional-delay approximation where possible, exact integer-delay bypass, queued click-safe transitions, explicit audition/Global-Bypass semantics, and deterministic 384 kHz-capable fixed storage.
 - **Legacy implementation reuse:** none. Historical fractional-delay source/tests were not used as implementation references.
+
+
+## PR31 — Noise / Hum suppression
+
+PR31 is a clean-room implementation. Historical Notch Sixty documentation, UI, and configuration state are used only to inventory observable behavior for Mains Hum Notch and spectral denoising. Historical `SpectralDenoiser`, `MainsHumDetector`, `GoertzelEstimator`, `MainsNotchCoefficients`, and DSP tests are explicitly excluded as implementation references.
+
+The first slice implements the static harmonic-notch signal path independently from standard parametric-biquad mathematics already present in the commercial engine. Mains-notch coefficients and states are intentionally double precision because 50/60 Hz high-Q filters at 384 kHz operate at numerically extreme low normalized frequencies; float coefficient quantization measurably reduces requested center depth. Nominal 50/60 Hz selection, harmonic count, Q, and per-harmonic attenuation are product controls; coefficients are designed on the control plane and consumed by fixed realtime state. Detector/tracker and spectral-denoising mathematics will be independently derived in later PR31 slices from public DSP references and synthetic test vectors.

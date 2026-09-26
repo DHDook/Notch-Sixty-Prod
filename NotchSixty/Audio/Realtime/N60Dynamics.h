@@ -13,6 +13,7 @@ extern "C" {
 
 #define N60_MULTIBAND_BAND_COUNT 3
 #define N60_MAX_INFRASONIC_SECTIONS 8
+#define N60_MAX_MAINS_HARMONICS 16
 
 typedef enum {
     N60InfrasonicSlope24DBPerOctave = 0,
@@ -55,6 +56,28 @@ typedef struct {
     uint32_t sectionCount;
     N60BiquadCoefficients highPass[N60_MAX_INFRASONIC_SECTIONS];
 } N60InfrasonicFilterSnapshot;
+
+typedef struct {
+    double b0;
+    double b1;
+    double b2;
+    double a1;
+    double a2;
+} N60MainsNotchCoefficients;
+
+typedef struct {
+    double z1;
+    double z2;
+} N60MainsNotchState;
+
+typedef struct {
+    bool enabled;
+    double fundamentalHz;
+    uint32_t harmonicCount;
+    float q;
+    float depthsDB[N60_MAX_MAINS_HARMONICS];
+    N60MainsNotchCoefficients filters[N60_MAX_MAINS_HARMONICS];
+} N60MainsNotchSnapshot;
 
 typedef struct {
     bool enabled;
@@ -139,6 +162,7 @@ typedef struct {
     N60StereoWidenerSnapshot stereoWidener;
     N60DCOffsetFilterSnapshot dcOffsetFilter;
     N60InfrasonicFilterSnapshot infrasonicFilter;
+    N60MainsNotchSnapshot mainsNotch;
     N60LoudnessMatchSnapshot loudnessMatch;
     N60LoudnessContourSnapshot loudnessContour;
     N60DeEsserSnapshot deEsser;
@@ -167,6 +191,9 @@ typedef struct {
     N60BiquadState infrasonicLeft[N60_MAX_INFRASONIC_SECTIONS];
     N60BiquadState infrasonicRight[N60_MAX_INFRASONIC_SECTIONS];
     float infrasonicMix;
+    N60MainsNotchState mainsNotchLeft[N60_MAX_MAINS_HARMONICS];
+    N60MainsNotchState mainsNotchRight[N60_MAX_MAINS_HARMONICS];
+    float mainsNotchMix;
     N60BiquadState loudnessKWeightHighPassLeft;
     N60BiquadState loudnessKWeightHighPassRight;
     N60BiquadState loudnessKWeightShelfLeft;
@@ -242,6 +269,17 @@ bool N60DynamicsSnapshotSetInfrasonicFilter(
     bool enabled,
     double cutoffHz,
     N60InfrasonicSlope slope
+);
+
+bool N60DynamicsSnapshotSetMainsNotch(
+    N60DynamicsSnapshot * _Nonnull snapshot,
+    double sampleRate,
+    bool enabled,
+    double fundamentalHz,
+    uint32_t harmonicCount,
+    float q,
+    const float * _Nonnull depthsDB,
+    uint32_t depthCount
 );
 
 bool N60DynamicsSnapshotSetLoudnessMatch(

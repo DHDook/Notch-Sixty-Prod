@@ -95,6 +95,79 @@ static float process_filter_cascade(
     return output;
 }
 
+static N60MainsNotchCoefficients mains_notch_identity(void) {
+    N60MainsNotchCoefficients coefficients = {
+        .b0 = 1.0,
+        .b1 = 0.0,
+        .b2 = 0.0,
+        .a1 = 0.0,
+        .a2 = 0.0,
+    };
+    return coefficients;
+}
+
+static bool mains_notch_coefficients_are_finite(N60MainsNotchCoefficients coefficients) {
+    return isfinite(coefficients.b0)
+        && isfinite(coefficients.b1)
+        && isfinite(coefficients.b2)
+        && isfinite(coefficients.a1)
+        && isfinite(coefficients.a2);
+}
+
+// Control-plane design for a narrow peaking cut. Double coefficients are kept
+// through the realtime section because 50/60 Hz at 384 kHz is an unusually low
+// normalized frequency where float coefficient quantization loses several dB of
+// requested notch depth. This function is never called from the render callback.
+static bool design_mains_notch(
+    double sampleRate,
+    double frequencyHz,
+    double depthDB,
+    double q,
+    N60MainsNotchCoefficients *coefficients
+) {
+    if (coefficients == NULL
+        || !isfinite(sampleRate) || sampleRate <= 0.0
+        || !isfinite(frequencyHz) || frequencyHz <= 0.0 || frequencyHz >= sampleRate * 0.5
+        || !isfinite(depthDB) || depthDB < -40.0 || depthDB > 0.0
+        || !isfinite(q) || q < 5.0 || q > 60.0) return false;
+
+    double omega = 2.0 * M_PI * frequencyHz / sampleRate;
+    double alpha = sin(omega) / (2.0 * q);
+    double A = pow(10.0, depthDB / 40.0);
+    double cosOmega = cos(omega);
+    double a0 = 1.0 + alpha / A;
+    if (!isfinite(a0) || fabs(a0) < 1.0e-20) return false;
+
+    N60MainsNotchCoefficients designed = {
+        .b0 = (1.0 + alpha * A) / a0,
+        .b1 = (-2.0 * cosOmega) / a0,
+        .b2 = (1.0 - alpha * A) / a0,
+        .a1 = (-2.0 * cosOmega) / a0,
+        .a2 = (1.0 - alpha / A) / a0,
+    };
+    if (!mains_notch_coefficients_are_finite(designed)) return false;
+    *coefficients = designed;
+    return true;
+}
+
+static float process_mains_notch_cascade(
+    const N60MainsNotchCoefficients *coefficients,
+    N60MainsNotchState *states,
+    uint32_t sectionCount,
+    float input
+) {
+    double output = (double)input;
+    for (uint32_t index = 0; index < sectionCount; ++index) {
+        N60MainsNotchCoefficients c = coefficients[index];
+        N60MainsNotchState *state = &states[index];
+        double next = c.b0 * output + state->z1;
+        state->z1 = c.b1 * output - c.a1 * next + state->z2;
+        state->z2 = c.b2 * output - c.a2 * next;
+        output = next;
+    }
+    return (float)output;
+}
+
 static float dynamics_compression_target(
     float detector,
     bool enabled,
@@ -137,6 +210,15 @@ N60DynamicsSnapshot N60DynamicsSnapshotMakeBypassed(double sampleRate) {
     snapshot.infrasonicFilter.sectionCount = 0;
     for (uint32_t index = 0; index < N60_MAX_INFRASONIC_SECTIONS; ++index) {
         snapshot.infrasonicFilter.highPass[index] = N60BiquadCoefficientsMakeIdentity();
+    }
+
+    snapshot.mainsNotch.enabled = false;
+    snapshot.mainsNotch.fundamentalHz = 60.0;
+    snapshot.mainsNotch.harmonicCount = 8;
+    snapshot.mainsNotch.q = 30.0f;
+    for (uint32_t index = 0; index < N60_MAX_MAINS_HARMONICS; ++index) {
+        snapshot.mainsNotch.depthsDB[index] = 0.0f;
+        snapshot.mainsNotch.filters[index] = mains_notch_identity();
     }
 
     snapshot.loudnessMatch.enabled = false;
@@ -321,6 +403,51 @@ bool N60DynamicsSnapshotSetInfrasonicFilter(
                 &configured.highPass[index])) return false;
     }
     snapshot->infrasonicFilter = configured;
+    return true;
+}
+
+bool N60DynamicsSnapshotSetMainsNotch(
+    N60DynamicsSnapshot *snapshot,
+    double sampleRate,
+    bool enabled,
+    double fundamentalHz,
+    uint32_t harmonicCount,
+    float q,
+    const float *depthsDB,
+    uint32_t depthCount
+) {
+    if (snapshot == NULL || depthsDB == NULL
+        || !isfinite(sampleRate) || sampleRate <= 0.0
+        || !isfinite(fundamentalHz) || fundamentalHz < 40.0 || fundamentalHz > 70.0
+        || harmonicCount < 1 || harmonicCount > N60_MAX_MAINS_HARMONICS
+        || depthCount < harmonicCount || depthCount > N60_MAX_MAINS_HARMONICS
+        || !isfinite(q) || q < 5.0f || q > 60.0f) return false;
+
+    N60MainsNotchSnapshot configured = {0};
+    configured.enabled = enabled;
+    configured.fundamentalHz = fundamentalHz;
+    configured.harmonicCount = harmonicCount;
+    configured.q = q;
+    for (uint32_t index = 0; index < N60_MAX_MAINS_HARMONICS; ++index) {
+        configured.depthsDB[index] = 0.0f;
+        configured.filters[index] = mains_notch_identity();
+    }
+
+    for (uint32_t index = 0; index < harmonicCount; ++index) {
+        float depthDB = depthsDB[index];
+        if (!isfinite(depthDB) || depthDB < -40.0f || depthDB > 0.0f) return false;
+        configured.depthsDB[index] = depthDB;
+        double harmonicHz = fundamentalHz * (double)(index + 1u);
+        if (harmonicHz >= sampleRate * 0.45 || fabsf(depthDB) < 1.0e-6f) continue;
+        if (!design_mains_notch(
+                sampleRate,
+                harmonicHz,
+                depthDB,
+                q,
+                &configured.filters[index])) return false;
+    }
+
+    snapshot->mainsNotch = configured;
     return true;
 }
 
@@ -609,6 +736,15 @@ bool N60DynamicsSnapshotIsValid(N60DynamicsSnapshot snapshot) {
     for (uint32_t index = 0; index < snapshot.infrasonicFilter.sectionCount; ++index) {
         if (!N60BiquadCoefficientsAreFinite(snapshot.infrasonicFilter.highPass[index])) return false;
     }
+    if (!isfinite(snapshot.mainsNotch.fundamentalHz)
+        || snapshot.mainsNotch.fundamentalHz < 40.0 || snapshot.mainsNotch.fundamentalHz > 70.0
+        || snapshot.mainsNotch.harmonicCount < 1 || snapshot.mainsNotch.harmonicCount > N60_MAX_MAINS_HARMONICS
+        || !isfinite(snapshot.mainsNotch.q) || snapshot.mainsNotch.q < 5.0f || snapshot.mainsNotch.q > 60.0f) return false;
+    for (uint32_t index = 0; index < snapshot.mainsNotch.harmonicCount; ++index) {
+        if (!isfinite(snapshot.mainsNotch.depthsDB[index])
+            || snapshot.mainsNotch.depthsDB[index] < -40.0f || snapshot.mainsNotch.depthsDB[index] > 0.0f
+            || !mains_notch_coefficients_are_finite(snapshot.mainsNotch.filters[index])) return false;
+    }
     if (!isfinite(snapshot.loudnessMatch.targetLUFS) || snapshot.loudnessMatch.targetLUFS < -24.0f || snapshot.loudnessMatch.targetLUFS > -10.0f
         || !isfinite(snapshot.loudnessMatch.maxCorrectionDB) || snapshot.loudnessMatch.maxCorrectionDB < 3.0f || snapshot.loudnessMatch.maxCorrectionDB > 20.0f
         || !valid_coefficient(snapshot.loudnessMatch.attackCoefficient)
@@ -714,6 +850,25 @@ void N60DynamicsProcessPreEQStereoFrame(
     runtime->infrasonicMix = smooth_toward(runtime->infrasonicMix, infrasonicTarget, snapshot.bypassTransitionCoefficient);
     *left = dryLeft + (hpLeft - dryLeft) * runtime->infrasonicMix;
     *right = dryRight + (hpRight - dryRight) * runtime->infrasonicMix;
+
+    dryLeft = *left;
+    dryRight = *right;
+    float notchLeft = process_mains_notch_cascade(
+        snapshot.mainsNotch.filters,
+        runtime->mainsNotchLeft,
+        snapshot.mainsNotch.harmonicCount,
+        dryLeft
+    );
+    float notchRight = process_mains_notch_cascade(
+        snapshot.mainsNotch.filters,
+        runtime->mainsNotchRight,
+        snapshot.mainsNotch.harmonicCount,
+        dryRight
+    );
+    float mainsTarget = snapshot.mainsNotch.enabled ? 1.0f : 0.0f;
+    runtime->mainsNotchMix = smooth_toward(runtime->mainsNotchMix, mainsTarget, snapshot.bypassTransitionCoefficient);
+    *left = dryLeft + (notchLeft - dryLeft) * runtime->mainsNotchMix;
+    *right = dryRight + (notchRight - dryRight) * runtime->mainsNotchMix;
 }
 
 static void process_stereo_mode(

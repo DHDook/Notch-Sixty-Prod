@@ -632,3 +632,106 @@ private final class StubOutputDeviceCatalog: OutputDeviceCataloging {
     init(devices: [AudioOutputDevice]) { self.devices = devices }
     func outputDevices() throws -> [AudioOutputDevice] { devices }
 }
+
+
+extension NotchSixtyTests {
+    func testMainsNotchSuppressesConfiguredFundamentalAcrossRates() throws {
+        for rate in [48_000.0, 96_000.0, 384_000.0] {
+            let gainDB = try measuredMainsNotchGainDB(
+                sampleRate: rate,
+                toneFrequency: 60,
+                region: .hz60,
+                harmonic: 1,
+                depthDB: -24
+            )
+            XCTAssertLessThan(gainDB, -20.0, "Insufficient 60 Hz rejection at \(rate) Hz")
+        }
+    }
+
+    func testMainsNotchTargetsSelectedHarmonicWithoutBroadLevelLoss() throws {
+        let secondHarmonic = try measuredMainsNotchGainDB(
+            sampleRate: 96_000,
+            toneFrequency: 120,
+            region: .hz60,
+            harmonic: 2,
+            depthDB: -18
+        )
+        let offBand = try measuredMainsNotchGainDB(
+            sampleRate: 96_000,
+            toneFrequency: 1_000,
+            region: .hz60,
+            harmonic: 2,
+            depthDB: -18
+        )
+        XCTAssertLessThan(secondHarmonic, -14.0)
+        XCTAssertGreaterThan(offBand, -0.15)
+    }
+
+    func testMainsNotchDisabledIsTransparent() throws {
+        guard let kernel = N60RenderKernelCreate() else { return XCTFail("Unable to create render kernel") }
+        defer { N60RenderKernelDestroy(kernel) }
+        var dynamics = DynamicsConfiguration()
+        dynamics.mainsNotch.enabled = false
+        var graph = N60DSPGraphSnapshotMakeUnity(96_000)
+        graph.dynamics = try dynamics.makeSnapshot(sampleRate: 96_000)
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        for frame in 0..<4_000 {
+            let leftIn = Float(sin(Double(frame) * 0.071) * 0.35)
+            let rightIn = Float(cos(Double(frame) * 0.053) * 0.27)
+            var left: Float = 0
+            var right: Float = 0
+            N60RenderKernelProcessStereoFrame(kernel, leftIn, rightIn, &left, &right)
+            XCTAssertEqual(left, leftIn, accuracy: 0.000_001)
+            XCTAssertEqual(right, rightIn, accuracy: 0.000_001)
+        }
+    }
+
+    private func measuredMainsNotchGainDB(
+        sampleRate: Double,
+        toneFrequency: Double,
+        region: MainsRegion,
+        harmonic: Int,
+        depthDB: Double
+    ) throws -> Double {
+        guard let kernel = N60RenderKernelCreate() else {
+            XCTFail("Unable to create render kernel")
+            return 0
+        }
+        defer { N60RenderKernelDestroy(kernel) }
+
+        var dynamics = DynamicsConfiguration()
+        dynamics.mainsNotch.enabled = true
+        dynamics.mainsNotch.region = region
+        dynamics.mainsNotch.harmonicCount = max(1, harmonic)
+        dynamics.mainsNotch.q = 30
+        dynamics.mainsNotch.harmonicDepthsDB = Array(repeating: 0, count: MainsNotchConfiguration.maximumHarmonics)
+        dynamics.mainsNotch.harmonicDepthsDB[harmonic - 1] = depthDB
+
+        var graph = N60DSPGraphSnapshotMakeUnity(sampleRate)
+        graph.dynamics = try dynamics.makeSnapshot(sampleRate: sampleRate)
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+
+        // A 60 Hz, Q=30 cut has a long physical settling time. Give the
+        // realtime IIR enough time to reach steady state before evaluating the
+        // requested depth, especially at the 384 kHz validation rate.
+        let frameCount = max(Int(sampleRate * 1.25), 60_000)
+        let settleFrames = max(Int(sampleRate * 0.55), 24_000)
+        var inputEnergy = 0.0
+        var outputEnergy = 0.0
+        var measuredFrames = 0
+        for frame in 0..<frameCount {
+            let sample = Float(0.1 * sin(2.0 * Double.pi * toneFrequency * Double(frame) / sampleRate))
+            var left: Float = 0
+            var right: Float = 0
+            N60RenderKernelProcessStereoFrame(kernel, sample, sample, &left, &right)
+            if frame >= settleFrames {
+                inputEnergy += Double(sample * sample)
+                outputEnergy += Double(left * left)
+                measuredFrames += 1
+            }
+        }
+        let inputRMS = sqrt(inputEnergy / Double(measuredFrames))
+        let outputRMS = sqrt(outputEnergy / Double(measuredFrames))
+        return 20.0 * log10(max(outputRMS, 1.0e-12) / max(inputRMS, 1.0e-12))
+    }
+}
