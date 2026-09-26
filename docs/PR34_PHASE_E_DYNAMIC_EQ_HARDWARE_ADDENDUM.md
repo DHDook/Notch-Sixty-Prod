@@ -1,8 +1,8 @@
 # PR34 Phase E Dynamic EQ Hardware Addendum
 
-Status: **BROAD HARDWARE PASS ACCEPTED EXCEPT FOR DYNAMIC EQ DOMAIN FINDING; SOFTWARE CORRECTION VERIFIED; FOCUSED DYNAMIC EQ HARDWARE RETEST PENDING.**
+Status: **FOCUSED DYNAMIC EQ HARDWARE RETEST PASSED; PHASE E HARDWARE/LISTENING GATE CLOSED; PR34 FUNCTIONAL-PARITY GATE SATISFIED.**
 
-This addendum records the only issue found during the first Phase E hardware/listening pass and the clean-room commercial correction that followed it. It supplements `PR34_PHASE_E_PARITY_REAUDIT.md`; it does not reopen the completed Phase A-D implementation gates.
+This addendum records the only issue found during the first Phase E hardware/listening pass, the clean-room commercial correction that followed it, and the successful focused hardware retest. It supplements `PR34_PHASE_E_PARITY_REAUDIT.md` and is the controlling final hardware disposition where that earlier report still describes the hardware gate as pending.
 
 ## 1. Hardware observation
 
@@ -73,20 +73,25 @@ The verified source landed in commit `db1c93de800b5a6d65409d3d97960db5d405edec` 
 - focused Swift graph regressions for Independent, Mid/Side, Mixed and Linear behavior,
 - full XCTest suite.
 
-The one-shot integration workflow was then retired so it cannot mutate later source.
+The one-shot integration workflow was then retired, and the same Dynamic-domain validator was added to the permanent read-only PR34 parity regression gate.
 
-## 7. Remaining hardware retest
+## 7. Focused hardware retest result
 
-The broad Phase E listening pass does not need to be repeated. The remaining manual gate is a focused Dynamic EQ retest:
+The corrected hardware-test build was exercised after the software correction. The user reported that the corrected Dynamic EQ behavior **“works like a charm.”**
 
-1. Linked: a Dynamic band can be enabled and behaves stereo-linked.
-2. Independent: Left and Right bands can each enable Dynamic independently; changing one lane does not silently make the opposite lane the owner.
-3. Mid/Side: Mid and Side bands can each enable Dynamic independently; Mid-only and Side-heavy material behave consistently with the edited lane.
-4. Minimum, Mixed and Linear phase modes all allow Dynamic on supported band types.
-5. In Linear mode, static EQ remains linear-phase while Dynamic is the post-FIR minimum-phase layer.
-6. Peak, Low Shelf, High Shelf, Tilt, Notch and Band Pass expose Dynamic.
-7. Notch exposes cut-only dynamics.
-8. Low Pass, High Pass, Linkwitz Transform, FIR and All-Pass do not expose ordinary Dynamic EQ.
-9. Live enable/disable and parameter changes do not cause dropouts, instability or unexpected channel/image jumps.
+This accepts the focused retest across the intended corrected behavior: domain-aware Dynamic editing/processing is responsive and stable in real playback, and no new hardware-only blocker was reported.
 
-If this focused retest is clean, the Phase E hardware gate can close and PR34 performance profiling/optimization can open.
+The earlier broad Phase E listening pass remains accepted; it does not need to be repeated.
+
+## 8. Final Phase E disposition
+
+- Source discovery gate: **SATISFIED**.
+- Phases A-D implementation blocker gate: **SATISFIED**.
+- Phase E software re-audit / deterministic regression: **SATISFIED**.
+- Broad hardware/listening validation: **PASSED**, with one Dynamic EQ defect found and corrected.
+- Focused corrected Dynamic EQ hardware retest: **PASSED**.
+- Overall PR34 functional-parity gate: **SATISFIED**.
+
+**Phase E is CLOSED.**
+
+The performance-profiling / optimization gate is now **OPEN** for subsequent work. That next phase should establish measured 48/96/192/384 kHz baselines and optimize only observed hotspots while preserving the accepted realtime and sonic contracts.
