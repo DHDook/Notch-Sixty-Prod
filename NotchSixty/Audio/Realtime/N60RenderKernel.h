@@ -9,6 +9,7 @@
 #include "N60Crossover.h"
 #include "N60Dynamics.h"
 #include "N60FractionalDelay.h"
+#include "N60MixedPhase.h"
 #include "N60Protection.h"
 
 #ifdef __cplusplus
@@ -17,7 +18,9 @@ extern "C" {
 
 #define N60_MAX_EQ_BANDS 64
 #define N60_MAX_EQ_COMPILED_SECTIONS_PER_BAND 8
-#define N60_MAX_EQ_RENDER_SLOTS (N60_MAX_EQ_BANDS * 2 * N60_MAX_EQ_COMPILED_SECTIONS_PER_BAND)
+#define N60_MAX_EQ_USER_RENDER_SLOTS (N60_MAX_EQ_BANDS * 2 * N60_MAX_EQ_COMPILED_SECTIONS_PER_BAND)
+#define N60_MAX_EQ_MIXED_PHASE_RENDER_SLOTS (2u * N60_MIXED_PHASE_MAX_SECTIONS_PER_LANE)
+#define N60_MAX_EQ_RENDER_SLOTS (N60_MAX_EQ_USER_RENDER_SLOTS + N60_MAX_EQ_MIXED_PHASE_RENDER_SLOTS)
 #define N60_EQ_CHANNEL_LEFT 0x1u
 #define N60_EQ_CHANNEL_RIGHT 0x2u
 #define N60_EQ_CHANNEL_STEREO (N60_EQ_CHANNEL_LEFT | N60_EQ_CHANNEL_RIGHT)
@@ -78,6 +81,8 @@ typedef struct {
     uint32_t gainTransitionFrames;
     bool eqBypassed;
     bool eqMidSideMode;
+    bool mixedPhaseEnabled;
+    uint32_t mixedPhaseCorrectionSectionCount;
     uint32_t eqBandCount;
     uint32_t eqTransitionFrames;
     // Keep the pre-PR23 band array representation intact; channel scope is a
@@ -149,6 +154,8 @@ typedef struct {
     float balanceGainRightLinear;
     bool eqBypassed;
     bool eqMidSideMode;
+    bool mixedPhaseEnabled;
+    uint32_t mixedPhaseCorrectionSectionCount;
     uint32_t eqBandCount;
     uint32_t eqLeftBandCount;
     uint32_t eqRightBandCount;

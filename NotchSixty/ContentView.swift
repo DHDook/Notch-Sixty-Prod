@@ -999,6 +999,13 @@ struct ContentView: View {
                 Button("Load 64-Band Stress") { load64BandStressConfiguration() }
             }
 
+            if engine.eqConfiguration.phaseMode == .mixedPhase {
+                let diagnostics = engine.diagnosticsSnapshot().renderKernelDiagnostics
+                Text("Mixed Phase: static biquad EQ plus bounded all-pass phase correction • no FIR pre-ringing • no added fixed/buffer latency • \(diagnostics?.mixedPhaseCorrectionSectionCount ?? 0) internal correction sections")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             if engine.eqConfiguration.phaseMode == .linearPhase {
                 if let design = engine.linearPhaseDesignInfo {
                     Text("Linear FIR: \(design.tapCount) taps / group delay \(design.groupDelayMilliseconds.formatted(.number.precision(.fractionLength(2)))) ms / total \(formattedDSPTime(frames: design.totalLatencyFrames, sampleRate: currentDSPRate))")
@@ -1038,7 +1045,7 @@ struct ContentView: View {
     @ViewBuilder
     private func eqBandRow(index: Int, band: EQBand) -> some View {
         let binding = eqBandBinding(for: band.id)
-        let dynamicSupported = engine.eqConfiguration.phaseMode == .minimumPhase
+        let dynamicSupported = engine.eqConfiguration.phaseMode != .linearPhase
             && engine.stereoEQConfiguration.channelMode == .linked
             && band.type == .peaking
 

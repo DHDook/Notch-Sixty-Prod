@@ -233,7 +233,6 @@ static inline bool N60MixedPhaseDesign(
 
     double omega[N60_MIXED_PHASE_ANALYSIS_POINTS] = {0};
     double sourcePhase[N60_MIXED_PHASE_ANALYSIS_POINTS] = {0};
-    double correctionPhase[N60_MIXED_PHASE_ANALYSIS_POINTS] = {0};
     double weights[N60_MIXED_PHASE_ANALYSIS_POINTS] = {0};
     if (!N60MixedPhaseAnalysisGrid(sampleRate, omega, N60_MIXED_PHASE_ANALYSIS_POINTS)
         || !N60MixedPhaseSourceAnalysis(
@@ -325,7 +324,6 @@ static inline bool N60MixedPhaseDesign(
         if (!found || bestResidual >= currentResidual * 0.995) break;
         result.sections[result.sectionCount++] = bestSection;
         for (uint32_t point = 0; point < N60_MIXED_PHASE_ANALYSIS_POINTS; ++point) {
-            correctionPhase[point] += bestCandidatePhase[point];
             currentPhase[point] += bestCandidatePhase[point];
         }
         currentResidual = bestResidual;

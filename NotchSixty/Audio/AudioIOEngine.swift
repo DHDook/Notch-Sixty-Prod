@@ -78,6 +78,7 @@ enum EQFilterSlope: Int, CaseIterable, Identifiable, Sendable {
 
 enum EQPhaseMode: String, CaseIterable, Identifiable, Sendable {
     case minimumPhase
+    case mixedPhase
     case linearPhase
 
     var id: String { rawValue }
@@ -85,6 +86,7 @@ enum EQPhaseMode: String, CaseIterable, Identifiable, Sendable {
     var displayName: String {
         switch self {
         case .minimumPhase: return "Minimum phase"
+        case .mixedPhase: return "Mixed phase"
         case .linearPhase: return "Linear phase"
         }
     }
@@ -370,6 +372,7 @@ enum EQConfigurationError: Error, LocalizedError, Equatable {
     case invalidBand(index: Int)
     case allPassRequiresMinimumPhase
     case linearPhaseDesignFailed
+    case mixedPhaseDesignFailed
     case convolutionProgramUnavailable
     case firKernelRequired
     case invalidFIRTapCount(Int)
@@ -385,9 +388,11 @@ enum EQConfigurationError: Error, LocalizedError, Equatable {
         case .invalidBand(let index):
             return "EQ band \(index + 1) is invalid for the current output sample rate."
         case .allPassRequiresMinimumPhase:
-            return "All-Pass bands are phase-only IIR filters and require Minimum phase EQ mode."
+            return "User All-Pass bands require Minimum phase EQ mode; Mixed Phase owns its correction all-pass sections internally."
         case .linearPhaseDesignFailed:
             return "Unable to design the linear-phase FIR for the current EQ configuration."
+        case .mixedPhaseDesignFailed:
+            return "Unable to design the bounded all-pass correction for the current Mixed Phase EQ configuration."
         case .convolutionProgramUnavailable:
             return "No safe FIR program slot is currently available."
         case .firKernelRequired:
@@ -656,9 +661,13 @@ struct EQConfiguration: Equatable, Sendable {
         graph.eqBypassed = bypassed
         N60DSPGraphSnapshotClearEQ(&graph)
 
-        if phaseMode == .minimumPhase && !bypassed {
+        if phaseMode != .linearPhase && !bypassed {
             var renderIndex: UInt32 = 0
+            var mixedSource: [N60BiquadBandSnapshot] = []
             for (modelIndex, band) in bands.enumerated() where band.enabled {
+                if phaseMode == .mixedPhase && band.type == .allPass {
+                    throw EQConfigurationError.allPassRequiresMinimumPhase
+                }
                 guard try validateBand(band, index: modelIndex, sampleRate: sampleRate) else { continue }
                 for section in try band.compiledSections(sampleRate: sampleRate) {
                     let compiledCapacity = UInt32(EQConfiguration.maximumBandCount * 2 * Int(N60_MAX_EQ_COMPILED_SECTIONS_PER_BAND))
@@ -669,12 +678,37 @@ struct EQConfiguration: Equatable, Sendable {
                           ) else {
                         throw EQConfigurationError.invalidBand(index: modelIndex)
                     }
+                    if phaseMode == .mixedPhase && section.type != N60BiquadFilterTypeAllPass {
+                        mixedSource.append(section)
+                    }
+                    renderIndex += 1
+                }
+            }
+
+            if phaseMode == .mixedPhase {
+                var design = N60MixedPhaseDesignInfo()
+                let designed = mixedSource.withUnsafeBufferPointer { buffer in
+                    N60MixedPhaseDesign(sampleRate, buffer.baseAddress, UInt32(buffer.count), &design)
+                }
+                guard designed else { throw EQConfigurationError.mixedPhaseDesignFailed }
+                graph.mixedPhaseEnabled = true
+                graph.mixedPhaseCorrectionSectionCount = design.sectionCount
+                let totalCapacity = UInt32(EQConfiguration.maximumBandCount * 2 * Int(N60_MAX_EQ_COMPILED_SECTIONS_PER_BAND) + 12)
+                for correctionIndex in 0..<design.sectionCount {
+                    let section = N60MixedPhaseDesignSectionAt(&design, correctionIndex)
+                    guard renderIndex < totalCapacity,
+                          N60DSPGraphSnapshotSetEQPreparedBand(
+                            &graph, renderIndex, section.type, section.frequencyHz,
+                            section.gainDB, section.q, section.coefficients, true
+                          ) else {
+                        throw EQConfigurationError.mixedPhaseDesignFailed
+                    }
                     renderIndex += 1
                 }
             }
         }
 
-        if phaseMode == .minimumPhase && !bypassed {
+        if phaseMode != .linearPhase && !bypassed {
             let dynamicBands = bands.filter { $0.enabled && $0.type == .peaking && $0.dynamic.enabled }
             if !dynamicBands.isEmpty {
                 guard N60DynamicsSnapshotSetDynamicEQEnabled(&graph.dynamics, true) else {

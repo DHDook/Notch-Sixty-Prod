@@ -34,6 +34,8 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
     let balanceGainLeftLinear: Float
     let balanceGainRightLinear: Float
     let eqBypassed: Bool
+    let mixedPhaseEnabled: Bool
+    let mixedPhaseCorrectionSectionCount: UInt32
     let eqBandCount: UInt32
     let eqLeftBandCount: UInt32
     let eqRightBandCount: UInt32
@@ -132,6 +134,8 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
         balanceGainLeftLinear = diagnostics.balanceGainLeftLinear
         balanceGainRightLinear = diagnostics.balanceGainRightLinear
         eqBypassed = diagnostics.eqBypassed
+        mixedPhaseEnabled = diagnostics.mixedPhaseEnabled
+        mixedPhaseCorrectionSectionCount = diagnostics.mixedPhaseCorrectionSectionCount
         eqBandCount = diagnostics.eqBandCount
         eqLeftBandCount = diagnostics.eqLeftBandCount
         eqRightBandCount = diagnostics.eqRightBandCount

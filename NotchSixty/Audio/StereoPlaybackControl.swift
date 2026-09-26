@@ -239,7 +239,7 @@ struct StereoEQConfiguration: Equatable, Sendable {
         }
 
         let dynamicBoost: Double
-        if phaseMode == .minimumPhase && !bypassed {
+        if phaseMode != .linearPhase && !bypassed {
             // Dynamic EQ is a shared physical-stereo layer. The Linked bank owns
             // its settings even while static EQ editing is Independent or Mid/Side.
             dynamicBoost = linkedBands.lazy
@@ -263,7 +263,7 @@ struct StereoEQConfiguration: Equatable, Sendable {
         // applies that one physical-stereo dynamic layer after any Mid/Side
         // decode so no independent M/S or L/R detector behavior is invented.
         dynamics.dynamicEQ = DynamicEQConfiguration()
-        guard phaseMode == .minimumPhase,
+        guard phaseMode != .linearPhase,
               !bypassed else { return }
 
         let dynamicBands = try validatedEnabledBands(linkedBands, sampleRate: sampleRate)
@@ -327,6 +327,57 @@ struct StereoEQConfiguration: Equatable, Sendable {
             guard ok else { throw EQConfigurationError.invalidBand(index: Int(renderIndex)) }
             renderIndex += 1
         }
+    }
+
+    private func mixedPhaseSourceSections(
+        _ bands: [EQBand],
+        sampleRate: Double
+    ) throws -> [N60BiquadBandSnapshot] {
+        var source: [N60BiquadBandSnapshot] = []
+        for band in try validatedEnabledBands(bands, sampleRate: sampleRate) {
+            if band.type == .fir { continue }
+            if band.type == .allPass { throw EQConfigurationError.allPassRequiresMinimumPhase }
+            source.append(contentsOf: try band.compiledSections(sampleRate: sampleRate))
+        }
+        return source
+    }
+
+    private func appendMixedPhaseCorrection(
+        for bands: [EQBand],
+        sampleRate: Double,
+        into graph: inout N60DSPGraphSnapshot,
+        renderIndex: inout UInt32,
+        channelMask: UInt8? = nil
+    ) throws {
+        let source = try mixedPhaseSourceSections(bands, sampleRate: sampleRate)
+        var design = N60MixedPhaseDesignInfo()
+        let designed = source.withUnsafeBufferPointer { buffer in
+            N60MixedPhaseDesign(sampleRate, buffer.baseAddress, UInt32(buffer.count), &design)
+        }
+        guard designed else { throw EQConfigurationError.mixedPhaseDesignFailed }
+        let userCapacity = EQConfiguration.maximumBandCount * 2 * Int(N60_MAX_EQ_COMPILED_SECTIONS_PER_BAND)
+        let totalCapacity = UInt32(userCapacity + 12)
+        for correctionIndex in 0..<design.sectionCount {
+            let section = N60MixedPhaseDesignSectionAt(&design, correctionIndex)
+            guard renderIndex < totalCapacity else { throw EQConfigurationError.mixedPhaseDesignFailed }
+            let ok: Bool
+            if let channelMask {
+                ok = N60DSPGraphSnapshotSetEQPreparedBandForChannels(
+                    &graph, renderIndex, channelMask, section.type,
+                    section.frequencyHz, section.gainDB, section.q,
+                    section.coefficients, true
+                )
+            } else {
+                ok = N60DSPGraphSnapshotSetEQPreparedBand(
+                    &graph, renderIndex, section.type,
+                    section.frequencyHz, section.gainDB, section.q,
+                    section.coefficients, true
+                )
+            }
+            guard ok else { throw EQConfigurationError.mixedPhaseDesignFailed }
+            renderIndex += 1
+        }
+        graph.mixedPhaseCorrectionSectionCount += design.sectionCount
     }
 
     var requiresEQFIRProgram: Bool {
@@ -399,36 +450,84 @@ struct StereoEQConfiguration: Equatable, Sendable {
         graph.eqMidSideMode = channelMode == .midSide
         N60DSPGraphSnapshotClearEQ(&graph)
 
-        if phaseMode == .minimumPhase && !bypassed && !graph.bypassed {
+        if phaseMode != .linearPhase && !bypassed && !graph.bypassed {
             var renderIndex: UInt32 = 0
             switch channelMode {
             case .linked:
                 for band in try validatedEnabledBands(linkedBands, sampleRate: sampleRate) {
+                    if phaseMode == .mixedPhase && band.type == .allPass {
+                        throw EQConfigurationError.allPassRequiresMinimumPhase
+                    }
                     try publishMinimumPhaseBand(band, into: &graph, renderIndex: &renderIndex)
+                }
+                if phaseMode == .mixedPhase {
+                    graph.mixedPhaseEnabled = true
+                    try appendMixedPhaseCorrection(
+                        for: linkedBands, sampleRate: sampleRate,
+                        into: &graph, renderIndex: &renderIndex
+                    )
                 }
             case .independent:
                 for band in try validatedEnabledBands(leftBands, sampleRate: sampleRate) {
+                    if phaseMode == .mixedPhase && band.type == .allPass {
+                        throw EQConfigurationError.allPassRequiresMinimumPhase
+                    }
                     try publishMinimumPhaseBand(
                         band, into: &graph, renderIndex: &renderIndex,
                         channelMask: UInt8(N60_EQ_CHANNEL_LEFT)
                     )
                 }
                 for band in try validatedEnabledBands(rightBands, sampleRate: sampleRate) {
+                    if phaseMode == .mixedPhase && band.type == .allPass {
+                        throw EQConfigurationError.allPassRequiresMinimumPhase
+                    }
                     try publishMinimumPhaseBand(
                         band, into: &graph, renderIndex: &renderIndex,
                         channelMask: UInt8(N60_EQ_CHANNEL_RIGHT)
                     )
                 }
+                if phaseMode == .mixedPhase {
+                    graph.mixedPhaseEnabled = true
+                    try appendMixedPhaseCorrection(
+                        for: leftBands, sampleRate: sampleRate,
+                        into: &graph, renderIndex: &renderIndex,
+                        channelMask: UInt8(N60_EQ_CHANNEL_LEFT)
+                    )
+                    try appendMixedPhaseCorrection(
+                        for: rightBands, sampleRate: sampleRate,
+                        into: &graph, renderIndex: &renderIndex,
+                        channelMask: UInt8(N60_EQ_CHANNEL_RIGHT)
+                    )
+                }
             case .midSide:
                 for band in try validatedEnabledBands(midBands, sampleRate: sampleRate) {
+                    if phaseMode == .mixedPhase && band.type == .allPass {
+                        throw EQConfigurationError.allPassRequiresMinimumPhase
+                    }
                     try publishMinimumPhaseBand(
                         band, into: &graph, renderIndex: &renderIndex,
                         channelMask: UInt8(N60_EQ_CHANNEL_LEFT)
                     )
                 }
                 for band in try validatedEnabledBands(sideBands, sampleRate: sampleRate) {
+                    if phaseMode == .mixedPhase && band.type == .allPass {
+                        throw EQConfigurationError.allPassRequiresMinimumPhase
+                    }
                     try publishMinimumPhaseBand(
                         band, into: &graph, renderIndex: &renderIndex,
+                        channelMask: UInt8(N60_EQ_CHANNEL_RIGHT)
+                    )
+                }
+                if phaseMode == .mixedPhase {
+                    graph.mixedPhaseEnabled = true
+                    try appendMixedPhaseCorrection(
+                        for: midBands, sampleRate: sampleRate,
+                        into: &graph, renderIndex: &renderIndex,
+                        channelMask: UInt8(N60_EQ_CHANNEL_LEFT)
+                    )
+                    try appendMixedPhaseCorrection(
+                        for: sideBands, sampleRate: sampleRate,
+                        into: &graph, renderIndex: &renderIndex,
                         channelMask: UInt8(N60_EQ_CHANNEL_RIGHT)
                     )
                 }

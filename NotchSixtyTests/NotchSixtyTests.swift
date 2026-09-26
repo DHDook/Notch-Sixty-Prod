@@ -4,6 +4,143 @@ import XCTest
 @testable import NotchSixty
 
 final class NotchSixtyTests: XCTestCase {
+
+    func testMixedPhaseIsFixedThirdPhaseMode() {
+        XCTAssertTrue(EQPhaseMode.allCases.contains(.mixedPhase))
+        XCTAssertEqual(EQPhaseMode.mixedPhase.displayName, "Mixed phase")
+    }
+
+    func testMixedPhaseFlatGraphAddsNoCorrectionOrFixedLatency() throws {
+        let configuration = StereoEQConfiguration(phaseMode: .mixedPhase)
+        let graph = try configuration.makeGraphSnapshot(
+            sampleRate: 48_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: PlaybackControlConfiguration()
+        )
+        XCTAssertTrue(graph.mixedPhaseEnabled)
+        XCTAssertEqual(graph.mixedPhaseCorrectionSectionCount, 0)
+        XCTAssertEqual(graph.latencyFrames, 0)
+    }
+
+    func testMixedPhaseAddsOnlyUnityMagnitudeAllPassCorrectionThrough384k() throws {
+        for rate in [44_100.0, 48_000.0, 96_000.0, 192_000.0, 384_000.0] {
+            let bands = [
+                EQBand(type: .lowShelf, frequencyHz: 120, gainDB: 5, q: 0.707),
+                EQBand(type: .peaking, frequencyHz: 1_100, gainDB: 8, q: 2.0),
+                EQBand(type: .highShelf, frequencyHz: 7_000, gainDB: -4, q: 0.707),
+            ]
+            let minimum = StereoEQConfiguration(phaseMode: .minimumPhase, linkedBands: bands)
+            let mixed = StereoEQConfiguration(phaseMode: .mixedPhase, linkedBands: bands)
+            let minimumGraph = try minimum.makeGraphSnapshot(
+                sampleRate: rate,
+                gainConfiguration: DSPGainConfiguration(),
+                bassManagementConfiguration: BassManagementConfiguration(),
+                playbackConfiguration: PlaybackControlConfiguration()
+            )
+            let mixedGraph = try mixed.makeGraphSnapshot(
+                sampleRate: rate,
+                gainConfiguration: DSPGainConfiguration(),
+                bassManagementConfiguration: BassManagementConfiguration(),
+                playbackConfiguration: PlaybackControlConfiguration()
+            )
+            XCTAssertTrue(mixedGraph.mixedPhaseEnabled)
+            XCTAssertGreaterThan(mixedGraph.mixedPhaseCorrectionSectionCount, 0)
+            XCTAssertLessThanOrEqual(mixedGraph.mixedPhaseCorrectionSectionCount, 12)
+            XCTAssertEqual(mixedGraph.latencyFrames, minimumGraph.latencyFrames)
+            XCTAssertGreaterThan(mixedGraph.eqBandCount, minimumGraph.eqBandCount)
+            for index in Int(minimumGraph.eqBandCount)..<Int(mixedGraph.eqBandCount) {
+                let section = withUnsafePointer(to: mixedGraph.eqBands) { tuple in
+                    tuple.withMemoryRebound(to: N60BiquadBandSnapshot.self, capacity: Int(mixedGraph.eqBandCount)) { $0[index] }
+                }
+                XCTAssertEqual(section.type, N60BiquadFilterTypeAllPass)
+                XCTAssertTrue(N60BiquadCoefficientsAreFinite(section.coefficients))
+            }
+        }
+    }
+
+    func testMixedPhaseRejectsExplicitUserAllPassButKeepsFIRSeparate() throws {
+        let allPass = EQBand(type: .allPass, frequencyHz: 1_000, gainDB: 0, q: 1.0)
+        let invalid = StereoEQConfiguration(phaseMode: .mixedPhase, linkedBands: [allPass])
+        XCTAssertThrowsError(try invalid.makeGraphSnapshot(
+            sampleRate: 48_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: PlaybackControlConfiguration()
+        )) { error in
+            XCTAssertEqual(error as? EQConfigurationError, .allPassRequiresMinimumPhase)
+        }
+
+        let fir = EQBand(
+            type: .fir,
+            firKernel: EQFIRKernel(name: "User FIR", sampleRate: 48_000, taps: [0.25, 0.5, 0.25])
+        )
+        let mixedWithFIR = StereoEQConfiguration(
+            phaseMode: .mixedPhase,
+            linkedBands: [EQBand(type: .peaking, frequencyHz: 1_000, gainDB: 3, q: 1.0), fir]
+        )
+        XCTAssertTrue(mixedWithFIR.requiresEQFIRProgram)
+        let graph = try mixedWithFIR.makeGraphSnapshot(
+            sampleRate: 48_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: PlaybackControlConfiguration()
+        )
+        XCTAssertTrue(graph.mixedPhaseEnabled)
+    }
+
+    func testMixedPhaseUsesLaneSpecificCorrectionForIndependentAndMidSide() throws {
+        let leftOrMid = [
+            EQBand(type: .lowShelf, frequencyHz: 100, gainDB: 6, q: 0.707),
+            EQBand(type: .peaking, frequencyHz: 900, gainDB: 7, q: 2.0),
+        ]
+        let rightOrSide = [
+            EQBand(type: .highShelf, frequencyHz: 6_000, gainDB: -5, q: 0.707),
+            EQBand(type: .peaking, frequencyHz: 2_500, gainDB: -6, q: 1.4),
+        ]
+        for configuration in [
+            StereoEQConfiguration(
+                channelMode: .independent, editChannel: .left, phaseMode: .mixedPhase,
+                leftBands: leftOrMid, rightBands: rightOrSide, independentSeeded: true
+            ),
+            StereoEQConfiguration(
+                channelMode: .midSide, editChannel: .mid, phaseMode: .mixedPhase,
+                midBands: leftOrMid, sideBands: rightOrSide, midSideSeeded: true
+            ),
+        ] {
+            let graph = try configuration.makeGraphSnapshot(
+                sampleRate: 96_000,
+                gainConfiguration: DSPGainConfiguration(),
+                bassManagementConfiguration: BassManagementConfiguration(),
+                playbackConfiguration: PlaybackControlConfiguration()
+            )
+            XCTAssertTrue(graph.mixedPhaseEnabled)
+            XCTAssertGreaterThan(graph.mixedPhaseCorrectionSectionCount, 0)
+            XCTAssertEqual(graph.latencyFrames, 0)
+        }
+    }
+
+    func testMixedPhaseKeepsSharedDynamicEQActive() throws {
+        var dynamic = EQBandDynamicConfiguration()
+        dynamic.enabled = true
+        let dynamicBand = EQBand(
+            type: .peaking, frequencyHz: 1_500, gainDB: 2, q: 1.0, dynamic: dynamic
+        )
+        let configuration = StereoEQConfiguration(
+            channelMode: .linked,
+            phaseMode: .mixedPhase,
+            linkedBands: [dynamicBand]
+        )
+        let graph = try configuration.makeGraphSnapshot(
+            sampleRate: 48_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: PlaybackControlConfiguration()
+        )
+        XCTAssertTrue(graph.dynamics.dynamicEQ.enabled)
+        XCTAssertTrue(graph.mixedPhaseEnabled)
+    }
+
     func testBootstrapTestBundleRuns() {
         XCTAssertTrue(true)
     }

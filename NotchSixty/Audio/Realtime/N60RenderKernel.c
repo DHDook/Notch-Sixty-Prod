@@ -259,6 +259,8 @@ static bool snapshot_is_valid(N60DSPGraphSnapshot snapshot) {
         || (snapshot.auditionMode != N60AuditionModeProcessed
             && snapshot.latencyFrames >= N60_MAX_AUDITION_DELAY_FRAMES)
         || snapshot.eqBandCount > N60_MAX_EQ_RENDER_SLOTS
+        || snapshot.mixedPhaseCorrectionSectionCount > N60_MAX_EQ_MIXED_PHASE_RENDER_SLOTS
+        || (!snapshot.mixedPhaseEnabled && snapshot.mixedPhaseCorrectionSectionCount != 0u)
         || !crossover_snapshot_is_valid(snapshot.crossover, snapshot.sampleRate)
         || !N60DynamicsSnapshotIsValid(snapshot.dynamics)
         || !N60SpectralDenoiserSnapshotIsValid(snapshot.dynamics.spectralDenoiser, snapshot.sampleRate)
@@ -776,6 +778,8 @@ N60DSPGraphSnapshot N60DSPGraphSnapshotMakeUnity(double sampleRate) {
     snapshot.generation = 0;
     snapshot.gainTransitionFrames = gain_transition_frames_for_sample_rate(sampleRate);
     snapshot.eqBypassed = false;
+    snapshot.mixedPhaseEnabled = false;
+    snapshot.mixedPhaseCorrectionSectionCount = 0;
     snapshot.eqBandCount = 0;
     snapshot.eqTransitionFrames = eq_transition_frames_for_sample_rate(sampleRate);
     snapshot.crossoverTransitionFrames = crossover_transition_frames_for_sample_rate(sampleRate);
@@ -1374,6 +1378,8 @@ N60RenderKernelDiagnostics N60RenderKernelGetDiagnostics(const N60RenderKernel *
         diagnostics.balanceGainRightLinear = context.snapshot.balanceGainRightLinear;
         diagnostics.eqBypassed = context.snapshot.eqBypassed;
         diagnostics.eqMidSideMode = context.snapshot.eqMidSideMode;
+        diagnostics.mixedPhaseEnabled = context.snapshot.mixedPhaseEnabled;
+        diagnostics.mixedPhaseCorrectionSectionCount = context.snapshot.mixedPhaseCorrectionSectionCount;
         diagnostics.eqBandCount = context.snapshot.eqBandCount;
         for (uint32_t index = 0; index < context.snapshot.eqBandCount; ++index) {
             if (!context.snapshot.eqBands[index].enabled) continue;
