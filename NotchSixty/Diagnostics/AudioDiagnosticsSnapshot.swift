@@ -21,6 +21,7 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
     let snapshotReadMisses: UInt64
     let convolutionProgramMisses: UInt64
     let roomCorrectionProgramMisses: UInt64
+    let speakerIRProgramMisses: UInt64
     let publishedGeneration: UInt64
     let latencyFrames: UInt32
     let sampleRate: Double
@@ -110,6 +111,13 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
     let roomCorrectionPartitionCount: UInt32
     let roomCorrectionEngineLatencyFrames: UInt32
     let roomCorrectionDeclaredLatencyFrames: UInt32
+    let speakerIREnabled: Bool
+    let speakerIRProgramSlot: UInt32
+    let speakerIRProgramGeneration: UInt64
+    let speakerIRTapCount: UInt32
+    let speakerIRPartitionCount: UInt32
+    let speakerIREngineLatencyFrames: UInt32
+    let speakerIRDeclaredLatencyFrames: UInt32
     let inputMeter: StereoMeterReading
     let postEQMeter: StereoMeterReading
     let outputMeter: StereoMeterReading
@@ -121,6 +129,7 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
         snapshotReadMisses = diagnostics.snapshotReadMisses
         convolutionProgramMisses = diagnostics.convolutionProgramMisses
         roomCorrectionProgramMisses = diagnostics.roomCorrectionProgramMisses
+        speakerIRProgramMisses = diagnostics.speakerIRProgramMisses
         publishedGeneration = diagnostics.publishedGeneration
         latencyFrames = diagnostics.latencyFrames
         sampleRate = diagnostics.sampleRate
@@ -210,6 +219,13 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
         roomCorrectionPartitionCount = diagnostics.roomCorrectionPartitionCount
         roomCorrectionEngineLatencyFrames = diagnostics.roomCorrectionEngineLatencyFrames
         roomCorrectionDeclaredLatencyFrames = diagnostics.roomCorrectionDeclaredLatencyFrames
+        speakerIREnabled = diagnostics.speakerIREnabled
+        speakerIRProgramSlot = diagnostics.speakerIRProgramSlot
+        speakerIRProgramGeneration = diagnostics.speakerIRProgramGeneration
+        speakerIRTapCount = diagnostics.speakerIRTapCount
+        speakerIRPartitionCount = diagnostics.speakerIRPartitionCount
+        speakerIREngineLatencyFrames = diagnostics.speakerIREngineLatencyFrames
+        speakerIRDeclaredLatencyFrames = diagnostics.speakerIRDeclaredLatencyFrames
         inputMeter = StereoMeterReading(diagnostics.inputMeter)
         postEQMeter = StereoMeterReading(diagnostics.postEQMeter)
         outputMeter = StereoMeterReading(diagnostics.outputMeter)

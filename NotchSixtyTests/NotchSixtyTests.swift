@@ -193,6 +193,96 @@ final class NotchSixtyTests: XCTestCase {
         ))
     }
 
+    func testSpeakerIRIsThirdIndependentGlobalConvolutionSlot() {
+        guard let kernel = N60RenderKernelCreate() else {
+            XCTFail("Unable to allocate render kernel")
+            return
+        }
+        defer { N60RenderKernelDestroy(kernel) }
+
+        let eqTaps: [Float] = [0.25, 0.5, 0.25]
+        let roomTaps: [Float] = [0.2, 0.6, 0.2]
+        let speakerTaps: [Float] = [0.1, 0.4, 0.4, 0.1]
+        var eqInfo = N60ConvolutionProgramInfo()
+        var roomInfo = N60ConvolutionProgramInfo()
+        var speakerInfo = N60ConvolutionProgramInfo()
+
+        XCTAssertTrue(eqTaps.withUnsafeBufferPointer { taps in
+            N60RenderKernelPrepareConvolutionProgram(
+                kernel, 0, taps.baseAddress!, nil, UInt32(taps.count), 0, &eqInfo
+            )
+        })
+        XCTAssertTrue(roomTaps.withUnsafeBufferPointer { taps in
+            N60RenderKernelPrepareRoomCorrectionProgram(
+                kernel, 1, taps.baseAddress!, nil, UInt32(taps.count), 1, &roomInfo
+            )
+        })
+        XCTAssertTrue(speakerTaps.withUnsafeBufferPointer { taps in
+            N60RenderKernelPrepareSpeakerIRProgram(
+                kernel, 2, taps.baseAddress!, nil, UInt32(taps.count), 2, &speakerInfo
+            )
+        })
+
+        var graph = N60DSPGraphSnapshotMakeUnity(96_000)
+        XCTAssertTrue(N60DSPGraphSnapshotSetConvolutionProgram(&graph, 0, eqInfo, true))
+        XCTAssertTrue(N60DSPGraphSnapshotSetRoomCorrectionProgram(&graph, 1, roomInfo, true))
+        XCTAssertTrue(N60DSPGraphSnapshotSetSpeakerIRProgram(&graph, 2, speakerInfo, true))
+
+        let expectedLatency = eqInfo.engineLatencyFrames + eqInfo.declaredLatencyFrames
+            + roomInfo.engineLatencyFrames + roomInfo.declaredLatencyFrames
+            + speakerInfo.engineLatencyFrames + speakerInfo.declaredLatencyFrames
+        XCTAssertEqual(graph.latencyFrames, expectedLatency)
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+
+        let diagnostics = N60RenderKernelGetDiagnostics(kernel)
+        XCTAssertTrue(diagnostics.convolutionEnabled)
+        XCTAssertTrue(diagnostics.roomCorrectionEnabled)
+        XCTAssertTrue(diagnostics.speakerIREnabled)
+        XCTAssertEqual(diagnostics.convolutionProgramSlot, 0)
+        XCTAssertEqual(diagnostics.roomCorrectionProgramSlot, 1)
+        XCTAssertEqual(diagnostics.speakerIRProgramSlot, 2)
+        XCTAssertEqual(diagnostics.convolutionProgramGeneration, eqInfo.generation)
+        XCTAssertEqual(diagnostics.roomCorrectionProgramGeneration, roomInfo.generation)
+        XCTAssertEqual(diagnostics.speakerIRProgramGeneration, speakerInfo.generation)
+        XCTAssertEqual(diagnostics.latencyFrames, expectedLatency)
+        XCTAssertEqual(diagnostics.speakerIRProgramMisses, 0)
+    }
+
+    func testSpeakerIRPublishRejectsUnpreparedGeneration() {
+        guard let kernel = N60RenderKernelCreate() else {
+            XCTFail("Unable to allocate render kernel")
+            return
+        }
+        defer { N60RenderKernelDestroy(kernel) }
+
+        let taps: [Float] = [0.2, 0.6, 0.2]
+        var info = N60ConvolutionProgramInfo()
+        XCTAssertTrue(taps.withUnsafeBufferPointer { buffer in
+            N60RenderKernelPrepareSpeakerIRProgram(
+                kernel, 0, buffer.baseAddress!, nil, UInt32(buffer.count), 1, &info
+            )
+        })
+        var stale = info
+        stale.generation &+= 1
+        var graph = N60DSPGraphSnapshotMakeUnity(48_000)
+        XCTAssertTrue(N60DSPGraphSnapshotSetSpeakerIRProgram(&graph, 0, stale, true))
+        XCTAssertFalse(N60RenderKernelPublishSnapshot(kernel, graph))
+    }
+
+    func testSpeakerIRPolicyKeepsRawBypassRaw() {
+        var configuration = SpeakerIRConfiguration()
+        configuration.enabled = true
+        configuration.filter = .validation
+        XCTAssertTrue(FIRUpdatePolicy.shouldPrepareSpeakerIR(
+            speakerIR: configuration,
+            playback: PlaybackControlConfiguration()
+        ))
+        XCTAssertFalse(FIRUpdatePolicy.shouldPrepareSpeakerIR(
+            speakerIR: configuration,
+            playback: PlaybackControlConfiguration(globalBypassed: true)
+        ))
+    }
+
     func testCrosstalkCancellationGraphPublishesAuditedDefaults() throws {
         let playback = PlaybackControlConfiguration(crosstalkCancellationEnabled: true)
         let graph = try StereoEQConfiguration().makeGraphSnapshot(

@@ -99,6 +99,7 @@ typedef struct {
     N60ProtectionSnapshot protection;
     N60ConvolutionGraphState convolution;
     N60ConvolutionGraphState roomCorrection;
+    N60ConvolutionGraphState speakerIR;
 } N60DSPGraphSnapshot;
 
 typedef struct {
@@ -142,6 +143,7 @@ typedef struct {
     uint64_t snapshotReadMisses;
     uint64_t convolutionProgramMisses;
     uint64_t roomCorrectionProgramMisses;
+    uint64_t speakerIRProgramMisses;
     uint64_t publishedGeneration;
     uint32_t latencyFrames;
     double sampleRate;
@@ -234,6 +236,13 @@ typedef struct {
     uint32_t roomCorrectionPartitionCount;
     uint32_t roomCorrectionEngineLatencyFrames;
     uint32_t roomCorrectionDeclaredLatencyFrames;
+    bool speakerIREnabled;
+    uint32_t speakerIRProgramSlot;
+    uint64_t speakerIRProgramGeneration;
+    uint32_t speakerIRTapCount;
+    uint32_t speakerIRPartitionCount;
+    uint32_t speakerIREngineLatencyFrames;
+    uint32_t speakerIRDeclaredLatencyFrames;
     N60StereoMeterReading inputMeter;
     N60StereoMeterReading postEQMeter;
     N60StereoMeterReading outputMeter;
@@ -328,6 +337,12 @@ bool N60DSPGraphSnapshotSetRoomCorrectionProgram(
     N60ConvolutionProgramInfo programInfo,
     bool enabled
 );
+bool N60DSPGraphSnapshotSetSpeakerIRProgram(
+    N60DSPGraphSnapshot * _Nonnull snapshot,
+    uint32_t programSlot,
+    N60ConvolutionProgramInfo programInfo,
+    bool enabled
+);
 
 N60RenderKernel * _Nullable N60RenderKernelCreate(void);
 void N60RenderKernelDestroy(N60RenderKernel * _Nonnull kernel);
@@ -342,6 +357,15 @@ bool N60RenderKernelPrepareConvolutionProgram(
     N60ConvolutionProgramInfo * _Nullable programInfoOut
 );
 bool N60RenderKernelPrepareRoomCorrectionProgram(
+    N60RenderKernel * _Nonnull kernel,
+    uint32_t slot,
+    const float * _Nonnull leftTaps,
+    const float * _Nullable rightTaps,
+    uint32_t tapCount,
+    uint32_t declaredLatencyFrames,
+    N60ConvolutionProgramInfo * _Nullable programInfoOut
+);
+bool N60RenderKernelPrepareSpeakerIRProgram(
     N60RenderKernel * _Nonnull kernel,
     uint32_t slot,
     const float * _Nonnull leftTaps,

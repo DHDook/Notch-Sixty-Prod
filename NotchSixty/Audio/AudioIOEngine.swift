@@ -590,6 +590,71 @@ enum RoomCorrectionConfigurationError: Error, LocalizedError, Equatable {
     }
 }
 
+
+struct SpeakerIRFilter: Equatable, Sendable {
+    var name: String
+    var sampleRate: Double?
+    var leftTaps: [Float]
+    var rightTaps: [Float]?
+    var declaredLatencyFrames: UInt32
+
+    static let validation = SpeakerIRFilter(
+        name: "Deterministic Speaker IR validation",
+        sampleRate: nil,
+        leftTaps: [0.20, 0.60, 0.20],
+        rightTaps: nil,
+        declaredLatencyFrames: 1
+    )
+
+    func validateSampleRate(forOutputSampleRate outputSampleRate: Double) throws {
+        guard let sampleRate else { return }
+        guard sampleRate.isFinite,
+              abs(sampleRate - outputSampleRate) < 0.5 else {
+            throw SpeakerIRConfigurationError.sampleRateMismatch(
+                filter: sampleRate,
+                output: outputSampleRate
+            )
+        }
+    }
+}
+
+struct SpeakerIRConfiguration: Equatable, Sendable {
+    var enabled = false
+    var filter: SpeakerIRFilter?
+}
+
+enum SpeakerIRConfigurationError: Error, LocalizedError, Equatable {
+    case filterRequired
+    case invalidTapCount(Int)
+    case mismatchedStereoTapCount(left: Int, right: Int)
+    case nonFiniteTap
+    case sampleRateMismatch(filter: Double, output: Double)
+    case invalidDeclaredLatency(UInt32)
+    case convolutionProgramUnavailable
+    case graphAttachmentFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .filterRequired:
+            return "Speaker IR cannot be enabled until an impulse response is loaded."
+        case .invalidTapCount(let count):
+            return "Speaker IR tap count \(count) is outside the supported 1...\(Int(N60_CONVOLUTION_MAX_TAPS)) range."
+        case .mismatchedStereoTapCount(let left, let right):
+            return "Speaker IR left/right FIR lengths must match (left \(left), right \(right))."
+        case .nonFiniteTap:
+            return "Speaker IR coefficients must all be finite."
+        case .sampleRateMismatch(let filter, let output):
+            return "Speaker IR rate \(filter) Hz does not match the active output rate \(output) Hz."
+        case .invalidDeclaredLatency(let frames):
+            return "Speaker IR declared filter latency \(frames) frames exceeds the FIR length."
+        case .convolutionProgramUnavailable:
+            return "No safe Speaker IR FIR program slot is currently available."
+        case .graphAttachmentFailed:
+            return "Unable to attach the prepared Speaker IR to the DSP graph."
+        }
+    }
+}
+
 struct EQConfiguration: Equatable, Sendable {
     static let maximumBandCount = Int(N60_MAX_EQ_BANDS)
 
@@ -825,6 +890,11 @@ private struct PreparedRoomCorrectionProgram {
     let programInfo: N60ConvolutionProgramInfo
 }
 
+private struct PreparedSpeakerIRProgram {
+    let slot: UInt32
+    let programInfo: N60ConvolutionProgramInfo
+}
+
 @MainActor
 final class AudioIOEngine: ObservableObject {
     private let deviceCatalog: any OutputDeviceCataloging
@@ -844,6 +914,8 @@ final class AudioIOEngine: ObservableObject {
     private var nextEQFIRProgramSlot: UInt32 = 0
     private var activeRoomCorrectionProgram: PreparedRoomCorrectionProgram?
     private var nextRoomCorrectionProgramSlot: UInt32 = 0
+    private var activeSpeakerIRProgram: PreparedSpeakerIRProgram?
+    private var nextSpeakerIRProgramSlot: UInt32 = 0
 
     private(set) var sampleRateChangesHandled: UInt64 = 0
     private(set) var recoveryAttempts: UInt64 = 0
@@ -862,6 +934,7 @@ final class AudioIOEngine: ObservableObject {
     @Published private(set) var bassManagementConfiguration = BassManagementConfiguration()
     @Published private(set) var dynamicsConfiguration = DynamicsConfiguration()
     @Published private(set) var roomCorrectionConfiguration = RoomCorrectionConfiguration()
+    @Published private(set) var speakerIRConfiguration = SpeakerIRConfiguration()
     @Published private(set) var linearPhaseDesignInfo: N60LinearPhaseEQDesignInfo?
     @Published private(set) var lastErrorDescription: String?
     @Published private(set) var lifecycleState: AudioLifecycleState
@@ -1172,6 +1245,10 @@ final class AudioIOEngine: ObservableObject {
                 to: &graph,
                 playbackConfiguration: playbackControlConfiguration
             )
+            try attachActiveSpeakerIRProgramIfNeeded(
+                to: &graph,
+                playbackConfiguration: playbackControlConfiguration
+            )
             try session.publishDSPGraph(graph)
         }
         bassManagementConfiguration = configuration
@@ -1246,6 +1323,10 @@ final class AudioIOEngine: ObservableObject {
                 to: &graph,
                 playbackConfiguration: playbackControlConfiguration
             )
+            try attachActiveSpeakerIRProgramIfNeeded(
+                to: &graph,
+                playbackConfiguration: playbackControlConfiguration
+            )
             let protectionStructureChanged = oldProtection.latencyFrames != newProtection.latencyFrames
                 || oldProtection.effectiveFactor != newProtection.effectiveFactor
                 || oldProtection.limiterEnabled != newProtection.limiterEnabled
@@ -1277,6 +1358,29 @@ final class AudioIOEngine: ObservableObject {
 
     func replaceRoomCorrectionConfiguration(_ configuration: RoomCorrectionConfiguration) throws {
         try applyRoomCorrectionConfiguration(configuration)
+    }
+
+    func loadSpeakerIRValidationFilter() throws {
+        var updated = speakerIRConfiguration
+        updated.filter = .validation
+        try applySpeakerIRConfiguration(updated)
+    }
+
+    func setSpeakerIREnabled(_ enabled: Bool) throws {
+        var updated = speakerIRConfiguration
+        updated.enabled = enabled
+        try applySpeakerIRConfiguration(updated)
+    }
+
+    func clearSpeakerIRFilter() throws {
+        var updated = speakerIRConfiguration
+        updated.enabled = false
+        updated.filter = nil
+        try applySpeakerIRConfiguration(updated)
+    }
+
+    func replaceSpeakerIRConfiguration(_ configuration: SpeakerIRConfiguration) throws {
+        try applySpeakerIRConfiguration(configuration)
     }
 
     func start() throws {
@@ -1501,6 +1605,19 @@ final class AudioIOEngine: ObservableObject {
                         playbackConfiguration: configuration
                     )
                 }
+
+                if speakerIRConfiguration.enabled {
+                    guard let filter = speakerIRConfiguration.filter else {
+                        throw SpeakerIRConfigurationError.filterRequired
+                    }
+                    if activeSpeakerIRProgram == nil {
+                        activeSpeakerIRProgram = try prepareSpeakerIRProgram(filter, for: session)
+                    }
+                    try attachActiveSpeakerIRProgramIfNeeded(
+                        to: &graph,
+                        playbackConfiguration: configuration
+                    )
+                }
             }
 
             let auditionModeChanged = playbackControlConfiguration.auditionMode != configuration.auditionMode
@@ -1550,6 +1667,7 @@ final class AudioIOEngine: ObservableObject {
             )
             try attachActiveEQFIRProgramIfNeeded(to: &graph, stereoConfiguration: stereoEQConfiguration, playbackConfiguration: playbackControlConfiguration)
             try attachActiveRoomCorrectionProgramIfNeeded(to: &graph, playbackConfiguration: playbackControlConfiguration)
+            try attachActiveSpeakerIRProgramIfNeeded(to: &graph, playbackConfiguration: playbackControlConfiguration)
             try session.publishDSPGraph(graph)
         }
 
@@ -1597,6 +1715,7 @@ final class AudioIOEngine: ObservableObject {
             )
             try attachActiveEQFIRProgramIfNeeded(to: &graph, stereoConfiguration: stereoEQConfiguration, playbackConfiguration: playbackControlConfiguration)
             try attachActiveRoomCorrectionProgramIfNeeded(to: &graph, playbackConfiguration: playbackControlConfiguration)
+            try attachActiveSpeakerIRProgramIfNeeded(to: &graph, playbackConfiguration: playbackControlConfiguration)
             try session.publishDSPGraph(graph)
         }
         masterVolumeConfiguration = updated
@@ -1662,6 +1781,10 @@ final class AudioIOEngine: ObservableObject {
                 to: &graph,
                 playbackConfiguration: playbackControlConfiguration
             )
+            try attachActiveSpeakerIRProgramIfNeeded(
+                to: &graph,
+                playbackConfiguration: playbackControlConfiguration
+            )
             try session.publishDSPGraph(graph)
         }
         gainConfiguration = configuration
@@ -1685,6 +1808,10 @@ final class AudioIOEngine: ObservableObject {
             try attachActiveEQFIRProgramIfNeeded(
                 to: &graph,
                 stereoConfiguration: stereoEQConfiguration,
+                playbackConfiguration: playbackControlConfiguration
+            )
+            try attachActiveSpeakerIRProgramIfNeeded(
+                to: &graph,
                 playbackConfiguration: playbackControlConfiguration
             )
 
@@ -1720,6 +1847,63 @@ final class AudioIOEngine: ObservableObject {
         }
 
         roomCorrectionConfiguration = configuration
+        lastErrorDescription = nil
+    }
+
+    private func applySpeakerIRConfiguration(_ configuration: SpeakerIRConfiguration) throws {
+        if configuration.enabled && configuration.filter == nil {
+            throw SpeakerIRConfigurationError.filterRequired
+        }
+
+        if let session = transportSession {
+            var graph = try stereoEQConfiguration.makeGraphSnapshot(
+                sampleRate: session.outputFormat.sampleRate,
+                gainConfiguration: gainConfiguration,
+                bassManagementConfiguration: bassManagementConfiguration,
+                dynamicsConfiguration: dynamicsConfiguration,
+                playbackConfiguration: playbackControlConfiguration,
+                masterGainLinear: currentMasterSoftwareGain
+            )
+            try attachActiveEQFIRProgramIfNeeded(
+                to: &graph,
+                stereoConfiguration: stereoEQConfiguration,
+                playbackConfiguration: playbackControlConfiguration
+            )
+            try attachActiveRoomCorrectionProgramIfNeeded(
+                to: &graph,
+                playbackConfiguration: playbackControlConfiguration
+            )
+
+            if processingIsBypassed(playbackControlConfiguration) {
+                if let filter = configuration.filter {
+                    try validateSpeakerIRFilter(
+                        filter,
+                        outputSampleRate: session.outputFormat.sampleRate
+                    )
+                }
+                try session.publishDSPGraph(graph)
+                activeSpeakerIRProgram = nil
+            } else if configuration.enabled {
+                guard let filter = configuration.filter else {
+                    throw SpeakerIRConfigurationError.filterRequired
+                }
+                let preparedProgram = try prepareSpeakerIRProgram(filter, for: session)
+                try attachSpeakerIRProgram(preparedProgram, to: &graph)
+                try session.transitionDSPGraph(graph)
+                activeSpeakerIRProgram = preparedProgram
+            } else {
+                if activeSpeakerIRProgram != nil {
+                    try session.transitionDSPGraph(graph)
+                } else {
+                    try session.publishDSPGraph(graph)
+                }
+                activeSpeakerIRProgram = nil
+            }
+        } else {
+            activeSpeakerIRProgram = nil
+        }
+
+        speakerIRConfiguration = configuration
         lastErrorDescription = nil
     }
 
@@ -1895,6 +2079,49 @@ final class AudioIOEngine: ObservableObject {
         return PreparedRoomCorrectionProgram(slot: slot, programInfo: programInfo)
     }
 
+    private func validateSpeakerIRFilter(
+        _ filter: SpeakerIRFilter,
+        outputSampleRate: Double
+    ) throws {
+        let tapCount = filter.leftTaps.count
+        guard tapCount > 0, tapCount <= Int(N60_CONVOLUTION_MAX_TAPS) else {
+            throw SpeakerIRConfigurationError.invalidTapCount(tapCount)
+        }
+        if let rightTaps = filter.rightTaps, rightTaps.count != tapCount {
+            throw SpeakerIRConfigurationError.mismatchedStereoTapCount(left: tapCount, right: rightTaps.count)
+        }
+        guard filter.leftTaps.allSatisfy(\.isFinite),
+              filter.rightTaps?.allSatisfy(\.isFinite) ?? true else {
+            throw SpeakerIRConfigurationError.nonFiniteTap
+        }
+        try filter.validateSampleRate(forOutputSampleRate: outputSampleRate)
+        guard filter.declaredLatencyFrames < UInt32(tapCount) else {
+            throw SpeakerIRConfigurationError.invalidDeclaredLatency(filter.declaredLatencyFrames)
+        }
+    }
+
+    private func prepareSpeakerIRProgram(
+        _ filter: SpeakerIRFilter,
+        for session: CoreAudioTransportSession
+    ) throws -> PreparedSpeakerIRProgram {
+        try validateSpeakerIRFilter(filter, outputSampleRate: session.outputFormat.sampleRate)
+
+        let slot = nextSpeakerIRProgramSlot % UInt32(N60_CONVOLUTION_PROGRAM_SLOTS)
+        let programInfo: N60ConvolutionProgramInfo
+        do {
+            programInfo = try session.prepareSpeakerIRProgram(
+                slot: slot,
+                leftTaps: filter.leftTaps,
+                rightTaps: filter.rightTaps,
+                declaredLatencyFrames: filter.declaredLatencyFrames
+            )
+        } catch {
+            throw SpeakerIRConfigurationError.convolutionProgramUnavailable
+        }
+        nextSpeakerIRProgramSlot = (slot + 1) % UInt32(N60_CONVOLUTION_PROGRAM_SLOTS)
+        return PreparedSpeakerIRProgram(slot: slot, programInfo: programInfo)
+    }
+
     private func attachEQFIRProgram(
         _ program: PreparedEQFIRProgram,
         to graph: inout N60DSPGraphSnapshot
@@ -1949,6 +2176,32 @@ final class AudioIOEngine: ObservableObject {
         try attachRoomCorrectionProgram(activeRoomCorrectionProgram, to: &graph)
     }
 
+    private func attachSpeakerIRProgram(
+        _ program: PreparedSpeakerIRProgram,
+        to graph: inout N60DSPGraphSnapshot
+    ) throws {
+        guard N60DSPGraphSnapshotSetSpeakerIRProgram(
+            &graph,
+            program.slot,
+            program.programInfo,
+            true
+        ) else {
+            throw SpeakerIRConfigurationError.graphAttachmentFailed
+        }
+    }
+
+    private func attachActiveSpeakerIRProgramIfNeeded(
+        to graph: inout N60DSPGraphSnapshot,
+        playbackConfiguration: PlaybackControlConfiguration
+    ) throws {
+        guard !processingIsBypassed(playbackConfiguration),
+              speakerIRConfiguration.enabled else { return }
+        guard let activeSpeakerIRProgram else {
+            throw SpeakerIRConfigurationError.convolutionProgramUnavailable
+        }
+        try attachSpeakerIRProgram(activeSpeakerIRProgram, to: &graph)
+    }
+
     private func start(resetProcessingSessionCounters: Bool) throws {
         guard lifecycle.state == .idle else { return }
         try refreshOutputDevices()
@@ -1991,6 +2244,8 @@ final class AudioIOEngine: ObservableObject {
         nextEQFIRProgramSlot = 0
         activeRoomCorrectionProgram = nil
         nextRoomCorrectionProgramSlot = 0
+        activeSpeakerIRProgram = nil
+        nextSpeakerIRProgramSlot = 0
         var graph = try stereoEQConfiguration.makeGraphSnapshot(
             sampleRate: session.outputFormat.sampleRate,
             gainConfiguration: gainConfiguration,
@@ -2026,6 +2281,21 @@ final class AudioIOEngine: ObservableObject {
             }
         }
 
+        if speakerIRConfiguration.enabled {
+            guard let filter = speakerIRConfiguration.filter else {
+                throw SpeakerIRConfigurationError.filterRequired
+            }
+            try validateSpeakerIRFilter(filter, outputSampleRate: session.outputFormat.sampleRate)
+            if FIRUpdatePolicy.shouldPrepareSpeakerIR(
+                speakerIR: speakerIRConfiguration,
+                playback: playbackControlConfiguration
+            ) {
+                let preparedProgram = try prepareSpeakerIRProgram(filter, for: session)
+                activeSpeakerIRProgram = preparedProgram
+                try attachSpeakerIRProgram(preparedProgram, to: &graph)
+            }
+        }
+
         try session.publishDSPGraph(graph)
         transportSession = session
     }
@@ -2042,6 +2312,7 @@ final class AudioIOEngine: ObservableObject {
         }
         activeEQFIRProgram = nil
         activeRoomCorrectionProgram = nil
+        activeSpeakerIRProgram = nil
     }
 
     private func forceFailedState(_ error: Error) {

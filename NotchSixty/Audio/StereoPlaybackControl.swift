@@ -685,6 +685,13 @@ enum FIRUpdatePolicy {
     ) -> Bool {
         !isRawBypassed(playback) && roomCorrection.enabled
     }
+
+    static func shouldPrepareSpeakerIR(
+        speakerIR: SpeakerIRConfiguration,
+        playback: PlaybackControlConfiguration
+    ) -> Bool {
+        !isRawBypassed(playback) && speakerIR.enabled
+    }
 }
 
 enum MasterVolumeControlMode: String, Equatable, Sendable {

@@ -141,6 +141,7 @@ enum CoreAudioTransportError: Error, LocalizedError, Equatable {
     case dspGraphPublicationFailed
     case convolutionProgramPreparationFailed
     case roomCorrectionProgramPreparationFailed
+    case speakerIRProgramPreparationFailed
     case ioProcUnavailable(role: String)
     case outputBufferExceedsBridgeCapacity(bufferFrames: UInt32, capacityFrames: UInt32)
 
@@ -162,6 +163,8 @@ enum CoreAudioTransportError: Error, LocalizedError, Equatable {
             return "Unable to prepare an inactive convolution program slot."
         case .roomCorrectionProgramPreparationFailed:
             return "Unable to prepare an inactive room-correction FIR program slot."
+        case .speakerIRProgramPreparationFailed:
+            return "Unable to prepare an inactive Speaker IR FIR program slot."
         case .ioProcUnavailable(let role):
             return "Core Audio created the \(role) IOProc without returning a usable callback identifier."
         case .outputBufferExceedsBridgeCapacity(let bufferFrames, let capacityFrames):
@@ -421,6 +424,48 @@ final class CoreAudioTransportSession {
             )
         }
         guard prepared else { throw CoreAudioTransportError.roomCorrectionProgramPreparationFailed }
+        return info
+    }
+
+    func prepareSpeakerIRProgram(
+        slot: UInt32,
+        leftTaps: [Float],
+        rightTaps: [Float]? = nil,
+        declaredLatencyFrames: UInt32
+    ) throws -> N60ConvolutionProgramInfo {
+        guard let bridge, !leftTaps.isEmpty else {
+            throw CoreAudioTransportError.speakerIRProgramPreparationFailed
+        }
+        guard rightTaps == nil || rightTaps?.count == leftTaps.count else {
+            throw CoreAudioTransportError.speakerIRProgramPreparationFailed
+        }
+
+        var info = N60ConvolutionProgramInfo()
+        let prepared = leftTaps.withUnsafeBufferPointer { leftBuffer in
+            if let rightTaps {
+                return rightTaps.withUnsafeBufferPointer { rightBuffer in
+                    N60RealtimeAudioBridgePrepareSpeakerIRProgram(
+                        bridge,
+                        slot,
+                        leftBuffer.baseAddress!,
+                        rightBuffer.baseAddress!,
+                        UInt32(leftBuffer.count),
+                        declaredLatencyFrames,
+                        &info
+                    )
+                }
+            }
+            return N60RealtimeAudioBridgePrepareSpeakerIRProgram(
+                bridge,
+                slot,
+                leftBuffer.baseAddress!,
+                nil,
+                UInt32(leftBuffer.count),
+                declaredLatencyFrames,
+                &info
+            )
+        }
+        guard prepared else { throw CoreAudioTransportError.speakerIRProgramPreparationFailed }
         return info
     }
 

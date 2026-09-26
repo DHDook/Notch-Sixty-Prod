@@ -74,6 +74,7 @@ struct N60RenderKernel {
     N60ProtectionRuntime *protectionRuntime;
     N60PartitionedConvolver *convolver;
     N60PartitionedConvolver *roomCorrectionConvolver;
+    N60PartitionedConvolver *speakerIRConvolver;
     N60SmoothedGain inputGain;
     N60SmoothedGain headroomGain;
     N60SmoothedGain outputGain;
@@ -105,6 +106,7 @@ struct N60RenderKernel {
     _Atomic uint64_t snapshotReadMisses;
     _Atomic uint64_t convolutionProgramMisses;
     _Atomic uint64_t roomCorrectionProgramMisses;
+    _Atomic uint64_t speakerIRProgramMisses;
 
     _Atomic uint32_t mainsDetectedFrequencyBits;
     _Atomic uint32_t mainsDetectionConfidenceBits;
@@ -283,7 +285,8 @@ static bool snapshot_is_valid(N60DSPGraphSnapshot snapshot) {
         || !N60SpectralDenoiserSnapshotIsValid(snapshot.dynamics.spectralDenoiser, snapshot.sampleRate)
         || !N60ProtectionSnapshotIsValid(&snapshot.protection)
         || !convolution_snapshot_is_valid(snapshot.convolution)
-        || !convolution_snapshot_is_valid(snapshot.roomCorrection)) {
+        || !convolution_snapshot_is_valid(snapshot.roomCorrection)
+        || !convolution_snapshot_is_valid(snapshot.speakerIR)) {
         return false;
     }
 
@@ -837,6 +840,8 @@ N60DSPGraphSnapshot N60DSPGraphSnapshotMakeUnity(double sampleRate) {
     snapshot.convolution.programSlot = N60_CONVOLUTION_NO_PROGRAM;
     snapshot.roomCorrection.enabled = false;
     snapshot.roomCorrection.programSlot = N60_CONVOLUTION_NO_PROGRAM;
+    snapshot.speakerIR.enabled = false;
+    snapshot.speakerIR.programSlot = N60_CONVOLUTION_NO_PROGRAM;
     return snapshot;
 }
 
@@ -1031,6 +1036,22 @@ bool N60DSPGraphSnapshotSetRoomCorrectionProgram(
     );
 }
 
+bool N60DSPGraphSnapshotSetSpeakerIRProgram(
+    N60DSPGraphSnapshot *snapshot,
+    uint32_t programSlot,
+    N60ConvolutionProgramInfo programInfo,
+    bool enabled
+) {
+    if (snapshot == NULL) return false;
+    return set_convolution_graph_state(
+        snapshot,
+        &snapshot->speakerIR,
+        programSlot,
+        programInfo,
+        enabled
+    );
+}
+
 N60RenderKernel *N60RenderKernelCreate(void) {
     N60RenderKernel *kernel = calloc(1, sizeof(N60RenderKernel));
     if (kernel == NULL) return NULL;
@@ -1054,6 +1075,15 @@ N60RenderKernel *N60RenderKernelCreate(void) {
     }
     kernel->denoiserRuntime = N60SpectralDenoiserCreate();
     if (kernel->denoiserRuntime == NULL) {
+        N60ProtectionRuntimeDestroy(kernel->protectionRuntime);
+        N60PartitionedConvolverDestroy(kernel->roomCorrectionConvolver);
+        N60PartitionedConvolverDestroy(kernel->convolver);
+        free(kernel);
+        return NULL;
+    }
+    kernel->speakerIRConvolver = N60PartitionedConvolverCreate();
+    if (kernel->speakerIRConvolver == NULL) {
+        N60SpectralDenoiserDestroy(kernel->denoiserRuntime);
         N60ProtectionRuntimeDestroy(kernel->protectionRuntime);
         N60PartitionedConvolverDestroy(kernel->roomCorrectionConvolver);
         N60PartitionedConvolverDestroy(kernel->convolver);
@@ -1084,6 +1114,7 @@ void N60RenderKernelDestroy(N60RenderKernel *kernel) {
     if (kernel == NULL) return;
     N60SpectralDenoiserDestroy(kernel->denoiserRuntime);
     N60ProtectionRuntimeDestroy(kernel->protectionRuntime);
+    N60PartitionedConvolverDestroy(kernel->speakerIRConvolver);
     N60PartitionedConvolverDestroy(kernel->roomCorrectionConvolver);
     N60PartitionedConvolverDestroy(kernel->convolver);
     free(kernel);
@@ -1098,6 +1129,7 @@ void N60RenderKernelReset(N60RenderKernel *kernel) {
     N60ProtectionRuntimeReset(kernel->protectionRuntime);
     N60PartitionedConvolverReset(kernel->convolver);
     N60PartitionedConvolverReset(kernel->roomCorrectionConvolver);
+    N60PartitionedConvolverReset(kernel->speakerIRConvolver);
     reset_smoothed_gain(&kernel->inputGain, 1.0f);
     reset_smoothed_gain(&kernel->headroomGain, 1.0f);
     reset_smoothed_gain(&kernel->outputGain, 1.0f);
@@ -1121,6 +1153,7 @@ void N60RenderKernelReset(N60RenderKernel *kernel) {
     atomic_store_explicit(&kernel->snapshotReadMisses, 0, memory_order_relaxed);
     atomic_store_explicit(&kernel->convolutionProgramMisses, 0, memory_order_relaxed);
     atomic_store_explicit(&kernel->roomCorrectionProgramMisses, 0, memory_order_relaxed);
+    atomic_store_explicit(&kernel->speakerIRProgramMisses, 0, memory_order_relaxed);
     atomic_store_explicit(&kernel->denoiserProfileReady, false, memory_order_relaxed);
     atomic_store_explicit(&kernel->denoiserCapturedProfile, false, memory_order_relaxed);
     atomic_store_explicit(&kernel->denoiserCaptureActive, false, memory_order_relaxed);
@@ -1193,10 +1226,32 @@ bool N60RenderKernelPrepareRoomCorrectionProgram(
     );
 }
 
+bool N60RenderKernelPrepareSpeakerIRProgram(
+    N60RenderKernel *kernel,
+    uint32_t slot,
+    const float *leftTaps,
+    const float *rightTaps,
+    uint32_t tapCount,
+    uint32_t declaredLatencyFrames,
+    N60ConvolutionProgramInfo *programInfoOut
+) {
+    if (kernel == NULL) return false;
+    return prepare_program(
+        kernel->speakerIRConvolver,
+        slot,
+        leftTaps,
+        rightTaps,
+        tapCount,
+        declaredLatencyFrames,
+        programInfoOut
+    );
+}
+
 bool N60RenderKernelPublishSnapshot(N60RenderKernel *kernel, N60DSPGraphSnapshot snapshot) {
     if (kernel == NULL || !snapshot_is_valid(snapshot)) return false;
     if (!prepared_program_matches_graph_state(kernel->convolver, snapshot.convolution)
-        || !prepared_program_matches_graph_state(kernel->roomCorrectionConvolver, snapshot.roomCorrection)) {
+        || !prepared_program_matches_graph_state(kernel->roomCorrectionConvolver, snapshot.roomCorrection)
+        || !prepared_program_matches_graph_state(kernel->speakerIRConvolver, snapshot.speakerIR)) {
         return false;
     }
     uint32_t active = atomic_load_explicit(&kernel->activeSlot, memory_order_acquire);
@@ -1321,6 +1376,27 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
                 right = correctedRight;
             } else {
                 atomic_fetch_add_explicit(&kernel->roomCorrectionProgramMisses, 1, memory_order_relaxed);
+            }
+        }
+
+        // Independent global speaker impulse-response slot. This deliberately
+        // remains separate from main-EQ FIR and room correction so all three
+        // audited FIR workflows can coexist in the current stereo graph.
+        if (context->snapshot.speakerIR.enabled) {
+            float convolvedLeft = left;
+            float convolvedRight = right;
+            if (N60PartitionedConvolverProcessSample(
+                    kernel->speakerIRConvolver,
+                    context->snapshot.speakerIR.programSlot,
+                    context->snapshot.speakerIR.programGeneration,
+                    left,
+                    right,
+                    &convolvedLeft,
+                    &convolvedRight)) {
+                left = convolvedLeft;
+                right = convolvedRight;
+            } else {
+                atomic_fetch_add_explicit(&kernel->speakerIRProgramMisses, 1, memory_order_relaxed);
             }
         }
 
@@ -1555,6 +1631,13 @@ N60RenderKernelDiagnostics N60RenderKernelGetDiagnostics(const N60RenderKernel *
         diagnostics.roomCorrectionPartitionCount = context.snapshot.roomCorrection.partitionCount;
         diagnostics.roomCorrectionEngineLatencyFrames = context.snapshot.roomCorrection.engineLatencyFrames;
         diagnostics.roomCorrectionDeclaredLatencyFrames = context.snapshot.roomCorrection.declaredLatencyFrames;
+        diagnostics.speakerIREnabled = context.snapshot.speakerIR.enabled;
+        diagnostics.speakerIRProgramSlot = context.snapshot.speakerIR.programSlot;
+        diagnostics.speakerIRProgramGeneration = context.snapshot.speakerIR.programGeneration;
+        diagnostics.speakerIRTapCount = context.snapshot.speakerIR.tapCount;
+        diagnostics.speakerIRPartitionCount = context.snapshot.speakerIR.partitionCount;
+        diagnostics.speakerIREngineLatencyFrames = context.snapshot.speakerIR.engineLatencyFrames;
+        diagnostics.speakerIRDeclaredLatencyFrames = context.snapshot.speakerIR.declaredLatencyFrames;
         N60RenderKernelEndRender(mutableKernel, &context, 0);
     }
 
@@ -1564,6 +1647,7 @@ N60RenderKernelDiagnostics N60RenderKernelGetDiagnostics(const N60RenderKernel *
     diagnostics.snapshotReadMisses = atomic_load_explicit(&kernel->snapshotReadMisses, memory_order_relaxed);
     diagnostics.convolutionProgramMisses = atomic_load_explicit(&kernel->convolutionProgramMisses, memory_order_relaxed);
     diagnostics.roomCorrectionProgramMisses = atomic_load_explicit(&kernel->roomCorrectionProgramMisses, memory_order_relaxed);
+    diagnostics.speakerIRProgramMisses = atomic_load_explicit(&kernel->speakerIRProgramMisses, memory_order_relaxed);
     diagnostics.mainsDetectedFrequencyHz = bits_to_float(atomic_load_explicit(&kernel->mainsDetectedFrequencyBits, memory_order_relaxed));
     diagnostics.mainsDetectionConfidence = bits_to_float(atomic_load_explicit(&kernel->mainsDetectionConfidenceBits, memory_order_relaxed));
     diagnostics.denoiserProfileReady = atomic_load_explicit(&kernel->denoiserProfileReady, memory_order_relaxed);

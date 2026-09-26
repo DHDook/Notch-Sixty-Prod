@@ -147,6 +147,13 @@ struct ContentView: View {
         )
     }
 
+    private var speakerIREnabledBinding: Binding<Bool> {
+        Binding(
+            get: { engine.speakerIRConfiguration.enabled },
+            set: { try? engine.setSpeakerIREnabled($0) }
+        )
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
@@ -186,6 +193,7 @@ struct ContentView: View {
             pr33ValidationView
             crossoverValidationView
             roomCorrectionValidationView
+            speakerIRValidationView
             eqValidationView
 
             Divider()
@@ -1085,6 +1093,47 @@ struct ContentView: View {
             }
 
             Text("The validation FIR [0.25, 0.50, 0.25] is deliberately not an acoustic correction. It provides an audible, deterministic end-to-end hardware check of the dedicated room-correction control and convolution path before measurement/filter design exists.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(10)
+        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    @ViewBuilder
+    private var speakerIRValidationView: some View {
+        let filter = engine.speakerIRConfiguration.filter
+        let diagnostics = engine.diagnosticsSnapshot().renderKernelDiagnostics
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Speaker IR runtime validation").font(.headline)
+                Spacer()
+                Button("Load Validation IR") {
+                    try? engine.loadSpeakerIRValidationFilter()
+                }
+                Button("Clear") {
+                    try? engine.clearSpeakerIRFilter()
+                }
+                .disabled(filter == nil)
+                Toggle("Enable", isOn: speakerIREnabledBinding)
+                    .toggleStyle(.switch)
+                    .disabled(filter == nil)
+            }
+
+            if let filter {
+                Text("Loaded: \(filter.name) — \(filter.leftTaps.count) taps / declared latency \(filter.declaredLatencyFrames) frame\(filter.declaredLatencyFrames == 1 ? "" : "s")")
+                    .font(.caption)
+            } else {
+                Text("No Speaker IR loaded. The independent global Speaker IR slot is bypassed.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text("Realtime: \(diagnostics?.speakerIREnabled == true ? "enabled" : "bypassed") • \(diagnostics?.speakerIRTapCount ?? 0) taps • program generation \(diagnostics?.speakerIRProgramGeneration ?? 0)")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+
+            Text("Speaker IR is a third independent global convolution workflow, separate from main-EQ/per-band FIR and room correction. This PR validates the current stereo runtime contract; WAV/AIFF import and resource persistence remain in the later persistence milestone.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
