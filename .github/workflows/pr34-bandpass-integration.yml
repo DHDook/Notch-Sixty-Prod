@@ -88,6 +88,42 @@ jobs:
           ENABLE_TESTABILITY=YES
           build
 
+      - name: Test sub-phase defaults
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          -only-testing:NotchSixtyTests/NotchSixtyTests/testSubBassPhaseAlignmentPublishesAuditedDefaults
+          test
+
+      - name: Test sub-phase disabled identity
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          -only-testing:NotchSixtyTests/NotchSixtyTests/testSubBassPhaseAlignmentDisabledIsIdentity
+          test
+
+      - name: Test sub-phase invalid controls
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          -only-testing:NotchSixtyTests/NotchSixtyTests/testSubBassPhaseAlignmentRejectsInvalidControls
+          test
+
       - name: Test
         run: >-
           xcodebuild
