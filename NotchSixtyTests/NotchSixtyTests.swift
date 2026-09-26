@@ -810,3 +810,119 @@ extension NotchSixtyTests {
         XCTAssertLessThan(maximumJump, 0.03)
     }
 }
+
+
+extension NotchSixtyTests {
+    func testSpectralDenoiserQualityModesHaveExplicitPowerOfTwoContracts() throws {
+        for (quality, expected) in [
+            (N60DenoiserQualityQuality, UInt32(1024)),
+            (N60DenoiserQualityHigh, UInt32(2048)),
+            (N60DenoiserQualityUltra, UInt32(4096)),
+        ] {
+            var snapshot = N60SpectralDenoiserSnapshotMakeBypassed(96_000)
+            XCTAssertTrue(N60SpectralDenoiserSnapshotConfigure(
+                &snapshot, 96_000, true, N60DenoiserTuningStandard, quality,
+                0.5, -60, false, 0, 150, 0, N60DenoiserProfileCommandNone
+            ))
+            XCTAssertEqual(snapshot.fftSize, expected)
+            XCTAssertEqual(snapshot.hopSize, expected / 2)
+            XCTAssertEqual(snapshot.latencyFrames, expected)
+            XCTAssertTrue(N60SpectralDenoiserSnapshotIsValid(snapshot, 96_000))
+        }
+    }
+
+    func testSpectralDenoiserDisabledPathIsExactlyTransparent() throws {
+        guard let runtime = N60SpectralDenoiserCreate() else {
+            XCTFail("Unable to allocate spectral denoiser")
+            return
+        }
+        defer { N60SpectralDenoiserDestroy(runtime) }
+        var snapshot = N60SpectralDenoiserSnapshotMakeBypassed(48_000)
+        XCTAssertTrue(N60SpectralDenoiserSnapshotConfigure(
+            &snapshot, 48_000, false, N60DenoiserTuningNatural, N60DenoiserQualityHigh,
+            0.5, -72, false, 0, 150, 0, N60DenoiserProfileCommandNone
+        ))
+        for frame in 0..<12_000 {
+            let left = Float(sin(Double(frame) * 0.071)) * 0.37
+            let right = Float(cos(Double(frame) * 0.043)) * 0.29
+            var outputLeft: Float = 0
+            var outputRight: Float = 0
+            N60SpectralDenoiserProcessStereoFrame(runtime, snapshot, 48_000, left, right, &outputLeft, &outputRight)
+            XCTAssertEqual(outputLeft, left, accuracy: 0)
+            XCTAssertEqual(outputRight, right, accuracy: 0)
+        }
+    }
+
+    func testSpectralDenoiserCapturedProfileReducesStationaryNoiseWithLinkedStereoGain() throws {
+        guard let runtime = N60SpectralDenoiserCreate() else {
+            XCTFail("Unable to allocate spectral denoiser")
+            return
+        }
+        defer { N60SpectralDenoiserDestroy(runtime) }
+        var snapshot = N60SpectralDenoiserSnapshotMakeBypassed(48_000)
+        XCTAssertTrue(N60SpectralDenoiserSnapshotConfigure(
+            &snapshot, 48_000, true, N60DenoiserTuningStandard, N60DenoiserQualityHigh,
+            0.8, -48, false, 0, 150, 1, N60DenoiserProfileCommandCapture
+        ))
+
+        var state: UInt32 = 0x1234ABCD
+        var inputSquare = 0.0
+        var outputSquare = 0.0
+        var measured = 0
+        let totalFrames = 48_000 * 4
+        for frame in 0..<totalFrames {
+            state = state &* 1_664_525 &+ 1_013_904_223
+            let unit = Float(state & 0xFFFF) / 32_767.5 - 1.0
+            let left = unit * 0.045
+            let right = left * 0.5
+            var outputLeft: Float = 0
+            var outputRight: Float = 0
+            N60SpectralDenoiserProcessStereoFrame(runtime, snapshot, 48_000, left, right, &outputLeft, &outputRight)
+            if frame > 48_000 * 3 {
+                inputSquare += Double(left * left)
+                outputSquare += Double(outputLeft * outputLeft)
+                measured += 1
+                if abs(outputLeft) > 1.0e-5 {
+                    XCTAssertEqual(outputRight / outputLeft, 0.5, accuracy: 0.015)
+                }
+            }
+        }
+        let inputRMS = sqrt(inputSquare / Double(measured))
+        let outputRMS = sqrt(outputSquare / Double(measured))
+        XCTAssertLessThan(outputRMS, inputRMS * 0.75)
+        let telemetry = N60SpectralDenoiserRuntimeTelemetry(runtime)
+        XCTAssertTrue(telemetry.profileReady)
+        XCTAssertTrue(telemetry.capturedProfile)
+        XCTAssertFalse(telemetry.captureActive)
+        XCTAssertGreaterThan(telemetry.meanSuppressionDB, 1.0)
+        XCTAssertGreaterThan(telemetry.maxSuppressionDB, telemetry.meanSuppressionDB)
+    }
+
+    func testSpectralDenoiserProfileResetReturnsToAdaptiveLearning() throws {
+        guard let runtime = N60SpectralDenoiserCreate() else {
+            XCTFail("Unable to allocate spectral denoiser")
+            return
+        }
+        defer { N60SpectralDenoiserDestroy(runtime) }
+        var snapshot = N60SpectralDenoiserSnapshotMakeBypassed(48_000)
+        XCTAssertTrue(N60SpectralDenoiserSnapshotConfigure(
+            &snapshot, 48_000, false, N60DenoiserTuningStandard, N60DenoiserQualityQuality,
+            0.5, -60, false, 0, 150, 1, N60DenoiserProfileCommandCapture
+        ))
+        var left: Float = 0
+        var right: Float = 0
+        for frame in 0..<(48_000 + 2_048) {
+            let noise = Float(sin(Double(frame) * 0.713)) * 0.02
+            N60SpectralDenoiserProcessStereoFrame(runtime, snapshot, 48_000, noise, noise, &left, &right)
+        }
+        XCTAssertTrue(N60SpectralDenoiserRuntimeTelemetry(runtime).profileReady)
+
+        snapshot.profileRevision = 2
+        snapshot.profileCommand = N60DenoiserProfileCommandReset
+        N60SpectralDenoiserProcessStereoFrame(runtime, snapshot, 48_000, 0, 0, &left, &right)
+        let telemetry = N60SpectralDenoiserRuntimeTelemetry(runtime)
+        XCTAssertFalse(telemetry.profileReady)
+        XCTAssertFalse(telemetry.capturedProfile)
+        XCTAssertFalse(telemetry.captureActive)
+    }
+}
