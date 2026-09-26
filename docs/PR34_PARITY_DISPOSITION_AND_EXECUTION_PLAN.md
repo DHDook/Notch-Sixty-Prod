@@ -1,10 +1,10 @@
 # PR34 Parity Disposition and Execution Plan
 
-Status: **SOURCE DISCOVERY GATE SATISFIED; PHASES A-D IMPLEMENTED; PHASE E PARITY RE-AUDIT / REGRESSION GATE ACTIVE.**
+Status: **SOURCE DISCOVERY SATISFIED; PHASES A-D IMPLEMENTED; PHASE E SOFTWARE GATE SATISFIED; FOCUSED HARDWARE / LISTENING VALIDATION PENDING.**
 
 This document consolidates the source-level audit performed in PR34 and defines the execution order before performance optimisation begins.
 
-It does **not yet declare overall functional parity**. The current stereo product's implementation blocker queue has been retired, but PR34 must still complete the Phase E behavior-ledger re-audit, deterministic high-rate regression, and focused hardware/listening validation before the functional-parity gate can be declared satisfied.
+It does **not yet declare overall functional parity**. The current stereo product's software blocker queue has been retired and the Phase E software re-audit/regression gate has passed. PR34 must still complete the focused hardware/listening validation before the functional-parity gate can be declared satisfied and performance optimisation can open.
 
 The clean-room rule remains unchanged: legacy source establishes observable contracts and defects only. New production DSP is independently authored.
 
@@ -255,24 +255,28 @@ Consistent with the speaker-focused Notch Sixty product definition:
 - Sub-Bass Phase Alignment
 - independent global Speaker IR mapping
 
-## Phase E — ACTIVE: parity re-audit / regression gate
+## Phase E — SOFTWARE COMPLETE; HARDWARE VALIDATION PENDING
 
-Required before optimisation opens:
+Completed software checks:
 
-- rerun the legacy behavior ledger against the current commercial graph
-- verify every current-scope audited capability is either implemented/improved or explicitly assigned to the correct later milestone
-- verify no current blocker remains unexplained
-- run the accumulated deterministic high-rate regression coverage through 384 kHz
-- verify the three FIR workflows remain simultaneously representable
-- verify Reference / Delta / Global Bypass latency alignment remains coherent with cumulative FIR/protection/denoiser latency
-- inspect realtime-safety properties for the newly structural paths: no render-thread allocation, coefficient design, blocking or unsafe graph mutation
-- run focused hardware/listening validation on the structural audio changes
+- reran the legacy behavior ledger against the current commercial graph and recorded the reconciliation in `PR34_PHASE_E_PARITY_REAUDIT.md`,
+- verified every current-scope audited capability is implemented/improved or explicitly assigned to the correct later milestone / out-of-scope / legacy-dead disposition,
+- verified no current software blocker remains unexplained,
+- ran the accumulated deterministic high-rate regression coverage through the supported sample-rate set including 384 kHz where applicable,
+- verified the three FIR workflows remain simultaneously representable with independent program generations and additive latency,
+- verified Reference / Delta / Global Bypass latency semantics against the cumulative graph-latency contract,
+- reviewed the new structural paths for realtime allocation/design/blocking regressions,
+- normal macOS build/XCTest and the read-only PR34 Parity Regression Gate are green on the Phase E software baseline.
 
-Only after those checks does PR34 move to performance optimisation.
+Remaining exit gate:
+
+- focused hardware/listening validation on the structural audio changes using the checklist in `PR34_PHASE_E_PARITY_REAUDIT.md`.
+
+Only after that hardware pass does PR34 move to performance optimisation.
 
 # 8. Performance optimisation gate
 
-Once Phase E passes, establish repeatable baseline profiles at:
+Once Phase E hardware validation passes, establish repeatable baseline profiles at:
 
 - 48 kHz
 - 96 kHz
@@ -299,8 +303,12 @@ Only measured hotspots should be changed. Every optimisation must retain sonic/f
 
 **PR34 implementation blocker gate (Phases A-D): SATISFIED.**
 
-**PR34 functional-parity gate: NOT YET SATISFIED — Phase E re-audit/regression/hardware validation is active.**
+**PR34 Phase E software parity/regression gate: SATISFIED.**
 
-**PR34 optimisation gate: CLOSED until Phase E passes.**
+**PR34 focused hardware/listening gate: PENDING.**
 
-The next PR34 work is **Phase E parity re-audit and regression validation**.
+**PR34 functional-parity gate: NOT YET SATISFIED solely because the required hardware/listening validation remains open.**
+
+**PR34 optimisation gate: CLOSED until the hardware/listening pass is accepted.**
+
+The next PR34 activity is the **focused hardware/listening test build** defined in `PR34_PHASE_E_PARITY_REAUDIT.md`.
