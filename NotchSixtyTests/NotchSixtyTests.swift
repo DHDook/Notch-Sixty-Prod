@@ -994,106 +994,108 @@ final class NotchSixtyTests: XCTestCase {
         XCTAssertEqual(try linear.linearPhaseBands(for: .side, sampleRate: 96_000).count, 1)
     }
 
-    func testMidSideUsesMidBankForSharedDynamicEQ() throws {
+    func testMidSideDynamicEQUsesIndependentMidAndSideLanes() throws {
         var dynamic = EQBandDynamicConfiguration()
         dynamic.enabled = true
         dynamic.thresholdDB = -30
         dynamic.ratio = 2
         dynamic.rangeDB = -6
 
-        let midDynamicBand = EQBand(
-            type: .peaking,
-            frequencyHz: 1_000,
-            gainDB: 0,
-            q: 1.0,
-            dynamic: dynamic
-        )
-        let sideStaticBand = EQBand(type: .peaking, frequencyHz: 4_000, gainDB: -2, q: 1.0)
-
+        let midBand = EQBand(type: .peaking, frequencyHz: 1_000, gainDB: 0, q: 1.0, dynamic: dynamic)
+        let sideBand = EQBand(type: .highShelf, frequencyHz: 4_000, gainDB: 0, q: 0.707, dynamic: dynamic)
         let configuration = StereoEQConfiguration(
-            channelMode: .midSide,
-            editChannel: .mid,
-            phaseMode: .minimumPhase,
-            linkedBands: [],
-            midBands: [midDynamicBand],
-            sideBands: [sideStaticBand],
-            midSideSeeded: true
+            channelMode: .midSide, editChannel: .mid, phaseMode: .minimumPhase,
+            midBands: [midBand], sideBands: [sideBand], midSideSeeded: true
         )
         let graph = try configuration.makeGraphSnapshot(
-            sampleRate: 96_000,
-            gainConfiguration: DSPGainConfiguration(),
+            sampleRate: 96_000, gainConfiguration: DSPGainConfiguration(),
             bassManagementConfiguration: BassManagementConfiguration(),
             playbackConfiguration: PlaybackControlConfiguration()
         )
-        XCTAssertTrue(graph.eqMidSideMode)
         XCTAssertTrue(graph.dynamics.dynamicEQ.enabled)
+        XCTAssertEqual(graph.dynamics.dynamicEQ.domain, N60DynamicEQDomainMidSide)
         XCTAssertEqual(graph.dynamics.dynamicEQ.bandCount, 1)
-
-        let sideOnly = StereoEQConfiguration(
-            channelMode: .midSide,
-            editChannel: .side,
-            phaseMode: .minimumPhase,
-            linkedBands: [],
-            midBands: [],
-            sideBands: [midDynamicBand],
-            midSideSeeded: true
-        )
-        let sideOnlyGraph = try sideOnly.makeGraphSnapshot(
-            sampleRate: 96_000,
-            gainConfiguration: DSPGainConfiguration(),
-            bassManagementConfiguration: BassManagementConfiguration(),
-            playbackConfiguration: PlaybackControlConfiguration()
-        )
-        XCTAssertFalse(sideOnlyGraph.dynamics.dynamicEQ.enabled)
-        XCTAssertEqual(sideOnlyGraph.dynamics.dynamicEQ.bandCount, 0)
+        XCTAssertEqual(graph.dynamics.dynamicEQ.secondaryBandCount, 1)
+        XCTAssertEqual(graph.dynamics.dynamicEQ.bands.0.shape, N60DynamicEQShapePeak)
+        XCTAssertEqual(graph.dynamics.dynamicEQ.secondaryBands.0.shape, N60DynamicEQShapeHighShelf)
     }
 
-    func testIndependentUsesLeftBankForSharedDynamicEQ() throws {
+    func testIndependentDynamicEQUsesSeparateLeftAndRightLanes() throws {
         var dynamic = EQBandDynamicConfiguration()
         dynamic.enabled = true
-        let leftDynamicBand = EQBand(
-            type: .peaking,
-            frequencyHz: 1_600,
-            gainDB: 0,
-            q: 1.2,
-            dynamic: dynamic
+        let leftBand = EQBand(type: .lowShelf, frequencyHz: 120, gainDB: 0, q: 0.707, dynamic: dynamic)
+        let rightBand = EQBand(type: .peaking, frequencyHz: 1_600, gainDB: 0, q: 1.2, dynamic: dynamic)
+        let configuration = StereoEQConfiguration(
+            channelMode: .independent, editChannel: .right, phaseMode: .mixedPhase,
+            leftBands: [leftBand], rightBands: [rightBand], independentSeeded: true
         )
-
-        let leftOwned = StereoEQConfiguration(
-            channelMode: .independent,
-            editChannel: .left,
-            phaseMode: .mixedPhase,
-            linkedBands: [],
-            leftBands: [leftDynamicBand],
-            rightBands: [],
-            independentSeeded: true
-        )
-        let leftGraph = try leftOwned.makeGraphSnapshot(
-            sampleRate: 192_000,
-            gainConfiguration: DSPGainConfiguration(),
+        let graph = try configuration.makeGraphSnapshot(
+            sampleRate: 192_000, gainConfiguration: DSPGainConfiguration(),
             bassManagementConfiguration: BassManagementConfiguration(),
             playbackConfiguration: PlaybackControlConfiguration()
         )
-        XCTAssertTrue(leftGraph.dynamics.dynamicEQ.enabled)
-        XCTAssertEqual(leftGraph.dynamics.dynamicEQ.bandCount, 1)
+        XCTAssertTrue(graph.dynamics.dynamicEQ.enabled)
+        XCTAssertEqual(graph.dynamics.dynamicEQ.domain, N60DynamicEQDomainDualMono)
+        XCTAssertEqual(graph.dynamics.dynamicEQ.bandCount, 1)
+        XCTAssertEqual(graph.dynamics.dynamicEQ.secondaryBandCount, 1)
+        XCTAssertEqual(graph.dynamics.dynamicEQ.bands.0.shape, N60DynamicEQShapeLowShelf)
+        XCTAssertEqual(graph.dynamics.dynamicEQ.secondaryBands.0.shape, N60DynamicEQShapePeak)
+    }
 
-        let rightOnly = StereoEQConfiguration(
-            channelMode: .independent,
-            editChannel: .right,
-            phaseMode: .mixedPhase,
-            linkedBands: [],
-            leftBands: [],
-            rightBands: [leftDynamicBand],
-            independentSeeded: true
-        )
-        let rightGraph = try rightOnly.makeGraphSnapshot(
-            sampleRate: 192_000,
-            gainConfiguration: DSPGainConfiguration(),
+    func testLinearPhaseRetainsDynamicAsPostFIRMinimumPhaseLayer() throws {
+        var dynamic = EQBandDynamicConfiguration()
+        dynamic.enabled = true
+        let band = EQBand(type: .tilt, frequencyHz: 1_000, gainDB: 2, q: 0.707, dynamic: dynamic)
+        let configuration = StereoEQConfiguration(phaseMode: .linearPhase, linkedBands: [band])
+        let graph = try configuration.makeGraphSnapshot(
+            sampleRate: 96_000, gainConfiguration: DSPGainConfiguration(),
             bassManagementConfiguration: BassManagementConfiguration(),
             playbackConfiguration: PlaybackControlConfiguration()
         )
-        XCTAssertFalse(rightGraph.dynamics.dynamicEQ.enabled)
-        XCTAssertEqual(rightGraph.dynamics.dynamicEQ.bandCount, 0)
+        XCTAssertTrue(graph.dynamics.dynamicEQ.enabled)
+        XCTAssertEqual(graph.dynamics.dynamicEQ.domain, N60DynamicEQDomainLinkedStereo)
+        XCTAssertEqual(graph.dynamics.dynamicEQ.bandCount, 1)
+        XCTAssertEqual(graph.dynamics.dynamicEQ.bands.0.shape, N60DynamicEQShapeTilt)
+    }
+
+    func testDynamicEQFilterCoverageAndStructuralRestrictions() throws {
+        var dynamic = EQBandDynamicConfiguration()
+        dynamic.enabled = true
+        var notchDynamic = dynamic
+        notchDynamic.direction = .cutOnly
+        let supported = [
+            EQBand(type: .peaking, frequencyHz: 1_000, gainDB: 0, q: 1, dynamic: dynamic),
+            EQBand(type: .lowShelf, frequencyHz: 120, gainDB: 0, q: 0.707, dynamic: dynamic),
+            EQBand(type: .highShelf, frequencyHz: 5_000, gainDB: 0, q: 0.707, dynamic: dynamic),
+            EQBand(type: .tilt, frequencyHz: 1_000, gainDB: 0, q: 0.707, dynamic: dynamic),
+            EQBand(type: .notch, frequencyHz: 2_000, gainDB: 0, q: 2, dynamic: notchDynamic),
+            EQBand(type: .bandPass, frequencyHz: 800, gainDB: 0, q: 1, dynamic: dynamic),
+        ]
+        let graph = try StereoEQConfiguration(linkedBands: supported).makeGraphSnapshot(
+            sampleRate: 48_000, gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: PlaybackControlConfiguration()
+        )
+        XCTAssertEqual(graph.dynamics.dynamicEQ.bandCount, 6)
+
+        for type in [EQFilterType.lowPass, .highPass, .linkwitzTransform, .fir, .allPass] {
+            var band = EQBand(type: type, dynamic: dynamic)
+            if type == .fir { band.firKernel = .validation() }
+            XCTAssertThrowsError(try StereoEQConfiguration(linkedBands: [band]).makeGraphSnapshot(
+                sampleRate: 48_000, gainConfiguration: DSPGainConfiguration(),
+                bassManagementConfiguration: BassManagementConfiguration(),
+                playbackConfiguration: PlaybackControlConfiguration()
+            ))
+        }
+
+        var invalidNotch = dynamic
+        invalidNotch.direction = .boostOnly
+        let notch = EQBand(type: .notch, frequencyHz: 2_000, gainDB: 0, q: 2, dynamic: invalidNotch)
+        XCTAssertThrowsError(try StereoEQConfiguration(linkedBands: [notch]).makeGraphSnapshot(
+            sampleRate: 48_000, gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: PlaybackControlConfiguration()
+        ))
     }
 
     func testMidSideRealtimeIdentityAndAuditionContracts() throws {

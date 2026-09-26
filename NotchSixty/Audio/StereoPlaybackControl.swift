@@ -200,10 +200,11 @@ struct StereoEQConfiguration: Equatable, Sendable {
                 }
             }
             if band.dynamic.enabled {
-                guard band.type == .peaking,
+                guard band.type.supportsDynamicEQ,
                       DynamicEQBandConfiguration.frequencyRange.contains(band.frequencyHz),
                       DynamicEQBandConfiguration.qRange.contains(band.q),
-                      band.dynamic.isValid else {
+                      band.dynamic.isValid,
+                      !(band.type == .notch && band.dynamic.direction != .cutOnly) else {
                     throw EQConfigurationError.invalidBand(index: index)
                 }
             }
@@ -214,12 +215,14 @@ struct StereoEQConfiguration: Equatable, Sendable {
         return result
     }
 
-    private var sharedDynamicSourceBands: [EQBand] {
-        switch channelMode {
-        case .linked: return linkedBands
-        case .independent: return leftBands
-        case .midSide: return midBands
-        }
+    private func dynamicBoostDB(in bands: [EQBand]) -> Double {
+        bands.lazy
+            .filter { $0.enabled && $0.type.supportsDynamicEQ && $0.dynamic.enabled }
+            .reduce(0.0) { partial, band in
+                let dynamic = band.dynamic
+                let boost = dynamic.direction == .cutOnly ? 0.0 : max(0.0, dynamic.maxBoostDB)
+                return partial + boost
+            }
     }
 
     private func conservativeAutomaticHeadroomDB(
@@ -247,65 +250,75 @@ struct StereoEQConfiguration: Equatable, Sendable {
         }
 
         let dynamicBoost: Double
-        if phaseMode != .linearPhase && !bypassed {
-            // Dynamic EQ remains one physical-stereo layer. Its controls follow
-            // the audited source-of-truth bank: Linked, Left, or Mid.
-            dynamicBoost = sharedDynamicSourceBands.lazy
-                .filter { $0.enabled && $0.type == .peaking && $0.dynamic.enabled }
-                .reduce(0.0) { partial, band in
-                    let dynamicPart = band.dynamic.direction == .cutOnly ? 0.0 : max(0.0, band.dynamic.maxBoostDB)
-                    return partial + dynamicPart
-                }
-        } else {
+        if bypassed {
             dynamicBoost = 0
+        } else {
+            switch channelMode {
+            case .linked:
+                dynamicBoost = dynamicBoostDB(in: linkedBands)
+            case .independent:
+                dynamicBoost = max(dynamicBoostDB(in: leftBands), dynamicBoostDB(in: rightBands))
+            case .midSide:
+                dynamicBoost = max(dynamicBoostDB(in: midBands), dynamicBoostDB(in: sideBands))
+            }
         }
         return min(dynamics.automaticHeadroom.maxAttenuationDB, staticBoost + dynamicBoost)
     }
 
-    private func compileUnifiedDynamicEQ(
-        into dynamics: inout DynamicsConfiguration,
-        sampleRate: Double
-    ) throws {
-        // Dynamic EQ is intentionally shared across channel-editing modes.
-        // Linked owns its controls in Linked mode, Left in Independent mode, and
-        // Mid in Mid/Side mode. The realtime engine still applies exactly one
-        // physical-stereo layer after any Mid/Side decode; no asymmetric detector
-        // behavior is implied or created by the static channel editor.
-        dynamics.dynamicEQ = DynamicEQConfiguration()
-        guard phaseMode != .linearPhase,
-              !bypassed else { return }
+    private func makeDomainDynamicEQSnapshot(sampleRate: Double) throws -> N60DynamicEQSnapshot {
+        var snapshot = N60DynamicEQSnapshotMakeBypassed(sampleRate)
+        let domain: N60DynamicEQDomain
+        switch channelMode {
+        case .linked: domain = N60DynamicEQDomainLinkedStereo
+        case .independent: domain = N60DynamicEQDomainDualMono
+        case .midSide: domain = N60DynamicEQDomainMidSide
+        }
+        guard N60DynamicEQSnapshotSetDomain(&snapshot, domain) else {
+            throw DynamicsConfigurationError.invalidDynamicEQ
+        }
 
-        let dynamicBands = try validatedEnabledBands(sharedDynamicSourceBands, sampleRate: sampleRate)
-            .filter { $0.type == .peaking && $0.dynamic.enabled }
-        guard dynamicBands.count <= DynamicEQConfiguration.maximumBandCount else {
-            throw EQConfigurationError.tooManyBands(dynamicBands.count)
+        func compileLane(_ source: [EQBand], lane: N60DynamicEQLane) throws -> Int {
+            let validated = try validatedEnabledBands(source, sampleRate: sampleRate)
+            let dynamicBands = validated.filter { $0.dynamic.enabled }
+            var outputIndex: UInt32 = 0
+            for (sourceIndex, band) in dynamicBands.enumerated() {
+                guard let shape = band.type.dynamicEQShape else {
+                    throw EQConfigurationError.invalidBand(index: sourceIndex)
+                }
+                let dynamic = band.dynamic
+                guard N60DynamicEQSnapshotSetBandForLane(
+                    &snapshot, sampleRate, lane, outputIndex, true, shape,
+                    band.frequencyHz, Float(band.q), 0,
+                    Float(dynamic.thresholdDB), Float(dynamic.ratio), Float(dynamic.rangeDB),
+                    Float(dynamic.attackMs), Float(dynamic.releaseMs), dynamic.direction.cType,
+                    Float(dynamic.boostThresholdDB), Float(dynamic.boostRatio), Float(dynamic.maxBoostDB),
+                    dynamic.detectorMode.cType, Float(dynamic.rmsWindowMs)
+                ) else {
+                    throw EQConfigurationError.invalidBand(index: sourceIndex)
+                }
+                outputIndex += 1
+            }
+            return Int(outputIndex)
         }
-        dynamics.dynamicEQ.enabled = !dynamicBands.isEmpty
-        dynamics.dynamicEQ.bands = dynamicBands.map { band in
-            let dynamic = band.dynamic
-            var compiled = DynamicEQBandConfiguration()
-            compiled.enabled = true
-            compiled.frequencyHz = band.frequencyHz
-            compiled.q = band.q
-            // Static gain remains in the normal EQ biquad. The Dynamic engine
-            // contributes only the time-varying delta, so enabling Dynamic does
-            // not change the band's static response at the neutral operating point.
-            compiled.staticGainDB = 0
-            compiled.thresholdDB = dynamic.thresholdDB
-            compiled.ratio = dynamic.ratio
-            compiled.rangeDB = dynamic.rangeDB
-            compiled.attackMs = dynamic.attackMs
-            compiled.releaseMs = dynamic.releaseMs
-            compiled.direction = dynamic.direction
-            compiled.boostThresholdDB = dynamic.boostThresholdDB
-            compiled.boostRatio = dynamic.boostRatio
-            compiled.maxBoostDB = dynamic.maxBoostDB
-            compiled.detectorMode = dynamic.detectorMode
-            compiled.rmsWindowMs = dynamic.rmsWindowMs
-            return compiled
+
+        let count: Int
+        switch channelMode {
+        case .linked:
+            count = try compileLane(linkedBands, lane: N60DynamicEQLanePrimary)
+        case .independent:
+            let primaryCount = try compileLane(leftBands, lane: N60DynamicEQLanePrimary)
+            let secondaryCount = try compileLane(rightBands, lane: N60DynamicEQLaneSecondary)
+            count = primaryCount + secondaryCount
+        case .midSide:
+            let primaryCount = try compileLane(midBands, lane: N60DynamicEQLanePrimary)
+            let secondaryCount = try compileLane(sideBands, lane: N60DynamicEQLaneSecondary)
+            count = primaryCount + secondaryCount
         }
+        guard N60DynamicEQSnapshotSetEnabled(&snapshot, !bypassed && count > 0) else {
+            throw DynamicsConfigurationError.invalidDynamicEQ
+        }
+        return snapshot
     }
-
 
     private func publishMinimumPhaseBand(
         _ band: EQBand,
@@ -449,7 +462,10 @@ struct StereoEQConfiguration: Equatable, Sendable {
         }
 
         var compiledDynamics = dynamicsConfiguration
-        try compileUnifiedDynamicEQ(into: &compiledDynamics, sampleRate: sampleRate)
+        // EQ-band dynamics are compiled below into a domain-aware realtime snapshot.
+        // Keep the older standalone DynamicEQConfiguration empty so it cannot
+        // accidentally create a second shared layer.
+        compiledDynamics.dynamicEQ = DynamicEQConfiguration()
 
         var graph = N60DSPGraphSnapshotMakeUnity(sampleRate)
         graph.inputGainLinear = DSPGainConfiguration.linearGain(forDB: gainConfiguration.inputPreampDB)
@@ -617,6 +633,7 @@ struct StereoEQConfiguration: Equatable, Sendable {
             throw BassManagementConfigurationError.graphDesignFailed
         }
         graph.dynamics = try compiledDynamics.makeSnapshot(sampleRate: sampleRate)
+        graph.dynamics.dynamicEQ = try makeDomainDynamicEQSnapshot(sampleRate: sampleRate)
         graph.protection = try compiledDynamics.makeProtectionSnapshot(sampleRate: sampleRate)
         let denoiserLatency = graph.dynamics.spectralDenoiser.enabled
             ? UInt64(graph.dynamics.spectralDenoiser.latencyFrames)

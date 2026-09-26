@@ -888,7 +888,7 @@ struct ContentView: View {
             GroupBox("Dynamic EQ integration") {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Dynamic EQ is now configured on the normal Parametric EQ bands below rather than in a separate band bank.")
-                    Text("Commercial capacity: up to \(EQConfiguration.maximumBandCount) EQ bands. Dynamic settings are owned by Linked, Left (Independent), or Mid (Mid/Side) Peak bands in Minimum/Mixed Phase and render as one identical physical-stereo layer.")
+                    Text("Commercial capacity: up to \(EQConfiguration.maximumBandCount) EQ bands. Dynamic EQ follows the active band domain: Linked is stereo-linked, Independent uses separate Left/Right lanes, and Mid/Side uses separate Mid/Side lanes. Peak, shelves, Tilt, Notch, and Band Pass support dynamics in Minimum, Mixed, and Linear phase modes.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -1230,19 +1230,7 @@ struct ContentView: View {
     @ViewBuilder
     private func eqBandRow(index: Int, band: EQBand) -> some View {
         let binding = eqBandBinding(for: band.id)
-        let dynamicOwnerChannel: Bool = {
-            switch engine.stereoEQConfiguration.channelMode {
-            case .linked:
-                return true
-            case .independent:
-                return engine.stereoEQConfiguration.editChannel == .left
-            case .midSide:
-                return engine.stereoEQConfiguration.editChannel == .mid
-            }
-        }()
-        let dynamicSupported = engine.eqConfiguration.phaseMode != .linearPhase
-            && dynamicOwnerChannel
-            && band.type == .peaking
+        let dynamicSupported = band.type.supportsDynamicEQ
 
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
@@ -1273,10 +1261,8 @@ struct ContentView: View {
                 Button("Remove") { try? engine.removeEQBand(id: band.id) }
             }
 
-            if engine.eqConfiguration.phaseMode != .linearPhase && band.type == .peaking && !dynamicOwnerChannel {
-                Text(engine.stereoEQConfiguration.channelMode == .midSide
-                     ? "Dynamic EQ is shared across physical L/R; edit Dynamic settings from Mid."
-                     : "Dynamic EQ is shared across physical L/R; edit Dynamic settings from Left.")
+            if !dynamicSupported {
+                Text("Dynamic EQ is not available for HP/LP, Linkwitz Transform, FIR, or All-Pass bands.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -1345,9 +1331,13 @@ struct ContentView: View {
             if binding.wrappedValue.dynamic.enabled && dynamicSupported {
                 HStack(spacing: 8) {
                     Text("Dynamic").frame(width: 82, alignment: .leading).foregroundStyle(.secondary)
-                    Picker("Direction", selection: binding.dynamic.direction) {
-                        ForEach(DynamicEQDirection.allCases) { value in Text(value.displayName).tag(value) }
-                    }.frame(width: 165)
+                    if band.type == .notch {
+                        Text("Cut Only").frame(width: 165, alignment: .leading)
+                    } else {
+                        Picker("Direction", selection: binding.dynamic.direction) {
+                            ForEach(DynamicEQDirection.allCases) { value in Text(value.displayName).tag(value) }
+                        }.frame(width: 165)
+                    }
                     Text("Threshold")
                     Slider(value: binding.dynamic.thresholdDB, in: EQBandDynamicConfiguration.thresholdRange, step: 0.5).frame(width: 100)
                     Text("\(binding.wrappedValue.dynamic.thresholdDB, specifier: "%.1f") dB").monospacedDigit().frame(width: 64)
@@ -1383,11 +1373,12 @@ struct ContentView: View {
                         Text("\(binding.wrappedValue.dynamic.maxBoostDB, specifier: "%.1f") dB").monospacedDigit().frame(width: 62)
                     }
                 }
-            } else if band.dynamic.enabled {
-                Text("Dynamic is inactive for this band. Use Linked + Minimum phase + Peak to enable dynamic operation.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.leading, 40)
+                if engine.eqConfiguration.phaseMode == .linearPhase {
+                    Text("Linear Phase keeps the static FIR linear-phase; the time-varying Dynamic correction runs as a minimum-phase layer after the FIR.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 40)
+                }
             }
         }
         .textFieldStyle(.roundedBorder)
@@ -1405,7 +1396,12 @@ struct ContentView: View {
                 )
                 if sanitized.type != .peaking {
                     sanitized.constantQ = false
+                }
+                if !sanitized.type.supportsDynamicEQ {
                     sanitized.dynamic.enabled = false
+                }
+                if sanitized.type == .notch {
+                    sanitized.dynamic.direction = .cutOnly
                 }
                 if sanitized.type != .fir {
                     // Keep a loaded FIR asset attached to the band so switching

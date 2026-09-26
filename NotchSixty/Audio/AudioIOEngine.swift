@@ -41,6 +41,20 @@ enum EQFilterType: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    var dynamicEQShape: N60DynamicEQShape? {
+        switch self {
+        case .peaking: return N60DynamicEQShapePeak
+        case .lowShelf: return N60DynamicEQShapeLowShelf
+        case .highShelf: return N60DynamicEQShapeHighShelf
+        case .bandPass: return N60DynamicEQShapeBandPass
+        case .tilt: return N60DynamicEQShapeTilt
+        case .notch: return N60DynamicEQShapeNotch
+        case .lowPass, .highPass, .linkwitzTransform, .fir, .allPass: return nil
+        }
+    }
+
+    var supportsDynamicEQ: Bool { dynamicEQShape != nil }
+
     var cType: N60BiquadFilterType {
         switch self {
         case .peaking: return N60BiquadFilterTypePeaking
@@ -702,10 +716,11 @@ struct EQConfiguration: Equatable, Sendable {
             }
         }
         if band.dynamic.enabled {
-            guard band.type == .peaking,
+            guard band.type.supportsDynamicEQ,
                   DynamicEQBandConfiguration.frequencyRange.contains(band.frequencyHz),
                   DynamicEQBandConfiguration.qRange.contains(band.q),
-                  band.dynamic.isValid else {
+                  band.dynamic.isValid,
+                  !(band.type == .notch && band.dynamic.direction != .cutOnly) else {
                 throw EQConfigurationError.invalidBand(index: index)
             }
         }
