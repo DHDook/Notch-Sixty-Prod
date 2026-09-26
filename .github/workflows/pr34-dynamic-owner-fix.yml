@@ -1,0 +1,73 @@
+name: PR34 Dynamic EQ Owner Fix
+
+on:
+  push:
+    branches:
+      - feature/dsp-optimization-parity-audit
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    runs-on: xcode-27
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v7
+        with:
+          ref: feature/dsp-optimization-parity-audit
+          fetch-depth: 0
+
+      - name: Apply audited Dynamic EQ owner-bank fix
+        run: python3 ci/pr34_fix_dynamic_owner_banks.py
+
+      - name: Verify patch cleanliness
+        run: git diff --check
+
+      - name: Build
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          build
+
+      - name: Focused Dynamic EQ owner-bank regressions
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          -only-testing:NotchSixtyTests/NotchSixtyTests/testMidSideUsesMidBankForSharedDynamicEQ
+          -only-testing:NotchSixtyTests/NotchSixtyTests/testIndependentUsesLeftBankForSharedDynamicEQ
+          -only-testing:NotchSixtyTests/NotchSixtyTests/testMixedPhaseKeepsSharedDynamicEQActive
+          test
+
+      - name: Full test suite
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          test
+
+      - name: Commit verified source fix
+        run: |
+          if git diff --quiet; then
+            echo "Fix already applied; nothing to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add NotchSixty/Audio/StereoPlaybackControl.swift NotchSixty/ContentView.swift NotchSixtyTests/NotchSixtyTests.swift
+          git commit -m "Fix Dynamic EQ ownership in Mid Side and Independent modes"
+          git push origin HEAD:feature/dsp-optimization-parity-audit
