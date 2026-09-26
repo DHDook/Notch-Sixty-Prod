@@ -17,6 +17,9 @@ jobs:
         with:
           ref: feature/dsp-optimization-parity-audit
 
+      - name: Apply Phase A core integration
+        run: python3 ci/pr34_apply_phase_a_core.py
+
       - name: Apply live stereo Phase A integration
         run: python3 ci/pr34_apply_stereo_phase_a.py
 
@@ -70,5 +73,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add NotchSixty/Audio/Realtime/N60Biquad.h NotchSixty/Audio/Realtime/N60RenderKernel.h NotchSixty/Audio/Realtime/N60RenderKernel.c NotchSixty/Audio/Realtime/N60LinearPhaseEQ.h NotchSixty/Audio/AudioIOEngine.swift NotchSixty/Audio/StereoPlaybackControl.swift NotchSixty/ContentView.swift NotchSixtyTests/NotchSixtyTests.swift
-          git commit -m "Integrate next PR34 parity slice"
+          git commit -m "Integrate PR34 Phase A through live stereo graph"
           git push origin HEAD:feature/dsp-optimization-parity-audit
