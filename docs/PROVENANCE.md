@@ -112,3 +112,12 @@ The mains detector/tracker is independently authored. It uses a conventional qua
 - **Realtime contract:** fixed/preallocated state; immutable/precomputed snapshots; no allocation/free, locks, logging, file/device/UI access, filter design, or coefficient construction in the render callback; zero added algorithmic latency for PR32 stages.
 - **Validation:** deterministic coverage includes high-rate finite operation, new-parameter validation, feed-back compressor stability, bounded De-Esser attenuation, multiband independent controls, dialogue disabled transparency, program gating, relative-masking response, maximum-boost bounds, and voice-confidence bounds. Full integration suites were green before the hardware gate.
 - **Residual audit:** `docs/PR32_DYNAMICS_PARITY_AUDIT.md` explicitly routes remaining required observable items rather than silently omitting them. General Dynamic EQ, Dynamic Gain Rider/auto-headroom, explicit True-Peak Guard semantics, clipper asymmetry trim, per-band loudness, De-Harsh, and EQ/DSP automatic-headroom compensation are assigned to the immediately following parity PR before optimization.
+
+
+## PR33 Slice 2 — gain/protection integration
+
+Classification: **specification-derived / independently authored commercial implementation**.
+
+Behavioral inventory references are limited to observable legacy configuration/UI state: Dynamic Gain Rider enable/target/max-cut/Fast-Medium-Slow controls; the distinct TP Guard toggle; ±3 dB clipper asymmetry trim; and EQ Headroom Compensation enable/3–24 dB maximum attenuation. Historical gain-rider, limiter, clipper, or EQ-headroom DSP implementations and historical DSP tests are not implementation references.
+
+The commercial algorithms are derived independently from standard level/envelope smoothing, oversampled peak protection, bounded gain-riding, and pre-EQ gain-staging principles. The realtime path remains fixed/preallocated and performs no allocation, locking, logging, file/device/UI access, or coefficient/filter design.

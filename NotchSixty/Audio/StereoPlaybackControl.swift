@@ -147,6 +147,36 @@ struct StereoEQConfiguration: Equatable, Sendable {
         return result
     }
 
+    private func conservativeAutomaticHeadroomDB(
+        dynamics: DynamicsConfiguration
+    ) -> Double {
+        guard dynamics.automaticHeadroom.enabled else { return 0 }
+
+        func channelBoost(_ bands: [EQBand]) -> Double {
+            bands.lazy.filter(\.enabled).reduce(0.0) { partial, band in
+                partial + max(0.0, band.gainDB)
+            }
+        }
+        let staticBoost: Double
+        if bypassed {
+            staticBoost = 0
+        } else {
+            switch channelMode {
+            case .linked: staticBoost = channelBoost(linkedBands)
+            case .independent: staticBoost = max(channelBoost(leftBands), channelBoost(rightBands))
+            }
+        }
+
+        let dynamicBoost = dynamics.dynamicEQ.enabled
+            ? dynamics.dynamicEQ.bands.lazy.filter(\.enabled).reduce(0.0) { partial, band in
+                let staticPart = max(0.0, band.staticGainDB)
+                let dynamicPart = band.direction == .cutOnly ? 0.0 : max(0.0, band.maxBoostDB)
+                return partial + staticPart + dynamicPart
+            }
+            : 0.0
+        return min(dynamics.automaticHeadroom.maxAttenuationDB, staticBoost + dynamicBoost)
+    }
+
     func makeGraphSnapshot(
         sampleRate: Double,
         gainConfiguration: DSPGainConfiguration,
@@ -166,7 +196,10 @@ struct StereoEQConfiguration: Equatable, Sendable {
 
         var graph = N60DSPGraphSnapshotMakeUnity(sampleRate)
         graph.inputGainLinear = DSPGainConfiguration.linearGain(forDB: gainConfiguration.inputPreampDB)
-        graph.headroomGainLinear = DSPGainConfiguration.linearGain(forDB: gainConfiguration.headroomAttenuationDB)
+        let automaticHeadroomDB = playbackConfiguration.globalBypassed
+            ? 0.0 : conservativeAutomaticHeadroomDB(dynamics: dynamicsConfiguration)
+        graph.headroomGainLinear = DSPGainConfiguration.linearGain(
+            forDB: gainConfiguration.headroomAttenuationDB - automaticHeadroomDB)
         graph.outputGainLinear = DSPGainConfiguration.linearGain(forDB: gainConfiguration.outputGainDB)
         graph.masterGainLinear = masterGainLinear
         let balance = playbackConfiguration.balanceLinearGains

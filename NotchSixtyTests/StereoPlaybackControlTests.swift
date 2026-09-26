@@ -619,4 +619,24 @@ final class StereoPlaybackControlTests: XCTestCase {
 
         XCTAssertEqual(graph.eqBandCount, 128)
     }
+
+    func testAutomaticHeadroomAddsPredictiveAttenuationAndRespectsCap() throws {
+        var eq = StereoEQConfiguration()
+        eq.linkedBands = [
+            EQBand(enabled: true, type: .peaking, frequencyHz: 1_000, gainDB: 6, q: 1),
+            EQBand(enabled: true, type: .peaking, frequencyHz: 3_000, gainDB: 6, q: 1),
+        ]
+        var dynamics = DynamicsConfiguration()
+        dynamics.automaticHeadroom.enabled = true
+        dynamics.automaticHeadroom.maxAttenuationDB = 8
+        let graph = try eq.makeGraphSnapshot(
+            sampleRate: 96_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            dynamicsConfiguration: dynamics,
+            playbackConfiguration: PlaybackControlConfiguration())
+        let expected = Float(pow(10.0, -8.0 / 20.0))
+        XCTAssertEqual(graph.headroomGainLinear, expected, accuracy: 0.000_001)
+    }
+
 }

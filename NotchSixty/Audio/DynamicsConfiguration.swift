@@ -18,6 +18,8 @@ enum DynamicsConfigurationError: Error, LocalizedError, Equatable {
     case invalidPauseGate
     case invalidSoftClipper
     case invalidLimiter
+    case invalidGainRider
+    case invalidAutomaticHeadroom
     case invalidOversampling
 
     var errorDescription: String? {
@@ -56,6 +58,10 @@ enum DynamicsConfigurationError: Error, LocalizedError, Equatable {
             return "Soft Clipper parameters are outside the supported production range."
         case .invalidLimiter:
             return "Limiter parameters are outside the supported production range."
+        case .invalidGainRider:
+            return "Dynamic Gain Rider parameters are outside the supported production range."
+        case .invalidAutomaticHeadroom:
+            return "Automatic Headroom parameters are outside the supported production range."
         case .invalidOversampling:
             return "Oversampling configuration is invalid."
         }
@@ -806,6 +812,7 @@ struct SoftClipperConfiguration: Equatable, Sendable {
     static let driveRange = 0.0...12.0
     static let thresholdRange = -6.0...0.0
     static let kneeRange = 0.0...1.0
+    static let asymmetryTrimRange = -3.0...3.0
 
     var enabled = false
     var driveDB = 0.0
@@ -813,11 +820,13 @@ struct SoftClipperConfiguration: Equatable, Sendable {
     var kneeSmooth = 0.5
     var curve: SoftClipperCurve = .quadratic
     var autoCompensateGain = true
+    var asymmetryTrimDB = 0.0
 
     func validate() throws {
         guard driveDB.isFinite, Self.driveRange.contains(driveDB),
               thresholdDB.isFinite, Self.thresholdRange.contains(thresholdDB),
-              kneeSmooth.isFinite, Self.kneeRange.contains(kneeSmooth) else {
+              kneeSmooth.isFinite, Self.kneeRange.contains(kneeSmooth),
+              asymmetryTrimDB.isFinite, Self.asymmetryTrimRange.contains(asymmetryTrimDB) else {
             throw DynamicsConfigurationError.invalidSoftClipper
         }
     }
@@ -836,6 +845,8 @@ struct LimiterConfiguration: Equatable, Sendable {
     var attackMs = 0.1
     var releaseMs = 20.0
     var lookAheadMs = 2.0
+    // True preserves the accepted PR27 behavior: limiter reconstruction is 4x.
+    var truePeakGuardEnabled = true
 
     func validate() throws {
         guard ceilingDB.isFinite, Self.ceilingRange.contains(ceilingDB),
@@ -843,6 +854,51 @@ struct LimiterConfiguration: Equatable, Sendable {
               releaseMs.isFinite, Self.releaseRange.contains(releaseMs),
               lookAheadMs.isFinite, Self.lookAheadRange.contains(lookAheadMs) else {
             throw DynamicsConfigurationError.invalidLimiter
+        }
+    }
+}
+
+enum GainRiderSpeed: String, CaseIterable, Identifiable, Sendable {
+    case fast
+    case medium
+    case slow
+    var id: String { rawValue }
+    var displayName: String { rawValue.capitalized }
+    var cType: N60GainRiderSpeed {
+        switch self {
+        case .fast: return N60GainRiderSpeedFast
+        case .medium: return N60GainRiderSpeedMedium
+        case .slow: return N60GainRiderSpeedSlow
+        }
+    }
+}
+
+struct GainRiderConfiguration: Equatable, Sendable {
+    static let targetRange = 0.5...6.0
+    static let maxReductionRange = 3.0...12.0
+    var enabled = false
+    var targetGainReductionDB = 3.0
+    var maxReductionDB = 6.0
+    var speed: GainRiderSpeed = .medium
+
+    func validate() throws {
+        guard targetGainReductionDB.isFinite, Self.targetRange.contains(targetGainReductionDB),
+              maxReductionDB.isFinite, Self.maxReductionRange.contains(maxReductionDB) else {
+            throw DynamicsConfigurationError.invalidGainRider
+        }
+    }
+}
+
+struct AutomaticHeadroomConfiguration: Equatable, Sendable {
+    static let maxAttenuationRange = 3.0...24.0
+    // Disabled by default in the commercial validation build so accepted PR25–32
+    // listening baselines are not silently attenuated; production presets can opt in.
+    var enabled = false
+    var maxAttenuationDB = 12.0
+
+    func validate() throws {
+        guard maxAttenuationDB.isFinite, Self.maxAttenuationRange.contains(maxAttenuationDB) else {
+            throw DynamicsConfigurationError.invalidAutomaticHeadroom
         }
     }
 }
@@ -864,6 +920,8 @@ struct DynamicsConfiguration: Equatable, Sendable {
     var expander = ExpanderConfiguration()
     var softClipper = SoftClipperConfiguration()
     var limiter = LimiterConfiguration()
+    var gainRider = GainRiderConfiguration()
+    var automaticHeadroom = AutomaticHeadroomConfiguration()
     var oversampling: OversamplingFactor = .one
     var pauseGate = PauseGateConfiguration()
 
@@ -1058,6 +1116,8 @@ struct DynamicsConfiguration: Equatable, Sendable {
     func makeProtectionSnapshot(sampleRate: Double) throws -> N60ProtectionSnapshot {
         try softClipper.validate()
         try limiter.validate()
+        try gainRider.validate()
+        try automaticHeadroom.validate()
         guard sampleRate.isFinite, sampleRate > 0, sampleRate <= N60_PROTECTION_MAX_SAMPLE_RATE else {
             throw DynamicsConfigurationError.invalidOversampling
         }
@@ -1066,23 +1126,32 @@ struct DynamicsConfiguration: Equatable, Sendable {
         guard N60ProtectionSnapshotSetOversamplingFactor(&snapshot, oversampling.cType) else {
             throw DynamicsConfigurationError.invalidOversampling
         }
-        guard N60ProtectionSnapshotSetSoftClipper(
+        guard N60ProtectionSnapshotSetSoftClipperAdvanced(
             &snapshot,
             softClipper.enabled,
             Float(softClipper.driveDB),
             Float(softClipper.thresholdDB),
             Float(softClipper.kneeSmooth),
             softClipper.curve.cType,
-            softClipper.autoCompensateGain
+            softClipper.autoCompensateGain,
+            Float(softClipper.asymmetryTrimDB)
         ) else { throw DynamicsConfigurationError.invalidSoftClipper }
-        guard N60ProtectionSnapshotSetLimiter(
+        guard N60ProtectionSnapshotSetLimiterAdvanced(
             &snapshot,
             limiter.enabled,
             Float(limiter.ceilingDB),
             Float(limiter.attackMs),
             Float(limiter.releaseMs),
-            Float(limiter.lookAheadMs)
+            Float(limiter.lookAheadMs),
+            limiter.truePeakGuardEnabled
         ) else { throw DynamicsConfigurationError.invalidLimiter }
+        guard N60ProtectionSnapshotSetGainRider(
+            &snapshot,
+            gainRider.enabled,
+            Float(gainRider.targetGainReductionDB),
+            Float(gainRider.maxReductionDB),
+            gainRider.speed.cType
+        ) else { throw DynamicsConfigurationError.invalidGainRider }
         return snapshot
     }
 }

@@ -56,6 +56,8 @@ struct N60ProtectionRuntime {
     float limiterDelayRight[N60_PROTECTION_MAX_LOOKAHEAD_HIGH_SAMPLES + 1u];
     uint64_t limiterSequence;
     float limiterGain;
+    float gainRiderAttenuationDB;
+    float sustainedLimiterGainReductionDB;
 
     float peakDequeValue[N60_PROTECTION_MAX_LOOKAHEAD_HIGH_SAMPLES + 1u];
     uint64_t peakDequeIndex[N60_PROTECTION_MAX_LOOKAHEAD_HIGH_SAMPLES + 1u];
@@ -79,6 +81,10 @@ static float linear_to_db(float linear) {
     return 20.0f * log10f(fmaxf(linear, N60_EPSILON));
 }
 
+static float coefficient_for_seconds(double sampleRate, float seconds) {
+    return expf(-1.0f / fmaxf(1.0f, seconds * (float)sampleRate));
+}
+
 static uint32_t oversampling_latency_frames(N60OversamplingFactor factor) {
     switch (factor) {
     case N60OversamplingFactor2x: return 32u;
@@ -91,7 +97,7 @@ static uint32_t oversampling_latency_frames(N60OversamplingFactor factor) {
 static void refresh_derived_state(N60ProtectionSnapshot *snapshot) {
     if (snapshot == NULL || !isfinite(snapshot->sampleRate) || snapshot->sampleRate <= 0.0) return;
 
-    snapshot->effectiveFactor = snapshot->limiterEnabled
+    snapshot->effectiveFactor = (snapshot->limiterEnabled && snapshot->truePeakGuardEnabled)
         ? N60OversamplingFactor4x
         : snapshot->oversamplingFactor;
 
@@ -126,10 +132,20 @@ N60ProtectionSnapshot N60ProtectionSnapshotMakeBypassed(double sampleRate) {
     snapshot.clipperKneeSmooth = 0.5f;
     snapshot.clipperCurve = N60ClipperCurveQuadratic;
     snapshot.clipperCompensationLinear = 1.0f;
+    snapshot.clipperAsymmetryTrimDB = 0.0f;
     snapshot.limiterCeilingLinear = db_to_linear(-0.2f);
     snapshot.limiterAttackMs = 0.1f;
     snapshot.limiterReleaseMs = 20.0f;
     snapshot.limiterLookAheadMs = 2.0f;
+    // Preserve the accepted PR27 limiter behavior: true-peak limiting uses the
+    // 4x reconstruction path unless the user explicitly disables TP Guard.
+    snapshot.truePeakGuardEnabled = true;
+    snapshot.gainRiderEnabled = false;
+    snapshot.gainRiderTargetGRDB = 3.0f;
+    snapshot.gainRiderMaxReductionDB = 6.0f;
+    snapshot.gainRiderSpeed = N60GainRiderSpeedMedium;
+    snapshot.gainRiderMeasurementCoefficient = coefficient_for_seconds(sampleRate, 1.0f);
+    snapshot.gainRiderResponseCoefficient = coefficient_for_seconds(sampleRate, 10.0f);
     refresh_derived_state(&snapshot);
     return snapshot;
 }
@@ -150,10 +166,25 @@ bool N60ProtectionSnapshotSetSoftClipper(
     N60ClipperCurveType curve,
     bool autoCompensateGain
 ) {
+    return N60ProtectionSnapshotSetSoftClipperAdvanced(
+        snapshot, enabled, driveDB, thresholdDB, kneeSmooth, curve, autoCompensateGain, 0.0f);
+}
+
+bool N60ProtectionSnapshotSetSoftClipperAdvanced(
+    N60ProtectionSnapshot *snapshot,
+    bool enabled,
+    float driveDB,
+    float thresholdDB,
+    float kneeSmooth,
+    N60ClipperCurveType curve,
+    bool autoCompensateGain,
+    float asymmetryTrimDB
+) {
     if (snapshot == NULL
         || !isfinite(driveDB) || driveDB < 0.0f || driveDB > 12.0f
         || !isfinite(thresholdDB) || thresholdDB < -6.0f || thresholdDB > 0.0f
         || !isfinite(kneeSmooth) || kneeSmooth < 0.0f || kneeSmooth > 1.0f
+        || !isfinite(asymmetryTrimDB) || asymmetryTrimDB < -3.0f || asymmetryTrimDB > 3.0f
         || curve < N60ClipperCurveQuadratic || curve > N60ClipperCurveAsymmetricTube) {
         return false;
     }
@@ -163,6 +194,7 @@ bool N60ProtectionSnapshotSetSoftClipper(
     snapshot->clipperKneeSmooth = kneeSmooth;
     snapshot->clipperCurve = curve;
     snapshot->clipperCompensationLinear = autoCompensateGain ? 1.0f / snapshot->clipperDriveLinear : 1.0f;
+    snapshot->clipperAsymmetryTrimDB = asymmetryTrimDB;
     refresh_derived_state(snapshot);
     return N60ProtectionSnapshotIsValid(snapshot);
 }
@@ -174,6 +206,19 @@ bool N60ProtectionSnapshotSetLimiter(
     float attackMs,
     float releaseMs,
     float lookAheadMs
+) {
+    return N60ProtectionSnapshotSetLimiterAdvanced(
+        snapshot, enabled, ceilingDB, attackMs, releaseMs, lookAheadMs, true);
+}
+
+bool N60ProtectionSnapshotSetLimiterAdvanced(
+    N60ProtectionSnapshot *snapshot,
+    bool enabled,
+    float ceilingDB,
+    float attackMs,
+    float releaseMs,
+    float lookAheadMs,
+    bool truePeakGuardEnabled
 ) {
     if (snapshot == NULL
         || !isfinite(ceilingDB) || ceilingDB < -20.0f || ceilingDB > 0.0f
@@ -187,7 +232,30 @@ bool N60ProtectionSnapshotSetLimiter(
     snapshot->limiterAttackMs = attackMs;
     snapshot->limiterReleaseMs = releaseMs;
     snapshot->limiterLookAheadMs = lookAheadMs;
+    snapshot->truePeakGuardEnabled = truePeakGuardEnabled;
     refresh_derived_state(snapshot);
+    return N60ProtectionSnapshotIsValid(snapshot);
+}
+
+bool N60ProtectionSnapshotSetGainRider(
+    N60ProtectionSnapshot *snapshot,
+    bool enabled,
+    float targetGainReductionDB,
+    float maxReductionDB,
+    N60GainRiderSpeed speed
+) {
+    if (snapshot == NULL
+        || !isfinite(targetGainReductionDB) || targetGainReductionDB < 0.5f || targetGainReductionDB > 6.0f
+        || !isfinite(maxReductionDB) || maxReductionDB < 3.0f || maxReductionDB > 12.0f
+        || speed < N60GainRiderSpeedFast || speed > N60GainRiderSpeedSlow) return false;
+    float seconds = speed == N60GainRiderSpeedFast ? 3.0f
+        : (speed == N60GainRiderSpeedSlow ? 30.0f : 10.0f);
+    snapshot->gainRiderEnabled = enabled;
+    snapshot->gainRiderTargetGRDB = targetGainReductionDB;
+    snapshot->gainRiderMaxReductionDB = maxReductionDB;
+    snapshot->gainRiderSpeed = speed;
+    snapshot->gainRiderMeasurementCoefficient = coefficient_for_seconds(snapshot->sampleRate, 1.0f);
+    snapshot->gainRiderResponseCoefficient = coefficient_for_seconds(snapshot->sampleRate, seconds);
     return N60ProtectionSnapshotIsValid(snapshot);
 }
 
@@ -209,6 +277,13 @@ bool N60ProtectionSnapshotIsValid(const N60ProtectionSnapshot *snapshot) {
         && snapshot->clipperCurve >= N60ClipperCurveQuadratic
         && snapshot->clipperCurve <= N60ClipperCurveAsymmetricTube
         && isfinite(snapshot->clipperCompensationLinear) && snapshot->clipperCompensationLinear > 0.0f
+        && isfinite(snapshot->clipperAsymmetryTrimDB)
+        && snapshot->clipperAsymmetryTrimDB >= -3.0f && snapshot->clipperAsymmetryTrimDB <= 3.0f
+        && isfinite(snapshot->gainRiderTargetGRDB) && snapshot->gainRiderTargetGRDB >= 0.5f && snapshot->gainRiderTargetGRDB <= 6.0f
+        && isfinite(snapshot->gainRiderMaxReductionDB) && snapshot->gainRiderMaxReductionDB >= 3.0f && snapshot->gainRiderMaxReductionDB <= 12.0f
+        && snapshot->gainRiderSpeed >= N60GainRiderSpeedFast && snapshot->gainRiderSpeed <= N60GainRiderSpeedSlow
+        && isfinite(snapshot->gainRiderMeasurementCoefficient) && snapshot->gainRiderMeasurementCoefficient >= 0.0f && snapshot->gainRiderMeasurementCoefficient < 1.0f
+        && isfinite(snapshot->gainRiderResponseCoefficient) && snapshot->gainRiderResponseCoefficient >= 0.0f && snapshot->gainRiderResponseCoefficient < 1.0f
         && isfinite(snapshot->limiterCeilingLinear) && snapshot->limiterCeilingLinear > 0.0f
         && snapshot->limiterCeilingLinear <= 1.0f
         && isfinite(snapshot->limiterAttackMs)
@@ -308,7 +383,13 @@ static float curve_value(N60ClipperCurveType curve, float u, bool negative) {
 }
 
 static float soft_clip_sample(const N60ProtectionSnapshot *snapshot, float input) {
-    float driven = input * snapshot->clipperDriveLinear;
+    // Equal-and-opposite half-cycle drive trim creates controllable even-order
+    // asymmetry without changing the nominal broadband drive setting. Zero trim
+    // is sample-identical to the PR27 clipper path.
+    float polarityTrimDB = input < 0.0f
+        ? -snapshot->clipperAsymmetryTrimDB
+        : snapshot->clipperAsymmetryTrimDB;
+    float driven = input * snapshot->clipperDriveLinear * db_to_linear(polarityTrimDB);
     float sign = driven < 0.0f ? -1.0f : 1.0f;
     float magnitude = fabsf(driven);
     float threshold = snapshot->clipperThresholdLinear;
@@ -437,6 +518,33 @@ static void process_high_sample(
     runtime->telemetry.outputTruePeakLinear = fmaxf(runtime->telemetry.outputTruePeakLinear, outputPeak);
 }
 
+static void update_gain_rider(
+    N60ProtectionRuntime *runtime,
+    const N60ProtectionSnapshot *snapshot
+) {
+    float instantaneousGRDB = snapshot->limiterEnabled
+        ? fmaxf(0.0f, -linear_to_db(fminf(runtime->limiterGain, 1.0f)))
+        : 0.0f;
+    runtime->sustainedLimiterGainReductionDB = instantaneousGRDB
+        + snapshot->gainRiderMeasurementCoefficient
+            * (runtime->sustainedLimiterGainReductionDB - instantaneousGRDB);
+
+    float desiredAttenuationDB = 0.0f;
+    if (snapshot->gainRiderEnabled && snapshot->limiterEnabled) {
+        // Integral-style correction: once sustained limiter GR settles at the
+        // requested target, attenuation is held instead of collapsing back to 0.
+        float errorDB = runtime->sustainedLimiterGainReductionDB - snapshot->gainRiderTargetGRDB;
+        desiredAttenuationDB = fminf(snapshot->gainRiderMaxReductionDB,
+            fmaxf(0.0f, runtime->gainRiderAttenuationDB + errorDB));
+    }
+    runtime->gainRiderAttenuationDB = desiredAttenuationDB
+        + snapshot->gainRiderResponseCoefficient
+            * (runtime->gainRiderAttenuationDB - desiredAttenuationDB);
+    runtime->telemetry.gainRiderAttenuationDB = runtime->gainRiderAttenuationDB;
+    runtime->telemetry.sustainedLimiterGainReductionDB = runtime->sustainedLimiterGainReductionDB;
+    runtime->telemetry.truePeakGuardActive = snapshot->limiterEnabled && snapshot->truePeakGuardEnabled;
+}
+
 void N60ProtectionProcessStereoFrame(
     N60ProtectionRuntime *runtime,
     const N60ProtectionSnapshot *snapshot,
@@ -444,6 +552,11 @@ void N60ProtectionProcessStereoFrame(
     float *right
 ) {
     if (runtime == NULL || snapshot == NULL || left == NULL || right == NULL) return;
+
+    update_gain_rider(runtime, snapshot);
+    float riderGain = db_to_linear(-runtime->gainRiderAttenuationDB);
+    *left *= riderGain;
+    *right *= riderGain;
 
     N60OversamplingFactor factor = snapshot->effectiveFactor;
     if (factor == N60OversamplingFactor1x) {

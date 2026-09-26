@@ -178,3 +178,14 @@ PR33 is complete only when:
 - Processed / Reference / Delta and raw Global Bypass semantics remain intact
 
 Only after PR33 hardware acceptance and merge does the roadmap advance to the bounded DSP optimization/enhancement pass.
+
+## Slice 2 commercial semantics
+
+The gain/protection controls share a single ownership model:
+
+- **Predictive EQ/DSP headroom** is a control-plane pre-EQ attenuation. It is capped by the visible 3–24 dB maximum and is never applied during raw Global Bypass. The validation implementation is deliberately disabled by default so PR25–32 accepted listening baselines are not silently changed.
+- **Dynamic Gain Rider** is a slow pre-protection attenuation driven only by sustained limiter gain reduction. Target GR is 0.5–6 dB, maximum rider cut is 3–12 dB, and Fast/Medium/Slow correspond to approximately 3/10/30 second response constants. It does not chase isolated transient peaks.
+- **TP Guard** is an explicit limiter reconstruction-quality mode. ON preserves the accepted PR27 4x true-peak reconstruction path; OFF lets the limiter use the selected 1x/2x/4x protection factor instead of silently forcing 4x.
+- **Clipper Asymmetry Trim** is an independent ±3 dB half-cycle drive trim around the existing clipper curve. Zero is sample-identical to the established clipper behavior.
+
+No new limiter or duplicate hidden master-gain stage is introduced.
