@@ -1046,15 +1046,35 @@ struct ContentView: View {
                 .frame(width: 115)
                 TextField("Hz", value: binding.frequencyHz, format: .number.precision(.fractionLength(0...1))).frame(width: 85)
                 Text("Hz").foregroundStyle(.secondary)
-                TextField("dB", value: binding.gainDB, format: .number.precision(.fractionLength(1))).frame(width: 65)
+                TextField("dB", value: binding.gainDB, format: .number.precision(.fractionLength(1)))
+                    .frame(width: 65)
+                    .disabled(band.type == .linkwitzTransform)
                 Text("dB").font(.caption).foregroundStyle(.secondary)
                 TextField("Q", value: binding.q, format: .number.precision(.fractionLength(2...3))).frame(width: 65)
                 Text("Q").foregroundStyle(.secondary)
+                Toggle("Constant Q", isOn: binding.constantQ)
+                    .toggleStyle(.switch)
+                    .disabled(band.type != .peaking)
                 Toggle("Dynamic", isOn: binding.dynamic.enabled)
                     .toggleStyle(.switch)
                     .disabled(!dynamicSupported)
                 Spacer()
                 Button("Remove") { try? engine.removeEQBand(id: band.id) }
+            }
+
+            if band.type == .linkwitzTransform {
+                HStack(spacing: 8) {
+                    Text("Linkwitz").frame(width: 82, alignment: .leading).foregroundStyle(.secondary)
+                    Text("Resonance f0")
+                    Text("\(band.frequencyHz, specifier: "%.1f") Hz").monospacedDigit()
+                    Text("Box Q0")
+                    Text("\(band.q, specifier: "%.3f")").monospacedDigit()
+                    Text("Target fp")
+                    TextField("Hz", value: binding.linkwitzTargetHz, format: .number.precision(.fractionLength(0...1))).frame(width: 85)
+                    Text("Hz").foregroundStyle(.secondary)
+                    Text("Target Qp")
+                    TextField("Q", value: binding.linkwitzTargetQ, format: .number.precision(.fractionLength(2...3))).frame(width: 70)
+                }
             }
 
             if binding.wrappedValue.dynamic.enabled && dynamicSupported {
@@ -1119,6 +1139,7 @@ struct ContentView: View {
                     StereoEQConfiguration.bandGainRange.upperBound
                 )
                 if sanitized.type != .peaking {
+                    sanitized.constantQ = false
                     sanitized.dynamic.enabled = false
                 }
                 try? engine.updateEQBand(sanitized)

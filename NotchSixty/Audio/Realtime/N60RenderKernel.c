@@ -807,6 +807,56 @@ bool N60DSPGraphSnapshotSetInterChannelDelay(
     return true;
 }
 
+bool N60DSPGraphSnapshotSetEQPreparedBandForChannels(
+    N60DSPGraphSnapshot *snapshot,
+    uint32_t bandIndex,
+    uint8_t channelMask,
+    N60BiquadFilterType type,
+    double frequencyHz,
+    double gainDB,
+    double q,
+    N60BiquadCoefficients coefficients,
+    bool enabled
+) {
+    if (snapshot == NULL || bandIndex >= N60_MAX_EQ_RENDER_SLOTS) return false;
+    if (enabled && !channel_mask_is_valid(channelMask)) return false;
+    if (enabled && (!isfinite(frequencyHz) || frequencyHz <= 0.0
+        || frequencyHz >= snapshot->sampleRate * 0.5
+        || !isfinite(gainDB)
+        || !isfinite(q) || q <= 0.0
+        || !N60BiquadCoefficientsAreFinite(coefficients))) {
+        return false;
+    }
+
+    N60BiquadBandSnapshot band = {0};
+    band.enabled = enabled;
+    band.type = type;
+    band.frequencyHz = frequencyHz;
+    band.gainDB = gainDB;
+    band.q = q;
+    band.coefficients = enabled ? coefficients : N60BiquadCoefficientsMakeIdentity();
+    snapshot->eqBands[bandIndex] = band;
+    snapshot->eqBandChannelMasks[bandIndex] = enabled ? channelMask : 0;
+    if (snapshot->eqBandCount <= bandIndex) snapshot->eqBandCount = bandIndex + 1;
+    return true;
+}
+
+bool N60DSPGraphSnapshotSetEQPreparedBand(
+    N60DSPGraphSnapshot *snapshot,
+    uint32_t bandIndex,
+    N60BiquadFilterType type,
+    double frequencyHz,
+    double gainDB,
+    double q,
+    N60BiquadCoefficients coefficients,
+    bool enabled
+) {
+    return N60DSPGraphSnapshotSetEQPreparedBandForChannels(
+        snapshot, bandIndex, N60_EQ_CHANNEL_STEREO, type,
+        frequencyHz, gainDB, q, coefficients, enabled
+    );
+}
+
 bool N60DSPGraphSnapshotSetEQBandForChannels(
     N60DSPGraphSnapshot *snapshot,
     uint32_t bandIndex,

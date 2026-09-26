@@ -24,6 +24,9 @@ typedef enum {
     N60BiquadFilterTypeHighPass = 4,
     N60BiquadFilterTypeNotch = 5,
     N60BiquadFilterTypeAllPass = 6,
+    N60BiquadFilterTypeBandPass = 7,
+    N60BiquadFilterTypePeakingConstantQ = 8,
+    N60BiquadFilterTypeLinkwitzTransform = 9,
 } N60BiquadFilterType;
 
 typedef struct {
@@ -130,6 +133,21 @@ static inline bool N60BiquadDesign(
         a2 = 1.0 - alpha / A;
         break;
     }
+    case N60BiquadFilterTypePeakingConstantQ: {
+        // W3C Audio EQ Cookbook defines peaking-EQ Q such that A*Q is the
+        // classic electrical-engineering Q. The product's Constant-Q control
+        // exposes that classic Q directly, so hold it fixed by using
+        // Qcookbook = Qclassic / A. This is control-plane coefficient design.
+        double A = pow(10.0, gainDB / 40.0);
+        double constantAlpha = A * sinOmega / (2.0 * q);
+        b0 = 1.0 + constantAlpha * A;
+        b1 = -2.0 * cosOmega;
+        b2 = 1.0 - constantAlpha * A;
+        a0 = 1.0 + constantAlpha / A;
+        a1 = -2.0 * cosOmega;
+        a2 = 1.0 - constantAlpha / A;
+        break;
+    }
     case N60BiquadFilterTypeLowShelf: {
         double A = pow(10.0, gainDB / 40.0);
         double beta = 2.0 * sqrt(A) * alpha;
@@ -168,6 +186,18 @@ static inline bool N60BiquadDesign(
         a1 = -2.0 * cosOmega;
         a2 = 1.0 - alpha;
         break;
+    case N60BiquadFilterTypeBandPass:
+        // W3C/Web Audio Audio EQ Cookbook BPF: constant 0 dB peak gain.
+        // Gain is intentionally ignored for this filter family; frequency and Q
+        // define the pass-band center and bandwidth. Coefficients are designed
+        // only on the control plane and consumed as immutable realtime snapshots.
+        b0 = alpha;
+        b1 = 0.0;
+        b2 = -alpha;
+        a0 = 1.0 + alpha;
+        a1 = -2.0 * cosOmega;
+        a2 = 1.0 - alpha;
+        break;
     case N60BiquadFilterTypeNotch:
         b0 = 1.0;
         b1 = -2.0 * cosOmega;
@@ -195,6 +225,49 @@ static inline bool N60BiquadDesign(
     if (!N60BiquadCoefficientsAreFinite(normalized)) {
         return false;
     }
+    *coefficients = normalized;
+    return true;
+}
+
+static inline bool N60BiquadDesignLinkwitzTransform(
+    double sampleRate,
+    double f0Hz,
+    double q0,
+    double fpHz,
+    double qp,
+    N60BiquadCoefficients * _Nonnull coefficients
+) {
+    if (coefficients == NULL
+        || !isfinite(sampleRate) || sampleRate <= 0.0
+        || !isfinite(f0Hz) || f0Hz <= 0.0 || f0Hz >= sampleRate * 0.5
+        || !isfinite(fpHz) || fpHz <= 0.0 || fpHz >= sampleRate * 0.5
+        || !isfinite(q0) || q0 <= 0.0
+        || !isfinite(qp) || qp <= 0.0) {
+        return false;
+    }
+
+    // Linkwitz's published transform cancels the original sealed-box pole pair
+    // (f0,Q0) with zeros and installs a target pole pair (fp,Qp). Pre-warp both
+    // natural frequencies, then apply the bilinear transform. The leading s^2
+    // terms are equal, preserving unity gain at high frequency.
+    double k = 2.0 * sampleRate;
+    double w0 = k * tan(M_PI * f0Hz / sampleRate);
+    double wp = k * tan(M_PI * fpHz / sampleRate);
+    double k2 = k * k;
+    double w02 = w0 * w0;
+    double wp2 = wp * wp;
+    double numeratorDamping = (w0 / q0) * k;
+    double denominatorDamping = (wp / qp) * k;
+
+    N60BiquadCoefficients normalized = N60BiquadNormalize(
+        k2 + numeratorDamping + w02,
+        2.0 * (w02 - k2),
+        k2 - numeratorDamping + w02,
+        k2 + denominatorDamping + wp2,
+        2.0 * (wp2 - k2),
+        k2 - denominatorDamping + wp2
+    );
+    if (!N60BiquadCoefficientsAreFinite(normalized)) return false;
     *coefficients = normalized;
     return true;
 }

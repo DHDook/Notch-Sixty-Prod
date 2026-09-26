@@ -1,0 +1,88 @@
+name: PR34 Integration Gate
+
+on:
+  push:
+    branches:
+      - feature/dsp-optimization-parity-audit
+
+permissions:
+  contents: write
+
+jobs:
+  integrate-pr34-slice:
+    runs-on: xcode-27
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v7
+        with:
+          ref: feature/dsp-optimization-parity-audit
+
+      - name: Apply Phase A core integration
+        run: python3 ci/pr34_apply_phase_a_core.py
+
+      - name: Apply live stereo Phase A integration
+        run: python3 ci/pr34_apply_stereo_phase_a.py
+
+      - name: Verify Phase A source integration
+        run: python3 ci/pr34_apply_bandpass_integration.py
+
+      - name: Apply Phase B compiled EQ integration
+        run: |
+          python3 ci/pr34_apply_phase_b.py
+          python3 ci/pr34_fix_phase_b_linear_bound.py
+          python3 ci/pr34_fix_phase_b_swift_bridge.py
+
+      - name: Validate Band Pass DSP
+        run: |
+          clang -std=c11 -Wall -Wextra -Werror ci/validate_pr34_bandpass.c -o /tmp/validate-pr34-bandpass
+          /tmp/validate-pr34-bandpass
+
+      - name: Validate Constant-Q DSP
+        run: |
+          clang -std=c11 -Wall -Wextra -Werror ci/validate_pr34_constantq.c -o /tmp/validate-pr34-constantq
+          /tmp/validate-pr34-constantq
+
+      - name: Validate Linkwitz Transform DSP
+        run: |
+          clang -std=c11 -Wall -Wextra -Werror ci/validate_pr34_linkwitz.c -o /tmp/validate-pr34-linkwitz
+          /tmp/validate-pr34-linkwitz
+
+      - name: Validate compiled EQ, slopes, and Tilt DSP
+        run: |
+          clang -std=c11 -Wall -Wextra -Werror ci/validate_pr34_compiled_eq.c -o /tmp/validate-pr34-compiled-eq
+          /tmp/validate-pr34-compiled-eq
+
+      - name: Build
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          build
+
+      - name: Test
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          test
+
+      - name: Commit integrated source
+        run: |
+          git diff --check
+          if git diff --quiet; then
+            echo "No source changes to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add NotchSixty/Audio/Realtime/N60Biquad.h NotchSixty/Audio/Realtime/N60RenderKernel.h NotchSixty/Audio/Realtime/N60RenderKernel.c NotchSixty/Audio/Realtime/N60LinearPhaseEQ.h NotchSixty/Audio/AudioIOEngine.swift NotchSixty/Audio/StereoPlaybackControl.swift NotchSixty/ContentView.swift NotchSixtyTests/NotchSixtyTests.swift
+          git commit -m "Integrate PR34 Phase B compiled EQ slopes and Tilt"
+          git push origin HEAD:feature/dsp-optimization-parity-audit

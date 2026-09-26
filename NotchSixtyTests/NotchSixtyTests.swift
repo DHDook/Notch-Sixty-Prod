@@ -254,6 +254,99 @@ final class NotchSixtyTests: XCTestCase {
         XCTAssertLessThan(notchCenter, -30)
     }
 
+    func testBandPassIsExposedBySwiftEQModelAndLinearPhaseProjection() throws {
+        XCTAssertTrue(EQFilterType.allCases.contains(.bandPass))
+        XCTAssertEqual(EQFilterType.bandPass.displayName, "Band Pass")
+        XCTAssertEqual(EQFilterType.bandPass.cType, N60BiquadFilterTypeBandPass)
+
+        let configuration = EQConfiguration(
+            phaseMode: .linearPhase,
+            bands: [EQBand(type: .bandPass, frequencyHz: 1_000, gainDB: 12, q: 0.707)]
+        )
+        let projected = try configuration.linearPhaseBands(sampleRate: 48_000)
+        XCTAssertEqual(projected.count, 1)
+        XCTAssertEqual(projected[0].type, N60BiquadFilterTypeBandPass)
+        XCTAssertEqual(projected[0].frequencyHz, 1_000, accuracy: 0.001)
+        XCTAssertEqual(projected[0].q, 0.707, accuracy: 0.000_001)
+    }
+
+    func testConstantQIsTypedPerPeakAndProjectsIntoLinearPhase() throws {
+        let ordinary = EQBand(type: .peaking, frequencyHz: 1_000, gainDB: 6, q: 2.0)
+        let constant = EQBand(type: .peaking, frequencyHz: 1_000, gainDB: 6, q: 2.0, constantQ: true)
+        XCTAssertEqual(ordinary.compiledCType, N60BiquadFilterTypePeaking)
+        XCTAssertEqual(constant.compiledCType, N60BiquadFilterTypePeakingConstantQ)
+
+        let configuration = EQConfiguration(phaseMode: .linearPhase, bands: [constant])
+        let projected = try configuration.linearPhaseBands(sampleRate: 48_000)
+        XCTAssertEqual(projected.count, 1)
+        XCTAssertEqual(projected[0].type, N60BiquadFilterTypePeakingConstantQ)
+        XCTAssertEqual(projected[0].frequencyHz, 1_000, accuracy: 0.001)
+        XCTAssertEqual(projected[0].q, 2.0, accuracy: 0.000_001)
+    }
+
+    func testLinkwitzTransformUsesAllFourPhysicalParametersInMinimumAndLinearPhase() throws {
+        let band = EQBand(
+            type: .linkwitzTransform,
+            frequencyHz: 50,
+            gainDB: 0,
+            q: 0.7,
+            linkwitzTargetHz: 32,
+            linkwitzTargetQ: 0.577
+        )
+        XCTAssertEqual(band.compiledCType, N60BiquadFilterTypeLinkwitzTransform)
+        XCTAssertNotNil(band.linkwitzCoefficients(sampleRate: 48_000))
+
+        let minimum = EQConfiguration(phaseMode: .minimumPhase, bands: [band])
+        let graph = try minimum.makeGraphSnapshot(sampleRate: 48_000)
+        XCTAssertEqual(graph.eqBandCount, 1)
+        XCTAssertEqual(graph.eqBands.0.type, N60BiquadFilterTypeLinkwitzTransform)
+        XCTAssertTrue(N60BiquadCoefficientsAreFinite(graph.eqBands.0.coefficients))
+
+        let linear = EQConfiguration(phaseMode: .linearPhase, bands: [band])
+        let projected = try linear.linearPhaseBands(sampleRate: 48_000)
+        XCTAssertEqual(projected.count, 1)
+        XCTAssertEqual(projected[0].type, N60BiquadFilterTypeLinkwitzTransform)
+        XCTAssertTrue(projected[0].usesPreparedCoefficients)
+        XCTAssertTrue(N60BiquadCoefficientsAreFinite(projected[0].preparedCoefficients))
+
+        var changedTarget = band
+        changedTarget.linkwitzTargetHz = 40
+        let first = band.linkwitzCoefficients(sampleRate: 48_000)!
+        let second = changedTarget.linkwitzCoefficients(sampleRate: 48_000)!
+        XCTAssertNotEqual(first.b0, second.b0)
+    }
+
+    func testLiveStereoCompilerPublishesConstantQAndLinkwitzInMinimumAndLinearPhase() throws {
+        let constant = EQBand(type: .peaking, frequencyHz: 1_000, gainDB: 6, q: 2.0, constantQ: true)
+        let linkwitz = EQBand(
+            type: .linkwitzTransform, frequencyHz: 50, gainDB: 0, q: 0.7,
+            linkwitzTargetHz: 32, linkwitzTargetQ: 0.577
+        )
+        let minimum = StereoEQConfiguration(
+            channelMode: .linked,
+            phaseMode: .minimumPhase,
+            linkedBands: [constant, linkwitz]
+        )
+        let graph = try minimum.makeGraphSnapshot(
+            sampleRate: 48_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: PlaybackControlConfiguration()
+        )
+        XCTAssertEqual(graph.eqBandCount, 2)
+        XCTAssertEqual(graph.eqBands.0.type, N60BiquadFilterTypePeakingConstantQ)
+        XCTAssertEqual(graph.eqBands.1.type, N60BiquadFilterTypeLinkwitzTransform)
+        XCTAssertTrue(N60BiquadCoefficientsAreFinite(graph.eqBands.1.coefficients))
+
+        var linear = minimum
+        linear.phaseMode = .linearPhase
+        let projected = try linear.linearPhaseBands(for: .linked, sampleRate: 48_000)
+        XCTAssertEqual(projected.count, 2)
+        XCTAssertEqual(projected[0].type, N60BiquadFilterTypePeakingConstantQ)
+        XCTAssertEqual(projected[1].type, N60BiquadFilterTypeLinkwitzTransform)
+        XCTAssertTrue(projected[1].usesPreparedCoefficients)
+    }
+
     func testAllPassMaintainsUnityMagnitudeAcrossSupportedRates() {
         for rate in [44_100.0, 48_000.0, 96_000.0, 192_000.0, 384_000.0] {
             for tone in [100.0, 1_000.0, min(10_000.0, rate * 0.20)] {
