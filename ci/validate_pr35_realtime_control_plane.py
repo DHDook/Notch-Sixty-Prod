@@ -120,11 +120,30 @@ require(transition_graph, "enqueueTransition", "transitionDSPGraph")
 publish_graph = function_body(core_audio, r"func\s+publishDSPGraph\s*\(")
 require(publish_graph, "enqueuePublish", "publishDSPGraph running-transport path")
 
+# Structural transitions must be registered synchronously before returning to
+# the single MainActor control writer. That closes the race where another FIR
+# generation could otherwise wrap the three-slot prepared-program ring while a
+# prior structural graph was only queued for publication.
+enqueue_transition = function_body(core_audio, r"func\s+enqueueTransition\s*\(")
+require(enqueue_transition, "queue.sync", "DSPGraphPublicationCoordinator.enqueueTransition")
+can_prepare = function_body(core_audio, r"func\s+canPrepareProgram\s*\(")
+require(can_prepare, "!transitionActive", "prepared-program transition gate")
+
+for function_name, pattern in (
+    ("prepareConvolutionProgram", r"func\s+prepareConvolutionProgram\s*\(\s*slot:\s*UInt32,\s*leftTaps:"),
+    ("prepareRoomCorrectionProgram", r"func\s+prepareRoomCorrectionProgram\s*\("),
+    ("prepareSpeakerIRProgram", r"func\s+prepareSpeakerIRProgram\s*\("),
+):
+    body = function_body(core_audio, pattern)
+    require(body, "canPrepareProgram()", function_name)
+
 require(core_audio, "DSPGraphPublicationCoordinator", "Core Audio control plane")
 require(core_audio, "DispatchQueue(", "DSP graph publication coordinator")
 require(core_audio, "pendingSnapshot", "DSP graph publication coalescing")
 require(core_audio, "graphPublicationCoalescedUpdates", "publication instrumentation")
 require(core_audio, "graphPublicationFailures", "publication instrumentation")
 require(core_audio, "graphTransitionsScheduled", "publication instrumentation")
+forbid(core_audio, "fadeStepMicroseconds", "CoreAudioTransportSession stale transition scaffolding")
+forbid(core_audio, "fadeStepCount", "CoreAudioTransportSession stale transition scaffolding")
 
 print("PR35 realtime/control-plane architecture: PASS")
