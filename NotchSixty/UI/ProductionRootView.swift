@@ -249,7 +249,7 @@ private struct ProductionDashboardView: View {
     private var crossoverSummary: String {
         let c = engine.bassManagementConfiguration
         guard c.enabled else { return "Off" }
-        return "\(c.frequencyHz, specifier: "%.0f") Hz · \(c.topology.displayName)"
+        return "\(Int(c.frequencyHz.rounded())) Hz · \(c.topology.displayName)"
     }
 
     private var roomCorrectionSummary: String {
