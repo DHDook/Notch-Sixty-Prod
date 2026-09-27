@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-and-test:
@@ -18,20 +18,6 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
-
-      - name: Apply PR35 Disabled Stage Contract
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'feature/pr35-dsp-performance-readiness'
-        run: |
-          git fetch origin feature/pr35-dsp-performance-readiness
-          git checkout -B feature/pr35-dsp-performance-readiness origin/feature/pr35-dsp-performance-readiness
-          python3 ci/apply_pr35_disabled_stage_contract.py
-          if ! git diff --quiet; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add NotchSixty ci
-            git commit -m "PR35: enforce disabled-stage parking"
-            git push origin HEAD:feature/pr35-dsp-performance-readiness
-          fi
 
       - name: Show toolchain
         run: |
@@ -49,6 +35,9 @@ jobs:
 
       - name: Validate PR35 Realtime Control Plane
         run: python3 ci/validate_pr35_realtime_control_plane.py
+
+      - name: Validate PR35 Optional Stage Parking
+        run: python3 ci/validate_pr35_optional_stage_parking.py
 
       - name: Validate PR35 Protection Reset Equivalence
         run: |
@@ -86,9 +75,22 @@ jobs:
             NotchSixty/Audio/Realtime/N60Dynamics.c \
             NotchSixty/Audio/Realtime/N60DynamicEQ.c \
             NotchSixty/Audio/Realtime/N60SpectralDenoiser.c \
+            NotchSixty/Audio/Realtime/N60Protection.c \
             -lm \
             -o /tmp/validate-pr35-disabled-dsp
           /tmp/validate-pr35-disabled-dsp
+
+      - name: Validate PR35 Meter Gating
+        run: |
+          REALTIME_SOURCES=$(find NotchSixty/Audio/Realtime -name '*.c' ! -name 'N60RealtimeAudioBridge.c' -print)
+          clang -std=c11 -Wall -Wextra -Werror \
+            -include stddef.h \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr35_meter_gating.c \
+            $REALTIME_SOURCES \
+            -framework Accelerate \
+            -o /tmp/validate-pr35-meter-gating
+          /tmp/validate-pr35-meter-gating
 
       - name: Validate PR35 Render Snapshot Lifetime
         run: |
