@@ -115,6 +115,16 @@ jobs:
           ENABLE_TESTABILITY=YES
           build
 
+      - name: Build Release Performance Scheme
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty-Performance
+          -configuration Release
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          build
+
       - name: Test
         run: |
           set -o pipefail
