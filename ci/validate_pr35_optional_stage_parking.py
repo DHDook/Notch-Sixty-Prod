@@ -26,7 +26,9 @@ reject(
 
 require(
     "NotchSixty/Audio/Realtime/N60SpectralDenoiser.c",
-    "if (!snapshot->enabled && snapshot->profileCommand != N60DenoiserProfileCommandCapture)",
+    "handle_profile_command(runtime, snapshot, sampleRate);",
+    "if (!snapshot->enabled && !runtime->captureActive)",
+    "park_stream_state(runtime);",
 )
 require(
     "NotchSixty/Audio/Realtime/N60DynamicEQ.c",
