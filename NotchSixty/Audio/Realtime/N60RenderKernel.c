@@ -18,6 +18,12 @@
 #define N60_GAIN_MAX_TRANSITION_FRAMES 4096
 #define N60_CROSSOVER_MIN_TRANSITION_FRAMES 64
 #define N60_CROSSOVER_MAX_TRANSITION_FRAMES 8192
+#define N60_AUDITION_DELAY_MASK (N60_MAX_AUDITION_DELAY_FRAMES - 1u)
+
+_Static_assert(
+    (N60_MAX_AUDITION_DELAY_FRAMES & N60_AUDITION_DELAY_MASK) == 0u,
+    "audition delay ring size must remain a power of two"
+);
 
 typedef struct {
     N60DSPGraphSnapshot snapshot;
@@ -68,6 +74,7 @@ struct N60RenderKernel {
     _Atomic uint64_t nextGeneration;
 
     N60EQBandRuntime eqRuntime[N60_MAX_EQ_RENDER_SLOTS];
+    uint32_t eqRuntimeHighWaterMark;
     N60CrossoverRuntime crossoverRuntime;
     N60DynamicsRuntime dynamicsRuntime;
     N60SpectralDenoiserRuntime *denoiserRuntime;
@@ -338,6 +345,7 @@ static void reset_band_runtime(N60EQBandRuntime *runtime) {
 
 static void reset_eq_runtime(N60RenderKernel *kernel) {
     for (uint32_t index = 0; index < N60_MAX_EQ_RENDER_SLOTS; ++index) reset_band_runtime(&kernel->eqRuntime[index]);
+    kernel->eqRuntimeHighWaterMark = 0;
 }
 
 static void reset_smoothed_gain(N60SmoothedGain *gain, float value) {
@@ -498,7 +506,10 @@ static void prepare_runtime_for_snapshot(N60RenderKernel *kernel, const N60DSPGr
     if (sampleRateChanged || leavingGraphBypass || leavingEQBypass) reset_eq_runtime(kernel);
     if (!snapshot->bypassed && !snapshot->eqBypassed) {
         uint32_t eqFrames = snapshot->eqTransitionFrames > 0 ? snapshot->eqTransitionFrames : eq_transition_frames_for_sample_rate(snapshot->sampleRate);
-        for (uint32_t index = 0; index < N60_MAX_EQ_RENDER_SLOTS; ++index) {
+        uint32_t scheduleCount = snapshot->eqBandCount > kernel->eqRuntimeHighWaterMark
+            ? snapshot->eqBandCount
+            : kernel->eqRuntimeHighWaterMark;
+        for (uint32_t index = 0; index < scheduleCount; ++index) {
             bool enabled = false;
             uint8_t channelMask = 0;
             N60BiquadCoefficients coefficients = N60BiquadCoefficientsMakeIdentity();
@@ -509,6 +520,7 @@ static void prepare_runtime_for_snapshot(N60RenderKernel *kernel, const N60DSPGr
             }
             schedule_band_transition(&kernel->eqRuntime[index], enabled, channelMask, coefficients, eqFrames);
         }
+        kernel->eqRuntimeHighWaterMark = scheduleCount;
     } else {
         reset_eq_runtime(kernel);
     }
@@ -554,7 +566,8 @@ static float process_eq_band(N60EQBandRuntime *runtime, float input, uint8_t cha
 }
 
 static void advance_eq_transitions(N60RenderKernel *kernel) {
-    for (uint32_t index = 0; index < N60_MAX_EQ_RENDER_SLOTS; ++index) {
+    uint32_t highWater = kernel->eqRuntimeHighWaterMark;
+    for (uint32_t index = 0; index < highWater; ++index) {
         N60EQBandRuntime *runtime = &kernel->eqRuntime[index];
         if (runtime->transitionFramesRemaining == 0) continue;
         runtime->transitionFramesRemaining -= 1;
@@ -569,6 +582,12 @@ static void advance_eq_transitions(N60RenderKernel *kernel) {
             if (!runtime->currentEnabled || (runtime->currentChannelMask & N60_EQ_CHANNEL_RIGHT) == 0) clear_state(&runtime->currentRight);
         }
     }
+    while (highWater > 0) {
+        N60EQBandRuntime *runtime = &kernel->eqRuntime[highWater - 1u];
+        if (runtime->currentEnabled || runtime->pendingEnabled || runtime->transitionFramesRemaining != 0) break;
+        highWater -= 1u;
+    }
+    kernel->eqRuntimeHighWaterMark = highWater;
 }
 
 static void process_crossover_path(
@@ -670,14 +689,14 @@ static void process_reference_delay(
     } else {
         uint32_t readIndex = (kernel->referenceDelayWriteIndex
             + N60_MAX_AUDITION_DELAY_FRAMES
-            - delayFrames) % N60_MAX_AUDITION_DELAY_FRAMES;
+            - delayFrames) & N60_AUDITION_DELAY_MASK;
         *referenceLeft = kernel->referenceDelayLeft[readIndex];
         *referenceRight = kernel->referenceDelayRight[readIndex];
     }
 
     kernel->referenceDelayLeft[kernel->referenceDelayWriteIndex] = inputLeft;
     kernel->referenceDelayRight[kernel->referenceDelayWriteIndex] = inputRight;
-    kernel->referenceDelayWriteIndex = (kernel->referenceDelayWriteIndex + 1u) % N60_MAX_AUDITION_DELAY_FRAMES;
+    kernel->referenceDelayWriteIndex = (kernel->referenceDelayWriteIndex + 1u) & N60_AUDITION_DELAY_MASK;
 }
 
 static void meter_sample(float left, float right, float *peakLeft, float *peakRight, double *squareSumLeft, double *squareSumRight, uint64_t *overRangeSamples) {
@@ -1331,7 +1350,7 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
         }
 
         if (!context->snapshot->eqBypassed) {
-            for (uint32_t index = 0; index < N60_MAX_EQ_RENDER_SLOTS; ++index) {
+            for (uint32_t index = 0; index < kernel->eqRuntimeHighWaterMark; ++index) {
                 N60EQBandRuntime *runtime = &kernel->eqRuntime[index];
                 if (!runtime->currentEnabled && runtime->transitionFramesRemaining == 0) continue;
                 left = process_eq_band(runtime, left, N60_EQ_CHANNEL_LEFT);
