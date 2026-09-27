@@ -675,16 +675,22 @@ OSStatus N60OutputIOProc(
     }
 
     N60RenderKernelEndRender(bridge->renderKernel, &renderContext, renderedFrames);
-    bridge->transitionRuntime = transitionRamp;
-    bridge->startupFadeRuntime = startupFade;
-    publish_transition_runtime(bridge, &transitionRamp);
 
+    // Transition ramps live on the physical output timeline, not only on the
+    // subset of frames for which captured program audio was available. Advance
+    // through zero-filled output too so the control plane can receive a rendered
+    // completion acknowledgement even during silence or a transient underrun.
     for (UInt32 frameIndex = framesToRead; frameIndex < frameCount; ++frameIndex) {
+        (void)next_transition_gain(&transitionRamp);
         *outputLeft = 0.0f;
         *outputRight = 0.0f;
         outputLeft += outputView.leftStride;
         outputRight += outputView.rightStride;
     }
+
+    bridge->transitionRuntime = transitionRamp;
+    bridge->startupFadeRuntime = startupFade;
+    publish_transition_runtime(bridge, &transitionRamp);
 
     atomic_store_explicit(&bridge->readIndex, readIndex + framesToRead, memory_order_release);
     atomic_fetch_add_explicit(&bridge->deliveredFrames, framesToRead, memory_order_relaxed);
