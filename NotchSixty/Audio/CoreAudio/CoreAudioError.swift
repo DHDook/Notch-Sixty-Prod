@@ -59,6 +59,10 @@ struct AudioTransportCounters: Equatable, Sendable {
     var gatedOutputCallbacks: UInt64 = 0
     var gatedOutputFrames: UInt64 = 0
     var bufferedFrames: UInt32 = 0
+    var graphPublications: UInt64 = 0
+    var graphPublicationFailures: UInt64 = 0
+    var graphPublicationCoalescedUpdates: UInt64 = 0
+    var graphTransitionsScheduled: UInt64 = 0
 
     init(snapshot: N60RealtimeAudioBridgeSnapshot) {
         captureCallbacks = snapshot.captureCallbacks
@@ -83,7 +87,11 @@ struct AudioTransportCounters: Equatable, Sendable {
         unsupportedBufferLayouts: UInt64 = 0,
         gatedOutputCallbacks: UInt64 = 0,
         gatedOutputFrames: UInt64 = 0,
-        bufferedFrames: UInt32 = 0
+        bufferedFrames: UInt32 = 0,
+        graphPublications: UInt64 = 0,
+        graphPublicationFailures: UInt64 = 0,
+        graphPublicationCoalescedUpdates: UInt64 = 0,
+        graphTransitionsScheduled: UInt64 = 0
     ) {
         self.captureCallbacks = captureCallbacks
         self.outputCallbacks = outputCallbacks
@@ -95,6 +103,10 @@ struct AudioTransportCounters: Equatable, Sendable {
         self.gatedOutputCallbacks = gatedOutputCallbacks
         self.gatedOutputFrames = gatedOutputFrames
         self.bufferedFrames = bufferedFrames
+        self.graphPublications = graphPublications
+        self.graphPublicationFailures = graphPublicationFailures
+        self.graphPublicationCoalescedUpdates = graphPublicationCoalescedUpdates
+        self.graphTransitionsScheduled = graphTransitionsScheduled
     }
 
     static func + (lhs: Self, rhs: Self) -> Self {
@@ -108,7 +120,11 @@ struct AudioTransportCounters: Equatable, Sendable {
             unsupportedBufferLayouts: lhs.unsupportedBufferLayouts + rhs.unsupportedBufferLayouts,
             gatedOutputCallbacks: lhs.gatedOutputCallbacks + rhs.gatedOutputCallbacks,
             gatedOutputFrames: lhs.gatedOutputFrames + rhs.gatedOutputFrames,
-            bufferedFrames: rhs.bufferedFrames
+            bufferedFrames: rhs.bufferedFrames,
+            graphPublications: lhs.graphPublications + rhs.graphPublications,
+            graphPublicationFailures: lhs.graphPublicationFailures + rhs.graphPublicationFailures,
+            graphPublicationCoalescedUpdates: lhs.graphPublicationCoalescedUpdates + rhs.graphPublicationCoalescedUpdates,
+            graphTransitionsScheduled: lhs.graphTransitionsScheduled + rhs.graphTransitionsScheduled
         )
     }
 }
@@ -173,6 +189,132 @@ enum CoreAudioTransportError: Error, LocalizedError, Equatable {
     }
 }
 
+private final class DSPGraphSnapshotBox: @unchecked Sendable {
+    let snapshot: N60DSPGraphSnapshot
+
+    init(_ snapshot: N60DSPGraphSnapshot) {
+        self.snapshot = snapshot
+    }
+}
+
+private struct DSPGraphPublicationMetrics: Sendable {
+    var publications: UInt64 = 0
+    var failures: UInt64 = 0
+    var coalescedUpdates: UInt64 = 0
+    var transitionsScheduled: UInt64 = 0
+}
+
+/// Serial control-plane publisher for an already-running transport.
+///
+/// The realtime reader remains lock-free. Graph writes that can wait for an
+/// inactive render slot happen on this worker instead of the MainActor, and
+/// rapid control updates collapse to the newest complete graph. Structural
+/// transitions use the bridge's sample-domain ramp, wait off the caller thread,
+/// publish the latest graph at the fade midpoint, then fade back up.
+private final class DSPGraphPublicationCoordinator: @unchecked Sendable {
+    private let queue = DispatchQueue(
+        label: "com.dhdook.NotchSixty.dsp-graph-publication",
+        qos: .userInteractive
+    )
+    private let bridge: OpaquePointer
+    private var stopped = false
+    private var transitionActive = false
+    private var flushScheduled = false
+    private var pendingSnapshot: DSPGraphSnapshotBox?
+    private var metrics = DSPGraphPublicationMetrics()
+
+    init(bridge: OpaquePointer) {
+        self.bridge = bridge
+    }
+
+    func enqueuePublish(_ snapshot: N60DSPGraphSnapshot) {
+        let box = DSPGraphSnapshotBox(snapshot)
+        queue.async { [self, box] in
+            guard !stopped else { return }
+            replacePending(with: box)
+            guard !transitionActive, !flushScheduled else { return }
+            flushScheduled = true
+            queue.async { [self] in flushLatestPublish() }
+        }
+    }
+
+    func enqueueTransition(
+        _ snapshot: N60DSPGraphSnapshot,
+        fadeFrames: UInt32,
+        fadeNanoseconds: UInt64
+    ) {
+        let box = DSPGraphSnapshotBox(snapshot)
+        queue.async { [self, box] in
+            guard !stopped else { return }
+            replacePending(with: box)
+            guard !transitionActive else { return }
+
+            transitionActive = true
+            metrics.transitionsScheduled &+= 1
+            N60RealtimeAudioBridgeRampTransitionGain(bridge, 0.0, fadeFrames)
+
+            let boundedDelay = Int(min(fadeNanoseconds, UInt64(Int.max)))
+            queue.asyncAfter(deadline: .now() + .nanoseconds(boundedDelay)) { [self] in
+                finishTransition(fadeFrames: fadeFrames)
+            }
+        }
+    }
+
+    func snapshotMetrics() -> DSPGraphPublicationMetrics {
+        queue.sync { metrics }
+    }
+
+    func stop() {
+        queue.sync {
+            stopped = true
+            pendingSnapshot = nil
+            flushScheduled = false
+        }
+    }
+
+    private func replacePending(with box: DSPGraphSnapshotBox) {
+        if pendingSnapshot != nil {
+            metrics.coalescedUpdates &+= 1
+        }
+        pendingSnapshot = box
+    }
+
+    private func flushLatestPublish() {
+        flushScheduled = false
+        guard !stopped, !transitionActive, let box = pendingSnapshot else { return }
+        pendingSnapshot = nil
+        publish(box.snapshot)
+    }
+
+    private func finishTransition(fadeFrames: UInt32) {
+        guard !stopped else {
+            transitionActive = false
+            pendingSnapshot = nil
+            return
+        }
+
+        let snapshot = pendingSnapshot?.snapshot
+        pendingSnapshot = nil
+        if let snapshot, publish(snapshot) {
+            N60RealtimeAudioBridgeSetTransitionGainImmediate(bridge, 0.0)
+            N60RealtimeAudioBridgeRampTransitionGain(bridge, 1.0, fadeFrames)
+        } else {
+            N60RealtimeAudioBridgeSetTransitionGainImmediate(bridge, 1.0)
+        }
+        transitionActive = false
+    }
+
+    @discardableResult
+    private func publish(_ snapshot: N60DSPGraphSnapshot) -> Bool {
+        if N60RealtimeAudioBridgePublishDSPGraph(bridge, snapshot) {
+            metrics.publications &+= 1
+            return true
+        }
+        metrics.failures &+= 1
+        return false
+    }
+}
+
 final class CoreAudioTransportSession {
     private static let bridgeCapacityFrames: UInt32 = 65_536
     private static let fadeStepMicroseconds: UInt32 = 1_500
@@ -191,6 +333,7 @@ final class CoreAudioTransportSession {
     }
 
     private var bridge: OpaquePointer?
+    private var graphPublicationCoordinator: DSPGraphPublicationCoordinator?
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateDeviceID = AudioDeviceID(kAudioObjectUnknown)
     private var captureIOProcID: AudioDeviceIOProcID?
@@ -205,6 +348,7 @@ final class CoreAudioTransportSession {
             throw CoreAudioTransportError.realtimeBridgeAllocationFailed
         }
         bridge = newBridge
+        graphPublicationCoordinator = DSPGraphPublicationCoordinator(bridge: newBridge)
 
         do {
             let processObject = try Self.currentProcessObjectID()
@@ -322,7 +466,14 @@ final class CoreAudioTransportSession {
 
     func counters() -> AudioTransportCounters {
         guard let bridge else { return AudioTransportCounters() }
-        return AudioTransportCounters(snapshot: N60RealtimeAudioBridgeGetSnapshot(bridge))
+        var counters = AudioTransportCounters(snapshot: N60RealtimeAudioBridgeGetSnapshot(bridge))
+        if let metrics = graphPublicationCoordinator?.snapshotMetrics() {
+            counters.graphPublications = metrics.publications
+            counters.graphPublicationFailures = metrics.failures
+            counters.graphPublicationCoalescedUpdates = metrics.coalescedUpdates
+            counters.graphTransitionsScheduled = metrics.transitionsScheduled
+        }
+        return counters
     }
 
     func renderDiagnostics() -> RenderKernelDiagnostics? {
@@ -470,50 +621,63 @@ final class CoreAudioTransportSession {
     }
 
     func publishDSPGraph(_ snapshot: N60DSPGraphSnapshot) throws {
-        guard let bridge, N60RealtimeAudioBridgePublishDSPGraph(bridge, snapshot) else {
+        guard let bridge else { throw CoreAudioTransportError.dspGraphPublicationFailed }
+        if !isOutputStarted || !isCaptureStarted {
+            guard N60RealtimeAudioBridgePublishDSPGraph(bridge, snapshot) else {
+                throw CoreAudioTransportError.dspGraphPublicationFailed
+            }
+            try startIO()
+            return
+        }
+        guard let graphPublicationCoordinator else {
             throw CoreAudioTransportError.dspGraphPublicationFailed
         }
-        if !isOutputStarted || !isCaptureStarted {
-            try startIO()
-        }
+        graphPublicationCoordinator.enqueuePublish(snapshot)
     }
 
     func transitionDSPGraph(_ snapshot: N60DSPGraphSnapshot) throws {
-        guard let bridge else { throw CoreAudioTransportError.dspGraphPublicationFailed }
+        guard bridge != nil else { throw CoreAudioTransportError.dspGraphPublicationFailed }
 
         if !isOutputStarted || !isCaptureStarted {
             try publishDSPGraph(snapshot)
             return
         }
 
-        for step in stride(from: Int(Self.fadeStepCount) - 1, through: 0, by: -1) {
-            N60RealtimeAudioBridgeSetTransitionGainImmediate(
-                bridge,
-                Float(step) / Float(Self.fadeStepCount)
-            )
-            usleep(Self.fadeStepMicroseconds)
-        }
-
-        guard N60RealtimeAudioBridgePublishDSPGraph(bridge, snapshot) else {
-            N60RealtimeAudioBridgeSetTransitionGainImmediate(bridge, 1.0)
+        guard let graphPublicationCoordinator else {
             throw CoreAudioTransportError.dspGraphPublicationFailed
         }
-
-        let fadeFramesDouble = max(outputFormat.sampleRate, 1) * Self.graphTransitionFadeMilliseconds / 1_000.0
-        let fadeFrames = UInt32(min(max(fadeFramesDouble.rounded(), 1), Double(UInt32.max)))
-        N60RealtimeAudioBridgeSetTransitionGainImmediate(bridge, 0.0)
-        N60RealtimeAudioBridgeRampTransitionGain(bridge, 1.0, fadeFrames)
+        let fadeFrames = graphTransitionFadeFrames()
+        let fadeNanoseconds = UInt64(
+            min(
+                max(Self.graphTransitionFadeMilliseconds * 1_000_000.0, 1.0),
+                Double(UInt64.max)
+            ).rounded()
+        )
+        graphPublicationCoordinator.enqueueTransition(
+            snapshot,
+            fadeFrames: fadeFrames,
+            fadeNanoseconds: fadeNanoseconds
+        )
     }
 
     func stop(fadeOut: Bool) {
         guard !stopped else { return }
         stopped = true
+        graphPublicationCoordinator?.stop()
 
+        // Transport teardown is intentionally synchronous so Core Audio cannot
+        // call through a freed bridge. Keep the short shutdown-only fade here;
+        // interactive graph transitions never sleep the caller thread.
         if fadeOut, let bridge, isOutputStarted {
-            for step in stride(from: Int(Self.fadeStepCount) - 1, through: 0, by: -1) {
-                N60RealtimeAudioBridgeSetOutputGain(bridge, Float(step) / Float(Self.fadeStepCount))
-                usleep(Self.fadeStepMicroseconds)
-            }
+            let fadeFrames = graphTransitionFadeFrames()
+            N60RealtimeAudioBridgeRampTransitionGain(bridge, 0.0, fadeFrames)
+            let fadeMicroseconds = UInt32(
+                min(
+                    max(Self.graphTransitionFadeMilliseconds * 1_000.0, 1.0),
+                    Double(UInt32.max)
+                ).rounded()
+            )
+            usleep(fadeMicroseconds)
         }
 
         if isOutputStarted, let outputIOProcID {
@@ -544,6 +708,13 @@ final class CoreAudioTransportSession {
             N60RealtimeAudioBridgeDestroy(bridge)
             self.bridge = nil
         }
+        graphPublicationCoordinator = nil
+    }
+
+    private func graphTransitionFadeFrames() -> UInt32 {
+        let fadeFramesDouble = max(outputFormat.sampleRate, 1)
+            * Self.graphTransitionFadeMilliseconds / 1_000.0
+        return UInt32(min(max(fadeFramesDouble.rounded(), 1), Double(UInt32.max)))
     }
 
     private func startIO() throws {
@@ -627,7 +798,10 @@ final class CoreAudioTransportSession {
         )
         var format = AudioStreamBasicDescription()
         var dataSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
-        try check(AudioObjectGetPropertyData(objectID, &address, 0, nil, &dataSize, &format), operation: operation)
+        try check(
+            AudioObjectGetPropertyData(objectID, &address, 0, nil, &dataSize, &format),
+            operation: operation
+        )
         return format
     }
 
@@ -644,7 +818,10 @@ final class CoreAudioTransportSession {
         )
         var value: UInt32 = 0
         var dataSize = UInt32(MemoryLayout<UInt32>.size)
-        try check(AudioObjectGetPropertyData(objectID, &address, 0, nil, &dataSize, &value), operation: operation)
+        try check(
+            AudioObjectGetPropertyData(objectID, &address, 0, nil, &dataSize, &value),
+            operation: operation
+        )
         return value
     }
 
@@ -682,9 +859,17 @@ final class AudioHardwareEventMonitor {
         let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
             self?.onSelectedOutputSampleRateChanged?()
         }
-        let status = AudioObjectAddPropertyListenerBlock(deviceID, &address, DispatchQueue.main, listener)
+        let status = AudioObjectAddPropertyListenerBlock(
+            deviceID,
+            &address,
+            DispatchQueue.main,
+            listener
+        )
         guard status == noErr else {
-            throw CoreAudioTransportError.operationFailed(operation: "install sample-rate listener", status: status)
+            throw CoreAudioTransportError.operationFailed(
+                operation: "install sample-rate listener",
+                status: status
+            )
         }
         monitoredOutputDeviceID = deviceID
         sampleRateListener = listener
@@ -701,7 +886,12 @@ final class AudioHardwareEventMonitor {
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain
         )
-        AudioObjectRemovePropertyListenerBlock(deviceID, &address, DispatchQueue.main, sampleRateListener)
+        AudioObjectRemovePropertyListenerBlock(
+            deviceID,
+            &address,
+            DispatchQueue.main,
+            sampleRateListener
+        )
         monitoredOutputDeviceID = nil
         self.sampleRateListener = nil
     }
@@ -749,7 +939,10 @@ final class AudioHardwareEventMonitor {
             listener
         )
         guard status == noErr else {
-            throw CoreAudioTransportError.operationFailed(operation: "install device-list listener", status: status)
+            throw CoreAudioTransportError.operationFailed(
+                operation: "install device-list listener",
+                status: status
+            )
         }
         deviceListListener = listener
     }
@@ -758,12 +951,20 @@ final class AudioHardwareEventMonitor {
         guard notificationTokens.isEmpty else { return }
         let center = NSWorkspace.shared.notificationCenter
         notificationTokens.append(
-            center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
+            center.addObserver(
+                forName: NSWorkspace.willSleepNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
                 self?.onWillSleep?()
             }
         )
         notificationTokens.append(
-            center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            center.addObserver(
+                forName: NSWorkspace.didWakeNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
                 self?.onDidWake?()
             }
         )
