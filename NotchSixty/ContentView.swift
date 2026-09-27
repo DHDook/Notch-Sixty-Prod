@@ -198,7 +198,7 @@ struct ContentView: View {
 
             Divider()
 
-            TimelineView(.periodic(from: .now, by: 0.25)) { _ in
+            TimelineView(.periodic(from: .now, by: engine.lifecycleState == .running ? 1.0 : 3_600.0)) { _ in
                 diagnosticsView(engine.diagnosticsSnapshot())
             }
 
@@ -470,7 +470,7 @@ struct ContentView: View {
                     .monospacedDigit().frame(width: 60)
             }
 
-            TimelineView(.periodic(from: .now, by: 0.1)) { _ in
+            TimelineView(.periodic(from: .now, by: engine.lifecycleState == .running ? 1.0 : 3_600.0)) { _ in
                 let diagnostics = engine.diagnosticsSnapshot().renderKernelDiagnostics
                 HStack(spacing: 18) {
                     Text("Comp GR: \(diagnostics?.compressorGainReductionDB ?? 0, specifier: "%.2f") dB")
@@ -665,7 +665,7 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }
 
-            TimelineView(.periodic(from: .now, by: 0.1)) { _ in
+            TimelineView(.periodic(from: .now, by: engine.lifecycleState == .running ? 1.0 : 3_600.0)) { _ in
                 let diagnostics = engine.diagnosticsSnapshot().renderKernelDiagnostics
                 HStack(spacing: 16) {
                     Text("Short-term: \(diagnostics?.loudnessShortTermLUFS ?? -120, specifier: "%.1f") LUFS")
@@ -726,7 +726,7 @@ struct ContentView: View {
                     Text("Min"); TextField("", value: voiceMinimumConfidence, format: .number.precision(.fractionLength(2))).frame(width: 54).textFieldStyle(.roundedBorder)
                 }
             }
-            TimelineView(.periodic(from: .now, by: 0.1)) { _ in
+            TimelineView(.periodic(from: .now, by: engine.lifecycleState == .running ? 1.0 : 3_600.0)) { _ in
                 let d = engine.diagnosticsSnapshot().renderKernelDiagnostics
                 HStack(spacing: 14) {
                     Text("Program: \(d?.dialogueProgramLevelDBFS ?? -120, specifier: "%.1f") dBFS")
@@ -832,7 +832,7 @@ struct ContentView: View {
                 Text("dB (linked stereo per band)").font(.caption).foregroundStyle(.secondary)
             }
 
-            TimelineView(.periodic(from: .now, by: 0.1)) { _ in
+            TimelineView(.periodic(from: .now, by: engine.lifecycleState == .running ? 1.0 : 3_600.0)) { _ in
                 let diagnostics = engine.diagnosticsSnapshot().renderKernelDiagnostics
                 HStack(spacing: 16) {
                     Text("De-Esser GR: \(diagnostics?.deEsserGainReductionDB ?? 0, specifier: "%.2f") dB")
