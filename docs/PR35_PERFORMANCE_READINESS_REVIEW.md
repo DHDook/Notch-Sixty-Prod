@@ -62,12 +62,23 @@ Every material finding is classified as one of:
 | PR35-013 | Spectral denoiser validation path | The callback repeated snapshot validation that is already guaranteed by the immutable prepared graph. | FIX NOW | Added a prevalidated realtime fast path while retaining the safe public path; dedicated equivalence validation compares audio and telemetry across enabled/bypassed states and 44.1/48/96/192/384 kHz. | COMPLETE |
 | PR35-014 | Prepared FIR slot ownership | Main EQ, room correction and Speaker IR use three prepared-program slots: two may be referenced by immutable render generations while the third is prepared. Fully asynchronous structural publication could let a new FIR generation wrap into a still-referenced slot. | FIX NOW | Structural transitions are registered synchronously on the serial coordinator (no sleep), and all prepared FIR paths refuse another program preparation while that structural generation is in flight. This preserves the two-live-generations-plus-one-spare invariant. Retained source guard enforces it. | COMPLETE |
 | PR35-015 | Transport shutdown fade | `stop(fadeOut:)` retains one short synchronous fade wait before Core Audio callbacks are stopped and the realtime bridge can be freed. This is teardown/lifetime work, not an interactive graph-update path. | NO ACTION | Keep the bounded shutdown barrier for now. Revisit only if measured app shutdown/restart UX makes it material; do not weaken callback lifetime safety to remove it. | REVIEWED |
+| PR35-016 | Disabled DSP baseline cost | Manual PR35 smoke testing exposed roughly one-core CPU use with audio processing enabled but EQ/dynamics audibly disabled; PR34 showed the same behavior. Source review found that several disabled stages remained computationally active, most notably the spectral denoiser running its full FFT/profile/overlap-add engine while returning dry audio, plus disabled Dynamics analyzers/filter cascades continuing to execute. | FIX NOW | Disabled denoiser playback now parks before buffering/FFT work except during explicit profile capture. Pre-EQ, core Dynamics and pause-gate paths retain their existing disable tails, then park at neutral state; enabling them clears stale filter/analyzer state before normal processing resumes. The deliberately low-rate/decimated mains-hum detector remains available while its notch is bypassed. A retained validator requires bypassed denoiser spectral-frame count to remain zero and bypassed Dynamics to remain parked and sample-transparent across 44.1/48/96/192/384 kHz. | COMPLETE |
 
 ## Closure findings
 
 ### Realtime callback ownership
 
 The render kernel acquires one immutable graph generation for the output callback. Large nested Dynamics / Dynamic EQ configuration no longer moves by value through the per-frame call chain. Startup and graph-transition gain ramps also no longer use atomics as their per-sample state machine: the control plane publishes sequence-protected commands, the callback latches them at a bounded point, advances local ramp state for the buffer, then publishes bounded transition state afterward.
+
+### Disabled-stage baseline cost
+
+Manual smoke testing before merge showed that the app could consume roughly one CPU core even with no audible EQ or Dynamics processing enabled. The same result reproduced in the PR34 test build, establishing that this was an inherited baseline-cost issue rather than a regression from PR35.
+
+The source audit found a concrete cause: several feature toggles were audio bypasses rather than computational bypasses. In particular, a disabled spectral denoiser still buffered audio, performed forward FFTs, noise-profile analysis, spectral gain work, inverse FFTs and overlap-add before discarding the processed path in favor of dry output. Disabled Dynamics stages likewise continued filter/detector/transcendental work while their wet/gain states converged to neutral.
+
+PR35 now gives these paths explicit parked states. Disabled denoiser playback returns dry before spectral work while preserving learned profile state; explicit profile capture is still permitted while audibly bypassed. Pre-EQ and core Dynamics run the existing click-free disable trajectory when needed, then snap only near-neutral state to exact neutral and park. Re-enabling clears stale filter/analyzer histories once before processing resumes. The pause gate similarly stops detector work once disabled at unity. The mains-hum detector intentionally remains available because it supports detection/apply workflows and is already decimated to a low analysis rate.
+
+This is an architectural inactive-path correction, not a claim about final CPU targets. The GitHub workflow is a Debug build, which magnifies scalar FFT/transcendental cost, and production Release profiling remains part of the later measured campaign. The important PR35 contract is now that disabled heavyweight DSP no longer burns its full enabled-path cost merely to return dry audio.
 
 ### Control/UI boundary
 
@@ -95,9 +106,9 @@ The normal macOS workflow now retains the PR34 Band Pass DSP validator and adds 
 - protection sparse-reset equivalence;
 - denoiser bounded-reset equivalence across 44.1/48/96/192/384 kHz;
 - denoiser prevalidated-fast-path equivalence across 44.1/48/96/192/384 kHz;
+- disabled-DSP parking/sample-transparency across 44.1/48/96/192/384 kHz, including zero spectral frames while the denoiser is bypassed;
+- render-context pinned-snapshot lifetime;
 - normal arm64 macOS build and XCTest.
-
-The render-context pinned-snapshot validator remains retained alongside the source and protects the two-slot immutable-generation lifetime contract used by the render kernel.
 
 ## Deferred measured phase
 
