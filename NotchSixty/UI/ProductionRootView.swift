@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
@@ -194,7 +195,7 @@ private struct ProductionDashboardView: View {
 
     private var outputSummary: String {
         guard let output = engine.selectedOutputDevice else { return "Choose an output in Audio to begin." }
-        return "\(output.name) · \(output.nominalSampleRate / 1_000, specifier: "%.1f") kHz"
+        return "\(output.name) · \(String(format: "%.1f", output.nominalSampleRate / 1_000)) kHz"
     }
 
     private var dynamicsSummary: String {
@@ -339,7 +340,7 @@ private struct SignatureVUMeter: View {
 
     private var peakText: String {
         peakDBFS.isFinite && peakDBFS > -119
-            ? "PEAK \(peakDBFS, specifier: "%.1f") dBFS"
+            ? "PEAK \(String(format: "%.1f", peakDBFS)) dBFS"
             : "PEAK −∞ dBFS"
     }
 
@@ -506,7 +507,7 @@ private struct ProductionAudioView: View {
                         .disabled(engine.lifecycleState != .idle)
                     }
                     if let output = engine.selectedOutputDevice {
-                        LabeledContent("Nominal Sample Rate", value: "\(output.nominalSampleRate / 1_000, specifier: "%.1f") kHz")
+                        LabeledContent("Nominal Sample Rate", value: "\(String(format: "%.1f", output.nominalSampleRate / 1_000)) kHz")
                     }
                     LabeledContent("Processing State", value: engine.lifecycleState.rawValue.capitalized)
                     HStack {
