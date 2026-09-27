@@ -68,30 +68,30 @@ static float smooth_toward(float current, float target, float coefficient) {
     return target + coefficient * (current - target);
 }
 
-static float compressor_target_gain_db(float detectorDB, N60CompressorSnapshot snapshot) {
-    if (!snapshot.enabled) return 0.0f;
-    float over = detectorDB - snapshot.thresholdDB;
-    float slope = (1.0f / snapshot.ratio) - 1.0f;
+static float compressor_target_gain_db(float detectorDB, const N60CompressorSnapshot *snapshot) {
+    if (!snapshot->enabled) return 0.0f;
+    float over = detectorDB - snapshot->thresholdDB;
+    float slope = (1.0f / snapshot->ratio) - 1.0f;
     float compressionDB = 0.0f;
 
-    if (snapshot.kneeWidthDB <= 0.0f) {
+    if (snapshot->kneeWidthDB <= 0.0f) {
         if (over > 0.0f) compressionDB = slope * over;
     } else {
-        float halfKnee = snapshot.kneeWidthDB * 0.5f;
+        float halfKnee = snapshot->kneeWidthDB * 0.5f;
         if (over >= halfKnee) {
             compressionDB = slope * over;
         } else if (over > -halfKnee) {
             float kneePosition = over + halfKnee;
-            compressionDB = slope * kneePosition * kneePosition / (2.0f * snapshot.kneeWidthDB);
+            compressionDB = slope * kneePosition * kneePosition / (2.0f * snapshot->kneeWidthDB);
         }
     }
-    return compressionDB + snapshot.makeupGainDB;
+    return compressionDB + snapshot->makeupGainDB;
 }
 
-static float expander_target_gain_db(float detectorDB, N60ExpanderSnapshot snapshot) {
-    if (!snapshot.enabled || detectorDB >= snapshot.thresholdDB) return 0.0f;
-    float gainDB = (snapshot.ratio - 1.0f) * (detectorDB - snapshot.thresholdDB);
-    return fmaxf(gainDB, snapshot.rangeDB);
+static float expander_target_gain_db(float detectorDB, const N60ExpanderSnapshot *snapshot) {
+    if (!snapshot->enabled || detectorDB >= snapshot->thresholdDB) return 0.0f;
+    float gainDB = (snapshot->ratio - 1.0f) * (detectorDB - snapshot->thresholdDB);
+    return fmaxf(gainDB, snapshot->rangeDB);
 }
 
 static float process_filter_cascade(
@@ -180,24 +180,24 @@ static float process_mains_notch_cascade(
     return (float)output;
 }
 
-static bool mains_notch_runtime_matches_snapshot(const N60DynamicsRuntime *runtime, N60MainsNotchSnapshot snapshot) {
+static bool mains_notch_runtime_matches_snapshot(const N60DynamicsRuntime *runtime, const N60MainsNotchSnapshot *snapshot) {
     if (!runtime->mainsNotchInitialized
-        || runtime->mainsNotchCurrentFundamentalHz != snapshot.fundamentalHz
-        || runtime->mainsNotchCurrentQ != snapshot.q
-        || runtime->mainsNotchCurrentHarmonicCount != snapshot.harmonicCount) return false;
-    for (uint32_t index = 0; index < snapshot.harmonicCount; ++index) {
-        if (runtime->mainsNotchCurrentDepthsDB[index] != snapshot.depthsDB[index]) return false;
+        || runtime->mainsNotchCurrentFundamentalHz != snapshot->fundamentalHz
+        || runtime->mainsNotchCurrentQ != snapshot->q
+        || runtime->mainsNotchCurrentHarmonicCount != snapshot->harmonicCount) return false;
+    for (uint32_t index = 0; index < snapshot->harmonicCount; ++index) {
+        if (runtime->mainsNotchCurrentDepthsDB[index] != snapshot->depthsDB[index]) return false;
     }
     return true;
 }
 
-static void copy_mains_notch_snapshot_to_current(N60DynamicsRuntime *runtime, N60MainsNotchSnapshot snapshot) {
-    runtime->mainsNotchCurrentFundamentalHz = snapshot.fundamentalHz;
-    runtime->mainsNotchCurrentQ = snapshot.q;
-    runtime->mainsNotchCurrentHarmonicCount = snapshot.harmonicCount;
+static void copy_mains_notch_snapshot_to_current(N60DynamicsRuntime *runtime, const N60MainsNotchSnapshot *snapshot) {
+    runtime->mainsNotchCurrentFundamentalHz = snapshot->fundamentalHz;
+    runtime->mainsNotchCurrentQ = snapshot->q;
+    runtime->mainsNotchCurrentHarmonicCount = snapshot->harmonicCount;
     for (uint32_t index = 0; index < N60_MAX_MAINS_HARMONICS; ++index) {
-        runtime->mainsNotchCurrentFilters[index] = snapshot.filters[index];
-        runtime->mainsNotchCurrentDepthsDB[index] = snapshot.depthsDB[index];
+        runtime->mainsNotchCurrentFilters[index] = snapshot->filters[index];
+        runtime->mainsNotchCurrentDepthsDB[index] = snapshot->depthsDB[index];
         runtime->mainsNotchLeft[index].z1 = 0.0;
         runtime->mainsNotchLeft[index].z2 = 0.0;
         runtime->mainsNotchRight[index].z1 = 0.0;
@@ -220,19 +220,19 @@ static void promote_pending_mains_notch(N60DynamicsRuntime *runtime) {
     runtime->mainsNotchTransitionFramesRemaining = 0;
 }
 
-static void schedule_mains_notch_retune(N60DynamicsRuntime *runtime, N60MainsNotchSnapshot snapshot, uint32_t transitionFrames) {
+static void schedule_mains_notch_retune(N60DynamicsRuntime *runtime, const N60MainsNotchSnapshot *snapshot, uint32_t transitionFrames) {
     if (!runtime->mainsNotchInitialized) {
         copy_mains_notch_snapshot_to_current(runtime, snapshot);
         return;
     }
     if (runtime->mainsNotchTransitionFramesRemaining > 0) promote_pending_mains_notch(runtime);
     if (mains_notch_runtime_matches_snapshot(runtime, snapshot)) return;
-    runtime->mainsNotchPendingFundamentalHz = snapshot.fundamentalHz;
-    runtime->mainsNotchPendingQ = snapshot.q;
-    runtime->mainsNotchPendingHarmonicCount = snapshot.harmonicCount;
+    runtime->mainsNotchPendingFundamentalHz = snapshot->fundamentalHz;
+    runtime->mainsNotchPendingQ = snapshot->q;
+    runtime->mainsNotchPendingHarmonicCount = snapshot->harmonicCount;
     for (uint32_t index = 0; index < N60_MAX_MAINS_HARMONICS; ++index) {
-        runtime->mainsNotchPendingFilters[index] = snapshot.filters[index];
-        runtime->mainsNotchPendingDepthsDB[index] = snapshot.depthsDB[index];
+        runtime->mainsNotchPendingFilters[index] = snapshot->filters[index];
+        runtime->mainsNotchPendingDepthsDB[index] = snapshot->depthsDB[index];
         runtime->mainsNotchPendingLeft[index] = runtime->mainsNotchLeft[index];
         runtime->mainsNotchPendingRight[index] = runtime->mainsNotchRight[index];
     }
@@ -253,13 +253,13 @@ static void reset_mains_detector_window(N60DynamicsRuntime *runtime) {
 
 static void process_mains_hum_detector(
     N60DynamicsRuntime *runtime,
-    N60MainsHumDetectorSnapshot snapshot,
+    const N60MainsHumDetectorSnapshot *snapshot,
     float left,
     float right
 ) {
-    if (!snapshot.enabled || snapshot.decimationFactor == 0 || snapshot.windowSamples == 0) return;
+    if (!snapshot->enabled || snapshot->decimationFactor == 0 || snapshot->windowSamples == 0) return;
     runtime->mainsDetectorDecimationCounter += 1;
-    if (runtime->mainsDetectorDecimationCounter < snapshot.decimationFactor) return;
+    if (runtime->mainsDetectorDecimationCounter < snapshot->decimationFactor) return;
     runtime->mainsDetectorDecimationCounter = 0;
 
     double mono = 0.5 * ((double)left + (double)right);
@@ -269,13 +269,13 @@ static void process_mains_hum_detector(
         double oscSin = runtime->mainsDetectorOscSin[index];
         runtime->mainsDetectorReal[index] += mono * oscCos;
         runtime->mainsDetectorImag[index] += mono * oscSin;
-        double stepCos = (double)snapshot.oscillatorStepCos[index];
-        double stepSin = (double)snapshot.oscillatorStepSin[index];
+        double stepCos = (double)snapshot->oscillatorStepCos[index];
+        double stepSin = (double)snapshot->oscillatorStepSin[index];
         runtime->mainsDetectorOscCos[index] = oscCos * stepCos - oscSin * stepSin;
         runtime->mainsDetectorOscSin[index] = oscSin * stepCos + oscCos * stepSin;
     }
     runtime->mainsDetectorSampleCount += 1;
-    if (runtime->mainsDetectorSampleCount < snapshot.windowSamples) return;
+    if (runtime->mainsDetectorSampleCount < snapshot->windowSamples) return;
 
     double powers[N60_MAINS_DETECTOR_BIN_COUNT];
     uint32_t bestIndex = 0;
@@ -326,8 +326,8 @@ static void process_mains_hum_detector(
         }
     }
     runtime->mainsDetectedFrequencyHz = (float)(
-        snapshot.searchStartHz
-        + ((double)bestIndex + fractionalBin) * snapshot.binSpacingHz
+        snapshot->searchStartHz
+        + ((double)bestIndex + fractionalBin) * snapshot->binSpacingHz
     );
     runtime->mainsDetectionConfidence = (float)confidence;
     reset_mains_detector_window(runtime);
@@ -346,7 +346,7 @@ static float dynamics_compression_target(
     compressor.ratio = ratio;
     compressor.kneeWidthDB = kneeWidthDB;
     compressor.makeupGainDB = 0.0f;
-    return compressor_target_gain_db(linear_to_db(detector), compressor);
+    return compressor_target_gain_db(linear_to_db(detector), &compressor);
 }
 
 N60DynamicsSnapshot N60DynamicsSnapshotMakeBypassed(double sampleRate) {
@@ -1504,10 +1504,10 @@ void N60DynamicsProcessPreEQStereoFrame(
 
     dryLeft = *left;
     dryRight = *right;
-    process_mains_hum_detector(runtime, snapshot->mainsHumDetector, dryLeft, dryRight);
+    process_mains_hum_detector(runtime, &snapshot->mainsHumDetector, dryLeft, dryRight);
 
     uint32_t retuneFrames = (uint32_t)fmax(32.0, snapshot->mainsHumDetector.decimationFactor * N60_MAINS_DETECTOR_TARGET_RATE * N60_MAINS_NOTCH_RETUNE_SECONDS);
-    schedule_mains_notch_retune(runtime, snapshot->mainsNotch, retuneFrames);
+    schedule_mains_notch_retune(runtime, &snapshot->mainsNotch, retuneFrames);
     float notchLeft = process_mains_notch_cascade(
         runtime->mainsNotchCurrentFilters,
         runtime->mainsNotchLeft,
@@ -1575,18 +1575,18 @@ static void process_stereo_widener(
     float *left,
     float *right
 ) {
-    N60StereoWidenerSnapshot widener = snapshot->stereoWidener;
-    if (widener.sectionCount == 0) return;
+    const N60StereoWidenerSnapshot *widener = &snapshot->stereoWidener;
+    if (widener->sectionCount == 0) return;
 
     float mid = 0.5f * (*left + *right);
     float side = 0.5f * (*left - *right);
-    float lowSide = process_filter_cascade(widener.lowPass, runtime->widenerLowPass, widener.sectionCount, side);
-    float highSide = process_filter_cascade(widener.highPass, runtime->widenerHighPass, widener.sectionCount, side);
+    float lowSide = process_filter_cascade(widener->lowPass, runtime->widenerLowPass, widener->sectionCount, side);
+    float highSide = process_filter_cascade(widener->highPass, runtime->widenerHighPass, widener->sectionCount, side);
     float midSide = side - lowSide - highSide;
 
-    float lowTarget = widener.enabled ? (widener.monoLowBand ? 0.0f : widener.lowWidth) : 1.0f;
-    float midTarget = widener.enabled ? widener.midWidth : 1.0f;
-    float highTarget = widener.enabled ? widener.highWidth : 1.0f;
+    float lowTarget = widener->enabled ? (widener->monoLowBand ? 0.0f : widener->lowWidth) : 1.0f;
+    float midTarget = widener->enabled ? widener->midWidth : 1.0f;
+    float highTarget = widener->enabled ? widener->highWidth : 1.0f;
     runtime->widenerLowWidth = smooth_toward(runtime->widenerLowWidth, lowTarget, snapshot->bypassTransitionCoefficient);
     runtime->widenerMidWidth = smooth_toward(runtime->widenerMidWidth, midTarget, snapshot->bypassTransitionCoefficient);
     runtime->widenerHighWidth = smooth_toward(runtime->widenerHighWidth, highTarget, snapshot->bypassTransitionCoefficient);
@@ -1639,66 +1639,66 @@ static void process_loudness_contour(
 ) {
     float dryLeft = *left;
     float dryRight = *right;
-    N60LoudnessContourSnapshot config = snapshot->loudnessContour;
+    const N60LoudnessContourSnapshot *config = &snapshot->loudnessContour;
 
-    if (!config.perBandMode) {
-        float wetLeft = N60BiquadProcessSample(config.lowShelf, &runtime->loudnessLowShelfLeft, dryLeft);
-        wetLeft = N60BiquadProcessSample(config.highShelf, &runtime->loudnessHighShelfLeft, wetLeft);
-        float wetRight = N60BiquadProcessSample(config.lowShelf, &runtime->loudnessLowShelfRight, dryRight);
-        wetRight = N60BiquadProcessSample(config.highShelf, &runtime->loudnessHighShelfRight, wetRight);
+    if (!config->perBandMode) {
+        float wetLeft = N60BiquadProcessSample(config->lowShelf, &runtime->loudnessLowShelfLeft, dryLeft);
+        wetLeft = N60BiquadProcessSample(config->highShelf, &runtime->loudnessHighShelfLeft, wetLeft);
+        float wetRight = N60BiquadProcessSample(config->lowShelf, &runtime->loudnessLowShelfRight, dryRight);
+        wetRight = N60BiquadProcessSample(config->highShelf, &runtime->loudnessHighShelfRight, wetRight);
         float volumeScale = 0.0f;
-        if (masterGainLinear <= config.fullContourMasterGainLinear) {
+        if (masterGainLinear <= config->fullContourMasterGainLinear) {
             volumeScale = 1.0f;
-        } else if (masterGainLinear < config.flatContourMasterGainLinear) {
+        } else if (masterGainLinear < config->flatContourMasterGainLinear) {
             float masterDB = linear_to_db(masterGainLinear);
             volumeScale = (N60_LOUDNESS_FLAT_CONTOUR_DB - masterDB)
                 / (N60_LOUDNESS_FLAT_CONTOUR_DB - N60_LOUDNESS_FULL_CONTOUR_DB);
             volumeScale = clampf(volumeScale, 0.0f, 1.0f);
         }
-        float target = config.enabled ? volumeScale : 0.0f;
+        float target = config->enabled ? volumeScale : 0.0f;
         runtime->loudnessMix = smooth_toward(runtime->loudnessMix, target, snapshot->bypassTransitionCoefficient);
-        runtime->loudnessLowGainDB = N60_LOUDNESS_MAX_BASS_DB * config.strength * runtime->loudnessMix;
-        runtime->loudnessHighGainDB = N60_LOUDNESS_MAX_TREBLE_DB * config.strength * runtime->loudnessMix;
-        runtime->loudnessEstimatedPhons = config.referencePhons;
+        runtime->loudnessLowGainDB = N60_LOUDNESS_MAX_BASS_DB * config->strength * runtime->loudnessMix;
+        runtime->loudnessHighGainDB = N60_LOUDNESS_MAX_TREBLE_DB * config->strength * runtime->loudnessMix;
+        runtime->loudnessEstimatedPhons = config->referencePhons;
         *left = dryLeft + (wetLeft - dryLeft) * runtime->loudnessMix;
         *right = dryRight + (wetRight - dryRight) * runtime->loudnessMix;
         return;
     }
 
-    float lowLeft = N60BiquadProcessSample(config.lowBandLowPass, &runtime->loudnessLowBandLeft, dryLeft);
-    float lowRight = N60BiquadProcessSample(config.lowBandLowPass, &runtime->loudnessLowBandRight, dryRight);
-    float highLeft = N60BiquadProcessSample(config.highBandHighPass, &runtime->loudnessHighBandLeft, dryLeft);
-    float highRight = N60BiquadProcessSample(config.highBandHighPass, &runtime->loudnessHighBandRight, dryRight);
+    float lowLeft = N60BiquadProcessSample(config->lowBandLowPass, &runtime->loudnessLowBandLeft, dryLeft);
+    float lowRight = N60BiquadProcessSample(config->lowBandLowPass, &runtime->loudnessLowBandRight, dryRight);
+    float highLeft = N60BiquadProcessSample(config->highBandHighPass, &runtime->loudnessHighBandLeft, dryLeft);
+    float highRight = N60BiquadProcessSample(config->highBandHighPass, &runtime->loudnessHighBandRight, dryRight);
 
     float measuredLUFS = -0.691f + 10.0f * log10f(fmaxf(runtime->loudnessMeanSquare, N60_DYNAMICS_EPSILON));
     float estimatedPhons;
-    if (config.levelSource == N60LoudnessLevelSourceIntegrated) {
+    if (config->levelSource == N60LoudnessLevelSourceIntegrated) {
         // Commercial calibration: -16 LUFS program level corresponds to the
         // configured reference-phons point. This is intentionally explicit and
         // deterministic rather than claiming to be a calibrated SPL meter.
-        estimatedPhons = config.referencePhons + (measuredLUFS - N60_LOUDNESS_INTEGRATED_REFERENCE_LUFS);
+        estimatedPhons = config->referencePhons + (measuredLUFS - N60_LOUDNESS_INTEGRATED_REFERENCE_LUFS);
     } else {
         // Preserve PR29's useful anchor points: master -6 dB is flat/reference;
         // master -30 dB is 24 phons below reference and therefore reaches the
         // historical +6/+3 dB contour with the default psychoacoustic slopes.
         float masterDB = linear_to_db(fmaxf(masterGainLinear, N60_DYNAMICS_EPSILON));
-        estimatedPhons = config.referencePhons + (masterDB - N60_LOUDNESS_FLAT_CONTOUR_DB);
+        estimatedPhons = config->referencePhons + (masterDB - N60_LOUDNESS_FLAT_CONTOUR_DB);
     }
     runtime->loudnessEstimatedPhons = estimatedPhons;
 
-    float phonDelta = config.referencePhons - estimatedPhons;
+    float phonDelta = config->referencePhons - estimatedPhons;
     float lowTargetDB = 0.0f;
     float highTargetDB = 0.0f;
-    if (config.enabled && phonDelta >= 0.0f) {
-        lowTargetDB = fminf(config.maxBoostDB, phonDelta * N60_LOUDNESS_LOW_DB_PER_PHON) * config.strength;
-        highTargetDB = fminf(config.maxBoostDB, phonDelta * N60_LOUDNESS_HIGH_DB_PER_PHON) * config.strength;
-    } else if (config.enabled) {
+    if (config->enabled && phonDelta >= 0.0f) {
+        lowTargetDB = fminf(config->maxBoostDB, phonDelta * N60_LOUDNESS_LOW_DB_PER_PHON) * config->strength;
+        highTargetDB = fminf(config->maxBoostDB, phonDelta * N60_LOUDNESS_HIGH_DB_PER_PHON) * config->strength;
+    } else if (config->enabled) {
         float surplus = -phonDelta;
-        lowTargetDB = -fminf(config.maxCutDB, surplus * N60_LOUDNESS_LOW_CUT_DB_PER_PHON) * config.strength;
-        highTargetDB = -fminf(config.maxCutDB, surplus * N60_LOUDNESS_HIGH_CUT_DB_PER_PHON) * config.strength;
+        lowTargetDB = -fminf(config->maxCutDB, surplus * N60_LOUDNESS_LOW_CUT_DB_PER_PHON) * config->strength;
+        highTargetDB = -fminf(config->maxCutDB, surplus * N60_LOUDNESS_HIGH_CUT_DB_PER_PHON) * config->strength;
     }
 
-    float coefficient = config.enabled ? config.responseCoefficient : snapshot->bypassTransitionCoefficient;
+    float coefficient = config->enabled ? config->responseCoefficient : snapshot->bypassTransitionCoefficient;
     runtime->loudnessLowGainDB = smooth_toward(runtime->loudnessLowGainDB, lowTargetDB, coefficient);
     runtime->loudnessHighGainDB = smooth_toward(runtime->loudnessHighGainDB, highTargetDB, coefficient);
     float lowGain = db_to_linear(runtime->loudnessLowGainDB);
@@ -1707,7 +1707,7 @@ static void process_loudness_contour(
     // themselves are not complementary crossover pairs.
     *left = dryLeft + lowLeft * (lowGain - 1.0f) + highLeft * (highGain - 1.0f);
     *right = dryRight + lowRight * (lowGain - 1.0f) + highRight * (highGain - 1.0f);
-    float normalization = fmaxf(config.maxBoostDB, fmaxf(config.maxCutDB, 1.0f));
+    float normalization = fmaxf(config->maxBoostDB, fmaxf(config->maxCutDB, 1.0f));
     runtime->loudnessMix = clampf(fmaxf(fabsf(runtime->loudnessLowGainDB), fabsf(runtime->loudnessHighGainDB)) / normalization, 0.0f, 1.0f);
 }
 
@@ -1733,19 +1733,19 @@ static void process_dialogue_leveler(
     float *left,
     float *right
 ) {
-    N60DialogueLevelerSnapshot config = snapshot->dialogueLeveler;
+    const N60DialogueLevelerSnapshot *config = &snapshot->dialogueLeveler;
     float dryLeft = *left;
     float dryRight = *right;
 
-    float dialogueLeft = N60BiquadProcessSample(config.bandHighPass, &runtime->dialogueHighPassLeft, dryLeft);
-    dialogueLeft = N60BiquadProcessSample(config.bandLowPass, &runtime->dialogueLowPassLeft, dialogueLeft);
-    float dialogueRight = N60BiquadProcessSample(config.bandHighPass, &runtime->dialogueHighPassRight, dryRight);
-    dialogueRight = N60BiquadProcessSample(config.bandLowPass, &runtime->dialogueLowPassRight, dialogueRight);
+    float dialogueLeft = N60BiquadProcessSample(config->bandHighPass, &runtime->dialogueHighPassLeft, dryLeft);
+    dialogueLeft = N60BiquadProcessSample(config->bandLowPass, &runtime->dialogueLowPassLeft, dialogueLeft);
+    float dialogueRight = N60BiquadProcessSample(config->bandHighPass, &runtime->dialogueHighPassRight, dryRight);
+    dialogueRight = N60BiquadProcessSample(config->bandLowPass, &runtime->dialogueLowPassRight, dialogueRight);
 
     float programPower = 0.5f * (dryLeft * dryLeft + dryRight * dryRight);
     float dialoguePower = 0.5f * (dialogueLeft * dialogueLeft + dialogueRight * dialogueRight);
-    runtime->dialogueProgramMeanSquare = smooth_toward(runtime->dialogueProgramMeanSquare, programPower, config.detectorCoefficient);
-    runtime->dialogueBandMeanSquare = smooth_toward(runtime->dialogueBandMeanSquare, dialoguePower, config.detectorCoefficient);
+    runtime->dialogueProgramMeanSquare = smooth_toward(runtime->dialogueProgramMeanSquare, programPower, config->detectorCoefficient);
+    runtime->dialogueBandMeanSquare = smooth_toward(runtime->dialogueBandMeanSquare, dialoguePower, config->detectorCoefficient);
     runtime->dialogueProgramLevelDBFS = 10.0f * log10f(fmaxf(runtime->dialogueProgramMeanSquare, N60_DYNAMICS_EPSILON));
     runtime->dialogueBandLevelDBFS = 10.0f * log10f(fmaxf(runtime->dialogueBandMeanSquare, N60_DYNAMICS_EPSILON));
     runtime->dialogueGapDB = runtime->dialogueProgramLevelDBFS - runtime->dialogueBandLevelDBFS;
@@ -1755,36 +1755,36 @@ static void process_dialogue_leveler(
     // coefficients are prepared in the snapshot; the render path is fixed state.
     float dialogueEnvelopeInput = sqrtf(fmaxf(dialoguePower, 0.0f));
     runtime->dialogueVoiceEnvelope = smooth_toward(
-        runtime->dialogueVoiceEnvelope, dialogueEnvelopeInput, config.voiceEnvelopeCoefficient);
+        runtime->dialogueVoiceEnvelope, dialogueEnvelopeInput, config->voiceEnvelopeCoefficient);
     float modulationHP = runtime->dialogueVoiceEnvelope - runtime->dialogueModulationPreviousInput
-        + config.modulationHighPassPole * runtime->dialogueModulationHighPassOutput;
+        + config->modulationHighPassPole * runtime->dialogueModulationHighPassOutput;
     runtime->dialogueModulationPreviousInput = runtime->dialogueVoiceEnvelope;
     runtime->dialogueModulationHighPassOutput = modulationHP;
-    float modulationLP = (1.0f - config.modulationLowPassPole) * modulationHP
-        + config.modulationLowPassPole * runtime->dialogueModulationLowPassOutput;
+    float modulationLP = (1.0f - config->modulationLowPassPole) * modulationHP
+        + config->modulationLowPassPole * runtime->dialogueModulationLowPassOutput;
     runtime->dialogueModulationLowPassOutput = modulationLP;
     float modulationPower = modulationLP * modulationLP;
     runtime->dialogueModulationMeanSquare = smooth_toward(
-        runtime->dialogueModulationMeanSquare, modulationPower, config.voiceMeasurementCoefficient);
+        runtime->dialogueModulationMeanSquare, modulationPower, config->voiceMeasurementCoefficient);
     float modulationIndex = sqrtf(fmaxf(runtime->dialogueModulationMeanSquare, 0.0f))
         / fmaxf(runtime->dialogueVoiceEnvelope, 1.0e-6f);
-    float mappedConfidence = (modulationIndex - config.confidenceFloorIndex)
-        / fmaxf(config.confidenceCeilingIndex - config.confidenceFloorIndex, 1.0e-6f);
+    float mappedConfidence = (modulationIndex - config->confidenceFloorIndex)
+        / fmaxf(config->confidenceCeilingIndex - config->confidenceFloorIndex, 1.0e-6f);
     mappedConfidence = clampf(mappedConfidence, 0.0f, 1.0f);
-    runtime->dialogueVoiceConfidence = config.voiceGateEnabled
-        ? config.minConfidence + (1.0f - config.minConfidence) * mappedConfidence
+    runtime->dialogueVoiceConfidence = config->voiceGateEnabled
+        ? config->minConfidence + (1.0f - config->minConfidence) * mappedConfidence
         : 1.0f;
 
     float targetBoostDB = 0.0f;
-    if (config.enabled && runtime->dialogueProgramLevelDBFS >= config.programGateThresholdDB) {
-        float excessGap = fmaxf(0.0f, runtime->dialogueGapDB - config.targetGapDB);
-        float correctionFraction = config.boostRatio > 1.0f ? (1.0f - 1.0f / config.boostRatio) : 0.0f;
-        targetBoostDB = fminf(config.maxBoostDB, excessGap * correctionFraction);
+    if (config->enabled && runtime->dialogueProgramLevelDBFS >= config->programGateThresholdDB) {
+        float excessGap = fmaxf(0.0f, runtime->dialogueGapDB - config->targetGapDB);
+        float correctionFraction = config->boostRatio > 1.0f ? (1.0f - 1.0f / config->boostRatio) : 0.0f;
+        targetBoostDB = fminf(config->maxBoostDB, excessGap * correctionFraction);
         targetBoostDB *= runtime->dialogueVoiceConfidence;
     }
-    float coefficient = !config.enabled
+    float coefficient = !config->enabled
         ? snapshot->bypassTransitionCoefficient
-        : (targetBoostDB > runtime->dialogueBoostDB ? config.attackCoefficient : config.releaseCoefficient);
+        : (targetBoostDB > runtime->dialogueBoostDB ? config->attackCoefficient : config->releaseCoefficient);
     runtime->dialogueBoostDB = smooth_toward(runtime->dialogueBoostDB, targetBoostDB, coefficient);
 
     // Boost only the extracted dialogue band, not the full program. The same
@@ -1855,33 +1855,33 @@ static void process_multiband_compressor(
     float *left,
     float *right
 ) {
-    N60MultibandCompressorSnapshot multiband = snapshot->multibandCompressor;
-    if (multiband.lowSectionCount == 0 || multiband.highSectionCount == 0) return;
+    const N60MultibandCompressorSnapshot *multiband = &snapshot->multibandCompressor;
+    if (multiband->lowSectionCount == 0 || multiband->highSectionCount == 0) return;
 
     float dryLeft = *left;
     float dryRight = *right;
     float lowLeft = process_filter_cascade(
-        multiband.lowPass,
+        multiband->lowPass,
         runtime->multibandLowPassLeft,
-        multiband.lowSectionCount,
+        multiband->lowSectionCount,
         dryLeft
     );
     float lowRight = process_filter_cascade(
-        multiband.lowPass,
+        multiband->lowPass,
         runtime->multibandLowPassRight,
-        multiband.lowSectionCount,
+        multiband->lowSectionCount,
         dryRight
     );
     float highLeft = process_filter_cascade(
-        multiband.highPass,
+        multiband->highPass,
         runtime->multibandHighPassLeft,
-        multiband.highSectionCount,
+        multiband->highSectionCount,
         dryLeft
     );
     float highRight = process_filter_cascade(
-        multiband.highPass,
+        multiband->highPass,
         runtime->multibandHighPassRight,
-        multiband.highSectionCount,
+        multiband->highSectionCount,
         dryRight
     );
 
@@ -1895,22 +1895,22 @@ static void process_multiband_compressor(
     float outputRight = 0.0f;
 
     for (uint32_t band = 0; band < N60_MULTIBAND_BAND_COUNT; ++band) {
-        float detectorLeft = N60BiquadProcessSample(multiband.sidechainHighPass[band], &runtime->multibandSidechainLeft[band], bandLeft[band]);
-        float detectorRight = N60BiquadProcessSample(multiband.sidechainHighPass[band], &runtime->multibandSidechainRight[band], bandRight[band]);
+        float detectorLeft = N60BiquadProcessSample(multiband->sidechainHighPass[band], &runtime->multibandSidechainLeft[band], bandLeft[band]);
+        float detectorRight = N60BiquadProcessSample(multiband->sidechainHighPass[band], &runtime->multibandSidechainRight[band], bandRight[band]);
         float detector = fmaxf(fabsf(detectorLeft), fabsf(detectorRight));
         float targetDB = dynamics_compression_target(
             detector,
-            multiband.enabled,
-            multiband.thresholdDB[band],
-            multiband.ratio[band],
-            multiband.kneeWidthDB[band]
+            multiband->enabled,
+            multiband->thresholdDB[band],
+            multiband->ratio[band],
+            multiband->kneeWidthDB[band]
         );
-        if (multiband.enabled) targetDB += multiband.makeupGainDB[band];
-        float coefficient = !multiband.enabled
+        if (multiband->enabled) targetDB += multiband->makeupGainDB[band];
+        float coefficient = !multiband->enabled
             ? snapshot->bypassTransitionCoefficient
             : (targetDB < runtime->multibandGainDB[band]
-                ? multiband.attackCoefficient[band]
-                : multiband.releaseCoefficient[band]);
+                ? multiband->attackCoefficient[band]
+                : multiband->releaseCoefficient[band]);
         runtime->multibandGainDB[band] = smooth_toward(
             runtime->multibandGainDB[band],
             targetDB,
@@ -1963,7 +1963,7 @@ void N60DynamicsProcessCoreStereoFrameWithMasterGain(
     float detector = fmaxf(fabsf(compressorDetectorLeft), fabsf(compressorDetectorRight));
     float detectorDB = linear_to_db(detector);
 
-    float compressorTargetDB = compressor_target_gain_db(detectorDB, snapshot->compressor);
+    float compressorTargetDB = compressor_target_gain_db(detectorDB, &snapshot->compressor);
     float compressorCoefficient;
     if (!snapshot->compressor.enabled) {
         compressorCoefficient = snapshot->bypassTransitionCoefficient;
@@ -1987,7 +1987,7 @@ void N60DynamicsProcessCoreStereoFrameWithMasterGain(
 
     detector = fmaxf(fabsf(*left), fabsf(*right));
     detectorDB = linear_to_db(detector);
-    float expanderTargetDB = expander_target_gain_db(detectorDB, snapshot->expander);
+    float expanderTargetDB = expander_target_gain_db(detectorDB, &snapshot->expander);
     float expanderCoefficient;
     if (!snapshot->expander.enabled) {
         expanderCoefficient = snapshot->bypassTransitionCoefficient;
