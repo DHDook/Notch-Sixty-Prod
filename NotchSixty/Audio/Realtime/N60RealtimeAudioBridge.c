@@ -11,6 +11,22 @@ typedef struct {
 } N60StereoFrame;
 
 typedef struct {
+    const float *left;
+    const float *right;
+    UInt32 leftStride;
+    UInt32 rightStride;
+    UInt32 frameCount;
+} N60InputBufferView;
+
+typedef struct {
+    float *left;
+    float *right;
+    UInt32 leftStride;
+    UInt32 rightStride;
+    UInt32 frameCount;
+} N60OutputBufferView;
+
+typedef struct {
     float currentGain;
     float startGain;
     float targetGain;
@@ -92,53 +108,85 @@ static void zero_output(AudioBufferList *bufferList) {
     }
 }
 
-static bool read_input_frame(const AudioBufferList *bufferList, UInt32 frameIndex, N60StereoFrame *frame) {
-    if (bufferList == NULL || frame == NULL) return false;
+static bool make_input_buffer_view(
+    const AudioBufferList *bufferList,
+    N60InputBufferView *view
+) {
+    if (bufferList == NULL || view == NULL) return false;
+    *view = (N60InputBufferView){0};
+
     if (bufferList->mNumberBuffers == 1) {
         const AudioBuffer *buffer = &bufferList->mBuffers[0];
         if (buffer->mData == NULL || buffer->mNumberChannels != 2) return false;
         const float *samples = (const float *)buffer->mData;
-        frame->left = samples[frameIndex * 2];
-        frame->right = samples[frameIndex * 2 + 1];
+        view->left = samples;
+        view->right = samples + 1;
+        view->leftStride = 2;
+        view->rightStride = 2;
+        view->frameCount = buffer->mDataByteSize / (UInt32)(sizeof(float) * 2);
         return true;
     }
+
     if (bufferList->mNumberBuffers >= 2) {
         const AudioBuffer *left = &bufferList->mBuffers[0];
         const AudioBuffer *right = &bufferList->mBuffers[1];
-        if (left->mData == NULL || right->mData == NULL ||
-            left->mNumberChannels < 1 || right->mNumberChannels < 1) {
+        if (left->mData == NULL || right->mData == NULL
+            || left->mNumberChannels < 1 || right->mNumberChannels < 1) {
             return false;
         }
-        frame->left = ((const float *)left->mData)[frameIndex];
-        frame->right = ((const float *)right->mData)[frameIndex];
+        UInt32 leftFrames = left->mDataByteSize
+            / (UInt32)(sizeof(float) * left->mNumberChannels);
+        UInt32 rightFrames = right->mDataByteSize
+            / (UInt32)(sizeof(float) * right->mNumberChannels);
+        view->left = (const float *)left->mData;
+        view->right = (const float *)right->mData;
+        view->leftStride = left->mNumberChannels;
+        view->rightStride = right->mNumberChannels;
+        view->frameCount = leftFrames < rightFrames ? leftFrames : rightFrames;
         return true;
     }
+
     return false;
 }
 
-static bool write_output_frame(AudioBufferList *bufferList, UInt32 frameIndex, N60StereoFrame frame, float gain) {
-    if (bufferList == NULL) return false;
-    frame.left *= gain;
-    frame.right *= gain;
+static bool make_output_buffer_view(
+    AudioBufferList *bufferList,
+    N60OutputBufferView *view
+) {
+    if (bufferList == NULL || view == NULL) return false;
+    *view = (N60OutputBufferView){0};
+
     if (bufferList->mNumberBuffers == 1) {
         AudioBuffer *buffer = &bufferList->mBuffers[0];
         if (buffer->mData == NULL || buffer->mNumberChannels != 2) return false;
         float *samples = (float *)buffer->mData;
-        samples[frameIndex * 2] = frame.left;
-        samples[frameIndex * 2 + 1] = frame.right;
+        view->left = samples;
+        view->right = samples + 1;
+        view->leftStride = 2;
+        view->rightStride = 2;
+        view->frameCount = buffer->mDataByteSize / (UInt32)(sizeof(float) * 2);
         return true;
     }
+
     if (bufferList->mNumberBuffers >= 2) {
         AudioBuffer *left = &bufferList->mBuffers[0];
         AudioBuffer *right = &bufferList->mBuffers[1];
-        if (left->mData == NULL || right->mData == NULL ||
-            left->mNumberChannels < 1 || right->mNumberChannels < 1) {
+        if (left->mData == NULL || right->mData == NULL
+            || left->mNumberChannels < 1 || right->mNumberChannels < 1) {
             return false;
         }
-        ((float *)left->mData)[frameIndex] = frame.left;
-        ((float *)right->mData)[frameIndex] = frame.right;
+        UInt32 leftFrames = left->mDataByteSize
+            / (UInt32)(sizeof(float) * left->mNumberChannels);
+        UInt32 rightFrames = right->mDataByteSize
+            / (UInt32)(sizeof(float) * right->mNumberChannels);
+        view->left = (float *)left->mData;
+        view->right = (float *)right->mData;
+        view->leftStride = left->mNumberChannels;
+        view->rightStride = right->mNumberChannels;
+        view->frameCount = leftFrames < rightFrames ? leftFrames : rightFrames;
         return true;
     }
+
     return false;
 }
 
@@ -505,15 +553,12 @@ OSStatus N60CaptureIOProc(
     if (bridge == NULL || inInputData == NULL) return noErr;
     atomic_fetch_add_explicit(&bridge->captureCallbacks, 1, memory_order_relaxed);
 
-    UInt32 frameCount = 0;
-    if (inInputData->mNumberBuffers == 1 && inInputData->mBuffers[0].mNumberChannels == 2) {
-        frameCount = inInputData->mBuffers[0].mDataByteSize / (UInt32)(sizeof(float) * 2);
-    } else if (inInputData->mNumberBuffers >= 2) {
-        frameCount = inInputData->mBuffers[0].mDataByteSize / (UInt32)sizeof(float);
-    } else {
+    N60InputBufferView inputView = {0};
+    if (!make_input_buffer_view(inInputData, &inputView)) {
         atomic_fetch_add_explicit(&bridge->unsupportedBufferLayouts, 1, memory_order_relaxed);
         return noErr;
     }
+    UInt32 frameCount = inputView.frameCount;
 
     uint64_t writeIndex = atomic_load_explicit(&bridge->writeIndex, memory_order_relaxed);
     uint64_t readIndex = atomic_load_explicit(&bridge->readIndex, memory_order_acquire);
@@ -521,13 +566,13 @@ OSStatus N60CaptureIOProc(
     uint64_t available = used < bridge->capacityFrames ? bridge->capacityFrames - used : 0;
     UInt32 framesToWrite = frameCount < available ? frameCount : (UInt32)available;
     uint32_t ringWriteIndex = (uint32_t)(writeIndex % bridge->capacityFrames);
+    const float *inputLeft = inputView.left;
+    const float *inputRight = inputView.right;
 
     for (UInt32 frameIndex = 0; frameIndex < framesToWrite; ++frameIndex) {
-        N60StereoFrame frame;
-        if (!read_input_frame(inInputData, frameIndex, &frame)) {
-            atomic_fetch_add_explicit(&bridge->unsupportedBufferLayouts, 1, memory_order_relaxed);
-            return noErr;
-        }
+        N60StereoFrame frame = {*inputLeft, *inputRight};
+        inputLeft += inputView.leftStride;
+        inputRight += inputView.rightStride;
         bridge->frames[ringWriteIndex] = frame;
         ringWriteIndex += 1u;
         if (ringWriteIndex == bridge->capacityFrames) ringWriteIndex = 0u;
@@ -564,16 +609,13 @@ OSStatus N60OutputIOProc(
     if (bridge == NULL || outOutputData == NULL) return noErr;
     atomic_fetch_add_explicit(&bridge->outputCallbacks, 1, memory_order_relaxed);
 
-    UInt32 frameCount = 0;
-    if (outOutputData->mNumberBuffers == 1 && outOutputData->mBuffers[0].mNumberChannels == 2) {
-        frameCount = outOutputData->mBuffers[0].mDataByteSize / (UInt32)(sizeof(float) * 2);
-    } else if (outOutputData->mNumberBuffers >= 2) {
-        frameCount = outOutputData->mBuffers[0].mDataByteSize / (UInt32)sizeof(float);
-    } else {
+    N60OutputBufferView outputView = {0};
+    if (!make_output_buffer_view(outOutputData, &outputView)) {
         zero_output(outOutputData);
         atomic_fetch_add_explicit(&bridge->unsupportedBufferLayouts, 1, memory_order_relaxed);
         return noErr;
     }
+    UInt32 frameCount = outputView.frameCount;
 
     uint64_t readIndex = atomic_load_explicit(&bridge->readIndex, memory_order_relaxed);
     uint64_t writeIndex = atomic_load_explicit(&bridge->writeIndex, memory_order_acquire);
@@ -607,6 +649,8 @@ OSStatus N60OutputIOProc(
     N60RenderKernelRenderContext renderContext = N60RenderKernelBeginRender(bridge->renderKernel);
     UInt32 renderedFrames = 0;
     uint32_t ringReadIndex = (uint32_t)(readIndex % bridge->capacityFrames);
+    float *outputLeft = outputView.left;
+    float *outputRight = outputView.right;
     for (UInt32 frameIndex = 0; frameIndex < framesToRead; ++frameIndex) {
         N60StereoFrame frame = bridge->frames[ringReadIndex];
         ringReadIndex += 1u;
@@ -623,15 +667,10 @@ OSStatus N60OutputIOProc(
 
         float transitionGain = next_transition_gain(&transitionRamp);
         float gain = startup_fade_gain(&startupFade, masterGain) * transitionGain;
-        if (!write_output_frame(outOutputData, frameIndex, processed, gain)) {
-            N60RenderKernelEndRender(bridge->renderKernel, &renderContext, renderedFrames);
-            bridge->transitionRuntime = transitionRamp;
-            bridge->startupFadeRuntime = startupFade;
-            publish_transition_runtime(bridge, &transitionRamp);
-            zero_output(outOutputData);
-            atomic_fetch_add_explicit(&bridge->unsupportedBufferLayouts, 1, memory_order_relaxed);
-            return noErr;
-        }
+        *outputLeft = processed.left * gain;
+        *outputRight = processed.right * gain;
+        outputLeft += outputView.leftStride;
+        outputRight += outputView.rightStride;
         renderedFrames += 1;
     }
 
@@ -641,8 +680,10 @@ OSStatus N60OutputIOProc(
     publish_transition_runtime(bridge, &transitionRamp);
 
     for (UInt32 frameIndex = framesToRead; frameIndex < frameCount; ++frameIndex) {
-        N60StereoFrame silence = {0.0f, 0.0f};
-        (void)write_output_frame(outOutputData, frameIndex, silence, 1.0f);
+        *outputLeft = 0.0f;
+        *outputRight = 0.0f;
+        outputLeft += outputView.leftStride;
+        outputRight += outputView.rightStride;
     }
 
     atomic_store_explicit(&bridge->readIndex, readIndex + framesToRead, memory_order_release);
