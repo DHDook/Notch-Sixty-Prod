@@ -520,6 +520,7 @@ OSStatus N60CaptureIOProc(
     uint64_t used = writeIndex >= readIndex ? writeIndex - readIndex : 0;
     uint64_t available = used < bridge->capacityFrames ? bridge->capacityFrames - used : 0;
     UInt32 framesToWrite = frameCount < available ? frameCount : (UInt32)available;
+    uint32_t ringWriteIndex = (uint32_t)(writeIndex % bridge->capacityFrames);
 
     for (UInt32 frameIndex = 0; frameIndex < framesToWrite; ++frameIndex) {
         N60StereoFrame frame;
@@ -527,7 +528,9 @@ OSStatus N60CaptureIOProc(
             atomic_fetch_add_explicit(&bridge->unsupportedBufferLayouts, 1, memory_order_relaxed);
             return noErr;
         }
-        bridge->frames[(writeIndex + frameIndex) % bridge->capacityFrames] = frame;
+        bridge->frames[ringWriteIndex] = frame;
+        ringWriteIndex += 1u;
+        if (ringWriteIndex == bridge->capacityFrames) ringWriteIndex = 0u;
     }
 
     atomic_store_explicit(&bridge->writeIndex, writeIndex + framesToWrite, memory_order_release);
@@ -603,8 +606,11 @@ OSStatus N60OutputIOProc(
 
     N60RenderKernelRenderContext renderContext = N60RenderKernelBeginRender(bridge->renderKernel);
     UInt32 renderedFrames = 0;
+    uint32_t ringReadIndex = (uint32_t)(readIndex % bridge->capacityFrames);
     for (UInt32 frameIndex = 0; frameIndex < framesToRead; ++frameIndex) {
-        N60StereoFrame frame = bridge->frames[(readIndex + frameIndex) % bridge->capacityFrames];
+        N60StereoFrame frame = bridge->frames[ringReadIndex];
+        ringReadIndex += 1u;
+        if (ringReadIndex == bridge->capacityFrames) ringReadIndex = 0u;
         N60StereoFrame processed;
         N60RenderKernelProcessStereoFrameInContext(
             bridge->renderKernel,
