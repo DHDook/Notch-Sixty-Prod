@@ -88,6 +88,7 @@ private enum ProductionMeteringDemand {
 
 struct ProductionRootView: View {
     @ObservedObject var product: ProductController
+    @Environment(\.openWindow) private var openWindow
     @State private var selection: ProductionSection? = .dashboard
 
     private var engine: AudioIOEngine { product.audioEngine }
@@ -141,6 +142,14 @@ struct ProductionRootView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            Button {
+                openWindow(id: "engineering-validation")
+            } label: {
+                Label("Engineering Validation", systemImage: "wrench.and.screwdriver")
+            }
+            .buttonStyle(.glass)
+            .help("Open the retained engineering validation tools")
+
             Button {
                 if engine.lifecycleState == .running { engine.stop() }
                 else { try? engine.start() }
