@@ -26,7 +26,7 @@ def forbid(text: str, needle: str, context: str) -> None:
 
 
 def vu_for_dbfs(dbfs: float) -> float:
-    return min(max(dbfs - (-18.0), -20.0), 3.0)
+    return min(max(dbfs - (-18.0), -30.0), 3.0)
 
 
 # Shipping target / platform language.
@@ -57,22 +57,30 @@ for validation_surface in [
 ]:
     require(APP, validation_surface, "retained engineering validation")
 
-# Signature dashboard identity is a new clean-room stereo analog meter pair.
-require(UI, "private struct SignatureVUMeter", "signature VU component")
-require(UI, "private struct SignatureVUScaleFace", "static VU face component")
-require(UI, 'SignatureVUMeter(channel: "LEFT"', "left VU")
-require(UI, 'SignatureVUMeter(channel: "RIGHT"', "right VU")
+# Signature dashboard identity is one clean-room stereo analog instrument with
+# two independently driven needles and one centered brand mark.
+require(UI, "private struct StereoSignatureVUMeterPanel", "isolated VU update surface")
+require(UI, "private struct StereoSignatureVUMeter", "stereo signature VU component")
+require(UI, "private struct StereoSignatureVUScaleFace", "static stereo VU face component")
+require(UI, "StereoSignatureVUMeter(leftVU: leftVU, rightVU: rightVU)", "stereo VU deck")
 require(UI, "static let referenceDBFS = -18.0", "VU reference")
-require(UI, "static let minimumVU = -20.0", "VU display floor")
+require(UI, "static let minimumVU = -30.0", "extended VU display floor")
 require(UI, "static let maximumVU = 3.0", "VU display ceiling")
 require(UI, "dbFS - referenceDBFS", "VU dBFS mapping")
-require(UI, "startAngle: .degrees(210)", "upper-arc 1970s VU scale")
-require(UI, "endAngle: .degrees(330)", "upper-arc 1970s VU scale")
-require(UI, "210 + normalizedPosition(forVU: vu) * 120", "VU needle sweep")
+require(UI, "startAngle: .degrees(205)", "upper-arc 1970s VU scale")
+require(UI, "endAngle: .degrees(335)", "upper-arc 1970s VU scale")
+require(UI, "205 + normalizedPosition(forVU: vu) * 130", "VU needle sweep")
 require(UI, ".equatable()", "static VU face redraw suppression")
+require(UI, 'Text("NOTCH SIXTY")', "single centered product mark")
+if UI.count('Text("NOTCH SIXTY")') != 1:
+    print("PR36 UI foundation validation: FAIL: stereo VU deck must contain exactly one NOTCH SIXTY mark", file=sys.stderr)
+    raise SystemExit(1)
+forbid(UI, "peakDBFS", "signature VU numeric peak readout")
+forbid(UI, 'Text("PEAK ', "signature VU numeric peak readout")
 
-# Numerical guard for the shipping VU calibration contract.
-for dbfs, expected in [(-38.0, -20.0), (-18.0, 0.0), (-15.0, 3.0), (-60.0, -20.0), (-10.0, 3.0)]:
+# Numerical guard for the shipping VU calibration contract. Extending the low
+# end gives useful motion at ordinary/quiet playback levels without changing 0 VU.
+for dbfs, expected in [(-48.0, -30.0), (-38.0, -20.0), (-18.0, 0.0), (-15.0, 3.0), (-60.0, -30.0), (-10.0, 3.0)]:
     actual = vu_for_dbfs(dbfs)
     if not math.isclose(actual, expected, abs_tol=1e-12):
         print(
@@ -80,6 +88,16 @@ for dbfs, expected in [(-38.0, -20.0), (-18.0, 0.0), (-15.0, 3.0), (-60.0, -20.0
             file=sys.stderr,
         )
         raise SystemExit(1)
+
+# Live VU state is isolated from the Dashboard hierarchy so 20 Hz needle updates
+# do not invalidate all Dashboard controls/cards.
+dashboard_body = UI.split("private struct ProductionDashboardView", 1)[1].split(
+    "private struct StereoSignatureVUMeterPanel", 1
+)[0]
+forbid(dashboard_body, "@State private var leftVU", "Dashboard-wide VU state")
+forbid(dashboard_body, ".task(id:", "Dashboard-wide VU polling task")
+require(UI, "@State private var leftVU", "isolated left VU state")
+require(UI, "@State private var rightVU", "isolated right VU state")
 
 # Meter pipelines are independent. Dashboard owns a lightweight output-only VU
 # pipeline and must not enable the render-kernel input/post-EQ/output meter stack.
@@ -118,12 +136,15 @@ require(UI, 'Label("Refresh Outputs", systemImage: "arrow.clockwise")', "dashboa
 forbid(UI, 'Button("Open")', "redundant dashboard jump buttons")
 forbid(UI, "private struct ProductionAudioView", "obsolete audio page")
 
-# Room Correction and Active Crossover belong to the dedicated speaker workspace.
-require(UI, "case speakerSetup", "speaker setup route")
-require(UI, "private struct ProductionSpeakerSetupView", "speaker setup surface")
-require(UI, 'Text("Active Crossover")', "speaker setup crossover route")
-require(UI, 'Text("Room Correction")', "speaker setup room-correction route")
-require(DOC, "Room Correction and Active Crossover do not appear as dashboard control panels.", "information architecture contract")
+# Active Crossover and Room Correction now have separate first-class sidebar
+# workspaces rather than sharing a segmented Speaker Setup page.
+require(UI, "case activeCrossover", "active crossover route")
+require(UI, "case roomCorrection", "room correction route")
+forbid(UI, "case speakerSetup", "combined speaker setup route")
+require(UI, "private struct ProductionActiveCrossoverView", "active crossover surface")
+require(UI, "private struct ProductionRoomCorrectionView", "room correction surface")
+forbid(UI, "private struct ProductionSpeakerSetupView", "combined speaker setup surface")
+require(DOC, "Active Crossover and Room Correction are separate sidebar workspaces.", "information architecture contract")
 require(DOC, "independent meter pipelines", "meter pipeline architecture contract")
 
 # Engineering validation is intentionally retained during migration.
