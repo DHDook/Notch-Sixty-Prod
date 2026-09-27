@@ -92,6 +92,12 @@ for helper_name, helper_body in (
 ):
     forbid(helper_body, "atomic_", helper_name)
 
+capture_callback = function_body(bridge, r"OSStatus\s+N60CaptureIOProc\s*\(")
+require(capture_callback, "uint32_t ringWriteIndex = (uint32_t)(writeIndex % bridge->capacityFrames);", "N60CaptureIOProc")
+require(capture_callback, "bridge->frames[ringWriteIndex] = frame;", "N60CaptureIOProc")
+require(capture_callback, "if (ringWriteIndex == bridge->capacityFrames) ringWriteIndex = 0u;", "N60CaptureIOProc")
+forbid(capture_callback, "bridge->frames[(writeIndex + frameIndex) % bridge->capacityFrames]", "N60CaptureIOProc per-frame ring path")
+
 output_callback = function_body(bridge, r"OSStatus\s+N60OutputIOProc\s*\(")
 require(output_callback, "latch_transition_command(bridge);", "N60OutputIOProc callback preamble")
 require(output_callback, "latch_startup_fade_command(bridge);", "N60OutputIOProc callback preamble")
@@ -100,6 +106,10 @@ require(output_callback, "N60StartupFadeRuntime startupFade = bridge->startupFad
 require(output_callback, "next_transition_gain(&transitionRamp)", "N60OutputIOProc rendered-frame path")
 require(output_callback, "startup_fade_gain(&startupFade, masterGain)", "N60OutputIOProc rendered-frame path")
 require(output_callback, "publish_transition_runtime(bridge, &transitionRamp);", "N60OutputIOProc")
+require(output_callback, "uint32_t ringReadIndex = (uint32_t)(readIndex % bridge->capacityFrames);", "N60OutputIOProc")
+require(output_callback, "N60StereoFrame frame = bridge->frames[ringReadIndex];", "N60OutputIOProc")
+require(output_callback, "if (ringReadIndex == bridge->capacityFrames) ringReadIndex = 0u;", "N60OutputIOProc")
+forbid(output_callback, "bridge->frames[(readIndex + frameIndex) % bridge->capacityFrames]", "N60OutputIOProc per-frame ring path")
 
 # Command publication must remain sequence-protected rather than mutating the
 # callback-owned runtime from the control thread.
