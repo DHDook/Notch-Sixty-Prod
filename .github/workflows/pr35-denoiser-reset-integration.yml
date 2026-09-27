@@ -1,0 +1,109 @@
+name: PR35 Denoiser Reset Integration
+
+on:
+  push:
+    branches:
+      - feature/pr35-dsp-performance-readiness
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: xcode-27
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v7
+        with:
+          ref: feature/pr35-dsp-performance-readiness
+          fetch-depth: 0
+
+      - name: Apply bounded denoiser reset
+        run: python3 ci/apply_pr35_denoiser_bounded_reset.py
+
+      - name: Validate diff cleanliness
+        run: git diff --check
+
+      - name: Reject callback-side bulk denoiser reset
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path('NotchSixty/Audio/Realtime/N60SpectralDenoiser.c').read_text()
+          if 'clear_processing_state' in text:
+              raise SystemExit('legacy bulk clear_processing_state remains')
+          start = text.index('void N60SpectralDenoiserProcessStereoFrame(')
+          body = text[start:]
+          forbidden = [
+              'memset(runtime->inputLeft',
+              'memset(runtime->inputRight',
+              'memset(runtime->outputLeft',
+              'memset(runtime->outputRight',
+              'memset(runtime->noisePower',
+              'memset(runtime->captureSum',
+              'memset(runtime->previousEnhancedPower',
+          ]
+          for needle in forbidden:
+              if needle in body:
+                  raise SystemExit(f'callback-side bulk clear remains: {needle}')
+          print('Denoiser callback reset is logically invalidated: PASS')
+          PY
+
+      - name: Validate bounded reset equivalence
+        run: >-
+          clang -std=c11 -O2 -Wall -Wextra -Werror
+          -I NotchSixty/Audio/Realtime
+          ci/validate_pr35_denoiser_bounded_reset.c
+          NotchSixty/Audio/Realtime/N60SpectralDenoiser.c
+          -lm
+          -o /tmp/validate-pr35-denoiser-reset
+          && /tmp/validate-pr35-denoiser-reset
+
+      - name: Validate retained PR34 DSP contracts
+        run: |
+          set -euo pipefail
+          clang -std=c11 -Wall -Wextra -Werror ci/validate_pr34_bandpass.c -o /tmp/validate-pr34-bandpass && /tmp/validate-pr34-bandpass
+          clang -std=c11 -Wall -Wextra -Werror ci/validate_pr34_constantq.c -o /tmp/validate-pr34-constantq && /tmp/validate-pr34-constantq
+          clang -std=c11 -Wall -Wextra -Werror ci/validate_pr34_linkwitz.c -o /tmp/validate-pr34-linkwitz && /tmp/validate-pr34-linkwitz
+          clang -std=c11 -Wall -Wextra -Werror ci/validate_pr34_compiled_eq.c -o /tmp/validate-pr34-compiled-eq && /tmp/validate-pr34-compiled-eq
+          clang -std=c11 -Wall -Wextra -Werror ci/validate_pr34_midside.c -o /tmp/validate-pr34-midside && /tmp/validate-pr34-midside
+          clang -std=c11 -Wall -Wextra -Werror ci/validate_pr34_per_band_fir.c NotchSixty/Audio/Realtime/N60Convolution.c -lm -o /tmp/validate-pr34-per-band-fir && /tmp/validate-pr34-per-band-fir
+          clang -std=c11 -Wall -Wextra -Werror ci/validate_pr34_mixed_phase.c -lm -o /tmp/validate-pr34-mixed-phase && /tmp/validate-pr34-mixed-phase
+          clang -std=c11 -Wall -Wextra -Werror -I NotchSixty/Audio/Realtime ci/validate_pr34_dynamic_domains.c NotchSixty/Audio/Realtime/N60DynamicEQ.c -lm -o /tmp/validate-pr34-dynamic-domains && /tmp/validate-pr34-dynamic-domains
+          clang -std=c11 -Wall -Wextra -Werror ci/validate_pr34_symmetry_balance.c -lm -o /tmp/validate-pr34-symmetry-balance && /tmp/validate-pr34-symmetry-balance
+          clang -std=c11 -Wall -Wextra -Werror ci/validate_pr34_speaker_crossfeed.c -lm -o /tmp/validate-pr34-speaker-crossfeed && /tmp/validate-pr34-speaker-crossfeed
+          clang -std=c11 -Wall -Wextra -Werror ci/validate_pr34_crosstalk_cancellation.c -lm -o /tmp/validate-pr34-crosstalk && /tmp/validate-pr34-crosstalk
+          clang -std=c11 -Wall -Wextra -Werror ci/validate_pr34_sub_phase_alignment.c -lm -o /tmp/validate-pr34-sub-phase && /tmp/validate-pr34-sub-phase
+
+      - name: Build
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          build
+
+      - name: Test
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          test
+
+      - name: Commit verified denoiser reset
+        run: |
+          git add NotchSixty/Audio/Realtime/N60SpectralDenoiser.c
+          if git diff --cached --quiet; then
+            echo "Bounded denoiser reset already committed; nothing to do."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Make denoiser reset realtime-bounded"
+          git push origin HEAD:feature/pr35-dsp-performance-readiness
