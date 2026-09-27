@@ -114,8 +114,8 @@ jobs:
             $REALTIME_SOURCES \
             -framework Accelerate \
             -o /tmp/benchmark-pr35-render-o0
-          echo '=== O0 ==='
-          /tmp/benchmark-pr35-render-o0
+          echo '=== O0 ===' | tee /tmp/pr35-render-benchmark.txt
+          /tmp/benchmark-pr35-render-o0 | tee -a /tmp/pr35-render-benchmark.txt
 
           clang -std=c11 -O3 -Wall -Wextra \
             -include stddef.h \
@@ -124,8 +124,16 @@ jobs:
             $REALTIME_SOURCES \
             -framework Accelerate \
             -o /tmp/benchmark-pr35-render-o3
-          echo '=== O3 ==='
-          /tmp/benchmark-pr35-render-o3
+          echo '=== O3 ===' | tee -a /tmp/pr35-render-benchmark.txt
+          /tmp/benchmark-pr35-render-o3 | tee -a /tmp/pr35-render-benchmark.txt
+
+      - name: Upload PR35 render benchmark
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr35-render-benchmark
+          path: /tmp/pr35-render-benchmark.txt
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Build
         run: >-
