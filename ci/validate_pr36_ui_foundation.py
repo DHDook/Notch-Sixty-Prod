@@ -9,6 +9,7 @@ APP = (ROOT / "NotchSixty/NotchSixtyApp.swift").read_text()
 PROJECT = (ROOT / "NotchSixty.xcodeproj/project.pbxproj").read_text()
 DOC = (ROOT / "docs/PR36_PRODUCTION_UI_FOUNDATION.md").read_text()
 BRIDGE = (ROOT / "NotchSixty/Audio/Realtime/N60RealtimeAudioBridge.c").read_text()
+BRIDGE_HEADER = (ROOT / "NotchSixty/Audio/Realtime/N60RealtimeAudioBridge.h").read_text()
 DIAGNOSTICS = (ROOT / "NotchSixty/Diagnostics/AudioDiagnosticsSnapshot.swift").read_text()
 
 
@@ -58,6 +59,7 @@ for validation_surface in [
 
 # Signature dashboard identity is a new clean-room stereo analog meter pair.
 require(UI, "private struct SignatureVUMeter", "signature VU component")
+require(UI, "private struct SignatureVUScaleFace", "static VU face component")
 require(UI, 'SignatureVUMeter(channel: "LEFT"', "left VU")
 require(UI, 'SignatureVUMeter(channel: "RIGHT"', "right VU")
 require(UI, "static let referenceDBFS = -18.0", "VU reference")
@@ -66,7 +68,8 @@ require(UI, "static let maximumVU = 3.0", "VU display ceiling")
 require(UI, "dbFS - referenceDBFS", "VU dBFS mapping")
 require(UI, "startAngle: .degrees(210)", "upper-arc 1970s VU scale")
 require(UI, "endAngle: .degrees(330)", "upper-arc 1970s VU scale")
-require(UI, "210 + ProductionVUScale.normalizedPosition(forVU: value) * 120", "VU needle sweep")
+require(UI, "210 + normalizedPosition(forVU: vu) * 120", "VU needle sweep")
+require(UI, ".equatable()", "static VU face redraw suppression")
 
 # Numerical guard for the shipping VU calibration contract.
 for dbfs, expected in [(-38.0, -20.0), (-18.0, 0.0), (-15.0, 3.0), (-60.0, -20.0), (-10.0, 3.0)]:
@@ -78,22 +81,33 @@ for dbfs, expected in [(-38.0, -20.0), (-18.0, 0.0), (-15.0, 3.0), (-60.0, -20.0
         )
         raise SystemExit(1)
 
-# PR35 meter gating remains intact. Dashboard visibility plus the explicit user
-# VU toggle request metering; turning the toggle off cancels the loop and releases
-# the demand token, parking both UI polling and render-kernel meter work.
+# Meter pipelines are independent. Dashboard owns a lightweight output-only VU
+# pipeline and must not enable the render-kernel input/post-EQ/output meter stack.
 require(UI, 'Toggle("VU Meters", isOn: $vuMetersEnabled)', "explicit VU meter toggle")
 require(UI, "engine.lifecycleState == .running, vuMetersEnabled", "meter-loop enable guard")
-require(UI, "ProductionMeteringDemand.acquire", "visible-dashboard meter request")
-require(UI, "ProductionMeteringDemand.release", "hidden/disabled-dashboard meter release")
-require(UI, "Task.sleep(nanoseconds: 33_000_000)", "bounded UI meter polling")
-require(BRIDGE, "static _Atomic bool gMeteringDemand = false;", "default-off meter demand")
-require(BRIDGE, "snapshot.meteringEnabled = N60RealtimeAudioBridgeMeteringDemand();", "graph-publication meter demand injection")
-require(DIAGNOSTICS, "let meteringEnabled: Bool", "Swift meter-gate diagnostics")
-require(DIAGNOSTICS, "meteringEnabled = diagnostics.meteringEnabled", "Swift meter-gate diagnostics mapping")
+require(UI, "ProductionOutputVUMeterDemand.acquire", "visible-dashboard output VU request")
+require(UI, "ProductionOutputVUMeterDemand.release", "hidden/disabled-dashboard output VU release")
+require(UI, "Task.sleep(nanoseconds: 50_000_000)", "20 Hz VU UI polling")
+forbid(UI, "ProductionMeteringDemand.acquire", "Dashboard full-meter request")
+forbid(UI, "N60RealtimeAudioBridgeSetMeteringDemand", "Dashboard full-meter API")
 
-# The meter-demand getter must not creep into the physical-output sample loop.
+require(BRIDGE, "static _Atomic bool gMeteringDemand = false;", "default-off full meter demand")
+require(BRIDGE, "static _Atomic bool gOutputVUMeterDemand = false;", "default-off output VU demand")
+require(BRIDGE_HEADER, "N60RealtimeAudioBridgeSetOutputVUMeterDemand", "output VU demand API")
+require(BRIDGE_HEADER, "N60OutputVUMeterSnapshot", "output VU snapshot API")
+require(BRIDGE, "bool outputVUMeterEnabled = N60RealtimeAudioBridgeOutputVUMeterDemand();", "callback-bounded VU demand latch")
+require(BRIDGE, "publish_output_vu_meter(", "output-only VU publication")
+require(BRIDGE, "diagnostics.outputMeter.rmsLeft = vu.rmsLeft;", "VU diagnostics bridge")
+require(BRIDGE, "snapshot.meteringEnabled = N60RealtimeAudioBridgeMeteringDemand();", "independent full-meter graph demand")
+require(DIAGNOSTICS, "let meteringEnabled: Bool", "Swift full-meter diagnostics")
+
+# Demand is read once before the sample loop; no atomic demand lookup may occur
+# inside the rendered-frame loop itself.
 output_proc = BRIDGE.split("OSStatus N60OutputIOProc(", 1)[1]
-forbid(output_proc, "N60RealtimeAudioBridgeMeteringDemand()", "realtime output callback")
+loop = output_proc.split("for (UInt32 frameIndex = 0; frameIndex < framesToRead; ++frameIndex)", 1)[1]
+loop = loop.split("N60RenderKernelEndRender", 1)[0]
+forbid(loop, "N60RealtimeAudioBridgeOutputVUMeterDemand()", "per-sample VU path")
+forbid(output_proc, "N60RealtimeAudioBridgeMeteringDemand()", "realtime output callback full-meter demand")
 
 # Side navigation is authoritative. Detailed metering gets its own future workspace;
 # the minimal Audio route is removed and its useful routing control lives on Dashboard.
@@ -110,6 +124,7 @@ require(UI, "private struct ProductionSpeakerSetupView", "speaker setup surface"
 require(UI, 'Text("Active Crossover")', "speaker setup crossover route")
 require(UI, 'Text("Room Correction")', "speaker setup room-correction route")
 require(DOC, "Room Correction and Active Crossover do not appear as dashboard control panels.", "information architecture contract")
+require(DOC, "independent meter pipelines", "meter pipeline architecture contract")
 
 # Engineering validation is intentionally retained during migration.
 require(DOC, "Engineering Validation", "validation migration contract")
