@@ -358,6 +358,8 @@ typedef struct {
     float gateDetectorEnvelope;
     uint32_t gateBelowThresholdFrames;
     bool gateOpen;
+    bool preEQParked;
+    bool coreParked;
 } N60DynamicsRuntime;
 
 typedef struct {
