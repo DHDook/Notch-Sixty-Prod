@@ -63,6 +63,17 @@ jobs:
             -o /tmp/validate-pr35-denoiser-fastpath
           /tmp/validate-pr35-denoiser-fastpath
 
+      - name: Validate PR35 Render Snapshot Lifetime
+        run: |
+          REALTIME_SOURCES=$(find NotchSixty/Audio/Realtime -name '*.c' ! -name 'N60RealtimeAudioBridge.c' -print)
+          clang -std=c11 -Wall -Wextra \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr35_render_context_snapshot_pointer.c \
+            $REALTIME_SOURCES \
+            -framework Accelerate \
+            -o /tmp/validate-pr35-render-snapshot
+          /tmp/validate-pr35-render-snapshot
+
       - name: Build
         run: >-
           xcodebuild
