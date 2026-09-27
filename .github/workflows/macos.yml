@@ -36,6 +36,19 @@ jobs:
       - name: Validate PR35 Realtime Control Plane
         run: python3 ci/validate_pr35_realtime_control_plane.py
 
+      - name: Validate PR35 Rendered Transition Acknowledgement
+        run: |
+          REALTIME_SOURCES=$(find NotchSixty/Audio/Realtime -name '*.c' -print)
+          clang -std=c11 -O2 -Wall -Wextra -Werror \
+            -include stddef.h \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr35_transition_ack.c \
+            $REALTIME_SOURCES \
+            -framework Accelerate \
+            -framework CoreAudio \
+            -o /tmp/validate-pr35-transition-ack
+          /tmp/validate-pr35-transition-ack
+
       - name: Validate PR35 Optional Stage Parking
         run: python3 ci/validate_pr35_optional_stage_parking.py
 
