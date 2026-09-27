@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+from pathlib import Path
+import re
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+BRIDGE = ROOT / "NotchSixty/Audio/Realtime/N60RealtimeAudioBridge.c"
+CORE_AUDIO = ROOT / "NotchSixty/Audio/CoreAudio/CoreAudioError.swift"
+
+
+def fail(message: str) -> None:
+    print(f"PR35 realtime/control-plane validation: FAIL: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def function_body(source: str, signature_pattern: str) -> str:
+    match = re.search(signature_pattern, source, re.MULTILINE)
+    if match is None:
+        fail(f"missing function matching {signature_pattern!r}")
+    opening = source.find("{", match.end())
+    if opening < 0:
+        fail(f"missing opening brace for {signature_pattern!r}")
+
+    depth = 0
+    index = opening
+    state = "code"
+    while index < len(source):
+        ch = source[index]
+        nxt = source[index + 1] if index + 1 < len(source) else ""
+
+        if state == "code":
+            if ch == '"':
+                state = "string"
+            elif ch == "'":
+                state = "char"
+            elif ch == "/" and nxt == "/":
+                state = "line_comment"
+                index += 1
+            elif ch == "/" and nxt == "*":
+                state = "block_comment"
+                index += 1
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return source[opening + 1:index]
+        elif state == "string":
+            if ch == "\\":
+                index += 1
+            elif ch == '"':
+                state = "code"
+        elif state == "char":
+            if ch == "\\":
+                index += 1
+            elif ch == "'":
+                state = "code"
+        elif state == "line_comment":
+            if ch == "\n":
+                state = "code"
+        elif state == "block_comment":
+            if ch == "*" and nxt == "/":
+                state = "code"
+                index += 1
+        index += 1
+
+    fail(f"unterminated function matching {signature_pattern!r}")
+    return ""
+
+
+def require(haystack: str, needle: str, context: str) -> None:
+    if needle not in haystack:
+        fail(f"{context} must contain {needle!r}")
+
+
+def forbid(haystack: str, needle: str, context: str) -> None:
+    if needle in haystack:
+        fail(f"{context} must not contain {needle!r}")
+
+
+bridge = BRIDGE.read_text()
+core_audio = CORE_AUDIO.read_text()
+
+# The per-frame gain helpers must remain pure callback-local arithmetic.
+transition_helper = function_body(bridge, r"static\s+float\s+next_transition_gain\s*\(")
+startup_helper = function_body(bridge, r"static\s+float\s+startup_fade_gain\s*\(")
+for helper_name, helper_body in (
+    ("next_transition_gain", transition_helper),
+    ("startup_fade_gain", startup_helper),
+):
+    forbid(helper_body, "atomic_", helper_name)
+
+# The rendered-frame loop itself must not gain direct atomic traffic again.
+output_callback = function_body(bridge, r"OSStatus\s+N60OutputIOProc\s*\(")
+loop_match = re.search(
+    r"for\s*\(UInt32\s+frameIndex\s*=\s*0;\s*frameIndex\s*<\s*framesToRead;\s*\+\+frameIndex\s*\)",
+    output_callback,
+)
+if loop_match is None:
+    fail("unable to locate rendered-frame loop in N60OutputIOProc")
+loop_opening = output_callback.find("{", loop_match.end())
+if loop_opening < 0:
+    fail("rendered-frame loop has no body")
+loop_body = function_body("void loop(void) " + output_callback[loop_opening:], r"void\s+loop\s*\(")
+forbid(loop_body, "atomic_", "N60OutputIOProc rendered-frame loop")
+require(output_callback, "latch_transition_command(bridge);", "N60OutputIOProc callback preamble")
+require(output_callback, "latch_startup_fade_command(bridge);", "N60OutputIOProc callback preamble")
+require(output_callback, "N60TransitionRampRuntime transitionRamp = bridge->transitionRuntime;", "N60OutputIOProc")
+require(output_callback, "N60StartupFadeRuntime startupFade = bridge->startupFadeRuntime;", "N60OutputIOProc")
+require(output_callback, "publish_transition_runtime(bridge, &transitionRamp);", "N60OutputIOProc")
+
+# Command publication must remain sequence-protected rather than mutating the
+# callback-owned runtime from the control thread.
+require(bridge, "transitionCommandSequence", "bridge transition command state")
+require(bridge, "startupFadeCommandSequence", "bridge startup-fade command state")
+require(bridge, "begin_command_write", "bridge command publication")
+require(bridge, "end_command_write", "bridge command publication")
+
+# Interactive graph mutation must remain off the caller/MainActor and free of
+# explicit sleep choreography. Teardown may retain a bounded synchronous
+# lifetime barrier because the Core Audio callbacks must be stopped before the
+# bridge can be freed.
+transition_graph = function_body(core_audio, r"func\s+transitionDSPGraph\s*\(")
+forbid(transition_graph, "usleep(", "transitionDSPGraph")
+forbid(transition_graph, "for step", "transitionDSPGraph")
+require(transition_graph, "enqueueTransition", "transitionDSPGraph")
+
+publish_graph = function_body(core_audio, r"func\s+publishDSPGraph\s*\(")
+require(publish_graph, "enqueuePublish", "publishDSPGraph running-transport path")
+
+require(core_audio, "DSPGraphPublicationCoordinator", "Core Audio control plane")
+require(core_audio, "DispatchQueue(", "DSP graph publication coordinator")
+require(core_audio, "pendingSnapshot", "DSP graph publication coalescing")
+require(core_audio, "graphPublicationCoalescedUpdates", "publication instrumentation")
+require(core_audio, "graphPublicationFailures", "publication instrumentation")
+require(core_audio, "graphTransitionsScheduled", "publication instrumentation")
+
+print("PR35 realtime/control-plane architecture: PASS")
