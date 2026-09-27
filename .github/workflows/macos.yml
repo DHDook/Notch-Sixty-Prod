@@ -36,6 +36,33 @@ jobs:
       - name: Validate PR35 Realtime Control Plane
         run: python3 ci/validate_pr35_realtime_control_plane.py
 
+      - name: Validate PR35 Protection Reset Equivalence
+        run: |
+          clang -std=c11 -Wall -Wextra -Werror \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr35_protection_sparse_reset.c \
+            NotchSixty/Audio/Realtime/N60Protection.c \
+            -o /tmp/validate-pr35-protection-reset
+          /tmp/validate-pr35-protection-reset
+
+      - name: Validate PR35 Denoiser Bounded Reset Equivalence
+        run: |
+          clang -std=c11 -Wall -Wextra -Werror \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr35_denoiser_bounded_reset.c \
+            NotchSixty/Audio/Realtime/N60SpectralDenoiser.c \
+            -o /tmp/validate-pr35-denoiser-reset
+          /tmp/validate-pr35-denoiser-reset
+
+      - name: Validate PR35 Denoiser Fast Path Equivalence
+        run: |
+          clang -std=c11 -Wall -Wextra -Werror \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr35_denoiser_validated_fastpath.c \
+            NotchSixty/Audio/Realtime/N60SpectralDenoiser.c \
+            -o /tmp/validate-pr35-denoiser-fastpath
+          /tmp/validate-pr35-denoiser-fastpath
+
       - name: Build
         run: >-
           xcodebuild
