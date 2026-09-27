@@ -42,6 +42,7 @@ jobs:
       - name: Validate pinned snapshot lifetime
         run: >-
           clang -std=c11 -O2 -Wall -Wextra -Werror
+          -include stddef.h
           -I NotchSixty/Audio/Realtime
           ci/validate_pr35_render_context_snapshot_pointer.c
           NotchSixty/Audio/Realtime/N60RenderKernel.c
