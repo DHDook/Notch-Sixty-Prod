@@ -103,7 +103,10 @@ typedef struct {
 } N60DSPGraphSnapshot;
 
 typedef struct {
-    N60DSPGraphSnapshot snapshot;
+    // Points at the reader-pinned snapshot slot for the lifetime of this render
+    // context. The publisher cannot overwrite that slot until EndRender releases
+    // its reader count, so copying the full graph once per callback is unnecessary.
+    const N60DSPGraphSnapshot * _Nullable snapshot;
     uint32_t slotIndex;
     bool acquired;
 

@@ -704,7 +704,7 @@ static N60RenderKernelRenderContext acquire_render_context(N60RenderKernel *kern
         N60SnapshotSlot *slot = &kernel->slots[slotIndex];
         atomic_fetch_add_explicit(&slot->readers, 1, memory_order_acq_rel);
         if (slotIndex == atomic_load_explicit(&kernel->activeSlot, memory_order_acquire)) {
-            context.snapshot = slot->snapshot;
+            context.snapshot = &slot->snapshot;
             context.slotIndex = slotIndex;
             context.acquired = true;
             return context;
@@ -1266,8 +1266,8 @@ bool N60RenderKernelPublishSnapshot(N60RenderKernel *kernel, N60DSPGraphSnapshot
 
 N60RenderKernelRenderContext N60RenderKernelBeginRender(N60RenderKernel *kernel) {
     N60RenderKernelRenderContext context = acquire_render_context(kernel);
-    if (context.acquired) {
-        prepare_runtime_for_snapshot(kernel, &context.snapshot);
+    if (context.acquired && context.snapshot != NULL) {
+        prepare_runtime_for_snapshot(kernel, context.snapshot);
         N60ProtectionRuntimeBeginBuffer(kernel->protectionRuntime);
     }
     return context;
@@ -1280,29 +1280,29 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
     float right = sanitize_sample(kernel, inputRight);
     float referenceLeft = 0.0f;
     float referenceRight = 0.0f;
-    uint32_t referenceDelayFrames = context->acquired ? context->snapshot.latencyFrames : 0;
+    uint32_t referenceDelayFrames = context->acquired && context->snapshot != NULL ? context->snapshot->latencyFrames : 0;
     process_reference_delay(kernel, referenceDelayFrames, left, right, &referenceLeft, &referenceRight);
     meter_sample(left, right, &context->inputPeakLeft, &context->inputPeakRight, &context->inputSquareSumLeft, &context->inputSquareSumRight, &context->inputOverRangeSamples);
 
-    if (context->acquired && !context->snapshot.bypassed) {
+    if (context->acquired && context->snapshot != NULL && !context->snapshot->bypassed) {
         float inputGain = next_gain_value(&kernel->inputGain);
         float headroomGain = next_gain_value(&kernel->headroomGain);
         left *= inputGain * headroomGain;
         right *= inputGain * headroomGain;
 
-        N60DynamicsProcessPreEQStereoFrame(&kernel->dynamicsRuntime, &context->snapshot.dynamics, &left, &right);
+        N60DynamicsProcessPreEQStereoFrame(&kernel->dynamicsRuntime, &context->snapshot->dynamics, &left, &right);
 
         N60SpectralDenoiserProcessStereoFrameValidated(
             kernel->denoiserRuntime,
-            &context->snapshot.dynamics.spectralDenoiser,
-            context->snapshot.sampleRate,
+            &context->snapshot->dynamics.spectralDenoiser,
+            context->snapshot->sampleRate,
             left,
             right,
             &left,
             &right
         );
 
-        bool midSideEQ = !context->snapshot.eqBypassed && context->snapshot.eqMidSideMode;
+        bool midSideEQ = !context->snapshot->eqBypassed && context->snapshot->eqMidSideMode;
         if (midSideEQ) {
             float mid = 0.0f;
             float side = 0.0f;
@@ -1311,7 +1311,7 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
             right = side;
         }
 
-        if (!context->snapshot.eqBypassed) {
+        if (!context->snapshot->eqBypassed) {
             for (uint32_t index = 0; index < N60_MAX_EQ_RENDER_SLOTS; ++index) {
                 N60EQBandRuntime *runtime = &kernel->eqRuntime[index];
                 if (!runtime->currentEnabled && runtime->transitionFramesRemaining == 0) continue;
@@ -1321,13 +1321,13 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
             advance_eq_transitions(kernel);
         }
 
-        if (context->snapshot.convolution.enabled) {
+        if (context->snapshot->convolution.enabled) {
             float convolvedLeft = left;
             float convolvedRight = right;
             if (N60PartitionedConvolverProcessSample(
                     kernel->convolver,
-                    context->snapshot.convolution.programSlot,
-                    context->snapshot.convolution.programGeneration,
+                    context->snapshot->convolution.programSlot,
+                    context->snapshot->convolution.programGeneration,
                     left,
                     right,
                     &convolvedLeft,
@@ -1347,12 +1347,12 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
             right = physicalRight;
         }
 
-        if (!context->snapshot.eqBypassed) {
+        if (!context->snapshot->eqBypassed) {
             // Dynamic EQ follows the active EQ channel domain: linked stereo,
             // independent L/R, or independent Mid/Side lanes before decode.
             N60DynamicsProcessDynamicEQStereoFrame(
                 &kernel->dynamicsRuntime,
-                &context->snapshot.dynamics,
+                &context->snapshot->dynamics,
                 &left,
                 &right
             );
@@ -1361,13 +1361,13 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
         meter_sample(left, right, &context->postEQPeakLeft, &context->postEQPeakRight, &context->postEQSquareSumLeft, &context->postEQSquareSumRight, &context->postEQOverRangeSamples);
         process_crossover(&kernel->crossoverRuntime, left, right, &left, &right);
 
-        if (context->snapshot.roomCorrection.enabled) {
+        if (context->snapshot->roomCorrection.enabled) {
             float correctedLeft = left;
             float correctedRight = right;
             if (N60PartitionedConvolverProcessSample(
                     kernel->roomCorrectionConvolver,
-                    context->snapshot.roomCorrection.programSlot,
-                    context->snapshot.roomCorrection.programGeneration,
+                    context->snapshot->roomCorrection.programSlot,
+                    context->snapshot->roomCorrection.programGeneration,
                     left,
                     right,
                     &correctedLeft,
@@ -1382,13 +1382,13 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
         // Independent global speaker impulse-response slot. This deliberately
         // remains separate from main-EQ FIR and room correction so all three
         // audited FIR workflows can coexist in the current stereo graph.
-        if (context->snapshot.speakerIR.enabled) {
+        if (context->snapshot->speakerIR.enabled) {
             float convolvedLeft = left;
             float convolvedRight = right;
             if (N60PartitionedConvolverProcessSample(
                     kernel->speakerIRConvolver,
-                    context->snapshot.speakerIR.programSlot,
-                    context->snapshot.speakerIR.programGeneration,
+                    context->snapshot->speakerIR.programSlot,
+                    context->snapshot->speakerIR.programGeneration,
                     left,
                     right,
                     &convolvedLeft,
@@ -1400,7 +1400,7 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
             }
         }
 
-        N60DynamicsProcessCoreStereoFrameWithMasterGain(&kernel->dynamicsRuntime, &context->snapshot.dynamics, context->snapshot.masterGainLinear, &left, &right);
+        N60DynamicsProcessCoreStereoFrameWithMasterGain(&kernel->dynamicsRuntime, &context->snapshot->dynamics, context->snapshot->masterGainLinear, &left, &right);
 
         // Listening-position symmetry compensation is intentionally separate
         // from ordinary attenuation-style Balance. It feeds the speaker-spatial
@@ -1437,19 +1437,19 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
 
         N60ProtectionProcessStereoFrame(
             kernel->protectionRuntime,
-            &context->snapshot.protection,
+            &context->snapshot->protection,
             &left,
             &right
         );
 
         N60DynamicsProcessPauseGateStereoFrame(
             &kernel->dynamicsRuntime,
-            &context->snapshot.dynamics,
+            &context->snapshot->dynamics,
             &left,
             &right
         );
 
-        switch (context->snapshot.auditionMode) {
+        switch (context->snapshot->auditionMode) {
         case N60AuditionModeReference:
             left = referenceLeft;
             right = referenceRight;
@@ -1469,12 +1469,12 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
     // Keep the alignment history warm even during Global Bypass, but discard the
     // aligned copy while bypassed so Global Bypass remains the true raw escape path.
     // Processed / Reference / Delta all receive the same speaker-alignment stage.
-    if (context->acquired) {
+    if (context->acquired && context->snapshot != NULL) {
         float alignedLeft = left;
         float alignedRight = right;
         N60InterChannelDelayRuntimeProcess(
             &kernel->interChannelDelayRuntime, left, right, &alignedLeft, &alignedRight);
-        if (!context->snapshot.bypassed) {
+        if (!context->snapshot->bypassed) {
             left = alignedLeft;
             right = alignedRight;
         }
@@ -1561,83 +1561,83 @@ N60RenderKernelDiagnostics N60RenderKernelGetDiagnostics(const N60RenderKernel *
 
     N60RenderKernel *mutableKernel = (N60RenderKernel *)kernel;
     N60RenderKernelRenderContext context = acquire_render_context(mutableKernel);
-    if (context.acquired) {
-        diagnostics.publishedGeneration = context.snapshot.generation;
-        diagnostics.latencyFrames = context.snapshot.latencyFrames;
-        diagnostics.sampleRate = context.snapshot.sampleRate;
-        diagnostics.channelCount = context.snapshot.channelCount;
-        diagnostics.bypassed = context.snapshot.bypassed;
-        diagnostics.auditionMode = context.snapshot.auditionMode;
-        diagnostics.interChannelDelayMs = context.snapshot.interChannelDelay.signedDelayMs;
-        diagnostics.interChannelAlignmentLatencyFrames = context.snapshot.interChannelDelay.commonLatencyFrames;
-        diagnostics.inputGainLinear = context.snapshot.inputGainLinear;
-        diagnostics.headroomGainLinear = context.snapshot.headroomGainLinear;
-        diagnostics.outputGainLinear = context.snapshot.outputGainLinear;
-        diagnostics.masterGainLinear = context.snapshot.masterGainLinear;
-        diagnostics.balanceGainLeftLinear = context.snapshot.balanceGainLeftLinear;
-        diagnostics.balanceGainRightLinear = context.snapshot.balanceGainRightLinear;
-        diagnostics.eqBypassed = context.snapshot.eqBypassed;
-        diagnostics.eqMidSideMode = context.snapshot.eqMidSideMode;
-        diagnostics.mixedPhaseEnabled = context.snapshot.mixedPhaseEnabled;
-        diagnostics.mixedPhaseCorrectionSectionCount = context.snapshot.mixedPhaseCorrectionSectionCount;
-        diagnostics.eqBandCount = context.snapshot.eqBandCount;
-        for (uint32_t index = 0; index < context.snapshot.eqBandCount; ++index) {
-            if (!context.snapshot.eqBands[index].enabled) continue;
-            uint8_t mask = context.snapshot.eqBandChannelMasks[index];
+    if (context.acquired && context.snapshot != NULL) {
+        diagnostics.publishedGeneration = context.snapshot->generation;
+        diagnostics.latencyFrames = context.snapshot->latencyFrames;
+        diagnostics.sampleRate = context.snapshot->sampleRate;
+        diagnostics.channelCount = context.snapshot->channelCount;
+        diagnostics.bypassed = context.snapshot->bypassed;
+        diagnostics.auditionMode = context.snapshot->auditionMode;
+        diagnostics.interChannelDelayMs = context.snapshot->interChannelDelay.signedDelayMs;
+        diagnostics.interChannelAlignmentLatencyFrames = context.snapshot->interChannelDelay.commonLatencyFrames;
+        diagnostics.inputGainLinear = context.snapshot->inputGainLinear;
+        diagnostics.headroomGainLinear = context.snapshot->headroomGainLinear;
+        diagnostics.outputGainLinear = context.snapshot->outputGainLinear;
+        diagnostics.masterGainLinear = context.snapshot->masterGainLinear;
+        diagnostics.balanceGainLeftLinear = context.snapshot->balanceGainLeftLinear;
+        diagnostics.balanceGainRightLinear = context.snapshot->balanceGainRightLinear;
+        diagnostics.eqBypassed = context.snapshot->eqBypassed;
+        diagnostics.eqMidSideMode = context.snapshot->eqMidSideMode;
+        diagnostics.mixedPhaseEnabled = context.snapshot->mixedPhaseEnabled;
+        diagnostics.mixedPhaseCorrectionSectionCount = context.snapshot->mixedPhaseCorrectionSectionCount;
+        diagnostics.eqBandCount = context.snapshot->eqBandCount;
+        for (uint32_t index = 0; index < context.snapshot->eqBandCount; ++index) {
+            if (!context.snapshot->eqBands[index].enabled) continue;
+            uint8_t mask = context.snapshot->eqBandChannelMasks[index];
             if ((mask & N60_EQ_CHANNEL_LEFT) != 0) diagnostics.eqLeftBandCount += 1;
             if ((mask & N60_EQ_CHANNEL_RIGHT) != 0) diagnostics.eqRightBandCount += 1;
         }
-        diagnostics.crossoverEnabled = context.snapshot.crossover.enabled;
-        diagnostics.crossoverFrequencyHz = context.snapshot.crossover.frequencyHz;
-        diagnostics.crossoverTopology = context.snapshot.crossover.topology;
-        diagnostics.crossoverMonitorMode = context.snapshot.crossover.monitorMode;
-        diagnostics.crossoverSubGainLinear = context.snapshot.crossover.subGainLinear;
-        diagnostics.crossoverSubPolarityInverted = context.snapshot.crossover.subPolarityInverted;
-        diagnostics.crossoverSectionCount = context.snapshot.crossover.sectionCount;
+        diagnostics.crossoverEnabled = context.snapshot->crossover.enabled;
+        diagnostics.crossoverFrequencyHz = context.snapshot->crossover.frequencyHz;
+        diagnostics.crossoverTopology = context.snapshot->crossover.topology;
+        diagnostics.crossoverMonitorMode = context.snapshot->crossover.monitorMode;
+        diagnostics.crossoverSubGainLinear = context.snapshot->crossover.subGainLinear;
+        diagnostics.crossoverSubPolarityInverted = context.snapshot->crossover.subPolarityInverted;
+        diagnostics.crossoverSectionCount = context.snapshot->crossover.sectionCount;
         diagnostics.mainsDetectedFrequencyHz = bits_to_float(atomic_load_explicit(&kernel->mainsDetectedFrequencyBits, memory_order_relaxed));
         diagnostics.mainsDetectionConfidence = bits_to_float(atomic_load_explicit(&kernel->mainsDetectionConfidenceBits, memory_order_relaxed));
-        diagnostics.spectralDenoiserEnabled = context.snapshot.dynamics.spectralDenoiser.enabled;
-        diagnostics.spectralDenoiserTuning = context.snapshot.dynamics.spectralDenoiser.tuning;
-        diagnostics.spectralDenoiserQuality = context.snapshot.dynamics.spectralDenoiser.quality;
-        diagnostics.denoiserFFTSize = context.snapshot.dynamics.spectralDenoiser.fftSize;
-        diagnostics.denoiserHopSize = context.snapshot.dynamics.spectralDenoiser.hopSize;
-        diagnostics.denoiserLatencyFrames = context.snapshot.dynamics.spectralDenoiser.enabled
-            ? context.snapshot.dynamics.spectralDenoiser.latencyFrames : 0;
-        diagnostics.deEsserEnabled = context.snapshot.dynamics.deEsser.enabled;
-        diagnostics.deEsserDynamicEQMode = context.snapshot.dynamics.deEsser.dynamicEQMode;
-        diagnostics.deEsserFrequencyHz = context.snapshot.dynamics.deEsser.frequencyHz;
-        diagnostics.multibandCompressorEnabled = context.snapshot.dynamics.multibandCompressor.enabled;
-        diagnostics.multibandLowMidFrequencyHz = context.snapshot.dynamics.multibandCompressor.lowMidFrequencyHz;
-        diagnostics.multibandMidHighFrequencyHz = context.snapshot.dynamics.multibandCompressor.midHighFrequencyHz;
-        diagnostics.multibandTopology = context.snapshot.dynamics.multibandCompressor.lowTopology;
-        diagnostics.compressorEnabled = context.snapshot.dynamics.compressor.enabled;
-        diagnostics.expanderEnabled = context.snapshot.dynamics.expander.enabled;
-        diagnostics.pauseGateEnabled = context.snapshot.dynamics.pauseGate.enabled;
-        diagnostics.softClipperEnabled = context.snapshot.protection.softClipperEnabled;
-        diagnostics.limiterEnabled = context.snapshot.protection.limiterEnabled;
-        diagnostics.oversamplingFactor = context.snapshot.protection.oversamplingFactor;
-        diagnostics.effectiveOversamplingFactor = context.snapshot.protection.effectiveFactor;
-        diagnostics.convolutionEnabled = context.snapshot.convolution.enabled;
-        diagnostics.convolutionProgramSlot = context.snapshot.convolution.programSlot;
-        diagnostics.convolutionProgramGeneration = context.snapshot.convolution.programGeneration;
-        diagnostics.convolutionTapCount = context.snapshot.convolution.tapCount;
-        diagnostics.convolutionPartitionCount = context.snapshot.convolution.partitionCount;
-        diagnostics.convolutionEngineLatencyFrames = context.snapshot.convolution.engineLatencyFrames;
-        diagnostics.convolutionDeclaredLatencyFrames = context.snapshot.convolution.declaredLatencyFrames;
-        diagnostics.roomCorrectionEnabled = context.snapshot.roomCorrection.enabled;
-        diagnostics.roomCorrectionProgramSlot = context.snapshot.roomCorrection.programSlot;
-        diagnostics.roomCorrectionProgramGeneration = context.snapshot.roomCorrection.programGeneration;
-        diagnostics.roomCorrectionTapCount = context.snapshot.roomCorrection.tapCount;
-        diagnostics.roomCorrectionPartitionCount = context.snapshot.roomCorrection.partitionCount;
-        diagnostics.roomCorrectionEngineLatencyFrames = context.snapshot.roomCorrection.engineLatencyFrames;
-        diagnostics.roomCorrectionDeclaredLatencyFrames = context.snapshot.roomCorrection.declaredLatencyFrames;
-        diagnostics.speakerIREnabled = context.snapshot.speakerIR.enabled;
-        diagnostics.speakerIRProgramSlot = context.snapshot.speakerIR.programSlot;
-        diagnostics.speakerIRProgramGeneration = context.snapshot.speakerIR.programGeneration;
-        diagnostics.speakerIRTapCount = context.snapshot.speakerIR.tapCount;
-        diagnostics.speakerIRPartitionCount = context.snapshot.speakerIR.partitionCount;
-        diagnostics.speakerIREngineLatencyFrames = context.snapshot.speakerIR.engineLatencyFrames;
-        diagnostics.speakerIRDeclaredLatencyFrames = context.snapshot.speakerIR.declaredLatencyFrames;
+        diagnostics.spectralDenoiserEnabled = context.snapshot->dynamics.spectralDenoiser.enabled;
+        diagnostics.spectralDenoiserTuning = context.snapshot->dynamics.spectralDenoiser.tuning;
+        diagnostics.spectralDenoiserQuality = context.snapshot->dynamics.spectralDenoiser.quality;
+        diagnostics.denoiserFFTSize = context.snapshot->dynamics.spectralDenoiser.fftSize;
+        diagnostics.denoiserHopSize = context.snapshot->dynamics.spectralDenoiser.hopSize;
+        diagnostics.denoiserLatencyFrames = context.snapshot->dynamics.spectralDenoiser.enabled
+            ? context.snapshot->dynamics.spectralDenoiser.latencyFrames : 0;
+        diagnostics.deEsserEnabled = context.snapshot->dynamics.deEsser.enabled;
+        diagnostics.deEsserDynamicEQMode = context.snapshot->dynamics.deEsser.dynamicEQMode;
+        diagnostics.deEsserFrequencyHz = context.snapshot->dynamics.deEsser.frequencyHz;
+        diagnostics.multibandCompressorEnabled = context.snapshot->dynamics.multibandCompressor.enabled;
+        diagnostics.multibandLowMidFrequencyHz = context.snapshot->dynamics.multibandCompressor.lowMidFrequencyHz;
+        diagnostics.multibandMidHighFrequencyHz = context.snapshot->dynamics.multibandCompressor.midHighFrequencyHz;
+        diagnostics.multibandTopology = context.snapshot->dynamics.multibandCompressor.lowTopology;
+        diagnostics.compressorEnabled = context.snapshot->dynamics.compressor.enabled;
+        diagnostics.expanderEnabled = context.snapshot->dynamics.expander.enabled;
+        diagnostics.pauseGateEnabled = context.snapshot->dynamics.pauseGate.enabled;
+        diagnostics.softClipperEnabled = context.snapshot->protection.softClipperEnabled;
+        diagnostics.limiterEnabled = context.snapshot->protection.limiterEnabled;
+        diagnostics.oversamplingFactor = context.snapshot->protection.oversamplingFactor;
+        diagnostics.effectiveOversamplingFactor = context.snapshot->protection.effectiveFactor;
+        diagnostics.convolutionEnabled = context.snapshot->convolution.enabled;
+        diagnostics.convolutionProgramSlot = context.snapshot->convolution.programSlot;
+        diagnostics.convolutionProgramGeneration = context.snapshot->convolution.programGeneration;
+        diagnostics.convolutionTapCount = context.snapshot->convolution.tapCount;
+        diagnostics.convolutionPartitionCount = context.snapshot->convolution.partitionCount;
+        diagnostics.convolutionEngineLatencyFrames = context.snapshot->convolution.engineLatencyFrames;
+        diagnostics.convolutionDeclaredLatencyFrames = context.snapshot->convolution.declaredLatencyFrames;
+        diagnostics.roomCorrectionEnabled = context.snapshot->roomCorrection.enabled;
+        diagnostics.roomCorrectionProgramSlot = context.snapshot->roomCorrection.programSlot;
+        diagnostics.roomCorrectionProgramGeneration = context.snapshot->roomCorrection.programGeneration;
+        diagnostics.roomCorrectionTapCount = context.snapshot->roomCorrection.tapCount;
+        diagnostics.roomCorrectionPartitionCount = context.snapshot->roomCorrection.partitionCount;
+        diagnostics.roomCorrectionEngineLatencyFrames = context.snapshot->roomCorrection.engineLatencyFrames;
+        diagnostics.roomCorrectionDeclaredLatencyFrames = context.snapshot->roomCorrection.declaredLatencyFrames;
+        diagnostics.speakerIREnabled = context.snapshot->speakerIR.enabled;
+        diagnostics.speakerIRProgramSlot = context.snapshot->speakerIR.programSlot;
+        diagnostics.speakerIRProgramGeneration = context.snapshot->speakerIR.programGeneration;
+        diagnostics.speakerIRTapCount = context.snapshot->speakerIR.tapCount;
+        diagnostics.speakerIRPartitionCount = context.snapshot->speakerIR.partitionCount;
+        diagnostics.speakerIREngineLatencyFrames = context.snapshot->speakerIR.engineLatencyFrames;
+        diagnostics.speakerIRDeclaredLatencyFrames = context.snapshot->speakerIR.declaredLatencyFrames;
         N60RenderKernelEndRender(mutableKernel, &context, 0);
     }
 
