@@ -95,6 +95,91 @@ static int validate_dynamics(double sampleRate) {
     return 0;
 }
 
+static int validate_individual_dynamics_parking(double sampleRate) {
+    N60DynamicsSnapshot snapshot = N60DynamicsSnapshotMakeBypassed(sampleRate);
+    N60DynamicsRuntime runtime;
+    N60DynamicsRuntimeReset(&runtime);
+
+    if (!N60DynamicsSnapshotSetDCOffsetFilter(&snapshot, sampleRate, true)) return 1;
+    float left = 0.25f;
+    float right = -0.17f;
+    N60DynamicsProcessPreEQStereoFrame(&runtime, &snapshot, &left, &right);
+    if (runtime.dcParked
+        || !runtime.infrasonicParked
+        || !runtime.mainsNotchParked
+        || !runtime.mainsDetectorParked) {
+        fprintf(stderr, "enabling DC filter woke a disabled pre-EQ sibling at %.0f Hz\n", sampleRate);
+        return 1;
+    }
+
+    if (!N60DynamicsSnapshotSetDCOffsetFilter(&snapshot, sampleRate, false)) return 1;
+    for (uint32_t frame = 0; frame < 30000u && !runtime.preEQParked; ++frame) {
+        left = 0.21f * sinf((float)frame * 0.017f);
+        right = 0.16f * cosf((float)frame * 0.013f);
+        N60DynamicsProcessPreEQStereoFrame(&runtime, &snapshot, &left, &right);
+    }
+    if (!runtime.dcParked || !runtime.preEQParked) {
+        fprintf(stderr, "disabled DC filter failed to park after its tail at %.0f Hz\n", sampleRate);
+        return 1;
+    }
+
+    N60DynamicsRuntimeReset(&runtime);
+    snapshot = N60DynamicsSnapshotMakeBypassed(sampleRate);
+    if (!N60DynamicsSnapshotSetMainsHumDetector(&snapshot, sampleRate, true, 60.0)) return 1;
+    left = 0.2f;
+    right = 0.1f;
+    N60DynamicsProcessPreEQStereoFrame(&runtime, &snapshot, &left, &right);
+    if (runtime.mainsDetectorParked
+        || !runtime.preEQParked
+        || !runtime.dcParked
+        || !runtime.infrasonicParked
+        || !runtime.mainsNotchParked) {
+        fprintf(stderr, "explicit mains analysis disturbed disabled pre-EQ stages at %.0f Hz\n", sampleRate);
+        return 1;
+    }
+    if (!N60DynamicsSnapshotSetMainsHumDetector(&snapshot, sampleRate, false, 60.0)) return 1;
+    N60DynamicsProcessPreEQStereoFrame(&runtime, &snapshot, &left, &right);
+    if (!runtime.mainsDetectorParked
+        || runtime.mainsDetectorDecimationCounter != 0u
+        || runtime.mainsDetectorSampleCount != 0u) {
+        fprintf(stderr, "disabled mains analysis failed to park/reset at %.0f Hz\n", sampleRate);
+        return 1;
+    }
+
+    N60DynamicsRuntimeReset(&runtime);
+    snapshot = N60DynamicsSnapshotMakeBypassed(sampleRate);
+    snapshot.expander.enabled = true;
+    left = 0.23f;
+    right = -0.18f;
+    N60DynamicsProcessCoreStereoFrame(&runtime, &snapshot, &left, &right);
+    if (runtime.expanderParked
+        || !runtime.stereoModeParked
+        || !runtime.widenerParked
+        || !runtime.loudnessMatchParked
+        || !runtime.loudnessContourParked
+        || !runtime.dialogueLevelerParked
+        || !runtime.deHarshParked
+        || !runtime.deEsserParked
+        || !runtime.multibandParked
+        || !runtime.compressorParked) {
+        fprintf(stderr, "enabling Expander woke a disabled core-Dynamics sibling at %.0f Hz\n", sampleRate);
+        return 1;
+    }
+
+    snapshot.expander.enabled = false;
+    for (uint32_t frame = 0; frame < 30000u && !runtime.coreParked; ++frame) {
+        left = 0.19f * sinf((float)frame * 0.011f);
+        right = 0.14f * cosf((float)frame * 0.007f);
+        N60DynamicsProcessCoreStereoFrame(&runtime, &snapshot, &left, &right);
+    }
+    if (!runtime.expanderParked || !runtime.coreParked) {
+        fprintf(stderr, "disabled Expander failed to return core Dynamics to parked state at %.0f Hz\n", sampleRate);
+        return 1;
+    }
+
+    return 0;
+}
+
 static int validate_dynamic_eq(double sampleRate) {
     N60DynamicEQSnapshot snapshot = N60DynamicEQSnapshotMakeBypassed(sampleRate);
     if (!N60DynamicEQSnapshotSetBand(
@@ -219,6 +304,7 @@ int main(void) {
     for (uint32_t index = 0; index < sizeof(sampleRates) / sizeof(sampleRates[0]); ++index) {
         if (validate_denoiser(sampleRates[index]) != 0) return 1;
         if (validate_dynamics(sampleRates[index]) != 0) return 1;
+        if (validate_individual_dynamics_parking(sampleRates[index]) != 0) return 1;
         if (validate_dynamic_eq(sampleRates[index]) != 0) return 1;
         if (validate_protection(sampleRates[index]) != 0) return 1;
     }
