@@ -5,6 +5,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 UI = (ROOT / "NotchSixty/UI/ProductionRootView.swift").read_text()
+APP = (ROOT / "NotchSixty/NotchSixtyApp.swift").read_text()
 PROJECT = (ROOT / "NotchSixty.xcodeproj/project.pbxproj").read_text()
 DOC = (ROOT / "docs/PR36_PRODUCTION_UI_FOUNDATION.md").read_text()
 BRIDGE = (ROOT / "NotchSixty/Audio/Realtime/N60RealtimeAudioBridge.c").read_text()
@@ -36,6 +37,24 @@ require(UI, "NavigationSplitView", "production navigation")
 require(UI, "GlassEffectContainer", "selective custom glass controls")
 require(UI, ".buttonStyle(.glassProminent)", "primary glass action")
 require(UI, ".glassEffect(.regular", "Liquid Glass status/control surface")
+
+# The shipping launch scene is production. Engineering validation remains a
+# separately addressable window that reuses the same ProductController/engine.
+require(APP, "ProductionRootView(product: product)", "primary production scene")
+require(APP, 'Window("Engineering Validation", id: "engineering-validation")', "engineering validation scene")
+require(APP, "EngineeringValidationView(engine: product.audioEngine)", "shared-engine validation scene")
+require(UI, 'openWindow(id: "engineering-validation")', "engineering validation toolbar affordance")
+if APP.index("ProductionRootView(product: product)") > APP.index('Window("Engineering Validation"'):
+    print("PR36 UI foundation validation: FAIL: production scene must be declared before engineering validation", file=sys.stderr)
+    raise SystemExit(1)
+for validation_surface in [
+    "ContentView(engine: engine)",
+    "PR27ProtectionValidationView(engine: engine)",
+    "PR28AdvancedDynamicsValidationView(engine: engine)",
+    "PR30PhaseTimeValidationView(engine: engine)",
+    "PR31NoiseHumValidationView(engine: engine)",
+]:
+    require(APP, validation_surface, "retained engineering validation")
 
 # Signature dashboard identity is a new clean-room stereo analog meter pair.
 require(UI, "private struct SignatureVUMeter", "signature VU component")
