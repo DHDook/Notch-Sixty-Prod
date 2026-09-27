@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-and-test:
@@ -18,6 +18,20 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
+
+      - name: Apply PR35 Individual Dynamics Parking
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'feature/pr35-dsp-performance-readiness'
+        run: |
+          git fetch origin feature/pr35-dsp-performance-readiness
+          git checkout -B feature/pr35-dsp-performance-readiness origin/feature/pr35-dsp-performance-readiness
+          python3 ci/apply_pr35_individual_stage_parking.py
+          if ! git diff --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add NotchSixty
+            git commit -m "PR35: park individually disabled Dynamics stages"
+            git push origin HEAD:feature/pr35-dsp-performance-readiness
+          fi
 
       - name: Show toolchain
         run: |
