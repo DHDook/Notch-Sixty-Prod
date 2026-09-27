@@ -37,6 +37,42 @@ require(
     "NotchSixty/Audio/Realtime/N60DynamicEQ.h",
     "bool parked;",
 )
+
+# Every Dynamics substage has its own parked state. This is important when one
+# sibling is active: OFF processors must not wake merely because core Dynamics is.
+require(
+    "NotchSixty/Audio/Realtime/N60Dynamics.h",
+    "bool dcParked;",
+    "bool infrasonicParked;",
+    "bool mainsNotchParked;",
+    "bool mainsDetectorParked;",
+    "bool stereoModeParked;",
+    "bool widenerParked;",
+    "bool loudnessMatchParked;",
+    "bool loudnessContourParked;",
+    "bool dialogueLevelerParked;",
+    "bool deHarshParked;",
+    "bool deEsserParked;",
+    "bool multibandParked;",
+    "bool compressorParked;",
+    "bool expanderParked;",
+    "bool pauseGateParked;",
+)
+require(
+    "NotchSixty/Audio/Realtime/N60Dynamics.c",
+    "if (!snapshot->deHarsh.enabled && runtime->deHarshParked) return;",
+    "if (!config->enabled && runtime->dialogueLevelerParked) return;",
+    "if (!snapshot->deEsser.enabled && runtime->deEsserParked) return;",
+    "if (!multiband->enabled && runtime->multibandParked) return;",
+    "if (!snapshot->pauseGate.enabled && runtime->pauseGateParked) return;",
+    "if (!enabled && runtime->stereoModeParked) return;",
+    "if (!widener->enabled && runtime->widenerParked) return;",
+    "if (!measurementNeeded && !snapshot->loudnessMatch.enabled && runtime->loudnessMatchParked) return;",
+    "if (!config->enabled && runtime->loudnessContourParked) return;",
+    "} else if (!runtime->compressorParked) {",
+    "} else if (!runtime->expanderParked) {",
+)
+
 require(
     "NotchSixty/Audio/Realtime/N60Protection.c",
     "snapshot->effectiveFactor == N60OversamplingFactor1x",
