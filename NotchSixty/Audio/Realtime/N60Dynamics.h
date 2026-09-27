@@ -360,6 +360,21 @@ typedef struct {
     bool gateOpen;
     bool preEQParked;
     bool coreParked;
+    bool dcParked;
+    bool infrasonicParked;
+    bool mainsNotchParked;
+    bool mainsDetectorParked;
+    bool stereoModeParked;
+    bool widenerParked;
+    bool loudnessMatchParked;
+    bool loudnessContourParked;
+    bool dialogueLevelerParked;
+    bool deHarshParked;
+    bool deEsserParked;
+    bool multibandParked;
+    bool compressorParked;
+    bool expanderParked;
+    bool pauseGateParked;
 } N60DynamicsRuntime;
 
 typedef struct {
