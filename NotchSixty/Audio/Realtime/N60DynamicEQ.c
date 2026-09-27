@@ -9,6 +9,7 @@
 
 #define N60_DYNAMIC_EQ_EPSILON 1.0e-20f
 #define N60_DYNAMIC_EQ_TRANSITION_MS 5.0f
+#define N60_DYNAMIC_EQ_PARK_EPSILON 1.0e-5f
 
 static float clampf_local(float value, float lower, float upper) {
     return fminf(upper, fmaxf(lower, value));
@@ -385,6 +386,7 @@ bool N60DynamicEQSnapshotIsValid(N60DynamicEQSnapshot snapshot) {
 void N60DynamicEQRuntimeReset(N60DynamicEQRuntime *runtime) {
     if (runtime == NULL) return;
     memset(runtime, 0, sizeof(*runtime));
+    runtime->parked = true;
     for (uint32_t index = 0; index < N60_DYNAMIC_EQ_MAX_BANDS; ++index) {
         runtime->detectorLevelDBFS[index] = -120.0f;
         runtime->secondaryDetectorLevelDBFS[index] = -120.0f;
@@ -413,14 +415,31 @@ static void update_gain_state(
     *wetMix = smooth_pole(*wetMix, active ? 1.0f : 0.0f, bypassTransitionCoefficient);
 }
 
+static bool runtime_can_park(
+    const N60DynamicEQRuntime *runtime,
+    const N60DynamicEQSnapshot *snapshot
+) {
+    for (uint32_t index = 0; index < snapshot->bandCount; ++index) {
+        if (fabsf(runtime->dynamicGainDB[index]) > N60_DYNAMIC_EQ_PARK_EPSILON
+            || fabsf(runtime->staticGainDB[index]) > N60_DYNAMIC_EQ_PARK_EPSILON
+            || fabsf(runtime->wetMix[index]) > N60_DYNAMIC_EQ_PARK_EPSILON) return false;
+    }
+    for (uint32_t index = 0; index < snapshot->secondaryBandCount; ++index) {
+        if (fabsf(runtime->secondaryDynamicGainDB[index]) > N60_DYNAMIC_EQ_PARK_EPSILON
+            || fabsf(runtime->secondaryStaticGainDB[index]) > N60_DYNAMIC_EQ_PARK_EPSILON
+            || fabsf(runtime->secondaryWetMix[index]) > N60_DYNAMIC_EQ_PARK_EPSILON) return false;
+    }
+    return true;
+}
+
 static void process_linked_stereo(
     N60DynamicEQRuntime *runtime,
-    N60DynamicEQSnapshot snapshot,
+    const N60DynamicEQSnapshot *snapshot,
     float *left,
     float *right
 ) {
-    for (uint32_t index = 0; index < snapshot.bandCount; ++index) {
-        N60DynamicEQBandSnapshot band = snapshot.bands[index];
+    for (uint32_t index = 0; index < snapshot->bandCount; ++index) {
+        N60DynamicEQBandSnapshot band = snapshot->bands[index];
         float inputLeft = *left;
         float inputRight = *right;
         float analysisLeft = process_biquad(band.analysisBandPass, &runtime->analysisLeft[index], inputLeft);
@@ -436,9 +455,9 @@ static void process_linked_stereo(
         }
         float detectorDB = linear_to_db(detectorLinear);
         runtime->detectorLevelDBFS[index] = detectorDB;
-        update_gain_state(snapshot.enabled, snapshot.bypassTransitionCoefficient, band, detectorDB,
+        update_gain_state(snapshot->enabled, snapshot->bypassTransitionCoefficient, band, detectorDB,
                           &runtime->dynamicGainDB[index], &runtime->staticGainDB[index], &runtime->wetMix[index]);
-        if (snapshot.enabled && band.enabled) runtime->activeBandCount += 1u;
+        if (snapshot->enabled && band.enabled) runtime->activeBandCount += 1u;
         runtime->maxAbsDynamicGainDB = fmaxf(runtime->maxAbsDynamicGainDB, fabsf(runtime->dynamicGainDB[index]));
         float totalGainDB = clampf_local(runtime->staticGainDB[index] + runtime->dynamicGainDB[index], -42.0f, 18.0f);
         *left = apply_shape(band, &runtime->processPrimaryLeft[index], &runtime->processSecondaryLeft[index],
@@ -450,11 +469,11 @@ static void process_linked_stereo(
 
 static void process_primary_mono(
     N60DynamicEQRuntime *runtime,
-    N60DynamicEQSnapshot snapshot,
+    const N60DynamicEQSnapshot *snapshot,
     float *sample
 ) {
-    for (uint32_t index = 0; index < snapshot.bandCount; ++index) {
-        N60DynamicEQBandSnapshot band = snapshot.bands[index];
+    for (uint32_t index = 0; index < snapshot->bandCount; ++index) {
+        N60DynamicEQBandSnapshot band = snapshot->bands[index];
         float input = *sample;
         float analysis = process_biquad(band.analysisBandPass, &runtime->analysisLeft[index], input);
         float detectorLinear;
@@ -468,9 +487,9 @@ static void process_primary_mono(
         }
         float detectorDB = linear_to_db(detectorLinear);
         runtime->detectorLevelDBFS[index] = detectorDB;
-        update_gain_state(snapshot.enabled, snapshot.bypassTransitionCoefficient, band, detectorDB,
+        update_gain_state(snapshot->enabled, snapshot->bypassTransitionCoefficient, band, detectorDB,
                           &runtime->dynamicGainDB[index], &runtime->staticGainDB[index], &runtime->wetMix[index]);
-        if (snapshot.enabled && band.enabled) runtime->activeBandCount += 1u;
+        if (snapshot->enabled && band.enabled) runtime->activeBandCount += 1u;
         runtime->maxAbsDynamicGainDB = fmaxf(runtime->maxAbsDynamicGainDB, fabsf(runtime->dynamicGainDB[index]));
         float totalGainDB = clampf_local(runtime->staticGainDB[index] + runtime->dynamicGainDB[index], -42.0f, 18.0f);
         *sample = apply_shape(band, &runtime->processPrimaryLeft[index], &runtime->processSecondaryLeft[index],
@@ -480,11 +499,11 @@ static void process_primary_mono(
 
 static void process_secondary_mono(
     N60DynamicEQRuntime *runtime,
-    N60DynamicEQSnapshot snapshot,
+    const N60DynamicEQSnapshot *snapshot,
     float *sample
 ) {
-    for (uint32_t index = 0; index < snapshot.secondaryBandCount; ++index) {
-        N60DynamicEQBandSnapshot band = snapshot.secondaryBands[index];
+    for (uint32_t index = 0; index < snapshot->secondaryBandCount; ++index) {
+        N60DynamicEQBandSnapshot band = snapshot->secondaryBands[index];
         float input = *sample;
         float analysis = process_biquad(band.analysisBandPass, &runtime->secondaryAnalysisLeft[index], input);
         float detectorLinear;
@@ -498,9 +517,9 @@ static void process_secondary_mono(
         }
         float detectorDB = linear_to_db(detectorLinear);
         runtime->secondaryDetectorLevelDBFS[index] = detectorDB;
-        update_gain_state(snapshot.enabled, snapshot.bypassTransitionCoefficient, band, detectorDB,
+        update_gain_state(snapshot->enabled, snapshot->bypassTransitionCoefficient, band, detectorDB,
                           &runtime->secondaryDynamicGainDB[index], &runtime->secondaryStaticGainDB[index], &runtime->secondaryWetMix[index]);
-        if (snapshot.enabled && band.enabled) runtime->activeBandCount += 1u;
+        if (snapshot->enabled && band.enabled) runtime->activeBandCount += 1u;
         runtime->maxAbsDynamicGainDB = fmaxf(runtime->maxAbsDynamicGainDB, fabsf(runtime->secondaryDynamicGainDB[index]));
         float totalGainDB = clampf_local(runtime->secondaryStaticGainDB[index] + runtime->secondaryDynamicGainDB[index], -42.0f, 18.0f);
         *sample = apply_shape(band, &runtime->secondaryProcessPrimaryLeft[index], &runtime->secondaryProcessSecondaryLeft[index],
@@ -510,20 +529,22 @@ static void process_secondary_mono(
 
 void N60DynamicEQProcessStereoFrame(
     N60DynamicEQRuntime *runtime,
-    N60DynamicEQSnapshot snapshot,
+    const N60DynamicEQSnapshot *snapshot,
     float *left,
     float *right
 ) {
-    if (runtime == NULL || left == NULL || right == NULL) return;
-    if (!runtime->domainInitialized || runtime->currentDomain != snapshot.domain) {
+    if (runtime == NULL || snapshot == NULL || left == NULL || right == NULL) return;
+    if (!runtime->domainInitialized || runtime->currentDomain != snapshot->domain) {
         N60DynamicEQRuntimeReset(runtime);
-        runtime->currentDomain = snapshot.domain;
+        runtime->currentDomain = snapshot->domain;
         runtime->domainInitialized = true;
     }
     runtime->activeBandCount = 0;
     runtime->maxAbsDynamicGainDB = 0.0f;
+    if (!snapshot->enabled && runtime->parked) return;
+    if (snapshot->enabled) runtime->parked = false;
 
-    switch (snapshot.domain) {
+    switch (snapshot->domain) {
     case N60DynamicEQDomainDualMono:
         process_primary_mono(runtime, snapshot, left);
         process_secondary_mono(runtime, snapshot, right);
@@ -541,6 +562,14 @@ void N60DynamicEQProcessStereoFrame(
     default:
         process_linked_stereo(runtime, snapshot, left, right);
         break;
+    }
+
+    if (!snapshot->enabled && runtime_can_park(runtime, snapshot)) {
+        N60DynamicEQDomain domain = snapshot->domain;
+        N60DynamicEQRuntimeReset(runtime);
+        runtime->currentDomain = domain;
+        runtime->domainInitialized = true;
+        runtime->parked = true;
     }
 }
 

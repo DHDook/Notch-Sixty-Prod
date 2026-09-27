@@ -33,6 +33,135 @@ jobs:
           clang -std=c11 -Wall -Wextra -Werror ci/validate_pr34_bandpass.c -o /tmp/validate-pr34-bandpass
           /tmp/validate-pr34-bandpass
 
+      - name: Validate PR35 Realtime Control Plane
+        run: python3 ci/validate_pr35_realtime_control_plane.py
+
+      - name: Validate PR35 Rendered Transition Acknowledgement
+        run: |
+          REALTIME_SOURCES=$(find NotchSixty/Audio/Realtime -name '*.c' -print)
+          clang -std=c11 -O2 -Wall -Wextra -Werror \
+            -include stddef.h \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr35_transition_ack.c \
+            $REALTIME_SOURCES \
+            -framework Accelerate \
+            -framework CoreAudio \
+            -o /tmp/validate-pr35-transition-ack
+          /tmp/validate-pr35-transition-ack
+
+      - name: Validate PR35 Optional Stage Parking
+        run: python3 ci/validate_pr35_optional_stage_parking.py
+
+      - name: Validate PR35 Protection Reset Equivalence
+        run: |
+          clang -std=c11 -Wall -Wextra -Werror \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr35_protection_sparse_reset.c \
+            NotchSixty/Audio/Realtime/N60Protection.c \
+            -o /tmp/validate-pr35-protection-reset
+          /tmp/validate-pr35-protection-reset
+
+      - name: Validate PR35 Denoiser Bounded Reset Equivalence
+        run: |
+          clang -std=c11 -Wall -Wextra -Werror \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr35_denoiser_bounded_reset.c \
+            NotchSixty/Audio/Realtime/N60SpectralDenoiser.c \
+            -o /tmp/validate-pr35-denoiser-reset
+          /tmp/validate-pr35-denoiser-reset
+
+      - name: Validate PR35 Denoiser Fast Path Equivalence
+        run: |
+          clang -std=c11 -Wall -Wextra -Werror \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr35_denoiser_validated_fastpath.c \
+            NotchSixty/Audio/Realtime/N60SpectralDenoiser.c \
+            -o /tmp/validate-pr35-denoiser-fastpath
+          /tmp/validate-pr35-denoiser-fastpath
+
+      - name: Validate PR35 Disabled DSP Fast Paths
+        run: |
+          clang -std=c11 -Wall -Wextra -Werror \
+            -include stddef.h \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr35_disabled_dsp_fastpath.c \
+            NotchSixty/Audio/Realtime/N60Dynamics.c \
+            NotchSixty/Audio/Realtime/N60DynamicEQ.c \
+            NotchSixty/Audio/Realtime/N60SpectralDenoiser.c \
+            NotchSixty/Audio/Realtime/N60Protection.c \
+            -lm \
+            -o /tmp/validate-pr35-disabled-dsp
+          /tmp/validate-pr35-disabled-dsp
+
+      - name: Validate PR35 Meter Gating
+        run: |
+          REALTIME_SOURCES=$(find NotchSixty/Audio/Realtime -name '*.c' ! -name 'N60RealtimeAudioBridge.c' -print)
+          clang -std=c11 -Wall -Wextra -Werror \
+            -include stddef.h \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr35_meter_gating.c \
+            $REALTIME_SOURCES \
+            -framework Accelerate \
+            -o /tmp/validate-pr35-meter-gating
+          /tmp/validate-pr35-meter-gating
+
+      - name: Validate PR35 Render Snapshot Lifetime
+        run: |
+          REALTIME_SOURCES=$(find NotchSixty/Audio/Realtime -name '*.c' ! -name 'N60RealtimeAudioBridge.c' -print)
+          clang -std=c11 -Wall -Wextra \
+            -include stddef.h \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr35_render_context_snapshot_pointer.c \
+            $REALTIME_SOURCES \
+            -framework Accelerate \
+            -o /tmp/validate-pr35-render-snapshot
+          /tmp/validate-pr35-render-snapshot
+
+      - name: Benchmark PR35 Render Kernel O0 vs O3
+        run: |
+          REALTIME_SOURCES=$(find NotchSixty/Audio/Realtime -name '*.c' ! -name 'N60RealtimeAudioBridge.c' -print)
+          clang -std=c11 -O0 -Wall -Wextra \
+            -include stddef.h \
+            -INotchSixty/Audio/Realtime \
+            ci/benchmark_pr35_render_kernel.c \
+            $REALTIME_SOURCES \
+            -framework Accelerate \
+            -o /tmp/benchmark-pr35-render-o0
+          echo '=== O0 ===' | tee /tmp/pr35-render-benchmark.txt
+          /tmp/benchmark-pr35-render-o0 | tee -a /tmp/pr35-render-benchmark.txt
+
+          clang -std=c11 -O3 -Wall -Wextra \
+            -include stddef.h \
+            -INotchSixty/Audio/Realtime \
+            ci/benchmark_pr35_render_kernel.c \
+            $REALTIME_SOURCES \
+            -framework Accelerate \
+            -o /tmp/benchmark-pr35-render-o3
+          echo '=== O3 ===' | tee -a /tmp/pr35-render-benchmark.txt
+          /tmp/benchmark-pr35-render-o3 | tee -a /tmp/pr35-render-benchmark.txt
+
+      - name: Benchmark PR35 Realtime Bridge O3
+        run: |
+          REALTIME_SOURCES=$(find NotchSixty/Audio/Realtime -name '*.c' -print)
+          clang -std=c11 -O3 -Wall -Wextra \
+            -include stddef.h \
+            -INotchSixty/Audio/Realtime \
+            ci/benchmark_pr35_realtime_bridge.c \
+            $REALTIME_SOURCES \
+            -framework Accelerate \
+            -framework CoreAudio \
+            -o /tmp/benchmark-pr35-bridge-o3
+          echo '=== BRIDGE O3 ===' | tee -a /tmp/pr35-render-benchmark.txt
+          /tmp/benchmark-pr35-bridge-o3 | tee -a /tmp/pr35-render-benchmark.txt
+
+      - name: Upload PR35 render benchmark
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr35-render-benchmark
+          path: /tmp/pr35-render-benchmark.txt
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Build
         run: >-
           xcodebuild
@@ -44,13 +173,34 @@ jobs:
           ENABLE_TESTABILITY=YES
           build
 
-      - name: Test
+      - name: Build Release Performance Scheme
         run: >-
           xcodebuild
           -project NotchSixty.xcodeproj
-          -scheme NotchSixty
-          -configuration Debug
+          -scheme NotchSixty-Performance
+          -configuration Release
           -destination 'platform=macOS,arch=arm64'
           CODE_SIGNING_ALLOWED=NO
-          ENABLE_TESTABILITY=YES
-          test
+          build
+
+      - name: Test
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            test 2>&1 | tee /tmp/pr35-xctest.log
+
+      - name: Upload XCTest diagnostic log
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr35-xctest-log
+          path: /tmp/pr35-xctest.log
+          if-no-files-found: error
+          retention-days: 1

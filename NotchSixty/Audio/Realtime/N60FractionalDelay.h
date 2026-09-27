@@ -12,6 +12,7 @@ extern "C" {
 
 #define N60_INTERCHANNEL_DELAY_MAX_MS 20.0
 #define N60_FRACTIONAL_DELAY_CAPACITY 8192u
+#define N60_FRACTIONAL_DELAY_MASK (N60_FRACTIONAL_DELAY_CAPACITY - 1u)
 #define N60_FRACTIONAL_DELAY_MAX_ORDER 3u
 #define N60_FRACTIONAL_DELAY_COMMON_FRAMES 2u
 
@@ -215,7 +216,7 @@ static inline float N60FractionalDelayRead(
     N60FractionalDelayAllPassState *state
 ) {
     uint32_t readIndex = (writeIndex + N60_FRACTIONAL_DELAY_CAPACITY - tap.integerFrames)
-        % N60_FRACTIONAL_DELAY_CAPACITY;
+        & N60_FRACTIONAL_DELAY_MASK;
     float input = history[readIndex];
     if (tap.order == 0u) return input;
 
@@ -301,8 +302,17 @@ static inline void N60InterChannelDelayRuntimeProcess(
 ) {
     if (runtime == NULL || outputLeft == NULL || outputRight == NULL) return;
 
+    // Keep only the inexpensive history writes alive while alignment is parked.
+    // This preserves recent source material for a click-free future enable without
+    // spending realtime cycles on delay reads/all-pass math while the control is OFF.
     runtime->historyLeft[runtime->writeIndex] = inputLeft;
     runtime->historyRight[runtime->writeIndex] = inputRight;
+    if (!runtime->current.enabled && runtime->transitionFramesRemaining == 0u) {
+        *outputLeft = inputLeft;
+        *outputRight = inputRight;
+        runtime->writeIndex = (runtime->writeIndex + 1u) & N60_FRACTIONAL_DELAY_MASK;
+        return;
+    }
 
     float currentLeft = N60FractionalDelayRead(
         runtime->historyLeft, runtime->writeIndex, runtime->current.left, &runtime->currentLeftState);
@@ -327,7 +337,7 @@ static inline void N60InterChannelDelayRuntimeProcess(
         }
     }
 
-    runtime->writeIndex = (runtime->writeIndex + 1u) % N60_FRACTIONAL_DELAY_CAPACITY;
+    runtime->writeIndex = (runtime->writeIndex + 1u) & N60_FRACTIONAL_DELAY_MASK;
 }
 
 #ifdef __cplusplus

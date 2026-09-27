@@ -77,6 +77,7 @@ typedef struct {
     N60SymmetryBalanceSnapshot symmetryBalance;
     N60SpeakerCrossfeedSnapshot speakerCrossfeed;
     N60CrosstalkCancellationSnapshot crosstalkCancellation;
+    bool meteringEnabled;
     bool bypassed;
     N60AuditionMode auditionMode;
     N60InterChannelDelaySnapshot interChannelDelay;
@@ -103,7 +104,10 @@ typedef struct {
 } N60DSPGraphSnapshot;
 
 typedef struct {
-    N60DSPGraphSnapshot snapshot;
+    // Points at the reader-pinned snapshot slot for the lifetime of this render
+    // context. The publisher cannot overwrite that slot until EndRender releases
+    // its reader count, so copying the full graph once per callback is unnecessary.
+    const N60DSPGraphSnapshot * _Nullable snapshot;
     uint32_t slotIndex;
     bool acquired;
 
@@ -148,6 +152,7 @@ typedef struct {
     uint32_t latencyFrames;
     double sampleRate;
     uint32_t channelCount;
+    bool meteringEnabled;
     bool bypassed;
     N60AuditionMode auditionMode;
     double interChannelDelayMs;
@@ -249,6 +254,10 @@ typedef struct {
 } N60RenderKernelDiagnostics;
 
 N60DSPGraphSnapshot N60DSPGraphSnapshotMakeUnity(double sampleRate);
+bool N60DSPGraphSnapshotSetMeteringEnabled(
+    N60DSPGraphSnapshot * _Nonnull snapshot,
+    bool enabled
+);
 void N60DSPGraphSnapshotClearEQ(N60DSPGraphSnapshot * _Nonnull snapshot);
 bool N60DSPGraphSnapshotSetSymmetryBalance(
     N60DSPGraphSnapshot * _Nonnull snapshot,

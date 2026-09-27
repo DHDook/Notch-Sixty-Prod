@@ -1663,6 +1663,7 @@ extension NotchSixtyTests {
         let sampleRate = 48_000.0
         var dynamics = DynamicsConfiguration()
         dynamics.mainsNotch.enabled = false
+        dynamics.mainsNotch.continuousTracking = true
         dynamics.mainsNotch.region = .hz60
         var graph = N60DSPGraphSnapshotMakeUnity(sampleRate)
         graph.dynamics = try dynamics.makeSnapshot(sampleRate: sampleRate)
@@ -1684,6 +1685,7 @@ extension NotchSixtyTests {
         defer { N60RenderKernelDestroy(kernel) }
         let sampleRate = 48_000.0
         var dynamics = DynamicsConfiguration()
+        dynamics.mainsNotch.continuousTracking = true
         dynamics.mainsNotch.region = .hz60
         var graph = N60DSPGraphSnapshotMakeUnity(sampleRate)
         graph.dynamics = try dynamics.makeSnapshot(sampleRate: sampleRate)
@@ -1696,6 +1698,28 @@ extension NotchSixtyTests {
         }
         let diagnostics = N60RenderKernelGetDiagnostics(kernel)
         XCTAssertLessThan(diagnostics.mainsDetectionConfidence, 0.25)
+    }
+
+    func testMainsHumDetectorIsParkedWhenContinuousTrackingIsDisabled() throws {
+        guard let kernel = N60RenderKernelCreate() else { return XCTFail("Unable to create render kernel") }
+        defer { N60RenderKernelDestroy(kernel) }
+        let sampleRate = 48_000.0
+        var dynamics = DynamicsConfiguration()
+        dynamics.mainsNotch.continuousTracking = false
+        dynamics.mainsNotch.region = .hz60
+        var graph = N60DSPGraphSnapshotMakeUnity(sampleRate)
+        graph.dynamics = try dynamics.makeSnapshot(sampleRate: sampleRate)
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+        let frequency = 60.75
+        for frame in 0..<Int(sampleRate * 2.2) {
+            let sample = Float(0.08 * sin(2.0 * Double.pi * frequency * Double(frame) / sampleRate))
+            var left: Float = 0
+            var right: Float = 0
+            N60RenderKernelProcessStereoFrame(kernel, sample, sample, &left, &right)
+        }
+        let diagnostics = N60RenderKernelGetDiagnostics(kernel)
+        XCTAssertEqual(diagnostics.mainsDetectedFrequencyHz, 0, accuracy: 0)
+        XCTAssertEqual(diagnostics.mainsDetectionConfidence, 0, accuracy: 0)
     }
 
     func testMainsNotchRetuneTransitionRemainsFiniteAndBounded() throws {

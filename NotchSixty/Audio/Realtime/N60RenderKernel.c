@@ -18,6 +18,12 @@
 #define N60_GAIN_MAX_TRANSITION_FRAMES 4096
 #define N60_CROSSOVER_MIN_TRANSITION_FRAMES 64
 #define N60_CROSSOVER_MAX_TRANSITION_FRAMES 8192
+#define N60_AUDITION_DELAY_MASK (N60_MAX_AUDITION_DELAY_FRAMES - 1u)
+
+_Static_assert(
+    (N60_MAX_AUDITION_DELAY_FRAMES & N60_AUDITION_DELAY_MASK) == 0u,
+    "audition delay ring size must remain a power of two"
+);
 
 typedef struct {
     N60DSPGraphSnapshot snapshot;
@@ -68,6 +74,7 @@ struct N60RenderKernel {
     _Atomic uint64_t nextGeneration;
 
     N60EQBandRuntime eqRuntime[N60_MAX_EQ_RENDER_SLOTS];
+    uint32_t eqRuntimeHighWaterMark;
     N60CrossoverRuntime crossoverRuntime;
     N60DynamicsRuntime dynamicsRuntime;
     N60SpectralDenoiserRuntime *denoiserRuntime;
@@ -338,6 +345,7 @@ static void reset_band_runtime(N60EQBandRuntime *runtime) {
 
 static void reset_eq_runtime(N60RenderKernel *kernel) {
     for (uint32_t index = 0; index < N60_MAX_EQ_RENDER_SLOTS; ++index) reset_band_runtime(&kernel->eqRuntime[index]);
+    kernel->eqRuntimeHighWaterMark = 0;
 }
 
 static void reset_smoothed_gain(N60SmoothedGain *gain, float value) {
@@ -367,6 +375,12 @@ static float next_gain_value(N60SmoothedGain *gain) {
     gain->transitionFramesRemaining -= 1;
     if (gain->transitionFramesRemaining == 0) gain->current = gain->target;
     return gain->current;
+}
+
+static bool smoothed_gain_is_settled_at(const N60SmoothedGain *gain, float value) {
+    return gain->transitionFramesRemaining == 0
+        && gain->current == value
+        && gain->target == value;
 }
 
 static void promote_pending_filter(N60EQBandRuntime *runtime) {
@@ -470,7 +484,7 @@ static void prepare_runtime_for_snapshot(N60RenderKernel *kernel, const N60DSPGr
         reset_smoothed_gain(&kernel->symmetryBalanceGainRight, snapshot->symmetryBalance.rightGainLinear);
         reset_smoothed_gain(&kernel->speakerCrossfeedAmount, snapshot->speakerCrossfeed.enabled ? snapshot->speakerCrossfeed.amount : 0.0f);
         reset_smoothed_gain(&kernel->crosstalkCancellationAmount, snapshot->crosstalkCancellation.enabled ? snapshot->crosstalkCancellation.amount : 0.0f);
-        reset_smoothed_gain(&kernel->crosstalkHeadShadowAlpha, snapshot->crosstalkCancellation.headShadowAlpha);
+        reset_smoothed_gain(&kernel->crosstalkHeadShadowAlpha, snapshot->crosstalkCancellation.enabled ? snapshot->crosstalkCancellation.headShadowAlpha : 0.0f);
         kernel->crosstalkShadowLeft = 0.0f;
         kernel->crosstalkShadowRight = 0.0f;
         N60InterChannelDelayRuntimeReset(&kernel->interChannelDelayRuntime, snapshot->interChannelDelay);
@@ -485,14 +499,17 @@ static void prepare_runtime_for_snapshot(N60RenderKernel *kernel, const N60DSPGr
         schedule_gain_transition(&kernel->symmetryBalanceGainRight, snapshot->symmetryBalance.rightGainLinear, gainFrames);
         schedule_gain_transition(&kernel->speakerCrossfeedAmount, snapshot->speakerCrossfeed.enabled ? snapshot->speakerCrossfeed.amount : 0.0f, gainFrames);
         schedule_gain_transition(&kernel->crosstalkCancellationAmount, snapshot->crosstalkCancellation.enabled ? snapshot->crosstalkCancellation.amount : 0.0f, gainFrames);
-        schedule_gain_transition(&kernel->crosstalkHeadShadowAlpha, snapshot->crosstalkCancellation.headShadowAlpha, gainFrames);
+        schedule_gain_transition(&kernel->crosstalkHeadShadowAlpha, snapshot->crosstalkCancellation.enabled ? snapshot->crosstalkCancellation.headShadowAlpha : 0.0f, gainFrames);
         N60InterChannelDelayRuntimeSchedule(&kernel->interChannelDelayRuntime, snapshot->interChannelDelay, gainFrames);
     }
 
     if (sampleRateChanged || leavingGraphBypass || leavingEQBypass) reset_eq_runtime(kernel);
     if (!snapshot->bypassed && !snapshot->eqBypassed) {
         uint32_t eqFrames = snapshot->eqTransitionFrames > 0 ? snapshot->eqTransitionFrames : eq_transition_frames_for_sample_rate(snapshot->sampleRate);
-        for (uint32_t index = 0; index < N60_MAX_EQ_RENDER_SLOTS; ++index) {
+        uint32_t scheduleCount = snapshot->eqBandCount > kernel->eqRuntimeHighWaterMark
+            ? snapshot->eqBandCount
+            : kernel->eqRuntimeHighWaterMark;
+        for (uint32_t index = 0; index < scheduleCount; ++index) {
             bool enabled = false;
             uint8_t channelMask = 0;
             N60BiquadCoefficients coefficients = N60BiquadCoefficientsMakeIdentity();
@@ -503,6 +520,7 @@ static void prepare_runtime_for_snapshot(N60RenderKernel *kernel, const N60DSPGr
             }
             schedule_band_transition(&kernel->eqRuntime[index], enabled, channelMask, coefficients, eqFrames);
         }
+        kernel->eqRuntimeHighWaterMark = scheduleCount;
     } else {
         reset_eq_runtime(kernel);
     }
@@ -548,7 +566,8 @@ static float process_eq_band(N60EQBandRuntime *runtime, float input, uint8_t cha
 }
 
 static void advance_eq_transitions(N60RenderKernel *kernel) {
-    for (uint32_t index = 0; index < N60_MAX_EQ_RENDER_SLOTS; ++index) {
+    uint32_t highWater = kernel->eqRuntimeHighWaterMark;
+    for (uint32_t index = 0; index < highWater; ++index) {
         N60EQBandRuntime *runtime = &kernel->eqRuntime[index];
         if (runtime->transitionFramesRemaining == 0) continue;
         runtime->transitionFramesRemaining -= 1;
@@ -563,6 +582,12 @@ static void advance_eq_transitions(N60RenderKernel *kernel) {
             if (!runtime->currentEnabled || (runtime->currentChannelMask & N60_EQ_CHANNEL_RIGHT) == 0) clear_state(&runtime->currentRight);
         }
     }
+    while (highWater > 0) {
+        N60EQBandRuntime *runtime = &kernel->eqRuntime[highWater - 1u];
+        if (runtime->currentEnabled || runtime->pendingEnabled || runtime->transitionFramesRemaining != 0) break;
+        highWater -= 1u;
+    }
+    kernel->eqRuntimeHighWaterMark = highWater;
 }
 
 static void process_crossover_path(
@@ -664,14 +689,14 @@ static void process_reference_delay(
     } else {
         uint32_t readIndex = (kernel->referenceDelayWriteIndex
             + N60_MAX_AUDITION_DELAY_FRAMES
-            - delayFrames) % N60_MAX_AUDITION_DELAY_FRAMES;
+            - delayFrames) & N60_AUDITION_DELAY_MASK;
         *referenceLeft = kernel->referenceDelayLeft[readIndex];
         *referenceRight = kernel->referenceDelayRight[readIndex];
     }
 
     kernel->referenceDelayLeft[kernel->referenceDelayWriteIndex] = inputLeft;
     kernel->referenceDelayRight[kernel->referenceDelayWriteIndex] = inputRight;
-    kernel->referenceDelayWriteIndex = (kernel->referenceDelayWriteIndex + 1u) % N60_MAX_AUDITION_DELAY_FRAMES;
+    kernel->referenceDelayWriteIndex = (kernel->referenceDelayWriteIndex + 1u) & N60_AUDITION_DELAY_MASK;
 }
 
 static void meter_sample(float left, float right, float *peakLeft, float *peakRight, double *squareSumLeft, double *squareSumRight, uint64_t *overRangeSamples) {
@@ -704,7 +729,7 @@ static N60RenderKernelRenderContext acquire_render_context(N60RenderKernel *kern
         N60SnapshotSlot *slot = &kernel->slots[slotIndex];
         atomic_fetch_add_explicit(&slot->readers, 1, memory_order_acq_rel);
         if (slotIndex == atomic_load_explicit(&kernel->activeSlot, memory_order_acquire)) {
-            context.snapshot = slot->snapshot;
+            context.snapshot = &slot->snapshot;
             context.slotIndex = slotIndex;
             context.acquired = true;
             return context;
@@ -821,6 +846,7 @@ N60DSPGraphSnapshot N60DSPGraphSnapshotMakeUnity(double sampleRate) {
     snapshot.speakerCrossfeed.enabled = false;
     snapshot.speakerCrossfeed.amount = 0.0f;
     (void)N60CrosstalkCancellationDesign(sampleRate, 0.5, 700.0, false, &snapshot.crosstalkCancellation);
+    snapshot.meteringEnabled = false;
     snapshot.bypassed = false;
     snapshot.auditionMode = N60AuditionModeProcessed;
     snapshot.interChannelDelay = N60InterChannelDelaySnapshotMakeBypassed();
@@ -843,6 +869,15 @@ N60DSPGraphSnapshot N60DSPGraphSnapshotMakeUnity(double sampleRate) {
     snapshot.speakerIR.enabled = false;
     snapshot.speakerIR.programSlot = N60_CONVOLUTION_NO_PROGRAM;
     return snapshot;
+}
+
+bool N60DSPGraphSnapshotSetMeteringEnabled(
+    N60DSPGraphSnapshot *snapshot,
+    bool enabled
+) {
+    if (snapshot == NULL) return false;
+    snapshot->meteringEnabled = enabled;
+    return true;
 }
 
 void N60DSPGraphSnapshotClearEQ(N60DSPGraphSnapshot *snapshot) {
@@ -1266,8 +1301,8 @@ bool N60RenderKernelPublishSnapshot(N60RenderKernel *kernel, N60DSPGraphSnapshot
 
 N60RenderKernelRenderContext N60RenderKernelBeginRender(N60RenderKernel *kernel) {
     N60RenderKernelRenderContext context = acquire_render_context(kernel);
-    if (context.acquired) {
-        prepare_runtime_for_snapshot(kernel, &context.snapshot);
+    if (context.acquired && context.snapshot != NULL) {
+        prepare_runtime_for_snapshot(kernel, context.snapshot);
         N60ProtectionRuntimeBeginBuffer(kernel->protectionRuntime);
     }
     return context;
@@ -1280,29 +1315,32 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
     float right = sanitize_sample(kernel, inputRight);
     float referenceLeft = 0.0f;
     float referenceRight = 0.0f;
-    uint32_t referenceDelayFrames = context->acquired ? context->snapshot.latencyFrames : 0;
+    uint32_t referenceDelayFrames = context->acquired && context->snapshot != NULL ? context->snapshot->latencyFrames : 0;
     process_reference_delay(kernel, referenceDelayFrames, left, right, &referenceLeft, &referenceRight);
-    meter_sample(left, right, &context->inputPeakLeft, &context->inputPeakRight, &context->inputSquareSumLeft, &context->inputSquareSumRight, &context->inputOverRangeSamples);
+    bool meteringEnabled = context->acquired && context->snapshot != NULL && context->snapshot->meteringEnabled;
+    if (meteringEnabled) {
+        meter_sample(left, right, &context->inputPeakLeft, &context->inputPeakRight, &context->inputSquareSumLeft, &context->inputSquareSumRight, &context->inputOverRangeSamples);
+    }
 
-    if (context->acquired && !context->snapshot.bypassed) {
+    if (context->acquired && context->snapshot != NULL && !context->snapshot->bypassed) {
         float inputGain = next_gain_value(&kernel->inputGain);
         float headroomGain = next_gain_value(&kernel->headroomGain);
         left *= inputGain * headroomGain;
         right *= inputGain * headroomGain;
 
-        N60DynamicsProcessPreEQStereoFrame(&kernel->dynamicsRuntime, context->snapshot.dynamics, &left, &right);
+        N60DynamicsProcessPreEQStereoFrame(&kernel->dynamicsRuntime, &context->snapshot->dynamics, &left, &right);
 
-        N60SpectralDenoiserProcessStereoFrame(
+        N60SpectralDenoiserProcessStereoFrameValidated(
             kernel->denoiserRuntime,
-            context->snapshot.dynamics.spectralDenoiser,
-            context->snapshot.sampleRate,
+            &context->snapshot->dynamics.spectralDenoiser,
+            context->snapshot->sampleRate,
             left,
             right,
             &left,
             &right
         );
 
-        bool midSideEQ = !context->snapshot.eqBypassed && context->snapshot.eqMidSideMode;
+        bool midSideEQ = !context->snapshot->eqBypassed && context->snapshot->eqMidSideMode;
         if (midSideEQ) {
             float mid = 0.0f;
             float side = 0.0f;
@@ -1311,8 +1349,8 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
             right = side;
         }
 
-        if (!context->snapshot.eqBypassed) {
-            for (uint32_t index = 0; index < N60_MAX_EQ_RENDER_SLOTS; ++index) {
+        if (!context->snapshot->eqBypassed) {
+            for (uint32_t index = 0; index < kernel->eqRuntimeHighWaterMark; ++index) {
                 N60EQBandRuntime *runtime = &kernel->eqRuntime[index];
                 if (!runtime->currentEnabled && runtime->transitionFramesRemaining == 0) continue;
                 left = process_eq_band(runtime, left, N60_EQ_CHANNEL_LEFT);
@@ -1321,13 +1359,13 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
             advance_eq_transitions(kernel);
         }
 
-        if (context->snapshot.convolution.enabled) {
+        if (context->snapshot->convolution.enabled) {
             float convolvedLeft = left;
             float convolvedRight = right;
             if (N60PartitionedConvolverProcessSample(
                     kernel->convolver,
-                    context->snapshot.convolution.programSlot,
-                    context->snapshot.convolution.programGeneration,
+                    context->snapshot->convolution.programSlot,
+                    context->snapshot->convolution.programGeneration,
                     left,
                     right,
                     &convolvedLeft,
@@ -1347,27 +1385,29 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
             right = physicalRight;
         }
 
-        if (!context->snapshot.eqBypassed) {
-            // Dynamic EQ remains a linked physical-stereo stage. Mid/Side does
-            // not create independent M/S dynamic detectors.
+        if (!context->snapshot->eqBypassed) {
+            // Dynamic EQ follows the active EQ channel domain: linked stereo,
+            // independent L/R, or independent Mid/Side lanes before decode.
             N60DynamicsProcessDynamicEQStereoFrame(
                 &kernel->dynamicsRuntime,
-                context->snapshot.dynamics,
+                &context->snapshot->dynamics,
                 &left,
                 &right
             );
         }
 
-        meter_sample(left, right, &context->postEQPeakLeft, &context->postEQPeakRight, &context->postEQSquareSumLeft, &context->postEQSquareSumRight, &context->postEQOverRangeSamples);
+        if (meteringEnabled) {
+            meter_sample(left, right, &context->postEQPeakLeft, &context->postEQPeakRight, &context->postEQSquareSumLeft, &context->postEQSquareSumRight, &context->postEQOverRangeSamples);
+        }
         process_crossover(&kernel->crossoverRuntime, left, right, &left, &right);
 
-        if (context->snapshot.roomCorrection.enabled) {
+        if (context->snapshot->roomCorrection.enabled) {
             float correctedLeft = left;
             float correctedRight = right;
             if (N60PartitionedConvolverProcessSample(
                     kernel->roomCorrectionConvolver,
-                    context->snapshot.roomCorrection.programSlot,
-                    context->snapshot.roomCorrection.programGeneration,
+                    context->snapshot->roomCorrection.programSlot,
+                    context->snapshot->roomCorrection.programGeneration,
                     left,
                     right,
                     &correctedLeft,
@@ -1382,13 +1422,13 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
         // Independent global speaker impulse-response slot. This deliberately
         // remains separate from main-EQ FIR and room correction so all three
         // audited FIR workflows can coexist in the current stereo graph.
-        if (context->snapshot.speakerIR.enabled) {
+        if (context->snapshot->speakerIR.enabled) {
             float convolvedLeft = left;
             float convolvedRight = right;
             if (N60PartitionedConvolverProcessSample(
                     kernel->speakerIRConvolver,
-                    context->snapshot.speakerIR.programSlot,
-                    context->snapshot.speakerIR.programGeneration,
+                    context->snapshot->speakerIR.programSlot,
+                    context->snapshot->speakerIR.programGeneration,
                     left,
                     right,
                     &convolvedLeft,
@@ -1400,34 +1440,46 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
             }
         }
 
-        N60DynamicsProcessCoreStereoFrameWithMasterGain(&kernel->dynamicsRuntime, context->snapshot.dynamics, context->snapshot.masterGainLinear, &left, &right);
+        N60DynamicsProcessCoreStereoFrameWithMasterGain(&kernel->dynamicsRuntime, &context->snapshot->dynamics, context->snapshot->masterGainLinear, &left, &right);
 
         // Listening-position symmetry compensation is intentionally separate
         // from ordinary attenuation-style Balance. It feeds the speaker-spatial
         // chain and is gain-smoothed so live position changes remain click-free.
-        left *= next_gain_value(&kernel->symmetryBalanceGainLeft);
-        right *= next_gain_value(&kernel->symmetryBalanceGainRight);
+        if (!smoothed_gain_is_settled_at(&kernel->symmetryBalanceGainLeft, 1.0f)
+            || !smoothed_gain_is_settled_at(&kernel->symmetryBalanceGainRight, 1.0f)) {
+            left *= next_gain_value(&kernel->symmetryBalanceGainLeft);
+            right *= next_gain_value(&kernel->symmetryBalanceGainRight);
+        }
 
-        // Speaker crossfeed / Panning Gain Matrix. The audited effective range
-        // is 0...0.5: zero is identity and 0.5 is exact mono.
-        const float crossfeed = next_gain_value(&kernel->speakerCrossfeedAmount);
-        const float direct = 1.0f - crossfeed;
-        const float spatialLeft = left;
-        const float spatialRight = right;
-        left = direct * spatialLeft + crossfeed * spatialRight;
-        right = direct * spatialRight + crossfeed * spatialLeft;
+        // Speaker crossfeed / Panning Gain Matrix. Once its disable ramp has
+        // reached zero the processor is computationally parked.
+        if (!smoothed_gain_is_settled_at(&kernel->speakerCrossfeedAmount, 0.0f)) {
+            const float crossfeed = next_gain_value(&kernel->speakerCrossfeedAmount);
+            const float direct = 1.0f - crossfeed;
+            const float spatialLeft = left;
+            const float spatialRight = right;
+            left = direct * spatialLeft + crossfeed * spatialRight;
+            right = direct * spatialRight + crossfeed * spatialLeft;
+        }
 
-        // Gentle feed-forward speaker crosstalk cancellation. The opposite-channel
-        // cancellation signal is frequency-shaped by a first-order far-ear/head-
-        // shadow model; there is no recursive feedback loop in the realtime path.
-        const float shadowAlpha = next_gain_value(&kernel->crosstalkHeadShadowAlpha);
-        kernel->crosstalkShadowLeft += shadowAlpha * (left - kernel->crosstalkShadowLeft);
-        kernel->crosstalkShadowRight += shadowAlpha * (right - kernel->crosstalkShadowRight);
-        const float cancellationAmount = next_gain_value(&kernel->crosstalkCancellationAmount);
-        const float cancellationLeft = left;
-        const float cancellationRight = right;
-        left = cancellationLeft - cancellationAmount * kernel->crosstalkShadowRight;
-        right = cancellationRight - cancellationAmount * kernel->crosstalkShadowLeft;
+        // Gentle feed-forward speaker crosstalk cancellation. The shadow filter
+        // and cancellation matrix park completely after the disable ramp reaches 0.
+        if (!smoothed_gain_is_settled_at(&kernel->crosstalkCancellationAmount, 0.0f)
+            || !smoothed_gain_is_settled_at(&kernel->crosstalkHeadShadowAlpha, 0.0f)) {
+            const float shadowAlpha = next_gain_value(&kernel->crosstalkHeadShadowAlpha);
+            kernel->crosstalkShadowLeft += shadowAlpha * (left - kernel->crosstalkShadowLeft);
+            kernel->crosstalkShadowRight += shadowAlpha * (right - kernel->crosstalkShadowRight);
+            const float cancellationAmount = next_gain_value(&kernel->crosstalkCancellationAmount);
+            const float cancellationLeft = left;
+            const float cancellationRight = right;
+            left = cancellationLeft - cancellationAmount * kernel->crosstalkShadowRight;
+            right = cancellationRight - cancellationAmount * kernel->crosstalkShadowLeft;
+            if (smoothed_gain_is_settled_at(&kernel->crosstalkCancellationAmount, 0.0f)
+                && smoothed_gain_is_settled_at(&kernel->crosstalkHeadShadowAlpha, 0.0f)) {
+                kernel->crosstalkShadowLeft = 0.0f;
+                kernel->crosstalkShadowRight = 0.0f;
+            }
+        }
 
         left *= next_gain_value(&kernel->balanceGainLeft);
         right *= next_gain_value(&kernel->balanceGainRight);
@@ -1437,19 +1489,19 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
 
         N60ProtectionProcessStereoFrame(
             kernel->protectionRuntime,
-            &context->snapshot.protection,
+            &context->snapshot->protection,
             &left,
             &right
         );
 
         N60DynamicsProcessPauseGateStereoFrame(
             &kernel->dynamicsRuntime,
-            context->snapshot.dynamics,
+            &context->snapshot->dynamics,
             &left,
             &right
         );
 
-        switch (context->snapshot.auditionMode) {
+        switch (context->snapshot->auditionMode) {
         case N60AuditionModeReference:
             left = referenceLeft;
             right = referenceRight;
@@ -1463,18 +1515,20 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
             break;
         }
     } else {
-        meter_sample(left, right, &context->postEQPeakLeft, &context->postEQPeakRight, &context->postEQSquareSumLeft, &context->postEQSquareSumRight, &context->postEQOverRangeSamples);
+        if (meteringEnabled) {
+            meter_sample(left, right, &context->postEQPeakLeft, &context->postEQPeakRight, &context->postEQSquareSumLeft, &context->postEQSquareSumRight, &context->postEQOverRangeSamples);
+        }
     }
 
     // Keep the alignment history warm even during Global Bypass, but discard the
     // aligned copy while bypassed so Global Bypass remains the true raw escape path.
     // Processed / Reference / Delta all receive the same speaker-alignment stage.
-    if (context->acquired) {
+    if (context->acquired && context->snapshot != NULL) {
         float alignedLeft = left;
         float alignedRight = right;
         N60InterChannelDelayRuntimeProcess(
             &kernel->interChannelDelayRuntime, left, right, &alignedLeft, &alignedRight);
-        if (!context->snapshot.bypassed) {
+        if (!context->snapshot->bypassed) {
             left = alignedLeft;
             right = alignedRight;
         }
@@ -1485,17 +1539,21 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
     right *= masterGain;
     left = sanitize_sample(kernel, left);
     right = sanitize_sample(kernel, right);
-    meter_sample(left, right, &context->outputPeakLeft, &context->outputPeakRight, &context->outputSquareSumLeft, &context->outputSquareSumRight, &context->outputOverRangeSamples);
-    context->meteredFrames += 1;
+    if (meteringEnabled) {
+        meter_sample(left, right, &context->outputPeakLeft, &context->outputPeakRight, &context->outputSquareSumLeft, &context->outputSquareSumRight, &context->outputOverRangeSamples);
+        context->meteredFrames += 1;
+    }
     *outputLeft = left;
     *outputRight = right;
 }
 
 void N60RenderKernelEndRender(N60RenderKernel *kernel, N60RenderKernelRenderContext *context, uint32_t renderedFrames) {
     if (kernel == NULL || context == NULL) return;
-    publish_meter(&kernel->inputPeakLeftBits, &kernel->inputPeakRightBits, &kernel->inputRMSLeftBits, &kernel->inputRMSRightBits, &kernel->inputOverRangeSamples, context->inputPeakLeft, context->inputPeakRight, context->inputSquareSumLeft, context->inputSquareSumRight, context->inputOverRangeSamples, context->meteredFrames);
-    publish_meter(&kernel->postEQPeakLeftBits, &kernel->postEQPeakRightBits, &kernel->postEQRMSLeftBits, &kernel->postEQRMSRightBits, &kernel->postEQOverRangeSamples, context->postEQPeakLeft, context->postEQPeakRight, context->postEQSquareSumLeft, context->postEQSquareSumRight, context->postEQOverRangeSamples, context->meteredFrames);
-    publish_meter(&kernel->outputPeakLeftBits, &kernel->outputPeakRightBits, &kernel->outputRMSLeftBits, &kernel->outputRMSRightBits, &kernel->outputOverRangeSamples, context->outputPeakLeft, context->outputPeakRight, context->outputSquareSumLeft, context->outputSquareSumRight, context->outputOverRangeSamples, context->meteredFrames);
+    if (context->acquired && context->snapshot != NULL && context->snapshot->meteringEnabled) {
+        publish_meter(&kernel->inputPeakLeftBits, &kernel->inputPeakRightBits, &kernel->inputRMSLeftBits, &kernel->inputRMSRightBits, &kernel->inputOverRangeSamples, context->inputPeakLeft, context->inputPeakRight, context->inputSquareSumLeft, context->inputSquareSumRight, context->inputOverRangeSamples, context->meteredFrames);
+        publish_meter(&kernel->postEQPeakLeftBits, &kernel->postEQPeakRightBits, &kernel->postEQRMSLeftBits, &kernel->postEQRMSRightBits, &kernel->postEQOverRangeSamples, context->postEQPeakLeft, context->postEQPeakRight, context->postEQSquareSumLeft, context->postEQSquareSumRight, context->postEQOverRangeSamples, context->meteredFrames);
+        publish_meter(&kernel->outputPeakLeftBits, &kernel->outputPeakRightBits, &kernel->outputRMSLeftBits, &kernel->outputRMSRightBits, &kernel->outputOverRangeSamples, context->outputPeakLeft, context->outputPeakRight, context->outputSquareSumLeft, context->outputSquareSumRight, context->outputOverRangeSamples, context->meteredFrames);
+    }
     if (renderedFrames > 0) {
         N60DynamicsTelemetry telemetry = N60DynamicsRuntimeTelemetry(&kernel->dynamicsRuntime);
         atomic_store_explicit(&kernel->mainsDetectedFrequencyBits, float_to_bits(telemetry.mainsDetectedFrequencyHz), memory_order_relaxed);
@@ -1561,83 +1619,84 @@ N60RenderKernelDiagnostics N60RenderKernelGetDiagnostics(const N60RenderKernel *
 
     N60RenderKernel *mutableKernel = (N60RenderKernel *)kernel;
     N60RenderKernelRenderContext context = acquire_render_context(mutableKernel);
-    if (context.acquired) {
-        diagnostics.publishedGeneration = context.snapshot.generation;
-        diagnostics.latencyFrames = context.snapshot.latencyFrames;
-        diagnostics.sampleRate = context.snapshot.sampleRate;
-        diagnostics.channelCount = context.snapshot.channelCount;
-        diagnostics.bypassed = context.snapshot.bypassed;
-        diagnostics.auditionMode = context.snapshot.auditionMode;
-        diagnostics.interChannelDelayMs = context.snapshot.interChannelDelay.signedDelayMs;
-        diagnostics.interChannelAlignmentLatencyFrames = context.snapshot.interChannelDelay.commonLatencyFrames;
-        diagnostics.inputGainLinear = context.snapshot.inputGainLinear;
-        diagnostics.headroomGainLinear = context.snapshot.headroomGainLinear;
-        diagnostics.outputGainLinear = context.snapshot.outputGainLinear;
-        diagnostics.masterGainLinear = context.snapshot.masterGainLinear;
-        diagnostics.balanceGainLeftLinear = context.snapshot.balanceGainLeftLinear;
-        diagnostics.balanceGainRightLinear = context.snapshot.balanceGainRightLinear;
-        diagnostics.eqBypassed = context.snapshot.eqBypassed;
-        diagnostics.eqMidSideMode = context.snapshot.eqMidSideMode;
-        diagnostics.mixedPhaseEnabled = context.snapshot.mixedPhaseEnabled;
-        diagnostics.mixedPhaseCorrectionSectionCount = context.snapshot.mixedPhaseCorrectionSectionCount;
-        diagnostics.eqBandCount = context.snapshot.eqBandCount;
-        for (uint32_t index = 0; index < context.snapshot.eqBandCount; ++index) {
-            if (!context.snapshot.eqBands[index].enabled) continue;
-            uint8_t mask = context.snapshot.eqBandChannelMasks[index];
+    if (context.acquired && context.snapshot != NULL) {
+        diagnostics.publishedGeneration = context.snapshot->generation;
+        diagnostics.latencyFrames = context.snapshot->latencyFrames;
+        diagnostics.sampleRate = context.snapshot->sampleRate;
+        diagnostics.channelCount = context.snapshot->channelCount;
+        diagnostics.meteringEnabled = context.snapshot->meteringEnabled;
+        diagnostics.bypassed = context.snapshot->bypassed;
+        diagnostics.auditionMode = context.snapshot->auditionMode;
+        diagnostics.interChannelDelayMs = context.snapshot->interChannelDelay.signedDelayMs;
+        diagnostics.interChannelAlignmentLatencyFrames = context.snapshot->interChannelDelay.commonLatencyFrames;
+        diagnostics.inputGainLinear = context.snapshot->inputGainLinear;
+        diagnostics.headroomGainLinear = context.snapshot->headroomGainLinear;
+        diagnostics.outputGainLinear = context.snapshot->outputGainLinear;
+        diagnostics.masterGainLinear = context.snapshot->masterGainLinear;
+        diagnostics.balanceGainLeftLinear = context.snapshot->balanceGainLeftLinear;
+        diagnostics.balanceGainRightLinear = context.snapshot->balanceGainRightLinear;
+        diagnostics.eqBypassed = context.snapshot->eqBypassed;
+        diagnostics.eqMidSideMode = context.snapshot->eqMidSideMode;
+        diagnostics.mixedPhaseEnabled = context.snapshot->mixedPhaseEnabled;
+        diagnostics.mixedPhaseCorrectionSectionCount = context.snapshot->mixedPhaseCorrectionSectionCount;
+        diagnostics.eqBandCount = context.snapshot->eqBandCount;
+        for (uint32_t index = 0; index < context.snapshot->eqBandCount; ++index) {
+            if (!context.snapshot->eqBands[index].enabled) continue;
+            uint8_t mask = context.snapshot->eqBandChannelMasks[index];
             if ((mask & N60_EQ_CHANNEL_LEFT) != 0) diagnostics.eqLeftBandCount += 1;
             if ((mask & N60_EQ_CHANNEL_RIGHT) != 0) diagnostics.eqRightBandCount += 1;
         }
-        diagnostics.crossoverEnabled = context.snapshot.crossover.enabled;
-        diagnostics.crossoverFrequencyHz = context.snapshot.crossover.frequencyHz;
-        diagnostics.crossoverTopology = context.snapshot.crossover.topology;
-        diagnostics.crossoverMonitorMode = context.snapshot.crossover.monitorMode;
-        diagnostics.crossoverSubGainLinear = context.snapshot.crossover.subGainLinear;
-        diagnostics.crossoverSubPolarityInverted = context.snapshot.crossover.subPolarityInverted;
-        diagnostics.crossoverSectionCount = context.snapshot.crossover.sectionCount;
+        diagnostics.crossoverEnabled = context.snapshot->crossover.enabled;
+        diagnostics.crossoverFrequencyHz = context.snapshot->crossover.frequencyHz;
+        diagnostics.crossoverTopology = context.snapshot->crossover.topology;
+        diagnostics.crossoverMonitorMode = context.snapshot->crossover.monitorMode;
+        diagnostics.crossoverSubGainLinear = context.snapshot->crossover.subGainLinear;
+        diagnostics.crossoverSubPolarityInverted = context.snapshot->crossover.subPolarityInverted;
+        diagnostics.crossoverSectionCount = context.snapshot->crossover.sectionCount;
         diagnostics.mainsDetectedFrequencyHz = bits_to_float(atomic_load_explicit(&kernel->mainsDetectedFrequencyBits, memory_order_relaxed));
         diagnostics.mainsDetectionConfidence = bits_to_float(atomic_load_explicit(&kernel->mainsDetectionConfidenceBits, memory_order_relaxed));
-        diagnostics.spectralDenoiserEnabled = context.snapshot.dynamics.spectralDenoiser.enabled;
-        diagnostics.spectralDenoiserTuning = context.snapshot.dynamics.spectralDenoiser.tuning;
-        diagnostics.spectralDenoiserQuality = context.snapshot.dynamics.spectralDenoiser.quality;
-        diagnostics.denoiserFFTSize = context.snapshot.dynamics.spectralDenoiser.fftSize;
-        diagnostics.denoiserHopSize = context.snapshot.dynamics.spectralDenoiser.hopSize;
-        diagnostics.denoiserLatencyFrames = context.snapshot.dynamics.spectralDenoiser.enabled
-            ? context.snapshot.dynamics.spectralDenoiser.latencyFrames : 0;
-        diagnostics.deEsserEnabled = context.snapshot.dynamics.deEsser.enabled;
-        diagnostics.deEsserDynamicEQMode = context.snapshot.dynamics.deEsser.dynamicEQMode;
-        diagnostics.deEsserFrequencyHz = context.snapshot.dynamics.deEsser.frequencyHz;
-        diagnostics.multibandCompressorEnabled = context.snapshot.dynamics.multibandCompressor.enabled;
-        diagnostics.multibandLowMidFrequencyHz = context.snapshot.dynamics.multibandCompressor.lowMidFrequencyHz;
-        diagnostics.multibandMidHighFrequencyHz = context.snapshot.dynamics.multibandCompressor.midHighFrequencyHz;
-        diagnostics.multibandTopology = context.snapshot.dynamics.multibandCompressor.lowTopology;
-        diagnostics.compressorEnabled = context.snapshot.dynamics.compressor.enabled;
-        diagnostics.expanderEnabled = context.snapshot.dynamics.expander.enabled;
-        diagnostics.pauseGateEnabled = context.snapshot.dynamics.pauseGate.enabled;
-        diagnostics.softClipperEnabled = context.snapshot.protection.softClipperEnabled;
-        diagnostics.limiterEnabled = context.snapshot.protection.limiterEnabled;
-        diagnostics.oversamplingFactor = context.snapshot.protection.oversamplingFactor;
-        diagnostics.effectiveOversamplingFactor = context.snapshot.protection.effectiveFactor;
-        diagnostics.convolutionEnabled = context.snapshot.convolution.enabled;
-        diagnostics.convolutionProgramSlot = context.snapshot.convolution.programSlot;
-        diagnostics.convolutionProgramGeneration = context.snapshot.convolution.programGeneration;
-        diagnostics.convolutionTapCount = context.snapshot.convolution.tapCount;
-        diagnostics.convolutionPartitionCount = context.snapshot.convolution.partitionCount;
-        diagnostics.convolutionEngineLatencyFrames = context.snapshot.convolution.engineLatencyFrames;
-        diagnostics.convolutionDeclaredLatencyFrames = context.snapshot.convolution.declaredLatencyFrames;
-        diagnostics.roomCorrectionEnabled = context.snapshot.roomCorrection.enabled;
-        diagnostics.roomCorrectionProgramSlot = context.snapshot.roomCorrection.programSlot;
-        diagnostics.roomCorrectionProgramGeneration = context.snapshot.roomCorrection.programGeneration;
-        diagnostics.roomCorrectionTapCount = context.snapshot.roomCorrection.tapCount;
-        diagnostics.roomCorrectionPartitionCount = context.snapshot.roomCorrection.partitionCount;
-        diagnostics.roomCorrectionEngineLatencyFrames = context.snapshot.roomCorrection.engineLatencyFrames;
-        diagnostics.roomCorrectionDeclaredLatencyFrames = context.snapshot.roomCorrection.declaredLatencyFrames;
-        diagnostics.speakerIREnabled = context.snapshot.speakerIR.enabled;
-        diagnostics.speakerIRProgramSlot = context.snapshot.speakerIR.programSlot;
-        diagnostics.speakerIRProgramGeneration = context.snapshot.speakerIR.programGeneration;
-        diagnostics.speakerIRTapCount = context.snapshot.speakerIR.tapCount;
-        diagnostics.speakerIRPartitionCount = context.snapshot.speakerIR.partitionCount;
-        diagnostics.speakerIREngineLatencyFrames = context.snapshot.speakerIR.engineLatencyFrames;
-        diagnostics.speakerIRDeclaredLatencyFrames = context.snapshot.speakerIR.declaredLatencyFrames;
+        diagnostics.spectralDenoiserEnabled = context.snapshot->dynamics.spectralDenoiser.enabled;
+        diagnostics.spectralDenoiserTuning = context.snapshot->dynamics.spectralDenoiser.tuning;
+        diagnostics.spectralDenoiserQuality = context.snapshot->dynamics.spectralDenoiser.quality;
+        diagnostics.denoiserFFTSize = context.snapshot->dynamics.spectralDenoiser.fftSize;
+        diagnostics.denoiserHopSize = context.snapshot->dynamics.spectralDenoiser.hopSize;
+        diagnostics.denoiserLatencyFrames = context.snapshot->dynamics.spectralDenoiser.enabled
+            ? context.snapshot->dynamics.spectralDenoiser.latencyFrames : 0;
+        diagnostics.deEsserEnabled = context.snapshot->dynamics.deEsser.enabled;
+        diagnostics.deEsserDynamicEQMode = context.snapshot->dynamics.deEsser.dynamicEQMode;
+        diagnostics.deEsserFrequencyHz = context.snapshot->dynamics.deEsser.frequencyHz;
+        diagnostics.multibandCompressorEnabled = context.snapshot->dynamics.multibandCompressor.enabled;
+        diagnostics.multibandLowMidFrequencyHz = context.snapshot->dynamics.multibandCompressor.lowMidFrequencyHz;
+        diagnostics.multibandMidHighFrequencyHz = context.snapshot->dynamics.multibandCompressor.midHighFrequencyHz;
+        diagnostics.multibandTopology = context.snapshot->dynamics.multibandCompressor.lowTopology;
+        diagnostics.compressorEnabled = context.snapshot->dynamics.compressor.enabled;
+        diagnostics.expanderEnabled = context.snapshot->dynamics.expander.enabled;
+        diagnostics.pauseGateEnabled = context.snapshot->dynamics.pauseGate.enabled;
+        diagnostics.softClipperEnabled = context.snapshot->protection.softClipperEnabled;
+        diagnostics.limiterEnabled = context.snapshot->protection.limiterEnabled;
+        diagnostics.oversamplingFactor = context.snapshot->protection.oversamplingFactor;
+        diagnostics.effectiveOversamplingFactor = context.snapshot->protection.effectiveFactor;
+        diagnostics.convolutionEnabled = context.snapshot->convolution.enabled;
+        diagnostics.convolutionProgramSlot = context.snapshot->convolution.programSlot;
+        diagnostics.convolutionProgramGeneration = context.snapshot->convolution.programGeneration;
+        diagnostics.convolutionTapCount = context.snapshot->convolution.tapCount;
+        diagnostics.convolutionPartitionCount = context.snapshot->convolution.partitionCount;
+        diagnostics.convolutionEngineLatencyFrames = context.snapshot->convolution.engineLatencyFrames;
+        diagnostics.convolutionDeclaredLatencyFrames = context.snapshot->convolution.declaredLatencyFrames;
+        diagnostics.roomCorrectionEnabled = context.snapshot->roomCorrection.enabled;
+        diagnostics.roomCorrectionProgramSlot = context.snapshot->roomCorrection.programSlot;
+        diagnostics.roomCorrectionProgramGeneration = context.snapshot->roomCorrection.programGeneration;
+        diagnostics.roomCorrectionTapCount = context.snapshot->roomCorrection.tapCount;
+        diagnostics.roomCorrectionPartitionCount = context.snapshot->roomCorrection.partitionCount;
+        diagnostics.roomCorrectionEngineLatencyFrames = context.snapshot->roomCorrection.engineLatencyFrames;
+        diagnostics.roomCorrectionDeclaredLatencyFrames = context.snapshot->roomCorrection.declaredLatencyFrames;
+        diagnostics.speakerIREnabled = context.snapshot->speakerIR.enabled;
+        diagnostics.speakerIRProgramSlot = context.snapshot->speakerIR.programSlot;
+        diagnostics.speakerIRProgramGeneration = context.snapshot->speakerIR.programGeneration;
+        diagnostics.speakerIRTapCount = context.snapshot->speakerIR.tapCount;
+        diagnostics.speakerIRPartitionCount = context.snapshot->speakerIR.partitionCount;
+        diagnostics.speakerIREngineLatencyFrames = context.snapshot->speakerIR.engineLatencyFrames;
+        diagnostics.speakerIRDeclaredLatencyFrames = context.snapshot->speakerIR.declaredLatencyFrames;
         N60RenderKernelEndRender(mutableKernel, &context, 0);
     }
 

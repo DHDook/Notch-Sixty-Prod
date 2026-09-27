@@ -232,7 +232,7 @@ private struct PR27ProtectionValidationView: View {
                 }
 
                 GroupBox("Realtime Protection Telemetry") {
-                    TimelineView(.periodic(from: .now, by: 0.1)) { _ in
+                    TimelineView(.periodic(from: .now, by: engine.lifecycleState == .running ? 1.0 : 3_600.0)) { _ in
                         let diagnostics = engine.diagnosticsSnapshot().renderKernelDiagnostics
                         Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 7) {
                             telemetryRow("Requested oversampling", oversamplingName(diagnostics?.oversamplingFactor ?? N60OversamplingFactor1x))
@@ -405,7 +405,7 @@ private struct PR28AdvancedDynamicsValidationView: View {
                 }
 
                 GroupBox("Realtime Gain Reduction") {
-                    TimelineView(.periodic(from: .now, by: 0.1)) { _ in
+                    TimelineView(.periodic(from: .now, by: engine.lifecycleState == .running ? 1.0 : 3_600.0)) { _ in
                         let diagnostics = engine.diagnosticsSnapshot().renderKernelDiagnostics
                         Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 7) {
                             telemetryRow("De-Esser GR", diagnostics?.deEsserGainReductionDB ?? 0)
@@ -599,7 +599,7 @@ private struct PR30PhaseTimeValidationView: View {
                 }
 
                 GroupBox("Realtime Alignment Telemetry") {
-                    TimelineView(.periodic(from: .now, by: 0.1)) { _ in
+                    TimelineView(.periodic(from: .now, by: engine.lifecycleState == .running ? 1.0 : 3_600.0)) { _ in
                         let diagnostics = engine.diagnosticsSnapshot().renderKernelDiagnostics
                         Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 7) {
                             GridRow {
@@ -635,7 +635,7 @@ private struct PR30PhaseTimeValidationView: View {
 private struct PR31NoiseHumValidationView: View {
     @ObservedObject var engine: AudioIOEngine
     @State private var mainsDiagnostics: RenderKernelDiagnostics?
-    private let trackingTimer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
+    private let trackingTimer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
 
     private func mainsBinding<Value>(_ keyPath: WritableKeyPath<MainsNotchConfiguration, Value>) -> Binding<Value> {
         Binding(
@@ -861,7 +861,7 @@ private struct PR31NoiseHumValidationView: View {
                             Button("Capture Noise Profile") { try? engine.captureSpectralNoiseProfile() }
                             Button("Reset Profile") { try? engine.resetSpectralNoiseProfile() }
                         }
-                        Text("Capture listens for about one second. Use a noise-only passage if possible. Reset returns to conservative adaptive learning. Analysis remains warm while bypassed so enabling does not begin from a cold estimator.")
+                        Text("Capture listens for about one second. Use a noise-only passage if possible. Reset returns to conservative adaptive learning. Learned profile/configuration state is preserved while bypassed; ordinary disabled playback parks the spectral FFT path until the denoiser or an explicit profile capture is enabled.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -904,8 +904,11 @@ private struct PR31NoiseHumValidationView: View {
         .frame(minWidth: 880, minHeight: 700)
         .onAppear { mainsDiagnostics = engine.diagnosticsSnapshot().renderKernelDiagnostics }
         .onReceive(trackingTimer) { _ in
+            guard engine.lifecycleState == .running else { return }
             mainsDiagnostics = engine.diagnosticsSnapshot().renderKernelDiagnostics
-            engine.pollMainsHumTracking()
+            if engine.dynamicsConfiguration.mainsNotch.continuousTracking {
+                engine.pollMainsHumTracking()
+            }
         }
     }
 }

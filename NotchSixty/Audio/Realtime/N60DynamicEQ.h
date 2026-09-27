@@ -117,6 +117,7 @@ typedef struct {
     uint32_t activeBandCount;
     N60DynamicEQDomain currentDomain;
     bool domainInitialized;
+    bool parked;
 } N60DynamicEQRuntime;
 
 typedef struct {
@@ -173,7 +174,7 @@ bool N60DynamicEQSnapshotIsValid(N60DynamicEQSnapshot snapshot);
 void N60DynamicEQRuntimeReset(N60DynamicEQRuntime *runtime);
 void N60DynamicEQProcessStereoFrame(
     N60DynamicEQRuntime *runtime,
-    N60DynamicEQSnapshot snapshot,
+    const N60DynamicEQSnapshot *snapshot,
     float *left,
     float *right
 );
