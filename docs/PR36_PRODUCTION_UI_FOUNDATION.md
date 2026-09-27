@@ -1,10 +1,10 @@
 # PR36 Production UI Foundation
 
-Status: IN PROGRESS
+Status: IMPLEMENTATION COMPLETE — awaiting exact-head CI and hardware UI/audio smoke test
 
 ## Purpose
 
-PR36 begins the transition from the engineering-validation shell to the shipping Notch Sixty interface. It establishes the production information architecture, macOS 27 visual language, signature VU presentation, and performance-aware meter lifecycle without changing accepted DSP behavior.
+PR36 transitions Notch Sixty from the engineering-validation shell to the first shipping macOS 27 interface. It establishes the production information architecture, Liquid Glass visual language, signature VU presentation, and performance-aware meter lifecycle without changing accepted DSP behavior.
 
 ## Product requirements
 
@@ -60,6 +60,12 @@ The purpose is to keep system-calibration workflows separate from day-to-day pla
 
 Output-device selection, processing transport state, sample-rate/status information and app-level audio configuration.
 
+## Application scene contract
+
+The first declared scene is now the production `WindowGroup`, whose root is `ProductionRootView`. This is the normal launch experience.
+
+The historical Main/PR27/PR28/PR30/PR31 validation surfaces are retained together in a separate `Engineering Validation` window. Both windows share the same `ProductController` and `AudioIOEngine`; opening engineering tools does not create a second transport or DSP engine. The production toolbar provides an explicit Engineering Validation button, and the validation window remains secondary rather than appearing in shipping navigation.
+
 ## Liquid Glass rules
 
 - Use native `NavigationSplitView`, toolbar and system controls so macOS 27 supplies platform-correct Liquid Glass automatically.
@@ -75,9 +81,11 @@ The Dashboard uses two large analog meters, Left and Right.
 Initial signal source:
 - output RMS drives the mechanical-style needle;
 - output peak is available as a supporting numeric readout;
-- 0 VU is initially referenced to -18 dBFS for display mapping;
+- 0 VU is referenced to -18 dBFS for display mapping;
 - the display range is -20 VU through +3 VU;
 - UI-side ballistics smooth the diagnostic samples so the needle behaves like an instrument rather than a sample-peak meter.
+
+The retained PR36 validator checks the calibration points and clamps, including -18 dBFS = 0 VU, -38 dBFS = -20 VU, and -15 dBFS = +3 VU.
 
 This mapping is a UI presentation contract, not a change to DSP gain staging.
 
@@ -86,28 +94,46 @@ This mapping is a UI presentation contract, not a change to DSP gain staging.
 PR35 established that user-visible analysis must be explicitly gated. PR36 preserves that rule:
 
 - graph metering defaults OFF;
-- entering a visible, running Dashboard enables the meter gate;
-- leaving Dashboard or stopping transport disables it;
-- one production meter loop polls a compact diagnostics snapshot;
+- entering a visible, running Dashboard acquires a metering-demand token;
+- leaving Dashboard or stopping transport releases the token;
+- demand is reference-counted so multiple production windows cannot disable a meter still needed by another visible Dashboard;
+- the bridge injects the current demand bit only at DSP graph publication, avoiding a new meter-demand atomic read in the physical-output per-sample loop;
+- later EQ, Dynamics, gain, crossover, or other graph publications automatically preserve the current visible-meter state;
+- Swift diagnostics expose the actual published `meteringEnabled` state before the Dashboard consumes meter values;
+- one production meter loop polls a compact diagnostics snapshot at approximately 30 Hz;
 - no hidden production page owns an independent high-frequency timer;
 - the validation-shell polling loops remain separate from the production UI and are not used as the production meter source.
 
-The initial production meter cadence is bounded to approximately 30 Hz and exists only while the Dashboard is visible and transport is running. It is subject to production profiling once the UI workload is representative.
+When the last Dashboard disappears, PR36 republishes the current graph through a neutral control-plane path so PR35 meter accumulation returns to its parked state. The meter-demand getter is guarded by CI against accidental use in `N60OutputIOProc`.
 
 ## Engineering validation access
 
-The existing Main/PR27/PR28/PR30/PR31 validation tabs remain available in a separate `Engineering Validation` window during the UI migration. The shipping window no longer presents those tabs as its primary navigation.
+The existing Main/PR27/PR28/PR30/PR31 validation tabs remain available in the separate `Engineering Validation` window during the UI migration. The shipping window no longer presents those tabs as its primary navigation.
+
+## Retained PR36 CI guard
+
+`ci/validate_pr36_ui_foundation.py` protects the structural contract introduced here:
+- macOS 27 deployment target;
+- production launch scene before the engineering scene;
+- all legacy validation surfaces retained in the engineering window;
+- `NavigationSplitView` and selective Liquid Glass usage;
+- dual signature VUs and their calibration constants/mapping;
+- visible-only meter-demand acquisition/release;
+- graph-publication meter injection with no demand read in the realtime output callback;
+- Speaker Setup ownership of Active Crossover and Room Correction;
+- post-merge handoff-document requirement.
 
 ## PR36 acceptance
 
 - macOS deployment target is 27.0;
-- production window uses the new navigation shell;
+- production window uses the new navigation shell and is the normal launch scene;
 - Dashboard contains the new clean-room stereo VU deck as its focal point;
 - VUs are fed by explicitly gated current-engine metering rather than synthetic animation;
+- hidden Dashboard meters return PR35 metering to its computationally parked state;
 - start/stop, output selection, volume and mute are available from production surfaces;
 - Room Correction and Active Crossover are contained in Speaker Setup;
-- engineering validation remains reachable in a separate window;
+- engineering validation remains reachable in a separate shared-engine window;
 - no DSP algorithm or accepted sonic behavior changes;
-- Debug build, Release build and XCTest remain green;
-- hardware smoke test confirms UI responsiveness, meter behavior and no new audio dropouts;
+- retained PR34/PR35/PR36 validators, Debug build, Release build and XCTest remain green on the exact closing head;
+- hardware smoke test confirms launch layout, Engineering Validation access, UI responsiveness, VU behavior and no new audio dropouts;
 - handoff document is updated after merge.
