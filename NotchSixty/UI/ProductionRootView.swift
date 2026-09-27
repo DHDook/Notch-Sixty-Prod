@@ -5,8 +5,8 @@ enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
     case dashboard
     case equalizer
     case dynamics
+    case meters
     case speakerSetup
-    case audio
 
     var id: String { rawValue }
     var title: String {
@@ -14,8 +14,8 @@ enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
         case .dashboard: return "Dashboard"
         case .equalizer: return "Equalizer"
         case .dynamics: return "Dynamics"
+        case .meters: return "Meters"
         case .speakerSetup: return "Speaker Setup"
-        case .audio: return "Audio"
         }
     }
     var systemImage: String {
@@ -23,8 +23,8 @@ enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
         case .dashboard: return "gauge.with.dots.needle.50percent"
         case .equalizer: return "slider.horizontal.3"
         case .dynamics: return "waveform.path.ecg"
+        case .meters: return "chart.xyaxis.line"
         case .speakerSetup: return "hifispeaker.2.fill"
-        case .audio: return "speaker.wave.3.fill"
         }
     }
 }
@@ -112,7 +112,7 @@ struct ProductionRootView: View {
     private func detail(for section: ProductionSection) -> some View {
         switch section {
         case .dashboard:
-            ProductionDashboardView(engine: engine) { selection = $0 }
+            ProductionDashboardView(engine: engine)
         case .equalizer:
             ProductionPlaceholderPage(
                 title: "Equalizer",
@@ -127,10 +127,15 @@ struct ProductionRootView: View {
                 systemImage: "waveform.path.ecg",
                 detail: "The dense dynamics editor will migrate from validation into this production workspace."
             )
+        case .meters:
+            ProductionPlaceholderPage(
+                title: "Meters",
+                subtitle: "Detailed signal, loudness, protection, and analysis telemetry.",
+                systemImage: "chart.xyaxis.line",
+                detail: "Detailed meters and analyzers will live here with explicit opt-in processing so hidden analysis remains parked."
+            )
         case .speakerSetup:
             ProductionSpeakerSetupView(engine: engine)
-        case .audio:
-            ProductionAudioView(engine: engine)
         }
     }
 
@@ -167,7 +172,7 @@ struct ProductionRootView: View {
 
 private struct ProductionDashboardView: View {
     @ObservedObject var engine: AudioIOEngine
-    let navigate: (ProductionSection) -> Void
+    @AppStorage("production.vuMetersEnabled") private var vuMetersEnabled = true
     @State private var leftVU = ProductionVUScale.minimumVU
     @State private var rightVU = ProductionVUScale.minimumVU
     @State private var leftPeak = -120.0
@@ -191,9 +196,12 @@ private struct ProductionDashboardView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 10) {
-                    HStack {
+                    HStack(spacing: 14) {
                         Text("OUTPUT").font(.caption.bold()).tracking(1.8).foregroundStyle(.secondary)
                         Spacer()
+                        Toggle("VU Meters", isOn: $vuMetersEnabled)
+                            .toggleStyle(.switch)
+                            .controlSize(.small)
                         Text("0 VU = −18 dBFS").font(.caption.monospacedDigit()).foregroundStyle(.tertiary)
                     }
                     HStack(spacing: 18) {
@@ -203,26 +211,24 @@ private struct ProductionDashboardView: View {
                     .frame(minHeight: 285)
                 }
 
+                audioControls
                 masterControls
 
                 HStack(alignment: .top, spacing: 16) {
                     summaryCard(
                         title: "Equalizer",
                         text: "\(engine.stereoEQConfiguration.enabledBandCount) bands · \(engine.stereoEQConfiguration.phaseMode.displayName)",
-                        systemImage: "slider.horizontal.3",
-                        destination: .equalizer
+                        systemImage: "slider.horizontal.3"
                     )
                     summaryCard(
                         title: "Dynamics",
                         text: dynamicsSummary,
-                        systemImage: "waveform.path.ecg",
-                        destination: .dynamics
+                        systemImage: "waveform.path.ecg"
                     )
                     summaryCard(
                         title: "Speaker Setup",
                         text: "Active crossover and room correction are kept in a dedicated calibration workspace.",
-                        systemImage: "hifispeaker.2.fill",
-                        destination: .speakerSetup
+                        systemImage: "hifispeaker.2.fill"
                     )
                 }
             }
@@ -230,11 +236,11 @@ private struct ProductionDashboardView: View {
             .frame(maxWidth: 1180, alignment: .topLeading)
         }
         .navigationTitle("Dashboard")
-        .task(id: engine.lifecycleState) { await runMeterLoop() }
+        .task(id: "\(engine.lifecycleState.rawValue)|\(vuMetersEnabled)") { await runMeterLoop() }
     }
 
     private var outputSummary: String {
-        guard let output = engine.selectedOutputDevice else { return "Choose an output in Audio to begin." }
+        guard let output = engine.selectedOutputDevice else { return "Choose an output below to begin." }
         return "\(output.name) · \(String(format: "%.1f", output.nominalSampleRate / 1_000)) kHz"
     }
 
@@ -247,6 +253,46 @@ private struct ProductionDashboardView: View {
         if d.spectralDenoiser.enabled { names.append("Denoiser") }
         if d.limiter.enabled { names.append("Limiter") }
         return names.isEmpty ? "No dynamics processors enabled." : names.joined(separator: " · ")
+    }
+
+    private var audioControls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 14) {
+                Text("Output Device").font(.subheadline.bold())
+                Picker("Output Device", selection: Binding(
+                    get: { engine.routeConfiguration.selectedOutputUID },
+                    set: { try? engine.selectOutput(uid: $0) }
+                )) {
+                    Text("No Output").tag(String?.none)
+                    ForEach(engine.outputDevices) { device in
+                        Text(device.name).tag(Optional(device.uid))
+                    }
+                }
+                .labelsHidden()
+                .frame(maxWidth: 360)
+                .disabled(engine.lifecycleState != .idle)
+
+                Button {
+                    try? engine.refreshOutputDevices()
+                } label: {
+                    Label("Refresh Outputs", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.glass)
+                .disabled(engine.lifecycleState != .idle)
+
+                Spacer()
+                Text(engine.lifecycleState.rawValue.capitalized)
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
+            }
+            if let error = engine.lastErrorDescription {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(14)
+        .background(.quaternary.opacity(0.22), in: .rect(cornerRadius: 18))
     }
 
     private var masterControls: some View {
@@ -295,14 +341,12 @@ private struct ProductionDashboardView: View {
     private func summaryCard(
         title: String,
         text: String,
-        systemImage: String,
-        destination: ProductionSection
+        systemImage: String
     ) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Label(title, systemImage: systemImage).font(.headline)
             Text(text).font(.subheadline).foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, minHeight: 46, alignment: .topLeading)
-            Button("Open") { navigate(destination) }.buttonStyle(.glass)
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -311,7 +355,7 @@ private struct ProductionDashboardView: View {
 
     @MainActor
     private func runMeterLoop() async {
-        guard engine.lifecycleState == .running else {
+        guard engine.lifecycleState == .running, vuMetersEnabled else {
             resetMeters()
             return
         }
@@ -322,7 +366,7 @@ private struct ProductionDashboardView: View {
             resetMeters()
         }
 
-        while !Task.isCancelled && engine.lifecycleState == .running {
+        while !Task.isCancelled && engine.lifecycleState == .running && vuMetersEnabled {
             if let diagnostics = engine.diagnosticsSnapshot().renderKernelDiagnostics,
                diagnostics.meteringEnabled {
                 let meter = diagnostics.outputMeter
@@ -356,8 +400,8 @@ private struct SignatureVUMeter: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let center = CGPoint(x: proxy.size.width * 0.5, y: proxy.size.height * 0.82)
-            let radius = min(proxy.size.width * 0.43, proxy.size.height * 0.72)
+            let center = CGPoint(x: proxy.size.width * 0.5, y: proxy.size.height * 0.88)
+            let radius = min(proxy.size.width * 0.40, proxy.size.height * 0.74)
             ZStack {
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
                     .fill(LinearGradient(
@@ -382,7 +426,7 @@ private struct SignatureVUMeter: View {
                     Text(peakText).font(.caption.monospacedDigit())
                 }
                 .foregroundStyle(.black.opacity(0.70))
-                .position(x: proxy.size.width * 0.5, y: proxy.size.height * 0.62)
+                .position(x: proxy.size.width * 0.5, y: proxy.size.height * 0.68)
             }
         }
         .aspectRatio(1.65, contentMode: .fit)
@@ -401,7 +445,7 @@ private struct SignatureVUMeter: View {
         let ticks: [Double] = [-20, -10, -7, -5, -3, -2, -1, 0, 1, 2, 3]
         let labels: Set<Double> = [-20, -10, -7, -5, -3, 0, 3]
         var arc = Path()
-        arc.addArc(center: center, radius: radius, startAngle: .degrees(128), endAngle: .degrees(232), clockwise: false)
+        arc.addArc(center: center, radius: radius, startAngle: .degrees(210), endAngle: .degrees(330), clockwise: false)
         context.stroke(arc, with: .color(.black.opacity(0.62)), lineWidth: 1.3)
 
         for value in ticks {
@@ -421,21 +465,25 @@ private struct SignatureVUMeter: View {
                 )
             }
         }
-        context.draw(Text("VU").font(.system(size: 15, weight: .bold, design: .rounded)).foregroundStyle(.black.opacity(0.72)),
-                     at: CGPoint(x: center.x, y: center.y - radius * 0.43))
+        context.draw(
+            Text("VU")
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .foregroundStyle(.black.opacity(0.72)),
+            at: CGPoint(x: center.x, y: center.y - radius * 0.43)
+        )
     }
 
     private func drawNeedle(context: inout GraphicsContext, center: CGPoint, radius: CGFloat) {
         let angle = meterAngle(vu)
         var path = Path()
-        path.move(to: point(center, -radius * 0.12, angle))
+        path.move(to: point(center, -radius * 0.10, angle))
         path.addLine(to: point(center, radius * 0.92, angle))
         context.stroke(path, with: .color(.red.opacity(0.92)), lineWidth: 2.2)
         context.fill(Path(ellipseIn: CGRect(x: center.x - 8, y: center.y - 8, width: 16, height: 16)), with: .color(.black.opacity(0.8)))
     }
 
     private func meterAngle(_ value: Double) -> Double {
-        128 + ProductionVUScale.normalizedPosition(forVU: value) * 104
+        210 + ProductionVUScale.normalizedPosition(forVU: value) * 120
     }
 
     private func point(_ center: CGPoint, _ radius: CGFloat, _ angle: Double) -> CGPoint {
@@ -535,55 +583,6 @@ private struct ProductionSpeakerSetupView: View {
         var updated = engine.bassManagementConfiguration
         mutation(&updated)
         try? engine.replaceBassManagementConfiguration(updated)
-    }
-}
-
-private struct ProductionAudioView: View {
-    @ObservedObject var engine: AudioIOEngine
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                pageHeader("Audio", "Physical output routing and processing transport.")
-                VStack(alignment: .leading, spacing: 16) {
-                    LabeledContent("Output Device") {
-                        Picker("Output Device", selection: Binding(
-                            get: { engine.routeConfiguration.selectedOutputUID },
-                            set: { try? engine.selectOutput(uid: $0) }
-                        )) {
-                            Text("No Output").tag(String?.none)
-                            ForEach(engine.outputDevices) { device in
-                                Text(device.name).tag(Optional(device.uid))
-                            }
-                        }
-                        .labelsHidden().frame(width: 340)
-                        .disabled(engine.lifecycleState != .idle)
-                    }
-                    if let output = engine.selectedOutputDevice {
-                        LabeledContent("Nominal Sample Rate", value: "\(String(format: "%.1f", output.nominalSampleRate / 1_000)) kHz")
-                    }
-                    LabeledContent("Processing State", value: engine.lifecycleState.rawValue.capitalized)
-                    HStack {
-                        Button("Refresh Devices") { try? engine.refreshOutputDevices() }.buttonStyle(.glass)
-                        Button(engine.lifecycleState == .running ? "Stop Processing" : "Start Processing") {
-                            if engine.lifecycleState == .running { engine.stop() }
-                            else { try? engine.start() }
-                        }
-                        .buttonStyle(.glassProminent)
-                        .disabled(engine.lifecycleState != .idle && engine.lifecycleState != .running)
-                    }
-                    if let error = engine.lastErrorDescription {
-                        Label(error, systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange).textSelection(.enabled)
-                    }
-                }
-                .padding(20)
-                .background(.quaternary.opacity(0.28), in: .rect(cornerRadius: 18))
-            }
-            .padding(28)
-            .frame(maxWidth: 900, alignment: .topLeading)
-        }
-        .navigationTitle("Audio")
     }
 }
 
