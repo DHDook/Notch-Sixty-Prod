@@ -125,8 +125,13 @@ require(output_callback, "publish_transition_runtime(bridge, &transitionRamp);",
 require(output_callback, "uint32_t ringReadIndex = (uint32_t)(readIndex % bridge->capacityFrames);", "N60OutputIOProc")
 require(output_callback, "N60StereoFrame frame = bridge->frames[ringReadIndex];", "N60OutputIOProc")
 require(output_callback, "if (ringReadIndex == bridge->capacityFrames) ringReadIndex = 0u;", "N60OutputIOProc")
-require(output_callback, "*outputLeft = processed.left * gain;", "N60OutputIOProc hot frame path")
-require(output_callback, "*outputRight = processed.right * gain;", "N60OutputIOProc hot frame path")
+# PR36 names the exact final physical samples so its optional output-only VU can
+# observe them without recomputing gain. Preserve the PR35 invariant that the
+# device output remains processed sample × the callback-local gain.
+require(output_callback, "float finalLeft = processed.left * gain;", "N60OutputIOProc hot frame path")
+require(output_callback, "float finalRight = processed.right * gain;", "N60OutputIOProc hot frame path")
+require(output_callback, "*outputLeft = finalLeft;", "N60OutputIOProc hot frame path")
+require(output_callback, "*outputRight = finalRight;", "N60OutputIOProc hot frame path")
 require(output_callback, "outputLeft += outputView.leftStride;", "N60OutputIOProc hot frame path")
 require(output_callback, "outputRight += outputView.rightStride;", "N60OutputIOProc hot frame path")
 require(

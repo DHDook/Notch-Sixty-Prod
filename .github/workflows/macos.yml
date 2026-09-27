@@ -117,6 +117,9 @@ jobs:
             -o /tmp/validate-pr35-render-snapshot
           /tmp/validate-pr35-render-snapshot
 
+      - name: Validate PR36 Production UI Foundation
+        run: python3 ci/validate_pr36_ui_foundation.py
+
       - name: Benchmark PR35 Render Kernel O0 vs O3
         run: |
           REALTIME_SOURCES=$(find NotchSixty/Audio/Realtime -name '*.c' ! -name 'N60RealtimeAudioBridge.c' -print)

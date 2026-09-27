@@ -289,7 +289,6 @@ private struct PR27ProtectionValidationView: View {
     }
 }
 
-
 private struct PR28AdvancedDynamicsValidationView: View {
     @ObservedObject var engine: AudioIOEngine
 
@@ -329,7 +328,6 @@ private struct PR28AdvancedDynamicsValidationView: View {
                     .font(.title2.bold())
                 Text("Clean-room validation surface for De-Esser and three-band Multiband Compressor parity.")
                     .foregroundStyle(.secondary)
-
 
                 GroupBox("Signal Conditioning") {
                     VStack(alignment: .leading, spacing: 10) {
@@ -448,7 +446,6 @@ private struct PR28AdvancedDynamicsValidationView: View {
         }
     }
 }
-
 
 private struct PR30PhaseTimeValidationView: View {
     @ObservedObject var engine: AudioIOEngine
@@ -630,7 +627,6 @@ private struct PR30PhaseTimeValidationView: View {
         .frame(minWidth: 880, minHeight: 700)
     }
 }
-
 
 private struct PR31NoiseHumValidationView: View {
     @ObservedObject var engine: AudioIOEngine
@@ -913,28 +909,44 @@ private struct PR31NoiseHumValidationView: View {
     }
 }
 
+private struct EngineeringValidationView: View {
+    @ObservedObject var engine: AudioIOEngine
+
+    var body: some View {
+        TabView {
+            ContentView(engine: engine)
+                .tabItem { Label("Main Validation", systemImage: "slider.horizontal.3") }
+
+            PR27ProtectionValidationView(engine: engine)
+                .tabItem { Label("PR27 Protection", systemImage: "waveform.path.ecg") }
+
+            PR28AdvancedDynamicsValidationView(engine: engine)
+                .tabItem { Label("PR28 Advanced Dynamics", systemImage: "waveform.badge.plus") }
+
+            PR30PhaseTimeValidationView(engine: engine)
+                .tabItem { Label("PR30 Phase / Time", systemImage: "timeline.selection") }
+
+            PR31NoiseHumValidationView(engine: engine)
+                .tabItem { Label("PR31 Noise / Hum", systemImage: "waveform.slash") }
+        }
+        .frame(minWidth: 900, minHeight: 720)
+    }
+}
+
 @main
 struct NotchSixtyApp: App {
     @StateObject private var product = ProductController()
 
     var body: some Scene {
         WindowGroup {
-            TabView {
-                ContentView(engine: product.audioEngine)
-                    .tabItem { Label("Main Validation", systemImage: "slider.horizontal.3") }
-
-                PR27ProtectionValidationView(engine: product.audioEngine)
-                    .tabItem { Label("PR27 Protection", systemImage: "waveform.path.ecg") }
-
-                PR28AdvancedDynamicsValidationView(engine: product.audioEngine)
-                    .tabItem { Label("PR28 Advanced Dynamics", systemImage: "waveform.badge.plus") }
-
-                PR30PhaseTimeValidationView(engine: product.audioEngine)
-                    .tabItem { Label("PR30 Phase / Time", systemImage: "timeline.selection") }
-
-                PR31NoiseHumValidationView(engine: product.audioEngine)
-                    .tabItem { Label("PR31 Noise / Hum", systemImage: "waveform.slash") }
-            }
+            ProductionRootView(product: product)
         }
+        .defaultSize(width: 1180, height: 780)
+
+        Window("Engineering Validation", id: "engineering-validation") {
+            EngineeringValidationView(engine: product.audioEngine)
+                .task { product.prepareForUse() }
+        }
+        .defaultSize(width: 1000, height: 760)
     }
 }

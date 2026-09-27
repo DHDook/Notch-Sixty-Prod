@@ -26,6 +26,7 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
     let latencyFrames: UInt32
     let sampleRate: Double
     let channelCount: UInt32
+    let meteringEnabled: Bool
     let bypassed: Bool
     let interChannelDelayMs: Double
     let interChannelAlignmentLatencyFrames: UInt32
@@ -134,6 +135,7 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
         latencyFrames = diagnostics.latencyFrames
         sampleRate = diagnostics.sampleRate
         channelCount = diagnostics.channelCount
+        meteringEnabled = diagnostics.meteringEnabled
         bypassed = diagnostics.bypassed
         interChannelDelayMs = diagnostics.interChannelDelayMs
         interChannelAlignmentLatencyFrames = diagnostics.interChannelAlignmentLatencyFrames

@@ -15,6 +15,7 @@ typedef enum {
     BenchmarkBypass = 0,
     BenchmarkUnity = 1,
     BenchmarkCompressor = 2,
+    BenchmarkFullMetering = 3,
 } BenchmarkCase;
 
 static volatile double benchmark_sink = 0.0;
@@ -47,6 +48,9 @@ static bool configure_snapshot(N60DSPGraphSnapshot *snapshot, BenchmarkCase benc
             false,
             0.0f
         );
+    }
+    if (benchmarkCase == BenchmarkFullMetering) {
+        snapshot->meteringEnabled = true;
     }
     return true;
 }
@@ -138,6 +142,7 @@ int main(void) {
     if (!run_case("global-bypass", BenchmarkBypass)) return EXIT_FAILURE;
     if (!run_case("unity-parked", BenchmarkUnity)) return EXIT_FAILURE;
     if (!run_case("compressor", BenchmarkCompressor)) return EXIT_FAILURE;
+    if (!run_case("full-metering", BenchmarkFullMetering)) return EXIT_FAILURE;
     if (benchmark_sink == 123456789.0) puts("unreachable");
     return EXIT_SUCCESS;
 }

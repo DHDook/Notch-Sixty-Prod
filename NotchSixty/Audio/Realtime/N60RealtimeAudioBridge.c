@@ -5,6 +5,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+static _Atomic bool gMeteringDemand = false;
+static _Atomic bool gOutputVUMeterDemand = false;
+
 typedef struct {
     float left;
     float right;
@@ -60,6 +63,14 @@ struct N60RealtimeAudioBridge {
     _Atomic uint64_t gatedOutputFrames;
 
     _Atomic uint32_t outputGainBits;
+
+    // Output-only production VU telemetry. The callback accumulates in locals
+    // and publishes one bounded atomic snapshot per callback, never per sample.
+    _Atomic uint32_t outputVUPeakLeftBits;
+    _Atomic uint32_t outputVUPeakRightBits;
+    _Atomic uint32_t outputVURMSLeftBits;
+    _Atomic uint32_t outputVURMSRightBits;
+    _Atomic uint64_t outputVUOverRangeSamples;
 
     // Control-plane command payload plus an even/odd sequence. The output
     // callback latches a stable command once per callback and then advances a
@@ -191,8 +202,6 @@ static bool make_output_buffer_view(
 }
 
 static void begin_command_write(_Atomic uint64_t *sequence) {
-    // Single control-plane writer contract: odd means a payload write is in
-    // progress; even means readers may latch it.
     atomic_fetch_add_explicit(sequence, 1, memory_order_acq_rel);
 }
 
@@ -273,6 +282,25 @@ static void publish_transition_runtime(
     );
 }
 
+static void publish_output_vu_meter(
+    N60RealtimeAudioBridge *bridge,
+    float peakLeft,
+    float peakRight,
+    double squareSumLeft,
+    double squareSumRight,
+    uint64_t overRangeSamples,
+    uint32_t frameCount
+) {
+    if (bridge == NULL || frameCount == 0) return;
+    float rmsLeft = (float)sqrt(squareSumLeft / (double)frameCount);
+    float rmsRight = (float)sqrt(squareSumRight / (double)frameCount);
+    atomic_store_explicit(&bridge->outputVUPeakLeftBits, float_to_bits(peakLeft), memory_order_relaxed);
+    atomic_store_explicit(&bridge->outputVUPeakRightBits, float_to_bits(peakRight), memory_order_relaxed);
+    atomic_store_explicit(&bridge->outputVURMSLeftBits, float_to_bits(rmsLeft), memory_order_relaxed);
+    atomic_store_explicit(&bridge->outputVURMSRightBits, float_to_bits(rmsRight), memory_order_relaxed);
+    atomic_fetch_add_explicit(&bridge->outputVUOverRangeSamples, overRangeSamples, memory_order_relaxed);
+}
+
 N60RealtimeAudioBridge *N60RealtimeAudioBridgeCreate(uint32_t capacityFrames) {
     if (capacityFrames == 0) return NULL;
     N60RealtimeAudioBridge *bridge = calloc(1, sizeof(N60RealtimeAudioBridge));
@@ -324,6 +352,11 @@ void N60RealtimeAudioBridgeReset(N60RealtimeAudioBridge *bridge) {
     atomic_store_explicit(&bridge->gatedOutputCallbacks, 0, memory_order_relaxed);
     atomic_store_explicit(&bridge->gatedOutputFrames, 0, memory_order_relaxed);
     atomic_store_explicit(&bridge->outputGainBits, float_to_bits(1.0f), memory_order_relaxed);
+    atomic_store_explicit(&bridge->outputVUPeakLeftBits, 0, memory_order_relaxed);
+    atomic_store_explicit(&bridge->outputVUPeakRightBits, 0, memory_order_relaxed);
+    atomic_store_explicit(&bridge->outputVURMSLeftBits, 0, memory_order_relaxed);
+    atomic_store_explicit(&bridge->outputVURMSRightBits, 0, memory_order_relaxed);
+    atomic_store_explicit(&bridge->outputVUOverRangeSamples, 0, memory_order_relaxed);
 
     atomic_store_explicit(&bridge->transitionCommandSequence, 0, memory_order_relaxed);
     atomic_store_explicit(&bridge->transitionTargetGainBits, float_to_bits(1.0f), memory_order_relaxed);
@@ -360,8 +393,6 @@ void N60RealtimeAudioBridgeSetTransitionGainImmediate(N60RealtimeAudioBridge *br
     atomic_store_explicit(&bridge->transitionFramesTotal, 0, memory_order_relaxed);
     end_command_write(&bridge->transitionCommandSequence);
 
-    // Snapshot telemetry reflects the command immediately; the callback-owned
-    // runtime consumes the command at its next bounded latch point.
     atomic_store_explicit(&bridge->transitionGainBits, bits, memory_order_release);
     atomic_store_explicit(&bridge->transitionFramesRemaining, 0, memory_order_release);
 }
@@ -410,6 +441,36 @@ void N60RealtimeAudioBridgeConfigureOutputGate(
         minimumBufferedFrames == 0,
         memory_order_release
     );
+}
+
+void N60RealtimeAudioBridgeSetMeteringDemand(bool enabled) {
+    atomic_store_explicit(&gMeteringDemand, enabled, memory_order_release);
+}
+
+bool N60RealtimeAudioBridgeMeteringDemand(void) {
+    return atomic_load_explicit(&gMeteringDemand, memory_order_acquire);
+}
+
+void N60RealtimeAudioBridgeSetOutputVUMeterDemand(bool enabled) {
+    atomic_store_explicit(&gOutputVUMeterDemand, enabled, memory_order_release);
+}
+
+bool N60RealtimeAudioBridgeOutputVUMeterDemand(void) {
+    return atomic_load_explicit(&gOutputVUMeterDemand, memory_order_acquire);
+}
+
+N60OutputVUMeterSnapshot N60RealtimeAudioBridgeGetOutputVUMeterSnapshot(
+    const N60RealtimeAudioBridge *bridge
+) {
+    N60OutputVUMeterSnapshot snapshot = {0};
+    if (bridge == NULL) return snapshot;
+    snapshot.enabled = N60RealtimeAudioBridgeOutputVUMeterDemand();
+    snapshot.peakLeft = bits_to_float(atomic_load_explicit(&bridge->outputVUPeakLeftBits, memory_order_relaxed));
+    snapshot.peakRight = bits_to_float(atomic_load_explicit(&bridge->outputVUPeakRightBits, memory_order_relaxed));
+    snapshot.rmsLeft = bits_to_float(atomic_load_explicit(&bridge->outputVURMSLeftBits, memory_order_relaxed));
+    snapshot.rmsRight = bits_to_float(atomic_load_explicit(&bridge->outputVURMSRightBits, memory_order_relaxed));
+    snapshot.overRangeSamples = atomic_load_explicit(&bridge->outputVUOverRangeSamples, memory_order_relaxed);
+    return snapshot;
 }
 
 bool N60RealtimeAudioBridgePrepareConvolutionProgram(
@@ -480,6 +541,7 @@ bool N60RealtimeAudioBridgePublishDSPGraph(
     N60DSPGraphSnapshot snapshot
 ) {
     if (bridge == NULL || bridge->renderKernel == NULL) return false;
+    snapshot.meteringEnabled = N60RealtimeAudioBridgeMeteringDemand();
     return N60RenderKernelPublishSnapshot(bridge->renderKernel, snapshot);
 }
 
@@ -515,6 +577,7 @@ N60RealtimeAudioBridgeSnapshot N60RealtimeAudioBridgeGetSnapshot(
         &bridge->transitionFramesRemaining,
         memory_order_acquire
     );
+    snapshot.outputVUMeter = N60RealtimeAudioBridgeGetOutputVUMeterSnapshot(bridge);
 
     uint64_t writeIndex = atomic_load_explicit(&bridge->writeIndex, memory_order_acquire);
     uint64_t readIndex = atomic_load_explicit(&bridge->readIndex, memory_order_acquire);
@@ -531,7 +594,16 @@ N60RenderKernelDiagnostics N60RealtimeAudioBridgeGetRenderDiagnostics(
         N60RenderKernelDiagnostics diagnostics = {0};
         return diagnostics;
     }
-    return N60RenderKernelGetDiagnostics(bridge->renderKernel);
+    N60RenderKernelDiagnostics diagnostics = N60RenderKernelGetDiagnostics(bridge->renderKernel);
+    N60OutputVUMeterSnapshot vu = N60RealtimeAudioBridgeGetOutputVUMeterSnapshot(bridge);
+    if (vu.enabled) {
+        diagnostics.outputMeter.peakLeft = vu.peakLeft;
+        diagnostics.outputMeter.peakRight = vu.peakRight;
+        diagnostics.outputMeter.rmsLeft = vu.rmsLeft;
+        diagnostics.outputMeter.rmsRight = vu.rmsRight;
+        diagnostics.outputMeter.overRangeSamples = vu.overRangeSamples;
+    }
+    return diagnostics;
 }
 
 OSStatus N60CaptureIOProc(
@@ -640,6 +712,12 @@ OSStatus N60OutputIOProc(
     float masterGain = bits_to_float(
         atomic_load_explicit(&bridge->outputGainBits, memory_order_acquire)
     );
+    bool outputVUMeterEnabled = N60RealtimeAudioBridgeOutputVUMeterDemand();
+    float outputVUPeakLeft = 0.0f;
+    float outputVUPeakRight = 0.0f;
+    double outputVUSquareSumLeft = 0.0;
+    double outputVUSquareSumRight = 0.0;
+    uint64_t outputVUOverRangeSamples = 0;
 
     latch_transition_command(bridge);
     latch_startup_fade_command(bridge);
@@ -667,8 +745,20 @@ OSStatus N60OutputIOProc(
 
         float transitionGain = next_transition_gain(&transitionRamp);
         float gain = startup_fade_gain(&startupFade, masterGain) * transitionGain;
-        *outputLeft = processed.left * gain;
-        *outputRight = processed.right * gain;
+        float finalLeft = processed.left * gain;
+        float finalRight = processed.right * gain;
+        *outputLeft = finalLeft;
+        *outputRight = finalRight;
+        if (outputVUMeterEnabled) {
+            float absLeft = fabsf(finalLeft);
+            float absRight = fabsf(finalRight);
+            if (absLeft > outputVUPeakLeft) outputVUPeakLeft = absLeft;
+            if (absRight > outputVUPeakRight) outputVUPeakRight = absRight;
+            outputVUSquareSumLeft += (double)finalLeft * (double)finalLeft;
+            outputVUSquareSumRight += (double)finalRight * (double)finalRight;
+            if (absLeft > 1.0f) outputVUOverRangeSamples += 1;
+            if (absRight > 1.0f) outputVUOverRangeSamples += 1;
+        }
         outputLeft += outputView.leftStride;
         outputRight += outputView.rightStride;
         renderedFrames += 1;
@@ -676,16 +766,24 @@ OSStatus N60OutputIOProc(
 
     N60RenderKernelEndRender(bridge->renderKernel, &renderContext, renderedFrames);
 
-    // Transition ramps live on the physical output timeline, not only on the
-    // subset of frames for which captured program audio was available. Advance
-    // through zero-filled output too so the control plane can receive a rendered
-    // completion acknowledgement even during silence or a transient underrun.
     for (UInt32 frameIndex = framesToRead; frameIndex < frameCount; ++frameIndex) {
         (void)next_transition_gain(&transitionRamp);
         *outputLeft = 0.0f;
         *outputRight = 0.0f;
         outputLeft += outputView.leftStride;
         outputRight += outputView.rightStride;
+    }
+
+    if (outputVUMeterEnabled) {
+        publish_output_vu_meter(
+            bridge,
+            outputVUPeakLeft,
+            outputVUPeakRight,
+            outputVUSquareSumLeft,
+            outputVUSquareSumRight,
+            outputVUOverRangeSamples,
+            frameCount
+        );
     }
 
     bridge->transitionRuntime = transitionRamp;
