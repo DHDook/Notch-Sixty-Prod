@@ -129,6 +129,11 @@ require(output_callback, "*outputLeft = processed.left * gain;", "N60OutputIOPro
 require(output_callback, "*outputRight = processed.right * gain;", "N60OutputIOProc hot frame path")
 require(output_callback, "outputLeft += outputView.leftStride;", "N60OutputIOProc hot frame path")
 require(output_callback, "outputRight += outputView.rightStride;", "N60OutputIOProc hot frame path")
+require(
+    output_callback,
+    "for (UInt32 frameIndex = framesToRead; frameIndex < frameCount; ++frameIndex) {\n        (void)next_transition_gain(&transitionRamp);",
+    "N60OutputIOProc silent transition timeline",
+)
 forbid(output_callback, "bridge->frames[(readIndex + frameIndex) % bridge->capacityFrames]", "N60OutputIOProc per-frame ring path")
 
 # Alignment history is a fixed power-of-two ring. Preserve its click-free warm
@@ -165,13 +170,33 @@ require(core_audio, "CoreAudioTransportError.captureBufferSizeMismatch", "tap ag
 require(core_audio, "AudioObjectSetPropertyData(", "tap aggregate property writer")
 
 # Interactive graph mutation must remain off the caller/MainActor and free of
-# explicit sleep choreography. Teardown may retain a bounded synchronous
-# lifetime barrier because the Core Audio callbacks must be stopped before the
-# bridge can be freed.
+# fixed wall-clock fade assumptions. Structural graph publication waits for the
+# callback-published rendered-zero acknowledgement before swapping generations.
 transition_graph = function_body(core_audio, r"func\s+transitionDSPGraph\s*\(")
 forbid(transition_graph, "usleep(", "transitionDSPGraph")
-forbid(transition_graph, "for step", "transitionDSPGraph")
+forbid(transition_graph, "fadeNanoseconds", "transitionDSPGraph")
 require(transition_graph, "enqueueTransition", "transitionDSPGraph")
+
+enqueue_transition = function_body(core_audio, r"func\s+enqueueTransition\s*\(")
+require(enqueue_transition, "queue.sync", "DSPGraphPublicationCoordinator.enqueueTransition")
+require(enqueue_transition, "N60RealtimeAudioBridgeRampTransitionGain", "DSPGraphPublicationCoordinator.enqueueTransition")
+forbid(enqueue_transition, "fadeNanoseconds", "DSPGraphPublicationCoordinator.enqueueTransition")
+
+wait_for_fade = function_body(core_audio, r"private\s+func\s+waitForFadeDownCompletion\s*\(")
+require(wait_for_fade, "N60RealtimeAudioBridgeGetSnapshot(bridge)", "rendered fade acknowledgement")
+require(wait_for_fade, "state.transitionFramesRemaining == 0", "rendered fade acknowledgement")
+require(wait_for_fade, "state.transitionGain <= 0.000_001", "rendered fade acknowledgement")
+require(wait_for_fade, "finishTransition", "rendered fade acknowledgement")
+
+finish_transition = function_body(core_audio, r"private\s+func\s+finishTransition\s*\(")
+forbid(finish_transition, "N60RealtimeAudioBridgeSetTransitionGainImmediate(bridge, 0.0)", "graph-swap fade boundary")
+require(finish_transition, "N60RealtimeAudioBridgeRampTransitionGain(bridge, 1.0, fadeFrames)", "graph-swap fade-up")
+
+stop_transport = function_body(core_audio, r"func\s+stop\s*\(\s*fadeOut:")
+require(stop_transport, "N60RealtimeAudioBridgeGetSnapshot(bridge)", "shutdown fade acknowledgement")
+require(stop_transport, "state.transitionFramesRemaining == 0", "shutdown fade acknowledgement")
+require(stop_transport, "state.transitionGain <= 0.000_001", "shutdown fade acknowledgement")
+require(stop_transport, "shutdownFadeTimeoutMicroseconds", "bounded shutdown fade acknowledgement")
 
 publish_graph = function_body(core_audio, r"func\s+publishDSPGraph\s*\(")
 require(publish_graph, "enqueuePublish", "publishDSPGraph running-transport path")
@@ -180,8 +205,6 @@ require(publish_graph, "enqueuePublish", "publishDSPGraph running-transport path
 # the single MainActor control writer. That closes the race where another FIR
 # generation could otherwise wrap the three-slot prepared-program ring while a
 # prior structural graph was only queued for publication.
-enqueue_transition = function_body(core_audio, r"func\s+enqueueTransition\s*\(")
-require(enqueue_transition, "queue.sync", "DSPGraphPublicationCoordinator.enqueueTransition")
 can_prepare = function_body(core_audio, r"func\s+canPrepareProgram\s*\(")
 require(can_prepare, "!transitionActive", "prepared-program transition gate")
 
