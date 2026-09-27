@@ -13,19 +13,21 @@ static int fail(const char *message) {
 
 static int run_silent_output_callback(N60RealtimeAudioBridge *bridge) {
     float output[TEST_FRAMES * 2u] = {0};
-    AudioBufferList list = {0};
-    list.mNumberBuffers = 1;
-    list.mBuffers[0].mNumberChannels = 2;
-    list.mBuffers[0].mDataByteSize = (UInt32)sizeof(output);
-    list.mBuffers[0].mData = output;
+    AudioBufferList outputList = {0};
+    outputList.mNumberBuffers = 1;
+    outputList.mBuffers[0].mNumberChannels = 2;
+    outputList.mBuffers[0].mDataByteSize = (UInt32)sizeof(output);
+    outputList.mBuffers[0].mData = output;
 
+    AudioBufferList ignoredInput = {0};
+    AudioTimeStamp timestamp = {0};
     OSStatus status = N60OutputIOProc(
         0,
-        NULL,
-        NULL,
-        NULL,
-        &list,
-        NULL,
+        &timestamp,
+        &ignoredInput,
+        &timestamp,
+        &outputList,
+        &timestamp,
         bridge
     );
     if (status != noErr) return fail("silent output callback returned an error");
