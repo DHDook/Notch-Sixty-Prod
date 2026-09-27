@@ -211,6 +211,12 @@ private struct DSPGraphPublicationMetrics: Sendable {
 /// rapid control updates collapse to the newest complete graph. Structural
 /// transitions use the bridge's sample-domain ramp, wait off the caller thread,
 /// publish the latest graph at the fade midpoint, then fade back up.
+///
+/// Prepared FIR programs have a stricter ownership rule: their three program
+/// slots are sized for the two immutable render-graph generations plus one
+/// preparation target. A structural transition is therefore registered
+/// synchronously (without sleeping) so the single MainActor control writer can
+/// refuse another FIR preparation until the queued generation is published.
 private final class DSPGraphPublicationCoordinator: @unchecked Sendable {
     private let queue = DispatchQueue(
         label: "com.dhdook.NotchSixty.dsp-graph-publication",
@@ -244,7 +250,7 @@ private final class DSPGraphPublicationCoordinator: @unchecked Sendable {
         fadeNanoseconds: UInt64
     ) {
         let box = DSPGraphSnapshotBox(snapshot)
-        queue.async { [self, box] in
+        queue.sync { [self, box] in
             guard !stopped else { return }
             replacePending(with: box)
             guard !transitionActive else { return }
@@ -258,6 +264,10 @@ private final class DSPGraphPublicationCoordinator: @unchecked Sendable {
                 finishTransition(fadeFrames: fadeFrames)
             }
         }
+    }
+
+    func canPrepareProgram() -> Bool {
+        queue.sync { !stopped && !transitionActive }
     }
 
     func snapshotMetrics() -> DSPGraphPublicationMetrics {
@@ -317,8 +327,6 @@ private final class DSPGraphPublicationCoordinator: @unchecked Sendable {
 
 final class CoreAudioTransportSession {
     private static let bridgeCapacityFrames: UInt32 = 65_536
-    private static let fadeStepMicroseconds: UInt32 = 1_500
-    private static let fadeStepCount: UInt32 = 8
     private static let graphTransitionFadeMilliseconds = 8.0
 
     let selectedOutput: AudioOutputDevice
@@ -490,6 +498,9 @@ final class CoreAudioTransportSession {
         guard let bridge, !leftTaps.isEmpty else {
             throw CoreAudioTransportError.convolutionProgramPreparationFailed
         }
+        guard graphPublicationCoordinator?.canPrepareProgram() ?? true else {
+            throw CoreAudioTransportError.convolutionProgramPreparationFailed
+        }
         guard rightTaps == nil || rightTaps?.count == leftTaps.count else {
             throw CoreAudioTransportError.convolutionProgramPreparationFailed
         }
@@ -545,6 +556,9 @@ final class CoreAudioTransportSession {
         guard let bridge, !leftTaps.isEmpty else {
             throw CoreAudioTransportError.roomCorrectionProgramPreparationFailed
         }
+        guard graphPublicationCoordinator?.canPrepareProgram() ?? true else {
+            throw CoreAudioTransportError.roomCorrectionProgramPreparationFailed
+        }
         guard rightTaps == nil || rightTaps?.count == leftTaps.count else {
             throw CoreAudioTransportError.roomCorrectionProgramPreparationFailed
         }
@@ -585,6 +599,9 @@ final class CoreAudioTransportSession {
         declaredLatencyFrames: UInt32
     ) throws -> N60ConvolutionProgramInfo {
         guard let bridge, !leftTaps.isEmpty else {
+            throw CoreAudioTransportError.speakerIRProgramPreparationFailed
+        }
+        guard graphPublicationCoordinator?.canPrepareProgram() ?? true else {
             throw CoreAudioTransportError.speakerIRProgramPreparationFailed
         }
         guard rightTaps == nil || rightTaps?.count == leftTaps.count else {
