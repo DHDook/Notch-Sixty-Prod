@@ -47,6 +47,11 @@ void N60RealtimeAudioBridgeConfigureOutputGate(
     uint32_t minimumBufferedFrames,
     uint32_t fadeInFrames
 );
+// Product UI demand is intentionally control-plane-only. The bridge applies
+// this flag whenever a graph is published so ordinary DSP republishes preserve
+// visible VU metering without adding an atomic read to the per-sample path.
+void N60RealtimeAudioBridgeSetMeteringDemand(bool enabled);
+bool N60RealtimeAudioBridgeMeteringDemand(void);
 bool N60RealtimeAudioBridgePrepareConvolutionProgram(
     N60RealtimeAudioBridge * _Nonnull bridge,
     uint32_t slot,
