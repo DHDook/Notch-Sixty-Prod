@@ -63,6 +63,19 @@ jobs:
             -o /tmp/validate-pr35-denoiser-fastpath
           /tmp/validate-pr35-denoiser-fastpath
 
+      - name: Validate PR35 Disabled DSP Fast Paths
+        run: |
+          clang -std=c11 -Wall -Wextra -Werror \
+            -include stddef.h \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr35_disabled_dsp_fastpath.c \
+            NotchSixty/Audio/Realtime/N60Dynamics.c \
+            NotchSixty/Audio/Realtime/N60DynamicEQ.c \
+            NotchSixty/Audio/Realtime/N60SpectralDenoiser.c \
+            -lm \
+            -o /tmp/validate-pr35-disabled-dsp
+          /tmp/validate-pr35-disabled-dsp
+
       - name: Validate PR35 Render Snapshot Lifetime
         run: |
           REALTIME_SOURCES=$(find NotchSixty/Audio/Realtime -name '*.c' ! -name 'N60RealtimeAudioBridge.c' -print)
