@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+static _Atomic bool gMeteringDemand = false;
+
 typedef struct {
     float left;
     float right;
@@ -412,6 +414,14 @@ void N60RealtimeAudioBridgeConfigureOutputGate(
     );
 }
 
+void N60RealtimeAudioBridgeSetMeteringDemand(bool enabled) {
+    atomic_store_explicit(&gMeteringDemand, enabled, memory_order_release);
+}
+
+bool N60RealtimeAudioBridgeMeteringDemand(void) {
+    return atomic_load_explicit(&gMeteringDemand, memory_order_acquire);
+}
+
 bool N60RealtimeAudioBridgePrepareConvolutionProgram(
     N60RealtimeAudioBridge *bridge,
     uint32_t slot,
@@ -480,6 +490,7 @@ bool N60RealtimeAudioBridgePublishDSPGraph(
     N60DSPGraphSnapshot snapshot
 ) {
     if (bridge == NULL || bridge->renderKernel == NULL) return false;
+    snapshot.meteringEnabled = N60RealtimeAudioBridgeMeteringDemand();
     return N60RenderKernelPublishSnapshot(bridge->renderKernel, snapshot);
 }
 
