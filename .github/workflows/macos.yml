@@ -115,6 +115,84 @@ jobs:
           ENABLE_TESTABILITY=YES
           build
 
+      - name: Diagnose DynamicsTests
+        continue-on-error: true
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          -only-testing:NotchSixtyTests/DynamicsTests
+          test
+
+      - name: Diagnose ProtectionTests
+        continue-on-error: true
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          -only-testing:NotchSixtyTests/ProtectionTests
+          test
+
+      - name: Diagnose ConvolutionTests
+        continue-on-error: true
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          -only-testing:NotchSixtyTests/ConvolutionTests
+          test
+
+      - name: Diagnose LiveLinearPhaseTests
+        continue-on-error: true
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          -only-testing:NotchSixtyTests/LiveLinearPhaseTests
+          test
+
+      - name: Diagnose StereoPlaybackControlTests
+        continue-on-error: true
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          -only-testing:NotchSixtyTests/StereoPlaybackControlTests
+          test
+
+      - name: Diagnose NotchSixtyTests
+        continue-on-error: true
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          -only-testing:NotchSixtyTests/NotchSixtyTests
+          test
+
       - name: Test
         run: >-
           xcodebuild
