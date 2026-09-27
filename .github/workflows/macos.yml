@@ -33,6 +33,9 @@ jobs:
           clang -std=c11 -Wall -Wextra -Werror ci/validate_pr34_bandpass.c -o /tmp/validate-pr34-bandpass
           /tmp/validate-pr34-bandpass
 
+      - name: Validate PR35 Realtime Control Plane
+        run: python3 ci/validate_pr35_realtime_control_plane.py
+
       - name: Build
         run: >-
           xcodebuild
