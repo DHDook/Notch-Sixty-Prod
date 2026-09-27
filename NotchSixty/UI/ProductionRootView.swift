@@ -51,38 +51,40 @@ enum ProductionVUScale {
     }
 
     static func smoothed(current: Double, target: Double) -> Double {
-        current + (target - current) * (target > current ? 0.28 : 0.10)
+        // 20 Hz UI updates with approximately the same attack/release timing as
+        // the original 30 Hz presentation.
+        current + (target - current) * (target > current ? 0.39 : 0.15)
+    }
+
+    static func angle(forVU vu: Double) -> Double {
+        210 + normalizedPosition(forVU: vu) * 120
+    }
+
+    static func point(center: CGPoint, radius: CGFloat, angle: Double) -> CGPoint {
+        let radians = angle * .pi / 180
+        return CGPoint(x: center.x + cos(radians) * radius, y: center.y + sin(radians) * radius)
     }
 }
 
 @MainActor
-private enum ProductionMeteringDemand {
+private enum ProductionOutputVUMeterDemand {
     private static var activeRequests: Set<UUID> = []
 
-    static func acquire(for engine: AudioIOEngine) -> UUID {
+    static func acquire() -> UUID {
         let token = UUID()
         let wasInactive = activeRequests.isEmpty
         activeRequests.insert(token)
         if wasInactive {
-            apply(true, to: engine)
+            N60RealtimeAudioBridgeSetOutputVUMeterDemand(true)
         }
         return token
     }
 
-    static func release(_ token: UUID, for engine: AudioIOEngine) {
+    static func release(_ token: UUID) {
         guard activeRequests.remove(token) != nil else { return }
         if activeRequests.isEmpty {
-            apply(false, to: engine)
+            N60RealtimeAudioBridgeSetOutputVUMeterDemand(false)
         }
-    }
-
-    private static func apply(_ enabled: Bool, to engine: AudioIOEngine) {
-        N60RealtimeAudioBridgeSetMeteringDemand(enabled)
-        guard engine.lifecycleState == .running else { return }
-        // Republish the current graph through an existing neutral control path.
-        // The bridge injects the demand bit at publication time, so later DSP
-        // updates preserve the visible-only metering state automatically.
-        try? engine.setChannelBalance(engine.playbackControlConfiguration.balance)
     }
 }
 
@@ -132,7 +134,7 @@ struct ProductionRootView: View {
                 title: "Meters",
                 subtitle: "Detailed signal, loudness, protection, and analysis telemetry.",
                 systemImage: "chart.xyaxis.line",
-                detail: "Detailed meters and analyzers will live here with explicit opt-in processing so hidden analysis remains parked."
+                detail: "Each detailed meter or analyzer will request only its own pipeline so hidden analysis remains parked."
             )
         case .speakerSetup:
             ProductionSpeakerSetupView(engine: engine)
@@ -360,15 +362,14 @@ private struct ProductionDashboardView: View {
             return
         }
 
-        let demandToken = ProductionMeteringDemand.acquire(for: engine)
+        let demandToken = ProductionOutputVUMeterDemand.acquire()
         defer {
-            ProductionMeteringDemand.release(demandToken, for: engine)
+            ProductionOutputVUMeterDemand.release(demandToken)
             resetMeters()
         }
 
         while !Task.isCancelled && engine.lifecycleState == .running && vuMetersEnabled {
-            if let diagnostics = engine.diagnosticsSnapshot().renderKernelDiagnostics,
-               diagnostics.meteringEnabled {
+            if let diagnostics = engine.diagnosticsSnapshot().renderKernelDiagnostics {
                 let meter = diagnostics.outputMeter
                 leftVU = ProductionVUScale.smoothed(
                     current: leftVU,
@@ -381,7 +382,7 @@ private struct ProductionDashboardView: View {
                 leftPeak = ProductionVUScale.decibelsFS(fromLinear: meter.peakLeft)
                 rightPeak = ProductionVUScale.decibelsFS(fromLinear: meter.peakRight)
             }
-            try? await Task.sleep(nanoseconds: 33_000_000)
+            try? await Task.sleep(nanoseconds: 50_000_000)
         }
     }
 
@@ -415,8 +416,10 @@ private struct SignatureVUMeter: View {
                     .overlay { RoundedRectangle(cornerRadius: 24).stroke(.black.opacity(0.28)) }
                     .shadow(color: .black.opacity(0.16), radius: 12, y: 5)
 
+                SignatureVUScaleFace(center: center, radius: radius)
+                    .equatable()
+
                 Canvas { context, _ in
-                    drawScale(context: &context, center: center, radius: radius)
                     drawNeedle(context: &context, center: center, radius: radius)
                 }
 
@@ -441,54 +444,71 @@ private struct SignatureVUMeter: View {
             : "PEAK −∞ dBFS"
     }
 
-    private func drawScale(context: inout GraphicsContext, center: CGPoint, radius: CGFloat) {
-        let ticks: [Double] = [-20, -10, -7, -5, -3, -2, -1, 0, 1, 2, 3]
-        let labels: Set<Double> = [-20, -10, -7, -5, -3, 0, 3]
-        var arc = Path()
-        arc.addArc(center: center, radius: radius, startAngle: .degrees(210), endAngle: .degrees(330), clockwise: false)
-        context.stroke(arc, with: .color(.black.opacity(0.62)), lineWidth: 1.3)
-
-        for value in ticks {
-            let angle = meterAngle(value)
-            let inner = point(center, radius * (labels.contains(value) ? 0.87 : 0.91), angle)
-            let outer = point(center, radius, angle)
-            var path = Path(); path.move(to: inner); path.addLine(to: outer)
-            context.stroke(path, with: .color(value > 0 ? .red.opacity(0.8) : .black.opacity(0.72)), lineWidth: labels.contains(value) ? 2 : 1)
-            if labels.contains(value) {
-                let p = point(center, radius * 0.76, angle)
-                let label = value > 0 ? "+\(Int(value))" : "\(Int(value))"
-                context.draw(
-                    Text(label)
-                        .font(.system(size: 12, weight: value == 0 ? .bold : .medium, design: .rounded))
-                        .foregroundStyle(value > 0 ? Color.red : Color.black.opacity(0.72)),
-                    at: p
-                )
-            }
-        }
-        context.draw(
-            Text("VU")
-                .font(.system(size: 15, weight: .bold, design: .rounded))
-                .foregroundStyle(.black.opacity(0.72)),
-            at: CGPoint(x: center.x, y: center.y - radius * 0.43)
+    private func drawNeedle(context: inout GraphicsContext, center: CGPoint, radius: CGFloat) {
+        let angle = ProductionVUScale.angle(forVU: vu)
+        var path = Path()
+        path.move(to: ProductionVUScale.point(center: center, radius: -radius * 0.10, angle: angle))
+        path.addLine(to: ProductionVUScale.point(center: center, radius: radius * 0.92, angle: angle))
+        context.stroke(path, with: .color(.red.opacity(0.92)), lineWidth: 2.2)
+        context.fill(
+            Path(ellipseIn: CGRect(x: center.x - 8, y: center.y - 8, width: 16, height: 16)),
+            with: .color(.black.opacity(0.8))
         )
     }
+}
 
-    private func drawNeedle(context: inout GraphicsContext, center: CGPoint, radius: CGFloat) {
-        let angle = meterAngle(vu)
-        var path = Path()
-        path.move(to: point(center, -radius * 0.10, angle))
-        path.addLine(to: point(center, radius * 0.92, angle))
-        context.stroke(path, with: .color(.red.opacity(0.92)), lineWidth: 2.2)
-        context.fill(Path(ellipseIn: CGRect(x: center.x - 8, y: center.y - 8, width: 16, height: 16)), with: .color(.black.opacity(0.8)))
-    }
+private struct SignatureVUScaleFace: View, Equatable {
+    let center: CGPoint
+    let radius: CGFloat
 
-    private func meterAngle(_ value: Double) -> Double {
-        210 + ProductionVUScale.normalizedPosition(forVU: value) * 120
-    }
+    var body: some View {
+        Canvas { context, _ in
+            let ticks: [Double] = [-20, -10, -7, -5, -3, -2, -1, 0, 1, 2, 3]
+            let labels: Set<Double> = [-20, -10, -7, -5, -3, 0, 3]
+            var arc = Path()
+            arc.addArc(
+                center: center,
+                radius: radius,
+                startAngle: .degrees(210),
+                endAngle: .degrees(330),
+                clockwise: false
+            )
+            context.stroke(arc, with: .color(.black.opacity(0.62)), lineWidth: 1.3)
 
-    private func point(_ center: CGPoint, _ radius: CGFloat, _ angle: Double) -> CGPoint {
-        let radians = angle * .pi / 180
-        return CGPoint(x: center.x + cos(radians) * radius, y: center.y + sin(radians) * radius)
+            for value in ticks {
+                let angle = ProductionVUScale.angle(forVU: value)
+                let inner = ProductionVUScale.point(
+                    center: center,
+                    radius: radius * (labels.contains(value) ? 0.87 : 0.91),
+                    angle: angle
+                )
+                let outer = ProductionVUScale.point(center: center, radius: radius, angle: angle)
+                var path = Path()
+                path.move(to: inner)
+                path.addLine(to: outer)
+                context.stroke(
+                    path,
+                    with: .color(value > 0 ? .red.opacity(0.8) : .black.opacity(0.72)),
+                    lineWidth: labels.contains(value) ? 2 : 1
+                )
+                if labels.contains(value) {
+                    let point = ProductionVUScale.point(center: center, radius: radius * 0.76, angle: angle)
+                    let label = value > 0 ? "+\(Int(value))" : "\(Int(value))"
+                    context.draw(
+                        Text(label)
+                            .font(.system(size: 12, weight: value == 0 ? .bold : .medium, design: .rounded))
+                            .foregroundStyle(value > 0 ? Color.red : Color.black.opacity(0.72)),
+                        at: point
+                    )
+                }
+            }
+            context.draw(
+                Text("VU")
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundStyle(.black.opacity(0.72)),
+                at: CGPoint(x: center.x, y: center.y - radius * 0.43)
+            )
+        }
     }
 }
 
