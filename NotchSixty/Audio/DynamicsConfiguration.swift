@@ -1014,7 +1014,7 @@ struct DynamicsConfiguration: Equatable, Sendable {
         guard N60DynamicsSnapshotSetMainsHumDetector(
             &snapshot,
             sampleRate,
-            true,
+            mainsNotch.continuousTracking,
             mainsNotch.region.fundamentalHz
         ) else { throw DynamicsConfigurationError.invalidMainsHumDetector }
         guard N60DynamicsSnapshotSetSpectralDenoiser(

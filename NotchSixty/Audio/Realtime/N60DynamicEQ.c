@@ -9,6 +9,7 @@
 
 #define N60_DYNAMIC_EQ_EPSILON 1.0e-20f
 #define N60_DYNAMIC_EQ_TRANSITION_MS 5.0f
+#define N60_DYNAMIC_EQ_PARK_EPSILON 1.0e-5f
 
 static float clampf_local(float value, float lower, float upper) {
     return fminf(upper, fmaxf(lower, value));
@@ -385,6 +386,7 @@ bool N60DynamicEQSnapshotIsValid(N60DynamicEQSnapshot snapshot) {
 void N60DynamicEQRuntimeReset(N60DynamicEQRuntime *runtime) {
     if (runtime == NULL) return;
     memset(runtime, 0, sizeof(*runtime));
+    runtime->parked = true;
     for (uint32_t index = 0; index < N60_DYNAMIC_EQ_MAX_BANDS; ++index) {
         runtime->detectorLevelDBFS[index] = -120.0f;
         runtime->secondaryDetectorLevelDBFS[index] = -120.0f;
@@ -411,6 +413,23 @@ static void update_gain_state(
     *staticGainDB = smooth_pole(
         *staticGainDB, active ? band.staticGainDB : 0.0f, bypassTransitionCoefficient);
     *wetMix = smooth_pole(*wetMix, active ? 1.0f : 0.0f, bypassTransitionCoefficient);
+}
+
+static bool runtime_can_park(
+    const N60DynamicEQRuntime *runtime,
+    const N60DynamicEQSnapshot *snapshot
+) {
+    for (uint32_t index = 0; index < snapshot->bandCount; ++index) {
+        if (fabsf(runtime->dynamicGainDB[index]) > N60_DYNAMIC_EQ_PARK_EPSILON
+            || fabsf(runtime->staticGainDB[index]) > N60_DYNAMIC_EQ_PARK_EPSILON
+            || fabsf(runtime->wetMix[index]) > N60_DYNAMIC_EQ_PARK_EPSILON) return false;
+    }
+    for (uint32_t index = 0; index < snapshot->secondaryBandCount; ++index) {
+        if (fabsf(runtime->secondaryDynamicGainDB[index]) > N60_DYNAMIC_EQ_PARK_EPSILON
+            || fabsf(runtime->secondaryStaticGainDB[index]) > N60_DYNAMIC_EQ_PARK_EPSILON
+            || fabsf(runtime->secondaryWetMix[index]) > N60_DYNAMIC_EQ_PARK_EPSILON) return false;
+    }
+    return true;
 }
 
 static void process_linked_stereo(
@@ -514,7 +533,7 @@ void N60DynamicEQProcessStereoFrame(
     float *left,
     float *right
 ) {
-    if (runtime == NULL || left == NULL || right == NULL) return;
+    if (runtime == NULL || snapshot == NULL || left == NULL || right == NULL) return;
     if (!runtime->domainInitialized || runtime->currentDomain != snapshot->domain) {
         N60DynamicEQRuntimeReset(runtime);
         runtime->currentDomain = snapshot->domain;
@@ -522,6 +541,8 @@ void N60DynamicEQProcessStereoFrame(
     }
     runtime->activeBandCount = 0;
     runtime->maxAbsDynamicGainDB = 0.0f;
+    if (!snapshot->enabled && runtime->parked) return;
+    if (snapshot->enabled) runtime->parked = false;
 
     switch (snapshot->domain) {
     case N60DynamicEQDomainDualMono:
@@ -541,6 +562,14 @@ void N60DynamicEQProcessStereoFrame(
     default:
         process_linked_stereo(runtime, snapshot, left, right);
         break;
+    }
+
+    if (!snapshot->enabled && runtime_can_park(runtime, snapshot)) {
+        N60DynamicEQDomain domain = snapshot->domain;
+        N60DynamicEQRuntimeReset(runtime);
+        runtime->currentDomain = domain;
+        runtime->domainInitialized = true;
+        runtime->parked = true;
     }
 }
 

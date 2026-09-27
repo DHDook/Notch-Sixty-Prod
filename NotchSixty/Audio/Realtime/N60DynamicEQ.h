@@ -117,6 +117,7 @@ typedef struct {
     uint32_t activeBandCount;
     N60DynamicEQDomain currentDomain;
     bool domainInitialized;
+    bool parked;
 } N60DynamicEQRuntime;
 
 typedef struct {

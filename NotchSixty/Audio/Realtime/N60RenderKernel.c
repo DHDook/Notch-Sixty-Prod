@@ -369,6 +369,12 @@ static float next_gain_value(N60SmoothedGain *gain) {
     return gain->current;
 }
 
+static bool smoothed_gain_is_settled_at(const N60SmoothedGain *gain, float value) {
+    return gain->transitionFramesRemaining == 0
+        && gain->current == value
+        && gain->target == value;
+}
+
 static void promote_pending_filter(N60EQBandRuntime *runtime) {
     if (runtime->transitionFramesRemaining == 0) return;
     runtime->currentCoefficients = runtime->pendingCoefficients;
@@ -470,7 +476,7 @@ static void prepare_runtime_for_snapshot(N60RenderKernel *kernel, const N60DSPGr
         reset_smoothed_gain(&kernel->symmetryBalanceGainRight, snapshot->symmetryBalance.rightGainLinear);
         reset_smoothed_gain(&kernel->speakerCrossfeedAmount, snapshot->speakerCrossfeed.enabled ? snapshot->speakerCrossfeed.amount : 0.0f);
         reset_smoothed_gain(&kernel->crosstalkCancellationAmount, snapshot->crosstalkCancellation.enabled ? snapshot->crosstalkCancellation.amount : 0.0f);
-        reset_smoothed_gain(&kernel->crosstalkHeadShadowAlpha, snapshot->crosstalkCancellation.headShadowAlpha);
+        reset_smoothed_gain(&kernel->crosstalkHeadShadowAlpha, snapshot->crosstalkCancellation.enabled ? snapshot->crosstalkCancellation.headShadowAlpha : 0.0f);
         kernel->crosstalkShadowLeft = 0.0f;
         kernel->crosstalkShadowRight = 0.0f;
         N60InterChannelDelayRuntimeReset(&kernel->interChannelDelayRuntime, snapshot->interChannelDelay);
@@ -485,7 +491,7 @@ static void prepare_runtime_for_snapshot(N60RenderKernel *kernel, const N60DSPGr
         schedule_gain_transition(&kernel->symmetryBalanceGainRight, snapshot->symmetryBalance.rightGainLinear, gainFrames);
         schedule_gain_transition(&kernel->speakerCrossfeedAmount, snapshot->speakerCrossfeed.enabled ? snapshot->speakerCrossfeed.amount : 0.0f, gainFrames);
         schedule_gain_transition(&kernel->crosstalkCancellationAmount, snapshot->crosstalkCancellation.enabled ? snapshot->crosstalkCancellation.amount : 0.0f, gainFrames);
-        schedule_gain_transition(&kernel->crosstalkHeadShadowAlpha, snapshot->crosstalkCancellation.headShadowAlpha, gainFrames);
+        schedule_gain_transition(&kernel->crosstalkHeadShadowAlpha, snapshot->crosstalkCancellation.enabled ? snapshot->crosstalkCancellation.headShadowAlpha : 0.0f, gainFrames);
         N60InterChannelDelayRuntimeSchedule(&kernel->interChannelDelayRuntime, snapshot->interChannelDelay, gainFrames);
     }
 
@@ -821,6 +827,7 @@ N60DSPGraphSnapshot N60DSPGraphSnapshotMakeUnity(double sampleRate) {
     snapshot.speakerCrossfeed.enabled = false;
     snapshot.speakerCrossfeed.amount = 0.0f;
     (void)N60CrosstalkCancellationDesign(sampleRate, 0.5, 700.0, false, &snapshot.crosstalkCancellation);
+    snapshot.meteringEnabled = false;
     snapshot.bypassed = false;
     snapshot.auditionMode = N60AuditionModeProcessed;
     snapshot.interChannelDelay = N60InterChannelDelaySnapshotMakeBypassed();
@@ -843,6 +850,15 @@ N60DSPGraphSnapshot N60DSPGraphSnapshotMakeUnity(double sampleRate) {
     snapshot.speakerIR.enabled = false;
     snapshot.speakerIR.programSlot = N60_CONVOLUTION_NO_PROGRAM;
     return snapshot;
+}
+
+bool N60DSPGraphSnapshotSetMeteringEnabled(
+    N60DSPGraphSnapshot *snapshot,
+    bool enabled
+) {
+    if (snapshot == NULL) return false;
+    snapshot->meteringEnabled = enabled;
+    return true;
 }
 
 void N60DSPGraphSnapshotClearEQ(N60DSPGraphSnapshot *snapshot) {
@@ -1282,7 +1298,10 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
     float referenceRight = 0.0f;
     uint32_t referenceDelayFrames = context->acquired && context->snapshot != NULL ? context->snapshot->latencyFrames : 0;
     process_reference_delay(kernel, referenceDelayFrames, left, right, &referenceLeft, &referenceRight);
-    meter_sample(left, right, &context->inputPeakLeft, &context->inputPeakRight, &context->inputSquareSumLeft, &context->inputSquareSumRight, &context->inputOverRangeSamples);
+    bool meteringEnabled = context->acquired && context->snapshot != NULL && context->snapshot->meteringEnabled;
+    if (meteringEnabled) {
+        meter_sample(left, right, &context->inputPeakLeft, &context->inputPeakRight, &context->inputSquareSumLeft, &context->inputSquareSumRight, &context->inputOverRangeSamples);
+    }
 
     if (context->acquired && context->snapshot != NULL && !context->snapshot->bypassed) {
         float inputGain = next_gain_value(&kernel->inputGain);
@@ -1358,7 +1377,9 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
             );
         }
 
-        meter_sample(left, right, &context->postEQPeakLeft, &context->postEQPeakRight, &context->postEQSquareSumLeft, &context->postEQSquareSumRight, &context->postEQOverRangeSamples);
+        if (meteringEnabled) {
+            meter_sample(left, right, &context->postEQPeakLeft, &context->postEQPeakRight, &context->postEQSquareSumLeft, &context->postEQSquareSumRight, &context->postEQOverRangeSamples);
+        }
         process_crossover(&kernel->crossoverRuntime, left, right, &left, &right);
 
         if (context->snapshot->roomCorrection.enabled) {
@@ -1405,29 +1426,41 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
         // Listening-position symmetry compensation is intentionally separate
         // from ordinary attenuation-style Balance. It feeds the speaker-spatial
         // chain and is gain-smoothed so live position changes remain click-free.
-        left *= next_gain_value(&kernel->symmetryBalanceGainLeft);
-        right *= next_gain_value(&kernel->symmetryBalanceGainRight);
+        if (!smoothed_gain_is_settled_at(&kernel->symmetryBalanceGainLeft, 1.0f)
+            || !smoothed_gain_is_settled_at(&kernel->symmetryBalanceGainRight, 1.0f)) {
+            left *= next_gain_value(&kernel->symmetryBalanceGainLeft);
+            right *= next_gain_value(&kernel->symmetryBalanceGainRight);
+        }
 
-        // Speaker crossfeed / Panning Gain Matrix. The audited effective range
-        // is 0...0.5: zero is identity and 0.5 is exact mono.
-        const float crossfeed = next_gain_value(&kernel->speakerCrossfeedAmount);
-        const float direct = 1.0f - crossfeed;
-        const float spatialLeft = left;
-        const float spatialRight = right;
-        left = direct * spatialLeft + crossfeed * spatialRight;
-        right = direct * spatialRight + crossfeed * spatialLeft;
+        // Speaker crossfeed / Panning Gain Matrix. Once its disable ramp has
+        // reached zero the processor is computationally parked.
+        if (!smoothed_gain_is_settled_at(&kernel->speakerCrossfeedAmount, 0.0f)) {
+            const float crossfeed = next_gain_value(&kernel->speakerCrossfeedAmount);
+            const float direct = 1.0f - crossfeed;
+            const float spatialLeft = left;
+            const float spatialRight = right;
+            left = direct * spatialLeft + crossfeed * spatialRight;
+            right = direct * spatialRight + crossfeed * spatialLeft;
+        }
 
-        // Gentle feed-forward speaker crosstalk cancellation. The opposite-channel
-        // cancellation signal is frequency-shaped by a first-order far-ear/head-
-        // shadow model; there is no recursive feedback loop in the realtime path.
-        const float shadowAlpha = next_gain_value(&kernel->crosstalkHeadShadowAlpha);
-        kernel->crosstalkShadowLeft += shadowAlpha * (left - kernel->crosstalkShadowLeft);
-        kernel->crosstalkShadowRight += shadowAlpha * (right - kernel->crosstalkShadowRight);
-        const float cancellationAmount = next_gain_value(&kernel->crosstalkCancellationAmount);
-        const float cancellationLeft = left;
-        const float cancellationRight = right;
-        left = cancellationLeft - cancellationAmount * kernel->crosstalkShadowRight;
-        right = cancellationRight - cancellationAmount * kernel->crosstalkShadowLeft;
+        // Gentle feed-forward speaker crosstalk cancellation. The shadow filter
+        // and cancellation matrix park completely after the disable ramp reaches 0.
+        if (!smoothed_gain_is_settled_at(&kernel->crosstalkCancellationAmount, 0.0f)
+            || !smoothed_gain_is_settled_at(&kernel->crosstalkHeadShadowAlpha, 0.0f)) {
+            const float shadowAlpha = next_gain_value(&kernel->crosstalkHeadShadowAlpha);
+            kernel->crosstalkShadowLeft += shadowAlpha * (left - kernel->crosstalkShadowLeft);
+            kernel->crosstalkShadowRight += shadowAlpha * (right - kernel->crosstalkShadowRight);
+            const float cancellationAmount = next_gain_value(&kernel->crosstalkCancellationAmount);
+            const float cancellationLeft = left;
+            const float cancellationRight = right;
+            left = cancellationLeft - cancellationAmount * kernel->crosstalkShadowRight;
+            right = cancellationRight - cancellationAmount * kernel->crosstalkShadowLeft;
+            if (smoothed_gain_is_settled_at(&kernel->crosstalkCancellationAmount, 0.0f)
+                && smoothed_gain_is_settled_at(&kernel->crosstalkHeadShadowAlpha, 0.0f)) {
+                kernel->crosstalkShadowLeft = 0.0f;
+                kernel->crosstalkShadowRight = 0.0f;
+            }
+        }
 
         left *= next_gain_value(&kernel->balanceGainLeft);
         right *= next_gain_value(&kernel->balanceGainRight);
@@ -1463,7 +1496,9 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
             break;
         }
     } else {
-        meter_sample(left, right, &context->postEQPeakLeft, &context->postEQPeakRight, &context->postEQSquareSumLeft, &context->postEQSquareSumRight, &context->postEQOverRangeSamples);
+        if (meteringEnabled) {
+            meter_sample(left, right, &context->postEQPeakLeft, &context->postEQPeakRight, &context->postEQSquareSumLeft, &context->postEQSquareSumRight, &context->postEQOverRangeSamples);
+        }
     }
 
     // Keep the alignment history warm even during Global Bypass, but discard the
@@ -1485,17 +1520,21 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
     right *= masterGain;
     left = sanitize_sample(kernel, left);
     right = sanitize_sample(kernel, right);
-    meter_sample(left, right, &context->outputPeakLeft, &context->outputPeakRight, &context->outputSquareSumLeft, &context->outputSquareSumRight, &context->outputOverRangeSamples);
-    context->meteredFrames += 1;
+    if (meteringEnabled) {
+        meter_sample(left, right, &context->outputPeakLeft, &context->outputPeakRight, &context->outputSquareSumLeft, &context->outputSquareSumRight, &context->outputOverRangeSamples);
+        context->meteredFrames += 1;
+    }
     *outputLeft = left;
     *outputRight = right;
 }
 
 void N60RenderKernelEndRender(N60RenderKernel *kernel, N60RenderKernelRenderContext *context, uint32_t renderedFrames) {
     if (kernel == NULL || context == NULL) return;
-    publish_meter(&kernel->inputPeakLeftBits, &kernel->inputPeakRightBits, &kernel->inputRMSLeftBits, &kernel->inputRMSRightBits, &kernel->inputOverRangeSamples, context->inputPeakLeft, context->inputPeakRight, context->inputSquareSumLeft, context->inputSquareSumRight, context->inputOverRangeSamples, context->meteredFrames);
-    publish_meter(&kernel->postEQPeakLeftBits, &kernel->postEQPeakRightBits, &kernel->postEQRMSLeftBits, &kernel->postEQRMSRightBits, &kernel->postEQOverRangeSamples, context->postEQPeakLeft, context->postEQPeakRight, context->postEQSquareSumLeft, context->postEQSquareSumRight, context->postEQOverRangeSamples, context->meteredFrames);
-    publish_meter(&kernel->outputPeakLeftBits, &kernel->outputPeakRightBits, &kernel->outputRMSLeftBits, &kernel->outputRMSRightBits, &kernel->outputOverRangeSamples, context->outputPeakLeft, context->outputPeakRight, context->outputSquareSumLeft, context->outputSquareSumRight, context->outputOverRangeSamples, context->meteredFrames);
+    if (context->acquired && context->snapshot != NULL && context->snapshot->meteringEnabled) {
+        publish_meter(&kernel->inputPeakLeftBits, &kernel->inputPeakRightBits, &kernel->inputRMSLeftBits, &kernel->inputRMSRightBits, &kernel->inputOverRangeSamples, context->inputPeakLeft, context->inputPeakRight, context->inputSquareSumLeft, context->inputSquareSumRight, context->inputOverRangeSamples, context->meteredFrames);
+        publish_meter(&kernel->postEQPeakLeftBits, &kernel->postEQPeakRightBits, &kernel->postEQRMSLeftBits, &kernel->postEQRMSRightBits, &kernel->postEQOverRangeSamples, context->postEQPeakLeft, context->postEQPeakRight, context->postEQSquareSumLeft, context->postEQSquareSumRight, context->postEQOverRangeSamples, context->meteredFrames);
+        publish_meter(&kernel->outputPeakLeftBits, &kernel->outputPeakRightBits, &kernel->outputRMSLeftBits, &kernel->outputRMSRightBits, &kernel->outputOverRangeSamples, context->outputPeakLeft, context->outputPeakRight, context->outputSquareSumLeft, context->outputSquareSumRight, context->outputOverRangeSamples, context->meteredFrames);
+    }
     if (renderedFrames > 0) {
         N60DynamicsTelemetry telemetry = N60DynamicsRuntimeTelemetry(&kernel->dynamicsRuntime);
         atomic_store_explicit(&kernel->mainsDetectedFrequencyBits, float_to_bits(telemetry.mainsDetectedFrequencyHz), memory_order_relaxed);
@@ -1566,6 +1605,7 @@ N60RenderKernelDiagnostics N60RenderKernelGetDiagnostics(const N60RenderKernel *
         diagnostics.latencyFrames = context.snapshot->latencyFrames;
         diagnostics.sampleRate = context.snapshot->sampleRate;
         diagnostics.channelCount = context.snapshot->channelCount;
+        diagnostics.meteringEnabled = context.snapshot->meteringEnabled;
         diagnostics.bypassed = context.snapshot->bypassed;
         diagnostics.auditionMode = context.snapshot->auditionMode;
         diagnostics.interChannelDelayMs = context.snapshot->interChannelDelay.signedDelayMs;

@@ -571,6 +571,17 @@ void N60ProtectionProcessStereoFrame(
 ) {
     if (runtime == NULL || snapshot == NULL || left == NULL || right == NULL) return;
 
+    if (snapshot->effectiveFactor == N60OversamplingFactor1x
+        && !snapshot->softClipperEnabled
+        && !snapshot->limiterEnabled) {
+        runtime->gainRiderAttenuationDB = 0.0f;
+        runtime->sustainedLimiterGainReductionDB = 0.0f;
+        runtime->telemetry.gainRiderAttenuationDB = 0.0f;
+        runtime->telemetry.sustainedLimiterGainReductionDB = 0.0f;
+        runtime->telemetry.truePeakGuardActive = false;
+        return;
+    }
+
     update_gain_rider(runtime, snapshot);
     float riderGain = db_to_linear(-runtime->gainRiderAttenuationDB);
     *left *= riderGain;
