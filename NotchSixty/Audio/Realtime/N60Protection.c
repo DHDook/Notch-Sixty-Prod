@@ -308,8 +308,26 @@ void N60ProtectionRuntimeDestroy(N60ProtectionRuntime *runtime) {
 
 void N60ProtectionRuntimeReset(N60ProtectionRuntime *runtime) {
     if (runtime == NULL) return;
-    memset(runtime, 0, sizeof(*runtime));
+
+    // The large limiter delay/deque backing arrays do not need to be cleared.
+    // Resetting the sequence/count metadata makes every old entry unreachable,
+    // and delay slots are overwritten before they become readable again. Keep
+    // callback-side graph activation bounded by clearing only live runtime state.
+    memset(&runtime->upStage1, 0, sizeof(runtime->upStage1));
+    memset(&runtime->upStage2, 0, sizeof(runtime->upStage2));
+    memset(&runtime->downStage2, 0, sizeof(runtime->downStage2));
+    memset(&runtime->downStage1, 0, sizeof(runtime->downStage1));
+    runtime->downStage2Phase = 0u;
+    runtime->downStage1Phase = 0u;
+
+    runtime->limiterSequence = 0u;
     runtime->limiterGain = 1.0f;
+    runtime->gainRiderAttenuationDB = 0.0f;
+    runtime->sustainedLimiterGainReductionDB = 0.0f;
+
+    runtime->peakDequeHead = 0u;
+    runtime->peakDequeCount = 0u;
+    memset(&runtime->telemetry, 0, sizeof(runtime->telemetry));
 }
 
 void N60ProtectionRuntimeBeginBuffer(N60ProtectionRuntime *runtime) {
