@@ -264,6 +264,24 @@ static void reset_processing_state(N60SpectralDenoiserRuntime *runtime) {
     runtime->spectralFramesProcessed = 0;
 }
 
+static void park_stream_state(N60SpectralDenoiserRuntime *runtime) {
+    // Bypass must not discard a learned profile, but stale overlap-add/input
+    // history must never leak across a disabled interval. Invalidate only stream
+    // state; preserve the profile, revision bookkeeping, and cumulative telemetry.
+    runtime->inputWrite = 0;
+    runtime->samplesAvailable = 0;
+    runtime->samplesSinceFrame = 0;
+    runtime->sampleIndex = 0;
+    runtime->outputGeneration += 1u;
+    if (runtime->outputGeneration == 0u) runtime->outputGeneration = 1u;
+    runtime->enhancementHistoryValid = false;
+    runtime->adaptiveFramesInBlock = 0;
+    runtime->adaptiveBlockTargetFrames = 0;
+    runtime->adaptiveBlockFresh = true;
+    runtime->meanSuppressionDB = 0.0f;
+    runtime->maxSuppressionDB = 0.0f;
+}
+
 N60SpectralDenoiserRuntime *N60SpectralDenoiserCreate(void) {
     N60SpectralDenoiserRuntime *runtime = calloc(1, sizeof(N60SpectralDenoiserRuntime));
     if (runtime == NULL) return NULL;
@@ -657,7 +675,24 @@ static void process_stereo_frame_validated(
         runtime->activeFFTSize = snapshot->fftSize;
     }
 
+    // Profile commands must still work while the audible denoiser is bypassed.
+    // Once an explicit capture is complete, however, disabled playback parks the
+    // spectral stream and avoids all FFT/profile/overlap-add work.
     handle_profile_command(runtime, snapshot, sampleRate);
+    if (!snapshot->enabled && !runtime->captureActive) {
+        if (runtime->inputWrite != 0u
+            || runtime->samplesAvailable != 0u
+            || runtime->samplesSinceFrame != 0u
+            || runtime->sampleIndex != 0u) {
+            park_stream_state(runtime);
+        } else {
+            runtime->meanSuppressionDB = 0.0f;
+            runtime->maxSuppressionDB = 0.0f;
+        }
+        *outputLeft = inputLeft;
+        *outputRight = inputRight;
+        return;
+    }
 
     uint32_t size = snapshot->fftSize;
     runtime->inputLeft[runtime->inputWrite] = inputLeft;
