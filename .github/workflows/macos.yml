@@ -67,6 +67,7 @@ jobs:
         run: |
           REALTIME_SOURCES=$(find NotchSixty/Audio/Realtime -name '*.c' ! -name 'N60RealtimeAudioBridge.c' -print)
           clang -std=c11 -Wall -Wextra \
+            -include stddef.h \
             -INotchSixty/Audio/Realtime \
             ci/validate_pr35_render_context_snapshot_pointer.c \
             $REALTIME_SOURCES \
