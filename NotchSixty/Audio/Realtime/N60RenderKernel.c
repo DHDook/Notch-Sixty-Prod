@@ -1290,7 +1290,7 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
         left *= inputGain * headroomGain;
         right *= inputGain * headroomGain;
 
-        N60DynamicsProcessPreEQStereoFrame(&kernel->dynamicsRuntime, context->snapshot.dynamics, &left, &right);
+        N60DynamicsProcessPreEQStereoFrame(&kernel->dynamicsRuntime, &context->snapshot.dynamics, &left, &right);
 
         N60SpectralDenoiserProcessStereoFrame(
             kernel->denoiserRuntime,
@@ -1348,11 +1348,11 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
         }
 
         if (!context->snapshot.eqBypassed) {
-            // Dynamic EQ remains a linked physical-stereo stage. Mid/Side does
-            // not create independent M/S dynamic detectors.
+            // Dynamic EQ follows the active EQ channel domain: linked stereo,
+            // independent L/R, or independent Mid/Side lanes before decode.
             N60DynamicsProcessDynamicEQStereoFrame(
                 &kernel->dynamicsRuntime,
-                context->snapshot.dynamics,
+                &context->snapshot.dynamics,
                 &left,
                 &right
             );
@@ -1400,7 +1400,7 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
             }
         }
 
-        N60DynamicsProcessCoreStereoFrameWithMasterGain(&kernel->dynamicsRuntime, context->snapshot.dynamics, context->snapshot.masterGainLinear, &left, &right);
+        N60DynamicsProcessCoreStereoFrameWithMasterGain(&kernel->dynamicsRuntime, &context->snapshot.dynamics, context->snapshot.masterGainLinear, &left, &right);
 
         // Listening-position symmetry compensation is intentionally separate
         // from ordinary attenuation-style Balance. It feeds the speaker-spatial
@@ -1444,7 +1444,7 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
 
         N60DynamicsProcessPauseGateStereoFrame(
             &kernel->dynamicsRuntime,
-            context->snapshot.dynamics,
+            &context->snapshot.dynamics,
             &left,
             &right
         );

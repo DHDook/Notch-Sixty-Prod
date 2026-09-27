@@ -415,12 +415,12 @@ static void update_gain_state(
 
 static void process_linked_stereo(
     N60DynamicEQRuntime *runtime,
-    N60DynamicEQSnapshot snapshot,
+    const N60DynamicEQSnapshot *snapshot,
     float *left,
     float *right
 ) {
-    for (uint32_t index = 0; index < snapshot.bandCount; ++index) {
-        N60DynamicEQBandSnapshot band = snapshot.bands[index];
+    for (uint32_t index = 0; index < snapshot->bandCount; ++index) {
+        N60DynamicEQBandSnapshot band = snapshot->bands[index];
         float inputLeft = *left;
         float inputRight = *right;
         float analysisLeft = process_biquad(band.analysisBandPass, &runtime->analysisLeft[index], inputLeft);
@@ -436,9 +436,9 @@ static void process_linked_stereo(
         }
         float detectorDB = linear_to_db(detectorLinear);
         runtime->detectorLevelDBFS[index] = detectorDB;
-        update_gain_state(snapshot.enabled, snapshot.bypassTransitionCoefficient, band, detectorDB,
+        update_gain_state(snapshot->enabled, snapshot->bypassTransitionCoefficient, band, detectorDB,
                           &runtime->dynamicGainDB[index], &runtime->staticGainDB[index], &runtime->wetMix[index]);
-        if (snapshot.enabled && band.enabled) runtime->activeBandCount += 1u;
+        if (snapshot->enabled && band.enabled) runtime->activeBandCount += 1u;
         runtime->maxAbsDynamicGainDB = fmaxf(runtime->maxAbsDynamicGainDB, fabsf(runtime->dynamicGainDB[index]));
         float totalGainDB = clampf_local(runtime->staticGainDB[index] + runtime->dynamicGainDB[index], -42.0f, 18.0f);
         *left = apply_shape(band, &runtime->processPrimaryLeft[index], &runtime->processSecondaryLeft[index],
@@ -450,11 +450,11 @@ static void process_linked_stereo(
 
 static void process_primary_mono(
     N60DynamicEQRuntime *runtime,
-    N60DynamicEQSnapshot snapshot,
+    const N60DynamicEQSnapshot *snapshot,
     float *sample
 ) {
-    for (uint32_t index = 0; index < snapshot.bandCount; ++index) {
-        N60DynamicEQBandSnapshot band = snapshot.bands[index];
+    for (uint32_t index = 0; index < snapshot->bandCount; ++index) {
+        N60DynamicEQBandSnapshot band = snapshot->bands[index];
         float input = *sample;
         float analysis = process_biquad(band.analysisBandPass, &runtime->analysisLeft[index], input);
         float detectorLinear;
@@ -468,9 +468,9 @@ static void process_primary_mono(
         }
         float detectorDB = linear_to_db(detectorLinear);
         runtime->detectorLevelDBFS[index] = detectorDB;
-        update_gain_state(snapshot.enabled, snapshot.bypassTransitionCoefficient, band, detectorDB,
+        update_gain_state(snapshot->enabled, snapshot->bypassTransitionCoefficient, band, detectorDB,
                           &runtime->dynamicGainDB[index], &runtime->staticGainDB[index], &runtime->wetMix[index]);
-        if (snapshot.enabled && band.enabled) runtime->activeBandCount += 1u;
+        if (snapshot->enabled && band.enabled) runtime->activeBandCount += 1u;
         runtime->maxAbsDynamicGainDB = fmaxf(runtime->maxAbsDynamicGainDB, fabsf(runtime->dynamicGainDB[index]));
         float totalGainDB = clampf_local(runtime->staticGainDB[index] + runtime->dynamicGainDB[index], -42.0f, 18.0f);
         *sample = apply_shape(band, &runtime->processPrimaryLeft[index], &runtime->processSecondaryLeft[index],
@@ -480,11 +480,11 @@ static void process_primary_mono(
 
 static void process_secondary_mono(
     N60DynamicEQRuntime *runtime,
-    N60DynamicEQSnapshot snapshot,
+    const N60DynamicEQSnapshot *snapshot,
     float *sample
 ) {
-    for (uint32_t index = 0; index < snapshot.secondaryBandCount; ++index) {
-        N60DynamicEQBandSnapshot band = snapshot.secondaryBands[index];
+    for (uint32_t index = 0; index < snapshot->secondaryBandCount; ++index) {
+        N60DynamicEQBandSnapshot band = snapshot->secondaryBands[index];
         float input = *sample;
         float analysis = process_biquad(band.analysisBandPass, &runtime->secondaryAnalysisLeft[index], input);
         float detectorLinear;
@@ -498,9 +498,9 @@ static void process_secondary_mono(
         }
         float detectorDB = linear_to_db(detectorLinear);
         runtime->secondaryDetectorLevelDBFS[index] = detectorDB;
-        update_gain_state(snapshot.enabled, snapshot.bypassTransitionCoefficient, band, detectorDB,
+        update_gain_state(snapshot->enabled, snapshot->bypassTransitionCoefficient, band, detectorDB,
                           &runtime->secondaryDynamicGainDB[index], &runtime->secondaryStaticGainDB[index], &runtime->secondaryWetMix[index]);
-        if (snapshot.enabled && band.enabled) runtime->activeBandCount += 1u;
+        if (snapshot->enabled && band.enabled) runtime->activeBandCount += 1u;
         runtime->maxAbsDynamicGainDB = fmaxf(runtime->maxAbsDynamicGainDB, fabsf(runtime->secondaryDynamicGainDB[index]));
         float totalGainDB = clampf_local(runtime->secondaryStaticGainDB[index] + runtime->secondaryDynamicGainDB[index], -42.0f, 18.0f);
         *sample = apply_shape(band, &runtime->secondaryProcessPrimaryLeft[index], &runtime->secondaryProcessSecondaryLeft[index],
@@ -510,20 +510,20 @@ static void process_secondary_mono(
 
 void N60DynamicEQProcessStereoFrame(
     N60DynamicEQRuntime *runtime,
-    N60DynamicEQSnapshot snapshot,
+    const N60DynamicEQSnapshot *snapshot,
     float *left,
     float *right
 ) {
     if (runtime == NULL || left == NULL || right == NULL) return;
-    if (!runtime->domainInitialized || runtime->currentDomain != snapshot.domain) {
+    if (!runtime->domainInitialized || runtime->currentDomain != snapshot->domain) {
         N60DynamicEQRuntimeReset(runtime);
-        runtime->currentDomain = snapshot.domain;
+        runtime->currentDomain = snapshot->domain;
         runtime->domainInitialized = true;
     }
     runtime->activeBandCount = 0;
     runtime->maxAbsDynamicGainDB = 0.0f;
 
-    switch (snapshot.domain) {
+    switch (snapshot->domain) {
     case N60DynamicEQDomainDualMono:
         process_primary_mono(runtime, snapshot, left);
         process_secondary_mono(runtime, snapshot, right);

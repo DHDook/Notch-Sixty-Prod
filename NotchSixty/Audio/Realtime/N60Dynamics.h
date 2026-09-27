@@ -658,38 +658,38 @@ bool N60DynamicsSnapshotIsValid(N60DynamicsSnapshot snapshot);
 void N60DynamicsRuntimeReset(N60DynamicsRuntime * _Nonnull runtime);
 void N60DynamicsProcessPreEQStereoFrame(
     N60DynamicsRuntime * _Nonnull runtime,
-    N60DynamicsSnapshot snapshot,
+    const N60DynamicsSnapshot * _Nonnull snapshot,
     float * _Nonnull left,
     float * _Nonnull right
 );
 void N60DynamicsProcessDynamicEQStereoFrame(
     N60DynamicsRuntime * _Nonnull runtime,
-    N60DynamicsSnapshot snapshot,
+    const N60DynamicsSnapshot * _Nonnull snapshot,
     float * _Nonnull left,
     float * _Nonnull right
 );
 void N60DynamicsProcessCoreStereoFrame(
     N60DynamicsRuntime * _Nonnull runtime,
-    N60DynamicsSnapshot snapshot,
+    const N60DynamicsSnapshot * _Nonnull snapshot,
     float * _Nonnull left,
     float * _Nonnull right
 );
 void N60DynamicsProcessCoreStereoFrameWithMasterGain(
     N60DynamicsRuntime * _Nonnull runtime,
-    N60DynamicsSnapshot snapshot,
+    const N60DynamicsSnapshot * _Nonnull snapshot,
     float masterGainLinear,
     float * _Nonnull left,
     float * _Nonnull right
 );
 void N60DynamicsProcessPauseGateStereoFrame(
     N60DynamicsRuntime * _Nonnull runtime,
-    N60DynamicsSnapshot snapshot,
+    const N60DynamicsSnapshot * _Nonnull snapshot,
     float * _Nonnull left,
     float * _Nonnull right
 );
 void N60DynamicsProcessStereoFrame(
     N60DynamicsRuntime * _Nonnull runtime,
-    N60DynamicsSnapshot snapshot,
+    const N60DynamicsSnapshot * _Nonnull snapshot,
     float * _Nonnull left,
     float * _Nonnull right
 );

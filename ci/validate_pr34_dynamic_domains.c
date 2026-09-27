@@ -109,7 +109,7 @@ static void run_sine(
         float inputRight = pureSide ? -sample : sample;
         float left = inputLeft;
         float right = inputRight;
-        N60DynamicEQProcessStereoFrame(runtime, snapshot, &left, &right);
+        N60DynamicEQProcessStereoFrame(runtime, &snapshot, &left, &right);
         require_true(isfinite(left) && isfinite(right), "dynamic output finite");
         require_true(fabsf(left) < 4.0f && fabsf(right) < 4.0f, "dynamic output bounded");
         if (frame >= measureStart) {

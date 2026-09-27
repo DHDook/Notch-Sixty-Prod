@@ -5,14 +5,14 @@ final class DynamicsTests: XCTestCase {
     func testBypassedDynamicsIsExactUnity() {
         var runtime = N60DynamicsRuntime()
         N60DynamicsRuntimeReset(&runtime)
-        let snapshot = N60DynamicsSnapshotMakeBypassed(96_000)
+        var snapshot = N60DynamicsSnapshotMakeBypassed(96_000)
 
         for frame in 0..<20_000 {
             let leftIn = Float(sin(Double(frame) * 0.017) * 0.72)
             let rightIn = Float(cos(Double(frame) * 0.011) * 0.41)
             var left = leftIn
             var right = rightIn
-            N60DynamicsProcessStereoFrame(&runtime, snapshot, &left, &right)
+            N60DynamicsProcessStereoFrame(&runtime, &snapshot, &left, &right)
             XCTAssertEqual(left, leftIn, accuracy: 0.000_001)
             XCTAssertEqual(right, rightIn, accuracy: 0.000_001)
         }
@@ -30,7 +30,7 @@ final class DynamicsTests: XCTestCase {
         for _ in 0..<48_000 {
             left = 0.5
             right = 0.25
-            N60DynamicsProcessStereoFrame(&runtime, snapshot, &left, &right)
+            N60DynamicsProcessStereoFrame(&runtime, &snapshot, &left, &right)
         }
 
         let inputDB = 20.0 * log10(0.5)
@@ -52,7 +52,7 @@ final class DynamicsTests: XCTestCase {
         for _ in 0..<10_000 {
             var left: Float = 0.5
             var right: Float = -0.25
-            N60DynamicsProcessStereoFrame(&runtime, snapshot, &left, &right)
+            N60DynamicsProcessStereoFrame(&runtime, &snapshot, &left, &right)
             XCTAssertEqual(left, 0.5, accuracy: 0.000_001)
             XCTAssertEqual(right, -0.25, accuracy: 0.000_001)
         }
@@ -62,7 +62,7 @@ final class DynamicsTests: XCTestCase {
         for _ in 0..<48_000 {
             lowLeft = 0.001
             lowRight = -0.0005
-            N60DynamicsProcessStereoFrame(&runtime, snapshot, &lowLeft, &lowRight)
+            N60DynamicsProcessStereoFrame(&runtime, &snapshot, &lowLeft, &lowRight)
         }
         let minimumGain = pow(10.0, -12.0 / 20.0)
         XCTAssertEqual(Double(lowLeft), 0.001 * minimumGain, accuracy: 0.000_02)
@@ -81,7 +81,7 @@ final class DynamicsTests: XCTestCase {
         for _ in 0..<5_000 {
             var left: Float = 0.1
             var right: Float = 0.1
-            N60DynamicsProcessStereoFrame(&runtime, snapshot, &left, &right)
+            N60DynamicsProcessStereoFrame(&runtime, &snapshot, &left, &right)
         }
         XCTAssertTrue(N60DynamicsRuntimeTelemetry(&runtime).pauseGateOpen)
 
@@ -89,7 +89,7 @@ final class DynamicsTests: XCTestCase {
         for _ in 0..<8_000 {
             var left: Float = 0
             var right: Float = 0
-            N60DynamicsProcessStereoFrame(&runtime, snapshot, &left, &right)
+            N60DynamicsProcessStereoFrame(&runtime, &snapshot, &left, &right)
         }
         let closed = N60DynamicsRuntimeTelemetry(&runtime)
         XCTAssertFalse(closed.pauseGateOpen)
@@ -98,14 +98,14 @@ final class DynamicsTests: XCTestCase {
         // Resume signal reopens immediately, but Release deliberately fades in more slowly.
         var firstResumeLeft: Float = 0.1
         var firstResumeRight: Float = 0.1
-        N60DynamicsProcessStereoFrame(&runtime, snapshot, &firstResumeLeft, &firstResumeRight)
+        N60DynamicsProcessStereoFrame(&runtime, &snapshot, &firstResumeLeft, &firstResumeRight)
         XCTAssertTrue(N60DynamicsRuntimeTelemetry(&runtime).pauseGateOpen)
         XCTAssertLessThan(firstResumeLeft, 0.02)
 
         for _ in 0..<24_000 {
             var left: Float = 0.1
             var right: Float = 0.1
-            N60DynamicsProcessStereoFrame(&runtime, snapshot, &left, &right)
+            N60DynamicsProcessStereoFrame(&runtime, &snapshot, &left, &right)
         }
         XCTAssertGreaterThan(N60DynamicsRuntimeTelemetry(&runtime).pauseGateGain, 0.98)
     }
@@ -162,7 +162,7 @@ final class DynamicsTests: XCTestCase {
                 let rightIn = Float(0.31 * cos(Double(frame) * 0.043) - 0.09 * sin(Double(frame) * 0.013))
                 var left = leftIn
                 var right = rightIn
-                N60DynamicsProcessStereoFrame(&runtime, snapshot, &left, &right)
+                N60DynamicsProcessStereoFrame(&runtime, &snapshot, &left, &right)
                 XCTAssertEqual(left, leftIn, accuracy: 0.000_002)
                 XCTAssertEqual(right, rightIn, accuracy: 0.000_002)
             }
@@ -183,7 +183,7 @@ final class DynamicsTests: XCTestCase {
             let input = Float(0.5 * sin(2.0 * Double.pi * 6_500.0 * Double(frame) / sampleRate))
             var left = input
             var right = input * 0.5
-            N60DynamicsProcessStereoFrame(&runtime, snapshot, &left, &right)
+            N60DynamicsProcessStereoFrame(&runtime, &snapshot, &left, &right)
             if frame >= startMeasure {
                 inputSquare += Double(input * input)
                 outputSquare += Double(left * left)
@@ -219,7 +219,7 @@ final class DynamicsTests: XCTestCase {
             let input = Float(0.5 * sin(2.0 * Double.pi * 6_000.0 * Double(frame) / sampleRate))
             left = input
             right = input * 0.5
-            N60DynamicsProcessStereoFrame(&runtime, snapshot, &left, &right)
+            N60DynamicsProcessStereoFrame(&runtime, &snapshot, &left, &right)
         }
 
         let telemetry = N60DynamicsRuntimeTelemetry(&runtime)
@@ -282,7 +282,7 @@ final class DynamicsTests: XCTestCase {
         for _ in 0..<240_000 {
             var left: Float = 0.25
             var right: Float = 0.25
-            N60DynamicsProcessPreEQStereoFrame(&runtime, snapshot, &left, &right)
+            N60DynamicsProcessPreEQStereoFrame(&runtime, &snapshot, &left, &right)
             last = left
         }
         XCTAssertLessThan(abs(last), 0.01)
@@ -300,7 +300,7 @@ final class DynamicsTests: XCTestCase {
             for frame in 0..<192_000 {
                 var left = Float(0.5 * sin(2.0 * Double.pi * frequency * Double(frame) / sampleRate))
                 var right = left
-                N60DynamicsProcessPreEQStereoFrame(&runtime, snapshot, &left, &right)
+                N60DynamicsProcessPreEQStereoFrame(&runtime, &snapshot, &left, &right)
                 if frame >= start { sum += Double(left * left) }
             }
             return sqrt(sum / Double(192_000 - start))
@@ -325,7 +325,7 @@ final class DynamicsTests: XCTestCase {
                 var right = left
                 N60DynamicsProcessCoreStereoFrameWithMasterGain(
                     &runtime,
-                    snapshot,
+                    &snapshot,
                     lowMasterGain,
                     &left,
                     &right
@@ -353,7 +353,7 @@ final class DynamicsTests: XCTestCase {
                 var right = left
                 N60DynamicsProcessCoreStereoFrameWithMasterGain(
                     &runtime,
-                    snapshot,
+                    &snapshot,
                     masterGain,
                     &left,
                     &right
@@ -399,7 +399,7 @@ final class DynamicsTests: XCTestCase {
             lastRight = input * 0.5
             N60DynamicsProcessCoreStereoFrameWithMasterGain(
                 &runtime,
-                snapshot,
+                &snapshot,
                 1.0,
                 &lastLeft,
                 &lastRight
@@ -435,7 +435,7 @@ final class DynamicsTests: XCTestCase {
             var right: Float = 0
             N60DynamicsProcessCoreStereoFrameWithMasterGain(
                 &runtime,
-                snapshot,
+                &snapshot,
                 1.0,
                 &left,
                 &right
@@ -461,7 +461,7 @@ final class DynamicsTests: XCTestCase {
                 for frame in 0..<Int(rate * 0.1) {
                     var left = Float(0.55 * sin(2 * Double.pi * 1000 * Double(frame) / rate))
                     var right = left * 0.5
-                    N60DynamicsProcessStereoFrame(&runtime, snapshot, &left, &right)
+                    N60DynamicsProcessStereoFrame(&runtime, &snapshot, &left, &right)
                     XCTAssertTrue(left.isFinite && right.isFinite)
                 }
             }
@@ -479,7 +479,7 @@ final class DynamicsTests: XCTestCase {
         for frame in 0..<48_000 {
             var left = Float(0.7 * sin(2 * Double.pi * 6500 * Double(frame) / rate))
             var right = left
-            N60DynamicsProcessStereoFrame(&runtime, snapshot, &left, &right)
+            N60DynamicsProcessStereoFrame(&runtime, &snapshot, &left, &right)
         }
         XCTAssertLessThanOrEqual(N60DynamicsRuntimeTelemetry(&runtime).deEsserGainReductionDB, 6.05)
     }
@@ -504,7 +504,7 @@ final class DynamicsTests: XCTestCase {
             let x = Float(0.25 * sin(2 * Double.pi * 6000 * Double(frame) / rate))
             var left = x
             var right = x * 0.5
-            N60DynamicsProcessStereoFrame(&runtime, snapshot, &left, &right)
+            N60DynamicsProcessStereoFrame(&runtime, &snapshot, &left, &right)
             XCTAssertTrue(left.isFinite && right.isFinite)
         }
     }
@@ -524,7 +524,7 @@ final class DynamicsTests: XCTestCase {
 
     func testPR32DialogueLevelerDisabledIsTransparent() throws {
         let rate = 96_000.0
-        let snapshot = try DynamicsConfiguration().makeSnapshot(sampleRate: rate)
+        var snapshot = try DynamicsConfiguration().makeSnapshot(sampleRate: rate)
         var runtime = N60DynamicsRuntime()
         N60DynamicsRuntimeReset(&runtime)
         for frame in 0..<20_000 {
@@ -532,7 +532,7 @@ final class DynamicsTests: XCTestCase {
             let sourceR = Float(0.13 * sin(2 * Double.pi * 1511 * Double(frame) / rate))
             var left = sourceL
             var right = sourceR
-            N60DynamicsProcessCoreStereoFrame(&runtime, snapshot, &left, &right)
+            N60DynamicsProcessCoreStereoFrame(&runtime, &snapshot, &left, &right)
             XCTAssertEqual(left, sourceL, accuracy: 2e-5)
             XCTAssertEqual(right, sourceR, accuracy: 2e-5)
         }
@@ -550,7 +550,7 @@ final class DynamicsTests: XCTestCase {
         for frame in 0..<96_000 {
             var left = Float(0.002 * sin(2 * Double.pi * 1000 * Double(frame) / rate))
             var right = left
-            N60DynamicsProcessCoreStereoFrame(&runtime, snapshot, &left, &right)
+            N60DynamicsProcessCoreStereoFrame(&runtime, &snapshot, &left, &right)
         }
         XCTAssertLessThan(abs(N60DynamicsRuntimeTelemetry(&runtime).dialogueBoostDB), 0.05)
     }
@@ -570,7 +570,7 @@ final class DynamicsTests: XCTestCase {
             let x = 0.45 * sin(2 * Double.pi * 9000 * t) + 0.035 * sin(2 * Double.pi * 1000 * t)
             var left = Float(x)
             var right = Float(x * 0.5)
-            N60DynamicsProcessCoreStereoFrame(&runtime, snapshot, &left, &right)
+            N60DynamicsProcessCoreStereoFrame(&runtime, &snapshot, &left, &right)
         }
         let telemetry = N60DynamicsRuntimeTelemetry(&runtime)
         XCTAssertGreaterThan(telemetry.dialogueGapDB, 3)
@@ -592,7 +592,7 @@ final class DynamicsTests: XCTestCase {
             let x = 0.45 * sin(2 * Double.pi * 9000 * t) + 0.03 * sin(2 * Double.pi * 1000 * t)
             var left = Float(x)
             var right = left
-            N60DynamicsProcessCoreStereoFrame(&runtime, snapshot, &left, &right)
+            N60DynamicsProcessCoreStereoFrame(&runtime, &snapshot, &left, &right)
         }
         let telemetry = N60DynamicsRuntimeTelemetry(&runtime)
         XCTAssertGreaterThanOrEqual(telemetry.dialogueVoiceConfidence, 0.249)
@@ -605,14 +605,14 @@ final class DynamicsTests: XCTestCase {
             var config = DynamicsConfiguration()
             config.dialogueRelativeLeveler.enabled = true
             config.dialogueRelativeLeveler.voiceGate.enabled = true
-            let snapshot = try config.makeSnapshot(sampleRate: rate)
+            var snapshot = try config.makeSnapshot(sampleRate: rate)
             var runtime = N60DynamicsRuntime()
             N60DynamicsRuntimeReset(&runtime)
             for frame in 0..<Int(min(rate * 0.2, 30_000)) {
                 let t = Double(frame) / rate
                 var left = Float(0.1 * sin(2 * Double.pi * 1000 * t))
                 var right = left * 0.7
-                N60DynamicsProcessCoreStereoFrame(&runtime, snapshot, &left, &right)
+                N60DynamicsProcessCoreStereoFrame(&runtime, &snapshot, &left, &right)
                 XCTAssertTrue(left.isFinite && right.isFinite)
             }
         }
@@ -634,7 +634,7 @@ final class DynamicsTests: XCTestCase {
             let input = Float(0.4 * sin(2.0 * Double.pi * 1_000.0 * Double(frame) / sampleRate))
             var left = input
             var right = -input * 0.7
-            N60DynamicsProcessDynamicEQStereoFrame(&runtime, snapshot, &left, &right)
+            N60DynamicsProcessDynamicEQStereoFrame(&runtime, &snapshot, &left, &right)
             XCTAssertEqual(left, input, accuracy: 0.000_001)
             XCTAssertEqual(right, -input * 0.7, accuracy: 0.000_001)
         }
@@ -657,7 +657,7 @@ final class DynamicsTests: XCTestCase {
             let input = Float(0.35 * sin(2.0 * Double.pi * 1_000.0 * Double(frame) / sampleRate))
             var left = input
             var right = input * 0.5
-            N60DynamicsProcessDynamicEQStereoFrame(&runtime, snapshot, &left, &right)
+            N60DynamicsProcessDynamicEQStereoFrame(&runtime, &snapshot, &left, &right)
             if frame >= 48_000 {
                 inSq += Double(input * input)
                 outSq += Double(left * left)
@@ -683,7 +683,7 @@ final class DynamicsTests: XCTestCase {
             let input = Float(0.005 * sin(2.0 * Double.pi * 1_000.0 * Double(frame) / sampleRate))
             var left = input
             var right = input
-            N60DynamicsProcessDynamicEQStereoFrame(&runtime, snapshot, &left, &right)
+            N60DynamicsProcessDynamicEQStereoFrame(&runtime, &snapshot, &left, &right)
         }
         let telemetry = N60DynamicsRuntimeTelemetry(&runtime)
         XCTAssertGreaterThan(telemetry.dynamicEQMaxAbsGainDB, 1.0)
@@ -707,7 +707,7 @@ final class DynamicsTests: XCTestCase {
             band.thresholdDB = -24
             return band
         }
-        let snapshot = try config.makeSnapshot(sampleRate: 384_000)
+        var snapshot = try config.makeSnapshot(sampleRate: 384_000)
         XCTAssertEqual(snapshot.dynamicEQ.bandCount, 64)
         XCTAssertTrue(N60DynamicEQSnapshotIsValid(snapshot.dynamicEQ))
     }
@@ -725,7 +725,7 @@ final class DynamicsTests: XCTestCase {
             let input = Float(0.2 * sin(2 * Double.pi * 1_000 * Double(frame) / rate))
             var left = input
             var right = -input * 0.5
-            N60DynamicsProcessCoreStereoFrameWithMasterGain(&runtime, snapshot, master, &left, &right)
+            N60DynamicsProcessCoreStereoFrameWithMasterGain(&runtime, &snapshot, master, &left, &right)
             if frame > 20_000 {
                 XCTAssertEqual(left, input, accuracy: 0.000_01)
                 XCTAssertEqual(right, -input * 0.5, accuracy: 0.000_01)
@@ -748,7 +748,7 @@ final class DynamicsTests: XCTestCase {
         for frame in 0..<(48_000 / 2) {
             var left = Float(0.15 * sin(2 * Double.pi * 200 * Double(frame) / rate))
             var right = left
-            N60DynamicsProcessCoreStereoFrameWithMasterGain(&runtime, snapshot, master, &left, &right)
+            N60DynamicsProcessCoreStereoFrameWithMasterGain(&runtime, &snapshot, master, &left, &right)
         }
         let t = N60DynamicsRuntimeTelemetry(&runtime)
         XCTAssertEqual(t.loudnessLowCompensationDB, 6.0, accuracy: 0.05)
@@ -766,7 +766,7 @@ final class DynamicsTests: XCTestCase {
         for frame in 0..<(48_000 / 2) {
             var left = Float(0.1 * sin(2 * Double.pi * 1_000 * Double(frame) / rate))
             var right = left
-            N60DynamicsProcessCoreStereoFrameWithMasterGain(&runtime, snapshot, 1.0, &left, &right)
+            N60DynamicsProcessCoreStereoFrameWithMasterGain(&runtime, &snapshot, 1.0, &left, &right)
         }
         let t = N60DynamicsRuntimeTelemetry(&runtime)
         XCTAssertLessThan(t.loudnessLowCompensationDB, 0)
@@ -785,7 +785,7 @@ final class DynamicsTests: XCTestCase {
         for frame in 0..<(48_000 * 4) {
             var left = Float(0.01 * sin(2 * Double.pi * 1_000 * Double(frame) / rate))
             var right = left
-            N60DynamicsProcessCoreStereoFrameWithMasterGain(&runtime, snapshot, 1.0, &left, &right)
+            N60DynamicsProcessCoreStereoFrameWithMasterGain(&runtime, &snapshot, 1.0, &left, &right)
         }
         let t = N60DynamicsRuntimeTelemetry(&runtime)
         XCTAssertLessThan(t.loudnessEstimatedPhons, 85)
@@ -804,7 +804,7 @@ final class DynamicsTests: XCTestCase {
             let input = Float(0.3 * sin(2 * Double.pi * 8_000 * Double(frame) / rate))
             var left = input
             var right = -input
-            N60DynamicsProcessCoreStereoFrame(&dryRuntime, disabled, &left, &right)
+            N60DynamicsProcessCoreStereoFrame(&dryRuntime, &disabled, &left, &right)
             XCTAssertEqual(left, input, accuracy: 0.000_001)
             XCTAssertEqual(right, -input, accuracy: 0.000_001)
         }
@@ -819,7 +819,7 @@ final class DynamicsTests: XCTestCase {
                 let input = Float(0.25 * sin(2 * Double.pi * frequency * Double(frame) / rate))
                 var left = input
                 var right = input
-                N60DynamicsProcessCoreStereoFrame(&runtime, snapshot, &left, &right)
+                N60DynamicsProcessCoreStereoFrame(&runtime, &snapshot, &left, &right)
                 if frame >= 24_000 {
                     inputSq += Double(input * input)
                     outputSq += Double(left * left)
@@ -852,7 +852,7 @@ final class DynamicsTests: XCTestCase {
             for frame in 0..<10_000 {
                 var left = Float(0.1 * sin(2 * Double.pi * 1_000 * Double(frame) / rate))
                 var right = left * 0.7
-                N60DynamicsProcessCoreStereoFrameWithMasterGain(&runtime, snapshot, 0.25, &left, &right)
+                N60DynamicsProcessCoreStereoFrameWithMasterGain(&runtime, &snapshot, 0.25, &left, &right)
                 XCTAssertTrue(left.isFinite && right.isFinite)
             }
         }
