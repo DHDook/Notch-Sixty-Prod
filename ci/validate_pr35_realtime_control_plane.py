@@ -148,8 +148,9 @@ require(bridge, "end_command_write", "bridge command publication")
 
 # The tap aggregate is explicitly started/stopped by the session. Keep tap
 # auto-start disabled and pin the aggregate's rate + frame quantum to the
-# physical output before installing IOProcs, avoiding an independent high-rate
-# capture callback cadence.
+# physical output before installing IOProcs. Read the quantum back and refuse to
+# start if Core Audio did not accept it rather than silently running a high-rate
+# capture cadence.
 require(core_audio, "kAudioAggregateDeviceTapAutoStartKey: false", "tap aggregate lifecycle")
 forbid(core_audio, "kAudioAggregateDeviceTapAutoStartKey: true", "tap aggregate lifecycle")
 require(core_audio, "selector: kAudioDevicePropertyNominalSampleRate", "tap aggregate sample-rate configuration")
@@ -157,6 +158,10 @@ require(core_audio, "operation: \"set tap aggregate sample rate\"", "tap aggrega
 require(core_audio, "selector: kAudioDevicePropertyBufferFrameSize", "tap aggregate buffer configuration")
 require(core_audio, "value: outputBufferFrames", "tap aggregate buffer configuration")
 require(core_audio, "operation: \"set tap aggregate buffer size\"", "tap aggregate buffer configuration")
+require(core_audio, "let captureBufferFrames = try Self.readUInt32Property(", "tap aggregate buffer verification")
+require(core_audio, "operation: \"read tap aggregate buffer size\"", "tap aggregate buffer verification")
+require(core_audio, "guard captureBufferFrames == outputBufferFrames else", "tap aggregate buffer verification")
+require(core_audio, "CoreAudioTransportError.captureBufferSizeMismatch", "tap aggregate buffer verification")
 require(core_audio, "AudioObjectSetPropertyData(", "tap aggregate property writer")
 
 # Interactive graph mutation must remain off the caller/MainActor and free of
