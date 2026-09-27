@@ -160,6 +160,7 @@ enum CoreAudioTransportError: Error, LocalizedError, Equatable {
     case speakerIRProgramPreparationFailed
     case ioProcUnavailable(role: String)
     case outputBufferExceedsBridgeCapacity(bufferFrames: UInt32, capacityFrames: UInt32)
+    case captureBufferSizeMismatch(capture: UInt32, output: UInt32)
 
     var errorDescription: String? {
         switch self {
@@ -185,6 +186,8 @@ enum CoreAudioTransportError: Error, LocalizedError, Equatable {
             return "Core Audio created the \(role) IOProc without returning a usable callback identifier."
         case .outputBufferExceedsBridgeCapacity(let bufferFrames, let capacityFrames):
             return "Startup gate requires \(bufferFrames) buffered frames but realtime bridge capacity is \(capacityFrames) frames."
+        case .captureBufferSizeMismatch(let capture, let output):
+            return "Tap aggregate callback quantum is \(capture) frames; expected \(output) frames to match the physical output."
         }
     }
 }
@@ -458,6 +461,18 @@ final class CoreAudioTransportSession {
                 value: outputBufferFrames,
                 operation: "set tap aggregate buffer size"
             )
+            let captureBufferFrames = try Self.readUInt32Property(
+                objectID: aggregateDeviceID,
+                selector: kAudioDevicePropertyBufferFrameSize,
+                scope: kAudioObjectPropertyScopeGlobal,
+                operation: "read tap aggregate buffer size"
+            )
+            guard captureBufferFrames == outputBufferFrames else {
+                throw CoreAudioTransportError.captureBufferSizeMismatch(
+                    capture: captureBufferFrames,
+                    output: outputBufferFrames
+                )
+            }
 
             let clientData = UnsafeMutableRawPointer(newBridge)
             try Self.check(
