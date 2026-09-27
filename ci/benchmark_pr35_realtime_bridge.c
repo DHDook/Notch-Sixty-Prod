@@ -81,59 +81,70 @@ static bool process_buffers(
     return true;
 }
 
-int main(void) {
+static bool run_case(const char *name, bool outputVUEnabled) {
+    N60RealtimeAudioBridgeSetOutputVUMeterDemand(outputVUEnabled);
     N60RealtimeAudioBridge *bridge = N60RealtimeAudioBridgeCreate(BRIDGE_CAPACITY);
     if (bridge == NULL) {
-        fputs("unable to create realtime bridge\n", stderr);
-        return EXIT_FAILURE;
+        fprintf(stderr, "%s: unable to create realtime bridge\n", name);
+        return false;
     }
 
     N60DSPGraphSnapshot snapshot = N60DSPGraphSnapshotMakeUnity(SAMPLE_RATE);
     if (!N60RealtimeAudioBridgePublishDSPGraph(bridge, snapshot)) {
-        fputs("unable to publish unity graph\n", stderr);
+        fprintf(stderr, "%s: unable to publish unity graph\n", name);
         N60RealtimeAudioBridgeDestroy(bridge);
-        return EXIT_FAILURE;
+        return false;
     }
     N60RealtimeAudioBridgeConfigureOutputGate(bridge, 0u, 0u);
 
     float *inputSamples = calloc(BUFFER_FRAMES * 2u, sizeof(float));
     float *outputSamples = calloc(BUFFER_FRAMES * 2u, sizeof(float));
     if (inputSamples == NULL || outputSamples == NULL) {
-        fputs("unable to allocate benchmark buffers\n", stderr);
+        fprintf(stderr, "%s: unable to allocate benchmark buffers\n", name);
         free(inputSamples);
         free(outputSamples);
         N60RealtimeAudioBridgeDestroy(bridge);
-        return EXIT_FAILURE;
+        return false;
     }
 
     double sink = 0.0;
     if (!process_buffers(bridge, WARMUP_BUFFERS, inputSamples, outputSamples, &sink)) {
-        fputs("bridge warmup failed\n", stderr);
+        fprintf(stderr, "%s: bridge warmup failed\n", name);
         free(inputSamples);
         free(outputSamples);
         N60RealtimeAudioBridgeDestroy(bridge);
-        return EXIT_FAILURE;
+        return false;
     }
 
     double start = monotonic_seconds();
     if (start <= 0.0
         || !process_buffers(bridge, MEASURE_BUFFERS, inputSamples, outputSamples, &sink)) {
-        fputs("bridge measurement failed\n", stderr);
+        fprintf(stderr, "%s: bridge measurement failed\n", name);
         free(inputSamples);
         free(outputSamples);
         N60RealtimeAudioBridgeDestroy(bridge);
-        return EXIT_FAILURE;
+        return false;
     }
     double finish = monotonic_seconds();
 
     N60RealtimeAudioBridgeSnapshot counters = N60RealtimeAudioBridgeGetSnapshot(bridge);
+    N60OutputVUMeterSnapshot vu = N60RealtimeAudioBridgeGetOutputVUMeterSnapshot(bridge);
     free(inputSamples);
     free(outputSamples);
     N60RealtimeAudioBridgeDestroy(bridge);
 
     if (finish <= start) {
-        fputs("invalid timer result\n", stderr);
-        return EXIT_FAILURE;
+        fprintf(stderr, "%s: invalid timer result\n", name);
+        return false;
+    }
+    if (vu.enabled != outputVUEnabled) {
+        fprintf(stderr, "%s: VU demand state mismatch\n", name);
+        return false;
+    }
+    if (outputVUEnabled && (vu.rmsLeft <= 0.0f || vu.rmsRight <= 0.0f
+        || vu.peakLeft <= 0.0f || vu.peakRight <= 0.0f)) {
+        fprintf(stderr, "%s: output VU failed to publish readings\n", name);
+        return false;
     }
 
     const double frames = (double)BUFFER_FRAMES * (double)MEASURE_BUFFERS;
@@ -143,16 +154,25 @@ int main(void) {
     benchmark_sink += sink;
 
     printf(
-        "bridge-unity-512: %.2f ns/frame, theoretical %.2f%% of one core at 96 kHz "
-        "(%.3f s / %.0f frames; capture callbacks=%llu output callbacks=%llu)\n",
+        "%s: %.2f ns/frame, theoretical %.2f%% of one core at 96 kHz "
+        "(%.3f s / %.0f frames; capture callbacks=%llu output callbacks=%llu; vu-rms=%.5f/%.5f)\n",
+        name,
         nsPerFrame,
         oneCorePercentAt96k,
         seconds,
         frames,
         (unsigned long long)counters.captureCallbacks,
-        (unsigned long long)counters.outputCallbacks
+        (unsigned long long)counters.outputCallbacks,
+        vu.rmsLeft,
+        vu.rmsRight
     );
+    return true;
+}
 
+int main(void) {
+    if (!run_case("bridge-unity-512", false)) return EXIT_FAILURE;
+    if (!run_case("bridge-output-vu-512", true)) return EXIT_FAILURE;
+    N60RealtimeAudioBridgeSetOutputVUMeterDemand(false);
     if (benchmark_sink == 123456789.0) puts("unreachable");
     return EXIT_SUCCESS;
 }
