@@ -14,6 +14,15 @@ extern "C" {
 typedef struct N60RealtimeAudioBridge N60RealtimeAudioBridge;
 
 typedef struct {
+    bool enabled;
+    float peakLeft;
+    float peakRight;
+    float rmsLeft;
+    float rmsRight;
+    uint64_t overRangeSamples;
+} N60OutputVUMeterSnapshot;
+
+typedef struct {
     uint64_t captureCallbacks;
     uint64_t outputCallbacks;
     uint64_t capturedFrames;
@@ -27,6 +36,7 @@ typedef struct {
     bool outputGateOpen;
     float transitionGain;
     uint32_t transitionFramesRemaining;
+    N60OutputVUMeterSnapshot outputVUMeter;
 } N60RealtimeAudioBridgeSnapshot;
 
 N60RealtimeAudioBridge * _Nullable N60RealtimeAudioBridgeCreate(uint32_t capacityFrames);
@@ -47,11 +57,20 @@ void N60RealtimeAudioBridgeConfigureOutputGate(
     uint32_t minimumBufferedFrames,
     uint32_t fadeInFrames
 );
-// Product UI demand is intentionally control-plane-only. The bridge applies
-// this flag whenever a graph is published so ordinary DSP republishes preserve
-// visible VU metering without adding an atomic read to the per-sample path.
+// Full render-kernel metering remains available for engineering/detailed meter
+// surfaces. This is intentionally independent from the lightweight Dashboard VU
+// pipeline below.
 void N60RealtimeAudioBridgeSetMeteringDemand(bool enabled);
 bool N60RealtimeAudioBridgeMeteringDemand(void);
+
+// Signature Dashboard VUs use an output-only bridge meter. Demand is read once
+// per physical-output callback and only that output meter advances while enabled.
+void N60RealtimeAudioBridgeSetOutputVUMeterDemand(bool enabled);
+bool N60RealtimeAudioBridgeOutputVUMeterDemand(void);
+N60OutputVUMeterSnapshot N60RealtimeAudioBridgeGetOutputVUMeterSnapshot(
+    const N60RealtimeAudioBridge * _Nonnull bridge
+);
+
 bool N60RealtimeAudioBridgePrepareConvolutionProgram(
     N60RealtimeAudioBridge * _Nonnull bridge,
     uint32_t slot,
