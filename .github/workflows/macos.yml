@@ -104,6 +104,29 @@ jobs:
             -o /tmp/validate-pr35-render-snapshot
           /tmp/validate-pr35-render-snapshot
 
+      - name: Benchmark PR35 Render Kernel O0 vs O3
+        run: |
+          REALTIME_SOURCES=$(find NotchSixty/Audio/Realtime -name '*.c' ! -name 'N60RealtimeAudioBridge.c' -print)
+          clang -std=c11 -O0 -Wall -Wextra \
+            -include stddef.h \
+            -INotchSixty/Audio/Realtime \
+            ci/benchmark_pr35_render_kernel.c \
+            $REALTIME_SOURCES \
+            -framework Accelerate \
+            -o /tmp/benchmark-pr35-render-o0
+          echo '=== O0 ==='
+          /tmp/benchmark-pr35-render-o0
+
+          clang -std=c11 -O3 -Wall -Wextra \
+            -include stddef.h \
+            -INotchSixty/Audio/Realtime \
+            ci/benchmark_pr35_render_kernel.c \
+            $REALTIME_SOURCES \
+            -framework Accelerate \
+            -o /tmp/benchmark-pr35-render-o3
+          echo '=== O3 ==='
+          /tmp/benchmark-pr35-render-o3
+
       - name: Build
         run: >-
           xcodebuild
