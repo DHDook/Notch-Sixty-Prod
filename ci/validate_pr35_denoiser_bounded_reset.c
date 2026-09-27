@@ -25,7 +25,7 @@ static N60SpectralDenoiserSnapshot make_snapshot(double sampleRate, N60DenoiserQ
     return snapshot;
 }
 
-static float signal(uint64_t index, float scale, double divisor) {
+static float test_signal(uint64_t index, float scale, double divisor) {
     return scale * (float)(sin((double)index / divisor) + 0.37 * cos((double)index / (divisor * 0.61)));
 }
 
@@ -37,8 +37,8 @@ static void process_one(
     float *left,
     float *right
 ) {
-    float inLeft = signal(index, scale, 17.0);
-    float inRight = signal(index + 37u, scale * 0.83f, 23.0);
+    float inLeft = test_signal(index, scale, 17.0);
+    float inRight = test_signal(index + 37u, scale * 0.83f, 23.0);
     N60SpectralDenoiserProcessStereoFrame(runtime, snapshot, snapshot.sampleRate, inLeft, inRight, left, right);
 }
 
