@@ -146,6 +146,19 @@ require(bridge, "startupFadeCommandSequence", "bridge startup-fade command state
 require(bridge, "begin_command_write", "bridge command publication")
 require(bridge, "end_command_write", "bridge command publication")
 
+# The tap aggregate is explicitly started/stopped by the session. Keep tap
+# auto-start disabled and pin the aggregate's rate + frame quantum to the
+# physical output before installing IOProcs, avoiding an independent high-rate
+# capture callback cadence.
+require(core_audio, "kAudioAggregateDeviceTapAutoStartKey: false", "tap aggregate lifecycle")
+forbid(core_audio, "kAudioAggregateDeviceTapAutoStartKey: true", "tap aggregate lifecycle")
+require(core_audio, "selector: kAudioDevicePropertyNominalSampleRate", "tap aggregate sample-rate configuration")
+require(core_audio, "operation: \"set tap aggregate sample rate\"", "tap aggregate sample-rate configuration")
+require(core_audio, "selector: kAudioDevicePropertyBufferFrameSize", "tap aggregate buffer configuration")
+require(core_audio, "value: outputBufferFrames", "tap aggregate buffer configuration")
+require(core_audio, "operation: \"set tap aggregate buffer size\"", "tap aggregate buffer configuration")
+require(core_audio, "AudioObjectSetPropertyData(", "tap aggregate property writer")
+
 # Interactive graph mutation must remain off the caller/MainActor and free of
 # explicit sleep choreography. Teardown may retain a bounded synchronous
 # lifetime barrier because the Core Audio callbacks must be stopped before the
