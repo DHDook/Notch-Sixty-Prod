@@ -223,11 +223,21 @@ def patch_swift_tests() -> None:
         text = path.read_text()
         original = text
         if any(name in text for name in function_names):
+            # Swift needs an addressable mutable local to pass to imported const C pointers.
             text = text.replace("let snapshot = N60DynamicsSnapshotMakeBypassed", "var snapshot = N60DynamicsSnapshotMakeBypassed")
             text = text.replace("let snapshot = try DynamicsConfiguration().makeSnapshot", "var snapshot = try DynamicsConfiguration().makeSnapshot")
             text = text.replace("let snapshot = try config.makeSnapshot", "var snapshot = try config.makeSnapshot")
+            text = text.replace("let disabled = N60DynamicsSnapshotMakeBypassed", "var disabled = N60DynamicsSnapshotMakeBypassed")
+
             for name in function_names:
-                text = text.replace(f"{name}(&runtime, snapshot,", f"{name}(&runtime, &snapshot,")
+                # Handle single-line and multiline calls. Existing call sites use an
+                # addressable runtime as argument 1 and a local snapshot variable as
+                # argument 2; only add the missing `&` to that second argument.
+                pattern = re.compile(
+                    rf"({name}\(\s*&[A-Za-z_][A-Za-z0-9_]*\s*,\s*)(snapshot|disabled)(\s*,)",
+                    re.MULTILINE,
+                )
+                text = pattern.sub(r"\1&\2\3", text)
         if text != original:
             path.write_text(text)
 
