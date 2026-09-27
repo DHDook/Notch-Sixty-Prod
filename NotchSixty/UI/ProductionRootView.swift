@@ -55,6 +55,37 @@ enum ProductionVUScale {
     }
 }
 
+@MainActor
+private enum ProductionMeteringDemand {
+    private static var activeRequests: Set<UUID> = []
+
+    static func acquire(for engine: AudioIOEngine) -> UUID {
+        let token = UUID()
+        let wasInactive = activeRequests.isEmpty
+        activeRequests.insert(token)
+        if wasInactive {
+            apply(true, to: engine)
+        }
+        return token
+    }
+
+    static func release(_ token: UUID, for engine: AudioIOEngine) {
+        guard activeRequests.remove(token) != nil else { return }
+        if activeRequests.isEmpty {
+            apply(false, to: engine)
+        }
+    }
+
+    private static func apply(_ enabled: Bool, to engine: AudioIOEngine) {
+        N60RealtimeAudioBridgeSetMeteringDemand(enabled)
+        guard engine.lifecycleState == .running else { return }
+        // Republish the current graph through an existing neutral control path.
+        // The bridge injects the demand bit at publication time, so later DSP
+        // updates preserve the visible-only metering state automatically.
+        try? engine.setChannelBalance(engine.playbackControlConfiguration.balance)
+    }
+}
+
 struct ProductionRootView: View {
     @ObservedObject var product: ProductController
     @State private var selection: ProductionSection? = .dashboard
@@ -272,14 +303,20 @@ private struct ProductionDashboardView: View {
     @MainActor
     private func runMeterLoop() async {
         guard engine.lifecycleState == .running else {
-            leftVU = ProductionVUScale.minimumVU
-            rightVU = ProductionVUScale.minimumVU
-            leftPeak = -120
-            rightPeak = -120
+            resetMeters()
             return
         }
+
+        let demandToken = ProductionMeteringDemand.acquire(for: engine)
+        defer {
+            ProductionMeteringDemand.release(demandToken, for: engine)
+            resetMeters()
+        }
+
         while !Task.isCancelled && engine.lifecycleState == .running {
-            if let meter = engine.diagnosticsSnapshot().renderKernelDiagnostics?.outputMeter {
+            if let diagnostics = engine.diagnosticsSnapshot().renderKernelDiagnostics,
+               diagnostics.meteringEnabled {
+                let meter = diagnostics.outputMeter
                 leftVU = ProductionVUScale.smoothed(
                     current: leftVU,
                     target: ProductionVUScale.vu(fromLinearRMS: meter.rmsLeft)
@@ -293,6 +330,13 @@ private struct ProductionDashboardView: View {
             }
             try? await Task.sleep(nanoseconds: 33_000_000)
         }
+    }
+
+    private func resetMeters() {
+        leftVU = ProductionVUScale.minimumVU
+        rightVU = ProductionVUScale.minimumVU
+        leftPeak = -120
+        rightPeak = -120
     }
 }
 
