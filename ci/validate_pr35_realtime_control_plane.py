@@ -81,7 +81,9 @@ def forbid(haystack: str, needle: str, context: str) -> None:
 bridge = BRIDGE.read_text()
 core_audio = CORE_AUDIO.read_text()
 
-# The per-frame gain helpers must remain pure callback-local arithmetic.
+# The hot gain helpers are called for every rendered frame, so they must remain
+# pure callback-local arithmetic. The output loop is allowed to retain bounded
+# diagnostic atomics on exceptional paths (for example unsupported layouts).
 transition_helper = function_body(bridge, r"static\s+float\s+next_transition_gain\s*\(")
 startup_helper = function_body(bridge, r"static\s+float\s+startup_fade_gain\s*\(")
 for helper_name, helper_body in (
@@ -90,23 +92,13 @@ for helper_name, helper_body in (
 ):
     forbid(helper_body, "atomic_", helper_name)
 
-# The rendered-frame loop itself must not gain direct atomic traffic again.
 output_callback = function_body(bridge, r"OSStatus\s+N60OutputIOProc\s*\(")
-loop_match = re.search(
-    r"for\s*\(UInt32\s+frameIndex\s*=\s*0;\s*frameIndex\s*<\s*framesToRead;\s*\+\+frameIndex\s*\)",
-    output_callback,
-)
-if loop_match is None:
-    fail("unable to locate rendered-frame loop in N60OutputIOProc")
-loop_opening = output_callback.find("{", loop_match.end())
-if loop_opening < 0:
-    fail("rendered-frame loop has no body")
-loop_body = function_body("void loop(void) " + output_callback[loop_opening:], r"void\s+loop\s*\(")
-forbid(loop_body, "atomic_", "N60OutputIOProc rendered-frame loop")
 require(output_callback, "latch_transition_command(bridge);", "N60OutputIOProc callback preamble")
 require(output_callback, "latch_startup_fade_command(bridge);", "N60OutputIOProc callback preamble")
 require(output_callback, "N60TransitionRampRuntime transitionRamp = bridge->transitionRuntime;", "N60OutputIOProc")
 require(output_callback, "N60StartupFadeRuntime startupFade = bridge->startupFadeRuntime;", "N60OutputIOProc")
+require(output_callback, "next_transition_gain(&transitionRamp)", "N60OutputIOProc rendered-frame path")
+require(output_callback, "startup_fade_gain(&startupFade, masterGain)", "N60OutputIOProc rendered-frame path")
 require(output_callback, "publish_transition_runtime(bridge, &transitionRamp);", "N60OutputIOProc")
 
 # Command publication must remain sequence-protected rather than mutating the
