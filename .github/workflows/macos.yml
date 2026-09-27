@@ -127,6 +127,20 @@ jobs:
           echo '=== O3 ===' | tee -a /tmp/pr35-render-benchmark.txt
           /tmp/benchmark-pr35-render-o3 | tee -a /tmp/pr35-render-benchmark.txt
 
+      - name: Benchmark PR35 Realtime Bridge O3
+        run: |
+          REALTIME_SOURCES=$(find NotchSixty/Audio/Realtime -name '*.c' -print)
+          clang -std=c11 -O3 -Wall -Wextra \
+            -include stddef.h \
+            -INotchSixty/Audio/Realtime \
+            ci/benchmark_pr35_realtime_bridge.c \
+            $REALTIME_SOURCES \
+            -framework Accelerate \
+            -framework CoreAudio \
+            -o /tmp/benchmark-pr35-bridge-o3
+          echo '=== BRIDGE O3 ===' | tee -a /tmp/pr35-render-benchmark.txt
+          /tmp/benchmark-pr35-bridge-o3 | tee -a /tmp/pr35-render-benchmark.txt
+
       - name: Upload PR35 render benchmark
         uses: actions/upload-artifact@v4
         with:
