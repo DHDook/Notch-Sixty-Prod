@@ -367,10 +367,10 @@ static float bin_power(N60DenoiserComplex value, uint32_t bin, uint32_t nyquistB
     return (value.real * value.real + value.imag * value.imag) * scale * scale;
 }
 
-static bool bin_is_protected(N60SpectralDenoiserSnapshot snapshot, double sampleRate, uint32_t bin) {
-    if (!snapshot.protectedRangeEnabled) return false;
-    double frequency = (double)bin * sampleRate / (double)snapshot.fftSize;
-    return frequency >= (double)snapshot.protectedLowHz && frequency <= (double)snapshot.protectedHighHz;
+static bool bin_is_protected(const N60SpectralDenoiserSnapshot *snapshot, double sampleRate, uint32_t bin) {
+    if (!snapshot->protectedRangeEnabled) return false;
+    double frequency = (double)bin * sampleRate / (double)snapshot->fftSize;
+    return frequency >= (double)snapshot->protectedLowHz && frequency <= (double)snapshot->protectedHighHz;
 }
 
 static void reset_adaptive_minimum(N60SpectralDenoiserRuntime *runtime, uint32_t binCount) {
@@ -400,16 +400,16 @@ static void reset_profile(N60SpectralDenoiserRuntime *runtime, uint32_t binCount
 
 static void handle_profile_command(
     N60SpectralDenoiserRuntime *runtime,
-    N60SpectralDenoiserSnapshot snapshot,
+    const N60SpectralDenoiserSnapshot *snapshot,
     double sampleRate
 ) {
-    if (snapshot.profileRevision == runtime->lastProfileRevision) return;
-    runtime->lastProfileRevision = snapshot.profileRevision;
-    uint32_t binCount = snapshot.fftSize / 2u + 1u;
-    if (snapshot.profileCommand == N60DenoiserProfileCommandReset) {
+    if (snapshot->profileRevision == runtime->lastProfileRevision) return;
+    runtime->lastProfileRevision = snapshot->profileRevision;
+    uint32_t binCount = snapshot->fftSize / 2u + 1u;
+    if (snapshot->profileCommand == N60DenoiserProfileCommandReset) {
         reset_profile(runtime, binCount);
-    } else if (snapshot.profileCommand == N60DenoiserProfileCommandCapture) {
-        begin_capture(runtime, sampleRate, snapshot.hopSize, binCount);
+    } else if (snapshot->profileCommand == N60DenoiserProfileCommandCapture) {
+        begin_capture(runtime, sampleRate, snapshot->hopSize, binCount);
     }
 }
 
@@ -511,11 +511,11 @@ static void update_noise_telemetry(N60SpectralDenoiserRuntime *runtime, uint32_t
 
 static void process_spectral_frame(
     N60SpectralDenoiserRuntime *runtime,
-    N60SpectralDenoiserSnapshot snapshot,
+    const N60SpectralDenoiserSnapshot *snapshot,
     double sampleRate,
     uint64_t frameStart
 ) {
-    uint32_t size = snapshot.fftSize;
+    uint32_t size = snapshot->fftSize;
     uint32_t binCount = size / 2u + 1u;
     uint32_t nyquistBin = size / 2u;
     float windowSum = 0.0f;
@@ -539,8 +539,8 @@ static void process_spectral_frame(
         runtime->linkedPower[bin] = fmaxf(leftPower, rightPower);
     }
 
-    float thresholdPower = powf(10.0f, snapshot.thresholdDBFS / 10.0f);
-    update_profile(runtime, runtime->linkedPower, binCount, sampleRate, snapshot.hopSize, thresholdPower);
+    float thresholdPower = powf(10.0f, snapshot->thresholdDBFS / 10.0f);
+    update_profile(runtime, runtime->linkedPower, binCount, sampleRate, snapshot->hopSize, thresholdPower);
     update_noise_telemetry(runtime, binCount);
 
     double weightedSuppression = 0.0;
@@ -550,16 +550,16 @@ static void process_spectral_frame(
 
     for (uint32_t bin = 0; bin < binCount; ++bin) {
         float target = 1.0f;
-        if (runtime->profileReady && snapshot.reductionAmount > 0.0f && !bin_is_protected(snapshot, sampleRate, bin)) {
+        if (runtime->profileReady && snapshot->reductionAmount > 0.0f && !bin_is_protected(snapshot, sampleRate, bin)) {
             float noise = fminf(fmaxf(runtime->noisePower[bin], N60_DENOISER_EPSILON), thresholdPower);
-            if (snapshot.dehissStrength > 0.0f) {
+            if (snapshot->dehissStrength > 0.0f) {
                 double frequency = (double)bin * sampleRate / (double)size;
                 double start = 3000.0;
                 double nyquist = sampleRate * 0.5;
                 float highWeight = nyquist > start
                     ? clampf((float)((frequency - start) / (nyquist - start)), 0.0f, 1.0f)
                     : 0.0f;
-                noise *= 1.0f + 1.5f * snapshot.dehissStrength * highWeight;
+                noise *= 1.0f + 1.5f * snapshot->dehissStrength * highWeight;
             }
             float power = fmaxf(runtime->linkedPower[bin], N60_DENOISER_EPSILON);
             float posterior = power / fmaxf(noise, N60_DENOISER_EPSILON);
@@ -567,16 +567,16 @@ static void process_spectral_frame(
             float previousPrior = historyValid
                 ? runtime->previousEnhancedPower[bin] / fmaxf(noise, N60_DENOISER_EPSILON)
                 : 0.0f;
-            float prior = snapshot.decisionDirectedAlpha * previousPrior
-                + (1.0f - snapshot.decisionDirectedAlpha) * instantaneousPrior;
+            float prior = snapshot->decisionDirectedAlpha * previousPrior
+                + (1.0f - snapshot->decisionDirectedAlpha) * instantaneousPrior;
             float wiener = prior / (1.0f + prior);
-            float baseGain = fmaxf(wiener, snapshot.minimumGain);
-            target = powf(baseGain, snapshot.reductionAmount);
+            float baseGain = fmaxf(wiener, snapshot->minimumGain);
+            target = powf(baseGain, snapshot->reductionAmount);
         }
-        runtime->targetGain[bin] = clampf(target, snapshot.minimumGain, 1.0f);
+        runtime->targetGain[bin] = clampf(target, snapshot->minimumGain, 1.0f);
     }
 
-    uint32_t radius = snapshot.spectralSmoothingRadius;
+    uint32_t radius = snapshot->spectralSmoothingRadius;
     for (uint32_t bin = 0; bin < binCount; ++bin) {
         float target = runtime->targetGain[bin];
         if (radius > 0u && !bin_is_protected(snapshot, sampleRate, bin)) {
@@ -596,9 +596,9 @@ static void process_spectral_frame(
         if (bin_is_protected(snapshot, sampleRate, bin)) target = 1.0f;
 
         float previous = historyValid ? runtime->smoothedGain[bin] : 1.0f;
-        float coefficient = target < previous ? snapshot.suppressionAttack : snapshot.suppressionRelease;
+        float coefficient = target < previous ? snapshot->suppressionAttack : snapshot->suppressionRelease;
         float gain = target + coefficient * (previous - target);
-        gain = clampf(gain, snapshot.minimumGain, 1.0f);
+        gain = clampf(gain, snapshot->minimumGain, 1.0f);
         runtime->smoothedGain[bin] = gain;
         runtime->previousEnhancedPower[bin] = runtime->linkedPower[bin] * gain * gain;
 
@@ -626,7 +626,7 @@ static void process_spectral_frame(
     transform(runtime, runtime->fftLeft, size, true);
     transform(runtime, runtime->fftRight, size, true);
     for (uint32_t index = 0; index < size; ++index) {
-        uint64_t absoluteTarget = frameStart + (uint64_t)snapshot.latencyFrames + (uint64_t)index;
+        uint64_t absoluteTarget = frameStart + (uint64_t)snapshot->latencyFrames + (uint64_t)index;
         uint32_t ringIndex = (uint32_t)(absoluteTarget & (N60_DENOISER_OUTPUT_RING_SIZE - 1u));
         if (runtime->outputGenerationTag[ringIndex] != runtime->outputGeneration) {
             runtime->outputGenerationTag[ringIndex] = runtime->outputGeneration;
@@ -643,30 +643,23 @@ static void process_spectral_frame(
     runtime->spectralFramesProcessed += 1u;
 }
 
-void N60SpectralDenoiserProcessStereoFrame(
+static void process_stereo_frame_validated(
     N60SpectralDenoiserRuntime *runtime,
-    N60SpectralDenoiserSnapshot snapshot,
+    const N60SpectralDenoiserSnapshot *snapshot,
     double sampleRate,
     float inputLeft,
     float inputRight,
     float *outputLeft,
     float *outputRight
 ) {
-    if (outputLeft == NULL || outputRight == NULL) return;
-    if (runtime == NULL || !N60SpectralDenoiserSnapshotIsValid(snapshot, sampleRate)) {
-        *outputLeft = inputLeft;
-        *outputRight = inputRight;
-        return;
-    }
-
-    if (runtime->activeFFTSize != snapshot.fftSize) {
+    if (runtime->activeFFTSize != snapshot->fftSize) {
         reset_processing_state(runtime);
-        runtime->activeFFTSize = snapshot.fftSize;
+        runtime->activeFFTSize = snapshot->fftSize;
     }
 
     handle_profile_command(runtime, snapshot, sampleRate);
 
-    uint32_t size = snapshot.fftSize;
+    uint32_t size = snapshot->fftSize;
     runtime->inputLeft[runtime->inputWrite] = inputLeft;
     runtime->inputRight[runtime->inputWrite] = inputRight;
     runtime->inputWrite = (runtime->inputWrite + 1u) % size;
@@ -687,10 +680,10 @@ void N60SpectralDenoiserProcessStereoFrame(
             process_spectral_frame(runtime, snapshot, sampleRate, frameStart);
         }
         runtime->samplesSinceFrame += 1u;
-        if (runtime->samplesSinceFrame >= snapshot.hopSize) runtime->samplesSinceFrame = 0u;
+        if (runtime->samplesSinceFrame >= snapshot->hopSize) runtime->samplesSinceFrame = 0u;
     }
 
-    if (snapshot.enabled) {
+    if (snapshot->enabled) {
         *outputLeft = delayedLeft;
         *outputRight = delayedRight;
     } else {
@@ -698,6 +691,42 @@ void N60SpectralDenoiserProcessStereoFrame(
         *outputRight = inputRight;
     }
     runtime->sampleIndex += 1u;
+}
+
+void N60SpectralDenoiserProcessStereoFrameValidated(
+    N60SpectralDenoiserRuntime *runtime,
+    const N60SpectralDenoiserSnapshot *snapshot,
+    double sampleRate,
+    float inputLeft,
+    float inputRight,
+    float *outputLeft,
+    float *outputRight
+) {
+    if (outputLeft == NULL || outputRight == NULL) return;
+    if (runtime == NULL || snapshot == NULL) {
+        *outputLeft = inputLeft;
+        *outputRight = inputRight;
+        return;
+    }
+    process_stereo_frame_validated(runtime, snapshot, sampleRate, inputLeft, inputRight, outputLeft, outputRight);
+}
+
+void N60SpectralDenoiserProcessStereoFrame(
+    N60SpectralDenoiserRuntime *runtime,
+    N60SpectralDenoiserSnapshot snapshot,
+    double sampleRate,
+    float inputLeft,
+    float inputRight,
+    float *outputLeft,
+    float *outputRight
+) {
+    if (outputLeft == NULL || outputRight == NULL) return;
+    if (runtime == NULL || !N60SpectralDenoiserSnapshotIsValid(snapshot, sampleRate)) {
+        *outputLeft = inputLeft;
+        *outputRight = inputRight;
+        return;
+    }
+    process_stereo_frame_validated(runtime, &snapshot, sampleRate, inputLeft, inputRight, outputLeft, outputRight);
 }
 
 N60SpectralDenoiserTelemetry N60SpectralDenoiserRuntimeTelemetry(const N60SpectralDenoiserRuntime *runtime) {

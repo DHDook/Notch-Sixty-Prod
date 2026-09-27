@@ -1292,9 +1292,9 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
 
         N60DynamicsProcessPreEQStereoFrame(&kernel->dynamicsRuntime, &context->snapshot.dynamics, &left, &right);
 
-        N60SpectralDenoiserProcessStereoFrame(
+        N60SpectralDenoiserProcessStereoFrameValidated(
             kernel->denoiserRuntime,
-            context->snapshot.dynamics.spectralDenoiser,
+            &context->snapshot.dynamics.spectralDenoiser,
             context->snapshot.sampleRate,
             left,
             right,

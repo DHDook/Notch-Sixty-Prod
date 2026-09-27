@@ -96,6 +96,18 @@ N60SpectralDenoiserRuntime *N60SpectralDenoiserCreate(void);
 void N60SpectralDenoiserDestroy(N60SpectralDenoiserRuntime *runtime);
 void N60SpectralDenoiserReset(N60SpectralDenoiserRuntime *runtime);
 
+// Render-kernel fast path. The caller must have already validated the immutable
+// snapshot at graph publication. This avoids repeated validation/copying at audio rate.
+void N60SpectralDenoiserProcessStereoFrameValidated(
+    N60SpectralDenoiserRuntime *runtime,
+    const N60SpectralDenoiserSnapshot *snapshot,
+    double sampleRate,
+    float inputLeft,
+    float inputRight,
+    float *outputLeft,
+    float *outputRight
+);
+
 void N60SpectralDenoiserProcessStereoFrame(
     N60SpectralDenoiserRuntime *runtime,
     N60SpectralDenoiserSnapshot snapshot,
