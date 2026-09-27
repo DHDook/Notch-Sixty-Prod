@@ -430,12 +430,33 @@ final class CoreAudioTransportSession {
                 kAudioAggregateDeviceNameKey: "Notch Sixty Private Tap",
                 kAudioAggregateDeviceUIDKey: "com.dhdook.NotchSixty.tap.\(UUID().uuidString)",
                 kAudioAggregateDeviceTapListKey: [tapEntry],
-                kAudioAggregateDeviceTapAutoStartKey: true,
+                // The session owns capture lifecycle explicitly through its IOProc.
+                // Do not let the aggregate run the tap independently.
+                kAudioAggregateDeviceTapAutoStartKey: false,
                 kAudioAggregateDeviceIsPrivateKey: true,
             ]
             try Self.check(
                 AudioHardwareCreateAggregateDevice(aggregateDescription as CFDictionary, &aggregateDeviceID),
                 operation: "create private aggregate device"
+            )
+
+            // A tap-only aggregate otherwise chooses its own IO quantum. Pin it to
+            // the physical output's clock rate and buffer size before installing
+            // callbacks so capture cannot wake at a much smaller cadence than the
+            // output path.
+            try Self.writeFloat64Property(
+                objectID: aggregateDeviceID,
+                selector: kAudioDevicePropertyNominalSampleRate,
+                scope: kAudioObjectPropertyScopeGlobal,
+                value: outputFormat.sampleRate,
+                operation: "set tap aggregate sample rate"
+            )
+            try Self.writeUInt32Property(
+                objectID: aggregateDeviceID,
+                selector: kAudioDevicePropertyBufferFrameSize,
+                scope: kAudioObjectPropertyScopeGlobal,
+                value: outputBufferFrames,
+                operation: "set tap aggregate buffer size"
             )
 
             let clientData = UnsafeMutableRawPointer(newBridge)
@@ -840,6 +861,58 @@ final class CoreAudioTransportSession {
             operation: operation
         )
         return value
+    }
+
+    private static func writeUInt32Property(
+        objectID: AudioObjectID,
+        selector: AudioObjectPropertySelector,
+        scope: AudioObjectPropertyScope,
+        value: UInt32,
+        operation: String
+    ) throws {
+        var address = AudioObjectPropertyAddress(
+            mSelector: selector,
+            mScope: scope,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var mutableValue = value
+        try check(
+            AudioObjectSetPropertyData(
+                objectID,
+                &address,
+                0,
+                nil,
+                UInt32(MemoryLayout<UInt32>.size),
+                &mutableValue
+            ),
+            operation: operation
+        )
+    }
+
+    private static func writeFloat64Property(
+        objectID: AudioObjectID,
+        selector: AudioObjectPropertySelector,
+        scope: AudioObjectPropertyScope,
+        value: Float64,
+        operation: String
+    ) throws {
+        var address = AudioObjectPropertyAddress(
+            mSelector: selector,
+            mScope: scope,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var mutableValue = value
+        try check(
+            AudioObjectSetPropertyData(
+                objectID,
+                &address,
+                0,
+                nil,
+                UInt32(MemoryLayout<Float64>.size),
+                &mutableValue
+            ),
+            operation: operation
+        )
     }
 
     private static func check(_ status: OSStatus, operation: String) throws {
