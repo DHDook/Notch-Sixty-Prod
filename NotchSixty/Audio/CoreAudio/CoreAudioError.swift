@@ -212,8 +212,9 @@ private struct DSPGraphPublicationMetrics: Sendable {
 /// The realtime reader remains lock-free. Graph writes that can wait for an
 /// inactive render slot happen on this worker instead of the MainActor, and
 /// rapid control updates collapse to the newest complete graph. Structural
-/// transitions use the bridge's sample-domain ramp, wait off the caller thread,
-/// publish the latest graph at the fade midpoint, then fade back up.
+/// transitions use the bridge's sample-domain ramp, wait off the caller thread
+/// for the audio callback to acknowledge rendered zero gain, publish the latest
+/// graph at that silent boundary, then fade back up.
 ///
 /// Prepared FIR programs have a stricter ownership rule: their three program
 /// slots are sized for the two immutable render-graph generations plus one
@@ -221,6 +222,8 @@ private struct DSPGraphPublicationMetrics: Sendable {
 /// synchronously (without sleeping) so the single MainActor control writer can
 /// refuse another FIR preparation until the queued generation is published.
 private final class DSPGraphPublicationCoordinator: @unchecked Sendable {
+    private static let transitionPollIntervalMilliseconds = 1
+
     private let queue = DispatchQueue(
         label: "com.dhdook.NotchSixty.dsp-graph-publication",
         qos: .userInteractive
@@ -249,8 +252,7 @@ private final class DSPGraphPublicationCoordinator: @unchecked Sendable {
 
     func enqueueTransition(
         _ snapshot: N60DSPGraphSnapshot,
-        fadeFrames: UInt32,
-        fadeNanoseconds: UInt64
+        fadeFrames: UInt32
     ) {
         let box = DSPGraphSnapshotBox(snapshot)
         queue.sync { [self, box] in
@@ -261,10 +263,8 @@ private final class DSPGraphPublicationCoordinator: @unchecked Sendable {
             transitionActive = true
             metrics.transitionsScheduled &+= 1
             N60RealtimeAudioBridgeRampTransitionGain(bridge, 0.0, fadeFrames)
-
-            let boundedDelay = Int(min(fadeNanoseconds, UInt64(Int.max)))
-            queue.asyncAfter(deadline: .now() + .nanoseconds(boundedDelay)) { [self] in
-                finishTransition(fadeFrames: fadeFrames)
+            queue.asyncAfter(deadline: .now() + .milliseconds(Self.transitionPollIntervalMilliseconds)) { [self] in
+                waitForFadeDownCompletion(fadeFrames: fadeFrames)
             }
         }
     }
@@ -299,6 +299,23 @@ private final class DSPGraphPublicationCoordinator: @unchecked Sendable {
         publish(box.snapshot)
     }
 
+    private func waitForFadeDownCompletion(fadeFrames: UInt32) {
+        guard !stopped else {
+            transitionActive = false
+            pendingSnapshot = nil
+            return
+        }
+
+        let state = N60RealtimeAudioBridgeGetSnapshot(bridge)
+        guard state.transitionFramesRemaining == 0, state.transitionGain <= 0.000_001 else {
+            queue.asyncAfter(deadline: .now() + .milliseconds(Self.transitionPollIntervalMilliseconds)) { [self] in
+                waitForFadeDownCompletion(fadeFrames: fadeFrames)
+            }
+            return
+        }
+        finishTransition(fadeFrames: fadeFrames)
+    }
+
     private func finishTransition(fadeFrames: UInt32) {
         guard !stopped else {
             transitionActive = false
@@ -308,12 +325,10 @@ private final class DSPGraphPublicationCoordinator: @unchecked Sendable {
 
         let snapshot = pendingSnapshot?.snapshot
         pendingSnapshot = nil
-        if let snapshot, publish(snapshot) {
-            N60RealtimeAudioBridgeSetTransitionGainImmediate(bridge, 0.0)
-            N60RealtimeAudioBridgeRampTransitionGain(bridge, 1.0, fadeFrames)
-        } else {
-            N60RealtimeAudioBridgeSetTransitionGainImmediate(bridge, 1.0)
+        if let snapshot {
+            _ = publish(snapshot)
         }
+        N60RealtimeAudioBridgeRampTransitionGain(bridge, 1.0, fadeFrames)
         transitionActive = false
     }
 
@@ -331,6 +346,8 @@ private final class DSPGraphPublicationCoordinator: @unchecked Sendable {
 final class CoreAudioTransportSession {
     private static let bridgeCapacityFrames: UInt32 = 65_536
     private static let graphTransitionFadeMilliseconds = 8.0
+    private static let shutdownFadePollMicroseconds: UInt32 = 250
+    private static let shutdownFadeTimeoutMicroseconds: UInt32 = 100_000
 
     let selectedOutput: AudioOutputDevice
     private(set) var tapFormat = AudioStreamFormatDescription(AudioStreamBasicDescription())
@@ -699,17 +716,9 @@ final class CoreAudioTransportSession {
         guard let graphPublicationCoordinator else {
             throw CoreAudioTransportError.dspGraphPublicationFailed
         }
-        let fadeFrames = graphTransitionFadeFrames()
-        let fadeNanoseconds = UInt64(
-            min(
-                max(Self.graphTransitionFadeMilliseconds * 1_000_000.0, 1.0),
-                Double(UInt64.max)
-            ).rounded()
-        )
         graphPublicationCoordinator.enqueueTransition(
             snapshot,
-            fadeFrames: fadeFrames,
-            fadeNanoseconds: fadeNanoseconds
+            fadeFrames: graphTransitionFadeFrames()
         )
     }
 
@@ -718,19 +727,29 @@ final class CoreAudioTransportSession {
         stopped = true
         graphPublicationCoordinator?.stop()
 
-        // Transport teardown is intentionally synchronous so Core Audio cannot
-        // call through a freed bridge. Keep the short shutdown-only fade here;
-        // interactive graph transitions never sleep the caller thread.
+        // Teardown remains synchronous so Core Audio cannot call through a freed
+        // bridge. If output has opened, wait for the audio callback to report that
+        // the sample-domain fade actually reached zero rather than sleeping for
+        // its nominal duration. The bounded timeout prevents teardown deadlock if
+        // the device stops delivering callbacks unexpectedly.
         if fadeOut, let bridge, isOutputStarted {
-            let fadeFrames = graphTransitionFadeFrames()
-            N60RealtimeAudioBridgeRampTransitionGain(bridge, 0.0, fadeFrames)
-            let fadeMicroseconds = UInt32(
-                min(
-                    max(Self.graphTransitionFadeMilliseconds * 1_000.0, 1.0),
-                    Double(UInt32.max)
-                ).rounded()
-            )
-            usleep(fadeMicroseconds)
+            let initialState = N60RealtimeAudioBridgeGetSnapshot(bridge)
+            if initialState.outputGateOpen {
+                N60RealtimeAudioBridgeRampTransitionGain(
+                    bridge,
+                    0.0,
+                    graphTransitionFadeFrames()
+                )
+                var waitedMicroseconds: UInt32 = 0
+                while waitedMicroseconds < Self.shutdownFadeTimeoutMicroseconds {
+                    let state = N60RealtimeAudioBridgeGetSnapshot(bridge)
+                    if state.transitionFramesRemaining == 0, state.transitionGain <= 0.000_001 {
+                        break
+                    }
+                    usleep(Self.shutdownFadePollMicroseconds)
+                    waitedMicroseconds &+= Self.shutdownFadePollMicroseconds
+                }
+            }
         }
 
         if isOutputStarted, let outputIOProcID {
@@ -846,9 +865,10 @@ final class CoreAudioTransportSession {
     ) throws -> AudioStreamBasicDescription {
         var address = AudioObjectPropertyAddress(
             mSelector: selector,
-            mScope: scope,
+            mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain
         )
+        address.mScope = scope
         var format = AudioStreamBasicDescription()
         var dataSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
         try check(
