@@ -1,0 +1,47 @@
+name: PR39 App Identity
+
+on:
+  push:
+    branches:
+      - feature/pr39-production-meters-analysis
+
+permissions:
+  contents: write
+
+jobs:
+  implement:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feature/pr39-production-meters-analysis
+          fetch-depth: 0
+
+      - name: Generate app identity implementation
+        run: |
+          python3 .github/scripts/pr39_app_identity.py
+          python3 ci/validate_pr39_app_identity.py
+          git diff --check
+
+      - name: Compile and test app identity
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          test
+
+      - name: Commit validated product implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -- .github/workflows/pr39-app-identity.yml .github/workflows/macos.yml
+          git rm .github/scripts/pr39_app_identity.py
+          git add -A
+          git diff --cached --check
+          git commit -m "PR39: integrate app identity and Liquid Glass shell"
+          git push origin HEAD:feature/pr39-production-meters-analysis
