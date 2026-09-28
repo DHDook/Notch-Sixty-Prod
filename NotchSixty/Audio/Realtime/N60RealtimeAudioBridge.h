@@ -22,6 +22,26 @@ typedef struct {
     uint64_t overRangeSamples;
 } N60OutputVUMeterSnapshot;
 
+#define N60_ANALYSIS_DEMAND_NONE 0u
+#define N60_ANALYSIS_DEMAND_SPECTRUM (1u << 0)
+#define N60_ANALYSIS_DEMAND_STEREO (1u << 1)
+#define N60_ANALYSIS_DEMAND_ALL (N60_ANALYSIS_DEMAND_SPECTRUM | N60_ANALYSIS_DEMAND_STEREO)
+#define N60_ANALYSIS_CAPTURE_CAPACITY_FRAMES 65536u
+
+typedef struct {
+    float inputLeft;
+    float inputRight;
+    float outputLeft;
+    float outputRight;
+} N60AnalysisFrame;
+
+typedef struct {
+    uint32_t demandMask;
+    uint32_t availableFrames;
+    uint64_t capturedFrames;
+    uint64_t droppedFrames;
+} N60AnalysisCaptureSnapshot;
+
 typedef struct {
     uint64_t captureCallbacks;
     uint64_t outputCallbacks;
@@ -69,6 +89,26 @@ void N60RealtimeAudioBridgeSetOutputVUMeterDemand(bool enabled);
 bool N60RealtimeAudioBridgeOutputVUMeterDemand(void);
 N60OutputVUMeterSnapshot N60RealtimeAudioBridgeGetOutputVUMeterSnapshot(
     const N60RealtimeAudioBridge * _Nonnull bridge
+);
+
+// Spectrum and stereo analysis share one bounded SPSC capture ring. The
+// physical-output callback writes exact render Input and DSP Output samples
+// only while one of these demand bits is active. Consumers read/copy off the
+// realtime thread; unread samples are never overwritten.
+void N60RealtimeAudioBridgeSetAnalysisDemand(
+    N60RealtimeAudioBridge * _Nonnull bridge,
+    uint32_t demandMask
+);
+uint32_t N60RealtimeAudioBridgeAnalysisDemand(
+    const N60RealtimeAudioBridge * _Nonnull bridge
+);
+N60AnalysisCaptureSnapshot N60RealtimeAudioBridgeGetAnalysisCaptureSnapshot(
+    const N60RealtimeAudioBridge * _Nonnull bridge
+);
+uint32_t N60RealtimeAudioBridgeReadAnalysisFrames(
+    N60RealtimeAudioBridge * _Nonnull bridge,
+    N60AnalysisFrame * _Nonnull destination,
+    uint32_t capacityFrames
 );
 
 bool N60RealtimeAudioBridgePrepareConvolutionProgram(

@@ -1487,6 +1487,18 @@ final class AudioIOEngine: ObservableObject {
         }
     }
 
+    func setAnalysisDemand(_ demandMask: UInt32) {
+        transportSession?.setAnalysisDemand(demandMask)
+    }
+
+    func analysisCaptureSnapshot() -> N60AnalysisCaptureSnapshot? {
+        transportSession?.analysisCaptureSnapshot()
+    }
+
+    func readAnalysisFrames(into buffer: UnsafeMutableBufferPointer<N60AnalysisFrame>) -> Int {
+        transportSession?.readAnalysisFrames(into: buffer) ?? 0
+    }
+
     func diagnosticsSnapshot() -> AudioDiagnosticsSnapshot {
         let selectedDevice = selectedOutputDevice
         let currentCounters = transportSession?.counters() ?? AudioTransportCounters()
