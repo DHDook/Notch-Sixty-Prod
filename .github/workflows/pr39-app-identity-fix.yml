@@ -1,0 +1,65 @@
+name: PR39 App Identity Compatibility Fix
+
+on:
+  push:
+    branches:
+      - feature/pr39-production-meters-analysis
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feature/pr39-production-meters-analysis
+          fetch-depth: 0
+
+      - name: Preserve the unique VU brand mark
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path('NotchSixty/UI/ProductionRootView.swift')
+          text = root.read_text()
+          old = 'Text("NOTCH SIXTY")\n                    .font(.headline.weight(.semibold))'
+          new = 'Text("Notch Sixty")\n                    .textCase(.uppercase)\n                    .font(.headline.weight(.semibold))'
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one sidebar brand source, found {text.count(old)}')
+          root.write_text(text.replace(old, new, 1))
+
+          validator = Path('ci/validate_pr39_app_identity.py')
+          v = validator.read_text()
+          old_assert = 'assert \'Text("NOTCH SIXTY")\' in ui'
+          new_assert = 'assert \'Text("Notch Sixty")\' in ui and ".textCase(.uppercase)" in ui'
+          if v.count(old_assert) != 1:
+              raise SystemExit(f'expected one identity assertion, found {v.count(old_assert)}')
+          validator.write_text(v.replace(old_assert, new_assert, 1))
+          PY
+          python3 ci/validate_pr36_ui_foundation.py
+          python3 ci/validate_pr39_app_identity.py
+          git diff --check
+
+      - name: Compile and test compatibility fix
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          test
+
+      - name: Commit validated compatibility fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -- .github/workflows/pr39-app-identity-fix.yml
+          git add NotchSixty/UI/ProductionRootView.swift ci/validate_pr39_app_identity.py
+          git diff --cached --check
+          git commit -m "PR39: preserve unique VU brand mark"
+          git push origin HEAD:feature/pr39-production-meters-analysis
