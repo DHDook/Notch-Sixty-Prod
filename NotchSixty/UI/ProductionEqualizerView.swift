@@ -5,6 +5,7 @@ struct ProductionEqualizerView: View {
     @ObservedObject var engine: AudioIOEngine
     @State private var selectedBandID: UUID?
     @State private var dragPreview: EQBand?
+    @State private var pendingDragBand: EQBand?
     @State private var pendingPublishTask: Task<Void, Never>?
 
     private var configuration: StereoEQConfiguration { engine.stereoEQConfiguration }
@@ -43,6 +44,7 @@ struct ProductionEqualizerView: View {
         .onDisappear {
             pendingPublishTask?.cancel()
             pendingPublishTask = nil
+            pendingDragBand = nil
             dragPreview = nil
         }
     }
@@ -142,6 +144,7 @@ struct ProductionEqualizerView: View {
                 onCommit: { band in
                     pendingPublishTask?.cancel()
                     pendingPublishTask = nil
+                    pendingDragBand = nil
                     let sanitized = sanitize(band)
                     dragPreview = nil
                     try? engine.updateEQBand(sanitized)
@@ -449,6 +452,7 @@ struct ProductionEqualizerView: View {
             set: { updated in
                 pendingPublishTask?.cancel()
                 pendingPublishTask = nil
+                pendingDragBand = nil
                 dragPreview = nil
                 try? engine.updateEQBand(sanitize(updated))
             }
@@ -495,17 +499,24 @@ struct ProductionEqualizerView: View {
     private func resetSelectionForBank() {
         pendingPublishTask?.cancel()
         pendingPublishTask = nil
+        pendingDragBand = nil
         dragPreview = nil
         selectedBandID = bands.first?.id
     }
 
     private func scheduleCoalescedPublish(_ band: EQBand) {
-        pendingPublishTask?.cancel()
-        let sanitized = sanitize(band)
+        pendingDragBand = sanitize(band)
+        guard pendingPublishTask == nil else { return }
+
         pendingPublishTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 33_000_000)
-            guard !Task.isCancelled else { return }
-            try? engine.updateEQBand(sanitized)
+            while !Task.isCancelled {
+                guard let next = pendingDragBand else { break }
+                pendingDragBand = nil
+                try? engine.updateEQBand(next)
+                try? await Task.sleep(nanoseconds: 33_000_000)
+                guard !Task.isCancelled else { break }
+            }
+            pendingPublishTask = nil
         }
     }
 

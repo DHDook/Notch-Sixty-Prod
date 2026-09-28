@@ -39,3 +39,8 @@ No response-graph drawing or coefficient design occurs in the realtime callback.
 - Add Band is available with Shift-Command-N; previous/next band selection uses Command-[ / Command-]; removal uses Command-Delete.
 - Removing the selected band keeps selection on the nearest surviving neighbor rather than jumping unexpectedly to the first band.
 - The response graph compiles each active band's control-plane sections once per graph draw and reuses that flattened coefficient program across plotted frequency points. It no longer redesigns the same filter sections for every pixel sample.
+
+
+## Drag publication semantics
+
+The graph uses a latest-value throttle rather than a debounce. The first drag value publishes immediately, pointer-rate updates replace one pending value, and the publisher advances at most once per 33 ms while dragging. Gesture completion cancels the throttle and publishes the final exact band state. This keeps audible interaction live without allowing pointer event rate to become graph-publication rate.
