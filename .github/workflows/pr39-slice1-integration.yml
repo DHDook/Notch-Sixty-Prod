@@ -1,0 +1,122 @@
+name: PR39 Slice 1 Integration
+
+on:
+  push:
+    branches:
+      - feature/pr39-production-meters-analysis
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    if: ${{ !contains(github.event.head_commit.message, 'PR39: integrate production meter levels') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/pr39-production-meters-analysis
+          fetch-depth: 0
+
+      - name: Integrate production Meters Slice 1
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          root = Path('NotchSixty/UI/ProductionRootView.swift')
+          text = root.read_text()
+          old = '''        case .meters:
+              ProductionPlaceholderPage(
+                  title: "Meters",
+                  subtitle: "Detailed signal, loudness, protection, and analysis telemetry.",
+                  systemImage: "chart.xyaxis.line",
+                  detail: "Each detailed meter or analyzer will request only its own pipeline so hidden analysis remains parked."
+              )'''
+          new = '''        case .meters:
+              ProductionMetersView(engine: engine)'''
+          if old not in text:
+              raise SystemExit('ProductionRootView meters placeholder anchor not found')
+          root.write_text(text.replace(old, new, 1))
+
+          engine = Path('NotchSixty/Audio/AudioIOEngine.swift')
+          text = engine.read_text()
+          anchor = '''    func diagnosticsSnapshot() -> AudioDiagnosticsSnapshot {'''
+          if anchor not in text:
+              raise SystemExit('AudioIOEngine diagnostics anchor not found')
+          method = '''    func setDetailedMeteringDemand(_ enabled: Bool) throws {
+              let previousDemand = N60RealtimeAudioBridgeMeteringDemand()
+              guard previousDemand != enabled else { return }
+
+              N60RealtimeAudioBridgeSetMeteringDemand(enabled)
+              guard let session = transportSession else { return }
+
+              do {
+                  var graph = try stereoEQConfiguration.makeGraphSnapshot(
+                      sampleRate: session.outputFormat.sampleRate,
+                      gainConfiguration: gainConfiguration,
+                      bassManagementConfiguration: bassManagementConfiguration,
+                      dynamicsConfiguration: dynamicsConfiguration,
+                      playbackConfiguration: playbackControlConfiguration
+                  )
+                  try attachActiveEQFIRProgramIfNeeded(
+                      to: &graph,
+                      stereoConfiguration: stereoEQConfiguration,
+                      playbackConfiguration: playbackControlConfiguration
+                  )
+                  try attachActiveRoomCorrectionProgramIfNeeded(
+                      to: &graph,
+                      playbackConfiguration: playbackControlConfiguration
+                  )
+                  try attachActiveSpeakerIRProgramIfNeeded(
+                      to: &graph,
+                      playbackConfiguration: playbackControlConfiguration
+                  )
+                  try session.publishDSPGraph(graph)
+                  lastErrorDescription = nil
+              } catch {
+                  N60RealtimeAudioBridgeSetMeteringDemand(previousDemand)
+                  lastErrorDescription = error.localizedDescription
+                  throw error
+              }
+          }
+
+'''
+          engine.write_text(text.replace(anchor, method + anchor, 1))
+
+          project = Path('NotchSixty.xcodeproj/project.pbxproj')
+          text = project.read_text()
+          replacements = [
+              (
+                  '\t\tA40000000000000000000013 /* ProductionDynamicsTelemetryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000023 /* ProductionDynamicsTelemetryView.swift */; };',
+                  '\t\tA40000000000000000000013 /* ProductionDynamicsTelemetryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000023 /* ProductionDynamicsTelemetryView.swift */; };\n\t\tA40000000000000000000014 /* ProductionMetersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000024 /* ProductionMetersView.swift */; };'
+              ),
+              (
+                  '\t\tA40000000000000000000023 /* ProductionDynamicsTelemetryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionDynamicsTelemetryView.swift; sourceTree = "<group>"; };',
+                  '\t\tA40000000000000000000023 /* ProductionDynamicsTelemetryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionDynamicsTelemetryView.swift; sourceTree = "<group>"; };\n\t\tA40000000000000000000024 /* ProductionMetersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionMetersView.swift; sourceTree = "<group>"; };'
+              ),
+              (
+                  'A40000000000000000000022 /* ProductionDynamicsView.swift */, A40000000000000000000023 /* ProductionDynamicsTelemetryView.swift */,); path = UI;',
+                  'A40000000000000000000022 /* ProductionDynamicsView.swift */, A40000000000000000000023 /* ProductionDynamicsTelemetryView.swift */, A40000000000000000000024 /* ProductionMetersView.swift */,); path = UI;'
+              ),
+              (
+                  '\t\t\t\tA40000000000000000000013 /* ProductionDynamicsTelemetryView.swift in Sources */,',
+                  '\t\t\t\tA40000000000000000000013 /* ProductionDynamicsTelemetryView.swift in Sources */,\n\t\t\t\tA40000000000000000000014 /* ProductionMetersView.swift in Sources */,'
+              ),
+          ]
+          for old, new in replacements:
+              if old not in text:
+                  raise SystemExit(f'project.pbxproj anchor not found: {old[:80]}')
+              text = text.replace(old, new, 1)
+          project.write_text(text)
+
+          helper = Path('.github/workflows/pr39-slice1-integration.yml')
+          helper.unlink()
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "PR39: integrate production meter levels"
+          git push origin HEAD:feature/pr39-production-meters-analysis
