@@ -97,6 +97,9 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
     let inputTruePeakLinear: Float
     let outputTruePeakLinear: Float
     let limiterGainReductionDB: Float
+    let gainRiderAttenuationDB: Float
+    let sustainedLimiterGainReductionDB: Float
+    let truePeakGuardActive: Bool
     let limiterSafetyClampSamples: UInt64
     let convolutionEnabled: Bool
     let convolutionProgramSlot: UInt32
@@ -206,6 +209,9 @@ struct RenderKernelDiagnostics: Equatable, Sendable {
         inputTruePeakLinear = diagnostics.inputTruePeakLinear
         outputTruePeakLinear = diagnostics.outputTruePeakLinear
         limiterGainReductionDB = diagnostics.limiterGainReductionDB
+        gainRiderAttenuationDB = diagnostics.gainRiderAttenuationDB
+        sustainedLimiterGainReductionDB = diagnostics.sustainedLimiterGainReductionDB
+        truePeakGuardActive = diagnostics.truePeakGuardActive
         limiterSafetyClampSamples = diagnostics.limiterSafetyClampSamples
         convolutionEnabled = diagnostics.convolutionEnabled
         convolutionProgramSlot = diagnostics.convolutionProgramSlot
