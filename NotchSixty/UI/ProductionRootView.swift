@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SwiftUI
 
@@ -125,15 +126,21 @@ struct ProductionRootView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(ProductionSection.allCases, selection: $selection) { section in
-                Label(section.title, systemImage: section.systemImage).tag(section)
+            VStack(spacing: 0) {
+                ProductionSidebarBrand()
+                Divider()
+                List(ProductionSection.allCases, selection: $selection) { section in
+                    Label(section.title, systemImage: section.systemImage).tag(section)
+                }
+                .listStyle(.sidebar)
             }
             .navigationTitle("Notch Sixty")
-            .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 280)
+            .navigationSplitViewColumnWidth(min: 200, ideal: 232, max: 290)
         } detail: {
             detail(for: selection ?? .dashboard)
                 .toolbar { toolbar }
         }
+        .tint(Color(red: 0.91, green: 0.58, blue: 0.24))
         .frame(minWidth: 980, minHeight: 680)
         .task { product.prepareForUse() }
     }
@@ -186,6 +193,35 @@ struct ProductionRootView: View {
             .buttonStyle(.glassProminent)
             .disabled(engine.lifecycleState != .idle && engine.lifecycleState != .running)
         }
+    }
+}
+
+
+private struct ProductionSidebarBrand: View {
+    var body: some View {
+        HStack(spacing: 12) {
+            if let icon = NSApplication.shared.applicationIconImage {
+                Image(nsImage: icon)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: 44, height: 44)
+                    .clipShape(.rect(cornerRadius: 10))
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("NOTCH SIXTY")
+                    .font(.headline.weight(.semibold))
+                    .tracking(1.5)
+                Text("Stereo DSP")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Notch Sixty Stereo DSP")
     }
 }
 
@@ -313,7 +349,7 @@ private struct ProductionDashboardView: View {
             }
         }
         .padding(14)
-        .background(.quaternary.opacity(0.22), in: .rect(cornerRadius: 18))
+        .glassEffect(.regular, in: .rect(cornerRadius: 18))
     }
 
     private var masterControls: some View {
@@ -371,7 +407,7 @@ private struct ProductionDashboardView: View {
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary.opacity(0.28), in: .rect(cornerRadius: 18))
+        .glassEffect(.regular, in: .rect(cornerRadius: 18))
     }
 }
 
@@ -629,7 +665,7 @@ private struct ProductionActiveCrossoverView: View {
                     )).toggleStyle(.switch)
                 }
                 .padding(20)
-                .background(.quaternary.opacity(0.28), in: .rect(cornerRadius: 18))
+                .glassEffect(.regular, in: .rect(cornerRadius: 18))
             }
             .padding(28)
             .frame(maxWidth: 900, alignment: .topLeading)
@@ -678,7 +714,7 @@ private struct ProductionRoomCorrectionView: View {
                     .frame(maxWidth: .infinity, minHeight: 240)
                 }
                 .padding(20)
-                .background(.quaternary.opacity(0.28), in: .rect(cornerRadius: 18))
+                .glassEffect(.regular, in: .rect(cornerRadius: 18))
             }
             .padding(28)
             .frame(maxWidth: 900, alignment: .topLeading)

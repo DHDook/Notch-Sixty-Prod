@@ -164,6 +164,7 @@ struct ProductionProfileToolbar: View {
                     : "hifispeaker.2.fill"
             )
         }
+        .buttonStyle(.glass)
         .help(
             "Playback System: output association, crossover, alignment, output trim, room correction, and speaker correction"
         )
