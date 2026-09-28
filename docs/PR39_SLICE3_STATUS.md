@@ -13,5 +13,7 @@ Slice 3 integrates the off-callback production analysis engine.
 - Output phase correlation uses normalized cross-correlation over approximately 100 ms and reports silence as undefined rather than inventing a phase value.
 - The output goniometer uses the standard 45-degree stereo rotation and a bounded recent-history point set.
 - Deterministic tests cover adaptive FFT sizing, correlation canonical cases, goniometer rotation, silence floor, and 1 kHz full-scale calibration through 384 kHz.
+- The first complete production-analysis compile exposed only a Swift stored-property initialization rule: the worker's buffer initializers referenced class constants through covariant `Self`. Those initializers now use the concrete `ProductionAnalysisWorker` type name; no algorithm, realtime capture, demand, signal-location, or UI behavior changed.
+- The temporary compiler-diagnostic workflow and output file were removed after the fix.
 
-The production Spectrum and Stereo SwiftUI surfaces are wired in the next slice after this analyzer/core integration passes the normal macOS build and XCTest gate.
+The production Spectrum and Stereo SwiftUI surfaces are now wired. The next gate is the normal exact-head macOS Debug/Release/XCTest suite followed by focused hardware/UI/CPU validation.
