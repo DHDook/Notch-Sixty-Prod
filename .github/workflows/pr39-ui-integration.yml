@@ -1,0 +1,171 @@
+name: PR39 Production Analysis UI Integration
+
+on:
+  push:
+    branches:
+      - feature/pr39-production-meters-analysis
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/pr39-production-meters-analysis
+          fetch-depth: 0
+
+      - name: Integrate Spectrum and Stereo surfaces
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          meters = Path('NotchSixty/UI/ProductionMetersView.swift')
+          text = meters.read_text()
+
+          anchor = '    @State private var snapshot = ProductionMetersSnapshot()\n'
+          replacement = anchor + '    @State private var analysisSnapshot = ProductionAnalysisSnapshot.empty\n'
+          if anchor not in text:
+              raise SystemExit('meter snapshot state anchor not found')
+          text = text.replace(anchor, replacement, 1)
+
+          old = (
+              '                case .spectrum:\n'
+              '                    pendingAnalysisPage(\n'
+              '                        title: "Input / Output Spectrum",\n'
+              '                        systemImage: "waveform.path",\n'
+              '                        detail: "The realtime-safe dual Input/Output capture and off-callback RTA engine are the next PR39 slice. No spectrum work is running yet."\n'
+              '                    )\n'
+              '                case .stereo:\n'
+              '                    pendingAnalysisPage(\n'
+              '                        title: "Stereo Field",\n'
+              '                        systemImage: "circle.grid.cross",\n'
+              '                        detail: "Phase correlation and the output goniometer will use their own bounded, demand-gated stereo capture. No stereo-analysis work is running yet."\n'
+              '                    )\n'
+          )
+          new = (
+              '                case .spectrum:\n'
+              '                    ProductionSpectrumView(\n'
+              '                        snapshot: analysisSnapshot,\n'
+              '                        isRunning: engine.lifecycleState == .running,\n'
+              '                        resetPeakHold: { engine.resetSpectrumPeakHold() }\n'
+              '                    )\n'
+              '                case .stereo:\n'
+              '                    ProductionStereoAnalysisView(\n'
+              '                        snapshot: analysisSnapshot,\n'
+              '                        isRunning: engine.lifecycleState == .running\n'
+              '                    )\n'
+          )
+          if old not in text:
+              raise SystemExit('spectrum/stereo placeholder anchor not found')
+          text = text.replace(old, new, 1)
+
+          old = (
+              '    @MainActor\n'
+              '    private func runVisiblePageLoop() async {\n'
+              '        var demandToken: UUID?\n'
+              '        if page == .levels, engine.lifecycleState == .running {\n'
+              '            demandToken = ProductionDetailedMeterDemand.acquire(engine: engine)\n'
+              '        }\n'
+              '        defer {\n'
+              '            if let demandToken {\n'
+              '                ProductionDetailedMeterDemand.release(demandToken, engine: engine)\n'
+              '            }\n'
+              '        }\n\n'
+              '        while !Task.isCancelled {\n'
+              '            refreshSnapshot()\n'
+              '            let interval: UInt64 = page == .levels ? 33_000_000 : 125_000_000\n'
+              '            try? await Task.sleep(nanoseconds: interval)\n'
+              '        }\n'
+              '    }\n'
+          )
+          new = (
+              '    @MainActor\n'
+              '    private func runVisiblePageLoop() async {\n'
+              '        let activePage = page\n'
+              '        var demandToken: UUID?\n'
+              '        if activePage == .levels, engine.lifecycleState == .running {\n'
+              '            demandToken = ProductionDetailedMeterDemand.acquire(engine: engine)\n'
+              '        }\n\n'
+              '        let analysisDemand: UInt32\n'
+              '        switch activePage {\n'
+              '        case .spectrum:\n'
+              '            analysisDemand = UInt32(N60_ANALYSIS_DEMAND_SPECTRUM)\n'
+              '        case .stereo:\n'
+              '            analysisDemand = UInt32(N60_ANALYSIS_DEMAND_STEREO)\n'
+              '        case .levels, .dynamics:\n'
+              '            analysisDemand = UInt32(N60_ANALYSIS_DEMAND_NONE)\n'
+              '        }\n'
+              '        if analysisDemand != 0, engine.lifecycleState == .running {\n'
+              '            engine.setAnalysisDemand(analysisDemand)\n'
+              '        }\n\n'
+              '        defer {\n'
+              '            if let demandToken {\n'
+              '                ProductionDetailedMeterDemand.release(demandToken, engine: engine)\n'
+              '            }\n'
+              '            if analysisDemand != 0 {\n'
+              '                engine.setAnalysisDemand(UInt32(N60_ANALYSIS_DEMAND_NONE))\n'
+              '            }\n'
+              '        }\n\n'
+              '        while !Task.isCancelled {\n'
+              '            refreshSnapshot()\n'
+              '            if analysisDemand != 0, engine.lifecycleState == .running {\n'
+              '                analysisSnapshot = engine.productionAnalysisSnapshot()\n'
+              '            } else {\n'
+              '                analysisSnapshot = .empty\n'
+              '            }\n\n'
+              '            let interval: UInt64\n'
+              '            switch activePage {\n'
+              '            case .levels, .stereo:\n'
+              '                interval = 33_000_000\n'
+              '            case .spectrum:\n'
+              '                interval = 50_000_000\n'
+              '            case .dynamics:\n'
+              '                interval = 125_000_000\n'
+              '            }\n'
+              '            try? await Task.sleep(nanoseconds: interval)\n'
+              '        }\n'
+              '    }\n'
+          )
+          if old not in text:
+              raise SystemExit('visible-page loop anchor not found')
+          meters.write_text(text.replace(old, new, 1))
+
+          project = Path('NotchSixty.xcodeproj/project.pbxproj')
+          text = project.read_text()
+          replacements = [
+              (
+                  '\t\tA40000000000000000000014 /* ProductionMetersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000024 /* ProductionMetersView.swift */; };',
+                  '\t\tA40000000000000000000014 /* ProductionMetersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000024 /* ProductionMetersView.swift */; };\n\t\tA40000000000000000000015 /* ProductionAnalysisViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000025 /* ProductionAnalysisViews.swift */; };'
+              ),
+              (
+                  '\t\tA40000000000000000000024 /* ProductionMetersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionMetersView.swift; sourceTree = "<group>"; };',
+                  '\t\tA40000000000000000000024 /* ProductionMetersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionMetersView.swift; sourceTree = "<group>"; };\n\t\tA40000000000000000000025 /* ProductionAnalysisViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionAnalysisViews.swift; sourceTree = "<group>"; };'
+              ),
+              (
+                  'A40000000000000000000023 /* ProductionDynamicsTelemetryView.swift */, A40000000000000000000024 /* ProductionMetersView.swift */,); path = UI;',
+                  'A40000000000000000000023 /* ProductionDynamicsTelemetryView.swift */, A40000000000000000000024 /* ProductionMetersView.swift */, A40000000000000000000025 /* ProductionAnalysisViews.swift */,); path = UI;'
+              ),
+              (
+                  '\t\t\t\tA40000000000000000000014 /* ProductionMetersView.swift in Sources */,',
+                  '\t\t\t\tA40000000000000000000014 /* ProductionMetersView.swift in Sources */,\n\t\t\t\tA40000000000000000000015 /* ProductionAnalysisViews.swift in Sources */,'
+              ),
+          ]
+          for old_value, new_value in replacements:
+              if old_value not in text:
+                  raise SystemExit(f'project.pbxproj anchor not found: {old_value[:100]}')
+              text = text.replace(old_value, new_value, 1)
+          project.write_text(text)
+
+          Path('.github/workflows/pr39-ui-integration.yml').unlink()
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "PR39: integrate production spectrum and stereo surfaces"
+          git push origin HEAD:feature/pr39-production-meters-analysis
