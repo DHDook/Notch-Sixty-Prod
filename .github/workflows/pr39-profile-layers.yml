@@ -36,11 +36,16 @@ jobs:
           ENABLE_TESTABILITY=YES
           test
 
-      - name: Commit implementation and remove staging helpers
+      - name: Commit validated product implementation
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git rm .github/workflows/pr39-profile-layers.yml .github/scripts/pr39_profile_layers.py .github/scripts/pr39_profile_layers_fix.py
+          # The installation token cannot mutate workflow files. Keep the
+          # production macOS workflow and this temporary staging workflow
+          # unchanged in the bot-authored product commit; they are cleaned up
+          # by a normal connector commit after the validated product source lands.
+          git checkout -- .github/workflows/macos.yml .github/workflows/pr39-profile-layers.yml
+          git rm .github/scripts/pr39_profile_layers.py .github/scripts/pr39_profile_layers_fix.py
           git add -A
           git diff --cached --check
           git commit -m "PR39: separate content presets from playback systems"
