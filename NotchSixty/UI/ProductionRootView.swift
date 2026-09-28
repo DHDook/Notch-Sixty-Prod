@@ -122,12 +122,7 @@ struct ProductionRootView: View {
         case .dynamics:
             ProductionDynamicsView(engine: engine)
         case .meters:
-            ProductionPlaceholderPage(
-                title: "Meters",
-                subtitle: "Detailed signal, loudness, protection, and analysis telemetry.",
-                systemImage: "chart.xyaxis.line",
-                detail: "Each detailed meter or analyzer will request only its own pipeline so hidden analysis remains parked."
-            )
+            ProductionMetersView(engine: engine)
         case .activeCrossover:
             ProductionActiveCrossoverView(engine: engine)
         case .roomCorrection:

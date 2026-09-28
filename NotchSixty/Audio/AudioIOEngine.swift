@@ -1450,6 +1450,43 @@ final class AudioIOEngine: ObservableObject {
         eventMonitor.stop()
     }
 
+    func setDetailedMeteringDemand(_ enabled: Bool) throws {
+        let previousDemand = N60RealtimeAudioBridgeMeteringDemand()
+        guard previousDemand != enabled else { return }
+
+        N60RealtimeAudioBridgeSetMeteringDemand(enabled)
+        guard let session = transportSession else { return }
+
+        do {
+            var graph = try stereoEQConfiguration.makeGraphSnapshot(
+                sampleRate: session.outputFormat.sampleRate,
+                gainConfiguration: gainConfiguration,
+                bassManagementConfiguration: bassManagementConfiguration,
+                dynamicsConfiguration: dynamicsConfiguration,
+                playbackConfiguration: playbackControlConfiguration
+            )
+            try attachActiveEQFIRProgramIfNeeded(
+                to: &graph,
+                stereoConfiguration: stereoEQConfiguration,
+                playbackConfiguration: playbackControlConfiguration
+            )
+            try attachActiveRoomCorrectionProgramIfNeeded(
+                to: &graph,
+                playbackConfiguration: playbackControlConfiguration
+            )
+            try attachActiveSpeakerIRProgramIfNeeded(
+                to: &graph,
+                playbackConfiguration: playbackControlConfiguration
+            )
+            try session.publishDSPGraph(graph)
+            lastErrorDescription = nil
+        } catch {
+            N60RealtimeAudioBridgeSetMeteringDemand(previousDemand)
+            lastErrorDescription = error.localizedDescription
+            throw error
+        }
+    }
+
     func diagnosticsSnapshot() -> AudioDiagnosticsSnapshot {
         let selectedDevice = selectedOutputDevice
         let currentCounters = transportSession?.counters() ?? AudioTransportCounters()
