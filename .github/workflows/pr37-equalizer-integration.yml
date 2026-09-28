@@ -22,11 +22,21 @@ jobs:
       - name: Apply production Equalizer workspace
         run: python3 ci/pr37_apply_equalizer_workspace.py
 
+      - name: Restore workflow-only files
+        run: |
+          git checkout HEAD -- .github/workflows/macos.yml
+          git checkout HEAD -- .github/workflows/pr37-equalizer-integration.yml
+          git checkout HEAD -- ci/pr37_apply_equalizer_workspace.py
+
       - name: Commit integrated source
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
+          git add NotchSixty/UI/ProductionRootView.swift
+          git add NotchSixty/UI/ProductionEqualizerView.swift
+          git add NotchSixty.xcodeproj/project.pbxproj
+          git add ci/validate_pr37_equalizer_ui.py
+          git add docs/PR37_PRODUCTION_EQUALIZER.md
           if git diff --cached --quiet; then
             echo "No integration changes to commit."
             exit 0
