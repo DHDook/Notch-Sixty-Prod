@@ -123,6 +123,9 @@ jobs:
       - name: Validate PR39 Content Preset / Playback System Layers
         run: python3 ci/validate_pr39_profile_layers.py
 
+      - name: Validate PR39 App Identity / Liquid Glass
+        run: python3 ci/validate_pr39_app_identity.py
+
       - name: Validate PR37 Production Equalizer
         run: python3 ci/validate_pr37_equalizer_ui.py
 
