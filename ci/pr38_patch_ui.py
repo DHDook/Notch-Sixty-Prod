@@ -11,14 +11,6 @@ def replace_once(path, old, new):
     p.write_text(text.replace(old, new, 1))
 
 
-def add_telemetry(anchor, kind):
-    p = ROOT / "NotchSixty/UI/ProductionDynamicsView.swift"
-    text = p.read_text()
-    if text.count(anchor) != 1:
-        raise SystemExit(f"telemetry anchor count {text.count(anchor)}: {anchor[:100]!r}")
-    p.write_text(text.replace(anchor, anchor + f"            ProductionDynamicsTelemetryView(engine: engine, kind: {kind})\n", 1))
-
-
 def apply():
     replace_once(
         "NotchSixty/Audio/AudioIOEngine.swift",
@@ -32,14 +24,9 @@ def apply():
         "    @State private var selectedModule: ProductionDynamicsModule = .compressor\n    @State private var mainsDetectInFlight = false\n    @State private var mainsDetectionMessage: String?\n",
     )
 
-    add_telemetry(
-        "        ) {\n",
-        ".compressor",
-    )
-    # The first generic ') {' belongs to compressor by construction. Patch remaining
-    # editors with their unique moduleCard opening lines.
     anchors = [
-        ("        moduleCard(module: .multiband,", ".multiband"),
+        ("        moduleCard(\n            module: .compressor,", ".compressor"),
+        ("        moduleCard(\n            module: .multiband,", ".multiband"),
         ("        moduleCard(module: .expander,", ".expander"),
         ("        moduleCard(module: .pauseGate,", ".pauseGate"),
         ("        moduleCard(module: .gainRider,", ".gainRider"),
