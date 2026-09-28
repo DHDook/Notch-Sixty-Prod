@@ -120,6 +120,9 @@ jobs:
       - name: Validate PR36 Production UI Foundation
         run: python3 ci/validate_pr36_ui_foundation.py
 
+      - name: Validate PR37 Production Equalizer
+        run: python3 ci/validate_pr37_equalizer_ui.py
+
       - name: Benchmark PR35 Render Kernel O0 vs O3
         run: |
           REALTIME_SOURCES=$(find NotchSixty/Audio/Realtime -name '*.c' ! -name 'N60RealtimeAudioBridge.c' -print)
