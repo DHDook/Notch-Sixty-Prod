@@ -10,7 +10,6 @@ permissions:
 
 jobs:
   integrate:
-    if: ${{ !contains(github.event.head_commit.message, 'PR39: integrate production meter levels') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,14 +26,14 @@ jobs:
           root = Path('NotchSixty/UI/ProductionRootView.swift')
           text = root.read_text()
           old = '''        case .meters:
-              ProductionPlaceholderPage(
-                  title: "Meters",
-                  subtitle: "Detailed signal, loudness, protection, and analysis telemetry.",
-                  systemImage: "chart.xyaxis.line",
-                  detail: "Each detailed meter or analyzer will request only its own pipeline so hidden analysis remains parked."
-              )'''
+            ProductionPlaceholderPage(
+                title: "Meters",
+                subtitle: "Detailed signal, loudness, protection, and analysis telemetry.",
+                systemImage: "chart.xyaxis.line",
+                detail: "Each detailed meter or analyzer will request only its own pipeline so hidden analysis remains parked."
+            )'''
           new = '''        case .meters:
-              ProductionMetersView(engine: engine)'''
+            ProductionMetersView(engine: engine)'''
           if old not in text:
               raise SystemExit('ProductionRootView meters placeholder anchor not found')
           root.write_text(text.replace(old, new, 1))
@@ -45,41 +44,41 @@ jobs:
           if anchor not in text:
               raise SystemExit('AudioIOEngine diagnostics anchor not found')
           method = '''    func setDetailedMeteringDemand(_ enabled: Bool) throws {
-              let previousDemand = N60RealtimeAudioBridgeMeteringDemand()
-              guard previousDemand != enabled else { return }
+        let previousDemand = N60RealtimeAudioBridgeMeteringDemand()
+        guard previousDemand != enabled else { return }
 
-              N60RealtimeAudioBridgeSetMeteringDemand(enabled)
-              guard let session = transportSession else { return }
+        N60RealtimeAudioBridgeSetMeteringDemand(enabled)
+        guard let session = transportSession else { return }
 
-              do {
-                  var graph = try stereoEQConfiguration.makeGraphSnapshot(
-                      sampleRate: session.outputFormat.sampleRate,
-                      gainConfiguration: gainConfiguration,
-                      bassManagementConfiguration: bassManagementConfiguration,
-                      dynamicsConfiguration: dynamicsConfiguration,
-                      playbackConfiguration: playbackControlConfiguration
-                  )
-                  try attachActiveEQFIRProgramIfNeeded(
-                      to: &graph,
-                      stereoConfiguration: stereoEQConfiguration,
-                      playbackConfiguration: playbackControlConfiguration
-                  )
-                  try attachActiveRoomCorrectionProgramIfNeeded(
-                      to: &graph,
-                      playbackConfiguration: playbackControlConfiguration
-                  )
-                  try attachActiveSpeakerIRProgramIfNeeded(
-                      to: &graph,
-                      playbackConfiguration: playbackControlConfiguration
-                  )
-                  try session.publishDSPGraph(graph)
-                  lastErrorDescription = nil
-              } catch {
-                  N60RealtimeAudioBridgeSetMeteringDemand(previousDemand)
-                  lastErrorDescription = error.localizedDescription
-                  throw error
-              }
-          }
+        do {
+            var graph = try stereoEQConfiguration.makeGraphSnapshot(
+                sampleRate: session.outputFormat.sampleRate,
+                gainConfiguration: gainConfiguration,
+                bassManagementConfiguration: bassManagementConfiguration,
+                dynamicsConfiguration: dynamicsConfiguration,
+                playbackConfiguration: playbackControlConfiguration
+            )
+            try attachActiveEQFIRProgramIfNeeded(
+                to: &graph,
+                stereoConfiguration: stereoEQConfiguration,
+                playbackConfiguration: playbackControlConfiguration
+            )
+            try attachActiveRoomCorrectionProgramIfNeeded(
+                to: &graph,
+                playbackConfiguration: playbackControlConfiguration
+            )
+            try attachActiveSpeakerIRProgramIfNeeded(
+                to: &graph,
+                playbackConfiguration: playbackControlConfiguration
+            )
+            try session.publishDSPGraph(graph)
+            lastErrorDescription = nil
+        } catch {
+            N60RealtimeAudioBridgeSetMeteringDemand(previousDemand)
+            lastErrorDescription = error.localizedDescription
+            throw error
+        }
+    }
 
 '''
           engine.write_text(text.replace(anchor, method + anchor, 1))
@@ -110,8 +109,7 @@ jobs:
               text = text.replace(old, new, 1)
           project.write_text(text)
 
-          helper = Path('.github/workflows/pr39-slice1-integration.yml')
-          helper.unlink()
+          Path('.github/workflows/pr39-slice1-integration.yml').unlink()
           PY
 
           git config user.name "github-actions[bot]"
