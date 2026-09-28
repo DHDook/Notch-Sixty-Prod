@@ -209,7 +209,8 @@ private struct ProductionSidebarBrand: View {
             }
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("NOTCH SIXTY")
+                Text("Notch Sixty")
+                    .textCase(.uppercase)
                     .font(.headline.weight(.semibold))
                     .tracking(1.5)
                 Text("Stereo DSP")

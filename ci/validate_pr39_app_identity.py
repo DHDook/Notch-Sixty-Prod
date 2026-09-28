@@ -23,7 +23,7 @@ assert "ProductionSidebarBrand()" in ui
 assert ".listStyle(.sidebar)" in ui
 assert ".tint(Color(red: 0.91, green: 0.58, blue: 0.24))" in ui
 assert ui.count(".glassEffect(.regular, in: .rect(cornerRadius: 18))") >= 4
-assert 'Text("NOTCH SIXTY")' in ui
+assert 'Text("Notch Sixty")' in ui and ".textCase(.uppercase)" in ui
 assert "Color(red: 0.94, green: 0.89, blue: 0.73)" in ui, "signature VU face must remain warm and opaque"
 profiles = (root / "NotchSixty/UI/ProductionProfileToolbar.swift").read_text()
 assert profiles.count(".buttonStyle(.glass)") >= 3
