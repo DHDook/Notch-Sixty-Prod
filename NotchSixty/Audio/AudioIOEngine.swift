@@ -1503,10 +1503,6 @@ final class AudioIOEngine: ObservableObject {
         transportSession?.resetSpectrumPeakHold()
     }
 
-    func readAnalysisFrames(into buffer: UnsafeMutableBufferPointer<N60AnalysisFrame>) -> Int {
-        transportSession?.readAnalysisFrames(into: buffer) ?? 0
-    }
-
     func diagnosticsSnapshot() -> AudioDiagnosticsSnapshot {
         let selectedDevice = selectedOutputDevice
         let currentCounters = transportSession?.counters() ?? AudioTransportCounters()

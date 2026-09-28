@@ -7,6 +7,7 @@ Slice 2 adds the production analysis-capture transport used by the later Spectru
 - The capture ring is fixed/preallocated at 65,536 paired frames.
 - The physical-output callback captures the exact raw render Input frame and the exact DSP Output frame returned by `N60RenderKernelProcessStereoFrameInContext`, before the bridge's startup/transition fade.
 - The ring is single-producer/single-consumer: the callback never waits and never overwrites unread analysis data. If the control-plane reader falls behind, new analysis frames are dropped and counted.
+- The analysis worker exclusively owns the consumer read index. Control-thread demand changes never advance or rewind that index; stale frames are discarded on the worker's serial queue when the demand generation changes.
 - Analysis demand is read once per output callback. No capture copy runs when no analysis surface is demanded.
 - Consumers drain frames through a bounded off-callback copy API exposed through `CoreAudioTransportSession` and `AudioIOEngine`.
 - FFT/windowing/stereo-analysis work remains outside the realtime callback and is implemented in the next slice.

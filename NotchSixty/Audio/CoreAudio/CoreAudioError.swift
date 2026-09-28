@@ -558,13 +558,6 @@ final class CoreAudioTransportSession {
         return N60RealtimeAudioBridgeGetAnalysisCaptureSnapshot(bridge)
     }
 
-    func readAnalysisFrames(into buffer: UnsafeMutableBufferPointer<N60AnalysisFrame>) -> Int {
-        guard let bridge, let baseAddress = buffer.baseAddress, !buffer.isEmpty else { return 0 }
-        return Int(N60RealtimeAudioBridgeReadAnalysisFrames(
-            bridge, baseAddress, UInt32(buffer.count)
-        ))
-    }
-
     func renderDiagnostics() -> RenderKernelDiagnostics? {
         guard let bridge else { return nil }
         return RenderKernelDiagnostics(N60RealtimeAudioBridgeGetRenderDiagnostics(bridge))

@@ -509,15 +509,15 @@ void N60RealtimeAudioBridgeSetAnalysisDemand(
 ) {
     if (bridge == NULL) return;
     uint32_t sanitized = demandMask & N60_ANALYSIS_DEMAND_ALL;
-    uint32_t previous = atomic_exchange_explicit(
-        &bridge->analysisDemandMask, sanitized, memory_order_acq_rel
+    atomic_store_explicit(&bridge->analysisDemandMask, sanitized, memory_order_release);
+}
+
+void N60RealtimeAudioBridgeDiscardAnalysisFrames(N60RealtimeAudioBridge *bridge) {
+    if (bridge == NULL) return;
+    uint64_t writeIndex = atomic_load_explicit(
+        &bridge->analysisWriteIndex, memory_order_acquire
     );
-    if (previous != sanitized) {
-        uint64_t writeIndex = atomic_load_explicit(
-            &bridge->analysisWriteIndex, memory_order_acquire
-        );
-        atomic_store_explicit(&bridge->analysisReadIndex, writeIndex, memory_order_release);
-    }
+    atomic_store_explicit(&bridge->analysisReadIndex, writeIndex, memory_order_release);
 }
 
 uint32_t N60RealtimeAudioBridgeAnalysisDemand(const N60RealtimeAudioBridge *bridge) {

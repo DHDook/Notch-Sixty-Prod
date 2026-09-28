@@ -401,6 +401,7 @@ final class ProductionAnalysisWorker: @unchecked Sendable {
             self.demandMask = sanitized
             self.sampleRate = sampleRate
             if changed {
+                N60RealtimeAudioBridgeDiscardAnalysisFrames(self.bridge)
                 self.clearHistory()
                 self.spectrumAnalyzer.requestPeakHoldReset()
             }

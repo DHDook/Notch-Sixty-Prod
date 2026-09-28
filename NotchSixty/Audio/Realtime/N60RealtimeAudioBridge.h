@@ -102,6 +102,12 @@ void N60RealtimeAudioBridgeSetAnalysisDemand(
 uint32_t N60RealtimeAudioBridgeAnalysisDemand(
     const N60RealtimeAudioBridge * _Nonnull bridge
 );
+// Consumer-side operation. The analysis worker is the sole owner of
+// the ring read index and calls this off the realtime thread when a
+// demand generation changes.
+void N60RealtimeAudioBridgeDiscardAnalysisFrames(
+    N60RealtimeAudioBridge * _Nonnull bridge
+);
 N60AnalysisCaptureSnapshot N60RealtimeAudioBridgeGetAnalysisCaptureSnapshot(
     const N60RealtimeAudioBridge * _Nonnull bridge
 );
