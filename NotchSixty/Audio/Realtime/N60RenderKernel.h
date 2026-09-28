@@ -226,6 +226,9 @@ typedef struct {
     float inputTruePeakLinear;
     float outputTruePeakLinear;
     float limiterGainReductionDB;
+    float gainRiderAttenuationDB;
+    float sustainedLimiterGainReductionDB;
+    bool truePeakGuardActive;
     uint64_t limiterSafetyClampSamples;
     bool convolutionEnabled;
     uint32_t convolutionProgramSlot;

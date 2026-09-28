@@ -1284,6 +1284,25 @@ final class AudioIOEngine: ObservableObject {
         return true
     }
 
+    func detectMainsHumOnce(minimumConfidence: Float = 0.55) async throws -> Bool {
+        guard lifecycle.state == .running else { return false }
+        let trackingWasEnabled = dynamicsConfiguration.mainsNotch.continuousTracking
+        if !trackingWasEnabled {
+            var detecting = dynamicsConfiguration
+            detecting.mainsNotch.continuousTracking = true
+            try replaceDynamicsConfiguration(detecting)
+        }
+        defer {
+            if !trackingWasEnabled {
+                var restored = dynamicsConfiguration
+                restored.mainsNotch.continuousTracking = false
+                try? replaceDynamicsConfiguration(restored)
+            }
+        }
+        try await Task.sleep(nanoseconds: 1_150_000_000)
+        return try applyDetectedMainsHum(minimumConfidence: minimumConfidence)
+    }
+
     func pollMainsHumTracking(minimumConfidence: Float = 0.70) {
         guard dynamicsConfiguration.mainsNotch.continuousTracking,
               let diagnostics = diagnosticsSnapshot().renderKernelDiagnostics,

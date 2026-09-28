@@ -1,6 +1,6 @@
 # PR38 Legacy Dynamics Code Audit
 
-Status: **SOURCE INVENTORY COMPLETE; IMPLEMENTATION GAP CLOSURE IN PROGRESS**
+Status: **SOURCE INVENTORY COMPLETE; PRODUCTION PARITY UI IMPLEMENTED; HARDWARE ACCEPTANCE PENDING**
 
 This audit defines the parity floor for the PR38 production Dynamics workspace.
 
@@ -52,7 +52,7 @@ Legacy UI parity:
 - global Q
 - independent depth for each enabled harmonic
 
-Commercial status: **Prod-present**. Production UI must expose the complete workflow, including Detect/status and per-harmonic depth editing. Tracking remains independently parked when OFF.
+Commercial status: **Prod-present**. PR38 now exposes the complete workflow, including one-shot Detect/status and per-harmonic depth editing. One-shot Detect temporarily enables the existing detector only for its measurement window, then restores the user's Continuous Tracking preference; Tracking remains parked when OFF.
 
 ### Spectral Denoiser
 
@@ -73,7 +73,7 @@ Legacy UI parity:
 
 Commercial status:
 - enable, preset/base preset, quality, reduction, threshold, protected range, profile command/revision and telemetry are **Prod-present**.
-- Wiener floor and attack/release are **confirmed Prod-gaps**.
+- Wiener floor and attack/release were **confirmed Prod-gaps** and are now restored by PR38 behind an explicit advanced-tuning override so named-preset sound remains unchanged by default.
 
 Processor-level finding: the commercial `N60SpectralDenoiserSnapshot` already owns `minimumGain`, `suppressionAttack`, and `suppressionRelease`, but `N60SpectralDenoiserSnapshotConfigure` currently overwrites them from tuning defaults. Legacy code exposed Wiener floor and millisecond smoothing explicitly. PR38 will restore advanced user overrides while keeping named-preset behavior unchanged unless the user deliberately customizes them.
 
@@ -207,7 +207,7 @@ Legacy UI parity:
 
 Commercial status:
 - threshold, hold, attack, release and hysteresis are **Prod-present**.
-- named presets are a **confirmed Prod-gap** in the Swift control plane and will be restored in PR38 without changing the DSP.
+- named presets were a **confirmed Prod-gap** in the Swift control plane and are now restored in PR38 without changing Pause Gate DSP semantics.
 
 Product convention is explicit and retained:
 - **Attack = fade-out / close time**
@@ -359,7 +359,7 @@ Examples:
 - denoiser suppression/profile status requests denoiser telemetry only;
 - limiter/true-peak display does not wake compressor, RTA, or VU pipelines.
 
-A processor being enabled does not imply its UI telemetry must also run when the editor is hidden.
+A processor being enabled does not imply its UI telemetry must also run when the editor is hidden. PR38 implements live status as a cancellable child of the selected processor editor at 8 Hz. Compressor/expander/limiter/GR/etc. values are direct runtime state already required by the active processor, so reading them does not enable the expensive render-kernel meter accumulator or a second analyzer pipeline. True analyzers/detectors such as Mains detection retain explicit activation semantics.
 
 ## 9. Accepted enhancement candidates for PR38
 

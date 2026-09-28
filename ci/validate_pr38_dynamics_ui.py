@@ -3,6 +3,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 ui = (ROOT / "NotchSixty/UI/ProductionDynamicsView.swift").read_text()
+telemetry = (ROOT / "NotchSixty/UI/ProductionDynamicsTelemetryView.swift").read_text()
+engine = (ROOT / "NotchSixty/Audio/AudioIOEngine.swift").read_text()
+render_h = (ROOT / "NotchSixty/Audio/Realtime/N60RenderKernel.h").read_text()
+render_c = (ROOT / "NotchSixty/Audio/Realtime/N60RenderKernel.c").read_text()
 root = (ROOT / "NotchSixty/UI/ProductionRootView.swift").read_text()
 config = (ROOT / "NotchSixty/Audio/DynamicsConfiguration.swift").read_text()
 compat = (ROOT / "NotchSixty/Audio/Realtime/N60DynamicsLegacyAdvanced.c").read_text()
@@ -18,6 +22,7 @@ def require(condition: bool, message: str) -> None:
 # Production route / target membership.
 require("ProductionDynamicsView(engine: engine)" in root, "Dynamics must route to production workspace")
 require("ProductionDynamicsView.swift in Sources" in project, "production Dynamics view must be in target")
+require("ProductionDynamicsTelemetryView.swift in Sources" in project, "isolated Dynamics telemetry view must be in target")
 require("dense dynamics editor will migrate" not in root.lower(), "Dynamics placeholder must not return")
 
 # Source-first parity contract.
@@ -67,8 +72,23 @@ require("denoiser->suppressionAttack = legacyReleaseAlpha" in compat, "legacy Re
 for forbidden in ["Bass Management", "FIR Correction", "Multi-Seat"]:
     require(f'return "{forbidden}"' not in ui, f"{forbidden} should live in its dedicated production workspace")
 
-# No free-running telemetry was added to this first UI slice.
-require("TimelineView" not in ui, "Dynamics workspace must not introduce unconditional polling")
-require("Timer.publish" not in ui, "Dynamics workspace must not introduce unconditional timers")
+# Live status is isolated to the selected processor editor. It reads direct
+# processor state only and never activates the render-kernel full meter stack.
+require("TimelineView" not in ui and "TimelineView" not in telemetry, "Dynamics telemetry must not use free-running TimelineView redraws")
+require("Timer.publish" not in ui and "Timer.publish" not in telemetry, "Dynamics telemetry must not use publisher timers")
+require(".task(id: kind)" in telemetry, "selected Dynamics telemetry must have cancellable view lifetime")
+require("125_000_000" in telemetry, "Dynamics live status polling should remain bounded at 8 Hz")
+require("N60RealtimeAudioBridgeSetMeteringDemand" not in telemetry, "Dynamics status must not activate full meter accumulation")
+require("ProductionDynamicsTelemetryView(engine: engine, kind:" in ui, "processor editors must host isolated telemetry children")
+
+# Legacy one-shot Mains Detect must work independently of tracking preference.
+require("detectMainsHumOnce" in engine, "one-shot Mains Detect control-plane method missing")
+require("1_150_000_000" in engine, "one-shot Mains Detect must wait for a complete detector window")
+require("Detecting…" in ui and "No stable mains tone detected." in ui, "production Mains Detect workflow missing")
+
+# Gain Rider live parity uses protection-runtime state, not a new analyzer.
+for token in ["gainRiderAttenuationDB", "sustainedLimiterGainReductionDB", "truePeakGuardActive"]:
+    require(token in render_h and token in render_c, f"protection telemetry field missing: {token}")
+require("Rider Attenuation" in telemetry, "Gain Rider live attenuation readout missing")
 
 print("PR38 production Dynamics parity guard: PASS")

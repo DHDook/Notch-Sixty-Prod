@@ -4,6 +4,8 @@ import SwiftUI
 struct ProductionDynamicsView: View {
     @ObservedObject var engine: AudioIOEngine
     @State private var selectedModule: ProductionDynamicsModule = .compressor
+    @State private var mainsDetectInFlight = false
+    @State private var mainsDetectionMessage: String?
 
     private var configuration: DynamicsConfiguration { engine.dynamicsConfiguration }
 
@@ -104,6 +106,7 @@ struct ProductionDynamicsView: View {
             enabled: boolBinding({ $0.compressor.enabled }, { $0.compressor.enabled = $1 }),
             reset: { preserveEnabledReset(\.compressor, defaultValue: CompressorConfiguration()) }
         ) {
+            ProductionDynamicsTelemetryView(engine: engine, kind: .compressor)
             DynamicsParameterRow("Threshold", value: doubleBinding({ $0.compressor.thresholdDB }, { $0.compressor.thresholdDB = $1 }), range: -60...0, step: 0.5, unit: "dB", digits: 1)
             DynamicsParameterRow("Ratio", value: doubleBinding({ $0.compressor.ratio }, { $0.compressor.ratio = $1 }), range: 1...20, step: 0.1, unit: ":1", digits: 1)
             DynamicsParameterRow("Knee", value: doubleBinding({ $0.compressor.kneeWidthDB }, { $0.compressor.kneeWidthDB = $1 }), range: 0...20, step: 0.5, unit: "dB", digits: 1)
@@ -132,6 +135,7 @@ struct ProductionDynamicsView: View {
             enabled: boolBinding({ $0.multibandCompressor.enabled }, { $0.multibandCompressor.enabled = $1 }),
             reset: { preserveEnabledReset(\.multibandCompressor, defaultValue: MultibandCompressorConfiguration()) }
         ) {
+            ProductionDynamicsTelemetryView(engine: engine, kind: .multiband)
             GroupBox("Crossovers") {
                 VStack(spacing: 10) {
                     DynamicsParameterRow("Low / Mid", value: doubleBinding({ $0.multibandCompressor.lowMidFrequencyHz }, { $0.multibandCompressor.lowMidFrequencyHz = $1 }), range: 40...250, step: 5, unit: "Hz", digits: 0)
@@ -184,6 +188,7 @@ struct ProductionDynamicsView: View {
 
     private var expanderEditor: some View {
         moduleCard(module: .expander, enabled: boolBinding({ $0.expander.enabled }, { $0.expander.enabled = $1 }), reset: { preserveEnabledReset(\.expander, defaultValue: ExpanderConfiguration()) }) {
+            ProductionDynamicsTelemetryView(engine: engine, kind: .expander)
             DynamicsParameterRow("Threshold", value: doubleBinding({ $0.expander.thresholdDB }, { $0.expander.thresholdDB = $1 }), range: -60...0, step: 0.5, unit: "dB", digits: 1)
             DynamicsParameterRow("Ratio", value: doubleBinding({ $0.expander.ratio }, { $0.expander.ratio = $1 }), range: 1...4, step: 0.1, unit: ":1", digits: 1)
             DynamicsParameterRow("Range", value: doubleBinding({ $0.expander.rangeDB }, { $0.expander.rangeDB = $1 }), range: -40...0, step: 0.5, unit: "dB", digits: 1)
@@ -194,6 +199,7 @@ struct ProductionDynamicsView: View {
 
     private var pauseGateEditor: some View {
         moduleCard(module: .pauseGate, enabled: boolBinding({ $0.pauseGate.enabled }, { $0.pauseGate.enabled = $1 }), reset: { preserveEnabledReset(\.pauseGate, defaultValue: PauseGateConfiguration()) }) {
+            ProductionDynamicsTelemetryView(engine: engine, kind: .pauseGate)
             Picker("Preset", selection: binding({ $0.pauseGate.preset }, { config, value in config.pauseGate.applyPreset(value) })) {
                 ForEach(PauseGatePreset.allCases) { preset in Text(preset.displayName).tag(preset) }
             }
@@ -215,13 +221,14 @@ struct ProductionDynamicsView: View {
 
     private var gainRiderEditor: some View {
         moduleCard(module: .gainRider, enabled: boolBinding({ $0.gainRider.enabled }, { $0.gainRider.enabled = $1 }), reset: { preserveEnabledReset(\.gainRider, defaultValue: GainRiderConfiguration()) }) {
+            ProductionDynamicsTelemetryView(engine: engine, kind: .gainRider)
             DynamicsParameterRow("Target Gain Reduction", value: doubleBinding({ $0.gainRider.targetGainReductionDB }, { $0.gainRider.targetGainReductionDB = $1 }), range: 0.5...6, step: 0.5, unit: "dB", digits: 1)
             DynamicsParameterRow("Maximum Reduction", value: doubleBinding({ $0.gainRider.maxReductionDB }, { $0.gainRider.maxReductionDB = $1 }), range: 3...12, step: 1, unit: "dB", digits: 0)
             Picker("Response", selection: binding({ $0.gainRider.speed }, { $0.gainRider.speed = $1 })) {
                 ForEach(GainRiderSpeed.allCases) { speed in Text(speed.displayName).tag(speed) }
             }
             .pickerStyle(.segmented)
-            Text("Live rider gain will be added through its own demand-gated telemetry channel rather than enabling unrelated meters.")
+            Text("The live readout above is derived from existing Gain Rider runtime state and does not activate unrelated metering or analysis.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -231,6 +238,7 @@ struct ProductionDynamicsView: View {
 
     private var denoiserEditor: some View {
         moduleCard(module: .denoiser, enabled: boolBinding({ $0.spectralDenoiser.enabled }, { $0.spectralDenoiser.enabled = $1 }), reset: resetDenoiser) {
+            ProductionDynamicsTelemetryView(engine: engine, kind: .denoiser)
             Picker("Preset", selection: Binding(
                 get: { configuration.spectralDenoiser.preset },
                 set: { try? engine.applySpectralDenoiserPreset($0) }
@@ -282,6 +290,7 @@ struct ProductionDynamicsView: View {
 
     private var deEsserEditor: some View {
         moduleCard(module: .deEsser, enabled: boolBinding({ $0.deEsser.enabled }, { $0.deEsser.enabled = $1 }), reset: { preserveEnabledReset(\.deEsser, defaultValue: DeEsserConfiguration()) }) {
+            ProductionDynamicsTelemetryView(engine: engine, kind: .deEsser)
             DynamicsParameterRow("Frequency", value: doubleBinding({ $0.deEsser.frequencyHz }, { $0.deEsser.frequencyHz = $1 }), range: 2_000...10_000, step: 50, unit: "Hz", digits: 0)
             DynamicsParameterRow("Detector Q", value: doubleBinding({ $0.deEsser.detectionQ }, { $0.deEsser.detectionQ = $1 }), range: 0.5...8, step: 0.1, unit: "", digits: 1)
             DynamicsParameterRow("Threshold", value: doubleBinding({ $0.deEsser.thresholdDB }, { $0.deEsser.thresholdDB = $1 }), range: -60...0, step: 0.5, unit: "dB", digits: 1)
@@ -298,6 +307,7 @@ struct ProductionDynamicsView: View {
 
     private var mainsHumEditor: some View {
         moduleCard(module: .mainsHum, enabled: boolBinding({ $0.mainsNotch.enabled }, { $0.mainsNotch.enabled = $1 }), reset: resetMainsHum) {
+            ProductionDynamicsTelemetryView(engine: engine, kind: .mainsHum)
             Picker("Mains Region", selection: binding({ $0.mainsNotch.region }, { config, region in config.mainsNotch.selectRegion(region) })) {
                 ForEach(MainsRegion.allCases) { region in Text(region.displayName).tag(region) }
             }
@@ -306,8 +316,25 @@ struct ProductionDynamicsView: View {
             HStack {
                 Toggle("Continuous Tracking", isOn: boolBinding({ $0.mainsNotch.continuousTracking }, { $0.mainsNotch.continuousTracking = $1 }))
                 Spacer()
-                Button("Apply Detected Frequency") { _ = try? engine.applyDetectedMainsHum() }
-                    .buttonStyle(.glass)
+                Button(mainsDetectInFlight ? "Detecting…" : "Detect") {
+                    guard !mainsDetectInFlight else { return }
+                    mainsDetectInFlight = true
+                    mainsDetectionMessage = nil
+                    Task { @MainActor in
+                        do {
+                            let applied = try await engine.detectMainsHumOnce()
+                            mainsDetectionMessage = applied ? "Detected frequency applied." : "No stable mains tone detected."
+                        } catch {
+                            mainsDetectionMessage = error.localizedDescription
+                        }
+                        mainsDetectInFlight = false
+                    }
+                }
+                .buttonStyle(.glassProminent)
+                .disabled(mainsDetectInFlight || engine.lifecycleState != .running)
+            }
+            if let mainsDetectionMessage {
+                Text(mainsDetectionMessage).font(.caption).foregroundStyle(.secondary)
             }
             Text("Current fundamental: \(configuration.mainsNotch.fundamentalHz, specifier: "%.2f") Hz")
                 .font(.caption.monospacedDigit())
@@ -351,6 +378,7 @@ struct ProductionDynamicsView: View {
 
     private var loudnessMatchEditor: some View {
         moduleCard(module: .loudnessMatch, enabled: boolBinding({ $0.loudnessMatch.enabled }, { $0.loudnessMatch.enabled = $1 }), reset: { preserveEnabledReset(\.loudnessMatch, defaultValue: LoudnessMatchConfiguration()) }) {
+            ProductionDynamicsTelemetryView(engine: engine, kind: .loudnessMatch)
             DynamicsParameterRow("Target", value: doubleBinding({ $0.loudnessMatch.targetLUFS }, { $0.loudnessMatch.targetLUFS = $1 }), range: -24 ... -10, step: 0.5, unit: "LUFS", digits: 1)
             DynamicsParameterRow("Maximum Correction", value: doubleBinding({ $0.loudnessMatch.maxCorrectionDB }, { $0.loudnessMatch.maxCorrectionDB = $1 }), range: 3...20, step: 1, unit: "dB", digits: 0)
             DynamicsParameterRow("Attack", value: doubleBinding({ $0.loudnessMatch.attackSeconds }, { $0.loudnessMatch.attackSeconds = $1 }), range: 0.3...5, step: 0.1, unit: "s", digits: 1)
@@ -374,6 +402,7 @@ struct ProductionDynamicsView: View {
 
     private var dialogueLevelerEditor: some View {
         moduleCard(module: .dialogueLeveler, enabled: boolBinding({ $0.dialogueRelativeLeveler.enabled }, { $0.dialogueRelativeLeveler.enabled = $1 }), reset: { preserveEnabledReset(\.dialogueRelativeLeveler, defaultValue: DialogueRelativeLevelerConfiguration()) }) {
+            ProductionDynamicsTelemetryView(engine: engine, kind: .dialogue)
             DynamicsParameterRow("Band Low", value: doubleBinding({ $0.dialogueRelativeLeveler.bandLowHz }, { $0.dialogueRelativeLeveler.bandLowHz = $1 }), range: 100...8_000, step: 50, unit: "Hz", digits: 0)
             DynamicsParameterRow("Band High", value: doubleBinding({ $0.dialogueRelativeLeveler.bandHighHz }, { $0.dialogueRelativeLeveler.bandHighHz = $1 }), range: 100...8_000, step: 50, unit: "Hz", digits: 0)
             DynamicsParameterRow("Target Gap", value: doubleBinding({ $0.dialogueRelativeLeveler.targetGapDB }, { $0.dialogueRelativeLeveler.targetGapDB = $1 }), range: 3...20, step: 0.5, unit: "dB", digits: 1)
@@ -409,6 +438,7 @@ struct ProductionDynamicsView: View {
 
     private var limiterEditor: some View {
         moduleCard(module: .limiter, enabled: boolBinding({ $0.limiter.enabled }, { $0.limiter.enabled = $1 }), reset: { preserveEnabledReset(\.limiter, defaultValue: LimiterConfiguration()) }) {
+            ProductionDynamicsTelemetryView(engine: engine, kind: .limiter)
             DynamicsParameterRow("Ceiling", value: doubleBinding({ $0.limiter.ceilingDB }, { $0.limiter.ceilingDB = $1 }), range: -20...0, step: 0.1, unit: "dB", digits: 1)
             DynamicsParameterRow("Attack", value: doubleBinding({ $0.limiter.attackMs }, { $0.limiter.attackMs = $1 }), range: 0.1...50, step: 0.1, unit: "ms", digits: 1)
             DynamicsParameterRow("Release", value: doubleBinding({ $0.limiter.releaseMs }, { $0.limiter.releaseMs = $1 }), range: 5...500, step: 5, unit: "ms", digits: 0)
