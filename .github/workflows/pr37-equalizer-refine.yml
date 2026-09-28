@@ -1,0 +1,37 @@
+name: PR37 Equalizer Refinement
+
+on:
+  push:
+    branches:
+      - feature/pr37-production-equalizer
+
+permissions:
+  contents: write
+
+jobs:
+  refine:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out PR37 branch
+        uses: actions/checkout@v7
+        with:
+          ref: feature/pr37-production-equalizer
+          fetch-depth: 0
+
+      - name: Apply Equalizer refinements
+        run: python3 ci/pr37_refine_equalizer_workspace.py
+
+      - name: Commit refined source
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add NotchSixty/UI/ProductionEqualizerView.swift
+          git add ci/validate_pr37_equalizer_ui.py
+          git add docs/PR37_PRODUCTION_EQUALIZER.md
+          if git diff --cached --quiet; then
+            echo "No refinement changes to commit."
+            exit 0
+          fi
+          git commit -m "PR37: refine equalizer interactions and graph cost"
+          git push origin HEAD:feature/pr37-production-equalizer
