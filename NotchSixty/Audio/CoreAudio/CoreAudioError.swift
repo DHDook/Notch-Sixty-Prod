@@ -362,6 +362,7 @@ final class CoreAudioTransportSession {
 
     private var bridge: OpaquePointer?
     private var graphPublicationCoordinator: DSPGraphPublicationCoordinator?
+    private var analysisWorker: ProductionAnalysisWorker?
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateDeviceID = AudioDeviceID(kAudioObjectUnknown)
     private var captureIOProcID: AudioDeviceIOProcID?
@@ -377,6 +378,7 @@ final class CoreAudioTransportSession {
         }
         bridge = newBridge
         graphPublicationCoordinator = DSPGraphPublicationCoordinator(bridge: newBridge)
+        analysisWorker = ProductionAnalysisWorker(bridge: newBridge)
 
         do {
             let processObject = try Self.currentProcessObjectID()
@@ -540,6 +542,15 @@ final class CoreAudioTransportSession {
     func setAnalysisDemand(_ demandMask: UInt32) {
         guard let bridge else { return }
         N60RealtimeAudioBridgeSetAnalysisDemand(bridge, demandMask)
+        analysisWorker?.setDemand(demandMask, sampleRate: outputFormat.sampleRate)
+    }
+
+    func productionAnalysisSnapshot() -> ProductionAnalysisSnapshot {
+        analysisWorker?.snapshot() ?? .empty
+    }
+
+    func resetSpectrumPeakHold() {
+        analysisWorker?.resetSpectrumPeakHold()
     }
 
     func analysisCaptureSnapshot() -> N60AnalysisCaptureSnapshot? {
@@ -743,6 +754,8 @@ final class CoreAudioTransportSession {
         guard !stopped else { return }
         stopped = true
         graphPublicationCoordinator?.stop()
+        analysisWorker?.stop()
+        analysisWorker = nil
 
         // Teardown remains synchronous so Core Audio cannot call through a freed
         // bridge. If output has opened, wait for the audio callback to report that

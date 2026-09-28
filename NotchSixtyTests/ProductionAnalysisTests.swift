@@ -47,10 +47,10 @@ final class ProductionAnalysisTests: XCTestCase {
     func testGoniometerUsesStandardFortyFiveDegreeRotation() {
         let mono = ProductionAnalysisMath.goniometerPoint(left: 1, right: 1)
         XCTAssertEqual(mono.x, 0, accuracy: 0.000_01)
-        XCTAssertEqual(mono.y, Float.sqrt(2), accuracy: 0.000_01)
+        XCTAssertEqual(mono.y, Float(2).squareRoot(), accuracy: 0.000_01)
 
         let side = ProductionAnalysisMath.goniometerPoint(left: 1, right: -1)
-        XCTAssertEqual(side.x, Float.sqrt(2), accuracy: 0.000_01)
+        XCTAssertEqual(side.x, Float(2).squareRoot(), accuracy: 0.000_01)
         XCTAssertEqual(side.y, 0, accuracy: 0.000_01)
     }
 

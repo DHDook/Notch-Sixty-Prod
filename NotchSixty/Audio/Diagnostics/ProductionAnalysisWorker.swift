@@ -42,7 +42,7 @@ enum ProductionAnalysisMath {
     }
 
     static func phaseCorrelation(left: [Float], right: [Float], count: Int) -> Float? {
-        let usable = min(count, left.count, right.count)
+        let usable = min(count, min(left.count, right.count))
         guard usable > 0 else { return nil }
 
         var cross = 0.0
@@ -480,7 +480,7 @@ final class ProductionAnalysisWorker: @unchecked Sendable {
     }
 
     private func copyLatestMono(count: Int) {
-        let usable = min(count, historyCount, Self.historyCapacity)
+        let usable = min(count, min(historyCount, Self.historyCapacity))
         let start = (historyWriteIndex - usable + Self.historyCapacity) % Self.historyCapacity
         for index in 0..<usable {
             let sourceIndex = (start + index) % Self.historyCapacity
@@ -490,7 +490,7 @@ final class ProductionAnalysisWorker: @unchecked Sendable {
     }
 
     private func copyLatestStereo(count: Int) {
-        let usable = min(count, historyCount, Self.correlationCapacity)
+        let usable = min(count, min(historyCount, Self.correlationCapacity))
         let start = (historyWriteIndex - usable + Self.historyCapacity) % Self.historyCapacity
         for index in 0..<usable {
             let sourceIndex = (start + index) % Self.historyCapacity

@@ -1495,6 +1495,14 @@ final class AudioIOEngine: ObservableObject {
         transportSession?.analysisCaptureSnapshot()
     }
 
+    func productionAnalysisSnapshot() -> ProductionAnalysisSnapshot {
+        transportSession?.productionAnalysisSnapshot() ?? .empty
+    }
+
+    func resetSpectrumPeakHold() {
+        transportSession?.resetSpectrumPeakHold()
+    }
+
     func readAnalysisFrames(into buffer: UnsafeMutableBufferPointer<N60AnalysisFrame>) -> Int {
         transportSession?.readAnalysisFrames(into: buffer) ?? 0
     }
