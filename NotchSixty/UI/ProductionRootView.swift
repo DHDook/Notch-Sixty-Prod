@@ -120,12 +120,7 @@ struct ProductionRootView: View {
         case .equalizer:
             ProductionEqualizerView(engine: engine)
         case .dynamics:
-            ProductionPlaceholderPage(
-                title: "Dynamics",
-                subtitle: "Level control, protection, noise tools, and program-aware processing.",
-                systemImage: "waveform.path.ecg",
-                detail: "The dense dynamics editor will migrate from validation into this production workspace."
-            )
+            ProductionDynamicsView(engine: engine)
         case .meters:
             ProductionPlaceholderPage(
                 title: "Meters",

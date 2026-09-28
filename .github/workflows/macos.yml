@@ -123,6 +123,21 @@ jobs:
       - name: Validate PR37 Production Equalizer
         run: python3 ci/validate_pr37_equalizer_ui.py
 
+      - name: Validate PR38 Production Dynamics
+        run: python3 ci/validate_pr38_dynamics_ui.py
+
+      - name: Validate PR38 Denoiser Advanced Parity
+        run: |
+          REALTIME_SOURCES=$(find NotchSixty/Audio/Realtime -name '*.c' ! -name 'N60RealtimeAudioBridge.c' -print)
+          clang -std=c11 -O2 -Wall -Wextra -Werror \
+            -include stddef.h \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr38_denoiser_advanced.c \
+            $REALTIME_SOURCES \
+            -framework Accelerate \
+            -o /tmp/validate-pr38-denoiser-advanced
+          /tmp/validate-pr38-denoiser-advanced
+
       - name: Benchmark PR35 Render Kernel O0 vs O3
         run: |
           REALTIME_SOURCES=$(find NotchSixty/Audio/Realtime -name '*.c' ! -name 'N60RealtimeAudioBridge.c' -print)

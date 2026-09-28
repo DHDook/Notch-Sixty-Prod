@@ -35,6 +35,9 @@
 		A30000000000000000000016 /* N60DynamicEQ.c in Sources */ = {isa = PBXBuildFile; fileRef = A3000000000000000000002B /* N60DynamicEQ.c */; };
 		A40000000000000000000010 /* ProductionRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000020 /* ProductionRootView.swift */; };
 		A40000000000000000000011 /* ProductionEqualizerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000021 /* ProductionEqualizerView.swift */; };
+		A40000000000000000000012 /* ProductionDynamicsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000022 /* ProductionDynamicsView.swift */; };
+		A40000000000000000000013 /* ProductionDynamicsTelemetryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000023 /* ProductionDynamicsTelemetryView.swift */; };
+		A30000000000000000000017 /* N60DynamicsLegacyAdvanced.c in Sources */ = {isa = PBXBuildFile; fileRef = A3000000000000000000002D /* N60DynamicsLegacyAdvanced.c */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -85,6 +88,10 @@
 		A3000000000000000000002C /* N60DynamicEQ.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60DynamicEQ.h; sourceTree = "<group>"; };
 		A40000000000000000000020 /* ProductionRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionRootView.swift; sourceTree = "<group>"; };
 		A40000000000000000000021 /* ProductionEqualizerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionEqualizerView.swift; sourceTree = "<group>"; };
+		A40000000000000000000022 /* ProductionDynamicsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionDynamicsView.swift; sourceTree = "<group>"; };
+		A40000000000000000000023 /* ProductionDynamicsTelemetryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionDynamicsTelemetryView.swift; sourceTree = "<group>"; };
+		A3000000000000000000002D /* N60DynamicsLegacyAdvanced.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = N60DynamicsLegacyAdvanced.c; sourceTree = "<group>"; };
+		A3000000000000000000002E /* N60DynamicsLegacyAdvanced.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60DynamicsLegacyAdvanced.h; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -174,11 +181,13 @@
 				A3000000000000000000002A /* N60SpectralDenoiser.h */,
 				A3000000000000000000002B /* N60DynamicEQ.c */,
 				A3000000000000000000002C /* N60DynamicEQ.h */,
+				A3000000000000000000002D /* N60DynamicsLegacyAdvanced.c */,
+				A3000000000000000000002E /* N60DynamicsLegacyAdvanced.h */,
 			);
 			path = Realtime;
 			sourceTree = "<group>";
 		};
-		A40000000000000000000050 /* UI */ = {isa = PBXGroup; children = (A40000000000000000000020 /* ProductionRootView.swift */, A40000000000000000000021 /* ProductionEqualizerView.swift */,); path = UI; sourceTree = "<group>"; };
+		A40000000000000000000050 /* UI */ = {isa = PBXGroup; children = (A40000000000000000000020 /* ProductionRootView.swift */, A40000000000000000000021 /* ProductionEqualizerView.swift */, A40000000000000000000022 /* ProductionDynamicsView.swift */, A40000000000000000000023 /* ProductionDynamicsTelemetryView.swift */,); path = UI; sourceTree = "<group>"; };
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -245,6 +254,8 @@
 				A10000000000000000000010 /* NotchSixtyApp.swift in Sources */,
 				A40000000000000000000010 /* ProductionRootView.swift in Sources */,
 				A40000000000000000000011 /* ProductionEqualizerView.swift in Sources */,
+				A40000000000000000000012 /* ProductionDynamicsView.swift in Sources */,
+				A40000000000000000000013 /* ProductionDynamicsTelemetryView.swift in Sources */,
 				A20000000000000000000010 /* AudioIOEngine.swift in Sources */,
 				A20000000000000000000011 /* CoreAudioError.swift in Sources */,
 				A20000000000000000000012 /* AudioOutputDevice.swift in Sources */,
@@ -262,6 +273,7 @@
 				A30000000000000000000014 /* N60Protection.c in Sources */,
 				A30000000000000000000015 /* N60SpectralDenoiser.c in Sources */,
 				A30000000000000000000016 /* N60DynamicEQ.c in Sources */,
+				A30000000000000000000017 /* N60DynamicsLegacyAdvanced.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
