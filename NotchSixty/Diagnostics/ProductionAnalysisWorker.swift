@@ -73,7 +73,9 @@ enum ProductionAnalysisMath {
 /// Independently authored production RTA. It intentionally analyzes copied
 /// bridge samples off the realtime callback. The transform setup and all work
 /// buffers are retained across updates so steady-state analysis does not rebuild
-/// FFT state or allocate large scratch vectors.
+/// FFT state or allocate large scratch vectors. Left/right spectra are combined
+/// by energy after the transforms so anti-phase stereo content cannot disappear
+/// through a time-domain mono sum.
 final class ProductionSpectrumAnalyzer {
     private static let bandCount = 96
     private static let peakHoldUpdates = 20       // ~1 s at the worker's 20 Hz cadence.
@@ -84,12 +86,21 @@ final class ProductionSpectrumAnalyzer {
     private var window: [Float] = []
     private var windowSum: Float = 1
     private var zeroImaginary: [Float] = []
-    private var inputWindowed: [Float] = []
-    private var outputWindowed: [Float] = []
-    private var inputReal: [Float] = []
-    private var inputImaginary: [Float] = []
-    private var outputReal: [Float] = []
-    private var outputImaginary: [Float] = []
+
+    private var inputLeftWindowed: [Float] = []
+    private var inputRightWindowed: [Float] = []
+    private var outputLeftWindowed: [Float] = []
+    private var outputRightWindowed: [Float] = []
+
+    private var inputLeftReal: [Float] = []
+    private var inputLeftImaginary: [Float] = []
+    private var inputRightReal: [Float] = []
+    private var inputRightImaginary: [Float] = []
+    private var outputLeftReal: [Float] = []
+    private var outputLeftImaginary: [Float] = []
+    private var outputRightReal: [Float] = []
+    private var outputRightImaginary: [Float] = []
+
     private var inputPeakHold: [Float] = []
     private var outputPeakHold: [Float] = []
     private var inputPeakAge: [Int] = []
@@ -107,15 +118,19 @@ final class ProductionSpectrumAnalyzer {
     }
 
     func analyze(
-        input: [Float],
-        output: [Float],
+        inputLeft: [Float],
+        inputRight: [Float],
+        outputLeft: [Float],
+        outputRight: [Float],
         count: Int,
         sampleRate: Double
     ) -> [ProductionSpectrumBand] {
         let transformSize = ProductionAnalysisMath.fftSize(sampleRate: sampleRate)
         guard count >= transformSize,
-              input.count >= transformSize,
-              output.count >= transformSize,
+              inputLeft.count >= transformSize,
+              inputRight.count >= transformSize,
+              outputLeft.count >= transformSize,
+              outputRight.count >= transformSize,
               sampleRate.isFinite,
               sampleRate > 0,
               configureIfNeeded(size: transformSize) else {
@@ -124,13 +139,18 @@ final class ProductionSpectrumAnalyzer {
 
         let sourceOffset = count - transformSize
         for index in 0..<transformSize {
+            let sourceIndex = sourceOffset + index
             let windowValue = window[index]
-            inputWindowed[index] = input[sourceOffset + index] * windowValue
-            outputWindowed[index] = output[sourceOffset + index] * windowValue
+            inputLeftWindowed[index] = inputLeft[sourceIndex] * windowValue
+            inputRightWindowed[index] = inputRight[sourceIndex] * windowValue
+            outputLeftWindowed[index] = outputLeft[sourceIndex] * windowValue
+            outputRightWindowed[index] = outputRight[sourceIndex] * windowValue
         }
 
-        execute(inputWindowed, outputReal: &inputReal, outputImaginary: &inputImaginary)
-        execute(outputWindowed, outputReal: &outputReal, outputImaginary: &outputImaginary)
+        execute(inputLeftWindowed, outputReal: &inputLeftReal, outputImaginary: &inputLeftImaginary)
+        execute(inputRightWindowed, outputReal: &inputRightReal, outputImaginary: &inputRightImaginary)
+        execute(outputLeftWindowed, outputReal: &outputLeftReal, outputImaginary: &outputLeftImaginary)
+        execute(outputRightWindowed, outputReal: &outputRightReal, outputImaginary: &outputRightImaginary)
 
         let nyquist = sampleRate * 0.5
         let maximumFrequency = min(20_000.0, nyquist * 0.98)
@@ -164,12 +184,37 @@ final class ProductionSpectrumAnalyzer {
             var outputMagnitude = 0.0
             if firstBin <= lastBin {
                 for bin in firstBin...lastBin {
-                    let inReal = Double(inputReal[bin])
-                    let inImag = Double(inputImaginary[bin])
-                    let outReal = Double(outputReal[bin])
-                    let outImag = Double(outputImaginary[bin])
-                    inputMagnitude = max(inputMagnitude, hypot(inReal, inImag))
-                    outputMagnitude = max(outputMagnitude, hypot(outReal, outImag))
+                    let inputLeftMagnitude = hypot(
+                        Double(inputLeftReal[bin]),
+                        Double(inputLeftImaginary[bin])
+                    )
+                    let inputRightMagnitude = hypot(
+                        Double(inputRightReal[bin]),
+                        Double(inputRightImaginary[bin])
+                    )
+                    let outputLeftMagnitude = hypot(
+                        Double(outputLeftReal[bin]),
+                        Double(outputLeftImaginary[bin])
+                    )
+                    let outputRightMagnitude = hypot(
+                        Double(outputRightReal[bin]),
+                        Double(outputRightImaginary[bin])
+                    )
+
+                    let inputStereoMagnitude = sqrt(
+                        0.5 * (
+                            inputLeftMagnitude * inputLeftMagnitude
+                            + inputRightMagnitude * inputRightMagnitude
+                        )
+                    )
+                    let outputStereoMagnitude = sqrt(
+                        0.5 * (
+                            outputLeftMagnitude * outputLeftMagnitude
+                            + outputRightMagnitude * outputRightMagnitude
+                        )
+                    )
+                    inputMagnitude = max(inputMagnitude, inputStereoMagnitude)
+                    outputMagnitude = max(outputMagnitude, outputStereoMagnitude)
                 }
             }
 
@@ -208,12 +253,20 @@ final class ProductionSpectrumAnalyzer {
         configuredSize = size
         window = [Float](repeating: 0, count: size)
         zeroImaginary = [Float](repeating: 0, count: size)
-        inputWindowed = [Float](repeating: 0, count: size)
-        outputWindowed = [Float](repeating: 0, count: size)
-        inputReal = [Float](repeating: 0, count: size)
-        inputImaginary = [Float](repeating: 0, count: size)
-        outputReal = [Float](repeating: 0, count: size)
-        outputImaginary = [Float](repeating: 0, count: size)
+
+        inputLeftWindowed = [Float](repeating: 0, count: size)
+        inputRightWindowed = [Float](repeating: 0, count: size)
+        outputLeftWindowed = [Float](repeating: 0, count: size)
+        outputRightWindowed = [Float](repeating: 0, count: size)
+
+        inputLeftReal = [Float](repeating: 0, count: size)
+        inputLeftImaginary = [Float](repeating: 0, count: size)
+        inputRightReal = [Float](repeating: 0, count: size)
+        inputRightImaginary = [Float](repeating: 0, count: size)
+        outputLeftReal = [Float](repeating: 0, count: size)
+        outputLeftImaginary = [Float](repeating: 0, count: size)
+        outputRightReal = [Float](repeating: 0, count: size)
+        outputRightImaginary = [Float](repeating: 0, count: size)
 
         if size == 1 {
             window[0] = 1
@@ -296,9 +349,10 @@ final class ProductionSpectrumAnalyzer {
 /// the sole reader of the bridge analysis ring, which preserves the SPSC
 /// contract. SwiftUI receives only compact immutable snapshots.
 final class ProductionAnalysisWorker: @unchecked Sendable {
-    private static let historyCapacity = 32_768
+    private static let historyCapacity = 65_536
+    private static let spectrumCapacity = 32_768
     private static let drainCapacity = 8_192
-    private static let correlationCapacity = 8_192
+    private static let correlationCapacity = 65_536
     private static let goniometerHistoryFrames = 4_096
     private static let goniometerPointLimit = 384
 
@@ -318,15 +372,17 @@ final class ProductionAnalysisWorker: @unchecked Sendable {
         repeating: N60AnalysisFrame(inputLeft: 0, inputRight: 0, outputLeft: 0, outputRight: 0),
         count: ProductionAnalysisWorker.drainCapacity
     )
-    private var inputHistory = [Float](repeating: 0, count: ProductionAnalysisWorker.historyCapacity)
-    private var outputHistory = [Float](repeating: 0, count: ProductionAnalysisWorker.historyCapacity)
+    private var inputLeftHistory = [Float](repeating: 0, count: ProductionAnalysisWorker.historyCapacity)
+    private var inputRightHistory = [Float](repeating: 0, count: ProductionAnalysisWorker.historyCapacity)
     private var outputLeftHistory = [Float](repeating: 0, count: ProductionAnalysisWorker.historyCapacity)
     private var outputRightHistory = [Float](repeating: 0, count: ProductionAnalysisWorker.historyCapacity)
     private var historyWriteIndex = 0
     private var historyCount = 0
 
-    private var latestInput = [Float](repeating: 0, count: ProductionAnalysisWorker.historyCapacity)
-    private var latestOutput = [Float](repeating: 0, count: ProductionAnalysisWorker.historyCapacity)
+    private var latestInputLeft = [Float](repeating: 0, count: ProductionAnalysisWorker.spectrumCapacity)
+    private var latestInputRight = [Float](repeating: 0, count: ProductionAnalysisWorker.spectrumCapacity)
+    private var latestOutputLeft = [Float](repeating: 0, count: ProductionAnalysisWorker.spectrumCapacity)
+    private var latestOutputRight = [Float](repeating: 0, count: ProductionAnalysisWorker.spectrumCapacity)
     private var latestLeft = [Float](repeating: 0, count: ProductionAnalysisWorker.correlationCapacity)
     private var latestRight = [Float](repeating: 0, count: ProductionAnalysisWorker.correlationCapacity)
 
@@ -418,10 +474,12 @@ final class ProductionAnalysisWorker: @unchecked Sendable {
         if (demandMask & UInt32(N60_ANALYSIS_DEMAND_SPECTRUM)) != 0 {
             let transformSize = ProductionAnalysisMath.fftSize(sampleRate: sampleRate)
             if historyCount >= transformSize {
-                copyLatestMono(count: transformSize)
+                copyLatestSpectrum(count: transformSize)
                 next.spectrum = spectrumAnalyzer.analyze(
-                    input: latestInput,
-                    output: latestOutput,
+                    inputLeft: latestInputLeft,
+                    inputRight: latestInputRight,
+                    outputLeft: latestOutputLeft,
+                    outputRight: latestOutputRight,
                     count: transformSize,
                     sampleRate: sampleRate
                 )
@@ -429,7 +487,9 @@ final class ProductionAnalysisWorker: @unchecked Sendable {
         }
 
         if (demandMask & UInt32(N60_ANALYSIS_DEMAND_STEREO)) != 0 {
-            let requestedCorrelationFrames = Int(min(max(sampleRate * 0.1, 1_024), Double(Self.correlationCapacity)))
+            let requestedCorrelationFrames = Int(
+                min(max(sampleRate * 0.1, 1_024), Double(Self.correlationCapacity))
+            )
             let correlationFrames = min(historyCount, requestedCorrelationFrames)
             if correlationFrames > 0 {
                 copyLatestStereo(count: correlationFrames)
@@ -461,8 +521,8 @@ final class ProductionAnalysisWorker: @unchecked Sendable {
 
             for index in 0..<readCount {
                 let frame = drainBuffer[index]
-                inputHistory[historyWriteIndex] = (frame.inputLeft + frame.inputRight) * 0.5
-                outputHistory[historyWriteIndex] = (frame.outputLeft + frame.outputRight) * 0.5
+                inputLeftHistory[historyWriteIndex] = frame.inputLeft
+                inputRightHistory[historyWriteIndex] = frame.inputRight
                 outputLeftHistory[historyWriteIndex] = frame.outputLeft
                 outputRightHistory[historyWriteIndex] = frame.outputRight
                 historyWriteIndex += 1
@@ -479,13 +539,15 @@ final class ProductionAnalysisWorker: @unchecked Sendable {
         historyCount = 0
     }
 
-    private func copyLatestMono(count: Int) {
-        let usable = min(count, min(historyCount, Self.historyCapacity))
+    private func copyLatestSpectrum(count: Int) {
+        let usable = min(count, min(historyCount, Self.spectrumCapacity))
         let start = (historyWriteIndex - usable + Self.historyCapacity) % Self.historyCapacity
         for index in 0..<usable {
             let sourceIndex = (start + index) % Self.historyCapacity
-            latestInput[index] = inputHistory[sourceIndex]
-            latestOutput[index] = outputHistory[sourceIndex]
+            latestInputLeft[index] = inputLeftHistory[sourceIndex]
+            latestInputRight[index] = inputRightHistory[sourceIndex]
+            latestOutputLeft[index] = outputLeftHistory[sourceIndex]
+            latestOutputRight[index] = outputRightHistory[sourceIndex]
         }
     }
 
