@@ -18,4 +18,12 @@ Slice 3 integrates the off-callback production analysis engine.
 - A later ownership audit found and fixed a potential SPSC race: demand changes no longer mutate the consumer read index from the control thread. The worker exclusively owns read-index advancement/discard operations on its serial queue.
 - The temporary compiler-diagnostic and ownership-fix workflows were removed after their changes landed.
 
+## Dashboard signature VU finishing amendment
+
+- The signature Dashboard VU display floor is extended from -30 VU to -40 VU without changing the established `0 VU = -18 dBFS` calibration or +3 VU ceiling.
+- Scale geometry now uses continuous piecewise interpolation between explicit analog-style anchors rather than linear dB spacing. The quiet end is compressed while progressively more angular resolution is reserved for the working range around 0 VU.
+- Additional major/minor graduations provide useful visual reference across the extended range while retaining the existing 130-degree needle sweep and meter ballistics.
+- The retained PR36 production-UI validator now guards the -40 VU floor, nonlinear scale anchors, and updated dBFS-to-VU clamping contract.
+- This amendment changes only Dashboard meter presentation/mapping; it does not enable detailed metering, add a peak readout, or alter the independent output-VU demand pipeline.
+
 The production Spectrum and Stereo SwiftUI surfaces are now wired. The next gate is the normal exact-head macOS Debug/Release/XCTest suite followed by focused hardware/UI/CPU validation.
