@@ -72,7 +72,7 @@ enum DynamicsConfigurationError: Error, LocalizedError, Equatable {
 }
 
 
-enum StereoProcessingMode: String, CaseIterable, Identifiable, Sendable {
+enum StereoProcessingMode: String, CaseIterable, Identifiable, Codable, Sendable {
     case stereo
     case wideMono
     case trueMono
@@ -94,7 +94,7 @@ enum StereoProcessingMode: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-struct StereoWidenerConfiguration: Equatable, Sendable {
+struct StereoWidenerConfiguration: Equatable, Codable, Sendable {
     static let lowWidthRange = 0.0...1.0
     static let midWidthRange = 1.0...2.0
     static let highWidthRange = 1.0...2.0
@@ -121,11 +121,11 @@ struct StereoWidenerConfiguration: Equatable, Sendable {
     }
 }
 
-struct DCOffsetFilterConfiguration: Equatable, Sendable {
+struct DCOffsetFilterConfiguration: Equatable, Codable, Sendable {
     var enabled = false
 }
 
-enum InfrasonicSlope: String, CaseIterable, Identifiable, Sendable {
+enum InfrasonicSlope: String, CaseIterable, Identifiable, Codable, Sendable {
     case db24
     case db48
     case db96
@@ -147,7 +147,7 @@ enum InfrasonicSlope: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-struct InfrasonicFilterConfiguration: Equatable, Sendable {
+struct InfrasonicFilterConfiguration: Equatable, Codable, Sendable {
     static let cutoffRange = 10.0...30.0
     var enabled = false
     var cutoffHz = 18.0
@@ -160,7 +160,7 @@ struct InfrasonicFilterConfiguration: Equatable, Sendable {
     }
 }
 
-enum MainsRegion: Int, CaseIterable, Identifiable, Sendable {
+enum MainsRegion: Int, CaseIterable, Identifiable, Codable, Sendable {
     case hz50 = 50
     case hz60 = 60
 
@@ -169,7 +169,7 @@ enum MainsRegion: Int, CaseIterable, Identifiable, Sendable {
     var fundamentalHz: Double { Double(rawValue) }
 }
 
-struct MainsNotchConfiguration: Equatable, Sendable {
+struct MainsNotchConfiguration: Equatable, Codable, Sendable {
     static let harmonicCountRange = 1...16
     static let qRange = 5.0...60.0
     static let depthRange = -40.0...0.0
@@ -205,7 +205,7 @@ struct MainsNotchConfiguration: Equatable, Sendable {
     }
 }
 
-enum SpectralDenoiserPreset: String, CaseIterable, Identifiable, Sendable {
+enum SpectralDenoiserPreset: String, CaseIterable, Identifiable, Codable, Sendable {
     case natural
     case standard
     case aggressive
@@ -234,7 +234,7 @@ enum SpectralDenoiserPreset: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-enum SpectralDenoiserQuality: String, CaseIterable, Identifiable, Sendable {
+enum SpectralDenoiserQuality: String, CaseIterable, Identifiable, Codable, Sendable {
     case quality
     case high
     case ultra
@@ -256,7 +256,7 @@ enum SpectralDenoiserQuality: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-enum SpectralDenoiserProfileCommand: Equatable, Sendable {
+enum SpectralDenoiserProfileCommand: Equatable, Codable, Sendable {
     case none
     case capture
     case reset
@@ -270,7 +270,7 @@ enum SpectralDenoiserProfileCommand: Equatable, Sendable {
     }
 }
 
-struct SpectralDenoiserConfiguration: Equatable, Sendable {
+struct SpectralDenoiserConfiguration: Equatable, Codable, Sendable {
     static let reductionRange = 0.0...1.0
     static let thresholdRange = -96.0 ... -30.0
     static let protectedFrequencyRange = 0.0...20_000.0
@@ -374,7 +374,7 @@ struct SpectralDenoiserConfiguration: Equatable, Sendable {
     }
 }
 
-struct LoudnessMatchConfiguration: Equatable, Sendable {
+struct LoudnessMatchConfiguration: Equatable, Codable, Sendable {
     static let targetRange = -24.0 ... -10.0
     static let maxCorrectionRange = 3.0...20.0
     static let attackRange = 0.3...5.0
@@ -397,7 +397,7 @@ struct LoudnessMatchConfiguration: Equatable, Sendable {
     }
 }
 
-enum LoudnessLevelSource: String, CaseIterable, Identifiable, Sendable {
+enum LoudnessLevelSource: String, CaseIterable, Identifiable, Codable, Sendable {
     case systemVolume
     case integrated
     var id: String { rawValue }
@@ -407,7 +407,7 @@ enum LoudnessLevelSource: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-struct LoudnessContourConfiguration: Equatable, Sendable {
+struct LoudnessContourConfiguration: Equatable, Codable, Sendable {
     static let strengthRange = 0.0...1.0
     static let referencePhonsRange = 60.0...95.0
     static let maxBoostRange = 6.0...20.0
@@ -430,7 +430,7 @@ struct LoudnessContourConfiguration: Equatable, Sendable {
     }
 }
 
-struct DeHarshConfiguration: Equatable, Sendable {
+struct DeHarshConfiguration: Equatable, Codable, Sendable {
     static let amountRange = -6.0...0.0
     static let frequencyRange = 1_500.0...10_000.0
     var enabled = false
@@ -446,7 +446,7 @@ struct DeHarshConfiguration: Equatable, Sendable {
     }
 }
 
-struct DialogueVoiceGateConfiguration: Equatable, Sendable {
+struct DialogueVoiceGateConfiguration: Equatable, Codable, Sendable {
     static let centerRange = 2.0...10.0
     static let bandwidthRange = 2.0...8.0
     static let envelopeWindowRange = 5.0...30.0
@@ -476,7 +476,7 @@ struct DialogueVoiceGateConfiguration: Equatable, Sendable {
     }
 }
 
-struct DialogueRelativeLevelerConfiguration: Equatable, Sendable {
+struct DialogueRelativeLevelerConfiguration: Equatable, Codable, Sendable {
     static let bandRange = 100.0...8_000.0
     static let targetGapRange = 3.0...20.0
     static let boostRatioRange = 1.0...6.0
@@ -516,7 +516,7 @@ struct DialogueRelativeLevelerConfiguration: Equatable, Sendable {
     }
 }
 
-enum DynamicEQDirection: String, CaseIterable, Identifiable, Sendable {
+enum DynamicEQDirection: String, CaseIterable, Identifiable, Codable, Sendable {
     case cutOnly
     case boostOnly
     case both
@@ -538,7 +538,7 @@ enum DynamicEQDirection: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-enum DynamicEQDetectorMode: String, CaseIterable, Identifiable, Sendable {
+enum DynamicEQDetectorMode: String, CaseIterable, Identifiable, Codable, Sendable {
     case peak
     case rms
 
@@ -549,7 +549,7 @@ enum DynamicEQDetectorMode: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-struct DynamicEQBandConfiguration: Equatable, Sendable {
+struct DynamicEQBandConfiguration: Equatable, Codable, Sendable {
     static let frequencyRange = 20.0...20_000.0
     static let qRange = 0.4...8.0
     static let staticGainRange = -18.0...6.0
@@ -597,7 +597,7 @@ struct DynamicEQBandConfiguration: Equatable, Sendable {
     }
 }
 
-struct DynamicEQConfiguration: Equatable, Sendable {
+struct DynamicEQConfiguration: Equatable, Codable, Sendable {
     static let maximumBandCount = Int(N60_DYNAMIC_EQ_MAX_BANDS)
     var enabled = false
     var bands: [DynamicEQBandConfiguration] = []
@@ -610,7 +610,7 @@ struct DynamicEQConfiguration: Equatable, Sendable {
     }
 }
 
-struct DeEsserConfiguration: Equatable, Sendable {
+struct DeEsserConfiguration: Equatable, Codable, Sendable {
     static let frequencyRange = 2_000.0...10_000.0
     static let thresholdRange = -60.0...0.0
     static let ratioRange = 1.0...20.0
@@ -642,7 +642,7 @@ struct DeEsserConfiguration: Equatable, Sendable {
     }
 }
 
-enum MultibandSlope: String, CaseIterable, Identifiable, Sendable {
+enum MultibandSlope: String, CaseIterable, Identifiable, Codable, Sendable {
     case gentle
     case steep
 
@@ -662,7 +662,7 @@ enum MultibandSlope: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-struct MultibandCompressorConfiguration: Equatable, Sendable {
+struct MultibandCompressorConfiguration: Equatable, Codable, Sendable {
     static let lowMidFrequencyRange = 40.0...250.0
     static let midHighFrequencyRange = 1_000.0...8_000.0
     static let thresholdRange = -60.0...0.0
@@ -729,7 +729,7 @@ struct MultibandCompressorConfiguration: Equatable, Sendable {
     }
 }
 
-enum CompressorTopology: String, CaseIterable, Identifiable, Sendable {
+enum CompressorTopology: String, CaseIterable, Identifiable, Codable, Sendable {
     case feedForward
     case feedBack
     var id: String { rawValue }
@@ -737,7 +737,7 @@ enum CompressorTopology: String, CaseIterable, Identifiable, Sendable {
     var cType: N60CompressorTopology { self == .feedForward ? N60CompressorTopologyFeedForward : N60CompressorTopologyFeedBack }
 }
 
-struct CompressorConfiguration: Equatable, Sendable {
+struct CompressorConfiguration: Equatable, Codable, Sendable {
     static let thresholdRange = -96.0...0.0
     static let ratioRange = 1.0...100.0
     static let kneeRange = 0.0...24.0
@@ -770,7 +770,7 @@ struct CompressorConfiguration: Equatable, Sendable {
     }
 }
 
-struct ExpanderConfiguration: Equatable, Sendable {
+struct ExpanderConfiguration: Equatable, Codable, Sendable {
     static let thresholdRange = -120.0...0.0
     static let ratioRange = 1.0...20.0
     static let rangeRange = -96.0...0.0
@@ -795,7 +795,7 @@ struct ExpanderConfiguration: Equatable, Sendable {
     }
 }
 
-struct PauseGatePresetParameters: Equatable, Sendable {
+struct PauseGatePresetParameters: Equatable, Codable, Sendable {
     var thresholdDBFS: Double
     var holdMs: Double
     var attackMs: Double
@@ -803,7 +803,7 @@ struct PauseGatePresetParameters: Equatable, Sendable {
     var hysteresisDB: Double
 }
 
-enum PauseGatePreset: String, CaseIterable, Identifiable, Sendable {
+enum PauseGatePreset: String, CaseIterable, Identifiable, Codable, Sendable {
     case amplifierHiss
     case sensitive
     case relaxed
@@ -832,7 +832,7 @@ enum PauseGatePreset: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-struct PauseGateConfiguration: Equatable, Sendable {
+struct PauseGateConfiguration: Equatable, Codable, Sendable {
     static let thresholdRange = -80.0 ... -40.0
     static let holdRange = 100.0...2_000.0
     static let attackRange = 1.0...100.0
@@ -878,7 +878,7 @@ struct PauseGateConfiguration: Equatable, Sendable {
     }
 }
 
-enum OversamplingFactor: Int, CaseIterable, Identifiable, Sendable {
+enum OversamplingFactor: Int, CaseIterable, Identifiable, Codable, Sendable {
     case one = 1
     case two = 2
     case four = 4
@@ -895,7 +895,7 @@ enum OversamplingFactor: Int, CaseIterable, Identifiable, Sendable {
     }
 }
 
-enum SoftClipperCurve: String, CaseIterable, Identifiable, Sendable {
+enum SoftClipperCurve: String, CaseIterable, Identifiable, Codable, Sendable {
     case quadratic
     case cubic
     case sine
@@ -921,7 +921,7 @@ enum SoftClipperCurve: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-struct SoftClipperConfiguration: Equatable, Sendable {
+struct SoftClipperConfiguration: Equatable, Codable, Sendable {
     static let driveRange = 0.0...12.0
     static let thresholdRange = -6.0...0.0
     static let kneeRange = 0.0...1.0
@@ -945,7 +945,7 @@ struct SoftClipperConfiguration: Equatable, Sendable {
     }
 }
 
-struct LimiterConfiguration: Equatable, Sendable {
+struct LimiterConfiguration: Equatable, Codable, Sendable {
     static let ceilingRange = -20.0...0.0
     static let attackRange = 0.1...50.0
     static let releaseRange = 5.0...500.0
@@ -971,7 +971,7 @@ struct LimiterConfiguration: Equatable, Sendable {
     }
 }
 
-enum GainRiderSpeed: String, CaseIterable, Identifiable, Sendable {
+enum GainRiderSpeed: String, CaseIterable, Identifiable, Codable, Sendable {
     case fast
     case medium
     case slow
@@ -986,7 +986,7 @@ enum GainRiderSpeed: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-struct GainRiderConfiguration: Equatable, Sendable {
+struct GainRiderConfiguration: Equatable, Codable, Sendable {
     static let targetRange = 0.5...6.0
     static let maxReductionRange = 3.0...12.0
     var enabled = false
@@ -1002,7 +1002,7 @@ struct GainRiderConfiguration: Equatable, Sendable {
     }
 }
 
-struct AutomaticHeadroomConfiguration: Equatable, Sendable {
+struct AutomaticHeadroomConfiguration: Equatable, Codable, Sendable {
     static let maxAttenuationRange = 3.0...24.0
     // Disabled by default in the commercial validation build so accepted PR25–32
     // listening baselines are not silently attenuated; production presets can opt in.
@@ -1016,7 +1016,7 @@ struct AutomaticHeadroomConfiguration: Equatable, Sendable {
     }
 }
 
-struct DynamicsConfiguration: Equatable, Sendable {
+struct DynamicsConfiguration: Equatable, Codable, Sendable {
     var stereoMode: StereoProcessingMode = .stereo
     var stereoWidener = StereoWidenerConfiguration()
     var dcOffsetFilter = DCOffsetFilterConfiguration()

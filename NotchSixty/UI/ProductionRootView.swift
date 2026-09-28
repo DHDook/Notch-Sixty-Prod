@@ -159,6 +159,8 @@ struct ProductionRootView: View {
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
         ToolbarItemGroup(placement: .primaryAction) {
+            ProductionProfileToolbar(profiles: product.profiles, engine: engine)
+
             if let output = engine.selectedOutputDevice {
                 Text("\(output.name) · \(output.nominalSampleRate / 1_000, specifier: "%.1f") kHz")
                     .font(.caption)

@@ -2073,4 +2073,74 @@ extension NotchSixtyTests {
         XCTAssertLessThan(highAmplitude, lowAmplitude * 0.75,
                           "An unprotected captured stationary component should be reduced relative to the protected band")
     }
+
+    func testProductProfileModelsRoundTripAndPreserveLayerOwnership() throws {
+        var eq = StereoEQConfiguration()
+        eq.phaseMode = .mixedPhase
+        eq.linkedBands = [
+            EQBand(type: .peaking, frequencyHz: 1_800, gainDB: 1.2, q: 1.0)
+        ]
+        var dynamics = DynamicsConfiguration()
+        dynamics.loudnessContour.enabled = true
+        dynamics.loudnessContour.strength = 0.65
+
+        let content = ContentPreset(
+            name: "Round Trip",
+            origin: .user,
+            state: ContentPresetState(
+                stereoEQ: eq,
+                inputPreampDB: -2,
+                headroomAttenuationDB: -1.5,
+                dynamics: dynamics
+            )
+        )
+        let contentData = try JSONEncoder().encode(content)
+        XCTAssertEqual(try JSONDecoder().decode(ContentPreset.self, from: contentData), content)
+
+        var baseGain = DSPGainConfiguration()
+        baseGain.outputGainDB = 4
+        let contentGain = content.state.composingGain(over: baseGain)
+        XCTAssertEqual(contentGain.inputPreampDB, -2)
+        XCTAssertEqual(contentGain.headroomAttenuationDB, -1.5)
+        XCTAssertEqual(contentGain.outputGainDB, 4, "Content Presets must preserve System output trim")
+
+        var playback = PlaybackControlConfiguration()
+        playback.globalBypassed = true
+        playback.auditionMode = .delta
+        var systemPlayback = PlaybackSystemControlState(playback)
+        systemPlayback.balance = 0.2
+        systemPlayback.interChannelDelayMs = 0.75
+        let appliedPlayback = systemPlayback.applying(to: playback)
+        XCTAssertTrue(appliedPlayback.globalBypassed)
+        XCTAssertEqual(appliedPlayback.auditionMode, .delta)
+        XCTAssertEqual(appliedPlayback.balance, 0.2)
+        XCTAssertEqual(appliedPlayback.interChannelDelayMs, 0.75)
+
+        var bass = BassManagementConfiguration()
+        bass.enabled = true
+        bass.frequencyHz = 80
+        let system = PlaybackSystemProfile(
+            name: "Living Room",
+            state: PlaybackSystemState(
+                associatedOutputUID: "test-output",
+                outputGainDB: 2.5,
+                playback: systemPlayback,
+                bassManagement: bass
+            )
+        )
+        let systemData = try JSONEncoder().encode(system)
+        XCTAssertEqual(
+            try JSONDecoder().decode(PlaybackSystemProfile.self, from: systemData),
+            system
+        )
+
+        var retainedContentGain = DSPGainConfiguration()
+        retainedContentGain.inputPreampDB = -3
+        retainedContentGain.headroomAttenuationDB = -2
+        let systemGain = system.state.composingGain(over: retainedContentGain)
+        XCTAssertEqual(systemGain.inputPreampDB, -3)
+        XCTAssertEqual(systemGain.headroomAttenuationDB, -2)
+        XCTAssertEqual(systemGain.outputGainDB, 2.5)
+    }
+
 }

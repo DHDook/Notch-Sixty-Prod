@@ -64,15 +64,19 @@ final class ProductController: ObservableObject {
     nonisolated let objectWillChange = ObservableObjectPublisher()
 
     let audioEngine: AudioIOEngine
+    let profiles: ProductProfileController
     private var audioEngineObservation: AnyCancellable?
 
     init() {
-        self.audioEngine = AudioIOEngine()
+        let audioEngine = AudioIOEngine()
+        self.audioEngine = audioEngine
+        self.profiles = ProductProfileController(engine: audioEngine)
         observeAudioEngine()
     }
 
     init(audioEngine: AudioIOEngine) {
         self.audioEngine = audioEngine
+        self.profiles = ProductProfileController(engine: audioEngine)
         observeAudioEngine()
     }
 
@@ -95,6 +99,7 @@ final class ProductController: ObservableObject {
 
     func prepareForUse() {
         audioEngine.prepareForUse()
+        profiles.restoreSelectedLayers()
     }
 
     func shutdownForTermination() {
