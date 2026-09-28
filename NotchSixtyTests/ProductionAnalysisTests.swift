@@ -11,6 +11,68 @@ final class ProductionAnalysisTests: XCTestCase {
         XCTAssertEqual(ProductionAnalysisMath.fftSize(sampleRate: 384_000), 32_768)
     }
 
+    func testAnalysisBridgeDemandIsLocalSanitizedAndParkedByDefault() {
+        guard let first = N60RealtimeAudioBridgeCreate(256),
+              let second = N60RealtimeAudioBridgeCreate(256) else {
+            XCTFail("Could not create analysis bridge fixtures")
+            return
+        }
+        defer {
+            N60RealtimeAudioBridgeDestroy(first)
+            N60RealtimeAudioBridgeDestroy(second)
+        }
+
+        XCTAssertEqual(
+            N60RealtimeAudioBridgeAnalysisDemand(first),
+            UInt32(N60_ANALYSIS_DEMAND_NONE)
+        )
+        XCTAssertEqual(
+            N60RealtimeAudioBridgeAnalysisDemand(second),
+            UInt32(N60_ANALYSIS_DEMAND_NONE)
+        )
+
+        let unsupportedBit = UInt32(1 << 30)
+        N60RealtimeAudioBridgeSetAnalysisDemand(
+            first,
+            UInt32(N60_ANALYSIS_DEMAND_ALL) | unsupportedBit
+        )
+
+        XCTAssertEqual(
+            N60RealtimeAudioBridgeAnalysisDemand(first),
+            UInt32(N60_ANALYSIS_DEMAND_ALL)
+        )
+        XCTAssertEqual(
+            N60RealtimeAudioBridgeAnalysisDemand(second),
+            UInt32(N60_ANALYSIS_DEMAND_NONE),
+            "Analysis demand must remain bridge-local"
+        )
+
+        let activeSnapshot = N60RealtimeAudioBridgeGetAnalysisCaptureSnapshot(first)
+        XCTAssertEqual(activeSnapshot.demandMask, UInt32(N60_ANALYSIS_DEMAND_ALL))
+        XCTAssertEqual(activeSnapshot.availableFrames, 0)
+        XCTAssertEqual(activeSnapshot.capturedFrames, 0)
+        XCTAssertEqual(activeSnapshot.droppedFrames, 0)
+
+        var frames = [N60AnalysisFrame](
+            repeating: N60AnalysisFrame(inputLeft: 0, inputRight: 0, outputLeft: 0, outputRight: 0),
+            count: 8
+        )
+        let readCount = frames.withUnsafeMutableBufferPointer { buffer in
+            N60RealtimeAudioBridgeReadAnalysisFrames(
+                first,
+                buffer.baseAddress!,
+                UInt32(buffer.count)
+            )
+        }
+        XCTAssertEqual(readCount, 0, "An empty capture ring must not synthesize frames")
+
+        N60RealtimeAudioBridgeSetAnalysisDemand(first, UInt32(N60_ANALYSIS_DEMAND_NONE))
+        XCTAssertEqual(
+            N60RealtimeAudioBridgeAnalysisDemand(first),
+            UInt32(N60_ANALYSIS_DEMAND_NONE)
+        )
+    }
+
     func testPhaseCorrelationCanonicalCases() {
         let sampleCount = 4_096
         let phaseStep = 2.0 * Double.pi * 64.0 / Double(sampleCount)
@@ -60,8 +122,10 @@ final class ProductionAnalysisTests: XCTestCase {
             let count = ProductionAnalysisMath.fftSize(sampleRate: sampleRate)
             let silence = [Float](repeating: 0, count: count)
             let bands = analyzer.analyze(
-                input: silence,
-                output: silence,
+                inputLeft: silence,
+                inputRight: silence,
+                outputLeft: silence,
+                outputRight: silence,
                 count: count,
                 sampleRate: sampleRate
             )
@@ -84,8 +148,10 @@ final class ProductionAnalysisTests: XCTestCase {
                 Float(sin(2.0 * Double.pi * 1_000.0 * Double(index) / sampleRate))
             }
             let bands = analyzer.analyze(
-                input: samples,
-                output: samples,
+                inputLeft: samples,
+                inputRight: samples,
+                outputLeft: samples,
+                outputRight: samples,
                 count: count,
                 sampleRate: sampleRate
             )
@@ -99,5 +165,35 @@ final class ProductionAnalysisTests: XCTestCase {
             XCTAssertEqual(strongest.inputDB, strongest.outputDB, accuracy: 0.000_1)
             XCTAssertLessThan(abs(strongest.frequencyHz - 1_000.0), 175.0)
         }
+    }
+
+    func testSpectrumStereoEnergyDoesNotCancelAntiPhaseChannels() {
+        let sampleRate = 96_000.0
+        let analyzer = ProductionSpectrumAnalyzer()
+        let count = ProductionAnalysisMath.fftSize(sampleRate: sampleRate)
+        let left = (0..<count).map { index in
+            Float(sin(2.0 * Double.pi * 1_000.0 * Double(index) / sampleRate))
+        }
+        let right = left.map { -$0 }
+
+        let bands = analyzer.analyze(
+            inputLeft: left,
+            inputRight: right,
+            outputLeft: left,
+            outputRight: right,
+            count: count,
+            sampleRate: sampleRate
+        )
+
+        guard let strongest = bands.max(by: { $0.inputDB < $1.inputDB }) else {
+            XCTFail("No anti-phase RTA bands")
+            return
+        }
+        XCTAssertGreaterThan(
+            strongest.inputDB,
+            -4.0,
+            "Stereo RTA must combine channel energy after the transform rather than cancel anti-phase content"
+        )
+        XCTAssertEqual(strongest.inputDB, strongest.outputDB, accuracy: 0.000_1)
     }
 }
