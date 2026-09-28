@@ -1,0 +1,65 @@
+name: PR39 Build Diagnostic
+
+on:
+  push:
+    branches:
+      - feature/pr39-production-meters-analysis
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feature/pr39-production-meters-analysis
+          fetch-depth: 0
+
+      - name: Capture Swift build diagnostics
+        shell: bash
+        run: |
+          set +e
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            build > /tmp/pr39-build.log 2>&1
+          STATUS=$?
+
+          python3 <<'PY'
+          from pathlib import Path
+          log = Path('/tmp/pr39-build.log').read_text(errors='replace').splitlines()
+          selected = []
+          for i, line in enumerate(log):
+              lower = line.lower()
+              if ' error:' in lower or lower.startswith('error:') or 'fatal error:' in lower:
+                  start = max(0, i - 2)
+                  end = min(len(log), i + 5)
+                  block = log[start:end]
+                  if block not in selected:
+                      selected.append(block)
+          out = ['# PR39 build diagnostic', '']
+          if selected:
+              for block in selected:
+                  out.append('```text')
+                  out.extend(block)
+                  out.append('```')
+                  out.append('')
+          else:
+              out.append('No compiler error lines were detected in the build log.')
+          Path('docs/PR39_BUILD_DIAGNOSTIC.md').write_text('\n'.join(out) + '\n')
+          PY
+
+          rm .github/workflows/pr39-build-diagnostic.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "PR39: capture build diagnostic"
+          git push origin HEAD:feature/pr39-production-meters-analysis
+          exit 0
