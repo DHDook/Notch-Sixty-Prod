@@ -3,6 +3,7 @@
 Slice 3 integrates the off-callback production analysis engine.
 
 - `ProductionAnalysisWorker` is owned by the active `CoreAudioTransportSession` and is stopped synchronously before its realtime bridge is destroyed.
+- The worker source lives in the existing `NotchSixty/Diagnostics` Xcode group; an initial path mismatch was corrected before the compiled Slice 3 validation pass.
 - The worker is the single consumer of the Slice 2 SPSC analysis ring.
 - Analysis runs on a dedicated serial queue only while Spectrum or Stereo demand is active.
 - RTA uses an independently authored Accelerate DFT implementation with retained setup/work buffers and adaptive 4096 / 8192 / 16384 / 32768 transforms through 384 kHz.
