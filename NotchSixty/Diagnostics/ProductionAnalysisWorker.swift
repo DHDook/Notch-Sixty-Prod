@@ -316,19 +316,19 @@ final class ProductionAnalysisWorker: @unchecked Sendable {
 
     private var drainBuffer = [N60AnalysisFrame](
         repeating: N60AnalysisFrame(inputLeft: 0, inputRight: 0, outputLeft: 0, outputRight: 0),
-        count: Self.drainCapacity
+        count: ProductionAnalysisWorker.drainCapacity
     )
-    private var inputHistory = [Float](repeating: 0, count: Self.historyCapacity)
-    private var outputHistory = [Float](repeating: 0, count: Self.historyCapacity)
-    private var outputLeftHistory = [Float](repeating: 0, count: Self.historyCapacity)
-    private var outputRightHistory = [Float](repeating: 0, count: Self.historyCapacity)
+    private var inputHistory = [Float](repeating: 0, count: ProductionAnalysisWorker.historyCapacity)
+    private var outputHistory = [Float](repeating: 0, count: ProductionAnalysisWorker.historyCapacity)
+    private var outputLeftHistory = [Float](repeating: 0, count: ProductionAnalysisWorker.historyCapacity)
+    private var outputRightHistory = [Float](repeating: 0, count: ProductionAnalysisWorker.historyCapacity)
     private var historyWriteIndex = 0
     private var historyCount = 0
 
-    private var latestInput = [Float](repeating: 0, count: Self.historyCapacity)
-    private var latestOutput = [Float](repeating: 0, count: Self.historyCapacity)
-    private var latestLeft = [Float](repeating: 0, count: Self.correlationCapacity)
-    private var latestRight = [Float](repeating: 0, count: Self.correlationCapacity)
+    private var latestInput = [Float](repeating: 0, count: ProductionAnalysisWorker.historyCapacity)
+    private var latestOutput = [Float](repeating: 0, count: ProductionAnalysisWorker.historyCapacity)
+    private var latestLeft = [Float](repeating: 0, count: ProductionAnalysisWorker.correlationCapacity)
+    private var latestRight = [Float](repeating: 0, count: ProductionAnalysisWorker.correlationCapacity)
 
     private let spectrumAnalyzer = ProductionSpectrumAnalyzer()
     private var publishedSnapshot = ProductionAnalysisSnapshot.empty
