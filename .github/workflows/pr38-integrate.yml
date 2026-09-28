@@ -1,0 +1,415 @@
+name: PR38 Integration Helper
+
+on:
+  push:
+    branches:
+      - feature/pr38-production-dynamics
+    paths:
+      - .github/workflows/pr38-integrate.yml
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/pr38-production-dynamics
+          fetch-depth: 0
+      - name: Apply PR38 production Dynamics integration
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              if old not in text:
+                  raise SystemExit(f"expected block not found in {path}: {old[:120]!r}")
+              p.write_text(text.replace(old, new, 1))
+
+          dynamics = Path("NotchSixty/Audio/DynamicsConfiguration.swift")
+          text = dynamics.read_text()
+
+          old = '''struct SpectralDenoiserConfiguration: Equatable, Sendable {
+              static let reductionRange = 0.0...1.0
+              static let thresholdRange = -96.0 ... -30.0
+              static let protectedFrequencyRange = 0.0...20_000.0
+          '''
+          new = '''struct SpectralDenoiserConfiguration: Equatable, Sendable {
+              static let reductionRange = 0.0...1.0
+              static let thresholdRange = -96.0 ... -30.0
+              static let protectedFrequencyRange = 0.0...20_000.0
+              static let minimumGainRange = 0.001...0.5
+              static let attackRange = 1.0...100.0
+              static let releaseRange = 5.0...500.0
+          '''
+          if old not in text: raise SystemExit("denoiser range anchor missing")
+          text = text.replace(old, new, 1)
+
+          old = '''    var profileRevision: UInt32 = 0
+              var profileCommand: SpectralDenoiserProfileCommand = .none
+          '''
+          new = '''    var profileRevision: UInt32 = 0
+              var profileCommand: SpectralDenoiserProfileCommand = .none
+              // Legacy-parity expert controls. Named tuning presets continue to own
+              // the accepted suppression behavior until this explicit override is enabled.
+              var advancedTuningEnabled = false
+              var minimumGain = 0.01
+              // Legacy semantics: Attack is gain recovery toward unity; Release is
+              // gain fall into suppression. The C compatibility setter preserves this.
+              var attackMs = 11.0
+              var releaseMs = 21.0
+          '''
+          if old not in text: raise SystemExit("denoiser field anchor missing")
+          text = text.replace(old, new, 1)
+
+          old = '''        preset = value
+              customBasePreset = value
+              quality = .high
+              protectedLowHz = 0
+          '''
+          new = '''        preset = value
+              customBasePreset = value
+              quality = .high
+              // Preserve named-preset sound exactly. Advanced values remain stored
+              // for later custom use, but are ignored until explicitly enabled.
+              advancedTuningEnabled = false
+              protectedLowHz = 0
+          '''
+          if old not in text: raise SystemExit("denoiser preset anchor missing")
+          text = text.replace(old, new, 1)
+
+          old = '''              protectedHighHz.isFinite, Self.protectedFrequencyRange.contains(protectedHighHz),
+                        protectedLowHz <= protectedHighHz,
+                        protectedHighHz < nyquist else {
+          '''
+          new = '''              protectedHighHz.isFinite, Self.protectedFrequencyRange.contains(protectedHighHz),
+                        protectedLowHz <= protectedHighHz,
+                        protectedHighHz < nyquist,
+                        minimumGain.isFinite, Self.minimumGainRange.contains(minimumGain),
+                        attackMs.isFinite, Self.attackRange.contains(attackMs),
+                        releaseMs.isFinite, Self.releaseRange.contains(releaseMs) else {
+          '''
+          if old not in text: raise SystemExit("denoiser validate anchor missing")
+          text = text.replace(old, new, 1)
+
+          old = '''struct PauseGateConfiguration: Equatable, Sendable {
+          '''
+          new = '''struct PauseGatePresetParameters: Equatable, Sendable {
+              var thresholdDBFS: Double
+              var holdMs: Double
+              var attackMs: Double
+              var releaseMs: Double
+              var hysteresisDB: Double
+          }
+
+          enum PauseGatePreset: String, CaseIterable, Identifiable, Sendable {
+              case amplifierHiss
+              case sensitive
+              case relaxed
+              case broadcast
+              case custom
+
+              var id: String { rawValue }
+              var displayName: String {
+                  switch self {
+                  case .amplifierHiss: return "Amplifier Hiss"
+                  case .sensitive: return "Sensitive"
+                  case .relaxed: return "Relaxed"
+                  case .broadcast: return "Broadcast"
+                  case .custom: return "Custom"
+                  }
+              }
+
+              var parameters: PauseGatePresetParameters? {
+                  switch self {
+                  case .amplifierHiss: return .init(thresholdDBFS: -60, holdMs: 500, attackMs: 10, releaseMs: 200, hysteresisDB: 3)
+                  case .sensitive: return .init(thresholdDBFS: -50, holdMs: 300, attackMs: 5, releaseMs: 150, hysteresisDB: 2)
+                  case .relaxed: return .init(thresholdDBFS: -70, holdMs: 1000, attackMs: 20, releaseMs: 400, hysteresisDB: 4)
+                  case .broadcast: return .init(thresholdDBFS: -55, holdMs: 200, attackMs: 2, releaseMs: 300, hysteresisDB: 6)
+                  case .custom: return nil
+                  }
+              }
+          }
+
+          struct PauseGateConfiguration: Equatable, Sendable {
+          '''
+          if old not in text: raise SystemExit("pause gate type anchor missing")
+          text = text.replace(old, new, 1)
+
+          old = '''    var enabled = false
+              var thresholdDBFS = -60.0
+          '''
+          new = '''    var enabled = false
+              var preset: PauseGatePreset = .amplifierHiss
+              var thresholdDBFS = -60.0
+          '''
+          # Occurs only in PauseGateConfiguration after the insertion above.
+          idx = text.find("struct PauseGateConfiguration")
+          tail = text[idx:]
+          if old not in tail: raise SystemExit("pause gate field anchor missing")
+          tail = tail.replace(old, new, 1)
+          text = text[:idx] + tail
+
+          old = '''    func validate() throws {
+                  guard thresholdDBFS.isFinite, Self.thresholdRange.contains(thresholdDBFS),
+          '''
+          new = '''    mutating func applyPreset(_ value: PauseGatePreset) {
+                  preset = value
+                  guard let p = value.parameters else { return }
+                  thresholdDBFS = p.thresholdDBFS
+                  holdMs = p.holdMs
+                  attackMs = p.attackMs
+                  releaseMs = p.releaseMs
+                  hysteresisDB = p.hysteresisDB
+              }
+
+              mutating func markCustomIfNeeded() {
+                  guard let p = preset.parameters else { return }
+                  if thresholdDBFS != p.thresholdDBFS || holdMs != p.holdMs ||
+                      attackMs != p.attackMs || releaseMs != p.releaseMs || hysteresisDB != p.hysteresisDB {
+                      preset = .custom
+                  }
+              }
+
+              func validate() throws {
+                  guard thresholdDBFS.isFinite, Self.thresholdRange.contains(thresholdDBFS),
+          '''
+          # Scope replacement to pause gate block.
+          idx = text.find("struct PauseGateConfiguration")
+          tail = text[idx:]
+          if old not in tail: raise SystemExit("pause gate validate anchor missing")
+          tail = tail.replace(old, new, 1)
+          text = text[:idx] + tail
+
+          old = '''        guard N60DynamicsSnapshotSetSpectralDenoiser(
+                  &snapshot,
+                  sampleRate,
+                  spectralDenoiser.enabled,
+                  spectralDenoiser.algorithmPreset.cType,
+                  spectralDenoiser.quality.cType,
+                  Float(spectralDenoiser.reductionAmount),
+                  Float(spectralDenoiser.thresholdDBFS),
+                  spectralDenoiser.protectedRangeEnabled,
+                  Float(spectralDenoiser.protectedLowHz),
+                  Float(spectralDenoiser.protectedHighHz),
+                  spectralDenoiser.profileRevision,
+                  spectralDenoiser.profileCommand.cType
+              ) else { throw DynamicsConfigurationError.invalidSpectralDenoiser }
+          '''
+          new = '''        guard N60DynamicsSnapshotSetSpectralDenoiserLegacyAdvanced(
+                  &snapshot,
+                  sampleRate,
+                  spectralDenoiser.enabled,
+                  spectralDenoiser.algorithmPreset.cType,
+                  spectralDenoiser.quality.cType,
+                  Float(spectralDenoiser.reductionAmount),
+                  Float(spectralDenoiser.thresholdDBFS),
+                  spectralDenoiser.protectedRangeEnabled,
+                  Float(spectralDenoiser.protectedLowHz),
+                  Float(spectralDenoiser.protectedHighHz),
+                  spectralDenoiser.profileRevision,
+                  spectralDenoiser.profileCommand.cType,
+                  spectralDenoiser.advancedTuningEnabled,
+                  Float(spectralDenoiser.minimumGain),
+                  Float(spectralDenoiser.attackMs),
+                  Float(spectralDenoiser.releaseMs)
+              ) else { throw DynamicsConfigurationError.invalidSpectralDenoiser }
+          '''
+          if old not in text: raise SystemExit("snapshot denoiser setter anchor missing")
+          text = text.replace(old, new, 1)
+          dynamics.write_text(text)
+
+          # New compatibility setter: wraps the accepted denoiser configuration and
+          # changes only the three legacy expert fields when explicitly requested.
+          Path("NotchSixty/Audio/Realtime/N60DynamicsLegacyAdvanced.h").write_text(r'''#ifndef N60_DYNAMICS_LEGACY_ADVANCED_H
+          #define N60_DYNAMICS_LEGACY_ADVANCED_H
+
+          #include "N60Dynamics.h"
+
+          #ifdef __cplusplus
+          extern "C" {
+          #endif
+
+          bool N60DynamicsSnapshotSetSpectralDenoiserLegacyAdvanced(
+              N60DynamicsSnapshot *snapshot,
+              double sampleRate,
+              bool enabled,
+              N60DenoiserTuning tuning,
+              N60DenoiserQuality quality,
+              float reductionAmount,
+              float thresholdDBFS,
+              bool protectedRangeEnabled,
+              float protectedLowHz,
+              float protectedHighHz,
+              uint32_t profileRevision,
+              N60DenoiserProfileCommand profileCommand,
+              bool advancedTuningEnabled,
+              float minimumGain,
+              float legacyAttackMs,
+              float legacyReleaseMs
+          );
+
+          #ifdef __cplusplus
+          }
+          #endif
+
+          #endif
+          ''')
+
+          Path("NotchSixty/Audio/Realtime/N60DynamicsLegacyAdvanced.c").write_text(r'''#include "N60DynamicsLegacyAdvanced.h"
+
+          #include <math.h>
+
+          static float legacy_gain_smoothing_coefficient(double frameMs, float timeMs) {
+              return (float)exp(-frameMs / (double)timeMs);
+          }
+
+          bool N60DynamicsSnapshotSetSpectralDenoiserLegacyAdvanced(
+              N60DynamicsSnapshot *snapshot,
+              double sampleRate,
+              bool enabled,
+              N60DenoiserTuning tuning,
+              N60DenoiserQuality quality,
+              float reductionAmount,
+              float thresholdDBFS,
+              bool protectedRangeEnabled,
+              float protectedLowHz,
+              float protectedHighHz,
+              uint32_t profileRevision,
+              N60DenoiserProfileCommand profileCommand,
+              bool advancedTuningEnabled,
+              float minimumGain,
+              float legacyAttackMs,
+              float legacyReleaseMs
+          ) {
+              if (!N60DynamicsSnapshotSetSpectralDenoiser(
+                      snapshot, sampleRate, enabled, tuning, quality, reductionAmount,
+                      thresholdDBFS, protectedRangeEnabled, protectedLowHz, protectedHighHz,
+                      profileRevision, profileCommand)) {
+                  return false;
+              }
+              if (!advancedTuningEnabled) return true;
+              if (snapshot == NULL || !isfinite(sampleRate) || sampleRate <= 0.0
+                  || !isfinite(minimumGain) || minimumGain < 0.001f || minimumGain > 0.5f
+                  || !isfinite(legacyAttackMs) || legacyAttackMs < 1.0f || legacyAttackMs > 100.0f
+                  || !isfinite(legacyReleaseMs) || legacyReleaseMs < 5.0f || legacyReleaseMs > 500.0f) {
+                  return false;
+              }
+
+              N60SpectralDenoiserSnapshot *denoiser = &snapshot->spectralDenoiser;
+              double frameMs = ((double)denoiser->hopSize / sampleRate) * 1000.0;
+              float legacyAttackAlpha = legacy_gain_smoothing_coefficient(frameMs, legacyAttackMs);
+              float legacyReleaseAlpha = legacy_gain_smoothing_coefficient(frameMs, legacyReleaseMs);
+
+              denoiser->minimumGain = minimumGain;
+              // Legacy semantics are defined in terms of gain direction:
+              // Attack = gain rises toward unity; Release = gain falls into suppression.
+              // The commercial engine names coefficients from suppression direction,
+              // so the assignments are intentionally crossed.
+              denoiser->suppressionRelease = legacyAttackAlpha;
+              denoiser->suppressionAttack = legacyReleaseAlpha;
+              return N60SpectralDenoiserSnapshotIsValid(*denoiser, sampleRate);
+          }
+          ''')
+
+          # Expose the compatibility setter to Swift.
+          bridge = Path("NotchSixty/Audio/Realtime/NotchSixty-Bridging-Header.h")
+          b = bridge.read_text()
+          if '#import "N60DynamicsLegacyAdvanced.h"' not in b:
+              b = b.replace('#import "N60SpectralDenoiser.h"', '#import "N60SpectralDenoiser.h"\n#import "N60DynamicsLegacyAdvanced.h"')
+          bridge.write_text(b)
+
+          # Production Dynamics route.
+          root = Path("NotchSixty/UI/ProductionRootView.swift")
+          r = root.read_text()
+          placeholder = '''        case .dynamics:
+                      ProductionPlaceholderPage(
+                          title: "Dynamics",
+                          subtitle: "Level control, protection, noise tools, and program-aware processing.",
+                          systemImage: "waveform.path.ecg",
+                          detail: "The dense dynamics editor will migrate from validation into this production workspace."
+                      )
+          '''
+          if placeholder not in r: raise SystemExit("Dynamics route placeholder missing")
+          r = r.replace(placeholder, '''        case .dynamics:
+                      ProductionDynamicsView(engine: engine)
+          ''', 1)
+          root.write_text(r)
+
+          # Xcode project: new production view + compatibility C source/header.
+          project = Path("NotchSixty.xcodeproj/project.pbxproj")
+          p = project.read_text()
+          p = p.replace(
+              'A40000000000000000000011 /* ProductionEqualizerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000021 /* ProductionEqualizerView.swift */; };',
+              'A40000000000000000000011 /* ProductionEqualizerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000021 /* ProductionEqualizerView.swift */; };\n\t\tA40000000000000000000012 /* ProductionDynamicsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000022 /* ProductionDynamicsView.swift */; };\n\t\tA30000000000000000000017 /* N60DynamicsLegacyAdvanced.c in Sources */ = {isa = PBXBuildFile; fileRef = A3000000000000000000002D /* N60DynamicsLegacyAdvanced.c */; };'
+          )
+          p = p.replace(
+              'A40000000000000000000021 /* ProductionEqualizerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionEqualizerView.swift; sourceTree = "<group>"; };',
+              'A40000000000000000000021 /* ProductionEqualizerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionEqualizerView.swift; sourceTree = "<group>"; };\n\t\tA40000000000000000000022 /* ProductionDynamicsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionDynamicsView.swift; sourceTree = "<group>"; };\n\t\tA3000000000000000000002D /* N60DynamicsLegacyAdvanced.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = N60DynamicsLegacyAdvanced.c; sourceTree = "<group>"; };\n\t\tA3000000000000000000002E /* N60DynamicsLegacyAdvanced.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60DynamicsLegacyAdvanced.h; sourceTree = "<group>"; };'
+          )
+          p = p.replace(
+              'A3000000000000000000002C /* N60DynamicEQ.h */,',
+              'A3000000000000000000002C /* N60DynamicEQ.h */,\n\t\t\t\tA3000000000000000000002D /* N60DynamicsLegacyAdvanced.c */,\n\t\t\t\tA3000000000000000000002E /* N60DynamicsLegacyAdvanced.h */,'
+          )
+          p = p.replace(
+              'A40000000000000000000050 /* UI */ = {isa = PBXGroup; children = (A40000000000000000000020 /* ProductionRootView.swift */, A40000000000000000000021 /* ProductionEqualizerView.swift */,); path = UI; sourceTree = "<group>"; };',
+              'A40000000000000000000050 /* UI */ = {isa = PBXGroup; children = (A40000000000000000000020 /* ProductionRootView.swift */, A40000000000000000000021 /* ProductionEqualizerView.swift */, A40000000000000000000022 /* ProductionDynamicsView.swift */,); path = UI; sourceTree = "<group>"; };'
+          )
+          p = p.replace(
+              'A40000000000000000000011 /* ProductionEqualizerView.swift in Sources */,',
+              'A40000000000000000000011 /* ProductionEqualizerView.swift in Sources */,\n\t\t\t\tA40000000000000000000012 /* ProductionDynamicsView.swift in Sources */,'
+          )
+          p = p.replace(
+              'A30000000000000000000016 /* N60DynamicEQ.c in Sources */,',
+              'A30000000000000000000016 /* N60DynamicEQ.c in Sources */,\n\t\t\t\tA30000000000000000000017 /* N60DynamicsLegacyAdvanced.c in Sources */,'
+          )
+          project.write_text(p)
+
+          # Focused C validator for named-preset compatibility and legacy timing semantics.
+          Path("ci/validate_pr38_denoiser_advanced.c").write_text(r'''#include "../NotchSixty/Audio/Realtime/N60DynamicsLegacyAdvanced.h"
+          #include <math.h>
+          #include <stdio.h>
+
+          static int closef(float a, float b, float tolerance) { return fabsf(a - b) <= tolerance; }
+
+          int main(void) {
+              const double sampleRate = 48000.0;
+              N60DynamicsSnapshot baseline = N60DynamicsSnapshotMakeBypassed(sampleRate);
+              N60DynamicsSnapshot wrapped = N60DynamicsSnapshotMakeBypassed(sampleRate);
+              if (!N60DynamicsSnapshotSetSpectralDenoiser(&baseline, sampleRate, true,
+                      N60DenoiserTuningStandard, N60DenoiserQualityHigh, 0.5f, -60.0f,
+                      false, 0.0f, 150.0f, 0u, N60DenoiserProfileCommandNone)) return 1;
+              if (!N60DynamicsSnapshotSetSpectralDenoiserLegacyAdvanced(&wrapped, sampleRate, true,
+                      N60DenoiserTuningStandard, N60DenoiserQualityHigh, 0.5f, -60.0f,
+                      false, 0.0f, 150.0f, 0u, N60DenoiserProfileCommandNone,
+                      false, 0.01f, 11.0f, 21.0f)) return 2;
+              if (!closef(baseline.spectralDenoiser.minimumGain, wrapped.spectralDenoiser.minimumGain, 1e-7f)
+                  || !closef(baseline.spectralDenoiser.suppressionAttack, wrapped.spectralDenoiser.suppressionAttack, 1e-7f)
+                  || !closef(baseline.spectralDenoiser.suppressionRelease, wrapped.spectralDenoiser.suppressionRelease, 1e-7f)) return 3;
+
+              N60DynamicsSnapshot custom = N60DynamicsSnapshotMakeBypassed(sampleRate);
+              if (!N60DynamicsSnapshotSetSpectralDenoiserLegacyAdvanced(&custom, sampleRate, true,
+                      N60DenoiserTuningStandard, N60DenoiserQualityHigh, 0.5f, -60.0f,
+                      false, 0.0f, 150.0f, 0u, N60DenoiserProfileCommandNone,
+                      true, 0.01f, 11.0f, 21.0f)) return 4;
+              double frameMs = ((double)custom.spectralDenoiser.hopSize / sampleRate) * 1000.0;
+              float expectedLegacyAttack = (float)exp(-frameMs / 11.0);
+              float expectedLegacyRelease = (float)exp(-frameMs / 21.0);
+              if (!closef(custom.spectralDenoiser.minimumGain, 0.01f, 1e-7f)) return 5;
+              if (!closef(custom.spectralDenoiser.suppressionRelease, expectedLegacyAttack, 1e-6f)) return 6;
+              if (!closef(custom.spectralDenoiser.suppressionAttack, expectedLegacyRelease, 1e-6f)) return 7;
+              puts("PR38 denoiser advanced parity: PASS");
+              return 0;
+          }
+          ''')
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add NotchSixty NotchSixty.xcodeproj ci/validate_pr38_denoiser_advanced.c
+          git commit -m "PR38: integrate production dynamics workspace and parity controls"
+          git push origin HEAD:feature/pr38-production-dynamics
