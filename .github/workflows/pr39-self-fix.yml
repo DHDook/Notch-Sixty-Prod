@@ -1,0 +1,50 @@
+name: PR39 Analyzer Initializer Fix
+
+on:
+  push:
+    branches:
+      - feature/pr39-production-meters-analysis
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/pr39-production-meters-analysis
+          fetch-depth: 0
+
+      - name: Fix concrete analyzer storage constants
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path('NotchSixty/Diagnostics/ProductionAnalysisWorker.swift')
+          text = path.read_text()
+          replacements = {
+              'count: Self.drainCapacity': 'count: ProductionAnalysisWorker.drainCapacity',
+              'count: Self.historyCapacity': 'count: ProductionAnalysisWorker.historyCapacity',
+              'count: Self.correlationCapacity': 'count: ProductionAnalysisWorker.correlationCapacity',
+          }
+          for old, new in replacements.items():
+              if old not in text:
+                  raise SystemExit(f'expected initializer reference not found: {old}')
+              text = text.replace(old, new)
+          path.write_text(text)
+
+          diagnostic = Path('docs/PR39_BUILD_DIAGNOSTIC.md')
+          if diagnostic.exists():
+              diagnostic.unlink()
+          Path('.github/workflows/pr39-self-fix.yml').unlink()
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "PR39: fix analyzer stored-property initialization"
+          git push origin HEAD:feature/pr39-production-meters-analysis
