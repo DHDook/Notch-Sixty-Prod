@@ -66,35 +66,54 @@ struct ProductionEqualizerView: View {
 
     private var modeBar: some View {
         GlassEffectContainer(spacing: 10) {
-            HStack(spacing: 12) {
-                Picker("Channels", selection: Binding(
-                    get: { configuration.channelMode },
-                    set: { try? engine.setEQChannelMode($0) }
-                )) {
-                    ForEach(EQChannelMode.allCases) { mode in Text(mode.displayName).tag(mode) }
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 300)
+            HStack(alignment: .bottom, spacing: 16) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("CHANNELS")
+                        .font(.caption2.bold())
+                        .tracking(1.2)
+                        .foregroundStyle(.secondary)
 
-                if configuration.channelMode != .linked {
-                    Picker("Edit", selection: Binding(
-                        get: { configuration.editChannel },
-                        set: { engine.setEQEditChannel($0) }
-                    )) {
-                        ForEach(editChannels) { channel in Text(channel.displayName).tag(channel) }
+                    HStack(spacing: 8) {
+                        Picker("Channels", selection: Binding(
+                            get: { configuration.channelMode },
+                            set: { try? engine.setEQChannelMode($0) }
+                        )) {
+                            ForEach(EQChannelMode.allCases) { mode in Text(mode.displayName).tag(mode) }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.segmented)
+                        .frame(width: 300)
+
+                        if configuration.channelMode != .linked {
+                            Picker("Edit Channel", selection: Binding(
+                                get: { configuration.editChannel },
+                                set: { engine.setEQEditChannel($0) }
+                            )) {
+                                ForEach(editChannels) { channel in Text(channel.displayName).tag(channel) }
+                            }
+                            .labelsHidden()
+                            .pickerStyle(.segmented)
+                            .frame(width: 160)
+                        }
                     }
-                    .pickerStyle(.segmented)
-                    .frame(width: 160)
                 }
 
-                Picker("Phase", selection: Binding(
-                    get: { configuration.phaseMode },
-                    set: { try? engine.setEQPhaseMode($0) }
-                )) {
-                    ForEach(EQPhaseMode.allCases) { mode in Text(mode.displayName).tag(mode) }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("PHASE")
+                        .font(.caption2.bold())
+                        .tracking(1.2)
+                        .foregroundStyle(.secondary)
+
+                    Picker("Phase", selection: Binding(
+                        get: { configuration.phaseMode },
+                        set: { try? engine.setEQPhaseMode($0) }
+                    )) {
+                        ForEach(EQPhaseMode.allCases) { mode in Text(mode.displayName).tag(mode) }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .frame(width: 330)
                 }
-                .pickerStyle(.segmented)
-                .frame(width: 330)
 
                 Spacer(minLength: 8)
 
