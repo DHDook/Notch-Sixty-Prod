@@ -118,12 +118,7 @@ struct ProductionRootView: View {
         case .dashboard:
             ProductionDashboardView(engine: engine)
         case .equalizer:
-            ProductionPlaceholderPage(
-                title: "Equalizer",
-                subtitle: "Static and dynamic EQ, channel domains, and phase strategy.",
-                systemImage: "slider.horizontal.3",
-                detail: "The production graphical EQ editor follows on this UI foundation."
-            )
+            ProductionEqualizerView(engine: engine)
         case .dynamics:
             ProductionPlaceholderPage(
                 title: "Dynamics",
@@ -477,16 +472,11 @@ private struct StereoSignatureVUMeter: View {
                     .foregroundStyle(.black.opacity(0.64))
                     .position(x: proxy.size.width * 0.72, y: proxy.size.height * 0.67)
 
-                VStack(spacing: 3) {
-                    Text("NOTCH SIXTY")
-                        .font(.subheadline.bold())
-                        .tracking(3)
-                    Text("STEREO VU")
-                        .font(.caption2.bold())
-                        .tracking(1.7)
-                }
-                .foregroundStyle(.black.opacity(0.72))
-                .position(x: proxy.size.width * 0.5, y: proxy.size.height * 0.80)
+                Text("NOTCH SIXTY")
+                    .font(.headline.bold())
+                    .tracking(3.2)
+                    .foregroundStyle(.black.opacity(0.72))
+                    .position(x: proxy.size.width * 0.5, y: proxy.size.height * 0.80)
             }
         }
         .aspectRatio(3.2, contentMode: .fit)
