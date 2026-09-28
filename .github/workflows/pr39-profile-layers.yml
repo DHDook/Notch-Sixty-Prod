@@ -21,6 +21,7 @@ jobs:
       - name: Generate profile-layer implementation
         run: |
           python3 .github/scripts/pr39_profile_layers.py
+          python3 .github/scripts/pr39_profile_layers_fix.py
           python3 ci/validate_pr39_profile_layers.py
           git diff --check
 
@@ -39,7 +40,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git rm .github/workflows/pr39-profile-layers.yml .github/scripts/pr39_profile_layers.py
+          git rm .github/workflows/pr39-profile-layers.yml .github/scripts/pr39_profile_layers.py .github/scripts/pr39_profile_layers_fix.py
           git add -A
           git diff --cached --check
           git commit -m "PR39: separate content presets from playback systems"
