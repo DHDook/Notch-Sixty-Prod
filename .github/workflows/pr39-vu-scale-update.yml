@@ -1,0 +1,145 @@
+name: PR39 VU Scale Update
+
+on:
+  push:
+    branches:
+      - feature/pr39-production-meters-analysis
+    paths:
+      - .github/workflows/pr39-vu-scale-update.yml
+
+permissions:
+  contents: write
+
+jobs:
+  update-vu-scale:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/pr39-production-meters-analysis
+          fetch-depth: 0
+
+      - name: Extend and densify signature VU scale
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          ui_path = Path('NotchSixty/UI/ProductionRootView.swift')
+          ui = ui_path.read_text()
+
+          old_scale = '''enum ProductionVUScale {
+              static let referenceDBFS = -18.0
+              static let minimumVU = -30.0
+              static let maximumVU = 3.0
+
+              static func decibelsFS(fromLinear linear: Float) -> Double {
+                  guard linear.isFinite, linear > 0 else { return -.infinity }
+                  return 20 * log10(Double(linear))
+              }
+
+              static func vu(fromLinearRMS linear: Float) -> Double {
+                  let dbFS = decibelsFS(fromLinear: linear)
+                  guard dbFS.isFinite else { return minimumVU }
+                  return min(max(dbFS - referenceDBFS, minimumVU), maximumVU)
+              }
+
+              static func normalizedPosition(forVU vu: Double) -> Double {
+                  let value = min(max(vu, minimumVU), maximumVU)
+                  return (value - minimumVU) / (maximumVU - minimumVU)
+              }
+'''
+          new_scale = '''enum ProductionVUScale {
+              static let referenceDBFS = -18.0
+              static let minimumVU = -40.0
+              static let maximumVU = 3.0
+
+              // A traditional analog-style VU face compresses the quiet end and
+              // devotes progressively more angular resolution to the region around
+              // 0 VU. Interpolation between these anchors keeps the needle motion
+              // continuous while preserving useful detail in the working range.
+              static let scaleAnchors: [(vu: Double, position: Double)] = [
+                  (-40, 0.000),
+                  (-30, 0.090),
+                  (-20, 0.215),
+                  (-10, 0.400),
+                  (-7, 0.475),
+                  (-5, 0.545),
+                  (-3, 0.625),
+                  (-2, 0.675),
+                  (-1, 0.730),
+                  (0, 0.790),
+                  (1, 0.855),
+                  (2, 0.925),
+                  (3, 1.000),
+              ]
+
+              static func decibelsFS(fromLinear linear: Float) -> Double {
+                  guard linear.isFinite, linear > 0 else { return -.infinity }
+                  return 20 * log10(Double(linear))
+              }
+
+              static func vu(fromLinearRMS linear: Float) -> Double {
+                  let dbFS = decibelsFS(fromLinear: linear)
+                  guard dbFS.isFinite else { return minimumVU }
+                  return min(max(dbFS - referenceDBFS, minimumVU), maximumVU)
+              }
+
+              static func normalizedPosition(forVU vu: Double) -> Double {
+                  let value = min(max(vu, minimumVU), maximumVU)
+                  for index in 0..<(scaleAnchors.count - 1) {
+                      let lower = scaleAnchors[index]
+                      let upper = scaleAnchors[index + 1]
+                      guard value <= upper.vu else { continue }
+                      let span = upper.vu - lower.vu
+                      let fraction = span > 0 ? (value - lower.vu) / span : 0
+                      return lower.position + fraction * (upper.position - lower.position)
+                  }
+                  return 1
+              }
+'''
+          if old_scale not in ui:
+              raise SystemExit('ProductionVUScale source block did not match expected head')
+          ui = ui.replace(old_scale, new_scale, 1)
+
+          old_ticks = '''        let ticks: [Double] = [-30, -20, -10, -7, -5, -3, -2, -1, 0, 1, 2, 3]
+                  let labels: Set<Double> = [-30, -20, -10, -5, -3, 0, 3]
+'''
+          new_ticks = '''        let ticks: [Double] = [-40, -35, -30, -25, -20, -15, -10, -7, -5, -4, -3, -2, -1, 0, 1, 2, 3]
+                  let labels: Set<Double> = [-40, -30, -20, -10, -7, -5, -3, 0, 3]
+'''
+          if old_ticks not in ui:
+              raise SystemExit('VU tick source block did not match expected head')
+          ui = ui.replace(old_ticks, new_ticks, 1)
+          ui_path.write_text(ui)
+
+          validator_path = Path('ci/validate_pr36_ui_foundation.py')
+          validator = validator_path.read_text()
+          validator = validator.replace(
+              'return min(max(dbfs - (-18.0), -30.0), 3.0)',
+              'return min(max(dbfs - (-18.0), -40.0), 3.0)',
+              1,
+          )
+          validator = validator.replace(
+              'require(UI, "static let minimumVU = -30.0", "extended VU display floor")',
+              'require(UI, "static let minimumVU = -40.0", "extended VU display floor")\nrequire(UI, "static let scaleAnchors", "nonlinear analog VU scale")\nrequire(UI, "(-40, 0.000)", "VU scale quiet-end anchor")\nrequire(UI, "(0, 0.790)", "VU scale reference anchor")\nrequire(UI, "(3, 1.000)", "VU scale upper anchor")',
+              1,
+          )
+          old_cases = 'for dbfs, expected in [(-48.0, -30.0), (-38.0, -20.0), (-18.0, 0.0), (-15.0, 3.0), (-60.0, -30.0), (-10.0, 3.0)]:'
+          new_cases = 'for dbfs, expected in [(-58.0, -40.0), (-48.0, -30.0), (-38.0, -20.0), (-18.0, 0.0), (-15.0, 3.0), (-60.0, -40.0), (-10.0, 3.0)]:'
+          if old_cases not in validator:
+              raise SystemExit('PR36 VU numerical cases did not match expected head')
+          validator = validator.replace(old_cases, new_cases, 1)
+          validator_path.write_text(validator)
+          PY
+
+      - name: Run retained PR36 UI guard
+        run: python3 ci/validate_pr36_ui_foundation.py
+
+      - name: Commit source update and remove temporary workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/pr39-vu-scale-update.yml
+          git add NotchSixty/UI/ProductionRootView.swift ci/validate_pr36_ui_foundation.py
+          git commit -m "PR39: extend signature VU scale to -40"
+          git push origin HEAD:feature/pr39-production-meters-analysis
