@@ -24,6 +24,11 @@ required_eq = [
     "StereoEQConfiguration.bandGainRange",
     "DynamicEQBandConfiguration.qRange",
     "band.compiledSections(sampleRate: sampleRate)",
+    "ProductionEQResponseMath.compile",
+    "selectAdjacentBand(offset:",
+    "keyboardShortcut("n", modifiers: [.command, .shift])",
+    "type == .fir && band.firKernel == nil",
+    "type == .allPass && configuration.phaseMode != .minimumPhase",
     "Per-band FIR processing remains active",
 ]
 

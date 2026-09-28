@@ -108,6 +108,8 @@ struct ProductionEqualizerView: View {
                     Label("Add Band", systemImage: "plus")
                 }
                 .buttonStyle(.glassProminent)
+                .keyboardShortcut("n", modifiers: [.command, .shift])
+                .help("Add EQ band (⇧⌘N)")
                 .disabled(bands.count >= EQConfiguration.maximumBandCount)
             }
             .padding(12)
@@ -165,6 +167,20 @@ struct ProductionEqualizerView: View {
             HStack {
                 Text("BANDS").font(.caption.bold()).tracking(1.5).foregroundStyle(.secondary)
                 Spacer()
+                Button { selectAdjacentBand(offset: -1) } label: {
+                    Image(systemName: "chevron.left")
+                }
+                .buttonStyle(.borderless)
+                .keyboardShortcut("[", modifiers: [.command])
+                .help("Previous band (⌘[)")
+                .disabled(bands.count < 2)
+                Button { selectAdjacentBand(offset: 1) } label: {
+                    Image(systemName: "chevron.right")
+                }
+                .buttonStyle(.borderless)
+                .keyboardShortcut("]", modifiers: [.command])
+                .help("Next band (⌘])")
+                .disabled(bands.count < 2)
                 Text("\(bands.count) / \(EQConfiguration.maximumBandCount)")
                     .font(.caption.monospacedDigit()).foregroundStyle(.tertiary)
             }
@@ -256,6 +272,8 @@ struct ProductionEqualizerView: View {
                 Label("Remove", systemImage: "trash")
             }
             .buttonStyle(.glass)
+            .keyboardShortcut(.delete, modifiers: [.command])
+            .help("Remove selected band (⌘⌫)")
         }
     }
 
@@ -266,7 +284,14 @@ struct ProductionEqualizerView: View {
 
             LabeledContent("Filter") {
                 Picker("Filter", selection: binding.type) {
-                    ForEach(EQFilterType.allCases) { type in Text(type.displayName).tag(type) }
+                    ForEach(EQFilterType.allCases) { type in
+                        Text(type.displayName)
+                            .tag(type)
+                            .disabled(
+                                (type == .fir && band.firKernel == nil)
+                                    || (type == .allPass && configuration.phaseMode != .minimumPhase)
+                            )
+                    }
                 }
                 .labelsHidden()
                 .frame(width: 180)
@@ -439,11 +464,22 @@ struct ProductionEqualizerView: View {
     }
 
     private func removeBand(_ id: UUID) {
+        let previousBands = bands
+        let previousIndex = previousBands.firstIndex(where: { $0.id == id }) ?? 0
         do {
             try engine.removeEQBand(id: id)
-            if selectedBandID == id { selectedBandID = nil }
-            ensureSelection()
+            if selectedBandID == id {
+                let remaining = engine.stereoEQConfiguration.editableBands
+                selectedBandID = remaining.isEmpty ? nil : remaining[min(previousIndex, remaining.count - 1)].id
+            }
         } catch { }
+    }
+
+    private func selectAdjacentBand(offset: Int) {
+        guard !bands.isEmpty else { return }
+        let current = selectedBandID.flatMap { id in bands.firstIndex(where: { $0.id == id }) } ?? 0
+        let next = (current + offset + bands.count) % bands.count
+        selectedBandID = bands[next].id
     }
 
     private func suggestedFrequency() -> Double {
@@ -625,13 +661,14 @@ private struct ProductionEQResponseGraph: View {
     }
 
     private func drawResponse(context: inout GraphicsContext, size: CGSize) {
-        guard !displayBands.isEmpty else { return }
+        let program = ProductionEQResponseMath.compile(bands: displayBands, sampleRate: sampleRate)
+        guard !program.isEmpty else { return }
         let count = max(180, Int(size.width / 3))
         var path = Path()
         for index in 0..<count {
             let t = Double(index) / Double(max(1, count - 1))
             let frequency = exp(log(minimumFrequency) + t * (log(graphMaximumFrequency) - log(minimumFrequency)))
-            let db = ProductionEQResponseMath.responseDB(bands: displayBands, sampleRate: sampleRate, frequencyHz: frequency)
+            let db = ProductionEQResponseMath.responseDB(program: program, sampleRate: sampleRate, frequencyHz: frequency)
             let point = CGPoint(x: CGFloat(t) * size.width, y: yPosition(db, height: size.height))
             if index == 0 { path.move(to: point) } else { path.addLine(to: point) }
         }
@@ -672,14 +709,23 @@ private struct ProductionEQResponseGraph: View {
 }
 
 private enum ProductionEQResponseMath {
-    static func responseDB(bands: [EQBand], sampleRate: Double, frequencyHz: Double) -> Double {
-        guard sampleRate.isFinite, sampleRate > 0, frequencyHz > 0, frequencyHz < sampleRate * 0.5 else { return 0 }
-        var total = 0.0
+    static func compile(bands: [EQBand], sampleRate: Double) -> [N60BiquadCoefficients] {
+        var program: [N60BiquadCoefficients] = []
         for band in bands where band.enabled && band.type != .fir {
             guard let sections = try? band.compiledSections(sampleRate: sampleRate) else { continue }
-            for section in sections {
-                total += sectionResponseDB(section.coefficients, sampleRate: sampleRate, frequencyHz: frequencyHz)
-            }
+            program.append(contentsOf: sections.map(\.coefficients))
+        }
+        return program
+    }
+
+    static func responseDB(
+        program: [N60BiquadCoefficients],
+        sampleRate: Double,
+        frequencyHz: Double
+    ) -> Double {
+        guard sampleRate.isFinite, sampleRate > 0, frequencyHz > 0, frequencyHz < sampleRate * 0.5 else { return 0 }
+        let total = program.reduce(0.0) { partial, coefficients in
+            partial + sectionResponseDB(coefficients, sampleRate: sampleRate, frequencyHz: frequencyHz)
         }
         return min(max(total, -48), 48)
     }

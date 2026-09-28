@@ -31,3 +31,11 @@ No response-graph drawing or coefficient design occurs in the realtime callback.
 ## Validation
 
 `ci/validate_pr37_equalizer_ui.py` retains the production route, domain/phase controls, ordinary-band Dynamic EQ model, direct manipulation/coalescing contract, Xcode source membership, and CI integration.
+
+
+## Interaction / presentation refinement
+
+- Filter choices that the active control plane cannot accept are disabled instead of failing silently: an empty band cannot be switched to FIR until it owns a kernel, and user All-Pass is restricted to Minimum Phase.
+- Add Band is available with Shift-Command-N; previous/next band selection uses Command-[ / Command-]; removal uses Command-Delete.
+- Removing the selected band keeps selection on the nearest surviving neighbor rather than jumping unexpectedly to the first band.
+- The response graph compiles each active band's control-plane sections once per graph draw and reuses that flattened coefficient program across plotted frequency points. It no longer redesigns the same filter sections for every pixel sample.
