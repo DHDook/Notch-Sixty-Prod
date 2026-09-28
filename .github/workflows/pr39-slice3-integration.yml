@@ -1,0 +1,158 @@
+name: PR39 Slice 3 Integration
+
+on:
+  push:
+    branches:
+      - feature/pr39-production-meters-analysis
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/pr39-production-meters-analysis
+          fetch-depth: 0
+
+      - name: Integrate production analyzer worker and tests
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          worker = Path('NotchSixty/Audio/Diagnostics/ProductionAnalysisWorker.swift')
+          text = worker.read_text()
+          text = text.replace(
+              'let usable = min(count, left.count, right.count)',
+              'let usable = min(count, min(left.count, right.count))'
+          )
+          text = text.replace(
+              'let usable = min(count, historyCount, Self.historyCapacity)',
+              'let usable = min(count, min(historyCount, Self.historyCapacity))'
+          )
+          text = text.replace(
+              'let usable = min(count, historyCount, Self.correlationCapacity)',
+              'let usable = min(count, min(historyCount, Self.correlationCapacity))'
+          )
+          worker.write_text(text)
+
+          tests = Path('NotchSixtyTests/ProductionAnalysisTests.swift')
+          text = tests.read_text().replace('Float.sqrt(2)', 'Float(2).squareRoot()')
+          tests.write_text(text)
+
+          core = Path('NotchSixty/Audio/CoreAudio/CoreAudioError.swift')
+          text = core.read_text()
+          anchor = '    private var graphPublicationCoordinator: DSPGraphPublicationCoordinator?\n'
+          replacement = anchor + '    private var analysisWorker: ProductionAnalysisWorker?\n'
+          if anchor not in text:
+              raise SystemExit('CoreAudio analysis-worker field anchor not found')
+          text = text.replace(anchor, replacement, 1)
+
+          anchor = '        graphPublicationCoordinator = DSPGraphPublicationCoordinator(bridge: newBridge)\n'
+          replacement = anchor + '        analysisWorker = ProductionAnalysisWorker(bridge: newBridge)\n'
+          if anchor not in text:
+              raise SystemExit('CoreAudio worker init anchor not found')
+          text = text.replace(anchor, replacement, 1)
+
+          old = (
+              '    func setAnalysisDemand(_ demandMask: UInt32) {\n'
+              '        guard let bridge else { return }\n'
+              '        N60RealtimeAudioBridgeSetAnalysisDemand(bridge, demandMask)\n'
+              '    }\n\n'
+          )
+          new = (
+              '    func setAnalysisDemand(_ demandMask: UInt32) {\n'
+              '        guard let bridge else { return }\n'
+              '        N60RealtimeAudioBridgeSetAnalysisDemand(bridge, demandMask)\n'
+              '        analysisWorker?.setDemand(demandMask, sampleRate: outputFormat.sampleRate)\n'
+              '    }\n\n'
+              '    func productionAnalysisSnapshot() -> ProductionAnalysisSnapshot {\n'
+              '        analysisWorker?.snapshot() ?? .empty\n'
+              '    }\n\n'
+              '    func resetSpectrumPeakHold() {\n'
+              '        analysisWorker?.resetSpectrumPeakHold()\n'
+              '    }\n\n'
+          )
+          if old not in text:
+              raise SystemExit('CoreAudio analysis-demand method anchor not found')
+          text = text.replace(old, new, 1)
+
+          anchor = '        graphPublicationCoordinator?.stop()\n'
+          replacement = anchor + '        analysisWorker?.stop()\n        analysisWorker = nil\n'
+          if anchor not in text:
+              raise SystemExit('CoreAudio stop anchor not found')
+          core.write_text(text.replace(anchor, replacement, 1))
+
+          engine = Path('NotchSixty/Audio/AudioIOEngine.swift')
+          text = engine.read_text()
+          anchor = (
+              '    func analysisCaptureSnapshot() -> N60AnalysisCaptureSnapshot? {\n'
+              '        transportSession?.analysisCaptureSnapshot()\n'
+              '    }\n\n'
+          )
+          replacement = anchor + (
+              '    func productionAnalysisSnapshot() -> ProductionAnalysisSnapshot {\n'
+              '        transportSession?.productionAnalysisSnapshot() ?? .empty\n'
+              '    }\n\n'
+              '    func resetSpectrumPeakHold() {\n'
+              '        transportSession?.resetSpectrumPeakHold()\n'
+              '    }\n\n'
+          )
+          if anchor not in text:
+              raise SystemExit('AudioIOEngine analysis snapshot anchor not found')
+          engine.write_text(text.replace(anchor, replacement, 1))
+
+          project = Path('NotchSixty.xcodeproj/project.pbxproj')
+          text = project.read_text()
+          replacements = [
+              (
+                  '\t\tA10000000000000000000018 /* ProtectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002B /* ProtectionTests.swift */; };',
+                  '\t\tA10000000000000000000018 /* ProtectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002B /* ProtectionTests.swift */; };\n\t\tA10000000000000000000019 /* ProductionAnalysisTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002C /* ProductionAnalysisTests.swift */; };'
+              ),
+              (
+                  '\t\tA20000000000000000000019 /* DynamicsConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000029 /* DynamicsConfiguration.swift */; };',
+                  '\t\tA20000000000000000000019 /* DynamicsConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000029 /* DynamicsConfiguration.swift */; };\n\t\tA2000000000000000000001A /* ProductionAnalysisWorker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000002A /* ProductionAnalysisWorker.swift */; };'
+              ),
+              (
+                  '\t\tA1000000000000000000002B /* ProtectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtectionTests.swift; sourceTree = "<group>"; };',
+                  '\t\tA1000000000000000000002B /* ProtectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtectionTests.swift; sourceTree = "<group>"; };\n\t\tA1000000000000000000002C /* ProductionAnalysisTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionAnalysisTests.swift; sourceTree = "<group>"; };'
+              ),
+              (
+                  '\t\tA20000000000000000000029 /* DynamicsConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DynamicsConfiguration.swift; sourceTree = "<group>"; };',
+                  '\t\tA20000000000000000000029 /* DynamicsConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DynamicsConfiguration.swift; sourceTree = "<group>"; };\n\t\tA2000000000000000000002A /* ProductionAnalysisWorker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionAnalysisWorker.swift; sourceTree = "<group>"; };'
+              ),
+              (
+                  '\t\t\t\tA1000000000000000000002B /* ProtectionTests.swift */,\n\t\t\t);',
+                  '\t\t\t\tA1000000000000000000002B /* ProtectionTests.swift */,\n\t\t\t\tA1000000000000000000002C /* ProductionAnalysisTests.swift */,\n\t\t\t);'
+              ),
+              (
+                  'A20000000000000000000055 /* Diagnostics */ = {isa = PBXGroup; children = (A20000000000000000000026 /* AudioDiagnosticsSnapshot.swift */,); path = Diagnostics;',
+                  'A20000000000000000000055 /* Diagnostics */ = {isa = PBXGroup; children = (A20000000000000000000026 /* AudioDiagnosticsSnapshot.swift */, A2000000000000000000002A /* ProductionAnalysisWorker.swift */,); path = Diagnostics;'
+              ),
+              (
+                  '\t\t\t\tA20000000000000000000016 /* AudioDiagnosticsSnapshot.swift in Sources */,',
+                  '\t\t\t\tA20000000000000000000016 /* AudioDiagnosticsSnapshot.swift in Sources */,\n\t\t\t\tA2000000000000000000001A /* ProductionAnalysisWorker.swift in Sources */,'
+              ),
+              (
+                  '\t\t\t\tA10000000000000000000018 /* ProtectionTests.swift in Sources */,',
+                  '\t\t\t\tA10000000000000000000018 /* ProtectionTests.swift in Sources */,\n\t\t\t\tA10000000000000000000019 /* ProductionAnalysisTests.swift in Sources */,'
+              ),
+          ]
+          for old_value, new_value in replacements:
+              if old_value not in text:
+                  raise SystemExit(f'project.pbxproj anchor not found: {old_value[:100]}')
+              text = text.replace(old_value, new_value, 1)
+          project.write_text(text)
+
+          Path('.github/workflows/pr39-slice3-integration.yml').unlink()
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "PR39: integrate off-callback production analyzers"
+          git push origin HEAD:feature/pr39-production-meters-analysis
