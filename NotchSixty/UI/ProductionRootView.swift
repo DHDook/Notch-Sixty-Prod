@@ -34,8 +34,26 @@ enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
 
 enum ProductionVUScale {
     static let referenceDBFS = -18.0
-    static let minimumVU = -30.0
+    static let minimumVU = -40.0
     static let maximumVU = 3.0
+
+    // Compress the quiet end and devote progressively more angular
+    // resolution to the working range around 0 VU, like an analog face.
+    static let scaleAnchors: [(vu: Double, position: Double)] = [
+        (-40, 0.000),
+        (-30, 0.090),
+        (-20, 0.215),
+        (-10, 0.400),
+        (-7, 0.475),
+        (-5, 0.545),
+        (-3, 0.625),
+        (-2, 0.675),
+        (-1, 0.730),
+        (0, 0.790),
+        (1, 0.855),
+        (2, 0.925),
+        (3, 1.000),
+    ]
 
     static func decibelsFS(fromLinear linear: Float) -> Double {
         guard linear.isFinite, linear > 0 else { return -.infinity }
@@ -50,7 +68,15 @@ enum ProductionVUScale {
 
     static func normalizedPosition(forVU vu: Double) -> Double {
         let value = min(max(vu, minimumVU), maximumVU)
-        return (value - minimumVU) / (maximumVU - minimumVU)
+        for index in 0..<(scaleAnchors.count - 1) {
+            let lower = scaleAnchors[index]
+            let upper = scaleAnchors[index + 1]
+            guard value <= upper.vu else { continue }
+            let span = upper.vu - lower.vu
+            let fraction = span > 0 ? (value - lower.vu) / span : 0
+            return lower.position + fraction * (upper.position - lower.position)
+        }
+        return 1
     }
 
     static func smoothed(current: Double, target: Double) -> Double {
@@ -506,8 +532,8 @@ private struct StereoSignatureVUScaleFace: View, Equatable {
     }
 
     private func drawScale(context: inout GraphicsContext, center: CGPoint) {
-        let ticks: [Double] = [-30, -20, -10, -7, -5, -3, -2, -1, 0, 1, 2, 3]
-        let labels: Set<Double> = [-30, -20, -10, -5, -3, 0, 3]
+        let ticks: [Double] = [-40, -35, -30, -25, -20, -15, -10, -7, -5, -4, -3, -2, -1, 0, 1, 2, 3]
+        let labels: Set<Double> = [-40, -30, -20, -10, -7, -5, -3, 0, 3]
         var arc = Path()
         arc.addArc(
             center: center,
