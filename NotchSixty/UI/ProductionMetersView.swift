@@ -106,6 +106,7 @@ struct ProductionMetersView: View {
     @ObservedObject var engine: AudioIOEngine
     @State private var page: ProductionMetersPage = .levels
     @State private var snapshot = ProductionMetersSnapshot()
+    @State private var analysisSnapshot = ProductionAnalysisSnapshot.empty
 
     var body: some View {
         ScrollView {
@@ -117,16 +118,15 @@ struct ProductionMetersView: View {
                 case .levels:
                     levelsPage
                 case .spectrum:
-                    pendingAnalysisPage(
-                        title: "Input / Output Spectrum",
-                        systemImage: "waveform.path",
-                        detail: "The realtime-safe dual Input/Output capture and off-callback RTA engine are the next PR39 slice. No spectrum work is running yet."
+                    ProductionSpectrumView(
+                        snapshot: analysisSnapshot,
+                        isRunning: engine.lifecycleState == .running,
+                        resetPeakHold: { engine.resetSpectrumPeakHold() }
                     )
                 case .stereo:
-                    pendingAnalysisPage(
-                        title: "Stereo Field",
-                        systemImage: "circle.grid.cross",
-                        detail: "Phase correlation and the output goniometer will use their own bounded, demand-gated stereo capture. No stereo-analysis work is running yet."
+                    ProductionStereoAnalysisView(
+                        snapshot: analysisSnapshot,
+                        isRunning: engine.lifecycleState == .running
                     )
                 case .dynamics:
                     dynamicsPage
@@ -351,19 +351,51 @@ struct ProductionMetersView: View {
 
     @MainActor
     private func runVisiblePageLoop() async {
+        let activePage = page
         var demandToken: UUID?
-        if page == .levels, engine.lifecycleState == .running {
+        if activePage == .levels, engine.lifecycleState == .running {
             demandToken = ProductionDetailedMeterDemand.acquire(engine: engine)
         }
+
+        let analysisDemand: UInt32
+        switch activePage {
+        case .spectrum:
+            analysisDemand = UInt32(N60_ANALYSIS_DEMAND_SPECTRUM)
+        case .stereo:
+            analysisDemand = UInt32(N60_ANALYSIS_DEMAND_STEREO)
+        case .levels, .dynamics:
+            analysisDemand = UInt32(N60_ANALYSIS_DEMAND_NONE)
+        }
+        if analysisDemand != 0, engine.lifecycleState == .running {
+            engine.setAnalysisDemand(analysisDemand)
+        }
+
         defer {
             if let demandToken {
                 ProductionDetailedMeterDemand.release(demandToken, engine: engine)
+            }
+            if analysisDemand != 0 {
+                engine.setAnalysisDemand(UInt32(N60_ANALYSIS_DEMAND_NONE))
             }
         }
 
         while !Task.isCancelled {
             refreshSnapshot()
-            let interval: UInt64 = page == .levels ? 33_000_000 : 125_000_000
+            if analysisDemand != 0, engine.lifecycleState == .running {
+                analysisSnapshot = engine.productionAnalysisSnapshot()
+            } else {
+                analysisSnapshot = .empty
+            }
+
+            let interval: UInt64
+            switch activePage {
+            case .levels, .stereo:
+                interval = 33_000_000
+            case .spectrum:
+                interval = 50_000_000
+            case .dynamics:
+                interval = 125_000_000
+            }
             try? await Task.sleep(nanoseconds: interval)
         }
     }
