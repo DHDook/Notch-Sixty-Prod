@@ -274,6 +274,9 @@ struct SpectralDenoiserConfiguration: Equatable, Sendable {
     static let reductionRange = 0.0...1.0
     static let thresholdRange = -96.0 ... -30.0
     static let protectedFrequencyRange = 0.0...20_000.0
+    static let minimumGainRange = 0.001...0.5
+    static let attackRange = 1.0...100.0
+    static let releaseRange = 5.0...500.0
 
     var enabled = false
     var preset: SpectralDenoiserPreset = .natural
@@ -289,6 +292,14 @@ struct SpectralDenoiserConfiguration: Equatable, Sendable {
     var protectedHighHz = 150.0
     var profileRevision: UInt32 = 0
     var profileCommand: SpectralDenoiserProfileCommand = .none
+    // Legacy-parity expert controls. Named tuning presets continue to own
+    // the accepted suppression behavior until this explicit override is enabled.
+    var advancedTuningEnabled = false
+    var minimumGain = 0.01
+    // Legacy semantics: Attack is gain recovery toward unity; Release is
+    // gain fall into suppression. The C compatibility setter preserves this.
+    var attackMs = 11.0
+    var releaseMs = 21.0
 
     var algorithmPreset: SpectralDenoiserPreset {
         preset == .custom ? customBasePreset : preset
@@ -302,6 +313,9 @@ struct SpectralDenoiserConfiguration: Equatable, Sendable {
         preset = value
         customBasePreset = value
         quality = .high
+        // Preserve named-preset sound exactly. Advanced values remain stored
+        // for later custom use, but are ignored until explicitly enabled.
+        advancedTuningEnabled = false
         protectedLowHz = 0
         protectedHighHz = 150
         switch value {
@@ -351,7 +365,10 @@ struct SpectralDenoiserConfiguration: Equatable, Sendable {
               protectedLowHz.isFinite, Self.protectedFrequencyRange.contains(protectedLowHz),
               protectedHighHz.isFinite, Self.protectedFrequencyRange.contains(protectedHighHz),
               protectedLowHz <= protectedHighHz,
-              protectedHighHz < nyquist else {
+              protectedHighHz < nyquist,
+              minimumGain.isFinite, Self.minimumGainRange.contains(minimumGain),
+              attackMs.isFinite, Self.attackRange.contains(attackMs),
+              releaseMs.isFinite, Self.releaseRange.contains(releaseMs) else {
             throw DynamicsConfigurationError.invalidSpectralDenoiser
         }
     }
@@ -778,6 +795,43 @@ struct ExpanderConfiguration: Equatable, Sendable {
     }
 }
 
+struct PauseGatePresetParameters: Equatable, Sendable {
+    var thresholdDBFS: Double
+    var holdMs: Double
+    var attackMs: Double
+    var releaseMs: Double
+    var hysteresisDB: Double
+}
+
+enum PauseGatePreset: String, CaseIterable, Identifiable, Sendable {
+    case amplifierHiss
+    case sensitive
+    case relaxed
+    case broadcast
+    case custom
+
+    var id: String { rawValue }
+    var displayName: String {
+        switch self {
+        case .amplifierHiss: return "Amplifier Hiss"
+        case .sensitive: return "Sensitive"
+        case .relaxed: return "Relaxed"
+        case .broadcast: return "Broadcast"
+        case .custom: return "Custom"
+        }
+    }
+
+    var parameters: PauseGatePresetParameters? {
+        switch self {
+        case .amplifierHiss: return .init(thresholdDBFS: -60, holdMs: 500, attackMs: 10, releaseMs: 200, hysteresisDB: 3)
+        case .sensitive: return .init(thresholdDBFS: -50, holdMs: 300, attackMs: 5, releaseMs: 150, hysteresisDB: 2)
+        case .relaxed: return .init(thresholdDBFS: -70, holdMs: 1000, attackMs: 20, releaseMs: 400, hysteresisDB: 4)
+        case .broadcast: return .init(thresholdDBFS: -55, holdMs: 200, attackMs: 2, releaseMs: 300, hysteresisDB: 6)
+        case .custom: return nil
+        }
+    }
+}
+
 struct PauseGateConfiguration: Equatable, Sendable {
     static let thresholdRange = -80.0 ... -40.0
     static let holdRange = 100.0...2_000.0
@@ -786,6 +840,7 @@ struct PauseGateConfiguration: Equatable, Sendable {
     static let hysteresisRange = 0.0...6.0
 
     var enabled = false
+    var preset: PauseGatePreset = .amplifierHiss
     var thresholdDBFS = -60.0
     var holdMs = 500.0
     /// Product convention: Attack is the fade-out/close time.
@@ -793,6 +848,24 @@ struct PauseGateConfiguration: Equatable, Sendable {
     /// Product convention: Release is the fade-in/open time.
     var releaseMs = 200.0
     var hysteresisDB = 3.0
+
+    mutating func applyPreset(_ value: PauseGatePreset) {
+        preset = value
+        guard let p = value.parameters else { return }
+        thresholdDBFS = p.thresholdDBFS
+        holdMs = p.holdMs
+        attackMs = p.attackMs
+        releaseMs = p.releaseMs
+        hysteresisDB = p.hysteresisDB
+    }
+
+    mutating func markCustomIfNeeded() {
+        guard let p = preset.parameters else { return }
+        if thresholdDBFS != p.thresholdDBFS || holdMs != p.holdMs ||
+            attackMs != p.attackMs || releaseMs != p.releaseMs || hysteresisDB != p.hysteresisDB {
+            preset = .custom
+        }
+    }
 
     func validate() throws {
         guard thresholdDBFS.isFinite, Self.thresholdRange.contains(thresholdDBFS),
@@ -1017,20 +1090,24 @@ struct DynamicsConfiguration: Equatable, Sendable {
             mainsNotch.continuousTracking,
             mainsNotch.region.fundamentalHz
         ) else { throw DynamicsConfigurationError.invalidMainsHumDetector }
-        guard N60DynamicsSnapshotSetSpectralDenoiser(
-            &snapshot,
-            sampleRate,
-            spectralDenoiser.enabled,
-            spectralDenoiser.algorithmPreset.cType,
-            spectralDenoiser.quality.cType,
-            Float(spectralDenoiser.reductionAmount),
-            Float(spectralDenoiser.thresholdDBFS),
-            spectralDenoiser.protectedRangeEnabled,
-            Float(spectralDenoiser.protectedLowHz),
-            Float(spectralDenoiser.protectedHighHz),
-            spectralDenoiser.profileRevision,
-            spectralDenoiser.profileCommand.cType
-        ) else { throw DynamicsConfigurationError.invalidSpectralDenoiser }
+        guard N60DynamicsSnapshotSetSpectralDenoiserLegacyAdvanced(
+    &snapshot,
+    sampleRate,
+    spectralDenoiser.enabled,
+    spectralDenoiser.algorithmPreset.cType,
+    spectralDenoiser.quality.cType,
+    Float(spectralDenoiser.reductionAmount),
+    Float(spectralDenoiser.thresholdDBFS),
+    spectralDenoiser.protectedRangeEnabled,
+    Float(spectralDenoiser.protectedLowHz),
+    Float(spectralDenoiser.protectedHighHz),
+    spectralDenoiser.profileRevision,
+    spectralDenoiser.profileCommand.cType,
+    spectralDenoiser.advancedTuningEnabled,
+    Float(spectralDenoiser.minimumGain),
+    Float(spectralDenoiser.attackMs),
+    Float(spectralDenoiser.releaseMs)
+) else { throw DynamicsConfigurationError.invalidSpectralDenoiser }
         guard N60DynamicsSnapshotSetLoudnessMatch(
             &snapshot,
             sampleRate,

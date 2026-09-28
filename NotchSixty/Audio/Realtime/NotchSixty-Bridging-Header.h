@@ -3,3 +3,4 @@
 #import "N60LinearPhaseEQ.h"
 
 #import "N60SpectralDenoiser.h"
+#import "N60DynamicsLegacyAdvanced.h"
