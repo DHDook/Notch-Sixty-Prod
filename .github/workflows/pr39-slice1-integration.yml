@@ -25,62 +25,53 @@ jobs:
 
           root = Path('NotchSixty/UI/ProductionRootView.swift')
           text = root.read_text()
-          old = '''        case .meters:
-            ProductionPlaceholderPage(
-                title: "Meters",
-                subtitle: "Detailed signal, loudness, protection, and analysis telemetry.",
-                systemImage: "chart.xyaxis.line",
-                detail: "Each detailed meter or analyzer will request only its own pipeline so hidden analysis remains parked."
-            )'''
-          new = '''        case .meters:
-            ProductionMetersView(engine: engine)'''
+          old = "        case .meters:\n            ProductionPlaceholderPage(\n                title: \"Meters\",\n                subtitle: \"Detailed signal, loudness, protection, and analysis telemetry.\",\n                systemImage: \"chart.xyaxis.line\",\n                detail: \"Each detailed meter or analyzer will request only its own pipeline so hidden analysis remains parked.\"\n            )"
+          new = "        case .meters:\n            ProductionMetersView(engine: engine)"
           if old not in text:
               raise SystemExit('ProductionRootView meters placeholder anchor not found')
           root.write_text(text.replace(old, new, 1))
 
           engine = Path('NotchSixty/Audio/AudioIOEngine.swift')
           text = engine.read_text()
-          anchor = '''    func diagnosticsSnapshot() -> AudioDiagnosticsSnapshot {'''
+          anchor = "    func diagnosticsSnapshot() -> AudioDiagnosticsSnapshot {"
           if anchor not in text:
               raise SystemExit('AudioIOEngine diagnostics anchor not found')
-          method = '''    func setDetailedMeteringDemand(_ enabled: Bool) throws {
-        let previousDemand = N60RealtimeAudioBridgeMeteringDemand()
-        guard previousDemand != enabled else { return }
-
-        N60RealtimeAudioBridgeSetMeteringDemand(enabled)
-        guard let session = transportSession else { return }
-
-        do {
-            var graph = try stereoEQConfiguration.makeGraphSnapshot(
-                sampleRate: session.outputFormat.sampleRate,
-                gainConfiguration: gainConfiguration,
-                bassManagementConfiguration: bassManagementConfiguration,
-                dynamicsConfiguration: dynamicsConfiguration,
-                playbackConfiguration: playbackControlConfiguration
-            )
-            try attachActiveEQFIRProgramIfNeeded(
-                to: &graph,
-                stereoConfiguration: stereoEQConfiguration,
-                playbackConfiguration: playbackControlConfiguration
-            )
-            try attachActiveRoomCorrectionProgramIfNeeded(
-                to: &graph,
-                playbackConfiguration: playbackControlConfiguration
-            )
-            try attachActiveSpeakerIRProgramIfNeeded(
-                to: &graph,
-                playbackConfiguration: playbackControlConfiguration
-            )
-            try session.publishDSPGraph(graph)
-            lastErrorDescription = nil
-        } catch {
-            N60RealtimeAudioBridgeSetMeteringDemand(previousDemand)
-            lastErrorDescription = error.localizedDescription
-            throw error
-        }
-    }
-
-'''
+          method = (
+              "    func setDetailedMeteringDemand(_ enabled: Bool) throws {\n"
+              "        let previousDemand = N60RealtimeAudioBridgeMeteringDemand()\n"
+              "        guard previousDemand != enabled else { return }\n\n"
+              "        N60RealtimeAudioBridgeSetMeteringDemand(enabled)\n"
+              "        guard let session = transportSession else { return }\n\n"
+              "        do {\n"
+              "            var graph = try stereoEQConfiguration.makeGraphSnapshot(\n"
+              "                sampleRate: session.outputFormat.sampleRate,\n"
+              "                gainConfiguration: gainConfiguration,\n"
+              "                bassManagementConfiguration: bassManagementConfiguration,\n"
+              "                dynamicsConfiguration: dynamicsConfiguration,\n"
+              "                playbackConfiguration: playbackControlConfiguration\n"
+              "            )\n"
+              "            try attachActiveEQFIRProgramIfNeeded(\n"
+              "                to: &graph,\n"
+              "                stereoConfiguration: stereoEQConfiguration,\n"
+              "                playbackConfiguration: playbackControlConfiguration\n"
+              "            )\n"
+              "            try attachActiveRoomCorrectionProgramIfNeeded(\n"
+              "                to: &graph,\n"
+              "                playbackConfiguration: playbackControlConfiguration\n"
+              "            )\n"
+              "            try attachActiveSpeakerIRProgramIfNeeded(\n"
+              "                to: &graph,\n"
+              "                playbackConfiguration: playbackControlConfiguration\n"
+              "            )\n"
+              "            try session.publishDSPGraph(graph)\n"
+              "            lastErrorDescription = nil\n"
+              "        } catch {\n"
+              "            N60RealtimeAudioBridgeSetMeteringDemand(previousDemand)\n"
+              "            lastErrorDescription = error.localizedDescription\n"
+              "            throw error\n"
+              "        }\n"
+              "    }\n\n"
+          )
           engine.write_text(text.replace(anchor, method + anchor, 1))
 
           project = Path('NotchSixty.xcodeproj/project.pbxproj')
@@ -103,10 +94,10 @@ jobs:
                   '\t\t\t\tA40000000000000000000013 /* ProductionDynamicsTelemetryView.swift in Sources */,\n\t\t\t\tA40000000000000000000014 /* ProductionMetersView.swift in Sources */,'
               ),
           ]
-          for old, new in replacements:
-              if old not in text:
-                  raise SystemExit(f'project.pbxproj anchor not found: {old[:80]}')
-              text = text.replace(old, new, 1)
+          for old_value, new_value in replacements:
+              if old_value not in text:
+                  raise SystemExit(f'project.pbxproj anchor not found: {old_value[:80]}')
+              text = text.replace(old_value, new_value, 1)
           project.write_text(text)
 
           Path('.github/workflows/pr39-slice1-integration.yml').unlink()
