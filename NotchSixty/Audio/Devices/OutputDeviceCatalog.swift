@@ -399,7 +399,7 @@ private enum CoreAudioDeviceCatalogSupport {
             )
         }
 
-        try check(status, operation: operation, objectID: deviceID)
+        try check(status, operation: .readAvailableSampleRates, objectID: deviceID)
 
         return ranges
             .map { AudioSampleRateRange(minimum: $0.mMinimum, maximum: $0.mMaximum) }
