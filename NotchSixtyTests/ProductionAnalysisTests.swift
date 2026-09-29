@@ -208,6 +208,57 @@ final class ProductionAnalysisTests: XCTestCase {
         XCTAssertEqual(decoded, state)
     }
 
+    func testMicrophoneCalibrationParserNormalizesSortsAndDeduplicates() throws {
+        let text = """
+        # frequency gain
+        1000, -1.0
+        20 1.5
+        1000 -3.0 ; duplicate points are averaged
+        20000 -0.5
+        """
+
+        let calibration = try RoomCorrectionMicrophoneCalibrationParser()
+            .parse(text, sourceName: "fixture.cal")
+
+        XCTAssertEqual(calibration.sourceName, "fixture.cal")
+        XCTAssertEqual(calibration.points.map(\.frequencyHz), [20, 1_000, 20_000])
+        XCTAssertEqual(calibration.points.map(\.gainDB), [1.5, -2.0, -0.5])
+    }
+
+    func testMicrophoneCalibrationInterpolatesInLogFrequencySpaceAndClampsEnds() throws {
+        let calibration = RoomCorrectionMicrophoneCalibration(
+            sourceName: "fixture.cal",
+            points: [
+                RoomCorrectionCalibrationPoint(frequencyHz: 100, gainDB: 0),
+                RoomCorrectionCalibrationPoint(frequencyHz: 10_000, gainDB: 4),
+            ]
+        )
+
+        XCTAssertEqual(try calibration.gainDB(at: 10), 0, accuracy: 0.000_001)
+        XCTAssertEqual(try calibration.gainDB(at: 1_000), 2, accuracy: 0.000_001)
+        XCTAssertEqual(try calibration.gainDB(at: 20_000), 4, accuracy: 0.000_001)
+    }
+
+    func testMicrophoneCalibrationParserRejectsAmbiguousOrInvalidData() throws {
+        XCTAssertThrowsError(
+            try RoomCorrectionMicrophoneCalibrationParser().parse("20 0.5 12\n20000 0")
+        ) { error in
+            XCTAssertEqual(error as? RoomCorrectionMicrophoneCalibrationError, .malformedLine(1))
+        }
+
+        XCTAssertThrowsError(
+            try RoomCorrectionMicrophoneCalibrationParser().parse("0 0.5\n20000 0")
+        ) { error in
+            XCTAssertEqual(error as? RoomCorrectionMicrophoneCalibrationError, .invalidFrequency(line: 1))
+        }
+
+        XCTAssertThrowsError(
+            try RoomCorrectionMicrophoneCalibrationParser().parse("1000 0\n1000 1")
+        ) { error in
+            XCTAssertEqual(error as? RoomCorrectionMicrophoneCalibrationError, .insufficientUniquePoints)
+        }
+    }
+
     func testRoomCorrectionProjectRoundTripsRawAndDesignAssets() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("NotchSixty-PR40-\(UUID().uuidString)", isDirectory: true)
