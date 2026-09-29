@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SwiftUI
 
@@ -34,8 +35,26 @@ enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
 
 enum ProductionVUScale {
     static let referenceDBFS = -18.0
-    static let minimumVU = -30.0
+    static let minimumVU = -40.0
     static let maximumVU = 3.0
+
+    // Compress the quiet end and devote progressively more angular
+    // resolution to the working range around 0 VU, like an analog face.
+    static let scaleAnchors: [(vu: Double, position: Double)] = [
+        (-40, 0.000),
+        (-30, 0.090),
+        (-20, 0.215),
+        (-10, 0.400),
+        (-7, 0.475),
+        (-5, 0.545),
+        (-3, 0.625),
+        (-2, 0.675),
+        (-1, 0.730),
+        (0, 0.790),
+        (1, 0.855),
+        (2, 0.925),
+        (3, 1.000),
+    ]
 
     static func decibelsFS(fromLinear linear: Float) -> Double {
         guard linear.isFinite, linear > 0 else { return -.infinity }
@@ -50,7 +69,15 @@ enum ProductionVUScale {
 
     static func normalizedPosition(forVU vu: Double) -> Double {
         let value = min(max(vu, minimumVU), maximumVU)
-        return (value - minimumVU) / (maximumVU - minimumVU)
+        for index in 0..<(scaleAnchors.count - 1) {
+            let lower = scaleAnchors[index]
+            let upper = scaleAnchors[index + 1]
+            guard value <= upper.vu else { continue }
+            let span = upper.vu - lower.vu
+            let fraction = span > 0 ? (value - lower.vu) / span : 0
+            return lower.position + fraction * (upper.position - lower.position)
+        }
+        return 1
     }
 
     static func smoothed(current: Double, target: Double) -> Double {
@@ -99,11 +126,16 @@ struct ProductionRootView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(ProductionSection.allCases, selection: $selection) { section in
-                Label(section.title, systemImage: section.systemImage).tag(section)
+            VStack(spacing: 0) {
+                ProductionSidebarBrand()
+                Divider()
+                List(ProductionSection.allCases, selection: $selection) { section in
+                    Label(section.title, systemImage: section.systemImage).tag(section)
+                }
+                .listStyle(.sidebar)
             }
             .navigationTitle("Notch Sixty")
-            .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 280)
+            .navigationSplitViewColumnWidth(min: 200, ideal: 232, max: 290)
         } detail: {
             detail(for: selection ?? .dashboard)
                 .toolbar { toolbar }
@@ -122,12 +154,7 @@ struct ProductionRootView: View {
         case .dynamics:
             ProductionDynamicsView(engine: engine)
         case .meters:
-            ProductionPlaceholderPage(
-                title: "Meters",
-                subtitle: "Detailed signal, loudness, protection, and analysis telemetry.",
-                systemImage: "chart.xyaxis.line",
-                detail: "Each detailed meter or analyzer will request only its own pipeline so hidden analysis remains parked."
-            )
+            ProductionMetersView(engine: engine)
         case .activeCrossover:
             ProductionActiveCrossoverView(engine: engine)
         case .roomCorrection:
@@ -138,10 +165,16 @@ struct ProductionRootView: View {
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
         ToolbarItemGroup(placement: .primaryAction) {
+            ProductionProfileToolbar(profiles: product.profiles, engine: engine)
+
             if let output = engine.selectedOutputDevice {
                 Text("\(output.name) · \(output.nominalSampleRate / 1_000, specifier: "%.1f") kHz")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 6)
+                    .glassEffect(.regular, in: .capsule)
             }
             Button {
                 openWindow(id: "engineering-validation")
@@ -163,6 +196,36 @@ struct ProductionRootView: View {
             .buttonStyle(.glassProminent)
             .disabled(engine.lifecycleState != .idle && engine.lifecycleState != .running)
         }
+    }
+}
+
+
+private struct ProductionSidebarBrand: View {
+    var body: some View {
+        HStack(spacing: 12) {
+            if let icon = NSApplication.shared.applicationIconImage {
+                Image(nsImage: icon)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: 44, height: 44)
+                    .clipShape(.rect(cornerRadius: 10))
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Notch Sixty")
+                    .textCase(.uppercase)
+                    .font(.headline.weight(.semibold))
+                    .tracking(1.5)
+                Text("Stereo DSP")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Notch Sixty Stereo DSP")
     }
 }
 
@@ -290,7 +353,7 @@ private struct ProductionDashboardView: View {
             }
         }
         .padding(14)
-        .background(.quaternary.opacity(0.22), in: .rect(cornerRadius: 18))
+        .glassEffect(.regular, in: .rect(cornerRadius: 18))
     }
 
     private var masterControls: some View {
@@ -348,7 +411,7 @@ private struct ProductionDashboardView: View {
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary.opacity(0.28), in: .rect(cornerRadius: 18))
+        .glassEffect(.regular, in: .rect(cornerRadius: 18))
     }
 }
 
@@ -511,8 +574,8 @@ private struct StereoSignatureVUScaleFace: View, Equatable {
     }
 
     private func drawScale(context: inout GraphicsContext, center: CGPoint) {
-        let ticks: [Double] = [-30, -20, -10, -7, -5, -3, -2, -1, 0, 1, 2, 3]
-        let labels: Set<Double> = [-30, -20, -10, -5, -3, 0, 3]
+        let ticks: [Double] = [-40, -35, -30, -25, -20, -15, -10, -7, -5, -4, -3, -2, -1, 0, 1, 2, 3]
+        let labels: Set<Double> = [-40, -30, -20, -10, -7, -5, -3, 0, 3]
         var arc = Path()
         arc.addArc(
             center: center,
@@ -606,7 +669,7 @@ private struct ProductionActiveCrossoverView: View {
                     )).toggleStyle(.switch)
                 }
                 .padding(20)
-                .background(.quaternary.opacity(0.28), in: .rect(cornerRadius: 18))
+                .glassEffect(.regular, in: .rect(cornerRadius: 18))
             }
             .padding(28)
             .frame(maxWidth: 900, alignment: .topLeading)
@@ -655,7 +718,7 @@ private struct ProductionRoomCorrectionView: View {
                     .frame(maxWidth: .infinity, minHeight: 240)
                 }
                 .padding(20)
-                .background(.quaternary.opacity(0.28), in: .rect(cornerRadius: 18))
+                .glassEffect(.regular, in: .rect(cornerRadius: 18))
             }
             .padding(28)
             .frame(maxWidth: 900, alignment: .topLeading)

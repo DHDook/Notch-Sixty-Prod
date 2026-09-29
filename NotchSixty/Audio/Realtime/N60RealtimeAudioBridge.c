@@ -8,6 +8,12 @@
 static _Atomic bool gMeteringDemand = false;
 static _Atomic bool gOutputVUMeterDemand = false;
 
+#define N60_ANALYSIS_CAPTURE_MASK (N60_ANALYSIS_CAPTURE_CAPACITY_FRAMES - 1u)
+_Static_assert(
+    (N60_ANALYSIS_CAPTURE_CAPACITY_FRAMES & N60_ANALYSIS_CAPTURE_MASK) == 0u,
+    "analysis capture capacity must remain a power of two"
+);
+
 typedef struct {
     float left;
     float right;
@@ -71,6 +77,16 @@ struct N60RealtimeAudioBridge {
     _Atomic uint32_t outputVURMSLeftBits;
     _Atomic uint32_t outputVURMSRightBits;
     _Atomic uint64_t outputVUOverRangeSamples;
+
+    // Demand-gated Input/DSP-Output analysis capture. This is a bounded
+    // single-producer/single-consumer ring: the audio callback never waits
+    // and never overwrites unread data; the control plane drains it.
+    N60AnalysisFrame *analysisFrames;
+    _Atomic uint32_t analysisDemandMask;
+    _Atomic uint64_t analysisWriteIndex;
+    _Atomic uint64_t analysisReadIndex;
+    _Atomic uint64_t analysisCapturedFrames;
+    _Atomic uint64_t analysisDroppedFrames;
 
     // Control-plane command payload plus an even/odd sequence. The output
     // callback latches a stable command once per callback and then advances a
@@ -312,8 +328,16 @@ N60RealtimeAudioBridge *N60RealtimeAudioBridgeCreate(uint32_t capacityFrames) {
         return NULL;
     }
 
+    bridge->analysisFrames = calloc(N60_ANALYSIS_CAPTURE_CAPACITY_FRAMES, sizeof(N60AnalysisFrame));
+    if (bridge->analysisFrames == NULL) {
+        free(bridge->frames);
+        free(bridge);
+        return NULL;
+    }
+
     bridge->renderKernel = N60RenderKernelCreate();
     if (bridge->renderKernel == NULL) {
+        free(bridge->analysisFrames);
         free(bridge->frames);
         free(bridge);
         return NULL;
@@ -333,6 +357,7 @@ N60RealtimeAudioBridge *N60RealtimeAudioBridgeCreate(uint32_t capacityFrames) {
 void N60RealtimeAudioBridgeDestroy(N60RealtimeAudioBridge *bridge) {
     if (bridge == NULL) return;
     N60RenderKernelDestroy(bridge->renderKernel);
+    free(bridge->analysisFrames);
     free(bridge->frames);
     free(bridge);
 }
@@ -357,6 +382,11 @@ void N60RealtimeAudioBridgeReset(N60RealtimeAudioBridge *bridge) {
     atomic_store_explicit(&bridge->outputVURMSLeftBits, 0, memory_order_relaxed);
     atomic_store_explicit(&bridge->outputVURMSRightBits, 0, memory_order_relaxed);
     atomic_store_explicit(&bridge->outputVUOverRangeSamples, 0, memory_order_relaxed);
+    atomic_store_explicit(&bridge->analysisDemandMask, N60_ANALYSIS_DEMAND_NONE, memory_order_release);
+    atomic_store_explicit(&bridge->analysisWriteIndex, 0, memory_order_release);
+    atomic_store_explicit(&bridge->analysisReadIndex, 0, memory_order_release);
+    atomic_store_explicit(&bridge->analysisCapturedFrames, 0, memory_order_relaxed);
+    atomic_store_explicit(&bridge->analysisDroppedFrames, 0, memory_order_relaxed);
 
     atomic_store_explicit(&bridge->transitionCommandSequence, 0, memory_order_relaxed);
     atomic_store_explicit(&bridge->transitionTargetGainBits, float_to_bits(1.0f), memory_order_relaxed);
@@ -471,6 +501,73 @@ N60OutputVUMeterSnapshot N60RealtimeAudioBridgeGetOutputVUMeterSnapshot(
     snapshot.rmsRight = bits_to_float(atomic_load_explicit(&bridge->outputVURMSRightBits, memory_order_relaxed));
     snapshot.overRangeSamples = atomic_load_explicit(&bridge->outputVUOverRangeSamples, memory_order_relaxed);
     return snapshot;
+}
+
+void N60RealtimeAudioBridgeSetAnalysisDemand(
+    N60RealtimeAudioBridge *bridge,
+    uint32_t demandMask
+) {
+    if (bridge == NULL) return;
+    uint32_t sanitized = demandMask & N60_ANALYSIS_DEMAND_ALL;
+    atomic_store_explicit(&bridge->analysisDemandMask, sanitized, memory_order_release);
+}
+
+void N60RealtimeAudioBridgeDiscardAnalysisFrames(N60RealtimeAudioBridge *bridge) {
+    if (bridge == NULL) return;
+    uint64_t writeIndex = atomic_load_explicit(
+        &bridge->analysisWriteIndex, memory_order_acquire
+    );
+    atomic_store_explicit(&bridge->analysisReadIndex, writeIndex, memory_order_release);
+}
+
+uint32_t N60RealtimeAudioBridgeAnalysisDemand(const N60RealtimeAudioBridge *bridge) {
+    if (bridge == NULL) return N60_ANALYSIS_DEMAND_NONE;
+    return atomic_load_explicit(&bridge->analysisDemandMask, memory_order_acquire);
+}
+
+N60AnalysisCaptureSnapshot N60RealtimeAudioBridgeGetAnalysisCaptureSnapshot(
+    const N60RealtimeAudioBridge *bridge
+) {
+    N60AnalysisCaptureSnapshot snapshot = {0};
+    if (bridge == NULL) return snapshot;
+    snapshot.demandMask = N60RealtimeAudioBridgeAnalysisDemand(bridge);
+    uint64_t readIndex = atomic_load_explicit(&bridge->analysisReadIndex, memory_order_acquire);
+    uint64_t writeIndex = atomic_load_explicit(&bridge->analysisWriteIndex, memory_order_acquire);
+    uint64_t available = writeIndex >= readIndex ? writeIndex - readIndex : 0;
+    if (available > N60_ANALYSIS_CAPTURE_CAPACITY_FRAMES) {
+        available = N60_ANALYSIS_CAPTURE_CAPACITY_FRAMES;
+    }
+    snapshot.availableFrames = (uint32_t)available;
+    snapshot.capturedFrames = atomic_load_explicit(&bridge->analysisCapturedFrames, memory_order_relaxed);
+    snapshot.droppedFrames = atomic_load_explicit(&bridge->analysisDroppedFrames, memory_order_relaxed);
+    return snapshot;
+}
+
+uint32_t N60RealtimeAudioBridgeReadAnalysisFrames(
+    N60RealtimeAudioBridge *bridge,
+    N60AnalysisFrame *destination,
+    uint32_t capacityFrames
+) {
+    if (bridge == NULL || destination == NULL || capacityFrames == 0) return 0;
+    uint64_t readIndex = atomic_load_explicit(&bridge->analysisReadIndex, memory_order_relaxed);
+    uint64_t writeIndex = atomic_load_explicit(&bridge->analysisWriteIndex, memory_order_acquire);
+    uint64_t available = writeIndex >= readIndex ? writeIndex - readIndex : 0;
+    uint32_t framesToRead = capacityFrames < available ? capacityFrames : (uint32_t)available;
+    if (framesToRead == 0) return 0;
+    uint32_t ringIndex = (uint32_t)readIndex & N60_ANALYSIS_CAPTURE_MASK;
+    uint32_t first = framesToRead;
+    uint32_t untilWrap = N60_ANALYSIS_CAPTURE_CAPACITY_FRAMES - ringIndex;
+    if (first > untilWrap) first = untilWrap;
+    memcpy(destination, bridge->analysisFrames + ringIndex, first * sizeof(N60AnalysisFrame));
+    if (first < framesToRead) {
+        memcpy(
+            destination + first,
+            bridge->analysisFrames,
+            (framesToRead - first) * sizeof(N60AnalysisFrame)
+        );
+    }
+    atomic_store_explicit(&bridge->analysisReadIndex, readIndex + framesToRead, memory_order_release);
+    return framesToRead;
 }
 
 bool N60RealtimeAudioBridgePrepareConvolutionProgram(
@@ -713,6 +810,22 @@ OSStatus N60OutputIOProc(
         atomic_load_explicit(&bridge->outputGainBits, memory_order_acquire)
     );
     bool outputVUMeterEnabled = N60RealtimeAudioBridgeOutputVUMeterDemand();
+    uint32_t analysisDemand = atomic_load_explicit(&bridge->analysisDemandMask, memory_order_acquire);
+    uint64_t analysisWriteIndex = 0;
+    uint32_t analysisFramesToWrite = 0;
+    uint32_t analysisRingIndex = 0;
+    if (analysisDemand != N60_ANALYSIS_DEMAND_NONE) {
+        analysisWriteIndex = atomic_load_explicit(&bridge->analysisWriteIndex, memory_order_relaxed);
+        uint64_t analysisReadIndex = atomic_load_explicit(&bridge->analysisReadIndex, memory_order_acquire);
+        uint64_t used = analysisWriteIndex >= analysisReadIndex
+            ? analysisWriteIndex - analysisReadIndex
+            : N60_ANALYSIS_CAPTURE_CAPACITY_FRAMES;
+        uint64_t freeFrames = used < N60_ANALYSIS_CAPTURE_CAPACITY_FRAMES
+            ? N60_ANALYSIS_CAPTURE_CAPACITY_FRAMES - used
+            : 0;
+        analysisFramesToWrite = framesToRead < freeFrames ? framesToRead : (uint32_t)freeFrames;
+        analysisRingIndex = (uint32_t)analysisWriteIndex & N60_ANALYSIS_CAPTURE_MASK;
+    }
     float outputVUPeakLeft = 0.0f;
     float outputVUPeakRight = 0.0f;
     double outputVUSquareSumLeft = 0.0;
@@ -743,6 +856,13 @@ OSStatus N60OutputIOProc(
             &processed.right
         );
 
+        if (frameIndex < analysisFramesToWrite) {
+            bridge->analysisFrames[analysisRingIndex] = (N60AnalysisFrame){
+                frame.left, frame.right, processed.left, processed.right
+            };
+            analysisRingIndex = (analysisRingIndex + 1u) & N60_ANALYSIS_CAPTURE_MASK;
+        }
+
         float transitionGain = next_transition_gain(&transitionRamp);
         float gain = startup_fade_gain(&startupFade, masterGain) * transitionGain;
         float finalLeft = processed.left * gain;
@@ -765,6 +885,24 @@ OSStatus N60OutputIOProc(
     }
 
     N60RenderKernelEndRender(bridge->renderKernel, &renderContext, renderedFrames);
+
+    if (analysisDemand != N60_ANALYSIS_DEMAND_NONE) {
+        atomic_store_explicit(
+            &bridge->analysisWriteIndex,
+            analysisWriteIndex + analysisFramesToWrite,
+            memory_order_release
+        );
+        atomic_fetch_add_explicit(
+            &bridge->analysisCapturedFrames, analysisFramesToWrite, memory_order_relaxed
+        );
+        if (analysisFramesToWrite < framesToRead) {
+            atomic_fetch_add_explicit(
+                &bridge->analysisDroppedFrames,
+                framesToRead - analysisFramesToWrite,
+                memory_order_relaxed
+            );
+        }
+    }
 
     for (UInt32 frameIndex = framesToRead; frameIndex < frameCount; ++frameIndex) {
         (void)next_transition_gain(&transitionRamp);

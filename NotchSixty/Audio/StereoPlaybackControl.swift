@@ -1,6 +1,6 @@
 import Foundation
 
-enum EQChannelMode: String, CaseIterable, Identifiable, Sendable {
+enum EQChannelMode: String, CaseIterable, Identifiable, Codable, Sendable {
     case linked
     case independent
     case midSide
@@ -16,7 +16,7 @@ enum EQChannelMode: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-enum EQEditChannel: String, CaseIterable, Identifiable, Sendable {
+enum EQEditChannel: String, CaseIterable, Identifiable, Codable, Sendable {
     case linked
     case left
     case right
@@ -36,7 +36,7 @@ enum EQEditChannel: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-struct StereoEQConfiguration: Equatable, Sendable {
+struct StereoEQConfiguration: Equatable, Codable, Sendable {
     static let bandGainRange = -24.0...24.0
 
     var channelMode: EQChannelMode

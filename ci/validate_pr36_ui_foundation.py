@@ -26,7 +26,7 @@ def forbid(text: str, needle: str, context: str) -> None:
 
 
 def vu_for_dbfs(dbfs: float) -> float:
-    return min(max(dbfs - (-18.0), -30.0), 3.0)
+    return min(max(dbfs - (-18.0), -40.0), 3.0)
 
 
 # Shipping target / platform language.
@@ -64,7 +64,11 @@ require(UI, "private struct StereoSignatureVUMeter", "stereo signature VU compon
 require(UI, "private struct StereoSignatureVUScaleFace", "static stereo VU face component")
 require(UI, "StereoSignatureVUMeter(leftVU: leftVU, rightVU: rightVU)", "stereo VU deck")
 require(UI, "static let referenceDBFS = -18.0", "VU reference")
-require(UI, "static let minimumVU = -30.0", "extended VU display floor")
+require(UI, "static let minimumVU = -40.0", "extended VU display floor")
+require(UI, "static let scaleAnchors", "nonlinear analog VU scale")
+require(UI, "(-40, 0.000)", "VU scale quiet-end anchor")
+require(UI, "(0, 0.790)", "VU scale reference anchor")
+require(UI, "(3, 1.000)", "VU scale upper anchor")
 require(UI, "static let maximumVU = 3.0", "VU display ceiling")
 require(UI, "dbFS - referenceDBFS", "VU dBFS mapping")
 require(UI, "startAngle: .degrees(205)", "upper-arc 1970s VU scale")
@@ -80,7 +84,7 @@ forbid(UI, 'Text("PEAK ', "signature VU numeric peak readout")
 
 # Numerical guard for the shipping VU calibration contract. Extending the low
 # end gives useful motion at ordinary/quiet playback levels without changing 0 VU.
-for dbfs, expected in [(-48.0, -30.0), (-38.0, -20.0), (-18.0, 0.0), (-15.0, 3.0), (-60.0, -30.0), (-10.0, 3.0)]:
+for dbfs, expected in [(-58.0, -40.0), (-48.0, -30.0), (-38.0, -20.0), (-18.0, 0.0), (-15.0, 3.0), (-60.0, -40.0), (-10.0, 3.0)]:
     actual = vu_for_dbfs(dbfs)
     if not math.isclose(actual, expected, abs_tol=1e-12):
         print(

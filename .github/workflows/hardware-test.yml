@@ -1,5 +1,5 @@
 name: Hardware Test DMG
-# PR38 production Dynamics hardware/UI acceptance trigger. Workflow-only change; no product source modification.
+# PR39 production Meters/RTA/Analysis hardware/UI acceptance trigger. Workflow-only change; no product source modification.
 
 on:
   workflow_dispatch:

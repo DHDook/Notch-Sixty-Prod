@@ -2,7 +2,7 @@ import Combine
 import CoreAudio
 import Foundation
 
-enum EQFilterType: String, CaseIterable, Identifiable, Sendable {
+enum EQFilterType: String, CaseIterable, Identifiable, Codable, Sendable {
     case peaking
     case lowShelf
     case highShelf
@@ -73,7 +73,7 @@ enum EQFilterType: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-enum EQFilterSlope: Int, CaseIterable, Identifiable, Sendable {
+enum EQFilterSlope: Int, CaseIterable, Identifiable, Codable, Sendable {
     case db6 = 6
     case db12 = 12
     case db18 = 18
@@ -90,7 +90,7 @@ enum EQFilterSlope: Int, CaseIterable, Identifiable, Sendable {
     var order: Int { rawValue / 6 }
 }
 
-enum EQPhaseMode: String, CaseIterable, Identifiable, Sendable {
+enum EQPhaseMode: String, CaseIterable, Identifiable, Codable, Sendable {
     case minimumPhase
     case mixedPhase
     case linearPhase
@@ -106,7 +106,7 @@ enum EQPhaseMode: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-struct EQBandDynamicConfiguration: Equatable, Sendable {
+struct EQBandDynamicConfiguration: Equatable, Codable, Sendable {
     static let thresholdRange = -60.0...0.0
     static let ratioRange = 1.0...10.0
     static let rangeRange = -24.0...0.0
@@ -143,7 +143,7 @@ struct EQBandDynamicConfiguration: Equatable, Sendable {
     }
 }
 
-struct EQFIRKernel: Equatable, Sendable {
+struct EQFIRKernel: Equatable, Codable, Sendable {
     var name: String
     var sampleRate: Double?
     var taps: [Float]
@@ -221,7 +221,7 @@ enum EQFIRCompiler {
     }
 }
 
-struct EQBand: Identifiable, Equatable, Sendable {
+struct EQBand: Identifiable, Equatable, Codable, Sendable {
     let id: UUID
     var enabled: Bool
     var type: EQFilterType
@@ -425,7 +425,7 @@ enum EQConfigurationError: Error, LocalizedError, Equatable {
     }
 }
 
-struct DSPGainConfiguration: Equatable, Sendable {
+struct DSPGainConfiguration: Equatable, Codable, Sendable {
     static let inputPreampRange = -60.0...24.0
     static let headroomAttenuationRange = -48.0...0.0
     static let outputGainRange = -60.0...12.0
@@ -456,7 +456,7 @@ enum DSPGainConfigurationError: Error, LocalizedError, Equatable {
     }
 }
 
-enum CrossoverTopology: String, CaseIterable, Identifiable, Sendable {
+enum CrossoverTopology: String, CaseIterable, Identifiable, Codable, Sendable {
     case linkwitzRiley24
     case linkwitzRiley48
 
@@ -477,7 +477,7 @@ enum CrossoverTopology: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-enum CrossoverMonitorMode: String, CaseIterable, Identifiable, Sendable {
+enum CrossoverMonitorMode: String, CaseIterable, Identifiable, Codable, Sendable {
     case recombined
     case mainsOnly
     case subOnly
@@ -501,7 +501,7 @@ enum CrossoverMonitorMode: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-struct BassManagementConfiguration: Equatable, Sendable {
+struct BassManagementConfiguration: Equatable, Codable, Sendable {
     static let frequencyRange = 20.0...500.0
     static let subGainRange = -24.0...12.0
     static let subPhaseAlignmentQRange = 0.1...10.0
@@ -540,7 +540,7 @@ enum BassManagementConfigurationError: Error, LocalizedError, Equatable {
     }
 }
 
-struct RoomCorrectionFilter: Equatable, Sendable {
+struct RoomCorrectionFilter: Equatable, Codable, Sendable {
     var name: String
     var sampleRate: Double?
     var leftTaps: [Float]
@@ -567,7 +567,7 @@ struct RoomCorrectionFilter: Equatable, Sendable {
     }
 }
 
-struct RoomCorrectionConfiguration: Equatable, Sendable {
+struct RoomCorrectionConfiguration: Equatable, Codable, Sendable {
     var enabled = false
     var filter: RoomCorrectionFilter?
 }
@@ -605,7 +605,7 @@ enum RoomCorrectionConfigurationError: Error, LocalizedError, Equatable {
 }
 
 
-struct SpeakerIRFilter: Equatable, Sendable {
+struct SpeakerIRFilter: Equatable, Codable, Sendable {
     var name: String
     var sampleRate: Double?
     var leftTaps: [Float]
@@ -632,7 +632,7 @@ struct SpeakerIRFilter: Equatable, Sendable {
     }
 }
 
-struct SpeakerIRConfiguration: Equatable, Sendable {
+struct SpeakerIRConfiguration: Equatable, Codable, Sendable {
     var enabled = false
     var filter: SpeakerIRFilter?
 }
@@ -1091,6 +1091,10 @@ final class AudioIOEngine: ObservableObject {
         try applyStereoEQConfiguration(updated)
     }
 
+    func replacePlaybackControlConfiguration(_ configuration: PlaybackControlConfiguration) throws {
+        try applyPlaybackControlConfiguration(configuration)
+    }
+
     func setCrosstalkCancellationEnabled(_ enabled: Bool) throws {
         var updated = playbackControlConfiguration
         updated.crosstalkCancellationEnabled = enabled
@@ -1194,6 +1198,10 @@ final class AudioIOEngine: ObservableObject {
         var updated = masterVolumeConfiguration
         updated.muted = muted
         try applyMasterVolumeConfiguration(updated, writeDevice: true)
+    }
+
+    func replaceGainConfiguration(_ configuration: DSPGainConfiguration) throws {
+        try applyGainConfiguration(configuration)
     }
 
     func setInputPreampDB(_ value: Double) throws {
@@ -1448,6 +1456,59 @@ final class AudioIOEngine: ObservableObject {
         globalVolumeKeyMonitor.stop()
         globalVolumeKeyMonitoringState = .stopped
         eventMonitor.stop()
+    }
+
+    func setDetailedMeteringDemand(_ enabled: Bool) throws {
+        let previousDemand = N60RealtimeAudioBridgeMeteringDemand()
+        guard previousDemand != enabled else { return }
+
+        N60RealtimeAudioBridgeSetMeteringDemand(enabled)
+        guard let session = transportSession else { return }
+
+        do {
+            var graph = try stereoEQConfiguration.makeGraphSnapshot(
+                sampleRate: session.outputFormat.sampleRate,
+                gainConfiguration: gainConfiguration,
+                bassManagementConfiguration: bassManagementConfiguration,
+                dynamicsConfiguration: dynamicsConfiguration,
+                playbackConfiguration: playbackControlConfiguration
+            )
+            try attachActiveEQFIRProgramIfNeeded(
+                to: &graph,
+                stereoConfiguration: stereoEQConfiguration,
+                playbackConfiguration: playbackControlConfiguration
+            )
+            try attachActiveRoomCorrectionProgramIfNeeded(
+                to: &graph,
+                playbackConfiguration: playbackControlConfiguration
+            )
+            try attachActiveSpeakerIRProgramIfNeeded(
+                to: &graph,
+                playbackConfiguration: playbackControlConfiguration
+            )
+            try session.publishDSPGraph(graph)
+            lastErrorDescription = nil
+        } catch {
+            N60RealtimeAudioBridgeSetMeteringDemand(previousDemand)
+            lastErrorDescription = error.localizedDescription
+            throw error
+        }
+    }
+
+    func setAnalysisDemand(_ demandMask: UInt32) {
+        transportSession?.setAnalysisDemand(demandMask)
+    }
+
+    func analysisCaptureSnapshot() -> N60AnalysisCaptureSnapshot? {
+        transportSession?.analysisCaptureSnapshot()
+    }
+
+    func productionAnalysisSnapshot() -> ProductionAnalysisSnapshot {
+        transportSession?.productionAnalysisSnapshot() ?? .empty
+    }
+
+    func resetSpectrumPeakHold() {
+        transportSession?.resetSpectrumPeakHold()
     }
 
     func diagnosticsSnapshot() -> AudioDiagnosticsSnapshot {
