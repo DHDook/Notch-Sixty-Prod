@@ -1,3 +1,4 @@
+import AVFoundation
 import CoreAudio
 import CoreFoundation
 import Foundation
@@ -6,11 +7,15 @@ protocol OutputDeviceCataloging {
     func outputDevices() throws -> [AudioOutputDevice]
 }
 
+protocol InputDeviceCataloging {
+    func inputDevices() throws -> [AudioInputDevice]
+}
+
 struct CoreAudioOutputDeviceCatalog: OutputDeviceCataloging {
     func outputDevices() throws -> [AudioOutputDevice] {
-        try allDeviceIDs()
-            .filter { try hasOutputStreams($0) }
-            .map { try makeOutputDevice(deviceID: $0) }
+        try CoreAudioDeviceCatalogSupport.allDeviceIDs()
+            .filter { try CoreAudioDeviceCatalogSupport.hasOutputStreams($0) }
+            .map { try CoreAudioDeviceCatalogSupport.makeOutputDevice(deviceID: $0) }
             .sorted { lhs, rhs in
                 let comparison = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
                 if comparison == .orderedSame {
@@ -19,8 +24,70 @@ struct CoreAudioOutputDeviceCatalog: OutputDeviceCataloging {
                 return comparison == .orderedAscending
             }
     }
+}
 
-    private func allDeviceIDs() throws -> [AudioDeviceID] {
+struct CoreAudioInputDeviceCatalog: InputDeviceCataloging {
+    func inputDevices() throws -> [AudioInputDevice] {
+        try CoreAudioDeviceCatalogSupport.allDeviceIDs()
+            .filter { try CoreAudioDeviceCatalogSupport.hasInputStreams($0) }
+            .map { try CoreAudioDeviceCatalogSupport.makeInputDevice(deviceID: $0) }
+            .sorted { lhs, rhs in
+                let comparison = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
+                if comparison == .orderedSame {
+                    return lhs.uid < rhs.uid
+                }
+                return comparison == .orderedAscending
+            }
+    }
+}
+
+enum MicrophonePermissionStatus: String, Codable, Equatable, Sendable {
+    case notDetermined
+    case restricted
+    case denied
+    case authorized
+
+    init(_ authorizationStatus: AVAuthorizationStatus) {
+        switch authorizationStatus {
+        case .notDetermined:
+            self = .notDetermined
+        case .restricted:
+            self = .restricted
+        case .denied:
+            self = .denied
+        case .authorized:
+            self = .authorized
+        @unknown default:
+            self = .denied
+        }
+    }
+}
+
+protocol MicrophonePermissionRequesting: Sendable {
+    func currentStatus() -> MicrophonePermissionStatus
+    func requestAccess() async -> MicrophonePermissionStatus
+}
+
+struct AVFoundationMicrophonePermissionClient: MicrophonePermissionRequesting {
+    func currentStatus() -> MicrophonePermissionStatus {
+        MicrophonePermissionStatus(AVCaptureDevice.authorizationStatus(for: .audio))
+    }
+
+    func requestAccess() async -> MicrophonePermissionStatus {
+        let current = currentStatus()
+        guard current == .notDetermined else { return current }
+
+        let granted = await withCheckedContinuation { continuation in
+            AVCaptureDevice.requestAccess(for: .audio) { granted in
+                continuation.resume(returning: granted)
+            }
+        }
+        return granted ? .authorized : currentStatus()
+    }
+}
+
+private enum CoreAudioDeviceCatalogSupport {
+    static func allDeviceIDs() throws -> [AudioDeviceID] {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDevices,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -66,7 +133,7 @@ struct CoreAudioOutputDeviceCatalog: OutputDeviceCataloging {
         return deviceIDs
     }
 
-    private func hasOutputStreams(_ deviceID: AudioDeviceID) throws -> Bool {
+    static func hasOutputStreams(_ deviceID: AudioDeviceID) throws -> Bool {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyStreams,
             mScope: kAudioDevicePropertyScopeOutput,
@@ -83,7 +150,24 @@ struct CoreAudioOutputDeviceCatalog: OutputDeviceCataloging {
         return dataSize > 0
     }
 
-    private func makeOutputDevice(deviceID: AudioDeviceID) throws -> AudioOutputDevice {
+    static func hasInputStreams(_ deviceID: AudioDeviceID) throws -> Bool {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyStreams,
+            mScope: kAudioDevicePropertyScopeInput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var dataSize: UInt32 = 0
+        let status = AudioObjectGetPropertyDataSize(deviceID, &address, 0, nil, &dataSize)
+        guard status == 0 else {
+            throw CoreAudioTransportError.operationFailed(
+                operation: "read input streams for device \(deviceID)",
+                status: status
+            )
+        }
+        return dataSize > 0
+    }
+
+    static func makeOutputDevice(deviceID: AudioDeviceID) throws -> AudioOutputDevice {
         AudioOutputDevice(
             deviceID: deviceID,
             uid: try readString(
@@ -101,7 +185,25 @@ struct CoreAudioOutputDeviceCatalog: OutputDeviceCataloging {
         )
     }
 
-    private func readString(
+    static func makeInputDevice(deviceID: AudioDeviceID) throws -> AudioInputDevice {
+        AudioInputDevice(
+            deviceID: deviceID,
+            uid: try readString(
+                deviceID: deviceID,
+                selector: kAudioDevicePropertyDeviceUID,
+                operation: .readDeviceUID
+            ),
+            name: try readString(
+                deviceID: deviceID,
+                selector: kAudioObjectPropertyName,
+                operation: .readDeviceName
+            ),
+            nominalSampleRate: try readNominalSampleRate(deviceID: deviceID),
+            availableSampleRateRanges: try readAvailableSampleRateRanges(deviceID: deviceID)
+        )
+    }
+
+    static func readString(
         deviceID: AudioDeviceID,
         selector: AudioObjectPropertySelector,
         operation: CoreAudioOperation
@@ -122,7 +224,7 @@ struct CoreAudioOutputDeviceCatalog: OutputDeviceCataloging {
         return value as String
     }
 
-    private func readNominalSampleRate(deviceID: AudioDeviceID) throws -> Double {
+    static func readNominalSampleRate(deviceID: AudioDeviceID) throws -> Double {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyNominalSampleRate,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -140,7 +242,7 @@ struct CoreAudioOutputDeviceCatalog: OutputDeviceCataloging {
         return sampleRate
     }
 
-    private func readAvailableSampleRateRanges(deviceID: AudioDeviceID) throws -> [AudioSampleRateRange] {
+    static func readAvailableSampleRateRanges(deviceID: AudioDeviceID) throws -> [AudioSampleRateRange] {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyAvailableNominalSampleRates,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -186,7 +288,7 @@ struct CoreAudioOutputDeviceCatalog: OutputDeviceCataloging {
             }
     }
 
-    private func check(
+    static func check(
         _ status: OSStatus,
         operation: CoreAudioOperation,
         objectID: AudioObjectID
