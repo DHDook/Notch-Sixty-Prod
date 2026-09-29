@@ -196,4 +196,154 @@ final class ProductionAnalysisTests: XCTestCase {
         )
         XCTAssertEqual(strongest.inputDB, strongest.outputDB, accuracy: 0.000_1)
     }
+
+    func testPlaybackSystemStateKeepsPR39ProfileDataBackwardCompatible() throws {
+        let state = PlaybackSystemState()
+        let data = try JSONEncoder().encode(state)
+        let json = String(decoding: data, as: UTF8.self)
+        XCTAssertFalse(json.contains("roomCorrectionCalibration"), "Nil additive metadata should remain absent from legacy-compatible JSON")
+
+        let decoded = try JSONDecoder().decode(PlaybackSystemState.self, from: data)
+        XCTAssertNil(decoded.roomCorrectionCalibration)
+        XCTAssertEqual(decoded, state)
+    }
+
+    func testRoomCorrectionProjectRoundTripsRawAndDesignAssets() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NotchSixty-PR40-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = RoomCorrectionProjectStore(rootDirectory: root)
+        let created = Date(timeIntervalSince1970: 1_700_000_000)
+        let systemID = UUID()
+        var project = RoomCorrectionProject(
+            playbackSystemID: systemID,
+            name: "Living Room",
+            createdAt: created,
+            modifiedAt: created
+        )
+        project.microphone = RoomCorrectionMicrophone(
+            stableID: "fixture-mic",
+            displayName: "Fixture Microphone",
+            manufacturer: "Notch Sixty Tests",
+            calibration: RoomCorrectionMicrophoneCalibration(
+                sourceName: "fixture.cal",
+                points: [
+                    RoomCorrectionCalibrationPoint(frequencyHz: 20, gainDB: 0.5),
+                    RoomCorrectionCalibrationPoint(frequencyHz: 1_000, gainDB: 0),
+                    RoomCorrectionCalibrationPoint(frequencyHz: 20_000, gainDB: -0.5),
+                ]
+            )
+        )
+        project.sweep = RoomCorrectionSweepSettings(sampleRate: 48_000)
+
+        let response = RoomCorrectionFrequencyResponse(
+            frequenciesHz: [20, 100, 1_000, 10_000, 20_000],
+            magnitudeDB: [2, 1, 0, -1, -2],
+            phaseRadians: [0, -0.1, -0.2, -0.3, -0.4]
+        )
+        let measurement = RoomCorrectionMeasurement(
+            name: "Center",
+            capturedAt: created,
+            sampleRate: 48_000,
+            rawCapture: [0, 0.25, -0.25, 0],
+            impulseResponse: [0, 1, 0],
+            transferFunction: response,
+            quality: RoomCorrectionMeasurementQuality(
+                clipped: false,
+                playbackPeakDBFS: -18,
+                capturePeakDBFS: -12,
+                estimatedNoiseFloorDBFS: -70,
+                estimatedSNRDB: 58,
+                sweepComplete: true,
+                directArrivalSeconds: 0.012,
+                usableLowHz: 25,
+                usableHighHz: 19_000,
+                warnings: []
+            )
+        )
+        project.measurements = [measurement]
+        project.aggregate = RoomCorrectionAggregateResponse(
+            generatedAt: created,
+            includedMeasurementIDs: [measurement.id],
+            response: response
+        )
+        project.target = RoomCorrectionTargetCurve(
+            name: "Gentle Tilt",
+            points: [
+                RoomCorrectionTargetPoint(frequencyHz: 20, gainDB: 3),
+                RoomCorrectionTargetPoint(frequencyHz: 1_000, gainDB: 0),
+                RoomCorrectionTargetPoint(frequencyHz: 20_000, gainDB: -2),
+            ]
+        )
+
+        let design = RoomCorrectionDesign(
+            name: "Living Room v1",
+            createdAt: created,
+            sampleRate: 48_000,
+            parameters: RoomCorrectionDesignParameters(
+                correctionLowHz: 25,
+                correctionHighHz: 19_000,
+                smoothingOctaves: 1.0 / 6.0,
+                maximumBoostDB: 6,
+                maximumCutDB: 12,
+                requestedTapCount: 4_096
+            ),
+            filter: RoomCorrectionFilter(
+                name: "Living Room v1",
+                sampleRate: 48_000,
+                leftTaps: [0.25, 0.5, 0.25],
+                rightTaps: nil,
+                declaredLatencyFrames: 1
+            ),
+            predictedResponse: response,
+            recommendedHeadroomDB: 3,
+            algorithmVersion: "pr40-fixture-v1"
+        )
+        project.designs = [design]
+        project.selectedDesignID = design.id
+
+        let savedURL = try store.save(project)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: savedURL.path))
+        XCTAssertEqual(try store.load(project.id), project)
+        XCTAssertEqual(try store.existingProjectIDs(), [project.id])
+    }
+
+    func testRoomCorrectionProjectStorePreservesCorruptFileForRecovery() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NotchSixty-PR40-Corrupt-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = RoomCorrectionProjectStore(rootDirectory: root)
+        let id = UUID()
+        let url = store.projectURL(for: id)
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data("{ definitely-not-json".utf8).write(to: url, options: .atomic)
+
+        XCTAssertThrowsError(try store.load(id)) { error in
+            XCTAssertEqual(error as? RoomCorrectionProjectError, .corruptProject(id))
+        }
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: url.path),
+            "Corrupt project data must be left in place for explicit recovery rather than silently deleted"
+        )
+    }
+
+    func testRoomCorrectionProjectRejectsUnsupportedSchemaBeforeWrite() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NotchSixty-PR40-Version-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = RoomCorrectionProjectStore(rootDirectory: root)
+        var project = RoomCorrectionProject(playbackSystemID: UUID(), name: "Version Fixture")
+        project.schemaVersion = RoomCorrectionProject.currentSchemaVersion + 1
+
+        XCTAssertThrowsError(try store.save(project)) { error in
+            XCTAssertEqual(
+                error as? RoomCorrectionProjectError,
+                .unsupportedVersion(RoomCorrectionProject.currentSchemaVersion + 1)
+            )
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.projectURL(for: project.id).path))
+    }
 }
