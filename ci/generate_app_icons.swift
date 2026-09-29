@@ -7,19 +7,22 @@ struct Theme {
     let bodyBottom: NSColor
     let needle: NSColor
     let labelFill: NSColor
+    let glossAlpha: CGFloat
 }
 
 let light = Theme(
     bodyTop: NSColor(calibratedRed: 0.97, green: 0.94, blue: 0.86, alpha: 1),
     bodyBottom: NSColor(calibratedRed: 0.89, green: 0.82, blue: 0.68, alpha: 1),
     needle: NSColor(calibratedRed: 0.36, green: 0.16, blue: 0.05, alpha: 1),
-    labelFill: NSColor(calibratedRed: 0.36, green: 0.16, blue: 0.05, alpha: 1)
+    labelFill: NSColor(calibratedRed: 0.36, green: 0.16, blue: 0.05, alpha: 1),
+    glossAlpha: 0.08
 )
 let dark = Theme(
     bodyTop: NSColor(calibratedRed: 0.22, green: 0.14, blue: 0.10, alpha: 1),
     bodyBottom: NSColor(calibratedRed: 0.11, green: 0.065, blue: 0.045, alpha: 1),
     needle: NSColor(calibratedRed: 0.95, green: 0.86, blue: 0.68, alpha: 1),
-    labelFill: NSColor(calibratedRed: 0.95, green: 0.86, blue: 0.68, alpha: 1)
+    labelFill: NSColor(calibratedRed: 0.95, green: 0.86, blue: 0.68, alpha: 1),
+    glossAlpha: 0.035
 )
 
 let out = URL(fileURLWithPath: "NotchSixty/Assets.xcassets/AppIcon.appiconset", isDirectory: true)
@@ -56,9 +59,8 @@ func render(size: CGFloat, theme: Theme) -> Data {
     let body = rounded(bodyRect, 145*s)
     NSGradient(starting: theme.bodyTop, ending: theme.bodyBottom)!.draw(in: body, angle: -90)
 
-    // Soft enamel depth without an outline frame.
     let topGloss = rounded(R(94, 560, 836, 350), 120*s)
-    NSColor.white.withAlphaComponent(theme === light ? 0.08 : 0.035).setFill(); topGloss.fill()
+    NSColor.white.withAlphaComponent(theme.glossAlpha).setFill(); topGloss.fill()
 
     let meterRect = R(126, 488, 772, 280)
     let meter = rounded(meterRect, 42*s)
@@ -69,7 +71,6 @@ func render(size: CGFloat, theme: Theme) -> Data {
     NSGraphicsContext.saveGraphicsState()
     meter.addClip()
 
-    // Meter scale first: one shared geometry for light/dark.
     let xs: [CGFloat] = [0.12,0.17,0.22,0.27,0.32,0.37,0.42,0.47,0.52,0.57,0.62,0.67,0.72,0.77,0.82,0.87,0.92]
     let major: Set<Int> = [0,5,11,16]
     let redStart = 13
@@ -78,7 +79,7 @@ func render(size: CGFloat, theme: Theme) -> Data {
         let t = (u - 0.52) / 0.52
         let y = meterRect.minY + meterRect.height*(0.54 + 0.12*(1 - t*t))
         let len = (major.contains(i) ? 54 : 34) * s
-        let p = NSBezierPath(); p.move(to: NSPoint(x: x, y: y)); p.line(to: NSPoint(x: x, y: y-len));
+        let p = NSBezierPath(); p.move(to: NSPoint(x: x, y: y)); p.line(to: NSPoint(x: x, y: y-len))
         p.lineWidth = (major.contains(i) ? 8 : 5) * s
         p.lineCapStyle = .butt
         (i >= redStart ? NSColor(calibratedRed: 0.87, green: 0.12, blue: 0.04, alpha: 1) : NSColor.black).setStroke(); p.stroke()
@@ -95,12 +96,10 @@ func render(size: CGFloat, theme: Theme) -> Data {
     scaleLabel("0", x: meterRect.minX + meterRect.width*xs[11], color: .black)
     scaleLabel("+3", x: meterRect.minX + meterRect.width*xs[16], color: NSColor(calibratedRed: 0.87, green: 0.12, blue: 0.04, alpha: 1))
 
-    // Needle second, precisely between two neighboring ticks, with pivot hidden below the meter opening.
     let topX = meterRect.minX + meterRect.width*((xs[6] + xs[7]) * 0.5)
-    let needle = NSBezierPath(); needle.move(to: NSPoint(x: meterRect.midX+8*s, y: meterRect.minY-18*s)); needle.line(to: NSPoint(x: topX, y: meterRect.minY + meterRect.height*0.77));
+    let needle = NSBezierPath(); needle.move(to: NSPoint(x: meterRect.midX+8*s, y: meterRect.minY-18*s)); needle.line(to: NSPoint(x: topX, y: meterRect.minY + meterRect.height*0.77))
     needle.lineWidth = 8*s; needle.lineCapStyle = .butt; theme.needle.setStroke(); needle.stroke()
 
-    // Clear glass on top: no separate frame, strong top reflection, side refraction/distortion where glass meets enamel.
     let glassTop = NSGradient(colors: [NSColor.white.withAlphaComponent(0.40), NSColor.white.withAlphaComponent(0.08), NSColor.clear], atLocations: [0,0.36,1], colorSpace: .deviceRGB)!
     glassTop.draw(in: NSRect(x: meterRect.minX, y: meterRect.minY + meterRect.height*0.42, width: meterRect.width, height: meterRect.height*0.58), angle: -90)
     NSColor.white.withAlphaComponent(0.33).setFill()
