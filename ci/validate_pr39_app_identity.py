@@ -21,10 +21,16 @@ assert "import AppKit" in ui
 assert "NSApplication.shared.applicationIconImage" in ui
 assert "ProductionSidebarBrand()" in ui
 assert ".listStyle(.sidebar)" in ui
-assert ".tint(Color(red: 0.91, green: 0.58, blue: 0.24))" in ui
+assert ".tint(Color(red: 0.91, green: 0.58, blue: 0.24))" not in ui, "brand amber must not override the system-wide control tint"
 assert ui.count(".glassEffect(.regular, in: .rect(cornerRadius: 18))") >= 4
 assert 'Text("Notch Sixty")' in ui and ".textCase(.uppercase)" in ui
 assert "Color(red: 0.94, green: 0.89, blue: 0.73)" in ui, "signature VU face must remain warm and opaque"
+assert ".padding(.horizontal, 11)" in ui and ".padding(.vertical, 6)" in ui, "toolbar device readout must retain comfortable padding"
 profiles = (root / "NotchSixty/UI/ProductionProfileToolbar.swift").read_text()
-assert profiles.count(".buttonStyle(.glass)") >= 3
-print("PR39 app identity / Liquid Glass validation passed")
+assert profiles.count(".buttonStyle(.glass)") >= 2
+for label in ("New Preset…", "Save Changes", "Rename…", "Delete", "New Playback System…"):
+    assert label in profiles, f"missing simplified profile action: {label}"
+assert "Save Current as New Preset" not in profiles
+assert "New System from Current" not in profiles
+assert "selectedContentPresetIsDirty" in profiles and "selectedSystemProfileIsDirty" in profiles
+print("PR39 app identity / Liquid Glass / toolbar validation passed")
