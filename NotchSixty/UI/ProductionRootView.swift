@@ -140,7 +140,6 @@ struct ProductionRootView: View {
             detail(for: selection ?? .dashboard)
                 .toolbar { toolbar }
         }
-        .tint(Color(red: 0.91, green: 0.58, blue: 0.24))
         .frame(minWidth: 980, minHeight: 680)
         .task { product.prepareForUse() }
     }
@@ -172,6 +171,10 @@ struct ProductionRootView: View {
                 Text("\(output.name) · \(output.nominalSampleRate / 1_000, specifier: "%.1f") kHz")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 6)
+                    .glassEffect(.regular, in: .capsule)
             }
             Button {
                 openWindow(id: "engineering-validation")

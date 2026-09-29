@@ -4,17 +4,28 @@ struct ProductionProfileToolbar: View {
     @ObservedObject var profiles: ProductProfileController
     @ObservedObject var engine: AudioIOEngine
 
-    @State private var savePrompt: SavePrompt?
+    @State private var editorPrompt: EditorPrompt?
     @State private var draftName = ""
 
-    private enum SavePrompt {
-        case content
-        case system
+    private enum EditorPrompt {
+        case newContent
+        case renameContent
+        case newSystem
+        case renameSystem
 
         var title: String {
             switch self {
-            case .content: return "Save Content Preset"
-            case .system: return "Save Playback System"
+            case .newContent: return "New Content Preset"
+            case .renameContent: return "Rename Content Preset"
+            case .newSystem: return "New Playback System"
+            case .renameSystem: return "Rename Playback System"
+            }
+        }
+
+        var actionTitle: String {
+            switch self {
+            case .newContent, .newSystem: return "Create"
+            case .renameContent, .renameSystem: return "Rename"
             }
         }
     }
@@ -22,29 +33,9 @@ struct ProductionProfileToolbar: View {
     var body: some View {
         HStack(spacing: 8) {
             contentPresetMenu
-
-            Button {
-                if profiles.canOverwriteSelectedContentPreset {
-                    profiles.overwriteSelectedContentPreset()
-                } else {
-                    beginSave(
-                        .content,
-                        defaultName: profiles.selectedContentPresetName == "Custom"
-                            ? "My Preset"
-                            : profiles.selectedContentPresetName
-                    )
-                }
-            } label: {
-                Image(systemName: "square.and.arrow.down")
-            }
-            .buttonStyle(.glass)
-            .help(
-                profiles.canOverwriteSelectedContentPreset
-                    ? "Update selected Content Preset"
-                    : "Save current Content Preset"
-            )
-
-            systemMenu.controlSize(.small)
+                .controlSize(.small)
+            systemMenu
+                .controlSize(.small)
 
             if let error = profiles.lastErrorDescription {
                 Button {
@@ -59,22 +50,26 @@ struct ProductionProfileToolbar: View {
         }
         .fixedSize(horizontal: true, vertical: false)
         .alert(
-            savePrompt?.title ?? "Save",
+            editorPrompt?.title ?? "Edit",
             isPresented: Binding(
-                get: { savePrompt != nil },
-                set: { if !$0 { savePrompt = nil } }
+                get: { editorPrompt != nil },
+                set: { if !$0 { editorPrompt = nil } }
             )
         ) {
             TextField("Name", text: $draftName)
-            Button("Cancel", role: .cancel) { savePrompt = nil }
-            Button("Save") {
-                let prompt = savePrompt
-                savePrompt = nil
+            Button("Cancel", role: .cancel) { editorPrompt = nil }
+            Button(editorPrompt?.actionTitle ?? "Save") {
+                let prompt = editorPrompt
+                editorPrompt = nil
                 switch prompt {
-                case .content:
+                case .newContent:
                     profiles.saveCurrentContentPreset(named: draftName)
-                case .system:
+                case .renameContent:
+                    profiles.renameSelectedContentPreset(to: draftName)
+                case .newSystem:
                     profiles.saveCurrentSystemProfile(named: draftName)
+                case .renameSystem:
+                    profiles.renameSelectedSystemProfile(to: draftName)
                 case .none:
                     break
                 }
@@ -103,14 +98,20 @@ struct ProductionProfileToolbar: View {
             }
 
             Divider()
-            Button("Save Current as New Preset…") {
-                beginSave(.content, defaultName: "My Preset")
+            Button("New Preset…") {
+                begin(.newContent, defaultName: "My Preset")
             }
             if profiles.canOverwriteSelectedContentPreset {
-                Button("Update \(profiles.selectedContentPresetName)") {
+                Button("Save Changes") {
                     profiles.overwriteSelectedContentPreset()
                 }
-                Button("Delete \(profiles.selectedContentPresetName)", role: .destructive) {
+                .disabled(!profiles.selectedContentPresetIsDirty)
+
+                Button("Rename…") {
+                    begin(.renameContent, defaultName: profiles.selectedContentPresetName)
+                }
+
+                Button("Delete", role: .destructive) {
                     profiles.deleteSelectedContentPreset()
                 }
             }
@@ -121,7 +122,11 @@ struct ProductionProfileToolbar: View {
             )
         }
         .buttonStyle(.glass)
-        .help("Content Preset: EQ/voicing, phase mode, dynamics, and input/headroom gain")
+        .help(
+            profiles.selectedContentPresetIsDirty
+                ? "Content Preset — unsaved changes"
+                : "Content Preset: EQ/voicing, phase mode, dynamics, and input/headroom gain"
+        )
     }
 
     private var systemMenu: some View {
@@ -142,18 +147,26 @@ struct ProductionProfileToolbar: View {
             }
 
             Divider()
-            Button("New System from Current…") {
-                beginSave(.system, defaultName: "My System")
+            Button("New Playback System…") {
+                begin(.newSystem, defaultName: "My System")
             }
             if profiles.selectedSystemProfile != nil {
-                Button("Update \(profiles.selectedSystemProfileName)") {
+                Button("Save Changes") {
                     profiles.overwriteSelectedSystemProfile()
                 }
+                .disabled(!profiles.selectedSystemProfileIsDirty)
+
+                Button("Rename…") {
+                    begin(.renameSystem, defaultName: profiles.selectedSystemProfileName)
+                }
+
+                Button("Delete", role: .destructive) {
+                    profiles.deleteSelectedSystemProfile()
+                }
+
+                Divider()
                 Button("Associate with Current Output") {
                     profiles.associateSelectedSystemWithCurrentOutput()
-                }
-                Button("Delete \(profiles.selectedSystemProfileName)", role: .destructive) {
-                    profiles.deleteSelectedSystemProfile()
                 }
             }
         } label: {
@@ -166,12 +179,14 @@ struct ProductionProfileToolbar: View {
         }
         .buttonStyle(.glass)
         .help(
-            "Playback System: output association, crossover, alignment, output trim, room correction, and speaker correction"
+            profiles.selectedSystemProfileIsDirty
+                ? "Playback System — unsaved changes"
+                : "Playback System: output association, crossover, alignment, output trim, room correction, and speaker correction"
         )
     }
 
-    private func beginSave(_ prompt: SavePrompt, defaultName: String) {
+    private func begin(_ prompt: EditorPrompt, defaultName: String) {
         draftName = defaultName
-        savePrompt = prompt
+        editorPrompt = prompt
     }
 }

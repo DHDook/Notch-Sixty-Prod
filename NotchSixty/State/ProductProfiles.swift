@@ -298,6 +298,23 @@ final class ProductProfileController: ObservableObject {
         persist()
     }
 
+    func renameSelectedContentPreset(to proposedName: String) {
+        guard let selectedContentPresetID,
+              let index = userContentPresets.firstIndex(where: { $0.id == selectedContentPresetID }) else { return }
+        let existing = Set(
+            contentPresets
+                .filter { $0.id != selectedContentPresetID }
+                .map { $0.name.lowercased() }
+        )
+        userContentPresets[index].name = uniqueName(
+            proposedName,
+            existing: existing,
+            fallback: "My Preset"
+        )
+        lastErrorDescription = nil
+        persist()
+    }
+
     func deleteSelectedContentPreset() {
         guard let selectedContentPresetID,
               let selected = selectedContentPreset,
@@ -339,6 +356,23 @@ final class ProductProfileController: ObservableObject {
         var state = captureSystemState()
         state.associatedOutputUID = association
         systemProfiles[index].state = state
+        lastErrorDescription = nil
+        persist()
+    }
+
+    func renameSelectedSystemProfile(to proposedName: String) {
+        guard let selectedSystemProfileID,
+              let index = systemProfiles.firstIndex(where: { $0.id == selectedSystemProfileID }) else { return }
+        let existing = Set(
+            systemProfiles
+                .filter { $0.id != selectedSystemProfileID }
+                .map { $0.name.lowercased() }
+        )
+        systemProfiles[index].name = uniqueName(
+            proposedName,
+            existing: existing,
+            fallback: "My System"
+        )
         lastErrorDescription = nil
         persist()
     }
