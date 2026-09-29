@@ -86,6 +86,129 @@ struct AVFoundationMicrophonePermissionClient: MicrophonePermissionRequesting {
     }
 }
 
+enum RoomCorrectionMicrophoneCalibrationError: Error, Equatable, LocalizedError {
+    case empty
+    case malformedLine(Int)
+    case invalidFrequency(line: Int)
+    case invalidGain(line: Int)
+    case insufficientUniquePoints
+    case invalidInterpolationFrequency
+    case invalidStoredCurve
+
+    var errorDescription: String? {
+        switch self {
+        case .empty:
+            return "The microphone calibration file does not contain any calibration points."
+        case .malformedLine(let line):
+            return "Microphone calibration line \(line) must contain exactly two numeric columns: frequency in Hz and gain in dB."
+        case .invalidFrequency(let line):
+            return "Microphone calibration line \(line) contains an invalid frequency."
+        case .invalidGain(let line):
+            return "Microphone calibration line \(line) contains an invalid gain value."
+        case .insufficientUniquePoints:
+            return "Microphone calibration requires at least two unique frequency points."
+        case .invalidInterpolationFrequency:
+            return "Microphone calibration can only be evaluated at a finite positive frequency."
+        case .invalidStoredCurve:
+            return "Stored microphone calibration points are not finite and strictly increasing in frequency."
+        }
+    }
+}
+
+struct RoomCorrectionMicrophoneCalibrationParser: Sendable {
+    func parse(_ text: String, sourceName: String? = nil) throws -> RoomCorrectionMicrophoneCalibration {
+        var pointsByFrequency: [Double: (sum: Double, count: Int)] = [:]
+        var sawDataLine = false
+
+        for (offset, rawLine) in text.components(separatedBy: .newlines).enumerated() {
+            let lineNumber = offset + 1
+            var line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.isEmpty else { continue }
+            if line.hasPrefix("#") || line.hasPrefix(";") || line.hasPrefix("*") || line.hasPrefix("//") {
+                continue
+            }
+
+            for marker in ["//", "#", ";"] {
+                if let range = line.range(of: marker) {
+                    line = String(line[..<range.lowerBound])
+                }
+            }
+            line = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.isEmpty else { continue }
+
+            sawDataLine = true
+            let normalized = line.replacingOccurrences(of: ",", with: " ")
+            let fields = normalized.split(whereSeparator: { $0.isWhitespace })
+            guard fields.count == 2 else {
+                throw RoomCorrectionMicrophoneCalibrationError.malformedLine(lineNumber)
+            }
+            guard let frequency = Double(fields[0]), frequency.isFinite, frequency > 0 else {
+                throw RoomCorrectionMicrophoneCalibrationError.invalidFrequency(line: lineNumber)
+            }
+            guard let gain = Double(fields[1]), gain.isFinite else {
+                throw RoomCorrectionMicrophoneCalibrationError.invalidGain(line: lineNumber)
+            }
+
+            let previous = pointsByFrequency[frequency] ?? (sum: 0, count: 0)
+            pointsByFrequency[frequency] = (previous.sum + gain, previous.count + 1)
+        }
+
+        guard sawDataLine else {
+            throw RoomCorrectionMicrophoneCalibrationError.empty
+        }
+        guard pointsByFrequency.count >= 2 else {
+            throw RoomCorrectionMicrophoneCalibrationError.insufficientUniquePoints
+        }
+
+        let points = pointsByFrequency
+            .map { frequency, aggregate in
+                RoomCorrectionCalibrationPoint(
+                    frequencyHz: frequency,
+                    gainDB: aggregate.sum / Double(aggregate.count)
+                )
+            }
+            .sorted { $0.frequencyHz < $1.frequencyHz }
+
+        return RoomCorrectionMicrophoneCalibration(sourceName: sourceName, points: points)
+    }
+}
+
+extension RoomCorrectionMicrophoneCalibration {
+    func gainDB(at frequencyHz: Double) throws -> Double {
+        guard frequencyHz.isFinite, frequencyHz > 0 else {
+            throw RoomCorrectionMicrophoneCalibrationError.invalidInterpolationFrequency
+        }
+        guard points.count >= 2 else {
+            throw RoomCorrectionMicrophoneCalibrationError.invalidStoredCurve
+        }
+
+        var previousFrequency = 0.0
+        for point in points {
+            guard point.frequencyHz.isFinite,
+                  point.frequencyHz > previousFrequency,
+                  point.gainDB.isFinite else {
+                throw RoomCorrectionMicrophoneCalibrationError.invalidStoredCurve
+            }
+            previousFrequency = point.frequencyHz
+        }
+
+        if frequencyHz <= points[0].frequencyHz { return points[0].gainDB }
+        if frequencyHz >= points[points.count - 1].frequencyHz { return points[points.count - 1].gainDB }
+
+        for upperIndex in 1..<points.count {
+            let upper = points[upperIndex]
+            guard frequencyHz <= upper.frequencyHz else { continue }
+            let lower = points[upperIndex - 1]
+            let logLower = log(lower.frequencyHz)
+            let logUpper = log(upper.frequencyHz)
+            let position = (log(frequencyHz) - logLower) / (logUpper - logLower)
+            return lower.gainDB + position * (upper.gainDB - lower.gainDB)
+        }
+
+        return points[points.count - 1].gainDB
+    }
+}
+
 private enum CoreAudioDeviceCatalogSupport {
     static func allDeviceIDs() throws -> [AudioDeviceID] {
         var address = AudioObjectPropertyAddress(
@@ -276,7 +399,7 @@ private enum CoreAudioDeviceCatalogSupport {
             )
         }
 
-        try check(status, operation: .readAvailableSampleRates, objectID: deviceID)
+        try check(status, operation: operation, objectID: deviceID)
 
         return ranges
             .map { AudioSampleRateRange(minimum: $0.mMinimum, maximum: $0.mMaximum) }
