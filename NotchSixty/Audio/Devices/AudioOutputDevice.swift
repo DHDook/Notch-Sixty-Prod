@@ -29,3 +29,19 @@ struct AudioOutputDevice: Identifiable, Equatable, Sendable {
         availableSampleRateRanges.contains { $0.contains(sampleRate) }
     }
 }
+
+struct AudioInputDevice: Identifiable, Equatable, Sendable {
+    typealias ID = String
+
+    let deviceID: AudioDeviceID
+    let uid: String
+    let name: String
+    let nominalSampleRate: Double
+    let availableSampleRateRanges: [AudioSampleRateRange]
+
+    var id: String { uid }
+
+    func supports(sampleRate: Double) -> Bool {
+        availableSampleRateRanges.contains { $0.contains(sampleRate) }
+    }
+}
