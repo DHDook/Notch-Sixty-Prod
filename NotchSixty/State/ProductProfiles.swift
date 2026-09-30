@@ -674,6 +674,7 @@ struct RoomCorrectionMicrophone: Codable, Equatable, Sendable {
     var stableID: String?
     var displayName: String
     var manufacturer: String?
+    var inputChannelIndex: Int = 0
     var calibration: RoomCorrectionMicrophoneCalibration?
 }
 
@@ -710,23 +711,29 @@ struct RoomCorrectionMeasurementQuality: Codable, Equatable, Sendable {
     var warnings: [String] = []
 }
 
-struct RoomCorrectionMeasurement: Identifiable, Codable, Equatable, Sendable {
-    var id: UUID = UUID()
-    var name: String
+struct RoomCorrectionChannelMeasurement: Codable, Equatable, Sendable {
     var capturedAt: Date
-    var included: Bool = true
-    var weight: Double = 1
-    var sampleRate: Double
     var rawCapture: [Float]
     var impulseResponse: [Float]
     var transferFunction: RoomCorrectionFrequencyResponse?
     var quality: RoomCorrectionMeasurementQuality
 }
 
+struct RoomCorrectionMeasurementPosition: Identifiable, Codable, Equatable, Sendable {
+    var id: UUID = UUID()
+    var name: String
+    var included: Bool = true
+    var weight: Double = 1
+    var sampleRate: Double
+    var left: RoomCorrectionChannelMeasurement
+    var right: RoomCorrectionChannelMeasurement
+}
+
 struct RoomCorrectionAggregateResponse: Codable, Equatable, Sendable {
     var generatedAt: Date
-    var includedMeasurementIDs: [UUID]
-    var response: RoomCorrectionFrequencyResponse
+    var includedPositionIDs: [UUID]
+    var leftResponse: RoomCorrectionFrequencyResponse
+    var rightResponse: RoomCorrectionFrequencyResponse
 }
 
 struct RoomCorrectionTargetPoint: Codable, Equatable, Sendable {
@@ -756,13 +763,14 @@ struct RoomCorrectionDesign: Identifiable, Codable, Equatable, Sendable {
     var sampleRate: Double
     var parameters: RoomCorrectionDesignParameters
     var filter: RoomCorrectionFilter
-    var predictedResponse: RoomCorrectionFrequencyResponse?
+    var predictedLeftResponse: RoomCorrectionFrequencyResponse?
+    var predictedRightResponse: RoomCorrectionFrequencyResponse?
     var recommendedHeadroomDB: Double
     var algorithmVersion: String
 }
 
 struct RoomCorrectionProject: Identifiable, Codable, Equatable, Sendable {
-    static let currentSchemaVersion = 1
+    static let currentSchemaVersion = 2
 
     var schemaVersion: Int = currentSchemaVersion
     var id: UUID = UUID()
@@ -772,7 +780,7 @@ struct RoomCorrectionProject: Identifiable, Codable, Equatable, Sendable {
     var modifiedAt: Date
     var microphone: RoomCorrectionMicrophone?
     var sweep: RoomCorrectionSweepSettings?
-    var measurements: [RoomCorrectionMeasurement] = []
+    var measurements: [RoomCorrectionMeasurementPosition] = []
     var aggregate: RoomCorrectionAggregateResponse?
     var target: RoomCorrectionTargetCurve?
     var designs: [RoomCorrectionDesign] = []
@@ -800,7 +808,7 @@ struct RoomCorrectionProject: Identifiable, Codable, Equatable, Sendable {
             throw RoomCorrectionProjectError.invalidProject("Project name is empty.")
         }
         guard Set(measurements.map(\.id)).count == measurements.count else {
-            throw RoomCorrectionProjectError.invalidProject("Measurement identifiers must be unique.")
+            throw RoomCorrectionProjectError.invalidProject("Measurement position identifiers must be unique.")
         }
         guard Set(designs.map(\.id)).count == designs.count else {
             throw RoomCorrectionProjectError.invalidProject("Design identifiers must be unique.")
@@ -810,15 +818,23 @@ struct RoomCorrectionProject: Identifiable, Codable, Equatable, Sendable {
         }
         if let microphone { try Self.validateMicrophone(microphone) }
         if let sweep { try Self.validateSweep(sweep) }
-        for measurement in measurements { try Self.validateMeasurement(measurement) }
-        if let aggregate { try Self.validateResponse(aggregate.response) }
+        for measurement in measurements { try Self.validateMeasurementPosition(measurement) }
+        if let aggregate {
+            guard Set(aggregate.includedPositionIDs).count == aggregate.includedPositionIDs.count,
+                  aggregate.includedPositionIDs.allSatisfy({ id in measurements.contains(where: { $0.id == id }) }) else {
+                throw RoomCorrectionProjectError.invalidProject("Aggregate response references invalid measurement positions.")
+            }
+            try Self.validateResponse(aggregate.leftResponse)
+            try Self.validateResponse(aggregate.rightResponse)
+        }
         if let target { try Self.validateTarget(target) }
         for design in designs { try Self.validateDesign(design) }
     }
 
     private static func validateMicrophone(_ microphone: RoomCorrectionMicrophone) throws {
-        guard !microphone.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw RoomCorrectionProjectError.invalidProject("Microphone display name is empty.")
+        guard !microphone.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              microphone.inputChannelIndex >= 0 else {
+            throw RoomCorrectionProjectError.invalidProject("Microphone identity or selected input channel is invalid.")
         }
         guard let calibration = microphone.calibration else { return }
         guard calibration.schemaVersion == RoomCorrectionMicrophoneCalibration.currentSchemaVersion else {
@@ -852,11 +868,18 @@ struct RoomCorrectionProject: Identifiable, Codable, Equatable, Sendable {
         }
     }
 
-    private static func validateMeasurement(_ measurement: RoomCorrectionMeasurement) throws {
+    private static func validateMeasurementPosition(_ measurement: RoomCorrectionMeasurementPosition) throws {
         guard !measurement.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               measurement.sampleRate.isFinite, measurement.sampleRate > 0,
-              measurement.weight.isFinite, measurement.weight >= 0,
-              measurement.rawCapture.allSatisfy(\.isFinite),
+              measurement.weight.isFinite, measurement.weight >= 0 else {
+            throw RoomCorrectionProjectError.invalidProject("Measurement position metadata is invalid.")
+        }
+        try validateChannelMeasurement(measurement.left)
+        try validateChannelMeasurement(measurement.right)
+    }
+
+    private static func validateChannelMeasurement(_ measurement: RoomCorrectionChannelMeasurement) throws {
+        guard measurement.rawCapture.allSatisfy(\.isFinite),
               measurement.impulseResponse.allSatisfy(\.isFinite) else {
             throw RoomCorrectionProjectError.invalidProject("Measurement data is invalid or non-finite.")
         }
@@ -938,7 +961,8 @@ struct RoomCorrectionProject: Identifiable, Codable, Equatable, Sendable {
                 || abs((filter.sampleRate ?? design.sampleRate) - design.sampleRate) < 0.5 else {
             throw RoomCorrectionProjectError.invalidProject("Generated correction filter metadata is invalid.")
         }
-        if let response = design.predictedResponse { try validateResponse(response) }
+        if let response = design.predictedLeftResponse { try validateResponse(response) }
+        if let response = design.predictedRightResponse { try validateResponse(response) }
     }
 }
 
@@ -977,7 +1001,7 @@ struct RoomCorrectionProjectStore: Sendable {
     }
 
     func projectURL(for id: UUID) -> URL {
-        projectDirectory(for: id).appendingPathComponent("project-v1.json", isDirectory: false)
+        projectDirectory(for: id).appendingPathComponent("project-v2.json", isDirectory: false)
     }
 
     @discardableResult
