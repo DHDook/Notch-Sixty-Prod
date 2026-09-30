@@ -1,5 +1,6 @@
 name: PR40 Preserve Sweep Settings
 
+# Re-triggered after the permission fixture commit so this patch runs on the current branch head.
 on:
   push:
     branches:
