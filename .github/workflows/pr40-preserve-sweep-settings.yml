@@ -1,6 +1,5 @@
 name: PR40 Preserve Sweep Settings
 
-# Re-triggered after the permission fixture commit so this patch runs on the current branch head.
 on:
   push:
     branches:
@@ -25,44 +24,43 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
+
           path = Path('NotchSixty/Audio/Devices/OutputDeviceCatalog.swift')
-          text = path.read_text()
+          lines = path.read_text().splitlines()
 
-          old_struct = '''struct RoomCorrectionSweepProgram: Equatable, Sendable {
-              var sampleRate: Double
-              var sweepSamples: [Float]
-              var inverseFilter: [Float]
-              var leadInFrames: Int
-              var tailFrames: Int
-          '''
-          new_struct = '''struct RoomCorrectionSweepProgram: Equatable, Sendable {
-              var settings: RoomCorrectionSweepSettings
-              var sampleRate: Double
-              var sweepSamples: [Float]
-              var inverseFilter: [Float]
-              var leadInFrames: Int
-              var tailFrames: Int
-          '''
-          if new_struct not in text:
-              if text.count(old_struct) != 1:
-                  raise SystemExit('Unexpected RoomCorrectionSweepProgram declaration')
-              text = text.replace(old_struct, new_struct, 1)
+          struct_anchor = 'struct RoomCorrectionSweepProgram: Equatable, Sendable {'
+          struct_matches = [i for i, line in enumerate(lines) if line.strip() == struct_anchor]
+          if len(struct_matches) != 1:
+              raise SystemExit('Unexpected RoomCorrectionSweepProgram declaration count')
+          struct_index = struct_matches[0]
+          if not any(line.strip() == 'var settings: RoomCorrectionSweepSettings' for line in lines[struct_index:struct_index + 8]):
+              sample_index = next(
+                  (i for i in range(struct_index + 1, min(struct_index + 8, len(lines)))
+                   if lines[i].strip() == 'var sampleRate: Double'),
+                  None,
+              )
+              if sample_index is None:
+                  raise SystemExit('RoomCorrectionSweepProgram sampleRate field not found')
+              indent = lines[sample_index][:len(lines[sample_index]) - len(lines[sample_index].lstrip())]
+              lines.insert(sample_index, indent + 'var settings: RoomCorrectionSweepSettings')
 
-          old_init = '''        return RoomCorrectionSweepProgram(
-              sampleRate: sampleRate,
-              sweepSamples: sweep,
-          '''
-          new_init = '''        return RoomCorrectionSweepProgram(
-              settings: settings,
-              sampleRate: sampleRate,
-              sweepSamples: sweep,
-          '''
-          if new_init not in text:
-              if text.count(old_init) != 1:
-                  raise SystemExit('Unexpected RoomCorrectionSweepProgram construction')
-              text = text.replace(old_init, new_init, 1)
+          init_anchor = 'return RoomCorrectionSweepProgram('
+          init_matches = [i for i, line in enumerate(lines) if line.strip() == init_anchor]
+          if len(init_matches) != 1:
+              raise SystemExit('Unexpected RoomCorrectionSweepProgram construction count')
+          init_index = init_matches[0]
+          if not any(line.strip() == 'settings: settings,' for line in lines[init_index:init_index + 8]):
+              sample_index = next(
+                  (i for i in range(init_index + 1, min(init_index + 8, len(lines)))
+                   if lines[i].strip() == 'sampleRate: sampleRate,'),
+                  None,
+              )
+              if sample_index is None:
+                  raise SystemExit('RoomCorrectionSweepProgram sampleRate argument not found')
+              indent = lines[sample_index][:len(lines[sample_index]) - len(lines[sample_index].lstrip())]
+              lines.insert(sample_index, indent + 'settings: settings,')
 
-          path.write_text(text)
+          path.write_text('\n'.join(lines) + '\n')
           PY
 
       - name: Commit fix and remove helper
