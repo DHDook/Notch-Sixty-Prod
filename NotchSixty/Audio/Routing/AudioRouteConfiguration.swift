@@ -112,6 +112,10 @@ enum MultiOutputRoutingError: Error, Equatable, LocalizedError {
     case liveTransportOutputMismatch(selected: String, routed: String)
     case liveTransportBusUnavailable(SpeakerOutputBus)
     case routingChangeRequiresIdle
+    case aggregateTransportRequiresMultipleDevices([String])
+    case aggregateReferenceOutputMismatch(selected: String, reference: String)
+    case aggregateChannelCountOverflow
+    case softwarePLLSuperseded
 
     var errorDescription: String? {
         switch self {
@@ -145,6 +149,14 @@ enum MultiOutputRoutingError: Error, Equatable, LocalizedError {
             return "\(bus.displayName) is not live-routable yet. C2b only routes the final post-DSP Left/Right Full Range buses."
         case .routingChangeRequiresIdle:
             return "Stop processing before changing physical output routing."
+        case .aggregateTransportRequiresMultipleDevices(let uids):
+            return "Aggregate-device transport requires at least two physical output devices; found: \(uids.joined(separator: ", "))."
+        case .aggregateReferenceOutputMismatch(let selected, let reference):
+            return "The selected physical output \(selected) must match the aggregate synchronization reference \(reference)."
+        case .aggregateChannelCountOverflow:
+            return "Aggregate output channel count exceeds the supported Core Audio channel-index range."
+        case .softwarePLLSuperseded:
+            return "Software PLL mode is superseded by the Core Audio Aggregate Device clock domain with HAL drift compensation. Use Automatic or Aggregate Device synchronization."
         }
     }
 }
@@ -328,6 +340,113 @@ extension SameDeviceOutputRoutePlan {
         }
         for route in routes where !route.bus.isC2bLiveFullRangeBus {
             throw MultiOutputRoutingError.liveTransportBusUnavailable(route.bus)
+        }
+    }
+}
+
+struct AggregateMappedSpeakerOutputRoute: Equatable, Sendable {
+    let route: SpeakerOutputRoute
+    let aggregateChannelIndex: UInt32
+}
+
+/// Immutable control-plane plan for multiple hardware devices synchronized by a
+/// private Core Audio Aggregate Device. Device order is significant because the
+/// HAL concatenates aggregate streams in subdevice order.
+struct AggregateDeviceOutputRoutePlan: Equatable, Sendable {
+    let referenceDeviceUID: String
+    let orderedDeviceUIDs: [String]
+    let devices: [AudioOutputDevice]
+    let physicalChannelCount: UInt32
+    let mappedRoutes: [AggregateMappedSpeakerOutputRoute]
+
+    var routes: [SpeakerOutputRoute] { mappedRoutes.map(\.route) }
+}
+
+extension MultiOutputRoutingConfiguration {
+    func makeAggregateDevicePlan(
+        availableDevices: [AudioOutputDevice],
+        sampleRate: Double
+    ) throws -> AggregateDeviceOutputRoutePlan {
+        guard enabled else {
+            throw MultiOutputRoutingError.sameDeviceTransportRequiresEnabledRouting
+        }
+        try validate(availableDevices: availableDevices, sampleRate: sampleRate)
+        guard synchronizationMode != .softwarePLL else {
+            throw MultiOutputRoutingError.softwarePLLSuperseded
+        }
+
+        var orderedDeviceUIDs: [String] = []
+        let reference = resolvedReferenceDeviceUID ?? ""
+        if !reference.isEmpty {
+            orderedDeviceUIDs.append(reference)
+        }
+        for route in enabledRoutes {
+            let uid = route.destination.deviceUID
+            if !orderedDeviceUIDs.contains(uid) {
+                orderedDeviceUIDs.append(uid)
+            }
+        }
+        guard orderedDeviceUIDs.count > 1 else {
+            throw MultiOutputRoutingError.aggregateTransportRequiresMultipleDevices(orderedDeviceUIDs)
+        }
+
+        let byUID = Dictionary(uniqueKeysWithValues: availableDevices.map { ($0.uid, $0) })
+        var devices: [AudioOutputDevice] = []
+        var offsets: [String: UInt32] = [:]
+        var total: UInt64 = 0
+        for uid in orderedDeviceUIDs {
+            guard let device = byUID[uid] else {
+                throw MultiOutputRoutingError.outputDeviceUnavailable(uid)
+            }
+            guard total <= UInt64(UInt32.max) else {
+                throw MultiOutputRoutingError.aggregateChannelCountOverflow
+            }
+            offsets[uid] = UInt32(total)
+            total += UInt64(device.outputChannelCount)
+            guard total <= UInt64(UInt32.max) else {
+                throw MultiOutputRoutingError.aggregateChannelCountOverflow
+            }
+            devices.append(device)
+        }
+
+        var mapped: [AggregateMappedSpeakerOutputRoute] = []
+        mapped.reserveCapacity(enabledRoutes.count)
+        for route in enabledRoutes {
+            guard let offset = offsets[route.destination.deviceUID] else {
+                throw MultiOutputRoutingError.outputDeviceUnavailable(route.destination.deviceUID)
+            }
+            let aggregateIndex64 = UInt64(offset) + UInt64(route.destination.channelIndex)
+            guard aggregateIndex64 <= UInt64(UInt32.max) else {
+                throw MultiOutputRoutingError.aggregateChannelCountOverflow
+            }
+            mapped.append(
+                AggregateMappedSpeakerOutputRoute(
+                    route: route,
+                    aggregateChannelIndex: UInt32(aggregateIndex64)
+                )
+            )
+        }
+
+        return AggregateDeviceOutputRoutePlan(
+            referenceDeviceUID: reference,
+            orderedDeviceUIDs: orderedDeviceUIDs,
+            devices: devices,
+            physicalChannelCount: UInt32(total),
+            mappedRoutes: mapped
+        )
+    }
+}
+
+extension AggregateDeviceOutputRoutePlan {
+    func validateForC3LiveTransport(selectedOutputUID: String) throws {
+        guard selectedOutputUID == referenceDeviceUID else {
+            throw MultiOutputRoutingError.aggregateReferenceOutputMismatch(
+                selected: selectedOutputUID,
+                reference: referenceDeviceUID
+            )
+        }
+        for mapped in mappedRoutes where !mapped.route.bus.isC2bLiveFullRangeBus {
+            throw MultiOutputRoutingError.liveTransportBusUnavailable(mapped.route.bus)
         }
     }
 }

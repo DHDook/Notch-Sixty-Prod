@@ -1117,4 +1117,173 @@ final class RoomCorrectionProjectControllerTests: XCTestCase {
         XCTAssertEqual(fixture.profiles.selectedSystemProfile?.state.outputRouting, routing)
         XCTAssertEqual(fixture.profiles.captureSystemState().outputRouting, routing)
     }
+
+    func testAggregateDevicePlanFlattensPhysicalChannelsReferenceFirst() throws {
+        let main = AudioOutputDevice(
+            deviceID: 701,
+            uid: "main-dac",
+            name: "Main Four Channel",
+            nominalSampleRate: 96_000,
+            availableSampleRateRanges: [AudioSampleRateRange(minimum: 44_100, maximum: 192_000)],
+            outputChannelCount: 4
+        )
+        let aux = AudioOutputDevice(
+            deviceID: 702,
+            uid: "aux-dac",
+            name: "Aux Stereo",
+            nominalSampleRate: 96_000,
+            availableSampleRateRanges: [AudioSampleRateRange(minimum: 48_000, maximum: 96_000)],
+            outputChannelCount: 2
+        )
+        let third = AudioOutputDevice(
+            deviceID: 703,
+            uid: "third-dac",
+            name: "Third Stereo",
+            nominalSampleRate: 96_000,
+            availableSampleRateRanges: [AudioSampleRateRange(minimum: 48_000, maximum: 96_000)],
+            outputChannelCount: 2
+        )
+        let configuration = MultiOutputRoutingConfiguration(
+            enabled: true,
+            routes: [
+                SpeakerOutputRoute(
+                    name: "Aux Left",
+                    bus: .leftFullRange,
+                    destination: PhysicalOutputEndpoint(deviceUID: aux.uid, channelIndex: 1)
+                ),
+                SpeakerOutputRoute(
+                    name: "Main Left",
+                    bus: .leftFullRange,
+                    destination: PhysicalOutputEndpoint(deviceUID: main.uid, channelIndex: 2)
+                ),
+                SpeakerOutputRoute(
+                    name: "Third Right",
+                    bus: .rightFullRange,
+                    destination: PhysicalOutputEndpoint(deviceUID: third.uid, channelIndex: 0)
+                ),
+                SpeakerOutputRoute(
+                    name: "Main Right",
+                    bus: .rightFullRange,
+                    destination: PhysicalOutputEndpoint(deviceUID: main.uid, channelIndex: 3)
+                ),
+            ],
+            synchronizationMode: .aggregateDevice,
+            referenceDeviceUID: main.uid
+        )
+
+        let plan = try configuration.makeAggregateDevicePlan(
+            availableDevices: [aux, third, main],
+            sampleRate: 96_000
+        )
+        XCTAssertEqual(plan.referenceDeviceUID, main.uid)
+        XCTAssertEqual(plan.orderedDeviceUIDs, [main.uid, aux.uid, third.uid])
+        XCTAssertEqual(plan.devices.map(\.uid), [main.uid, aux.uid, third.uid])
+        XCTAssertEqual(plan.physicalChannelCount, 8)
+        XCTAssertEqual(plan.mappedRoutes.map(\.aggregateChannelIndex), [5, 2, 6, 3])
+        XCTAssertNoThrow(try plan.validateForC3LiveTransport(selectedOutputUID: main.uid))
+        XCTAssertThrowsError(try plan.validateForC3LiveTransport(selectedOutputUID: aux.uid)) { error in
+            XCTAssertEqual(
+                error as? MultiOutputRoutingError,
+                .aggregateReferenceOutputMismatch(selected: aux.uid, reference: main.uid)
+            )
+        }
+    }
+
+    func testAggregateDevicePlanUsesFirstEnabledDeviceWhenReferenceIsAutomatic() throws {
+        let first = AudioOutputDevice(
+            deviceID: 711,
+            uid: "first",
+            name: "First",
+            nominalSampleRate: 48_000,
+            availableSampleRateRanges: [AudioSampleRateRange(minimum: 48_000, maximum: 96_000)],
+            outputChannelCount: 2
+        )
+        let second = AudioOutputDevice(
+            deviceID: 712,
+            uid: "second",
+            name: "Second",
+            nominalSampleRate: 48_000,
+            availableSampleRateRanges: [AudioSampleRateRange(minimum: 48_000, maximum: 96_000)],
+            outputChannelCount: 2
+        )
+        let configuration = MultiOutputRoutingConfiguration(
+            enabled: true,
+            routes: [
+                SpeakerOutputRoute(
+                    name: "Right Secondary",
+                    bus: .rightFullRange,
+                    destination: PhysicalOutputEndpoint(deviceUID: second.uid, channelIndex: 0)
+                ),
+                SpeakerOutputRoute(
+                    name: "Left Primary",
+                    bus: .leftFullRange,
+                    destination: PhysicalOutputEndpoint(deviceUID: first.uid, channelIndex: 0)
+                ),
+            ],
+            synchronizationMode: .automatic
+        )
+        let plan = try configuration.makeAggregateDevicePlan(
+            availableDevices: [first, second],
+            sampleRate: 48_000
+        )
+        XCTAssertEqual(plan.referenceDeviceUID, second.uid)
+        XCTAssertEqual(plan.orderedDeviceUIDs, [second.uid, first.uid])
+        XCTAssertEqual(plan.mappedRoutes.map(\.aggregateChannelIndex), [0, 2])
+    }
+
+    func testAggregateDevicePlanRejectsSoftwarePLLAndNonFullRangeLiveBus() throws {
+        let first = AudioOutputDevice(
+            deviceID: 721,
+            uid: "first",
+            name: "First",
+            nominalSampleRate: 48_000,
+            availableSampleRateRanges: [AudioSampleRateRange(minimum: 48_000, maximum: 96_000)],
+            outputChannelCount: 2
+        )
+        let second = AudioOutputDevice(
+            deviceID: 722,
+            uid: "second",
+            name: "Second",
+            nominalSampleRate: 48_000,
+            availableSampleRateRanges: [AudioSampleRateRange(minimum: 48_000, maximum: 96_000)],
+            outputChannelCount: 2
+        )
+        let routes = [
+            SpeakerOutputRoute(
+                name: "Left",
+                bus: .leftFullRange,
+                destination: PhysicalOutputEndpoint(deviceUID: first.uid, channelIndex: 0)
+            ),
+            SpeakerOutputRoute(
+                name: "Sub",
+                bus: .subMono,
+                destination: PhysicalOutputEndpoint(deviceUID: second.uid, channelIndex: 0)
+            ),
+        ]
+        let pll = MultiOutputRoutingConfiguration(
+            enabled: true,
+            routes: routes,
+            synchronizationMode: .softwarePLL,
+            referenceDeviceUID: first.uid
+        )
+        XCTAssertThrowsError(
+            try pll.makeAggregateDevicePlan(availableDevices: [first, second], sampleRate: 48_000)
+        ) { error in
+            XCTAssertEqual(error as? MultiOutputRoutingError, .softwarePLLSuperseded)
+        }
+
+        let aggregate = MultiOutputRoutingConfiguration(
+            enabled: true,
+            routes: routes,
+            synchronizationMode: .aggregateDevice,
+            referenceDeviceUID: first.uid
+        )
+        let plan = try aggregate.makeAggregateDevicePlan(
+            availableDevices: [first, second],
+            sampleRate: 48_000
+        )
+        XCTAssertThrowsError(try plan.validateForC3LiveTransport(selectedOutputUID: first.uid)) { error in
+            XCTAssertEqual(error as? MultiOutputRoutingError, .liveTransportBusUnavailable(.subMono))
+        }
+    }
 }

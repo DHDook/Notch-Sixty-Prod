@@ -2349,19 +2349,33 @@ final class AudioIOEngine: ObservableObject {
 
     private func buildTransport(output: AudioOutputDevice) throws {
         let sameDeviceOutputPlan: SameDeviceOutputRoutePlan?
+        let aggregateDeviceOutputPlan: AggregateDeviceOutputRoutePlan?
         if let routing = multiOutputRoutingConfiguration, routing.enabled {
-            let plan = try routing.makeSameDevicePlan(
-                availableDevices: outputDevices,
-                sampleRate: output.nominalSampleRate
-            )
-            try plan.validateForC2bLiveTransport(selectedOutputUID: output.uid)
-            sameDeviceOutputPlan = plan
+            if routing.usesMultiplePhysicalDevices {
+                let plan = try routing.makeAggregateDevicePlan(
+                    availableDevices: outputDevices,
+                    sampleRate: output.nominalSampleRate
+                )
+                try plan.validateForC3LiveTransport(selectedOutputUID: output.uid)
+                aggregateDeviceOutputPlan = plan
+                sameDeviceOutputPlan = nil
+            } else {
+                let plan = try routing.makeSameDevicePlan(
+                    availableDevices: outputDevices,
+                    sampleRate: output.nominalSampleRate
+                )
+                try plan.validateForC2bLiveTransport(selectedOutputUID: output.uid)
+                sameDeviceOutputPlan = plan
+                aggregateDeviceOutputPlan = nil
+            }
         } else {
             sameDeviceOutputPlan = nil
+            aggregateDeviceOutputPlan = nil
         }
         let session = try CoreAudioTransportSession(
             selectedOutput: output,
-            sameDeviceOutputPlan: sameDeviceOutputPlan
+            sameDeviceOutputPlan: sameDeviceOutputPlan,
+            aggregateDeviceOutputPlan: aggregateDeviceOutputPlan
         )
         activeEQFIRProgram = nil
         nextEQFIRProgramSlot = 0
