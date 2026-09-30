@@ -14,6 +14,9 @@ Included in this gate:
 - correction-preview Left / Right magnitude curves plus maximum positive correction;
 - explicit estimated headroom preview without mutating Content Preset headroom ownership;
 - existing `N60_CONVOLUTION_MAX_TAPS` validation carried into design parameters;
-- deterministic tests for built-in identity, import/interpolation, smoothing, usable-range behavior, boost/cut limits, null protection, headroom, and invalid inputs.
+- deterministic tests for built-in identity, import/interpolation, smoothing, usable-range behavior, boost/cut limits, null protection, headroom, and invalid inputs;
+- corrected PBX wiring with a globally unique PBXBuildFile identifier for the target designer source.
+
+The first exact-head attempt failed before Swift compilation because the initial PBXBuildFile identifier collided with the existing AudioIOEngine file-reference identifier. That project-file identity collision is fixed in this checkpoint; the design source and tests are otherwise unchanged.
 
 This checkpoint does not yet generate FIR taps, persist a selected target/design, expose production Target/Design controls, or deploy a filter. Those remain subsequent Slice E/F gates so FIR synthesis and runtime deployment can be validated independently.
