@@ -182,6 +182,11 @@ enum RoomCorrectionProjectControllerError: Error, Equatable, LocalizedError {
     case invalidWeight(Double)
     case positionNotFound(UUID)
     case measurementAlreadyRetained
+    case aggregateUnavailable
+    case targetUnavailable
+    case designNotFound(UUID)
+    case measurementNotDesignable(positionID: UUID, pass: RoomCorrectionMeasurementPass)
+    case noUsableMeasurementRange
 
     var errorDescription: String? {
         switch self {
@@ -203,6 +208,16 @@ enum RoomCorrectionProjectControllerError: Error, Equatable, LocalizedError {
             return "Listening position \(id.uuidString) was not found."
         case .measurementAlreadyRetained:
             return "This analyzed measurement is already saved in the current project."
+        case .aggregateUnavailable:
+            return "Retain and include at least one weighted room measurement before previewing or designing correction."
+        case .targetUnavailable:
+            return "Choose or import a room-correction target before previewing or designing correction."
+        case .designNotFound(let id):
+            return "Room-correction design \(id.uuidString) was not found in the current project."
+        case .measurementNotDesignable(let positionID, let pass):
+            return "Room measurement \(positionID.uuidString) has insufficient \(pass.rawValue) quality for correction design. Re-measure or exclude that position."
+        case .noUsableMeasurementRange:
+            return "The included measurements do not share a usable frequency range for correction design."
         }
     }
 }
@@ -233,7 +248,12 @@ final class RoomCorrectionProjectController: ObservableObject {
     }
 
     var aggregate: RoomCorrectionAggregateResponse? { project?.aggregate }
-
+    var target: RoomCorrectionTargetCurve? { project?.target }
+    var designs: [RoomCorrectionDesign] { project?.designs ?? [] }
+    var selectedDesign: RoomCorrectionDesign? {
+        guard let project, let selectedDesignID = project.selectedDesignID else { return nil }
+        return project.designs.first { $0.id == selectedDesignID }
+    }
 
     var suggestedPositionName: String {
         Self.defaultPositionName(index: positions.count)
@@ -380,6 +400,92 @@ final class RoomCorrectionProjectController: ObservableObject {
         try persistAndPublish(updated)
     }
 
+    func setTarget(_ target: RoomCorrectionTargetCurve, modifiedAt: Date = Date()) throws {
+        var updated = try requiredProject()
+        updated.target = target
+        // A target edit invalidates candidate selection, but retained historical
+        // designs remain reproducibility assets. Deployed playback is owned by
+        // the Playback System profile and is intentionally untouched here.
+        updated.selectedDesignID = nil
+        updated.modifiedAt = modifiedAt
+        try persistAndPublish(updated)
+    }
+
+    func previewDesign(
+        parameters: RoomCorrectionDesignParameters
+    ) throws -> RoomCorrectionCorrectionPreview {
+        let current = try requiredProject()
+        guard let aggregate = current.aggregate else {
+            throw RoomCorrectionProjectControllerError.aggregateUnavailable
+        }
+        guard let target = current.target else {
+            throw RoomCorrectionProjectControllerError.targetUnavailable
+        }
+        let usable = try usableDesignRange(in: current)
+        return try RoomCorrectionCorrectionPreviewDesigner().preview(
+            aggregate: aggregate,
+            target: target,
+            parameters: parameters,
+            usableLowHz: usable.low,
+            usableHighHz: usable.high
+        )
+    }
+
+    @discardableResult
+    func generateDesign(
+        parameters: RoomCorrectionDesignParameters,
+        name proposedName: String = "Room Correction",
+        createdAt: Date = Date()
+    ) throws -> RoomCorrectionDesign {
+        var updated = try requiredProject()
+        guard let aggregate = updated.aggregate else {
+            throw RoomCorrectionProjectControllerError.aggregateUnavailable
+        }
+        guard let target = updated.target else {
+            throw RoomCorrectionProjectControllerError.targetUnavailable
+        }
+        guard let sweep = updated.sweep else {
+            throw RoomCorrectionProjectControllerError.aggregateUnavailable
+        }
+        let usable = try usableDesignRange(in: updated)
+        let result = try RoomCorrectionFIRDesigner().design(
+            aggregate: aggregate,
+            target: target,
+            parameters: parameters,
+            sampleRate: sweep.sampleRate,
+            usableLowHz: usable.low,
+            usableHighHz: usable.high,
+            name: proposedName,
+            createdAt: createdAt
+        )
+        updated.designs.append(result.design)
+        updated.selectedDesignID = result.design.id
+        updated.modifiedAt = createdAt
+        try persistAndPublish(updated)
+        return result.design
+    }
+
+    func selectDesign(id: UUID, modifiedAt: Date = Date()) throws {
+        var updated = try requiredProject()
+        guard updated.designs.contains(where: { $0.id == id }) else {
+            throw RoomCorrectionProjectControllerError.designNotFound(id)
+        }
+        updated.selectedDesignID = id
+        updated.modifiedAt = modifiedAt
+        try persistAndPublish(updated)
+    }
+
+    func deleteDesign(id: UUID, modifiedAt: Date = Date()) throws {
+        var updated = try requiredProject()
+        guard updated.designs.contains(where: { $0.id == id }) else {
+            throw RoomCorrectionProjectControllerError.designNotFound(id)
+        }
+        updated.designs.removeAll { $0.id == id }
+        if updated.selectedDesignID == id { updated.selectedDesignID = nil }
+        updated.modifiedAt = modifiedAt
+        try persistAndPublish(updated)
+    }
+
     private func projectForMutation(
         systemID: UUID,
         sweep: RoomCorrectionSweepSettings,
@@ -437,6 +543,48 @@ final class RoomCorrectionProjectController: ObservableObject {
             )
         }
         return project
+    }
+
+    private func usableDesignRange(in project: RoomCorrectionProject) throws -> (low: Double, high: Double) {
+        guard let aggregate = project.aggregate,
+              let aggregateLow = aggregate.leftResponse.frequenciesHz.first,
+              let aggregateHigh = aggregate.leftResponse.frequenciesHz.last else {
+            throw RoomCorrectionProjectControllerError.aggregateUnavailable
+        }
+        let contributors = project.measurements.filter { $0.included && $0.weight > 0 }
+        guard !contributors.isEmpty else {
+            throw RoomCorrectionProjectControllerError.aggregateUnavailable
+        }
+
+        var low = aggregateLow
+        var high = aggregateHigh
+        for position in contributors {
+            for (pass, measurement) in [
+                (RoomCorrectionMeasurementPass.left, position.left),
+                (RoomCorrectionMeasurementPass.right, position.right),
+            ] {
+                let quality = measurement.quality
+                guard quality.sweepComplete,
+                      !quality.clipped,
+                      let snr = quality.estimatedSNRDB,
+                      snr >= RoomCorrectionMeasurementAnalyzer.lowSNRWarningDB,
+                      let usableLow = quality.usableLowHz,
+                      let usableHigh = quality.usableHighHz,
+                      usableLow.isFinite, usableHigh.isFinite,
+                      usableLow > 0, usableHigh > usableLow else {
+                    throw RoomCorrectionProjectControllerError.measurementNotDesignable(
+                        positionID: position.id,
+                        pass: pass
+                    )
+                }
+                low = max(low, usableLow)
+                high = min(high, usableHigh)
+            }
+        }
+        guard high > low else {
+            throw RoomCorrectionProjectControllerError.noUsableMeasurementRange
+        }
+        return (low, high)
     }
 
     private func aggregateOrNil(

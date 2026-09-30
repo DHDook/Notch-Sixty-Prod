@@ -63,15 +63,18 @@ final class RoomCorrectionProjectControllerTests: XCTestCase {
         leftMagnitude: [Double] = [0, 0],
         rightMagnitude: [Double] = [0, 0],
         frequencies: [Double] = [100, 1_000],
-        sampleRate: Double = 48_000
+        sampleRate: Double = 48_000,
+        clipped: Bool = false,
+        snr: Double = 45,
+        sweepComplete: Bool = true
     ) -> RoomCorrectionMeasurementAnalysis {
         let quality = RoomCorrectionMeasurementQuality(
-            clipped: false,
+            clipped: clipped,
             playbackPeakDBFS: -18,
             capturePeakDBFS: -12,
             estimatedNoiseFloorDBFS: -70,
-            estimatedSNRDB: 45,
-            sweepComplete: true,
+            estimatedSNRDB: snr,
+            sweepComplete: sweepComplete,
             directArrivalSeconds: 0.01,
             usableLowHz: frequencies.first,
             usableHighHz: frequencies.last,
@@ -327,4 +330,131 @@ final class RoomCorrectionProjectControllerTests: XCTestCase {
         }
         XCTAssertEqual(fixture.controller.positions.count, 1)
     }
+
+    func testTargetPreviewAndGeneratedDesignPersistTransactionally() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+
+        _ = try fixture.controller.retainMeasurement(
+            analysis(
+                capturedAt: 1,
+                leftMagnitude: [-2, -2],
+                rightMagnitude: [2, 2]
+            ),
+            sweep: sweep(),
+            microphone: microphone()
+        )
+        let target = RoomCorrectionBuiltInTarget.flat.curve
+        try fixture.controller.setTarget(target)
+        let parameters = RoomCorrectionDesignParameters(
+            correctionLowHz: 80,
+            correctionHighHz: 2_000,
+            smoothingOctaves: 1.0 / 6.0,
+            maximumBoostDB: 4,
+            maximumCutDB: 6,
+            requestedTapCount: 1_024
+        )
+
+        let preview = try fixture.controller.previewDesign(parameters: parameters)
+        XCTAssertEqual(preview.effectiveCorrectionLowHz, 100, accuracy: 0.000_001)
+        XCTAssertEqual(preview.effectiveCorrectionHighHz, 1_000, accuracy: 0.000_001)
+
+        let design = try fixture.controller.generateDesign(
+            parameters: parameters,
+            name: "Fixture Design",
+            createdAt: Date(timeIntervalSince1970: 900)
+        )
+        XCTAssertEqual(fixture.controller.selectedDesign?.id, design.id)
+        XCTAssertEqual(fixture.controller.designs.count, 1)
+        XCTAssertEqual(design.filter.leftTaps.count, 1_024)
+        XCTAssertEqual(design.filter.rightTaps?.count, 1_024)
+        XCTAssertEqual(design.filter.sampleRate, 48_000)
+
+        let projectID = try XCTUnwrap(fixture.controller.project?.id)
+        let persisted = try fixture.controller.store.load(projectID)
+        XCTAssertEqual(persisted.target, target)
+        XCTAssertEqual(persisted.selectedDesignID, design.id)
+        XCTAssertEqual(persisted.designs, [design])
+    }
+
+    func testChangingTargetInvalidatesCandidateSelectionButKeepsDesignHistory() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        _ = try fixture.controller.retainMeasurement(
+            analysis(capturedAt: 1),
+            sweep: sweep(),
+            microphone: microphone()
+        )
+        try fixture.controller.setTarget(RoomCorrectionBuiltInTarget.flat.curve)
+        let parameters = RoomCorrectionDesignParameters(
+            correctionLowHz: 100,
+            correctionHighHz: 1_000,
+            smoothingOctaves: 0,
+            maximumBoostDB: 3,
+            maximumCutDB: 6,
+            requestedTapCount: 1_024
+        )
+        let design = try fixture.controller.generateDesign(parameters: parameters)
+        XCTAssertEqual(fixture.controller.selectedDesign?.id, design.id)
+
+        try fixture.controller.setTarget(RoomCorrectionBuiltInTarget.gentleDownwardTilt.curve)
+        XCTAssertNil(fixture.controller.selectedDesign)
+        XCTAssertEqual(fixture.controller.designs.map(\.id), [design.id])
+    }
+
+    func testLowConfidenceMeasurementCannotSilentlyEnterCorrectionDesign() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let positionID = try fixture.controller.retainMeasurement(
+            analysis(capturedAt: 1, snr: 10),
+            sweep: sweep(),
+            microphone: microphone()
+        )
+        try fixture.controller.setTarget(RoomCorrectionBuiltInTarget.flat.curve)
+        let parameters = RoomCorrectionDesignParameters(
+            correctionLowHz: 100,
+            correctionHighHz: 1_000,
+            smoothingOctaves: 0,
+            maximumBoostDB: 3,
+            maximumCutDB: 6,
+            requestedTapCount: 1_024
+        )
+
+        XCTAssertThrowsError(try fixture.controller.previewDesign(parameters: parameters)) { error in
+            XCTAssertEqual(
+                error as? RoomCorrectionProjectControllerError,
+                .measurementNotDesignable(positionID: positionID, pass: .left)
+            )
+        }
+        XCTAssertTrue(fixture.controller.designs.isEmpty)
+    }
+
+    func testDesignSelectionAndDeletionPersist() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        _ = try fixture.controller.retainMeasurement(
+            analysis(capturedAt: 1),
+            sweep: sweep(),
+            microphone: microphone()
+        )
+        try fixture.controller.setTarget(RoomCorrectionBuiltInTarget.flat.curve)
+        let parameters = RoomCorrectionDesignParameters(
+            correctionLowHz: 100,
+            correctionHighHz: 1_000,
+            smoothingOctaves: 0,
+            maximumBoostDB: 3,
+            maximumCutDB: 6,
+            requestedTapCount: 1_024
+        )
+        let first = try fixture.controller.generateDesign(parameters: parameters, name: "First")
+        let second = try fixture.controller.generateDesign(parameters: parameters, name: "Second")
+        XCTAssertEqual(fixture.controller.selectedDesign?.id, second.id)
+
+        try fixture.controller.selectDesign(id: first.id)
+        XCTAssertEqual(fixture.controller.selectedDesign?.id, first.id)
+        try fixture.controller.deleteDesign(id: first.id)
+        XCTAssertNil(fixture.controller.selectedDesign)
+        XCTAssertEqual(fixture.controller.designs.map(\.id), [second.id])
+    }
+
 }
