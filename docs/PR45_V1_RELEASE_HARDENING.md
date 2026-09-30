@@ -59,7 +59,20 @@ The report includes product/runtime metadata such as:
 
 The report does **not** contain captured system audio, microphone audio, room-measurement samples, or user media.
 
-### 5. Repository/release metadata
+### 5. Final application icons
+
+The approved owner-supplied light and dark VU-meter artwork is now the production AppIcon source of truth:
+
+- `artwork/AppIcon-light-master.png` — approved 1254×1254 light master;
+- `artwork/AppIcon-dark-master.png` — approved 1254×1254 dark master.
+
+`ci/generate_app_icons.swift` uses Core Graphics/ImageIO only to resample those exact PNG rasters into the standard 20-slot macOS AppIcon catalog: 10 default/light slots and 10 dark-appearance slots from 16 px through 1024 px. It does not crop, redraw, mask, or reinterpret the artwork.
+
+The production tray/menu-bar icon remains the owner-controlled legacy solid VU glyph. Its blob identity is permanently pinned separately from the Dock/AppIcon artwork, so application-icon updates cannot silently alter the tray design.
+
+Superseded SVG/WebP app-icon staging files and one-shot icon workflows are removed from the release-candidate tree. The permanent PR45 validator pins the exact uploaded master PNGs, verifies all generated slot dimensions, and verifies the legacy tray icon remains unchanged.
+
+### 6. Repository/release metadata
 
 The repository status describes v1.0 release-candidate hardening rather than the old bootstrap phase. The product boundary is updated to match the current architecture: source/program material remains stereo while the speaker-integration layer may fan out to 2–8 physical outputs for mains/sub and active bi-/tri-amp systems.
 
@@ -97,7 +110,7 @@ Before a v1.0 release candidate is promoted, perform the combined PR40–PR45 re
 12. normal Cmd-Q and menu-bar Quit teardown;
 13. Stop/Start loops, sample-rate changes, sleep/wake, output unplug/replug, and recovery;
 14. final factory-preset listening smoke and PR40–PR43 hardware/acoustic acceptance;
-15. final app-icon appearance in Finder, Dock, Settings/sidebar, and packaged DMG;
+15. final app-icon appearance in Finder, Dock, Settings/sidebar, light/dark appearance, and packaged DMG;
 16. final signing/notarization or Mac App Store archive/TestFlight/App Review flow when release credentials are introduced.
 
 ## Release-candidate discipline
