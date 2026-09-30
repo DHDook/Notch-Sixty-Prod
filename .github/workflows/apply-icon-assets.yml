@@ -23,6 +23,34 @@ jobs:
           ref: pr42-parity-provenance-closure
           fetch-depth: 0
 
+      - name: Decode approved masters to standard PNG
+        run: |
+          set -euo pipefail
+          convert_master() {
+            local src="$1"
+            local dst="$2"
+            if command -v magick >/dev/null 2>&1; then
+              magick "$src" "$dst"
+            elif command -v convert >/dev/null 2>&1; then
+              convert "$src" "$dst"
+            elif command -v ffmpeg >/dev/null 2>&1; then
+              ffmpeg -v error -y -i "$src" "$dst"
+            elif python3 -c 'from PIL import Image' >/dev/null 2>&1; then
+              python3 - "$src" "$dst" <<'PY'
+          from PIL import Image
+          import sys
+          Image.open(sys.argv[1]).convert("RGBA").save(sys.argv[2], "PNG")
+          PY
+            else
+              echo "No WebP-capable converter is available on the runner" >&2
+              exit 1
+            fi
+          }
+          convert_master artwork/AppIcon-light-master.webp artwork/AppIcon-light-master.png
+          convert_master artwork/AppIcon-dark-master.webp artwork/AppIcon-dark-master.png
+          file artwork/AppIcon-light-master.png artwork/AppIcon-dark-master.png | grep -c 'PNG image data' | grep -q '^2$'
+          sips -g pixelWidth -g pixelHeight artwork/AppIcon-light-master.png artwork/AppIcon-dark-master.png
+
       - name: Generate exact asset-catalog rasters
         run: swift ci/generate_app_icons.swift
 
@@ -39,6 +67,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add artwork/AppIcon-light-master.png artwork/AppIcon-dark-master.png
           git add NotchSixty/Assets.xcassets/AppIcon.appiconset/*.png
           git add artwork/AppIcon-light-final.png artwork/AppIcon-dark-final.png
           if git diff --cached --quiet; then
