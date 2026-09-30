@@ -65,18 +65,22 @@ final class ProductController: ObservableObject {
 
     let audioEngine: AudioIOEngine
     let profiles: ProductProfileController
+    let calibration: RoomCorrectionCalibrationController
     private var audioEngineObservation: AnyCancellable?
+    private var calibrationObservation: AnyCancellable?
 
     init() {
         let audioEngine = AudioIOEngine()
         self.audioEngine = audioEngine
         self.profiles = ProductProfileController(engine: audioEngine)
+        self.calibration = RoomCorrectionCalibrationController(engine: audioEngine)
         observeAudioEngine()
     }
 
     init(audioEngine: AudioIOEngine) {
         self.audioEngine = audioEngine
         self.profiles = ProductProfileController(engine: audioEngine)
+        self.calibration = RoomCorrectionCalibrationController(engine: audioEngine)
         observeAudioEngine()
     }
 
@@ -100,14 +104,19 @@ final class ProductController: ObservableObject {
     func prepareForUse() {
         audioEngine.prepareForUse()
         profiles.restoreSelectedLayers()
+        calibration.prepareForUse()
     }
 
     func shutdownForTermination() {
+        calibration.cancelMeasurement()
         audioEngine.shutdownForTermination()
     }
 
     private func observeAudioEngine() {
         audioEngineObservation = audioEngine.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+        calibrationObservation = calibration.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
     }

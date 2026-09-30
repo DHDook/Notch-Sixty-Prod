@@ -47,6 +47,7 @@
 		A40000000000000000000014 /* ProductionMetersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000024 /* ProductionMetersView.swift */; };
 		A40000000000000000000015 /* ProductionAnalysisViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000025 /* ProductionAnalysisViews.swift */; };
 		A40000000000000000000016 /* ProductionProfileToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000026 /* ProductionProfileToolbar.swift */; };
+		A40000000000000000000017 /* ProductionRoomCorrectionWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000027 /* ProductionRoomCorrectionWorkspace.swift */; };
 		A30000000000000000000017 /* N60DynamicsLegacyAdvanced.c in Sources */ = {isa = PBXBuildFile; fileRef = A3000000000000000000002D /* N60DynamicsLegacyAdvanced.c */; };
 		A30000000000000000000018 /* N60RoomMeasurementBridge.c in Sources */ = {isa = PBXBuildFile; fileRef = A3000000000000000000002F /* N60RoomMeasurementBridge.c */; };
 /* End PBXBuildFile section */
@@ -111,6 +112,7 @@
 		A40000000000000000000024 /* ProductionMetersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionMetersView.swift; sourceTree = "<group>"; };
 		A40000000000000000000025 /* ProductionAnalysisViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionAnalysisViews.swift; sourceTree = "<group>"; };
 		A40000000000000000000026 /* ProductionProfileToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionProfileToolbar.swift; sourceTree = "<group>"; };
+		A40000000000000000000027 /* ProductionRoomCorrectionWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionRoomCorrectionWorkspace.swift; sourceTree = "<group>"; };
 		A3000000000000000000002D /* N60DynamicsLegacyAdvanced.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = N60DynamicsLegacyAdvanced.c; sourceTree = "<group>"; };
 		A3000000000000000000002E /* N60DynamicsLegacyAdvanced.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60DynamicsLegacyAdvanced.h; sourceTree = "<group>"; };
 		A3000000000000000000002F /* N60RoomMeasurementBridge.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = N60RoomMeasurementBridge.c; sourceTree = "<group>"; };
@@ -215,7 +217,7 @@
 			path = Realtime;
 			sourceTree = "<group>";
 		};
-		A40000000000000000000050 /* UI */ = {isa = PBXGroup; children = (A40000000000000000000020 /* ProductionRootView.swift */, A40000000000000000000021 /* ProductionEqualizerView.swift */, A40000000000000000000022 /* ProductionDynamicsView.swift */, A40000000000000000000023 /* ProductionDynamicsTelemetryView.swift */, A40000000000000000000024 /* ProductionMetersView.swift */, A40000000000000000000025 /* ProductionAnalysisViews.swift */, A40000000000000000000026 /* ProductionProfileToolbar.swift */,); path = UI; sourceTree = "<group>"; };
+		A40000000000000000000050 /* UI */ = {isa = PBXGroup; children = (A40000000000000000000020 /* ProductionRootView.swift */, A40000000000000000000021 /* ProductionEqualizerView.swift */, A40000000000000000000022 /* ProductionDynamicsView.swift */, A40000000000000000000023 /* ProductionDynamicsTelemetryView.swift */, A40000000000000000000024 /* ProductionMetersView.swift */, A40000000000000000000025 /* ProductionAnalysisViews.swift */, A40000000000000000000026 /* ProductionProfileToolbar.swift */, A40000000000000000000027 /* ProductionRoomCorrectionWorkspace.swift */,); path = UI; sourceTree = "<group>"; };
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -287,6 +289,7 @@
 				A40000000000000000000014 /* ProductionMetersView.swift in Sources */,
 				A40000000000000000000015 /* ProductionAnalysisViews.swift in Sources */,
 				A40000000000000000000016 /* ProductionProfileToolbar.swift in Sources */,
+				A40000000000000000000017 /* ProductionRoomCorrectionWorkspace.swift in Sources */,
 				A20000000000000000000010 /* AudioIOEngine.swift in Sources */,
 				A20000000000000000000011 /* CoreAudioError.swift in Sources */,
 				A20000000000000000000012 /* AudioOutputDevice.swift in Sources */,
