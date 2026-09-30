@@ -382,7 +382,7 @@ struct RoomCorrectionMeasurementAnalyzer: Sendable {
 
         let noiseFloor = noiseRMS.flatMap(Self.amplitudeDBFS)
         let signalLevel = signalRMS.flatMap(Self.amplitudeDBFS)
-        let snr = if let signalLevel, let noiseFloor {
+        let snr: Double? = if let signalLevel, let noiseFloor {
             signalLevel - noiseFloor
         } else {
             nil
