@@ -259,7 +259,7 @@ final class ProductionAnalysisTests: XCTestCase {
         }
     }
 
-    func testRoomCorrectionProjectRoundTripsRawAndDesignAssets() throws {
+    func testRoomCorrectionProjectRoundTripsPairedStereoMeasurementAndDesignAssets() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("NotchSixty-PR40-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -276,6 +276,7 @@ final class ProductionAnalysisTests: XCTestCase {
             stableID: "fixture-mic",
             displayName: "Fixture Microphone",
             manufacturer: "Notch Sixty Tests",
+            inputChannelIndex: 1,
             calibration: RoomCorrectionMicrophoneCalibration(
                 sourceName: "fixture.cal",
                 points: [
@@ -287,36 +288,52 @@ final class ProductionAnalysisTests: XCTestCase {
         )
         project.sweep = RoomCorrectionSweepSettings(sampleRate: 48_000)
 
-        let response = RoomCorrectionFrequencyResponse(
+        let leftResponse = RoomCorrectionFrequencyResponse(
             frequenciesHz: [20, 100, 1_000, 10_000, 20_000],
             magnitudeDB: [2, 1, 0, -1, -2],
             phaseRadians: [0, -0.1, -0.2, -0.3, -0.4]
         )
-        let measurement = RoomCorrectionMeasurement(
+        let rightResponse = RoomCorrectionFrequencyResponse(
+            frequenciesHz: [20, 100, 1_000, 10_000, 20_000],
+            magnitudeDB: [1.5, 0.75, -0.25, -1.25, -2.5],
+            phaseRadians: [0.05, -0.05, -0.15, -0.25, -0.35]
+        )
+        let quality = RoomCorrectionMeasurementQuality(
+            clipped: false,
+            playbackPeakDBFS: -18,
+            capturePeakDBFS: -12,
+            estimatedNoiseFloorDBFS: -70,
+            estimatedSNRDB: 58,
+            sweepComplete: true,
+            directArrivalSeconds: 0.012,
+            usableLowHz: 25,
+            usableHighHz: 19_000,
+            warnings: []
+        )
+        let position = RoomCorrectionMeasurementPosition(
             name: "Center",
-            capturedAt: created,
             sampleRate: 48_000,
-            rawCapture: [0, 0.25, -0.25, 0],
-            impulseResponse: [0, 1, 0],
-            transferFunction: response,
-            quality: RoomCorrectionMeasurementQuality(
-                clipped: false,
-                playbackPeakDBFS: -18,
-                capturePeakDBFS: -12,
-                estimatedNoiseFloorDBFS: -70,
-                estimatedSNRDB: 58,
-                sweepComplete: true,
-                directArrivalSeconds: 0.012,
-                usableLowHz: 25,
-                usableHighHz: 19_000,
-                warnings: []
+            left: RoomCorrectionChannelMeasurement(
+                capturedAt: created,
+                rawCapture: [0, 0.25, -0.25, 0],
+                impulseResponse: [0, 1, 0],
+                transferFunction: leftResponse,
+                quality: quality
+            ),
+            right: RoomCorrectionChannelMeasurement(
+                capturedAt: created.addingTimeInterval(6),
+                rawCapture: [0, 0.2, -0.15, 0],
+                impulseResponse: [0, 0.9, 0],
+                transferFunction: rightResponse,
+                quality: quality
             )
         )
-        project.measurements = [measurement]
+        project.measurements = [position]
         project.aggregate = RoomCorrectionAggregateResponse(
             generatedAt: created,
-            includedMeasurementIDs: [measurement.id],
-            response: response
+            includedPositionIDs: [position.id],
+            leftResponse: leftResponse,
+            rightResponse: rightResponse
         )
         project.target = RoomCorrectionTargetCurve(
             name: "Gentle Tilt",
@@ -343,20 +360,39 @@ final class ProductionAnalysisTests: XCTestCase {
                 name: "Living Room v1",
                 sampleRate: 48_000,
                 leftTaps: [0.25, 0.5, 0.25],
-                rightTaps: nil,
+                rightTaps: [0.2, 0.6, 0.2],
                 declaredLatencyFrames: 1
             ),
-            predictedResponse: response,
+            predictedLeftResponse: leftResponse,
+            predictedRightResponse: rightResponse,
             recommendedHeadroomDB: 3,
-            algorithmVersion: "pr40-fixture-v1"
+            algorithmVersion: "pr40-fixture-v2"
         )
         project.designs = [design]
         project.selectedDesignID = design.id
 
         let savedURL = try store.save(project)
         XCTAssertTrue(FileManager.default.fileExists(atPath: savedURL.path))
+        XCTAssertEqual(savedURL.lastPathComponent, "project-v2.json")
         XCTAssertEqual(try store.load(project.id), project)
         XCTAssertEqual(try store.existingProjectIDs(), [project.id])
+    }
+
+    func testRoomCorrectionProjectRejectsAggregateThatReferencesMissingPosition() throws {
+        var project = RoomCorrectionProject(playbackSystemID: UUID(), name: "Invalid Aggregate")
+        let response = RoomCorrectionFrequencyResponse(
+            frequenciesHz: [20, 20_000],
+            magnitudeDB: [0, 0],
+            phaseRadians: nil
+        )
+        project.aggregate = RoomCorrectionAggregateResponse(
+            generatedAt: Date(),
+            includedPositionIDs: [UUID()],
+            leftResponse: response,
+            rightResponse: response
+        )
+
+        XCTAssertThrowsError(try project.validateForPersistence())
     }
 
     func testRoomCorrectionProjectStorePreservesCorruptFileForRecovery() throws {
