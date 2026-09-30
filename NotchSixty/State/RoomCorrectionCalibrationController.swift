@@ -454,7 +454,11 @@ final class RoomCorrectionCalibrationController: ObservableObject {
         if let selectedInputUID, devices.contains(where: { $0.uid == selectedInputUID }) {
             return devices
         }
-        selectedInputUID = devices.first?.uid
+        let replacementUID = devices.first?.uid
+        if selectedInputUID != replacementUID {
+            microphoneCalibration = nil
+        }
+        selectedInputUID = replacementUID
         selectedInputChannelIndex = 0
         return devices
     }

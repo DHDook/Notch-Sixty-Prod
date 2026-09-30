@@ -14,6 +14,17 @@ final class RoomCorrectionCalibrationControllerTests: XCTestCase {
         func inputDevices() throws -> [AudioInputDevice] { devices }
     }
 
+
+    private final class MutableInputCatalogFixture: InputDeviceCataloging {
+        var devices: [AudioInputDevice]
+
+        init(devices: [AudioInputDevice]) {
+            self.devices = devices
+        }
+
+        func inputDevices() throws -> [AudioInputDevice] { devices }
+    }
+
     private final class PermissionRequestCounter: @unchecked Sendable {
         private let lock = NSLock()
         private var value = 0
@@ -379,6 +390,40 @@ final class RoomCorrectionCalibrationControllerTests: XCTestCase {
         XCTAssertEqual(imported.points.count, 3)
 
         controller.selectInput(uid: second.uid)
+        XCTAssertNil(controller.microphoneCalibration)
+    }
+
+    func testDeviceRediscoveryClearsCalibrationWhenSelectedMicrophoneDisappears() throws {
+        let output = outputDevice()
+        let first = inputDevice()
+        let second = AudioInputDevice(
+            deviceID: 24,
+            uid: "rediscovered-input-fixture",
+            name: "Rediscovered Measurement Mic",
+            nominalSampleRate: 48_000,
+            availableSampleRateRanges: [
+                AudioSampleRateRange(minimum: 48_000, maximum: 48_000),
+            ]
+        )
+        let catalog = MutableInputCatalogFixture(devices: [first])
+        let controller = RoomCorrectionCalibrationController(
+            engine: try engine(output: output),
+            inputCatalog: catalog,
+            permissionClient: PermissionFixture(status: .authorized)
+        )
+        controller.prepareForUse()
+        _ = try controller.importMicrophoneCalibration(
+            text: "20 1.0\n1000 0.0\n20000 -1.0",
+            sourceName: "first.cal"
+        )
+        XCTAssertEqual(controller.selectedInputDevice?.uid, first.uid)
+        XCTAssertNotNil(controller.microphoneCalibration)
+
+        catalog.devices = [second]
+        _ = try controller.refreshInputDevices()
+
+        XCTAssertEqual(controller.selectedInputDevice?.uid, second.uid)
+        XCTAssertEqual(controller.selectedInputChannelIndex, 0)
         XCTAssertNil(controller.microphoneCalibration)
     }
 
