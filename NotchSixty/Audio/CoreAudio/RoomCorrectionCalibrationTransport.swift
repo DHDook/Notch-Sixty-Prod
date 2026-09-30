@@ -14,6 +14,7 @@ enum RoomCorrectionCalibrationTransportError: Error, Equatable, LocalizedError {
     case frameCountOverflow
     case bridgeAllocationFailed
     case ioProcUnavailable
+    case closed
     case incompleteCapture
     case unsupportedRealtimeBufferLayout(UInt64)
     case operationFailed(operation: String, status: OSStatus)
@@ -34,6 +35,8 @@ enum RoomCorrectionCalibrationTransportError: Error, Equatable, LocalizedError {
             return "Unable to allocate the preallocated room-measurement realtime bridge."
         case .ioProcUnavailable:
             return "Core Audio did not return a usable room-measurement IOProc."
+        case .closed:
+            return "Room-measurement transport is already closed."
         case .incompleteCapture:
             return "Room measurement stopped before both loudspeaker passes were captured completely."
         case .unsupportedRealtimeBufferLayout(let count):
@@ -97,10 +100,7 @@ final class RoomCorrectionCalibrationTransport {
 
     func start() throws {
         guard !isClosed else {
-            throw RoomCorrectionCalibrationTransportError.operationFailed(
-                operation: "start closed room-measurement transport",
-                status: kAudioHardwareNotRunningError
-            )
+            throw RoomCorrectionCalibrationTransportError.closed
         }
         guard !isStarted else { return }
         guard let bridge, let ioProcID else {
@@ -226,6 +226,10 @@ final class RoomCorrectionCalibrationTransport {
                     sampleRate: sampleRate,
                     operation: "set measurement microphone sample rate"
                 )
+                // Mark immediately after a successful device write so teardown
+                // restores the user's prior rate even if verification or later
+                // aggregate setup fails.
+                inputSampleRateWasChanged = true
                 let applied = try Self.readNominalSampleRate(deviceID: input.deviceID)
                 guard abs(applied - sampleRate) < 0.5 else {
                     throw RoomCorrectionCalibrationTransportError.outputSampleRateMismatch(
