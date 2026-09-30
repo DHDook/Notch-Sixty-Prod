@@ -28,7 +28,7 @@ There may be no unexplained omission at PR42 exit.
 - `THIRD_PARTY_NOTICES.md` — release-time dependency/notice result.
 - `ci/validate_pr42_parity_closure.py` — permanent machine guard against unclassified or release-blocking matrix drift; `SUPERSEDED` rows must state a semantic replacement, deliberate boundary, audited no-op, or future handoff rather than merely satisfy an arbitrary prose-length threshold.
 
-`docs/PR42_INITIAL_PARITY_MATRIX.md` remains as historical triage only; it is no longer the controlling closure ledger.
+`docs/PR42_INITIAL_PARITY_MATRIX.md` remains historical triage only; it is not the controlling closure ledger.
 
 ## Source-of-truth / clean-room rule
 
@@ -111,7 +111,7 @@ The final PR42 software gate requires:
 - App Sandbox validation;
 - Release app / DMG packaging.
 
-The closure validator must fail if the final matrix has an invalid/unclassified row, a `BLOCKED` disposition, a superseded row without a real replacement/boundary rationale, missing key audited capabilities, or an incomplete provenance/third-party result.
+The closure validator must fail if the final matrix has an invalid/unclassified row, a `BLOCKED` disposition, a superseded row without a real replacement/boundary rationale, missing key audited capabilities, an initial matrix that is no longer explicitly historical/non-controlling, or an incomplete provenance/third-party result.
 
 ## Manual acceptance remaining
 
