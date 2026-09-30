@@ -43,8 +43,9 @@ require(app, '#if DEBUG\n        Window("Engineering Validation", id: "engineeri
 require(root_view, '#if DEBUG\n    @Environment(\\.openWindow)', "DEBUG openWindow gate")
 require(root_view, '#if DEBUG\n            Button {\n                openWindow(id: "engineering-validation")', "DEBUG engineering toolbar gate")
 
-# Launch at Login must use the public Apple API and must remain an explicit
-# registration action rather than an audio-processing startup side effect.
+# Launch at Login must use the public Apple API, share one preference model
+# between Settings and the menu-bar app menu, and remain an explicit registration
+# action rather than an audio-processing startup side effect.
 for token in [
     "import ServiceManagement",
     "SMAppService.mainApp.status",
@@ -53,6 +54,12 @@ for token in [
     'Section("Startup")',
     '"Launch at Login"',
     "does not automatically start audio processing",
+    "@ObservedObject private var preferences: ApplicationPreferences",
+    "init(product: ProductController, preferences: ApplicationPreferences)",
+    "ProductionMenuBarView(product: product, preferences: preferences)",
+    'get: { preferences.launchAtLoginEnabled }',
+    'set: { preferences.setLaunchAtLogin($0) }',
+    'Text("Login: \\(preferences.launchAtLoginStatusDescription)")',
 ]:
     require(app, token, "Launch at Login contract")
 
@@ -92,6 +99,8 @@ if "**Commercial bootstrap / architecture foundation.**" in readme:
 for path in [
     ROOT / ".github" / "workflows" / "pr45-apply-release-hardening.yml",
     ROOT / "ci" / "pr45_apply_release_hardening.py",
+    ROOT / ".github" / "workflows" / "pr45-apply-launch-at-login-menu.yml",
+    ROOT / "ci" / "pr45_add_launch_at_login_menu.py",
 ]:
     if path.exists():
         fail(f"one-shot PR45 staging file remains: {path.relative_to(ROOT)}")
