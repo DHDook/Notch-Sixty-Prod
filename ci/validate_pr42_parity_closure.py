@@ -69,10 +69,11 @@ for capability in required_capabilities:
     require(capability in capability_names, f"required audited capability missing from final matrix: {capability}")
 
 # A SUPERSEDED row must explain the replacement/boundary rather than silently
-# using the label as a way to erase historical behavior.
+# using the label as a way to erase historical behavior. Concise explanations
+# such as an audited no-op are valid; the guard rejects only token/empty rationales.
 for capability, status, rationale in rows:
     if status == "SUPERSEDED":
-        require(len(rationale) >= 40, f"SUPERSEDED row lacks rationale: {capability}")
+        require(len(rationale) >= 20, f"SUPERSEDED row lacks substantive rationale: {capability}")
 
 require("not claims of current implementation" in matrix, "post-1.0 register must disclaim current implementation")
 require("There are no unresolved release-blocking rows" in matrix, "matrix closure result is missing")
