@@ -1,0 +1,31 @@
+name: PR43 UI Polish Stage
+
+on:
+  push:
+    branches:
+      - pr43-advanced-acoustic-speaker-optimization
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: pr43-advanced-acoustic-speaker-optimization
+      - name: Apply UI polish patch
+        run: python3 ci/pr43_ui_polish_patch.py
+      - name: Commit production UI changes if needed
+        shell: bash
+        run: |
+          if git diff --quiet -- NotchSixty/UI/ProductionRootView.swift NotchSixty/UI/ProductionRoomCorrectionWorkspace.swift; then
+            echo "UI polish already applied."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add NotchSixty/UI/ProductionRootView.swift NotchSixty/UI/ProductionRoomCorrectionWorkspace.swift
+          git commit -m "PR43: align acoustic UI with current macOS design"
+          git push origin HEAD:pr43-advanced-acoustic-speaker-optimization
