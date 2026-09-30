@@ -43,25 +43,33 @@ require(app, '#if DEBUG\n        Window("Engineering Validation", id: "engineeri
 require(root_view, '#if DEBUG\n    @Environment(\\.openWindow)', "DEBUG openWindow gate")
 require(root_view, '#if DEBUG\n            Button {\n                openWindow(id: "engineering-validation")', "DEBUG engineering toolbar gate")
 
-# Launch at Login must use the public Apple API, share one preference model
-# between Settings and the menu-bar app menu, and remain an explicit registration
-# action rather than an audio-processing startup side effect.
+# Launch at Login must use the public Apple API, live in the same Settings/app
+# preferences UI as Appearance and App Presence, and remain an explicit
+# registration action rather than an audio-processing startup side effect.
 for token in [
     "import ServiceManagement",
     "SMAppService.mainApp.status",
     "SMAppService.mainApp.register()",
     "SMAppService.mainApp.unregister()",
+    'Section("Appearance")',
+    'Section("App Presence")',
     'Section("Startup")',
     '"Launch at Login"',
-    "does not automatically start audio processing",
-    "@ObservedObject private var preferences: ApplicationPreferences",
-    "init(product: ProductController, preferences: ApplicationPreferences)",
-    "ProductionMenuBarView(product: product, preferences: preferences)",
     'get: { preferences.launchAtLoginEnabled }',
     'set: { preferences.setLaunchAtLogin($0) }',
-    'Text("Login: \\(preferences.launchAtLoginStatusDescription)")',
+    "does not automatically start audio processing",
+    "ProductionMenuBarView(product: product)",
 ]:
     require(app, token, "Launch at Login contract")
+
+if app.count('"Launch at Login"') != 1:
+    fail(f"expected exactly one Launch at Login control in Settings, found {app.count(chr(34) + 'Launch at Login' + chr(34))}")
+
+menu_start = app.index("private struct ProductionMenuBarView")
+settings_start = app.index("private struct ProductionSettingsView", menu_start)
+menu_block = app[menu_start:settings_start]
+if "Launch at Login" in menu_block or "launchAtLogin" in menu_block:
+    fail("Launch at Login leaked into the tray/menu-bar dropdown instead of remaining in app Settings")
 
 # Support/privacy affordances.
 for token in [
@@ -101,6 +109,8 @@ for path in [
     ROOT / "ci" / "pr45_apply_release_hardening.py",
     ROOT / ".github" / "workflows" / "pr45-apply-launch-at-login-menu.yml",
     ROOT / "ci" / "pr45_add_launch_at_login_menu.py",
+    ROOT / ".github" / "workflows" / "pr45-apply-login-placement.yml",
+    ROOT / "ci" / "pr45_remove_login_toggle_from_tray.py",
 ]:
     if path.exists():
         fail(f"one-shot PR45 staging file remains: {path.relative_to(ROOT)}")
