@@ -205,7 +205,9 @@ final class RoomCorrectionFIRDesignerTests: XCTestCase {
             playbackSystemID: UUID(),
             name: "Persistence Fixture"
         )
-        project.aggregate = measured
+        var persistedAggregate = measured
+        persistedAggregate.includedPositionIDs = []
+        project.aggregate = persistedAggregate
         project.target = target
         project.designs = [result.design]
         project.selectedDesignID = result.design.id
