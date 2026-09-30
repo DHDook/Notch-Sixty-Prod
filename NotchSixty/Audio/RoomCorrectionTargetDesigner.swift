@@ -273,8 +273,8 @@ struct RoomCorrectionCorrectionPreviewDesigner: Sendable {
             )
         }
 
-        let effectiveLow = max(parameters.correctionLowHz, measuredLow, firstFrequency)
-        let effectiveHigh = min(parameters.correctionHighHz, measuredHigh, lastFrequency)
+        let effectiveLow = max(max(parameters.correctionLowHz, measuredLow), firstFrequency)
+        let effectiveHigh = min(min(parameters.correctionHighHz, measuredHigh), lastFrequency)
         guard effectiveHigh > effectiveLow else {
             throw RoomCorrectionTargetDesignError.noUsableCorrectionRange
         }
@@ -314,8 +314,10 @@ struct RoomCorrectionCorrectionPreviewDesigner: Sendable {
             effectiveHigh: effectiveHigh
         )
         let maximumPositive = max(
-            leftCorrection.magnitudeDB.max() ?? 0,
-            rightCorrection.magnitudeDB.max() ?? 0,
+            max(
+                leftCorrection.magnitudeDB.max() ?? 0,
+                rightCorrection.magnitudeDB.max() ?? 0
+            ),
             0
         )
         let estimatedHeadroom = maximumPositive > 0
