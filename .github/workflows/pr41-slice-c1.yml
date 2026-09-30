@@ -1,5 +1,5 @@
 name: PR41 Multi-output Routing Model
-# Direct checkpoint after repairing the one-shot patch helper.
+# Direct checkpoint after repairing both ambiguous one-shot helper targets.
 
 on:
   push:
