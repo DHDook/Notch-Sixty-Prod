@@ -1,0 +1,75 @@
+name: PR40 Preserve Sweep Settings
+
+on:
+  push:
+    branches:
+      - pr40-room-correction-production-workflow
+    paths:
+      - .github/workflows/pr40-preserve-sweep-settings.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: pr40-room-correction-production-workflow
+          fetch-depth: 0
+
+      - name: Preserve originating sweep settings
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('NotchSixty/Audio/Devices/OutputDeviceCatalog.swift')
+          text = path.read_text()
+
+          old_struct = '''struct RoomCorrectionSweepProgram: Equatable, Sendable {
+              var sampleRate: Double
+              var sweepSamples: [Float]
+              var inverseFilter: [Float]
+              var leadInFrames: Int
+              var tailFrames: Int
+          '''
+          new_struct = '''struct RoomCorrectionSweepProgram: Equatable, Sendable {
+              var settings: RoomCorrectionSweepSettings
+              var sampleRate: Double
+              var sweepSamples: [Float]
+              var inverseFilter: [Float]
+              var leadInFrames: Int
+              var tailFrames: Int
+          '''
+          if new_struct not in text:
+              if text.count(old_struct) != 1:
+                  raise SystemExit('Unexpected RoomCorrectionSweepProgram declaration')
+              text = text.replace(old_struct, new_struct, 1)
+
+          old_init = '''        return RoomCorrectionSweepProgram(
+              sampleRate: sampleRate,
+              sweepSamples: sweep,
+          '''
+          new_init = '''        return RoomCorrectionSweepProgram(
+              settings: settings,
+              sampleRate: sampleRate,
+              sweepSamples: sweep,
+          '''
+          if new_init not in text:
+              if text.count(old_init) != 1:
+                  raise SystemExit('Unexpected RoomCorrectionSweepProgram construction')
+              text = text.replace(old_init, new_init, 1)
+
+          path.write_text(text)
+          PY
+
+      - name: Commit fix and remove helper
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add NotchSixty/Audio/Devices/OutputDeviceCatalog.swift
+          git rm .github/workflows/pr40-preserve-sweep-settings.yml
+          git commit -m "PR40: preserve exact measurement sweep settings"
+          git push origin HEAD:pr40-room-correction-production-workflow
