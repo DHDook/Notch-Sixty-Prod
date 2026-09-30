@@ -38,7 +38,7 @@
 		A2000000000000000000001D /* RoomCorrectionCalibrationController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000002D /* RoomCorrectionCalibrationController.swift */; };
 		A2000000000000000000001E /* RoomCorrectionMeasurementAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000002E /* RoomCorrectionMeasurementAnalyzer.swift */; };
 		A2000000000000000000001F /* RoomCorrectionProjectController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000002F /* RoomCorrectionProjectController.swift */; };
-		A20000000000000000000020 /* RoomCorrectionTargetDesigner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000030 /* RoomCorrectionTargetDesigner.swift */; };
+		E20000000000000000000001 /* RoomCorrectionTargetDesigner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000030 /* RoomCorrectionTargetDesigner.swift */; };
 		A30000000000000000000010 /* N60RealtimeAudioBridge.c in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000020 /* N60RealtimeAudioBridge.c */; };
 		A30000000000000000000011 /* N60RenderKernel.c in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000021 /* N60RenderKernel.c */; };
 		A30000000000000000000012 /* N60Convolution.c in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000023 /* N60Convolution.c */; };
@@ -320,7 +320,7 @@
 				A2000000000000000000001D /* RoomCorrectionCalibrationController.swift in Sources */,
 				A2000000000000000000001E /* RoomCorrectionMeasurementAnalyzer.swift in Sources */,
 				A2000000000000000000001F /* RoomCorrectionProjectController.swift in Sources */,
-				A20000000000000000000020 /* RoomCorrectionTargetDesigner.swift in Sources */,
+				E20000000000000000000001 /* RoomCorrectionTargetDesigner.swift in Sources */,
 				A20000000000000000000017 /* StereoPlaybackControl.swift in Sources */,
 				A20000000000000000000019 /* DynamicsConfiguration.swift in Sources */,
 				A20000000000000000000018 /* MasterVolumeDeviceController.swift in Sources */,
