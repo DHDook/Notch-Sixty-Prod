@@ -1,158 +1,141 @@
 # PR42 — Formal Parity, Provenance, and Release-Gap Closure
 
-Status: **KICKOFF / AUDIT IN PROGRESS**
+Status: **CLOSURE GATE — FINAL MATRIX / PROVENANCE COMPLETE; EXACT-HEAD CI REQUIRED**
 
 Starting point: PR41 clean combined head `c168f55367112750b0cb58adf5a1d8493202b6a4`.
 
-PR42 is intentionally stacked on PR41 while PR40/PR41 await their combined real-Mac physical acceptance and merge sequence. It must not rewrite or destabilize the accepted PR34–PR41 DSP/transport architecture merely to satisfy historical structure.
+PR42 remains intentionally stacked on PR41 while PR40/PR41 await their combined real-Mac physical acceptance and merge sequence. It does not rewrite the accepted PR34–PR41 realtime/DSP architecture merely to resemble historical structure.
 
 ## Purpose
 
 Close the commercial rewrite parity and provenance gate before production hardening.
 
-PR42 will produce a source-backed disposition for every externally observable legacy capability and every material commercial rewrite obligation. Each item must end in exactly one of:
+Every externally observable legacy capability and material commercial rewrite obligation must have exactly one final disposition:
 
 - **PARITY** — equivalent user-observable capability exists in the proprietary product;
-- **IMPROVED** — capability exists with intentionally improved product behavior or architecture;
-- **PORT VERIFIED** — later owner-authored clean candidate was deliberately reused after provenance and quality review;
-- **SUPERSEDED** — the historical capability is intentionally replaced by a better production mechanism;
-- **BLOCKED** — release-blocking gap remains and must be implemented before closure.
+- **IMPROVED** — capability exists with intentionally stronger product behavior or architecture;
+- **PORT VERIFIED** — owner-authored clean material was deliberately reused after provenance/quality review;
+- **SUPERSEDED** — historical behavior is intentionally not reproduced because the commercial product uses a different mechanism or a deliberately narrower 1.0 workflow;
+- **BLOCKED** — release-blocking gap. PR42 cannot close while one remains.
 
 There may be no unexplained omission at PR42 exit.
 
+## Final controlling artifacts
+
+- `docs/PR42_FINAL_PARITY_MATRIX.md` — final capability-by-capability commercial disposition ledger.
+- `docs/PR42_PROVENANCE_CLOSURE.md` — PR34–PR42 implementation/source/asset/dependency reconciliation.
+- `docs/PR42_INTERCHANGE_CLOSURE.md` — `.eqpreset`, REW, EasyEffects and CamillaDSP compatibility contract.
+- `THIRD_PARTY_NOTICES.md` — release-time dependency/notice result.
+- `ci/validate_pr42_parity_closure.py` — permanent machine guard against unclassified or release-blocking matrix drift.
+
+`docs/PR42_INITIAL_PARITY_MATRIX.md` remains as historical triage only; it is no longer the controlling closure ledger.
+
 ## Source-of-truth / clean-room rule
 
-The legacy GPL repository may be used only to inventory externally observable behavior and feature surface. It is not an implementation template.
+The historical GPL repository may be used only to inventory externally observable behavior, data-format compatibility, known defects and reachability. It is not an implementation template.
 
-Commercial implementation work must continue to come from:
+Commercial implementation sources remain:
 
-- the existing proprietary Notch Sixty architecture and accepted PR1–PR41 behavior;
+- the proprietary Notch Sixty architecture and accepted PR1–PR41 behavior;
 - independently written product requirements;
 - Apple platform documentation and public APIs;
-- public DSP/acoustics specifications and literature where DSP math is required;
-- explicitly provenance-cleared owner-authored material recorded in `docs/PROVENANCE.md`.
+- public DSP/acoustic specifications/literature where mathematics is required;
+- explicitly provenance-cleared owner-authored material.
 
-No historical GPL source expression, tests, scripts, assets, project structure, or configuration should be copied into production.
+Historical GPL source expression, tests, scripts, project structure and configuration are not permitted production implementation sources.
 
-## Audit workstreams
+## Workstream closure
 
-### A. Product capability matrix
+### A. Product capability matrix — CLOSED
 
-Reconcile the existing parity audits and the shipping production UI against the legacy externally observable feature set.
+The final matrix reconciles transport/device behavior, playback/audition, EQ/phase/FIR, dynamics/restoration/protection, metering/analysis, Room Correction, physical routing/crossover, persistence/interchange, production UI and release provenance.
 
-Minimum domains:
+The matrix makes a critical distinction: **SUPERSEDED does not mean implemented**. It records an intentional 1.0 product decision and replacement/boundary. Future speaker-optimization and advanced acoustic-analysis opportunities remain listed explicitly as post-1.0 work.
 
-- transport / selected-device behavior / lifecycle;
-- stereo playback controls and audition modes;
-- EQ, phase modes, FIR and convolution workflows;
-- dynamics, restoration, protection and conditioning;
-- metering / RTA / analysis;
-- Room Correction measurement, multi-position workflow, target/design/deployment;
-- bass management and Active Crossover;
-- physical speaker routing and synchronization;
-- persistence, Content Presets, Playback System Profiles and session state;
-- import/export/interchange obligations;
-- permissions, recovery and App Sandbox behavior;
-- production UI and accessibility-visible capabilities.
+### B. Deferred loudspeaker optimization classification — CLOSED FOR 1.0
 
-### B. Deferred loudspeaker optimization classification
+PR41's deliberately deferred driver-specific EQ/trim/delay/protection/metering and measurement-assisted optimizer/diagnostic suite are not falsely claimed as current capability. The final matrix records the bounded 1.0 routing/crossover product and retains the larger suite in a named post-1.0 enhancement register.
 
-PR41 deliberately deferred the larger speaker-optimization suite. PR42 must classify each deferred item as either required for legacy parity / launch or a documented post-1.0 enhancement.
+Known audited legacy no-ops remain intentionally excluded, including the optimizer slope/delay toggles and ambiguous Apply-All delta-vs-absolute behavior.
 
-Items to classify include:
+### C. Persistence / interchange — CLOSED
 
-- arbitrary per-output parametric EQ;
-- arbitrary per-output gain / polarity / broadband delay beyond current Sub controls;
-- per-output limiting and metering;
-- group-delay analysis/correction;
-- measured acoustic-summation overlays;
-- crossover-frequency / per-output-EQ optimization;
-- broadband driver time alignment;
-- automated polarity / acoustic-center diagnosis;
-- baffle-step / diaphragm-resonance recommendations;
-- automated combined-system verification.
+PR42 implements/control-plane-validates:
 
-No PR41 parity claim is retroactively expanded without implementation and validation evidence.
+- one-way legacy `.eqpreset` v1/v2 migration;
+- Pause Gate semantic timing translation;
+- supported legacy EQ/dynamics-state migration with explicit warnings for unrecoverable fields;
+- REW filter-text import/export;
+- EasyEffects EQ import/export with ownership-safe input/output gain handling;
+- CamillaDSP content-EQ/FIR YAML export;
+- App Sandbox user-selected read/write access for explicit import/export.
 
-### C. Persistence / interchange gap audit
+The commercial Content Preset / Playback System ownership split remains authoritative. Machine-specific private HAL speaker routing is intentionally not serialized as though it were a portable foreign-runtime configuration.
 
-Confirm the final commercial disposition of:
+### D. Provenance / third-party — CLOSED
 
-- versioned state migrations;
-- `.eqpreset` import/export and legacy migration semantics;
-- REW interoperability;
-- AutoEQ interoperability if still product-relevant;
-- CamillaDSP interoperability if still product-relevant;
-- EasyEffects interoperability if required by parity;
-- resource-backed FIR / Speaker IR / Room Correction assets.
+`docs/PR42_PROVENANCE_CLOSURE.md` reconciles PR34–PR42 implementation areas, app artwork, Apple-platform dependencies and interchange code. No unresolved GPL/AGPL production dependency or bundled third-party production component is identified.
 
-Anything not required for 1.0 must be explicitly reclassified rather than silently dropped.
+The analog-meter identity artwork is recorded as user-authored owner-controlled material, deliberately reused under the owner's independent rights rather than inherited merely because it appeared in a historical GPL repository.
 
-### D. Provenance and third-party review
+### E. Production UI consistency — CLOSED SUBJECT TO USER SMOKE TEST
 
-Reconcile:
+The Dynamics selected-processor editor now uses semantic `LabeledContent`, native rounded editable values and an adaptive material/border surface instead of the old fixed-column/fixed-quaternary treatment. Existing bindings, processor grouping, ranges, Pause Gate semantics, telemetry demand and realtime behavior are unchanged.
 
-- `docs/PROVENANCE.md`;
-- `THIRD_PARTY_NOTICES.md`;
-- committed source/assets;
-- any generated or imported resources;
-- Apple-framework-only assumptions;
-- cleared owner-authored reuse.
-
-Exit requires no unexplained production source or asset origin and no unresolved GPL/AGPL dependency.
-
-### E. Production UI consistency audit
-
-PR42 includes a bounded current-platform UI consistency pass where an existing production surface visibly lags the established macOS design language without requiring product/DSP behavior changes.
-
-First identified item: the Dynamics selected-processor editor. Its controls are current SwiftUI, but the editor uses a manually composed parameter-row layout and a fixed quaternary rounded background rather than the newer semantic form/labeled-content structure used by current SwiftUI guidance. The goal is a native current-macOS inspector/form presentation while preserving all PR38 controls, grouping, telemetry demand isolation, and parameter semantics.
-
-**Initial Dynamics UI slice implemented:** numeric parameter rows now use semantic `LabeledContent`, editable values use native rounded text-field styling, and the processor editor uses an adaptive material surface with a subtle semantic boundary instead of the fixed quaternary card. All existing bindings, parameter ranges, units, processor grouping, telemetry children, Pause Gate semantics, and realtime behavior are unchanged. `ci/validate_pr42_dynamics_ui_style.py` guards this presentation contract.
-
-UI polish must not become a broad visual redesign of accepted PR36–PR41 surfaces.
+`ci/validate_pr42_dynamics_ui_style.py` retains this contract.
 
 ## Realtime / architecture impact
 
-The audit itself has no realtime impact.
+PR42's substantive additions are control/UI/file-interchange work. They do not add file parsing, allocation, locks, logging, device work or UI work to the physical-output realtime callback.
 
-Any discovered implementation gap that touches audio must preserve the existing rules:
+The accepted rules remain:
 
-- no allocation/free, locks, logging, file/device/UI work, or task creation in the realtime callback;
 - immutable/preallocated state prepared off-callback;
 - existing Processed / Reference / Delta and raw Global Bypass contracts;
-- PR35 parking and demand-gating semantics;
-- PR40/PR41 Room Correction / speaker-routing ownership boundaries.
-
-UI-only work must not alter DSP snapshots or publication cadence except through already-existing bindings.
+- PR35 parking/demand-gating semantics;
+- PR40 Room Correction ownership;
+- PR41 physical speaker-routing/crossover safety boundaries.
 
 ## Validation strategy
 
-PR42 will add a permanent parity-closure validator that fails if the controlling disposition matrix contains unclassified items or unresolved BLOCKED entries at final closure.
-
-As implementation gaps are closed, retain the relevant PR34–PR41 regression gates and add focused deterministic coverage.
-
-Final software gate should include:
+The final PR42 software gate requires:
 
 - retained PR34–PR41 validators;
-- PR42 parity/provenance validator;
-- Debug and Release Performance builds;
-- full XCTest;
+- `ci/validate_pr42_dynamics_ui_style.py`;
+- `ci/validate_pr42_interchange.py`;
+- `ci/validate_pr42_parity_closure.py`;
 - realtime benchmarks;
+- Debug build;
+- Release Performance build;
+- full XCTest;
 - App Sandbox validation;
 - Release app / DMG packaging.
 
-Manual validation is required only for PR42 changes whose user-observable behavior cannot be established deterministically, plus a final production UI smoke pass.
+The closure validator must fail if the final matrix has an invalid/unclassified row, a `BLOCKED` disposition, a superseded row without rationale, missing key audited capabilities, or an incomplete provenance/third-party result.
+
+## Manual acceptance remaining
+
+No Mac-only test is required to establish the documentary classifications themselves. Before PR42 is marked ready/merged, the user should perform the already-planned combined PR40/PR41 real-hardware acceptance and a brief PR42 production UI/interchange smoke pass when a Mac is available.
+
+The PR42 smoke pass should include:
+
+- Dynamics editor appearance/control editing;
+- import a representative `.eqpreset` and inspect migration notes;
+- import/export representative REW and EasyEffects EQ files;
+- export a CamillaDSP YAML and inspect/open it as text;
+- verify Content Preset import does not change Playback System routing/output trim;
+- ordinary playback plus Processed / Reference / Delta / Global Bypass regression smoke.
 
 ## Exit criteria
 
-PR42 closes only when:
+PR42 reaches software closure when:
 
-1. every externally observable legacy capability has a documented final disposition;
-2. every release-relevant deferred PR41 speaker item is either implemented/validated or explicitly classified as post-1.0;
-3. persistence/interchange obligations are explicit;
-4. provenance and third-party notices are reconciled;
-5. no unresolved `BLOCKED` item remains;
-6. bounded UI consistency findings are closed;
-7. exact-head CI is green.
+1. every audited capability has a final disposition in `PR42_FINAL_PARITY_MATRIX.md`;
+2. no matrix row has `BLOCKED` disposition;
+3. post-1.0 items are explicitly identified and are not claimed as current implementation;
+4. interchange obligations are explicit and validated;
+5. provenance/third-party notices are reconciled;
+6. Dynamics UI consistency work is structurally guarded;
+7. exact-head CI and packaging are green.
 
-After PR42, the roadmap advances to production hardening rather than another broad parity-development phase.
+After PR42, new broad parity discovery stops. Remaining work moves to production hardening, real-hardware acceptance and App Store/commercial release preparation.
