@@ -16,10 +16,12 @@ Current foundation on the PR40 branch:
 - the App Sandbox audio-input entitlement and a dedicated microphone privacy usage description are present for the AVFoundation measurement-microphone permission path;
 - a MainActor calibration controller owns the user-initiated microphone permission flow, input selection, sweep settings, calibration state, and measurement-transport lifetime;
 - calibration hardware ownership is permitted only while the ordinary `AudioIOEngine` is exactly `idle`; the controller never silently stops or resumes normal DSP playback;
-- raw paired captures are handed from the calibration controller to the subsequent analysis stage only after the dedicated transport has stopped and materialized its bounded capture buffers;
+- atomic transport progress/completion is polled from the control plane; raw paired captures are materialized only after the dedicated IOProc timeline is complete and stopped;
+- the production Room Correction workspace now exposes permission, microphone/input-channel selection, sweep duration/level, explicit playback-idle ownership, live measurement progress, cancellation, and paired raw-capture completion;
+- analysis/target/design controls are intentionally not simulated in Slice C; completed captures are handed to the next analysis stage;
 - deterministic C-bridge tests cover exact left/right routing, arbitrary callback quanta, capture boundaries, reset behavior, post-completion silence, and frame-count overflow rejection;
-- deterministic Swift tests cover sweep generation, routing, topology, state transitions, capture contiguity, arbitrary callback boundaries, permission behavior, exclusive hardware ownership, cancellation, and capture handoff.
+- deterministic Swift tests cover sweep generation, routing, topology, state transitions, capture contiguity, arbitrary callback boundaries, permission behavior, exclusive hardware ownership, atomic completion polling, cancellation, and capture handoff.
 
-The physical transport and calibration controller are compiled into the production target. Remaining Slice C work after exact-head software/DMG validation is production Setup/Measure UI integration and the focused real-Mac microphone/output acceptance path before treating capture as complete.
+The full Slice C software path is integrated into the production target and is under exact-head software/DMG validation. The remaining Slice C acceptance item is the focused real-Mac microphone/output run; capture is not considered hardware-complete until that pass is performed or explicitly waived.
 
 This transport remains calibration-only. It does not alter the normal process-tap DSP bridge or the deployed room-correction convolution path.
