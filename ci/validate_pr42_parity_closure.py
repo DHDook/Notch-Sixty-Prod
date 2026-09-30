@@ -4,6 +4,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 MATRIX = ROOT / "docs" / "PR42_FINAL_PARITY_MATRIX.md"
+INITIAL_MATRIX = ROOT / "docs" / "PR42_INITIAL_PARITY_MATRIX.md"
 PROVENANCE = ROOT / "docs" / "PR42_PROVENANCE_CLOSURE.md"
 NOTICES = ROOT / "THIRD_PARTY_NOTICES.md"
 CONTRACT = ROOT / "docs" / "PR42_PARITY_PROVENANCE_CLOSURE.md"
@@ -26,10 +27,11 @@ def require(condition: bool, message: str) -> None:
         fail(message)
 
 
-for path in (MATRIX, PROVENANCE, NOTICES, CONTRACT):
+for path in (MATRIX, INITIAL_MATRIX, PROVENANCE, NOTICES, CONTRACT):
     require(path.exists(), f"missing required closure file: {path.relative_to(ROOT)}")
 
 matrix = MATRIX.read_text(encoding="utf-8")
+initial_matrix = INITIAL_MATRIX.read_text(encoding="utf-8")
 provenance = PROVENANCE.read_text(encoding="utf-8")
 notices = NOTICES.read_text(encoding="utf-8")
 contract = CONTRACT.read_text(encoding="utf-8")
@@ -86,6 +88,8 @@ for capability, status, rationale in rows:
 
 require("not claims of current implementation" in matrix, "post-1.0 register must disclaim current implementation")
 require("There are no unresolved release-blocking rows" in matrix, "matrix closure result is missing")
+require("HISTORICAL TRIAGE" in initial_matrix and "PR42_FINAL_PARITY_MATRIX.md" in initial_matrix,
+        "initial parity matrix must remain explicitly historical/non-controlling")
 
 # Provenance must close the production-source, license, dependency and asset axes.
 for token in [
