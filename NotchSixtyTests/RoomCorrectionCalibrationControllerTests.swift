@@ -76,6 +76,34 @@ final class RoomCorrectionCalibrationControllerTests: XCTestCase {
         func cancel() { cancelCount += 1 }
     }
 
+    private actor AnalysisGate {
+        private var continuation: CheckedContinuation<Void, Never>?
+        private var waiting = false
+
+        func wait() async {
+            await withCheckedContinuation { continuation in
+                waiting = true
+                self.continuation = continuation
+            }
+        }
+
+        func isWaiting() -> Bool { waiting }
+
+        func release() {
+            continuation?.resume()
+            continuation = nil
+            waiting = false
+        }
+    }
+
+    private enum AnalysisFixtureError: Error, LocalizedError {
+        case synthetic
+
+        var errorDescription: String? {
+            "Synthetic analysis failure."
+        }
+    }
+
     private func outputDevice() -> AudioOutputDevice {
         AudioOutputDevice(
             deviceID: 11,
@@ -105,6 +133,38 @@ final class RoomCorrectionCalibrationControllerTests: XCTestCase {
         _ = try engine.refreshOutputDevices()
         try engine.selectOutput(uid: output.uid)
         return engine
+    }
+
+    private func analysisResult(sampleRate: Double = 48_000) -> RoomCorrectionMeasurementAnalysis {
+        let response = RoomCorrectionFrequencyResponse(
+            frequenciesHz: [100, 1_000],
+            magnitudeDB: [0, -1],
+            phaseRadians: [0, 0.1]
+        )
+        let quality = RoomCorrectionMeasurementQuality(
+            clipped: false,
+            playbackPeakDBFS: -18,
+            capturePeakDBFS: -12,
+            estimatedNoiseFloorDBFS: -70,
+            estimatedSNRDB: 45,
+            sweepComplete: true,
+            directArrivalSeconds: 0.01,
+            usableLowHz: 20,
+            usableHighHz: 20_000,
+            warnings: []
+        )
+        let channel = RoomCorrectionChannelMeasurement(
+            capturedAt: Date(timeIntervalSince1970: 123),
+            rawCapture: [0.1, 0.2],
+            impulseResponse: [1, 0],
+            transferFunction: response,
+            quality: quality
+        )
+        return RoomCorrectionMeasurementAnalysis(
+            sampleRate: sampleRate,
+            left: channel,
+            right: channel
+        )
     }
 
     func testPrepareForUseEnumeratesAuthorizedInputsAndSelectsFirstDevice() throws {
@@ -214,6 +274,7 @@ final class RoomCorrectionCalibrationControllerTests: XCTestCase {
 
         XCTAssertEqual(capture, transport.capture)
         XCTAssertEqual(controller.latestCapture, transport.capture)
+        XCTAssertNil(controller.latestAnalysis)
         XCTAssertEqual(controller.state, .analyzing)
         XCTAssertEqual(transport.finishCount, 1)
         XCTAssertEqual(transport.cancelCount, 0)
@@ -254,6 +315,91 @@ final class RoomCorrectionCalibrationControllerTests: XCTestCase {
         XCTAssertEqual(transport.finishCount, 1)
     }
 
+    func testAnalysisPublishesCurrentGenerationAndAdvancesToReviewing() async throws {
+        let output = outputDevice()
+        let input = inputDevice()
+        let transport = TransportFixture()
+        let expected = analysisResult()
+        let controller = RoomCorrectionCalibrationController(
+            engine: try engine(output: output),
+            inputCatalog: InputCatalogFixture(devices: [input]),
+            permissionClient: PermissionFixture(status: .authorized),
+            transportFactory: { _, _, _, _ in transport },
+            analysisOperation: { _, _, _ in expected }
+        )
+        controller.prepareForUse()
+        try controller.beginMeasurement()
+        _ = try controller.finishMeasurement()
+
+        let published = await controller.analyzeLatestCapture()
+
+        XCTAssertTrue(published)
+        XCTAssertEqual(controller.latestAnalysis, expected)
+        XCTAssertEqual(controller.state, .reviewing)
+        XCTAssertNil(controller.lastErrorDescription)
+        XCTAssertTrue(controller.canBeginMeasurement)
+    }
+
+    func testAnalysisFailureFailsClosedAndKeepsResultUnpublished() async throws {
+        let output = outputDevice()
+        let input = inputDevice()
+        let transport = TransportFixture()
+        let controller = RoomCorrectionCalibrationController(
+            engine: try engine(output: output),
+            inputCatalog: InputCatalogFixture(devices: [input]),
+            permissionClient: PermissionFixture(status: .authorized),
+            transportFactory: { _, _, _, _ in transport },
+            analysisOperation: { _, _, _ in throw AnalysisFixtureError.synthetic }
+        )
+        controller.prepareForUse()
+        try controller.beginMeasurement()
+        _ = try controller.finishMeasurement()
+
+        let published = await controller.analyzeLatestCapture()
+
+        XCTAssertFalse(published)
+        XCTAssertNil(controller.latestAnalysis)
+        XCTAssertEqual(controller.state, .failed)
+        XCTAssertEqual(controller.lastErrorDescription, "Synthetic analysis failure.")
+    }
+
+    func testCancelledAnalysisCannotPublishStaleResult() async throws {
+        let output = outputDevice()
+        let input = inputDevice()
+        let transport = TransportFixture()
+        let gate = AnalysisGate()
+        let expected = analysisResult()
+        let controller = RoomCorrectionCalibrationController(
+            engine: try engine(output: output),
+            inputCatalog: InputCatalogFixture(devices: [input]),
+            permissionClient: PermissionFixture(status: .authorized),
+            transportFactory: { _, _, _, _ in transport },
+            analysisOperation: { _, _, _ in
+                await gate.wait()
+                return expected
+            }
+        )
+        controller.prepareForUse()
+        try controller.beginMeasurement()
+        _ = try controller.finishMeasurement()
+
+        let analysisTask = Task { await controller.analyzeLatestCapture() }
+        while !(await gate.isWaiting()) {
+            await Task.yield()
+        }
+
+        controller.cancelMeasurement()
+        await gate.release()
+        let published = await analysisTask.value
+
+        XCTAssertFalse(published)
+        XCTAssertEqual(controller.state, .idle)
+        XCTAssertNil(controller.activePlan)
+        XCTAssertNil(controller.latestCapture)
+        XCTAssertNil(controller.latestAnalysis)
+        XCTAssertNil(controller.lastErrorDescription)
+    }
+
     func testCancelReleasesCalibrationTransportAndReturnsIdle() throws {
         let output = outputDevice()
         let input = inputDevice()
@@ -272,6 +418,8 @@ final class RoomCorrectionCalibrationControllerTests: XCTestCase {
         XCTAssertEqual(transport.cancelCount, 1)
         XCTAssertEqual(controller.state, .idle)
         XCTAssertNil(controller.activePlan)
+        XCTAssertNil(controller.latestCapture)
+        XCTAssertNil(controller.latestAnalysis)
     }
 
     func testHardwareClaimEligibilityIsStrictlyIdle() {
