@@ -52,15 +52,14 @@ for forbidden in ["bodyX", "bodyYFromBottom", "addClip()", "sourceCanvas"]:
 # The original PR39 implementation used AppKit/NSImage.draw. PR45 moved the
 # same raster-preserving resize contract to Core Graphics/ImageIO because the
 # old NSBitmapImageRep context constructor is no longer reliable on macOS 27.
-# Require the current low-level raster path explicitly rather than weakening the
-# no-crop/no-redraw contract.
+# Validate the actual full-canvas draw and PNG pipeline rather than brittle
+# explanatory-comment wording.
 for required in [
-    "does not alter source geometry",
-    "does not redraw, mask, crop, or reinterpret",
     "CGImageSourceCreateWithURL",
     "CGContext(",
     "context.interpolationQuality = .high",
-    "context.draw(source, in:",
+    "context.clear(CGRect(x: 0, y: 0, width: pixels, height: pixels))",
+    "context.draw(source, in: CGRect(x: 0, y: 0, width: pixels, height: pixels))",
     "CGImageDestinationCreateWithData",
     "UTType.png.identifier",
     'AppIcon-light-master.png',
