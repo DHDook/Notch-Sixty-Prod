@@ -1,0 +1,191 @@
+name: PR40 Capture Session Test Integration
+
+on:
+  push:
+    branches:
+      - pr40-room-correction-production-workflow
+    paths:
+      - .github/workflows/pr40-capture-tests-integration.yml
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: pr40-room-correction-production-workflow
+          fetch-depth: 0
+
+      - name: Add capture-session tests
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('NotchSixtyTests/ProductionAnalysisTests.swift')
+          text = path.read_text()
+          marker = 'func testRoomCorrectionRealtimeSessionUsesBoundedPairedCaptures()'
+          if marker not in text:
+              snippet = r'''
+
+    func testRoomCorrectionCalibrationStateMachineEnforcesWorkflow() throws {
+        var machine = RoomCorrectionCalibrationStateMachine()
+        XCTAssertEqual(machine.state, .idle)
+
+        try machine.transition(to: .requestingPermission)
+        try machine.transition(to: .enumeratingInputs)
+        try machine.transition(to: .ready)
+        try machine.transition(to: .arming)
+        try machine.transition(to: .measuring)
+        try machine.transition(to: .analyzing)
+        try machine.transition(to: .reviewing)
+        try machine.transition(to: .designing)
+        try machine.transition(to: .deploying)
+        try machine.transition(to: .reviewing)
+
+        XCTAssertThrowsError(try machine.transition(to: .measuring))
+        machine.cancelToIdle()
+        XCTAssertEqual(machine.state, .idle)
+    }
+
+    func testRoomCorrectionCalibrationTopologyUsesPrivateAggregateForSeparateDevices() {
+        let ranges = [AudioSampleRateRange(minimum: 48_000, maximum: 48_000)]
+        let output = AudioOutputDevice(
+            deviceID: 10,
+            uid: "output",
+            name: "Output",
+            nominalSampleRate: 48_000,
+            availableSampleRateRanges: ranges
+        )
+        let sameInput = AudioInputDevice(
+            deviceID: 10,
+            uid: "same",
+            name: "Same Device Input",
+            nominalSampleRate: 48_000,
+            availableSampleRateRanges: ranges
+        )
+        let externalInput = AudioInputDevice(
+            deviceID: 20,
+            uid: "mic",
+            name: "Measurement Mic",
+            nominalSampleRate: 48_000,
+            availableSampleRateRanges: ranges
+        )
+
+        XCTAssertEqual(
+            RoomCorrectionCalibrationTopologyPlanner.topology(output: output, input: sameInput),
+            .direct(deviceID: 10)
+        )
+        XCTAssertEqual(
+            RoomCorrectionCalibrationTopologyPlanner.topology(output: output, input: externalInput),
+            .privateAggregate(outputDeviceID: 10, inputDeviceID: 20, driftCompensateInput: true)
+        )
+    }
+
+    func testRoomCorrectionRealtimeSessionUsesBoundedPairedCaptures() throws {
+        let settings = RoomCorrectionSweepSettings(
+            sampleRate: 1_000,
+            startFrequencyHz: 20,
+            endFrequencyHz: 400,
+            durationSeconds: 0.1,
+            levelDBFS: -6,
+            leadInSeconds: 0.01,
+            tailSeconds: 0.02,
+            fadeSeconds: 0
+        )
+        let program = try RoomCorrectionSweepGenerator().makeProgram(settings: settings)
+        let plan = try RoomCorrectionMeasurementPlan(program: program, settlingSeconds: 0.03)
+        let session = try RoomCorrectionMeasurementRealtimeSession(plan: plan)
+
+        let callbackSizes = [7, 31, 64, 83, 105]
+        for callbackSize in callbackSizes where !session.isComplete {
+            let start = session.frameCursor
+            var microphone = (0..<callbackSize).map { Float(start + $0) }
+            var left = [Float](repeating: -1, count: callbackSize)
+            var right = [Float](repeating: -1, count: callbackSize)
+            microphone.withUnsafeBufferPointer { mic in
+                left.withUnsafeMutableBufferPointer { leftBuffer in
+                    right.withUnsafeMutableBufferPointer { rightBuffer in
+                        _ = session.process(
+                            microphone: mic.baseAddress!,
+                            outputLeft: leftBuffer.baseAddress!,
+                            outputRight: rightBuffer.baseAddress!,
+                            frameCount: callbackSize
+                        )
+                    }
+                }
+            }
+        }
+
+        while !session.isComplete {
+            let callbackSize = 47
+            let start = session.frameCursor
+            var microphone = (0..<callbackSize).map { Float(start + $0) }
+            var left = [Float](repeating: -1, count: callbackSize)
+            var right = [Float](repeating: -1, count: callbackSize)
+            microphone.withUnsafeBufferPointer { mic in
+                left.withUnsafeMutableBufferPointer { leftBuffer in
+                    right.withUnsafeMutableBufferPointer { rightBuffer in
+                        _ = session.process(
+                            microphone: mic.baseAddress!,
+                            outputLeft: leftBuffer.baseAddress!,
+                            outputRight: rightBuffer.baseAddress!,
+                            frameCount: callbackSize
+                        )
+                    }
+                }
+            }
+        }
+
+        XCTAssertEqual(session.frameCursor, plan.totalFrameCount)
+        let leftCapture = try session.leftCapture.materialize()
+        let rightCapture = try session.rightCapture.materialize()
+        XCTAssertEqual(leftCapture.count, plan.leftPass.captureFrameCount)
+        XCTAssertEqual(rightCapture.count, plan.rightPass.captureFrameCount)
+        XCTAssertEqual(leftCapture.first, 0)
+        XCTAssertEqual(leftCapture.last, Float(plan.leftPass.captureEndFrameExclusive - 1))
+        XCTAssertEqual(rightCapture.first, Float(plan.rightPass.captureStartFrame))
+        XCTAssertEqual(rightCapture.last, Float(plan.rightPass.captureEndFrameExclusive - 1))
+
+        var mic = [Float](repeating: 1, count: 8)
+        var left = [Float](repeating: 1, count: 8)
+        var right = [Float](repeating: 1, count: 8)
+        let consumed = mic.withUnsafeBufferPointer { micBuffer in
+            left.withUnsafeMutableBufferPointer { leftBuffer in
+                right.withUnsafeMutableBufferPointer { rightBuffer in
+                    session.process(
+                        microphone: micBuffer.baseAddress!,
+                        outputLeft: leftBuffer.baseAddress!,
+                        outputRight: rightBuffer.baseAddress!,
+                        frameCount: 8
+                    )
+                }
+            }
+        }
+        XCTAssertEqual(consumed, 0)
+        XCTAssertTrue(left.allSatisfy { $0 == 0 })
+        XCTAssertTrue(right.allSatisfy { $0 == 0 })
+    }
+'''
+              insert_at = text.rfind('\n}')
+              if insert_at < 0:
+                  raise SystemExit('Could not find test class closing brace')
+              text = text[:insert_at] + snippet + text[insert_at:]
+              path.write_text(text)
+          PY
+
+      - name: Commit integration
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add NotchSixtyTests/ProductionAnalysisTests.swift
+          git rm .github/workflows/pr40-capture-tests-integration.yml
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "PR40: test bounded room measurement session"
+          git push origin HEAD:pr40-room-correction-production-workflow
