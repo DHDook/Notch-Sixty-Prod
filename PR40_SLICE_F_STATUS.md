@@ -22,4 +22,6 @@ Deterministic tests in this checkpoint cover:
 - profile reload restoring a deployed FIR and metadata without requiring a sidecar project;
 - forced profile-persistence failure rolling back both engine and profile state.
 
+The first Hardware XCTest attempt reached the new test target and exposed only two optional-value assertion compile errors in the provenance test; production Slice F source compiled successfully. Those assertions now unwrap the optional effective-range values explicitly, and this checkpoint reruns the exact deployment foundation after that test-only correction.
+
 After this exact tree is green, the next Slice F step is the explicit Deploy UI, persistent enable/bypass control, and Daily Playback calibration/design summary. The final PR40 gate remains Processed/Reference/Delta + raw Global Bypass regression coverage and focused real-Mac acoustic acceptance.
