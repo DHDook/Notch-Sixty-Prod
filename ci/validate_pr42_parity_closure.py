@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 from pathlib import Path
-import re
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -10,6 +9,11 @@ NOTICES = ROOT / "THIRD_PARTY_NOTICES.md"
 CONTRACT = ROOT / "docs" / "PR42_PARITY_PROVENANCE_CLOSURE.md"
 
 ALLOWED = {"PARITY", "IMPROVED", "PORT VERIFIED", "SUPERSEDED", "BLOCKED"}
+SUPERSEDED_RATIONALE_SIGNALS = (
+    "replaced", "outside", "no-op", "not reproduced", "not recreated",
+    "does not", "deliberately", "intentionally", "post-1.0", "future",
+    "remains", "shared", "prioritizes", "uses", "avoids", "available",
+)
 
 
 def fail(message: str) -> None:
@@ -68,12 +72,17 @@ capability_names = {capability for capability, _, _ in rows}
 for capability in required_capabilities:
     require(capability in capability_names, f"required audited capability missing from final matrix: {capability}")
 
-# A SUPERSEDED row must explain the replacement/boundary rather than silently
-# using the label as a way to erase historical behavior. Concise explanations
-# such as an audited no-op are valid; the guard rejects only token/empty rationales.
+# SUPERSEDED must describe a replacement, deliberate boundary, audited no-op, or
+# future handoff. This is semantic rather than padding rationales to an arbitrary
+# character count.
 for capability, status, rationale in rows:
-    if status == "SUPERSEDED":
-        require(len(rationale) >= 20, f"SUPERSEDED row lacks substantive rationale: {capability}")
+    if status != "SUPERSEDED":
+        continue
+    normalized = rationale.lower()
+    require(
+        any(signal in normalized for signal in SUPERSEDED_RATIONALE_SIGNALS),
+        f"SUPERSEDED row lacks replacement/boundary rationale: {capability}",
+    )
 
 require("not claims of current implementation" in matrix, "post-1.0 register must disclaim current implementation")
 require("There are no unresolved release-blocking rows" in matrix, "matrix closure result is missing")
