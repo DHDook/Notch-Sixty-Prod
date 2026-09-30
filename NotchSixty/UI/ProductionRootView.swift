@@ -156,7 +156,7 @@ struct ProductionRootView: View {
         case .meters:
             ProductionMetersView(engine: engine)
         case .activeCrossover:
-            ProductionActiveCrossoverView(engine: engine)
+            ProductionActiveCrossoverView(engine: engine, profiles: product.profiles)
         case .roomCorrection:
             ProductionRoomCorrectionWorkspace(
             engine: engine,
@@ -630,20 +630,34 @@ private struct StereoSignatureVUScaleFace: View, Equatable {
 
 private struct ProductionActiveCrossoverView: View {
     @ObservedObject var engine: AudioIOEngine
+    @ObservedObject var profiles: ProductProfileController
+    @State private var actionError: String?
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 pageHeader(
                     "Active Crossover",
-                    "Bass-management and main/sub integration controls live in their own calibration workspace."
+                    "Speaker/sub integration belongs to the selected Playback System and remains independent from Content Presets."
                 )
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Playback System").font(.caption).foregroundStyle(.secondary)
+                    Text(profiles.selectedSystemProfileName).font(.headline)
+                    Text("These controls are persisted with this physical playback system. Content Preset EQ, dynamics, preamp, and headroom are not modified.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .glassEffect(.regular, in: .rect(cornerRadius: 16))
 
                 VStack(alignment: .leading, spacing: 18) {
                     Toggle("Enable Active Crossover", isOn: Binding(
                         get: { engine.bassManagementConfiguration.enabled },
                         set: { value in updateCrossover { $0.enabled = value } }
-                    )).toggleStyle(.switch)
+                    ))
+                    .toggleStyle(.switch)
 
                     LabeledContent("Crossover Frequency") {
                         HStack {
@@ -654,6 +668,7 @@ private struct ProductionActiveCrossoverView: View {
                             .frame(width: 300)
                             Text("\(engine.bassManagementConfiguration.frequencyHz, specifier: "%.0f") Hz")
                                 .monospacedDigit()
+                                .frame(width: 62, alignment: .trailing)
                         }
                     }
 
@@ -662,19 +677,114 @@ private struct ProductionActiveCrossoverView: View {
                             get: { engine.bassManagementConfiguration.topology },
                             set: { value in updateCrossover { $0.topology = value } }
                         )) {
-                            ForEach(CrossoverTopology.allCases) { Text($0.displayName).tag($0) }
+                            ForEach(CrossoverTopology.allCases) { topology in
+                                Text(topology.displayName).tag(topology)
+                            }
                         }
                         .labelsHidden()
-                        .frame(width: 260)
+                        .frame(width: 280)
+                    }
+
+                    LabeledContent("Sub Gain") {
+                        HStack(spacing: 12) {
+                            Slider(value: Binding(
+                                get: { engine.bassManagementConfiguration.subGainDB },
+                                set: { value in updateCrossover { $0.subGainDB = value } }
+                            ), in: BassManagementConfiguration.subGainRange, step: 0.5)
+                            .frame(width: 260)
+                            Text("\(engine.bassManagementConfiguration.subGainDB, specifier: "%.1f") dB")
+                                .monospacedDigit()
+                                .frame(width: 68, alignment: .trailing)
+                        }
                     }
 
                     Toggle("Invert Sub Polarity", isOn: Binding(
                         get: { engine.bassManagementConfiguration.subPolarityInverted },
                         set: { value in updateCrossover { $0.subPolarityInverted = value } }
-                    )).toggleStyle(.switch)
+                    ))
+                    .toggleStyle(.switch)
                 }
                 .padding(20)
                 .glassEffect(.regular, in: .rect(cornerRadius: 18))
+
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Sub Phase Alignment").font(.headline)
+                            Text("A bounded all-pass alignment network on the logical sub path. Use measurement evidence when available rather than tuning blindly.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Toggle("Enabled", isOn: Binding(
+                            get: { engine.bassManagementConfiguration.subPhaseAlignmentEnabled },
+                            set: { value in updateCrossover { $0.subPhaseAlignmentEnabled = value } }
+                        ))
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                    }
+
+                    LabeledContent("Alignment Frequency") {
+                        HStack {
+                            Slider(value: Binding(
+                                get: { engine.bassManagementConfiguration.subPhaseAlignmentFrequencyHz },
+                                set: { value in updateCrossover { $0.subPhaseAlignmentFrequencyHz = value } }
+                            ), in: BassManagementConfiguration.frequencyRange, step: 1)
+                            .frame(width: 260)
+                            Text("\(engine.bassManagementConfiguration.subPhaseAlignmentFrequencyHz, specifier: "%.0f") Hz")
+                                .monospacedDigit()
+                                .frame(width: 62, alignment: .trailing)
+                        }
+                    }
+                    .disabled(!engine.bassManagementConfiguration.subPhaseAlignmentEnabled)
+
+                    LabeledContent("Alignment Q") {
+                        HStack {
+                            Slider(value: Binding(
+                                get: { engine.bassManagementConfiguration.subPhaseAlignmentQ },
+                                set: { value in updateCrossover { $0.subPhaseAlignmentQ = value } }
+                            ), in: BassManagementConfiguration.subPhaseAlignmentQRange, step: 0.05)
+                            .frame(width: 260)
+                            Text("\(engine.bassManagementConfiguration.subPhaseAlignmentQ, specifier: "%.2f")")
+                                .monospacedDigit()
+                                .frame(width: 62, alignment: .trailing)
+                        }
+                    }
+                    .disabled(!engine.bassManagementConfiguration.subPhaseAlignmentEnabled)
+                }
+                .padding(20)
+                .glassEffect(.regular, in: .rect(cornerRadius: 18))
+
+                DisclosureGroup("Verification Monitor") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Picker("Monitor Path", selection: Binding(
+                            get: { engine.bassManagementConfiguration.monitorMode },
+                            set: { value in updateCrossover { $0.monitorMode = value } }
+                        )) {
+                            ForEach(CrossoverMonitorMode.allCases) { mode in
+                                Text(mode.displayName).tag(mode)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+
+                        Text("This is a logical validation monitor inside the stereo render path. It does not create or route a separate physical subwoofer output.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.top, 10)
+                }
+                .padding(20)
+                .glassEffect(.regular, in: .rect(cornerRadius: 18))
+
+                if let error = actionError ?? profiles.lastErrorDescription {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .font(.callout)
+                        .foregroundStyle(.red)
+                        .textSelection(.enabled)
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                }
             }
             .padding(28)
             .frame(maxWidth: 900, alignment: .topLeading)
@@ -683,9 +793,14 @@ private struct ProductionActiveCrossoverView: View {
     }
 
     private func updateCrossover(_ mutation: (inout BassManagementConfiguration) -> Void) {
+        actionError = nil
         var updated = engine.bassManagementConfiguration
         mutation(&updated)
-        try? engine.replaceBassManagementConfiguration(updated)
+        do {
+            try profiles.replaceSelectedSystemBassManagement(updated)
+        } catch {
+            actionError = error.localizedDescription
+        }
     }
 }
 

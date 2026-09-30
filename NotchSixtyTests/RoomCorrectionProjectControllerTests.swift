@@ -668,4 +668,99 @@ final class RoomCorrectionProjectControllerTests: XCTestCase {
         XCTAssertEqual(profiles.selectedSystemProfile?.state, beforeProfile)
     }
 
+
+    func testProfileBassManagementChangesOnlyPlaybackSystemAndRestoresWithRoomCorrectionIntact() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let profiles = fixture.profiles
+        let beforeContent = profiles.captureContentState()
+
+        let roomFilter = RoomCorrectionFilter(
+            name: "PR41 Room Fixture",
+            sampleRate: nil,
+            leftTaps: [0.5, 0.5],
+            rightTaps: [0.4, 0.6],
+            declaredLatencyFrames: 0
+        )
+        let room = RoomCorrectionConfiguration(enabled: true, filter: roomFilter)
+        let summary = RoomCorrectionCalibrationSummary(
+            projectID: UUID(),
+            activeDesignID: UUID(),
+            designDate: Date(timeIntervalSince1970: 410),
+            positionCount: 3,
+            correctionLowHz: 80,
+            correctionHighHz: 12_000,
+            targetName: "PR41 Fixture Target",
+            smoothingOctaves: 1.0 / 6.0,
+            maximumBoostDB: 4,
+            maximumCutDB: 8,
+            recommendedHeadroomDB: 2,
+            algorithmVersion: "pr41-fixture"
+        )
+        try profiles.replaceSelectedSystemRoomCorrection(room, calibrationSummary: summary)
+
+        var crossover = BassManagementConfiguration()
+        crossover.enabled = true
+        crossover.frequencyHz = 92
+        crossover.topology = .linkwitzRiley48
+        crossover.monitorMode = .mainsOnly
+        crossover.subGainDB = 2.5
+        crossover.subPolarityInverted = true
+        crossover.subPhaseAlignmentEnabled = true
+        crossover.subPhaseAlignmentFrequencyHz = 88
+        crossover.subPhaseAlignmentQ = 0.9
+
+        try profiles.replaceSelectedSystemBassManagement(crossover)
+        XCTAssertEqual(profiles.engine.bassManagementConfiguration, crossover)
+        XCTAssertEqual(profiles.selectedSystemProfile?.state.bassManagement, crossover)
+        XCTAssertEqual(profiles.engine.roomCorrectionConfiguration, room)
+        XCTAssertEqual(profiles.selectedSystemProfile?.state.roomCorrection, room)
+        XCTAssertEqual(profiles.selectedSystemProfile?.state.roomCorrectionCalibration, summary)
+        XCTAssertEqual(profiles.captureContentState(), beforeContent)
+
+        try profiles.setSelectedSystemBassManagementEnabled(false)
+        XCTAssertFalse(profiles.engine.bassManagementConfiguration.enabled)
+        XCTAssertEqual(profiles.engine.bassManagementConfiguration.frequencyHz, 92, accuracy: 0.000_001)
+        XCTAssertEqual(profiles.selectedSystemProfile?.state.roomCorrectionCalibration, summary)
+        XCTAssertEqual(profiles.captureContentState(), beforeContent)
+
+        try profiles.setSelectedSystemBassManagementEnabled(true)
+        XCTAssertEqual(profiles.engine.bassManagementConfiguration, crossover)
+        XCTAssertEqual(profiles.captureContentState(), beforeContent)
+
+        let restoredEngine = AudioIOEngine(deviceCatalog: OutputCatalogFixture())
+        let restoredProfiles = ProductProfileController(
+            engine: restoredEngine,
+            storageURL: fixture.root.appendingPathComponent("profiles-v1.json")
+        )
+        restoredProfiles.restoreSelectedLayers()
+        XCTAssertEqual(restoredEngine.bassManagementConfiguration, crossover)
+        XCTAssertEqual(restoredProfiles.selectedSystemProfile?.state.bassManagement, crossover)
+        XCTAssertEqual(restoredEngine.roomCorrectionConfiguration, room)
+        XCTAssertEqual(restoredProfiles.selectedSystemProfile?.state.roomCorrectionCalibration, summary)
+    }
+
+    func testProfileBassManagementPersistenceFailureRollsBackEngineAndProfile() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NotchSixty-PR41-Crossover-Rollback-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let storageDirectory = root.appendingPathComponent("profiles", isDirectory: true)
+        let storageURL = storageDirectory.appendingPathComponent("profiles-v1.json")
+        let engine = AudioIOEngine(deviceCatalog: OutputCatalogFixture())
+        let profiles = ProductProfileController(engine: engine, storageURL: storageURL)
+        let beforeEngine = engine.bassManagementConfiguration
+        let beforeProfile = try XCTUnwrap(profiles.selectedSystemProfile).state
+
+        try FileManager.default.removeItem(at: storageDirectory)
+        try Data("not-a-directory".utf8).write(to: storageDirectory)
+
+        var crossover = BassManagementConfiguration()
+        crossover.enabled = true
+        crossover.frequencyHz = 110
+        crossover.subGainDB = 1.5
+
+        XCTAssertThrowsError(try profiles.replaceSelectedSystemBassManagement(crossover))
+        XCTAssertEqual(engine.bassManagementConfiguration, beforeEngine)
+        XCTAssertEqual(profiles.selectedSystemProfile?.state, beforeProfile)
+    }
 }

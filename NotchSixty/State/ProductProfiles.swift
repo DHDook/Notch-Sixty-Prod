@@ -394,6 +394,39 @@ final class ProductProfileController: ObservableObject {
         persist()
     }
 
+    func replaceSelectedSystemBassManagement(
+        _ configuration: BassManagementConfiguration
+    ) throws {
+        guard let selectedSystemProfileID,
+              let index = systemProfiles.firstIndex(where: { $0.id == selectedSystemProfileID }) else {
+            throw ProductProfileError.selectedSystemProfileRequired
+        }
+
+        let previousEngineConfiguration = engine.bassManagementConfiguration
+        let previousState = systemProfiles[index].state
+        do {
+            try engine.replaceBassManagementConfiguration(configuration)
+            systemProfiles[index].state.bassManagement = configuration
+            try persistThrowing()
+            lastErrorDescription = nil
+        } catch {
+            systemProfiles[index].state = previousState
+            try? engine.replaceBassManagementConfiguration(previousEngineConfiguration)
+            lastErrorDescription = error.localizedDescription
+            throw error
+        }
+    }
+
+    func setSelectedSystemBassManagementEnabled(_ enabled: Bool) throws {
+        guard let selectedSystemProfileID,
+              let index = systemProfiles.firstIndex(where: { $0.id == selectedSystemProfileID }) else {
+            throw ProductProfileError.selectedSystemProfileRequired
+        }
+        var configuration = systemProfiles[index].state.bassManagement
+        configuration.enabled = enabled
+        try replaceSelectedSystemBassManagement(configuration)
+    }
+
     func replaceSelectedSystemRoomCorrection(
         _ configuration: RoomCorrectionConfiguration,
         calibrationSummary summary: RoomCorrectionCalibrationSummary?

@@ -735,6 +735,91 @@ final class StereoPlaybackControlTests: XCTestCase {
         }
     }
 
+    func testCrossoverPreservesRoomCorrectionProgramIdentityLatencyAndRawBypass() throws {
+        for sampleRate in [44_100.0, 48_000.0, 96_000.0, 192_000.0, 384_000.0] {
+            guard let kernel = N60RenderKernelCreate() else {
+                return XCTFail("Unable to create render kernel")
+            }
+            defer { N60RenderKernelDestroy(kernel) }
+
+            let taps: [Float] = [1]
+            var roomProgram = N60ConvolutionProgramInfo()
+            XCTAssertTrue(taps.withUnsafeBufferPointer { buffer in
+                N60RenderKernelPrepareRoomCorrectionProgram(
+                    kernel,
+                    1,
+                    buffer.baseAddress!,
+                    nil,
+                    UInt32(buffer.count),
+                    0,
+                    &roomProgram
+                )
+            })
+
+            var crossover = BassManagementConfiguration()
+            crossover.enabled = true
+            crossover.frequencyHz = 80
+            crossover.topology = .linkwitzRiley24
+            crossover.subGainDB = 1.5
+            crossover.subPhaseAlignmentEnabled = true
+            crossover.subPhaseAlignmentFrequencyHz = 80
+            crossover.subPhaseAlignmentQ = 0.8
+
+            var graph = try StereoEQConfiguration().makeGraphSnapshot(
+                sampleRate: sampleRate,
+                gainConfiguration: DSPGainConfiguration(),
+                bassManagementConfiguration: crossover,
+                playbackConfiguration: PlaybackControlConfiguration(auditionMode: .processed)
+            )
+            XCTAssertEqual(graph.latencyFrames, 0)
+            XCTAssertTrue(N60DSPGraphSnapshotSetRoomCorrectionProgram(&graph, 1, roomProgram, true))
+            let roomLatency = roomProgram.engineLatencyFrames + roomProgram.declaredLatencyFrames
+            XCTAssertEqual(graph.latencyFrames, roomLatency)
+            XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+
+            var diagnostics = N60RenderKernelGetDiagnostics(kernel)
+            XCTAssertTrue(diagnostics.crossoverEnabled)
+            XCTAssertEqual(diagnostics.crossoverFrequencyHz, 80, accuracy: 0.000_001)
+            XCTAssertTrue(diagnostics.roomCorrectionEnabled)
+            XCTAssertEqual(diagnostics.roomCorrectionProgramGeneration, roomProgram.generation)
+            XCTAssertEqual(diagnostics.latencyFrames, roomLatency)
+
+            crossover.frequencyHz = 120
+            crossover.topology = .linkwitzRiley48
+            crossover.monitorMode = .subOnly
+            var changed = try StereoEQConfiguration().makeGraphSnapshot(
+                sampleRate: sampleRate,
+                gainConfiguration: DSPGainConfiguration(),
+                bassManagementConfiguration: crossover,
+                playbackConfiguration: PlaybackControlConfiguration(auditionMode: .reference)
+            )
+            XCTAssertEqual(changed.latencyFrames, 0)
+            XCTAssertTrue(N60DSPGraphSnapshotSetRoomCorrectionProgram(&changed, 1, roomProgram, true))
+            XCTAssertEqual(changed.latencyFrames, roomLatency)
+            XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, changed))
+
+            diagnostics = N60RenderKernelGetDiagnostics(kernel)
+            XCTAssertEqual(diagnostics.crossoverFrequencyHz, 120, accuracy: 0.000_001)
+            XCTAssertEqual(diagnostics.crossoverTopology, N60CrossoverTopologyLinkwitzRiley48)
+            XCTAssertEqual(diagnostics.crossoverMonitorMode, N60CrossoverMonitorModeSubOnly)
+            XCTAssertEqual(diagnostics.roomCorrectionProgramGeneration, roomProgram.generation)
+            XCTAssertEqual(diagnostics.latencyFrames, roomLatency)
+
+            changed.bypassed = true
+            changed.auditionMode = N60AuditionModeDelta
+            XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, changed))
+            for frame in 0..<1_024 {
+                let leftInput = Float(sin(Double(frame) * 0.019) * 0.55)
+                let rightInput = Float(cos(Double(frame) * 0.023) * 0.45)
+                var left: Float = 0
+                var right: Float = 0
+                N60RenderKernelProcessStereoFrame(kernel, leftInput, rightInput, &left, &right)
+                XCTAssertEqual(left, leftInput, accuracy: 0.000_001)
+                XCTAssertEqual(right, rightInput, accuracy: 0.000_001)
+            }
+        }
+    }
+
     func testStereoGraphCompilesUpToSixtyFourBandsPerChannelAt384k() throws {
         let left = (0..<64).map { index in
             EQBand(
