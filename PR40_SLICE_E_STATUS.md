@@ -27,13 +27,15 @@ FIR work already validated:
 Project integration:
 - active target persistence in the room-correction sidecar;
 - target edits invalidate candidate selection without deleting historical design assets or touching deployed playback;
+- each generated design now retains the exact target curve snapshot that produced it;
+- aggregate-changing operations (new retained measurement, include/exclude, or weight change) clear candidate selection while preserving historical design assets;
 - correction preview and final FIR generation share the same included-position quality and usable-range gate;
 - clipped, incomplete, missing-range, or sub-20 dB SNR included measurements are rejected for design until re-measured or excluded;
 - generated design candidates persist transactionally and become the selected project candidate;
 - explicit persisted design selection and deletion;
-- deterministic controller tests for preview/design persistence, target-change invalidation, low-confidence rejection, selection and deletion.
+- deterministic controller/FIR tests cover preview/design persistence, target provenance, target/aggregate invalidation, low-confidence rejection, selection and deletion.
 
-Production Target / Design surface in this checkpoint:
+Production Target / Design surface:
 - built-in target menu plus sandboxed custom target-file import;
 - editable two-column target point editor using the same parser/normalization rules as imports;
 - correction low/high controls, smoothing selector, maximum boost/cut controls and FIR tap-count selector;
@@ -43,4 +45,4 @@ Production Target / Design surface in this checkpoint:
 - selected-candidate status makes clear that generation does not deploy or alter daily playback;
 - preview state is invalidated when project content changes so stale safety information is not retained in the UI.
 
-After this exact UI tree is green, Slice E is functionally complete. Slice F will deploy the selected candidate transactionally through the existing Room Correction runtime and Playback System profile ownership path, then add the daily-playback calibration summary and deployment/audition regression gates.
+After this exact tree is green, Slice E is complete. Slice F will deploy the selected candidate transactionally through the existing Room Correction runtime and Playback System profile ownership path, then add the daily-playback calibration summary and deployment/audition regression gates.
