@@ -531,4 +531,194 @@ final class ProductionAnalysisTests: XCTestCase {
         XCTAssertEqual(rightProbe.left, 0)
         XCTAssertNotEqual(rightProbe.right, 0)
     }
+
+    func testCalibrationStateMachineRejectsInvalidTransitions() throws {
+        var machine = RoomCorrectionCalibrationStateMachine()
+        XCTAssertEqual(machine.state, .idle)
+
+        XCTAssertThrowsError(try machine.transition(to: .measuring)) { error in
+            XCTAssertEqual(
+                error as? RoomCorrectionCalibrationSessionError,
+                .invalidTransition(from: .idle, to: .measuring)
+            )
+        }
+        XCTAssertEqual(machine.state, .idle)
+
+        try machine.transition(to: .ready)
+        try machine.transition(to: .arming)
+        try machine.transition(to: .measuring)
+        try machine.transition(to: .analyzing)
+        try machine.transition(to: .reviewing)
+        XCTAssertEqual(machine.state, .reviewing)
+
+        machine.cancelToIdle()
+        XCTAssertEqual(machine.state, .idle)
+    }
+
+    func testCalibrationTopologyRequiresNativeRateAndUsesInputDriftCompensation() throws {
+        let output = AudioOutputDevice(
+            deviceID: 7,
+            uid: "output",
+            name: "Output Fixture",
+            nominalSampleRate: 48_000,
+            availableSampleRateRanges: [AudioSampleRateRange(minimum: 44_100, maximum: 96_000)]
+        )
+        let sameDeviceInput = AudioInputDevice(
+            deviceID: 7,
+            uid: "same-device-input",
+            name: "Same Device Input",
+            nominalSampleRate: 48_000,
+            availableSampleRateRanges: [AudioSampleRateRange(minimum: 48_000, maximum: 48_000)]
+        )
+        let separateInput = AudioInputDevice(
+            deviceID: 8,
+            uid: "usb-mic",
+            name: "USB Mic Fixture",
+            nominalSampleRate: 48_000,
+            availableSampleRateRanges: [AudioSampleRateRange(minimum: 48_000, maximum: 96_000)]
+        )
+
+        XCTAssertEqual(
+            try RoomCorrectionCalibrationTopologyPlanner.validatedTopology(
+                output: output,
+                input: sameDeviceInput,
+                sampleRate: 48_000
+            ),
+            .direct(deviceID: 7)
+        )
+        XCTAssertEqual(
+            try RoomCorrectionCalibrationTopologyPlanner.validatedTopology(
+                output: output,
+                input: separateInput,
+                sampleRate: 96_000
+            ),
+            .privateAggregate(
+                outputDeviceID: 7,
+                inputDeviceID: 8,
+                driftCompensateInput: true
+            )
+        )
+
+        XCTAssertThrowsError(
+            try RoomCorrectionCalibrationTopologyPlanner.validatedTopology(
+                output: output,
+                input: separateInput,
+                sampleRate: 44_100
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? RoomCorrectionCalibrationSessionError,
+                .unsupportedSampleRate(
+                    sampleRate: 44_100,
+                    outputName: "Output Fixture",
+                    inputName: "USB Mic Fixture"
+                )
+            )
+        }
+    }
+
+    func testCaptureBufferRequiresContiguousWritesBeforeComplete() throws {
+        let buffer = try RoomCorrectionCaptureBuffer(capacityFrames: 3)
+
+        XCTAssertFalse(buffer.write(3, at: 2), "Out-of-order writes must not create a false-complete capture")
+        XCTAssertEqual(buffer.writtenFrames, 0)
+        XCTAssertFalse(buffer.isComplete)
+        XCTAssertThrowsError(try buffer.materialize()) { error in
+            XCTAssertEqual(error as? RoomCorrectionCalibrationSessionError, .captureNotComplete)
+        }
+
+        XCTAssertTrue(buffer.write(1, at: 0))
+        XCTAssertTrue(buffer.write(2, at: 1))
+        XCTAssertTrue(buffer.write(3, at: 2))
+        XCTAssertTrue(buffer.isComplete)
+        XCTAssertEqual(try buffer.materialize(), [1, 2, 3])
+
+        buffer.reset()
+        XCTAssertEqual(buffer.writtenFrames, 0)
+        XCTAssertFalse(buffer.isComplete)
+    }
+
+    func testRealtimeMeasurementSessionCapturesPairedPassesAcrossArbitraryQuanta() throws {
+        let settings = RoomCorrectionSweepSettings(
+            sampleRate: 1_000,
+            startFrequencyHz: 20,
+            endFrequencyHz: 400,
+            durationSeconds: 0.01,
+            levelDBFS: -12,
+            leadInSeconds: 0.002,
+            tailSeconds: 0.003,
+            fadeSeconds: 0
+        )
+        let program = try RoomCorrectionSweepGenerator().makeProgram(settings: settings)
+        let plan = try RoomCorrectionMeasurementPlan(program: program, settlingSeconds: 0.004)
+        let session = try RoomCorrectionMeasurementRealtimeSession(plan: plan)
+
+        XCTAssertEqual(program.captureFrameCount, 15)
+        XCTAssertEqual(plan.leftPass.captureStartFrame, 0)
+        XCTAssertEqual(plan.leftPass.captureEndFrameExclusive, 15)
+        XCTAssertEqual(plan.rightPass.captureStartFrame, 19)
+        XCTAssertEqual(plan.rightPass.captureEndFrameExclusive, 34)
+        XCTAssertEqual(plan.totalFrameCount, 34)
+
+        var renderedLeft: [Float] = []
+        var renderedRight: [Float] = []
+        for quantum in [7, 9, 18] {
+            let start = session.frameCursor
+            var microphone = (0..<quantum).map { Float(start + $0) }
+            var left = [Float](repeating: -99, count: quantum)
+            var right = [Float](repeating: -99, count: quantum)
+
+            let consumed = microphone.withUnsafeMutableBufferPointer { microphoneBuffer in
+                left.withUnsafeMutableBufferPointer { leftBuffer in
+                    right.withUnsafeMutableBufferPointer { rightBuffer in
+                        session.process(
+                            microphone: UnsafePointer(microphoneBuffer.baseAddress!),
+                            outputLeft: leftBuffer.baseAddress!,
+                            outputRight: rightBuffer.baseAddress!,
+                            frameCount: quantum
+                        )
+                    }
+                }
+            }
+            XCTAssertEqual(consumed, quantum)
+            renderedLeft.append(contentsOf: left)
+            renderedRight.append(contentsOf: right)
+        }
+
+        XCTAssertTrue(session.isComplete)
+        XCTAssertEqual(try session.leftCapture.materialize(), (0..<15).map(Float.init))
+        XCTAssertEqual(try session.rightCapture.materialize(), (19..<34).map(Float.init))
+        XCTAssertEqual(renderedLeft.count, 34)
+        XCTAssertEqual(renderedRight.count, 34)
+
+        for index in renderedLeft.indices {
+            XCTAssertFalse(
+                renderedLeft[index] != 0 && renderedRight[index] != 0,
+                "Only one loudspeaker may be excited at timeline frame \(index)"
+            )
+        }
+        for index in 15..<19 {
+            XCTAssertEqual(renderedLeft[index], 0)
+            XCTAssertEqual(renderedRight[index], 0)
+        }
+
+        var microphone = [Float](repeating: 0, count: 4)
+        var left = [Float](repeating: 1, count: 4)
+        var right = [Float](repeating: 1, count: 4)
+        let consumedAfterCompletion = microphone.withUnsafeMutableBufferPointer { microphoneBuffer in
+            left.withUnsafeMutableBufferPointer { leftBuffer in
+                right.withUnsafeMutableBufferPointer { rightBuffer in
+                    session.process(
+                        microphone: UnsafePointer(microphoneBuffer.baseAddress!),
+                        outputLeft: leftBuffer.baseAddress!,
+                        outputRight: rightBuffer.baseAddress!,
+                        frameCount: 4
+                    )
+                }
+            }
+        }
+        XCTAssertEqual(consumedAfterCompletion, 0)
+        XCTAssertEqual(left, [0, 0, 0, 0])
+        XCTAssertEqual(right, [0, 0, 0, 0])
+    }
 }
