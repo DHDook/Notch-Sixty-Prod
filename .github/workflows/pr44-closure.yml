@@ -1,0 +1,17 @@
+name: PR44 Closure
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate PR44 factory content presets
+        run: python3 ci/validate_pr44_factory_presets.py
