@@ -1,12 +1,12 @@
 # PR41 — Active Crossover / Speaker Integration
 
-Status: **STACKED ON PR40 — SLICES A/B + C1 IMPLEMENTED; C1 COMBINED CI CHECKPOINT**
+Status: **STACKED ON PR40 — SLICES A/B + C1 IMPLEMENTED; FULL C1 COMBINED CI CHECKPOINT**
 
 Base implementation dependency: PR40 exact green head `56d2fbac467fc6b43df5b699f4b50d195bff98d1`.
 
 Slice C1 substantive commit: `d339046f23c25490b55ca17bd86b012bb955752d`.
 
-This documentation-only checkpoint is used to validate the combined PR40 + PR41 tree through the repository's full exact-head Hardware Test DMG and macOS workflows before Slice C2 changes the physical transport.
+This documentation-only exact-head checkpoint validates the unchanged PR40 + PR41 C1 source tree through the repository's full Hardware Test DMG and macOS workflows before Slice C2 changes the physical transport.
 
 ## Product model
 
