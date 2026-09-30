@@ -3,6 +3,7 @@ import Foundation
 
 protocol RoomCorrectionCalibrationTransporting: AnyObject {
     func start() throws
+    func snapshot() -> N60RoomMeasurementBridgeSnapshot?
     func finishAndMaterialize() throws -> RoomCorrectionCalibrationCapture
     func cancel()
 }
@@ -291,6 +292,26 @@ final class RoomCorrectionCalibrationController: ObservableObject {
             recordFailure(error)
             throw error
         }
+    }
+
+    func measurementSnapshot() -> N60RoomMeasurementBridgeSnapshot? {
+        activeTransport?.snapshot()
+    }
+
+    var measurementProgress: Double {
+        guard let snapshot = measurementSnapshot(), snapshot.totalFrameCount > 0 else { return 0 }
+        return min(max(Double(snapshot.frameCursor) / Double(snapshot.totalFrameCount), 0), 1)
+    }
+
+    /// Polls the atomic realtime snapshot and materializes capture data only after
+    /// the dedicated IOProc timeline is complete. Returns true exactly when this
+    /// call completed the active measurement.
+    @discardableResult
+    func finishMeasurementIfComplete() throws -> Bool {
+        guard state == .measuring, let transport = activeTransport else { return false }
+        guard transport.snapshot()?.complete == true else { return false }
+        _ = try finishMeasurement()
+        return true
     }
 
     /// Called after the realtime transport reports completion. Analysis is the
