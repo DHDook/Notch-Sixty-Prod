@@ -20,6 +20,7 @@
 		A1000000000000000000001A /* RoomCorrectionMeasurementTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002D /* RoomCorrectionMeasurementTests.swift */; };
 		A1000000000000000000001B /* RoomCorrectionCalibrationControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002E /* RoomCorrectionCalibrationControllerTests.swift */; };
 		A1000000000000000000001C /* RoomCorrectionMeasurementAnalyzerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002F /* RoomCorrectionMeasurementAnalyzerTests.swift */; };
+		A1000000000000000000001D /* RoomCorrectionProjectControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000032 /* RoomCorrectionProjectControllerTests.swift */; };
 		A20000000000000000000010 /* AudioIOEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000020 /* AudioIOEngine.swift */; };
 		A20000000000000000000011 /* CoreAudioError.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000021 /* CoreAudioError.swift */; };
 		A20000000000000000000012 /* AudioOutputDevice.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000022 /* AudioOutputDevice.swift */; };
@@ -35,6 +36,7 @@
 		A2000000000000000000001C /* RoomCorrectionCalibrationTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000002C /* RoomCorrectionCalibrationTransport.swift */; };
 		A2000000000000000000001D /* RoomCorrectionCalibrationController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000002D /* RoomCorrectionCalibrationController.swift */; };
 		A2000000000000000000001E /* RoomCorrectionMeasurementAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000002E /* RoomCorrectionMeasurementAnalyzer.swift */; };
+		A2000000000000000000001F /* RoomCorrectionProjectController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000002F /* RoomCorrectionProjectController.swift */; };
 		A30000000000000000000010 /* N60RealtimeAudioBridge.c in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000020 /* N60RealtimeAudioBridge.c */; };
 		A30000000000000000000011 /* N60RenderKernel.c in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000021 /* N60RenderKernel.c */; };
 		A30000000000000000000012 /* N60Convolution.c in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000023 /* N60Convolution.c */; };
@@ -81,6 +83,7 @@
 		A1000000000000000000002D /* RoomCorrectionMeasurementTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionMeasurementTests.swift; sourceTree = "<group>"; };
 		A1000000000000000000002E /* RoomCorrectionCalibrationControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionCalibrationControllerTests.swift; sourceTree = "<group>"; };
 		A1000000000000000000002F /* RoomCorrectionMeasurementAnalyzerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionMeasurementAnalyzerTests.swift; sourceTree = "<group>"; };
+		A10000000000000000000032 /* RoomCorrectionProjectControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionProjectControllerTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000020 /* AudioIOEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioIOEngine.swift; sourceTree = "<group>"; };
 		A20000000000000000000021 /* CoreAudioError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudioError.swift; sourceTree = "<group>"; };
 		A20000000000000000000022 /* AudioOutputDevice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioOutputDevice.swift; sourceTree = "<group>"; };
@@ -96,6 +99,7 @@
 		A2000000000000000000002C /* RoomCorrectionCalibrationTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionCalibrationTransport.swift; sourceTree = "<group>"; };
 		A2000000000000000000002D /* RoomCorrectionCalibrationController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionCalibrationController.swift; sourceTree = "<group>"; };
 		A2000000000000000000002E /* RoomCorrectionMeasurementAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionMeasurementAnalyzer.swift; sourceTree = "<group>"; };
+		A2000000000000000000002F /* RoomCorrectionProjectController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionProjectController.swift; sourceTree = "<group>"; };
 		A30000000000000000000020 /* N60RealtimeAudioBridge.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = N60RealtimeAudioBridge.c; sourceTree = "<group>"; };
 		A30000000000000000000021 /* N60RenderKernel.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = N60RenderKernel.c; sourceTree = "<group>"; };
 		A30000000000000000000022 /* N60RenderKernel.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60RenderKernel.h; sourceTree = "<group>"; };
@@ -166,6 +170,7 @@
 				A1000000000000000000002D /* RoomCorrectionMeasurementTests.swift */,
 				A1000000000000000000002E /* RoomCorrectionCalibrationControllerTests.swift */,
 				A1000000000000000000002F /* RoomCorrectionMeasurementAnalyzerTests.swift */,
+				A10000000000000000000032 /* RoomCorrectionProjectControllerTests.swift */,
 			);
 			path = NotchSixtyTests;
 			sourceTree = "<group>";
@@ -197,7 +202,7 @@
 		A20000000000000000000051 /* CoreAudio */ = {isa = PBXGroup; children = (A20000000000000000000021 /* CoreAudioError.swift */, A20000000000000000000028 /* MasterVolumeDeviceController.swift */, A2000000000000000000002C /* RoomCorrectionCalibrationTransport.swift */,); path = CoreAudio; sourceTree = "<group>"; };
 		A20000000000000000000052 /* Devices */ = {isa = PBXGroup; children = (A20000000000000000000022 /* AudioOutputDevice.swift */, A20000000000000000000023 /* OutputDeviceCatalog.swift */,); path = Devices; sourceTree = "<group>"; };
 		A20000000000000000000053 /* Routing */ = {isa = PBXGroup; children = (A20000000000000000000024 /* AudioRouteConfiguration.swift */,); path = Routing; sourceTree = "<group>"; };
-		A20000000000000000000054 /* State */ = {isa = PBXGroup; children = (A20000000000000000000025 /* AudioLifecycleState.swift */, A2000000000000000000002B /* ProductProfiles.swift */, A2000000000000000000002D /* RoomCorrectionCalibrationController.swift */,); path = State; sourceTree = "<group>"; };
+		A20000000000000000000054 /* State */ = {isa = PBXGroup; children = (A20000000000000000000025 /* AudioLifecycleState.swift */, A2000000000000000000002B /* ProductProfiles.swift */, A2000000000000000000002D /* RoomCorrectionCalibrationController.swift */, A2000000000000000000002F /* RoomCorrectionProjectController.swift */,); path = State; sourceTree = "<group>"; };
 		A20000000000000000000055 /* Diagnostics */ = {isa = PBXGroup; children = (A20000000000000000000026 /* AudioDiagnosticsSnapshot.swift */, A2000000000000000000002A /* ProductionAnalysisWorker.swift */,); path = Diagnostics; sourceTree = "<group>"; };
 		A30000000000000000000050 /* Realtime */ = {
 			isa = PBXGroup;
@@ -308,6 +313,7 @@
 				A2000000000000000000001C /* RoomCorrectionCalibrationTransport.swift in Sources */,
 				A2000000000000000000001D /* RoomCorrectionCalibrationController.swift in Sources */,
 				A2000000000000000000001E /* RoomCorrectionMeasurementAnalyzer.swift in Sources */,
+				A2000000000000000000001F /* RoomCorrectionProjectController.swift in Sources */,
 				A20000000000000000000017 /* StereoPlaybackControl.swift in Sources */,
 				A20000000000000000000019 /* DynamicsConfiguration.swift in Sources */,
 				A20000000000000000000018 /* MasterVolumeDeviceController.swift in Sources */,
@@ -337,6 +343,7 @@
 				A1000000000000000000001A /* RoomCorrectionMeasurementTests.swift in Sources */,
 				A1000000000000000000001B /* RoomCorrectionCalibrationControllerTests.swift in Sources */,
 				A1000000000000000000001C /* RoomCorrectionMeasurementAnalyzerTests.swift in Sources */,
+				A1000000000000000000001D /* RoomCorrectionProjectControllerTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
