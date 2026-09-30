@@ -9,9 +9,11 @@ TRAY = ROOT / "NotchSixty" / "Assets.xcassets" / "TrayIcon.imageset"
 MATRIX = ROOT / "docs" / "PR42_FINAL_PARITY_MATRIX.md"
 PROVENANCE = ROOT / "docs" / "PROVENANCE.md"
 
+
 def fail(message: str) -> None:
     print(f"PR42 app-shell validation failed: {message}", file=sys.stderr)
     raise SystemExit(1)
+
 
 source = APP.read_text(encoding="utf-8")
 required = [
@@ -22,8 +24,12 @@ required = [
     "profiles.selectContentPreset(id)",
     "try engine.start()",
     "engine.stop()",
+    'openWindow(id: "main")',
+    "SettingsLink",
     "Settings {",
     "ProductionSettingsView",
+    "product.shutdownForTermination()",
+    "NSApplication.shared.terminate(nil)",
     'CFBundleShortVersionString',
     'CFBundleVersion',
     "ApplicationAppearanceMode",
@@ -62,5 +68,13 @@ if "Legacy owner-controlled tray icon artwork" not in matrix:
 provenance = PROVENANCE.read_text(encoding="utf-8")
 if "TrayIcon" not in provenance or "owner-controlled" not in provenance:
     fail("provenance ledger does not record the tray artwork")
+
+# The abandoned app-icon experiment must not leave a self-mutating workflow or
+# staging payload in the release branch. App-icon replacement is explicitly
+# deferred until a later, separately scoped pass.
+if (ROOT / ".github" / "workflows" / "apply-icon-assets.yml").exists():
+    fail("deferred app-icon mutation workflow is still present")
+if (ROOT / "icon_payload").exists():
+    fail("deferred app-icon staging payload is still present")
 
 print("PR42 menu-bar / settings app-shell guard: PASS")
