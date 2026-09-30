@@ -1,0 +1,564 @@
+name: PR42 Apply App Shell Enhancement
+
+on:
+  push:
+    branches:
+      - pr42-parity-provenance-closure
+    paths:
+      - .github/workflows/pr42-apply-app-shell.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: pr42-parity-provenance-closure
+          fetch-depth: 0
+
+      - name: Apply clean-room menu bar and settings enhancement
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import json
+          import re
+          import shutil
+
+          root = Path('.')
+          app_path = root / 'NotchSixty' / 'NotchSixtyApp.swift'
+          source = app_path.read_text(encoding='utf-8')
+
+          if 'import AppKit\n' not in source:
+              source = source.replace('import Combine\nimport SwiftUI\n', 'import AppKit\nimport Combine\nimport SwiftUI\n', 1)
+
+          replacement = r'''private enum ApplicationAppearanceMode: String, CaseIterable, Identifiable {
+              case system
+              case light
+              case dark
+
+              var id: String { rawValue }
+
+              var displayName: String {
+                  switch self {
+                  case .system: return "System"
+                  case .light: return "Light"
+                  case .dark: return "Dark"
+                  }
+              }
+          }
+
+          private enum ApplicationPresenceMode: String, CaseIterable, Identifiable {
+              case dock
+              case tray
+              case both
+
+              var id: String { rawValue }
+
+              var displayName: String {
+                  switch self {
+                  case .dock: return "Dock"
+                  case .tray: return "Menu Bar"
+                  case .both: return "Both"
+                  }
+              }
+          }
+
+          @MainActor
+          private final class ApplicationPreferences: ObservableObject {
+              private enum Key {
+                  static let appearance = "application.appearance"
+                  static let presence = "application.presence"
+              }
+
+              private let defaults: UserDefaults
+
+              @Published var appearance: ApplicationAppearanceMode {
+                  didSet {
+                      defaults.set(appearance.rawValue, forKey: Key.appearance)
+                      applyAppearance()
+                  }
+              }
+
+              @Published var presence: ApplicationPresenceMode {
+                  didSet {
+                      defaults.set(presence.rawValue, forKey: Key.presence)
+                      applyActivationPolicy()
+                  }
+              }
+
+              init(defaults: UserDefaults = .standard) {
+                  self.defaults = defaults
+                  appearance = ApplicationAppearanceMode(
+                      rawValue: defaults.string(forKey: Key.appearance) ?? ""
+                  ) ?? .system
+                  presence = ApplicationPresenceMode(
+                      rawValue: defaults.string(forKey: Key.presence) ?? ""
+                  ) ?? .both
+              }
+
+              var isTrayInserted: Bool { presence != .dock }
+
+              func setTrayInserted(_ inserted: Bool) {
+                  if inserted {
+                      if presence == .dock { presence = .both }
+                  } else if presence != .dock {
+                      // Never strand a tray-only app with no visible app surface.
+                      presence = .dock
+                  }
+              }
+
+              func apply() {
+                  applyAppearance()
+                  applyActivationPolicy()
+              }
+
+              private func applyAppearance() {
+                  switch appearance {
+                  case .system:
+                      NSApplication.shared.appearance = nil
+                  case .light:
+                      NSApplication.shared.appearance = NSAppearance(named: .aqua)
+                  case .dark:
+                      NSApplication.shared.appearance = NSAppearance(named: .darkAqua)
+                  }
+              }
+
+              private func applyActivationPolicy() {
+                  let policy: NSApplication.ActivationPolicy = presence == .tray ? .accessory : .regular
+                  _ = NSApplication.shared.setActivationPolicy(policy)
+              }
+          }
+
+          private struct ProductionMenuBarView: View {
+              let product: ProductController
+              @ObservedObject private var profiles: ProductProfileController
+              @ObservedObject private var engine: AudioIOEngine
+              @Environment(\.openWindow) private var openWindow
+              @State private var commandError: String?
+
+              init(product: ProductController) {
+                  self.product = product
+                  _profiles = ObservedObject(wrappedValue: product.profiles)
+                  _engine = ObservedObject(wrappedValue: product.audioEngine)
+              }
+
+              private var presetSelection: Binding<UUID?> {
+                  Binding(
+                      get: { profiles.selectedContentPresetID },
+                      set: { id in
+                          guard let id else { return }
+                          profiles.selectContentPreset(id)
+                      }
+                  )
+              }
+
+              private var processingActive: Bool {
+                  switch engine.lifecycleState {
+                  case .starting, .running, .reconfiguring, .recoveringOutput:
+                      return true
+                  default:
+                      return false
+                  }
+              }
+
+              private var canToggleProcessing: Bool {
+                  switch engine.lifecycleState {
+                  case .idle, .running, .reconfiguring, .recoveringOutput, .failed:
+                      return true
+                  default:
+                      return false
+                  }
+              }
+
+              private var processingBinding: Binding<Bool> {
+                  Binding(
+                      get: { processingActive },
+                      set: { enabled in
+                          if enabled {
+                              if engine.lifecycleState == .failed { engine.stop() }
+                              guard engine.lifecycleState == .idle else { return }
+                              do {
+                                  try engine.start()
+                                  commandError = nil
+                              } catch {
+                                  commandError = error.localizedDescription
+                              }
+                          } else {
+                              engine.stop()
+                              commandError = nil
+                          }
+                      }
+                  )
+              }
+
+              private var statusLabel: String {
+                  switch engine.lifecycleState {
+                  case .idle: return "Stopped"
+                  case .running: return "Processing"
+                  case .failed: return "Failed"
+                  case .requestingPermission: return "Requesting Permission"
+                  case .creatingTap, .creatingAggregate, .openingOutput, .starting: return "Starting"
+                  case .reconfiguring: return "Reconfiguring"
+                  case .recoveringOutput: return "Recovering Output"
+                  case .stopping: return "Stopping"
+                  }
+              }
+
+              private var statusSymbol: String {
+                  switch engine.lifecycleState {
+                  case .running: return "waveform.circle.fill"
+                  case .failed: return "exclamationmark.triangle.fill"
+                  case .idle: return "stop.circle"
+                  default: return "arrow.triangle.2.circlepath.circle"
+                  }
+              }
+
+              var body: some View {
+                  VStack(alignment: .leading, spacing: 14) {
+                      HStack(spacing: 10) {
+                          Image("TrayIcon")
+                              .resizable()
+                              .scaledToFit()
+                              .frame(width: 28, height: 24)
+                          VStack(alignment: .leading, spacing: 2) {
+                              Text("NOTCH SIXTY")
+                                  .font(.headline)
+                              Label(statusLabel, systemImage: statusSymbol)
+                                  .font(.caption)
+                                  .foregroundStyle(engine.lifecycleState == .failed ? .red : .secondary)
+                          }
+                          Spacer(minLength: 16)
+                      }
+
+                      Divider()
+
+                      Toggle("Processing", isOn: processingBinding)
+                          .toggleStyle(.switch)
+                          .disabled(!canToggleProcessing)
+
+                      Picker("Content Preset", selection: presetSelection) {
+                          ForEach(profiles.contentPresets) { preset in
+                              Text(preset.name).tag(Optional(preset.id))
+                          }
+                      }
+                      .pickerStyle(.menu)
+
+                      if profiles.selectedContentPresetIsDirty {
+                          Text("Current preset has unsaved changes.")
+                              .font(.caption)
+                              .foregroundStyle(.secondary)
+                      }
+
+                      Divider()
+
+                      Button {
+                          openWindow(id: "main")
+                          NSApplication.shared.activate(ignoringOtherApps: true)
+                      } label: {
+                          Label("Open Notch Sixty", systemImage: "macwindow")
+                      }
+
+                      SettingsLink {
+                          Label("Settings…", systemImage: "gearshape")
+                      }
+
+                      Divider()
+
+                      Button(role: .destructive) {
+                          product.shutdownForTermination()
+                          NSApplication.shared.terminate(nil)
+                      } label: {
+                          Label("Quit Notch Sixty", systemImage: "power")
+                      }
+                  }
+                  .padding(14)
+                  .frame(width: 300)
+                  .alert(
+                      "Processing Error",
+                      isPresented: Binding(
+                          get: { commandError != nil },
+                          set: { if !$0 { commandError = nil } }
+                      )
+                  ) {
+                      Button("OK") { commandError = nil }
+                  } message: {
+                      Text(commandError ?? "")
+                  }
+              }
+          }
+
+          private struct ProductionSettingsView: View {
+              @ObservedObject var preferences: ApplicationPreferences
+
+              private var version: String {
+                  Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
+              }
+
+              private var build: String {
+                  Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—"
+              }
+
+              var body: some View {
+                  Form {
+                      Section("About") {
+                          LabeledContent("Version") {
+                              Text(version).monospacedDigit()
+                          }
+                          LabeledContent("Build") {
+                              Text(build).monospacedDigit()
+                          }
+                      }
+
+                      Section("Appearance") {
+                          Picker("Appearance", selection: $preferences.appearance) {
+                              ForEach(ApplicationAppearanceMode.allCases) { mode in
+                                  Text(mode.displayName).tag(mode)
+                              }
+                          }
+                          .pickerStyle(.segmented)
+                      }
+
+                      Section("App Presence") {
+                          Picker("Show Notch Sixty in", selection: $preferences.presence) {
+                              ForEach(ApplicationPresenceMode.allCases) { mode in
+                                  Text(mode.displayName).tag(mode)
+                              }
+                          }
+                          .pickerStyle(.segmented)
+
+                          Text("Menu Bar mode keeps processing and preset controls available without a Dock icon. Both shows the app in both places.")
+                              .font(.caption)
+                              .foregroundStyle(.secondary)
+                      }
+                  }
+                  .formStyle(.grouped)
+                  .frame(width: 480)
+                  .padding(12)
+              }
+          }
+
+          @main
+          struct NotchSixtyApp: App {
+              @StateObject private var product: ProductController
+              @StateObject private var preferences: ApplicationPreferences
+
+              init() {
+                  _product = StateObject(wrappedValue: ProductController())
+                  _preferences = StateObject(wrappedValue: ApplicationPreferences())
+              }
+
+              private var trayInserted: Binding<Bool> {
+                  Binding(
+                      get: { preferences.isTrayInserted },
+                      set: { preferences.setTrayInserted($0) }
+                  )
+              }
+
+              var body: some Scene {
+                  WindowGroup(id: "main") {
+                      ProductionRootView(product: product)
+                          .task {
+                              product.prepareForUse()
+                              preferences.apply()
+                          }
+                  }
+                  .defaultSize(width: 1180, height: 780)
+
+                  MenuBarExtra(
+                      "Notch Sixty",
+                      image: "TrayIcon",
+                      isInserted: trayInserted
+                  ) {
+                      ProductionMenuBarView(product: product)
+                          .task { product.prepareForUse() }
+                  }
+                  .menuBarExtraStyle(.window)
+
+                  Settings {
+                      ProductionSettingsView(preferences: preferences)
+                  }
+
+                  Window("Engineering Validation", id: "engineering-validation") {
+                      EngineeringValidationView(engine: product.audioEngine)
+                          .task { product.prepareForUse() }
+                  }
+                  .defaultSize(width: 1000, height: 760)
+              }
+          }
+          '''
+
+          updated, count = re.subn(
+              r'@main\nstruct NotchSixtyApp: App \{.*\Z',
+              replacement,
+              source,
+              count=1,
+              flags=re.S,
+          )
+          if count != 1:
+              raise SystemExit('Unable to locate NotchSixtyApp tail for bounded replacement')
+          app_path.write_text(updated, encoding='utf-8')
+
+          tray_dir = root / 'NotchSixty' / 'Assets.xcassets' / 'TrayIcon.imageset'
+          tray_dir.mkdir(parents=True, exist_ok=True)
+          tray_contents = {
+              "images": [{
+                  "filename": "notch_sixty_tray_icon_final_tightcrop.svg",
+                  "idiom": "universal"
+              }],
+              "info": {"author": "xcode", "version": 1},
+              "properties": {
+                  "preserves-vector-representation": True,
+                  "template-rendering": True
+              }
+          }
+          (tray_dir / 'Contents.json').write_text(json.dumps(tray_contents, indent=2) + '\n', encoding='utf-8')
+          (tray_dir / 'notch_sixty_tray_icon_final_tightcrop.svg').write_text('''<svg width="88" height="72" viewBox="1 2 22 18" xmlns="http://www.w3.org/2000/svg">
+          <title>Notch Sixty menu bar icon - tightly cropped, inverted, mirrored needle</title>
+          <defs>
+          <mask id="cutout9" maskUnits="userSpaceOnUse" x="1" y="2" width="22" height="18">
+          <rect x="1" y="2" width="22" height="18" fill="#FFFFFF"/>
+          <g stroke="#000000" stroke-width="1.2" stroke-linecap="round">
+          <line x1="14.257" y1="9.298" x2="15.010" y2="7.231"/>
+          <line x1="9.743" y1="9.298" x2="8.990" y2="7.231"/>
+          <line x1="17.716" y1="12.200" x2="19.621" y2="11.100"/>
+          <line x1="6.284" y1="12.200" x2="4.379" y2="11.100"/>
+          </g>
+          <line x1="12" y1="15.5" x2="5.70" y2="7.99" stroke="#000000" stroke-width="1.2" stroke-linecap="round"/>
+          <circle cx="12" cy="15.5" r="1.6" fill="#000000"/>
+          </mask>
+          </defs>
+          <rect x="2" y="3" width="20" height="16" rx="2.2" fill="#000000" mask="url(#cutout9)"/>
+          </svg>
+          ''', encoding='utf-8')
+
+          validator = root / 'ci' / 'validate_pr42_app_shell.py'
+          validator.write_text('''#!/usr/bin/env python3
+          from pathlib import Path
+          import json
+          import sys
+
+          ROOT = Path(__file__).resolve().parents[1]
+          APP = ROOT / "NotchSixty" / "NotchSixtyApp.swift"
+          TRAY = ROOT / "NotchSixty" / "Assets.xcassets" / "TrayIcon.imageset"
+          MATRIX = ROOT / "docs" / "PR42_FINAL_PARITY_MATRIX.md"
+          PROVENANCE = ROOT / "docs" / "PROVENANCE.md"
+
+          def fail(message: str) -> None:
+              print(f"PR42 app-shell validation failed: {message}", file=sys.stderr)
+              raise SystemExit(1)
+
+          source = APP.read_text(encoding="utf-8")
+          required = [
+              "MenuBarExtra(",
+              'image: "TrayIcon"',
+              "isInserted: trayInserted",
+              "ProductionMenuBarView",
+              "profiles.selectContentPreset(id)",
+              "try engine.start()",
+              "engine.stop()",
+              "Settings {",
+              "ProductionSettingsView",
+              'CFBundleShortVersionString',
+              'CFBundleVersion',
+              "ApplicationAppearanceMode",
+              "case system",
+              "case light",
+              "case dark",
+              "ApplicationPresenceMode",
+              "case dock",
+              "case tray",
+              "case both",
+              "setActivationPolicy",
+              ".accessory",
+              ".regular",
+          ]
+          for token in required:
+              if token not in source:
+                  fail(f"missing app-shell contract token: {token}")
+
+          contents_path = TRAY / "Contents.json"
+          svg_path = TRAY / "notch_sixty_tray_icon_final_tightcrop.svg"
+          if not contents_path.exists() or not svg_path.exists():
+              fail("owner-controlled TrayIcon asset is missing")
+          payload = json.loads(contents_path.read_text(encoding="utf-8"))
+          props = payload.get("properties", {})
+          if props.get("template-rendering") is not True:
+              fail("TrayIcon must remain a template-rendered menu-bar asset")
+          if props.get("preserves-vector-representation") is not True:
+              fail("TrayIcon must preserve vector representation")
+
+          matrix = MATRIX.read_text(encoding="utf-8")
+          if "Menu bar preset / processing / quit controls" not in matrix:
+              fail("final parity matrix does not record menu-bar behavior")
+          if "Legacy owner-controlled tray icon artwork" not in matrix:
+              fail("final parity matrix does not record tray icon provenance")
+
+          provenance = PROVENANCE.read_text(encoding="utf-8")
+          if "TrayIcon" not in provenance or "owner-controlled" not in provenance:
+              fail("provenance ledger does not record the tray artwork")
+
+          print("PR42 menu-bar / settings app-shell guard: PASS")
+          ''', encoding='utf-8')
+          validator.chmod(0o755)
+
+          workflow = root / '.github' / 'workflows' / 'macos.yml'
+          wf = workflow.read_text(encoding='utf-8')
+          marker = '      - name: Validate PR42 Preset / Interchange Closure\n        run: python3 ci/validate_pr42_interchange.py\n'
+          shell_step = marker + '\n      - name: Validate PR42 Menu Bar / Settings Shell\n        run: python3 ci/validate_pr42_app_shell.py\n'
+          if 'Validate PR42 Menu Bar / Settings Shell' not in wf:
+              if marker not in wf:
+                  raise SystemExit('macOS workflow insertion point not found')
+              wf = wf.replace(marker, shell_step, 1)
+              workflow.write_text(wf, encoding='utf-8')
+
+          matrix_path = root / 'docs' / 'PR42_FINAL_PARITY_MATRIX.md'
+          matrix = matrix_path.read_text(encoding='utf-8')
+          anchor = '| Production Dynamics | IMPROVED | PR38 capability surface plus PR42 semantic LabeledContent/adaptive-material editor cleanup. |\n'
+          rows = anchor + '| Menu bar preset / processing / quit controls | IMPROVED | Fresh production SwiftUI MenuBarExtra exposes the selected Content Preset, start/stop processing through the existing AudioIOEngine lifecycle, main-window access, Settings, and orderly quit without importing legacy implementation code. |\n| Legacy owner-controlled tray icon artwork | PORT VERIFIED | Reuses only the project-owner-controlled vector TrayIcon artwork as a template-rendered asset; production behavior is independently implemented. |\n'
+          if 'Menu bar preset / processing / quit controls' not in matrix:
+              if anchor not in matrix:
+                  raise SystemExit('Final matrix insertion point not found')
+              matrix_path.write_text(matrix.replace(anchor, rows, 1), encoding='utf-8')
+
+          provenance_path = root / 'docs' / 'PROVENANCE.md'
+          provenance = provenance_path.read_text(encoding='utf-8')
+          section = '''\n\n### PR42 menu-bar artwork reuse\n\n- `NotchSixty/Assets.xcassets/TrayIcon.imageset/notch_sixty_tray_icon_final_tightcrop.svg` is project-owner-controlled artwork carried from the legacy repository by explicit owner request.\n- Only the visual asset is reused. The production `MenuBarExtra`, application preferences, processing controls, preset binding, Settings scene, and Dock/Menu Bar/Both behavior are newly authored against the proprietary production model.\n'''
+          if '### PR42 menu-bar artwork reuse' not in provenance:
+              provenance_path.write_text(provenance.rstrip() + section + '\n', encoding='utf-8')
+
+          closure_path = root / 'docs' / 'PR42_PARITY_PROVENANCE_CLOSURE.md'
+          closure = closure_path.read_text(encoding='utf-8')
+          shell_section = '''\n\n## Application shell enhancement\n\nPR42 restores the legacy-observable menu-bar convenience through a fresh production implementation: Content Preset switching, processing start/stop, main-window access, Settings, and quit. The Settings scene reports version/build and persists System/Light/Dark appearance plus Dock/Menu Bar/Both presence. The only legacy artifact reused is the project-owner-controlled `TrayIcon` vector asset, recorded separately as `PORT VERIFIED`.\n'''
+          if '## Application shell enhancement' not in closure:
+              closure_path.write_text(closure.rstrip() + shell_section + '\n', encoding='utf-8')
+
+          # The previous app-icon experiment is explicitly deferred. Remove its
+          # temporary automation/payload so it cannot keep mutating PR42.
+          stale_workflow = root / '.github' / 'workflows' / 'apply-icon-assets.yml'
+          if stale_workflow.exists():
+              stale_workflow.unlink()
+          payload_dir = root / 'icon_payload'
+          if payload_dir.exists():
+              shutil.rmtree(payload_dir)
+
+          # This workflow is a one-shot source patcher and removes itself.
+          self_path = root / '.github' / 'workflows' / 'pr42-apply-app-shell.yml'
+          if self_path.exists():
+              self_path.unlink()
+          PY
+
+      - name: Validate staged shell contract
+        run: python3 ci/validate_pr42_app_shell.py
+
+      - name: Commit enhancement back to PR42
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "PR42: add menu bar controls and application settings"
+          git push origin HEAD:pr42-parity-provenance-closure
