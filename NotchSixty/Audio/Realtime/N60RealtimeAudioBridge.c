@@ -703,6 +703,145 @@ N60RenderKernelDiagnostics N60RealtimeAudioBridgeGetRenderDiagnostics(
     return diagnostics;
 }
 
+static bool speaker_bus_is_valid(N60SpeakerOutputBus bus) {
+    return bus >= N60SpeakerOutputBusLeftFullRange && bus < N60SpeakerOutputBusCount;
+}
+
+N60SpeakerBusFrame N60SpeakerBusFrameMakeSilence(void) {
+    N60SpeakerBusFrame frame = {0};
+    return frame;
+}
+
+bool N60SpeakerBusFrameSet(
+    N60SpeakerBusFrame *frame,
+    N60SpeakerOutputBus bus,
+    float value
+) {
+    if (frame == NULL || !speaker_bus_is_valid(bus) || !isfinite(value)) return false;
+    frame->values[(uint32_t)bus] = value;
+    return true;
+}
+
+float N60SpeakerBusFrameGet(
+    const N60SpeakerBusFrame *frame,
+    N60SpeakerOutputBus bus
+) {
+    if (frame == NULL || !speaker_bus_is_valid(bus)) return 0.0f;
+    return frame->values[(uint32_t)bus];
+}
+
+bool N60SameDeviceOutputMapCompile(
+    uint32_t physicalChannelCount,
+    const N60SpeakerOutputRouteDescriptor *routes,
+    uint32_t routeCount,
+    N60SameDeviceOutputMap *mapOut
+) {
+    if (mapOut == NULL) return false;
+    memset(mapOut, 0, sizeof(*mapOut));
+    if (physicalChannelCount == 0
+        || routes == NULL
+        || routeCount < 2u
+        || routeCount > N60_SPEAKER_OUTPUT_MAX_ROUTES) {
+        return false;
+    }
+
+    for (uint32_t index = 0; index < routeCount; ++index) {
+        N60SpeakerOutputRouteDescriptor route = routes[index];
+        if (!speaker_bus_is_valid(route.bus)
+            || route.physicalChannelIndex >= physicalChannelCount) {
+            return false;
+        }
+        for (uint32_t previous = 0; previous < index; ++previous) {
+            if (routes[previous].physicalChannelIndex == route.physicalChannelIndex) {
+                return false;
+            }
+        }
+        mapOut->routes[index] = route;
+    }
+    mapOut->physicalChannelCount = physicalChannelCount;
+    mapOut->routeCount = routeCount;
+    mapOut->valid = true;
+    return true;
+}
+
+bool N60SameDeviceOutputMapValueForChannel(
+    const N60SameDeviceOutputMap *map,
+    const N60SpeakerBusFrame *frame,
+    uint32_t physicalChannelIndex,
+    float *valueOut
+) {
+    if (valueOut == NULL) return false;
+    *valueOut = 0.0f;
+    if (map == NULL || frame == NULL || !map->valid
+        || physicalChannelIndex >= map->physicalChannelCount) {
+        return false;
+    }
+    for (uint32_t index = 0; index < map->routeCount; ++index) {
+        if (map->routes[index].physicalChannelIndex == physicalChannelIndex) {
+            *valueOut = N60SpeakerBusFrameGet(frame, map->routes[index].bus);
+            return true;
+        }
+    }
+    return true;
+}
+
+static bool output_buffer_frame_is_addressable(
+    const AudioBuffer *buffer,
+    uint32_t frameIndex
+) {
+    if (buffer == NULL || buffer->mData == NULL || buffer->mNumberChannels == 0) return false;
+    uint64_t bytesPerFrame = (uint64_t)sizeof(float) * buffer->mNumberChannels;
+    uint64_t requiredBytes = ((uint64_t)frameIndex + 1u) * bytesPerFrame;
+    return requiredBytes <= buffer->mDataByteSize;
+}
+
+bool N60SameDeviceOutputMapWriteFrame(
+    const N60SameDeviceOutputMap *map,
+    const N60SpeakerBusFrame *frame,
+    AudioBufferList *outputData,
+    uint32_t frameIndex
+) {
+    if (map == NULL || frame == NULL || outputData == NULL || !map->valid
+        || outputData->mNumberBuffers == 0) {
+        return false;
+    }
+
+    uint64_t flattenedChannelCount = 0;
+    for (UInt32 bufferIndex = 0; bufferIndex < outputData->mNumberBuffers; ++bufferIndex) {
+        AudioBuffer *buffer = &outputData->mBuffers[bufferIndex];
+        if (!output_buffer_frame_is_addressable(buffer, frameIndex)) return false;
+        flattenedChannelCount += buffer->mNumberChannels;
+    }
+    if (flattenedChannelCount < map->physicalChannelCount) return false;
+
+    // Silence every channel represented by this callback frame before routing.
+    // This prevents stale samples on unassigned hardware channels.
+    for (UInt32 bufferIndex = 0; bufferIndex < outputData->mNumberBuffers; ++bufferIndex) {
+        AudioBuffer *buffer = &outputData->mBuffers[bufferIndex];
+        float *samples = (float *)buffer->mData;
+        uint64_t base = (uint64_t)frameIndex * buffer->mNumberChannels;
+        for (UInt32 localChannel = 0; localChannel < buffer->mNumberChannels; ++localChannel) {
+            samples[base + localChannel] = 0.0f;
+        }
+    }
+
+    for (uint32_t routeIndex = 0; routeIndex < map->routeCount; ++routeIndex) {
+        N60SpeakerOutputRouteDescriptor route = map->routes[routeIndex];
+        uint32_t remainingChannel = route.physicalChannelIndex;
+        for (UInt32 bufferIndex = 0; bufferIndex < outputData->mNumberBuffers; ++bufferIndex) {
+            AudioBuffer *buffer = &outputData->mBuffers[bufferIndex];
+            if (remainingChannel < buffer->mNumberChannels) {
+                float *samples = (float *)buffer->mData;
+                uint64_t sampleIndex = (uint64_t)frameIndex * buffer->mNumberChannels + remainingChannel;
+                samples[sampleIndex] = N60SpeakerBusFrameGet(frame, route.bus);
+                break;
+            }
+            remainingChannel -= buffer->mNumberChannels;
+        }
+    }
+    return true;
+}
+
 OSStatus N60CaptureIOProc(
     AudioDeviceID inDevice,
     const AudioTimeStamp *inNow,

@@ -107,6 +107,8 @@ enum MultiOutputRoutingError: Error, Equatable, LocalizedError {
     case outputChannelUnavailable(deviceUID: String, channelIndex: UInt32, channelCount: UInt32)
     case invalidSampleRate(Double)
     case sampleRateUnsupported(deviceUID: String, sampleRate: Double)
+    case sameDeviceTransportRequiresEnabledRouting
+    case sameDeviceTransportRequiresSingleDevice([String])
 
     var errorDescription: String? {
         switch self {
@@ -130,6 +132,10 @@ enum MultiOutputRoutingError: Error, Equatable, LocalizedError {
             return "Multi-output routing sample rate \(sampleRate) Hz is invalid."
         case .sampleRateUnsupported(let uid, let sampleRate):
             return "Output device \(uid) does not support \(sampleRate) Hz natively."
+        case .sameDeviceTransportRequiresEnabledRouting:
+            return "Enable multi-output routing before compiling a same-device output plan."
+        case .sameDeviceTransportRequiresSingleDevice(let uids):
+            return "Same-device transport requires every enabled route to target one physical device; found: \(uids.joined(separator: ", "))."
         }
     }
 }
@@ -241,3 +247,45 @@ struct MultiOutputRoutingConfiguration: Codable, Equatable, Sendable {
         }
     }
 }
+
+/// Immutable control-plane result for Slice C2. Every route targets one Core
+/// Audio device, so all physical channels share one hardware clock and no SRC or
+/// PLL is required. This does not activate the device; CoreAudioTransportSession
+/// owns activation in the following transport slice.
+struct SameDeviceOutputRoutePlan: Equatable, Sendable {
+    let deviceUID: String
+    let physicalChannelCount: UInt32
+    let routes: [SpeakerOutputRoute]
+
+    var requiredPhysicalChannelCount: UInt32 {
+        guard let highest = routes.map(\.destination.channelIndex).max() else { return 0 }
+        return highest + 1
+    }
+}
+
+extension MultiOutputRoutingConfiguration {
+    func makeSameDevicePlan(
+        availableDevices: [AudioOutputDevice],
+        sampleRate: Double
+    ) throws -> SameDeviceOutputRoutePlan {
+        guard enabled else {
+            throw MultiOutputRoutingError.sameDeviceTransportRequiresEnabledRouting
+        }
+        try validate(availableDevices: availableDevices, sampleRate: sampleRate)
+
+        let deviceUIDs = requiredDeviceUIDs.sorted()
+        guard deviceUIDs.count == 1, let deviceUID = deviceUIDs.first else {
+            throw MultiOutputRoutingError.sameDeviceTransportRequiresSingleDevice(deviceUIDs)
+        }
+        guard let device = availableDevices.first(where: { $0.uid == deviceUID }) else {
+            throw MultiOutputRoutingError.outputDeviceUnavailable(deviceUID)
+        }
+
+        return SameDeviceOutputRoutePlan(
+            deviceUID: deviceUID,
+            physicalChannelCount: device.outputChannelCount,
+            routes: enabledRoutes
+        )
+    }
+}
+

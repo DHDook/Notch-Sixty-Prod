@@ -28,6 +28,40 @@ typedef struct {
 #define N60_ANALYSIS_DEMAND_ALL (N60_ANALYSIS_DEMAND_SPECTRUM | N60_ANALYSIS_DEMAND_STEREO)
 #define N60_ANALYSIS_CAPTURE_CAPACITY_FRAMES 65536u
 
+// PR41 Slice C2a: immutable same-device speaker-output routing. The control
+// plane compiles at most eight logical-bus routes; the realtime writer only
+// reads this fixed-size map and writes preallocated Core Audio buffers.
+#define N60_SPEAKER_OUTPUT_MAX_ROUTES 8u
+
+typedef enum {
+    N60SpeakerOutputBusLeftFullRange = 0,
+    N60SpeakerOutputBusRightFullRange = 1,
+    N60SpeakerOutputBusLeftLow = 2,
+    N60SpeakerOutputBusRightLow = 3,
+    N60SpeakerOutputBusLeftMid = 4,
+    N60SpeakerOutputBusRightMid = 5,
+    N60SpeakerOutputBusLeftHigh = 6,
+    N60SpeakerOutputBusRightHigh = 7,
+    N60SpeakerOutputBusSubMono = 8,
+    N60SpeakerOutputBusCount = 9,
+} N60SpeakerOutputBus;
+
+typedef struct {
+    float values[N60SpeakerOutputBusCount];
+} N60SpeakerBusFrame;
+
+typedef struct {
+    N60SpeakerOutputBus bus;
+    uint32_t physicalChannelIndex;
+} N60SpeakerOutputRouteDescriptor;
+
+typedef struct {
+    bool valid;
+    uint32_t physicalChannelCount;
+    uint32_t routeCount;
+    N60SpeakerOutputRouteDescriptor routes[N60_SPEAKER_OUTPUT_MAX_ROUTES];
+} N60SameDeviceOutputMap;
+
 typedef struct {
     float inputLeft;
     float inputRight;
@@ -151,6 +185,38 @@ bool N60RealtimeAudioBridgePublishDSPGraph(
 N60RealtimeAudioBridgeSnapshot N60RealtimeAudioBridgeGetSnapshot(const N60RealtimeAudioBridge * _Nonnull bridge);
 N60RenderKernelDiagnostics N60RealtimeAudioBridgeGetRenderDiagnostics(
     const N60RealtimeAudioBridge * _Nonnull bridge
+);
+
+N60SpeakerBusFrame N60SpeakerBusFrameMakeSilence(void);
+bool N60SpeakerBusFrameSet(
+    N60SpeakerBusFrame * _Nonnull frame,
+    N60SpeakerOutputBus bus,
+    float value
+);
+float N60SpeakerBusFrameGet(
+    const N60SpeakerBusFrame * _Nonnull frame,
+    N60SpeakerOutputBus bus
+);
+bool N60SameDeviceOutputMapCompile(
+    uint32_t physicalChannelCount,
+    const N60SpeakerOutputRouteDescriptor * _Nonnull routes,
+    uint32_t routeCount,
+    N60SameDeviceOutputMap * _Nonnull mapOut
+);
+bool N60SameDeviceOutputMapValueForChannel(
+    const N60SameDeviceOutputMap * _Nonnull map,
+    const N60SpeakerBusFrame * _Nonnull frame,
+    uint32_t physicalChannelIndex,
+    float * _Nonnull valueOut
+);
+// Writes one frame to an arbitrary Core Audio output buffer layout. Every
+// physical channel represented by the AudioBufferList is zeroed first; mapped
+// channels then receive their logical-bus value. No allocation or locking.
+bool N60SameDeviceOutputMapWriteFrame(
+    const N60SameDeviceOutputMap * _Nonnull map,
+    const N60SpeakerBusFrame * _Nonnull frame,
+    AudioBufferList * _Nonnull outputData,
+    uint32_t frameIndex
 );
 
 OSStatus N60CaptureIOProc(

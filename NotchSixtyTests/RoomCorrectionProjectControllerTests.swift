@@ -953,4 +953,101 @@ final class RoomCorrectionProjectControllerTests: XCTestCase {
         XCTAssertThrowsError(try profiles.replaceSelectedSystemOutputRouting(routing))
         XCTAssertEqual(profiles.selectedSystemProfile?.state, beforeProfile)
     }
+
+    func testSameDeviceRoutePlanUsesOneClockDomainAndPreservesEnabledRouteOrder() throws {
+        let device = AudioOutputDevice(
+            deviceID: 303,
+            uid: "eight-channel-dac",
+            name: "Eight Channel DAC",
+            nominalSampleRate: 96_000,
+            availableSampleRateRanges: [AudioSampleRateRange(minimum: 44_100, maximum: 192_000)],
+            outputChannelCount: 8
+        )
+        let disabled = SpeakerOutputRoute(
+            name: "Unused",
+            bus: .leftHigh,
+            destination: PhysicalOutputEndpoint(deviceUID: device.uid, channelIndex: 7),
+            enabled: false
+        )
+        let enabledRoutes = [
+            SpeakerOutputRoute(
+                name: "Left Main",
+                bus: .leftFullRange,
+                destination: PhysicalOutputEndpoint(deviceUID: device.uid, channelIndex: 2)
+            ),
+            SpeakerOutputRoute(
+                name: "Right Main",
+                bus: .rightFullRange,
+                destination: PhysicalOutputEndpoint(deviceUID: device.uid, channelIndex: 3)
+            ),
+            SpeakerOutputRoute(
+                name: "Sub",
+                bus: .subMono,
+                destination: PhysicalOutputEndpoint(deviceUID: device.uid, channelIndex: 6)
+            ),
+        ]
+        let configuration = MultiOutputRoutingConfiguration(
+            enabled: true,
+            routes: [enabledRoutes[0], disabled, enabledRoutes[1], enabledRoutes[2]],
+            synchronizationMode: .softwarePLL,
+            referenceDeviceUID: device.uid
+        )
+
+        let plan = try configuration.makeSameDevicePlan(
+            availableDevices: [device],
+            sampleRate: 96_000
+        )
+        XCTAssertEqual(plan.deviceUID, device.uid)
+        XCTAssertEqual(plan.physicalChannelCount, 8)
+        XCTAssertEqual(plan.routes, enabledRoutes)
+        XCTAssertEqual(plan.requiredPhysicalChannelCount, 7)
+    }
+
+    func testSameDeviceRoutePlanRejectsDisabledAndMultiDeviceConfigurations() throws {
+        let first = AudioOutputDevice(
+            deviceID: 401,
+            uid: "dac-a",
+            name: "DAC A",
+            nominalSampleRate: 48_000,
+            availableSampleRateRanges: [AudioSampleRateRange(minimum: 48_000, maximum: 96_000)],
+            outputChannelCount: 4
+        )
+        let second = AudioOutputDevice(
+            deviceID: 402,
+            uid: "dac-b",
+            name: "DAC B",
+            nominalSampleRate: 48_000,
+            availableSampleRateRanges: [AudioSampleRateRange(minimum: 48_000, maximum: 96_000)],
+            outputChannelCount: 2
+        )
+        let routes = [
+            SpeakerOutputRoute(
+                name: "Left",
+                bus: .leftFullRange,
+                destination: PhysicalOutputEndpoint(deviceUID: first.uid, channelIndex: 0)
+            ),
+            SpeakerOutputRoute(
+                name: "Right",
+                bus: .rightFullRange,
+                destination: PhysicalOutputEndpoint(deviceUID: second.uid, channelIndex: 0)
+            ),
+        ]
+
+        let disabled = MultiOutputRoutingConfiguration(enabled: false, routes: routes)
+        XCTAssertThrowsError(
+            try disabled.makeSameDevicePlan(availableDevices: [first, second], sampleRate: 48_000)
+        ) { error in
+            XCTAssertEqual(error as? MultiOutputRoutingError, .sameDeviceTransportRequiresEnabledRouting)
+        }
+
+        let multiple = MultiOutputRoutingConfiguration(enabled: true, routes: routes)
+        XCTAssertThrowsError(
+            try multiple.makeSameDevicePlan(availableDevices: [first, second], sampleRate: 48_000)
+        ) { error in
+            XCTAssertEqual(
+                error as? MultiOutputRoutingError,
+                .sameDeviceTransportRequiresSingleDevice(["dac-a", "dac-b"])
+            )
+        }
+    }
 }
