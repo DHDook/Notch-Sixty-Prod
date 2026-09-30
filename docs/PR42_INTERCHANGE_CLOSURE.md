@@ -2,7 +2,7 @@
 
 Status: **IMPLEMENTATION COMPLETE — RETAINED IN FINAL PR42 GATE**
 
-This slice closes the release-blocking persistence/interchange obligations identified by the PR34 source audit without transplanting legacy implementation expression.
+This slice closes the release-relevant persistence/interchange obligations identified by the PR34 source audit without transplanting legacy implementation expression.
 
 ## Product boundary
 
@@ -60,7 +60,7 @@ Mid/Side export is rejected rather than flattened into Left/Right and changing i
 
 ## CamillaDSP export
 
-The first commercial exporter writes a current-product-derived YAML configuration with:
+The commercial exporter writes current-product-derived YAML with:
 
 - sample rate and CoreAudio device placeholders/identity;
 - independent or linked L/R EQ pipeline;
@@ -69,7 +69,7 @@ The first commercial exporter writes a current-product-derived YAML configuratio
 - inline FIR convolution values when a current per-band kernel exists;
 - deterministic channel-specific pipeline order.
 
-Linkwitz Transform is deliberately reported/omitted until coefficient-level representation is implemented rather than approximated with a different filter.
+Linkwitz Transform is reported/omitted until coefficient-level representation is implemented rather than approximated with a different filter.
 
 The machine-specific physical output-matrix/crossover portion of historical CamillaDSP export is intentionally not treated as a portable 1.0 interchange requirement. The final PR42 matrix records that narrower launch boundary and preserves richer cross-runtime speaker export as post-1.0 work rather than falsely claiming it here.
 
@@ -81,4 +81,4 @@ Because export is now a production workflow, the sandbox entitlement is `com.app
 
 `ci/validate_pr42_interchange.py` guards migration mappings, semantic Pause Gate translation, REW/EasyEffects/Camilla surface, ownership boundaries, and the sandbox entitlement. It remains chained into the final PR42 macOS gate alongside `ci/validate_pr42_parity_closure.py`.
 
-The interchange implementation previously passed the cumulative macOS and packaged-DMG gates on the PR40+PR41+PR42 tree. Final PR42 closure still requires the new exact-head run containing the completed final matrix/provenance validator, plus a brief user smoke pass when a Mac is available.
+The interchange implementation has already passed cumulative macOS and packaged-DMG validation on the PR40+PR41+PR42 tree. Final PR42 certification is the exact-head closure run containing the completed final matrix/provenance validator, followed later by the brief user smoke pass when a Mac is available.
