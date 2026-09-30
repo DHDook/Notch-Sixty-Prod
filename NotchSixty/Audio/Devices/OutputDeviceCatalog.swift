@@ -270,6 +270,10 @@ struct RoomCorrectionSweepGenerator: Sendable {
             try frameCount(seconds: fade, sampleRate: sampleRate),
             sweepFrameCount / 2
         )
+        guard leadInFrames <= Int.max - sweepFrameCount,
+              leadInFrames + sweepFrameCount <= Int.max - tailFrames else {
+            throw RoomCorrectionSweepGenerationError.frameCountOverflow
+        }
 
         let logRatio = log(endFrequency / startFrequency)
         let timeScale = duration / logRatio
