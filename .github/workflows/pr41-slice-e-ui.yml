@@ -1,0 +1,66 @@
+name: PR41 Production Routing UI
+
+on:
+  push:
+    branches:
+      - pr41-active-crossover-matrix-parity
+    paths:
+      - .github/scripts/pr41_slice_e_ui.py
+      - .github/workflows/pr41-slice-e-ui.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: xcode-27
+    steps:
+      - name: Check out PR41 branch
+        uses: actions/checkout@v7
+        with:
+          ref: pr41-active-crossover-matrix-parity
+          fetch-depth: 0
+
+      - name: Apply PR41 Slice E UI patch
+        run: python3 .github/scripts/pr41_slice_e_ui.py
+
+      - name: Validate project and focused tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -list -project NotchSixty.xcodeproj >/dev/null
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            -only-testing:NotchSixtyTests/RoomCorrectionProjectControllerTests \
+            test
+
+      - name: Validate production routing UI contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'Physical Output Matrix' NotchSixty/UI/ProductionRootView.swift
+          grep -q 'Physical Speaker Mode' NotchSixty/UI/ProductionRootView.swift
+          grep -q 'SpeakerCrossoverMode.allCases' NotchSixty/UI/ProductionRootView.swift
+          grep -q 'profiles.replaceSelectedSystemOutputRouting(updated)' NotchSixty/UI/ProductionRootView.swift
+          grep -q 'profiles.replaceSelectedSystemBassManagement(updated)' NotchSixty/UI/ProductionRootView.swift
+          grep -q 'Software PLL (superseded)' NotchSixty/UI/ProductionRootView.swift
+          grep -q 'engine.lifecycleState != .idle' NotchSixty/UI/ProductionRootView.swift
+          grep -q 'ForEach(routing.routes)' NotchSixty/UI/ProductionRootView.swift
+
+      - name: Commit UI and remove helpers
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm -f --ignore-unmatch \
+            .github/scripts/pr41_slice_e_ui.py \
+            .github/workflows/pr41-slice-e-ui.yml
+          git add NotchSixty/UI/ProductionRootView.swift
+          git commit -m 'PR41 Slice E: expose production speaker routing matrix'
+          git push origin HEAD:pr41-active-crossover-matrix-parity
