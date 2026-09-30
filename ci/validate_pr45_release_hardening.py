@@ -71,6 +71,10 @@ menu_block = app[menu_start:settings_start]
 if "Launch at Login" in menu_block or "launchAtLogin" in menu_block:
     fail("Launch at Login leaked into the tray/menu-bar dropdown instead of remaining in app Settings")
 
+settings_block = app[settings_start:app.index("@main", settings_start)]
+for token in ['Section("Appearance")', 'Section("App Presence")', 'Section("Startup")', '"Launch at Login"']:
+    require(settings_block, token, "Settings placement contract")
+
 # Support/privacy affordances.
 for token in [
     'Section("Permissions")',
