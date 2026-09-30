@@ -71,9 +71,9 @@ uint32_t N60RoomMeasurementBridgeCopyRightCapture(
 OSStatus N60RoomMeasurementIOProc(
     AudioDeviceID inDevice,
     const AudioTimeStamp * _Nonnull inNow,
-    const AudioBufferList * _Nullable inInputData,
+    const AudioBufferList * _Nonnull inInputData,
     const AudioTimeStamp * _Nonnull inInputTime,
-    AudioBufferList * _Nullable outOutputData,
+    AudioBufferList * _Nonnull outOutputData,
     const AudioTimeStamp * _Nonnull inOutputTime,
     void * _Nullable inClientData
 );
