@@ -157,7 +157,7 @@ final class RoomCorrectionCalibrationController: ObservableObject {
 
             try stateMachine.transition(to: .enumeratingInputs)
             publishState()
-            try discoverInputs()
+            _ = try discoverInputs()
             try stateMachine.transition(to: .ready)
             publishState()
             lastErrorDescription = nil
