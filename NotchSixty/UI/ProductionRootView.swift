@@ -1,4 +1,3 @@
-import AppKit
 import Foundation
 import SwiftUI
 
@@ -211,30 +210,17 @@ struct ProductionRootView: View {
 
 private struct ProductionSidebarBrand: View {
     var body: some View {
-        HStack(spacing: 12) {
-            if let icon = NSApplication.shared.applicationIconImage {
-                Image(nsImage: icon)
-                    .resizable()
-                    .interpolation(.high)
-                    .frame(width: 44, height: 44)
-                    .clipShape(.rect(cornerRadius: 10))
-            }
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Notch Sixty")
-                    .textCase(.uppercase)
-                    .font(.headline.weight(.semibold))
-                    .tracking(1.5)
-                Text("Stereo DSP")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+        HStack {
+            Text("Notch Sixty")
+                .textCase(.uppercase)
+                .font(.headline.weight(.semibold))
+                .tracking(1.5)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Notch Sixty Stereo DSP")
+        .accessibilityLabel("Notch Sixty")
     }
 }
 

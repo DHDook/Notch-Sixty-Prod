@@ -110,7 +110,7 @@ Before a v1.0 release candidate is promoted, perform the combined PR40–PR45 re
 12. normal Cmd-Q and menu-bar Quit teardown;
 13. Stop/Start loops, sample-rate changes, sleep/wake, output unplug/replug, and recovery;
 14. final factory-preset listening smoke and PR40–PR43 hardware/acoustic acceptance;
-15. final app-icon appearance in Finder, Dock, Settings/sidebar, light/dark appearance, and packaged DMG;
+15. final app-icon appearance in Finder, Dock, light/dark appearance, and packaged DMG;
 16. final signing/notarization or Mac App Store archive/TestFlight/App Review flow when release credentials are introduced.
 
 ## Release-candidate discipline
