@@ -234,6 +234,24 @@ final class RoomCorrectionProjectController: ObservableObject {
 
     var aggregate: RoomCorrectionAggregateResponse? { project?.aggregate }
 
+
+    var suggestedPositionName: String {
+        Self.defaultPositionName(index: positions.count)
+    }
+
+    func startNewProject(now: Date = Date()) throws {
+        guard let systemID = selectedPlaybackSystemID else {
+            throw RoomCorrectionProjectControllerError.noSelectedPlaybackSystem
+        }
+        let fresh = RoomCorrectionProject(
+            playbackSystemID: systemID,
+            name: "\(selectedPlaybackSystemName) Room Correction",
+            createdAt: now,
+            modifiedAt: now
+        )
+        try persistAndPublish(fresh)
+    }
+
     func prepareForUse() {
         do {
             try reloadForSelectedPlaybackSystem()
