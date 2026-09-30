@@ -1,0 +1,34 @@
+name: PR44 Classic Presets Stage
+
+on:
+  push:
+    branches:
+      - pr44-factory-content-presets
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: pr44-factory-content-presets
+
+      - name: Apply classic preset expansion
+        run: python3 ci/pr44_add_classic_presets_patch.py
+
+      - name: Commit production source if needed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- NotchSixty/State/ProductProfiles.swift; then
+            echo "Classic preset source already applied."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add NotchSixty/State/ProductProfiles.swift
+          git commit -m "PR44: add Classic Pop/Rock and Vocal Standards presets"
+          git push origin HEAD:pr44-factory-content-presets
