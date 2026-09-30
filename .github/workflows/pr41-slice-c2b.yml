@@ -1,0 +1,87 @@
+name: PR41 Live Same-device Transport
+
+on:
+  push:
+    branches:
+      - pr41-active-crossover-matrix-parity
+    paths:
+      - .github/scripts/pr41_slice_c2b.py
+      - .github/workflows/pr41-slice-c2b.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: xcode-27
+    steps:
+      - name: Check out PR41 branch
+        uses: actions/checkout@v7
+        with:
+          ref: pr41-active-crossover-matrix-parity
+          fetch-depth: 0
+
+      - name: Apply PR41 Slice C2b patch
+        run: python3 .github/scripts/pr41_slice_c2b.py
+
+      - name: Validate focused Swift ownership and route tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -list -project NotchSixty.xcodeproj >/dev/null
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            -only-testing:NotchSixtyTests/RoomCorrectionProjectControllerTests \
+            test
+
+      - name: Validate live multichannel IOProc
+        shell: bash
+        run: |
+          set -euo pipefail
+          REALTIME_SOURCES=$(find NotchSixty/Audio/Realtime -name '*.c' -print)
+          clang -std=c11 -O2 -Wall -Wextra -Werror \
+            -include stddef.h \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr41_same_device_output_map.c \
+            $REALTIME_SOURCES \
+            -framework Accelerate \
+            -framework CoreAudio \
+            -o /tmp/validate-pr41-live-same-device
+          /tmp/validate-pr41-live-same-device
+
+      - name: Validate C2b contract shape
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'validateForC2bLiveTransport' NotchSixty/Audio/Routing/AudioRouteConfiguration.swift
+          grep -q 'N60RealtimeAudioBridgeConfigureSameDeviceOutputMap' NotchSixty/Audio/Realtime/N60RealtimeAudioBridge.h
+          grep -q 'sameDeviceMultiOutput' NotchSixty/Audio/Realtime/N60RealtimeAudioBridge.c
+          grep -q 'sameDeviceOutputPlan: SameDeviceOutputRoutePlan?' NotchSixty/Audio/CoreAudio/CoreAudioError.swift
+          grep -q 'multiOutputRoutingConfiguration' NotchSixty/Audio/AudioIOEngine.swift
+          grep -q 'liveTransportBusUnavailable' NotchSixty/Audio/Routing/AudioRouteConfiguration.swift
+          grep -q 'validate_live_output_ioproc' ci/validate_pr41_same_device_output_map.c
+
+      - name: Commit C2b and remove helpers
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm -f --ignore-unmatch \
+            .github/scripts/pr41_slice_c2b.py \
+            .github/workflows/pr41-slice-c2b.yml
+          git add NotchSixty/Audio/Routing/AudioRouteConfiguration.swift \
+                  NotchSixty/Audio/Realtime/N60RealtimeAudioBridge.h \
+                  NotchSixty/Audio/Realtime/N60RealtimeAudioBridge.c \
+                  NotchSixty/Audio/CoreAudio/CoreAudioError.swift \
+                  NotchSixty/Audio/AudioIOEngine.swift \
+                  NotchSixty/State/ProductProfiles.swift \
+                  NotchSixtyTests/RoomCorrectionProjectControllerTests.swift \
+                  ci/validate_pr41_same_device_output_map.c
+          git commit -m 'PR41 Slice C2b: activate same-device full-range routing'
+          git push origin HEAD:pr41-active-crossover-matrix-parity
