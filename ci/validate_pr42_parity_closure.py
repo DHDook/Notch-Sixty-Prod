@@ -14,6 +14,7 @@ SUPERSEDED_RATIONALE_SIGNALS = (
     "replaced", "outside", "no-op", "not reproduced", "not recreated",
     "does not", "deliberately", "intentionally", "post-1.0", "future",
     "remains", "shared", "prioritizes", "uses", "avoids", "available",
+    "rather than", "no reproduction", "not part",
 )
 
 
