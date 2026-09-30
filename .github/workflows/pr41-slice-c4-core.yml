@@ -22,7 +22,9 @@ jobs:
           fetch-depth: 0
 
       - name: Apply PR41 Slice C4 core patch
-        run: python3 .github/scripts/pr41_slice_c4_core.py
+        run: |
+          sed -i '' 's/2_000\.0/2000.0/g' .github/scripts/pr41_slice_c4_core.py
+          python3 .github/scripts/pr41_slice_c4_core.py
 
       - name: Validate focused routing and crossover tests
         shell: bash
