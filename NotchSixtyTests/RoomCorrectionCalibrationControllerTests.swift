@@ -39,6 +39,7 @@ final class RoomCorrectionCalibrationControllerTests: XCTestCase {
         var startCount = 0
         var finishCount = 0
         var cancelCount = 0
+        var snapshotValue: N60RoomMeasurementBridgeSnapshot?
         let capture: RoomCorrectionCalibrationCapture
 
         init(capture: RoomCorrectionCalibrationCapture = .init(left: [1], right: [2])) {
@@ -46,6 +47,7 @@ final class RoomCorrectionCalibrationControllerTests: XCTestCase {
         }
 
         func start() throws { startCount += 1 }
+        func snapshot() -> N60RoomMeasurementBridgeSnapshot? { snapshotValue }
 
         func finishAndMaterialize() throws -> RoomCorrectionCalibrationCapture {
             finishCount += 1
@@ -191,6 +193,41 @@ final class RoomCorrectionCalibrationControllerTests: XCTestCase {
         XCTAssertEqual(controller.state, .analyzing)
         XCTAssertEqual(transport.finishCount, 1)
         XCTAssertEqual(transport.cancelCount, 0)
+    }
+
+    func testAtomicCompletionPollMaterializesOnlyAfterRealtimeTimelineCompletes() throws {
+        let output = outputDevice()
+        let input = inputDevice()
+        let transport = TransportFixture()
+        let controller = RoomCorrectionCalibrationController(
+            engine: try engine(output: output),
+            inputCatalog: InputCatalogFixture(devices: [input]),
+            permissionClient: PermissionFixture(status: .authorized),
+            transportFactory: { _, _, _, _ in transport }
+        )
+        controller.prepareForUse()
+        try controller.beginMeasurement()
+
+        var incomplete = N60RoomMeasurementBridgeSnapshot()
+        incomplete.frameCursor = 50
+        incomplete.totalFrameCount = 100
+        incomplete.complete = false
+        transport.snapshotValue = incomplete
+
+        XCTAssertFalse(try controller.finishMeasurementIfComplete())
+        XCTAssertEqual(controller.state, .measuring)
+        XCTAssertEqual(controller.measurementProgress, 0.5, accuracy: 0.000_001)
+        XCTAssertEqual(transport.finishCount, 0)
+
+        var complete = incomplete
+        complete.frameCursor = 100
+        complete.complete = true
+        transport.snapshotValue = complete
+
+        XCTAssertTrue(try controller.finishMeasurementIfComplete())
+        XCTAssertEqual(controller.state, .analyzing)
+        XCTAssertEqual(controller.latestCapture, transport.capture)
+        XCTAssertEqual(transport.finishCount, 1)
     }
 
     func testCancelReleasesCalibrationTransportAndReturnsIdle() throws {
