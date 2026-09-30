@@ -28,7 +28,7 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git rm ci/pr43_finish_surface_patch.py ci/pr43_finish_surface_fixup.py
+          git rm -f ci/pr43_finish_surface_patch.py ci/pr43_finish_surface_fixup.py
           git add NotchSixty/UI/ProductionRootView.swift docs/PR43_CLOSURE.md docs/PR43_ADVANCED_ACOUSTIC_SPEAKER_OPTIMIZATION.md ci/validate_pr43_closure.py
           git commit -m 'PR43: expose per-driver controls and close measurement scope'
           git push origin HEAD:pr43-advanced-acoustic-speaker-optimization
