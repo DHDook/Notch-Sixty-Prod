@@ -1098,15 +1098,13 @@ private struct ProductionMenuBarView: View {
     let product: ProductController
     @ObservedObject private var profiles: ProductProfileController
     @ObservedObject private var engine: AudioIOEngine
-    @ObservedObject private var preferences: ApplicationPreferences
     @Environment(\.openWindow) private var openWindow
     @State private var commandError: String?
 
-    init(product: ProductController, preferences: ApplicationPreferences) {
+    init(product: ProductController) {
         self.product = product
         _profiles = ObservedObject(wrappedValue: product.profiles)
         _engine = ObservedObject(wrappedValue: product.audioEngine)
-        _preferences = ObservedObject(wrappedValue: preferences)
     }
 
     private var presetSelection: Binding<UUID?> {
@@ -1223,28 +1221,6 @@ private struct ProductionMenuBarView: View {
                 NSApplication.shared.activate(ignoringOtherApps: true)
             } label: {
                 Label("Open Notch Sixty", systemImage: "macwindow")
-            }
-
-            Toggle(
-                "Launch at Login",
-                isOn: Binding(
-                    get: { preferences.launchAtLoginEnabled },
-                    set: { preferences.setLaunchAtLogin($0) }
-                )
-            )
-            .toggleStyle(.switch)
-
-            if preferences.launchAtLoginEnabled || preferences.launchAtLoginStatusDescription != "Off" {
-                Text("Login: \(preferences.launchAtLoginStatusDescription)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            if let error = preferences.launchAtLoginError {
-                Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                    .textSelection(.enabled)
             }
 
             SettingsLink {
@@ -1459,11 +1435,8 @@ struct NotchSixtyApp: App {
             image: "TrayIcon",
             isInserted: trayInserted
         ) {
-            ProductionMenuBarView(product: product, preferences: preferences)
-                .task {
-                    preferences.refreshLaunchAtLoginStatus()
-                    product.prepareForUse()
-                }
+            ProductionMenuBarView(product: product)
+                .task { product.prepareForUse() }
         }
         .menuBarExtraStyle(.window)
 
