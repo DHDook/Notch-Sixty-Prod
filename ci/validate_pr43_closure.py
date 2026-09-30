@@ -47,6 +47,9 @@ for token in [
     "isolated Low/Mid/High/Sub logical-bus acoustic captures",
     "automatic crossover-frequency optimization",
     "automatic measurement-derived excess-phase inversion",
+    "automatic low-latency IIR Room Correction fitting",
+    "per-driver realtime meter UI",
+    "richer portable CamillaDSP physical speaker-matrix export",
     "Headphone-specific workflows",
     "REAL-MAC ACOUSTIC ACCEPTANCE PENDING",
 ]:
