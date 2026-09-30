@@ -1,0 +1,53 @@
+name: PR43 Finish Surface Staging
+
+on:
+  push:
+    branches:
+      - pr43-advanced-acoustic-speaker-optimization
+
+permissions:
+  contents: write
+
+jobs:
+  stage:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: pr43-advanced-acoustic-speaker-optimization
+          fetch-depth: 0
+
+      - name: Apply production surface and closure patch
+        run: python3 ci/pr43_finish_surface_patch.py
+
+      - name: Validate PR43 closure surface
+        run: python3 ci/validate_pr43_closure.py
+
+      - name: Build Debug app
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Run XCTest
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            test
+
+      - name: Commit validated surface
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm ci/pr43_finish_surface_patch.py
+          git add NotchSixty/UI/ProductionRootView.swift docs/PR43_CLOSURE.md ci/validate_pr43_closure.py
+          git commit -m 'PR43: expose per-driver controls and close measurement scope'
+          git push origin HEAD:pr43-advanced-acoustic-speaker-optimization
