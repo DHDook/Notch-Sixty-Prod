@@ -1,6 +1,6 @@
 # PR42 — Preset / Interchange Closure
 
-Status: **IMPLEMENTATION SLICE IN CI VALIDATION**
+Status: **IMPLEMENTATION COMPLETE — RETAINED IN FINAL PR42 GATE**
 
 This slice closes the release-blocking persistence/interchange obligations identified by the PR34 source audit without transplanting legacy implementation expression.
 
@@ -71,7 +71,7 @@ The first commercial exporter writes a current-product-derived YAML configuratio
 
 Linkwitz Transform is deliberately reported/omitted until coefficient-level representation is implemented rather than approximated with a different filter.
 
-The remaining physical output-matrix/crossover portion of historical CamillaDSP export is classified separately with the PR41 loudspeaker-processing disposition and must not be falsely claimed by this first slice.
+The machine-specific physical output-matrix/crossover portion of historical CamillaDSP export is intentionally not treated as a portable 1.0 interchange requirement. The final PR42 matrix records that narrower launch boundary and preserves richer cross-runtime speaker export as post-1.0 work rather than falsely claiming it here.
 
 ## App Sandbox
 
@@ -79,4 +79,6 @@ Because export is now a production workflow, the sandbox entitlement is `com.app
 
 ## Validation
 
-`ci/validate_pr42_interchange.py` guards the migration mappings, semantic Pause Gate translation, REW/EasyEffects/Camilla surface, ownership boundary, and sandbox entitlement. It is chained into the current PR42 CI slot until the final milestone-wide closure validator supersedes slice-specific guards.
+`ci/validate_pr42_interchange.py` guards migration mappings, semantic Pause Gate translation, REW/EasyEffects/Camilla surface, ownership boundaries, and the sandbox entitlement. It remains chained into the final PR42 macOS gate alongside `ci/validate_pr42_parity_closure.py`.
+
+The interchange implementation previously passed the cumulative macOS and packaged-DMG gates on the PR40+PR41+PR42 tree. Final PR42 closure still requires the new exact-head run containing the completed final matrix/provenance validator, plus a brief user smoke pass when a Mac is available.
