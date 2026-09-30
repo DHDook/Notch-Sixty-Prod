@@ -483,4 +483,133 @@ final class RoomCorrectionProjectControllerTests: XCTestCase {
         XCTAssertEqual(fixture.controller.designs.map(\.id), [design.id])
     }
 
+
+    func testGeneratedDesignSnapshotsSourcePositionsRangeAndDeploymentSummary() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let firstID = try fixture.controller.retainMeasurement(
+            analysis(capturedAt: 10),
+            sweep: sweep(),
+            microphone: microphone()
+        )
+        let secondID = try fixture.controller.retainMeasurement(
+            analysis(capturedAt: 20),
+            sweep: sweep(),
+            microphone: microphone()
+        )
+        try fixture.controller.setMeasurementWeight(id: firstID, weight: 1)
+        try fixture.controller.setMeasurementWeight(id: secondID, weight: 2)
+        try fixture.controller.setTarget(RoomCorrectionBuiltInTarget.flat.curve)
+        let parameters = RoomCorrectionDesignParameters(
+            correctionLowHz: 80,
+            correctionHighHz: 2_000,
+            smoothingOctaves: 1.0 / 6.0,
+            maximumBoostDB: 4,
+            maximumCutDB: 8,
+            requestedTapCount: 1_024
+        )
+        let design = try fixture.controller.generateDesign(
+            parameters: parameters,
+            name: "Deploy Fixture",
+            createdAt: Date(timeIntervalSince1970: 100)
+        )
+
+        XCTAssertEqual(
+            design.sourcePositions,
+            [
+                RoomCorrectionDesignSourcePosition(id: firstID, weight: 1),
+                RoomCorrectionDesignSourcePosition(id: secondID, weight: 2),
+            ]
+        )
+        XCTAssertEqual(design.effectiveCorrectionLowHz, 100, accuracy: 0.000_001)
+        XCTAssertEqual(design.effectiveCorrectionHighHz, 1_000, accuracy: 0.000_001)
+        let summary = try fixture.controller.deploymentSummary(for: design)
+        XCTAssertEqual(summary.projectID, fixture.controller.project?.id)
+        XCTAssertEqual(summary.activeDesignID, design.id)
+        XCTAssertEqual(summary.positionCount, 2)
+        XCTAssertEqual(summary.targetName, "Flat")
+        XCTAssertEqual(summary.correctionLowHz, 100, accuracy: 0.000_001)
+        XCTAssertEqual(summary.correctionHighHz, 1_000, accuracy: 0.000_001)
+        XCTAssertEqual(summary.measurementDate, Date(timeIntervalSince1970: 20))
+    }
+
+    func testProfileRoomCorrectionDeploymentChangesOnlyRoomOwnedStateAndRestoresWithoutSidecar() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let profiles = fixture.profiles
+        let beforeContent = profiles.captureContentState()
+        let beforeSystem = try XCTUnwrap(profiles.selectedSystemProfile).state
+        let filter = RoomCorrectionFilter(
+            name: "Deployed Fixture",
+            sampleRate: nil,
+            leftTaps: [0.5, 0.5],
+            rightTaps: [0.4, 0.6],
+            declaredLatencyFrames: 0
+        )
+        let configuration = RoomCorrectionConfiguration(enabled: true, filter: filter)
+        let summary = RoomCorrectionCalibrationSummary(
+            projectID: UUID(),
+            activeDesignID: UUID(),
+            designDate: Date(timeIntervalSince1970: 200),
+            positionCount: 2,
+            correctionLowHz: 100,
+            correctionHighHz: 1_000,
+            targetName: "Flat",
+            smoothingOctaves: 1.0 / 6.0,
+            maximumBoostDB: 4,
+            maximumCutDB: 8,
+            recommendedHeadroomDB: 3.5,
+            algorithmVersion: "fixture"
+        )
+
+        try profiles.replaceSelectedSystemRoomCorrection(configuration, calibrationSummary: summary)
+        XCTAssertEqual(profiles.engine.roomCorrectionConfiguration, configuration)
+        var expectedSystem = beforeSystem
+        expectedSystem.roomCorrection = configuration
+        expectedSystem.roomCorrectionCalibration = summary
+        XCTAssertEqual(profiles.selectedSystemProfile?.state, expectedSystem)
+        XCTAssertEqual(profiles.captureContentState(), beforeContent)
+
+        let restoredEngine = AudioIOEngine(deviceCatalog: OutputCatalogFixture())
+        let restoredProfiles = ProductProfileController(
+            engine: restoredEngine,
+            storageURL: fixture.root.appendingPathComponent("profiles-v1.json")
+        )
+        restoredProfiles.restoreSelectedLayers()
+        XCTAssertEqual(restoredProfiles.selectedSystemProfile?.state.roomCorrection, configuration)
+        XCTAssertEqual(restoredProfiles.selectedSystemProfile?.state.roomCorrectionCalibration, summary)
+        XCTAssertEqual(restoredEngine.roomCorrectionConfiguration, configuration)
+    }
+
+    func testProfileDeploymentPersistenceFailureRollsBackEngineAndProfile() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NotchSixty-PR40-Rollback-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let storageDirectory = root.appendingPathComponent("profiles", isDirectory: true)
+        let storageURL = storageDirectory.appendingPathComponent("profiles-v1.json")
+        let engine = AudioIOEngine(deviceCatalog: OutputCatalogFixture())
+        let profiles = ProductProfileController(engine: engine, storageURL: storageURL)
+        let beforeEngine = engine.roomCorrectionConfiguration
+        let beforeProfile = try XCTUnwrap(profiles.selectedSystemProfile).state
+
+        try FileManager.default.removeItem(at: storageDirectory)
+        try Data("not-a-directory".utf8).write(to: storageDirectory)
+        let configuration = RoomCorrectionConfiguration(
+            enabled: true,
+            filter: RoomCorrectionFilter(
+                name: "Rollback Fixture",
+                sampleRate: nil,
+                leftTaps: [1],
+                rightTaps: nil,
+                declaredLatencyFrames: 0
+            )
+        )
+
+        XCTAssertThrowsError(
+            try profiles.replaceSelectedSystemRoomCorrection(configuration, calibrationSummary: nil)
+        )
+        XCTAssertEqual(engine.roomCorrectionConfiguration, beforeEngine)
+        XCTAssertEqual(profiles.selectedSystemProfile?.state, beforeProfile)
+    }
+
 }

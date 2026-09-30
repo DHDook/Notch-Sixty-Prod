@@ -458,6 +458,9 @@ final class RoomCorrectionProjectController: ObservableObject {
             sampleRate: sweep.sampleRate,
             usableLowHz: usable.low,
             usableHighHz: usable.high,
+            sourcePositions: updated.measurements
+                .filter { $0.included && $0.weight > 0 }
+                .map { RoomCorrectionDesignSourcePosition(id: $0.id, weight: $0.weight) },
             name: proposedName,
             createdAt: createdAt
         )
@@ -466,6 +469,37 @@ final class RoomCorrectionProjectController: ObservableObject {
         updated.modifiedAt = createdAt
         try persistAndPublish(updated)
         return result.design
+    }
+
+    func deploymentSummary(for design: RoomCorrectionDesign) throws -> RoomCorrectionCalibrationSummary {
+        let current = try requiredProject()
+        guard current.designs.contains(where: { $0.id == design.id }) else {
+            throw RoomCorrectionProjectControllerError.designNotFound(design.id)
+        }
+        let sourceIDs = design.sourcePositions?.map(\.id)
+            ?? current.aggregate?.includedPositionIDs
+            ?? []
+        let sourceSet = Set(sourceIDs)
+        let measurementDate = current.measurements
+            .filter { sourceSet.contains($0.id) }
+            .flatMap { [$0.left.capturedAt, $0.right.capturedAt] }
+            .max()
+        let targetName = design.target?.name ?? current.target?.name ?? "Custom Target"
+        return RoomCorrectionCalibrationSummary(
+            projectID: current.id,
+            activeDesignID: design.id,
+            measurementDate: measurementDate,
+            designDate: design.createdAt,
+            positionCount: sourceIDs.count,
+            correctionLowHz: design.effectiveCorrectionLowHz ?? design.parameters.correctionLowHz,
+            correctionHighHz: design.effectiveCorrectionHighHz ?? design.parameters.correctionHighHz,
+            targetName: targetName,
+            smoothingOctaves: design.parameters.smoothingOctaves,
+            maximumBoostDB: design.parameters.maximumBoostDB,
+            maximumCutDB: design.parameters.maximumCutDB,
+            recommendedHeadroomDB: design.recommendedHeadroomDB,
+            algorithmVersion: design.algorithmVersion
+        )
     }
 
     func selectDesign(id: UUID, modifiedAt: Date = Date()) throws {

@@ -9,6 +9,7 @@ enum RoomCorrectionFIRDesignError: Error, Equatable, LocalizedError {
     case transformSetupFailed(Int)
     case nonFiniteFilter
     case nonFiniteResponse
+    case invalidDeploymentHeadroom(Double)
 
     var errorDescription: String? {
         switch self {
@@ -26,6 +27,8 @@ enum RoomCorrectionFIRDesignError: Error, Equatable, LocalizedError {
             return "Generated room-correction FIR taps are non-finite."
         case .nonFiniteResponse:
             return "Generated room-correction FIR response is non-finite."
+        case .invalidDeploymentHeadroom(let headroom):
+            return "Room-correction deployment headroom \(headroom) dB is invalid."
         }
     }
 }
@@ -57,6 +60,7 @@ struct RoomCorrectionFIRDesigner: Sendable {
         sampleRate: Double,
         usableLowHz: Double? = nil,
         usableHighHz: Double? = nil,
+        sourcePositions: [RoomCorrectionDesignSourcePosition]? = nil,
         name proposedName: String = "Room Correction",
         createdAt: Date = Date(),
         id: UUID = UUID()
@@ -149,6 +153,9 @@ struct RoomCorrectionFIRDesigner: Sendable {
             sampleRate: sampleRate,
             parameters: parameters,
             target: target,
+            sourcePositions: sourcePositions,
+            effectiveCorrectionLowHz: preview.effectiveCorrectionLowHz,
+            effectiveCorrectionHighHz: preview.effectiveCorrectionHighHz,
             filter: filter,
             predictedLeftResponse: leftPredicted,
             predictedRightResponse: rightPredicted,
@@ -347,6 +354,36 @@ struct RoomCorrectionFIRDesigner: Sendable {
             throw RoomCorrectionFIRDesignError.transformTooLarge(required: required)
         }
         return size
+    }
+}
+
+extension RoomCorrectionDesign {
+    /// Returns the exact filter deployed to the Playback System. The sidecar
+    /// design remains unscaled for reproducibility; deployment embeds the
+    /// design's explicit safety headroom in the room-owned FIR rather than
+    /// mutating Content Preset headroom.
+    func deploymentFilter() throws -> RoomCorrectionFilter {
+        guard recommendedHeadroomDB.isFinite, recommendedHeadroomDB >= 0 else {
+            throw RoomCorrectionFIRDesignError.invalidDeploymentHeadroom(recommendedHeadroomDB)
+        }
+        let scale = pow(10.0, -recommendedHeadroomDB / 20.0)
+        guard scale.isFinite, scale > 0, scale <= 1 else {
+            throw RoomCorrectionFIRDesignError.invalidDeploymentHeadroom(recommendedHeadroomDB)
+        }
+        func scaled(_ taps: [Float]) throws -> [Float] {
+            let output = taps.map { Float(Double($0) * scale) }
+            guard output.allSatisfy(\.isFinite) else {
+                throw RoomCorrectionFIRDesignError.nonFiniteFilter
+            }
+            return output
+        }
+        return RoomCorrectionFilter(
+            name: filter.name,
+            sampleRate: filter.sampleRate,
+            leftTaps: try scaled(filter.leftTaps),
+            rightTaps: try filter.rightTaps.map(scaled),
+            declaredLatencyFrames: filter.declaredLatencyFrames
+        )
     }
 }
 

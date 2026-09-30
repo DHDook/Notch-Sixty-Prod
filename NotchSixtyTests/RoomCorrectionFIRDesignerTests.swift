@@ -215,4 +215,35 @@ final class RoomCorrectionFIRDesignerTests: XCTestCase {
 
         XCTAssertNoThrow(try project.validateForPersistence())
     }
+
+    func testDeploymentFilterEmbedsRecommendedHeadroomWithoutMutatingDesign() throws {
+        let frequencies: [Double] = [20, 80, 200, 1_000, 5_000, 10_000, 20_000]
+        let measured = aggregate(
+            frequencies: frequencies,
+            left: Array(repeating: -3, count: frequencies.count),
+            right: Array(repeating: -3, count: frequencies.count)
+        )
+        let result = try RoomCorrectionFIRDesigner().design(
+            aggregate: measured,
+            target: RoomCorrectionBuiltInTarget.flat.curve,
+            parameters: parameters(taps: 1_024),
+            sampleRate: 48_000
+        )
+        let original = result.design.filter
+        let deployed = try result.design.deploymentFilter()
+        let expectedScale = pow(10.0, -result.design.recommendedHeadroomDB / 20.0)
+
+        XCTAssertEqual(result.design.filter, original, "Deployment normalization must not mutate the reproducible design asset")
+        XCTAssertEqual(deployed.sampleRate, original.sampleRate)
+        XCTAssertEqual(deployed.declaredLatencyFrames, original.declaredLatencyFrames)
+        XCTAssertEqual(deployed.leftTaps.count, original.leftTaps.count)
+        for index in deployed.leftTaps.indices {
+            XCTAssertEqual(
+                Double(deployed.leftTaps[index]),
+                Double(original.leftTaps[index]) * expectedScale,
+                accuracy: 0.000_001
+            )
+        }
+    }
+
 }

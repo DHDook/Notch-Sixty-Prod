@@ -165,6 +165,7 @@ enum ProductProfileError: Error, LocalizedError {
     case outputChangeRequiresIdle(profile: String)
     case persistenceVersion(Int)
     case roomCorrectionCalibrationVersion(Int)
+    case selectedSystemProfileRequired
 
     var errorDescription: String? {
         switch self {
@@ -174,6 +175,8 @@ enum ProductProfileError: Error, LocalizedError {
             return "Saved profile data uses unsupported schema version \(version)."
         case .roomCorrectionCalibrationVersion(let version):
             return "Room-correction calibration metadata uses unsupported schema version \(version)."
+        case .selectedSystemProfileRequired:
+            return "Select a Playback System before changing deployed room correction."
         }
     }
 }
@@ -391,6 +394,47 @@ final class ProductProfileController: ObservableObject {
         persist()
     }
 
+    func replaceSelectedSystemRoomCorrection(
+        _ configuration: RoomCorrectionConfiguration,
+        calibrationSummary summary: RoomCorrectionCalibrationSummary?
+    ) throws {
+        guard let selectedSystemProfileID,
+              let index = systemProfiles.firstIndex(where: { $0.id == selectedSystemProfileID }) else {
+            throw ProductProfileError.selectedSystemProfileRequired
+        }
+        if let summary, summary.schemaVersion != RoomCorrectionCalibrationSummary.currentSchemaVersion {
+            throw ProductProfileError.roomCorrectionCalibrationVersion(summary.schemaVersion)
+        }
+
+        let previousEngineConfiguration = engine.roomCorrectionConfiguration
+        let previousState = systemProfiles[index].state
+        do {
+            try engine.replaceRoomCorrectionConfiguration(configuration)
+            systemProfiles[index].state.roomCorrection = configuration
+            systemProfiles[index].state.roomCorrectionCalibration = summary
+            try persistThrowing()
+            lastErrorDescription = nil
+        } catch {
+            systemProfiles[index].state = previousState
+            try? engine.replaceRoomCorrectionConfiguration(previousEngineConfiguration)
+            lastErrorDescription = error.localizedDescription
+            throw error
+        }
+    }
+
+    func setSelectedSystemRoomCorrectionEnabled(_ enabled: Bool) throws {
+        guard let selectedSystemProfileID,
+              let index = systemProfiles.firstIndex(where: { $0.id == selectedSystemProfileID }) else {
+            throw ProductProfileError.selectedSystemProfileRequired
+        }
+        var configuration = systemProfiles[index].state.roomCorrection
+        configuration.enabled = enabled
+        try replaceSelectedSystemRoomCorrection(
+            configuration,
+            calibrationSummary: systemProfiles[index].state.roomCorrectionCalibration
+        )
+    }
+
     func setSelectedSystemRoomCorrectionCalibration(_ summary: RoomCorrectionCalibrationSummary?) {
         guard let selectedSystemProfileID,
               let index = systemProfiles.firstIndex(where: { $0.id == selectedSystemProfileID }) else { return }
@@ -579,21 +623,25 @@ final class ProductProfileController: ObservableObject {
 
     private func persist() {
         do {
-            let directory = storageURL.deletingLastPathComponent()
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let archive = Archive(
-                userContentPresets: userContentPresets,
-                systemProfiles: systemProfiles,
-                selectedContentPresetID: selectedContentPresetID,
-                selectedSystemProfileID: selectedSystemProfileID
-            )
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let data = try encoder.encode(archive)
-            try data.write(to: storageURL, options: .atomic)
+            try persistThrowing()
         } catch {
             lastErrorDescription = error.localizedDescription
         }
+    }
+
+    private func persistThrowing() throws {
+        let directory = storageURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let archive = Archive(
+            userContentPresets: userContentPresets,
+            systemProfiles: systemProfiles,
+            selectedContentPresetID: selectedContentPresetID,
+            selectedSystemProfileID: selectedSystemProfileID
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(archive)
+        try data.write(to: storageURL, options: .atomic)
     }
 
     private static func defaultStorageURL() -> URL {
@@ -756,6 +804,11 @@ struct RoomCorrectionDesignParameters: Codable, Equatable, Sendable {
     var requestedTapCount: Int
 }
 
+struct RoomCorrectionDesignSourcePosition: Codable, Equatable, Sendable {
+    var id: UUID
+    var weight: Double
+}
+
 struct RoomCorrectionDesign: Identifiable, Codable, Equatable, Sendable {
     var id: UUID = UUID()
     var name: String
@@ -763,6 +816,9 @@ struct RoomCorrectionDesign: Identifiable, Codable, Equatable, Sendable {
     var sampleRate: Double
     var parameters: RoomCorrectionDesignParameters
     var target: RoomCorrectionTargetCurve? = nil
+    var sourcePositions: [RoomCorrectionDesignSourcePosition]? = nil
+    var effectiveCorrectionLowHz: Double? = nil
+    var effectiveCorrectionHighHz: Double? = nil
     var filter: RoomCorrectionFilter
     var predictedLeftResponse: RoomCorrectionFrequencyResponse?
     var predictedRightResponse: RoomCorrectionFrequencyResponse?
@@ -952,6 +1008,21 @@ struct RoomCorrectionProject: Identifiable, Codable, Equatable, Sendable {
             throw RoomCorrectionProjectError.invalidProject("Correction design metadata is invalid.")
         }
         if let target = design.target { try validateTarget(target) }
+        if let sourcePositions = design.sourcePositions {
+            guard !sourcePositions.isEmpty,
+                  Set(sourcePositions.map(\.id)).count == sourcePositions.count,
+                  sourcePositions.allSatisfy({ $0.weight.isFinite && $0.weight > 0 }) else {
+                throw RoomCorrectionProjectError.invalidProject("Correction design source positions are invalid.")
+            }
+        }
+        switch (design.effectiveCorrectionLowHz, design.effectiveCorrectionHighHz) {
+        case (nil, nil):
+            break
+        case let (low?, high?) where low.isFinite && high.isFinite && low > 0 && high > low:
+            break
+        default:
+            throw RoomCorrectionProjectError.invalidProject("Correction design effective range is invalid.")
+        }
         let filter = design.filter
         let tapCount = filter.leftTaps.count
         guard tapCount > 0, tapCount <= Int(N60_CONVOLUTION_MAX_TAPS),
