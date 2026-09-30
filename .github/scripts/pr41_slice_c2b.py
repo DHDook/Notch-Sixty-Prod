@@ -172,8 +172,8 @@ core = replace_once(
 )
 core = replace_once(
     core,
-    '''        case .captureBufferSizeMismatch(let capture, let output):\n            return "Capture buffer size \\(capture) frames does not match output buffer size \\(output) frames."\n''',
-    '''        case .captureBufferSizeMismatch(let capture, let output):\n            return "Capture buffer size \\(capture) frames does not match output buffer size \\(output) frames."\n        case .sameDeviceOutputMapCompilationFailed:\n            return "Unable to compile the validated same-device physical output map."\n''',
+    '''        case .captureBufferSizeMismatch(let capture, let output):\n            return "Tap aggregate callback quantum is \\(capture) frames; expected \\(output) frames to match the physical output."\n''',
+    '''        case .captureBufferSizeMismatch(let capture, let output):\n            return "Tap aggregate callback quantum is \\(capture) frames; expected \\(output) frames to match the physical output."\n        case .sameDeviceOutputMapCompilationFailed:\n            return "Unable to compile the validated same-device physical output map."\n''',
     "CoreAudioTransport C2b error description",
 )
 core = replace_once(
