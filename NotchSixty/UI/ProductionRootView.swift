@@ -672,6 +672,7 @@ private struct ProductionActiveCrossoverView: View {
                     subAlignmentCard
                 }
                 physicalRoutingCard
+                driverProcessingCard
                 verificationCard
 
                 if let error = actionError ?? profiles.lastErrorDescription {
@@ -1054,6 +1055,312 @@ private struct ProductionActiveCrossoverView: View {
         .disabled(physicalRoutingLocked)
         .padding(10)
         .background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private var driverProcessingCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Per-Driver Processing").font(.headline)
+                    Text("Playback-System-owned EQ, trim, polarity, fractional delay, and protection. Mandatory crossover filtering always runs first.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if physicalRoutingLocked {
+                    Label("Stop processing to edit", systemImage: "stop.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            let buses = routedDriverBuses
+            if buses.isEmpty {
+                Text("Enable and map physical speaker routes to expose per-driver controls.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(buses, id: \.self) { bus in
+                    driverBusEditor(bus)
+                }
+            }
+
+            Text("These controls are downstream of the mandatory Mains+Sub / Bi-Amp / Tri-Amp splitter. Global Bypass, audition modes, and driver-processing bypass cannot restore full-range signal to a protected split-driver bus.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(20)
+        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+    }
+
+    private var routedDriverBuses: [SpeakerOutputBus] {
+        let routed = Set(routing.routes.filter(\.enabled).map(\.bus))
+        return SpeakerOutputBus.allCases.filter { routed.contains($0) }
+    }
+
+    @ViewBuilder
+    private func driverBusEditor(_ bus: SpeakerOutputBus) -> some View {
+        let configuration = engine.speakerDriverProcessingConfiguration.configuration(for: bus)
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 18) {
+                    Toggle("Processing", isOn: Binding(
+                        get: { driverConfiguration(for: bus).enabled },
+                        set: { value in updateDriverBus(bus) { $0.enabled = value } }
+                    ))
+                    .toggleStyle(.switch)
+
+                    Toggle("Invert Polarity", isOn: Binding(
+                        get: { driverConfiguration(for: bus).polarityInverted },
+                        set: { value in updateDriverBus(bus) { $0.polarityInverted = value } }
+                    ))
+                    .toggleStyle(.switch)
+
+                    Toggle("Limiter", isOn: Binding(
+                        get: { driverConfiguration(for: bus).limiterEnabled },
+                        set: { value in updateDriverBus(bus) { $0.limiterEnabled = value } }
+                    ))
+                    .toggleStyle(.switch)
+                }
+
+                LabeledContent("Trim") {
+                    HStack(spacing: 10) {
+                        Slider(
+                            value: Binding(
+                                get: { driverConfiguration(for: bus).trimDB },
+                                set: { value in updateDriverBus(bus) { $0.trimDB = value } }
+                            ),
+                            in: SpeakerDriverBusProcessingConfiguration.trimRange,
+                            step: 0.1
+                        )
+                        Text("\(configuration.trimDB, specifier: "%.1f") dB")
+                            .monospacedDigit()
+                            .frame(width: 66, alignment: .trailing)
+                    }
+                }
+
+                LabeledContent("Delay") {
+                    HStack(spacing: 10) {
+                        Slider(
+                            value: Binding(
+                                get: { driverConfiguration(for: bus).delayMilliseconds },
+                                set: { value in updateDriverBus(bus) { $0.delayMilliseconds = value } }
+                            ),
+                            in: SpeakerDriverBusProcessingConfiguration.delayRangeMilliseconds,
+                            step: 0.01
+                        )
+                        Text("\(configuration.delayMilliseconds, specifier: "%.2f") ms")
+                            .monospacedDigit()
+                            .frame(width: 72, alignment: .trailing)
+                    }
+                }
+
+                if configuration.limiterEnabled {
+                    LabeledContent("Limiter Threshold") {
+                        HStack(spacing: 10) {
+                            Slider(
+                                value: Binding(
+                                    get: { driverConfiguration(for: bus).limiterThresholdDBFS },
+                                    set: { value in updateDriverBus(bus) { $0.limiterThresholdDBFS = value } }
+                                ),
+                                in: SpeakerDriverBusProcessingConfiguration.limiterThresholdRange,
+                                step: 0.5
+                            )
+                            Text("\(configuration.limiterThresholdDBFS, specifier: "%.1f") dBFS")
+                                .monospacedDigit()
+                                .frame(width: 78, alignment: .trailing)
+                        }
+                    }
+                }
+
+                Divider()
+                HStack {
+                    Text("Driver EQ").font(.subheadline.weight(.semibold))
+                    Text("\(configuration.eqBands.count)/\(SpeakerDriverBusProcessingConfiguration.maximumEQBandCount)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button {
+                        addDriverEQBand(to: bus)
+                    } label: {
+                        Label("Add Band", systemImage: "plus")
+                    }
+                    .buttonStyle(.glass)
+                    .disabled(configuration.eqBands.count >= SpeakerDriverBusProcessingConfiguration.maximumEQBandCount)
+                }
+
+                ForEach(Array(configuration.eqBands.enumerated()), id: \.element.id) { index, band in
+                    driverEQBandEditor(bus: bus, index: index, band: band)
+                }
+            }
+            .padding(.top, 10)
+            .disabled(physicalRoutingLocked)
+        } label: {
+            HStack {
+                Label(bus.displayName, systemImage: "hifispeaker.fill")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                let active = configuration.enabled && !configuration.isNeutral
+                Text(active ? "Configured" : "Neutral")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    @ViewBuilder
+    private func driverEQBandEditor(bus: SpeakerOutputBus, index: Int, band: EQBand) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Toggle("Band \(index + 1)", isOn: Binding(
+                    get: { driverBand(bus: bus, index: index)?.enabled ?? false },
+                    set: { value in updateDriverBand(bus: bus, index: index) { $0.enabled = value } }
+                ))
+                .toggleStyle(.switch)
+
+                Picker("Type", selection: Binding(
+                    get: { driverBand(bus: bus, index: index)?.type ?? .peaking },
+                    set: { value in updateDriverBand(bus: bus, index: index) { band in
+                        band.type = value
+                        band.slope = .db12
+                        band.constantQ = false
+                        band.firKernel = nil
+                    } }
+                )) {
+                    Text(EQFilterType.peaking.displayName).tag(EQFilterType.peaking)
+                    Text(EQFilterType.lowShelf.displayName).tag(EQFilterType.lowShelf)
+                    Text(EQFilterType.highShelf.displayName).tag(EQFilterType.highShelf)
+                    Text(EQFilterType.notch.displayName).tag(EQFilterType.notch)
+                    Text(EQFilterType.allPass.displayName).tag(EQFilterType.allPass)
+                }
+                .labelsHidden()
+                .frame(width: 150)
+
+                Spacer()
+                Button(role: .destructive) {
+                    removeDriverEQBand(from: bus, index: index)
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.plain)
+                .help("Remove driver EQ band")
+            }
+
+            LabeledContent("Frequency") {
+                HStack(spacing: 10) {
+                    Slider(
+                        value: Binding(
+                            get: { driverBand(bus: bus, index: index)?.frequencyHz ?? 1_000 },
+                            set: { value in updateDriverBand(bus: bus, index: index) { $0.frequencyHz = value } }
+                        ),
+                        in: 20 ... 20_000
+                    )
+                    Text("\(band.frequencyHz, specifier: "%.0f") Hz")
+                        .monospacedDigit()
+                        .frame(width: 76, alignment: .trailing)
+                }
+            }
+
+            if band.type != .notch && band.type != .allPass {
+                LabeledContent("Gain") {
+                    HStack(spacing: 10) {
+                        Slider(
+                            value: Binding(
+                                get: { driverBand(bus: bus, index: index)?.gainDB ?? 0 },
+                                set: { value in updateDriverBand(bus: bus, index: index) { $0.gainDB = value } }
+                            ),
+                            in: -12 ... 12,
+                            step: 0.1
+                        )
+                        Text("\(band.gainDB, specifier: "%.1f") dB")
+                            .monospacedDigit()
+                            .frame(width: 66, alignment: .trailing)
+                    }
+                }
+            }
+
+            LabeledContent("Q") {
+                HStack(spacing: 10) {
+                    Slider(
+                        value: Binding(
+                            get: { driverBand(bus: bus, index: index)?.q ?? 0.707 },
+                            set: { value in updateDriverBand(bus: bus, index: index) { $0.q = value } }
+                        ),
+                        in: 0.35 ... 10,
+                        step: 0.01
+                    )
+                    Text("\(band.q, specifier: "%.2f")")
+                        .monospacedDigit()
+                        .frame(width: 54, alignment: .trailing)
+                }
+            }
+        }
+        .padding(12)
+        .background(.background.opacity(0.42), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func driverConfiguration(for bus: SpeakerOutputBus) -> SpeakerDriverBusProcessingConfiguration {
+        engine.speakerDriverProcessingConfiguration.configuration(for: bus)
+    }
+
+    private func driverBand(bus: SpeakerOutputBus, index: Int) -> EQBand? {
+        let bands = driverConfiguration(for: bus).eqBands
+        guard bands.indices.contains(index) else { return nil }
+        return bands[index]
+    }
+
+    private func updateDriverBus(
+        _ bus: SpeakerOutputBus,
+        mutate: (inout SpeakerDriverBusProcessingConfiguration) -> Void
+    ) {
+        guard !physicalRoutingLocked else { return }
+        var all = engine.speakerDriverProcessingConfiguration
+        var busConfiguration = all.configuration(for: bus)
+        mutate(&busConfiguration)
+        all.replace(busConfiguration)
+        do {
+            try profiles.replaceSelectedSystemSpeakerDriverProcessing(all)
+            actionError = nil
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    private func addDriverEQBand(to bus: SpeakerOutputBus) {
+        updateDriverBus(bus) { configuration in
+            guard configuration.eqBands.count < SpeakerDriverBusProcessingConfiguration.maximumEQBandCount else { return }
+            let initialFrequency: Double
+            switch bus {
+            case .subMono: initialFrequency = 60
+            case .leftLow, .rightLow: initialFrequency = 120
+            case .leftMid, .rightMid: initialFrequency = 1_000
+            case .leftHigh, .rightHigh: initialFrequency = 5_000
+            case .leftFullRange, .rightFullRange: initialFrequency = 1_000
+            }
+            configuration.eqBands.append(
+                EQBand(type: .peaking, frequencyHz: initialFrequency, gainDB: 0, q: 0.707)
+            )
+        }
+    }
+
+    private func removeDriverEQBand(from bus: SpeakerOutputBus, index: Int) {
+        updateDriverBus(bus) { configuration in
+            guard configuration.eqBands.indices.contains(index) else { return }
+            configuration.eqBands.remove(at: index)
+        }
+    }
+
+    private func updateDriverBand(
+        bus: SpeakerOutputBus,
+        index: Int,
+        mutate: (inout EQBand) -> Void
+    ) {
+        updateDriverBus(bus) { configuration in
+            guard configuration.eqBands.indices.contains(index) else { return }
+            mutate(&configuration.eqBands[index])
+        }
     }
 
     private var verificationCard: some View {

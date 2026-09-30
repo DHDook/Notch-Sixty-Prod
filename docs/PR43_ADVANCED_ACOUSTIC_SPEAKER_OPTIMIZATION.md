@@ -1,6 +1,6 @@
 # PR43 — Advanced Acoustic & Speaker Optimization
 
-Status: **KICKOFF / IMPLEMENTATION IN PROGRESS**
+Status: **CLOSED BY `docs/PR43_CLOSURE.md` — REAL-MAC ACCEPTANCE PENDING**
 
 PR43 is stacked on the certified PR42 head and deliberately expands the existing speaker-focused product without broadening Notch Sixty into a headphone or surround/multichannel listening product before 1.0.
 
