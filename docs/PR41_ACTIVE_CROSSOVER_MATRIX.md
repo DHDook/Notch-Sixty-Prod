@@ -1,12 +1,14 @@
 # PR41 — Active Crossover / Speaker Integration
 
-Status: **STACKED ON PR40 — SLICES A/B + C1 + C2a + C2b IMPLEMENTED; FULL C2b COMBINED CI NEXT**
+Status: **STACKED ON PR40 — SLICES A/B + C1 + C2a + C2b IMPLEMENTED; FULL C2b COMBINED CI IN PROGRESS**
 
 Base implementation dependency: PR40 exact green head `56d2fbac467fc6b43df5b699f4b50d195bff98d1`.
 
 C1 substantive commit: `d339046f23c25490b55ca17bd86b012bb955752d`.
 C2a substantive commit: `fe49d2df8436e127904810630e912e1720398f55`.
 C2b substantive commit: `3daf12648c312d601b7cfee3b4f6252da30710fa`.
+
+This documentation-only checkpoint triggers the full combined PR40 + PR41 workflows on the unchanged C2b source tree. PR41 is temporarily targeted at `main` only for CI and returns to its PR40 base afterward.
 
 ## Product model
 
