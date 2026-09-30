@@ -1,0 +1,115 @@
+name: PR45 Apply Final App Icons
+
+on:
+  push:
+    branches:
+      - pr45-v1-release-hardening
+    paths:
+      - .github/workflows/pr45-apply-final-app-icons.yml
+
+permissions:
+  contents: write
+
+jobs:
+  install:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: pr45-v1-release-hardening
+          fetch-depth: 0
+
+      - name: Verify approved lossless payloads
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(shasum -a 256 icon_payload/pr45-light-final.webp | awk '{print $1}')" = "76bfc2c655584d3e6ec1485d643d95a148280f869724d28bc6abeaf79bb28c51"
+          test "$(shasum -a 256 icon_payload/pr45-dark-final.webp | awk '{print $1}')" = "89463092e9d4638bc48297d58f3ccc80cde51c65240dff3e14d7171c6f336dfe"
+          test "$(git hash-object NotchSixty/Assets.xcassets/TrayIcon.imageset/notch_sixty_tray_icon_final_tightcrop.svg)" = "759c6f2700c1250b8c697ca0eb480e1a2f11c577"
+
+      - name: Restore PNG masters losslessly
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artwork
+          cat > /tmp/convert_icon.swift <<'SWIFT'
+          import Foundation
+          import ImageIO
+          import UniformTypeIdentifiers
+
+          func convert(_ sourcePath: String, _ destinationPath: String) throws {
+              let sourceURL = URL(fileURLWithPath: sourcePath)
+              let destinationURL = URL(fileURLWithPath: destinationPath)
+              guard let source = CGImageSourceCreateWithURL(sourceURL as CFURL, nil),
+                    let image = CGImageSourceCreateImageAtIndex(source, 0, nil),
+                    let destination = CGImageDestinationCreateWithURL(
+                      destinationURL as CFURL,
+                      UTType.png.identifier as CFString,
+                      1,
+                      nil
+                    ) else {
+                  throw NSError(domain: "NotchSixtyIcon", code: 1)
+              }
+              CGImageDestinationAddImage(destination, image, nil)
+              guard CGImageDestinationFinalize(destination) else {
+                  throw NSError(domain: "NotchSixtyIcon", code: 2)
+              }
+          }
+
+          try convert("icon_payload/pr45-light-final.webp", "artwork/AppIcon-light-master.png")
+          try convert("icon_payload/pr45-dark-final.webp", "artwork/AppIcon-dark-master.png")
+          SWIFT
+          swift /tmp/convert_icon.swift
+          test "$(sips -g pixelWidth artwork/AppIcon-light-master.png | awk '/pixelWidth/ {print $2}')" = "1254"
+          test "$(sips -g pixelHeight artwork/AppIcon-light-master.png | awk '/pixelHeight/ {print $2}')" = "1254"
+          test "$(sips -g pixelWidth artwork/AppIcon-dark-master.png | awk '/pixelWidth/ {print $2}')" = "1254"
+          test "$(sips -g pixelHeight artwork/AppIcon-dark-master.png | awk '/pixelHeight/ {print $2}')" = "1254"
+
+      - name: Generate macOS app icon slots
+        run: swift ci/generate_app_icons.swift
+
+      - name: Validate asset catalog and tray preservation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          catalog = Path('NotchSixty/Assets.xcassets/AppIcon.appiconset')
+          data = json.loads((catalog / 'Contents.json').read_text())
+          files = [entry.get('filename') for entry in data['images'] if entry.get('filename')]
+          assert len(files) == 20, len(files)
+          for filename in files:
+              path = catalog / filename
+              assert path.exists() and path.stat().st_size > 0, filename
+          assert sum(1 for entry in data['images'] if not entry.get('appearances')) == 10
+          assert sum(1 for entry in data['images'] if entry.get('appearances')) == 10
+          print('20-slot light/dark AppIcon catalog verified')
+          PY
+          test "$(git hash-object NotchSixty/Assets.xcassets/TrayIcon.imageset/notch_sixty_tray_icon_final_tightcrop.svg)" = "759c6f2700c1250b8c697ca0eb480e1a2f11c577"
+
+      - name: Compile app with final icon catalog
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Commit approved app icon assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add artwork/AppIcon-light-master.png artwork/AppIcon-dark-master.png
+          git add artwork/AppIcon-light-final.png artwork/AppIcon-dark-final.png
+          git add NotchSixty/Assets.xcassets/AppIcon.appiconset/*.png
+          git rm icon_payload/pr45-light-final.webp icon_payload/pr45-dark-final.webp
+          git diff --cached --check
+          git commit -m "PR45: install approved light and dark app icons"
+          git push origin HEAD:pr45-v1-release-hardening
