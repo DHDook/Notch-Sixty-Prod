@@ -1,4 +1,6 @@
+import Foundation
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ProductionRoomCorrectionWorkspace: View {
     @ObservedObject var engine: AudioIOEngine
@@ -8,6 +10,7 @@ struct ProductionRoomCorrectionWorkspace: View {
 
     @State private var actionError: String?
     @State private var positionName = ""
+    @State private var importingMicrophoneCalibration = false
 
     private var selectedInputBinding: Binding<String?> {
         Binding(
@@ -56,6 +59,18 @@ struct ProductionRoomCorrectionWorkspace: View {
         .task { calibration.prepareForUse() }
         .task(id: profiles.selectedSystemProfileID) {
             projects.prepareForUse()
+            do {
+                try calibration.setMicrophoneCalibration(projects.project?.microphone?.calibration)
+            } catch {
+                actionError = error.localizedDescription
+            }
+        }
+        .fileImporter(
+            isPresented: $importingMicrophoneCalibration,
+            allowedContentTypes: [.data],
+            allowsMultipleSelection: false
+        ) { result in
+            importMicrophoneCalibrationFile(result)
         }
         .task(id: calibration.state) {
             switch calibration.state {
@@ -184,6 +199,37 @@ struct ProductionRoomCorrectionWorkspace: View {
                             || calibration.state == .measuring
                             || calibration.state == .arming
                     )
+                }
+
+
+                LabeledContent("Microphone Calibration") {
+                    HStack(spacing: 10) {
+                        Text(calibration.microphoneCalibration?.sourceName ?? "No calibration curve")
+                            .foregroundStyle(calibration.microphoneCalibration == nil ? .secondary : .primary)
+                            .lineLimit(1)
+
+                        Button("Import…") {
+                            actionError = nil
+                            importingMicrophoneCalibration = true
+                        }
+                        .disabled(calibration.state == .measuring || calibration.state == .arming)
+
+                        Button("Clear") {
+                            actionError = nil
+                            calibration.clearMicrophoneCalibration()
+                        }
+                        .disabled(
+                            calibration.microphoneCalibration == nil
+                                || calibration.state == .measuring
+                                || calibration.state == .arming
+                        )
+                    }
+                }
+
+                if let microphoneCalibration = calibration.microphoneCalibration {
+                    Text("\(microphoneCalibration.points.count) calibration points. The curve is applied to offline measurement analysis only; it is never inserted into daily playback DSP.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -459,6 +505,28 @@ struct ProductionRoomCorrectionWorkspace: View {
         .glassEffect(.regular, in: .rect(cornerRadius: 18))
     }
 
+    private func importMicrophoneCalibrationFile(_ result: Result<URL, Error>) {
+        actionError = nil
+        do {
+            let url = try result.get()
+            let accessed = url.startAccessingSecurityScopedResource()
+            defer {
+                if accessed { url.stopAccessingSecurityScopedResource() }
+            }
+            let data = try Data(contentsOf: url)
+            guard let text = String(data: data, encoding: .utf8) else {
+                actionError = "Microphone calibration files must be UTF-8 text with frequency and gain columns."
+                return
+            }
+            _ = try calibration.importMicrophoneCalibration(
+                text: text,
+                sourceName: url.lastPathComponent
+            )
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
     private func retainReviewedMeasurement(_ analysis: RoomCorrectionMeasurementAnalysis) {
         actionError = nil
         guard let input = calibration.selectedInputDevice,
@@ -472,7 +540,7 @@ struct ProductionRoomCorrectionWorkspace: View {
             displayName: input.name,
             manufacturer: nil,
             inputChannelIndex: calibration.selectedInputChannelIndex,
-            calibration: projects.project?.microphone?.calibration
+            calibration: calibration.microphoneCalibration
         )
         let proposed = positionName.trimmingCharacters(in: .whitespacesAndNewlines)
         do {

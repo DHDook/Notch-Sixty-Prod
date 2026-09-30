@@ -79,6 +79,7 @@ final class RoomCorrectionCalibrationController: ObservableObject {
     @Published private(set) var inputDevices: [AudioInputDevice] = []
     @Published private(set) var selectedInputUID: String?
     @Published private(set) var selectedInputChannelIndex = 0
+    @Published private(set) var microphoneCalibration: RoomCorrectionMicrophoneCalibration?
     @Published private(set) var activePlan: RoomCorrectionMeasurementPlan?
     @Published private(set) var latestCapture: RoomCorrectionCalibrationCapture?
     @Published private(set) var latestAnalysis: RoomCorrectionMeasurementAnalysis?
@@ -214,11 +215,13 @@ final class RoomCorrectionCalibrationController: ObservableObject {
     func selectInput(uid: String?) {
         guard activeTransport == nil else { return }
         guard let uid else {
+            if selectedInputUID != nil { microphoneCalibration = nil }
             selectedInputUID = nil
             selectedInputChannelIndex = 0
             return
         }
         guard inputDevices.contains(where: { $0.uid == uid }) else { return }
+        if selectedInputUID != uid { microphoneCalibration = nil }
         selectedInputUID = uid
         selectedInputChannelIndex = 0
         lastErrorDescription = nil
@@ -231,7 +234,35 @@ final class RoomCorrectionCalibrationController: ObservableObject {
         guard index >= 0 else {
             throw RoomCorrectionCalibrationControllerError.invalidInputChannel(index)
         }
+        if selectedInputChannelIndex != index { microphoneCalibration = nil }
         selectedInputChannelIndex = index
+        lastErrorDescription = nil
+    }
+
+    @discardableResult
+    func importMicrophoneCalibration(
+        text: String,
+        sourceName: String? = nil
+    ) throws -> RoomCorrectionMicrophoneCalibration {
+        let parsed = try RoomCorrectionMicrophoneCalibrationParser().parse(
+            text,
+            sourceName: sourceName
+        )
+        microphoneCalibration = parsed
+        lastErrorDescription = nil
+        return parsed
+    }
+
+    func setMicrophoneCalibration(_ calibration: RoomCorrectionMicrophoneCalibration?) throws {
+        if let calibration {
+            _ = try calibration.gainDB(at: 1.0)
+        }
+        microphoneCalibration = calibration
+        lastErrorDescription = nil
+    }
+
+    func clearMicrophoneCalibration() {
+        microphoneCalibration = nil
         lastErrorDescription = nil
     }
 
@@ -377,8 +408,9 @@ final class RoomCorrectionCalibrationController: ObservableObject {
         }
 
         let generation = analysisGeneration
+        let activeMicrophoneCalibration = microphoneCalibration ?? self.microphoneCalibration
         do {
-            let analysis = try await analysisOperation(capture, plan, microphoneCalibration)
+            let analysis = try await analysisOperation(capture, plan, activeMicrophoneCalibration)
             guard generation == analysisGeneration, state == .analyzing else { return false }
             latestAnalysis = analysis
             try stateMachine.transition(to: .reviewing)

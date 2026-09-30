@@ -76,6 +76,16 @@ final class RoomCorrectionCalibrationControllerTests: XCTestCase {
         func cancel() { cancelCount += 1 }
     }
 
+    private actor CalibrationRecorder {
+        private var value: RoomCorrectionMicrophoneCalibration?
+
+        func record(_ calibration: RoomCorrectionMicrophoneCalibration?) {
+            value = calibration
+        }
+
+        func snapshot() -> RoomCorrectionMicrophoneCalibration? { value }
+    }
+
     private actor AnalysisGate {
         private var continuation: CheckedContinuation<Void, Never>?
         private var waiting = false
@@ -338,6 +348,70 @@ final class RoomCorrectionCalibrationControllerTests: XCTestCase {
         XCTAssertEqual(controller.state, .reviewing)
         XCTAssertNil(controller.lastErrorDescription)
         XCTAssertTrue(controller.canBeginMeasurement)
+    }
+
+    func testMicrophoneCalibrationImportIsOwnedAndInvalidatedByInputChange() throws {
+        let output = outputDevice()
+        let first = inputDevice()
+        let second = AudioInputDevice(
+            deviceID: 23,
+            uid: "second-input-fixture",
+            name: "Second Measurement Mic",
+            nominalSampleRate: 48_000,
+            availableSampleRateRanges: [
+                AudioSampleRateRange(minimum: 48_000, maximum: 48_000),
+            ]
+        )
+        let controller = RoomCorrectionCalibrationController(
+            engine: try engine(output: output),
+            inputCatalog: InputCatalogFixture(devices: [first, second]),
+            permissionClient: PermissionFixture(status: .authorized)
+        )
+        controller.prepareForUse()
+
+        let imported = try controller.importMicrophoneCalibration(
+            text: "20 1.5\n1000 -2.0\n20000 -0.5",
+            sourceName: "fixture.cal"
+        )
+
+        XCTAssertEqual(controller.microphoneCalibration, imported)
+        XCTAssertEqual(imported.sourceName, "fixture.cal")
+        XCTAssertEqual(imported.points.count, 3)
+
+        controller.selectInput(uid: second.uid)
+        XCTAssertNil(controller.microphoneCalibration)
+    }
+
+    func testAnalysisUsesOwnedMicrophoneCalibration() async throws {
+        let output = outputDevice()
+        let input = inputDevice()
+        let transport = TransportFixture()
+        let expected = analysisResult()
+        let recorder = CalibrationRecorder()
+        let controller = RoomCorrectionCalibrationController(
+            engine: try engine(output: output),
+            inputCatalog: InputCatalogFixture(devices: [input]),
+            permissionClient: PermissionFixture(status: .authorized),
+            transportFactory: { _, _, _, _ in transport },
+            analysisOperation: { _, _, calibration in
+                await recorder.record(calibration)
+                return expected
+            }
+        )
+        controller.prepareForUse()
+        let imported = try controller.importMicrophoneCalibration(
+            text: "20 1.0\n1000 2.0\n20000 3.0",
+            sourceName: "owned.cal"
+        )
+        try controller.beginMeasurement()
+        _ = try controller.finishMeasurement()
+
+        let published = await controller.analyzeLatestCapture()
+        let received = await recorder.snapshot()
+
+        XCTAssertTrue(published)
+        XCTAssertEqual(received, imported)
+        XCTAssertEqual(controller.latestAnalysis, expected)
     }
 
     func testAnalysisFailureFailsClosedAndKeepsResultUnpublished() async throws {
