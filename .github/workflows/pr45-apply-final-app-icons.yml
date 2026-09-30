@@ -6,6 +6,7 @@ on:
       - pr45-v1-release-hardening
     paths:
       - .github/workflows/pr45-apply-final-app-icons.yml
+      - ci/generate_app_icons.swift
 
 permissions:
   contents: write
