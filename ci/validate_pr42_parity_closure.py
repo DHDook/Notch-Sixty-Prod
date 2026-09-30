@@ -36,8 +36,6 @@ provenance = PROVENANCE.read_text(encoding="utf-8")
 notices = NOTICES.read_text(encoding="utf-8")
 contract = CONTRACT.read_text(encoding="utf-8")
 
-# Parse every capability table row. The final matrix deliberately uses one of the
-# five PR42 dispositions as the complete second column of every data row.
 rows = []
 for line in matrix.splitlines():
     if not line.startswith("|"):
@@ -74,9 +72,6 @@ capability_names = {capability for capability, _, _ in rows}
 for capability in required_capabilities:
     require(capability in capability_names, f"required audited capability missing from final matrix: {capability}")
 
-# SUPERSEDED must describe a replacement, deliberate boundary, audited no-op, or
-# future handoff. This is semantic rather than padding rationales to an arbitrary
-# character count.
 for capability, status, rationale in rows:
     if status != "SUPERSEDED":
         continue
@@ -91,7 +86,6 @@ require("There are no unresolved release-blocking rows" in matrix, "matrix closu
 require("HISTORICAL TRIAGE" in initial_matrix and "PR42_FINAL_PARITY_MATRIX.md" in initial_matrix,
         "initial parity matrix must remain explicitly historical/non-controlling")
 
-# Provenance must close the production-source, license, dependency and asset axes.
 for token in [
     "unexplained production source origin: **none identified**",
     "unresolved GPL/AGPL production dependency: **none identified**",
@@ -106,8 +100,6 @@ require("no linked or bundled third-party production dependency" in notices,
 require("GPL/AGPL dependencies are not permitted" in notices,
         "third-party notice policy lost GPL/AGPL production prohibition")
 
-# Keep the main contract wired to the final artifacts/status once PR42 enters
-# closure. This also prevents the branch from drifting back to an audit-only state.
 require("PR42_FINAL_PARITY_MATRIX.md" in contract, "main PR42 contract does not reference the final matrix")
 require("PR42_PROVENANCE_CLOSURE.md" in contract, "main PR42 contract does not reference provenance closure")
 require("CLOSURE" in contract.upper(), "main PR42 contract no longer identifies closure state")
