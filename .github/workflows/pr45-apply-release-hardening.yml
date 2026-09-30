@@ -1,0 +1,37 @@
+name: PR45 Apply Release Hardening
+
+on:
+  push:
+    branches:
+      - pr45-v1-release-hardening
+    paths:
+      - .github/workflows/pr45-apply-release-hardening.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: pr45-v1-release-hardening
+
+      - name: Apply PR45 source patch
+        run: python3 ci/pr45_apply_release_hardening.py
+
+      - name: Commit patched production sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            NotchSixty/NotchSixtyApp.swift \
+            NotchSixty/ContentView.swift \
+            NotchSixty/UI/ProductionRootView.swift \
+            README.md
+          git diff --cached --check
+          git commit -m "PR45: harden v1 production shell"
+          git push origin HEAD:pr45-v1-release-hardening
