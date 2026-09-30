@@ -1,6 +1,6 @@
 # PR41 — Active Crossover / Speaker Integration
 
-Status: **STACKED ON PR40 — CONTRACT / INVENTORY SLICE**
+Status: **STACKED ON PR40 — SLICES A/B IMPLEMENTED; COMBINED CI CHECKPOINT**
 
 Base: PR40 exact green head `56d2fbac467fc6b43df5b699f4b50d195bff98d1`.
 
@@ -107,18 +107,36 @@ Behaviors that remain meaningful in a stereo speaker + sub integration product a
    - raw Global Bypass must remain raw apart from the established master-volume contract;
    - crossover state must not break PR40 room-correction audition/bypass behavior.
 
+## Slice A/B implementation checkpoint
+
+Implemented on top of PR40:
+
+- added `ProductProfileController.replaceSelectedSystemBassManagement(_:)`, a narrow transactional Playback System update matching the room-correction ownership pattern;
+- profile persistence failure rolls back both live `AudioIOEngine` crossover state and the in-memory Playback System profile;
+- added persistent enable/bypass convenience without overwriting unrelated Playback System fields;
+- Active Crossover production UI now writes through the selected Playback System rather than mutating transient engine state directly;
+- production UI now exposes the existing engine capabilities that were previously hidden: sub gain, sub phase-alignment enable/frequency/Q, and the logical verification monitor path;
+- verification monitor copy explicitly states that mains/sub monitor modes do not create a separately routed physical sub output;
+- Content Preset state remains independent from crossover changes;
+- deployed PR40 Room Correction configuration and calibration provenance remain unchanged by crossover edits;
+- reload restores the persisted crossover state alongside Room Correction;
+- deterministic realtime coverage verifies that enabling/changing the zero-latency crossover preserves the attached room-correction convolution program generation and latency at 44.1/48/96/192/384 kHz;
+- raw Global Bypass remains raw with crossover + room correction attached.
+
+Focused `xcode-27` validation passed before the substantive commit was created. This checkpoint is used for the full combined PR40 + PR41 CI matrix.
+
 ## Planned slices
 
-### Slice A — contract, ownership and baseline tests
+### Slice A — contract, ownership and baseline tests — COMPLETE
 
 - freeze the commercial two-channel disposition above;
 - inventory the current crossover model, render stage, persistence and production UI;
 - add deterministic tests proving Playback System ownership and Content Preset independence;
 - add exact baseline tests around crossover + Room Correction stage ordering and audition/bypass behavior before changing DSP semantics.
 
-### Slice B — complete the current production crossover surface
+### Slice B — complete the current production crossover surface — COMPLETE
 
-Expose and persist the capabilities that already exist in the production engine but are incomplete in the production UI:
+Expose and persist the capabilities that already exist in the production engine but were incomplete in the production UI:
 
 - enable/bypass;
 - frequency;
@@ -126,9 +144,9 @@ Expose and persist the capabilities that already exist in the production engine 
 - sub gain;
 - polarity;
 - sub phase-alignment enable/frequency/Q;
-- validation monitor path where appropriate for an engineering/verification surface.
+- logical validation monitor path.
 
-All production edits must persist through the selected Playback System rather than mutating only transient engine state.
+All production edits now persist through the selected Playback System rather than mutating only transient engine state.
 
 ### Slice C — stereo speaker/sub crossover model improvements
 
@@ -185,6 +203,6 @@ Combined hands-on Mac acceptance after PR40 + PR41 automated completion:
 - verify stop/start, relaunch and sample-rate rebuild behavior;
 - listen for clicks, dropouts, level jumps, unexpected latency, channel imbalance or transition artifacts.
 
-## First implementation decision
+## Next implementation decision
 
-PR41 starts by strengthening the existing stereo crossover ownership/UI/testing path before changing crossover math. That gives us a small, independently testable first slice and preserves a clean rollback point while PR40 remains unmerged pending physical acceptance.
+After the combined exact-head CI checkpoint is green, Slice C will evaluate crossover-model improvements that are genuinely useful for a stereo mains + sub product. It will not recreate legacy multichannel routing or expose controls without a real DSP effect.
