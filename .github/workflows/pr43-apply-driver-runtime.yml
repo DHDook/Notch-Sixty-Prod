@@ -27,7 +27,7 @@ jobs:
 
       - name: Validate realtime kernel numerically
         run: |
-          cc -std=c11 -Wall -Wextra -Werror ci/validate_pr43_driver_runtime.c -lm -o /tmp/validate-pr43-driver-runtime
+          clang -std=c11 -Wall -Wextra -Werror ci/validate_pr43_driver_runtime.c -lm -o /tmp/validate-pr43-driver-runtime
           /tmp/validate-pr43-driver-runtime
 
       - name: Commit implementation back to PR43
