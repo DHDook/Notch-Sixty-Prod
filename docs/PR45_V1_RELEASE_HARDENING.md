@@ -21,7 +21,7 @@ Debug builds retain all of those surfaces for future regression work.
 
 ### 2. Launch at Login
 
-Settings now exposes **Launch at Login** using Apple's `SMAppService.mainApp` API.
+The app Settings / preferences UI—the same surface that contains **Appearance** and **App Presence (Dock / Menu Bar / Both)**—now exposes **Launch at Login** using Apple's `SMAppService.mainApp` API. The compact tray dropdown intentionally does not duplicate this preference.
 
 Contract:
 
@@ -90,7 +90,7 @@ Before a v1.0 release candidate is promoted, perform the combined PR40–PR45 re
 5. stale/missing output UID and disconnected Playback System recovery;
 6. missing/corrupted Room Correction project-sidecar recovery without damaging deployed correction state;
 7. Dock / Menu Bar / Both appearance modes across relaunch;
-8. Launch at Login enable/disable and any System Settings approval flow;
+8. Launch at Login enable/disable and any System Settings approval flow from the app Settings / preferences UI;
 9. verify login launch does not begin processing automatically;
 10. Copy Diagnostics accuracy and privacy boundary;
 11. VoiceOver labels, keyboard traversal, control focus, light/dark appearance, and reduced-motion sanity;
