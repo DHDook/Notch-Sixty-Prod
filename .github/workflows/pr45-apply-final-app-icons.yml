@@ -23,9 +23,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(shasum -a 256 icon_payload/pr45-light-final.webp | awk '{print $1}')" = "76bfc2c655584d3e6ec1485d643d95a148280f869724d28bc6abeaf79bb28c51"
-          test "$(shasum -a 256 icon_payload/pr45-dark-final.webp | awk '{print $1}')" = "89463092e9d4638bc48297d58f3ccc80cde51c65240dff3e14d7171c6f336dfe"
-          test "$(git hash-object NotchSixty/Assets.xcassets/TrayIcon.imageset/notch_sixty_tray_icon_final_tightcrop.svg)" = "759c6f2700c1250b8c697ca0eb480e1a2f11c577"
+          LIGHT_SHA="$(shasum -a 256 icon_payload/pr45-light-final.webp | awk '{print $1}')"
+          DARK_SHA="$(shasum -a 256 icon_payload/pr45-dark-final.webp | awk '{print $1}')"
+          TRAY_SHA="$(git hash-object NotchSixty/Assets.xcassets/TrayIcon.imageset/notch_sixty_tray_icon_final_tightcrop.svg)"
+          echo "light=$LIGHT_SHA"
+          echo "dark=$DARK_SHA"
+          echo "tray=$TRAY_SHA"
+          test "$LIGHT_SHA" = "76bfc2c655584d3e6ec1485d643d95a148280f869724d28bc6abeaf79bb28c51"
+          test "$DARK_SHA" = "89463092e9d4638bc48297d58f3ccc80cde51c65240dff3e14d7171c6f336dfe"
+          test "$TRAY_SHA" = "759c6f2700c1250b8c697ca0eb480e1a2f11c577"
 
       - name: Restore PNG masters losslessly
         shell: bash
