@@ -343,6 +343,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Notch Sixty";
 				INFOPLIST_KEY_NSAudioCaptureUsageDescription = "Notch Sixty captures system audio so it can process and play it through your selected output device.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Notch Sixty uses your selected measurement microphone to measure speaker and room response for room correction.";
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.dhdook.NotchSixty;
 				PRODUCT_MODULE_NAME = NotchSixty;
@@ -366,6 +367,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Notch Sixty";
 				INFOPLIST_KEY_NSAudioCaptureUsageDescription = "Notch Sixty captures system audio so it can process and play it through your selected output device.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Notch Sixty uses your selected measurement microphone to measure speaker and room response for room correction.";
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.dhdook.NotchSixty;
 				PRODUCT_MODULE_NAME = NotchSixty;
