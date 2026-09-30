@@ -1,0 +1,17 @@
+name: PR45 Closure
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate PR45 v1 release hardening
+        run: python3 ci/validate_pr45_release_hardening.py
