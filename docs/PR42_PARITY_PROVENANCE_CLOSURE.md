@@ -26,9 +26,9 @@ There may be no unexplained omission at PR42 exit.
 - `docs/PR42_PROVENANCE_CLOSURE.md` — PR34–PR42 implementation/source/asset/dependency reconciliation.
 - `docs/PR42_INTERCHANGE_CLOSURE.md` — `.eqpreset`, REW, EasyEffects and CamillaDSP compatibility contract.
 - `THIRD_PARTY_NOTICES.md` — release-time dependency/notice result.
-- `ci/validate_pr42_parity_closure.py` — permanent machine guard against unclassified or release-blocking matrix drift; `SUPERSEDED` rows must state a semantic replacement, deliberate boundary, audited no-op, or future handoff rather than merely satisfy an arbitrary prose-length threshold.
+- `ci/validate_pr42_parity_closure.py` — permanent machine guard against unclassified or release-blocking matrix drift.
 
-`docs/PR42_INITIAL_PARITY_MATRIX.md` remains historical triage only; it is not the controlling closure ledger.
+`docs/PR42_INITIAL_PARITY_MATRIX.md` remains as historical triage only; it is no longer the controlling closure ledger.
 
 ## Source-of-truth / clean-room rule
 
@@ -40,7 +40,7 @@ Commercial implementation sources remain:
 - independently written product requirements;
 - Apple platform documentation and public APIs;
 - public DSP/acoustic specifications/literature where mathematics is required;
-- explicitly provenance-cleared owner-authored material.
+- explicitly provenance-cleared owner-controlled material.
 
 Historical GPL source expression, tests, scripts, project structure and configuration are not permitted production implementation sources.
 
@@ -76,7 +76,7 @@ The commercial Content Preset / Playback System ownership split remains authorit
 
 `docs/PR42_PROVENANCE_CLOSURE.md` reconciles PR34–PR42 implementation areas, app artwork, Apple-platform dependencies and interchange code. No unresolved GPL/AGPL production dependency or bundled third-party production component is identified.
 
-The analog-meter identity artwork is recorded as user-authored owner-controlled material, deliberately reused under the owner's independent rights rather than inherited merely because it appeared in a historical GPL repository.
+The Notch Sixty icon artwork is project-owner-approved/controlled material. The final light/dark raster pair is retained as the visual source of truth and generated asset-catalog slots are raster-preserving resamples only—no crop, mask, redraw or reinterpretation is applied.
 
 ### E. Production UI consistency — CLOSED SUBJECT TO USER SMOKE TEST
 
@@ -104,6 +104,7 @@ The final PR42 software gate requires:
 - `ci/validate_pr42_dynamics_ui_style.py`;
 - `ci/validate_pr42_interchange.py`;
 - `ci/validate_pr42_parity_closure.py`;
+- `ci/validate_pr39_app_identity.py`, including raster-preserving final icon treatment;
 - realtime benchmarks;
 - Debug build;
 - Release Performance build;
@@ -111,16 +112,15 @@ The final PR42 software gate requires:
 - App Sandbox validation;
 - Release app / DMG packaging.
 
-The closure validator must fail if the final matrix has an invalid/unclassified row, a `BLOCKED` disposition, a superseded row without a real replacement/boundary rationale, missing key audited capabilities, an initial matrix that is no longer explicitly historical/non-controlling, or an incomplete provenance/third-party result.
-
-For cumulative certification, PR42 may temporarily target `main` so the normal pull-request workflow evaluates the full PR40+PR41+PR42 tree. After that exact head is green, restoring the PR base to `pr41-active-crossover-matrix-parity` is a metadata-only change and does not alter the certified commit SHA.
+The closure validator must fail if the final matrix has an invalid/unclassified row, a `BLOCKED` disposition, a superseded row without rationale, missing key audited capabilities, or an incomplete provenance/third-party result.
 
 ## Manual acceptance remaining
 
-No Mac-only test is required to establish the documentary classifications themselves. Before PR42 is marked ready/merged, the user should perform the already-planned combined PR40/PR41 real-hardware acceptance and a brief PR42 production UI/interchange smoke pass when a Mac is available.
+No Mac-only test is required to establish the documentary classifications themselves. Before PR42 is marked ready/merged, the user should perform the already-planned combined PR40/PR41 real-hardware acceptance and a brief PR42 production UI/interchange/icon smoke pass when a Mac is available.
 
 The PR42 smoke pass should include:
 
+- confirm the approved light/dark Notch Sixty icon appears correctly in Finder/Dock/system surfaces;
 - Dynamics editor appearance/control editing;
 - import a representative `.eqpreset` and inspect migration notes;
 - import/export representative REW and EasyEffects EQ files;
@@ -137,7 +137,7 @@ PR42 reaches software closure when:
 3. post-1.0 items are explicitly identified and are not claimed as current implementation;
 4. interchange obligations are explicit and validated;
 5. provenance/third-party notices are reconciled;
-6. Dynamics UI consistency work is structurally guarded;
+6. Dynamics UI consistency and final icon treatment are structurally guarded;
 7. exact-head CI and packaging are green.
 
 After PR42, new broad parity discovery stops. Remaining work moves to production hardening, real-hardware acceptance and App Store/commercial release preparation.
