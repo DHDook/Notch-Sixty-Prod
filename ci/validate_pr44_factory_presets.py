@@ -14,13 +14,14 @@ required_names = [
     'name: "Streaming"',
 ]
 for token in required_names:
-    if token not in source:
-        raise SystemExit(f"Missing factory content preset: {token}")
+    count = source.count(token)
+    if count != 1:
+        raise SystemExit(f"Factory content preset must occur exactly once ({count}): {token}")
 
-if source.count("origin: .factory") < 8:
-    raise SystemExit("Expected eight factory content presets")
+if source.count("origin: .factory") != 8:
+    raise SystemExit("Expected exactly eight factory content presets")
 
-# Stable IDs keep persisted factory selections valid across releases.
+# Stable IDs keep persisted factory selections valid across releases and must remain unique.
 for suffix in [
     "000000000001",
     "000000000010",
@@ -31,8 +32,9 @@ for suffix in [
     "000000000015",
     "000000000016",
 ]:
-    if suffix not in source:
-        raise SystemExit(f"Missing stable factory preset UUID suffix {suffix}")
+    count = source.count(suffix)
+    if count != 1:
+        raise SystemExit(f"Factory preset UUID suffix must occur exactly once ({count}): {suffix}")
 
 # Final listening-approved Rock Arena revision.
 rock_contract = [
