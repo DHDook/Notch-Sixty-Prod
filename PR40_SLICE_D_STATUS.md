@@ -21,6 +21,7 @@ Microphone-calibration production work in this gate includes:
 - production Import and Clear controls with original source filename retention;
 - Xcode 27's multi-selection file-importer completion shape handled explicitly as `Result<[URL], Error>` even though the UI allows only one selection;
 - invalidation of the active curve when microphone input identity or input channel changes;
+- invalidation when device rediscovery replaces a disappeared selected microphone, with deterministic controller coverage;
 - restore of a persisted project calibration when the selected Playback System project is loaded;
 - automatic use of the owned calibration curve by offline analysis;
 - persistence of the same active curve with first-position microphone metadata;
