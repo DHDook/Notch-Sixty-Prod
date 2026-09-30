@@ -29,8 +29,8 @@ jobs:
           echo "light=$LIGHT_SHA"
           echo "dark=$DARK_SHA"
           echo "tray=$TRAY_SHA"
-          test "$LIGHT_SHA" = "76bfc2c655584d3e6ec1485d643d95a148280f869724d28bc6abeaf79bb28c51"
-          test "$DARK_SHA" = "89463092e9d4638bc48297d58f3ccc80cde51c65240dff3e14d7171c6f336dfe"
+          test "$LIGHT_SHA" = "89a55f5b95763d4b878468cb5a46a9c2cf6547fd7914e04d3fb73f59df6344ac"
+          test "$DARK_SHA" = "76fddad0b055ca6ebeefae1461e0140636840d7ef41d1332460f87deb0acdb38"
           test "$TRAY_SHA" = "759c6f2700c1250b8c697ca0eb480e1a2f11c577"
 
       - name: Restore PNG masters losslessly
