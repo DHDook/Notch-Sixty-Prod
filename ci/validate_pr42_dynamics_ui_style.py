@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import runpy
 
 ROOT = Path(__file__).resolve().parents[1]
 ui = (ROOT / "NotchSixty/UI/ProductionDynamicsView.swift").read_text()
@@ -20,3 +21,8 @@ require("ProductionDynamicsTelemetryView(engine: engine, kind:" in ui, "UI moder
 require("Attack = fade-out" in ui and "Release = fade-in" in ui, "Pause Gate product convention must remain visible")
 
 print("PR42 Dynamics current-macOS style guard: PASS")
+
+# The workflow already owns a single PR42 validation slot. Chain the new
+# interchange guard here until the final PR42 closure validator supersedes
+# the slice-specific validators at the end of this milestone.
+runpy.run_path(str(ROOT / "ci/validate_pr42_interchange.py"), run_name="__main__")
