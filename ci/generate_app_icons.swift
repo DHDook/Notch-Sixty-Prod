@@ -3,9 +3,9 @@ import AppKit
 import Foundation
 
 // Shipping icon generation is intentionally raster-preserving. The approved
-// light/dark artwork is the source of truth; this tool only removes the studio
-// background with the agreed body mask and resamples that artwork into the
-// macOS asset-catalog slots. It does not redraw or reinterpret the meter.
+// light/dark transparent artwork is the source of truth; this tool only
+// resamples those exact rasters into the macOS asset-catalog slots. It does
+// not redraw, mask, crop, or reinterpret the meter.
 
 let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
 let artwork = root.appendingPathComponent("artwork", isDirectory: true)
@@ -20,17 +20,6 @@ guard let lightMaster = NSImage(contentsOf: lightMasterURL),
       let darkMaster = NSImage(contentsOf: darkMasterURL) else {
     fatalError("Missing approved app-icon masters under artwork/")
 }
-
-// The approved 512×512 source artwork has a photographed/rendered studio
-// surround. The enamel body itself occupies this normalized rounded rectangle.
-// Clipping here preserves every pixel inside the approved icon while making the
-// surrounding studio floor/background transparent for native macOS icon use.
-let sourceCanvas: CGFloat = 512
-let bodyX: CGFloat = 36
-let bodyYFromBottom: CGFloat = 44
-let bodyWidth: CGFloat = 440
-let bodyHeight: CGFloat = 433
-let bodyRadius: CGFloat = 73
 
 func render(_ source: NSImage, pixels: Int) -> Data {
     let size = CGFloat(pixels)
@@ -59,20 +48,6 @@ func render(_ source: NSImage, pixels: Int) -> Data {
     NSColor.clear.setFill()
     NSRect(x: 0, y: 0, width: size, height: size).fill()
 
-    let scale = size / sourceCanvas
-    let bodyRect = NSRect(
-        x: bodyX * scale,
-        y: bodyYFromBottom * scale,
-        width: bodyWidth * scale,
-        height: bodyHeight * scale
-    )
-
-    NSGraphicsContext.saveGraphicsState()
-    NSBezierPath(
-        roundedRect: bodyRect,
-        xRadius: bodyRadius * scale,
-        yRadius: bodyRadius * scale
-    ).addClip()
     source.draw(
         in: NSRect(x: 0, y: 0, width: size, height: size),
         from: .zero,
@@ -81,7 +56,6 @@ func render(_ source: NSImage, pixels: Int) -> Data {
         respectFlipped: true,
         hints: [.interpolation: NSImageInterpolation.high]
     )
-    NSGraphicsContext.restoreGraphicsState()
 
     guard let png = rep.representation(using: .png, properties: [:]) else {
         fatalError("PNG encoding failed at \(pixels)×\(pixels)")
