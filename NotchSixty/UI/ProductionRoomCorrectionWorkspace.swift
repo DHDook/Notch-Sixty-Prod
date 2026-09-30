@@ -203,7 +203,11 @@ struct ProductionRoomCorrectionWorkspace: View {
             }
         }
         .padding(20)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .background(.regularMaterial, in: .rect(cornerRadius: 22))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(.quaternary, lineWidth: 0.5)
+        }
     }
 
     private var setupCard: some View {
@@ -326,7 +330,11 @@ struct ProductionRoomCorrectionWorkspace: View {
                 .foregroundStyle(.secondary)
         }
         .padding(20)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .background(.regularMaterial, in: .rect(cornerRadius: 22))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(.quaternary, lineWidth: 0.5)
+        }
     }
 
     private var measurementCard: some View {
@@ -406,7 +414,7 @@ struct ProductionRoomCorrectionWorkspace: View {
                 } label: {
                     Label("Measure Current Position", systemImage: "waveform.badge.magnifyingglass")
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.glassProminent)
                 .disabled(!calibration.canBeginMeasurement)
 
                 Text("This capture measures one listening position. After analysis, keep it as a named position below, then repeat for additional seats.")
@@ -415,7 +423,11 @@ struct ProductionRoomCorrectionWorkspace: View {
             }
         }
         .padding(20)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .background(.regularMaterial, in: .rect(cornerRadius: 22))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(.quaternary, lineWidth: 0.5)
+        }
     }
 
     private func reviewCard(_ analysis: RoomCorrectionMeasurementAnalysis) -> some View {
@@ -463,7 +475,7 @@ struct ProductionRoomCorrectionWorkspace: View {
                     } label: {
                         Label("Keep Position", systemImage: "tray.and.arrow.down")
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.glassProminent)
                 }
                 Text("Leave the name blank to use \(projects.suggestedPositionName). Raw capture, impulse response, transfer function, and quality metadata are retained together.")
                     .font(.caption)
@@ -475,7 +487,11 @@ struct ProductionRoomCorrectionWorkspace: View {
                 .foregroundStyle(.secondary)
         }
         .padding(20)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .background(.regularMaterial, in: .rect(cornerRadius: 22))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(.quaternary, lineWidth: 0.5)
+        }
     }
 
     @ViewBuilder
@@ -567,7 +583,11 @@ struct ProductionRoomCorrectionWorkspace: View {
             }
         }
         .padding(20)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .background(.regularMaterial, in: .rect(cornerRadius: 22))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(.quaternary, lineWidth: 0.5)
+        }
     }
 
     private var targetDesignCard: some View {
@@ -708,7 +728,7 @@ struct ProductionRoomCorrectionWorkspace: View {
                 } label: {
                     Label("Generate FIR", systemImage: "wand.and.stars")
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.glassProminent)
                 .disabled(projects.target == nil || projects.aggregate == nil)
             }
 
@@ -800,7 +820,7 @@ struct ProductionRoomCorrectionWorkspace: View {
                             systemImage: selectedDesignIsDeployed ? "checkmark.circle.fill" : "arrow.down.to.line"
                         )
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.glassProminent)
                     .disabled(selectedDesignIsDeployed || profiles.selectedSystemProfile == nil)
                 }
                 Text("Deployment embeds the design's recommended safety attenuation in the room-owned FIR. Content Preset preamp/headroom remain unchanged, and the deployed filter remains available even if the room-project sidecar is later unavailable.")
@@ -809,7 +829,11 @@ struct ProductionRoomCorrectionWorkspace: View {
             }
         }
         .padding(20)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .background(.regularMaterial, in: .rect(cornerRadius: 22))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(.quaternary, lineWidth: 0.5)
+        }
     }
 
     private var deployedRoomCorrection: RoomCorrectionConfiguration {
@@ -1158,7 +1182,7 @@ private struct RoomCorrectionPositionRow: View {
                 .foregroundStyle(.secondary)
             }
             .padding(12)
-            .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 12))
+            .background(.quaternary.opacity(0.18), in: .rect(cornerRadius: 12))
             .onChange(of: position.name) { _, newName in
                 if nameDraft != newName { nameDraft = newName }
             }
@@ -1407,7 +1431,7 @@ private struct RoomCorrectionDiagnosticLineChart: View {
                 context.stroke(path, with: .color(.accentColor), lineWidth: 1.5)
             }
             .frame(height: 230)
-            .background(.quaternary.opacity(0.16), in: RoundedRectangle(cornerRadius: 10))
+            .background(.quaternary.opacity(0.14), in: .rect(cornerRadius: 12))
 
             HStack {
                 Text(xAxis == .time ? "Time · ms" : "Frequency · Hz (log)")

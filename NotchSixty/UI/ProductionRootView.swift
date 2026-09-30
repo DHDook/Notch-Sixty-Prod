@@ -713,7 +713,11 @@ private struct ProductionActiveCrossoverView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular, in: .rect(cornerRadius: 16))
+        .background(.regularMaterial, in: .rect(cornerRadius: 22))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(.quaternary, lineWidth: 0.5)
+        }
     }
 
     private var crossoverCard: some View {
@@ -851,7 +855,11 @@ private struct ProductionActiveCrossoverView: View {
             }
         }
         .padding(20)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .background(.regularMaterial, in: .rect(cornerRadius: 22))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(.quaternary, lineWidth: 0.5)
+        }
     }
 
     private var subAlignmentCard: some View {
@@ -901,7 +909,11 @@ private struct ProductionActiveCrossoverView: View {
             .disabled(!engine.bassManagementConfiguration.subPhaseAlignmentEnabled)
         }
         .padding(20)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .background(.regularMaterial, in: .rect(cornerRadius: 22))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(.quaternary, lineWidth: 0.5)
+        }
     }
 
     private var physicalRoutingCard: some View {
@@ -979,6 +991,7 @@ private struct ProductionActiveCrossoverView: View {
                 } label: {
                     Label("Add Route", systemImage: "plus")
                 }
+                .buttonStyle(.glass)
                 .disabled(physicalRoutingLocked || routing.routes.count >= MultiOutputRoutingConfiguration.maximumRouteCount || engine.outputDevices.isEmpty)
 
                 Spacer()
@@ -994,7 +1007,11 @@ private struct ProductionActiveCrossoverView: View {
             }
         }
         .padding(20)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .background(.regularMaterial, in: .rect(cornerRadius: 22))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(.quaternary, lineWidth: 0.5)
+        }
     }
 
     private func routeRow(_ route: SpeakerOutputRoute) -> some View {
@@ -1054,7 +1071,7 @@ private struct ProductionActiveCrossoverView: View {
         }
         .disabled(physicalRoutingLocked)
         .padding(10)
-        .background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+        .background(.quaternary.opacity(0.18), in: .rect(cornerRadius: 12))
     }
 
     private var driverProcessingCard: some View {
@@ -1090,7 +1107,11 @@ private struct ProductionActiveCrossoverView: View {
                 .foregroundStyle(.secondary)
         }
         .padding(20)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .background(.regularMaterial, in: .rect(cornerRadius: 22))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(.quaternary, lineWidth: 0.5)
+        }
     }
 
     private var routedDriverBuses: [SpeakerOutputBus] {
@@ -1207,7 +1228,7 @@ private struct ProductionActiveCrossoverView: View {
             }
         }
         .padding(12)
-        .background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+        .background(.quaternary.opacity(0.18), in: .rect(cornerRadius: 14))
     }
 
     @ViewBuilder
@@ -1298,7 +1319,7 @@ private struct ProductionActiveCrossoverView: View {
             }
         }
         .padding(12)
-        .background(.background.opacity(0.42), in: RoundedRectangle(cornerRadius: 10))
+        .background(.quaternary.opacity(0.14), in: .rect(cornerRadius: 12))
     }
 
     private func driverConfiguration(for bus: SpeakerOutputBus) -> SpeakerDriverBusProcessingConfiguration {
@@ -1383,7 +1404,11 @@ private struct ProductionActiveCrossoverView: View {
             .padding(.top, 10)
         }
         .padding(20)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .background(.regularMaterial, in: .rect(cornerRadius: 22))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(.quaternary, lineWidth: 0.5)
+        }
     }
 
     private var lowerFrequencyRange: ClosedRange<Double> {
