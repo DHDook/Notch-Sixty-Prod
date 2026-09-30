@@ -1,23 +1,47 @@
 # PR41 — Active Crossover / Speaker Integration
 
-Status: **STACKED ON PR40 — SLICES A/B IMPLEMENTED; FULL COMBINED CI IN PROGRESS**
+Status: **STACKED ON PR40 — SLICES A/B IMPLEMENTED; COMBINED CI GREEN; MULTI-OUTPUT PARITY RETAINED**
 
 Base implementation dependency: PR40 exact green head `56d2fbac467fc6b43df5b699f4b50d195bff98d1`.
 
-This documentation-only checkpoint intentionally triggers the repository's ordinary `main`-targeted CI against the combined PR40 + PR41 source tree. PR41 will be retargeted back to the PR40 branch after those exact-head runs complete.
+Combined PR40 + PR41 source checkpoint `5084dbfebc5d7d4a7fa77a5d621bfbd2c9c9f167` passed the full Hardware Test DMG and macOS workflows before this documentation-only clarification.
 
 ## Purpose
 
-Turn the existing clean-room bass-management/crossover foundation into the production Active Crossover / speaker-integration workflow without violating the commercial product boundary established for Notch Sixty:
+Turn the existing clean-room bass-management/crossover foundation into the production Active Crossover / speaker-integration workflow while preserving the commercial product identity and the legacy product's useful routing capability:
 
-- stereo playback product;
+- stereo program/content semantics remain the default listening model;
+- multiple physical output channels/devices remain a parity target where required for active crossover and speaker integration;
 - no headphone feature expansion;
-- no general multichannel host/transport rewrite;
-- Playback System owns speaker/crossover state;
+- Playback System owns speaker/crossover/output-routing state;
 - Content Presets remain content DSP only;
 - touched DSP must remain realtime-safe and native-rate through the currently supported sample-rate matrix.
 
 PR41 is deliberately stacked on PR40 so Room Correction and Active Crossover can receive one combined hands-on Mac acceptance pass after both automated gates are green.
+
+## Important product-model distinction
+
+**Stereo program content is not the same thing as a single physical output device.**
+
+The legacy application already separates these concepts: it can start from a stereo program, derive logical crossover buses, and route those buses to multiple physical output channels/devices. The commercial rewrite should preserve that capability if it can be done cleanly within the proprietary transport architecture and App Store constraints.
+
+Accordingly, PR41 must not classify multi-output support as out of scope merely because the source program is stereo.
+
+The intended model is:
+
+```text
+Stereo program / content DSP
+            ↓
+Room / system processing
+            ↓
+Active-crossover signal derivation
+            ↓
+Per-output speaker processing
+            ↓
+Physical output routing (one or more devices)
+```
+
+This keeps stereo listening semantics clean while allowing true independent mains/sub or multi-driver output paths when configured.
 
 ## Existing production foundation
 
@@ -36,7 +60,7 @@ The current production engine already provides a clean-room crossover primitive 
 - short dual-path transition for live crossover changes;
 - no intentional algorithmic latency from the crossover itself.
 
-`PlaybackSystemState` already owns `BassManagementConfiguration`, which is the correct persistence layer for this work.
+`PlaybackSystemState` already owns `BassManagementConfiguration`, which is the correct persistence layer for the current speaker-integration state. Multi-output routing should also belong to Playback System state rather than Content Presets.
 
 ## Legacy behavioral evidence
 
@@ -70,44 +94,56 @@ The same audits also identify legacy behavior that must **not** be reproduced me
 
 ## Product-scope disposition
 
-The commercial rewrite keeps the explicit two-channel product directive. PR41 therefore does **not** add an arbitrary 2–8-channel physical render transport or multi-device output PLL/SRC layer.
+The commercial rewrite keeps stereo program semantics, but **multi-output routing remains a parity target**.
 
-Legacy behaviors that fundamentally require independently addressable multichannel physical outputs are classified **OUT OF CURRENT PRODUCT SCOPE** for this product rather than silently omitted. This includes:
+The following legacy capabilities are therefore no longer pre-classified as out of current product scope:
 
-- arbitrary 2–8 physical output routing;
-- bi-amp/tri-amp physical driver matrices;
+- multiple physical output channels;
 - multiple simultaneous physical output devices;
-- Aggregate Device / Software PLL secondary-output synchronization.
+- independently routable mains/sub or driver-derived buses;
+- Aggregate Device and/or independently implemented software synchronization/SRC where required for multiple hardware clocks.
 
-This is a product-scope disposition, not a claim that the historical behavior was dead.
+Exact implementation is intentionally not frozen yet. PR41 should first determine the cleanest proprietary architecture and App Store-safe transport model.
 
-Behaviors that remain meaningful in a stereo speaker + sub integration product are candidates for **PARITY / IMPROVED / SUPERSEDED** implementation in this PR, subject to the slices below.
+The commercial rewrite does **not** need to reproduce the historical routing internals. It does need to preserve the observable capability where practical, with equal or better synchronization, recovery, and realtime safety.
 
 ## Architecture rules
 
 1. **Playback System ownership**
-   - crossover/speaker integration belongs to the selected Playback System profile;
-   - changing Content Presets must not alter crossover state;
-   - changing crossover state must not overwrite Content Preset EQ/dynamics/headroom.
+   - crossover/speaker integration and physical output routing belong to the selected Playback System profile;
+   - changing Content Presets must not alter crossover or output routing state;
+   - changing crossover/routing state must not overwrite Content Preset EQ/dynamics/headroom.
 
-2. **No duplicate DSP path**
-   - extend the existing `N60Crossover` / graph snapshot path;
-   - do not create a second crossover engine.
+2. **Stereo program, explicit output fan-out**
+   - keep the source/content DSP model stereo;
+   - derive speaker/driver buses only after the appropriate shared program stages;
+   - output fan-out must be explicit and testable rather than hidden inside the stereo render path.
 
-3. **Realtime safety**
+3. **No duplicate DSP path**
+   - extend the existing `N60Crossover` / graph snapshot foundation where appropriate;
+   - do not create a second unrelated crossover engine.
+
+4. **Clock-domain correctness**
+   - one physical device may use the ordinary selected-device clock domain;
+   - multiple devices with independent hardware clocks require an explicit synchronization strategy;
+   - evaluate Aggregate Device first where appropriate, with an independently authored software PLL/SRC fallback only if needed;
+   - never assume two devices remain sample-synchronous merely because their nominal rates match.
+
+5. **Realtime safety**
    - no allocation, locks, logging, file I/O, coefficient design, FFT work, or async work on render;
+   - SRC/PLL control state must be bounded and render-safe if implemented;
    - all candidate designs and measurement analysis remain control-plane/offline;
-   - graph changes use the existing bounded transition discipline.
+   - graph/routing changes use bounded transition discipline.
 
-4. **Room Correction interaction**
+6. **Room Correction interaction**
    - PR40 remains the authoritative room-measurement/correction workflow;
    - crossover measurement assistance should reuse PR40 measurement/analysis assets where technically meaningful rather than adding another microphone pipeline;
-   - deployment ordering and latency must remain explicit and testable.
+   - deployment ordering, per-output correction ownership, and latency must remain explicit and testable.
 
-5. **Global audition contract**
+7. **Global audition contract**
    - Processed / Reference / Delta semantics remain latency-correct;
    - raw Global Bypass must remain raw apart from the established master-volume contract;
-   - crossover state must not break PR40 room-correction audition/bypass behavior.
+   - crossover/output-routing state must not break PR40 room-correction audition/bypass behavior.
 
 ## Slice A/B implementation checkpoint
 
@@ -118,23 +154,23 @@ Implemented on top of PR40:
 - added persistent enable/bypass convenience without overwriting unrelated Playback System fields;
 - Active Crossover production UI now writes through the selected Playback System rather than mutating transient engine state directly;
 - production UI now exposes the existing engine capabilities that were previously hidden: sub gain, sub phase-alignment enable/frequency/Q, and the logical verification monitor path;
-- verification monitor copy explicitly states that mains/sub monitor modes do not create a separately routed physical sub output;
+- current logical monitor copy correctly states that the present implementation does not yet create a separately routed physical sub output;
 - Content Preset state remains independent from crossover changes;
 - deployed PR40 Room Correction configuration and calibration provenance remain unchanged by crossover edits;
 - reload restores the persisted crossover state alongside Room Correction;
 - deterministic realtime coverage verifies that enabling/changing the zero-latency crossover preserves the attached room-correction convolution program generation and latency at 44.1/48/96/192/384 kHz;
 - raw Global Bypass remains raw with crossover + room correction attached.
 
-Focused `xcode-27` validation passed before the substantive commit was created. This checkpoint is used for the full combined PR40 + PR41 CI matrix.
+Focused `xcode-27` validation passed before the substantive commit was created. The combined PR40 + PR41 checkpoint then passed the full Hardware Test DMG and macOS workflows.
 
 ## Planned slices
 
 ### Slice A — contract, ownership and baseline tests — COMPLETE
 
-- freeze the commercial two-channel disposition above;
-- inventory the current crossover model, render stage, persistence and production UI;
-- add deterministic tests proving Playback System ownership and Content Preset independence;
-- add exact baseline tests around crossover + Room Correction stage ordering and audition/bypass behavior before changing DSP semantics.
+- establish Playback System ownership;
+- inventory current crossover model, render stage, persistence and production UI;
+- add deterministic tests proving Content Preset independence;
+- add exact baseline tests around crossover + Room Correction stage ordering and audition/bypass behavior.
 
 ### Slice B — complete the current production crossover surface — COMPLETE
 
@@ -150,34 +186,45 @@ Expose and persist the capabilities that already exist in the production engine 
 
 All production edits now persist through the selected Playback System rather than mutating only transient engine state.
 
-### Slice C — stereo speaker/sub crossover model improvements
+### Slice C — multi-output routing architecture + stereo speaker/sub crossover model
 
-Audit and independently design the useful subset of legacy asymmetric crossover behavior that remains meaningful without multichannel physical routing. Candidate improvements include:
+Before expanding crossover math, establish the physical-output architecture required to preserve legacy multi-output capability cleanly.
 
-- independently reviewable mains HP and sub LP settings rather than forcing hidden symmetry where a better commercial model is justified;
-- bounded crossover family/slope choices only where complementary summation and phase behavior are well-defined;
-- explicit validation of frequency/order combinations through 384 kHz;
-- predictable transition behavior with no hard state discontinuity.
+Work includes:
 
-Do not add controls that have no real DSP effect.
+- model logical output buses independently from physical devices/channels;
+- define per-output identity, enable state, source assignment, device UID and physical channel mapping;
+- preserve stereo program semantics while permitting true mains/sub and later bi/tri-amp fan-out;
+- determine same-device multichannel routing versus multiple-device routing contracts;
+- evaluate Aggregate Device support and software clock-synchronization/SRC fallback;
+- define bounded device-loss/recovery and sample-rate rebuild behavior;
+- keep routing state in Playback System persistence;
+- only then expand crossover families/asymmetric HP/LP controls where they map to real independently addressable output paths.
 
-### Slice D — measurement-assisted integration
+No UI control should imply an independent physical path unless one actually exists.
 
-Reuse PR40 measurement infrastructure for stereo speaker/sub integration where the measurement topology can produce trustworthy evidence. Candidate tools:
+### Slice D — per-output speaker processing + measurement-assisted integration
 
+Reuse PR40 measurement infrastructure and add per-output speaker processing where independently addressable outputs exist.
+
+Candidate capabilities:
+
+- per-output gain/polarity/delay;
+- per-output EQ/limiting where justified by the parity audit;
 - measured/predicted crossover-region response comparison;
-- group-delay visualization;
-- reviewable phase/alignment suggestions;
-- polarity diagnostics;
+- group-delay visualization/correction;
+- reviewable time-alignment and polarity suggestions;
+- crossover-frequency/acoustic-centre refinement;
 - explicit before/after verification.
 
 No automatic mutation from a single measurement. Suggestions must be reviewable and explicitly applied.
 
 ### Slice E — production workflow and parity closure
 
-- polished Active Crossover workspace;
-- authoritative Daily Playback/System summary;
+- polished Active Crossover / Output Routing workspace;
+- authoritative Playback System summary;
 - persistence/reload coverage;
+- multi-device clock/recovery hardening;
 - corruption/rollback handling;
 - combined PR40 + PR41 regression pass;
 - final legacy disposition ledger: PARITY / IMPROVED / SUPERSEDED / OUT OF CURRENT PRODUCT SCOPE / BLOCKED.
@@ -190,21 +237,24 @@ Automated:
 - Debug and Release builds;
 - existing retained PR34–PR40 validators remain green;
 - native-rate coverage through supported 44.1/48/96/192/384 kHz matrix where deterministic tests apply;
-- no Content Preset mutation from crossover operations;
+- no Content Preset mutation from crossover/routing operations;
 - PR40 Room Correction persistence/deployment/audition tests remain green;
 - Global Bypass remains raw;
 - no realtime allocation/locking regressions;
+- deterministic clock-domain/routing tests before multi-device output is enabled;
 - DMG packaging and sandbox validation remain green.
 
 Combined hands-on Mac acceptance after PR40 + PR41 automated completion:
 
 - verify PR40 measurement/design/deployment workflow;
-- verify Active Crossover controls and persistence;
-- verify crossover changes do not alter Content Presets or deployed room-correction provenance;
+- verify Active Crossover controls and Playback System persistence;
+- verify same-device multi-output routing where hardware permits;
+- verify multi-device routing/synchronization where hardware permits;
+- verify crossover/routing changes do not alter Content Presets or deployed room-correction provenance;
 - verify Processed / Reference / Delta and Global Bypass with crossover + room correction together;
-- verify stop/start, relaunch and sample-rate rebuild behavior;
-- listen for clicks, dropouts, level jumps, unexpected latency, channel imbalance or transition artifacts.
+- verify stop/start, relaunch, sample-rate rebuild, disconnect/reconnect and device-recovery behavior;
+- listen for clicks, dropouts, drift, combing, level jumps, unexpected latency or channel imbalance.
 
 ## Next implementation decision
 
-After the combined exact-head CI checkpoint is green, Slice C will evaluate crossover-model improvements that are genuinely useful for a stereo mains + sub product. It will not recreate legacy multichannel routing or expose controls without a real DSP effect.
+Slice C will now begin with the **multi-output routing architecture**, not with the earlier assumption that the product should remain single-device. The goal is to preserve a stereo program model while restoring true independently addressable physical output paths cleanly enough to support mains/sub and later driver-level crossover workflows without importing the legacy transport implementation.
