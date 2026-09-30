@@ -10,15 +10,15 @@ import Foundation
 let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
 let artwork = root.appendingPathComponent("artwork", isDirectory: true)
 let out = root.appendingPathComponent("NotchSixty/Assets.xcassets/AppIcon.appiconset", isDirectory: true)
-let lightMasterURL = artwork.appendingPathComponent("AppIcon-light-master.png")
-let darkMasterURL = artwork.appendingPathComponent("AppIcon-dark-master.png")
+let lightMasterURL = artwork.appendingPathComponent("AppIcon-light-master.webp")
+let darkMasterURL = artwork.appendingPathComponent("AppIcon-dark-master.webp")
 
 try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
 try FileManager.default.createDirectory(at: artwork, withIntermediateDirectories: true)
 
 guard let lightMaster = NSImage(contentsOf: lightMasterURL),
       let darkMaster = NSImage(contentsOf: darkMasterURL) else {
-    fatalError("Missing approved app-icon masters under artwork/")
+    fatalError("Missing or unreadable approved app-icon masters under artwork/")
 }
 
 func render(_ source: NSImage, pixels: Int) -> Data {
@@ -97,4 +97,4 @@ try render(lightMaster, pixels: 1024)
 try render(darkMaster, pixels: 1024)
     .write(to: artwork.appendingPathComponent("AppIcon-dark-final.png"), options: .atomic)
 
-print("Generated Notch Sixty app icons from approved raster masters")
+print("Generated Notch Sixty app icons from approved transparent raster masters")
