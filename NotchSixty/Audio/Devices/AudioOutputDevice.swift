@@ -66,6 +66,8 @@ enum RoomCorrectionCalibrationSessionError: Error, Equatable, LocalizedError {
     case invalidTransition(from: RoomCorrectionCalibrationState, to: RoomCorrectionCalibrationState)
     case invalidCaptureCapacity(Int)
     case captureNotComplete
+    case invalidSampleRate(Double)
+    case unsupportedSampleRate(sampleRate: Double, outputName: String, inputName: String)
 
     var errorDescription: String? {
         switch self {
@@ -75,6 +77,10 @@ enum RoomCorrectionCalibrationSessionError: Error, Equatable, LocalizedError {
             return "Room correction capture capacity \(capacity) frames is invalid."
         case .captureNotComplete:
             return "Room correction capture is not complete yet."
+        case .invalidSampleRate(let sampleRate):
+            return "Room correction calibration sample rate \(sampleRate) Hz is invalid."
+        case .unsupportedSampleRate(let sampleRate, let outputName, let inputName):
+            return "Room correction calibration requires both \(outputName) and \(inputName) to support \(sampleRate) Hz without sample-rate conversion."
         }
     }
 }
@@ -152,6 +158,24 @@ enum RoomCorrectionCalibrationTopologyPlanner {
             driftCompensateInput: true
         )
     }
+
+    static func validatedTopology(
+        output: AudioOutputDevice,
+        input: AudioInputDevice,
+        sampleRate: Double
+    ) throws -> RoomCorrectionCalibrationTopology {
+        guard sampleRate.isFinite, sampleRate > 0 else {
+            throw RoomCorrectionCalibrationSessionError.invalidSampleRate(sampleRate)
+        }
+        guard output.supports(sampleRate: sampleRate), input.supports(sampleRate: sampleRate) else {
+            throw RoomCorrectionCalibrationSessionError.unsupportedSampleRate(
+                sampleRate: sampleRate,
+                outputName: output.name,
+                inputName: input.name
+            )
+        }
+        return topology(output: output, input: input)
+    }
 }
 
 /// Preallocated single-writer storage for one microphone capture pass.
@@ -185,12 +209,15 @@ final class RoomCorrectionCaptureBuffer: @unchecked Sendable {
         writtenFrames = 0
     }
 
-    func write(_ sample: Float, at frame: Int) {
-        guard frame >= 0, frame < capacityFrames else { return }
+    /// Accepts only the next contiguous frame. The realtime measurement session
+    /// writes sequentially, so rejecting gaps keeps `isComplete` meaningful even
+    /// if this primitive is accidentally called out of order.
+    @discardableResult
+    func write(_ sample: Float, at frame: Int) -> Bool {
+        guard frame == writtenFrames, frame >= 0, frame < capacityFrames else { return false }
         storage[frame] = sample
-        if frame >= writtenFrames {
-            writtenFrames = frame + 1
-        }
+        writtenFrames += 1
+        return true
     }
 
     func materialize(requireComplete: Bool = true) throws -> [Float] {
@@ -251,9 +278,9 @@ final class RoomCorrectionMeasurementRealtimeSession: @unchecked Sendable {
             if let destination = plan.captureDestination(at: timelineFrame) {
                 switch destination.pass {
                 case .left:
-                    leftCapture.write(microphone[offset], at: destination.frameIndex)
+                    _ = leftCapture.write(microphone[offset], at: destination.frameIndex)
                 case .right:
-                    rightCapture.write(microphone[offset], at: destination.frameIndex)
+                    _ = rightCapture.write(microphone[offset], at: destination.frameIndex)
                 }
             }
         }
