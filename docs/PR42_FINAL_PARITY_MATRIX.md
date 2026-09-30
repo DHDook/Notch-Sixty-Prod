@@ -14,7 +14,7 @@ Allowed final dispositions:
 - **SUPERSEDED** — the historical behavior is intentionally not reproduced because the commercial product uses a different mechanism or deliberately narrower 1.0 workflow.
 - **BLOCKED** — release-blocking gap. PR42 cannot close while any row has this disposition.
 
-For rows marked **SUPERSEDED**, the rationale column states the replacement or deliberate 1.0 boundary. Some are retained as post-1.0 enhancement candidates; that does not mean the legacy capability exists today.
+For rows marked **SUPERSEDED**, the rationale states the replacement or deliberate 1.0 boundary. Some remain post-1.0 enhancement candidates; that does not mean the legacy capability exists today.
 
 ## Transport, device lifecycle, and playback
 
