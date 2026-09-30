@@ -609,6 +609,11 @@ struct SpeakerDriverBusProcessingConfiguration: Identifiable, Codable, Equatable
             guard Self.supportedEQTypes.contains(band.type) else {
                 throw SpeakerDriverProcessingError.unsupportedEQShape(bus: bus, type: band.type)
             }
+            // Per-driver shelves intentionally use one 12 dB/oct section so an
+            // eight-band UI remains an eight-section bounded realtime program.
+            if (band.type == .lowShelf || band.type == .highShelf), band.slope != .db12 {
+                throw SpeakerDriverProcessingError.invalidEQBand(bus: bus, index: index)
+            }
             guard band.firKernel == nil,
                   !band.dynamic.enabled,
                   band.frequencyHz.isFinite,
@@ -665,5 +670,85 @@ struct SpeakerDriverProcessingConfiguration: Codable, Equatable, Sendable {
             }
             try configuration.validateStructure()
         }
+    }
+}
+
+
+extension SpeakerOutputBus {
+    var realtimeDriverIndex: UInt32 {
+        switch self {
+        case .leftFullRange: return 0
+        case .rightFullRange: return 1
+        case .leftLow: return 2
+        case .rightLow: return 3
+        case .leftMid: return 4
+        case .rightMid: return 5
+        case .leftHigh: return 6
+        case .rightHigh: return 7
+        case .subMono: return 8
+        }
+    }
+}
+
+extension SpeakerDriverProcessingConfiguration {
+    func makeRealtimeSnapshot(sampleRate: Double) throws -> N60SpeakerDriverProcessingSnapshot {
+        guard sampleRate.isFinite, sampleRate > 0, sampleRate <= 384_000 else {
+            throw SpeakerDriverProcessingError.invalidDelay(bus: .leftFullRange, value: sampleRate)
+        }
+        try validateStructure()
+        var snapshot = N60SpeakerDriverProcessingSnapshotMakeBypassed()
+        for configuration in buses {
+            var coefficients: [N60BiquadCoefficients] = []
+            coefficients.reserveCapacity(configuration.eqBands.count)
+            for (index, band) in configuration.eqBands.enumerated() where band.enabled {
+                let sections = try band.compiledSections(sampleRate: sampleRate)
+                guard sections.count == 1,
+                      coefficients.count < Int(N60_SPEAKER_DRIVER_MAX_EQ_SECTIONS) else {
+                    throw SpeakerDriverProcessingError.invalidEQBand(
+                        bus: configuration.bus,
+                        index: index
+                    )
+                }
+                coefficients.append(sections[0].coefficients)
+            }
+
+            let exactDelay = configuration.delayMilliseconds * sampleRate / 1_000.0
+            let integerDelay = floor(exactDelay)
+            guard integerDelay >= 0,
+                  integerDelay < Double(N60_SPEAKER_DRIVER_MAX_DELAY_FRAMES) else {
+                throw SpeakerDriverProcessingError.invalidDelay(
+                    bus: configuration.bus,
+                    value: configuration.delayMilliseconds
+                )
+            }
+            let fractionalDelay = Float(exactDelay - integerDelay)
+            let trim = Float(pow(10.0, configuration.trimDB / 20.0))
+            let threshold = Float(pow(10.0, configuration.limiterThresholdDBFS / 20.0))
+            let release = Float(exp(-1.0 / (0.050 * sampleRate)))
+
+            let configured = coefficients.withUnsafeBufferPointer { buffer in
+                N60SpeakerDriverProcessingSnapshotSetBus(
+                    &snapshot,
+                    configuration.bus.realtimeDriverIndex,
+                    configuration.enabled,
+                    buffer.baseAddress,
+                    UInt32(buffer.count),
+                    trim,
+                    configuration.polarityInverted,
+                    UInt32(integerDelay),
+                    fractionalDelay,
+                    configuration.limiterEnabled,
+                    threshold,
+                    release
+                )
+            }
+            guard configured else {
+                throw SpeakerDriverProcessingError.invalidEQBand(
+                    bus: configuration.bus,
+                    index: 0
+                )
+            }
+        }
+        return snapshot
     }
 }

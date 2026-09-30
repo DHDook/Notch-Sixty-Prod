@@ -2542,12 +2542,15 @@ final class AudioIOEngine: ObservableObject {
                 crossoverMode: speakerCrossoverMode
             )
         }
+        let speakerDriverProcessingSnapshot = try speakerDriverProcessingConfiguration
+            .makeRealtimeSnapshot(sampleRate: output.nominalSampleRate)
         let session = try CoreAudioTransportSession(
             selectedOutput: output,
             sameDeviceOutputPlan: sameDeviceOutputPlan,
             aggregateDeviceOutputPlan: aggregateDeviceOutputPlan,
             speakerCrossoverMode: speakerCrossoverMode,
-            speakerBusSplitterSnapshot: speakerBusSplitterSnapshot
+            speakerBusSplitterSnapshot: speakerBusSplitterSnapshot,
+            speakerDriverProcessingSnapshot: speakerDriverProcessingSnapshot
         )
         activeEQFIRProgram = nil
         nextEQFIRProgramSlot = 0

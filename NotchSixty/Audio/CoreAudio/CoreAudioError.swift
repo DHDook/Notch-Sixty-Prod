@@ -169,6 +169,7 @@ enum CoreAudioTransportError: Error, LocalizedError, Equatable {
     case sameDeviceOutputMapCompilationFailed
     case aggregateDeviceNotReady
     case speakerBusSplitterConfigurationFailed
+    case speakerDriverProcessingConfigurationFailed
 
     var errorDescription: String? {
         switch self {
@@ -202,6 +203,8 @@ enum CoreAudioTransportError: Error, LocalizedError, Equatable {
             return "Core Audio created the private multi-output aggregate device but it did not become ready for IO."
         case .speakerBusSplitterConfigurationFailed:
             return "Unable to configure the immutable physical speaker crossover before audio callbacks start."
+        case .speakerDriverProcessingConfigurationFailed:
+            return "Unable to configure immutable per-driver speaker processing before audio callbacks start."
         }
     }
 }
@@ -393,7 +396,8 @@ final class CoreAudioTransportSession {
         sameDeviceOutputPlan: SameDeviceOutputRoutePlan? = nil,
         aggregateDeviceOutputPlan: AggregateDeviceOutputRoutePlan? = nil,
         speakerCrossoverMode: SpeakerCrossoverMode? = nil,
-        speakerBusSplitterSnapshot: N60SpeakerBusSplitterSnapshot? = nil
+        speakerBusSplitterSnapshot: N60SpeakerBusSplitterSnapshot? = nil,
+        speakerDriverProcessingSnapshot: N60SpeakerDriverProcessingSnapshot? = nil
     ) throws {
         precondition(sameDeviceOutputPlan == nil || aggregateDeviceOutputPlan == nil)
         self.selectedOutput = selectedOutput
@@ -485,6 +489,13 @@ final class CoreAudioTransportSession {
                     newBridge, speakerBusSplitterSnapshot
                 ) else {
                     throw CoreAudioTransportError.speakerBusSplitterConfigurationFailed
+                }
+            }
+            if let speakerDriverProcessingSnapshot {
+                guard N60RealtimeAudioBridgeConfigureSpeakerDriverProcessing(
+                    newBridge, speakerDriverProcessingSnapshot
+                ) else {
+                    throw CoreAudioTransportError.speakerDriverProcessingConfigurationFailed
                 }
             }
 

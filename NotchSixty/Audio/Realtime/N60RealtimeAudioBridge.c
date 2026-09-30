@@ -71,6 +71,7 @@ struct N60RealtimeAudioBridge {
     N60RenderKernel *renderKernel;
     N60SameDeviceOutputMap sameDeviceOutputMap;
     N60SpeakerBusSplitterRuntime speakerBusSplitter;
+    N60SpeakerDriverProcessingRuntime speakerDriverProcessing;
 
     _Atomic uint64_t writeIndex;
     _Atomic uint64_t readIndex;
@@ -936,6 +937,16 @@ bool N60RealtimeAudioBridgeConfigureSpeakerBusSplitter(
     return true;
 }
 
+bool N60RealtimeAudioBridgeConfigureSpeakerDriverProcessing(
+    N60RealtimeAudioBridge *bridge,
+    N60SpeakerDriverProcessingSnapshot snapshot
+) {
+    if (bridge == NULL) return false;
+    return N60SpeakerDriverProcessingRuntimeConfigure(
+        &bridge->speakerDriverProcessing, snapshot
+    );
+}
+
 bool N60SameDeviceOutputMapValueForChannel(
     const N60SameDeviceOutputMap *map,
     const N60SpeakerBusFrame *frame,
@@ -1196,6 +1207,12 @@ OSStatus N60OutputIOProc(
             N60SpeakerBusFrame busFrame;
             process_speaker_bus_splitter(
                 &bridge->speakerBusSplitter, finalLeft, finalRight, &busFrame
+            );
+            // PR43 invariant: mandatory crossover/speaker-bus splitting happens
+            // before any optional per-driver processing. Driver bypass can never
+            // restore full-range content to a protected Low/Mid/High/Sub bus.
+            N60SpeakerDriverProcessingRuntimeProcessValues(
+                &bridge->speakerDriverProcessing, busFrame.values
             );
             if (!N60SameDeviceOutputMapWriteFrame(
                 &bridge->sameDeviceOutputMap, &busFrame, outOutputData, frameIndex
