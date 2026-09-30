@@ -70,6 +70,8 @@ The approved owner-supplied light and dark VU-meter artwork is now the productio
 
 The production tray/menu-bar icon remains the owner-controlled legacy solid VU glyph. Its blob identity is permanently pinned separately from the Dock/AppIcon artwork, so application-icon updates cannot silently alter the tray design.
 
+The production sidebar deliberately uses a wordmark-only `NOTCH SIXTY` identity. The Dock/AppIcon artwork is not repeated inside the main app window, and the former `Stereo DSP` subtitle is omitted.
+
 Superseded SVG/WebP app-icon staging files and one-shot icon workflows are removed from the release-candidate tree. The permanent PR45 validator pins the exact uploaded master PNGs, verifies all generated slot dimensions, and verifies the legacy tray icon remains unchanged.
 
 ### 6. Repository/release metadata
