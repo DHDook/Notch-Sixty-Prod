@@ -119,7 +119,9 @@ private enum ProductionOutputVUMeterDemand {
 
 struct ProductionRootView: View {
     @ObservedObject var product: ProductController
+    #if DEBUG
     @Environment(\.openWindow) private var openWindow
+    #endif
     @State private var selection: ProductionSection? = .dashboard
 
     private var engine: AudioIOEngine { product.audioEngine }
@@ -181,6 +183,7 @@ struct ProductionRootView: View {
                     .padding(.vertical, 6)
                     .glassEffect(.regular, in: .capsule)
             }
+            #if DEBUG
             Button {
                 openWindow(id: "engineering-validation")
             } label: {
@@ -188,6 +191,7 @@ struct ProductionRootView: View {
             }
             .buttonStyle(.glass)
             .help("Open the retained engineering validation tools")
+            #endif
 
             Button {
                 if engine.lifecycleState == .running { engine.stop() }

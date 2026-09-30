@@ -6,7 +6,7 @@ This repository is a fresh proprietary codebase. It is not a fork of the histori
 
 ## Current status
 
-**Commercial bootstrap / architecture foundation.**
+**v1.0 release-candidate hardening.**
 
 The driverless Core Audio transport architecture has already been validated separately in the CoreAudioTapPOC-N60 proof of concept, including native transport through 384 kHz, live sample-rate rebuilding, selected-device persistence, USB reconnect, sleep/wake, permission transitions, failure-safe restoration, and extended high-rate soak testing.
 
@@ -19,7 +19,7 @@ The POC is architectural evidence, not a production dependency. The commercial i
 - two-channel loudspeaker playback
 - subwoofer support through bass management
 - multi-seat room correction is in scope
-- actual multichannel output is out of scope
+- stereo program material only; speaker-integration routing may fan out to 2–8 physical outputs for mains/sub and active bi-/tri-amp systems
 - headphone-only features are out of scope
 - native device sample rates through 384 kHz where the selected hardware exposes them
 - no hidden sample-rate conversion in the transport layer

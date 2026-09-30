@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import ServiceManagement
 import SwiftUI
 
 struct ProductDSPConfiguration: Equatable, Sendable {
@@ -129,6 +130,7 @@ final class ProductController: ObservableObject {
     }
 }
 
+#if DEBUG
 private struct PR27ProtectionValidationView: View {
     @ObservedObject var engine: AudioIOEngine
 
@@ -954,6 +956,8 @@ private struct EngineeringValidationView: View {
     }
 }
 
+#endif
+
 private enum ApplicationAppearanceMode: String, CaseIterable, Identifiable {
     case system
     case light
@@ -1009,6 +1013,9 @@ private final class ApplicationPreferences: ObservableObject {
         }
     }
 
+    @Published private(set) var launchAtLoginEnabled: Bool
+    @Published private(set) var launchAtLoginError: String?
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         appearance = ApplicationAppearanceMode(
@@ -1017,9 +1024,44 @@ private final class ApplicationPreferences: ObservableObject {
         presence = ApplicationPresenceMode(
             rawValue: defaults.string(forKey: Key.presence) ?? ""
         ) ?? .both
+        launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
+        launchAtLoginError = nil
     }
 
     var isTrayInserted: Bool { presence != .dock }
+
+    var launchAtLoginStatusDescription: String {
+        switch SMAppService.mainApp.status {
+        case .enabled:
+            return "Enabled"
+        case .requiresApproval:
+            return "Requires approval in System Settings"
+        case .notRegistered:
+            return "Off"
+        case .notFound:
+            return "Unavailable"
+        @unknown default:
+            return "Unknown"
+        }
+    }
+
+    func refreshLaunchAtLoginStatus() {
+        launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
+    }
+
+    func setLaunchAtLogin(_ enabled: Bool) {
+        do {
+            if enabled {
+                try SMAppService.mainApp.register()
+            } else {
+                try SMAppService.mainApp.unregister()
+            }
+            launchAtLoginError = nil
+        } catch {
+            launchAtLoginError = error.localizedDescription
+        }
+        refreshLaunchAtLoginStatus()
+    }
 
     func setTrayInserted(_ inserted: Bool) {
         if inserted {
@@ -1212,6 +1254,7 @@ private struct ProductionMenuBarView: View {
 
 private struct ProductionSettingsView: View {
     @ObservedObject var preferences: ApplicationPreferences
+    @ObservedObject var product: ProductController
 
     private var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
@@ -1219,6 +1262,52 @@ private struct ProductionSettingsView: View {
 
     private var build: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—"
+    }
+
+    private var diagnosticsReport: String {
+        let engine = product.audioEngine
+        let output = engine.selectedOutputDevice
+        let kernel = engine.diagnosticsSnapshot().renderKernelDiagnostics
+
+        let outputName = output?.name ?? "None selected"
+        let outputUID = output?.uid ?? "None"
+        let outputRate = output.map {
+            String(format: "%.1f kHz", $0.nominalSampleRate / 1_000.0)
+        } ?? "Unavailable"
+        let latency: String
+        if let kernel, kernel.sampleRate > 0 {
+            latency = String(
+                format: "%u frames / %.3f ms",
+                kernel.latencyFrames,
+                Double(kernel.latencyFrames) / kernel.sampleRate * 1_000.0
+            )
+        } else {
+            latency = "Unavailable"
+        }
+
+        return [
+            "Notch Sixty Diagnostics",
+            "Version: \(version) (\(build))",
+            "macOS: \(ProcessInfo.processInfo.operatingSystemVersionString)",
+            "Architecture: Apple Silicon",
+            "Lifecycle: \(engine.lifecycleState.rawValue)",
+            "Output: \(outputName)",
+            "Output UID: \(outputUID)",
+            "Output Rate: \(outputRate)",
+            "Content Preset: \(product.profiles.selectedContentPresetName)",
+            "Playback System: \(product.profiles.selectedSystemProfileName)",
+            "Global Bypass: \(engine.playbackControlConfiguration.globalBypassed ? "On" : "Off")",
+            "EQ Phase: \(engine.stereoEQConfiguration.phaseMode.displayName)",
+            "EQ Bands Enabled: \(engine.stereoEQConfiguration.enabledBandCount)",
+            "Bass Management: \(engine.bassManagementConfiguration.enabled ? "On" : "Off")",
+            "Room Correction: \(engine.roomCorrectionConfiguration.enabled ? "On" : "Off")",
+            "DSP Latency: \(latency)",
+        ].joined(separator: "\n")
+    }
+
+    private func copyDiagnostics() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(diagnosticsReport, forType: .string)
     }
 
     var body: some View {
@@ -1253,8 +1342,62 @@ private struct ProductionSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            Section("Startup") {
+                Toggle(
+                    "Launch at Login",
+                    isOn: Binding(
+                        get: { preferences.launchAtLoginEnabled },
+                        set: { preferences.setLaunchAtLogin($0) }
+                    )
+                )
+
+                LabeledContent("Status") {
+                    Text(preferences.launchAtLoginStatusDescription)
+                        .foregroundStyle(.secondary)
+                }
+
+                if let error = preferences.launchAtLoginError {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .textSelection(.enabled)
+                }
+
+                Text("Launch at Login is optional and does not automatically start audio processing. Processing remains an explicit user action in v1.0.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Permissions") {
+                LabeledContent("System Audio") {
+                    Text("Requested by macOS when processing needs system-audio capture.")
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.trailing)
+                }
+                LabeledContent("Measurement Microphone") {
+                    Text("Requested only from Room Correction when you choose Request Access.")
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.trailing)
+                }
+                Text("If processing starts but receives no system audio after permission was denied, allow Notch Sixty under Privacy & Security → Screen & System Audio Recording, then relaunch the app.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Support") {
+                Button {
+                    copyDiagnostics()
+                } label: {
+                    Label("Copy Diagnostics", systemImage: "doc.on.doc")
+                }
+
+                Text("Copies app/build, macOS, audio device/rate, active preset/system, bypass state, and DSP latency. It does not include captured audio or room-measurement samples.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
+        .task { preferences.refreshLaunchAtLoginStatus() }
         .frame(width: 480)
         .padding(12)
     }
@@ -1298,13 +1441,15 @@ struct NotchSixtyApp: App {
         .menuBarExtraStyle(.window)
 
         Settings {
-            ProductionSettingsView(preferences: preferences)
+            ProductionSettingsView(preferences: preferences, product: product)
         }
 
+        #if DEBUG
         Window("Engineering Validation", id: "engineering-validation") {
             EngineeringValidationView(engine: product.audioEngine)
                 .task { product.prepareForUse() }
         }
         .defaultSize(width: 1000, height: 760)
+        #endif
     }
 }
