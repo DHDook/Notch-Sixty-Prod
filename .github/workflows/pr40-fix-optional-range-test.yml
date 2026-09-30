@@ -1,0 +1,32 @@
+name: PR40 Fix Optional Range Test
+
+on:
+  push:
+    branches:
+      - pr40-room-correction-production-workflow
+    paths:
+      - .github/workflows/pr40-fix-optional-range-test.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: pr40-room-correction-production-workflow
+          fetch-depth: 0
+      - name: Fix optional range assertions
+        run: python3 .github/scripts/pr40_fix_optional_range_test.py
+      - name: Commit fix and remove helpers
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/scripts/pr40_fix_optional_range_test.py .github/workflows/pr40-fix-optional-range-test.yml
+          git add NotchSixtyTests/RoomCorrectionProjectControllerTests.swift
+          git commit -m "PR40 Slice F: unwrap optional design range in test"
+          git push origin HEAD:pr40-room-correction-production-workflow
