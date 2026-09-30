@@ -8,6 +8,7 @@ struct RoomCorrectionCalibrationCapture: Equatable, Sendable {
 
 enum RoomCorrectionCalibrationTransportError: Error, Equatable, LocalizedError {
     case outputSampleRateMismatch(expected: Double, actual: Double)
+    case sampleRateMismatch(role: String, expected: Double, actual: Double)
     case invalidInputChannel(index: Int, availableChannels: Int)
     case insufficientOutputChannels(Int)
     case unsupportedPCMFormat(role: String, format: AudioStreamFormatDescription)
@@ -23,6 +24,8 @@ enum RoomCorrectionCalibrationTransportError: Error, Equatable, LocalizedError {
         switch self {
         case .outputSampleRateMismatch(let expected, let actual):
             return "Room measurement requires the selected output to be running at \(expected) Hz; it is currently at \(actual) Hz."
+        case .sampleRateMismatch(let role, let expected, let actual):
+            return "Room measurement requires \(role) to run natively at \(expected) Hz; Core Audio reported \(actual) Hz."
         case .invalidInputChannel(let index, let availableChannels):
             return "Measurement microphone channel \(index + 1) is unavailable; the selected input exposes \(availableChannels) channel(s)."
         case .insufficientOutputChannels(let channels):
@@ -177,10 +180,11 @@ final class RoomCorrectionCalibrationTransport {
 
     private func prepareHardwareAndBridge() throws {
         let sampleRate = plan.program.sampleRate
-        guard abs(output.nominalSampleRate - sampleRate) < 0.5 else {
+        let actualOutputSampleRate = try Self.readNominalSampleRate(deviceID: output.deviceID)
+        guard abs(actualOutputSampleRate - sampleRate) < 0.5 else {
             throw RoomCorrectionCalibrationTransportError.outputSampleRateMismatch(
                 expected: sampleRate,
-                actual: output.nominalSampleRate
+                actual: actualOutputSampleRate
             )
         }
 
@@ -213,6 +217,7 @@ final class RoomCorrectionCalibrationTransport {
             )
         )
         try Self.validateFloatPCM(outputFormat, role: "physical output")
+        try Self.validateSampleRate(outputFormat, expected: sampleRate, role: "physical output stream")
 
         var aggregateInputChannelIndex = selectedInputChannelIndex
         switch topology {
@@ -232,12 +237,12 @@ final class RoomCorrectionCalibrationTransport {
                 inputSampleRateWasChanged = true
                 let applied = try Self.readNominalSampleRate(deviceID: input.deviceID)
                 guard abs(applied - sampleRate) < 0.5 else {
-                    throw RoomCorrectionCalibrationTransportError.outputSampleRateMismatch(
+                    throw RoomCorrectionCalibrationTransportError.sampleRateMismatch(
+                        role: "measurement microphone",
                         expected: sampleRate,
                         actual: applied
                     )
                 }
-                inputSampleRateWasChanged = true
             }
 
             let outputInputChannels = (try? Self.readChannelCount(
@@ -262,6 +267,14 @@ final class RoomCorrectionCalibrationTransport {
                 sampleRate: sampleRate,
                 operation: "set room-measurement aggregate sample rate"
             )
+            let aggregateSampleRate = try Self.readNominalSampleRate(deviceID: aggregateDeviceID)
+            guard abs(aggregateSampleRate - sampleRate) < 0.5 else {
+                throw RoomCorrectionCalibrationTransportError.sampleRateMismatch(
+                    role: "room-measurement aggregate",
+                    expected: sampleRate,
+                    actual: aggregateSampleRate
+                )
+            }
             let outputBufferFrames = try Self.readUInt32Property(
                 objectID: output.deviceID,
                 selector: kAudioDevicePropertyBufferFrameSize,
@@ -293,6 +306,8 @@ final class RoomCorrectionCalibrationTransport {
         )
         try Self.validateFloatPCM(inputFormat, role: "measurement input")
         try Self.validateFloatPCM(calibrationOutputFormat, role: "measurement output")
+        try Self.validateSampleRate(inputFormat, expected: sampleRate, role: "measurement input stream")
+        try Self.validateSampleRate(calibrationOutputFormat, expected: sampleRate, role: "measurement output stream")
 
         let calibrationInputChannels = try Self.readChannelCount(
             deviceID: calibrationDeviceID,
@@ -392,6 +407,20 @@ final class RoomCorrectionCalibrationTransport {
         }
     }
 
+    private static func validateSampleRate(
+        _ format: AudioStreamFormatDescription,
+        expected: Double,
+        role: String
+    ) throws {
+        guard format.sampleRate.isFinite, abs(format.sampleRate - expected) < 0.5 else {
+            throw RoomCorrectionCalibrationTransportError.sampleRateMismatch(
+                role: role,
+                expected: expected,
+                actual: format.sampleRate
+            )
+        }
+    }
+
     private static func aggregateDescription(
         output: AudioOutputDevice,
         input: AudioInputDevice
@@ -409,6 +438,7 @@ final class RoomCorrectionCalibrationTransport {
             kAudioAggregateDeviceUIDKey: "com.dhdook.NotchSixty.room-measurement.\(UUID().uuidString)",
             kAudioAggregateDeviceSubDeviceListKey: [outputEntry, inputEntry],
             kAudioAggregateDeviceMainSubDeviceKey: output.uid,
+            kAudioAggregateDeviceClockDeviceKey: output.uid,
             kAudioAggregateDeviceIsPrivateKey: true,
         ]
     }
