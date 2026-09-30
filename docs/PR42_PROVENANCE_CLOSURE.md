@@ -2,7 +2,7 @@
 
 Status: **FINAL COMMERCIAL PROVENANCE RECONCILIATION**
 
-This document closes the provenance delta from the existing `docs/PROVENANCE.md` register through PR42. It is additive to that living register and is the controlling PR42 evidence for the PR34–PR42 production surface.
+This document closes the provenance delta from the living `docs/PROVENANCE.md` register through PR42 and is the controlling PR42 evidence for the PR34–PR42 production surface.
 
 ## Clean-room conclusion
 
@@ -109,4 +109,4 @@ REW, EasyEffects and CamillaDSP names appear only to identify user-requested com
 - owner-authored reused asset without an ownership basis: **none identified**;
 - PR34–PR42 implementation areas without a provenance classification: **none identified**.
 
-The commercial provenance gate is therefore closed for the current PR42 tree, subject to the normal release-time recheck if new source, assets or dependencies are added after this audit.
+The commercial provenance gate is closed for the current PR42 tree, subject to the normal release-time recheck if new source, assets or dependencies are added after this audit.
