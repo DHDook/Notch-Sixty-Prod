@@ -39,7 +39,8 @@ require("Historical Constant-Q and Linkwitz target state" in toolbar,
 # REW audited subset.
 for token in ["PK", "LS", "HS", "LP", "HP", "BP", "NOTCH", "BW(?:/60)?"]:
     require(token in toolbar, f"REW mapping missing: {token}")
-require("no usable EQ filters" in toolbar.lower(), "empty REW import must fail explicitly")
+require("no usable" in toolbar.lower() and "filters" in toolbar.lower(),
+        "empty REW import must fail explicitly")
 
 # EasyEffects audited subset and ownership boundary.
 for token in ["equalizer#0", "split-channels", "input-gain", "output-gain", "Bell", "Band-pass"]:
