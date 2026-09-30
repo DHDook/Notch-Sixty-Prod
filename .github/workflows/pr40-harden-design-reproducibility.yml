@@ -1,0 +1,32 @@
+name: PR40 Harden Design Reproducibility
+
+on:
+  push:
+    branches:
+      - pr40-room-correction-production-workflow
+    paths:
+      - .github/workflows/pr40-harden-design-reproducibility.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: pr40-room-correction-production-workflow
+          fetch-depth: 0
+      - name: Harden design reproducibility
+        run: python3 .github/scripts/pr40_harden_design_reproducibility.py
+      - name: Commit hardening and remove helpers
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/scripts/pr40_harden_design_reproducibility.py .github/workflows/pr40-harden-design-reproducibility.yml
+          git add NotchSixty/State/ProductProfiles.swift NotchSixty/Audio/RoomCorrectionFIRDesigner.swift NotchSixty/State/RoomCorrectionProjectController.swift NotchSixtyTests/RoomCorrectionFIRDesignerTests.swift NotchSixtyTests/RoomCorrectionProjectControllerTests.swift
+          git commit -m "PR40 Slice E: preserve design target provenance"
+          git push origin HEAD:pr40-room-correction-production-workflow
