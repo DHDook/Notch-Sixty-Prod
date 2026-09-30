@@ -1,0 +1,37 @@
+name: PR44 Preset Stage
+
+on:
+  push:
+    branches:
+      - pr44-factory-content-presets
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: pr44-factory-content-presets
+
+      - name: Apply factory preset pack
+        run: python3 ci/pr44_factory_presets_patch.py
+
+      - name: Validate factory preset pack
+        run: python3 ci/validate_pr44_factory_presets.py
+
+      - name: Commit production source if needed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- NotchSixty/State/ProductProfiles.swift; then
+            echo "Factory preset source already applied."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add NotchSixty/State/ProductProfiles.swift
+          git commit -m "PR44: add factory content preset pack"
+          git push origin HEAD:pr44-factory-content-presets
