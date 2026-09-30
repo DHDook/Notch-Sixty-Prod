@@ -521,8 +521,8 @@ final class RoomCorrectionProjectControllerTests: XCTestCase {
                 RoomCorrectionDesignSourcePosition(id: secondID, weight: 2),
             ]
         )
-        XCTAssertEqual(design.effectiveCorrectionLowHz, 100, accuracy: 0.000_001)
-        XCTAssertEqual(design.effectiveCorrectionHighHz, 1_000, accuracy: 0.000_001)
+        XCTAssertEqual(try XCTUnwrap(design.effectiveCorrectionLowHz), 100, accuracy: 0.000_001)
+        XCTAssertEqual(try XCTUnwrap(design.effectiveCorrectionHighHz), 1_000, accuracy: 0.000_001)
         let summary = try fixture.controller.deploymentSummary(for: design)
         XCTAssertEqual(summary.projectID, fixture.controller.project?.id)
         XCTAssertEqual(summary.activeDesignID, design.id)
