@@ -113,6 +113,8 @@ The final PR42 software gate requires:
 
 The closure validator must fail if the final matrix has an invalid/unclassified row, a `BLOCKED` disposition, a superseded row without a real replacement/boundary rationale, missing key audited capabilities, an initial matrix that is no longer explicitly historical/non-controlling, or an incomplete provenance/third-party result.
 
+For cumulative certification, PR42 may temporarily target `main` so the normal pull-request workflow evaluates the full PR40+PR41+PR42 tree. After that exact head is green, restoring the PR base to `pr41-active-crossover-matrix-parity` is a metadata-only change and does not alter the certified commit SHA.
+
 ## Manual acceptance remaining
 
 No Mac-only test is required to establish the documentary classifications themselves. Before PR42 is marked ready/merged, the user should perform the already-planned combined PR40/PR41 real-hardware acceptance and a brief PR42 production UI/interchange smoke pass when a Mac is available.
