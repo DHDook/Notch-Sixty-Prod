@@ -21,7 +21,7 @@ Debug builds retain all of those surfaces for future regression work.
 
 ### 2. Launch at Login
 
-The app Settings / preferences UI—the same surface that contains **Appearance** and **App Presence (Dock / Menu Bar / Both)**—now exposes **Launch at Login** using Apple's `SMAppService.mainApp` API. The compact tray dropdown intentionally does not duplicate this preference.
+The app Settings / preferences UI—the same surface that contains **Appearance** and **App Presence (Dock / Menu Bar / Both)**—exposes **Launch at Login** using Apple's `SMAppService.mainApp` API. The compact tray dropdown intentionally does not duplicate this preference.
 
 Contract:
 
@@ -43,7 +43,7 @@ The system-audio guidance also describes the denied/no-signal recovery path: gra
 
 ### 4. Copy Diagnostics
 
-Settings now provides **Copy Diagnostics** for support and first-release troubleshooting.
+Settings provides **Copy Diagnostics** for support and first-release troubleshooting.
 
 The report includes product/runtime metadata such as:
 
@@ -61,7 +61,7 @@ The report does **not** contain captured system audio, microphone audio, room-me
 
 ### 5. Repository/release metadata
 
-The repository status now describes v1.0 release-candidate hardening rather than the old bootstrap phase. The product boundary is also updated to match the current architecture: source/program material remains stereo while the speaker-integration layer may fan out to 2–8 physical outputs for mains/sub and active bi-/tri-amp systems.
+The repository status describes v1.0 release-candidate hardening rather than the old bootstrap phase. The product boundary is updated to match the current architecture: source/program material remains stereo while the speaker-integration layer may fan out to 2–8 physical outputs for mains/sub and active bi-/tri-amp systems.
 
 The manually-triggered `Release DMG (Manual)` workflow is carried into the stacked PR45 tree so the final release candidate can be built from the exact cumulative revision. It records version/build/revision, validates the arm64 sandboxed Release app, produces a versioned DMG, computes SHA-256, and uploads both DMG and checksum. Production Developer-ID/App-Store signing/notarization remains a separate release credential step.
 
