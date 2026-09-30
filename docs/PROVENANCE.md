@@ -113,3 +113,9 @@ As of that review:
 - linked/bundled third-party production component requiring a notice: **none identified**;
 - owner-authored reused asset without an ownership basis: **none identified**;
 - substantive PR34–PR42 implementation area without a provenance classification: **none identified**.
+
+### PR42 menu-bar artwork reuse
+
+- `NotchSixty/Assets.xcassets/TrayIcon.imageset/notch_sixty_tray_icon_final_tightcrop.svg` is project-owner-controlled artwork carried from the legacy repository by explicit owner request.
+- Only the visual asset is reused. The production `MenuBarExtra`, application preferences, processing controls, preset binding, Settings scene, and Dock/Menu Bar/Both behavior are newly authored against the proprietary production model.
+

@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import SwiftUI
 
@@ -953,15 +954,352 @@ private struct EngineeringValidationView: View {
     }
 }
 
+private enum ApplicationAppearanceMode: String, CaseIterable, Identifiable {
+    case system
+    case light
+    case dark
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .system: return "System"
+        case .light: return "Light"
+        case .dark: return "Dark"
+        }
+    }
+}
+
+private enum ApplicationPresenceMode: String, CaseIterable, Identifiable {
+    case dock
+    case tray
+    case both
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .dock: return "Dock"
+        case .tray: return "Menu Bar"
+        case .both: return "Both"
+        }
+    }
+}
+
+@MainActor
+private final class ApplicationPreferences: ObservableObject {
+    private enum Key {
+        static let appearance = "application.appearance"
+        static let presence = "application.presence"
+    }
+
+    private let defaults: UserDefaults
+
+    @Published var appearance: ApplicationAppearanceMode {
+        didSet {
+            defaults.set(appearance.rawValue, forKey: Key.appearance)
+            applyAppearance()
+        }
+    }
+
+    @Published var presence: ApplicationPresenceMode {
+        didSet {
+            defaults.set(presence.rawValue, forKey: Key.presence)
+            applyActivationPolicy()
+        }
+    }
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        appearance = ApplicationAppearanceMode(
+            rawValue: defaults.string(forKey: Key.appearance) ?? ""
+        ) ?? .system
+        presence = ApplicationPresenceMode(
+            rawValue: defaults.string(forKey: Key.presence) ?? ""
+        ) ?? .both
+    }
+
+    var isTrayInserted: Bool { presence != .dock }
+
+    func setTrayInserted(_ inserted: Bool) {
+        if inserted {
+            if presence == .dock { presence = .both }
+        } else if presence != .dock {
+            // Never strand a tray-only app with no visible app surface.
+            presence = .dock
+        }
+    }
+
+    func apply() {
+        applyAppearance()
+        applyActivationPolicy()
+    }
+
+    private func applyAppearance() {
+        switch appearance {
+        case .system:
+            NSApplication.shared.appearance = nil
+        case .light:
+            NSApplication.shared.appearance = NSAppearance(named: .aqua)
+        case .dark:
+            NSApplication.shared.appearance = NSAppearance(named: .darkAqua)
+        }
+    }
+
+    private func applyActivationPolicy() {
+        let policy: NSApplication.ActivationPolicy = presence == .tray ? .accessory : .regular
+        _ = NSApplication.shared.setActivationPolicy(policy)
+    }
+}
+
+private struct ProductionMenuBarView: View {
+    let product: ProductController
+    @ObservedObject private var profiles: ProductProfileController
+    @ObservedObject private var engine: AudioIOEngine
+    @Environment(\.openWindow) private var openWindow
+    @State private var commandError: String?
+
+    init(product: ProductController) {
+        self.product = product
+        _profiles = ObservedObject(wrappedValue: product.profiles)
+        _engine = ObservedObject(wrappedValue: product.audioEngine)
+    }
+
+    private var presetSelection: Binding<UUID?> {
+        Binding(
+            get: { profiles.selectedContentPresetID },
+            set: { id in
+                guard let id else { return }
+                profiles.selectContentPreset(id)
+            }
+        )
+    }
+
+    private var processingActive: Bool {
+        switch engine.lifecycleState {
+        case .starting, .running, .reconfiguring, .recoveringOutput:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private var canToggleProcessing: Bool {
+        switch engine.lifecycleState {
+        case .idle, .running, .reconfiguring, .recoveringOutput, .failed:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private var processingBinding: Binding<Bool> {
+        Binding(
+            get: { processingActive },
+            set: { enabled in
+                if enabled {
+                    if engine.lifecycleState == .failed { engine.stop() }
+                    guard engine.lifecycleState == .idle else { return }
+                    do {
+                        try engine.start()
+                        commandError = nil
+                    } catch {
+                        commandError = error.localizedDescription
+                    }
+                } else {
+                    engine.stop()
+                    commandError = nil
+                }
+            }
+        )
+    }
+
+    private var statusLabel: String {
+        switch engine.lifecycleState {
+        case .idle: return "Stopped"
+        case .running: return "Processing"
+        case .failed: return "Failed"
+        case .requestingPermission: return "Requesting Permission"
+        case .creatingTap, .creatingAggregate, .openingOutput, .starting: return "Starting"
+        case .reconfiguring: return "Reconfiguring"
+        case .recoveringOutput: return "Recovering Output"
+        case .stopping: return "Stopping"
+        }
+    }
+
+    private var statusSymbol: String {
+        switch engine.lifecycleState {
+        case .running: return "waveform.circle.fill"
+        case .failed: return "exclamationmark.triangle.fill"
+        case .idle: return "stop.circle"
+        default: return "arrow.triangle.2.circlepath.circle"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                Image("TrayIcon")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 28, height: 24)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("NOTCH SIXTY")
+                        .font(.headline)
+                    Label(statusLabel, systemImage: statusSymbol)
+                        .font(.caption)
+                        .foregroundStyle(engine.lifecycleState == .failed ? .red : .secondary)
+                }
+                Spacer(minLength: 16)
+            }
+
+            Divider()
+
+            Toggle("Processing", isOn: processingBinding)
+                .toggleStyle(.switch)
+                .disabled(!canToggleProcessing)
+
+            Picker("Content Preset", selection: presetSelection) {
+                ForEach(profiles.contentPresets) { preset in
+                    Text(preset.name).tag(Optional(preset.id))
+                }
+            }
+            .pickerStyle(.menu)
+
+            if profiles.selectedContentPresetIsDirty {
+                Text("Current preset has unsaved changes.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Divider()
+
+            Button {
+                openWindow(id: "main")
+                NSApplication.shared.activate(ignoringOtherApps: true)
+            } label: {
+                Label("Open Notch Sixty", systemImage: "macwindow")
+            }
+
+            SettingsLink {
+                Label("Settings…", systemImage: "gearshape")
+            }
+
+            Divider()
+
+            Button(role: .destructive) {
+                product.shutdownForTermination()
+                NSApplication.shared.terminate(nil)
+            } label: {
+                Label("Quit Notch Sixty", systemImage: "power")
+            }
+        }
+        .padding(14)
+        .frame(width: 300)
+        .alert(
+            "Processing Error",
+            isPresented: Binding(
+                get: { commandError != nil },
+                set: { if !$0 { commandError = nil } }
+            )
+        ) {
+            Button("OK") { commandError = nil }
+        } message: {
+            Text(commandError ?? "")
+        }
+    }
+}
+
+private struct ProductionSettingsView: View {
+    @ObservedObject var preferences: ApplicationPreferences
+
+    private var version: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
+    }
+
+    private var build: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—"
+    }
+
+    var body: some View {
+        Form {
+            Section("About") {
+                LabeledContent("Version") {
+                    Text(version).monospacedDigit()
+                }
+                LabeledContent("Build") {
+                    Text(build).monospacedDigit()
+                }
+            }
+
+            Section("Appearance") {
+                Picker("Appearance", selection: $preferences.appearance) {
+                    ForEach(ApplicationAppearanceMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+
+            Section("App Presence") {
+                Picker("Show Notch Sixty in", selection: $preferences.presence) {
+                    ForEach(ApplicationPresenceMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+
+                Text("Menu Bar mode keeps processing and preset controls available without a Dock icon. Both shows the app in both places.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .frame(width: 480)
+        .padding(12)
+    }
+}
+
 @main
 struct NotchSixtyApp: App {
-    @StateObject private var product = ProductController()
+    @StateObject private var product: ProductController
+    @StateObject private var preferences: ApplicationPreferences
+
+    init() {
+        _product = StateObject(wrappedValue: ProductController())
+        _preferences = StateObject(wrappedValue: ApplicationPreferences())
+    }
+
+    private var trayInserted: Binding<Bool> {
+        Binding(
+            get: { preferences.isTrayInserted },
+            set: { preferences.setTrayInserted($0) }
+        )
+    }
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup(id: "main") {
             ProductionRootView(product: product)
+                .task {
+                    product.prepareForUse()
+                    preferences.apply()
+                }
         }
         .defaultSize(width: 1180, height: 780)
+
+        MenuBarExtra(
+            "Notch Sixty",
+            image: "TrayIcon",
+            isInserted: trayInserted
+        ) {
+            ProductionMenuBarView(product: product)
+                .task { product.prepareForUse() }
+        }
+        .menuBarExtraStyle(.window)
+
+        Settings {
+            ProductionSettingsView(preferences: preferences)
+        }
 
         Window("Engineering Validation", id: "engineering-validation") {
             EngineeringValidationView(engine: product.audioEngine)

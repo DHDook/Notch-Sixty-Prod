@@ -141,3 +141,8 @@ PR42 reaches software closure when:
 7. exact-head CI and packaging are green.
 
 After PR42, new broad parity discovery stops. Remaining work moves to production hardening, real-hardware acceptance and App Store/commercial release preparation.
+
+## Application shell enhancement
+
+PR42 restores the legacy-observable menu-bar convenience through a fresh production implementation: Content Preset switching, processing start/stop, main-window access, Settings, and quit. The Settings scene reports version/build and persists System/Light/Dark appearance plus Dock/Menu Bar/Both presence. The only legacy artifact reused is the project-owner-controlled `TrayIcon` vector asset, recorded separately as `PORT VERIFIED`.
+

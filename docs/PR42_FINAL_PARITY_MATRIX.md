@@ -142,6 +142,8 @@ For rows marked **SUPERSEDED**, the rationale states the replacement or delibera
 | Production navigation/workspaces | IMPROVED | PR36–PR41 replaced engineering validation surfaces with the commercial shell. |
 | Production Equalizer | IMPROVED | Current native SwiftUI editor reflects the commercial EQ model rather than historical UI structure. |
 | Production Dynamics | IMPROVED | PR38 capability surface plus PR42 semantic LabeledContent/adaptive-material editor cleanup. |
+| Menu bar preset / processing / quit controls | IMPROVED | Fresh production SwiftUI MenuBarExtra exposes the selected Content Preset, start/stop processing through the existing AudioIOEngine lifecycle, main-window access, Settings, and orderly quit without importing legacy implementation code. |
+| Legacy owner-controlled tray icon artwork | PORT VERIFIED | Reuses only the project-owner-controlled vector TrayIcon artwork as a template-rendered asset; production behavior is independently implemented. |
 | App identity/icon assets | PORT VERIFIED | PR39 records that the analog-meter artwork is user-authored; production light/dark derivatives are owner-approved and retained with vector sources. |
 | Third-party production dependencies | PARITY | None are linked into the production application; Apple platform frameworks and public specifications are not bundled third-party code. |
 
