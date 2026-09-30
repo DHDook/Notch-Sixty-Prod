@@ -91,7 +91,7 @@ for token in [
     "unexplained production source origin: **none identified**",
     "unresolved GPL/AGPL production dependency: **none identified**",
     "third-party linked production component requiring a notice: **none identified**",
-    "owner-authored reused asset without an ownership basis: **none identified**",
+    "project-owner-approved/controlled reused asset without an ownership basis: **none identified**",
     "PR34–PR42 implementation areas without a provenance classification: **none identified**",
 ]:
     require(token in provenance, f"provenance closure token missing: {token}")
