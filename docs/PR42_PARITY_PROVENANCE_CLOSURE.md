@@ -26,7 +26,7 @@ There may be no unexplained omission at PR42 exit.
 - `docs/PR42_PROVENANCE_CLOSURE.md` — PR34–PR42 implementation/source/asset/dependency reconciliation.
 - `docs/PR42_INTERCHANGE_CLOSURE.md` — `.eqpreset`, REW, EasyEffects and CamillaDSP compatibility contract.
 - `THIRD_PARTY_NOTICES.md` — release-time dependency/notice result.
-- `ci/validate_pr42_parity_closure.py` — permanent machine guard against unclassified or release-blocking matrix drift.
+- `ci/validate_pr42_parity_closure.py` — permanent machine guard against unclassified or release-blocking matrix drift; `SUPERSEDED` rows must state a semantic replacement, deliberate boundary, audited no-op, or future handoff rather than merely satisfy an arbitrary prose-length threshold.
 
 `docs/PR42_INITIAL_PARITY_MATRIX.md` remains as historical triage only; it is no longer the controlling closure ledger.
 
@@ -111,7 +111,7 @@ The final PR42 software gate requires:
 - App Sandbox validation;
 - Release app / DMG packaging.
 
-The closure validator must fail if the final matrix has an invalid/unclassified row, a `BLOCKED` disposition, a superseded row without rationale, missing key audited capabilities, or an incomplete provenance/third-party result.
+The closure validator must fail if the final matrix has an invalid/unclassified row, a `BLOCKED` disposition, a superseded row without a real replacement/boundary rationale, missing key audited capabilities, or an incomplete provenance/third-party result.
 
 ## Manual acceptance remaining
 
