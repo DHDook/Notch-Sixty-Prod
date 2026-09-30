@@ -1,0 +1,38 @@
+name: PR44 Classic Preset Deduplication
+
+on:
+  push:
+    branches:
+      - pr44-factory-content-presets
+
+permissions:
+  contents: write
+
+jobs:
+  dedupe:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: pr44-factory-content-presets
+
+      - name: Collapse duplicate classic preset entries
+        run: python3 ci/pr44_dedupe_classic_presets.py
+
+      - name: Validate exact eight-preset contract
+        run: python3 ci/validate_pr44_factory_presets.py
+
+      - name: Commit cleaned production source if needed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- NotchSixty/State/ProductProfiles.swift; then
+            echo "Factory preset source is already unique."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add NotchSixty/State/ProductProfiles.swift
+          git commit -m "PR44: collapse duplicate classic preset staging inserts"
+          git push origin HEAD:pr44-factory-content-presets
