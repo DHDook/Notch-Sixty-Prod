@@ -146,7 +146,7 @@ enum MultiOutputRoutingError: Error, Equatable, LocalizedError {
         case .liveTransportOutputMismatch(let selected, let routed):
             return "The selected physical output \(selected) does not match the routed same-device output \(routed)."
         case .liveTransportBusUnavailable(let bus):
-            return "\(bus.displayName) is not live-routable yet. C2b only routes the final post-DSP Left/Right Full Range buses."
+            return "\(bus.displayName) is not valid for the selected physical crossover topology."
         case .routingChangeRequiresIdle:
             return "Stop processing before changing physical output routing."
         case .aggregateTransportRequiresMultipleDevices(let uids):
@@ -326,6 +326,10 @@ extension SpeakerOutputBus {
     }
 
     var isC2bLiveFullRangeBus: Bool {
+        isFullRangeBus
+    }
+
+    var isFullRangeBus: Bool {
         self == .leftFullRange || self == .rightFullRange
     }
 }
@@ -447,6 +451,46 @@ extension AggregateDeviceOutputRoutePlan {
         }
         for mapped in mappedRoutes where !mapped.route.bus.isC2bLiveFullRangeBus {
             throw MultiOutputRoutingError.liveTransportBusUnavailable(mapped.route.bus)
+        }
+    }
+}
+
+extension SameDeviceOutputRoutePlan {
+    func validateForC4LiveTransport(
+        selectedOutputUID: String,
+        crossoverMode: SpeakerCrossoverMode?
+    ) throws {
+        guard deviceUID == selectedOutputUID else {
+            throw MultiOutputRoutingError.liveTransportOutputMismatch(
+                selected: selectedOutputUID,
+                routed: deviceUID
+            )
+        }
+        for route in routes {
+            if route.bus.isFullRangeBus { continue }
+            guard let crossoverMode, crossoverMode.supports(bus: route.bus) else {
+                throw MultiOutputRoutingError.liveTransportBusUnavailable(route.bus)
+            }
+        }
+    }
+}
+
+extension AggregateDeviceOutputRoutePlan {
+    func validateForC4LiveTransport(
+        selectedOutputUID: String,
+        crossoverMode: SpeakerCrossoverMode?
+    ) throws {
+        guard selectedOutputUID == referenceDeviceUID else {
+            throw MultiOutputRoutingError.aggregateReferenceOutputMismatch(
+                selected: selectedOutputUID,
+                reference: referenceDeviceUID
+            )
+        }
+        for mapped in mappedRoutes {
+            if mapped.route.bus.isFullRangeBus { continue }
+            guard let crossoverMode, crossoverMode.supports(bus: mapped.route.bus) else {
+                throw MultiOutputRoutingError.liveTransportBusUnavailable(mapped.route.bus)
+            }
         }
     }
 }

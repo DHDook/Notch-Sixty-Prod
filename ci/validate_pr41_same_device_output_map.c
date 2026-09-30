@@ -167,6 +167,94 @@ static int validate_live_output_ioproc(void) {
     return 0;
 }
 
+static int validate_live_mains_sub_splitter(void) {
+    const uint32_t frames = 4096;
+    N60RealtimeAudioBridge *bridge = N60RealtimeAudioBridgeCreate(frames + 64);
+    if (bridge == NULL) return 40;
+
+    N60SpeakerOutputRouteDescriptor routes[4] = {
+        {N60SpeakerOutputBusLeftHigh, 0},
+        {N60SpeakerOutputBusRightHigh, 1},
+        {N60SpeakerOutputBusSubMono, 2},
+        {N60SpeakerOutputBusLeftFullRange, 3},
+    };
+    N60SameDeviceOutputMap map = {0};
+    if (!N60SameDeviceOutputMapCompile(4, routes, 4, &map)
+        || !N60RealtimeAudioBridgeConfigureSameDeviceOutputMap(bridge, map)) {
+        N60RealtimeAudioBridgeDestroy(bridge);
+        return 41;
+    }
+    N60SpeakerBusSplitterSnapshot splitter = {0};
+    if (!N60SpeakerBusSplitterSnapshotMake(
+            48000.0,
+            N60SpeakerCrossoverModeMainsSub,
+            200.0,
+            N60CrossoverTopologyLinkwitzRiley24,
+            2000.0,
+            N60CrossoverTopologyLinkwitzRiley24,
+            1.0f,
+            false,
+            false,
+            200.0,
+            0.7,
+            &splitter)
+        || !N60RealtimeAudioBridgeConfigureSpeakerBusSplitter(bridge, splitter)) {
+        N60RealtimeAudioBridgeDestroy(bridge);
+        return 42;
+    }
+    N60DSPGraphSnapshot graph = N60DSPGraphSnapshotMakeUnity(48000.0);
+    if (!N60RealtimeAudioBridgePublishDSPGraph(bridge, graph)) {
+        N60RealtimeAudioBridgeDestroy(bridge);
+        return 43;
+    }
+
+    float *inputSamples = calloc((size_t)frames * 2u, sizeof(float));
+    float *outputSamples = calloc((size_t)frames * 4u, sizeof(float));
+    if (inputSamples == NULL || outputSamples == NULL) {
+        free(inputSamples);
+        free(outputSamples);
+        N60RealtimeAudioBridgeDestroy(bridge);
+        return 44;
+    }
+    for (uint32_t frame = 0; frame < frames; ++frame) {
+        inputSamples[frame * 2u] = 0.5f;
+        inputSamples[frame * 2u + 1u] = 0.5f;
+    }
+    AudioBufferList input = {0};
+    input.mNumberBuffers = 1;
+    input.mBuffers[0].mNumberChannels = 2;
+    input.mBuffers[0].mDataByteSize = frames * 2u * (uint32_t)sizeof(float);
+    input.mBuffers[0].mData = inputSamples;
+    AudioBufferList output = {0};
+    output.mNumberBuffers = 1;
+    output.mBuffers[0].mNumberChannels = 4;
+    output.mBuffers[0].mDataByteSize = frames * 4u * (uint32_t)sizeof(float);
+    output.mBuffers[0].mData = outputSamples;
+    AudioTimeStamp timestamp = {0};
+    if (N60CaptureIOProc(0, &timestamp, &input, &timestamp, &input, &timestamp, bridge) != noErr
+        || N60OutputIOProc(0, &timestamp, &input, &timestamp, &output, &timestamp, bridge) != noErr) {
+        free(inputSamples);
+        free(outputSamples);
+        N60RealtimeAudioBridgeDestroy(bridge);
+        return 45;
+    }
+
+    uint32_t base = (frames - 1u) * 4u;
+    float mainsLeft = outputSamples[base];
+    float mainsRight = outputSamples[base + 1u];
+    float sub = outputSamples[base + 2u];
+    float fullRange = outputSamples[base + 3u];
+    int result = 0;
+    if (fabsf(mainsLeft) > 0.01f || fabsf(mainsRight) > 0.01f) result = 46;
+    if (fabsf(sub - 0.5f) > 0.01f) result = 47;
+    if (fabsf(fullRange - 0.5f) > 1.0e-6f) result = 48;
+
+    free(inputSamples);
+    free(outputSamples);
+    N60RealtimeAudioBridgeDestroy(bridge);
+    return result;
+}
+
 int main(void) {
     int result = validate_interleaved();
     if (result != 0) return result;
@@ -176,6 +264,8 @@ int main(void) {
     if (result != 0) return result;
     result = validate_live_output_ioproc();
     if (result != 0) return result;
-    puts("PR41 same-device output map and live IOProc validation passed");
+    result = validate_live_mains_sub_splitter();
+    if (result != 0) return result;
+    puts("PR41 output map, live IOProc, and physical speaker-bus splitter validation passed");
     return 0;
 }

@@ -50,11 +50,27 @@ typedef struct {
     uint64_t appliedCommandSequence;
 } N60StartupFadeRuntime;
 
+typedef struct {
+    N60SpeakerBusSplitterSnapshot snapshot;
+    N60BiquadState lowerLowLeft[N60_MAX_CROSSOVER_SECTIONS];
+    N60BiquadState lowerLowRight[N60_MAX_CROSSOVER_SECTIONS];
+    N60BiquadState lowerLowMono[N60_MAX_CROSSOVER_SECTIONS];
+    N60BiquadState lowerHighLeft[N60_MAX_CROSSOVER_SECTIONS];
+    N60BiquadState lowerHighRight[N60_MAX_CROSSOVER_SECTIONS];
+    N60BiquadState upperLowLeft[N60_MAX_CROSSOVER_SECTIONS];
+    N60BiquadState upperLowRight[N60_MAX_CROSSOVER_SECTIONS];
+    N60BiquadState upperHighLeft[N60_MAX_CROSSOVER_SECTIONS];
+    N60BiquadState upperHighRight[N60_MAX_CROSSOVER_SECTIONS];
+    N60BiquadState subPhaseAlignment;
+} N60SpeakerBusSplitterRuntime;
+
+
 struct N60RealtimeAudioBridge {
     uint32_t capacityFrames;
     N60StereoFrame *frames;
     N60RenderKernel *renderKernel;
     N60SameDeviceOutputMap sameDeviceOutputMap;
+    N60SpeakerBusSplitterRuntime speakerBusSplitter;
 
     _Atomic uint64_t writeIndex;
     _Atomic uint64_t readIndex;
@@ -339,6 +355,115 @@ static void publish_output_vu_meter(
     atomic_store_explicit(&bridge->outputVURMSLeftBits, float_to_bits(rmsLeft), memory_order_relaxed);
     atomic_store_explicit(&bridge->outputVURMSRightBits, float_to_bits(rmsRight), memory_order_relaxed);
     atomic_fetch_add_explicit(&bridge->outputVUOverRangeSamples, overRangeSamples, memory_order_relaxed);
+}
+
+static float process_splitter_sections(
+    const N60BiquadCoefficients *coefficients,
+    N60BiquadState *states,
+    uint32_t count,
+    float input
+) {
+    float output = input;
+    for (uint32_t index = 0; index < count; ++index) {
+        output = N60BiquadProcessSample(coefficients[index], &states[index], output);
+    }
+    return output;
+}
+
+static void process_speaker_bus_splitter(
+    N60SpeakerBusSplitterRuntime *runtime,
+    float left,
+    float right,
+    N60SpeakerBusFrame *frame
+) {
+    *frame = N60SpeakerBusFrameMakeSilence();
+    (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusLeftFullRange, left);
+    (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusRightFullRange, right);
+    if (!runtime->snapshot.enabled) return;
+
+    const N60SpeakerBusSplitterSnapshot *snapshot = &runtime->snapshot;
+    if (snapshot->mode == N60SpeakerCrossoverModeMainsSub) {
+        float mainsLeft = process_splitter_sections(
+            snapshot->lowerHighPass, runtime->lowerHighLeft,
+            snapshot->lowerSectionCount, left
+        );
+        float mainsRight = process_splitter_sections(
+            snapshot->lowerHighPass, runtime->lowerHighRight,
+            snapshot->lowerSectionCount, right
+        );
+        float subMono = 0.5f * (left + right);
+        subMono = process_splitter_sections(
+            snapshot->lowerLowPass, runtime->lowerLowMono,
+            snapshot->lowerSectionCount, subMono
+        );
+        if (snapshot->subPhaseAlignmentEnabled) {
+            subMono = N60BiquadProcessSample(
+                snapshot->subPhaseAlignmentAllPass,
+                &runtime->subPhaseAlignment,
+                subMono
+            );
+        }
+        subMono *= snapshot->subGainLinear;
+        if (snapshot->subPolarityInverted) subMono = -subMono;
+        (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusLeftHigh, mainsLeft);
+        (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusRightHigh, mainsRight);
+        (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusSubMono, subMono);
+        return;
+    }
+
+    float lowLeft = process_splitter_sections(
+        snapshot->lowerLowPass, runtime->lowerLowLeft,
+        snapshot->lowerSectionCount, left
+    );
+    float lowRight = process_splitter_sections(
+        snapshot->lowerLowPass, runtime->lowerLowRight,
+        snapshot->lowerSectionCount, right
+    );
+    (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusLeftLow, lowLeft);
+    (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusRightLow, lowRight);
+
+    if (snapshot->mode == N60SpeakerCrossoverModeBiAmp) {
+        float highLeft = process_splitter_sections(
+            snapshot->lowerHighPass, runtime->lowerHighLeft,
+            snapshot->lowerSectionCount, left
+        );
+        float highRight = process_splitter_sections(
+            snapshot->lowerHighPass, runtime->lowerHighRight,
+            snapshot->lowerSectionCount, right
+        );
+        (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusLeftHigh, highLeft);
+        (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusRightHigh, highRight);
+        return;
+    }
+
+    float midLeft = process_splitter_sections(
+        snapshot->lowerHighPass, runtime->lowerHighLeft,
+        snapshot->lowerSectionCount, left
+    );
+    float midRight = process_splitter_sections(
+        snapshot->lowerHighPass, runtime->lowerHighRight,
+        snapshot->lowerSectionCount, right
+    );
+    midLeft = process_splitter_sections(
+        snapshot->upperLowPass, runtime->upperLowLeft,
+        snapshot->upperSectionCount, midLeft
+    );
+    midRight = process_splitter_sections(
+        snapshot->upperLowPass, runtime->upperLowRight,
+        snapshot->upperSectionCount, midRight
+    );
+    float highLeft = process_splitter_sections(
+        snapshot->upperHighPass, runtime->upperHighLeft,
+        snapshot->upperSectionCount, left
+    );
+    float highRight = process_splitter_sections(
+        snapshot->upperHighPass, runtime->upperHighRight,
+        snapshot->upperSectionCount, right
+    );
+    (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusLeftMid, midLeft);
+    (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusRightMid, midRight);
+    (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusLeftHigh, highLeft);
+    (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusRightHigh, highRight);
 }
 
 N60RealtimeAudioBridge *N60RealtimeAudioBridgeCreate(uint32_t capacityFrames) {
@@ -801,6 +926,16 @@ bool N60RealtimeAudioBridgeConfigureSameDeviceOutputMap(
     return true;
 }
 
+bool N60RealtimeAudioBridgeConfigureSpeakerBusSplitter(
+    N60RealtimeAudioBridge *bridge,
+    N60SpeakerBusSplitterSnapshot snapshot
+) {
+    if (bridge == NULL || !snapshot.enabled) return false;
+    memset(&bridge->speakerBusSplitter, 0, sizeof(bridge->speakerBusSplitter));
+    bridge->speakerBusSplitter.snapshot = snapshot;
+    return true;
+}
+
 bool N60SameDeviceOutputMapValueForChannel(
     const N60SameDeviceOutputMap *map,
     const N60SpeakerBusFrame *frame,
@@ -1058,9 +1193,10 @@ OSStatus N60OutputIOProc(
         float finalLeft = processed.left * gain;
         float finalRight = processed.right * gain;
         if (sameDeviceMultiOutput) {
-            N60SpeakerBusFrame busFrame = N60SpeakerBusFrameMakeSilence();
-            (void)N60SpeakerBusFrameSet(&busFrame, N60SpeakerOutputBusLeftFullRange, finalLeft);
-            (void)N60SpeakerBusFrameSet(&busFrame, N60SpeakerOutputBusRightFullRange, finalRight);
+            N60SpeakerBusFrame busFrame;
+            process_speaker_bus_splitter(
+                &bridge->speakerBusSplitter, finalLeft, finalRight, &busFrame
+            );
             if (!N60SameDeviceOutputMapWriteFrame(
                 &bridge->sameDeviceOutputMap, &busFrame, outOutputData, frameIndex
             )) {

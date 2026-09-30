@@ -1286,4 +1286,103 @@ final class RoomCorrectionProjectControllerTests: XCTestCase {
             XCTAssertEqual(error as? MultiOutputRoutingError, .liveTransportBusUnavailable(.subMono))
         }
     }
+
+    func testPhysicalSpeakerCrossoverDesignsAtNativeRateMatrix() throws {
+        for sampleRate in [44_100.0, 48_000.0, 96_000.0, 192000.0, 384_000.0] {
+            var mainsSub = BassManagementConfiguration()
+            mainsSub.enabled = true
+            mainsSub.physicalOutputMode = .mainsSub
+            mainsSub.frequencyHz = 80
+            mainsSub.topology = .linkwitzRiley24
+            var snapshot = try mainsSub.makeSpeakerBusSplitterSnapshot(sampleRate: sampleRate)
+            XCTAssertTrue(snapshot.enabled)
+            XCTAssertEqual(snapshot.mode, N60SpeakerCrossoverModeMainsSub)
+            XCTAssertEqual(snapshot.lowerSectionCount, 2)
+
+            var biAmp = BassManagementConfiguration()
+            biAmp.enabled = true
+            biAmp.physicalOutputMode = .biAmp
+            biAmp.frequencyHz = 2_000
+            biAmp.topology = .linkwitzRiley48
+            snapshot = try biAmp.makeSpeakerBusSplitterSnapshot(sampleRate: sampleRate)
+            XCTAssertEqual(snapshot.mode, N60SpeakerCrossoverModeBiAmp)
+            XCTAssertEqual(snapshot.lowerSectionCount, 4)
+
+            var triAmp = BassManagementConfiguration()
+            triAmp.enabled = true
+            triAmp.physicalOutputMode = .triAmp
+            triAmp.frequencyHz = 300
+            triAmp.topology = .linkwitzRiley24
+            triAmp.upperFrequencyHz = 3_000
+            triAmp.upperTopology = .linkwitzRiley48
+            snapshot = try triAmp.makeSpeakerBusSplitterSnapshot(sampleRate: sampleRate)
+            XCTAssertEqual(snapshot.mode, N60SpeakerCrossoverModeTriAmp)
+            XCTAssertEqual(snapshot.lowerSectionCount, 2)
+            XCTAssertEqual(snapshot.upperSectionCount, 4)
+        }
+    }
+
+    func testPhysicalSpeakerRouteCompatibilityMatchesTopology() throws {
+        let device = AudioOutputDevice(
+            deviceID: 801,
+            uid: "speaker-dac",
+            name: "Speaker DAC",
+            nominalSampleRate: 96_000,
+            availableSampleRateRanges: [AudioSampleRateRange(minimum: 44_100, maximum: 192_000)],
+            outputChannelCount: 8
+        )
+        func plan(_ buses: [SpeakerOutputBus]) throws -> SameDeviceOutputRoutePlan {
+            let routing = MultiOutputRoutingConfiguration(
+                enabled: true,
+                routes: buses.enumerated().map { index, bus in
+                    SpeakerOutputRoute(
+                        name: bus.displayName,
+                        bus: bus,
+                        destination: PhysicalOutputEndpoint(
+                            deviceUID: device.uid,
+                            channelIndex: UInt32(index)
+                        )
+                    )
+                }
+            )
+            return try routing.makeSameDevicePlan(
+                availableDevices: [device],
+                sampleRate: 96_000
+            )
+        }
+
+        XCTAssertNoThrow(try plan([.leftHigh, .rightHigh, .subMono]).validateForC4LiveTransport(
+            selectedOutputUID: device.uid,
+            crossoverMode: .mainsSub
+        ))
+        XCTAssertNoThrow(try plan([.leftLow, .rightLow, .leftHigh, .rightHigh]).validateForC4LiveTransport(
+            selectedOutputUID: device.uid,
+            crossoverMode: .biAmp
+        ))
+        XCTAssertNoThrow(try plan([.leftLow, .rightLow, .leftMid, .rightMid, .leftHigh, .rightHigh]).validateForC4LiveTransport(
+            selectedOutputUID: device.uid,
+            crossoverMode: .triAmp
+        ))
+        XCTAssertThrowsError(try plan([.leftMid, .rightMid]).validateForC4LiveTransport(
+            selectedOutputUID: device.uid,
+            crossoverMode: .biAmp
+        )) { error in
+            XCTAssertEqual(error as? MultiOutputRoutingError, .liveTransportBusUnavailable(.leftMid))
+        }
+        XCTAssertNoThrow(try plan([.leftFullRange, .rightFullRange]).validateForC4LiveTransport(
+            selectedOutputUID: device.uid,
+            crossoverMode: nil
+        ))
+    }
+
+    func testTriAmpRequiresOrderedUpperCrossover() throws {
+        var configuration = BassManagementConfiguration()
+        configuration.enabled = true
+        configuration.physicalOutputMode = .triAmp
+        configuration.frequencyHz = 2_000
+        configuration.upperFrequencyHz = 1_000
+        XCTAssertThrowsError(try configuration.makeSpeakerBusSplitterSnapshot(sampleRate: 48_000)) { error in
+            XCTAssertEqual(error as? BassManagementConfigurationError, .invalidUpperFrequency(1_000))
+        }
+    }
 }

@@ -168,6 +168,7 @@ enum CoreAudioTransportError: Error, LocalizedError, Equatable {
     case captureBufferSizeMismatch(capture: UInt32, output: UInt32)
     case sameDeviceOutputMapCompilationFailed
     case aggregateDeviceNotReady
+    case speakerBusSplitterConfigurationFailed
 
     var errorDescription: String? {
         switch self {
@@ -199,6 +200,8 @@ enum CoreAudioTransportError: Error, LocalizedError, Equatable {
             return "Unable to compile the validated physical output map."
         case .aggregateDeviceNotReady:
             return "Core Audio created the private multi-output aggregate device but it did not become ready for IO."
+        case .speakerBusSplitterConfigurationFailed:
+            return "Unable to configure the immutable physical speaker crossover before audio callbacks start."
         }
     }
 }
@@ -388,7 +391,9 @@ final class CoreAudioTransportSession {
     init(
         selectedOutput: AudioOutputDevice,
         sameDeviceOutputPlan: SameDeviceOutputRoutePlan? = nil,
-        aggregateDeviceOutputPlan: AggregateDeviceOutputRoutePlan? = nil
+        aggregateDeviceOutputPlan: AggregateDeviceOutputRoutePlan? = nil,
+        speakerCrossoverMode: SpeakerCrossoverMode? = nil,
+        speakerBusSplitterSnapshot: N60SpeakerBusSplitterSnapshot? = nil
     ) throws {
         precondition(sameDeviceOutputPlan == nil || aggregateDeviceOutputPlan == nil)
         self.selectedOutput = selectedOutput
@@ -448,7 +453,7 @@ final class CoreAudioTransportSession {
             }
 
             if let sameDeviceOutputPlan {
-                try sameDeviceOutputPlan.validateForC2bLiveTransport(selectedOutputUID: selectedOutput.uid)
+                try sameDeviceOutputPlan.validateForC4LiveTransport(selectedOutputUID: selectedOutput.uid, crossoverMode: speakerCrossoverMode)
                 let descriptors = sameDeviceOutputPlan.routes.map { route -> N60SpeakerOutputRouteDescriptor in
                     var descriptor = N60SpeakerOutputRouteDescriptor()
                     descriptor.bus = route.bus.realtimeCType
@@ -461,7 +466,7 @@ final class CoreAudioTransportSession {
                     descriptors: descriptors
                 )
             } else if let aggregateDeviceOutputPlan {
-                try aggregateDeviceOutputPlan.validateForC3LiveTransport(selectedOutputUID: selectedOutput.uid)
+                try aggregateDeviceOutputPlan.validateForC4LiveTransport(selectedOutputUID: selectedOutput.uid, crossoverMode: speakerCrossoverMode)
                 let descriptors = aggregateDeviceOutputPlan.mappedRoutes.map { mapped -> N60SpeakerOutputRouteDescriptor in
                     var descriptor = N60SpeakerOutputRouteDescriptor()
                     descriptor.bus = mapped.route.bus.realtimeCType
@@ -473,6 +478,14 @@ final class CoreAudioTransportSession {
                     physicalChannelCount: aggregateDeviceOutputPlan.physicalChannelCount,
                     descriptors: descriptors
                 )
+            }
+
+            if let speakerBusSplitterSnapshot {
+                guard N60RealtimeAudioBridgeConfigureSpeakerBusSplitter(
+                    newBridge, speakerBusSplitterSnapshot
+                ) else {
+                    throw CoreAudioTransportError.speakerBusSplitterConfigurationFailed
+                }
             }
 
             let unityGraph = N60DSPGraphSnapshotMakeUnity(outputFormat.sampleRate)

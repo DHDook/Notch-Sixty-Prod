@@ -209,6 +209,10 @@ bool N60RealtimeAudioBridgeConfigureSameDeviceOutputMap(
     N60RealtimeAudioBridge * _Nonnull bridge,
     N60SameDeviceOutputMap map
 );
+bool N60RealtimeAudioBridgeConfigureSpeakerBusSplitter(
+    N60RealtimeAudioBridge * _Nonnull bridge,
+    N60SpeakerBusSplitterSnapshot snapshot
+);
 
 bool N60SameDeviceOutputMapValueForChannel(
     const N60SameDeviceOutputMap * _Nonnull map,
