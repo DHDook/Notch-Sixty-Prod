@@ -1,0 +1,49 @@
+name: Apply PR42 Icon Assets
+
+on:
+  push:
+    branches:
+      - pr42-parity-provenance-closure
+    paths:
+      - artwork/AppIcon-light-master.webp
+      - artwork/AppIcon-dark-master.webp
+      - ci/generate_app_icons.swift
+      - .github/workflows/apply-icon-assets.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-icons:
+    runs-on: xcode-27
+    steps:
+      - name: Check out icon revision
+        uses: actions/checkout@v7
+        with:
+          ref: pr42-parity-provenance-closure
+          fetch-depth: 0
+
+      - name: Generate exact asset-catalog rasters
+        run: swift ci/generate_app_icons.swift
+
+      - name: Validate generated icon set
+        run: |
+          python3 ci/validate_pr39_app_identity.py
+          test "$(find NotchSixty/Assets.xcassets/AppIcon.appiconset -name '*.png' | wc -l | tr -d ' ')" = "20"
+          for image in NotchSixty/Assets.xcassets/AppIcon.appiconset/*.png; do
+            file "$image" | grep -q 'PNG image data'
+          done
+          sips -g pixelWidth -g pixelHeight artwork/AppIcon-light-final.png artwork/AppIcon-dark-final.png
+
+      - name: Commit generated binary assets
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add NotchSixty/Assets.xcassets/AppIcon.appiconset/*.png
+          git add artwork/AppIcon-light-final.png artwork/AppIcon-dark-final.png
+          if git diff --cached --quiet; then
+            echo "No icon raster changes were generated" >&2
+            exit 1
+          fi
+          git commit -m "PR42: install approved app icon rasters"
+          git push origin HEAD:pr42-parity-provenance-closure
