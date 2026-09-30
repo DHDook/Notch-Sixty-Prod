@@ -586,6 +586,155 @@ final class StereoPlaybackControlTests: XCTestCase {
         XCTAssertTrue(FIRUpdatePolicy.shouldPrepareRoomCorrection(roomCorrection: room, playback: playback))
     }
 
+    func testRoomCorrectionAuditionModesMatchLatencyAlignedContract() {
+        let cases = [
+            (N60AuditionModeProcessed, Float(0.5)),
+            (N60AuditionModeReference, Float(1.0)),
+            (N60AuditionModeDelta, Float(-0.5)),
+        ]
+
+        for (mode, expectedScale) in cases {
+            guard let kernel = N60RenderKernelCreate() else {
+                return XCTFail("Unable to create render kernel")
+            }
+            defer { N60RenderKernelDestroy(kernel) }
+
+            let taps: [Float] = [0.5]
+            var program = N60ConvolutionProgramInfo()
+            XCTAssertTrue(taps.withUnsafeBufferPointer { buffer in
+                N60RenderKernelPrepareRoomCorrectionProgram(
+                    kernel,
+                    1,
+                    buffer.baseAddress!,
+                    nil,
+                    UInt32(buffer.count),
+                    0,
+                    &program
+                )
+            })
+
+            var graph = N60DSPGraphSnapshotMakeUnity(96_000)
+            XCTAssertTrue(
+                N60DSPGraphSnapshotSetRoomCorrectionProgram(
+                    &graph,
+                    1,
+                    program,
+                    true
+                )
+            )
+            graph.auditionMode = mode
+            XCTAssertEqual(
+                graph.latencyFrames,
+                program.engineLatencyFrames + program.declaredLatencyFrames
+            )
+            XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+
+            let latency = Int(graph.latencyFrames)
+            var maximumError: Float = 0
+            for frame in 0..<(latency + 4_096) {
+                let leftInput = Float(sin(Double(frame) * 0.017) * 0.4)
+                let rightInput = Float(cos(Double(frame) * 0.013) * 0.3)
+                var left: Float = 0
+                var right: Float = 0
+                N60RenderKernelProcessStereoFrame(
+                    kernel,
+                    leftInput,
+                    rightInput,
+                    &left,
+                    &right
+                )
+
+                if frame > latency + 32 {
+                    let delayedFrame = frame - latency
+                    let expectedLeft = Float(sin(Double(delayedFrame) * 0.017) * 0.4) * expectedScale
+                    let expectedRight = Float(cos(Double(delayedFrame) * 0.013) * 0.3) * expectedScale
+                    maximumError = max(
+                        maximumError,
+                        max(abs(left - expectedLeft), abs(right - expectedRight))
+                    )
+                }
+            }
+            XCTAssertLessThan(maximumError, 0.000_2)
+        }
+    }
+
+    func testRawGlobalBypassOverridesAttachedRoomCorrectionAndDeltaAudition() {
+        guard let kernel = N60RenderKernelCreate() else {
+            return XCTFail("Unable to create render kernel")
+        }
+        defer { N60RenderKernelDestroy(kernel) }
+
+        let taps: [Float] = [0.5]
+        var program = N60ConvolutionProgramInfo()
+        XCTAssertTrue(taps.withUnsafeBufferPointer { buffer in
+            N60RenderKernelPrepareRoomCorrectionProgram(
+                kernel,
+                1,
+                buffer.baseAddress!,
+                nil,
+                UInt32(buffer.count),
+                0,
+                &program
+            )
+        })
+
+        var graph = N60DSPGraphSnapshotMakeUnity(96_000)
+        XCTAssertTrue(
+            N60DSPGraphSnapshotSetRoomCorrectionProgram(
+                &graph,
+                1,
+                program,
+                true
+            )
+        )
+        graph.auditionMode = N60AuditionModeDelta
+        graph.bypassed = true
+        graph.masterGainLinear = 0.5
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+
+        let diagnostics = N60RenderKernelGetDiagnostics(kernel)
+        XCTAssertTrue(diagnostics.bypassed)
+        XCTAssertTrue(diagnostics.roomCorrectionEnabled)
+
+        for frame in 0..<2_000 {
+            let leftInput = Float(sin(Double(frame) * 0.019) * 0.6)
+            let rightInput = Float(cos(Double(frame) * 0.023) * 0.4)
+            var left: Float = 0
+            var right: Float = 0
+            N60RenderKernelProcessStereoFrame(
+                kernel,
+                leftInput,
+                rightInput,
+                &left,
+                &right
+            )
+            XCTAssertEqual(left, leftInput * 0.5, accuracy: 0.000_001)
+            XCTAssertEqual(right, rightInput * 0.5, accuracy: 0.000_001)
+        }
+    }
+
+    func testRoomCorrectionPreparationPolicyParksAndRestoresOnlyForRawBypass() {
+        let room = RoomCorrectionConfiguration(enabled: true, filter: .validation)
+        let sequence: [(PlaybackControlConfiguration, Bool)] = [
+            (PlaybackControlConfiguration(auditionMode: .processed), true),
+            (PlaybackControlConfiguration(auditionMode: .reference), true),
+            (PlaybackControlConfiguration(auditionMode: .delta), true),
+            (PlaybackControlConfiguration(globalBypassed: true, auditionMode: .delta), false),
+            (PlaybackControlConfiguration(globalBypassed: true, auditionMode: .reference), false),
+            (PlaybackControlConfiguration(auditionMode: .processed), true),
+        ]
+
+        for (playback, shouldPrepare) in sequence {
+            XCTAssertEqual(
+                FIRUpdatePolicy.shouldPrepareRoomCorrection(
+                    roomCorrection: room,
+                    playback: playback
+                ),
+                shouldPrepare
+            )
+        }
+    }
+
     func testStereoGraphCompilesUpToSixtyFourBandsPerChannelAt384k() throws {
         let left = (0..<64).map { index in
             EQBand(

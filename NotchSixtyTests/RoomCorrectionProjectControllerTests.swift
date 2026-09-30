@@ -581,6 +581,62 @@ final class RoomCorrectionProjectControllerTests: XCTestCase {
         XCTAssertEqual(restoredEngine.roomCorrectionConfiguration, configuration)
     }
 
+    func testPersistentRoomCorrectionEnableTogglePreservesDeploymentAndContentPreset() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let profiles = fixture.profiles
+        let beforeContent = profiles.captureContentState()
+        let filter = RoomCorrectionFilter(
+            name: "Persistent Toggle Fixture",
+            sampleRate: nil,
+            leftTaps: [0.5, 0.5],
+            rightTaps: [0.4, 0.6],
+            declaredLatencyFrames: 0
+        )
+        let summary = RoomCorrectionCalibrationSummary(
+            projectID: UUID(),
+            activeDesignID: UUID(),
+            designDate: Date(timeIntervalSince1970: 300),
+            positionCount: 3,
+            correctionLowHz: 80,
+            correctionHighHz: 12_000,
+            targetName: "Gentle Tilt",
+            smoothingOctaves: 1.0 / 6.0,
+            maximumBoostDB: 4,
+            maximumCutDB: 8,
+            recommendedHeadroomDB: 2.5,
+            algorithmVersion: "fixture"
+        )
+        let deployed = RoomCorrectionConfiguration(enabled: true, filter: filter)
+        try profiles.replaceSelectedSystemRoomCorrection(
+            deployed,
+            calibrationSummary: summary
+        )
+
+        try profiles.setSelectedSystemRoomCorrectionEnabled(false)
+        XCTAssertFalse(profiles.engine.roomCorrectionConfiguration.enabled)
+        XCTAssertEqual(profiles.engine.roomCorrectionConfiguration.filter, filter)
+        XCTAssertEqual(profiles.selectedSystemProfile?.state.roomCorrection.filter, filter)
+        XCTAssertEqual(profiles.selectedSystemProfile?.state.roomCorrectionCalibration, summary)
+        XCTAssertEqual(profiles.captureContentState(), beforeContent)
+
+        try profiles.setSelectedSystemRoomCorrectionEnabled(true)
+        XCTAssertTrue(profiles.engine.roomCorrectionConfiguration.enabled)
+        XCTAssertEqual(profiles.engine.roomCorrectionConfiguration.filter, filter)
+        XCTAssertEqual(profiles.selectedSystemProfile?.state.roomCorrection, deployed)
+        XCTAssertEqual(profiles.selectedSystemProfile?.state.roomCorrectionCalibration, summary)
+        XCTAssertEqual(profiles.captureContentState(), beforeContent)
+
+        let restoredEngine = AudioIOEngine(deviceCatalog: OutputCatalogFixture())
+        let restoredProfiles = ProductProfileController(
+            engine: restoredEngine,
+            storageURL: fixture.root.appendingPathComponent("profiles-v1.json")
+        )
+        restoredProfiles.restoreSelectedLayers()
+        XCTAssertEqual(restoredEngine.roomCorrectionConfiguration, deployed)
+        XCTAssertEqual(restoredProfiles.selectedSystemProfile?.state.roomCorrectionCalibration, summary)
+    }
+
     func testProfileDeploymentPersistenceFailureRollsBackEngineAndProfile() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("NotchSixty-PR40-Rollback-\(UUID().uuidString)", isDirectory: true)
