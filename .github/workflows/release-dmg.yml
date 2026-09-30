@@ -1,0 +1,176 @@
+name: Release DMG (Manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_version:
+        description: Optional marketing version to require (for example, 1.0)
+        required: false
+        type: string
+      run_tests:
+        description: Run the full unit test suite before packaging
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  release-dmg:
+    runs-on: xcode-27
+    steps:
+      - name: Check out selected revision
+        uses: actions/checkout@v7
+
+      - name: Show toolchain and revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          sw_vers
+          xcodebuild -version
+          swift --version
+          git rev-parse HEAD
+
+      - name: Run unit tests
+        if: ${{ inputs.run_tests }}
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          test
+
+      - name: Build Release app
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Release
+          -destination 'platform=macOS,arch=arm64'
+          -derivedDataPath "$RUNNER_TEMP/NotchSixtyReleaseDerivedData"
+          CODE_SIGNING_ALLOWED=NO
+          GENERATE_INFOPLIST_FILE=NO
+          INFOPLIST_FILE=NotchSixty/Info.plist
+          build
+
+      - name: Ad-hoc sign Release app
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/NotchSixtyReleaseDerivedData/Build/Products/Release/Notch Sixty.app"
+          test -d "$APP"
+          codesign \
+            --force \
+            --sign - \
+            --timestamp=none \
+            --entitlements NotchSixty/NotchSixty.entitlements \
+            "$APP"
+          codesign --verify --strict --verbose=2 "$APP"
+
+      - name: Validate Release app metadata
+        id: metadata
+        shell: bash
+        env:
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/NotchSixtyReleaseDerivedData/Build/Products/Release/Notch Sixty.app"
+          INFO="$APP/Contents/Info.plist"
+          EXECUTABLE="$APP/Contents/MacOS/Notch Sixty"
+
+          test -f "$INFO"
+          test -x "$EXECUTABLE"
+
+          VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$INFO")"
+          BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$INFO")"
+          BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$INFO")"
+          MIN_MACOS="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$INFO")"
+          ARCHS="$(lipo -archs "$EXECUTABLE")"
+
+          test -n "$VERSION"
+          test -n "$BUILD"
+          test "$BUNDLE_ID" = "com.dhdook.NotchSixty"
+          test "$ARCHS" = "arm64"
+
+          if [[ -n "$EXPECTED_VERSION" && "$VERSION" != "$EXPECTED_VERSION" ]]; then
+            echo "Expected version '$EXPECTED_VERSION' but built '$VERSION'." >&2
+            exit 1
+          fi
+
+          ENTITLEMENTS="$(codesign -d --entitlements :- "$APP" 2>&1)"
+          echo "$ENTITLEMENTS" | grep -q 'com.apple.security.app-sandbox'
+          echo "$ENTITLEMENTS" | grep -q '<true/>'
+
+          CAPTURE_USAGE="$(/usr/libexec/PlistBuddy -c 'Print :NSAudioCaptureUsageDescription' "$INFO")"
+          MICROPHONE_USAGE="$(/usr/libexec/PlistBuddy -c 'Print :NSMicrophoneUsageDescription' "$INFO")"
+          test -n "$CAPTURE_USAGE"
+          test -n "$MICROPHONE_USAGE"
+
+          SAFE_VERSION="$(printf '%s' "$VERSION" | tr -c 'A-Za-z0-9._-' '-')"
+          SAFE_BUILD="$(printf '%s' "$BUILD" | tr -c 'A-Za-z0-9._-' '-')"
+          DMG_NAME="Notch-Sixty-${SAFE_VERSION}-build-${SAFE_BUILD}-arm64.dmg"
+
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "BUILD_NUMBER=$BUILD" >> "$GITHUB_ENV"
+          echo "DMG_NAME=$DMG_NAME" >> "$GITHUB_ENV"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "build=$BUILD" >> "$GITHUB_OUTPUT"
+          echo "dmg_name=$DMG_NAME" >> "$GITHUB_OUTPUT"
+
+          {
+            echo '### Release build metadata'
+            echo
+            echo "- Version: \`$VERSION\`"
+            echo "- Build: \`$BUILD\`"
+            echo "- Bundle ID: \`$BUNDLE_ID\`"
+            echo "- Minimum macOS: \`$MIN_MACOS\`"
+            echo "- Architectures: \`$ARCHS\`"
+            echo "- Revision: \`$(git rev-parse HEAD)\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create versioned Release DMG
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/NotchSixtyReleaseDerivedData/Build/Products/Release/Notch Sixty.app"
+          STAGE="$RUNNER_TEMP/NotchSixtyReleaseStage"
+          DMG="$RUNNER_TEMP/$DMG_NAME"
+
+          rm -rf "$STAGE" "$DMG"
+          mkdir -p "$STAGE"
+          cp -R "$APP" "$STAGE/"
+          ln -s /Applications "$STAGE/Applications"
+
+          hdiutil create \
+            -volname "Notch Sixty $VERSION" \
+            -srcfolder "$STAGE" \
+            -ov \
+            -format UDZO \
+            "$DMG"
+
+          shasum -a 256 "$DMG" | tee "$DMG.sha256"
+          SHA256="$(awk '{print $1}' "$DMG.sha256")"
+
+          {
+            echo
+            echo '### Release DMG'
+            echo
+            echo "- Artifact: \`$DMG_NAME\`"
+            echo "- SHA-256: \`$SHA256\`"
+            echo
+            echo '> This workflow currently uses an ad-hoc signature. The artifact is a Release build, but it is not Developer-ID signed or notarized. Add production signing/notarization before public direct distribution.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Release DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: NotchSixty-release-${{ steps.metadata.outputs.version }}-build-${{ steps.metadata.outputs.build }}
+          path: |
+            ${{ runner.temp }}/${{ steps.metadata.outputs.dmg_name }}
+            ${{ runner.temp }}/${{ steps.metadata.outputs.dmg_name }}.sha256
+          if-no-files-found: error
+          retention-days: 90
