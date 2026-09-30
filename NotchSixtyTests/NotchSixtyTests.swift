@@ -2143,4 +2143,44 @@ extension NotchSixtyTests {
         XCTAssertEqual(systemGain.outputGainDB, 2.5)
     }
 
+
+    func testPR43SpeakerDriverProcessingValidationAndBackwardPersistence() throws {
+        var low = SpeakerDriverBusProcessingConfiguration(bus: .leftLow)
+        low.eqBands = [EQBand(type: .peaking, frequencyHz: 120, gainDB: -2.5, q: 1.2)]
+        low.trimDB = -1.5
+        low.delayMilliseconds = 0.37
+        low.limiterEnabled = true
+        low.limiterThresholdDBFS = -4
+
+        let configuration = SpeakerDriverProcessingConfiguration(buses: [low])
+        XCTAssertNoThrow(try configuration.validateStructure())
+        XCTAssertEqual(configuration.configuration(for: .leftLow), low)
+        XCTAssertTrue(configuration.configuration(for: .rightHigh).isNeutral)
+
+        var duplicate = SpeakerDriverProcessingConfiguration(buses: [low, low])
+        XCTAssertThrowsError(try duplicate.validateStructure()) { error in
+            XCTAssertEqual(error as? SpeakerDriverProcessingError, .duplicateBus(.leftLow))
+        }
+
+        var invalidDelay = low
+        invalidDelay.delayMilliseconds = 51
+        XCTAssertThrowsError(try invalidDelay.validateStructure()) { error in
+            XCTAssertEqual(
+                error as? SpeakerDriverProcessingError,
+                .invalidDelay(bus: .leftLow, value: 51)
+            )
+        }
+
+        var system = PlaybackSystemState(speakerDriverProcessing: configuration)
+        let encoded = try JSONEncoder().encode(system)
+        let roundTrip = try JSONDecoder().decode(PlaybackSystemState.self, from: encoded)
+        XCTAssertEqual(roundTrip.speakerDriverProcessing, configuration)
+
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        object.removeValue(forKey: "speakerDriverProcessing")
+        let legacyData = try JSONSerialization.data(withJSONObject: object)
+        system = try JSONDecoder().decode(PlaybackSystemState.self, from: legacyData)
+        XCTAssertNil(system.speakerDriverProcessing)
+    }
+
 }

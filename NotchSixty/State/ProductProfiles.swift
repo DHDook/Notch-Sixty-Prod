@@ -111,6 +111,7 @@ struct PlaybackSystemState: Codable, Equatable, Sendable {
     var roomCorrection: RoomCorrectionConfiguration
     var roomCorrectionCalibration: RoomCorrectionCalibrationSummary?
     var outputRouting: MultiOutputRoutingConfiguration?
+    var speakerDriverProcessing: SpeakerDriverProcessingConfiguration?
     var speakerIR: SpeakerIRConfiguration
 
     init(
@@ -122,6 +123,7 @@ struct PlaybackSystemState: Codable, Equatable, Sendable {
         roomCorrection: RoomCorrectionConfiguration = RoomCorrectionConfiguration(),
         roomCorrectionCalibration: RoomCorrectionCalibrationSummary? = nil,
         outputRouting: MultiOutputRoutingConfiguration? = nil,
+        speakerDriverProcessing: SpeakerDriverProcessingConfiguration? = nil,
         speakerIR: SpeakerIRConfiguration = SpeakerIRConfiguration()
     ) {
         self.schemaVersion = schemaVersion
@@ -132,6 +134,7 @@ struct PlaybackSystemState: Codable, Equatable, Sendable {
         self.roomCorrection = roomCorrection
         self.roomCorrectionCalibration = roomCorrectionCalibration
         self.outputRouting = outputRouting
+        self.speakerDriverProcessing = speakerDriverProcessing
         self.speakerIR = speakerIR
     }
 
@@ -426,6 +429,30 @@ final class ProductProfileController: ObservableObject {
         }
     }
 
+    func replaceSelectedSystemSpeakerDriverProcessing(
+        _ configuration: SpeakerDriverProcessingConfiguration
+    ) throws {
+        guard let selectedSystemProfileID,
+              let index = systemProfiles.firstIndex(where: { $0.id == selectedSystemProfileID }) else {
+            throw ProductProfileError.selectedSystemProfileRequired
+        }
+        try configuration.validateStructure()
+
+        let previousEngineConfiguration = engine.speakerDriverProcessingConfiguration
+        let previousState = systemProfiles[index].state
+        do {
+            try engine.replaceSpeakerDriverProcessingConfiguration(configuration)
+            systemProfiles[index].state.speakerDriverProcessing = configuration.isNeutral ? nil : configuration
+            try persistThrowing()
+            lastErrorDescription = nil
+        } catch {
+            systemProfiles[index].state = previousState
+            try? engine.replaceSpeakerDriverProcessingConfiguration(previousEngineConfiguration)
+            lastErrorDescription = error.localizedDescription
+            throw error
+        }
+    }
+
     func replaceSelectedSystemBassManagement(
         _ configuration: BassManagementConfiguration
     ) throws {
@@ -552,6 +579,9 @@ final class ProductProfileController: ObservableObject {
             roomCorrection: engine.roomCorrectionConfiguration,
             roomCorrectionCalibration: selectedSystemProfile?.state.roomCorrectionCalibration,
             outputRouting: engine.multiOutputRoutingConfiguration,
+            speakerDriverProcessing: engine.speakerDriverProcessingConfiguration.isNeutral
+                ? nil
+                : engine.speakerDriverProcessingConfiguration,
             speakerIR: engine.speakerIRConfiguration
         )
     }
@@ -587,6 +617,9 @@ final class ProductProfileController: ObservableObject {
             let playback = state.playback.applying(to: engine.playbackControlConfiguration)
             let gain = state.composingGain(over: engine.gainConfiguration)
             try engine.replaceMultiOutputRoutingConfiguration(state.outputRouting)
+            try engine.replaceSpeakerDriverProcessingConfiguration(
+                state.speakerDriverProcessing ?? SpeakerDriverProcessingConfiguration()
+            )
             try engine.replacePlaybackControlConfiguration(playback)
             try engine.replaceBassManagementConfiguration(state.bassManagement)
             try engine.replaceGainConfiguration(gain)
@@ -600,6 +633,9 @@ final class ProductProfileController: ObservableObject {
             let playback = previous.playback.applying(to: engine.playbackControlConfiguration)
             let gain = previous.composingGain(over: engine.gainConfiguration)
             try? engine.replaceMultiOutputRoutingConfiguration(previous.outputRouting)
+            try? engine.replaceSpeakerDriverProcessingConfiguration(
+                previous.speakerDriverProcessing ?? SpeakerDriverProcessingConfiguration()
+            )
             try? engine.replacePlaybackControlConfiguration(playback)
             try? engine.replaceBassManagementConfiguration(previous.bassManagement)
             try? engine.replaceGainConfiguration(gain)
