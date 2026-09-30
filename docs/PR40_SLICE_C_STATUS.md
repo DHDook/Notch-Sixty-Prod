@@ -13,6 +13,7 @@ Current foundation on the PR40 branch:
 - a separate calibration-only Core Audio transport that owns either the selected full-duplex device or a private output-led aggregate, installs one full-duplex measurement IOProc, restores temporary microphone sample-rate changes, and tears down without touching the normal process-tap DSP bridge;
 - the separate-device aggregate explicitly uses the selected physical output as both main subdevice and clock device, with drift compensation enabled only for the microphone subdevice;
 - transport setup verifies the live output nominal rate, applied aggregate rate, and input/output stream sample rates so calibration remains native-rate and does not silently introduce SRC;
+- the App Sandbox audio-input entitlement and a dedicated microphone privacy usage description are present for the AVFoundation measurement-microphone permission path;
 - deterministic C-bridge tests for exact left/right routing, arbitrary callback quanta, capture boundaries, reset behavior, post-completion silence, and frame-count overflow rejection;
 - deterministic Swift tests for sweep generation, routing, topology, state transitions, capture contiguity, arbitrary callback boundaries, and post-completion silence.
 
