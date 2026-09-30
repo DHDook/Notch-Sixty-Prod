@@ -346,7 +346,7 @@ struct ProductionRoomCorrectionWorkspace: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(!calibration.canBeginMeasurement)
 
-                Text("This capture measures one listening position. Named multi-position storage and weighting build on the analyzed Left / Right result in the next Room Correction stage.")
+                Text("This capture measures one listening position. After analysis, keep it as a named position below, then repeat for additional seats.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -505,10 +505,14 @@ struct ProductionRoomCorrectionWorkspace: View {
         .glassEffect(.regular, in: .rect(cornerRadius: 18))
     }
 
-    private func importMicrophoneCalibrationFile(_ result: Result<URL, Error>) {
+    private func importMicrophoneCalibrationFile(_ result: Result<[URL], Error>) {
         actionError = nil
         do {
-            let url = try result.get()
+            let urls = try result.get()
+            guard let url = urls.first else {
+                actionError = "Choose a microphone calibration file."
+                return
+            }
             let accessed = url.startAccessingSecurityScopedResource()
             defer {
                 if accessed { url.stopAccessingSecurityScopedResource() }
