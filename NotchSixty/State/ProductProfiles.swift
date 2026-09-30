@@ -411,13 +411,16 @@ final class ProductProfileController: ObservableObject {
             try configuration.validateStructure()
         }
 
+        let previousEngineConfiguration = engine.multiOutputRoutingConfiguration
         let previousState = systemProfiles[index].state
         do {
+            try engine.replaceMultiOutputRoutingConfiguration(configuration)
             systemProfiles[index].state.outputRouting = configuration
             try persistThrowing()
             lastErrorDescription = nil
         } catch {
             systemProfiles[index].state = previousState
+            try? engine.replaceMultiOutputRoutingConfiguration(previousEngineConfiguration)
             lastErrorDescription = error.localizedDescription
             throw error
         }
@@ -548,7 +551,7 @@ final class ProductProfileController: ObservableObject {
             bassManagement: engine.bassManagementConfiguration,
             roomCorrection: engine.roomCorrectionConfiguration,
             roomCorrectionCalibration: selectedSystemProfile?.state.roomCorrectionCalibration,
-            outputRouting: selectedSystemProfile?.state.outputRouting,
+            outputRouting: engine.multiOutputRoutingConfiguration,
             speakerIR: engine.speakerIRConfiguration
         )
     }
@@ -583,6 +586,7 @@ final class ProductProfileController: ObservableObject {
 
             let playback = state.playback.applying(to: engine.playbackControlConfiguration)
             let gain = state.composingGain(over: engine.gainConfiguration)
+            try engine.replaceMultiOutputRoutingConfiguration(state.outputRouting)
             try engine.replacePlaybackControlConfiguration(playback)
             try engine.replaceBassManagementConfiguration(state.bassManagement)
             try engine.replaceGainConfiguration(gain)
@@ -595,6 +599,7 @@ final class ProductProfileController: ObservableObject {
             }
             let playback = previous.playback.applying(to: engine.playbackControlConfiguration)
             let gain = previous.composingGain(over: engine.gainConfiguration)
+            try? engine.replaceMultiOutputRoutingConfiguration(previous.outputRouting)
             try? engine.replacePlaybackControlConfiguration(playback)
             try? engine.replaceBassManagementConfiguration(previous.bassManagement)
             try? engine.replaceGainConfiguration(gain)

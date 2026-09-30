@@ -203,6 +203,13 @@ bool N60SameDeviceOutputMapCompile(
     uint32_t routeCount,
     N60SameDeviceOutputMap * _Nonnull mapOut
 );
+// Session setup operation. Configure only while physical output callbacks
+// are stopped; the realtime callback reads the copied fixed-size map directly.
+bool N60RealtimeAudioBridgeConfigureSameDeviceOutputMap(
+    N60RealtimeAudioBridge * _Nonnull bridge,
+    N60SameDeviceOutputMap map
+);
+
 bool N60SameDeviceOutputMapValueForChannel(
     const N60SameDeviceOutputMap * _Nonnull map,
     const N60SpeakerBusFrame * _Nonnull frame,

@@ -100,6 +100,73 @@ static int validate_rejections(void) {
     return 0;
 }
 
+static int validate_live_output_ioproc(void) {
+    N60RealtimeAudioBridge *bridge = N60RealtimeAudioBridgeCreate(64);
+    if (bridge == NULL) return 30;
+
+    N60SpeakerOutputRouteDescriptor routes[4] = {
+        {N60SpeakerOutputBusLeftFullRange, 0},
+        {N60SpeakerOutputBusLeftFullRange, 1},
+        {N60SpeakerOutputBusRightFullRange, 2},
+        {N60SpeakerOutputBusRightFullRange, 3},
+    };
+    N60SameDeviceOutputMap map = {0};
+    if (!N60SameDeviceOutputMapCompile(4, routes, 4, &map)
+        || !N60RealtimeAudioBridgeConfigureSameDeviceOutputMap(bridge, map)) {
+        N60RealtimeAudioBridgeDestroy(bridge);
+        return 31;
+    }
+    N60DSPGraphSnapshot graph = N60DSPGraphSnapshotMakeUnity(48000.0);
+    if (!N60RealtimeAudioBridgePublishDSPGraph(bridge, graph)) {
+        N60RealtimeAudioBridgeDestroy(bridge);
+        return 32;
+    }
+
+    float inputSamples[8] = {0.1f, -0.2f, 0.3f, -0.4f, -0.5f, 0.6f, 0.7f, -0.8f};
+    AudioBufferList input = {0};
+    input.mNumberBuffers = 1;
+    input.mBuffers[0].mNumberChannels = 2;
+    input.mBuffers[0].mDataByteSize = sizeof(inputSamples);
+    input.mBuffers[0].mData = inputSamples;
+    AudioTimeStamp timestamp = {0};
+    if (N60CaptureIOProc(0, &timestamp, &input, &timestamp, &input, &timestamp, bridge) != noErr) {
+        N60RealtimeAudioBridgeDestroy(bridge);
+        return 33;
+    }
+
+    float outputSamples[16];
+    for (uint32_t i = 0; i < 16; ++i) outputSamples[i] = 9.0f;
+    AudioBufferList output = {0};
+    output.mNumberBuffers = 1;
+    output.mBuffers[0].mNumberChannels = 4;
+    output.mBuffers[0].mDataByteSize = sizeof(outputSamples);
+    output.mBuffers[0].mData = outputSamples;
+    if (N60OutputIOProc(0, &timestamp, &input, &timestamp, &output, &timestamp, bridge) != noErr) {
+        N60RealtimeAudioBridgeDestroy(bridge);
+        return 34;
+    }
+
+    for (uint32_t frame = 0; frame < 4; ++frame) {
+        float left = inputSamples[frame * 2];
+        float right = inputSamples[frame * 2 + 1];
+        uint32_t base = frame * 4;
+        if (!close_enough(outputSamples[base], left)
+            || !close_enough(outputSamples[base + 1], left)
+            || !close_enough(outputSamples[base + 2], right)
+            || !close_enough(outputSamples[base + 3], right)) {
+            N60RealtimeAudioBridgeDestroy(bridge);
+            return 35;
+        }
+    }
+    N60RealtimeAudioBridgeSnapshot snapshot = N60RealtimeAudioBridgeGetSnapshot(bridge);
+    if (snapshot.deliveredFrames != 4 || snapshot.unsupportedBufferLayouts != 0) {
+        N60RealtimeAudioBridgeDestroy(bridge);
+        return 36;
+    }
+    N60RealtimeAudioBridgeDestroy(bridge);
+    return 0;
+}
+
 int main(void) {
     int result = validate_interleaved();
     if (result != 0) return result;
@@ -107,6 +174,8 @@ int main(void) {
     if (result != 0) return result;
     result = validate_rejections();
     if (result != 0) return result;
-    puts("PR41 same-device output map validation passed");
+    result = validate_live_output_ioproc();
+    if (result != 0) return result;
+    puts("PR41 same-device output map and live IOProc validation passed");
     return 0;
 }

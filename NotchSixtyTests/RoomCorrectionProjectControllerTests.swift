@@ -1050,4 +1050,71 @@ final class RoomCorrectionProjectControllerTests: XCTestCase {
             )
         }
     }
+
+    func testC2bLiveTransportAcceptsOnlyPostDSPFullRangeBuses() throws {
+        let fullRangePlan = SameDeviceOutputRoutePlan(
+            deviceUID: "dac",
+            physicalChannelCount: 4,
+            routes: [
+                SpeakerOutputRoute(
+                    name: "Left A",
+                    bus: .leftFullRange,
+                    destination: PhysicalOutputEndpoint(deviceUID: "dac", channelIndex: 0)
+                ),
+                SpeakerOutputRoute(
+                    name: "Right A",
+                    bus: .rightFullRange,
+                    destination: PhysicalOutputEndpoint(deviceUID: "dac", channelIndex: 1)
+                ),
+            ]
+        )
+        XCTAssertNoThrow(try fullRangePlan.validateForC2bLiveTransport(selectedOutputUID: "dac"))
+        XCTAssertThrowsError(try fullRangePlan.validateForC2bLiveTransport(selectedOutputUID: "other")) { error in
+            XCTAssertEqual(
+                error as? MultiOutputRoutingError,
+                .liveTransportOutputMismatch(selected: "other", routed: "dac")
+            )
+        }
+
+        var subPlan = fullRangePlan
+        subPlan = SameDeviceOutputRoutePlan(
+            deviceUID: subPlan.deviceUID,
+            physicalChannelCount: subPlan.physicalChannelCount,
+            routes: [
+                subPlan.routes[0],
+                SpeakerOutputRoute(
+                    name: "Sub",
+                    bus: .subMono,
+                    destination: PhysicalOutputEndpoint(deviceUID: "dac", channelIndex: 2)
+                ),
+            ]
+        )
+        XCTAssertThrowsError(try subPlan.validateForC2bLiveTransport(selectedOutputUID: "dac")) { error in
+            XCTAssertEqual(error as? MultiOutputRoutingError, .liveTransportBusUnavailable(.subMono))
+        }
+    }
+
+    func testPlaybackSystemRoutingTransactionUpdatesEngineIntentAndRollsBackTogether() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let routing = MultiOutputRoutingConfiguration(
+            enabled: true,
+            routes: [
+                SpeakerOutputRoute(
+                    name: "Left",
+                    bus: .leftFullRange,
+                    destination: PhysicalOutputEndpoint(deviceUID: "dac", channelIndex: 0)
+                ),
+                SpeakerOutputRoute(
+                    name: "Right",
+                    bus: .rightFullRange,
+                    destination: PhysicalOutputEndpoint(deviceUID: "dac", channelIndex: 1)
+                ),
+            ]
+        )
+        try fixture.profiles.replaceSelectedSystemOutputRouting(routing)
+        XCTAssertEqual(fixture.profiles.engine.multiOutputRoutingConfiguration, routing)
+        XCTAssertEqual(fixture.profiles.selectedSystemProfile?.state.outputRouting, routing)
+        XCTAssertEqual(fixture.profiles.captureSystemState().outputRouting, routing)
+    }
 }

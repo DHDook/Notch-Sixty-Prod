@@ -109,6 +109,9 @@ enum MultiOutputRoutingError: Error, Equatable, LocalizedError {
     case sampleRateUnsupported(deviceUID: String, sampleRate: Double)
     case sameDeviceTransportRequiresEnabledRouting
     case sameDeviceTransportRequiresSingleDevice([String])
+    case liveTransportOutputMismatch(selected: String, routed: String)
+    case liveTransportBusUnavailable(SpeakerOutputBus)
+    case routingChangeRequiresIdle
 
     var errorDescription: String? {
         switch self {
@@ -136,6 +139,12 @@ enum MultiOutputRoutingError: Error, Equatable, LocalizedError {
             return "Enable multi-output routing before compiling a same-device output plan."
         case .sameDeviceTransportRequiresSingleDevice(let uids):
             return "Same-device transport requires every enabled route to target one physical device; found: \(uids.joined(separator: ", "))."
+        case .liveTransportOutputMismatch(let selected, let routed):
+            return "The selected physical output \(selected) does not match the routed same-device output \(routed)."
+        case .liveTransportBusUnavailable(let bus):
+            return "\(bus.displayName) is not live-routable yet. C2b only routes the final post-DSP Left/Right Full Range buses."
+        case .routingChangeRequiresIdle:
+            return "Stop processing before changing physical output routing."
         }
     }
 }
@@ -286,6 +295,40 @@ extension MultiOutputRoutingConfiguration {
             physicalChannelCount: device.outputChannelCount,
             routes: enabledRoutes
         )
+    }
+}
+
+extension SpeakerOutputBus {
+    var realtimeCType: N60SpeakerOutputBus {
+        switch self {
+        case .leftFullRange: return N60SpeakerOutputBusLeftFullRange
+        case .rightFullRange: return N60SpeakerOutputBusRightFullRange
+        case .leftLow: return N60SpeakerOutputBusLeftLow
+        case .rightLow: return N60SpeakerOutputBusRightLow
+        case .leftMid: return N60SpeakerOutputBusLeftMid
+        case .rightMid: return N60SpeakerOutputBusRightMid
+        case .leftHigh: return N60SpeakerOutputBusLeftHigh
+        case .rightHigh: return N60SpeakerOutputBusRightHigh
+        case .subMono: return N60SpeakerOutputBusSubMono
+        }
+    }
+
+    var isC2bLiveFullRangeBus: Bool {
+        self == .leftFullRange || self == .rightFullRange
+    }
+}
+
+extension SameDeviceOutputRoutePlan {
+    func validateForC2bLiveTransport(selectedOutputUID: String) throws {
+        guard deviceUID == selectedOutputUID else {
+            throw MultiOutputRoutingError.liveTransportOutputMismatch(
+                selected: selectedOutputUID,
+                routed: deviceUID
+            )
+        }
+        for route in routes where !route.bus.isC2bLiveFullRangeBus {
+            throw MultiOutputRoutingError.liveTransportBusUnavailable(route.bus)
+        }
     }
 }
 

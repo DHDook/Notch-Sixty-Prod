@@ -44,8 +44,12 @@ struct AudioStreamFormatDescription: Equatable, Sendable {
         formatID == kAudioFormatLinearPCM && (formatFlags & kAudioFormatFlagIsFloat) != 0
     }
 
+    var isSupportedFloat32TransportFormat: Bool {
+        isFloatPCM && bitsPerChannel == 32 && channelCount > 0
+    }
+
     var isSupportedStereoTransportFormat: Bool {
-        isFloatPCM && channelCount == 2 && bitsPerChannel == 32
+        isSupportedFloat32TransportFormat && channelCount == 2
     }
 }
 
@@ -162,6 +166,7 @@ enum CoreAudioTransportError: Error, LocalizedError, Equatable {
     case ioProcUnavailable(role: String)
     case outputBufferExceedsBridgeCapacity(bufferFrames: UInt32, capacityFrames: UInt32)
     case captureBufferSizeMismatch(capture: UInt32, output: UInt32)
+    case sameDeviceOutputMapCompilationFailed
 
     var errorDescription: String? {
         switch self {
@@ -189,6 +194,8 @@ enum CoreAudioTransportError: Error, LocalizedError, Equatable {
             return "Startup gate requires \(bufferFrames) buffered frames but realtime bridge capacity is \(capacityFrames) frames."
         case .captureBufferSizeMismatch(let capture, let output):
             return "Tap aggregate callback quantum is \(capture) frames; expected \(output) frames to match the physical output."
+        case .sameDeviceOutputMapCompilationFailed:
+            return "Unable to compile the validated same-device physical output map."
         }
     }
 }
@@ -351,6 +358,7 @@ final class CoreAudioTransportSession {
     private static let shutdownFadeTimeoutMicroseconds: UInt32 = 100_000
 
     let selectedOutput: AudioOutputDevice
+    let sameDeviceOutputPlan: SameDeviceOutputRoutePlan?
     private(set) var tapFormat = AudioStreamFormatDescription(AudioStreamBasicDescription())
     private(set) var outputFormat = AudioStreamFormatDescription(AudioStreamBasicDescription())
     private(set) var startupGateTargetFrames: UInt32 = 0
@@ -372,8 +380,12 @@ final class CoreAudioTransportSession {
     private var isOutputStarted = false
     private var stopped = false
 
-    init(selectedOutput: AudioOutputDevice) throws {
+    init(
+        selectedOutput: AudioOutputDevice,
+        sameDeviceOutputPlan: SameDeviceOutputRoutePlan? = nil
+    ) throws {
         self.selectedOutput = selectedOutput
+        self.sameDeviceOutputPlan = sameDeviceOutputPlan
         guard let newBridge = N60RealtimeAudioBridgeCreate(Self.bridgeCapacityFrames) else {
             throw CoreAudioTransportError.realtimeBridgeAllocationFailed
         }
@@ -414,11 +426,40 @@ final class CoreAudioTransportSession {
             guard tapFormat.isSupportedStereoTransportFormat else {
                 throw CoreAudioTransportError.unsupportedFormat(role: "tap", format: tapFormat)
             }
-            guard outputFormat.isSupportedStereoTransportFormat else {
-                throw CoreAudioTransportError.unsupportedFormat(role: "output", format: outputFormat)
+            if sameDeviceOutputPlan == nil {
+                guard outputFormat.isSupportedStereoTransportFormat else {
+                    throw CoreAudioTransportError.unsupportedFormat(role: "output", format: outputFormat)
+                }
+            } else {
+                guard outputFormat.isSupportedFloat32TransportFormat else {
+                    throw CoreAudioTransportError.unsupportedFormat(role: "multichannel output", format: outputFormat)
+                }
             }
             guard abs(tapFormat.sampleRate - outputFormat.sampleRate) < 0.5 else {
                 throw CoreAudioTransportError.sampleRateMismatch(tap: tapFormat.sampleRate, output: outputFormat.sampleRate)
+            }
+
+            if let sameDeviceOutputPlan {
+                try sameDeviceOutputPlan.validateForC2bLiveTransport(selectedOutputUID: selectedOutput.uid)
+                var descriptors = sameDeviceOutputPlan.routes.map { route -> N60SpeakerOutputRouteDescriptor in
+                    var descriptor = N60SpeakerOutputRouteDescriptor()
+                    descriptor.bus = route.bus.realtimeCType
+                    descriptor.physicalChannelIndex = route.destination.channelIndex
+                    return descriptor
+                }
+                var outputMap = N60SameDeviceOutputMap()
+                let compiled = descriptors.withUnsafeBufferPointer { buffer in
+                    N60SameDeviceOutputMapCompile(
+                        sameDeviceOutputPlan.physicalChannelCount,
+                        buffer.baseAddress!,
+                        UInt32(buffer.count),
+                        &outputMap
+                    )
+                }
+                guard compiled,
+                      N60RealtimeAudioBridgeConfigureSameDeviceOutputMap(newBridge, outputMap) else {
+                    throw CoreAudioTransportError.sameDeviceOutputMapCompilationFailed
+                }
             }
 
             let unityGraph = N60DSPGraphSnapshotMakeUnity(outputFormat.sampleRate)

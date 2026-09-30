@@ -54,6 +54,7 @@ struct N60RealtimeAudioBridge {
     uint32_t capacityFrames;
     N60StereoFrame *frames;
     N60RenderKernel *renderKernel;
+    N60SameDeviceOutputMap sameDeviceOutputMap;
 
     _Atomic uint64_t writeIndex;
     _Atomic uint64_t readIndex;
@@ -174,6 +175,29 @@ static bool make_input_buffer_view(
     }
 
     return false;
+}
+
+static bool make_same_device_output_frame_count(
+    const AudioBufferList *bufferList,
+    uint32_t requiredPhysicalChannels,
+    UInt32 *frameCountOut
+) {
+    if (bufferList == NULL || frameCountOut == NULL || bufferList->mNumberBuffers == 0
+        || requiredPhysicalChannels == 0) return false;
+    uint64_t flattenedChannels = 0;
+    UInt32 frameCount = UINT32_MAX;
+    for (UInt32 index = 0; index < bufferList->mNumberBuffers; ++index) {
+        const AudioBuffer *buffer = &bufferList->mBuffers[index];
+        if (buffer->mData == NULL || buffer->mNumberChannels == 0) return false;
+        UInt32 bytesPerFrame = (UInt32)(sizeof(float) * buffer->mNumberChannels);
+        if (bytesPerFrame == 0 || (buffer->mDataByteSize % bytesPerFrame) != 0) return false;
+        UInt32 bufferFrames = buffer->mDataByteSize / bytesPerFrame;
+        if (bufferFrames < frameCount) frameCount = bufferFrames;
+        flattenedChannels += buffer->mNumberChannels;
+    }
+    if (flattenedChannels < requiredPhysicalChannels || frameCount == UINT32_MAX) return false;
+    *frameCountOut = frameCount;
+    return true;
 }
 
 static bool make_output_buffer_view(
@@ -764,6 +788,19 @@ bool N60SameDeviceOutputMapCompile(
     return true;
 }
 
+bool N60RealtimeAudioBridgeConfigureSameDeviceOutputMap(
+    N60RealtimeAudioBridge *bridge,
+    N60SameDeviceOutputMap map
+) {
+    if (bridge == NULL || !map.valid || map.routeCount < 2u
+        || map.routeCount > N60_SPEAKER_OUTPUT_MAX_ROUTES
+        || map.physicalChannelCount == 0) {
+        return false;
+    }
+    bridge->sameDeviceOutputMap = map;
+    return true;
+}
+
 bool N60SameDeviceOutputMapValueForChannel(
     const N60SameDeviceOutputMap *map,
     const N60SpeakerBusFrame *frame,
@@ -917,13 +954,27 @@ OSStatus N60OutputIOProc(
     if (bridge == NULL || outOutputData == NULL) return noErr;
     atomic_fetch_add_explicit(&bridge->outputCallbacks, 1, memory_order_relaxed);
 
+    bool sameDeviceMultiOutput = bridge->sameDeviceOutputMap.valid;
     N60OutputBufferView outputView = {0};
-    if (!make_output_buffer_view(outOutputData, &outputView)) {
-        zero_output(outOutputData);
-        atomic_fetch_add_explicit(&bridge->unsupportedBufferLayouts, 1, memory_order_relaxed);
-        return noErr;
+    UInt32 frameCount = 0;
+    if (sameDeviceMultiOutput) {
+        if (!make_same_device_output_frame_count(
+            outOutputData,
+            bridge->sameDeviceOutputMap.physicalChannelCount,
+            &frameCount
+        )) {
+            zero_output(outOutputData);
+            atomic_fetch_add_explicit(&bridge->unsupportedBufferLayouts, 1, memory_order_relaxed);
+            return noErr;
+        }
+    } else {
+        if (!make_output_buffer_view(outOutputData, &outputView)) {
+            zero_output(outOutputData);
+            atomic_fetch_add_explicit(&bridge->unsupportedBufferLayouts, 1, memory_order_relaxed);
+            return noErr;
+        }
+        frameCount = outputView.frameCount;
     }
-    UInt32 frameCount = outputView.frameCount;
 
     uint64_t readIndex = atomic_load_explicit(&bridge->readIndex, memory_order_relaxed);
     uint64_t writeIndex = atomic_load_explicit(&bridge->writeIndex, memory_order_acquire);
@@ -1006,8 +1057,22 @@ OSStatus N60OutputIOProc(
         float gain = startup_fade_gain(&startupFade, masterGain) * transitionGain;
         float finalLeft = processed.left * gain;
         float finalRight = processed.right * gain;
-        *outputLeft = finalLeft;
-        *outputRight = finalRight;
+        if (sameDeviceMultiOutput) {
+            N60SpeakerBusFrame busFrame = N60SpeakerBusFrameMakeSilence();
+            (void)N60SpeakerBusFrameSet(&busFrame, N60SpeakerOutputBusLeftFullRange, finalLeft);
+            (void)N60SpeakerBusFrameSet(&busFrame, N60SpeakerOutputBusRightFullRange, finalRight);
+            if (!N60SameDeviceOutputMapWriteFrame(
+                &bridge->sameDeviceOutputMap, &busFrame, outOutputData, frameIndex
+            )) {
+                zero_output(outOutputData);
+                atomic_fetch_add_explicit(&bridge->unsupportedBufferLayouts, 1, memory_order_relaxed);
+                N60RenderKernelEndRender(bridge->renderKernel, &renderContext, renderedFrames);
+                return noErr;
+            }
+        } else {
+            *outputLeft = finalLeft;
+            *outputRight = finalRight;
+        }
         if (outputVUMeterEnabled) {
             float absLeft = fabsf(finalLeft);
             float absRight = fabsf(finalRight);
@@ -1018,8 +1083,10 @@ OSStatus N60OutputIOProc(
             if (absLeft > 1.0f) outputVUOverRangeSamples += 1;
             if (absRight > 1.0f) outputVUOverRangeSamples += 1;
         }
-        outputLeft += outputView.leftStride;
-        outputRight += outputView.rightStride;
+        if (!sameDeviceMultiOutput) {
+            outputLeft += outputView.leftStride;
+            outputRight += outputView.rightStride;
+        }
         renderedFrames += 1;
     }
 
@@ -1045,10 +1112,17 @@ OSStatus N60OutputIOProc(
 
     for (UInt32 frameIndex = framesToRead; frameIndex < frameCount; ++frameIndex) {
         (void)next_transition_gain(&transitionRamp);
-        *outputLeft = 0.0f;
-        *outputRight = 0.0f;
-        outputLeft += outputView.leftStride;
-        outputRight += outputView.rightStride;
+        if (sameDeviceMultiOutput) {
+            N60SpeakerBusFrame silence = N60SpeakerBusFrameMakeSilence();
+            (void)N60SameDeviceOutputMapWriteFrame(
+                &bridge->sameDeviceOutputMap, &silence, outOutputData, frameIndex
+            );
+        } else {
+            *outputLeft = 0.0f;
+            *outputRight = 0.0f;
+            outputLeft += outputView.leftStride;
+            outputRight += outputView.rightStride;
+        }
     }
 
     if (outputVUMeterEnabled) {

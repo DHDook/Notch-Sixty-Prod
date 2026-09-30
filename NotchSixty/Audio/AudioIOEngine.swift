@@ -947,6 +947,7 @@ final class AudioIOEngine: ObservableObject {
     @Published private(set) var globalVolumeKeyMonitoringState: GlobalVolumeKeyMonitoringState = .stopped
     @Published private(set) var gainConfiguration = DSPGainConfiguration()
     @Published private(set) var bassManagementConfiguration = BassManagementConfiguration()
+    @Published private(set) var multiOutputRoutingConfiguration: MultiOutputRoutingConfiguration?
     @Published private(set) var dynamicsConfiguration = DynamicsConfiguration()
     @Published private(set) var roomCorrectionConfiguration = RoomCorrectionConfiguration()
     @Published private(set) var speakerIRConfiguration = SpeakerIRConfiguration()
@@ -1229,6 +1230,19 @@ final class AudioIOEngine: ObservableObject {
         var updated = gainConfiguration
         updated.outputGainDB = value
         try applyGainConfiguration(updated)
+    }
+
+    func replaceMultiOutputRoutingConfiguration(
+        _ configuration: MultiOutputRoutingConfiguration?
+    ) throws {
+        if let configuration {
+            try configuration.validateStructure()
+        }
+        guard lifecycle.state == .idle || configuration == multiOutputRoutingConfiguration else {
+            throw MultiOutputRoutingError.routingChangeRequiresIdle
+        }
+        multiOutputRoutingConfiguration = configuration
+        lastErrorDescription = nil
     }
 
     func replaceBassManagementConfiguration(_ configuration: BassManagementConfiguration) throws {
@@ -2334,7 +2348,21 @@ final class AudioIOEngine: ObservableObject {
     }
 
     private func buildTransport(output: AudioOutputDevice) throws {
-        let session = try CoreAudioTransportSession(selectedOutput: output)
+        let sameDeviceOutputPlan: SameDeviceOutputRoutePlan?
+        if let routing = multiOutputRoutingConfiguration, routing.enabled {
+            let plan = try routing.makeSameDevicePlan(
+                availableDevices: outputDevices,
+                sampleRate: output.nominalSampleRate
+            )
+            try plan.validateForC2bLiveTransport(selectedOutputUID: output.uid)
+            sameDeviceOutputPlan = plan
+        } else {
+            sameDeviceOutputPlan = nil
+        }
+        let session = try CoreAudioTransportSession(
+            selectedOutput: output,
+            sameDeviceOutputPlan: sameDeviceOutputPlan
+        )
         activeEQFIRProgram = nil
         nextEQFIRProgramSlot = 0
         activeRoomCorrectionProgram = nil
