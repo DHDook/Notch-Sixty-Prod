@@ -1,8 +1,10 @@
 # PR41 — Active Crossover / Speaker Integration
 
-Status: **STACKED ON PR40 — SLICES A/B IMPLEMENTED; COMBINED CI CHECKPOINT**
+Status: **STACKED ON PR40 — SLICES A/B IMPLEMENTED; FULL COMBINED CI IN PROGRESS**
 
-Base: PR40 exact green head `56d2fbac467fc6b43df5b699f4b50d195bff98d1`.
+Base implementation dependency: PR40 exact green head `56d2fbac467fc6b43df5b699f4b50d195bff98d1`.
+
+This documentation-only checkpoint intentionally triggers the repository's ordinary `main`-targeted CI against the combined PR40 + PR41 source tree. PR41 will be retargeted back to the PR40 branch after those exact-head runs complete.
 
 ## Purpose
 
