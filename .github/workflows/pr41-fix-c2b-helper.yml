@@ -1,0 +1,32 @@
+name: PR41 Fix C2b Helper
+
+on:
+  push:
+    branches:
+      - pr41-active-crossover-matrix-parity
+    paths:
+      - .github/scripts/pr41_fix_c2b_helper.py
+      - .github/workflows/pr41-fix-c2b-helper.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: pr41-active-crossover-matrix-parity
+          fetch-depth: 0
+      - run: python3 .github/scripts/pr41_fix_c2b_helper.py
+      - name: Commit helper fix and self-remove
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/scripts/pr41_fix_c2b_helper.py .github/workflows/pr41-fix-c2b-helper.yml
+          git add .github/scripts/pr41_slice_c2b.py
+          git commit -m 'PR41 Slice C2b: fix transport error helper anchor'
+          git push origin HEAD:pr41-active-crossover-matrix-parity
