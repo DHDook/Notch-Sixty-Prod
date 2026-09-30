@@ -433,4 +433,102 @@ final class ProductionAnalysisTests: XCTestCase {
         }
         XCTAssertFalse(FileManager.default.fileExists(atPath: store.projectURL(for: project.id).path))
     }
+
+    func testRoomCorrectionSweepGeneratorIsDeterministicFiniteAndBounded() throws {
+        let settings = RoomCorrectionSweepSettings(
+            sampleRate: 48_000,
+            startFrequencyHz: 20,
+            endFrequencyHz: 20_000,
+            durationSeconds: 0.25,
+            levelDBFS: -18,
+            leadInSeconds: 0.1,
+            tailSeconds: 0.2,
+            fadeSeconds: 0.01
+        )
+        let generator = RoomCorrectionSweepGenerator()
+        let first = try generator.makeProgram(settings: settings)
+        let second = try generator.makeProgram(settings: settings)
+
+        XCTAssertEqual(first, second)
+        XCTAssertEqual(first.sweepSamples.count, 12_000)
+        XCTAssertEqual(first.inverseFilter.count, first.sweepSamples.count)
+        XCTAssertEqual(first.leadInFrames, 4_800)
+        XCTAssertEqual(first.tailFrames, 9_600)
+        XCTAssertEqual(first.captureFrameCount, 26_400)
+        XCTAssertTrue(first.sweepSamples.allSatisfy(\.isFinite))
+        XCTAssertTrue(first.inverseFilter.allSatisfy(\.isFinite))
+
+        let expectedPeak = pow(10.0, -18.0 / 20.0)
+        XCTAssertLessThanOrEqual(
+            Double(first.sweepSamples.map { abs($0) }.max() ?? 0),
+            expectedPeak + 0.000_001
+        )
+        XCTAssertLessThanOrEqual(first.inverseFilter.map { abs($0) }.max() ?? 0, 1.000_001)
+    }
+
+    func testRoomCorrectionSweepGeneratorRejectsNyquistUnsafeSweep() throws {
+        let settings = RoomCorrectionSweepSettings(
+            sampleRate: 44_100,
+            startFrequencyHz: 20,
+            endFrequencyHz: 21_900,
+            durationSeconds: 1,
+            levelDBFS: -18,
+            leadInSeconds: 0,
+            tailSeconds: 0,
+            fadeSeconds: 0
+        )
+
+        XCTAssertThrowsError(try RoomCorrectionSweepGenerator().makeProgram(settings: settings)) { error in
+            XCTAssertEqual(error as? RoomCorrectionSweepGenerationError, .invalidSettings)
+        }
+    }
+
+    func testRoomCorrectionMeasurementPlanRoutesSequentialSpeakersAndExactCaptures() throws {
+        let settings = RoomCorrectionSweepSettings(
+            sampleRate: 1_000,
+            startFrequencyHz: 20,
+            endFrequencyHz: 400,
+            durationSeconds: 0.1,
+            levelDBFS: -6,
+            leadInSeconds: 0.01,
+            tailSeconds: 0.02,
+            fadeSeconds: 0
+        )
+        let program = try RoomCorrectionSweepGenerator().makeProgram(settings: settings)
+        let plan = try RoomCorrectionMeasurementPlan(program: program, settlingSeconds: 0.03)
+
+        XCTAssertEqual(program.sweepSamples.count, 100)
+        XCTAssertEqual(program.captureFrameCount, 130)
+        XCTAssertEqual(plan.settlingFrames, 30)
+        XCTAssertEqual(plan.leftPass.captureFrameCount, 130)
+        XCTAssertEqual(plan.rightPass.captureFrameCount, 130)
+        XCTAssertEqual(plan.rightPass.captureStartFrame, 160)
+        XCTAssertEqual(plan.totalFrameCount, 290)
+
+        XCTAssertEqual(
+            plan.captureDestination(at: plan.leftPass.captureStartFrame),
+            RoomCorrectionCaptureDestination(pass: .left, frameIndex: 0)
+        )
+        XCTAssertEqual(
+            plan.captureDestination(at: plan.leftPass.captureEndFrameExclusive - 1),
+            RoomCorrectionCaptureDestination(pass: .left, frameIndex: 129)
+        )
+        XCTAssertNil(plan.captureDestination(at: 145), "Inter-pass settling must not be captured")
+        XCTAssertEqual(
+            plan.captureDestination(at: plan.rightPass.captureStartFrame),
+            RoomCorrectionCaptureDestination(pass: .right, frameIndex: 0)
+        )
+
+        let leftProbe = plan.outputFrame(at: plan.leftPass.sweepStartFrame + 1)
+        XCTAssertNotEqual(leftProbe.left, 0)
+        XCTAssertEqual(leftProbe.right, 0)
+
+        let settlingProbe = plan.outputFrame(at: plan.leftPass.captureEndFrameExclusive + 1)
+        XCTAssertEqual(settlingProbe.left, 0)
+        XCTAssertEqual(settlingProbe.right, 0)
+
+        let rightProbe = plan.outputFrame(at: plan.rightPass.sweepStartFrame + 1)
+        XCTAssertEqual(rightProbe.left, 0)
+        XCTAssertNotEqual(rightProbe.right, 0)
+    }
 }
