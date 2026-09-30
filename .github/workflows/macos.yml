@@ -132,6 +132,9 @@ jobs:
       - name: Validate PR38 Production Dynamics
         run: python3 ci/validate_pr38_dynamics_ui.py
 
+      - name: Validate PR42 Dynamics Current-macOS Style
+        run: python3 ci/validate_pr42_dynamics_ui_style.py
+
       - name: Validate PR38 Denoiser Advanced Parity
         run: |
           REALTIME_SOURCES=$(find NotchSixty/Audio/Realtime -name '*.c' ! -name 'N60RealtimeAudioBridge.c' -print)
