@@ -28,6 +28,10 @@ struct ProductionRoomCorrectionWorkspace: View {
                 setupCard
                 measurementCard
 
+                if calibration.state == .reviewing, let analysis = calibration.latestAnalysis {
+                    reviewCard(analysis)
+                }
+
                 if let error = actionError ?? calibration.lastErrorDescription {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
                         .font(.callout)
@@ -44,16 +48,24 @@ struct ProductionRoomCorrectionWorkspace: View {
         .navigationTitle("Room Correction")
         .task { calibration.prepareForUse() }
         .task(id: calibration.state) {
-            guard calibration.state == .measuring else { return }
-            while !Task.isCancelled && calibration.state == .measuring {
-                try? await Task.sleep(for: .milliseconds(100))
-                guard !Task.isCancelled else { break }
-                do {
-                    if try calibration.finishMeasurementIfComplete() { break }
-                } catch {
-                    actionError = error.localizedDescription
-                    break
+            switch calibration.state {
+            case .measuring:
+                while !Task.isCancelled && calibration.state == .measuring {
+                    try? await Task.sleep(for: .milliseconds(100))
+                    guard !Task.isCancelled else { break }
+                    do {
+                        if try calibration.finishMeasurementIfComplete() { break }
+                    } catch {
+                        actionError = error.localizedDescription
+                        break
+                    }
                 }
+
+            case .analyzing:
+                _ = await calibration.analyzeLatestCapture()
+
+            default:
+                break
             }
         }
     }
@@ -157,7 +169,11 @@ struct ProductionRoomCorrectionWorkspace: View {
                         value: inputChannelBinding,
                         in: 1...32
                     )
-                    .disabled(calibration.selectedInputDevice == nil || calibration.state == .measuring)
+                    .disabled(
+                        calibration.selectedInputDevice == nil
+                            || calibration.state == .measuring
+                            || calibration.state == .arming
+                    )
                 }
             }
 
@@ -213,6 +229,9 @@ struct ProductionRoomCorrectionWorkspace: View {
             }
 
             switch calibration.state {
+            case .arming:
+                ProgressView("Preparing dedicated calibration transport…")
+
             case .measuring:
                 ProgressView(value: calibration.measurementProgress) {
                     Text("Capturing sequential Left / Right sweeps")
@@ -228,15 +247,30 @@ struct ProductionRoomCorrectionWorkspace: View {
                 }
 
             case .analyzing:
+                ProgressView("Extracting impulse responses and transfer functions…")
                 if let capture = calibration.latestCapture {
-                    Label("Paired stereo capture complete", systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
                     Text("Left: \(capture.left.count) samples · Right: \(capture.right.count) samples")
                         .font(.system(.body, design: .monospaced))
-                    Text("The raw measurement is ready for impulse-response extraction and transfer-function analysis in the next calibration stage.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
+                Text("Analysis runs off the realtime audio path. The captured sweeps are being deconvolved and checked for clipping, noise, usable bandwidth, and direct-arrival timing.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+            case .reviewing:
+                Label("Measurement and analysis complete", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                Text("Review the measured Left / Right quality below before keeping this position or measuring again.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button {
+                    actionError = nil
+                    do { try calibration.beginMeasurement() }
+                    catch { actionError = error.localizedDescription }
+                } label: {
+                    Label("Measure Current Position Again", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .disabled(!calibration.canBeginMeasurement)
 
             case .failed:
                 Button("Reset Calibration") {
@@ -256,13 +290,91 @@ struct ProductionRoomCorrectionWorkspace: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(!calibration.canBeginMeasurement)
 
-                Text("This first capture surface measures one position. Named multi-position storage, quality analysis, weighting, targets, and FIR design build on the paired capture in the following Room Correction stages.")
+                Text("This capture measures one listening position. Named multi-position storage and weighting build on the analyzed Left / Right result in the next Room Correction stage.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
         .padding(20)
         .glassEffect(.regular, in: .rect(cornerRadius: 18))
+    }
+
+    private func reviewCard(_ analysis: RoomCorrectionMeasurementAnalysis) -> some View {
+        let warnings = analysisWarnings(analysis)
+        return VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("3. Review").font(.headline)
+                Spacer()
+                Text(formattedRate(analysis.sampleRate))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+
+            channelReview("Left", measurement: analysis.left)
+            Divider()
+            channelReview("Right", measurement: analysis.right)
+
+            if !warnings.isEmpty {
+                Divider()
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Measurement notes", systemImage: "exclamationmark.triangle")
+                        .font(.callout.weight(.semibold))
+                    ForEach(warnings, id: \.self) { warning in
+                        Text("• \(warning)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            Text("This review is the measured response for the current position only. Named positions, inclusion/weighting, spatial aggregation, target shaping, and FIR design remain separate downstream stages; none are inferred here.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(20)
+        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+    }
+
+    @ViewBuilder
+    private func channelReview(
+        _ name: String,
+        measurement: RoomCorrectionChannelMeasurement
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(name).font(.callout.weight(.semibold))
+                Spacer()
+                if measurement.quality.clipped {
+                    Label("Clipped", systemImage: "waveform.path.badge.exclamationmark")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.red)
+                } else {
+                    Label("No clipping", systemImage: "checkmark.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            HStack(spacing: 24) {
+                statusValue("SNR", formattedDB(measurement.quality.estimatedSNRDB))
+                statusValue("Capture Peak", formattedDB(measurement.quality.capturePeakDBFS))
+                statusValue(
+                    "Direct Arrival",
+                    formattedMilliseconds(measurement.quality.directArrivalSeconds)
+                )
+                statusValue(
+                    "Usable Band",
+                    formattedBand(
+                        low: measurement.quality.usableLowHz,
+                        high: measurement.quality.usableHighHz
+                    )
+                )
+                statusValue(
+                    "Response Points",
+                    String(measurement.transferFunction?.frequenciesHz.count ?? 0)
+                )
+            }
+        }
     }
 
     private var calibrationStateBadge: some View {
@@ -292,6 +404,32 @@ struct ProductionRoomCorrectionWorkspace: View {
                 .font(.callout.weight(.medium))
                 .lineLimit(1)
         }
+    }
+
+    private func analysisWarnings(_ analysis: RoomCorrectionMeasurementAnalysis) -> [String] {
+        Array(Set(analysis.left.quality.warnings + analysis.right.quality.warnings)).sorted()
+    }
+
+    private func formattedDB(_ value: Double?) -> String {
+        guard let value else { return "—" }
+        return String(format: "%.1f dB", value)
+    }
+
+    private func formattedMilliseconds(_ seconds: Double?) -> String {
+        guard let seconds else { return "—" }
+        return String(format: "%.2f ms", seconds * 1_000)
+    }
+
+    private func formattedBand(low: Double?, high: Double?) -> String {
+        guard let low, let high else { return "—" }
+        return "\(formattedFrequency(low)) – \(formattedFrequency(high))"
+    }
+
+    private func formattedFrequency(_ frequency: Double) -> String {
+        if frequency >= 1_000 {
+            return String(format: "%.1f kHz", frequency / 1_000)
+        }
+        return String(format: "%.0f Hz", frequency)
     }
 
     private func formattedRate(_ rate: Double) -> String {
