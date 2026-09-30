@@ -5,7 +5,8 @@ import Foundation
 // Shipping icon generation is intentionally raster-preserving. The approved
 // light/dark transparent artwork is the source of truth; this tool only
 // resamples those exact rasters into the macOS asset-catalog slots. It does
-// not redraw, mask, crop, or reinterpret the meter.
+// not alter source geometry and does not redraw, mask, crop, or reinterpret
+// the meter artwork.
 
 let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
 let artwork = root.appendingPathComponent("artwork", isDirectory: true)
