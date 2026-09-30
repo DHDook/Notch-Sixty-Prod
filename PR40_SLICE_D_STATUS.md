@@ -11,4 +11,7 @@ Included in this gate:
 - capture peak, noise-floor, SNR, clipping, usable-band and warning metadata;
 - deterministic synthetic XCTest coverage for identity, gain/delay, calibration, malformed input, clipping and low SNR.
 
+Compiler checkpoint:
+- Swift 5 mode required an explicit `Double?` contextual type for the optional SNR `if` expression; the analyzer now carries that annotation without changing behavior.
+
 Controller/UI persistence integration remains the next step after this compiled math slice is green.
