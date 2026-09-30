@@ -1,0 +1,32 @@
+name: PR41 Fix C1 Helper
+
+on:
+  push:
+    branches:
+      - pr41-active-crossover-matrix-parity
+    paths:
+      - .github/scripts/pr41_fix_c1_helper.py
+      - .github/workflows/pr41-fix-c1-helper.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: pr41-active-crossover-matrix-parity
+          fetch-depth: 0
+      - run: python3 .github/scripts/pr41_fix_c1_helper.py
+      - name: Commit helper fix and self-remove
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/scripts/pr41_fix_c1_helper.py .github/workflows/pr41-fix-c1-helper.yml
+          git add .github/scripts/pr41_slice_c1.py
+          git commit -m 'PR41 Slice C1: fix routing helper targeting'
+          git push origin HEAD:pr41-active-crossover-matrix-parity
