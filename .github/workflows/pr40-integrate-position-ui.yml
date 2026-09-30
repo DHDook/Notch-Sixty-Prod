@@ -19,39 +19,48 @@ jobs:
           ref: pr40-room-correction-production-workflow
           fetch-depth: 0
 
-      - name: Add retain and multi-position controls
+      - name: Integrate named position UI
         shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
+
           path = Path('NotchSixty/UI/ProductionRoomCorrectionWorkspace.swift')
           text = path.read_text()
 
-          old_props = '''    @ObservedObject var engine: AudioIOEngine
+          def replace_once(old, new, label):
+              global text
+              if new in text:
+                  return
+              if text.count(old) != 1:
+                  raise SystemExit(f'Unexpected {label}: found {text.count(old)} anchors')
+              text = text.replace(old, new, 1)
+
+          replace_once(
+              '''    @ObservedObject var engine: AudioIOEngine
               @ObservedObject var calibration: RoomCorrectionCalibrationController
 
               @State private var actionError: String?
-          '''.replace('              ', '    ')
-          new_props = '''    @ObservedObject var engine: AudioIOEngine
+          '''.replace('              ', '    '),
+              '''    @ObservedObject var engine: AudioIOEngine
               @ObservedObject var calibration: RoomCorrectionCalibrationController
               @ObservedObject var projects: RoomCorrectionProjectController
               @ObservedObject var profiles: ProductProfileController
 
               @State private var actionError: String?
               @State private var positionName = ""
-          '''.replace('              ', '    ')
-          if new_props not in text:
-              if text.count(old_props) != 1:
-                  raise SystemExit('Unexpected workspace property block')
-              text = text.replace(old_props, new_props, 1)
+          '''.replace('              ', '    '),
+              'workspace properties'
+          )
 
-          old_review = '''                if calibration.state == .reviewing, let analysis = calibration.latestAnalysis {
+          replace_once(
+              '''                if calibration.state == .reviewing, let analysis = calibration.latestAnalysis {
                           reviewCard(analysis)
                       }
 
                       if let error = actionError ?? calibration.lastErrorDescription {
-          '''.replace('                          ', '                ').replace('                      ', '            ')
-          new_review = '''                if calibration.state == .reviewing, let analysis = calibration.latestAnalysis {
+          '''.replace('                          ', '                ').replace('                      ', '            '),
+              '''                if calibration.state == .reviewing, let analysis = calibration.latestAnalysis {
                           reviewCard(analysis)
                       }
 
@@ -60,31 +69,21 @@ jobs:
                       }
 
                       if let error = actionError ?? calibration.lastErrorDescription ?? projects.lastErrorDescription {
-          '''.replace('                          ', '                ').replace('                      ', '            ')
-          if new_review not in text:
-              if text.count(old_review) != 1:
-                  raise SystemExit('Unexpected workspace review/error block')
-              text = text.replace(old_review, new_review, 1)
+          '''.replace('                          ', '                ').replace('                      ', '            '),
+              'review/error section'
+          )
 
-          old_tasks = '''        .task { calibration.prepareForUse() }
-              .task(id: calibration.state) {
-          '''.replace('              ', '        ')
-          new_tasks = '''        .task { calibration.prepareForUse() }
-              .task(id: profiles.selectedSystemProfileID) {
-                  projects.prepareForUse()
-              }
-              .task(id: calibration.state) {
-          '''.replace('              ', '        ')
-          if new_tasks not in text:
-              if text.count(old_tasks) != 1:
-                  raise SystemExit('Unexpected workspace task anchor')
-              text = text.replace(old_tasks, new_tasks, 1)
+          replace_once(
+              '        .task { calibration.prepareForUse() }\n        .task(id: calibration.state) {',
+              '        .task { calibration.prepareForUse() }\n        .task(id: profiles.selectedSystemProfileID) {\n            projects.prepareForUse()\n        }\n        .task(id: calibration.state) {',
+              'workspace task chain'
+          )
 
-          old_review_footer = '''            Text("This review is the measured response for the current position only. Named positions, inclusion/weighting, spatial aggregation, target shaping, and FIR design remain separate downstream stages; none are inferred here.")
+          old_footer = '''            Text("This review is the measured response for the current position only. Named positions, inclusion/weighting, spatial aggregation, target shaping, and FIR design remain separate downstream stages; none are inferred here.")
                   .font(.caption)
                   .foregroundStyle(.secondary)
           '''.replace('                  ', '                ')
-          new_review_footer = '''            Divider()
+          new_footer = '''            Divider()
 
               if projects.contains(analysis) {
                   Label("Current measurement retained in the Playback System project", systemImage: "tray.and.arrow.down.fill")
@@ -101,7 +100,7 @@ jobs:
                       }
                       .buttonStyle(.borderedProminent)
                   }
-                  Text("Leave the name blank to use \(projects.suggestedPositionName). The raw capture, impulse response, transfer function and quality metadata are saved together.")
+                  Text("Leave the name blank to use \(projects.suggestedPositionName). Raw capture, impulse response, transfer function, and quality metadata are retained together.")
                       .font(.caption)
                       .foregroundStyle(.secondary)
               }
@@ -110,99 +109,96 @@ jobs:
                   .font(.caption)
                   .foregroundStyle(.secondary)
           '''.replace('              ', '            ').replace('                  ', '                ')
-          if new_review_footer not in text:
-              if text.count(old_review_footer) != 1:
-                  raise SystemExit('Unexpected review footer anchor')
-              text = text.replace(old_review_footer, new_review_footer, 1)
+          replace_once(old_footer, new_footer, 'review footer')
 
-          anchor = '    private var calibrationStateBadge: some View {\n'
           methods = r'''    private var positionsCard: some View {
-              VStack(alignment: .leading, spacing: 16) {
-                  HStack {
-                      VStack(alignment: .leading, spacing: 3) {
-                          Text("4. Positions").font(.headline)
-                          Text(projects.project?.name ?? "No room-correction project")
-                              .font(.caption)
-                              .foregroundStyle(.secondary)
-                      }
-                      Spacer()
-                      Button("Start New Project") {
-                          actionError = nil
-                          do {
-                              try projects.startNewProject()
-                              positionName = ""
-                          } catch {
-                              actionError = error.localizedDescription
-                          }
-                      }
-                      .buttonStyle(.bordered)
-                  }
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("4. Positions").font(.headline)
+                    Text(projects.project?.name ?? "No room-correction project")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Start New Project") {
+                    actionError = nil
+                    do {
+                        try projects.startNewProject()
+                        positionName = ""
+                    } catch {
+                        actionError = error.localizedDescription
+                    }
+                }
+                .buttonStyle(.bordered)
+            }
 
-                  ForEach(projects.positions) { position in
-                      RoomCorrectionPositionRow(
-                          position: position,
-                          projects: projects,
-                          onError: { actionError = $0 }
-                      )
-                  }
+            ForEach(projects.positions) { position in
+                RoomCorrectionPositionRow(
+                    position: position,
+                    projects: projects,
+                    onError: { actionError = $0 }
+                )
+            }
 
-                  Divider()
-                  if let aggregate = projects.aggregate {
-                      Label(
-                          "Weighted magnitude aggregate ready from \(aggregate.includedPositionIDs.count) included position\(aggregate.includedPositionIDs.count == 1 ? "" : "s")",
-                          systemImage: "sum"
-                      )
-                      .font(.callout.weight(.semibold))
-                      Text("Position weights are normalized before averaging magnitude in dB. Seat phase is intentionally kept per measurement rather than spatially averaged.")
-                          .font(.caption)
-                          .foregroundStyle(.secondary)
-                  } else {
-                      Text("No aggregate is active. Include at least one position with weight greater than zero.")
-                          .font(.caption)
-                          .foregroundStyle(.secondary)
-                  }
-              }
-              .padding(20)
-              .glassEffect(.regular, in: .rect(cornerRadius: 18))
-          }
+            Divider()
+            if let aggregate = projects.aggregate {
+                Label(
+                    "Weighted magnitude aggregate ready from \(aggregate.includedPositionIDs.count) included position\(aggregate.includedPositionIDs.count == 1 ? "" : "s")",
+                    systemImage: "sum"
+                )
+                .font(.callout.weight(.semibold))
+                Text("Weights are normalized before averaging magnitude in dB. Seat phase and timing remain attached to each individual measurement.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("No aggregate is active. Include at least one retained position with weight greater than zero.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(20)
+        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+    }
 
-          private func retainReviewedMeasurement(_ analysis: RoomCorrectionMeasurementAnalysis) {
-              actionError = nil
-              guard let input = calibration.selectedInputDevice,
-                    let sweep = calibration.activePlan?.program.settings else {
-                  actionError = "The reviewed measurement no longer has its originating microphone or sweep metadata. Measure the position again before retaining it."
-                  return
-              }
+    private func retainReviewedMeasurement(_ analysis: RoomCorrectionMeasurementAnalysis) {
+        actionError = nil
+        guard let input = calibration.selectedInputDevice,
+              let sweep = calibration.activePlan?.program.settings else {
+            actionError = "The reviewed measurement no longer has its originating microphone or sweep metadata. Measure the position again before retaining it."
+            return
+        }
 
-              let microphone = RoomCorrectionMicrophone(
-                  stableID: input.uid,
-                  displayName: input.name,
-                  manufacturer: nil,
-                  inputChannelIndex: calibration.selectedInputChannelIndex,
-                  calibration: nil
-              )
-              let proposed = positionName.trimmingCharacters(in: .whitespacesAndNewlines)
-              do {
-                  try projects.retainMeasurement(
-                      analysis,
-                      sweep: sweep,
-                      microphone: microphone,
-                      name: proposed.isEmpty ? nil : proposed
-                  )
-                  positionName = ""
-              } catch {
-                  actionError = error.localizedDescription
-              }
-          }
+        let microphone = RoomCorrectionMicrophone(
+            stableID: input.uid,
+            displayName: input.name,
+            manufacturer: nil,
+            inputChannelIndex: calibration.selectedInputChannelIndex,
+            calibration: projects.project?.microphone?.calibration
+        )
+        let proposed = positionName.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            try projects.retainMeasurement(
+                analysis,
+                sweep: sweep,
+                microphone: microphone,
+                name: proposed.isEmpty ? nil : proposed
+            )
+            positionName = ""
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
 
-'''.replace('          ', '    ')
+'''
+          badge_anchor = '    private var calibrationStateBadge: some View {\n'
           if '    private var positionsCard: some View {' not in text:
-              if text.count(anchor) != 1:
+              if text.count(badge_anchor) != 1:
                   raise SystemExit('Unexpected calibration badge anchor')
-              text = text.replace(anchor, methods + anchor, 1)
+              text = text.replace(badge_anchor, methods + badge_anchor, 1)
 
           if 'private struct RoomCorrectionPositionRow: View {' not in text:
-              row = r'''
+              text += r'''
 
 private struct RoomCorrectionPositionRow: View {
     let positionID: UUID
@@ -248,7 +244,7 @@ private struct RoomCorrectionPositionRow: View {
                         Text("Weight \(position.weight, specifier: "%.2f")")
                             .monospacedDigit()
                     }
-                    .frame(width: 160)
+                    .frame(width: 170)
                 }
 
                 HStack(spacing: 18) {
@@ -303,7 +299,6 @@ private struct RoomCorrectionPositionRow: View {
     }
 }
 '''
-              text += row
 
           path.write_text(text)
           PY
