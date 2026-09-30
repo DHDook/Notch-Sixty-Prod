@@ -1,4 +1,6 @@
 name: PR41 Same-device Fan-out Primitive
+# The permanent macOS workflow validator is committed separately through the
+# repository connection after this source-only substantive commit succeeds.
 
 on:
   push:
@@ -65,18 +67,24 @@ jobs:
           grep -q 'Validate PR41 Same-device Output Map' .github/workflows/macos.yml
           grep -q 'testSameDeviceRoutePlanUsesOneClockDomainAndPreservesEnabledRouteOrder' NotchSixtyTests/RoomCorrectionProjectControllerTests.swift
 
-      - name: Commit patch and remove helpers
+      - name: Commit source patch and remove helpers
         shell: bash
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git rm .github/scripts/pr41_slice_c2a.py .github/workflows/pr41-slice-c2a.yml
+          # The helper stages a permanent macOS validator too. Keep that validated
+          # worktree change out of the bot push; it is committed separately by the
+          # repository connection after this source commit lands.
+          git restore --source=HEAD -- .github/workflows/macos.yml
+          git rm -f --ignore-unmatch \
+            .github/scripts/pr41_slice_c2a.py \
+            .github/workflows/pr41-slice-c2a.yml
           git add NotchSixty/Audio/Routing/AudioRouteConfiguration.swift \
                   NotchSixty/Audio/Realtime/N60RealtimeAudioBridge.h \
                   NotchSixty/Audio/Realtime/N60RealtimeAudioBridge.c \
                   NotchSixtyTests/RoomCorrectionProjectControllerTests.swift \
-                  ci/validate_pr41_same_device_output_map.c \
-                  .github/workflows/macos.yml
+                  ci/validate_pr41_same_device_output_map.c
+          git status --short
           git commit -m 'PR41 Slice C2a: add same-device fan-out primitive'
           git push origin HEAD:pr41-active-crossover-matrix-parity
