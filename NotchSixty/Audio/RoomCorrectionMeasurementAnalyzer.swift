@@ -567,3 +567,215 @@ private final class RoomCorrectionDFT {
         return outputReal
     }
 }
+
+
+// MARK: - PR43 advanced acoustic diagnostics
+
+struct RoomCorrectionDiagnosticSeries: Equatable, Sendable {
+    var x: [Double]
+    var y: [Double]
+
+    init(x: [Double], y: [Double]) {
+        self.x = x
+        self.y = y
+    }
+}
+
+struct RoomCorrectionAcousticDiagnostics: Equatable, Sendable {
+    var impulse: RoomCorrectionDiagnosticSeries
+    var step: RoomCorrectionDiagnosticSeries
+    var energyTimeCurveDB: RoomCorrectionDiagnosticSeries
+    var energyDecayDB: RoomCorrectionDiagnosticSeries
+    var groupDelayMilliseconds: RoomCorrectionDiagnosticSeries?
+}
+
+struct RoomCorrectionAcousticDiagnosticsPair: Equatable, Sendable {
+    var left: RoomCorrectionAcousticDiagnostics
+    var right: RoomCorrectionAcousticDiagnostics
+}
+
+enum RoomCorrectionAcousticDiagnosticsError: Error, Equatable, LocalizedError {
+    case invalidSampleRate(Double)
+    case emptyImpulse
+    case nonFiniteImpulse
+    case unusableImpulse
+    case invalidTransferFunction
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidSampleRate(let sampleRate):
+            return "Acoustic diagnostics sample rate \(sampleRate) Hz is invalid."
+        case .emptyImpulse:
+            return "Acoustic diagnostics require a non-empty impulse response."
+        case .nonFiniteImpulse:
+            return "Acoustic diagnostics cannot analyze non-finite impulse samples."
+        case .unusableImpulse:
+            return "Acoustic diagnostics could not find usable impulse-response energy."
+        case .invalidTransferFunction:
+            return "Acoustic diagnostics require a finite, strictly increasing frequency grid with matching unwrapped phase data."
+        }
+    }
+}
+
+/// Offline-only derivation of advanced acoustic diagnostics from the PR40
+/// measurement products. This analyzer never runs on the realtime audio path.
+struct RoomCorrectionAcousticDiagnosticsAnalyzer: Sendable {
+    static let displayFloorDB = -120.0
+    static let energyTimeSmoothingSeconds = 0.001
+
+    func analyze(
+        _ analysis: RoomCorrectionMeasurementAnalysis
+    ) throws -> RoomCorrectionAcousticDiagnosticsPair {
+        RoomCorrectionAcousticDiagnosticsPair(
+            left: try analyze(
+                impulseResponse: analysis.left.impulseResponse,
+                transferFunction: analysis.left.transferFunction,
+                sampleRate: analysis.sampleRate,
+                referenceArrivalSeconds: analysis.left.quality.directArrivalSeconds
+            ),
+            right: try analyze(
+                impulseResponse: analysis.right.impulseResponse,
+                transferFunction: analysis.right.transferFunction,
+                sampleRate: analysis.sampleRate,
+                referenceArrivalSeconds: analysis.right.quality.directArrivalSeconds
+            )
+        )
+    }
+
+    func analyze(
+        impulseResponse: [Float],
+        transferFunction: RoomCorrectionFrequencyResponse?,
+        sampleRate: Double,
+        referenceArrivalSeconds: Double? = nil
+    ) throws -> RoomCorrectionAcousticDiagnostics {
+        guard sampleRate.isFinite, sampleRate > 0 else {
+            throw RoomCorrectionAcousticDiagnosticsError.invalidSampleRate(sampleRate)
+        }
+        guard !impulseResponse.isEmpty else {
+            throw RoomCorrectionAcousticDiagnosticsError.emptyImpulse
+        }
+        guard impulseResponse.allSatisfy(\.isFinite) else {
+            throw RoomCorrectionAcousticDiagnosticsError.nonFiniteImpulse
+        }
+
+        let impulse = impulseResponse.map(Double.init)
+        let peak = impulse.reduce(0.0) { max($0, abs($1)) }
+        let energy = impulse.map { $0 * $0 }
+        let totalEnergy = energy.reduce(0, +)
+        guard peak.isFinite, peak > 1.0e-12,
+              totalEnergy.isFinite, totalEnergy > 1.0e-24 else {
+            throw RoomCorrectionAcousticDiagnosticsError.unusableImpulse
+        }
+
+        let arrival = (referenceArrivalSeconds?.isFinite == true)
+            ? max(referenceArrivalSeconds ?? 0, 0)
+            : 0
+        let timeMilliseconds = impulse.indices.map {
+            (Double($0) / sampleRate - arrival) * 1_000.0
+        }
+        let normalizedImpulse = impulse.map { $0 / peak }
+
+        var runningStep = 0.0
+        var stepValues = [Double]()
+        stepValues.reserveCapacity(impulse.count)
+        for sample in impulse {
+            runningStep += sample
+            stepValues.append(runningStep)
+        }
+        let stepPeak = stepValues.reduce(0.0) { max($0, abs($1)) }
+        if stepPeak > 1.0e-12 {
+            for index in stepValues.indices {
+                stepValues[index] /= stepPeak
+            }
+        }
+
+        let smoothingFrames = max(
+            1,
+            Int((sampleRate * Self.energyTimeSmoothingSeconds).rounded())
+        )
+        var smoothedEnergy = [Double](repeating: 0, count: energy.count)
+        var movingEnergy = 0.0
+        for index in energy.indices {
+            movingEnergy += energy[index]
+            if index >= smoothingFrames {
+                movingEnergy -= energy[index - smoothingFrames]
+            }
+            let activeFrames = min(index + 1, smoothingFrames)
+            smoothedEnergy[index] = movingEnergy / Double(activeFrames)
+        }
+        let maximumSmoothedEnergy = smoothedEnergy.max() ?? 0
+        guard maximumSmoothedEnergy.isFinite, maximumSmoothedEnergy > 1.0e-24 else {
+            throw RoomCorrectionAcousticDiagnosticsError.unusableImpulse
+        }
+        let etc = smoothedEnergy.map {
+            Self.decibels(powerRatio: $0 / maximumSmoothedEnergy)
+        }
+
+        var reverseEnergy = [Double](repeating: 0, count: energy.count)
+        var accumulated = 0.0
+        for index in energy.indices.reversed() {
+            accumulated += energy[index]
+            reverseEnergy[index] = accumulated
+        }
+        let edc = reverseEnergy.map {
+            Self.decibels(powerRatio: $0 / totalEnergy)
+        }
+
+        return RoomCorrectionAcousticDiagnostics(
+            impulse: RoomCorrectionDiagnosticSeries(
+                x: timeMilliseconds,
+                y: normalizedImpulse
+            ),
+            step: RoomCorrectionDiagnosticSeries(
+                x: timeMilliseconds,
+                y: stepValues
+            ),
+            energyTimeCurveDB: RoomCorrectionDiagnosticSeries(
+                x: timeMilliseconds,
+                y: etc
+            ),
+            energyDecayDB: RoomCorrectionDiagnosticSeries(
+                x: timeMilliseconds,
+                y: edc
+            ),
+            groupDelayMilliseconds: try makeGroupDelay(transferFunction)
+        )
+    }
+
+    private func makeGroupDelay(
+        _ response: RoomCorrectionFrequencyResponse?
+    ) throws -> RoomCorrectionDiagnosticSeries? {
+        guard let response else { return nil }
+        guard let phase = response.phaseRadians else { return nil }
+        let frequencies = response.frequenciesHz
+        guard frequencies.count >= 2,
+              phase.count == frequencies.count,
+              frequencies.allSatisfy({ $0.isFinite && $0 > 0 }),
+              phase.allSatisfy(\.isFinite) else {
+            throw RoomCorrectionAcousticDiagnosticsError.invalidTransferFunction
+        }
+        for index in frequencies.indices.dropFirst() {
+            guard frequencies[index] > frequencies[index - 1] else {
+                throw RoomCorrectionAcousticDiagnosticsError.invalidTransferFunction
+            }
+        }
+
+        var delay = [Double](repeating: 0, count: frequencies.count)
+        for index in frequencies.indices {
+            let lower = index == frequencies.startIndex ? index : index - 1
+            let upper = index == frequencies.index(before: frequencies.endIndex) ? index : index + 1
+            let deltaFrequency = frequencies[upper] - frequencies[lower]
+            guard deltaFrequency.isFinite, deltaFrequency > 0 else {
+                throw RoomCorrectionAcousticDiagnosticsError.invalidTransferFunction
+            }
+            let deltaPhase = phase[upper] - phase[lower]
+            delay[index] = -deltaPhase / (2.0 * Double.pi * deltaFrequency) * 1_000.0
+        }
+        return RoomCorrectionDiagnosticSeries(x: frequencies, y: delay)
+    }
+
+    private static func decibels(powerRatio: Double) -> Double {
+        guard powerRatio.isFinite, powerRatio > 0 else { return displayFloorDB }
+        return max(displayFloorDB, 10.0 * log10(powerRatio))
+    }
+}
