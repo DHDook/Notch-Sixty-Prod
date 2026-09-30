@@ -107,6 +107,8 @@ PR42 includes a bounded current-platform UI consistency pass where an existing p
 
 First identified item: the Dynamics selected-processor editor. Its controls are current SwiftUI, but the editor uses a manually composed parameter-row layout and a fixed quaternary rounded background rather than the newer semantic form/labeled-content structure used by current SwiftUI guidance. The goal is a native current-macOS inspector/form presentation while preserving all PR38 controls, grouping, telemetry demand isolation, and parameter semantics.
 
+**Initial Dynamics UI slice implemented:** numeric parameter rows now use semantic `LabeledContent`, editable values use native rounded text-field styling, and the processor editor uses an adaptive material surface with a subtle semantic boundary instead of the fixed quaternary card. All existing bindings, parameter ranges, units, processor grouping, telemetry children, Pause Gate semantics, and realtime behavior are unchanged. `ci/validate_pr42_dynamics_ui_style.py` guards this presentation contract.
+
 UI polish must not become a broad visual redesign of accepted PR36–PR41 surfaces.
 
 ## Realtime / architecture impact
