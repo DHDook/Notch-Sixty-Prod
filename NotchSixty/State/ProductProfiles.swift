@@ -207,10 +207,6 @@ final class ProductProfileController: ObservableObject {
     private static let streamingPresetID = UUID(uuidString: "6A782AB6-492B-46C9-A0A0-000000000014")!
     private static let classicPopRockPresetID = UUID(uuidString: "6A782AB6-492B-46C9-A0A0-000000000015")!
     private static let vocalStandardsPresetID = UUID(uuidString: "6A782AB6-492B-46C9-A0A0-000000000016")!
-    private static let classicPopRockPresetID = UUID(uuidString: "6A782AB6-492B-46C9-A0A0-000000000015")!
-    private static let vocalStandardsPresetID = UUID(uuidString: "6A782AB6-492B-46C9-A0A0-000000000016")!
-    private static let classicPopRockPresetID = UUID(uuidString: "6A782AB6-492B-46C9-A0A0-000000000015")!
-    private static let vocalStandardsPresetID = UUID(uuidString: "6A782AB6-492B-46C9-A0A0-000000000016")!
 
     private static func factoryBand(
         _ type: EQFilterType,
@@ -391,44 +387,6 @@ final class ProductProfileController: ObservableObject {
             )
         ),
         ContentPreset(
-            id: classicPopRockPresetID,
-            name: "Classic Pop/Rock",
-            origin: .factory,
-            state: factoryState(
-                bands: [
-                    factoryBand(.lowShelf, 50, 0.6, 0.70),
-                    factoryBand(.peaking, 220, -0.5, 1.00),
-                    factoryBand(.peaking, 750, 0.5, 0.90),
-                    factoryBand(.peaking, 2_000, 0.9, 0.90),
-                    factoryBand(.peaking, 4_500, -0.4, 1.10),
-                    factoryBand(.highShelf, 11_000, 0.6, 0.70),
-                ],
-                inputPreampDB: -1.5,
-                headroomAttenuationDB: -0.8,
-                // Preserve vintage dynamics and image; no content compressor or widener.
-                dynamics: factoryBaseDynamics(limiterReleaseMs: 90.0)
-            )
-        ),
-        ContentPreset(
-            id: classicPopRockPresetID,
-            name: "Classic Pop/Rock",
-            origin: .factory,
-            state: factoryState(
-                bands: [
-                    factoryBand(.lowShelf, 50, 0.6, 0.70),
-                    factoryBand(.peaking, 220, -0.5, 1.00),
-                    factoryBand(.peaking, 750, 0.5, 0.90),
-                    factoryBand(.peaking, 2_000, 0.9, 0.90),
-                    factoryBand(.peaking, 4_500, -0.4, 1.10),
-                    factoryBand(.highShelf, 11_000, 0.6, 0.70),
-                ],
-                inputPreampDB: -1.5,
-                headroomAttenuationDB: -0.8,
-                // Preserve vintage dynamics and image; no content compressor or widener.
-                dynamics: factoryBaseDynamics(limiterReleaseMs: 90.0)
-            )
-        ),
-        ContentPreset(
             id: modernPopPresetID,
             name: "Modern Pop",
             origin: .factory,
@@ -464,44 +422,6 @@ final class ProductProfileController: ObservableObject {
                 inputPreampDB: -2.5,
                 headroomAttenuationDB: -1.2,
                 dynamics: hipHopClubDynamics()
-            )
-        ),
-        ContentPreset(
-            id: vocalStandardsPresetID,
-            name: "Vocal Standards",
-            origin: .factory,
-            state: factoryState(
-                bands: [
-                    factoryBand(.lowShelf, 70, 0.2, 0.70),
-                    factoryBand(.peaking, 150, 0.5, 0.85),
-                    factoryBand(.peaking, 350, -0.5, 1.00),
-                    factoryBand(.peaking, 1_700, 0.9, 0.90),
-                    factoryBand(.peaking, 4_000, -0.5, 1.10),
-                    factoryBand(.highShelf, 10_500, 0.3, 0.70),
-                ],
-                inputPreampDB: -1.3,
-                headroomAttenuationDB: -0.7,
-                // Keep mono/hard-panned-era recordings natural; no compressor or widener.
-                dynamics: factoryBaseDynamics(limiterReleaseMs: 100.0)
-            )
-        ),
-        ContentPreset(
-            id: vocalStandardsPresetID,
-            name: "Vocal Standards",
-            origin: .factory,
-            state: factoryState(
-                bands: [
-                    factoryBand(.lowShelf, 70, 0.2, 0.70),
-                    factoryBand(.peaking, 150, 0.5, 0.85),
-                    factoryBand(.peaking, 350, -0.5, 1.00),
-                    factoryBand(.peaking, 1_700, 0.9, 0.90),
-                    factoryBand(.peaking, 4_000, -0.5, 1.10),
-                    factoryBand(.highShelf, 10_500, 0.3, 0.70),
-                ],
-                inputPreampDB: -1.3,
-                headroomAttenuationDB: -0.7,
-                // Keep mono/hard-panned-era recordings natural; no compressor or widener.
-                dynamics: factoryBaseDynamics(limiterReleaseMs: 100.0)
             )
         ),
         ContentPreset(
