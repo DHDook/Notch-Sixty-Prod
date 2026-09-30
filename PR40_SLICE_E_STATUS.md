@@ -24,7 +24,7 @@ FIR work already validated:
 - stable algorithm version `n60-room-minphase-v1`;
 - deterministic native-rate coverage at 44.1, 48, 96 and 384 kHz plus the full 32,768-tap budget.
 
-Project integration in this checkpoint:
+Project integration:
 - active target persistence in the room-correction sidecar;
 - target edits invalidate candidate selection without deleting historical design assets or touching deployed playback;
 - correction preview and final FIR generation share the same included-position quality and usable-range gate;
@@ -33,4 +33,14 @@ Project integration in this checkpoint:
 - explicit persisted design selection and deletion;
 - deterministic controller tests for preview/design persistence, target-change invalidation, low-confidence rejection, selection and deletion.
 
-The next Slice E step is the production Target / Design surface: built-in/custom target selection and import/editing, smoothing/range/boost/cut/tap controls, preview/headroom summary, FIR generation, and candidate selection. Slice F will then deploy the selected candidate transactionally through the existing Room Correction runtime and Playback System profile ownership path.
+Production Target / Design surface in this checkpoint:
+- built-in target menu plus sandboxed custom target-file import;
+- editable two-column target point editor using the same parser/normalization rules as imports;
+- correction low/high controls, smoothing selector, maximum boost/cut controls and FIR tap-count selector;
+- safe correction preview showing effective measured range, maximum requested positive correction and advisory headroom;
+- explicit FIR generation with user-editable design name;
+- persisted generated-design history with selection and deletion controls;
+- selected-candidate status makes clear that generation does not deploy or alter daily playback;
+- preview state is invalidated when project content changes so stale safety information is not retained in the UI.
+
+After this exact UI tree is green, Slice E is functionally complete. Slice F will deploy the selected candidate transactionally through the existing Room Correction runtime and Playback System profile ownership path, then add the daily-playback calibration summary and deployment/audition regression gates.
