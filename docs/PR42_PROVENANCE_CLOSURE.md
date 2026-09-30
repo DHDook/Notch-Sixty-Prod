@@ -14,92 +14,33 @@ The production tree remains a proprietary clean-room rewrite.
 - The production repository has no approved third-party source dependency; platform functionality is provided by Apple frameworks.
 - Public DSP/acoustic specifications and standard mathematical formulas are implementation references where noted, not copied code.
 
-## PR34 — Core parity expansion
+## PR34–PR38
 
-**Classification:** specification-derived / original commercial implementation.
+Core parity expansion, realtime-readiness work, production UI, Equalizer and Dynamics are specification-derived and/or original commercial implementations against the proprietary N60 architecture. Public filter/dynamics mathematics and native SwiftUI APIs are implementation specifications. Historical source/tests/views were not ported.
 
-Commercial additions including Band Pass, Constant-Q Peak, Linkwitz Transform, high-order LP/HP/shelf compilation, Tilt, Mid/Side, per-band FIR, Mixed Phase, Symmetry Balance, speaker crossfeed/crosstalk cancellation and Sub phase alignment were independently implemented against the existing proprietary realtime graph and public DSP mathematics. Legacy source established only observable contracts and defects.
+## PR39
 
-No historical source/tests were ported. The source audits under `docs/PR34_*_AUDIT.md` are behavioral evidence, not code provenance.
+Metering/RTA/stereo analysis uses standard analysis concepts and proprietary demand-gated telemetry. Content Presets / Playback System Profiles are a new commercial ownership/archive model. The analog-meter identity artwork is user-authored owner-controlled material; its production light/dark derivatives and retained SVG sources are cleared under the owner's independent rights, not merely because the artwork appeared in a historical GPL repository.
 
-## PR35 — Realtime performance/readiness architecture
+## PR40
 
-**Classification:** original commercial implementation.
+Room Correction is specification-derived / original commercial implementation from proprietary runtime requirements, Apple capture APIs, published exponential-sine-sweep/acoustic transfer-function concepts, and general interpolation/smoothing/minimum-phase mathematics. The calibration controller, ESS path, analyzer, project store, spatial aggregation, target/FIR design and production workspace are independently authored.
 
-Immutable snapshot ownership, bounded transition acknowledgement, optional-stage parking, demand-gated telemetry, sparse-reset equivalence validation and realtime benchmarks were designed directly against the proprietary N60 graph. No third-party realtime framework or historical optimization code was imported.
+## PR41
 
-## PR36–PR38 — Production UI / Equalizer / Dynamics
+Physical routing / Active Crossover is specification-derived / original commercial implementation from Apple Core Audio APIs, standard Linkwitz-Riley mathematics and product requirements. The commercial Aggregate Device/HAL drift approach intentionally replaces the legacy Software PLL; legacy PLL/SRC implementation code was not ported.
 
-**Classification:** original commercial implementation.
+## PR42
 
-The SwiftUI production shell, Equalizer workspace and Dynamics workspace are newly authored presentation/control-plane code against the proprietary models. Historical UI was used only to inventory capability and naming where needed. PR42's Dynamics presentation cleanup uses native SwiftUI `LabeledContent`, materials and text-field styles without copying another application.
+The `.eqpreset` migration reader is independently written against proprietary `StereoEQConfiguration` / `DynamicsConfiguration`. Historical JSON field names and enum values are interoperability facts, not reused implementation expression. REW/EasyEffects support is independently authored against their public/user-visible formats. CamillaDSP export generates text YAML from current proprietary state; CamillaDSP is not linked, embedded or redistributed. Foundation serialization/direct text generation are used; no external YAML/JSON library is added.
 
-## PR39 — Metering, analysis, profiles, and identity
+## Platform / dependency inventory
 
-### Metering / analysis
+The shipping target relies on Apple SDK frameworks/system libraries supplied by supported macOS. These are platform APIs, not third-party code bundled by this repository.
 
-**Classification:** specification-derived / original commercial implementation.
+PR42 review finds no approved package-manager dependency or bundled third-party DSP library introducing production source. Any future dependency must be recorded in both `docs/PROVENANCE.md` and `THIRD_PARTY_NOTICES.md` before release.
 
-Production RTA, VU/level views, phase correlation and goniometer consume proprietary demand-gated analysis data. Standard spectral/stereo analysis concepts are used; no external analysis library is bundled.
-
-### Content Presets / Playback System Profiles
-
-**Classification:** original commercial implementation.
-
-The two-layer commercial archive and transactional ownership model are proprietary designs. They do not reuse the historical preset store structure.
-
-### App artwork
-
-**Classification:** asset with verified rights / owner-authored reuse.
-
-`docs/PR39_APP_IDENTITY_STATUS.md` records that the Notch Sixty analog-meter artwork is user-authored. The owner-authored artwork was deliberately reused from the user's legacy project under the owner's independent rights, not because of the historical GPL distribution. Production light/dark derivatives and retained SVG source files are therefore cleared owner assets. No Equaliser branding, external font file or third-party branding asset is bundled by PR39.
-
-## PR40 — Room Correction production workflow
-
-**Classification:** specification-derived / original commercial implementation.
-
-Sources of truth:
-
-- proprietary Room Correction runtime and Playback System ownership model;
-- Apple microphone/capture APIs;
-- published exponential sine sweep measurement literature (including Farina's public AES measurement method);
-- general acoustic transfer-function, interpolation, smoothing and minimum-phase concepts.
-
-PR40's calibration controller, ESS synthesis/capture bridge, deconvolution/analysis, project model/store, spatial aggregation, target designer, FIR designer and production workspace are independently authored. Legacy Room Correction source/tests were not coding references.
-
-## PR41 — Physical speaker routing / Active Crossover
-
-**Classification:** specification-derived / original commercial implementation.
-
-The 2–8 route model, same-device output map, private Aggregate Device plan/session, reference-clock selection, HAL drift compensation, speaker-bus splitter, Mains+Sub/Bi-Amp/Tri-Amp crossover behavior and driver-safe Global Bypass rules were independently authored against public Core Audio APIs and standard Linkwitz-Riley filter mathematics.
-
-The legacy Software PLL was not ported. PR41 deliberately uses Core Audio Aggregate Device clocking instead.
-
-## PR42 — Preset/interchange compatibility
-
-**Classification:** original commercial implementation from interoperability specifications and behavioral compatibility requirements.
-
-The `.eqpreset` migration code is a one-way compatibility reader written against the proprietary `StereoEQConfiguration` / `DynamicsConfiguration` models. Legacy JSON field names and enumerated user-visible values are data-format compatibility facts; no legacy serializer/parser source expression was copied.
-
-REW and EasyEffects support is independently written from their public/user-visible interchange formats and the audited compatibility subset.
-
-CamillaDSP YAML export is independently generated from current proprietary state. CamillaDSP is not linked, embedded or redistributed. The exporter emits text configuration only.
-
-No external YAML/JSON library is added; Foundation serialization and direct text generation are used.
-
-## Apple frameworks / system libraries
-
-The production target relies on Apple SDK frameworks and system libraries available on the supported macOS platform, including SwiftUI/Foundation/AppKit/Combine and the Core Audio/graphics/Accelerate facilities used by the project. These are platform APIs, not third-party code shipped in the app bundle by this repository.
-
-## Package/dependency inventory
-
-PR42 repository review finds no approved package-manager dependency that introduces third-party production source. There is no production Swift Package dependency, CocoaPods/Carthage vendor tree, or bundled third-party DSP library recorded by the project.
-
-If a dependency is added later, it must be entered in both `docs/PROVENANCE.md` and `THIRD_PARTY_NOTICES.md` before release.
-
-## Interoperability names
-
-REW, EasyEffects and CamillaDSP names appear only to identify user-requested compatible file/configuration formats. Their software is not embedded or linked and their names do not imply endorsement.
+REW, EasyEffects and CamillaDSP names identify compatible formats/workflows only and do not imply endorsement.
 
 ## PR42 provenance result
 
