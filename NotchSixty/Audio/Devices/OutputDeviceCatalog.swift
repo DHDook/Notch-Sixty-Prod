@@ -215,6 +215,7 @@ extension RoomCorrectionMicrophoneCalibration {
 /// dedicated room-measurement transport. These arrays are prepared before an
 /// IOProc starts; the realtime transport must consume preallocated storage only.
 struct RoomCorrectionSweepProgram: Equatable, Sendable {
+    var settings: RoomCorrectionSweepSettings
     var sampleRate: Double
     var sweepSamples: [Float]
     var inverseFilter: [Float]
@@ -318,6 +319,7 @@ struct RoomCorrectionSweepGenerator: Sendable {
         }
 
         return RoomCorrectionSweepProgram(
+            settings: settings,
             sampleRate: sampleRate,
             sweepSamples: sweep,
             inverseFilter: inverse,
