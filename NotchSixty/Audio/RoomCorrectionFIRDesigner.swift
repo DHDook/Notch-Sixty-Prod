@@ -148,6 +148,7 @@ struct RoomCorrectionFIRDesigner: Sendable {
             createdAt: createdAt,
             sampleRate: sampleRate,
             parameters: parameters,
+            target: target,
             filter: filter,
             predictedLeftResponse: leftPredicted,
             predictedRightResponse: rightPredicted,

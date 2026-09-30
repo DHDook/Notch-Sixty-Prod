@@ -66,6 +66,7 @@ final class RoomCorrectionFIRDesignerTests: XCTestCase {
         XCTAssertEqual(result.design.filter.declaredLatencyFrames, 0)
         XCTAssertEqual(result.design.filter.sampleRate, 48_000)
         XCTAssertEqual(result.design.algorithmVersion, RoomCorrectionFIRDesigner.algorithmVersion)
+        XCTAssertEqual(result.design.target, RoomCorrectionBuiltInTarget.flat.curve)
         XCTAssertEqual(result.design.filter.leftTaps[0], 1, accuracy: 0.000_01)
         XCTAssertEqual(result.design.filter.rightTaps?[0] ?? 0, 1, accuracy: 0.000_01)
         XCTAssertLessThan(

@@ -361,6 +361,7 @@ final class RoomCorrectionProjectController: ObservableObject {
         updated.measurements.append(position)
         updated.modifiedAt = retainedAt
         updated.aggregate = try aggregateOrNil(updated.measurements, generatedAt: retainedAt)
+        updated.selectedDesignID = nil
         try persistAndPublish(updated)
         return position.id
     }
@@ -383,6 +384,7 @@ final class RoomCorrectionProjectController: ObservableObject {
         updated.measurements[index].included = included
         updated.modifiedAt = modifiedAt
         updated.aggregate = try aggregateOrNil(updated.measurements, generatedAt: modifiedAt)
+        updated.selectedDesignID = nil
         try persistAndPublish(updated)
     }
 
@@ -397,6 +399,7 @@ final class RoomCorrectionProjectController: ObservableObject {
         updated.measurements[index].weight = weight
         updated.modifiedAt = modifiedAt
         updated.aggregate = try aggregateOrNil(updated.measurements, generatedAt: modifiedAt)
+        updated.selectedDesignID = nil
         try persistAndPublish(updated)
     }
 

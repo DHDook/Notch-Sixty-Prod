@@ -762,6 +762,7 @@ struct RoomCorrectionDesign: Identifiable, Codable, Equatable, Sendable {
     var createdAt: Date
     var sampleRate: Double
     var parameters: RoomCorrectionDesignParameters
+    var target: RoomCorrectionTargetCurve? = nil
     var filter: RoomCorrectionFilter
     var predictedLeftResponse: RoomCorrectionFrequencyResponse?
     var predictedRightResponse: RoomCorrectionFrequencyResponse?
@@ -950,6 +951,7 @@ struct RoomCorrectionProject: Identifiable, Codable, Equatable, Sendable {
               !design.algorithmVersion.isEmpty else {
             throw RoomCorrectionProjectError.invalidProject("Correction design metadata is invalid.")
         }
+        if let target = design.target { try validateTarget(target) }
         let filter = design.filter
         let tapCount = filter.leftTaps.count
         guard tapCount > 0, tapCount <= Int(N60_CONVOLUTION_MAX_TAPS),

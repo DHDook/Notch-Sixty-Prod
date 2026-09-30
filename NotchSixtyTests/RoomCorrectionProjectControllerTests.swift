@@ -457,4 +457,30 @@ final class RoomCorrectionProjectControllerTests: XCTestCase {
         XCTAssertEqual(fixture.controller.designs.map(\.id), [second.id])
     }
 
+
+    func testAggregateMutationInvalidatesSelectedCandidateButRetainsDesignHistory() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let id = try fixture.controller.retainMeasurement(
+            analysis(capturedAt: 1),
+            sweep: sweep(),
+            microphone: microphone()
+        )
+        try fixture.controller.setTarget(RoomCorrectionBuiltInTarget.flat.curve)
+        let parameters = RoomCorrectionDesignParameters(
+            correctionLowHz: 100,
+            correctionHighHz: 1_000,
+            smoothingOctaves: 0,
+            maximumBoostDB: 3,
+            maximumCutDB: 6,
+            requestedTapCount: 1_024
+        )
+        let design = try fixture.controller.generateDesign(parameters: parameters)
+        XCTAssertEqual(fixture.controller.selectedDesign?.id, design.id)
+
+        try fixture.controller.setMeasurementWeight(id: id, weight: 2)
+        XCTAssertNil(fixture.controller.selectedDesign)
+        XCTAssertEqual(fixture.controller.designs.map(\.id), [design.id])
+    }
+
 }
