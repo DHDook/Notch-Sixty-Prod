@@ -17,6 +17,12 @@ typealias RoomCorrectionCalibrationTransportFactory = (
     RoomCorrectionMeasurementPlan
 ) throws -> any RoomCorrectionCalibrationTransporting
 
+typealias RoomCorrectionMeasurementAnalysisOperation = @Sendable (
+    RoomCorrectionCalibrationCapture,
+    RoomCorrectionMeasurementPlan,
+    RoomCorrectionMicrophoneCalibration?
+) async throws -> RoomCorrectionMeasurementAnalysis
+
 enum RoomCorrectionCalibrationControllerError: Error, Equatable, LocalizedError {
     case microphonePermissionRequired(MicrophonePermissionStatus)
     case noMeasurementInputSelected
@@ -62,9 +68,11 @@ final class RoomCorrectionCalibrationController: ObservableObject {
     private let inputCatalog: any InputDeviceCataloging
     private let permissionClient: any MicrophonePermissionRequesting
     private let transportFactory: RoomCorrectionCalibrationTransportFactory
+    private let analysisOperation: RoomCorrectionMeasurementAnalysisOperation
     private let sweepGenerator = RoomCorrectionSweepGenerator()
     private var stateMachine = RoomCorrectionCalibrationStateMachine()
     private var activeTransport: (any RoomCorrectionCalibrationTransporting)?
+    private var analysisGeneration: UInt64 = 0
 
     @Published private(set) var state: RoomCorrectionCalibrationState = .idle
     @Published private(set) var permissionStatus: MicrophonePermissionStatus
@@ -73,6 +81,7 @@ final class RoomCorrectionCalibrationController: ObservableObject {
     @Published private(set) var selectedInputChannelIndex = 0
     @Published private(set) var activePlan: RoomCorrectionMeasurementPlan?
     @Published private(set) var latestCapture: RoomCorrectionCalibrationCapture?
+    @Published private(set) var latestAnalysis: RoomCorrectionMeasurementAnalysis?
     @Published private(set) var lastErrorDescription: String?
 
     @Published var sweepStartFrequencyHz = 20.0
@@ -95,12 +104,22 @@ final class RoomCorrectionCalibrationController: ObservableObject {
                 inputChannelIndex: channel,
                 plan: plan
             )
+        },
+        analysisOperation: @escaping RoomCorrectionMeasurementAnalysisOperation = { capture, plan, calibration in
+            try await Task.detached(priority: .userInitiated) {
+                try RoomCorrectionMeasurementAnalyzer().analyze(
+                    capture: capture,
+                    plan: plan,
+                    microphoneCalibration: calibration
+                )
+            }.value
         }
     ) {
         self.engine = engine
         self.inputCatalog = inputCatalog
         self.permissionClient = permissionClient
         self.transportFactory = transportFactory
+        self.analysisOperation = analysisOperation
         self.permissionStatus = permissionClient.currentStatus()
     }
 
@@ -253,6 +272,11 @@ final class RoomCorrectionCalibrationController: ObservableObject {
                     to: .arming
                 )
             }
+
+            analysisGeneration &+= 1
+            latestCapture = nil
+            latestAnalysis = nil
+
             try stateMachine.transition(to: .arming)
             publishState()
 
@@ -283,7 +307,6 @@ final class RoomCorrectionCalibrationController: ObservableObject {
 
             try stateMachine.transition(to: .measuring)
             publishState()
-            latestCapture = nil
             lastErrorDescription = nil
         } catch {
             activeTransport?.cancel()
@@ -314,8 +337,8 @@ final class RoomCorrectionCalibrationController: ObservableObject {
         return true
     }
 
-    /// Called after the realtime transport reports completion. Analysis is the
-    /// next Slice-D owner of the captured samples; no acoustic DSP runs here.
+    /// Called after the realtime transport reports completion. The materialized
+    /// samples are then owned by the offline Slice-D analyzer.
     @discardableResult
     func finishMeasurement() throws -> RoomCorrectionCalibrationCapture {
         guard state == .measuring, let transport = activeTransport else {
@@ -324,7 +347,9 @@ final class RoomCorrectionCalibrationController: ObservableObject {
         do {
             let capture = try transport.finishAndMaterialize()
             activeTransport = nil
+            analysisGeneration &+= 1
             latestCapture = capture
+            latestAnalysis = nil
             try stateMachine.transition(to: .analyzing)
             publishState()
             lastErrorDescription = nil
@@ -337,19 +362,55 @@ final class RoomCorrectionCalibrationController: ObservableObject {
         }
     }
 
+    /// Runs the immutable measurement analyzer outside the main actor and only
+    /// publishes its result if this is still the same capture generation. A
+    /// cancel/reset/new measurement therefore cannot be overwritten by a stale
+    /// asynchronous completion.
+    @discardableResult
+    func analyzeLatestCapture(
+        microphoneCalibration: RoomCorrectionMicrophoneCalibration? = nil
+    ) async -> Bool {
+        guard state == .analyzing,
+              let capture = latestCapture,
+              let plan = activePlan else {
+            return false
+        }
+
+        let generation = analysisGeneration
+        do {
+            let analysis = try await analysisOperation(capture, plan, microphoneCalibration)
+            guard generation == analysisGeneration, state == .analyzing else { return false }
+            latestAnalysis = analysis
+            try stateMachine.transition(to: .reviewing)
+            publishState()
+            lastErrorDescription = nil
+            return true
+        } catch {
+            guard generation == analysisGeneration, state == .analyzing else { return false }
+            recordFailure(error)
+            return false
+        }
+    }
+
     func cancelMeasurement() {
+        analysisGeneration &+= 1
         activeTransport?.cancel()
         activeTransport = nil
         activePlan = nil
+        latestCapture = nil
+        latestAnalysis = nil
         stateMachine.cancelToIdle()
         publishState()
         lastErrorDescription = nil
     }
 
     func resetAfterFailure() {
+        analysisGeneration &+= 1
         activeTransport?.cancel()
         activeTransport = nil
         activePlan = nil
+        latestCapture = nil
+        latestAnalysis = nil
         stateMachine.cancelToIdle()
         publishState()
         lastErrorDescription = nil
