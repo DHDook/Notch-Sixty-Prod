@@ -1,0 +1,39 @@
+name: PR40 Wire Deployment UI
+
+on:
+  push:
+    branches:
+      - pr40-room-correction-production-workflow
+    paths:
+      - .github/workflows/pr40-wire-deployment-ui.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: pr40-room-correction-production-workflow
+          fetch-depth: 0
+
+      - name: Wire deployment UI
+        run: python3 .github/scripts/pr40_wire_deployment_ui.py
+
+      - name: Validate patch shape
+        run: |
+          grep -q 'Deploy to \\(profiles.selectedSystemProfileName)' NotchSixty/UI/ProductionRoomCorrectionWorkspace.swift
+          grep -q 'setSelectedSystemRoomCorrectionEnabled' NotchSixty/UI/ProductionRoomCorrectionWorkspace.swift
+          grep -q 'deploymentFilter()' NotchSixty/UI/ProductionRoomCorrectionWorkspace.swift
+          grep -q 'roomCorrectionCalibration' NotchSixty/UI/ProductionRoomCorrectionWorkspace.swift
+
+      - name: Commit patch and remove helpers
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/scripts/pr40_wire_deployment_ui.py .github/workflows/pr40-wire-deployment-ui.yml
+          git add NotchSixty/UI/ProductionRoomCorrectionWorkspace.swift
+          git commit -m 'PR40 Slice F: add explicit room correction deployment UI'
+          git push origin HEAD:pr40-room-correction-production-workflow
