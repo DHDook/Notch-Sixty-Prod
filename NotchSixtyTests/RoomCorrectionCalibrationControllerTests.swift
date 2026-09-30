@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 @testable import NotchSixty
 
@@ -13,25 +14,43 @@ final class RoomCorrectionCalibrationControllerTests: XCTestCase {
         func inputDevices() throws -> [AudioInputDevice] { devices }
     }
 
-    private final class PermissionFixture: MicrophonePermissionRequesting, @unchecked Sendable {
-        var status: MicrophonePermissionStatus
-        let requestedStatus: MicrophonePermissionStatus
-        private(set) var requestCount = 0
+    private final class PermissionRequestCounter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = 0
+
+        func increment() {
+            lock.lock()
+            value += 1
+            lock.unlock()
+        }
+
+        var count: Int {
+            lock.lock()
+            defer { lock.unlock() }
+            return value
+        }
+    }
+
+    private struct PermissionFixture: MicrophonePermissionRequesting, Sendable {
+        let current: MicrophonePermissionStatus
+        let requested: MicrophonePermissionStatus
+        let requests: PermissionRequestCounter
 
         init(
             status: MicrophonePermissionStatus,
-            requestedStatus: MicrophonePermissionStatus? = nil
+            requestedStatus: MicrophonePermissionStatus? = nil,
+            requests: PermissionRequestCounter = PermissionRequestCounter()
         ) {
-            self.status = status
-            self.requestedStatus = requestedStatus ?? status
+            self.current = status
+            self.requested = requestedStatus ?? status
+            self.requests = requests
         }
 
-        func currentStatus() -> MicrophonePermissionStatus { status }
+        func currentStatus() -> MicrophonePermissionStatus { current }
 
         func requestAccess() async -> MicrophonePermissionStatus {
-            requestCount += 1
-            status = requestedStatus
-            return status
+            requests.increment()
+            return requested
         }
     }
 
@@ -111,19 +130,24 @@ final class RoomCorrectionCalibrationControllerTests: XCTestCase {
     func testPermissionRequestIsUserInitiatedAndAdvancesToReadyOnlyWhenAuthorized() async throws {
         let output = outputDevice()
         let input = inputDevice()
-        let permission = PermissionFixture(status: .notDetermined, requestedStatus: .authorized)
+        let requests = PermissionRequestCounter()
+        let permission = PermissionFixture(
+            status: .notDetermined,
+            requestedStatus: .authorized,
+            requests: requests
+        )
         let controller = RoomCorrectionCalibrationController(
             engine: try engine(output: output),
             inputCatalog: InputCatalogFixture(devices: [input]),
             permissionClient: permission
         )
 
-        XCTAssertEqual(permission.requestCount, 0)
+        XCTAssertEqual(requests.count, 0)
         XCTAssertEqual(controller.state, .idle)
 
         await controller.requestMicrophonePermission()
 
-        XCTAssertEqual(permission.requestCount, 1)
+        XCTAssertEqual(requests.count, 1)
         XCTAssertEqual(controller.permissionStatus, .authorized)
         XCTAssertEqual(controller.state, .ready)
         XCTAssertEqual(controller.selectedInputUID, input.uid)
