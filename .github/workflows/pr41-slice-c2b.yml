@@ -1,4 +1,5 @@
 name: PR41 Live Same-device Transport
+# Direct checkpoint after repairing the transport-error helper anchor.
 
 on:
   push:
