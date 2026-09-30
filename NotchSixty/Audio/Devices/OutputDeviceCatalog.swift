@@ -209,6 +209,253 @@ extension RoomCorrectionMicrophoneCalibration {
     }
 }
 
+// MARK: - Room Correction Measurement Foundation
+
+/// Control-plane representation of the deterministic excitation used by the
+/// dedicated room-measurement transport. These arrays are prepared before an
+/// IOProc starts; the realtime transport must consume preallocated storage only.
+struct RoomCorrectionSweepProgram: Equatable, Sendable {
+    var sampleRate: Double
+    var sweepSamples: [Float]
+    var inverseFilter: [Float]
+    var leadInFrames: Int
+    var tailFrames: Int
+
+    var captureFrameCount: Int {
+        leadInFrames + sweepSamples.count + tailFrames
+    }
+}
+
+enum RoomCorrectionSweepGenerationError: Error, Equatable, LocalizedError {
+    case invalidSettings
+    case frameCountOverflow
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidSettings:
+            return "Room-measurement sweep settings are invalid or unsafe for the selected sample rate."
+        case .frameCountOverflow:
+            return "Room-measurement sweep settings require an unsupported number of frames."
+        }
+    }
+}
+
+struct RoomCorrectionSweepGenerator: Sendable {
+    static let maximumDurationSeconds = 30.0
+    static let nyquistSafetyFactor = 0.98
+
+    func makeProgram(settings: RoomCorrectionSweepSettings) throws -> RoomCorrectionSweepProgram {
+        let sampleRate = settings.sampleRate
+        let startFrequency = settings.startFrequencyHz
+        let endFrequency = settings.endFrequencyHz
+        let duration = settings.durationSeconds
+        let fade = settings.fadeSeconds
+
+        guard sampleRate.isFinite, sampleRate > 0,
+              startFrequency.isFinite, startFrequency > 0,
+              endFrequency.isFinite, endFrequency > startFrequency,
+              endFrequency < sampleRate * 0.5 * Self.nyquistSafetyFactor,
+              duration.isFinite, duration > 0, duration <= Self.maximumDurationSeconds,
+              settings.levelDBFS.isFinite, settings.levelDBFS <= 0,
+              settings.leadInSeconds.isFinite, settings.leadInSeconds >= 0,
+              settings.tailSeconds.isFinite, settings.tailSeconds >= 0,
+              fade.isFinite, fade >= 0, fade <= duration * 0.5 else {
+            throw RoomCorrectionSweepGenerationError.invalidSettings
+        }
+
+        let sweepFrameCount = try frameCount(seconds: duration, sampleRate: sampleRate, minimum: 2)
+        let leadInFrames = try frameCount(seconds: settings.leadInSeconds, sampleRate: sampleRate)
+        let tailFrames = try frameCount(seconds: settings.tailSeconds, sampleRate: sampleRate)
+        let fadeFrames = min(
+            try frameCount(seconds: fade, sampleRate: sampleRate),
+            sweepFrameCount / 2
+        )
+
+        let logRatio = log(endFrequency / startFrequency)
+        let timeScale = duration / logRatio
+        let linearAmplitude = pow(10.0, settings.levelDBFS / 20.0)
+
+        var sweep = [Float](repeating: 0, count: sweepFrameCount)
+        for index in 0..<sweepFrameCount {
+            let time = Double(index) / sampleRate
+            let phase = 2.0 * Double.pi * startFrequency * timeScale
+                * (exp(time / timeScale) - 1.0)
+            var envelope = 1.0
+            if fadeFrames > 1, index < fadeFrames {
+                let position = Double(index) / Double(fadeFrames - 1)
+                envelope *= 0.5 - 0.5 * cos(Double.pi * position)
+            }
+            if fadeFrames > 1, index >= sweepFrameCount - fadeFrames {
+                let reverseIndex = sweepFrameCount - 1 - index
+                let position = Double(reverseIndex) / Double(fadeFrames - 1)
+                envelope *= 0.5 - 0.5 * cos(Double.pi * position)
+            }
+            sweep[index] = Float(linearAmplitude * envelope * sin(phase))
+        }
+
+        // Farina-style ESS inverse: time-reverse the excitation and compensate
+        // its exponential energy distribution. Normalize only the inverse so
+        // downstream deconvolution owns any absolute calibration scaling.
+        var inverse = [Float](repeating: 0, count: sweepFrameCount)
+        var inversePeak = 0.0
+        for index in 0..<sweepFrameCount {
+            let sourceIndex = sweepFrameCount - 1 - index
+            let time = Double(index) / sampleRate
+            let weighting = exp(-time * logRatio / duration)
+            let value = Double(sweep[sourceIndex]) * weighting
+            inverse[index] = Float(value)
+            inversePeak = max(inversePeak, abs(value))
+        }
+        if inversePeak > 0 {
+            let normalization = Float(1.0 / inversePeak)
+            for index in inverse.indices {
+                inverse[index] *= normalization
+            }
+        }
+
+        return RoomCorrectionSweepProgram(
+            sampleRate: sampleRate,
+            sweepSamples: sweep,
+            inverseFilter: inverse,
+            leadInFrames: leadInFrames,
+            tailFrames: tailFrames
+        )
+    }
+
+    private func frameCount(
+        seconds: Double,
+        sampleRate: Double,
+        minimum: Int = 0
+    ) throws -> Int {
+        let raw = seconds * sampleRate
+        guard raw.isFinite, raw >= 0, raw <= Double(Int.max) else {
+            throw RoomCorrectionSweepGenerationError.frameCountOverflow
+        }
+        return max(minimum, Int(raw.rounded()))
+    }
+}
+
+enum RoomCorrectionMeasurementPass: String, Codable, Equatable, Sendable {
+    case left
+    case right
+}
+
+struct RoomCorrectionMeasurementPassPlan: Equatable, Sendable {
+    var pass: RoomCorrectionMeasurementPass
+    var captureStartFrame: Int
+    var sweepStartFrame: Int
+    var sweepEndFrameExclusive: Int
+    var captureEndFrameExclusive: Int
+
+    var captureFrameCount: Int {
+        captureEndFrameExclusive - captureStartFrame
+    }
+}
+
+struct RoomCorrectionCaptureDestination: Equatable, Sendable {
+    var pass: RoomCorrectionMeasurementPass
+    var frameIndex: Int
+}
+
+struct RoomCorrectionStereoOutputFrame: Equatable, Sendable {
+    var left: Float
+    var right: Float
+}
+
+/// Immutable control-plane timeline for one named listening position. It keeps
+/// the left and right acoustic measurements independent while placing both
+/// passes on one deterministic device timeline.
+struct RoomCorrectionMeasurementPlan: Equatable, Sendable {
+    var program: RoomCorrectionSweepProgram
+    var settlingFrames: Int
+    var leftPass: RoomCorrectionMeasurementPassPlan
+    var rightPass: RoomCorrectionMeasurementPassPlan
+    var totalFrameCount: Int
+
+    init(
+        program: RoomCorrectionSweepProgram,
+        settlingSeconds: Double = 0.5
+    ) throws {
+        guard settlingSeconds.isFinite, settlingSeconds >= 0 else {
+            throw RoomCorrectionSweepGenerationError.invalidSettings
+        }
+        let rawSettlingFrames = settlingSeconds * program.sampleRate
+        guard rawSettlingFrames.isFinite,
+              rawSettlingFrames <= Double(Int.max) else {
+            throw RoomCorrectionSweepGenerationError.frameCountOverflow
+        }
+
+        let settlingFrames = Int(rawSettlingFrames.rounded())
+        let captureFrames = program.captureFrameCount
+        guard captureFrames >= program.sweepSamples.count,
+              captureFrames <= Int.max - settlingFrames,
+              captureFrames <= (Int.max - settlingFrames) / 2 else {
+            throw RoomCorrectionSweepGenerationError.frameCountOverflow
+        }
+
+        let leftCaptureStart = 0
+        let leftSweepStart = leftCaptureStart + program.leadInFrames
+        let leftSweepEnd = leftSweepStart + program.sweepSamples.count
+        let leftCaptureEnd = leftCaptureStart + captureFrames
+        let rightCaptureStart = leftCaptureEnd + settlingFrames
+        let rightSweepStart = rightCaptureStart + program.leadInFrames
+        let rightSweepEnd = rightSweepStart + program.sweepSamples.count
+        let rightCaptureEnd = rightCaptureStart + captureFrames
+
+        self.program = program
+        self.settlingFrames = settlingFrames
+        self.leftPass = RoomCorrectionMeasurementPassPlan(
+            pass: .left,
+            captureStartFrame: leftCaptureStart,
+            sweepStartFrame: leftSweepStart,
+            sweepEndFrameExclusive: leftSweepEnd,
+            captureEndFrameExclusive: leftCaptureEnd
+        )
+        self.rightPass = RoomCorrectionMeasurementPassPlan(
+            pass: .right,
+            captureStartFrame: rightCaptureStart,
+            sweepStartFrame: rightSweepStart,
+            sweepEndFrameExclusive: rightSweepEnd,
+            captureEndFrameExclusive: rightCaptureEnd
+        )
+        self.totalFrameCount = rightCaptureEnd
+    }
+
+    func outputFrame(at frame: Int) -> RoomCorrectionStereoOutputFrame {
+        if frame >= leftPass.sweepStartFrame, frame < leftPass.sweepEndFrameExclusive {
+            let index = frame - leftPass.sweepStartFrame
+            return RoomCorrectionStereoOutputFrame(
+                left: program.sweepSamples[index],
+                right: 0
+            )
+        }
+        if frame >= rightPass.sweepStartFrame, frame < rightPass.sweepEndFrameExclusive {
+            let index = frame - rightPass.sweepStartFrame
+            return RoomCorrectionStereoOutputFrame(
+                left: 0,
+                right: program.sweepSamples[index]
+            )
+        }
+        return RoomCorrectionStereoOutputFrame(left: 0, right: 0)
+    }
+
+    func captureDestination(at frame: Int) -> RoomCorrectionCaptureDestination? {
+        if frame >= leftPass.captureStartFrame, frame < leftPass.captureEndFrameExclusive {
+            return RoomCorrectionCaptureDestination(
+                pass: .left,
+                frameIndex: frame - leftPass.captureStartFrame
+            )
+        }
+        if frame >= rightPass.captureStartFrame, frame < rightPass.captureEndFrameExclusive {
+            return RoomCorrectionCaptureDestination(
+                pass: .right,
+                frameIndex: frame - rightPass.captureStartFrame
+            )
+        }
+        return nil
+    }
+}
+
 private enum CoreAudioDeviceCatalogSupport {
     static func allDeviceIDs() throws -> [AudioDeviceID] {
         var address = AudioObjectPropertyAddress(
@@ -259,7 +506,7 @@ private enum CoreAudioDeviceCatalogSupport {
     static func hasOutputStreams(_ deviceID: AudioDeviceID) throws -> Bool {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyStreams,
-            mScope: kAudioDevicePropertyScopeOutput,
+            mScope: kAudioObjectPropertyScopeOutput,
             mElement: kAudioObjectPropertyElementMain
         )
         var dataSize: UInt32 = 0
@@ -276,7 +523,7 @@ private enum CoreAudioDeviceCatalogSupport {
     static func hasInputStreams(_ deviceID: AudioDeviceID) throws -> Bool {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyStreams,
-            mScope: kAudioDevicePropertyScopeInput,
+            mScope: kAudioObjectPropertyScopeInput,
             mElement: kAudioObjectPropertyElementMain
         )
         var dataSize: UInt32 = 0
