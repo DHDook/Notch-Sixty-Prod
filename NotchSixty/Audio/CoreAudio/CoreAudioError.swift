@@ -6,6 +6,7 @@ import Foundation
 enum CoreAudioOperation: String, Equatable, Sendable {
     case enumerateDevices
     case readOutputStreams
+    case readOutputChannelCount
     case readDeviceUID
     case readDeviceName
     case readNominalSampleRate

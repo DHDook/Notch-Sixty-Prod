@@ -557,7 +557,8 @@ private enum CoreAudioDeviceCatalogSupport {
                 operation: .readDeviceName
             ),
             nominalSampleRate: try readNominalSampleRate(deviceID: deviceID),
-            availableSampleRateRanges: try readAvailableSampleRateRanges(deviceID: deviceID)
+            availableSampleRateRanges: try readAvailableSampleRateRanges(deviceID: deviceID),
+            outputChannelCount: try readOutputChannelCount(deviceID: deviceID)
         )
     }
 
@@ -598,6 +599,36 @@ private enum CoreAudioDeviceCatalogSupport {
 
         try check(status, operation: operation, objectID: deviceID)
         return value as String
+    }
+
+    static func readOutputChannelCount(deviceID: AudioDeviceID) throws -> UInt32 {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyStreamConfiguration,
+            mScope: kAudioObjectPropertyScopeOutput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var dataSize: UInt32 = 0
+        try check(
+            AudioObjectGetPropertyDataSize(deviceID, &address, 0, nil, &dataSize),
+            operation: .readOutputChannelCount,
+            objectID: deviceID
+        )
+        guard dataSize >= UInt32(MemoryLayout<AudioBufferList>.size) else { return 0 }
+
+        let storage = UnsafeMutableRawPointer.allocate(
+            byteCount: Int(dataSize),
+            alignment: MemoryLayout<AudioBufferList>.alignment
+        )
+        defer { storage.deallocate() }
+        try check(
+            AudioObjectGetPropertyData(deviceID, &address, 0, nil, &dataSize, storage),
+            operation: .readOutputChannelCount,
+            objectID: deviceID
+        )
+        let list = storage.assumingMemoryBound(to: AudioBufferList.self)
+        return UnsafeMutableAudioBufferListPointer(list).reduce(UInt32(0)) { partial, buffer in
+            partial + buffer.mNumberChannels
+        }
     }
 
     static func readNominalSampleRate(deviceID: AudioDeviceID) throws -> Double {
