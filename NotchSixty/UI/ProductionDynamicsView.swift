@@ -94,8 +94,6 @@ struct ProductionDynamicsView: View {
         .scrollIndicators(.visible)
         .background(.clear)
         .glassEffect(.regular, in: .rect(cornerRadius: 18))
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .containerShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     @ViewBuilder

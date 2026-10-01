@@ -172,12 +172,6 @@ struct ProductionRootView: View {
         ToolbarItemGroup(placement: .primaryAction) {
             ProductionProfileToolbar(profiles: product.profiles, engine: engine)
 
-            SettingsLink {
-                Label("Settings", systemImage: "gearshape")
-            }
-            .buttonStyle(.glass)
-            .help("Open Notch Sixty Settings")
-
             if let output = engine.selectedOutputDevice {
                 HStack(spacing: 5) {
                     Image(systemName: "hifispeaker")
@@ -214,6 +208,16 @@ struct ProductionRootView: View {
             }
             .buttonStyle(.glassProminent)
             .disabled(engine.lifecycleState != .idle && engine.lifecycleState != .running)
+        }
+
+        ToolbarSpacer(.flexible)
+
+        ToolbarItem(placement: .primaryAction) {
+            SettingsLink {
+                Label("Settings", systemImage: "gearshape")
+            }
+            .buttonStyle(.glass)
+            .help("Open Notch Sixty Settings")
         }
     }
 }
