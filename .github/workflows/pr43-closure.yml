@@ -1,0 +1,19 @@
+name: PR43 Closure
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate PR43 acoustic and speaker closure
+        run: python3 ci/validate_pr43_closure.py
+      - name: Validate PR43 current-macOS UI style
+        run: python3 ci/validate_pr43_current_macos_ui.py

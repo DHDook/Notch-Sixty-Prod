@@ -50,6 +50,8 @@ typedef struct {
     float values[N60SpeakerOutputBusCount];
 } N60SpeakerBusFrame;
 
+#include "N60SpeakerDriverProcessing.h"
+
 typedef struct {
     N60SpeakerOutputBus bus;
     uint32_t physicalChannelIndex;
@@ -212,6 +214,10 @@ bool N60RealtimeAudioBridgeConfigureSameDeviceOutputMap(
 bool N60RealtimeAudioBridgeConfigureSpeakerBusSplitter(
     N60RealtimeAudioBridge * _Nonnull bridge,
     N60SpeakerBusSplitterSnapshot snapshot
+);
+bool N60RealtimeAudioBridgeConfigureSpeakerDriverProcessing(
+    N60RealtimeAudioBridge * _Nonnull bridge,
+    N60SpeakerDriverProcessingSnapshot snapshot
 );
 
 bool N60SameDeviceOutputMapValueForChannel(

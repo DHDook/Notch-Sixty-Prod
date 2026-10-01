@@ -214,4 +214,77 @@ final class RoomCorrectionMeasurementAnalyzerTests: XCTestCase {
         XCTAssertTrue(result.left.quality.warnings.contains { $0.contains("full scale") })
         XCTAssertTrue(result.left.quality.warnings.contains { $0.contains("SNR") })
     }
+
+    func testPR43AcousticDiagnosticsDeriveStepDecayAndGroupDelay() throws {
+        let sampleRate = 1_000.0
+        let impulse: [Float] = [0, 1, 0.5, 0.25, 0, 0]
+        let delaySeconds = 0.005
+        let frequencies = [100.0, 200.0, 400.0, 800.0]
+        let response = RoomCorrectionFrequencyResponse(
+            frequenciesHz: frequencies,
+            magnitudeDB: [0, 0, 0, 0],
+            phaseRadians: frequencies.map { -2.0 * Double.pi * $0 * delaySeconds }
+        )
+
+        let diagnostics = try RoomCorrectionAcousticDiagnosticsAnalyzer().analyze(
+            impulseResponse: impulse,
+            transferFunction: response,
+            sampleRate: sampleRate,
+            referenceArrivalSeconds: 0.001
+        )
+
+        XCTAssertEqual(diagnostics.impulse.x[1], 0, accuracy: 1.0e-9)
+        XCTAssertEqual(diagnostics.impulse.y[1], 1, accuracy: 1.0e-9)
+        XCTAssertEqual(diagnostics.step.y.count, impulse.count)
+        XCTAssertEqual(diagnostics.energyTimeCurveDB.y.max() ?? -999, 0, accuracy: 1.0e-9)
+        XCTAssertEqual(diagnostics.energyDecayDB.y.first ?? -999, 0, accuracy: 1.0e-9)
+
+        for index in diagnostics.energyDecayDB.y.indices.dropFirst() {
+            XCTAssertLessThanOrEqual(
+                diagnostics.energyDecayDB.y[index],
+                diagnostics.energyDecayDB.y[index - 1] + 1.0e-12
+            )
+        }
+
+        let groupDelay = try XCTUnwrap(diagnostics.groupDelayMilliseconds)
+        XCTAssertEqual(groupDelay.x, frequencies)
+        for value in groupDelay.y {
+            XCTAssertEqual(value, 5.0, accuracy: 1.0e-9)
+        }
+    }
+
+    func testPR43AcousticDiagnosticsFailClosedOnInvalidInputs() throws {
+        let analyzer = RoomCorrectionAcousticDiagnosticsAnalyzer()
+        XCTAssertThrowsError(
+            try analyzer.analyze(
+                impulseResponse: [1],
+                transferFunction: nil,
+                sampleRate: 0
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? RoomCorrectionAcousticDiagnosticsError,
+                .invalidSampleRate(0)
+            )
+        }
+
+        let invalidResponse = RoomCorrectionFrequencyResponse(
+            frequenciesHz: [100, 100],
+            magnitudeDB: [0, 0],
+            phaseRadians: [0, 0]
+        )
+        XCTAssertThrowsError(
+            try analyzer.analyze(
+                impulseResponse: [1, 0],
+                transferFunction: invalidResponse,
+                sampleRate: 48_000
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? RoomCorrectionAcousticDiagnosticsError,
+                .invalidTransferFunction
+            )
+        }
+    }
+
 }

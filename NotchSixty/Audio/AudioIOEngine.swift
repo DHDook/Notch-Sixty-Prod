@@ -1055,6 +1055,7 @@ final class AudioIOEngine: ObservableObject {
     @Published private(set) var gainConfiguration = DSPGainConfiguration()
     @Published private(set) var bassManagementConfiguration = BassManagementConfiguration()
     @Published private(set) var multiOutputRoutingConfiguration: MultiOutputRoutingConfiguration?
+    @Published private(set) var speakerDriverProcessingConfiguration = SpeakerDriverProcessingConfiguration()
     @Published private(set) var dynamicsConfiguration = DynamicsConfiguration()
     @Published private(set) var roomCorrectionConfiguration = RoomCorrectionConfiguration()
     @Published private(set) var speakerIRConfiguration = SpeakerIRConfiguration()
@@ -1367,6 +1368,17 @@ final class AudioIOEngine: ObservableObject {
             throw MultiOutputRoutingError.routingChangeRequiresIdle
         }
         multiOutputRoutingConfiguration = configuration
+        lastErrorDescription = nil
+    }
+
+    func replaceSpeakerDriverProcessingConfiguration(
+        _ configuration: SpeakerDriverProcessingConfiguration
+    ) throws {
+        try configuration.validateStructure()
+        guard lifecycle.state == .idle || configuration == speakerDriverProcessingConfiguration else {
+            throw SpeakerDriverProcessingError.changesRequireIdle
+        }
+        speakerDriverProcessingConfiguration = configuration
         lastErrorDescription = nil
     }
 
@@ -2530,12 +2542,15 @@ final class AudioIOEngine: ObservableObject {
                 crossoverMode: speakerCrossoverMode
             )
         }
+        let speakerDriverProcessingSnapshot = try speakerDriverProcessingConfiguration
+            .makeRealtimeSnapshot(sampleRate: output.nominalSampleRate)
         let session = try CoreAudioTransportSession(
             selectedOutput: output,
             sameDeviceOutputPlan: sameDeviceOutputPlan,
             aggregateDeviceOutputPlan: aggregateDeviceOutputPlan,
             speakerCrossoverMode: speakerCrossoverMode,
-            speakerBusSplitterSnapshot: speakerBusSplitterSnapshot
+            speakerBusSplitterSnapshot: speakerBusSplitterSnapshot,
+            speakerDriverProcessingSnapshot: speakerDriverProcessingSnapshot
         )
         activeEQFIRProgram = nil
         nextEQFIRProgramSlot = 0

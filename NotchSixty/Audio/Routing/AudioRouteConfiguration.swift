@@ -495,3 +495,260 @@ extension AggregateDeviceOutputRoutePlan {
     }
 }
 
+
+
+// MARK: - PR43 per-driver Playback System processing
+
+/// Validation errors for processing that belongs to a logical speaker bus.
+/// Mandatory crossover filtering is intentionally not represented here and
+/// therefore cannot be bypassed by this configuration.
+enum SpeakerDriverProcessingError: Error, Equatable, LocalizedError {
+    case tooManyBusEntries(Int)
+    case duplicateBus(SpeakerOutputBus)
+    case tooManyEQBands(bus: SpeakerOutputBus, count: Int)
+    case unsupportedEQShape(bus: SpeakerOutputBus, type: EQFilterType)
+    case invalidEQBand(bus: SpeakerOutputBus, index: Int)
+    case invalidTrim(bus: SpeakerOutputBus, value: Double)
+    case invalidDelay(bus: SpeakerOutputBus, value: Double)
+    case invalidLimiterThreshold(bus: SpeakerOutputBus, value: Double)
+    case changesRequireIdle
+
+    var errorDescription: String? {
+        switch self {
+        case .tooManyBusEntries(let count):
+            return "Per-driver processing supports at most \(SpeakerOutputBus.allCases.count) logical speaker buses; configuration contains \(count)."
+        case .duplicateBus(let bus):
+            return "Per-driver processing contains more than one entry for \(bus.displayName)."
+        case .tooManyEQBands(let bus, let count):
+            return "\(bus.displayName) supports at most \(SpeakerDriverBusProcessingConfiguration.maximumEQBandCount) driver EQ bands; configuration contains \(count)."
+        case .unsupportedEQShape(let bus, let type):
+            return "\(type.displayName) is not a supported per-driver EQ shape on \(bus.displayName)."
+        case .invalidEQBand(let bus, let index):
+            return "Driver EQ band \(index + 1) on \(bus.displayName) is invalid."
+        case .invalidTrim(let bus, let value):
+            return "\(bus.displayName) trim \(value) dB is outside the supported range."
+        case .invalidDelay(let bus, let value):
+            return "\(bus.displayName) alignment delay \(value) ms is outside the supported range."
+        case .invalidLimiterThreshold(let bus, let value):
+            return "\(bus.displayName) limiter threshold \(value) dBFS is outside the supported range."
+        case .changesRequireIdle:
+            return "Stop processing before changing per-driver EQ, trim, polarity, delay, or protection."
+        }
+    }
+}
+
+struct SpeakerDriverBusProcessingConfiguration: Identifiable, Codable, Equatable, Sendable {
+    static let maximumEQBandCount = 8
+    static let trimRange = -24.0 ... 12.0
+    static let delayRangeMilliseconds = 0.0 ... 50.0
+    static let limiterThresholdRange = -30.0 ... 0.0
+    static let supportedEQTypes: Set<EQFilterType> = [
+        .peaking, .lowShelf, .highShelf, .notch, .allPass,
+    ]
+
+    var bus: SpeakerOutputBus
+    var enabled: Bool
+    var eqBands: [EQBand]
+    var trimDB: Double
+    var polarityInverted: Bool
+    var delayMilliseconds: Double
+    var limiterEnabled: Bool
+    var limiterThresholdDBFS: Double
+
+    var id: String { bus.rawValue }
+
+    init(
+        bus: SpeakerOutputBus,
+        enabled: Bool = true,
+        eqBands: [EQBand] = [],
+        trimDB: Double = 0,
+        polarityInverted: Bool = false,
+        delayMilliseconds: Double = 0,
+        limiterEnabled: Bool = false,
+        limiterThresholdDBFS: Double = -3
+    ) {
+        self.bus = bus
+        self.enabled = enabled
+        self.eqBands = eqBands
+        self.trimDB = trimDB
+        self.polarityInverted = polarityInverted
+        self.delayMilliseconds = delayMilliseconds
+        self.limiterEnabled = limiterEnabled
+        self.limiterThresholdDBFS = limiterThresholdDBFS
+    }
+
+    var isNeutral: Bool {
+        enabled
+            && eqBands.isEmpty
+            && trimDB == 0
+            && !polarityInverted
+            && delayMilliseconds == 0
+            && !limiterEnabled
+            && limiterThresholdDBFS == -3
+    }
+
+    func validateStructure() throws {
+        guard eqBands.count <= Self.maximumEQBandCount else {
+            throw SpeakerDriverProcessingError.tooManyEQBands(bus: bus, count: eqBands.count)
+        }
+        guard trimDB.isFinite, Self.trimRange.contains(trimDB) else {
+            throw SpeakerDriverProcessingError.invalidTrim(bus: bus, value: trimDB)
+        }
+        guard delayMilliseconds.isFinite,
+              Self.delayRangeMilliseconds.contains(delayMilliseconds) else {
+            throw SpeakerDriverProcessingError.invalidDelay(bus: bus, value: delayMilliseconds)
+        }
+        guard limiterThresholdDBFS.isFinite,
+              Self.limiterThresholdRange.contains(limiterThresholdDBFS) else {
+            throw SpeakerDriverProcessingError.invalidLimiterThreshold(
+                bus: bus,
+                value: limiterThresholdDBFS
+            )
+        }
+        for (index, band) in eqBands.enumerated() {
+            guard Self.supportedEQTypes.contains(band.type) else {
+                throw SpeakerDriverProcessingError.unsupportedEQShape(bus: bus, type: band.type)
+            }
+            // Per-driver shelves intentionally use one 12 dB/oct section so an
+            // eight-band UI remains an eight-section bounded realtime program.
+            if (band.type == .lowShelf || band.type == .highShelf), band.slope != .db12 {
+                throw SpeakerDriverProcessingError.invalidEQBand(bus: bus, index: index)
+            }
+            guard band.firKernel == nil,
+                  !band.dynamic.enabled,
+                  band.frequencyHz.isFinite,
+                  band.frequencyHz > 0,
+                  band.gainDB.isFinite,
+                  band.gainDB >= -24,
+                  band.gainDB <= 24,
+                  band.q.isFinite,
+                  band.q > 0 else {
+                throw SpeakerDriverProcessingError.invalidEQBand(bus: bus, index: index)
+            }
+        }
+    }
+}
+
+/// Playback-System-owned DSP keyed to logical speaker buses rather than physical
+/// device/channel endpoints. Physical route changes therefore do not discard a
+/// driver's acoustic calibration.
+struct SpeakerDriverProcessingConfiguration: Codable, Equatable, Sendable {
+    var buses: [SpeakerDriverBusProcessingConfiguration]
+
+    init(buses: [SpeakerDriverBusProcessingConfiguration] = []) {
+        self.buses = buses
+    }
+
+    var isNeutral: Bool { buses.isEmpty || buses.allSatisfy(\.isNeutral) }
+
+    func configuration(for bus: SpeakerOutputBus) -> SpeakerDriverBusProcessingConfiguration {
+        buses.first(where: { $0.bus == bus })
+            ?? SpeakerDriverBusProcessingConfiguration(bus: bus)
+    }
+
+    mutating func replace(_ configuration: SpeakerDriverBusProcessingConfiguration) {
+        if let index = buses.firstIndex(where: { $0.bus == configuration.bus }) {
+            buses[index] = configuration
+        } else {
+            buses.append(configuration)
+        }
+        buses.sort { $0.bus.rawValue < $1.bus.rawValue }
+    }
+
+    mutating func remove(bus: SpeakerOutputBus) {
+        buses.removeAll { $0.bus == bus }
+    }
+
+    func validateStructure() throws {
+        guard buses.count <= SpeakerOutputBus.allCases.count else {
+            throw SpeakerDriverProcessingError.tooManyBusEntries(buses.count)
+        }
+        var seen = Set<SpeakerOutputBus>()
+        for configuration in buses {
+            guard seen.insert(configuration.bus).inserted else {
+                throw SpeakerDriverProcessingError.duplicateBus(configuration.bus)
+            }
+            try configuration.validateStructure()
+        }
+    }
+}
+
+
+extension SpeakerOutputBus {
+    var realtimeDriverIndex: UInt32 {
+        switch self {
+        case .leftFullRange: return 0
+        case .rightFullRange: return 1
+        case .leftLow: return 2
+        case .rightLow: return 3
+        case .leftMid: return 4
+        case .rightMid: return 5
+        case .leftHigh: return 6
+        case .rightHigh: return 7
+        case .subMono: return 8
+        }
+    }
+}
+
+extension SpeakerDriverProcessingConfiguration {
+    func makeRealtimeSnapshot(sampleRate: Double) throws -> N60SpeakerDriverProcessingSnapshot {
+        guard sampleRate.isFinite, sampleRate > 0, sampleRate <= 384_000 else {
+            throw SpeakerDriverProcessingError.invalidDelay(bus: .leftFullRange, value: sampleRate)
+        }
+        try validateStructure()
+        var snapshot = N60SpeakerDriverProcessingSnapshotMakeBypassed()
+        for configuration in buses {
+            var coefficients: [N60BiquadCoefficients] = []
+            coefficients.reserveCapacity(configuration.eqBands.count)
+            for (index, band) in configuration.eqBands.enumerated() where band.enabled {
+                let sections = try band.compiledSections(sampleRate: sampleRate)
+                guard sections.count == 1,
+                      coefficients.count < Int(N60_SPEAKER_DRIVER_MAX_EQ_SECTIONS) else {
+                    throw SpeakerDriverProcessingError.invalidEQBand(
+                        bus: configuration.bus,
+                        index: index
+                    )
+                }
+                coefficients.append(sections[0].coefficients)
+            }
+
+            let exactDelay = configuration.delayMilliseconds * sampleRate / 1_000.0
+            let integerDelay = floor(exactDelay)
+            guard integerDelay >= 0,
+                  integerDelay < Double(N60_SPEAKER_DRIVER_MAX_DELAY_FRAMES) else {
+                throw SpeakerDriverProcessingError.invalidDelay(
+                    bus: configuration.bus,
+                    value: configuration.delayMilliseconds
+                )
+            }
+            let fractionalDelay = Float(exactDelay - integerDelay)
+            let trim = Float(pow(10.0, configuration.trimDB / 20.0))
+            let threshold = Float(pow(10.0, configuration.limiterThresholdDBFS / 20.0))
+            let release = Float(exp(-1.0 / (0.050 * sampleRate)))
+
+            let configured = coefficients.withUnsafeBufferPointer { buffer in
+                N60SpeakerDriverProcessingSnapshotSetBus(
+                    &snapshot,
+                    configuration.bus.realtimeDriverIndex,
+                    configuration.enabled,
+                    buffer.baseAddress,
+                    UInt32(buffer.count),
+                    trim,
+                    configuration.polarityInverted,
+                    UInt32(integerDelay),
+                    fractionalDelay,
+                    configuration.limiterEnabled,
+                    threshold,
+                    release
+                )
+            }
+            guard configured else {
+                throw SpeakerDriverProcessingError.invalidEQBand(
+                    bus: configuration.bus,
+                    index: 0
+                )
+            }
+        }
+        return snapshot
+    }
+}
