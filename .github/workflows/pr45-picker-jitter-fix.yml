@@ -1,0 +1,85 @@
+name: PR45 Picker Jitter Fix
+
+on:
+  push:
+    branches:
+      - pr45-v1-release-hardening
+
+permissions:
+  contents: write
+
+jobs:
+  patch-validate-commit:
+    if: github.event.head_commit.message != 'PR45: stabilize picker glass interaction'
+    runs-on: xcode-27
+    steps:
+      - name: Check out PR45
+        uses: actions/checkout@v7
+        with:
+          ref: pr45-v1-release-hardening
+          fetch-depth: 0
+
+      - name: Remove nested interactive glass from pickers
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root_path = Path('NotchSixty/UI/ProductionRootView.swift')
+          root = root_path.read_text()
+          old = '.glassEffect(.regular.interactive(), in: .capsule)'
+          new = '''// Picker owns pointer/press interaction. Keep the surrounding Liquid Glass\n            // visual-only so hover/click state cannot perturb layout.\n            .glassEffect(.regular, in: .capsule)'''
+          assert root.count(old) == 1, f'expected one picker interactive-glass modifier, found {root.count(old)}'
+          root_path.write_text(root.replace(old, new, 1))
+
+          validator_path = Path('ci/validate_pr45_control_style.py')
+          validator = validator_path.read_text()
+          old_guard = 'assert ".glassEffect(.regular.interactive(), in: .capsule)" in root, "production picker chrome must use interactive Liquid Glass"'
+          new_guard = '''assert ".glassEffect(.regular, in: .capsule)" in root, "production picker chrome must use stable Liquid Glass"\nassert ".glassEffect(.regular.interactive(), in: .capsule)" not in root, "Picker chrome must not layer interactive glass over native Picker interaction"'''
+          assert old_guard in validator, 'old picker interaction guard not found'
+          validator_path.write_text(validator.replace(old_guard, new_guard, 1))
+          PY
+
+      - name: Validate retained UI and release contracts
+        run: |
+          python3 ci/validate_pr37_equalizer_ui.py
+          python3 ci/validate_pr38_dynamics_ui.py
+          python3 ci/validate_pr39_app_identity.py
+          python3 ci/validate_pr42_dynamics_ui_style.py
+          python3 ci/validate_pr43_current_macos_ui.py
+          python3 ci/validate_pr45_release_hardening.py
+          python3 ci/validate_pr45_control_style.py
+
+      - name: Build Debug
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          build
+
+      - name: Run full XCTest
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            test
+
+      - name: Commit accepted jitter fix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add NotchSixty/UI/ProductionRootView.swift ci/validate_pr45_control_style.py
+          if git diff --cached --quiet; then
+            echo 'No picker jitter changes to commit.'
+            exit 0
+          fi
+          git commit -m 'PR45: stabilize picker glass interaction'
+          git push origin HEAD:pr45-v1-release-hardening
