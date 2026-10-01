@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   patch-validate-commit:
-    if: github.event.head_commit.message != 'PR45: stabilize picker glass interaction'
+    if: "${{ github.event.head_commit.message != 'PR45: stabilize picker glass interaction' }}"
     runs-on: xcode-27
     steps:
       - name: Check out PR45
