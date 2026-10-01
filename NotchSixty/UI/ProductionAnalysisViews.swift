@@ -368,8 +368,9 @@ struct ProductionStereoAnalysisView: View {
                 context.stroke(negativeDiagonal, with: .color(.secondary.opacity(0.10)), lineWidth: 0.6)
 
                 for point in snapshot.goniometer {
-                    let x = center.x + CGFloat(point.x) * scale
-                    let y = center.y - CGFloat(point.y) * scale
+                    let displayPoint = goniometerDisplayPoint(x: point.x, y: point.y)
+                    let x = center.x + displayPoint.x * scale
+                    let y = center.y - displayPoint.y * scale
                     let dot = Path(ellipseIn: CGRect(x: x - 1.2, y: y - 1.2, width: 2.4, height: 2.4))
                     context.fill(dot, with: .color(.primary.opacity(0.36)))
                 }
@@ -388,6 +389,22 @@ struct ProductionStereoAnalysisView: View {
         }
         .padding(16)
         .background(.quaternary.opacity(0.20), in: .rect(cornerRadius: 20))
+    }
+
+    private func goniometerDisplayPoint(x: Float, y: Float) -> CGPoint {
+        let rawX = Double(x)
+        let rawY = Double(y)
+        let radius = hypot(rawX, rawY)
+        guard radius > 1.0e-9 else { return .zero }
+
+        // Display-only radial shaping: expand quiet material without changing
+        // the goniometer angle/stereo orientation or the full-scale boundary.
+        let maximumRadius = sqrt(2.0)
+        let normalizedRadius = min(max(radius / maximumRadius, 0), 1)
+        let shapedRadius = log1p(9.0 * normalizedRadius) / log(10.0)
+        let mappedRadius = shapedRadius * maximumRadius
+        let gain = mappedRadius / radius
+        return CGPoint(x: rawX * gain, y: rawY * gain)
     }
 
     private var captureStatus: some View {
