@@ -158,7 +158,12 @@ struct ProductionRootView: View {
         case .activeCrossover:
             ProductionActiveCrossoverView(engine: engine)
         case .roomCorrection:
-            ProductionRoomCorrectionView(engine: engine)
+            ProductionRoomCorrectionWorkspace(
+            engine: engine,
+            calibration: product.calibration,
+            projects: product.roomCorrectionProjects,
+            profiles: product.profiles
+        )
         }
     }
 
