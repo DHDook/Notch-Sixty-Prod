@@ -5,7 +5,9 @@ struct ProductionGlassPickerChromeModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             // Picker owns pointer/press interaction. Keep the surrounding Liquid Glass
-            // visual-only so hover/click state cannot perturb layout.
+            // visual-only so hover/click state cannot perturb layout. A constant inset
+            // keeps text and segmented labels clear of the capsule edge in every state.
+            .padding(.horizontal, 6)
             .glassEffect(.regular, in: .capsule)
     }
 }

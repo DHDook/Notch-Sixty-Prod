@@ -9,6 +9,7 @@ profiles = Path("NotchSixty/UI/ProductionProfileToolbar.swift").read_text()
 
 assert "struct ProductionGlassPickerChromeModifier" in root, "shared production picker chrome modifier missing"
 assert ".glassEffect(.regular, in: .capsule)" in root, "production picker chrome must use stable Liquid Glass"
+assert ".padding(.horizontal, 6)" in root, "production picker chrome must keep a constant horizontal text inset"
 assert ".glassEffect(.regular.interactive(), in: .capsule)" not in root, "Picker chrome must not layer interactive glass over native Picker interaction"
 
 for path in ui_files:
