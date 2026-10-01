@@ -1,0 +1,58 @@
+name: Publish v1.0.0 Test Release
+
+on:
+  push:
+    branches:
+      - v1.0.0-postfix-build-artifacts
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    if: ${{ contains(github.event.head_commit.message, '[publish-v1-test-release]') }}
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_RUN_ID: 36924827584
+      RELEASE_ARTIFACT: NotchSixty-release-1.0.0-build-1-postfix
+      TARGET_SHA: ccdfec4cfce85c7c7f9603c53022f7ac1f07d559
+    steps:
+      - name: Wait for exact release build
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh run watch "$RELEASE_RUN_ID" --repo "$GITHUB_REPOSITORY" --exit-status
+
+      - name: Download release artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          gh run download "$RELEASE_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "$RELEASE_ARTIFACT" --dir dist
+          test -f dist/Notch-Sixty-1.0.0-build-1-arm64.dmg
+          test -f dist/Notch-Sixty-1.0.0-build-1-arm64.dmg.sha256
+          cd dist
+          shasum -a 256 -c Notch-Sixty-1.0.0-build-1-arm64.dmg.sha256
+
+      - name: Publish GitHub pre-release
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view v1.0.0 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload v1.0.0 \
+              dist/Notch-Sixty-1.0.0-build-1-arm64.dmg \
+              dist/Notch-Sixty-1.0.0-build-1-arm64.dmg.sha256 \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+          else
+            gh release create v1.0.0 \
+              dist/Notch-Sixty-1.0.0-build-1-arm64.dmg \
+              dist/Notch-Sixty-1.0.0-build-1-arm64.dmg.sha256 \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$TARGET_SHA" \
+              --title "Notch Sixty v1.0.0 — Test Release" \
+              --prerelease \
+              --notes $'First v1.0.0 release-candidate build for post-merge hardware validation.\n\nIncludes the final tray preset-label, Settings picker-label, and window-persistence hardening.\n\nThis DMG is ad-hoc signed and is not yet Developer-ID signed or notarized; it is published as a pre-release for testing only.'
+          fi
