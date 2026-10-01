@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   patch-validate-commit:
-    if: ${{ !contains(github.event.head_commit.message, 'PR45: unify production picker glass styling') }}
+    if: "github.event.head_commit.message != 'PR45: unify production picker glass styling'"
     runs-on: xcode-27
     steps:
       - name: Check out PR45
