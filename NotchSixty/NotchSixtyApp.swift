@@ -1226,13 +1226,20 @@ private struct ProductionMenuBarView: View {
                 .toggleStyle(.switch)
                 .disabled(!canToggleProcessing)
 
-            Picker("Content Preset", selection: presetSelection) {
-                ForEach(profiles.contentPresets) { preset in
-                    Text(preset.name).tag(Optional(preset.id))
+            HStack(spacing: 8) {
+                Label("Preset", systemImage: "music.note.list")
+                    .fixedSize()
+
+                Picker("", selection: presetSelection) {
+                    ForEach(profiles.contentPresets) { preset in
+                        Text(preset.name).tag(Optional(preset.id))
+                    }
                 }
+                .labelsHidden()
+                .productionGlassPickerChrome()
+                .pickerStyle(.menu)
+                .frame(maxWidth: .infinity)
             }
-            .productionGlassPickerChrome()
-            .pickerStyle(.menu)
 
             if profiles.selectedContentPresetIsDirty {
                 Text("Current preset has unsaved changes.")
@@ -1352,23 +1359,33 @@ private struct ProductionSettingsView: View {
                     }
 
                     settingsCard(title: "Appearance", systemImage: "circle.lefthalf.filled") {
-                        Picker("Appearance", selection: $preferences.appearance) {
-                            ForEach(ApplicationAppearanceMode.allCases) { mode in
-                                Text(mode.displayName).tag(mode)
+                        HStack(spacing: 10) {
+                            Text("Appearance")
+                            Picker("", selection: $preferences.appearance) {
+                                ForEach(ApplicationAppearanceMode.allCases) { mode in
+                                    Text(mode.displayName).tag(mode)
+                                }
                             }
+                            .labelsHidden()
+                            .productionGlassPickerChrome()
+                            .pickerStyle(.segmented)
+                            .frame(width: 220)
                         }
-                        .productionGlassPickerChrome()
-                        .pickerStyle(.segmented)
                     }
 
                     settingsCard(title: "App Presence", systemImage: "macwindow.on.rectangle") {
-                        Picker("Show Notch Sixty in", selection: $preferences.presence) {
-                            ForEach(ApplicationPresenceMode.allCases) { mode in
-                                Text(mode.displayName).tag(mode)
+                        HStack(spacing: 10) {
+                            Text("Show Notch Sixty in")
+                            Picker("", selection: $preferences.presence) {
+                                ForEach(ApplicationPresenceMode.allCases) { mode in
+                                    Text(mode.displayName).tag(mode)
+                                }
                             }
+                            .labelsHidden()
+                            .productionGlassPickerChrome()
+                            .pickerStyle(.segmented)
+                            .frame(width: 250)
                         }
-                        .productionGlassPickerChrome()
-                        .pickerStyle(.segmented)
 
                         Text("Menu Bar mode keeps processing and preset controls available without a Dock icon. Both shows the app in both places.")
                             .font(.caption)
@@ -1461,8 +1478,15 @@ private struct ProductionSettingsView: View {
 
 }
 
+private final class NotchSixtyAppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
+    }
+}
+
 @main
 struct NotchSixtyApp: App {
+    @NSApplicationDelegateAdaptor(NotchSixtyAppDelegate.self) private var appDelegate
     @StateObject private var product: ProductController
     @StateObject private var preferences: ApplicationPreferences
 
