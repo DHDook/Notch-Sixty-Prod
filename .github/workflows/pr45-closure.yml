@@ -15,3 +15,5 @@ jobs:
       - uses: actions/checkout@v7
       - name: Validate PR45 v1 release hardening
         run: python3 ci/validate_pr45_release_hardening.py
+      - name: Validate PR45 production control styling
+        run: python3 ci/validate_pr45_control_style.py
