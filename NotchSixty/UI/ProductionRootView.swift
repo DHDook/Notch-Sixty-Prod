@@ -199,8 +199,11 @@ struct ProductionRootView: View {
             #endif
 
             Button {
-                if engine.lifecycleState == .running { engine.stop() }
-                else { try? engine.start() }
+                Task { @MainActor in
+                    await Task.yield()
+                    if engine.lifecycleState == .running { engine.stop() }
+                    else if engine.lifecycleState == .idle { try? engine.start() }
+                }
             } label: {
                 Label(
                     engine.lifecycleState == .running ? "Stop Processing" : "Start Processing",
@@ -281,7 +284,6 @@ private struct ProductionDashboardView: View {
             .padding(28)
             .frame(maxWidth: 1180, alignment: .topLeading)
         }
-        .navigationTitle("Dashboard")
     }
 
     private var outputSummary: String {
@@ -684,7 +686,6 @@ private struct ProductionActiveCrossoverView: View {
             .padding(28)
             .frame(maxWidth: 1_050, alignment: .topLeading)
         }
-        .navigationTitle("Active Crossover")
     }
 
     private var playbackSystemCard: some View {
@@ -1545,7 +1546,6 @@ private struct ProductionRoomCorrectionView: View {
             .padding(28)
             .frame(maxWidth: 900, alignment: .topLeading)
         }
-        .navigationTitle("Room Correction")
     }
 }
 

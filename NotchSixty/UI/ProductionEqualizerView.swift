@@ -36,7 +36,6 @@ struct ProductionEqualizerView: View {
             }
         }
         .padding(24)
-        .navigationTitle("Equalizer")
         .onAppear { ensureSelection() }
         .onChange(of: configuration.channelMode) { _, _ in resetSelectionForBank() }
         .onChange(of: configuration.editChannel) { _, _ in resetSelectionForBank() }

@@ -25,7 +25,6 @@ struct ProductionDynamicsView: View {
             }
         }
         .padding(24)
-        .navigationTitle("Dynamics")
     }
 
     private var header: some View {
@@ -69,7 +68,11 @@ struct ProductionDynamicsView: View {
                 }
             }
         }
-        .listStyle(.sidebar)
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(.clear)
+        .padding(8)
+        .glassEffect(.regular, in: .rect(cornerRadius: 18))
     }
 
     @ViewBuilder

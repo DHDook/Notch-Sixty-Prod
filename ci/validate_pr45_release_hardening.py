@@ -73,9 +73,9 @@ for token in [
     "SMAppService.mainApp.status",
     "SMAppService.mainApp.register()",
     "SMAppService.mainApp.unregister()",
-    'Section("Appearance")',
-    'Section("App Presence")',
-    'Section("Startup")',
+    'settingsCard(title: "Appearance"',
+    'settingsCard(title: "App Presence"',
+    'settingsCard(title: "Startup"',
     '"Launch at Login"',
     'get: { preferences.launchAtLoginEnabled }',
     'set: { preferences.setLaunchAtLogin($0) }',
@@ -94,14 +94,14 @@ if "Launch at Login" in menu_block or "launchAtLogin" in menu_block:
     fail("Launch at Login leaked into the tray/menu-bar dropdown instead of remaining in app Settings")
 
 settings_block = app[settings_start:app.index("@main", settings_start)]
-for token in ['Section("Appearance")', 'Section("App Presence")', 'Section("Startup")', '"Launch at Login"']:
+for token in ['settingsCard(title: "Appearance"', 'settingsCard(title: "App Presence"', 'settingsCard(title: "Startup"', '"Launch at Login"']:
     require(settings_block, token, "Settings placement contract")
 
 # Support/privacy affordances.
 for token in [
-    'Section("Permissions")',
+    'settingsCard(title: "Permissions"',
     "Screen & System Audio Recording",
-    'Section("Support")',
+    'settingsCard(title: "Support"',
     'Label("Copy Diagnostics", systemImage: "doc.on.doc")',
     '"Content Preset: \\(product.profiles.selectedContentPresetName)"',
     '"Playback System: \\(product.profiles.selectedSystemProfileName)"',

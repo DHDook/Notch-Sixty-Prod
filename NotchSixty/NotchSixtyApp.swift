@@ -1016,6 +1016,7 @@ private final class ApplicationPreferences: ObservableObject {
     @Published private(set) var launchAtLoginEnabled: Bool
     @Published private(set) var launchAtLoginError: String?
     private var appearanceObservation: NSKeyValueObservation?
+    private var didApplyInitialPreferences = false
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -1079,6 +1080,8 @@ private final class ApplicationPreferences: ObservableObject {
     }
 
     func apply() {
+        guard !didApplyInitialPreferences else { return }
+        didApplyInitialPreferences = true
         applyAppearance()
         applyActivationPolicy()
     }
@@ -1162,18 +1165,21 @@ private struct ProductionMenuBarView: View {
         Binding(
             get: { processingActive },
             set: { enabled in
-                if enabled {
-                    if engine.lifecycleState == .failed { engine.stop() }
-                    guard engine.lifecycleState == .idle else { return }
-                    do {
-                        try engine.start()
+                Task { @MainActor in
+                    await Task.yield()
+                    if enabled {
+                        if engine.lifecycleState == .failed { engine.stop() }
+                        guard engine.lifecycleState == .idle else { return }
+                        do {
+                            try engine.start()
+                            commandError = nil
+                        } catch {
+                            commandError = error.localizedDescription
+                        }
+                    } else {
+                        engine.stop()
                         commandError = nil
-                    } catch {
-                        commandError = error.localizedDescription
                     }
-                } else {
-                    engine.stop()
-                    commandError = nil
                 }
             }
         )
@@ -1243,8 +1249,7 @@ private struct ProductionMenuBarView: View {
                     Label("Open Notch Sixty", systemImage: "macwindow")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.blue)
+                .buttonStyle(.glassProminent)
 
                 Button(role: .destructive) {
                     product.shutdownForTermination()
@@ -1253,8 +1258,8 @@ private struct ProductionMenuBarView: View {
                     Image(systemName: "power")
                         .frame(width: 18, height: 18)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.red)
+                .buttonStyle(.glass)
+                .foregroundStyle(.red)
                 .help("Quit Notch Sixty")
             }
         }
@@ -1333,96 +1338,117 @@ private struct ProductionSettingsView: View {
     }
 
     var body: some View {
-        Form {
-            Section("About") {
-                LabeledContent("Version") {
-                    Text(version).monospacedDigit()
-                }
-                LabeledContent("Build") {
-                    Text(build).monospacedDigit()
-                }
-            }
+        ScrollView {
+            GlassEffectContainer(spacing: 14) {
+                VStack(alignment: .leading, spacing: 14) {
+                    settingsCard(title: "About", systemImage: "info.circle") {
+                        LabeledContent("Version") {
+                            Text(version).monospacedDigit()
+                        }
+                        LabeledContent("Build") {
+                            Text(build).monospacedDigit()
+                        }
+                    }
 
-            Section("Appearance") {
-                Picker("Appearance", selection: $preferences.appearance) {
-                    ForEach(ApplicationAppearanceMode.allCases) { mode in
-                        Text(mode.displayName).tag(mode)
+                    settingsCard(title: "Appearance", systemImage: "circle.lefthalf.filled") {
+                        Picker("Appearance", selection: $preferences.appearance) {
+                            ForEach(ApplicationAppearanceMode.allCases) { mode in
+                                Text(mode.displayName).tag(mode)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                    }
+
+                    settingsCard(title: "App Presence", systemImage: "macwindow.on.rectangle") {
+                        Picker("Show Notch Sixty in", selection: $preferences.presence) {
+                            ForEach(ApplicationPresenceMode.allCases) { mode in
+                                Text(mode.displayName).tag(mode)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+
+                        Text("Menu Bar mode keeps processing and preset controls available without a Dock icon. Both shows the app in both places.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    settingsCard(title: "Startup", systemImage: "power") {
+                        Toggle(
+                            "Launch at Login",
+                            isOn: Binding(
+                                get: { preferences.launchAtLoginEnabled },
+                                set: { preferences.setLaunchAtLogin($0) }
+                            )
+                        )
+
+                        LabeledContent("Status") {
+                            Text(preferences.launchAtLoginStatusDescription)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        if let error = preferences.launchAtLoginError {
+                            Label(error, systemImage: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                                .textSelection(.enabled)
+                        }
+
+                        Text("Launch at Login is optional and does not automatically start audio processing. Processing remains an explicit user action in v1.0.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    settingsCard(title: "Permissions", systemImage: "lock.shield") {
+                        LabeledContent("System Audio") {
+                            Text("Requested by macOS when processing needs system-audio capture.")
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.trailing)
+                        }
+                        LabeledContent("Measurement Microphone") {
+                            Text("Requested only from Room Correction when you choose Request Access.")
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.trailing)
+                        }
+                        Text("If processing starts but receives no system audio after permission was denied, allow Notch Sixty under Privacy & Security → Screen & System Audio Recording, then relaunch the app.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    settingsCard(title: "Support", systemImage: "wrench.and.screwdriver") {
+                        Button {
+                            copyDiagnostics()
+                        } label: {
+                            Label("Copy Diagnostics", systemImage: "doc.on.doc")
+                        }
+                        .buttonStyle(.glass)
+
+                        Text("Copies app/build, macOS, audio device/rate, active preset/system, bypass state, and DSP latency. It does not include captured audio or room-measurement samples.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
-                .pickerStyle(.segmented)
             }
-
-            Section("App Presence") {
-                Picker("Show Notch Sixty in", selection: $preferences.presence) {
-                    ForEach(ApplicationPresenceMode.allCases) { mode in
-                        Text(mode.displayName).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-
-                Text("Menu Bar mode keeps processing and preset controls available without a Dock icon. Both shows the app in both places.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section("Startup") {
-                Toggle(
-                    "Launch at Login",
-                    isOn: Binding(
-                        get: { preferences.launchAtLoginEnabled },
-                        set: { preferences.setLaunchAtLogin($0) }
-                    )
-                )
-
-                LabeledContent("Status") {
-                    Text(preferences.launchAtLoginStatusDescription)
-                        .foregroundStyle(.secondary)
-                }
-
-                if let error = preferences.launchAtLoginError {
-                    Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
-                        .textSelection(.enabled)
-                }
-
-                Text("Launch at Login is optional and does not automatically start audio processing. Processing remains an explicit user action in v1.0.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section("Permissions") {
-                LabeledContent("System Audio") {
-                    Text("Requested by macOS when processing needs system-audio capture.")
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.trailing)
-                }
-                LabeledContent("Measurement Microphone") {
-                    Text("Requested only from Room Correction when you choose Request Access.")
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.trailing)
-                }
-                Text("If processing starts but receives no system audio after permission was denied, allow Notch Sixty under Privacy & Security → Screen & System Audio Recording, then relaunch the app.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section("Support") {
-                Button {
-                    copyDiagnostics()
-                } label: {
-                    Label("Copy Diagnostics", systemImage: "doc.on.doc")
-                }
-
-                Text("Copies app/build, macOS, audio device/rate, active preset/system, bypass state, and DSP latency. It does not include captured audio or room-measurement samples.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            .padding(18)
         }
-        .formStyle(.grouped)
         .task { preferences.refreshLaunchAtLoginStatus() }
-        .frame(width: 480)
-        .padding(12)
+        .frame(width: 540)
+        .frame(minHeight: 580)
     }
+
+    private func settingsCard<Content: View>(
+        title: String,
+        systemImage: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(title, systemImage: systemImage)
+                .font(.headline)
+            content()
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+    }
+
 }
 
 @main
@@ -1458,10 +1484,7 @@ struct NotchSixtyApp: App {
             isInserted: trayInserted
         ) {
             ProductionMenuBarView(product: product)
-                .task {
-                    product.prepareForUse()
-                    preferences.apply()
-                }
+                .task { product.prepareForUse() }
         }
         .menuBarExtraStyle(.window)
 

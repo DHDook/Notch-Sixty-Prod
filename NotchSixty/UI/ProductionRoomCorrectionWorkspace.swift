@@ -69,7 +69,6 @@ struct ProductionRoomCorrectionWorkspace: View {
             .padding(28)
             .frame(maxWidth: 940, alignment: .topLeading)
         }
-        .navigationTitle("Room Correction")
         .task { calibration.prepareForUse() }
         .task(id: profiles.selectedSystemProfileID) {
             projects.prepareForUse()
