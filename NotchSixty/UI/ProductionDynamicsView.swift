@@ -43,35 +43,57 @@ struct ProductionDynamicsView: View {
     }
 
     private var moduleNavigator: some View {
-        List(selection: $selectedModule) {
-            ForEach(ProductionDynamicsGroup.allCases) { group in
-                Section(group.title) {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 4) {
+                ForEach(ProductionDynamicsGroup.allCases) { group in
+                    Text(group.title.uppercased())
+                        .font(.caption2.bold())
+                        .tracking(0.6)
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 8)
+                        .padding(.top, 8)
+                        .padding(.bottom, 2)
+
                     ForEach(group.modules) { module in
-                        HStack(spacing: 9) {
-                            Image(systemName: module.systemImage)
-                                .frame(width: 18)
-                                .foregroundStyle(selectedModule == module ? .primary : .secondary)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(module.title)
-                                Text(module.subtitle)
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
+                        Button {
+                            selectedModule = module
+                        } label: {
+                            HStack(spacing: 9) {
+                                Image(systemName: module.systemImage)
+                                    .frame(width: 18)
+                                    .foregroundStyle(selectedModule == module ? .primary : .secondary)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(module.title)
+                                        .foregroundStyle(.primary)
+                                    Text(module.subtitle)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                                Spacer(minLength: 4)
+                                Circle()
+                                    .fill(moduleIsActive(module) ? Color.green : Color.secondary.opacity(0.28))
+                                    .frame(width: 7, height: 7)
                             }
-                            Spacer(minLength: 4)
-                            Circle()
-                                .fill(moduleIsActive(module) ? Color.green : Color.secondary.opacity(0.28))
-                                .frame(width: 7, height: 7)
+                            .contentShape(.rect)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 5)
+                            .background {
+                                if selectedModule == module {
+                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                        .fill(.primary.opacity(0.09))
+                                }
+                            }
                         }
-                        .tag(module)
+                        .buttonStyle(.plain)
                     }
                 }
             }
+            .padding(8)
         }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
+        .scrollIndicators(.visible)
         .background(.clear)
-        .padding(8)
+        .clipShape(.rect(cornerRadius: 18))
         .glassEffect(.regular, in: .rect(cornerRadius: 18))
     }
 

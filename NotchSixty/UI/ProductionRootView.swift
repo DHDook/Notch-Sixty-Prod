@@ -135,7 +135,6 @@ struct ProductionRootView: View {
                 }
                 .listStyle(.sidebar)
             }
-            .navigationTitle("Notch Sixty")
             .navigationSplitViewColumnWidth(min: 200, ideal: 232, max: 290)
         } detail: {
             detail(for: selection ?? .dashboard)
@@ -180,13 +179,16 @@ struct ProductionRootView: View {
             .help("Open Notch Sixty Settings")
 
             if let output = engine.selectedOutputDevice {
-                Text("\(output.name) · \(output.nominalSampleRate / 1_000, specifier: "%.1f") kHz")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 6)
-                    .glassEffect(.regular, in: .capsule)
+                HStack(spacing: 5) {
+                    Image(systemName: "hifispeaker")
+                    Text("\(output.name) · \(output.nominalSampleRate / 1_000, specifier: "%.1f") kHz")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .padding(.horizontal, 8)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Output \(output.name), \(output.nominalSampleRate / 1_000, specifier: "%.1f") kilohertz")
             }
             #if DEBUG
             Button {

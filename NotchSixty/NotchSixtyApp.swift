@@ -1398,19 +1398,26 @@ private struct ProductionSettingsView: View {
                     }
 
                     settingsCard(title: "Permissions", systemImage: "lock.shield") {
-                        LabeledContent("System Audio") {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("System Audio")
+                                .font(.subheadline.weight(.medium))
                             Text("Requested by macOS when processing needs system-audio capture.")
                                 .foregroundStyle(.secondary)
-                                .multilineTextAlignment(.trailing)
                         }
-                        LabeledContent("Measurement Microphone") {
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Measurement Microphone")
+                                .font(.subheadline.weight(.medium))
                             Text("Requested only from Room Correction when you choose Request Access.")
                                 .foregroundStyle(.secondary)
-                                .multilineTextAlignment(.trailing)
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
                         Text("If processing starts but receives no system audio after permission was denied, allow Notch Sixty under Privacy & Security → Screen & System Audio Recording, then relaunch the app.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
 
                     settingsCard(title: "Support", systemImage: "wrench.and.screwdriver") {
