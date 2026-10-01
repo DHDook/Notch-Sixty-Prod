@@ -1487,6 +1487,7 @@ struct NotchSixtyApp: App {
                 }
         }
         .defaultSize(width: 1180, height: 780)
+        .windowResizability(.contentMinSize)
         .windowToolbarStyle(.unified(showsTitle: false))
 
         MenuBarExtra(

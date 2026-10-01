@@ -142,6 +142,13 @@ struct ProductionRootView: View {
 
     private var engine: AudioIOEngine { product.audioEngine }
 
+    private var minimumWindowWidth: CGFloat {
+        if selection == .equalizer, engine.stereoEQConfiguration.channelMode != .linked {
+            return 1_320
+        }
+        return 980
+    }
+
     var body: some View {
         NavigationSplitView {
             VStack(spacing: 0) {
@@ -157,7 +164,7 @@ struct ProductionRootView: View {
             detail(for: selection ?? .dashboard)
                 .toolbar { toolbar }
         }
-        .frame(minWidth: 980, minHeight: 680)
+        .frame(minWidth: minimumWindowWidth, minHeight: 680)
         .task { product.prepareForUse() }
     }
 

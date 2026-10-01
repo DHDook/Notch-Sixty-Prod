@@ -139,13 +139,18 @@ struct ProductionDynamicsView: View {
             DynamicsParameterRow("Makeup Gain", value: doubleBinding({ $0.compressor.makeupGainDB }, { $0.compressor.makeupGainDB = $1 }), range: -24...24, step: 0.5, unit: "dB", digits: 1)
 
             Divider()
-            Picker("Topology", selection: binding({ $0.compressor.topology }, { $0.compressor.topology = $1 })) {
-                ForEach(CompressorTopology.allCases) { topology in
-                    Text(topology.displayName).tag(topology)
+            HStack(spacing: 12) {
+                Text("Topology")
+                Picker("Topology", selection: binding({ $0.compressor.topology }, { $0.compressor.topology = $1 })) {
+                    ForEach(CompressorTopology.allCases) { topology in
+                        Text(topology.displayName).tag(topology)
+                    }
                 }
+                .productionGlassPickerChrome()
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 230)
             }
-            .productionGlassPickerChrome()
-            .pickerStyle(.segmented)
 
             Toggle("Program-Dependent Release", isOn: boolBinding({ $0.compressor.programDependentRelease }, { $0.compressor.programDependentRelease = $1 }))
                 .help("Adapts release behavior to program dynamics instead of using only the fixed release time.")
