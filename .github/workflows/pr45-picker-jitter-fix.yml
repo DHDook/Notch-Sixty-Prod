@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   patch-validate-commit:
-    if: "${{ github.event.head_commit.message != 'PR45: stabilize picker glass interaction' }}"
+    if: "${{ github.event.head_commit.message != 'PR45: stabilize picker glass inset' }}"
     runs-on: xcode-27
     steps:
       - name: Check out PR45
@@ -19,24 +19,26 @@ jobs:
           ref: pr45-v1-release-hardening
           fetch-depth: 0
 
-      - name: Remove nested interactive glass from pickers
+      - name: Add stable picker glass inset
         run: |
           python3 - <<'PY'
           from pathlib import Path
 
           root_path = Path('NotchSixty/UI/ProductionRootView.swift')
           root = root_path.read_text()
-          old = '.glassEffect(.regular.interactive(), in: .capsule)'
-          new = '''// Picker owns pointer/press interaction. Keep the surrounding Liquid Glass\n            // visual-only so hover/click state cannot perturb layout.\n            .glassEffect(.regular, in: .capsule)'''
-          assert root.count(old) == 1, f'expected one picker interactive-glass modifier, found {root.count(old)}'
+          old = '''            // Picker owns pointer/press interaction. Keep the surrounding Liquid Glass\n            // visual-only so hover/click state cannot perturb layout.\n            .glassEffect(.regular, in: .capsule)'''
+          new = '''            // Picker owns pointer/press interaction. Keep the surrounding Liquid Glass\n            // visual-only so hover/click state cannot perturb layout. A constant inset\n            // keeps text and segmented labels clear of the capsule edge in every state.\n            .padding(.horizontal, 6)\n            .glassEffect(.regular, in: .capsule)'''
+          assert root.count(old) == 1, f'expected one stable picker chrome block, found {root.count(old)}'
           root_path.write_text(root.replace(old, new, 1))
 
           validator_path = Path('ci/validate_pr45_control_style.py')
           validator = validator_path.read_text()
-          old_guard = 'assert ".glassEffect(.regular.interactive(), in: .capsule)" in root, "production picker chrome must use interactive Liquid Glass"'
-          new_guard = '''assert ".glassEffect(.regular, in: .capsule)" in root, "production picker chrome must use stable Liquid Glass"\nassert ".glassEffect(.regular.interactive(), in: .capsule)" not in root, "Picker chrome must not layer interactive glass over native Picker interaction"'''
-          assert old_guard in validator, 'old picker interaction guard not found'
-          validator_path.write_text(validator.replace(old_guard, new_guard, 1))
+          anchor = 'assert ".glassEffect(.regular, in: .capsule)" in root, "production picker chrome must use stable Liquid Glass"\n'
+          addition = 'assert ".padding(.horizontal, 6)" in root, "production picker chrome must keep a constant horizontal text inset"\n'
+          assert anchor in validator, 'stable picker glass guard not found'
+          if addition not in validator:
+              validator = validator.replace(anchor, anchor + addition, 1)
+          validator_path.write_text(validator)
           PY
 
       - name: Validate retained UI and release contracts
@@ -72,14 +74,14 @@ jobs:
             ENABLE_TESTABILITY=YES \
             test
 
-      - name: Commit accepted jitter fix
+      - name: Commit accepted picker inset fix
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add NotchSixty/UI/ProductionRootView.swift ci/validate_pr45_control_style.py
           if git diff --cached --quiet; then
-            echo 'No picker jitter changes to commit.'
+            echo 'No picker inset changes to commit.'
             exit 0
           fi
-          git commit -m 'PR45: stabilize picker glass interaction'
+          git commit -m 'PR45: stabilize picker glass inset'
           git push origin HEAD:pr45-v1-release-hardening
