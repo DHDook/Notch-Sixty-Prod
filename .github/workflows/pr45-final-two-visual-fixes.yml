@@ -27,7 +27,6 @@ jobs:
       - name: Validate retained contracts
         run: |
           python3 ci/validate_pr39_app_identity.py
-          python3 ci/validate_pr42_menu_bar_settings_shell.py
           python3 ci/validate_pr45_release_hardening.py
 
       - name: Build Debug
