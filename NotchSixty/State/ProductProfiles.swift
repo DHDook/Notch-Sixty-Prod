@@ -110,6 +110,7 @@ struct PlaybackSystemState: Codable, Equatable, Sendable {
     var bassManagement: BassManagementConfiguration
     var roomCorrection: RoomCorrectionConfiguration
     var roomCorrectionCalibration: RoomCorrectionCalibrationSummary?
+    var outputRouting: MultiOutputRoutingConfiguration?
     var speakerIR: SpeakerIRConfiguration
 
     init(
@@ -120,6 +121,7 @@ struct PlaybackSystemState: Codable, Equatable, Sendable {
         bassManagement: BassManagementConfiguration = BassManagementConfiguration(),
         roomCorrection: RoomCorrectionConfiguration = RoomCorrectionConfiguration(),
         roomCorrectionCalibration: RoomCorrectionCalibrationSummary? = nil,
+        outputRouting: MultiOutputRoutingConfiguration? = nil,
         speakerIR: SpeakerIRConfiguration = SpeakerIRConfiguration()
     ) {
         self.schemaVersion = schemaVersion
@@ -129,6 +131,7 @@ struct PlaybackSystemState: Codable, Equatable, Sendable {
         self.bassManagement = bassManagement
         self.roomCorrection = roomCorrection
         self.roomCorrectionCalibration = roomCorrectionCalibration
+        self.outputRouting = outputRouting
         self.speakerIR = speakerIR
     }
 
@@ -238,6 +241,9 @@ final class ProductProfileController: ObservableObject {
 
     var selectedContentPresetName: String { selectedContentPreset?.name ?? "Custom" }
     var selectedSystemProfileName: String { selectedSystemProfile?.name ?? "System" }
+    var selectedSystemOutputRouting: MultiOutputRoutingConfiguration {
+        selectedSystemProfile?.state.outputRouting ?? MultiOutputRoutingConfiguration()
+    }
     var canOverwriteSelectedContentPreset: Bool { selectedContentPreset?.origin == .user }
 
     var selectedContentPresetIsDirty: Bool {
@@ -394,6 +400,65 @@ final class ProductProfileController: ObservableObject {
         persist()
     }
 
+    func replaceSelectedSystemOutputRouting(
+        _ configuration: MultiOutputRoutingConfiguration?
+    ) throws {
+        guard let selectedSystemProfileID,
+              let index = systemProfiles.firstIndex(where: { $0.id == selectedSystemProfileID }) else {
+            throw ProductProfileError.selectedSystemProfileRequired
+        }
+        if let configuration {
+            try configuration.validateStructure()
+        }
+
+        let previousEngineConfiguration = engine.multiOutputRoutingConfiguration
+        let previousState = systemProfiles[index].state
+        do {
+            try engine.replaceMultiOutputRoutingConfiguration(configuration)
+            systemProfiles[index].state.outputRouting = configuration
+            try persistThrowing()
+            lastErrorDescription = nil
+        } catch {
+            systemProfiles[index].state = previousState
+            try? engine.replaceMultiOutputRoutingConfiguration(previousEngineConfiguration)
+            lastErrorDescription = error.localizedDescription
+            throw error
+        }
+    }
+
+    func replaceSelectedSystemBassManagement(
+        _ configuration: BassManagementConfiguration
+    ) throws {
+        guard let selectedSystemProfileID,
+              let index = systemProfiles.firstIndex(where: { $0.id == selectedSystemProfileID }) else {
+            throw ProductProfileError.selectedSystemProfileRequired
+        }
+
+        let previousEngineConfiguration = engine.bassManagementConfiguration
+        let previousState = systemProfiles[index].state
+        do {
+            try engine.replaceBassManagementConfiguration(configuration)
+            systemProfiles[index].state.bassManagement = configuration
+            try persistThrowing()
+            lastErrorDescription = nil
+        } catch {
+            systemProfiles[index].state = previousState
+            try? engine.replaceBassManagementConfiguration(previousEngineConfiguration)
+            lastErrorDescription = error.localizedDescription
+            throw error
+        }
+    }
+
+    func setSelectedSystemBassManagementEnabled(_ enabled: Bool) throws {
+        guard let selectedSystemProfileID,
+              let index = systemProfiles.firstIndex(where: { $0.id == selectedSystemProfileID }) else {
+            throw ProductProfileError.selectedSystemProfileRequired
+        }
+        var configuration = systemProfiles[index].state.bassManagement
+        configuration.enabled = enabled
+        try replaceSelectedSystemBassManagement(configuration)
+    }
+
     func replaceSelectedSystemRoomCorrection(
         _ configuration: RoomCorrectionConfiguration,
         calibrationSummary summary: RoomCorrectionCalibrationSummary?
@@ -486,6 +551,7 @@ final class ProductProfileController: ObservableObject {
             bassManagement: engine.bassManagementConfiguration,
             roomCorrection: engine.roomCorrectionConfiguration,
             roomCorrectionCalibration: selectedSystemProfile?.state.roomCorrectionCalibration,
+            outputRouting: engine.multiOutputRoutingConfiguration,
             speakerIR: engine.speakerIRConfiguration
         )
     }
@@ -520,6 +586,7 @@ final class ProductProfileController: ObservableObject {
 
             let playback = state.playback.applying(to: engine.playbackControlConfiguration)
             let gain = state.composingGain(over: engine.gainConfiguration)
+            try engine.replaceMultiOutputRoutingConfiguration(state.outputRouting)
             try engine.replacePlaybackControlConfiguration(playback)
             try engine.replaceBassManagementConfiguration(state.bassManagement)
             try engine.replaceGainConfiguration(gain)
@@ -532,6 +599,7 @@ final class ProductProfileController: ObservableObject {
             }
             let playback = previous.playback.applying(to: engine.playbackControlConfiguration)
             let gain = previous.composingGain(over: engine.gainConfiguration)
+            try? engine.replaceMultiOutputRoutingConfiguration(previous.outputRouting)
             try? engine.replacePlaybackControlConfiguration(playback)
             try? engine.replaceBassManagementConfiguration(previous.bassManagement)
             try? engine.replaceGainConfiguration(gain)

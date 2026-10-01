@@ -50,10 +50,27 @@ typedef struct {
     uint64_t appliedCommandSequence;
 } N60StartupFadeRuntime;
 
+typedef struct {
+    N60SpeakerBusSplitterSnapshot snapshot;
+    N60BiquadState lowerLowLeft[N60_MAX_CROSSOVER_SECTIONS];
+    N60BiquadState lowerLowRight[N60_MAX_CROSSOVER_SECTIONS];
+    N60BiquadState lowerLowMono[N60_MAX_CROSSOVER_SECTIONS];
+    N60BiquadState lowerHighLeft[N60_MAX_CROSSOVER_SECTIONS];
+    N60BiquadState lowerHighRight[N60_MAX_CROSSOVER_SECTIONS];
+    N60BiquadState upperLowLeft[N60_MAX_CROSSOVER_SECTIONS];
+    N60BiquadState upperLowRight[N60_MAX_CROSSOVER_SECTIONS];
+    N60BiquadState upperHighLeft[N60_MAX_CROSSOVER_SECTIONS];
+    N60BiquadState upperHighRight[N60_MAX_CROSSOVER_SECTIONS];
+    N60BiquadState subPhaseAlignment;
+} N60SpeakerBusSplitterRuntime;
+
+
 struct N60RealtimeAudioBridge {
     uint32_t capacityFrames;
     N60StereoFrame *frames;
     N60RenderKernel *renderKernel;
+    N60SameDeviceOutputMap sameDeviceOutputMap;
+    N60SpeakerBusSplitterRuntime speakerBusSplitter;
 
     _Atomic uint64_t writeIndex;
     _Atomic uint64_t readIndex;
@@ -174,6 +191,29 @@ static bool make_input_buffer_view(
     }
 
     return false;
+}
+
+static bool make_same_device_output_frame_count(
+    const AudioBufferList *bufferList,
+    uint32_t requiredPhysicalChannels,
+    UInt32 *frameCountOut
+) {
+    if (bufferList == NULL || frameCountOut == NULL || bufferList->mNumberBuffers == 0
+        || requiredPhysicalChannels == 0) return false;
+    uint64_t flattenedChannels = 0;
+    UInt32 frameCount = UINT32_MAX;
+    for (UInt32 index = 0; index < bufferList->mNumberBuffers; ++index) {
+        const AudioBuffer *buffer = &bufferList->mBuffers[index];
+        if (buffer->mData == NULL || buffer->mNumberChannels == 0) return false;
+        UInt32 bytesPerFrame = (UInt32)(sizeof(float) * buffer->mNumberChannels);
+        if (bytesPerFrame == 0 || (buffer->mDataByteSize % bytesPerFrame) != 0) return false;
+        UInt32 bufferFrames = buffer->mDataByteSize / bytesPerFrame;
+        if (bufferFrames < frameCount) frameCount = bufferFrames;
+        flattenedChannels += buffer->mNumberChannels;
+    }
+    if (flattenedChannels < requiredPhysicalChannels || frameCount == UINT32_MAX) return false;
+    *frameCountOut = frameCount;
+    return true;
 }
 
 static bool make_output_buffer_view(
@@ -315,6 +355,115 @@ static void publish_output_vu_meter(
     atomic_store_explicit(&bridge->outputVURMSLeftBits, float_to_bits(rmsLeft), memory_order_relaxed);
     atomic_store_explicit(&bridge->outputVURMSRightBits, float_to_bits(rmsRight), memory_order_relaxed);
     atomic_fetch_add_explicit(&bridge->outputVUOverRangeSamples, overRangeSamples, memory_order_relaxed);
+}
+
+static float process_splitter_sections(
+    const N60BiquadCoefficients *coefficients,
+    N60BiquadState *states,
+    uint32_t count,
+    float input
+) {
+    float output = input;
+    for (uint32_t index = 0; index < count; ++index) {
+        output = N60BiquadProcessSample(coefficients[index], &states[index], output);
+    }
+    return output;
+}
+
+static void process_speaker_bus_splitter(
+    N60SpeakerBusSplitterRuntime *runtime,
+    float left,
+    float right,
+    N60SpeakerBusFrame *frame
+) {
+    *frame = N60SpeakerBusFrameMakeSilence();
+    (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusLeftFullRange, left);
+    (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusRightFullRange, right);
+    if (!runtime->snapshot.enabled) return;
+
+    const N60SpeakerBusSplitterSnapshot *snapshot = &runtime->snapshot;
+    if (snapshot->mode == N60SpeakerCrossoverModeMainsSub) {
+        float mainsLeft = process_splitter_sections(
+            snapshot->lowerHighPass, runtime->lowerHighLeft,
+            snapshot->lowerSectionCount, left
+        );
+        float mainsRight = process_splitter_sections(
+            snapshot->lowerHighPass, runtime->lowerHighRight,
+            snapshot->lowerSectionCount, right
+        );
+        float subMono = 0.5f * (left + right);
+        subMono = process_splitter_sections(
+            snapshot->lowerLowPass, runtime->lowerLowMono,
+            snapshot->lowerSectionCount, subMono
+        );
+        if (snapshot->subPhaseAlignmentEnabled) {
+            subMono = N60BiquadProcessSample(
+                snapshot->subPhaseAlignmentAllPass,
+                &runtime->subPhaseAlignment,
+                subMono
+            );
+        }
+        subMono *= snapshot->subGainLinear;
+        if (snapshot->subPolarityInverted) subMono = -subMono;
+        (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusLeftHigh, mainsLeft);
+        (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusRightHigh, mainsRight);
+        (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusSubMono, subMono);
+        return;
+    }
+
+    float lowLeft = process_splitter_sections(
+        snapshot->lowerLowPass, runtime->lowerLowLeft,
+        snapshot->lowerSectionCount, left
+    );
+    float lowRight = process_splitter_sections(
+        snapshot->lowerLowPass, runtime->lowerLowRight,
+        snapshot->lowerSectionCount, right
+    );
+    (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusLeftLow, lowLeft);
+    (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusRightLow, lowRight);
+
+    if (snapshot->mode == N60SpeakerCrossoverModeBiAmp) {
+        float highLeft = process_splitter_sections(
+            snapshot->lowerHighPass, runtime->lowerHighLeft,
+            snapshot->lowerSectionCount, left
+        );
+        float highRight = process_splitter_sections(
+            snapshot->lowerHighPass, runtime->lowerHighRight,
+            snapshot->lowerSectionCount, right
+        );
+        (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusLeftHigh, highLeft);
+        (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusRightHigh, highRight);
+        return;
+    }
+
+    float midLeft = process_splitter_sections(
+        snapshot->lowerHighPass, runtime->lowerHighLeft,
+        snapshot->lowerSectionCount, left
+    );
+    float midRight = process_splitter_sections(
+        snapshot->lowerHighPass, runtime->lowerHighRight,
+        snapshot->lowerSectionCount, right
+    );
+    midLeft = process_splitter_sections(
+        snapshot->upperLowPass, runtime->upperLowLeft,
+        snapshot->upperSectionCount, midLeft
+    );
+    midRight = process_splitter_sections(
+        snapshot->upperLowPass, runtime->upperLowRight,
+        snapshot->upperSectionCount, midRight
+    );
+    float highLeft = process_splitter_sections(
+        snapshot->upperHighPass, runtime->upperHighLeft,
+        snapshot->upperSectionCount, left
+    );
+    float highRight = process_splitter_sections(
+        snapshot->upperHighPass, runtime->upperHighRight,
+        snapshot->upperSectionCount, right
+    );
+    (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusLeftMid, midLeft);
+    (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusRightMid, midRight);
+    (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusLeftHigh, highLeft);
+    (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusRightHigh, highRight);
 }
 
 N60RealtimeAudioBridge *N60RealtimeAudioBridgeCreate(uint32_t capacityFrames) {
@@ -703,6 +852,168 @@ N60RenderKernelDiagnostics N60RealtimeAudioBridgeGetRenderDiagnostics(
     return diagnostics;
 }
 
+static bool speaker_bus_is_valid(N60SpeakerOutputBus bus) {
+    return bus >= N60SpeakerOutputBusLeftFullRange && bus < N60SpeakerOutputBusCount;
+}
+
+N60SpeakerBusFrame N60SpeakerBusFrameMakeSilence(void) {
+    N60SpeakerBusFrame frame = {0};
+    return frame;
+}
+
+bool N60SpeakerBusFrameSet(
+    N60SpeakerBusFrame *frame,
+    N60SpeakerOutputBus bus,
+    float value
+) {
+    if (frame == NULL || !speaker_bus_is_valid(bus) || !isfinite(value)) return false;
+    frame->values[(uint32_t)bus] = value;
+    return true;
+}
+
+float N60SpeakerBusFrameGet(
+    const N60SpeakerBusFrame *frame,
+    N60SpeakerOutputBus bus
+) {
+    if (frame == NULL || !speaker_bus_is_valid(bus)) return 0.0f;
+    return frame->values[(uint32_t)bus];
+}
+
+bool N60SameDeviceOutputMapCompile(
+    uint32_t physicalChannelCount,
+    const N60SpeakerOutputRouteDescriptor *routes,
+    uint32_t routeCount,
+    N60SameDeviceOutputMap *mapOut
+) {
+    if (mapOut == NULL) return false;
+    memset(mapOut, 0, sizeof(*mapOut));
+    if (physicalChannelCount == 0
+        || routes == NULL
+        || routeCount < 2u
+        || routeCount > N60_SPEAKER_OUTPUT_MAX_ROUTES) {
+        return false;
+    }
+
+    for (uint32_t index = 0; index < routeCount; ++index) {
+        N60SpeakerOutputRouteDescriptor route = routes[index];
+        if (!speaker_bus_is_valid(route.bus)
+            || route.physicalChannelIndex >= physicalChannelCount) {
+            return false;
+        }
+        for (uint32_t previous = 0; previous < index; ++previous) {
+            if (routes[previous].physicalChannelIndex == route.physicalChannelIndex) {
+                return false;
+            }
+        }
+        mapOut->routes[index] = route;
+    }
+    mapOut->physicalChannelCount = physicalChannelCount;
+    mapOut->routeCount = routeCount;
+    mapOut->valid = true;
+    return true;
+}
+
+bool N60RealtimeAudioBridgeConfigureSameDeviceOutputMap(
+    N60RealtimeAudioBridge *bridge,
+    N60SameDeviceOutputMap map
+) {
+    if (bridge == NULL || !map.valid || map.routeCount < 2u
+        || map.routeCount > N60_SPEAKER_OUTPUT_MAX_ROUTES
+        || map.physicalChannelCount == 0) {
+        return false;
+    }
+    bridge->sameDeviceOutputMap = map;
+    return true;
+}
+
+bool N60RealtimeAudioBridgeConfigureSpeakerBusSplitter(
+    N60RealtimeAudioBridge *bridge,
+    N60SpeakerBusSplitterSnapshot snapshot
+) {
+    if (bridge == NULL || !snapshot.enabled) return false;
+    memset(&bridge->speakerBusSplitter, 0, sizeof(bridge->speakerBusSplitter));
+    bridge->speakerBusSplitter.snapshot = snapshot;
+    return true;
+}
+
+bool N60SameDeviceOutputMapValueForChannel(
+    const N60SameDeviceOutputMap *map,
+    const N60SpeakerBusFrame *frame,
+    uint32_t physicalChannelIndex,
+    float *valueOut
+) {
+    if (valueOut == NULL) return false;
+    *valueOut = 0.0f;
+    if (map == NULL || frame == NULL || !map->valid
+        || physicalChannelIndex >= map->physicalChannelCount) {
+        return false;
+    }
+    for (uint32_t index = 0; index < map->routeCount; ++index) {
+        if (map->routes[index].physicalChannelIndex == physicalChannelIndex) {
+            *valueOut = N60SpeakerBusFrameGet(frame, map->routes[index].bus);
+            return true;
+        }
+    }
+    return true;
+}
+
+static bool output_buffer_frame_is_addressable(
+    const AudioBuffer *buffer,
+    uint32_t frameIndex
+) {
+    if (buffer == NULL || buffer->mData == NULL || buffer->mNumberChannels == 0) return false;
+    uint64_t bytesPerFrame = (uint64_t)sizeof(float) * buffer->mNumberChannels;
+    uint64_t requiredBytes = ((uint64_t)frameIndex + 1u) * bytesPerFrame;
+    return requiredBytes <= buffer->mDataByteSize;
+}
+
+bool N60SameDeviceOutputMapWriteFrame(
+    const N60SameDeviceOutputMap *map,
+    const N60SpeakerBusFrame *frame,
+    AudioBufferList *outputData,
+    uint32_t frameIndex
+) {
+    if (map == NULL || frame == NULL || outputData == NULL || !map->valid
+        || outputData->mNumberBuffers == 0) {
+        return false;
+    }
+
+    uint64_t flattenedChannelCount = 0;
+    for (UInt32 bufferIndex = 0; bufferIndex < outputData->mNumberBuffers; ++bufferIndex) {
+        AudioBuffer *buffer = &outputData->mBuffers[bufferIndex];
+        if (!output_buffer_frame_is_addressable(buffer, frameIndex)) return false;
+        flattenedChannelCount += buffer->mNumberChannels;
+    }
+    if (flattenedChannelCount < map->physicalChannelCount) return false;
+
+    // Silence every channel represented by this callback frame before routing.
+    // This prevents stale samples on unassigned hardware channels.
+    for (UInt32 bufferIndex = 0; bufferIndex < outputData->mNumberBuffers; ++bufferIndex) {
+        AudioBuffer *buffer = &outputData->mBuffers[bufferIndex];
+        float *samples = (float *)buffer->mData;
+        uint64_t base = (uint64_t)frameIndex * buffer->mNumberChannels;
+        for (UInt32 localChannel = 0; localChannel < buffer->mNumberChannels; ++localChannel) {
+            samples[base + localChannel] = 0.0f;
+        }
+    }
+
+    for (uint32_t routeIndex = 0; routeIndex < map->routeCount; ++routeIndex) {
+        N60SpeakerOutputRouteDescriptor route = map->routes[routeIndex];
+        uint32_t remainingChannel = route.physicalChannelIndex;
+        for (UInt32 bufferIndex = 0; bufferIndex < outputData->mNumberBuffers; ++bufferIndex) {
+            AudioBuffer *buffer = &outputData->mBuffers[bufferIndex];
+            if (remainingChannel < buffer->mNumberChannels) {
+                float *samples = (float *)buffer->mData;
+                uint64_t sampleIndex = (uint64_t)frameIndex * buffer->mNumberChannels + remainingChannel;
+                samples[sampleIndex] = N60SpeakerBusFrameGet(frame, route.bus);
+                break;
+            }
+            remainingChannel -= buffer->mNumberChannels;
+        }
+    }
+    return true;
+}
+
 OSStatus N60CaptureIOProc(
     AudioDeviceID inDevice,
     const AudioTimeStamp *inNow,
@@ -778,13 +1089,27 @@ OSStatus N60OutputIOProc(
     if (bridge == NULL || outOutputData == NULL) return noErr;
     atomic_fetch_add_explicit(&bridge->outputCallbacks, 1, memory_order_relaxed);
 
+    bool sameDeviceMultiOutput = bridge->sameDeviceOutputMap.valid;
     N60OutputBufferView outputView = {0};
-    if (!make_output_buffer_view(outOutputData, &outputView)) {
-        zero_output(outOutputData);
-        atomic_fetch_add_explicit(&bridge->unsupportedBufferLayouts, 1, memory_order_relaxed);
-        return noErr;
+    UInt32 frameCount = 0;
+    if (sameDeviceMultiOutput) {
+        if (!make_same_device_output_frame_count(
+            outOutputData,
+            bridge->sameDeviceOutputMap.physicalChannelCount,
+            &frameCount
+        )) {
+            zero_output(outOutputData);
+            atomic_fetch_add_explicit(&bridge->unsupportedBufferLayouts, 1, memory_order_relaxed);
+            return noErr;
+        }
+    } else {
+        if (!make_output_buffer_view(outOutputData, &outputView)) {
+            zero_output(outOutputData);
+            atomic_fetch_add_explicit(&bridge->unsupportedBufferLayouts, 1, memory_order_relaxed);
+            return noErr;
+        }
+        frameCount = outputView.frameCount;
     }
-    UInt32 frameCount = outputView.frameCount;
 
     uint64_t readIndex = atomic_load_explicit(&bridge->readIndex, memory_order_relaxed);
     uint64_t writeIndex = atomic_load_explicit(&bridge->writeIndex, memory_order_acquire);
@@ -867,8 +1192,23 @@ OSStatus N60OutputIOProc(
         float gain = startup_fade_gain(&startupFade, masterGain) * transitionGain;
         float finalLeft = processed.left * gain;
         float finalRight = processed.right * gain;
-        *outputLeft = finalLeft;
-        *outputRight = finalRight;
+        if (sameDeviceMultiOutput) {
+            N60SpeakerBusFrame busFrame;
+            process_speaker_bus_splitter(
+                &bridge->speakerBusSplitter, finalLeft, finalRight, &busFrame
+            );
+            if (!N60SameDeviceOutputMapWriteFrame(
+                &bridge->sameDeviceOutputMap, &busFrame, outOutputData, frameIndex
+            )) {
+                zero_output(outOutputData);
+                atomic_fetch_add_explicit(&bridge->unsupportedBufferLayouts, 1, memory_order_relaxed);
+                N60RenderKernelEndRender(bridge->renderKernel, &renderContext, renderedFrames);
+                return noErr;
+            }
+        } else {
+            *outputLeft = finalLeft;
+            *outputRight = finalRight;
+        }
         if (outputVUMeterEnabled) {
             float absLeft = fabsf(finalLeft);
             float absRight = fabsf(finalRight);
@@ -879,8 +1219,10 @@ OSStatus N60OutputIOProc(
             if (absLeft > 1.0f) outputVUOverRangeSamples += 1;
             if (absRight > 1.0f) outputVUOverRangeSamples += 1;
         }
-        outputLeft += outputView.leftStride;
-        outputRight += outputView.rightStride;
+        if (!sameDeviceMultiOutput) {
+            outputLeft += outputView.leftStride;
+            outputRight += outputView.rightStride;
+        }
         renderedFrames += 1;
     }
 
@@ -906,10 +1248,17 @@ OSStatus N60OutputIOProc(
 
     for (UInt32 frameIndex = framesToRead; frameIndex < frameCount; ++frameIndex) {
         (void)next_transition_gain(&transitionRamp);
-        *outputLeft = 0.0f;
-        *outputRight = 0.0f;
-        outputLeft += outputView.leftStride;
-        outputRight += outputView.rightStride;
+        if (sameDeviceMultiOutput) {
+            N60SpeakerBusFrame silence = N60SpeakerBusFrameMakeSilence();
+            (void)N60SameDeviceOutputMapWriteFrame(
+                &bridge->sameDeviceOutputMap, &silence, outOutputData, frameIndex
+            );
+        } else {
+            *outputLeft = 0.0f;
+            *outputRight = 0.0f;
+            outputLeft += outputView.leftStride;
+            outputRight += outputView.rightStride;
+        }
     }
 
     if (outputVUMeterEnabled) {

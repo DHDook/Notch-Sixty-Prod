@@ -144,6 +144,19 @@ jobs:
             -o /tmp/validate-pr38-denoiser-advanced
           /tmp/validate-pr38-denoiser-advanced
 
+      - name: Validate PR41 Same-device Output Map
+        run: |
+          REALTIME_SOURCES=$(find NotchSixty/Audio/Realtime -name '*.c' -print)
+          clang -std=c11 -O2 -Wall -Wextra -Werror \
+            -include stddef.h \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr41_same_device_output_map.c \
+            $REALTIME_SOURCES \
+            -framework Accelerate \
+            -framework CoreAudio \
+            -o /tmp/validate-pr41-same-device-output-map
+          /tmp/validate-pr41-same-device-output-map
+
       - name: Benchmark PR35 Render Kernel O0 vs O3
         run: |
           REALTIME_SOURCES=$(find NotchSixty/Audio/Realtime -name '*.c' ! -name 'N60RealtimeAudioBridge.c' -print)

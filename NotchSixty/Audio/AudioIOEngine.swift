@@ -501,10 +501,49 @@ enum CrossoverMonitorMode: String, CaseIterable, Identifiable, Codable, Sendable
     }
 }
 
+enum SpeakerCrossoverMode: String, CaseIterable, Identifiable, Codable, Sendable {
+    case mainsSub
+    case biAmp
+    case triAmp
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .mainsSub: return "Mains + Sub"
+        case .biAmp: return "Bi-Amp"
+        case .triAmp: return "Tri-Amp"
+        }
+    }
+
+    var cType: N60SpeakerCrossoverMode {
+        switch self {
+        case .mainsSub: return N60SpeakerCrossoverModeMainsSub
+        case .biAmp: return N60SpeakerCrossoverModeBiAmp
+        case .triAmp: return N60SpeakerCrossoverModeTriAmp
+        }
+    }
+
+    func supports(bus: SpeakerOutputBus) -> Bool {
+        if bus == .leftFullRange || bus == .rightFullRange { return true }
+        switch self {
+        case .mainsSub:
+            return bus == .leftHigh || bus == .rightHigh || bus == .subMono
+        case .biAmp:
+            return bus == .leftLow || bus == .rightLow || bus == .leftHigh || bus == .rightHigh
+        case .triAmp:
+            return bus == .leftLow || bus == .rightLow
+                || bus == .leftMid || bus == .rightMid
+                || bus == .leftHigh || bus == .rightHigh
+        }
+    }
+}
+
 struct BassManagementConfiguration: Equatable, Codable, Sendable {
     static let frequencyRange = 20.0...500.0
     static let subGainRange = -24.0...12.0
     static let subPhaseAlignmentQRange = 0.1...10.0
+    static let speakerFrequencyRange = 20.0...20_000.0
 
     var enabled = false
     var frequencyHz: Double = 80
@@ -515,6 +554,55 @@ struct BassManagementConfiguration: Equatable, Codable, Sendable {
     var subPhaseAlignmentEnabled = false
     var subPhaseAlignmentFrequencyHz: Double = 80
     var subPhaseAlignmentQ: Double = 0.7
+    // Optional for backward-compatible profile decoding. Nil preserves the
+    // existing recombined-stereo bass-management behavior.
+    var physicalOutputMode: SpeakerCrossoverMode? = nil
+    var upperFrequencyHz: Double? = nil
+    var upperTopology: CrossoverTopology? = nil
+
+    var lowerFrequencyRange: ClosedRange<Double> {
+        switch physicalOutputMode {
+        case .biAmp, .triAmp:
+            return Self.speakerFrequencyRange
+        case .mainsSub, .none:
+            return Self.frequencyRange
+        }
+    }
+
+    func makeSpeakerBusSplitterSnapshot(sampleRate: Double) throws -> N60SpeakerBusSplitterSnapshot {
+        guard enabled, let physicalOutputMode else {
+            throw BassManagementConfigurationError.physicalCrossoverModeRequired
+        }
+        guard frequencyHz.isFinite, lowerFrequencyRange.contains(frequencyHz),
+              frequencyHz < sampleRate * 0.5 else {
+            throw BassManagementConfigurationError.invalidFrequency(frequencyHz)
+        }
+        let upper = upperFrequencyHz ?? max(frequencyHz + 1.0, frequencyHz * 2.0)
+        if physicalOutputMode == .triAmp {
+            guard upper.isFinite, Self.speakerFrequencyRange.contains(upper),
+                  upper > frequencyHz, upper < sampleRate * 0.5 else {
+                throw BassManagementConfigurationError.invalidUpperFrequency(upper)
+            }
+        }
+        var snapshot = N60SpeakerBusSplitterSnapshot()
+        guard N60SpeakerBusSplitterSnapshotMake(
+            sampleRate,
+            physicalOutputMode.cType,
+            frequencyHz,
+            topology.cType,
+            upper,
+            (upperTopology ?? topology).cType,
+            DSPGainConfiguration.linearGain(forDB: subGainDB),
+            subPolarityInverted,
+            subPhaseAlignmentEnabled,
+            subPhaseAlignmentFrequencyHz,
+            subPhaseAlignmentQ,
+            &snapshot
+        ) else {
+            throw BassManagementConfigurationError.speakerBusSplitterDesignFailed
+        }
+        return snapshot
+    }
 }
 
 enum BassManagementConfigurationError: Error, LocalizedError, Equatable {
@@ -522,6 +610,10 @@ enum BassManagementConfigurationError: Error, LocalizedError, Equatable {
     case invalidSubGain(Double)
     case invalidSubPhaseAlignmentFrequency(Double)
     case invalidSubPhaseAlignmentQ(Double)
+    case invalidUpperFrequency(Double)
+    case physicalCrossoverModeRequired
+    case physicalCrossoverChangeRequiresIdle
+    case speakerBusSplitterDesignFailed
     case graphDesignFailed
 
     var errorDescription: String? {
@@ -534,6 +626,14 @@ enum BassManagementConfigurationError: Error, LocalizedError, Equatable {
             return "Sub phase-alignment frequency \(value) Hz is outside the supported 20...500 Hz range."
         case .invalidSubPhaseAlignmentQ(let value):
             return "Sub phase-alignment Q \(value) is outside the supported 0.1...10 range."
+        case .invalidUpperFrequency(let value):
+            return "Upper crossover frequency \(value) Hz must be above the lower crossover and below the active Nyquist limit."
+        case .physicalCrossoverModeRequired:
+            return "Choose Mains + Sub, Bi-Amp, or Tri-Amp before routing split speaker buses."
+        case .physicalCrossoverChangeRequiresIdle:
+            return "Stop processing before changing a physical speaker crossover."
+        case .speakerBusSplitterDesignFailed:
+            return "Unable to design the physical speaker crossover for the active output sample rate."
         case .graphDesignFailed:
             return "Unable to design the crossover for the current output sample rate."
         }
@@ -736,8 +836,15 @@ struct EQConfiguration: Equatable, Sendable {
             throw EQConfigurationError.tooManyBands(bands.count)
         }
         guard bassManagementConfiguration.frequencyHz.isFinite,
-              BassManagementConfiguration.frequencyRange.contains(bassManagementConfiguration.frequencyHz) else {
+              bassManagementConfiguration.lowerFrequencyRange.contains(bassManagementConfiguration.frequencyHz) else {
             throw BassManagementConfigurationError.invalidFrequency(bassManagementConfiguration.frequencyHz)
+        }
+        if bassManagementConfiguration.physicalOutputMode == .triAmp {
+            let upper = bassManagementConfiguration.upperFrequencyHz ?? .nan
+            guard upper.isFinite, BassManagementConfiguration.speakerFrequencyRange.contains(upper),
+                  upper > bassManagementConfiguration.frequencyHz, upper < sampleRate * 0.5 else {
+                throw BassManagementConfigurationError.invalidUpperFrequency(upper)
+            }
         }
         guard bassManagementConfiguration.subGainDB.isFinite,
               BassManagementConfiguration.subGainRange.contains(bassManagementConfiguration.subGainDB) else {
@@ -947,6 +1054,7 @@ final class AudioIOEngine: ObservableObject {
     @Published private(set) var globalVolumeKeyMonitoringState: GlobalVolumeKeyMonitoringState = .stopped
     @Published private(set) var gainConfiguration = DSPGainConfiguration()
     @Published private(set) var bassManagementConfiguration = BassManagementConfiguration()
+    @Published private(set) var multiOutputRoutingConfiguration: MultiOutputRoutingConfiguration?
     @Published private(set) var dynamicsConfiguration = DynamicsConfiguration()
     @Published private(set) var roomCorrectionConfiguration = RoomCorrectionConfiguration()
     @Published private(set) var speakerIRConfiguration = SpeakerIRConfiguration()
@@ -977,6 +1085,24 @@ final class AudioIOEngine: ObservableObject {
         masterVolumeController.onExternalChange = { [weak self] in self?.handleMasterVolumeDeviceChange() }
         globalVolumeKeyMonitor.onVolumeIncrement = { [weak self] in self?.handleGlobalVolumeKey(delta: 1.0 / 16.0) }
         globalVolumeKeyMonitor.onVolumeDecrement = { [weak self] in self?.handleGlobalVolumeKey(delta: -1.0 / 16.0) }
+    }
+
+    var physicalSpeakerBusRoutingActive: Bool {
+        guard let routing = multiOutputRoutingConfiguration, routing.enabled else { return false }
+        return routing.enabledRoutes.contains { !$0.bus.isFullRangeBus }
+    }
+
+    private func renderBassManagementConfiguration(
+        _ source: BassManagementConfiguration? = nil
+    ) -> BassManagementConfiguration {
+        var render = source ?? bassManagementConfiguration
+        if physicalSpeakerBusRoutingActive {
+            // The physical splitter runs after shared DSP/audition. Disabling the
+            // older early recombined crossover prevents double filtering.
+            render.enabled = false
+            render.subPhaseAlignmentEnabled = false
+        }
+        return render
     }
 
     var selectedOutputDevice: AudioOutputDevice? {
@@ -1231,9 +1357,22 @@ final class AudioIOEngine: ObservableObject {
         try applyGainConfiguration(updated)
     }
 
+    func replaceMultiOutputRoutingConfiguration(
+        _ configuration: MultiOutputRoutingConfiguration?
+    ) throws {
+        if let configuration {
+            try configuration.validateStructure()
+        }
+        guard lifecycle.state == .idle || configuration == multiOutputRoutingConfiguration else {
+            throw MultiOutputRoutingError.routingChangeRequiresIdle
+        }
+        multiOutputRoutingConfiguration = configuration
+        lastErrorDescription = nil
+    }
+
     func replaceBassManagementConfiguration(_ configuration: BassManagementConfiguration) throws {
         guard configuration.frequencyHz.isFinite,
-              BassManagementConfiguration.frequencyRange.contains(configuration.frequencyHz) else {
+              configuration.lowerFrequencyRange.contains(configuration.frequencyHz) else {
             throw BassManagementConfigurationError.invalidFrequency(configuration.frequencyHz)
         }
         guard configuration.subGainDB.isFinite,
@@ -1250,11 +1389,21 @@ final class AudioIOEngine: ObservableObject {
               BassManagementConfiguration.subPhaseAlignmentQRange.contains(configuration.subPhaseAlignmentQ) else {
             throw BassManagementConfigurationError.invalidSubPhaseAlignmentQ(configuration.subPhaseAlignmentQ)
         }
+        if configuration.physicalOutputMode == .triAmp {
+            let upper = configuration.upperFrequencyHz ?? .nan
+            guard upper.isFinite, BassManagementConfiguration.speakerFrequencyRange.contains(upper),
+                  upper > configuration.frequencyHz else {
+                throw BassManagementConfigurationError.invalidUpperFrequency(upper)
+            }
+        }
+        if physicalSpeakerBusRoutingActive, lifecycle.state != .idle, configuration != bassManagementConfiguration {
+            throw BassManagementConfigurationError.physicalCrossoverChangeRequiresIdle
+        }
         if let session = transportSession {
             var graph = try stereoEQConfiguration.makeGraphSnapshot(
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
-                bassManagementConfiguration: configuration,
+                bassManagementConfiguration: renderBassManagementConfiguration(configuration),
                 dynamicsConfiguration: dynamicsConfiguration,
                 playbackConfiguration: playbackControlConfiguration,
                 masterGainLinear: currentMasterSoftwareGain
@@ -1351,7 +1500,7 @@ final class AudioIOEngine: ObservableObject {
             var graph = try stereoEQConfiguration.makeGraphSnapshot(
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
-                bassManagementConfiguration: bassManagementConfiguration,
+                bassManagementConfiguration: renderBassManagementConfiguration(),
                 dynamicsConfiguration: configuration,
                 playbackConfiguration: playbackControlConfiguration,
                 masterGainLinear: currentMasterSoftwareGain
@@ -1469,7 +1618,7 @@ final class AudioIOEngine: ObservableObject {
             var graph = try stereoEQConfiguration.makeGraphSnapshot(
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
-                bassManagementConfiguration: bassManagementConfiguration,
+                bassManagementConfiguration: renderBassManagementConfiguration(),
                 dynamicsConfiguration: dynamicsConfiguration,
                 playbackConfiguration: playbackControlConfiguration
             )
@@ -1600,7 +1749,7 @@ final class AudioIOEngine: ObservableObject {
             var graph = try configuration.makeGraphSnapshot(
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
-                bassManagementConfiguration: bassManagementConfiguration,
+                bassManagementConfiguration: renderBassManagementConfiguration(),
                 dynamicsConfiguration: dynamicsConfiguration,
                 playbackConfiguration: playbackControlConfiguration,
                 masterGainLinear: currentMasterSoftwareGain
@@ -1662,7 +1811,7 @@ final class AudioIOEngine: ObservableObject {
             var graph = try stereoEQConfiguration.makeGraphSnapshot(
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
-                bassManagementConfiguration: bassManagementConfiguration,
+                bassManagementConfiguration: renderBassManagementConfiguration(),
                 dynamicsConfiguration: dynamicsConfiguration,
                 playbackConfiguration: configuration,
                 masterGainLinear: currentMasterSoftwareGain
@@ -1755,7 +1904,7 @@ final class AudioIOEngine: ObservableObject {
             var graph = try stereoEQConfiguration.makeGraphSnapshot(
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
-                bassManagementConfiguration: bassManagementConfiguration,
+                bassManagementConfiguration: renderBassManagementConfiguration(),
                 dynamicsConfiguration: dynamicsConfiguration,
                 playbackConfiguration: playbackControlConfiguration,
                 masterGainLinear: newSoftwareGain
@@ -1803,7 +1952,7 @@ final class AudioIOEngine: ObservableObject {
             var graph = try stereoEQConfiguration.makeGraphSnapshot(
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
-                bassManagementConfiguration: bassManagementConfiguration,
+                bassManagementConfiguration: renderBassManagementConfiguration(),
                 dynamicsConfiguration: dynamicsConfiguration,
                 playbackConfiguration: playbackControlConfiguration,
                 masterGainLinear: newGain
@@ -1862,7 +2011,7 @@ final class AudioIOEngine: ObservableObject {
             var graph = try stereoEQConfiguration.makeGraphSnapshot(
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: configuration,
-                bassManagementConfiguration: bassManagementConfiguration,
+                bassManagementConfiguration: renderBassManagementConfiguration(),
                 dynamicsConfiguration: dynamicsConfiguration,
                 playbackConfiguration: playbackControlConfiguration,
                 masterGainLinear: currentMasterSoftwareGain
@@ -1895,7 +2044,7 @@ final class AudioIOEngine: ObservableObject {
             var graph = try stereoEQConfiguration.makeGraphSnapshot(
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
-                bassManagementConfiguration: bassManagementConfiguration,
+                bassManagementConfiguration: renderBassManagementConfiguration(),
                 dynamicsConfiguration: dynamicsConfiguration,
                 playbackConfiguration: playbackControlConfiguration,
                 masterGainLinear: currentMasterSoftwareGain
@@ -1954,7 +2103,7 @@ final class AudioIOEngine: ObservableObject {
             var graph = try stereoEQConfiguration.makeGraphSnapshot(
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: gainConfiguration,
-                bassManagementConfiguration: bassManagementConfiguration,
+                bassManagementConfiguration: renderBassManagementConfiguration(),
                 dynamicsConfiguration: dynamicsConfiguration,
                 playbackConfiguration: playbackControlConfiguration,
                 masterGainLinear: currentMasterSoftwareGain
@@ -2334,7 +2483,60 @@ final class AudioIOEngine: ObservableObject {
     }
 
     private func buildTransport(output: AudioOutputDevice) throws {
-        let session = try CoreAudioTransportSession(selectedOutput: output)
+        let sameDeviceOutputPlan: SameDeviceOutputRoutePlan?
+        let aggregateDeviceOutputPlan: AggregateDeviceOutputRoutePlan?
+        if let routing = multiOutputRoutingConfiguration, routing.enabled {
+            if routing.usesMultiplePhysicalDevices {
+                let plan = try routing.makeAggregateDevicePlan(
+                    availableDevices: outputDevices,
+                    sampleRate: output.nominalSampleRate
+                )
+                try plan.validateForC3LiveTransport(selectedOutputUID: output.uid)
+                aggregateDeviceOutputPlan = plan
+                sameDeviceOutputPlan = nil
+            } else {
+                let plan = try routing.makeSameDevicePlan(
+                    availableDevices: outputDevices,
+                    sampleRate: output.nominalSampleRate
+                )
+                try plan.validateForC2bLiveTransport(selectedOutputUID: output.uid)
+                sameDeviceOutputPlan = plan
+                aggregateDeviceOutputPlan = nil
+            }
+        } else {
+            sameDeviceOutputPlan = nil
+            aggregateDeviceOutputPlan = nil
+        }
+        let speakerCrossoverMode: SpeakerCrossoverMode?
+        let speakerBusSplitterSnapshot: N60SpeakerBusSplitterSnapshot?
+        if physicalSpeakerBusRoutingActive {
+            speakerCrossoverMode = bassManagementConfiguration.physicalOutputMode
+            speakerBusSplitterSnapshot = try bassManagementConfiguration.makeSpeakerBusSplitterSnapshot(
+                sampleRate: output.nominalSampleRate
+            )
+        } else {
+            speakerCrossoverMode = nil
+            speakerBusSplitterSnapshot = nil
+        }
+        if let plan = sameDeviceOutputPlan {
+            try plan.validateForC4LiveTransport(
+                selectedOutputUID: output.uid,
+                crossoverMode: speakerCrossoverMode
+            )
+        }
+        if let plan = aggregateDeviceOutputPlan {
+            try plan.validateForC4LiveTransport(
+                selectedOutputUID: output.uid,
+                crossoverMode: speakerCrossoverMode
+            )
+        }
+        let session = try CoreAudioTransportSession(
+            selectedOutput: output,
+            sameDeviceOutputPlan: sameDeviceOutputPlan,
+            aggregateDeviceOutputPlan: aggregateDeviceOutputPlan,
+            speakerCrossoverMode: speakerCrossoverMode,
+            speakerBusSplitterSnapshot: speakerBusSplitterSnapshot
+        )
         activeEQFIRProgram = nil
         nextEQFIRProgramSlot = 0
         activeRoomCorrectionProgram = nil
@@ -2344,7 +2546,7 @@ final class AudioIOEngine: ObservableObject {
         var graph = try stereoEQConfiguration.makeGraphSnapshot(
             sampleRate: session.outputFormat.sampleRate,
             gainConfiguration: gainConfiguration,
-            bassManagementConfiguration: bassManagementConfiguration,
+            bassManagementConfiguration: renderBassManagementConfiguration(),
             dynamicsConfiguration: dynamicsConfiguration,
             playbackConfiguration: playbackControlConfiguration
         )

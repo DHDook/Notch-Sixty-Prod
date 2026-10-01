@@ -199,6 +199,159 @@ static inline bool N60CrossoverSnapshotSetSubPhaseAlignment(
     return true;
 }
 
+
+typedef enum {
+    N60SpeakerCrossoverModeMainsSub = 0,
+    N60SpeakerCrossoverModeBiAmp = 1,
+    N60SpeakerCrossoverModeTriAmp = 2,
+} N60SpeakerCrossoverMode;
+
+typedef struct {
+    bool enabled;
+    N60SpeakerCrossoverMode mode;
+    double lowerFrequencyHz;
+    N60CrossoverTopology lowerTopology;
+    double upperFrequencyHz;
+    N60CrossoverTopology upperTopology;
+    float subGainLinear;
+    bool subPolarityInverted;
+    bool subPhaseAlignmentEnabled;
+    double subPhaseAlignmentFrequencyHz;
+    double subPhaseAlignmentQ;
+    N60BiquadCoefficients subPhaseAlignmentAllPass;
+    uint32_t lowerSectionCount;
+    uint32_t upperSectionCount;
+    N60BiquadCoefficients lowerLowPass[N60_MAX_CROSSOVER_SECTIONS];
+    N60BiquadCoefficients lowerHighPass[N60_MAX_CROSSOVER_SECTIONS];
+    N60BiquadCoefficients upperLowPass[N60_MAX_CROSSOVER_SECTIONS];
+    N60BiquadCoefficients upperHighPass[N60_MAX_CROSSOVER_SECTIONS];
+} N60SpeakerBusSplitterSnapshot;
+
+static inline N60SpeakerBusSplitterSnapshot N60SpeakerBusSplitterSnapshotMakeBypassed(void) {
+    N60SpeakerBusSplitterSnapshot snapshot = {0};
+    snapshot.enabled = false;
+    snapshot.mode = N60SpeakerCrossoverModeMainsSub;
+    snapshot.lowerFrequencyHz = 80.0;
+    snapshot.lowerTopology = N60CrossoverTopologyLinkwitzRiley24;
+    snapshot.upperFrequencyHz = 2000.0;
+    snapshot.upperTopology = N60CrossoverTopologyLinkwitzRiley24;
+    snapshot.subGainLinear = 1.0f;
+    snapshot.subPhaseAlignmentFrequencyHz = 80.0;
+    snapshot.subPhaseAlignmentQ = 0.7;
+    snapshot.subPhaseAlignmentAllPass = N60BiquadCoefficientsMakeIdentity();
+    for (uint32_t index = 0; index < N60_MAX_CROSSOVER_SECTIONS; ++index) {
+        snapshot.lowerLowPass[index] = N60BiquadCoefficientsMakeIdentity();
+        snapshot.lowerHighPass[index] = N60BiquadCoefficientsMakeIdentity();
+        snapshot.upperLowPass[index] = N60BiquadCoefficientsMakeIdentity();
+        snapshot.upperHighPass[index] = N60BiquadCoefficientsMakeIdentity();
+    }
+    return snapshot;
+}
+
+// Control-plane only. Physical speaker crossover filters are intentionally
+// designed after the shared stereo DSP graph. The realtime bridge consumes only
+// this immutable coefficient snapshot and fixed preallocated filter state.
+static inline bool N60SpeakerBusSplitterSnapshotMake(
+    double sampleRate,
+    N60SpeakerCrossoverMode mode,
+    double lowerFrequencyHz,
+    N60CrossoverTopology lowerTopology,
+    double upperFrequencyHz,
+    N60CrossoverTopology upperTopology,
+    float subGainLinear,
+    bool subPolarityInverted,
+    bool subPhaseAlignmentEnabled,
+    double subPhaseAlignmentFrequencyHz,
+    double subPhaseAlignmentQ,
+    N60SpeakerBusSplitterSnapshot * _Nonnull snapshot
+) {
+    if (snapshot == NULL
+        || !isfinite(sampleRate) || sampleRate <= 0.0
+        || !isfinite(lowerFrequencyHz) || lowerFrequencyHz <= 0.0
+        || lowerFrequencyHz >= sampleRate * 0.5
+        || !isfinite(subGainLinear) || subGainLinear < 0.0f
+        || mode < N60SpeakerCrossoverModeMainsSub
+        || mode > N60SpeakerCrossoverModeTriAmp) {
+        return false;
+    }
+    if (mode == N60SpeakerCrossoverModeTriAmp
+        && (!isfinite(upperFrequencyHz)
+            || upperFrequencyHz <= lowerFrequencyHz
+            || upperFrequencyHz >= sampleRate * 0.5)) {
+        return false;
+    }
+    if (mode == N60SpeakerCrossoverModeMainsSub
+        && (!isfinite(subPhaseAlignmentFrequencyHz)
+            || subPhaseAlignmentFrequencyHz <= 0.0
+            || subPhaseAlignmentFrequencyHz >= sampleRate * 0.5
+            || !isfinite(subPhaseAlignmentQ)
+            || subPhaseAlignmentQ <= 0.0)) {
+        return false;
+    }
+
+    double lowerQ[N60_MAX_CROSSOVER_SECTIONS] = {0};
+    uint32_t lowerCount = 0;
+    if (!N60CrossoverTopologyQValues(lowerTopology, lowerQ, &lowerCount)) return false;
+
+    N60SpeakerBusSplitterSnapshot designed = N60SpeakerBusSplitterSnapshotMakeBypassed();
+    designed.enabled = true;
+    designed.mode = mode;
+    designed.lowerFrequencyHz = lowerFrequencyHz;
+    designed.lowerTopology = lowerTopology;
+    designed.upperFrequencyHz = upperFrequencyHz;
+    designed.upperTopology = upperTopology;
+    designed.subGainLinear = subGainLinear;
+    designed.subPolarityInverted = subPolarityInverted;
+    designed.subPhaseAlignmentEnabled = mode == N60SpeakerCrossoverModeMainsSub
+        && subPhaseAlignmentEnabled;
+    designed.subPhaseAlignmentFrequencyHz = subPhaseAlignmentFrequencyHz;
+    designed.subPhaseAlignmentQ = subPhaseAlignmentQ;
+    designed.lowerSectionCount = lowerCount;
+
+    for (uint32_t index = 0; index < lowerCount; ++index) {
+        if (!N60BiquadDesign(
+                N60BiquadFilterTypeLowPass, sampleRate, lowerFrequencyHz,
+                0.0, lowerQ[index], &designed.lowerLowPass[index])
+            || !N60BiquadDesign(
+                N60BiquadFilterTypeHighPass, sampleRate, lowerFrequencyHz,
+                0.0, lowerQ[index], &designed.lowerHighPass[index])) {
+            return false;
+        }
+    }
+
+    if (mode == N60SpeakerCrossoverModeTriAmp) {
+        double upperQ[N60_MAX_CROSSOVER_SECTIONS] = {0};
+        uint32_t upperCount = 0;
+        if (!N60CrossoverTopologyQValues(upperTopology, upperQ, &upperCount)) return false;
+        designed.upperSectionCount = upperCount;
+        for (uint32_t index = 0; index < upperCount; ++index) {
+            if (!N60BiquadDesign(
+                    N60BiquadFilterTypeLowPass, sampleRate, upperFrequencyHz,
+                    0.0, upperQ[index], &designed.upperLowPass[index])
+                || !N60BiquadDesign(
+                    N60BiquadFilterTypeHighPass, sampleRate, upperFrequencyHz,
+                    0.0, upperQ[index], &designed.upperHighPass[index])) {
+                return false;
+            }
+        }
+    }
+
+    if (designed.subPhaseAlignmentEnabled) {
+        if (!N60BiquadDesign(
+                N60BiquadFilterTypeAllPass,
+                sampleRate,
+                subPhaseAlignmentFrequencyHz,
+                0.0,
+                subPhaseAlignmentQ,
+                &designed.subPhaseAlignmentAllPass)) {
+            return false;
+        }
+    }
+
+    *snapshot = designed;
+    return true;
+}
+
 #ifdef __cplusplus
 }
 #endif

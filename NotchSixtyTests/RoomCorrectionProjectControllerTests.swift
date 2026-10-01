@@ -668,4 +668,721 @@ final class RoomCorrectionProjectControllerTests: XCTestCase {
         XCTAssertEqual(profiles.selectedSystemProfile?.state, beforeProfile)
     }
 
+
+    func testProfileBassManagementChangesOnlyPlaybackSystemAndRestoresWithRoomCorrectionIntact() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let profiles = fixture.profiles
+        let beforeContent = profiles.captureContentState()
+
+        let roomFilter = RoomCorrectionFilter(
+            name: "PR41 Room Fixture",
+            sampleRate: nil,
+            leftTaps: [0.5, 0.5],
+            rightTaps: [0.4, 0.6],
+            declaredLatencyFrames: 0
+        )
+        let room = RoomCorrectionConfiguration(enabled: true, filter: roomFilter)
+        let summary = RoomCorrectionCalibrationSummary(
+            projectID: UUID(),
+            activeDesignID: UUID(),
+            designDate: Date(timeIntervalSince1970: 410),
+            positionCount: 3,
+            correctionLowHz: 80,
+            correctionHighHz: 12_000,
+            targetName: "PR41 Fixture Target",
+            smoothingOctaves: 1.0 / 6.0,
+            maximumBoostDB: 4,
+            maximumCutDB: 8,
+            recommendedHeadroomDB: 2,
+            algorithmVersion: "pr41-fixture"
+        )
+        try profiles.replaceSelectedSystemRoomCorrection(room, calibrationSummary: summary)
+
+        var crossover = BassManagementConfiguration()
+        crossover.enabled = true
+        crossover.frequencyHz = 92
+        crossover.topology = .linkwitzRiley48
+        crossover.monitorMode = .mainsOnly
+        crossover.subGainDB = 2.5
+        crossover.subPolarityInverted = true
+        crossover.subPhaseAlignmentEnabled = true
+        crossover.subPhaseAlignmentFrequencyHz = 88
+        crossover.subPhaseAlignmentQ = 0.9
+
+        try profiles.replaceSelectedSystemBassManagement(crossover)
+        XCTAssertEqual(profiles.engine.bassManagementConfiguration, crossover)
+        XCTAssertEqual(profiles.selectedSystemProfile?.state.bassManagement, crossover)
+        XCTAssertEqual(profiles.engine.roomCorrectionConfiguration, room)
+        XCTAssertEqual(profiles.selectedSystemProfile?.state.roomCorrection, room)
+        XCTAssertEqual(profiles.selectedSystemProfile?.state.roomCorrectionCalibration, summary)
+        XCTAssertEqual(profiles.captureContentState(), beforeContent)
+
+        try profiles.setSelectedSystemBassManagementEnabled(false)
+        XCTAssertFalse(profiles.engine.bassManagementConfiguration.enabled)
+        XCTAssertEqual(profiles.engine.bassManagementConfiguration.frequencyHz, 92, accuracy: 0.000_001)
+        XCTAssertEqual(profiles.selectedSystemProfile?.state.roomCorrectionCalibration, summary)
+        XCTAssertEqual(profiles.captureContentState(), beforeContent)
+
+        try profiles.setSelectedSystemBassManagementEnabled(true)
+        XCTAssertEqual(profiles.engine.bassManagementConfiguration, crossover)
+        XCTAssertEqual(profiles.captureContentState(), beforeContent)
+
+        let restoredEngine = AudioIOEngine(deviceCatalog: OutputCatalogFixture())
+        let restoredProfiles = ProductProfileController(
+            engine: restoredEngine,
+            storageURL: fixture.root.appendingPathComponent("profiles-v1.json")
+        )
+        restoredProfiles.restoreSelectedLayers()
+        XCTAssertEqual(restoredEngine.bassManagementConfiguration, crossover)
+        XCTAssertEqual(restoredProfiles.selectedSystemProfile?.state.bassManagement, crossover)
+        XCTAssertEqual(restoredEngine.roomCorrectionConfiguration, room)
+        XCTAssertEqual(restoredProfiles.selectedSystemProfile?.state.roomCorrectionCalibration, summary)
+    }
+
+    func testProfileBassManagementPersistenceFailureRollsBackEngineAndProfile() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NotchSixty-PR41-Crossover-Rollback-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let storageDirectory = root.appendingPathComponent("profiles", isDirectory: true)
+        let storageURL = storageDirectory.appendingPathComponent("profiles-v1.json")
+        let engine = AudioIOEngine(deviceCatalog: OutputCatalogFixture())
+        let profiles = ProductProfileController(engine: engine, storageURL: storageURL)
+        let beforeEngine = engine.bassManagementConfiguration
+        let beforeProfile = try XCTUnwrap(profiles.selectedSystemProfile).state
+
+        try FileManager.default.removeItem(at: storageDirectory)
+        try Data("not-a-directory".utf8).write(to: storageDirectory)
+
+        var crossover = BassManagementConfiguration()
+        crossover.enabled = true
+        crossover.frequencyHz = 110
+        crossover.subGainDB = 1.5
+
+        XCTAssertThrowsError(try profiles.replaceSelectedSystemBassManagement(crossover))
+        XCTAssertEqual(engine.bassManagementConfiguration, beforeEngine)
+        XCTAssertEqual(profiles.selectedSystemProfile?.state, beforeProfile)
+    }
+
+    func testMultiOutputRoutingSeparatesLogicalBusFromPhysicalDestination() throws {
+        let sharedSubBus = SpeakerOutputBus.subMono
+        let routes = [
+            SpeakerOutputRoute(
+                name: "Left Main",
+                bus: .leftFullRange,
+                destination: PhysicalOutputEndpoint(deviceUID: "dac-a", channelIndex: 0)
+            ),
+            SpeakerOutputRoute(
+                name: "Right Main",
+                bus: .rightFullRange,
+                destination: PhysicalOutputEndpoint(deviceUID: "dac-a", channelIndex: 1)
+            ),
+            SpeakerOutputRoute(
+                name: "Sub A",
+                bus: sharedSubBus,
+                destination: PhysicalOutputEndpoint(deviceUID: "dac-b", channelIndex: 0)
+            ),
+            SpeakerOutputRoute(
+                name: "Sub B",
+                bus: sharedSubBus,
+                destination: PhysicalOutputEndpoint(deviceUID: "dac-b", channelIndex: 1)
+            ),
+        ]
+        let configuration = MultiOutputRoutingConfiguration(
+            enabled: true,
+            routes: routes,
+            synchronizationMode: .automatic,
+            referenceDeviceUID: "dac-a"
+        )
+
+        XCTAssertNoThrow(try configuration.validateStructure())
+        XCTAssertTrue(configuration.usesMultiplePhysicalDevices)
+        XCTAssertEqual(configuration.requiredDeviceUIDs, Set(["dac-a", "dac-b"]))
+        XCTAssertEqual(configuration.resolvedReferenceDeviceUID, "dac-a")
+        XCTAssertEqual(configuration.enabledRoutes.filter { $0.bus == .subMono }.count, 2,
+                       "One logical bus may intentionally feed multiple physical destinations")
+
+        var duplicate = configuration
+        duplicate.routes[3].destination = duplicate.routes[2].destination
+        XCTAssertThrowsError(try duplicate.validateStructure()) { error in
+            XCTAssertEqual(
+                error as? MultiOutputRoutingError,
+                .duplicateDestination(deviceUID: "dac-b", channelIndex: 0)
+            )
+        }
+    }
+
+    func testMultiOutputRoutingValidatesPhysicalCapacityAndNativeRate() throws {
+        let deviceA = AudioOutputDevice(
+            deviceID: 101,
+            uid: "dac-a",
+            name: "Four Channel DAC",
+            nominalSampleRate: 96_000,
+            availableSampleRateRanges: [AudioSampleRateRange(minimum: 44_100, maximum: 192_000)],
+            outputChannelCount: 4
+        )
+        let deviceB = AudioOutputDevice(
+            deviceID: 202,
+            uid: "dac-b",
+            name: "Stereo DAC",
+            nominalSampleRate: 96_000,
+            availableSampleRateRanges: [AudioSampleRateRange(minimum: 48_000, maximum: 96_000)],
+            outputChannelCount: 2
+        )
+        var configuration = MultiOutputRoutingConfiguration(
+            enabled: true,
+            routes: [
+                SpeakerOutputRoute(
+                    name: "Left",
+                    bus: .leftFullRange,
+                    destination: PhysicalOutputEndpoint(deviceUID: "dac-a", channelIndex: 2)
+                ),
+                SpeakerOutputRoute(
+                    name: "Right",
+                    bus: .rightFullRange,
+                    destination: PhysicalOutputEndpoint(deviceUID: "dac-a", channelIndex: 3)
+                ),
+                SpeakerOutputRoute(
+                    name: "Sub",
+                    bus: .subMono,
+                    destination: PhysicalOutputEndpoint(deviceUID: "dac-b", channelIndex: 0)
+                ),
+            ],
+            synchronizationMode: .aggregateDevice,
+            referenceDeviceUID: "dac-a"
+        )
+
+        XCTAssertNoThrow(try configuration.validate(availableDevices: [deviceA, deviceB], sampleRate: 96_000))
+
+        configuration.routes[2].destination.channelIndex = 2
+        XCTAssertThrowsError(try configuration.validate(availableDevices: [deviceA, deviceB], sampleRate: 96_000)) { error in
+            XCTAssertEqual(
+                error as? MultiOutputRoutingError,
+                .outputChannelUnavailable(deviceUID: "dac-b", channelIndex: 2, channelCount: 2)
+            )
+        }
+
+        configuration.routes[2].destination.channelIndex = 0
+        XCTAssertThrowsError(try configuration.validate(availableDevices: [deviceA, deviceB], sampleRate: 192_000)) { error in
+            XCTAssertEqual(
+                error as? MultiOutputRoutingError,
+                .sampleRateUnsupported(deviceUID: "dac-b", sampleRate: 192_000)
+            )
+        }
+    }
+
+    func testPlaybackSystemPersistsMultiOutputRoutingWithoutMutatingDSPOrLegacySelectedOutput() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let profiles = fixture.profiles
+        let beforeContent = profiles.captureContentState()
+        let beforeBass = profiles.engine.bassManagementConfiguration
+        let beforeRoom = profiles.engine.roomCorrectionConfiguration
+        let beforeSelectedOutput = profiles.engine.routeConfiguration.selectedOutputUID
+
+        let routing = MultiOutputRoutingConfiguration(
+            enabled: true,
+            routes: [
+                SpeakerOutputRoute(
+                    name: "Left Main",
+                    bus: .leftFullRange,
+                    destination: PhysicalOutputEndpoint(deviceUID: "main-dac", channelIndex: 0)
+                ),
+                SpeakerOutputRoute(
+                    name: "Right Main",
+                    bus: .rightFullRange,
+                    destination: PhysicalOutputEndpoint(deviceUID: "main-dac", channelIndex: 1)
+                ),
+                SpeakerOutputRoute(
+                    name: "Subwoofer",
+                    bus: .subMono,
+                    destination: PhysicalOutputEndpoint(deviceUID: "sub-dac", channelIndex: 0)
+                ),
+            ],
+            synchronizationMode: .softwarePLL,
+            referenceDeviceUID: "main-dac"
+        )
+
+        try profiles.replaceSelectedSystemOutputRouting(routing)
+        XCTAssertEqual(profiles.selectedSystemProfile?.state.outputRouting, routing)
+        XCTAssertEqual(profiles.selectedSystemOutputRouting, routing)
+        XCTAssertEqual(profiles.engine.routeConfiguration.selectedOutputUID, beforeSelectedOutput,
+                       "C1 stores routing intent only; transport activation comes in the next slice")
+        XCTAssertEqual(profiles.engine.bassManagementConfiguration, beforeBass)
+        XCTAssertEqual(profiles.engine.roomCorrectionConfiguration, beforeRoom)
+        XCTAssertEqual(profiles.captureContentState(), beforeContent)
+
+        let restoredEngine = AudioIOEngine(deviceCatalog: OutputCatalogFixture())
+        let restoredProfiles = ProductProfileController(
+            engine: restoredEngine,
+            storageURL: fixture.root.appendingPathComponent("profiles-v1.json")
+        )
+        XCTAssertEqual(restoredProfiles.selectedSystemProfile?.state.outputRouting, routing)
+        XCTAssertEqual(restoredProfiles.selectedSystemOutputRouting, routing)
+    }
+
+    func testPlaybackSystemRoutingPersistenceFailureRollsBackProfile() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NotchSixty-PR41-Routing-Rollback-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let storageDirectory = root.appendingPathComponent("profiles", isDirectory: true)
+        let storageURL = storageDirectory.appendingPathComponent("profiles-v1.json")
+        let engine = AudioIOEngine(deviceCatalog: OutputCatalogFixture())
+        let profiles = ProductProfileController(engine: engine, storageURL: storageURL)
+        let beforeProfile = try XCTUnwrap(profiles.selectedSystemProfile).state
+
+        try FileManager.default.removeItem(at: storageDirectory)
+        try Data("not-a-directory".utf8).write(to: storageDirectory)
+
+        let routing = MultiOutputRoutingConfiguration(
+            enabled: true,
+            routes: [
+                SpeakerOutputRoute(
+                    name: "Left",
+                    bus: .leftFullRange,
+                    destination: PhysicalOutputEndpoint(deviceUID: "dac", channelIndex: 0)
+                ),
+                SpeakerOutputRoute(
+                    name: "Right",
+                    bus: .rightFullRange,
+                    destination: PhysicalOutputEndpoint(deviceUID: "dac", channelIndex: 1)
+                ),
+            ]
+        )
+
+        XCTAssertThrowsError(try profiles.replaceSelectedSystemOutputRouting(routing))
+        XCTAssertEqual(profiles.selectedSystemProfile?.state, beforeProfile)
+    }
+
+    func testSameDeviceRoutePlanUsesOneClockDomainAndPreservesEnabledRouteOrder() throws {
+        let device = AudioOutputDevice(
+            deviceID: 303,
+            uid: "eight-channel-dac",
+            name: "Eight Channel DAC",
+            nominalSampleRate: 96_000,
+            availableSampleRateRanges: [AudioSampleRateRange(minimum: 44_100, maximum: 192_000)],
+            outputChannelCount: 8
+        )
+        let disabled = SpeakerOutputRoute(
+            name: "Unused",
+            bus: .leftHigh,
+            destination: PhysicalOutputEndpoint(deviceUID: device.uid, channelIndex: 7),
+            enabled: false
+        )
+        let enabledRoutes = [
+            SpeakerOutputRoute(
+                name: "Left Main",
+                bus: .leftFullRange,
+                destination: PhysicalOutputEndpoint(deviceUID: device.uid, channelIndex: 2)
+            ),
+            SpeakerOutputRoute(
+                name: "Right Main",
+                bus: .rightFullRange,
+                destination: PhysicalOutputEndpoint(deviceUID: device.uid, channelIndex: 3)
+            ),
+            SpeakerOutputRoute(
+                name: "Sub",
+                bus: .subMono,
+                destination: PhysicalOutputEndpoint(deviceUID: device.uid, channelIndex: 6)
+            ),
+        ]
+        let configuration = MultiOutputRoutingConfiguration(
+            enabled: true,
+            routes: [enabledRoutes[0], disabled, enabledRoutes[1], enabledRoutes[2]],
+            synchronizationMode: .softwarePLL,
+            referenceDeviceUID: device.uid
+        )
+
+        let plan = try configuration.makeSameDevicePlan(
+            availableDevices: [device],
+            sampleRate: 96_000
+        )
+        XCTAssertEqual(plan.deviceUID, device.uid)
+        XCTAssertEqual(plan.physicalChannelCount, 8)
+        XCTAssertEqual(plan.routes, enabledRoutes)
+        XCTAssertEqual(plan.requiredPhysicalChannelCount, 7)
+    }
+
+    func testSameDeviceRoutePlanRejectsDisabledAndMultiDeviceConfigurations() throws {
+        let first = AudioOutputDevice(
+            deviceID: 401,
+            uid: "dac-a",
+            name: "DAC A",
+            nominalSampleRate: 48_000,
+            availableSampleRateRanges: [AudioSampleRateRange(minimum: 48_000, maximum: 96_000)],
+            outputChannelCount: 4
+        )
+        let second = AudioOutputDevice(
+            deviceID: 402,
+            uid: "dac-b",
+            name: "DAC B",
+            nominalSampleRate: 48_000,
+            availableSampleRateRanges: [AudioSampleRateRange(minimum: 48_000, maximum: 96_000)],
+            outputChannelCount: 2
+        )
+        let routes = [
+            SpeakerOutputRoute(
+                name: "Left",
+                bus: .leftFullRange,
+                destination: PhysicalOutputEndpoint(deviceUID: first.uid, channelIndex: 0)
+            ),
+            SpeakerOutputRoute(
+                name: "Right",
+                bus: .rightFullRange,
+                destination: PhysicalOutputEndpoint(deviceUID: second.uid, channelIndex: 0)
+            ),
+        ]
+
+        let disabled = MultiOutputRoutingConfiguration(enabled: false, routes: routes)
+        XCTAssertThrowsError(
+            try disabled.makeSameDevicePlan(availableDevices: [first, second], sampleRate: 48_000)
+        ) { error in
+            XCTAssertEqual(error as? MultiOutputRoutingError, .sameDeviceTransportRequiresEnabledRouting)
+        }
+
+        let multiple = MultiOutputRoutingConfiguration(enabled: true, routes: routes)
+        XCTAssertThrowsError(
+            try multiple.makeSameDevicePlan(availableDevices: [first, second], sampleRate: 48_000)
+        ) { error in
+            XCTAssertEqual(
+                error as? MultiOutputRoutingError,
+                .sameDeviceTransportRequiresSingleDevice(["dac-a", "dac-b"])
+            )
+        }
+    }
+
+    func testC2bLiveTransportAcceptsOnlyPostDSPFullRangeBuses() throws {
+        let fullRangePlan = SameDeviceOutputRoutePlan(
+            deviceUID: "dac",
+            physicalChannelCount: 4,
+            routes: [
+                SpeakerOutputRoute(
+                    name: "Left A",
+                    bus: .leftFullRange,
+                    destination: PhysicalOutputEndpoint(deviceUID: "dac", channelIndex: 0)
+                ),
+                SpeakerOutputRoute(
+                    name: "Right A",
+                    bus: .rightFullRange,
+                    destination: PhysicalOutputEndpoint(deviceUID: "dac", channelIndex: 1)
+                ),
+            ]
+        )
+        XCTAssertNoThrow(try fullRangePlan.validateForC2bLiveTransport(selectedOutputUID: "dac"))
+        XCTAssertThrowsError(try fullRangePlan.validateForC2bLiveTransport(selectedOutputUID: "other")) { error in
+            XCTAssertEqual(
+                error as? MultiOutputRoutingError,
+                .liveTransportOutputMismatch(selected: "other", routed: "dac")
+            )
+        }
+
+        var subPlan = fullRangePlan
+        subPlan = SameDeviceOutputRoutePlan(
+            deviceUID: subPlan.deviceUID,
+            physicalChannelCount: subPlan.physicalChannelCount,
+            routes: [
+                subPlan.routes[0],
+                SpeakerOutputRoute(
+                    name: "Sub",
+                    bus: .subMono,
+                    destination: PhysicalOutputEndpoint(deviceUID: "dac", channelIndex: 2)
+                ),
+            ]
+        )
+        XCTAssertThrowsError(try subPlan.validateForC2bLiveTransport(selectedOutputUID: "dac")) { error in
+            XCTAssertEqual(error as? MultiOutputRoutingError, .liveTransportBusUnavailable(.subMono))
+        }
+    }
+
+    func testPlaybackSystemRoutingTransactionUpdatesEngineIntentAndRollsBackTogether() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let routing = MultiOutputRoutingConfiguration(
+            enabled: true,
+            routes: [
+                SpeakerOutputRoute(
+                    name: "Left",
+                    bus: .leftFullRange,
+                    destination: PhysicalOutputEndpoint(deviceUID: "dac", channelIndex: 0)
+                ),
+                SpeakerOutputRoute(
+                    name: "Right",
+                    bus: .rightFullRange,
+                    destination: PhysicalOutputEndpoint(deviceUID: "dac", channelIndex: 1)
+                ),
+            ]
+        )
+        try fixture.profiles.replaceSelectedSystemOutputRouting(routing)
+        XCTAssertEqual(fixture.profiles.engine.multiOutputRoutingConfiguration, routing)
+        XCTAssertEqual(fixture.profiles.selectedSystemProfile?.state.outputRouting, routing)
+        XCTAssertEqual(fixture.profiles.captureSystemState().outputRouting, routing)
+    }
+
+    func testAggregateDevicePlanFlattensPhysicalChannelsReferenceFirst() throws {
+        let main = AudioOutputDevice(
+            deviceID: 701,
+            uid: "main-dac",
+            name: "Main Four Channel",
+            nominalSampleRate: 96_000,
+            availableSampleRateRanges: [AudioSampleRateRange(minimum: 44_100, maximum: 192_000)],
+            outputChannelCount: 4
+        )
+        let aux = AudioOutputDevice(
+            deviceID: 702,
+            uid: "aux-dac",
+            name: "Aux Stereo",
+            nominalSampleRate: 96_000,
+            availableSampleRateRanges: [AudioSampleRateRange(minimum: 48_000, maximum: 96_000)],
+            outputChannelCount: 2
+        )
+        let third = AudioOutputDevice(
+            deviceID: 703,
+            uid: "third-dac",
+            name: "Third Stereo",
+            nominalSampleRate: 96_000,
+            availableSampleRateRanges: [AudioSampleRateRange(minimum: 48_000, maximum: 96_000)],
+            outputChannelCount: 2
+        )
+        let configuration = MultiOutputRoutingConfiguration(
+            enabled: true,
+            routes: [
+                SpeakerOutputRoute(
+                    name: "Aux Left",
+                    bus: .leftFullRange,
+                    destination: PhysicalOutputEndpoint(deviceUID: aux.uid, channelIndex: 1)
+                ),
+                SpeakerOutputRoute(
+                    name: "Main Left",
+                    bus: .leftFullRange,
+                    destination: PhysicalOutputEndpoint(deviceUID: main.uid, channelIndex: 2)
+                ),
+                SpeakerOutputRoute(
+                    name: "Third Right",
+                    bus: .rightFullRange,
+                    destination: PhysicalOutputEndpoint(deviceUID: third.uid, channelIndex: 0)
+                ),
+                SpeakerOutputRoute(
+                    name: "Main Right",
+                    bus: .rightFullRange,
+                    destination: PhysicalOutputEndpoint(deviceUID: main.uid, channelIndex: 3)
+                ),
+            ],
+            synchronizationMode: .aggregateDevice,
+            referenceDeviceUID: main.uid
+        )
+
+        let plan = try configuration.makeAggregateDevicePlan(
+            availableDevices: [aux, third, main],
+            sampleRate: 96_000
+        )
+        XCTAssertEqual(plan.referenceDeviceUID, main.uid)
+        XCTAssertEqual(plan.orderedDeviceUIDs, [main.uid, aux.uid, third.uid])
+        XCTAssertEqual(plan.devices.map(\.uid), [main.uid, aux.uid, third.uid])
+        XCTAssertEqual(plan.physicalChannelCount, 8)
+        XCTAssertEqual(plan.mappedRoutes.map(\.aggregateChannelIndex), [5, 2, 6, 3])
+        XCTAssertNoThrow(try plan.validateForC3LiveTransport(selectedOutputUID: main.uid))
+        XCTAssertThrowsError(try plan.validateForC3LiveTransport(selectedOutputUID: aux.uid)) { error in
+            XCTAssertEqual(
+                error as? MultiOutputRoutingError,
+                .aggregateReferenceOutputMismatch(selected: aux.uid, reference: main.uid)
+            )
+        }
+    }
+
+    func testAggregateDevicePlanUsesFirstEnabledDeviceWhenReferenceIsAutomatic() throws {
+        let first = AudioOutputDevice(
+            deviceID: 711,
+            uid: "first",
+            name: "First",
+            nominalSampleRate: 48_000,
+            availableSampleRateRanges: [AudioSampleRateRange(minimum: 48_000, maximum: 96_000)],
+            outputChannelCount: 2
+        )
+        let second = AudioOutputDevice(
+            deviceID: 712,
+            uid: "second",
+            name: "Second",
+            nominalSampleRate: 48_000,
+            availableSampleRateRanges: [AudioSampleRateRange(minimum: 48_000, maximum: 96_000)],
+            outputChannelCount: 2
+        )
+        let configuration = MultiOutputRoutingConfiguration(
+            enabled: true,
+            routes: [
+                SpeakerOutputRoute(
+                    name: "Right Secondary",
+                    bus: .rightFullRange,
+                    destination: PhysicalOutputEndpoint(deviceUID: second.uid, channelIndex: 0)
+                ),
+                SpeakerOutputRoute(
+                    name: "Left Primary",
+                    bus: .leftFullRange,
+                    destination: PhysicalOutputEndpoint(deviceUID: first.uid, channelIndex: 0)
+                ),
+            ],
+            synchronizationMode: .automatic
+        )
+        let plan = try configuration.makeAggregateDevicePlan(
+            availableDevices: [first, second],
+            sampleRate: 48_000
+        )
+        XCTAssertEqual(plan.referenceDeviceUID, second.uid)
+        XCTAssertEqual(plan.orderedDeviceUIDs, [second.uid, first.uid])
+        XCTAssertEqual(plan.mappedRoutes.map(\.aggregateChannelIndex), [0, 2])
+    }
+
+    func testAggregateDevicePlanRejectsSoftwarePLLAndNonFullRangeLiveBus() throws {
+        let first = AudioOutputDevice(
+            deviceID: 721,
+            uid: "first",
+            name: "First",
+            nominalSampleRate: 48_000,
+            availableSampleRateRanges: [AudioSampleRateRange(minimum: 48_000, maximum: 96_000)],
+            outputChannelCount: 2
+        )
+        let second = AudioOutputDevice(
+            deviceID: 722,
+            uid: "second",
+            name: "Second",
+            nominalSampleRate: 48_000,
+            availableSampleRateRanges: [AudioSampleRateRange(minimum: 48_000, maximum: 96_000)],
+            outputChannelCount: 2
+        )
+        let routes = [
+            SpeakerOutputRoute(
+                name: "Left",
+                bus: .leftFullRange,
+                destination: PhysicalOutputEndpoint(deviceUID: first.uid, channelIndex: 0)
+            ),
+            SpeakerOutputRoute(
+                name: "Sub",
+                bus: .subMono,
+                destination: PhysicalOutputEndpoint(deviceUID: second.uid, channelIndex: 0)
+            ),
+        ]
+        let pll = MultiOutputRoutingConfiguration(
+            enabled: true,
+            routes: routes,
+            synchronizationMode: .softwarePLL,
+            referenceDeviceUID: first.uid
+        )
+        XCTAssertThrowsError(
+            try pll.makeAggregateDevicePlan(availableDevices: [first, second], sampleRate: 48_000)
+        ) { error in
+            XCTAssertEqual(error as? MultiOutputRoutingError, .softwarePLLSuperseded)
+        }
+
+        let aggregate = MultiOutputRoutingConfiguration(
+            enabled: true,
+            routes: routes,
+            synchronizationMode: .aggregateDevice,
+            referenceDeviceUID: first.uid
+        )
+        let plan = try aggregate.makeAggregateDevicePlan(
+            availableDevices: [first, second],
+            sampleRate: 48_000
+        )
+        XCTAssertThrowsError(try plan.validateForC3LiveTransport(selectedOutputUID: first.uid)) { error in
+            XCTAssertEqual(error as? MultiOutputRoutingError, .liveTransportBusUnavailable(.subMono))
+        }
+    }
+
+    func testPhysicalSpeakerCrossoverDesignsAtNativeRateMatrix() throws {
+        for sampleRate in [44_100.0, 48_000.0, 96_000.0, 192000.0, 384_000.0] {
+            var mainsSub = BassManagementConfiguration()
+            mainsSub.enabled = true
+            mainsSub.physicalOutputMode = .mainsSub
+            mainsSub.frequencyHz = 80
+            mainsSub.topology = .linkwitzRiley24
+            var snapshot = try mainsSub.makeSpeakerBusSplitterSnapshot(sampleRate: sampleRate)
+            XCTAssertTrue(snapshot.enabled)
+            XCTAssertEqual(snapshot.mode, N60SpeakerCrossoverModeMainsSub)
+            XCTAssertEqual(snapshot.lowerSectionCount, 2)
+
+            var biAmp = BassManagementConfiguration()
+            biAmp.enabled = true
+            biAmp.physicalOutputMode = .biAmp
+            biAmp.frequencyHz = 2_000
+            biAmp.topology = .linkwitzRiley48
+            snapshot = try biAmp.makeSpeakerBusSplitterSnapshot(sampleRate: sampleRate)
+            XCTAssertEqual(snapshot.mode, N60SpeakerCrossoverModeBiAmp)
+            XCTAssertEqual(snapshot.lowerSectionCount, 4)
+
+            var triAmp = BassManagementConfiguration()
+            triAmp.enabled = true
+            triAmp.physicalOutputMode = .triAmp
+            triAmp.frequencyHz = 300
+            triAmp.topology = .linkwitzRiley24
+            triAmp.upperFrequencyHz = 3_000
+            triAmp.upperTopology = .linkwitzRiley48
+            snapshot = try triAmp.makeSpeakerBusSplitterSnapshot(sampleRate: sampleRate)
+            XCTAssertEqual(snapshot.mode, N60SpeakerCrossoverModeTriAmp)
+            XCTAssertEqual(snapshot.lowerSectionCount, 2)
+            XCTAssertEqual(snapshot.upperSectionCount, 4)
+        }
+    }
+
+    func testPhysicalSpeakerRouteCompatibilityMatchesTopology() throws {
+        let device = AudioOutputDevice(
+            deviceID: 801,
+            uid: "speaker-dac",
+            name: "Speaker DAC",
+            nominalSampleRate: 96_000,
+            availableSampleRateRanges: [AudioSampleRateRange(minimum: 44_100, maximum: 192_000)],
+            outputChannelCount: 8
+        )
+        func plan(_ buses: [SpeakerOutputBus]) throws -> SameDeviceOutputRoutePlan {
+            let routing = MultiOutputRoutingConfiguration(
+                enabled: true,
+                routes: buses.enumerated().map { index, bus in
+                    SpeakerOutputRoute(
+                        name: bus.displayName,
+                        bus: bus,
+                        destination: PhysicalOutputEndpoint(
+                            deviceUID: device.uid,
+                            channelIndex: UInt32(index)
+                        )
+                    )
+                }
+            )
+            return try routing.makeSameDevicePlan(
+                availableDevices: [device],
+                sampleRate: 96_000
+            )
+        }
+
+        XCTAssertNoThrow(try plan([.leftHigh, .rightHigh, .subMono]).validateForC4LiveTransport(
+            selectedOutputUID: device.uid,
+            crossoverMode: .mainsSub
+        ))
+        XCTAssertNoThrow(try plan([.leftLow, .rightLow, .leftHigh, .rightHigh]).validateForC4LiveTransport(
+            selectedOutputUID: device.uid,
+            crossoverMode: .biAmp
+        ))
+        XCTAssertNoThrow(try plan([.leftLow, .rightLow, .leftMid, .rightMid, .leftHigh, .rightHigh]).validateForC4LiveTransport(
+            selectedOutputUID: device.uid,
+            crossoverMode: .triAmp
+        ))
+        XCTAssertThrowsError(try plan([.leftMid, .rightMid]).validateForC4LiveTransport(
+            selectedOutputUID: device.uid,
+            crossoverMode: .biAmp
+        )) { error in
+            XCTAssertEqual(error as? MultiOutputRoutingError, .liveTransportBusUnavailable(.leftMid))
+        }
+        XCTAssertNoThrow(try plan([.leftFullRange, .rightFullRange]).validateForC4LiveTransport(
+            selectedOutputUID: device.uid,
+            crossoverMode: nil
+        ))
+    }
+
+    func testTriAmpRequiresOrderedUpperCrossover() throws {
+        var configuration = BassManagementConfiguration()
+        configuration.enabled = true
+        configuration.physicalOutputMode = .triAmp
+        configuration.frequencyHz = 2_000
+        configuration.upperFrequencyHz = 1_000
+        XCTAssertThrowsError(try configuration.makeSpeakerBusSplitterSnapshot(sampleRate: 48_000)) { error in
+            XCTAssertEqual(error as? BassManagementConfigurationError, .invalidUpperFrequency(1_000))
+        }
+    }
 }

@@ -6,6 +6,7 @@ import Foundation
 enum CoreAudioOperation: String, Equatable, Sendable {
     case enumerateDevices
     case readOutputStreams
+    case readOutputChannelCount
     case readDeviceUID
     case readDeviceName
     case readNominalSampleRate
@@ -43,8 +44,12 @@ struct AudioStreamFormatDescription: Equatable, Sendable {
         formatID == kAudioFormatLinearPCM && (formatFlags & kAudioFormatFlagIsFloat) != 0
     }
 
+    var isSupportedFloat32TransportFormat: Bool {
+        isFloatPCM && bitsPerChannel == 32 && channelCount > 0
+    }
+
     var isSupportedStereoTransportFormat: Bool {
-        isFloatPCM && channelCount == 2 && bitsPerChannel == 32
+        isSupportedFloat32TransportFormat && channelCount == 2
     }
 }
 
@@ -161,6 +166,9 @@ enum CoreAudioTransportError: Error, LocalizedError, Equatable {
     case ioProcUnavailable(role: String)
     case outputBufferExceedsBridgeCapacity(bufferFrames: UInt32, capacityFrames: UInt32)
     case captureBufferSizeMismatch(capture: UInt32, output: UInt32)
+    case sameDeviceOutputMapCompilationFailed
+    case aggregateDeviceNotReady
+    case speakerBusSplitterConfigurationFailed
 
     var errorDescription: String? {
         switch self {
@@ -188,6 +196,12 @@ enum CoreAudioTransportError: Error, LocalizedError, Equatable {
             return "Startup gate requires \(bufferFrames) buffered frames but realtime bridge capacity is \(capacityFrames) frames."
         case .captureBufferSizeMismatch(let capture, let output):
             return "Tap aggregate callback quantum is \(capture) frames; expected \(output) frames to match the physical output."
+        case .sameDeviceOutputMapCompilationFailed:
+            return "Unable to compile the validated physical output map."
+        case .aggregateDeviceNotReady:
+            return "Core Audio created the private multi-output aggregate device but it did not become ready for IO."
+        case .speakerBusSplitterConfigurationFailed:
+            return "Unable to configure the immutable physical speaker crossover before audio callbacks start."
         }
     }
 }
@@ -350,6 +364,8 @@ final class CoreAudioTransportSession {
     private static let shutdownFadeTimeoutMicroseconds: UInt32 = 100_000
 
     let selectedOutput: AudioOutputDevice
+    let sameDeviceOutputPlan: SameDeviceOutputRoutePlan?
+    let aggregateDeviceOutputPlan: AggregateDeviceOutputRoutePlan?
     private(set) var tapFormat = AudioStreamFormatDescription(AudioStreamBasicDescription())
     private(set) var outputFormat = AudioStreamFormatDescription(AudioStreamBasicDescription())
     private(set) var startupGateTargetFrames: UInt32 = 0
@@ -367,12 +383,22 @@ final class CoreAudioTransportSession {
     private var aggregateDeviceID = AudioDeviceID(kAudioObjectUnknown)
     private var captureIOProcID: AudioDeviceIOProcID?
     private var outputIOProcID: AudioDeviceIOProcID?
+    private var outputDeviceID = AudioDeviceID(kAudioObjectUnknown)
     private var isCaptureStarted = false
     private var isOutputStarted = false
     private var stopped = false
 
-    init(selectedOutput: AudioOutputDevice) throws {
+    init(
+        selectedOutput: AudioOutputDevice,
+        sameDeviceOutputPlan: SameDeviceOutputRoutePlan? = nil,
+        aggregateDeviceOutputPlan: AggregateDeviceOutputRoutePlan? = nil,
+        speakerCrossoverMode: SpeakerCrossoverMode? = nil,
+        speakerBusSplitterSnapshot: N60SpeakerBusSplitterSnapshot? = nil
+    ) throws {
+        precondition(sameDeviceOutputPlan == nil || aggregateDeviceOutputPlan == nil)
         self.selectedOutput = selectedOutput
+        self.sameDeviceOutputPlan = sameDeviceOutputPlan
+        self.aggregateDeviceOutputPlan = aggregateDeviceOutputPlan
         guard let newBridge = N60RealtimeAudioBridgeCreate(Self.bridgeCapacityFrames) else {
             throw CoreAudioTransportError.realtimeBridgeAllocationFailed
         }
@@ -413,11 +439,53 @@ final class CoreAudioTransportSession {
             guard tapFormat.isSupportedStereoTransportFormat else {
                 throw CoreAudioTransportError.unsupportedFormat(role: "tap", format: tapFormat)
             }
-            guard outputFormat.isSupportedStereoTransportFormat else {
-                throw CoreAudioTransportError.unsupportedFormat(role: "output", format: outputFormat)
+            if sameDeviceOutputPlan == nil && aggregateDeviceOutputPlan == nil {
+                guard outputFormat.isSupportedStereoTransportFormat else {
+                    throw CoreAudioTransportError.unsupportedFormat(role: "output", format: outputFormat)
+                }
+            } else {
+                guard outputFormat.isSupportedFloat32TransportFormat else {
+                    throw CoreAudioTransportError.unsupportedFormat(role: "multichannel output reference", format: outputFormat)
+                }
             }
             guard abs(tapFormat.sampleRate - outputFormat.sampleRate) < 0.5 else {
                 throw CoreAudioTransportError.sampleRateMismatch(tap: tapFormat.sampleRate, output: outputFormat.sampleRate)
+            }
+
+            if let sameDeviceOutputPlan {
+                try sameDeviceOutputPlan.validateForC4LiveTransport(selectedOutputUID: selectedOutput.uid, crossoverMode: speakerCrossoverMode)
+                let descriptors = sameDeviceOutputPlan.routes.map { route -> N60SpeakerOutputRouteDescriptor in
+                    var descriptor = N60SpeakerOutputRouteDescriptor()
+                    descriptor.bus = route.bus.realtimeCType
+                    descriptor.physicalChannelIndex = route.destination.channelIndex
+                    return descriptor
+                }
+                try Self.configureOutputMap(
+                    bridge: newBridge,
+                    physicalChannelCount: sameDeviceOutputPlan.physicalChannelCount,
+                    descriptors: descriptors
+                )
+            } else if let aggregateDeviceOutputPlan {
+                try aggregateDeviceOutputPlan.validateForC4LiveTransport(selectedOutputUID: selectedOutput.uid, crossoverMode: speakerCrossoverMode)
+                let descriptors = aggregateDeviceOutputPlan.mappedRoutes.map { mapped -> N60SpeakerOutputRouteDescriptor in
+                    var descriptor = N60SpeakerOutputRouteDescriptor()
+                    descriptor.bus = mapped.route.bus.realtimeCType
+                    descriptor.physicalChannelIndex = mapped.aggregateChannelIndex
+                    return descriptor
+                }
+                try Self.configureOutputMap(
+                    bridge: newBridge,
+                    physicalChannelCount: aggregateDeviceOutputPlan.physicalChannelCount,
+                    descriptors: descriptors
+                )
+            }
+
+            if let speakerBusSplitterSnapshot {
+                guard N60RealtimeAudioBridgeConfigureSpeakerBusSplitter(
+                    newBridge, speakerBusSplitterSnapshot
+                ) else {
+                    throw CoreAudioTransportError.speakerBusSplitterConfigurationFailed
+                }
             }
 
             let unityGraph = N60DSPGraphSnapshotMakeUnity(outputFormat.sampleRate)
@@ -448,21 +516,38 @@ final class CoreAudioTransportSession {
                 kAudioSubTapUIDKey: description.uuid.uuidString,
                 kAudioSubTapDriftCompensationKey: false,
             ]
-            let aggregateDescription: [String: Any] = [
-                kAudioAggregateDeviceNameKey: "Notch Sixty Private Tap",
-                kAudioAggregateDeviceUIDKey: "com.dhdook.NotchSixty.tap.\(UUID().uuidString)",
+            var aggregateDescription: [String: Any] = [
+                kAudioAggregateDeviceNameKey: aggregateDeviceOutputPlan == nil
+                    ? "Notch Sixty Private Tap"
+                    : "Notch Sixty Private Multi-Output",
+                kAudioAggregateDeviceUIDKey: "com.dhdook.NotchSixty.aggregate.\(UUID().uuidString)",
                 kAudioAggregateDeviceTapListKey: [tapEntry],
                 // The session owns capture lifecycle explicitly through its IOProc.
                 // Do not let the aggregate run the tap independently.
                 kAudioAggregateDeviceTapAutoStartKey: false,
                 kAudioAggregateDeviceIsPrivateKey: true,
             ]
+            if let aggregateDeviceOutputPlan {
+                let subdevices: [[String: Any]] = aggregateDeviceOutputPlan.orderedDeviceUIDs.map { uid in
+                    [
+                        kAudioSubDeviceUIDKey: uid,
+                        kAudioSubDeviceDriftCompensationKey: uid != aggregateDeviceOutputPlan.referenceDeviceUID,
+                    ]
+                }
+                aggregateDescription[kAudioAggregateDeviceSubDeviceListKey] = subdevices
+                aggregateDescription[kAudioAggregateDeviceMainSubDeviceKey] = aggregateDeviceOutputPlan.referenceDeviceUID
+            }
             try Self.check(
                 AudioHardwareCreateAggregateDevice(aggregateDescription as CFDictionary, &aggregateDeviceID),
-                operation: "create private aggregate device"
+                operation: aggregateDeviceOutputPlan == nil
+                    ? "create private tap aggregate device"
+                    : "create private multi-output aggregate device"
             )
+            if aggregateDeviceOutputPlan != nil {
+                try Self.waitForDeviceAlive(aggregateDeviceID)
+            }
 
-            // A tap-only aggregate otherwise chooses its own IO quantum. Pin it to
+            // Pin the aggregate to the physical reference output's clock rate and
             // the physical output's clock rate and buffer size before installing
             // callbacks so capture cannot wake at a much smaller cadence than the
             // output path.
@@ -493,13 +578,14 @@ final class CoreAudioTransportSession {
                 )
             }
 
+            outputDeviceID = aggregateDeviceOutputPlan == nil ? selectedOutput.deviceID : aggregateDeviceID
             let clientData = UnsafeMutableRawPointer(newBridge)
             try Self.check(
                 AudioDeviceCreateIOProcID(aggregateDeviceID, N60CaptureIOProc, clientData, &captureIOProcID),
                 operation: "create capture IOProc"
             )
             try Self.check(
-                AudioDeviceCreateIOProcID(selectedOutput.deviceID, N60OutputIOProc, clientData, &outputIOProcID),
+                AudioDeviceCreateIOProcID(outputDeviceID, N60OutputIOProc, clientData, &outputIOProcID),
                 operation: "create output IOProc"
             )
 
@@ -776,7 +862,7 @@ final class CoreAudioTransportSession {
         }
 
         if isOutputStarted, let outputIOProcID {
-            AudioDeviceStop(selectedOutput.deviceID, outputIOProcID)
+            AudioDeviceStop(outputDeviceID, outputIOProcID)
             isOutputStarted = false
         }
         if isCaptureStarted, let captureIOProcID, aggregateDeviceID != AudioDeviceID(kAudioObjectUnknown) {
@@ -784,7 +870,7 @@ final class CoreAudioTransportSession {
             isCaptureStarted = false
         }
         if let outputIOProcID {
-            AudioDeviceDestroyIOProcID(selectedOutput.deviceID, outputIOProcID)
+            AudioDeviceDestroyIOProcID(outputDeviceID, outputIOProcID)
             self.outputIOProcID = nil
         }
         if let captureIOProcID, aggregateDeviceID != AudioDeviceID(kAudioObjectUnknown) {
@@ -831,12 +917,12 @@ final class CoreAudioTransportSession {
             isCaptureStarted = false
         }
         if isOutputStarted {
-            AudioDeviceStop(selectedOutput.deviceID, outputIOProcID)
+            AudioDeviceStop(outputDeviceID, outputIOProcID)
             isOutputStarted = false
         }
 
         try Self.check(
-            AudioDeviceStart(selectedOutput.deviceID, outputIOProcID),
+            AudioDeviceStart(outputDeviceID, outputIOProcID),
             operation: "start physical output"
         )
         isOutputStarted = true
@@ -848,10 +934,45 @@ final class CoreAudioTransportSession {
             )
             isCaptureStarted = true
         } catch {
-            AudioDeviceStop(selectedOutput.deviceID, outputIOProcID)
+            AudioDeviceStop(outputDeviceID, outputIOProcID)
             isOutputStarted = false
             throw error
         }
+    }
+
+    private static func configureOutputMap(
+        bridge: OpaquePointer,
+        physicalChannelCount: UInt32,
+        descriptors: [N60SpeakerOutputRouteDescriptor]
+    ) throws {
+        var outputMap = N60SameDeviceOutputMap()
+        let compiled = descriptors.withUnsafeBufferPointer { buffer in
+            guard let baseAddress = buffer.baseAddress else { return false }
+            return N60SameDeviceOutputMapCompile(
+                physicalChannelCount,
+                baseAddress,
+                UInt32(buffer.count),
+                &outputMap
+            )
+        }
+        guard compiled,
+              N60RealtimeAudioBridgeConfigureSameDeviceOutputMap(bridge, outputMap) else {
+            throw CoreAudioTransportError.sameDeviceOutputMapCompilationFailed
+        }
+    }
+
+    private static func waitForDeviceAlive(_ deviceID: AudioDeviceID) throws {
+        for _ in 0..<300 {
+            let alive = try readUInt32Property(
+                objectID: deviceID,
+                selector: kAudioDevicePropertyDeviceIsAlive,
+                scope: kAudioObjectPropertyScopeGlobal,
+                operation: "read aggregate device readiness"
+            )
+            if alive != 0 { return }
+            usleep(10_000)
+        }
+        throw CoreAudioTransportError.aggregateDeviceNotReady
     }
 
     private static func currentProcessObjectID() throws -> AudioObjectID {

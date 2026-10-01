@@ -22,6 +22,23 @@ struct AudioOutputDevice: Identifiable, Equatable, Sendable {
     let name: String
     let nominalSampleRate: Double
     let availableSampleRateRanges: [AudioSampleRateRange]
+    let outputChannelCount: UInt32
+
+    init(
+        deviceID: AudioDeviceID,
+        uid: String,
+        name: String,
+        nominalSampleRate: Double,
+        availableSampleRateRanges: [AudioSampleRateRange],
+        outputChannelCount: UInt32 = 2
+    ) {
+        self.deviceID = deviceID
+        self.uid = uid
+        self.name = name
+        self.nominalSampleRate = nominalSampleRate
+        self.availableSampleRateRanges = availableSampleRateRanges
+        self.outputChannelCount = outputChannelCount
+    }
 
     var id: String { uid }
 
