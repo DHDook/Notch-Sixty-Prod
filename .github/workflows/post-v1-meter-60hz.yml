@@ -1,0 +1,68 @@
+name: Post-v1 60 Hz Meter Refresh
+
+on:
+  push:
+    branches:
+      - post-v1-meter-60hz
+
+permissions:
+  contents: write
+
+jobs:
+  patch-build-test:
+    if: ${{ !contains(github.event.head_commit.message, '[meter60-landed]') }}
+    runs-on: xcode-27
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v7
+        with:
+          ref: post-v1-meter-60hz
+
+      - name: Raise visible VU refresh to 60 Hz
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('NotchSixty/UI/ProductionMetersView.swift')
+          text = path.read_text()
+          old = '''            case .levels, .stereo:\n                interval = 33_000_000'''
+          new = '''            case .levels, .stereo:\n                interval = 16_666_667'''
+          if text.count(old) != 1:
+              raise SystemExit(f'expected exactly one 30 Hz visible-meter interval, found {text.count(old)}')
+          path.write_text(text.replace(old, new))
+          PY
+          grep -n -A2 'case .levels, .stereo:' NotchSixty/UI/ProductionMetersView.swift
+
+      - name: Build Debug
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          build
+
+      - name: Run full XCTest
+        shell: bash
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            test
+
+      - name: Commit validated meter cadence
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/post-v1-meter-60hz.yml
+          git add NotchSixty/UI/ProductionMetersView.swift
+          git commit -m 'Meters: refresh visible VUs at 60 Hz [meter60-landed]'
+          git push origin HEAD:post-v1-meter-60hz
