@@ -1,0 +1,512 @@
+name: PR45 Final Acceptance UX Fixes
+
+on:
+  push:
+    branches:
+      - pr45-v1-release-hardening
+    paths:
+      - .github/workflows/pr45-final-acceptance-fixes.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-validate-commit:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: pr45-v1-release-hardening
+
+      - name: Apply final acceptance fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+          import json
+
+          root = Path('.')
+
+          def replace(path, old, new, count=1):
+              p = root / path
+              text = p.read_text()
+              actual = text.count(old)
+              if actual != count:
+                  raise SystemExit(f'{path}: expected {count} occurrence(s), found {actual}: {old[:120]!r}')
+              p.write_text(text.replace(old, new, count))
+
+          # --- App shell / tray / singleton window / dynamic Dock icon ---
+          app = 'NotchSixty/NotchSixtyApp.swift'
+          replace(
+              app,
+              '    @Published private(set) var launchAtLoginEnabled: Bool\n    @Published private(set) var launchAtLoginError: String?\n',
+              '    @Published private(set) var launchAtLoginEnabled: Bool\n    @Published private(set) var launchAtLoginError: String?\n    private var appearanceObservation: NSKeyValueObservation?\n'
+          )
+          replace(
+              app,
+              '        launchAtLoginEnabled = SMAppService.mainApp.status == .enabled\n        launchAtLoginError = nil\n    }\n',
+              '        launchAtLoginEnabled = SMAppService.mainApp.status == .enabled\n        launchAtLoginError = nil\n        appearanceObservation = NSApplication.shared.observe(\\.effectiveAppearance, options: [.new]) { [weak self] _, _ in\n            Task { @MainActor in\n                self?.applyApplicationIcon()\n            }\n        }\n    }\n'
+          )
+          replace(
+              app,
+              '    private func applyAppearance() {\n        switch appearance {\n        case .system:\n            NSApplication.shared.appearance = nil\n        case .light:\n            NSApplication.shared.appearance = NSAppearance(named: .aqua)\n        case .dark:\n            NSApplication.shared.appearance = NSAppearance(named: .darkAqua)\n        }\n    }\n\n    private func applyActivationPolicy() {',
+              '    private func applyAppearance() {\n        switch appearance {\n        case .system:\n            NSApplication.shared.appearance = nil\n        case .light:\n            NSApplication.shared.appearance = NSAppearance(named: .aqua)\n        case .dark:\n            NSApplication.shared.appearance = NSAppearance(named: .darkAqua)\n        }\n        applyApplicationIcon()\n    }\n\n    private func applyApplicationIcon() {\n        let useDarkIcon: Bool\n        switch appearance {\n        case .light:\n            useDarkIcon = false\n        case .dark:\n            useDarkIcon = true\n        case .system:\n            useDarkIcon = NSApplication.shared.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua\n        }\n        let assetName = NSImage.Name(useDarkIcon ? "DockIconDark" : "DockIconLight")\n        if let icon = NSImage(named: assetName) {\n            NSApplication.shared.applicationIconImage = icon\n        }\n    }\n\n    private func applyActivationPolicy() {'
+          )
+          replace(
+              app,
+              '''            HStack(spacing: 10) {
+                Image("TrayIcon")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 28, height: 24)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("NOTCH SIXTY")
+                        .font(.headline)
+                    Label(statusLabel, systemImage: statusSymbol)
+                        .font(.caption)
+                        .foregroundStyle(engine.lifecycleState == .failed ? .red : .secondary)
+                }
+                Spacer(minLength: 16)
+            }
+''',
+              '''            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("NOTCH SIXTY")
+                        .font(.headline)
+                    Label(statusLabel, systemImage: statusSymbol)
+                        .font(.caption)
+                        .foregroundStyle(engine.lifecycleState == .failed ? .red : .secondary)
+                }
+                Spacer(minLength: 16)
+            }
+'''
+          )
+          replace(
+              app,
+              '''            Button {
+                openWindow(id: "main")
+                NSApplication.shared.activate(ignoringOtherApps: true)
+            } label: {
+                Label("Open Notch Sixty", systemImage: "macwindow")
+            }
+
+            SettingsLink {
+                Label("Settings…", systemImage: "gearshape")
+            }
+
+            Divider()
+
+            Button(role: .destructive) {
+                product.shutdownForTermination()
+                NSApplication.shared.terminate(nil)
+            } label: {
+                Label("Quit Notch Sixty", systemImage: "power")
+            }
+''',
+              '''            HStack(spacing: 8) {
+                Button {
+                    openWindow(id: "main")
+                    NSApplication.shared.activate(ignoringOtherApps: true)
+                } label: {
+                    Label("Open Notch Sixty", systemImage: "macwindow")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.blue)
+
+                Button(role: .destructive) {
+                    product.shutdownForTermination()
+                    NSApplication.shared.terminate(nil)
+                } label: {
+                    Image(systemName: "power")
+                        .frame(width: 18, height: 18)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+                .help("Quit Notch Sixty")
+            }
+'''
+          )
+          replace(app, '        WindowGroup(id: "main") {', '        Window("Notch Sixty", id: "main") {')
+          replace(
+              app,
+              '            ProductionMenuBarView(product: product)\n                .task { product.prepareForUse() }',
+              '            ProductionMenuBarView(product: product)\n                .task {\n                    product.prepareForUse()\n                    preferences.apply()\n                }'
+          )
+
+          # --- Main-window Settings affordance ---
+          root_view = 'NotchSixty/UI/ProductionRootView.swift'
+          replace(
+              root_view,
+              '            ProductionProfileToolbar(profiles: product.profiles, engine: engine)\n\n            if let output = engine.selectedOutputDevice {',
+              '            ProductionProfileToolbar(profiles: product.profiles, engine: engine)\n\n            SettingsLink {\n                Label("Settings", systemImage: "gearshape")\n            }\n            .buttonStyle(.glass)\n            .help("Open Notch Sixty Settings")\n\n            if let output = engine.selectedOutputDevice {'
+          )
+
+          # --- Make active Content/System identity explicit in toolbar and remove factory badge ---
+          toolbar = 'NotchSixty/UI/ProductionProfileToolbar.swift'
+          replace(
+              toolbar,
+              '''                            Text(preset.name)
+                            if preset.origin == .factory {
+                                Text("Factory")
+                            }
+''',
+              '''                            Text(preset.name)
+'''
+          )
+          replace(
+              toolbar,
+              '                "\\(profiles.selectedContentPresetName)\\(profiles.selectedContentPresetIsDirty ? " •" : "")",',
+              '                "Content: \\(profiles.selectedContentPresetName)\\(profiles.selectedContentPresetIsDirty ? " •" : "")",'
+          )
+          replace(
+              toolbar,
+              '                "\\(profiles.selectedSystemProfileName)\\(profiles.selectedSystemProfileIsDirty ? " •" : "")",',
+              '                "System: \\(profiles.selectedSystemProfileName)\\(profiles.selectedSystemProfileIsDirty ? " •" : "")",'
+          )
+
+          # --- Treat seeded factory Content Presets as normal editable/deletable user presets ---
+          profiles = 'NotchSixty/State/ProductProfiles.swift'
+          replace(
+              profiles,
+              '''    private struct Archive: Codable {
+        static let currentSchemaVersion = 1
+        var schemaVersion: Int = 1
+        var userContentPresets: [ContentPreset]
+        var systemProfiles: [PlaybackSystemProfile]
+        var selectedContentPresetID: UUID?
+        var selectedSystemProfileID: UUID?
+    }
+''',
+              '''    private struct Archive: Codable {
+        static let currentSchemaVersion = 2
+        var schemaVersion: Int = currentSchemaVersion
+        var contentPresets: [ContentPreset]?
+        // v1 migration field. New archives store the complete editable list in contentPresets.
+        var userContentPresets: [ContentPreset]?
+        var systemProfiles: [PlaybackSystemProfile]
+        var selectedContentPresetID: UUID?
+        var selectedSystemProfileID: UUID?
+    }
+'''
+          )
+          replace(
+              profiles,
+              '    private var didRestoreSelection = false\n',
+              '    private var didRestoreSelection = false\n    private var didLoadArchive = false\n'
+          )
+          replace(
+              profiles,
+              '        loadArchive()\n        ensureDefaultSystemProfile()\n        reconcileSelections()\n',
+              '        loadArchive()\n        ensureContentPresetsSeeded()\n        ensureDefaultSystemProfile()\n        reconcileSelections()\n'
+          )
+          replace(
+              profiles,
+              '''    var contentPresets: [ContentPreset] {
+        Self.factoryContentPresets + userContentPresets
+    }
+''',
+              '''    var contentPresets: [ContentPreset] {
+        userContentPresets
+    }
+'''
+          )
+          replace(
+              profiles,
+              '    var canOverwriteSelectedContentPreset: Bool { selectedContentPreset?.origin == .user }',
+              '    var canOverwriteSelectedContentPreset: Bool { selectedContentPreset != nil }'
+          )
+          replace(
+              profiles,
+              '''    func deleteSelectedContentPreset() {
+        guard let selectedContentPresetID,
+              let selected = selectedContentPreset,
+              selected.origin == .user else { return }
+        userContentPresets.removeAll { $0.id == selectedContentPresetID }
+        self.selectedContentPresetID = nil
+        persist()
+    }
+''',
+              '''    func deleteSelectedContentPreset() {
+        guard let selectedContentPresetID,
+              selectedContentPreset != nil else { return }
+        userContentPresets.removeAll { $0.id == selectedContentPresetID }
+        if let fallback = userContentPresets.first {
+            self.selectedContentPresetID = fallback.id
+            try? applyContentState(fallback.state)
+        } else {
+            self.selectedContentPresetID = nil
+        }
+        lastErrorDescription = nil
+        persist()
+    }
+'''
+          )
+          replace(
+              profiles,
+              '''    private func ensureDefaultSystemProfile() {
+''',
+              '''    private func ensureContentPresetsSeeded() {
+        guard !didLoadArchive, userContentPresets.isEmpty else { return }
+        userContentPresets = Self.factoryContentPresets
+        selectedContentPresetID = Self.referencePresetID
+        persist()
+    }
+
+    private func ensureDefaultSystemProfile() {
+'''
+          )
+          replace(
+              profiles,
+              '''        if selectedContentPresetID == nil, userContentPresets.isEmpty {
+            selectedContentPresetID = Self.referencePresetID
+        }
+''',
+              '''        if selectedContentPresetID == nil,
+           let fallback = contentPresets.first(where: { $0.id == Self.referencePresetID }) ?? contentPresets.first {
+            selectedContentPresetID = fallback.id
+        }
+'''
+          )
+          replace(
+              profiles,
+              '''    private func loadArchive() {
+        guard FileManager.default.fileExists(atPath: storageURL.path) else { return }
+        do {
+            let data = try Data(contentsOf: storageURL)
+            let archive = try JSONDecoder().decode(Archive.self, from: data)
+            guard archive.schemaVersion == Archive.currentSchemaVersion else {
+                throw ProductProfileError.persistenceVersion(archive.schemaVersion)
+            }
+            userContentPresets = archive.userContentPresets.filter {
+                $0.schemaVersion == ContentPreset.currentSchemaVersion
+                    && $0.state.schemaVersion == ContentPresetState.currentSchemaVersion
+            }
+            systemProfiles = archive.systemProfiles.filter {
+                $0.schemaVersion == PlaybackSystemProfile.currentSchemaVersion
+                    && $0.state.schemaVersion == PlaybackSystemState.currentSchemaVersion
+                    && ($0.state.roomCorrectionCalibration == nil
+                        || $0.state.roomCorrectionCalibration?.schemaVersion
+                            == RoomCorrectionCalibrationSummary.currentSchemaVersion)
+            }
+            selectedContentPresetID = archive.selectedContentPresetID
+            selectedSystemProfileID = archive.selectedSystemProfileID
+        } catch {
+            lastErrorDescription = error.localizedDescription
+        }
+    }
+''',
+              '''    private func loadArchive() {
+        guard FileManager.default.fileExists(atPath: storageURL.path) else { return }
+        do {
+            let data = try Data(contentsOf: storageURL)
+            let archive = try JSONDecoder().decode(Archive.self, from: data)
+            let storedContent: [ContentPreset]
+            switch archive.schemaVersion {
+            case 1:
+                // v1 kept factory presets outside the archive and only persisted custom presets.
+                // Materialize both into one editable list so factory presets can be renamed,
+                // overwritten, or deleted exactly like user-created presets.
+                storedContent = Self.factoryContentPresets + (archive.userContentPresets ?? [])
+            case Archive.currentSchemaVersion:
+                storedContent = archive.contentPresets ?? []
+            default:
+                throw ProductProfileError.persistenceVersion(archive.schemaVersion)
+            }
+            userContentPresets = storedContent.filter {
+                $0.schemaVersion == ContentPreset.currentSchemaVersion
+                    && $0.state.schemaVersion == ContentPresetState.currentSchemaVersion
+            }
+            systemProfiles = archive.systemProfiles.filter {
+                $0.schemaVersion == PlaybackSystemProfile.currentSchemaVersion
+                    && $0.state.schemaVersion == PlaybackSystemState.currentSchemaVersion
+                    && ($0.state.roomCorrectionCalibration == nil
+                        || $0.state.roomCorrectionCalibration?.schemaVersion
+                            == RoomCorrectionCalibrationSummary.currentSchemaVersion)
+            }
+            selectedContentPresetID = archive.selectedContentPresetID
+            selectedSystemProfileID = archive.selectedSystemProfileID
+            didLoadArchive = true
+            if archive.schemaVersion < Archive.currentSchemaVersion {
+                persist()
+            }
+        } catch {
+            lastErrorDescription = error.localizedDescription
+        }
+    }
+'''
+          )
+          replace(
+              profiles,
+              '''        let archive = Archive(
+            userContentPresets: userContentPresets,
+            systemProfiles: systemProfiles,
+            selectedContentPresetID: selectedContentPresetID,
+            selectedSystemProfileID: selectedSystemProfileID
+        )
+''',
+              '''        let archive = Archive(
+            contentPresets: userContentPresets,
+            userContentPresets: nil,
+            systemProfiles: systemProfiles,
+            selectedContentPresetID: selectedContentPresetID,
+            selectedSystemProfileID: selectedSystemProfileID
+        )
+'''
+          )
+
+          # --- Native template menu-bar glyph ---
+          tray_svg = root / 'NotchSixty/Assets.xcassets/TrayIcon.imageset/notch_sixty_tray_icon_final_tightcrop.svg'
+          svg = tray_svg.read_text()
+          if svg.count('<svg width="88" height="72"') != 1:
+              raise SystemExit('unexpected TrayIcon SVG intrinsic-size header')
+          tray_svg.write_text(svg.replace('<svg width="88" height="72"', '<svg width="22" height="18"', 1))
+
+          tray_contents = root / 'NotchSixty/Assets.xcassets/TrayIcon.imageset/Contents.json'
+          payload = json.loads(tray_contents.read_text())
+          props = payload.setdefault('properties', {})
+          props.pop('template-rendering', None)
+          props['template-rendering-intent'] = 'template'
+          tray_contents.write_text(json.dumps(payload, indent=2) + '\n')
+
+          # Runtime light/dark Dock images use the exact approved AppIcon rasters.
+          asset_root = root / 'NotchSixty/Assets.xcassets'
+          for name, source_prefix in [('DockIconLight', 'icon_512x512'), ('DockIconDark', 'icon_dark_512x512')]:
+              folder = asset_root / f'{name}.imageset'
+              folder.mkdir(parents=True, exist_ok=True)
+              (folder / f'{name}.png').write_bytes((asset_root / 'AppIcon.appiconset' / f'{source_prefix}.png').read_bytes())
+              (folder / f'{name}@2x.png').write_bytes((asset_root / 'AppIcon.appiconset' / f'{source_prefix}@2x.png').read_bytes())
+              manifest = {
+                  'images': [
+                      {'filename': f'{name}.png', 'idiom': 'universal', 'scale': '1x'},
+                      {'filename': f'{name}@2x.png', 'idiom': 'universal', 'scale': '2x'},
+                  ],
+                  'info': {'author': 'xcode', 'version': 1},
+              }
+              (folder / 'Contents.json').write_text(json.dumps(manifest, indent=2) + '\n')
+
+          # --- Validators/documentation follow the corrected production contract ---
+          validator42 = 'ci/validate_pr42_app_shell.py'
+          replace(
+              validator42,
+              'if props.get("template-rendering") is not True:\n    fail("TrayIcon must remain a template-rendered menu-bar asset")',
+              'if props.get("template-rendering-intent") != "template":\n    fail("TrayIcon must remain a template-rendered menu-bar asset")'
+          )
+
+          validator45 = 'ci/validate_pr45_release_hardening.py'
+          replace(
+              validator45,
+              'if git_blob_sha(TRAY_ICON) != "759c6f2700c1250b8c697ca0eb480e1a2f11c577":\n    fail("legacy tray icon changed")',
+              'if git_blob_sha(TRAY_ICON) != "3b711fd3c00712b0c04c031eceb392a1b523dc85":\n    fail("production tray glyph changed from the acceptance-corrected native-size asset")'
+          )
+          replace(
+              validator45,
+              '# blob identity; the shipping catalog must contain all 10 light + 10 dark slots\n# at their exact macOS pixel dimensions. The owner-controlled legacy tray glyph\n# is deliberately unchanged.',
+              '# blob identity; the shipping catalog must contain all 10 light + 10 dark slots\n# at their exact macOS pixel dimensions. The owner-controlled tray glyph keeps\n# the same drawing while using native 22×18 intrinsic sizing and template rendering.'
+          )
+          replace(
+              validator45,
+              'TRAY_ICON = ROOT / "NotchSixty" / "Assets.xcassets" / "TrayIcon.imageset" / "notch_sixty_tray_icon_final_tightcrop.svg"\n',
+              'TRAY_ICON = ROOT / "NotchSixty" / "Assets.xcassets" / "TrayIcon.imageset" / "notch_sixty_tray_icon_final_tightcrop.svg"\nDOCK_LIGHT = ROOT / "NotchSixty" / "Assets.xcassets" / "DockIconLight.imageset" / "DockIconLight@2x.png"\nDOCK_DARK = ROOT / "NotchSixty" / "Assets.xcassets" / "DockIconDark.imageset" / "DockIconDark@2x.png"\n'
+          )
+          replace(
+              validator45,
+              'for path in [LIGHT_MASTER, DARK_MASTER, LIGHT_FINAL, DARK_FINAL, TRAY_ICON, APP_ICON_CATALOG / "Contents.json"]:',
+              'for path in [LIGHT_MASTER, DARK_MASTER, LIGHT_FINAL, DARK_FINAL, TRAY_ICON, DOCK_LIGHT, DOCK_DARK, APP_ICON_CATALOG / "Contents.json"]:'
+          )
+          replace(
+              validator45,
+              'if png_dimensions(LIGHT_FINAL) != (1024, 1024) or png_dimensions(DARK_FINAL) != (1024, 1024):\n    fail("final app-icon previews must remain 1024×1024")\n',
+              'if png_dimensions(LIGHT_FINAL) != (1024, 1024) or png_dimensions(DARK_FINAL) != (1024, 1024):\n    fail("final app-icon previews must remain 1024×1024")\nif png_dimensions(DOCK_LIGHT) != (1024, 1024) or png_dimensions(DOCK_DARK) != (1024, 1024):\n    fail("runtime Dock appearance assets must remain 1024×1024")\nfor token in ["applicationIconImage", "DockIconLight", "DockIconDark", "effectiveAppearance"]:\n    require(app, token, "runtime Dock appearance switching")\n'
+          )
+
+          doc = 'docs/PR45_V1_RELEASE_HARDENING.md'
+          replace(
+              doc,
+              'The production tray/menu-bar icon remains the owner-controlled legacy solid VU glyph. Its blob identity is permanently pinned separately from the Dock/AppIcon artwork, so application-icon updates cannot silently alter the tray design.',
+              'The production tray/menu-bar icon remains the owner-controlled solid VU glyph. Final hardware acceptance corrected only its intrinsic canvas to the native 22×18 menu-bar size and its asset-catalog template-rendering declaration, so macOS now supplies the proper light/dark menu-bar tint. Its production blob identity remains pinned separately from the Dock/AppIcon artwork.'
+          )
+          replace(
+              doc,
+              'The production sidebar deliberately uses a wordmark-only `NOTCH SIXTY` identity. The Dock/AppIcon artwork is not repeated inside the main app window, and the former `Stereo DSP` subtitle is omitted.',
+              'The production sidebar and tray dropdown deliberately use a wordmark-only `NOTCH SIXTY` identity. The Dock/AppIcon artwork is not repeated inside either surface, and the former `Stereo DSP` subtitle is omitted. While the app is running, the Dock icon follows the selected System/Light/Dark appearance using runtime assets derived directly from the approved light/dark AppIcon rasters.'
+          )
+
+          # Add a focused persistence regression test to the existing test target.
+          tests = root / 'NotchSixtyTests/StereoPlaybackControlTests.swift'
+          text = tests.read_text()
+          insertion = r'''
+
+    @MainActor
+    func testSeededContentPresetsAreEditableDeletableAndStayDeleted() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NotchSixtyPresetMutation-\(UUID().uuidString)", isDirectory: true)
+        let archiveURL = directory.appendingPathComponent("profiles-v1.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let controller = ProductProfileController(engine: AudioIOEngine(), storageURL: archiveURL)
+        XCTAssertEqual(controller.contentPresets.count, 8)
+        XCTAssertEqual(controller.selectedContentPresetName, "Reference")
+        XCTAssertTrue(controller.canOverwriteSelectedContentPreset)
+
+        controller.renameSelectedContentPreset(to: "My Reference")
+        XCTAssertEqual(controller.selectedContentPresetName, "My Reference")
+
+        while !controller.contentPresets.isEmpty {
+            controller.deleteSelectedContentPreset()
+        }
+        XCTAssertNil(controller.selectedContentPresetID)
+
+        let reloaded = ProductProfileController(engine: AudioIOEngine(), storageURL: archiveURL)
+        XCTAssertTrue(reloaded.contentPresets.isEmpty)
+        XCTAssertNil(reloaded.selectedContentPresetID)
+    }
+'''
+          marker = '\n}\n'
+          position = text.rfind(marker)
+          if position < 0:
+              raise SystemExit('unable to locate StereoPlaybackControlTests class closing brace')
+          tests.write_text(text[:position] + insertion + text[position:])
+          PY
+
+      - name: Validate retained contracts
+        run: |
+          set -euo pipefail
+          python3 ci/validate_pr39_app_identity.py
+          python3 ci/validate_pr42_app_shell.py
+          python3 ci/validate_pr44_factory_presets.py
+          python3 ci/validate_pr45_release_hardening.py
+
+      - name: Build Debug
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          build
+
+      - name: Run tests
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          test
+
+      - name: Commit accepted fixes and remove one-shot workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/pr45-final-acceptance-fixes.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'PR45: fix final acceptance app shell and preset UX'
+          git push origin HEAD:pr45-v1-release-hardening
