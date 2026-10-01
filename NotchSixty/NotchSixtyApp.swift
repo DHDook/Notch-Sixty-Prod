@@ -1015,6 +1015,7 @@ private final class ApplicationPreferences: ObservableObject {
 
     @Published private(set) var launchAtLoginEnabled: Bool
     @Published private(set) var launchAtLoginError: String?
+    private var appearanceObservation: NSKeyValueObservation?
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -1026,6 +1027,11 @@ private final class ApplicationPreferences: ObservableObject {
         ) ?? .both
         launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
         launchAtLoginError = nil
+        appearanceObservation = NSApplication.shared.observe(\.effectiveAppearance, options: [.new]) { [weak self] _, _ in
+            Task { @MainActor in
+                self?.applyApplicationIcon()
+            }
+        }
     }
 
     var isTrayInserted: Bool { presence != .dock }
@@ -1085,6 +1091,23 @@ private final class ApplicationPreferences: ObservableObject {
             NSApplication.shared.appearance = NSAppearance(named: .aqua)
         case .dark:
             NSApplication.shared.appearance = NSAppearance(named: .darkAqua)
+        }
+        applyApplicationIcon()
+    }
+
+    private func applyApplicationIcon() {
+        let useDarkIcon: Bool
+        switch appearance {
+        case .light:
+            useDarkIcon = false
+        case .dark:
+            useDarkIcon = true
+        case .system:
+            useDarkIcon = NSApplication.shared.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        }
+        let assetName = NSImage.Name(useDarkIcon ? "DockIconDark" : "DockIconLight")
+        if let icon = NSImage(named: assetName) {
+            NSApplication.shared.applicationIconImage = icon
         }
     }
 
@@ -1181,10 +1204,6 @@ private struct ProductionMenuBarView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
-                Image("TrayIcon")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 28, height: 24)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("NOTCH SIXTY")
                         .font(.headline)
@@ -1216,24 +1235,27 @@ private struct ProductionMenuBarView: View {
 
             Divider()
 
-            Button {
-                openWindow(id: "main")
-                NSApplication.shared.activate(ignoringOtherApps: true)
-            } label: {
-                Label("Open Notch Sixty", systemImage: "macwindow")
-            }
+            HStack(spacing: 8) {
+                Button {
+                    openWindow(id: "main")
+                    NSApplication.shared.activate(ignoringOtherApps: true)
+                } label: {
+                    Label("Open Notch Sixty", systemImage: "macwindow")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.blue)
 
-            SettingsLink {
-                Label("Settings…", systemImage: "gearshape")
-            }
-
-            Divider()
-
-            Button(role: .destructive) {
-                product.shutdownForTermination()
-                NSApplication.shared.terminate(nil)
-            } label: {
-                Label("Quit Notch Sixty", systemImage: "power")
+                Button(role: .destructive) {
+                    product.shutdownForTermination()
+                    NSApplication.shared.terminate(nil)
+                } label: {
+                    Image(systemName: "power")
+                        .frame(width: 18, height: 18)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+                .help("Quit Notch Sixty")
             }
         }
         .padding(14)
@@ -1421,7 +1443,7 @@ struct NotchSixtyApp: App {
     }
 
     var body: some Scene {
-        WindowGroup(id: "main") {
+        Window("Notch Sixty", id: "main") {
             ProductionRootView(product: product)
                 .task {
                     product.prepareForUse()
@@ -1436,7 +1458,10 @@ struct NotchSixtyApp: App {
             isInserted: trayInserted
         ) {
             ProductionMenuBarView(product: product)
-                .task { product.prepareForUse() }
+                .task {
+                    product.prepareForUse()
+                    preferences.apply()
+                }
         }
         .menuBarExtraStyle(.window)
 

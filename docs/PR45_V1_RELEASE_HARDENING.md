@@ -68,9 +68,9 @@ The approved owner-supplied light and dark VU-meter artwork is now the productio
 
 `ci/generate_app_icons.swift` uses Core Graphics/ImageIO only to resample those exact PNG rasters into the standard 20-slot macOS AppIcon catalog: 10 default/light slots and 10 dark-appearance slots from 16 px through 1024 px. It does not crop, redraw, mask, or reinterpret the artwork.
 
-The production tray/menu-bar icon remains the owner-controlled legacy solid VU glyph. Its blob identity is permanently pinned separately from the Dock/AppIcon artwork, so application-icon updates cannot silently alter the tray design.
+The production tray/menu-bar icon remains the owner-controlled solid VU glyph. Final hardware acceptance corrected only its intrinsic canvas to the native 22×18 menu-bar size and its asset-catalog template-rendering declaration, so macOS now supplies the proper light/dark menu-bar tint. Its production blob identity remains pinned separately from the Dock/AppIcon artwork.
 
-The production sidebar deliberately uses a wordmark-only `NOTCH SIXTY` identity. The Dock/AppIcon artwork is not repeated inside the main app window, and the former `Stereo DSP` subtitle is omitted.
+The production sidebar and tray dropdown deliberately use a wordmark-only `NOTCH SIXTY` identity. The Dock/AppIcon artwork is not repeated inside either surface, and the former `Stereo DSP` subtitle is omitted. While the app is running, the Dock icon follows the selected System/Light/Dark appearance using runtime assets derived directly from the approved light/dark AppIcon rasters.
 
 Superseded SVG/WebP app-icon staging files and one-shot icon workflows are removed from the release-candidate tree. The permanent PR45 validator pins the exact uploaded master PNGs, verifies all generated slot dimensions, and verifies the legacy tray icon remains unchanged.
 

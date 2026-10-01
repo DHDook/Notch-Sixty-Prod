@@ -17,6 +17,8 @@ DARK_MASTER = ROOT / "artwork" / "AppIcon-dark-master.png"
 LIGHT_FINAL = ROOT / "artwork" / "AppIcon-light-final.png"
 DARK_FINAL = ROOT / "artwork" / "AppIcon-dark-final.png"
 TRAY_ICON = ROOT / "NotchSixty" / "Assets.xcassets" / "TrayIcon.imageset" / "notch_sixty_tray_icon_final_tightcrop.svg"
+DOCK_LIGHT = ROOT / "NotchSixty" / "Assets.xcassets" / "DockIconLight.imageset" / "DockIconLight@2x.png"
+DOCK_DARK = ROOT / "NotchSixty" / "Assets.xcassets" / "DockIconDark.imageset" / "DockIconDark@2x.png"
 
 
 def fail(message: str) -> None:
@@ -110,9 +112,9 @@ for token in [
 
 # Final v1 app icon contract. The owner-uploaded PNG masters are pinned by Git
 # blob identity; the shipping catalog must contain all 10 light + 10 dark slots
-# at their exact macOS pixel dimensions. The owner-controlled legacy tray glyph
-# is deliberately unchanged.
-for path in [LIGHT_MASTER, DARK_MASTER, LIGHT_FINAL, DARK_FINAL, TRAY_ICON, APP_ICON_CATALOG / "Contents.json"]:
+# at their exact macOS pixel dimensions. The owner-controlled tray glyph keeps
+# the same drawing while using native 22×18 intrinsic sizing and template rendering.
+for path in [LIGHT_MASTER, DARK_MASTER, LIGHT_FINAL, DARK_FINAL, TRAY_ICON, DOCK_LIGHT, DOCK_DARK, APP_ICON_CATALOG / "Contents.json"]:
     if not path.exists():
         fail(f"missing final icon asset {path.relative_to(ROOT)}")
 
@@ -120,13 +122,17 @@ if git_blob_sha(LIGHT_MASTER) != "d418e699b2c417c81d79e97ca0e4ae6ba84b2fe7":
     fail("approved light app-icon master changed")
 if git_blob_sha(DARK_MASTER) != "141cfc228e7fd71623e149cd9bdc9756b18e34a1":
     fail("approved dark app-icon master changed")
-if git_blob_sha(TRAY_ICON) != "759c6f2700c1250b8c697ca0eb480e1a2f11c577":
-    fail("legacy tray icon changed")
+if git_blob_sha(TRAY_ICON) != "3b711fd3c00712b0c04c031eceb392a1b523dc85":
+    fail("production tray glyph changed from the acceptance-corrected native-size asset")
 
 if png_dimensions(LIGHT_MASTER) != (1254, 1254) or png_dimensions(DARK_MASTER) != (1254, 1254):
     fail("approved app-icon masters must remain 1254×1254")
 if png_dimensions(LIGHT_FINAL) != (1024, 1024) or png_dimensions(DARK_FINAL) != (1024, 1024):
     fail("final app-icon previews must remain 1024×1024")
+if png_dimensions(DOCK_LIGHT) != (1024, 1024) or png_dimensions(DOCK_DARK) != (1024, 1024):
+    fail("runtime Dock appearance assets must remain 1024×1024")
+for token in ["applicationIconImage", "DockIconLight", "DockIconDark", "effectiveAppearance"]:
+    require(app, token, "runtime Dock appearance switching")
 
 expected_slots = {
     "icon_16x16.png": 16,

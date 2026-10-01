@@ -103,9 +103,6 @@ struct ProductionProfileToolbar: View {
                                 Image(systemName: "checkmark")
                             }
                             Text(preset.name)
-                            if preset.origin == .factory {
-                                Text("Factory")
-                            }
                         }
                     }
                 }
@@ -142,7 +139,7 @@ struct ProductionProfileToolbar: View {
             }
         } label: {
             Label(
-                "\(profiles.selectedContentPresetName)\(profiles.selectedContentPresetIsDirty ? " •" : "")",
+                "Content: \(profiles.selectedContentPresetName)\(profiles.selectedContentPresetIsDirty ? " •" : "")",
                 systemImage: "music.note.list"
             )
         }
@@ -196,7 +193,7 @@ struct ProductionProfileToolbar: View {
             }
         } label: {
             Label(
-                "\(profiles.selectedSystemProfileName)\(profiles.selectedSystemProfileIsDirty ? " •" : "")",
+                "System: \(profiles.selectedSystemProfileName)\(profiles.selectedSystemProfileIsDirty ? " •" : "")",
                 systemImage: profiles.selectedSystemOutputMatches
                     ? "hifispeaker.2"
                     : "hifispeaker.2.fill"

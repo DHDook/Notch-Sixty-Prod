@@ -11,6 +11,6 @@
   },
   "properties": {
     "preserves-vector-representation": true,
-    "template-rendering": true
+    "template-rendering-intent": "template"
   }
 }

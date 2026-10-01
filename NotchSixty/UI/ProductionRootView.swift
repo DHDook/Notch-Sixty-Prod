@@ -173,6 +173,12 @@ struct ProductionRootView: View {
         ToolbarItemGroup(placement: .primaryAction) {
             ProductionProfileToolbar(profiles: product.profiles, engine: engine)
 
+            SettingsLink {
+                Label("Settings", systemImage: "gearshape")
+            }
+            .buttonStyle(.glass)
+            .help("Open Notch Sixty Settings")
+
             if let output = engine.selectedOutputDevice {
                 Text("\(output.name) · \(output.nominalSampleRate / 1_000, specifier: "%.1f") kHz")
                     .font(.caption)
