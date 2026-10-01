@@ -106,7 +106,7 @@ replace_once(
 struct NotchSixtyApp: App {
     @StateObject private var product: ProductController
 ''',
-''' }
+'''}
 
 private final class NotchSixtyAppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -118,11 +118,10 @@ private final class NotchSixtyAppDelegate: NSObject, NSApplicationDelegate {
 struct NotchSixtyApp: App {
     @NSApplicationDelegateAdaptor(NotchSixtyAppDelegate.self) private var appDelegate
     @StateObject private var product: ProductController
-'''.replace('''' }''', '''}'''),
+''',
 "app delegate insertion",
 )
 
-# Targeted release-hardening assertions.
 required = [
     'Label("Preset", systemImage: "music.note.list")',
     '.labelsHidden()',
