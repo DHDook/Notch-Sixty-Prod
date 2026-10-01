@@ -1,5 +1,5 @@
 name: Hardware Test DMG
-# PR39 production Meters/RTA/Analysis hardware/UI acceptance trigger. Workflow-only change; no product source modification.
+# Post-v1 meter-polish hardware/UI acceptance trigger. Workflow-only change; no product source modification.
 
 on:
   workflow_dispatch:
