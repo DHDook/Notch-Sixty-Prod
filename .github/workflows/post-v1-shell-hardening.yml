@@ -1,0 +1,60 @@
+name: Post-v1.0.0 Shell Hardening
+
+on:
+  push:
+    branches:
+      - post-v1.0.0-shell-hardening
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-validate:
+    if: ${{ contains(github.event.head_commit.message, '[shell-hardening-applied]') == false }}
+    runs-on: xcode-27
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v7
+        with:
+          ref: post-v1.0.0-shell-hardening
+
+      - name: Apply shell hardening patch
+        run: python3 ci/apply_post_v1_shell_hardening.py
+
+      - name: Validate app shell
+        run: python3 ci/validate_pr42_app_shell.py
+
+      - name: Validate control style
+        run: python3 ci/validate_pr45_control_style.py
+
+      - name: Build Debug
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          build
+
+      - name: Run full XCTest
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          test
+
+      - name: Commit accepted changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add NotchSixty/NotchSixtyApp.swift
+          git diff --cached --quiet && exit 0
+          git commit -m 'Post-v1.0.0: shell persistence and picker labels [shell-hardening-applied]'
+          git push origin HEAD:post-v1.0.0-shell-hardening
