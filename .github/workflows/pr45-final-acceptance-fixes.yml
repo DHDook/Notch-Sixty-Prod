@@ -19,7 +19,9 @@ jobs:
           ref: pr45-v1-release-hardening
 
       - name: Apply final acceptance fixes
-        run: python3 ci/pr45_final_acceptance_fixes.py
+        run: |
+          python3 ci/pr45_final_acceptance_fixes.py
+          python3 ci/pr45_update_settings_guard.py
 
       - name: Validate retained contracts
         run: |
@@ -39,6 +41,7 @@ jobs:
         run: |
           rm .github/workflows/pr45-final-acceptance-fixes.yml
           rm ci/pr45_final_acceptance_fixes.py
+          rm ci/pr45_update_settings_guard.py
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
