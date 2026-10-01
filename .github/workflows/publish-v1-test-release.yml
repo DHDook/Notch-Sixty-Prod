@@ -25,16 +25,21 @@ jobs:
           set -euo pipefail
           gh run watch "$RELEASE_RUN_ID" --repo "$GITHUB_REPOSITORY" --exit-status
 
-      - name: Download release artifact
+      - name: Download and verify release artifact
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p dist
           gh run download "$RELEASE_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "$RELEASE_ARTIFACT" --dir dist
-          test -f dist/Notch-Sixty-1.0.0-build-1-arm64.dmg
-          test -f dist/Notch-Sixty-1.0.0-build-1-arm64.dmg.sha256
-          cd dist
-          shasum -a 256 -c Notch-Sixty-1.0.0-build-1-arm64.dmg.sha256
+          DMG="dist/Notch-Sixty-1.0.0-build-1-arm64.dmg"
+          SUM="dist/Notch-Sixty-1.0.0-build-1-arm64.dmg.sha256"
+          test -f "$DMG"
+          test -f "$SUM"
+          EXPECTED="$(awk '{print $1}' "$SUM")"
+          ACTUAL="$(shasum -a 256 "$DMG" | awk '{print $1}')"
+          echo "Expected SHA-256: $EXPECTED"
+          echo "Actual SHA-256:   $ACTUAL"
+          test "$EXPECTED" = "$ACTUAL"
 
       - name: Publish GitHub pre-release
         shell: bash
