@@ -1,0 +1,160 @@
+name: v1.0.0 Release Artifact
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/v1-first-release-build.yml
+
+permissions:
+  contents: read
+
+jobs:
+  release-dmg:
+    runs-on: xcode-27
+    steps:
+      - name: Check out exact merged v1.0.0 revision
+        uses: actions/checkout@v7
+        with:
+          ref: 0a27e8d919ec9a93e5d91fa55c1afcc4a41d84b7
+
+      - name: Show toolchain and revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          sw_vers
+          xcodebuild -version
+          swift --version
+          test "$(git rev-parse HEAD)" = "0a27e8d919ec9a93e5d91fa55c1afcc4a41d84b7"
+
+      - name: Run full unit test suite
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          test
+
+      - name: Build Release app
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Release
+          -destination 'platform=macOS,arch=arm64'
+          -derivedDataPath "$RUNNER_TEMP/NotchSixtyReleaseDerivedData"
+          CODE_SIGNING_ALLOWED=NO
+          GENERATE_INFOPLIST_FILE=NO
+          INFOPLIST_FILE=NotchSixty/Info.plist
+          build
+
+      - name: Ad-hoc sign Release app
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/NotchSixtyReleaseDerivedData/Build/Products/Release/Notch Sixty.app"
+          test -d "$APP"
+          codesign \
+            --force \
+            --sign - \
+            --timestamp=none \
+            --entitlements NotchSixty/NotchSixty.entitlements \
+            "$APP"
+          codesign --verify --strict --verbose=2 "$APP"
+
+      - name: Validate v1.0.0 Release app metadata
+        id: metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/NotchSixtyReleaseDerivedData/Build/Products/Release/Notch Sixty.app"
+          INFO="$APP/Contents/Info.plist"
+          EXECUTABLE="$APP/Contents/MacOS/Notch Sixty"
+
+          test -f "$INFO"
+          test -x "$EXECUTABLE"
+
+          VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$INFO")"
+          BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$INFO")"
+          BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$INFO")"
+          MIN_MACOS="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$INFO")"
+          ARCHS="$(lipo -archs "$EXECUTABLE")"
+
+          test "$VERSION" = "1.0.0"
+          test "$BUILD" = "1"
+          test "$BUNDLE_ID" = "com.dhdook.NotchSixty"
+          test "$ARCHS" = "arm64"
+
+          ENTITLEMENTS="$(codesign -d --entitlements :- "$APP" 2>&1)"
+          echo "$ENTITLEMENTS" | grep -q 'com.apple.security.app-sandbox'
+          echo "$ENTITLEMENTS" | grep -q '<true/>'
+
+          CAPTURE_USAGE="$(/usr/libexec/PlistBuddy -c 'Print :NSAudioCaptureUsageDescription' "$INFO")"
+          MICROPHONE_USAGE="$(/usr/libexec/PlistBuddy -c 'Print :NSMicrophoneUsageDescription' "$INFO")"
+          test -n "$CAPTURE_USAGE"
+          test -n "$MICROPHONE_USAGE"
+
+          DMG_NAME="Notch-Sixty-1.0.0-build-1-arm64.dmg"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "BUILD_NUMBER=$BUILD" >> "$GITHUB_ENV"
+          echo "DMG_NAME=$DMG_NAME" >> "$GITHUB_ENV"
+          echo "dmg_name=$DMG_NAME" >> "$GITHUB_OUTPUT"
+
+          {
+            echo '### v1.0.0 release build metadata'
+            echo
+            echo "- Version: \`$VERSION\`"
+            echo "- Build: \`$BUILD\`"
+            echo "- Bundle ID: \`$BUNDLE_ID\`"
+            echo "- Minimum macOS: \`$MIN_MACOS\`"
+            echo "- Architectures: \`$ARCHS\`"
+            echo "- Revision: \`$(git rev-parse HEAD)\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create v1.0.0 Release DMG
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/NotchSixtyReleaseDerivedData/Build/Products/Release/Notch Sixty.app"
+          STAGE="$RUNNER_TEMP/NotchSixtyReleaseStage"
+          DMG="$RUNNER_TEMP/$DMG_NAME"
+
+          rm -rf "$STAGE" "$DMG"
+          mkdir -p "$STAGE"
+          cp -R "$APP" "$STAGE/"
+          ln -s /Applications "$STAGE/Applications"
+
+          hdiutil create \
+            -volname "Notch Sixty $VERSION" \
+            -srcfolder "$STAGE" \
+            -ov \
+            -format UDZO \
+            "$DMG"
+
+          shasum -a 256 "$DMG" | tee "$DMG.sha256"
+          SHA256="$(awk '{print $1}' "$DMG.sha256")"
+          echo "RELEASE_SHA256=$SHA256" >> "$GITHUB_ENV"
+
+          {
+            echo
+            echo '### v1.0.0 Release DMG'
+            echo
+            echo "- Artifact: \`$DMG_NAME\`"
+            echo "- SHA-256: \`$SHA256\`"
+            echo
+            echo '> This is the first v1.0.0 test release artifact. It uses the current ad-hoc signature and is not Developer-ID signed or notarized.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload v1.0.0 Release DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: NotchSixty-release-1.0.0-build-1
+          path: |
+            ${{ runner.temp }}/${{ steps.metadata.outputs.dmg_name }}
+            ${{ runner.temp }}/${{ steps.metadata.outputs.dmg_name }}.sha256
+          if-no-files-found: error
+          retention-days: 90
