@@ -390,7 +390,7 @@ struct ProductionMetersView: View {
             let interval: UInt64
             switch activePage {
             case .levels, .stereo:
-                interval = 33_000_000
+                interval = 16_666_667
             case .spectrum:
                 interval = 50_000_000
             case .dynamics:
