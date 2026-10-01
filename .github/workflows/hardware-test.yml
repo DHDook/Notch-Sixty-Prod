@@ -1,5 +1,6 @@
 name: Hardware Test DMG
 # PR39 production Meters/RTA/Analysis hardware/UI acceptance trigger. Workflow-only change; no product source modification.
+# v1.0.0 post-fix artifact trigger; product source remains identical to merged main.
 
 on:
   workflow_dispatch:
