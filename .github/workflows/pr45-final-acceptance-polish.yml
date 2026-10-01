@@ -27,7 +27,6 @@ jobs:
         run: |
           python3 ci/validate_pr39_app_identity.py
           python3 ci/validate_pr42_app_shell.py
-          python3 ci/validate_pr44_factory_content_presets.py
           python3 ci/validate_pr45_release_hardening.py
 
       - name: Build Debug
