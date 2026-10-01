@@ -13,7 +13,7 @@ struct ProductionDynamicsView: View {
         VStack(alignment: .leading, spacing: 16) {
             header
 
-            HSplitView {
+            HStack(alignment: .top, spacing: 12) {
                 moduleNavigator
                     .frame(minWidth: 250, idealWidth: 285, maxWidth: 330)
 
@@ -93,8 +93,9 @@ struct ProductionDynamicsView: View {
         }
         .scrollIndicators(.visible)
         .background(.clear)
-        .clipShape(.rect(cornerRadius: 18))
         .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .containerShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     @ViewBuilder

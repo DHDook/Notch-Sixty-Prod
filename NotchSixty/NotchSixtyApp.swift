@@ -1484,6 +1484,7 @@ struct NotchSixtyApp: App {
                 }
         }
         .defaultSize(width: 1180, height: 780)
+        .windowToolbarStyle(.unified(showsTitle: false))
 
         MenuBarExtra(
             "Notch Sixty",
