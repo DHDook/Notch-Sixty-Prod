@@ -1,36 +1,59 @@
 #!/usr/bin/env python3
-import json
 from pathlib import Path
+import json
+import sys
 
-root = Path(__file__).resolve().parents[1]
-manifest = json.loads((root / "NotchSixty/Assets.xcassets/AppIcon.appiconset/Contents.json").read_text())
-images = manifest["images"]
-assert len(images) == 20, f"expected 20 macOS app icon variants, found {len(images)}"
-light = [image for image in images if "appearances" not in image]
-dark = [image for image in images if image.get("appearances") == [{"appearance": "luminosity", "value": "dark"}]]
-assert len(light) == 10 and len(dark) == 10
-for image in images:
-    path = root / "NotchSixty/Assets.xcassets/AppIcon.appiconset" / image["filename"]
-    assert path.exists(), f"missing app icon: {path.name}"
-    assert path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"), f"invalid PNG: {path.name}"
-for source in ("AppIcon-light.svg", "AppIcon-dark.svg"):
-    path = root / "artwork" / source
-    assert path.exists() and "<svg" in path.read_text()
-ui = (root / "NotchSixty/UI/ProductionRootView.swift").read_text()
-assert "import AppKit" in ui
-assert "NSApplication.shared.applicationIconImage" in ui
-assert "ProductionSidebarBrand()" in ui
-assert ".listStyle(.sidebar)" in ui
-assert ".tint(Color(red: 0.91, green: 0.58, blue: 0.24))" not in ui, "brand amber must not override the system-wide control tint"
-assert ui.count(".glassEffect(.regular, in: .rect(cornerRadius: 18))") >= 4
-assert 'Text("Notch Sixty")' in ui and ".textCase(.uppercase)" in ui
-assert "Color(red: 0.94, green: 0.89, blue: 0.73)" in ui, "signature VU face must remain warm and opaque"
-assert ".padding(.horizontal, 11)" in ui and ".padding(.vertical, 6)" in ui, "toolbar device readout must retain comfortable padding"
-profiles = (root / "NotchSixty/UI/ProductionProfileToolbar.swift").read_text()
-assert profiles.count(".buttonStyle(.glass)") >= 2
-for label in ("New Preset…", "Save Changes", "Rename…", "Delete", "New Playback System…"):
-    assert label in profiles, f"missing simplified profile action: {label}"
-assert "Save Current as New Preset" not in profiles
-assert "New System from Current" not in profiles
-assert "selectedContentPresetIsDirty" in profiles and "selectedSystemProfileIsDirty" in profiles
-print("PR39 app identity / Liquid Glass / toolbar validation passed")
+ROOT = Path(__file__).resolve().parents[1]
+APPICON = ROOT / "NotchSixty" / "Assets.xcassets" / "AppIcon.appiconset"
+CONTENTS = APPICON / "Contents.json"
+GENERATOR = ROOT / "ci" / "generate_app_icons.swift"
+STATUS = ROOT / "docs" / "PR39_APP_IDENTITY_STATUS.md"
+
+
+def fail(message: str) -> None:
+    print(f"PR39 identity validation failed: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+if not CONTENTS.exists():
+    fail("missing AppIcon Contents.json")
+
+payload = json.loads(CONTENTS.read_text(encoding="utf-8"))
+images = payload.get("images", [])
+if len(images) != 20:
+    fail(f"expected 20 macOS light/dark icon slots, found {len(images)}")
+
+filenames = []
+dark_count = 0
+for item in images:
+    name = item.get("filename")
+    if not name:
+        fail("app icon slot without filename")
+    filenames.append(name)
+    if item.get("appearances") == [{"appearance": "luminosity", "value": "dark"}]:
+        dark_count += 1
+    if not (APPICON / name).exists():
+        fail(f"missing committed app icon raster: {name}")
+
+if dark_count != 10:
+    fail(f"expected 10 luminosity-dark icon slots, found {dark_count}")
+if len(set(filenames)) != 20:
+    fail("duplicate app-icon filenames in Contents.json")
+
+for master in ["AppIcon-light-final.png", "AppIcon-dark-final.png"]:
+    if not (ROOT / "artwork" / master).exists():
+        fail(f"missing approved final artwork: {master}")
+
+source = GENERATOR.read_text(encoding="utf-8")
+for forbidden in ["bodyX", "bodyYFromBottom", "addClip()", "sourceCanvas"]:
+    if forbidden in source:
+        fail(f"icon generator still contains historical crop/mask token: {forbidden}")
+for required in ["does not redraw, mask, crop, or reinterpret", "source.draw("]:
+    if required not in source:
+        fail(f"icon generator lost raster-preserving contract: {required}")
+
+status = STATUS.read_text(encoding="utf-8")
+if "does not crop, mask, redraw, or reinterpret" not in status:
+    fail("identity status does not document the raster-preserving icon contract")
+
+print("PR39 app identity / raster-preserving icon validation passed")

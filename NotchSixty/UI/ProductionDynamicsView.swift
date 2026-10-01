@@ -526,7 +526,7 @@ struct ProductionDynamicsView: View {
         reset: @escaping () -> Void,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 14) {
                 Image(systemName: module.systemImage)
                     .font(.title2)
@@ -544,13 +544,22 @@ struct ProductionDynamicsView: View {
                 Button("Reset", action: reset)
                     .buttonStyle(.glass)
             }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 18)
 
             Divider()
-            content()
+
+            VStack(alignment: .leading, spacing: 16) {
+                content()
+            }
+            .padding(20)
         }
-        .padding(20)
         .frame(maxWidth: 920, alignment: .topLeading)
-        .background(.quaternary.opacity(0.22), in: .rect(cornerRadius: 22))
+        .background(.regularMaterial, in: .rect(cornerRadius: 22))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(.quaternary, lineWidth: 0.5)
+        }
         .padding(.bottom, 24)
     }
 
@@ -737,19 +746,29 @@ private struct DynamicsParameterRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 10) {
-            Text(title)
-                .frame(width: 165, alignment: .leading)
-                .foregroundStyle(.secondary)
-            Slider(value: $value, in: range, step: step)
-            TextField("", value: $value, format: .number.precision(.fractionLength(digits)))
+        LabeledContent(title) {
+            HStack(spacing: 10) {
+                Slider(value: $value, in: range, step: step)
+                    .frame(minWidth: 220)
+
+                TextField(
+                    title,
+                    value: $value,
+                    format: .number.precision(.fractionLength(digits))
+                )
+                .labelsHidden()
+                .textFieldStyle(.roundedBorder)
                 .multilineTextAlignment(.trailing)
                 .monospacedDigit()
                 .frame(width: 76)
-            Text(unit)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(width: 42, alignment: .leading)
+
+                if !unit.isEmpty {
+                    Text(unit)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(minWidth: 38, alignment: .leading)
+                }
+            }
         }
     }
 }
