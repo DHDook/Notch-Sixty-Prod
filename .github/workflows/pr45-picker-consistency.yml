@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   patch-validate-commit:
+    if: ${{ !contains(github.event.head_commit.message, 'PR45: unify production picker glass styling') }}
     runs-on: xcode-27
     steps:
       - name: Check out PR45
@@ -56,12 +57,12 @@ jobs:
 
       - name: Commit accepted consistency fixes
         run: |
-          rm -f .github/workflows/pr45-picker-consistency.yml ci/apply_pr45_picker_consistency.py
+          git restore .github/workflows/pr45-closure.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
+          git add NotchSixty ci/validate_pr45_control_style.py
           if git diff --cached --quiet; then
-            echo 'No changes to commit.'
+            echo 'No product/control-style changes to commit.'
             exit 0
           fi
           git commit -m 'PR45: unify production picker glass styling'
