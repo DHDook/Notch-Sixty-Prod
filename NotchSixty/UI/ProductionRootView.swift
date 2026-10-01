@@ -4,7 +4,9 @@ import SwiftUI
 struct ProductionGlassPickerChromeModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
-            .glassEffect(.regular.interactive(), in: .capsule)
+            // Picker owns pointer/press interaction. Keep the surrounding Liquid Glass
+            // visual-only so hover/click state cannot perturb layout.
+            .glassEffect(.regular, in: .capsule)
     }
 }
 
