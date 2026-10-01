@@ -69,7 +69,6 @@ struct ProductionRoomCorrectionWorkspace: View {
             .padding(28)
             .frame(maxWidth: 940, alignment: .topLeading)
         }
-        .navigationTitle("Room Correction")
         .task { calibration.prepareForUse() }
         .task(id: profiles.selectedSystemProfileID) {
             projects.prepareForUse()
@@ -242,6 +241,7 @@ struct ProductionRoomCorrectionWorkspace: View {
                                     .tag(Optional(device.uid))
                             }
                         }
+                        .productionGlassPickerChrome()
                         .labelsHidden()
                         .frame(minWidth: 320)
                         .disabled(calibration.state == .measuring || calibration.state == .arming)
@@ -309,6 +309,7 @@ struct ProductionRoomCorrectionWorkspace: View {
                     Text("15 s").tag(15.0)
                     Text("20 s").tag(20.0)
                 }
+                .productionGlassPickerChrome()
                 .labelsHidden()
                 .pickerStyle(.segmented)
                 .frame(width: 320)
@@ -675,6 +676,7 @@ struct ProductionRoomCorrectionWorkspace: View {
                         Text("1/6 oct").tag(1.0 / 6.0)
                         Text("1/3 oct").tag(1.0 / 3.0)
                     }
+                    .productionGlassPickerChrome()
                     .labelsHidden()
                     .pickerStyle(.segmented)
                     .frame(width: 360)
@@ -706,6 +708,7 @@ struct ProductionRoomCorrectionWorkspace: View {
                             Text("\(taps.formatted()) taps").tag(taps)
                         }
                     }
+                    .productionGlassPickerChrome()
                     .labelsHidden()
                     .frame(width: 180)
                 }
@@ -1277,6 +1280,7 @@ private struct RoomCorrectionAcousticDiagnosticsPanel: View {
                                 Text(channel.rawValue).tag(channel)
                             }
                         }
+                        .productionGlassPickerChrome()
                         .pickerStyle(.segmented)
                         .frame(width: 180)
 
@@ -1285,6 +1289,7 @@ private struct RoomCorrectionAcousticDiagnosticsPanel: View {
                                 Text(metric.rawValue).tag(metric)
                             }
                         }
+                        .productionGlassPickerChrome()
                         .pickerStyle(.menu)
                         .frame(minWidth: 180)
                     }

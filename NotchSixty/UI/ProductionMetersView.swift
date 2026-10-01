@@ -135,7 +135,6 @@ struct ProductionMetersView: View {
             .padding(28)
             .frame(maxWidth: 1180, alignment: .topLeading)
         }
-        .navigationTitle("Meters")
         .task(id: "\(engine.lifecycleState.rawValue)|\(page.rawValue)") {
             await runVisiblePageLoop()
         }
@@ -164,6 +163,7 @@ struct ProductionMetersView: View {
                 Label(page.title, systemImage: page.systemImage).tag(page)
             }
         }
+        .productionGlassPickerChrome()
         .pickerStyle(.segmented)
         .labelsHidden()
         .frame(maxWidth: 720)

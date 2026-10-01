@@ -190,9 +190,11 @@ enum ProductProfileError: Error, LocalizedError {
 @MainActor
 final class ProductProfileController: ObservableObject {
     private struct Archive: Codable {
-        static let currentSchemaVersion = 1
-        var schemaVersion: Int = 1
-        var userContentPresets: [ContentPreset]
+        static let currentSchemaVersion = 2
+        var schemaVersion: Int = currentSchemaVersion
+        var contentPresets: [ContentPreset]?
+        // v1 migration field. New archives store the complete editable list in contentPresets.
+        var userContentPresets: [ContentPreset]?
         var systemProfiles: [PlaybackSystemProfile]
         var selectedContentPresetID: UUID?
         var selectedSystemProfileID: UUID?
@@ -485,6 +487,7 @@ final class ProductProfileController: ObservableObject {
     let engine: AudioIOEngine
     private let storageURL: URL
     private var didRestoreSelection = false
+    private var didLoadArchive = false
 
     @Published private(set) var userContentPresets: [ContentPreset] = []
     @Published private(set) var systemProfiles: [PlaybackSystemProfile] = []
@@ -496,12 +499,13 @@ final class ProductProfileController: ObservableObject {
         self.engine = engine
         self.storageURL = storageURL ?? Self.defaultStorageURL()
         loadArchive()
+        ensureContentPresetsSeeded()
         ensureDefaultSystemProfile()
         reconcileSelections()
     }
 
     var contentPresets: [ContentPreset] {
-        Self.factoryContentPresets + userContentPresets
+        userContentPresets
     }
 
     var selectedContentPreset: ContentPreset? {
@@ -519,7 +523,7 @@ final class ProductProfileController: ObservableObject {
     var selectedSystemOutputRouting: MultiOutputRoutingConfiguration {
         selectedSystemProfile?.state.outputRouting ?? MultiOutputRoutingConfiguration()
     }
-    var canOverwriteSelectedContentPreset: Bool { selectedContentPreset?.origin == .user }
+    var canOverwriteSelectedContentPreset: Bool { selectedContentPreset != nil }
 
     var selectedContentPresetIsDirty: Bool {
         guard let preset = selectedContentPreset else { return true }
@@ -607,10 +611,15 @@ final class ProductProfileController: ObservableObject {
 
     func deleteSelectedContentPreset() {
         guard let selectedContentPresetID,
-              let selected = selectedContentPreset,
-              selected.origin == .user else { return }
+              selectedContentPreset != nil else { return }
         userContentPresets.removeAll { $0.id == selectedContentPresetID }
-        self.selectedContentPresetID = nil
+        if let fallback = userContentPresets.first {
+            self.selectedContentPresetID = fallback.id
+            try? applyContentState(fallback.state)
+        } else {
+            self.selectedContentPresetID = nil
+        }
+        lastErrorDescription = nil
         persist()
     }
 
@@ -917,6 +926,13 @@ final class ProductProfileController: ObservableObject {
         }
     }
 
+    private func ensureContentPresetsSeeded() {
+        guard !didLoadArchive, userContentPresets.isEmpty else { return }
+        userContentPresets = Self.factoryContentPresets
+        selectedContentPresetID = Self.referencePresetID
+        persist()
+    }
+
     private func ensureDefaultSystemProfile() {
         guard systemProfiles.isEmpty else { return }
         systemProfiles = [
@@ -935,8 +951,9 @@ final class ProductProfileController: ObservableObject {
            !contentPresets.contains(where: { $0.id == selectedContentPresetID }) {
             self.selectedContentPresetID = nil
         }
-        if selectedContentPresetID == nil, userContentPresets.isEmpty {
-            selectedContentPresetID = Self.referencePresetID
+        if selectedContentPresetID == nil,
+           let fallback = contentPresets.first(where: { $0.id == Self.referencePresetID }) ?? contentPresets.first {
+            selectedContentPresetID = fallback.id
         }
         if let selectedSystemProfileID,
            !systemProfiles.contains(where: { $0.id == selectedSystemProfileID }) {
@@ -976,10 +993,19 @@ final class ProductProfileController: ObservableObject {
         do {
             let data = try Data(contentsOf: storageURL)
             let archive = try JSONDecoder().decode(Archive.self, from: data)
-            guard archive.schemaVersion == Archive.currentSchemaVersion else {
+            let storedContent: [ContentPreset]
+            switch archive.schemaVersion {
+            case 1:
+                // v1 kept factory presets outside the archive and only persisted custom presets.
+                // Materialize both into one editable list so factory presets can be renamed,
+                // overwritten, or deleted exactly like user-created presets.
+                storedContent = Self.factoryContentPresets + (archive.userContentPresets ?? [])
+            case Archive.currentSchemaVersion:
+                storedContent = archive.contentPresets ?? []
+            default:
                 throw ProductProfileError.persistenceVersion(archive.schemaVersion)
             }
-            userContentPresets = archive.userContentPresets.filter {
+            userContentPresets = storedContent.filter {
                 $0.schemaVersion == ContentPreset.currentSchemaVersion
                     && $0.state.schemaVersion == ContentPresetState.currentSchemaVersion
             }
@@ -992,6 +1018,10 @@ final class ProductProfileController: ObservableObject {
             }
             selectedContentPresetID = archive.selectedContentPresetID
             selectedSystemProfileID = archive.selectedSystemProfileID
+            didLoadArchive = true
+            if archive.schemaVersion < Archive.currentSchemaVersion {
+                persist()
+            }
         } catch {
             lastErrorDescription = error.localizedDescription
         }
@@ -1009,7 +1039,8 @@ final class ProductProfileController: ObservableObject {
         let directory = storageURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let archive = Archive(
-            userContentPresets: userContentPresets,
+            contentPresets: userContentPresets,
+            userContentPresets: nil,
             systemProfiles: systemProfiles,
             selectedContentPresetID: selectedContentPresetID,
             selectedSystemProfileID: selectedSystemProfileID

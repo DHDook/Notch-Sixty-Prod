@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import ServiceManagement
 import SwiftUI
 
 struct ProductDSPConfiguration: Equatable, Sendable {
@@ -129,6 +130,7 @@ final class ProductController: ObservableObject {
     }
 }
 
+#if DEBUG
 private struct PR27ProtectionValidationView: View {
     @ObservedObject var engine: AudioIOEngine
 
@@ -954,6 +956,8 @@ private struct EngineeringValidationView: View {
     }
 }
 
+#endif
+
 private enum ApplicationAppearanceMode: String, CaseIterable, Identifiable {
     case system
     case light
@@ -1009,6 +1013,11 @@ private final class ApplicationPreferences: ObservableObject {
         }
     }
 
+    @Published private(set) var launchAtLoginEnabled: Bool
+    @Published private(set) var launchAtLoginError: String?
+    private var appearanceObservation: NSKeyValueObservation?
+    private var didApplyInitialPreferences = false
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         appearance = ApplicationAppearanceMode(
@@ -1017,9 +1026,49 @@ private final class ApplicationPreferences: ObservableObject {
         presence = ApplicationPresenceMode(
             rawValue: defaults.string(forKey: Key.presence) ?? ""
         ) ?? .both
+        launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
+        launchAtLoginError = nil
+        appearanceObservation = NSApplication.shared.observe(\.effectiveAppearance, options: [.new]) { [weak self] _, _ in
+            Task { @MainActor in
+                self?.applyApplicationIcon()
+            }
+        }
     }
 
     var isTrayInserted: Bool { presence != .dock }
+
+    var launchAtLoginStatusDescription: String {
+        switch SMAppService.mainApp.status {
+        case .enabled:
+            return "Enabled"
+        case .requiresApproval:
+            return "Requires approval in System Settings"
+        case .notRegistered:
+            return "Off"
+        case .notFound:
+            return "Unavailable"
+        @unknown default:
+            return "Unknown"
+        }
+    }
+
+    func refreshLaunchAtLoginStatus() {
+        launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
+    }
+
+    func setLaunchAtLogin(_ enabled: Bool) {
+        do {
+            if enabled {
+                try SMAppService.mainApp.register()
+            } else {
+                try SMAppService.mainApp.unregister()
+            }
+            launchAtLoginError = nil
+        } catch {
+            launchAtLoginError = error.localizedDescription
+        }
+        refreshLaunchAtLoginStatus()
+    }
 
     func setTrayInserted(_ inserted: Bool) {
         if inserted {
@@ -1031,6 +1080,8 @@ private final class ApplicationPreferences: ObservableObject {
     }
 
     func apply() {
+        guard !didApplyInitialPreferences else { return }
+        didApplyInitialPreferences = true
         applyAppearance()
         applyActivationPolicy()
     }
@@ -1043,6 +1094,23 @@ private final class ApplicationPreferences: ObservableObject {
             NSApplication.shared.appearance = NSAppearance(named: .aqua)
         case .dark:
             NSApplication.shared.appearance = NSAppearance(named: .darkAqua)
+        }
+        applyApplicationIcon()
+    }
+
+    private func applyApplicationIcon() {
+        let useDarkIcon: Bool
+        switch appearance {
+        case .light:
+            useDarkIcon = false
+        case .dark:
+            useDarkIcon = true
+        case .system:
+            useDarkIcon = NSApplication.shared.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        }
+        let assetName = NSImage.Name(useDarkIcon ? "DockIconDark" : "DockIconLight")
+        if let icon = NSImage(named: assetName) {
+            NSApplication.shared.applicationIconImage = icon
         }
     }
 
@@ -1097,18 +1165,21 @@ private struct ProductionMenuBarView: View {
         Binding(
             get: { processingActive },
             set: { enabled in
-                if enabled {
-                    if engine.lifecycleState == .failed { engine.stop() }
-                    guard engine.lifecycleState == .idle else { return }
-                    do {
-                        try engine.start()
+                Task { @MainActor in
+                    await Task.yield()
+                    if enabled {
+                        if engine.lifecycleState == .failed { engine.stop() }
+                        guard engine.lifecycleState == .idle else { return }
+                        do {
+                            try engine.start()
+                            commandError = nil
+                        } catch {
+                            commandError = error.localizedDescription
+                        }
+                    } else {
+                        engine.stop()
                         commandError = nil
-                    } catch {
-                        commandError = error.localizedDescription
                     }
-                } else {
-                    engine.stop()
-                    commandError = nil
                 }
             }
         )
@@ -1139,10 +1210,6 @@ private struct ProductionMenuBarView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
-                Image("TrayIcon")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 28, height: 24)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("NOTCH SIXTY")
                         .font(.headline)
@@ -1164,6 +1231,7 @@ private struct ProductionMenuBarView: View {
                     Text(preset.name).tag(Optional(preset.id))
                 }
             }
+            .productionGlassPickerChrome()
             .pickerStyle(.menu)
 
             if profiles.selectedContentPresetIsDirty {
@@ -1174,24 +1242,26 @@ private struct ProductionMenuBarView: View {
 
             Divider()
 
-            Button {
-                openWindow(id: "main")
-                NSApplication.shared.activate(ignoringOtherApps: true)
-            } label: {
-                Label("Open Notch Sixty", systemImage: "macwindow")
-            }
+            HStack(spacing: 8) {
+                Button {
+                    openWindow(id: "main")
+                    NSApplication.shared.activate(ignoringOtherApps: true)
+                } label: {
+                    Label("Open Notch Sixty", systemImage: "macwindow")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glassProminent)
 
-            SettingsLink {
-                Label("Settings…", systemImage: "gearshape")
-            }
-
-            Divider()
-
-            Button(role: .destructive) {
-                product.shutdownForTermination()
-                NSApplication.shared.terminate(nil)
-            } label: {
-                Label("Quit Notch Sixty", systemImage: "power")
+                Button(role: .destructive) {
+                    product.shutdownForTermination()
+                    NSApplication.shared.terminate(nil)
+                } label: {
+                    Image(systemName: "power")
+                        .frame(width: 18, height: 18)
+                }
+                .buttonStyle(.glass)
+                .foregroundStyle(.red)
+                .help("Quit Notch Sixty")
             }
         }
         .padding(14)
@@ -1212,6 +1282,7 @@ private struct ProductionMenuBarView: View {
 
 private struct ProductionSettingsView: View {
     @ObservedObject var preferences: ApplicationPreferences
+    @ObservedObject var product: ProductController
 
     private var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
@@ -1221,43 +1292,173 @@ private struct ProductionSettingsView: View {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—"
     }
 
-    var body: some View {
-        Form {
-            Section("About") {
-                LabeledContent("Version") {
-                    Text(version).monospacedDigit()
-                }
-                LabeledContent("Build") {
-                    Text(build).monospacedDigit()
-                }
-            }
+    private var diagnosticsReport: String {
+        let engine = product.audioEngine
+        let output = engine.selectedOutputDevice
+        let kernel = engine.diagnosticsSnapshot().renderKernelDiagnostics
 
-            Section("Appearance") {
-                Picker("Appearance", selection: $preferences.appearance) {
-                    ForEach(ApplicationAppearanceMode.allCases) { mode in
-                        Text(mode.displayName).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-            }
-
-            Section("App Presence") {
-                Picker("Show Notch Sixty in", selection: $preferences.presence) {
-                    ForEach(ApplicationPresenceMode.allCases) { mode in
-                        Text(mode.displayName).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-
-                Text("Menu Bar mode keeps processing and preset controls available without a Dock icon. Both shows the app in both places.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+        let outputName = output?.name ?? "None selected"
+        let outputUID = output?.uid ?? "None"
+        let outputRate = output.map {
+            String(format: "%.1f kHz", $0.nominalSampleRate / 1_000.0)
+        } ?? "Unavailable"
+        let latency: String
+        if let kernel, kernel.sampleRate > 0 {
+            latency = String(
+                format: "%u frames / %.3f ms",
+                kernel.latencyFrames,
+                Double(kernel.latencyFrames) / kernel.sampleRate * 1_000.0
+            )
+        } else {
+            latency = "Unavailable"
         }
-        .formStyle(.grouped)
-        .frame(width: 480)
-        .padding(12)
+
+        return [
+            "Notch Sixty Diagnostics",
+            "Version: \(version) (\(build))",
+            "macOS: \(ProcessInfo.processInfo.operatingSystemVersionString)",
+            "Architecture: Apple Silicon",
+            "Lifecycle: \(engine.lifecycleState.rawValue)",
+            "Output: \(outputName)",
+            "Output UID: \(outputUID)",
+            "Output Rate: \(outputRate)",
+            "Content Preset: \(product.profiles.selectedContentPresetName)",
+            "Playback System: \(product.profiles.selectedSystemProfileName)",
+            "Global Bypass: \(engine.playbackControlConfiguration.globalBypassed ? "On" : "Off")",
+            "EQ Phase: \(engine.stereoEQConfiguration.phaseMode.displayName)",
+            "EQ Bands Enabled: \(engine.stereoEQConfiguration.enabledBandCount)",
+            "Bass Management: \(engine.bassManagementConfiguration.enabled ? "On" : "Off")",
+            "Room Correction: \(engine.roomCorrectionConfiguration.enabled ? "On" : "Off")",
+            "DSP Latency: \(latency)",
+        ].joined(separator: "\n")
     }
+
+    private func copyDiagnostics() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(diagnosticsReport, forType: .string)
+    }
+
+    var body: some View {
+        ScrollView {
+            GlassEffectContainer(spacing: 14) {
+                VStack(alignment: .leading, spacing: 14) {
+                    settingsCard(title: "About", systemImage: "info.circle") {
+                        LabeledContent("Version") {
+                            Text(version).monospacedDigit()
+                        }
+                        LabeledContent("Build") {
+                            Text(build).monospacedDigit()
+                        }
+                    }
+
+                    settingsCard(title: "Appearance", systemImage: "circle.lefthalf.filled") {
+                        Picker("Appearance", selection: $preferences.appearance) {
+                            ForEach(ApplicationAppearanceMode.allCases) { mode in
+                                Text(mode.displayName).tag(mode)
+                            }
+                        }
+                        .productionGlassPickerChrome()
+                        .pickerStyle(.segmented)
+                    }
+
+                    settingsCard(title: "App Presence", systemImage: "macwindow.on.rectangle") {
+                        Picker("Show Notch Sixty in", selection: $preferences.presence) {
+                            ForEach(ApplicationPresenceMode.allCases) { mode in
+                                Text(mode.displayName).tag(mode)
+                            }
+                        }
+                        .productionGlassPickerChrome()
+                        .pickerStyle(.segmented)
+
+                        Text("Menu Bar mode keeps processing and preset controls available without a Dock icon. Both shows the app in both places.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    settingsCard(title: "Startup", systemImage: "power") {
+                        Toggle(
+                            "Launch at Login",
+                            isOn: Binding(
+                                get: { preferences.launchAtLoginEnabled },
+                                set: { preferences.setLaunchAtLogin($0) }
+                            )
+                        )
+
+                        LabeledContent("Status") {
+                            Text(preferences.launchAtLoginStatusDescription)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        if let error = preferences.launchAtLoginError {
+                            Label(error, systemImage: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                                .textSelection(.enabled)
+                        }
+
+                        Text("Launch at Login is optional and does not automatically start audio processing. Processing remains an explicit user action in v1.0.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    settingsCard(title: "Permissions", systemImage: "lock.shield") {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("System Audio")
+                                .font(.subheadline.weight(.medium))
+                            Text("Requested by macOS when processing needs system-audio capture.")
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Measurement Microphone")
+                                .font(.subheadline.weight(.medium))
+                            Text("Requested only from Room Correction when you choose Request Access.")
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                        Text("If processing starts but receives no system audio after permission was denied, allow Notch Sixty under Privacy & Security → Screen & System Audio Recording, then relaunch the app.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    settingsCard(title: "Support", systemImage: "wrench.and.screwdriver") {
+                        Button {
+                            copyDiagnostics()
+                        } label: {
+                            Label("Copy Diagnostics", systemImage: "doc.on.doc")
+                        }
+                        .buttonStyle(.glass)
+
+                        Text("Copies app/build, macOS, audio device/rate, active preset/system, bypass state, and DSP latency. It does not include captured audio or room-measurement samples.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .padding(18)
+        }
+        .task { preferences.refreshLaunchAtLoginStatus() }
+        .frame(width: 540)
+        .frame(minHeight: 580)
+    }
+
+    private func settingsCard<Content: View>(
+        title: String,
+        systemImage: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(title, systemImage: systemImage)
+                .font(.headline)
+            content()
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+    }
+
 }
 
 @main
@@ -1278,7 +1479,7 @@ struct NotchSixtyApp: App {
     }
 
     var body: some Scene {
-        WindowGroup(id: "main") {
+        Window("Notch Sixty", id: "main") {
             ProductionRootView(product: product)
                 .task {
                     product.prepareForUse()
@@ -1286,6 +1487,8 @@ struct NotchSixtyApp: App {
                 }
         }
         .defaultSize(width: 1180, height: 780)
+        .windowResizability(.contentMinSize)
+        .windowToolbarStyle(.unified(showsTitle: false))
 
         MenuBarExtra(
             "Notch Sixty",
@@ -1298,13 +1501,15 @@ struct NotchSixtyApp: App {
         .menuBarExtraStyle(.window)
 
         Settings {
-            ProductionSettingsView(preferences: preferences)
+            ProductionSettingsView(preferences: preferences, product: product)
         }
 
+        #if DEBUG
         Window("Engineering Validation", id: "engineering-validation") {
             EngineeringValidationView(engine: product.audioEngine)
                 .task { product.prepareForUse() }
         }
         .defaultSize(width: 1000, height: 760)
+        #endif
     }
 }

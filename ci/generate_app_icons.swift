@@ -1,9 +1,11 @@
 #!/usr/bin/env swift
-import AppKit
+import CoreGraphics
 import Foundation
+import ImageIO
+import UniformTypeIdentifiers
 
 // Shipping icon generation is intentionally raster-preserving. The approved
-// light/dark transparent artwork is the source of truth; this tool only
+// light/dark transparent PNG artwork is the source of truth; this tool only
 // resamples those exact rasters into the macOS asset-catalog slots. It does
 // not alter source geometry and does not redraw, mask, crop, or reinterpret
 // the meter artwork.
@@ -17,51 +19,54 @@ let darkMasterURL = artwork.appendingPathComponent("AppIcon-dark-master.png")
 try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
 try FileManager.default.createDirectory(at: artwork, withIntermediateDirectories: true)
 
-guard let lightMaster = NSImage(contentsOf: lightMasterURL),
-      let darkMaster = NSImage(contentsOf: darkMasterURL) else {
-    fatalError("Missing or unreadable approved app-icon masters under artwork/")
+func loadPNG(_ url: URL) -> CGImage {
+    guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+          let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+        fatalError("Missing or unreadable approved app-icon master: \(url.path)")
+    }
+    return image
 }
 
-func render(_ source: NSImage, pixels: Int) -> Data {
-    let size = CGFloat(pixels)
-    guard let rep = NSBitmapImageRep(
-        bitmapDataPlanes: nil,
-        pixelsWide: pixels,
-        pixelsHigh: pixels,
-        bitsPerSample: 8,
-        samplesPerPixel: 4,
-        hasAlpha: true,
-        isPlanar: false,
-        colorSpaceName: .deviceRGB,
-        bitmapFormat: .alphaNonpremultiplied,
+let lightMaster = loadPNG(lightMasterURL)
+let darkMaster = loadPNG(darkMasterURL)
+
+func render(_ source: CGImage, pixels: Int) -> Data {
+    let colorSpace = CGColorSpaceCreateDeviceRGB()
+    let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
+    guard let context = CGContext(
+        data: nil,
+        width: pixels,
+        height: pixels,
+        bitsPerComponent: 8,
         bytesPerRow: 0,
-        bitsPerPixel: 0
-    ), let context = NSGraphicsContext(bitmapImageRep: rep) else {
-        fatalError("Unable to create \(pixels)×\(pixels) bitmap context")
+        space: colorSpace,
+        bitmapInfo: bitmapInfo.rawValue
+    ) else {
+        fatalError("Unable to create \(pixels)×\(pixels) Core Graphics context")
     }
 
-    rep.size = NSSize(width: size, height: size)
-    let previous = NSGraphicsContext.current
-    NSGraphicsContext.current = context
-    defer { NSGraphicsContext.current = previous }
+    context.interpolationQuality = .high
+    context.clear(CGRect(x: 0, y: 0, width: pixels, height: pixels))
+    context.draw(source, in: CGRect(x: 0, y: 0, width: pixels, height: pixels))
 
-    context.imageInterpolation = .high
-    NSColor.clear.setFill()
-    NSRect(x: 0, y: 0, width: size, height: size).fill()
+    guard let image = context.makeImage() else {
+        fatalError("Unable to render \(pixels)×\(pixels) app icon")
+    }
 
-    source.draw(
-        in: NSRect(x: 0, y: 0, width: size, height: size),
-        from: .zero,
-        operation: .sourceOver,
-        fraction: 1,
-        respectFlipped: true,
-        hints: [.interpolation: NSImageInterpolation.high]
-    )
-
-    guard let png = rep.representation(using: .png, properties: [:]) else {
+    let data = NSMutableData()
+    guard let destination = CGImageDestinationCreateWithData(
+        data,
+        UTType.png.identifier as CFString,
+        1,
+        nil
+    ) else {
+        fatalError("Unable to create PNG destination at \(pixels)×\(pixels)")
+    }
+    CGImageDestinationAddImage(destination, image, nil)
+    guard CGImageDestinationFinalize(destination) else {
         fatalError("PNG encoding failed at \(pixels)×\(pixels)")
     }
-    return png
+    return data as Data
 }
 
 let slots: [(name: String, pixels: Int, dark: Bool)] = [

@@ -1,3 +1,4 @@
+#if DEBUG
 import AppKit
 import Combine
 import Foundation
@@ -1584,3 +1585,4 @@ struct ContentView: View {
         return String(format: "%.1f dBFS", 20.0 * log10(Double(linear)))
     }
 }
+#endif

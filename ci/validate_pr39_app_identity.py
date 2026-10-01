@@ -48,7 +48,23 @@ source = GENERATOR.read_text(encoding="utf-8")
 for forbidden in ["bodyX", "bodyYFromBottom", "addClip()", "sourceCanvas"]:
     if forbidden in source:
         fail(f"icon generator still contains historical crop/mask token: {forbidden}")
-for required in ["does not redraw, mask, crop, or reinterpret", "source.draw("]:
+
+# The original PR39 implementation used AppKit/NSImage.draw. PR45 moved the
+# same raster-preserving resize contract to Core Graphics/ImageIO because the
+# old NSBitmapImageRep context constructor is no longer reliable on macOS 27.
+# Validate the actual full-canvas draw and PNG pipeline rather than brittle
+# explanatory-comment wording.
+for required in [
+    "CGImageSourceCreateWithURL",
+    "CGContext(",
+    "context.interpolationQuality = .high",
+    "context.clear(CGRect(x: 0, y: 0, width: pixels, height: pixels))",
+    "context.draw(source, in: CGRect(x: 0, y: 0, width: pixels, height: pixels))",
+    "CGImageDestinationCreateWithData",
+    "UTType.png.identifier",
+    'AppIcon-light-master.png',
+    'AppIcon-dark-master.png',
+]:
     if required not in source:
         fail(f"icon generator lost raster-preserving contract: {required}")
 

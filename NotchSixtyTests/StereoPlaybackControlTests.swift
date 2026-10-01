@@ -939,4 +939,30 @@ final class StereoPlaybackControlTests: XCTestCase {
         XCTAssertTrue(graph.dynamics.dynamicEQ.enabled)
     }
 
+
+    @MainActor
+    func testSeededContentPresetsAreEditableDeletableAndStayDeleted() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NotchSixtyPresetMutation-\(UUID().uuidString)", isDirectory: true)
+        let archiveURL = directory.appendingPathComponent("profiles-v1.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let controller = ProductProfileController(engine: AudioIOEngine(), storageURL: archiveURL)
+        XCTAssertEqual(controller.contentPresets.count, 8)
+        XCTAssertEqual(controller.selectedContentPresetName, "Reference")
+        XCTAssertTrue(controller.canOverwriteSelectedContentPreset)
+
+        controller.renameSelectedContentPreset(to: "My Reference")
+        XCTAssertEqual(controller.selectedContentPresetName, "My Reference")
+
+        while !controller.contentPresets.isEmpty {
+            controller.deleteSelectedContentPreset()
+        }
+        XCTAssertNil(controller.selectedContentPresetID)
+
+        let reloaded = ProductProfileController(engine: AudioIOEngine(), storageURL: archiveURL)
+        XCTAssertTrue(reloaded.contentPresets.isEmpty)
+        XCTAssertNil(reloaded.selectedContentPresetID)
+    }
+
 }

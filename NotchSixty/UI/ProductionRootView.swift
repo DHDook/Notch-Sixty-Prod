@@ -1,6 +1,22 @@
-import AppKit
 import Foundation
 import SwiftUI
+
+struct ProductionGlassPickerChromeModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            // Picker owns pointer/press interaction. Keep the surrounding Liquid Glass
+            // visual-only so hover/click state cannot perturb layout. A constant inset
+            // keeps text and segmented labels clear of the capsule edge in every state.
+            .padding(.horizontal, 6)
+            .glassEffect(.regular, in: .capsule)
+    }
+}
+
+extension View {
+    func productionGlassPickerChrome() -> some View {
+        modifier(ProductionGlassPickerChromeModifier())
+    }
+}
 
 enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
     case dashboard
@@ -119,10 +135,19 @@ private enum ProductionOutputVUMeterDemand {
 
 struct ProductionRootView: View {
     @ObservedObject var product: ProductController
+    #if DEBUG
     @Environment(\.openWindow) private var openWindow
+    #endif
     @State private var selection: ProductionSection? = .dashboard
 
     private var engine: AudioIOEngine { product.audioEngine }
+
+    private var minimumWindowWidth: CGFloat {
+        if selection == .equalizer, engine.stereoEQConfiguration.channelMode != .linked {
+            return 1_320
+        }
+        return 980
+    }
 
     var body: some View {
         NavigationSplitView {
@@ -134,13 +159,12 @@ struct ProductionRootView: View {
                 }
                 .listStyle(.sidebar)
             }
-            .navigationTitle("Notch Sixty")
             .navigationSplitViewColumnWidth(min: 200, ideal: 232, max: 290)
         } detail: {
             detail(for: selection ?? .dashboard)
                 .toolbar { toolbar }
         }
-        .frame(minWidth: 980, minHeight: 680)
+        .frame(minWidth: minimumWindowWidth, minHeight: 680)
         .task { product.prepareForUse() }
     }
 
@@ -173,14 +197,18 @@ struct ProductionRootView: View {
             ProductionProfileToolbar(profiles: product.profiles, engine: engine)
 
             if let output = engine.selectedOutputDevice {
-                Text("\(output.name) · \(output.nominalSampleRate / 1_000, specifier: "%.1f") kHz")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 6)
-                    .glassEffect(.regular, in: .capsule)
+                HStack(spacing: 5) {
+                    Image(systemName: "hifispeaker")
+                    Text("\(output.name) · \(output.nominalSampleRate / 1_000, specifier: "%.1f") kHz")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .padding(.horizontal, 8)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Output \(output.name), \(output.nominalSampleRate / 1_000, specifier: "%.1f") kilohertz")
             }
+            #if DEBUG
             Button {
                 openWindow(id: "engineering-validation")
             } label: {
@@ -188,10 +216,14 @@ struct ProductionRootView: View {
             }
             .buttonStyle(.glass)
             .help("Open the retained engineering validation tools")
+            #endif
 
             Button {
-                if engine.lifecycleState == .running { engine.stop() }
-                else { try? engine.start() }
+                Task { @MainActor in
+                    await Task.yield()
+                    if engine.lifecycleState == .running { engine.stop() }
+                    else if engine.lifecycleState == .idle { try? engine.start() }
+                }
             } label: {
                 Label(
                     engine.lifecycleState == .running ? "Stop Processing" : "Start Processing",
@@ -201,36 +233,33 @@ struct ProductionRootView: View {
             .buttonStyle(.glassProminent)
             .disabled(engine.lifecycleState != .idle && engine.lifecycleState != .running)
         }
+
+        ToolbarSpacer(.flexible)
+
+        ToolbarItem(placement: .primaryAction) {
+            SettingsLink {
+                Label("Settings", systemImage: "gearshape")
+            }
+            .buttonStyle(.glass)
+            .help("Open Notch Sixty Settings")
+        }
     }
 }
 
 
 private struct ProductionSidebarBrand: View {
     var body: some View {
-        HStack(spacing: 12) {
-            if let icon = NSApplication.shared.applicationIconImage {
-                Image(nsImage: icon)
-                    .resizable()
-                    .interpolation(.high)
-                    .frame(width: 44, height: 44)
-                    .clipShape(.rect(cornerRadius: 10))
-            }
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Notch Sixty")
-                    .textCase(.uppercase)
-                    .font(.headline.weight(.semibold))
-                    .tracking(1.5)
-                Text("Stereo DSP")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+        HStack {
+            Text("Notch Sixty")
+                .textCase(.uppercase)
+                .font(.headline.weight(.semibold))
+                .tracking(1.5)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Notch Sixty Stereo DSP")
+        .accessibilityLabel("Notch Sixty")
     }
 }
 
@@ -285,7 +314,6 @@ private struct ProductionDashboardView: View {
             .padding(28)
             .frame(maxWidth: 1180, alignment: .topLeading)
         }
-        .navigationTitle("Dashboard")
     }
 
     private var outputSummary: String {
@@ -334,6 +362,7 @@ private struct ProductionDashboardView: View {
                         Text(device.name).tag(Optional(device.uid))
                     }
                 }
+                .productionGlassPickerChrome()
                 .labelsHidden()
                 .frame(maxWidth: 360)
                 .disabled(engine.lifecycleState != .idle)
@@ -688,7 +717,6 @@ private struct ProductionActiveCrossoverView: View {
             .padding(28)
             .frame(maxWidth: 1_050, alignment: .topLeading)
         }
-        .navigationTitle("Active Crossover")
     }
 
     private var playbackSystemCard: some View {
@@ -760,6 +788,7 @@ private struct ProductionActiveCrossoverView: View {
                         Text(mode.displayName).tag(Optional(mode))
                     }
                 }
+                .productionGlassPickerChrome()
                 .labelsHidden()
                 .frame(width: 260)
             }
@@ -788,6 +817,7 @@ private struct ProductionActiveCrossoverView: View {
                         Text(topology.displayName).tag(topology)
                     }
                 }
+                .productionGlassPickerChrome()
                 .labelsHidden()
                 .frame(width: 280)
             }
@@ -820,6 +850,7 @@ private struct ProductionActiveCrossoverView: View {
                             Text(topology.displayName).tag(topology)
                         }
                     }
+                    .productionGlassPickerChrome()
                     .labelsHidden()
                     .frame(width: 280)
                 }
@@ -946,6 +977,7 @@ private struct ProductionActiveCrossoverView: View {
                         .tag(MultiOutputSynchronizationMode.softwarePLL)
                         .disabled(true)
                 }
+                .productionGlassPickerChrome()
                 .labelsHidden()
                 .frame(width: 240)
             }
@@ -962,6 +994,7 @@ private struct ProductionActiveCrossoverView: View {
                             Text(deviceName(uid)).tag(Optional(uid))
                         }
                     }
+                    .productionGlassPickerChrome()
                     .labelsHidden()
                     .frame(width: 300)
                 }
@@ -1032,6 +1065,7 @@ private struct ProductionActiveCrossoverView: View {
                     Text(bus.displayName).tag(bus)
                 }
             }
+            .productionGlassPickerChrome()
             .labelsHidden()
             .frame(width: 180)
 
@@ -1048,6 +1082,7 @@ private struct ProductionActiveCrossoverView: View {
                     Text(device.name).tag(device.uid)
                 }
             }
+            .productionGlassPickerChrome()
             .labelsHidden()
             .frame(minWidth: 230)
 
@@ -1059,6 +1094,7 @@ private struct ProductionActiveCrossoverView: View {
                     Text("Ch \(channel + 1)").tag(UInt32(channel))
                 }
             }
+            .productionGlassPickerChrome()
             .labelsHidden()
             .frame(width: 80)
 
@@ -1256,6 +1292,7 @@ private struct ProductionActiveCrossoverView: View {
                     Text(EQFilterType.notch.displayName).tag(EQFilterType.notch)
                     Text(EQFilterType.allPass.displayName).tag(EQFilterType.allPass)
                 }
+                .productionGlassPickerChrome()
                 .labelsHidden()
                 .frame(width: 150)
 
@@ -1395,6 +1432,7 @@ private struct ProductionActiveCrossoverView: View {
                         Text(mode.displayName).tag(mode)
                     }
                 }
+                .productionGlassPickerChrome()
                 .pickerStyle(.segmented)
 
                 Text("The verification monitor affects the ordinary logical stereo crossover preview. Physical split routes are generated independently after the shared stereo DSP chain and are protected by their mandatory crossover even when raw Global Bypass is used.")
@@ -1549,7 +1587,6 @@ private struct ProductionRoomCorrectionView: View {
             .padding(28)
             .frame(maxWidth: 900, alignment: .topLeading)
         }
-        .navigationTitle("Room Correction")
     }
 }
 

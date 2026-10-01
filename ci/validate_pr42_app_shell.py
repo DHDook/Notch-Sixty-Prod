@@ -16,6 +16,7 @@ def fail(message: str) -> None:
 
 
 source = APP.read_text(encoding="utf-8")
+root_view = (ROOT / "NotchSixty" / "UI" / "ProductionRootView.swift").read_text(encoding="utf-8")
 required = [
     "MenuBarExtra(",
     'image: "TrayIcon"',
@@ -25,7 +26,6 @@ required = [
     "try engine.start()",
     "engine.stop()",
     'openWindow(id: "main")',
-    "SettingsLink",
     "Settings {",
     "ProductionSettingsView",
     "product.shutdownForTermination()",
@@ -48,13 +48,16 @@ for token in required:
     if token not in source:
         fail(f"missing app-shell contract token: {token}")
 
+if "SettingsLink" not in root_view or 'Label("Settings", systemImage: "gearshape")' not in root_view:
+    fail("Settings must be exposed from the main production window toolbar")
+
 contents_path = TRAY / "Contents.json"
 svg_path = TRAY / "notch_sixty_tray_icon_final_tightcrop.svg"
 if not contents_path.exists() or not svg_path.exists():
     fail("owner-controlled TrayIcon asset is missing")
 payload = json.loads(contents_path.read_text(encoding="utf-8"))
 props = payload.get("properties", {})
-if props.get("template-rendering") is not True:
+if props.get("template-rendering-intent") != "template":
     fail("TrayIcon must remain a template-rendered menu-bar asset")
 if props.get("preserves-vector-representation") is not True:
     fail("TrayIcon must preserve vector representation")

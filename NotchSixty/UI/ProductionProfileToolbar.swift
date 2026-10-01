@@ -103,9 +103,6 @@ struct ProductionProfileToolbar: View {
                                 Image(systemName: "checkmark")
                             }
                             Text(preset.name)
-                            if preset.origin == .factory {
-                                Text("Factory")
-                            }
                         }
                     }
                 }
@@ -141,10 +138,10 @@ struct ProductionProfileToolbar: View {
                 Button("CamillaDSP YAML…") { exportCamillaDSP() }
             }
         } label: {
-            Label(
-                "\(profiles.selectedContentPresetName)\(profiles.selectedContentPresetIsDirty ? " •" : "")",
-                systemImage: "music.note.list"
-            )
+            HStack(spacing: 6) {
+                Image(systemName: "music.note.list")
+                Text("Content: \(profiles.selectedContentPresetName)\(profiles.selectedContentPresetIsDirty ? " •" : "")")
+            }
         }
         .buttonStyle(.glass)
         .help(
@@ -195,12 +192,12 @@ struct ProductionProfileToolbar: View {
                 }
             }
         } label: {
-            Label(
-                "\(profiles.selectedSystemProfileName)\(profiles.selectedSystemProfileIsDirty ? " •" : "")",
-                systemImage: profiles.selectedSystemOutputMatches
+            HStack(spacing: 6) {
+                Image(systemName: profiles.selectedSystemOutputMatches
                     ? "hifispeaker.2"
-                    : "hifispeaker.2.fill"
-            )
+                    : "hifispeaker.2.fill")
+                Text("System: \(profiles.selectedSystemProfileName)\(profiles.selectedSystemProfileIsDirty ? " •" : "")")
+            }
         }
         .buttonStyle(.glass)
         .help(
