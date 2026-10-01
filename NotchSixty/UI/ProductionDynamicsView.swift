@@ -144,6 +144,7 @@ struct ProductionDynamicsView: View {
                     Text(topology.displayName).tag(topology)
                 }
             }
+            .productionGlassPickerChrome()
             .pickerStyle(.segmented)
 
             Toggle("Program-Dependent Release", isOn: boolBinding({ $0.compressor.programDependentRelease }, { $0.compressor.programDependentRelease = $1 }))
@@ -166,10 +167,12 @@ struct ProductionDynamicsView: View {
                     Picker("Low / Mid Slope", selection: binding({ $0.multibandCompressor.lowMidSlope }, { $0.multibandCompressor.lowMidSlope = $1 })) {
                         ForEach(MultibandSlope.allCases) { slope in Text(slope.displayName).tag(slope) }
                     }
+                    .productionGlassPickerChrome()
                     DynamicsParameterRow("Mid / High", value: doubleBinding({ $0.multibandCompressor.midHighFrequencyHz }, { $0.multibandCompressor.midHighFrequencyHz = $1 }), range: 1_000...8_000, step: 100, unit: "Hz", digits: 0)
                     Picker("Mid / High Slope", selection: binding({ $0.multibandCompressor.midHighSlope }, { $0.multibandCompressor.midHighSlope = $1 })) {
                         ForEach(MultibandSlope.allCases) { slope in Text(slope.displayName).tag(slope) }
                     }
+                    .productionGlassPickerChrome()
                 }
                 .padding(.vertical, 6)
             }
@@ -227,6 +230,7 @@ struct ProductionDynamicsView: View {
             Picker("Preset", selection: binding({ $0.pauseGate.preset }, { config, value in config.pauseGate.applyPreset(value) })) {
                 ForEach(PauseGatePreset.allCases) { preset in Text(preset.displayName).tag(preset) }
             }
+            .productionGlassPickerChrome()
             .pickerStyle(.menu)
 
             DynamicsParameterRow("Threshold", value: pauseGateDoubleBinding(\.thresholdDBFS), range: -80 ... -40, step: 1, unit: "dBFS", digits: 0)
@@ -251,6 +255,7 @@ struct ProductionDynamicsView: View {
             Picker("Response", selection: binding({ $0.gainRider.speed }, { $0.gainRider.speed = $1 })) {
                 ForEach(GainRiderSpeed.allCases) { speed in Text(speed.displayName).tag(speed) }
             }
+            .productionGlassPickerChrome()
             .pickerStyle(.segmented)
             Text("The live readout above is derived from existing Gain Rider runtime state and does not activate unrelated metering or analysis.")
                 .font(.caption)
@@ -269,11 +274,13 @@ struct ProductionDynamicsView: View {
             )) {
                 ForEach(SpectralDenoiserPreset.allCases) { preset in Text(preset.displayName).tag(preset) }
             }
+            .productionGlassPickerChrome()
             .pickerStyle(.menu)
 
             Picker("Quality", selection: denoiserBinding({ $0.quality }, { $0.quality = $1; $0.markCustom() })) {
                 ForEach(SpectralDenoiserQuality.allCases) { quality in Text(quality.displayName).tag(quality) }
             }
+            .productionGlassPickerChrome()
             .pickerStyle(.segmented)
 
             DynamicsParameterRow("Threshold", value: denoiserDoubleBinding(\.thresholdDBFS), range: -96 ... -30, step: 1, unit: "dBFS", digits: 0)
@@ -335,6 +342,7 @@ struct ProductionDynamicsView: View {
             Picker("Mains Region", selection: binding({ $0.mainsNotch.region }, { config, region in config.mainsNotch.selectRegion(region) })) {
                 ForEach(MainsRegion.allCases) { region in Text(region.displayName).tag(region) }
             }
+            .productionGlassPickerChrome()
             .pickerStyle(.segmented)
 
             HStack {
@@ -391,6 +399,7 @@ struct ProductionDynamicsView: View {
             Picker("Slope", selection: binding({ $0.infrasonicFilter.slope }, { $0.infrasonicFilter.slope = $1 })) {
                 ForEach(InfrasonicSlope.allCases) { slope in Text(slope.displayName).tag(slope) }
             }
+            .productionGlassPickerChrome()
             .pickerStyle(.segmented)
             Label("Legacy application-target routing is tracked as a parity gap. Main/sub target selection will live with crossover/output routing rather than be duplicated here.", systemImage: "arrow.triangle.branch")
                 .font(.caption)
@@ -420,6 +429,7 @@ struct ProductionDynamicsView: View {
             Picker("Level Source", selection: binding({ $0.loudnessContour.levelSource }, { $0.loudnessContour.levelSource = $1 })) {
                 ForEach(LoudnessLevelSource.allCases) { source in Text(source.displayName).tag(source) }
             }
+            .productionGlassPickerChrome()
             .pickerStyle(.segmented)
         }
     }
@@ -479,6 +489,7 @@ struct ProductionDynamicsView: View {
             Picker("Curve", selection: binding({ $0.softClipper.curve }, { $0.softClipper.curve = $1 })) {
                 ForEach(SoftClipperCurve.allCases) { curve in Text(curve.displayName).tag(curve) }
             }
+            .productionGlassPickerChrome()
             .pickerStyle(.menu)
             Toggle("Automatic Gain Compensation", isOn: boolBinding({ $0.softClipper.autoCompensateGain }, { $0.softClipper.autoCompensateGain = $1 }))
             DynamicsParameterRow("Asymmetry Trim", value: doubleBinding({ $0.softClipper.asymmetryTrimDB }, { $0.softClipper.asymmetryTrimDB = $1 }), range: -3...3, step: 0.1, unit: "dB", digits: 1)
@@ -499,6 +510,7 @@ struct ProductionDynamicsView: View {
             Picker("Protection Oversampling", selection: binding({ $0.oversampling }, { $0.oversampling = $1 })) {
                 ForEach(OversamplingFactor.allCases) { factor in Text(factor.displayName).tag(factor) }
             }
+            .productionGlassPickerChrome()
             .pickerStyle(.segmented)
             Text("Use higher factors when nonlinear protection stages need additional anti-aliasing margin. CPU cost rises with factor.")
                 .font(.caption)
@@ -531,6 +543,7 @@ struct ProductionDynamicsView: View {
             Picker("Stereo Processing Mode", selection: binding({ $0.stereoMode }, { $0.stereoMode = $1 })) {
                 ForEach(StereoProcessingMode.allCases) { mode in Text(mode.displayName).tag(mode) }
             }
+            .productionGlassPickerChrome()
             .pickerStyle(.segmented)
         }
     }

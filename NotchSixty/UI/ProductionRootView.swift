@@ -1,6 +1,19 @@
 import Foundation
 import SwiftUI
 
+struct ProductionGlassPickerChromeModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .glassEffect(.regular.interactive(), in: .capsule)
+    }
+}
+
+extension View {
+    func productionGlassPickerChrome() -> some View {
+        modifier(ProductionGlassPickerChromeModifier())
+    }
+}
+
 enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
     case dashboard
     case equalizer
@@ -338,6 +351,7 @@ private struct ProductionDashboardView: View {
                         Text(device.name).tag(Optional(device.uid))
                     }
                 }
+                .productionGlassPickerChrome()
                 .labelsHidden()
                 .frame(maxWidth: 360)
                 .disabled(engine.lifecycleState != .idle)
@@ -763,6 +777,7 @@ private struct ProductionActiveCrossoverView: View {
                         Text(mode.displayName).tag(Optional(mode))
                     }
                 }
+                .productionGlassPickerChrome()
                 .labelsHidden()
                 .frame(width: 260)
             }
@@ -791,6 +806,7 @@ private struct ProductionActiveCrossoverView: View {
                         Text(topology.displayName).tag(topology)
                     }
                 }
+                .productionGlassPickerChrome()
                 .labelsHidden()
                 .frame(width: 280)
             }
@@ -823,6 +839,7 @@ private struct ProductionActiveCrossoverView: View {
                             Text(topology.displayName).tag(topology)
                         }
                     }
+                    .productionGlassPickerChrome()
                     .labelsHidden()
                     .frame(width: 280)
                 }
@@ -949,6 +966,7 @@ private struct ProductionActiveCrossoverView: View {
                         .tag(MultiOutputSynchronizationMode.softwarePLL)
                         .disabled(true)
                 }
+                .productionGlassPickerChrome()
                 .labelsHidden()
                 .frame(width: 240)
             }
@@ -965,6 +983,7 @@ private struct ProductionActiveCrossoverView: View {
                             Text(deviceName(uid)).tag(Optional(uid))
                         }
                     }
+                    .productionGlassPickerChrome()
                     .labelsHidden()
                     .frame(width: 300)
                 }
@@ -1035,6 +1054,7 @@ private struct ProductionActiveCrossoverView: View {
                     Text(bus.displayName).tag(bus)
                 }
             }
+            .productionGlassPickerChrome()
             .labelsHidden()
             .frame(width: 180)
 
@@ -1051,6 +1071,7 @@ private struct ProductionActiveCrossoverView: View {
                     Text(device.name).tag(device.uid)
                 }
             }
+            .productionGlassPickerChrome()
             .labelsHidden()
             .frame(minWidth: 230)
 
@@ -1062,6 +1083,7 @@ private struct ProductionActiveCrossoverView: View {
                     Text("Ch \(channel + 1)").tag(UInt32(channel))
                 }
             }
+            .productionGlassPickerChrome()
             .labelsHidden()
             .frame(width: 80)
 
@@ -1259,6 +1281,7 @@ private struct ProductionActiveCrossoverView: View {
                     Text(EQFilterType.notch.displayName).tag(EQFilterType.notch)
                     Text(EQFilterType.allPass.displayName).tag(EQFilterType.allPass)
                 }
+                .productionGlassPickerChrome()
                 .labelsHidden()
                 .frame(width: 150)
 
@@ -1398,6 +1421,7 @@ private struct ProductionActiveCrossoverView: View {
                         Text(mode.displayName).tag(mode)
                     }
                 }
+                .productionGlassPickerChrome()
                 .pickerStyle(.segmented)
 
                 Text("The verification monitor affects the ordinary logical stereo crossover preview. Physical split routes are generated independently after the shared stereo DSP chain and are protected by their mandatory crossover even when raw Global Bypass is used.")

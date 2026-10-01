@@ -1231,6 +1231,7 @@ private struct ProductionMenuBarView: View {
                     Text(preset.name).tag(Optional(preset.id))
                 }
             }
+            .productionGlassPickerChrome()
             .pickerStyle(.menu)
 
             if profiles.selectedContentPresetIsDirty {
@@ -1356,6 +1357,7 @@ private struct ProductionSettingsView: View {
                                 Text(mode.displayName).tag(mode)
                             }
                         }
+                        .productionGlassPickerChrome()
                         .pickerStyle(.segmented)
                     }
 
@@ -1365,6 +1367,7 @@ private struct ProductionSettingsView: View {
                                 Text(mode.displayName).tag(mode)
                             }
                         }
+                        .productionGlassPickerChrome()
                         .pickerStyle(.segmented)
 
                         Text("Menu Bar mode keeps processing and preset controls available without a Dock icon. Both shows the app in both places.")
