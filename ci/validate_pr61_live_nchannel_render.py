@@ -112,12 +112,10 @@ static N60LiveNChannelRenderGraph make_bass_graph(void) {
     assert(N60LiveNChannelOutputMapCompile(
         layout, 7u, programPhysical, true, 2u, subPhysical, &outputMap));
 
-    // Bass-managed program LFE can never also map to a physical speaker lane.
     uint32_t invalidProgramPhysical[6] = {0u, 1u, 2u, 3u, 4u, 5u};
     assert(!N60LiveNChannelOutputMapCompile(
         layout, 7u, invalidProgramPhysical, true, 2u, subPhysical, &outputMap));
 
-    // Physical speaker/sub destinations must remain one-to-one.
     const uint32_t duplicateSubs[2] = {3u, 5u};
     assert(!N60LiveNChannelOutputMapCompile(
         layout, 7u, programPhysical, true, 2u, duplicateSubs, &outputMap));
@@ -147,13 +145,13 @@ int main(void) {
     N60LiveNChannelPhysicalFrame physical = {0};
     assert(N60LiveNChannelRenderProcessFrame(runtime, &graph, &first, &physical, NULL));
     assert(physical.physicalChannelCount == 7u);
-    closef(physical.values[0], 0.5f); // FL gain from PR54
+    closef(physical.values[0], 0.5f);
     closef(physical.values[1], 2.0f);
-    closef(physical.values[2], 0.0f); // one-frame center delay
-    closef(physical.values[3], 0.4f); // native LFE -> Sub 1
+    closef(physical.values[2], 0.0f);
+    closef(physical.values[3], 0.4f);
     closef(physical.values[4], 0.5f);
-    closef(physical.values[5], 0.0f); // SR mute from PR54
-    closef(physical.values[6], 0.2f); // independent LFE -> Sub 2 weight
+    closef(physical.values[5], 0.0f);
+    closef(physical.values[6], 0.2f);
 
     N60ProgramTransportFrame second = {0};
     second.channels[0] = 2.0f;
@@ -165,15 +163,13 @@ int main(void) {
     assert(N60LiveNChannelRenderProcessFrame(runtime, &graph, &second, &physical, NULL));
     closef(physical.values[0], 1.0f);
     closef(physical.values[1], 4.0f);
-    closef(physical.values[2], 3.0f); // delayed first center sample
+    closef(physical.values[2], 3.0f);
     closef(physical.values[3], 0.8f);
     closef(physical.values[4], 1.0f);
     closef(physical.values[5], 0.0f);
     closef(physical.values[6], 0.4f);
-
     N60LiveNChannelRenderRuntimeDestroy(runtime);
 
-    // Bass-management bypass retains semantic LFE as an ordinary program output.
     N60ProgramChannelLayout bypassLayout =
         N60ProgramChannelLayoutMakeStandard(N60ProgramLayoutFiveOne);
     N60ProgramLaneGraphSnapshot bypassLanes =
@@ -256,21 +252,6 @@ int main(void) {
     assert(bridge != NULL);
     N60LiveNChannelBridgeSetOutputGain(bridge, 0.5f);
 
-    float outputSamples[14];
-    for (uint32_t i = 0; i < 14u; ++i) outputSamples[i] = 9.0f;
-    AudioBufferList output = {0};
-    output.mNumberBuffers = 1u;
-    output.mBuffers[0].mNumberChannels = 7u;
-    output.mBuffers[0].mDataByteSize = sizeof(outputSamples);
-    output.mBuffers[0].mData = outputSamples;
-
-    // Gate fails closed before capture.
-    assert(N60LiveNChannelOutputIOProc(0, NULL, NULL, NULL, &output, NULL, bridge) == noErr);
-    for (uint32_t i = 0; i < 14u; ++i) closef(outputSamples[i], 0.0f);
-    N60LiveNChannelBridgeSnapshot snapshot = N60LiveNChannelBridgeGetSnapshot(bridge);
-    assert(snapshot.gatedOutputCallbacks == 1u);
-    assert(!snapshot.outputGateOpen);
-
     float inputSamples[12] = {
         1.0f, 2.0f, 3.0f, 0.4f, 0.5f, 0.6f,
         2.0f, 4.0f, 6.0f, 0.8f, 1.0f, 1.2f,
@@ -280,12 +261,33 @@ int main(void) {
     input.mBuffers[0].mNumberChannels = 6u;
     input.mBuffers[0].mDataByteSize = sizeof(inputSamples);
     input.mBuffers[0].mData = inputSamples;
-    assert(N60LiveNChannelCaptureIOProc(0, NULL, &input, NULL, NULL, NULL, bridge) == noErr);
+
+    float outputSamples[14];
+    for (uint32_t i = 0; i < 14u; ++i) outputSamples[i] = 9.0f;
+    AudioBufferList output = {0};
+    output.mNumberBuffers = 1u;
+    output.mBuffers[0].mNumberChannels = 7u;
+    output.mBuffers[0].mDataByteSize = sizeof(outputSamples);
+    output.mBuffers[0].mData = outputSamples;
+
+    AudioTimeStamp now = {0};
+    AudioTimeStamp inputTime = {0};
+    AudioTimeStamp outputTime = {0};
+
+    assert(N60LiveNChannelOutputIOProc(
+        0, &now, &input, &inputTime, &output, &outputTime, bridge) == noErr);
+    for (uint32_t i = 0; i < 14u; ++i) closef(outputSamples[i], 0.0f);
+    N60LiveNChannelBridgeSnapshot snapshot = N60LiveNChannelBridgeGetSnapshot(bridge);
+    assert(snapshot.gatedOutputCallbacks == 1u);
+    assert(!snapshot.outputGateOpen);
+
+    assert(N60LiveNChannelCaptureIOProc(
+        0, &now, &input, &inputTime, &output, &outputTime, bridge) == noErr);
 
     for (uint32_t i = 0; i < 14u; ++i) outputSamples[i] = 9.0f;
-    assert(N60LiveNChannelOutputIOProc(0, NULL, NULL, NULL, &output, NULL, bridge) == noErr);
+    assert(N60LiveNChannelOutputIOProc(
+        0, &now, &input, &inputTime, &output, &outputTime, bridge) == noErr);
 
-    // Frame 1, master gain 0.5. LFE exists only on explicit sub destinations.
     closef(outputSamples[0], 0.25f);
     closef(outputSamples[1], 1.0f);
     closef(outputSamples[2], 1.5f);
@@ -293,7 +295,6 @@ int main(void) {
     closef(outputSamples[4], 0.25f);
     closef(outputSamples[5], 0.3f);
     closef(outputSamples[6], 0.1f);
-    // Frame 2.
     closef(outputSamples[7], 0.5f);
     closef(outputSamples[8], 2.0f);
     closef(outputSamples[9], 3.0f);
