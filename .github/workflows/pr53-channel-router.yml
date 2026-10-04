@@ -1,0 +1,43 @@
+name: PR53 Channel Router
+
+on:
+  pull_request:
+    branches:
+      - feature/pr52-nchannel-core-foundation
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate-portable-router:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate semantic channel mapper and matrix router
+        run: python3 ci/validate_pr53_channel_router.py
+
+  validate-coreaudio-sdk:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Compile Core Audio mapping contract against Apple SDK
+        shell: bash
+        run: |
+          cat > /tmp/pr53_coreaudio_mapping.c <<'EOF'
+          #include "N60CoreAudioChannelMapping.h"
+
+          int main(void) {
+              AudioChannelDescription channels[2] = {0};
+              channels[0].mChannelLabel = kAudioChannelLabel_Left;
+              channels[1].mChannelLabel = kAudioChannelLabel_Right;
+              N60ProgramChannelLayout layout = {0};
+              return N60ProgramChannelLayoutFromAudioChannelDescriptions(channels, 2u, &layout) ? 0 : 1;
+          }
+          EOF
+          xcrun clang \
+            -std=c11 \
+            -Wall -Wextra -Werror \
+            -I NotchSixty/Audio/Realtime \
+            -fsyntax-only \
+            /tmp/pr53_coreaudio_mapping.c
