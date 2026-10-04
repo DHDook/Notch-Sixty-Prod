@@ -10,6 +10,8 @@
 #import "N60MultichannelBassManagement.h"
 #import "N60SubwooferTuning.h"
 #import "N60MultichannelCalibration.h"
+#import "N60MultichannelMeasurementCampaign.h"
+#import "N60SpeakerCorrectionDesigner.h"
 #import "N60MultiSubOptimizer.h"
 #import "N60HeadphoneDSP.h"
 #import "N60BinauralProfile.h"
