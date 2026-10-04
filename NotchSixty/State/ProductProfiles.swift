@@ -85,7 +85,6 @@ struct PlaybackSystemControlState: Codable, Equatable, Sendable {
     }
 
     func applying(to base: PlaybackControlConfiguration) -> PlaybackControlConfiguration {
-        // globalBypassed and auditionMode are session state and intentionally survive.
         var result = base
         result.balance = balance
         result.symmetryBalanceEnabled = symmetryBalanceEnabled
@@ -111,6 +110,7 @@ struct PlaybackSystemState: Codable, Equatable, Sendable {
     var roomCorrection: RoomCorrectionConfiguration
     var roomCorrectionCalibration: RoomCorrectionCalibrationSummary?
     var outputRouting: MultiOutputRoutingConfiguration?
+    var outputDeviceProfile: OutputDeviceProfileConfiguration?
     var speakerDriverProcessing: SpeakerDriverProcessingConfiguration?
     var speakerIR: SpeakerIRConfiguration
 
@@ -123,6 +123,7 @@ struct PlaybackSystemState: Codable, Equatable, Sendable {
         roomCorrection: RoomCorrectionConfiguration = RoomCorrectionConfiguration(),
         roomCorrectionCalibration: RoomCorrectionCalibrationSummary? = nil,
         outputRouting: MultiOutputRoutingConfiguration? = nil,
+        outputDeviceProfile: OutputDeviceProfileConfiguration? = nil,
         speakerDriverProcessing: SpeakerDriverProcessingConfiguration? = nil,
         speakerIR: SpeakerIRConfiguration = SpeakerIRConfiguration()
     ) {
@@ -134,12 +135,12 @@ struct PlaybackSystemState: Codable, Equatable, Sendable {
         self.roomCorrection = roomCorrection
         self.roomCorrectionCalibration = roomCorrectionCalibration
         self.outputRouting = outputRouting
+        self.outputDeviceProfile = outputDeviceProfile
         self.speakerDriverProcessing = speakerDriverProcessing
         self.speakerIR = speakerIR
     }
 
     func composingGain(over base: DSPGainConfiguration) -> DSPGainConfiguration {
-        // Input preamp/headroom belong to the selected Content Preset.
         var result = base
         result.outputGainDB = outputGainDB
         return result
@@ -193,7 +194,6 @@ final class ProductProfileController: ObservableObject {
         static let currentSchemaVersion = 2
         var schemaVersion: Int = currentSchemaVersion
         var contentPresets: [ContentPreset]?
-        // v1 migration field. New archives store the complete editable list in contentPresets.
         var userContentPresets: [ContentPreset]?
         var systemProfiles: [PlaybackSystemProfile]
         var selectedContentPresetID: UUID?
@@ -365,7 +365,6 @@ final class ProductProfileController: ObservableObject {
                 ],
                 inputPreampDB: -2.0,
                 headroomAttenuationDB: -1.0,
-                // Final listening revision: compressor and widener intentionally remain off.
                 dynamics: factoryBaseDynamics(limiterReleaseMs: 90.0)
             )
         ),
@@ -384,7 +383,6 @@ final class ProductProfileController: ObservableObject {
                 ],
                 inputPreampDB: -1.5,
                 headroomAttenuationDB: -0.8,
-                // Preserve vintage dynamics and image; no content compressor or widener.
                 dynamics: factoryBaseDynamics(limiterReleaseMs: 90.0)
             )
         ),
@@ -441,7 +439,6 @@ final class ProductProfileController: ObservableObject {
                 ],
                 inputPreampDB: -1.3,
                 headroomAttenuationDB: -0.7,
-                // Keep mono/hard-panned-era recordings natural; no compressor or widener.
                 dynamics: factoryBaseDynamics(limiterReleaseMs: 100.0)
             )
         ),
@@ -504,9 +501,7 @@ final class ProductProfileController: ObservableObject {
         reconcileSelections()
     }
 
-    var contentPresets: [ContentPreset] {
-        userContentPresets
-    }
+    var contentPresets: [ContentPreset] { userContentPresets }
 
     var selectedContentPreset: ContentPreset? {
         guard let selectedContentPresetID else { return nil }
@@ -522,6 +517,9 @@ final class ProductProfileController: ObservableObject {
     var selectedSystemProfileName: String { selectedSystemProfile?.name ?? "System" }
     var selectedSystemOutputRouting: MultiOutputRoutingConfiguration {
         selectedSystemProfile?.state.outputRouting ?? MultiOutputRoutingConfiguration()
+    }
+    var selectedSystemOutputDeviceProfile: OutputDeviceProfileConfiguration? {
+        selectedSystemProfile?.state.outputDeviceProfile
     }
     var canOverwriteSelectedContentPreset: Bool { selectedContentPreset != nil }
 
@@ -691,8 +689,10 @@ final class ProductProfileController: ObservableObject {
               let index = systemProfiles.firstIndex(where: { $0.id == selectedSystemProfileID }) else {
             throw ProductProfileError.selectedSystemProfileRequired
         }
-        if let configuration {
-            try configuration.validateStructure()
+        if let configuration { try configuration.validateStructure() }
+        if configuration?.enabled == true,
+           systemProfiles[index].state.outputDeviceProfile?.enabled == true {
+            throw OutputDeviceProfileError.legacyPhysicalRoutingConflict
         }
 
         let previousEngineConfiguration = engine.multiOutputRoutingConfiguration
@@ -705,6 +705,34 @@ final class ProductProfileController: ObservableObject {
         } catch {
             systemProfiles[index].state = previousState
             try? engine.replaceMultiOutputRoutingConfiguration(previousEngineConfiguration)
+            lastErrorDescription = error.localizedDescription
+            throw error
+        }
+    }
+
+    func replaceSelectedSystemOutputDeviceProfile(
+        _ configuration: OutputDeviceProfileConfiguration?
+    ) throws {
+        guard let selectedSystemProfileID,
+              let index = systemProfiles.firstIndex(where: { $0.id == selectedSystemProfileID }) else {
+            throw ProductProfileError.selectedSystemProfileRequired
+        }
+        if configuration?.enabled == true {
+            try configuration?.validateStructure(
+                bassManagementEnabled: systemProfiles[index].state.bassManagement.enabled
+            )
+            if systemProfiles[index].state.outputRouting?.enabled == true {
+                throw OutputDeviceProfileError.legacyPhysicalRoutingConflict
+            }
+        }
+
+        let previous = systemProfiles[index].state.outputDeviceProfile
+        systemProfiles[index].state.outputDeviceProfile = configuration
+        do {
+            try persistThrowing()
+            lastErrorDescription = nil
+        } catch {
+            systemProfiles[index].state.outputDeviceProfile = previous
             lastErrorDescription = error.localizedDescription
             throw error
         }
@@ -740,6 +768,10 @@ final class ProductProfileController: ObservableObject {
         guard let selectedSystemProfileID,
               let index = systemProfiles.firstIndex(where: { $0.id == selectedSystemProfileID }) else {
             throw ProductProfileError.selectedSystemProfileRequired
+        }
+        if let outputDeviceProfile = systemProfiles[index].state.outputDeviceProfile,
+           outputDeviceProfile.enabled {
+            try outputDeviceProfile.validateStructure(bassManagementEnabled: configuration.enabled)
         }
 
         let previousEngineConfiguration = engine.bassManagementConfiguration
@@ -860,6 +892,7 @@ final class ProductProfileController: ObservableObject {
             roomCorrection: engine.roomCorrectionConfiguration,
             roomCorrectionCalibration: selectedSystemProfile?.state.roomCorrectionCalibration,
             outputRouting: engine.multiOutputRoutingConfiguration,
+            outputDeviceProfile: selectedSystemProfile?.state.outputDeviceProfile,
             speakerDriverProcessing: engine.speakerDriverProcessingConfiguration.isNeutral
                 ? nil
                 : engine.speakerDriverProcessingConfiguration,
@@ -893,6 +926,14 @@ final class ProductProfileController: ObservableObject {
                     throw ProductProfileError.outputChangeRequiresIdle(profile: profileName)
                 }
                 try engine.selectOutput(uid: associated)
+            }
+            if state.outputRouting?.enabled == true, state.outputDeviceProfile?.enabled == true {
+                throw OutputDeviceProfileError.legacyPhysicalRoutingConflict
+            }
+            if let outputDeviceProfile = state.outputDeviceProfile, outputDeviceProfile.enabled {
+                try outputDeviceProfile.validateStructure(
+                    bassManagementEnabled: state.bassManagement.enabled
+                )
             }
 
             let playback = state.playback.applying(to: engine.playbackControlConfiguration)
@@ -996,9 +1037,6 @@ final class ProductProfileController: ObservableObject {
             let storedContent: [ContentPreset]
             switch archive.schemaVersion {
             case 1:
-                // v1 kept factory presets outside the archive and only persisted custom presets.
-                // Materialize both into one editable list so factory presets can be renamed,
-                // overwritten, or deleted exactly like user-created presets.
                 storedContent = Self.factoryContentPresets + (archive.userContentPresets ?? [])
             case Archive.currentSchemaVersion:
                 storedContent = archive.contentPresets ?? []

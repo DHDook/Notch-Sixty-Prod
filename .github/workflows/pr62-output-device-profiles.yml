@@ -1,0 +1,35 @@
+name: PR62 Output Device Profiles
+
+on:
+  pull_request:
+    branches:
+      - feature/pr61-live-nchannel-render
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate-portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate Output Device Profile contracts
+        run: python3 ci/validate_pr62_output_device_profiles.py
+
+  validate-macos-integration:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - name: Compile and run semantic profile behavior harness
+        run: python3 ci/validate_pr62_output_device_profiles.py
+      - name: Build app with Output Device Profile persistence
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          build
