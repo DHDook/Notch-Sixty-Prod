@@ -18,6 +18,18 @@ extern "C" {
 #endif
 
 typedef struct {
+    bool enabled;
+    uint32_t programChannelCount;
+    uint32_t physicalChannelCount;
+    float programPeak[N60_MAX_PROGRAM_CHANNELS];
+    float programRMS[N60_MAX_PROGRAM_CHANNELS];
+    uint64_t programOverRangeSamples[N60_MAX_PROGRAM_CHANNELS];
+    float physicalPeak[N60_LIVE_MAX_PHYSICAL_CHANNELS];
+    float physicalRMS[N60_LIVE_MAX_PHYSICAL_CHANNELS];
+    uint64_t physicalOverRangeSamples[N60_LIVE_MAX_PHYSICAL_CHANNELS];
+} N60LiveNChannelMeterSnapshot;
+
+typedef struct {
     uint64_t captureCallbacks;
     uint64_t outputCallbacks;
     uint64_t renderedFrames;
@@ -26,7 +38,9 @@ typedef struct {
     uint64_t gatedOutputCallbacks;
     uint64_t gatedOutputFrames;
     bool outputGateOpen;
+    uint64_t algorithmicLatencyFrames;
     N60ProgramTransportSnapshot transport;
+    N60LiveNChannelMeterSnapshot meter;
 } N60LiveNChannelBridgeSnapshot;
 
 typedef struct N60LiveNChannelBridge {
@@ -41,6 +55,13 @@ typedef struct N60LiveNChannelBridge {
 
     _Atomic bool outputGateOpen;
     _Atomic uint32_t outputGainBits;
+    _Atomic bool meteringDemand;
+    _Atomic uint32_t meterProgramPeakBits[N60_MAX_PROGRAM_CHANNELS];
+    _Atomic uint32_t meterProgramRMSBits[N60_MAX_PROGRAM_CHANNELS];
+    _Atomic uint64_t meterProgramOverRangeSamples[N60_MAX_PROGRAM_CHANNELS];
+    _Atomic uint32_t meterPhysicalPeakBits[N60_LIVE_MAX_PHYSICAL_CHANNELS];
+    _Atomic uint32_t meterPhysicalRMSBits[N60_LIVE_MAX_PHYSICAL_CHANNELS];
+    _Atomic uint64_t meterPhysicalOverRangeSamples[N60_LIVE_MAX_PHYSICAL_CHANNELS];
     _Atomic uint64_t captureCallbacks;
     _Atomic uint64_t outputCallbacks;
     _Atomic uint64_t renderedFrames;
@@ -60,6 +81,22 @@ static inline float N60LiveNChannelBitsToFloat(uint32_t bits) {
     float value = 0.0f;
     memcpy(&value, &bits, sizeof(value));
     return value;
+}
+
+static inline void N60LiveNChannelBridgeClearMeterPublication(
+    N60LiveNChannelBridge * _Nullable bridge
+) {
+    if (bridge == NULL) return;
+    for (uint32_t channel = 0; channel < N60_MAX_PROGRAM_CHANNELS; ++channel) {
+        atomic_store_explicit(&bridge->meterProgramPeakBits[channel], 0u, memory_order_relaxed);
+        atomic_store_explicit(&bridge->meterProgramRMSBits[channel], 0u, memory_order_relaxed);
+        atomic_store_explicit(&bridge->meterProgramOverRangeSamples[channel], 0u, memory_order_relaxed);
+    }
+    for (uint32_t physical = 0; physical < N60_LIVE_MAX_PHYSICAL_CHANNELS; ++physical) {
+        atomic_store_explicit(&bridge->meterPhysicalPeakBits[physical], 0u, memory_order_relaxed);
+        atomic_store_explicit(&bridge->meterPhysicalRMSBits[physical], 0u, memory_order_relaxed);
+        atomic_store_explicit(&bridge->meterPhysicalOverRangeSamples[physical], 0u, memory_order_relaxed);
+    }
 }
 
 static inline float N60LiveNChannelClampOutputGain(float gain) {
@@ -164,6 +201,8 @@ static inline bool N60LiveNChannelBridgeReset(
     atomic_store_explicit(&bridge->outputWriteFailures, 0u, memory_order_relaxed);
     atomic_store_explicit(&bridge->gatedOutputCallbacks, 0u, memory_order_relaxed);
     atomic_store_explicit(&bridge->gatedOutputFrames, 0u, memory_order_relaxed);
+    atomic_store_explicit(&bridge->meteringDemand, false, memory_order_release);
+    N60LiveNChannelBridgeClearMeterPublication(bridge);
     return true;
 }
 
@@ -177,6 +216,91 @@ static inline void N60LiveNChannelBridgeSetOutputGain(
         N60LiveNChannelFloatToBits(N60LiveNChannelClampOutputGain(gain)),
         memory_order_release
     );
+}
+
+static inline void N60LiveNChannelBridgeSetMeteringDemand(
+    N60LiveNChannelBridge * _Nullable bridge,
+    bool enabled
+) {
+    if (bridge == NULL) return;
+    if (enabled) {
+        N60LiveNChannelBridgeClearMeterPublication(bridge);
+        atomic_store_explicit(&bridge->meteringDemand, true, memory_order_release);
+    } else {
+        atomic_store_explicit(&bridge->meteringDemand, false, memory_order_release);
+        N60LiveNChannelBridgeClearMeterPublication(bridge);
+    }
+}
+
+static inline N60LiveNChannelMeterSnapshot N60LiveNChannelBridgeGetMeterSnapshot(
+    const N60LiveNChannelBridge * _Nullable bridge
+) {
+    N60LiveNChannelMeterSnapshot result = {0};
+    if (bridge == NULL) return result;
+    result.enabled = atomic_load_explicit(&bridge->meteringDemand, memory_order_acquire);
+    result.programChannelCount = bridge->graph.programLayout.channelCount;
+    result.physicalChannelCount = bridge->graph.outputMap.physicalChannelCount;
+    for (uint32_t channel = 0; channel < result.programChannelCount; ++channel) {
+        result.programPeak[channel] = N60LiveNChannelBitsToFloat(atomic_load_explicit(
+            &bridge->meterProgramPeakBits[channel], memory_order_relaxed
+        ));
+        result.programRMS[channel] = N60LiveNChannelBitsToFloat(atomic_load_explicit(
+            &bridge->meterProgramRMSBits[channel], memory_order_relaxed
+        ));
+        result.programOverRangeSamples[channel] = atomic_load_explicit(
+            &bridge->meterProgramOverRangeSamples[channel], memory_order_relaxed
+        );
+    }
+    for (uint32_t physical = 0; physical < result.physicalChannelCount; ++physical) {
+        result.physicalPeak[physical] = N60LiveNChannelBitsToFloat(atomic_load_explicit(
+            &bridge->meterPhysicalPeakBits[physical], memory_order_relaxed
+        ));
+        result.physicalRMS[physical] = N60LiveNChannelBitsToFloat(atomic_load_explicit(
+            &bridge->meterPhysicalRMSBits[physical], memory_order_relaxed
+        ));
+        result.physicalOverRangeSamples[physical] = atomic_load_explicit(
+            &bridge->meterPhysicalOverRangeSamples[physical], memory_order_relaxed
+        );
+    }
+    return result;
+}
+
+static inline float N60LiveNChannelMeterProgramPeak(
+    const N60LiveNChannelMeterSnapshot * _Nullable meter, uint32_t channel
+) {
+    return meter != NULL && channel < meter->programChannelCount ? meter->programPeak[channel] : 0.0f;
+}
+
+static inline float N60LiveNChannelMeterProgramRMS(
+    const N60LiveNChannelMeterSnapshot * _Nullable meter, uint32_t channel
+) {
+    return meter != NULL && channel < meter->programChannelCount ? meter->programRMS[channel] : 0.0f;
+}
+
+static inline uint64_t N60LiveNChannelMeterProgramOverRangeSamples(
+    const N60LiveNChannelMeterSnapshot * _Nullable meter, uint32_t channel
+) {
+    return meter != NULL && channel < meter->programChannelCount
+        ? meter->programOverRangeSamples[channel] : 0u;
+}
+
+static inline float N60LiveNChannelMeterPhysicalPeak(
+    const N60LiveNChannelMeterSnapshot * _Nullable meter, uint32_t physical
+) {
+    return meter != NULL && physical < meter->physicalChannelCount ? meter->physicalPeak[physical] : 0.0f;
+}
+
+static inline float N60LiveNChannelMeterPhysicalRMS(
+    const N60LiveNChannelMeterSnapshot * _Nullable meter, uint32_t physical
+) {
+    return meter != NULL && physical < meter->physicalChannelCount ? meter->physicalRMS[physical] : 0.0f;
+}
+
+static inline uint64_t N60LiveNChannelMeterPhysicalOverRangeSamples(
+    const N60LiveNChannelMeterSnapshot * _Nullable meter, uint32_t physical
+) {
+    return meter != NULL && physical < meter->physicalChannelCount
+        ? meter->physicalOverRangeSamples[physical] : 0u;
 }
 
 static inline N60LiveNChannelBridgeSnapshot N60LiveNChannelBridgeGetSnapshot(
@@ -198,7 +322,9 @@ static inline N60LiveNChannelBridgeSnapshot N60LiveNChannelBridgeGetSnapshot(
             memory_order_relaxed
         ),
         .outputGateOpen = atomic_load_explicit(&bridge->outputGateOpen, memory_order_acquire),
+        .algorithmicLatencyFrames = N60LiveNChannelRenderGraphLatencyFrames(&bridge->graph),
         .transport = N60ProgramTransportGetSnapshot(bridge->transport),
+        .meter = N60LiveNChannelBridgeGetMeterSnapshot(bridge),
     };
 }
 
@@ -333,6 +459,19 @@ static inline OSStatus N60LiveNChannelOutputIOProc(
     const float masterGain = N60LiveNChannelBitsToFloat(
         atomic_load_explicit(&bridge->outputGainBits, memory_order_acquire)
     );
+    const bool meterDemand = atomic_load_explicit(
+        &bridge->meteringDemand, memory_order_acquire
+    );
+    N60ProgramLaneMeterAccumulator programMeter = {0};
+    float physicalPeak[N60_LIVE_MAX_PHYSICAL_CHANNELS] = {0};
+    double physicalSquareSum[N60_LIVE_MAX_PHYSICAL_CHANNELS] = {0};
+    uint64_t physicalOverRange[N60_LIVE_MAX_PHYSICAL_CHANNELS] = {0};
+    uint32_t physicalMeterFrames = 0u;
+    if (meterDemand) {
+        N60ProgramLaneMeterAccumulatorReset(
+            &programMeter, bridge->graph.programLayout.channelCount
+        );
+    }
 
     for (uint32_t frameIndex = 0; frameIndex < frameCount; ++frameIndex) {
         N60ProgramTransportFrame input = {0};
@@ -344,19 +483,75 @@ static inline OSStatus N60LiveNChannelOutputIOProc(
                 &bridge->graph,
                 &input,
                 &physical,
-                NULL)) {
+                meterDemand ? &programMeter : NULL)) {
             (void)N60ProgramTransportZeroOutputFrame(outOutputData, frameIndex);
             atomic_fetch_add_explicit(&bridge->renderFailures, 1u, memory_order_relaxed);
             continue;
         }
 
         const float gain = N60LiveNChannelBridgeNextOutputGain(bridge, masterGain);
+        if (meterDemand) {
+            for (uint32_t physicalIndex = 0; physicalIndex < physical.physicalChannelCount; ++physicalIndex) {
+                const float value = physical.values[physicalIndex] * gain;
+                const float magnitude = fabsf(value);
+                if (magnitude > physicalPeak[physicalIndex]) physicalPeak[physicalIndex] = magnitude;
+                physicalSquareSum[physicalIndex] += (double)value * (double)value;
+                if (magnitude > 1.0f) physicalOverRange[physicalIndex] += 1u;
+            }
+            physicalMeterFrames += 1u;
+        }
         if (!N60LiveNChannelWritePhysicalFrame(&physical, outOutputData, frameIndex, gain)) {
             (void)N60ProgramTransportZeroOutputFrame(outOutputData, frameIndex);
             atomic_fetch_add_explicit(&bridge->outputWriteFailures, 1u, memory_order_relaxed);
             continue;
         }
         atomic_fetch_add_explicit(&bridge->renderedFrames, 1u, memory_order_relaxed);
+    }
+
+    if (meterDemand) {
+        const N60ProgramLaneMeterReading reading =
+            N60ProgramLaneMeterAccumulatorReading(&programMeter);
+        for (uint32_t channel = 0; channel < reading.channelCount; ++channel) {
+            atomic_store_explicit(
+                &bridge->meterProgramPeakBits[channel],
+                N60LiveNChannelFloatToBits(reading.peak[channel]),
+                memory_order_relaxed
+            );
+            atomic_store_explicit(
+                &bridge->meterProgramRMSBits[channel],
+                N60LiveNChannelFloatToBits(reading.rms[channel]),
+                memory_order_relaxed
+            );
+            atomic_fetch_add_explicit(
+                &bridge->meterProgramOverRangeSamples[channel],
+                reading.overRangeSamples[channel],
+                memory_order_relaxed
+            );
+        }
+        if (physicalMeterFrames > 0u) {
+            for (uint32_t physicalIndex = 0;
+                 physicalIndex < bridge->graph.outputMap.physicalChannelCount;
+                 ++physicalIndex) {
+                const float rms = (float)sqrt(
+                    physicalSquareSum[physicalIndex] / (double)physicalMeterFrames
+                );
+                atomic_store_explicit(
+                    &bridge->meterPhysicalPeakBits[physicalIndex],
+                    N60LiveNChannelFloatToBits(physicalPeak[physicalIndex]),
+                    memory_order_relaxed
+                );
+                atomic_store_explicit(
+                    &bridge->meterPhysicalRMSBits[physicalIndex],
+                    N60LiveNChannelFloatToBits(rms),
+                    memory_order_relaxed
+                );
+                atomic_fetch_add_explicit(
+                    &bridge->meterPhysicalOverRangeSamples[physicalIndex],
+                    physicalOverRange[physicalIndex],
+                    memory_order_relaxed
+                );
+            }
+        }
     }
     return noErr;
 }

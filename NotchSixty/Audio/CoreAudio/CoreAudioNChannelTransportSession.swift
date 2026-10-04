@@ -444,6 +444,15 @@ final class CoreAudioNChannelTransportSession {
         N60LiveNChannelBridgeSetOutputGain(bridge, gain)
     }
 
+    func setDetailedMeteringDemand(_ enabled: Bool) {
+        N60LiveNChannelBridgeSetMeteringDemand(bridge, enabled)
+    }
+
+    func bridgeSnapshot() -> N60LiveNChannelBridgeSnapshot? {
+        guard let bridge else { return nil }
+        return N60LiveNChannelBridgeGetSnapshot(bridge)
+    }
+
     func counters() -> AudioTransportCounters {
         guard let bridge else { return AudioTransportCounters() }
         let snapshot = N60LiveNChannelBridgeGetSnapshot(bridge)

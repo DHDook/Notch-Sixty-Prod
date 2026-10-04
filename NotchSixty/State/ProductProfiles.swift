@@ -1095,6 +1095,50 @@ final class ProductProfileController: ObservableObject {
         return "\(base) \(suffix)"
     }
 
+    private static func storedSystemTopologyIsValid(_ state: PlaybackSystemState) -> Bool {
+        do {
+            if let routing = state.outputRouting {
+                try routing.validateStructure()
+            }
+            if state.outputRouting?.enabled == true, state.outputDeviceProfile?.enabled == true {
+                return false
+            }
+            if state.outputRouting?.enabled == true, state.headphoneDeviceProfile?.enabled == true {
+                return false
+            }
+            if state.outputDeviceProfile?.enabled == true, state.headphoneDeviceProfile?.enabled == true {
+                return false
+            }
+            if let profile = state.outputDeviceProfile, profile.enabled {
+                try profile.validateStructure(bassManagementEnabled: state.bassManagement.enabled)
+            }
+            if let headphone = state.headphoneDeviceProfile, headphone.enabled {
+                guard headphone.outputDeviceUID?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
+                      !headphone.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      headphone.headroomAttenuationDB.isFinite,
+                      (0.0...30.0).contains(headphone.headroomAttenuationDB) else {
+                    return false
+                }
+                if headphone.spatialMode == .virtualSpeakers {
+                    guard let profile = headphone.binauralProfile else { return false }
+                    try profile.validate()
+                }
+                if let headTracking = headphone.headTracking {
+                    try headTracking.validate()
+                    if headTracking.enabled && headphone.spatialMode != .virtualSpeakers {
+                        return false
+                    }
+                }
+            }
+            if let speakerProcessing = state.speakerDriverProcessing {
+                try speakerProcessing.validateStructure()
+            }
+            return true
+        } catch {
+            return false
+        }
+    }
+
     private func loadArchive() {
         guard FileManager.default.fileExists(atPath: storageURL.path) else { return }
         do {
@@ -1119,6 +1163,7 @@ final class ProductProfileController: ObservableObject {
                     && ($0.state.roomCorrectionCalibration == nil
                         || $0.state.roomCorrectionCalibration?.schemaVersion
                             == RoomCorrectionCalibrationSummary.currentSchemaVersion)
+                    && Self.storedSystemTopologyIsValid($0.state)
             }
             selectedContentPresetID = archive.selectedContentPresetID
             selectedSystemProfileID = archive.selectedSystemProfileID

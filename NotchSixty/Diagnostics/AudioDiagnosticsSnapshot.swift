@@ -261,3 +261,40 @@ struct AudioDiagnosticsSnapshot: Equatable, Sendable {
     let recoveryFailures: UInt64
     let lastErrorDescription: String?
 }
+
+
+enum ProductionTransportMeterKind: String, Equatable, Sendable {
+    case semanticSpeakers
+    case virtualSpeakers
+
+    var displayName: String {
+        switch self {
+        case .semanticSpeakers: return "Semantic Speakers"
+        case .virtualSpeakers: return "Virtual Speakers"
+        }
+    }
+}
+
+struct ProductionTransportChannelMeter: Identifiable, Equatable, Sendable {
+    let id: String
+    let label: String
+    let channelIndex: UInt32
+    let peakLinear: Float
+    let rmsLinear: Float
+    let overRangeSamples: UInt64
+}
+
+struct ProductionTransportMeterSnapshot: Equatable, Sendable {
+    let kind: ProductionTransportMeterKind
+    let displayName: String
+    let programLayoutName: String
+    let sampleRate: Double
+    let latencyFrames: UInt64
+    let meteringEnabled: Bool
+    let programChannels: [ProductionTransportChannelMeter]
+    let physicalOutputs: [ProductionTransportChannelMeter]
+    let inputTruePeakLinear: Float?
+    let outputTruePeakLinear: Float?
+    let renderFailures: UInt64
+    let outputWriteFailures: UInt64
+}

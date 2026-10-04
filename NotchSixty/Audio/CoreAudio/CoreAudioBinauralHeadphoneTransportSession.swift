@@ -316,6 +316,15 @@ final class CoreAudioBinauralHeadphoneTransportSession {
         N60BinauralHeadphoneBridgeSetOutputGain(bridge, gain)
     }
 
+    func setDetailedMeteringDemand(_ enabled: Bool) {
+        N60BinauralHeadphoneBridgeSetMeteringDemand(bridge, enabled)
+    }
+
+    func bridgeSnapshot() -> N60BinauralHeadphoneBridgeSnapshot? {
+        guard let bridge else { return nil }
+        return N60BinauralHeadphoneBridgeGetSnapshot(bridge)
+    }
+
     func headTrackingSnapshot() -> N60HeadTrackedBinauralSnapshot? {
         guard let bridge else { return nil }
         return N60BinauralHeadphoneBridgeGetSnapshot(bridge).headTracking

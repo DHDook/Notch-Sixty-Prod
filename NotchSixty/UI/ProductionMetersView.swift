@@ -6,6 +6,7 @@ private enum ProductionMetersPage: String, CaseIterable, Identifiable {
     case spectrum
     case stereo
     case dynamics
+    case transport
 
     var id: String { rawValue }
 
@@ -15,6 +16,7 @@ private enum ProductionMetersPage: String, CaseIterable, Identifiable {
         case .spectrum: return "Spectrum"
         case .stereo: return "Stereo"
         case .dynamics: return "Dynamics"
+        case .transport: return "Transport"
         }
     }
 
@@ -24,6 +26,7 @@ private enum ProductionMetersPage: String, CaseIterable, Identifiable {
         case .spectrum: return "waveform.path"
         case .stereo: return "circle.grid.cross"
         case .dynamics: return "waveform.path.ecg"
+        case .transport: return "point.3.connected.trianglepath.dotted"
         }
     }
 }
@@ -107,6 +110,8 @@ struct ProductionMetersView: View {
     @State private var page: ProductionMetersPage = .levels
     @State private var snapshot = ProductionMetersSnapshot()
     @State private var analysisSnapshot = ProductionAnalysisSnapshot.empty
+    @State private var transportMeterSnapshot: ProductionTransportMeterSnapshot?
+    @State private var transportDiagnostics: AudioDiagnosticsSnapshot?
 
     var body: some View {
         ScrollView {
@@ -130,6 +135,8 @@ struct ProductionMetersView: View {
                     )
                 case .dynamics:
                     dynamicsPage
+                case .transport:
+                    transportPage
                 }
             }
             .padding(28)
@@ -169,7 +176,16 @@ struct ProductionMetersView: View {
         .frame(maxWidth: 720)
     }
 
+    @ViewBuilder
     private var levelsPage: some View {
+        if let transportMeterSnapshot {
+            semanticLevelsPage(transportMeterSnapshot)
+        } else {
+            legacyLevelsPage
+        }
+    }
+
+    private var legacyLevelsPage: some View {
         VStack(alignment: .leading, spacing: 16) {
             if engine.lifecycleState != .running {
                 statusBanner("Start processing to view live detailed meters. The detailed meter pipeline remains parked while processing is stopped.")
@@ -209,6 +225,115 @@ struct ProductionMetersView: View {
         }
     }
 
+    private func semanticLevelsPage(_ transport: ProductionTransportMeterSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            if engine.lifecycleState != .running {
+                statusBanner("Start processing to view live semantic meters.")
+            } else if !transport.meteringEnabled {
+                statusBanner("Detailed semantic metering is activating…")
+            }
+
+            HStack(alignment: .top, spacing: 14) {
+                metricCard(title: "Mode", value: transport.kind.displayName, detail: transport.displayName)
+                metricCard(
+                    title: "Processing",
+                    value: String(format: "%.1f kHz", transport.sampleRate / 1_000.0),
+                    detail: "\(transport.latencyFrames) frame maximum configured path latency"
+                )
+                metricCard(
+                    title: "Realtime Health",
+                    value: transport.renderFailures == 0 && transport.outputWriteFailures == 0 ? "Clean" : "Attention",
+                    detail: "\(transport.renderFailures) render · \(transport.outputWriteFailures) output failures"
+                )
+            }
+
+            if !transport.programChannels.isEmpty {
+                Text("Semantic Program Channels").font(.title2.bold())
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 12)], spacing: 12) {
+                    ForEach(transport.programChannels) { channel in transportChannelCard(channel) }
+                }
+            }
+
+            Text(transport.kind == .virtualSpeakers ? "Headphone Output" : "Physical Outputs")
+                .font(.title2.bold())
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 12)], spacing: 12) {
+                ForEach(transport.physicalOutputs) { channel in transportChannelCard(channel) }
+            }
+
+            if let input = transport.inputTruePeakLinear, let output = transport.outputTruePeakLinear {
+                HStack(alignment: .top, spacing: 14) {
+                    metricCard(
+                        title: "Spatial Input True Peak",
+                        value: ProductionMeterMath.formattedDB(ProductionMeterMath.decibels(input), suffix: "dBTP"),
+                        detail: "Downstream protection detector"
+                    )
+                    metricCard(
+                        title: "Headphone Output True Peak",
+                        value: ProductionMeterMath.formattedDB(ProductionMeterMath.decibels(output), suffix: "dBTP"),
+                        detail: "After headphone correction and protection"
+                    )
+                }
+            }
+
+            Text("Semantic program meters are measured after per-channel lane processing. Physical meters are measured after bass management, Sub N routing, startup fade, and master output gain. Meter work is demand-driven and parked when this Levels page is hidden.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var transportPage: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            let diagnostics = transportDiagnostics
+            let current = transportMeterSnapshot
+            Text("Transport & Recovery").font(.title2.bold())
+            Text("Live transport state, published latency, buffer health, and selected-device recovery policy.")
+                .foregroundStyle(.secondary)
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: 12)], spacing: 12) {
+                metricCard(
+                    title: "Active Path",
+                    value: current?.kind.displayName ?? "Stereo",
+                    detail: current?.displayName ?? "Legacy stereo render graph"
+                )
+                metricCard(
+                    title: "Published Latency",
+                    value: "\(current?.latencyFrames ?? UInt64(diagnostics?.renderKernelDiagnostics?.latencyFrames ?? 0)) frames",
+                    detail: diagnostics?.outputSampleRate.map { String(format: "%.2f ms at %.1f kHz", Double(current?.latencyFrames ?? UInt64(diagnostics?.renderKernelDiagnostics?.latencyFrames ?? 0)) * 1_000.0 / $0, $0 / 1_000.0) }
+                )
+                metricCard(
+                    title: "Buffered",
+                    value: "\(diagnostics?.sessionTransportCounters.bufferedFrames ?? 0) frames",
+                    detail: "Startup gate: \(diagnostics?.startupGateOpened == true ? "open" : "closed")"
+                )
+                metricCard(
+                    title: "Underruns",
+                    value: "\(diagnostics?.sessionTransportCounters.underrunFrames ?? 0)",
+                    detail: "Overruns \(diagnostics?.sessionTransportCounters.overrunFrames ?? 0) frames"
+                )
+                metricCard(
+                    title: "Recovery",
+                    value: "\(diagnostics?.recoverySuccesses ?? 0) recovered",
+                    detail: "\(diagnostics?.recoveryAttempts ?? 0) attempts · \(diagnostics?.recoveryFailures ?? 0) failures"
+                )
+                metricCard(
+                    title: "Selected Output",
+                    value: diagnostics?.selectedOutputPresent == true ? "Present" : "Unavailable",
+                    detail: diagnostics?.selectedOutputName ?? diagnostics?.selectedOutputUID ?? "No output selected"
+                )
+            }
+
+            if let error = diagnostics?.lastErrorDescription {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .textSelection(.enabled)
+            }
+
+            Text("Recovery remains pinned to the selected stable device UID. Notch Sixty does not silently follow the macOS default output or substitute a different device after disconnect.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
     private var dynamicsPage: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Gain Structure")
@@ -243,6 +368,30 @@ struct ProductionMetersView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    private func transportChannelCard(_ channel: ProductionTransportChannelMeter) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(channel.label).font(.headline)
+                Spacer()
+                Text("CH \(channel.channelIndex + 1)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            channelLevelRow(
+                label: "",
+                peak: ProductionMeterMath.decibels(channel.peakLinear),
+                rms: ProductionMeterMath.decibels(channel.rmsLinear)
+            )
+            HStack {
+                Text("Over-range").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Text("\(channel.overRangeSamples)").font(.caption.monospacedDigit())
+            }
+        }
+        .padding(14)
+        .background(.quaternary.opacity(0.22), in: .rect(cornerRadius: 16))
     }
 
     private func stereoLevelCard(
@@ -363,7 +512,7 @@ struct ProductionMetersView: View {
             analysisDemand = UInt32(N60_ANALYSIS_DEMAND_SPECTRUM)
         case .stereo:
             analysisDemand = UInt32(N60_ANALYSIS_DEMAND_STEREO)
-        case .levels, .dynamics:
+        case .levels, .dynamics, .transport:
             analysisDemand = UInt32(N60_ANALYSIS_DEMAND_NONE)
         }
         if analysisDemand != 0, engine.lifecycleState == .running {
@@ -395,6 +544,8 @@ struct ProductionMetersView: View {
                 interval = 50_000_000
             case .dynamics:
                 interval = 125_000_000
+            case .transport:
+                interval = 250_000_000
             }
             try? await Task.sleep(nanoseconds: interval)
         }
@@ -402,8 +553,17 @@ struct ProductionMetersView: View {
 
     @MainActor
     private func refreshSnapshot() {
-        guard engine.lifecycleState == .running,
-              let diagnostics = engine.diagnosticsSnapshot().renderKernelDiagnostics else {
+        transportDiagnostics = engine.diagnosticsSnapshot()
+        transportMeterSnapshot = engine.productionTransportMeterSnapshot()
+        guard engine.lifecycleState == .running else {
+            snapshot = ProductionMetersSnapshot()
+            return
+        }
+        if transportMeterSnapshot != nil {
+            snapshot = ProductionMetersSnapshot()
+            return
+        }
+        guard let diagnostics = transportDiagnostics?.renderKernelDiagnostics else {
             snapshot = ProductionMetersSnapshot()
             return
         }

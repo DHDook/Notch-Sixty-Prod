@@ -20,6 +20,16 @@ extern "C" {
 #endif
 
 typedef struct {
+    bool enabled;
+    float peakLeft;
+    float peakRight;
+    float rmsLeft;
+    float rmsRight;
+    uint64_t overRangeLeft;
+    uint64_t overRangeRight;
+} N60BinauralHeadphoneMeterSnapshot;
+
+typedef struct {
     uint64_t captureCallbacks;
     uint64_t outputCallbacks;
     uint64_t renderedFrames;
@@ -32,6 +42,7 @@ typedef struct {
     N60ProgramTransportSnapshot transport;
     N60ProtectionTelemetry protection;
     N60HeadTrackedBinauralSnapshot headTracking;
+    N60BinauralHeadphoneMeterSnapshot meter;
 } N60BinauralHeadphoneBridgeSnapshot;
 
 typedef struct N60BinauralHeadphoneBridge {
@@ -51,6 +62,13 @@ typedef struct N60BinauralHeadphoneBridge {
 
     _Atomic bool outputGateOpen;
     _Atomic uint32_t outputGainBits;
+    _Atomic bool meteringDemand;
+    _Atomic uint32_t meterPeakLeftBits;
+    _Atomic uint32_t meterPeakRightBits;
+    _Atomic uint32_t meterRMSLeftBits;
+    _Atomic uint32_t meterRMSRightBits;
+    _Atomic uint64_t meterOverRangeLeft;
+    _Atomic uint64_t meterOverRangeRight;
     _Atomic uint64_t captureCallbacks;
     _Atomic uint64_t outputCallbacks;
     _Atomic uint64_t renderedFrames;
@@ -70,6 +88,18 @@ static inline float N60BinauralHeadphoneBitsToFloat(uint32_t bits) {
     float value = 0.0f;
     memcpy(&value, &bits, sizeof(value));
     return value;
+}
+
+static inline void N60BinauralHeadphoneBridgeClearMeterPublication(
+    N60BinauralHeadphoneBridge * _Nullable bridge
+) {
+    if (bridge == NULL) return;
+    atomic_store_explicit(&bridge->meterPeakLeftBits, 0u, memory_order_relaxed);
+    atomic_store_explicit(&bridge->meterPeakRightBits, 0u, memory_order_relaxed);
+    atomic_store_explicit(&bridge->meterRMSLeftBits, 0u, memory_order_relaxed);
+    atomic_store_explicit(&bridge->meterRMSRightBits, 0u, memory_order_relaxed);
+    atomic_store_explicit(&bridge->meterOverRangeLeft, 0u, memory_order_relaxed);
+    atomic_store_explicit(&bridge->meterOverRangeRight, 0u, memory_order_relaxed);
 }
 
 static inline float N60BinauralHeadphoneClampGain(float gain) {
@@ -222,6 +252,8 @@ static inline bool N60BinauralHeadphoneBridgeReset(
     atomic_store_explicit(&bridge->outputWriteFailures, 0u, memory_order_relaxed);
     atomic_store_explicit(&bridge->gatedOutputCallbacks, 0u, memory_order_relaxed);
     atomic_store_explicit(&bridge->gatedOutputFrames, 0u, memory_order_relaxed);
+    atomic_store_explicit(&bridge->meteringDemand, false, memory_order_release);
+    N60BinauralHeadphoneBridgeClearMeterPublication(bridge);
     return true;
 }
 
@@ -235,6 +267,34 @@ static inline void N60BinauralHeadphoneBridgeSetOutputGain(
         N60BinauralHeadphoneFloatToBits(N60BinauralHeadphoneClampGain(gain)),
         memory_order_release
     );
+}
+
+static inline void N60BinauralHeadphoneBridgeSetMeteringDemand(
+    N60BinauralHeadphoneBridge * _Nullable bridge, bool enabled
+) {
+    if (bridge == NULL) return;
+    if (enabled) {
+        N60BinauralHeadphoneBridgeClearMeterPublication(bridge);
+        atomic_store_explicit(&bridge->meteringDemand, true, memory_order_release);
+    } else {
+        atomic_store_explicit(&bridge->meteringDemand, false, memory_order_release);
+        N60BinauralHeadphoneBridgeClearMeterPublication(bridge);
+    }
+}
+
+static inline N60BinauralHeadphoneMeterSnapshot N60BinauralHeadphoneBridgeGetMeterSnapshot(
+    const N60BinauralHeadphoneBridge * _Nullable bridge
+) {
+    if (bridge == NULL) return (N60BinauralHeadphoneMeterSnapshot){0};
+    return (N60BinauralHeadphoneMeterSnapshot){
+        .enabled = atomic_load_explicit(&bridge->meteringDemand, memory_order_acquire),
+        .peakLeft = N60BinauralHeadphoneBitsToFloat(atomic_load_explicit(&bridge->meterPeakLeftBits, memory_order_relaxed)),
+        .peakRight = N60BinauralHeadphoneBitsToFloat(atomic_load_explicit(&bridge->meterPeakRightBits, memory_order_relaxed)),
+        .rmsLeft = N60BinauralHeadphoneBitsToFloat(atomic_load_explicit(&bridge->meterRMSLeftBits, memory_order_relaxed)),
+        .rmsRight = N60BinauralHeadphoneBitsToFloat(atomic_load_explicit(&bridge->meterRMSRightBits, memory_order_relaxed)),
+        .overRangeLeft = atomic_load_explicit(&bridge->meterOverRangeLeft, memory_order_relaxed),
+        .overRangeRight = atomic_load_explicit(&bridge->meterOverRangeRight, memory_order_relaxed),
+    };
 }
 
 static inline bool N60BinauralHeadphoneBridgeCanPrepareTrackedGeneration(
@@ -270,7 +330,12 @@ static inline uint64_t N60BinauralHeadphoneBridgeLatencyFrames(
     const N60BinauralHeadphoneBridge * _Nullable bridge
 ) {
     if (bridge == NULL || bridge->binauralRuntime == NULL) return 0u;
+    const uint64_t correctionDelay = bridge->headphoneSnapshot.channels[0].delayFrames
+        > bridge->headphoneSnapshot.channels[1].delayFrames
+        ? bridge->headphoneSnapshot.channels[0].delayFrames
+        : bridge->headphoneSnapshot.channels[1].delayFrames;
     return N60HeadTrackedBinauralRuntimeLatencyFrames(bridge->binauralRuntime)
+        + correctionDelay
         + (uint64_t)N60ProtectionSnapshotLatencyFrames(&bridge->protectionSnapshot);
 }
 
@@ -295,6 +360,7 @@ static inline N60BinauralHeadphoneBridgeSnapshot N60BinauralHeadphoneBridgeGetSn
         .transport = N60ProgramTransportGetSnapshot(bridge->transport),
         .protection = N60ProtectionRuntimeTelemetry(bridge->protectionRuntime),
         .headTracking = N60HeadTrackedBinauralRuntimeGetSnapshot(bridge->binauralRuntime),
+        .meter = N60BinauralHeadphoneBridgeGetMeterSnapshot(bridge),
     };
 }
 
@@ -419,6 +485,15 @@ static inline OSStatus N60BinauralHeadphoneOutputIOProc(
     const float masterGain = N60BinauralHeadphoneBitsToFloat(
         atomic_load_explicit(&bridge->outputGainBits, memory_order_acquire)
     );
+    const bool meterDemand = atomic_load_explicit(
+        &bridge->meteringDemand, memory_order_acquire
+    );
+    float meterPeakLeft = 0.0f;
+    float meterPeakRight = 0.0f;
+    double meterSquareLeft = 0.0;
+    double meterSquareRight = 0.0;
+    uint64_t meterOverLeft = 0u;
+    uint64_t meterOverRight = 0u;
     N60ProtectionRuntimeBeginBuffer(bridge->protectionRuntime);
     N60HeadTrackedBinauralRuntimeBeginBuffer(bridge->binauralRuntime);
 
@@ -467,6 +542,16 @@ static inline OSStatus N60BinauralHeadphoneOutputIOProc(
         const float gain = N60BinauralHeadphoneNextOutputGain(bridge, masterGain);
         left *= gain;
         right *= gain;
+        if (meterDemand) {
+            const float leftMagnitude = fabsf(left);
+            const float rightMagnitude = fabsf(right);
+            if (leftMagnitude > meterPeakLeft) meterPeakLeft = leftMagnitude;
+            if (rightMagnitude > meterPeakRight) meterPeakRight = rightMagnitude;
+            meterSquareLeft += (double)left * (double)left;
+            meterSquareRight += (double)right * (double)right;
+            if (leftMagnitude > 1.0f) meterOverLeft += 1u;
+            if (rightMagnitude > 1.0f) meterOverRight += 1u;
+        }
 
         if (!N60BinauralHeadphoneWriteStereoFrame(
                 outOutputData, frameIndex, left, right)) {
@@ -477,6 +562,14 @@ static inline OSStatus N60BinauralHeadphoneOutputIOProc(
             return noErr;
         }
         atomic_fetch_add_explicit(&bridge->renderedFrames, 1u, memory_order_relaxed);
+    }
+    if (meterDemand && frameCount > 0u) {
+        atomic_store_explicit(&bridge->meterPeakLeftBits, N60BinauralHeadphoneFloatToBits(meterPeakLeft), memory_order_relaxed);
+        atomic_store_explicit(&bridge->meterPeakRightBits, N60BinauralHeadphoneFloatToBits(meterPeakRight), memory_order_relaxed);
+        atomic_store_explicit(&bridge->meterRMSLeftBits, N60BinauralHeadphoneFloatToBits((float)sqrt(meterSquareLeft / (double)frameCount)), memory_order_relaxed);
+        atomic_store_explicit(&bridge->meterRMSRightBits, N60BinauralHeadphoneFloatToBits((float)sqrt(meterSquareRight / (double)frameCount)), memory_order_relaxed);
+        atomic_fetch_add_explicit(&bridge->meterOverRangeLeft, meterOverLeft, memory_order_relaxed);
+        atomic_fetch_add_explicit(&bridge->meterOverRangeRight, meterOverRight, memory_order_relaxed);
     }
     return noErr;
 }
