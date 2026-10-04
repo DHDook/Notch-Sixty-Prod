@@ -1,0 +1,35 @@
+name: PR59 Advanced Spatial
+
+on:
+  pull_request:
+    branches:
+      - feature/pr58-multichannel-calibration
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate-portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate head tracking, MIMO, linked dynamics and downmix
+        run: python3 ci/validate_pr59_advanced_spatial.py
+
+  validate-macos-integration:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate advanced spatial primitives with Apple Clang
+        run: python3 ci/validate_pr59_advanced_spatial.py
+      - name: Build app with advanced spatial ABI exposed to Swift
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          build
