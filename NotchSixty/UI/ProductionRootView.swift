@@ -305,6 +305,11 @@ private struct ProductionDashboardView: View {
 
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
                     summaryCard(
+                        title: "Playback Path",
+                        text: playbackPathSummary,
+                        systemImage: "point.3.connected.trianglepath.dotted"
+                    )
+                    summaryCard(
                         title: "Equalizer",
                         text: "\(engine.stereoEQConfiguration.enabledBandCount) bands · \(engine.stereoEQConfiguration.phaseMode.displayName)",
                         systemImage: "slider.horizontal.3"
@@ -334,6 +339,20 @@ private struct ProductionDashboardView: View {
     private var outputSummary: String {
         guard let output = engine.selectedOutputDevice else { return "Choose an output below to begin." }
         return "\(output.name) · \(String(format: "%.1f", output.nominalSampleRate / 1_000)) kHz"
+    }
+
+    private var playbackPathSummary: String {
+        if engine.liveBinauralHeadphoneActive {
+            let layout = engine.headphoneDeviceProfileConfiguration?.programLayout.displayName ?? "2.0"
+            return "Virtual \(layout) → Headphones"
+        }
+        if engine.liveNChannelActive {
+            return engine.outputDeviceProfileConfiguration?.systemDisplayName ?? "Semantic speakers"
+        }
+        if engine.headphoneDeviceProfileConfiguration?.enabled == true {
+            return "Headphones · Stereo"
+        }
+        return "Stereo speakers"
     }
 
     private var dynamicsSummary: String {

@@ -1723,41 +1723,18 @@ final class AudioIOEngine: ObservableObject {
     }
 
     func setDetailedMeteringDemand(_ enabled: Bool) throws {
-        guard !immutableSemanticTransportActive else { return }
+        if let session = nChannelTransportSession {
+            session.setDetailedMeteringDemand(enabled)
+            return
+        }
+        if let session = binauralHeadphoneTransportSession {
+            session.setDetailedMeteringDemand(enabled)
+            return
+        }
         let previousDemand = N60RealtimeAudioBridgeMeteringDemand()
         guard previousDemand != enabled else { return }
 
         N60RealtimeAudioBridgeSetMeteringDemand(enabled)
-        guard let session = transportSession else { return }
-
-        do {
-            var graph = try stereoEQConfiguration.makeGraphSnapshot(
-                sampleRate: session.outputFormat.sampleRate,
-                gainConfiguration: gainConfiguration,
-                bassManagementConfiguration: renderBassManagementConfiguration(),
-                dynamicsConfiguration: dynamicsConfiguration,
-                playbackConfiguration: playbackControlConfiguration
-            )
-            try attachActiveEQFIRProgramIfNeeded(
-                to: &graph,
-                stereoConfiguration: stereoEQConfiguration,
-                playbackConfiguration: playbackControlConfiguration
-            )
-            try attachActiveRoomCorrectionProgramIfNeeded(
-                to: &graph,
-                playbackConfiguration: playbackControlConfiguration
-            )
-            try attachActiveSpeakerIRProgramIfNeeded(
-                to: &graph,
-                playbackConfiguration: playbackControlConfiguration
-            )
-            try session.publishDSPGraph(graph)
-            lastErrorDescription = nil
-        } catch {
-            N60RealtimeAudioBridgeSetMeteringDemand(previousDemand)
-            lastErrorDescription = error.localizedDescription
-            throw error
-        }
     }
 
     func setAnalysisDemand(_ demandMask: UInt32) {
@@ -1774,6 +1751,93 @@ final class AudioIOEngine: ObservableObject {
 
     func resetSpectrumPeakHold() {
         transportSession?.resetSpectrumPeakHold()
+    }
+
+    func productionTransportMeterSnapshot() -> ProductionTransportMeterSnapshot? {
+        if let session = nChannelTransportSession, var raw = session.bridgeSnapshot() {
+            var meter = raw.meter
+            let roles = session.routePlan.programLayout.roles
+            let programChannels: [ProductionTransportChannelMeter] = roles.enumerated().map { index, role in
+                let channel = UInt32(index)
+                return ProductionTransportChannelMeter(
+                    id: "program-\(role.rawValue)",
+                    label: role.displayName,
+                    channelIndex: channel,
+                    peakLinear: N60LiveNChannelMeterProgramPeak(&meter, channel),
+                    rmsLinear: N60LiveNChannelMeterProgramRMS(&meter, channel),
+                    overRangeSamples: N60LiveNChannelMeterProgramOverRangeSamples(&meter, channel)
+                )
+            }
+
+            var mapped: [(UInt32, String, String)] = []
+            for (index, role) in roles.enumerated() {
+                let physical = session.routePlan.programPhysicalChannels[index]
+                guard physical != UInt32.max else { continue }
+                mapped.append((physical, role.displayName, "physical-\(role.rawValue)"))
+            }
+            for sub in 0..<Int(session.routePlan.subwooferCount) {
+                let physical = session.routePlan.subwooferPhysicalChannels[sub]
+                guard physical != UInt32.max else { continue }
+                mapped.append((physical, "Sub \(sub + 1)", "physical-sub-\(sub)"))
+            }
+            mapped.sort { $0.0 < $1.0 }
+            let physicalOutputs = mapped.map { physical, label, id in
+                ProductionTransportChannelMeter(
+                    id: id,
+                    label: label,
+                    channelIndex: physical,
+                    peakLinear: N60LiveNChannelMeterPhysicalPeak(&meter, physical),
+                    rmsLinear: N60LiveNChannelMeterPhysicalRMS(&meter, physical),
+                    overRangeSamples: N60LiveNChannelMeterPhysicalOverRangeSamples(&meter, physical)
+                )
+            }
+            return ProductionTransportMeterSnapshot(
+                kind: .semanticSpeakers,
+                displayName: outputDeviceProfileConfiguration?.systemDisplayName
+                    ?? session.routePlan.programLayout.displayName,
+                programLayoutName: session.routePlan.programLayout.displayName,
+                sampleRate: session.outputFormat.sampleRate,
+                latencyFrames: raw.algorithmicLatencyFrames,
+                meteringEnabled: raw.meter.enabled,
+                programChannels: programChannels,
+                physicalOutputs: physicalOutputs,
+                inputTruePeakLinear: nil,
+                outputTruePeakLinear: nil,
+                renderFailures: raw.renderFailures,
+                outputWriteFailures: raw.outputWriteFailures
+            )
+        }
+
+        if let session = binauralHeadphoneTransportSession, let raw = session.bridgeSnapshot() {
+            let meter = raw.meter
+            let outputs = [
+                ProductionTransportChannelMeter(
+                    id: "headphone-left", label: "Left", channelIndex: 0,
+                    peakLinear: meter.peakLeft, rmsLinear: meter.rmsLeft,
+                    overRangeSamples: meter.overRangeLeft
+                ),
+                ProductionTransportChannelMeter(
+                    id: "headphone-right", label: "Right", channelIndex: 1,
+                    peakLinear: meter.peakRight, rmsLinear: meter.rmsRight,
+                    overRangeSamples: meter.overRangeRight
+                ),
+            ]
+            return ProductionTransportMeterSnapshot(
+                kind: .virtualSpeakers,
+                displayName: "Virtual \(session.programLayout.displayName) → Headphones",
+                programLayoutName: session.programLayout.displayName,
+                sampleRate: session.outputFormat.sampleRate,
+                latencyFrames: raw.algorithmicLatencyFrames,
+                meteringEnabled: meter.enabled,
+                programChannels: [],
+                physicalOutputs: outputs,
+                inputTruePeakLinear: raw.protection.inputTruePeakLinear,
+                outputTruePeakLinear: raw.protection.outputTruePeakLinear,
+                renderFailures: raw.renderFailures,
+                outputWriteFailures: raw.outputWriteFailures
+            )
+        }
+        return nil
     }
 
     func diagnosticsSnapshot() -> AudioDiagnosticsSnapshot {

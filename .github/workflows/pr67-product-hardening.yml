@@ -1,0 +1,38 @@
+name: PR67 Product Hardening + Acceptance
+
+on:
+  push:
+    branches:
+      - feature/pr67-product-hardening-acceptance
+  pull_request:
+    branches:
+      - feature/pr66-head-tracking-spatial-runtime
+  workflow_dispatch:
+
+jobs:
+  validate-portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate inherited head tracking and spatial runtime
+        run: python3 ci/validate_pr66_head_tracking.py
+      - name: Validate product diagnostics and hardening
+        run: python3 ci/validate_pr67_product_hardening.py
+
+  validate-macos-integration:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate inherited head tracking and spatial runtime
+        run: python3 ci/validate_pr66_head_tracking.py
+      - name: Validate product diagnostics and hardening
+        run: python3 ci/validate_pr67_product_hardening.py
+      - name: Build arm64 app with product hardening integration
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            build

@@ -182,6 +182,29 @@ static inline bool N60LiveNChannelRenderGraphIsValid(
         && graph->bassManagement.subwooferCount == graph->outputMap.subwooferCount;
 }
 
+static inline uint64_t N60LiveNChannelRenderGraphLatencyFrames(
+    const N60LiveNChannelRenderGraph * _Nullable graph
+) {
+    if (graph == NULL || !N60LiveNChannelRenderGraphIsValid(graph)) return 0u;
+
+    uint64_t maximumProgramDelay = 0u;
+    for (uint32_t channel = 0; channel < graph->programLayout.channelCount; ++channel) {
+        const uint64_t delay = (uint64_t)N60ProgramLaneGraphEffectiveDelayFrames(
+            &graph->laneGraph, channel
+        );
+        if (delay > maximumProgramDelay) maximumProgramDelay = delay;
+    }
+
+    uint64_t maximumSubwooferDelay = 0u;
+    if (graph->bassManagementEnabled) {
+        for (uint32_t sub = 0; sub < graph->bassManagement.subwooferCount; ++sub) {
+            const uint64_t delay = (uint64_t)graph->bassManagement.subwoofers[sub].delayFrames;
+            if (delay > maximumSubwooferDelay) maximumSubwooferDelay = delay;
+        }
+    }
+    return maximumProgramDelay + maximumSubwooferDelay;
+}
+
 static inline bool N60LiveNChannelRenderGraphMake(
     double sampleRate,
     N60ProgramChannelLayout programLayout,
