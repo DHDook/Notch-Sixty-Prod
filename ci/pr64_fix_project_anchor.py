@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from pathlib import Path
 
+# One-shot correction for the explicit one-line Routing PBXGroup anchor.
 path = Path(__file__).resolve().parent / "pr64_apply_integration_patch.py"
 text = path.read_text()
 old = '''project_insert(
