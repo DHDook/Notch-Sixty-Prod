@@ -25,6 +25,7 @@
 		E10000000000000000000002 /* RoomCorrectionFIRDesignerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000012 /* RoomCorrectionFIRDesignerTests.swift */; };
 		A20000000000000000000010 /* AudioIOEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000020 /* AudioIOEngine.swift */; };
 		A20000000000000000000011 /* CoreAudioError.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000021 /* CoreAudioError.swift */; };
+		F63000000000000000000001 /* CoreAudioNChannelTransportSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = F63000000000000000000011 /* CoreAudioNChannelTransportSession.swift */; };
 		A20000000000000000000012 /* AudioOutputDevice.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000022 /* AudioOutputDevice.swift */; };
 		A20000000000000000000013 /* OutputDeviceCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000023 /* OutputDeviceCatalog.swift */; };
 		A20000000000000000000014 /* AudioRouteConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000024 /* AudioRouteConfiguration.swift */; };
@@ -93,6 +94,7 @@
 		E10000000000000000000012 /* RoomCorrectionFIRDesignerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionFIRDesignerTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000020 /* AudioIOEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioIOEngine.swift; sourceTree = "<group>"; };
 		A20000000000000000000021 /* CoreAudioError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudioError.swift; sourceTree = "<group>"; };
+		F63000000000000000000011 /* CoreAudioNChannelTransportSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudioNChannelTransportSession.swift; sourceTree = "<group>"; };
 		A20000000000000000000022 /* AudioOutputDevice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioOutputDevice.swift; sourceTree = "<group>"; };
 		A20000000000000000000023 /* OutputDeviceCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutputDeviceCatalog.swift; sourceTree = "<group>"; };
 		A20000000000000000000024 /* AudioRouteConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRouteConfiguration.swift; sourceTree = "<group>"; };
@@ -213,7 +215,7 @@
 			path = Audio;
 			sourceTree = "<group>";
 		};
-		A20000000000000000000051 /* CoreAudio */ = {isa = PBXGroup; children = (A20000000000000000000021 /* CoreAudioError.swift */, A20000000000000000000028 /* MasterVolumeDeviceController.swift */, A2000000000000000000002C /* RoomCorrectionCalibrationTransport.swift */,); path = CoreAudio; sourceTree = "<group>"; };
+		A20000000000000000000051 /* CoreAudio */ = {isa = PBXGroup; children = (A20000000000000000000021 /* CoreAudioError.swift */, F63000000000000000000011 /* CoreAudioNChannelTransportSession.swift */, A20000000000000000000028 /* MasterVolumeDeviceController.swift */, A2000000000000000000002C /* RoomCorrectionCalibrationTransport.swift */,); path = CoreAudio; sourceTree = "<group>"; };
 		A20000000000000000000052 /* Devices */ = {isa = PBXGroup; children = (A20000000000000000000022 /* AudioOutputDevice.swift */, A20000000000000000000023 /* OutputDeviceCatalog.swift */,); path = Devices; sourceTree = "<group>"; };
 		A20000000000000000000053 /* Routing */ = {isa = PBXGroup; children = (A20000000000000000000024 /* AudioRouteConfiguration.swift */, F62000000000000000000011 /* OutputDeviceProfileConfiguration.swift */,); path = Routing; sourceTree = "<group>"; };
 		A20000000000000000000054 /* State */ = {isa = PBXGroup; children = (A20000000000000000000025 /* AudioLifecycleState.swift */, A2000000000000000000002B /* ProductProfiles.swift */, A2000000000000000000002D /* RoomCorrectionCalibrationController.swift */, A2000000000000000000002F /* RoomCorrectionProjectController.swift */,); path = State; sourceTree = "<group>"; };
@@ -317,6 +319,7 @@
 				A40000000000000000000017 /* ProductionRoomCorrectionWorkspace.swift in Sources */,
 				A20000000000000000000010 /* AudioIOEngine.swift in Sources */,
 				A20000000000000000000011 /* CoreAudioError.swift in Sources */,
+				F63000000000000000000001 /* CoreAudioNChannelTransportSession.swift in Sources */,
 				A20000000000000000000012 /* AudioOutputDevice.swift in Sources */,
 				A20000000000000000000013 /* OutputDeviceCatalog.swift in Sources */,
 				A20000000000000000000014 /* AudioRouteConfiguration.swift in Sources */,

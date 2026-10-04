@@ -4,6 +4,8 @@
 #include <CoreAudio/CoreAudio.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
+#include <string.h>
 
 #include "N60ProgramLayout.h"
 
@@ -167,6 +169,33 @@ static inline bool N60CoreAudioChannelLayoutUsesExplicitDescriptions(
     return layout != NULL
         && layout->mChannelLayoutTag == kAudioChannelLayoutTag_UseChannelDescriptions
         && layout->mNumberChannelDescriptions > 0u;
+}
+
+/// Copy a variable-length explicit Core Audio layout into caller-owned fixed
+/// storage. This helper deliberately performs no tag/bitmap inference; PR63's
+/// Swift control plane expands those forms with Audio Toolbox before calling it.
+static inline bool N60CoreAudioCopyExplicitChannelDescriptions(
+    const AudioChannelLayout * _Nullable layout,
+    uint32_t expectedChannelCount,
+    AudioChannelDescription * _Nonnull descriptionsOut
+) {
+    if (layout == NULL
+        || descriptionsOut == NULL
+        || expectedChannelCount == 0u
+        || expectedChannelCount > N60_MAX_PROGRAM_CHANNELS
+        || !N60CoreAudioChannelLayoutUsesExplicitDescriptions(layout)
+        || layout->mNumberChannelDescriptions != expectedChannelCount) {
+        return false;
+    }
+    const uint8_t *bytes = (const uint8_t *)layout;
+    const AudioChannelDescription *descriptions =
+        (const AudioChannelDescription *)(bytes + offsetof(AudioChannelLayout, mChannelDescriptions));
+    memcpy(
+        descriptionsOut,
+        descriptions,
+        (size_t)expectedChannelCount * sizeof(AudioChannelDescription)
+    );
+    return true;
 }
 
 #ifdef __cplusplus

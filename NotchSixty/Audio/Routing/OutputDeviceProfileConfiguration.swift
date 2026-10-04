@@ -80,6 +80,8 @@ enum OutputProgramLayout: String, CaseIterable, Identifiable, Codable, Sendable 
 
     var id: String { rawValue }
 
+    /// Program/source-layout nomenclature. A Playback System's user-facing name
+    /// is derived separately from its physical subwoofer assignment count.
     var displayName: String {
         switch self {
         case .stereo: return "2.0"
@@ -90,6 +92,25 @@ enum OutputProgramLayout: String, CaseIterable, Identifiable, Codable, Sendable 
         case .fiveOneFour: return "5.1.4"
         case .sevenOneFour: return "7.1.4"
         case .nineOneSix: return "9.1.6"
+        }
+    }
+
+    var bedChannelCount: Int {
+        switch self {
+        case .stereo: return 2
+        case .threeOne: return 3
+        case .fiveOne, .fiveOneTwo, .fiveOneFour: return 5
+        case .sevenOne, .sevenOneFour: return 7
+        case .nineOneSix: return 9
+        }
+    }
+
+    var heightChannelCount: Int {
+        switch self {
+        case .stereo, .threeOne, .fiveOne, .sevenOne: return 0
+        case .fiveOneTwo: return 2
+        case .fiveOneFour, .sevenOneFour: return 4
+        case .nineOneSix: return 6
         }
     }
 
@@ -278,6 +299,20 @@ struct OutputDeviceProfileConfiguration: Codable, Equatable, Sendable {
     }
 
     var physicalSubwooferCount: Int { subwooferAssignments.count }
+
+    /// User-facing physical speaker-system nomenclature. Native LFE is a program
+    /// channel, while Sub N assignments are physical outputs; when subs are
+    /// explicitly assigned they replace the middle program-layout "1" in the
+    /// display label (e.g. 9.1.6 program + two subs -> 9.2.6).
+    var systemDisplayName: String {
+        let displayedSubwooferCount = subwooferAssignments.isEmpty
+            ? (programLayout.containsLFE ? 1 : 0)
+            : subwooferAssignments.count
+        if programLayout.heightChannelCount > 0 {
+            return "\(programLayout.bedChannelCount).\(displayedSubwooferCount).\(programLayout.heightChannelCount)"
+        }
+        return "\(programLayout.bedChannelCount).\(displayedSubwooferCount)"
+    }
 
     func validateStructure(bassManagementEnabled: Bool) throws {
         guard subwooferAssignments.count <= Int(N60_MAX_SUBWOOFER_OUTPUTS) else {

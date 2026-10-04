@@ -726,13 +726,16 @@ final class ProductProfileController: ObservableObject {
             }
         }
 
-        let previous = systemProfiles[index].state.outputDeviceProfile
-        systemProfiles[index].state.outputDeviceProfile = configuration
+        let previousEngineConfiguration = engine.outputDeviceProfileConfiguration
+        let previousState = systemProfiles[index].state
         do {
+            try engine.replaceOutputDeviceProfileConfiguration(configuration)
+            systemProfiles[index].state.outputDeviceProfile = configuration
             try persistThrowing()
             lastErrorDescription = nil
         } catch {
-            systemProfiles[index].state.outputDeviceProfile = previous
+            systemProfiles[index].state = previousState
+            try? engine.replaceOutputDeviceProfileConfiguration(previousEngineConfiguration)
             lastErrorDescription = error.localizedDescription
             throw error
         }
@@ -892,7 +895,7 @@ final class ProductProfileController: ObservableObject {
             roomCorrection: engine.roomCorrectionConfiguration,
             roomCorrectionCalibration: selectedSystemProfile?.state.roomCorrectionCalibration,
             outputRouting: engine.multiOutputRoutingConfiguration,
-            outputDeviceProfile: selectedSystemProfile?.state.outputDeviceProfile,
+            outputDeviceProfile: engine.outputDeviceProfileConfiguration,
             speakerDriverProcessing: engine.speakerDriverProcessingConfiguration.isNeutral
                 ? nil
                 : engine.speakerDriverProcessingConfiguration,
@@ -938,12 +941,17 @@ final class ProductProfileController: ObservableObject {
 
             let playback = state.playback.applying(to: engine.playbackControlConfiguration)
             let gain = state.composingGain(over: engine.gainConfiguration)
+            // Remove the previous system's semantic routing contract before
+            // applying bass/routing state owned by the target system. The target
+            // profile is reinstalled only after its bass-management dependency.
+            try engine.replaceOutputDeviceProfileConfiguration(nil)
             try engine.replaceMultiOutputRoutingConfiguration(state.outputRouting)
             try engine.replaceSpeakerDriverProcessingConfiguration(
                 state.speakerDriverProcessing ?? SpeakerDriverProcessingConfiguration()
             )
             try engine.replacePlaybackControlConfiguration(playback)
             try engine.replaceBassManagementConfiguration(state.bassManagement)
+            try engine.replaceOutputDeviceProfileConfiguration(state.outputDeviceProfile)
             try engine.replaceGainConfiguration(gain)
             try engine.replaceRoomCorrectionConfiguration(state.roomCorrection)
             try engine.replaceSpeakerIRConfiguration(state.speakerIR)
@@ -954,12 +962,14 @@ final class ProductProfileController: ObservableObject {
             }
             let playback = previous.playback.applying(to: engine.playbackControlConfiguration)
             let gain = previous.composingGain(over: engine.gainConfiguration)
+            try? engine.replaceOutputDeviceProfileConfiguration(nil)
             try? engine.replaceMultiOutputRoutingConfiguration(previous.outputRouting)
             try? engine.replaceSpeakerDriverProcessingConfiguration(
                 previous.speakerDriverProcessing ?? SpeakerDriverProcessingConfiguration()
             )
             try? engine.replacePlaybackControlConfiguration(playback)
             try? engine.replaceBassManagementConfiguration(previous.bassManagement)
+            try? engine.replaceOutputDeviceProfileConfiguration(previous.outputDeviceProfile)
             try? engine.replaceGainConfiguration(gain)
             try? engine.replaceRoomCorrectionConfiguration(previous.roomCorrection)
             try? engine.replaceSpeakerIRConfiguration(previous.speakerIR)

@@ -1025,6 +1025,7 @@ final class AudioIOEngine: ObservableObject {
     private let globalVolumeKeyMonitor: any GlobalVolumeKeyMonitoring
     private var lifecycle: AudioLifecycleStateMachine
     private var transportSession: CoreAudioTransportSession?
+    private var nChannelTransportSession: CoreAudioNChannelTransportSession?
     private var lifetimeArchivedCounters = AudioTransportCounters()
     private var processingSessionArchivedCounters = AudioTransportCounters()
     private var reconfigurationWorkItem: DispatchWorkItem?
@@ -1055,6 +1056,7 @@ final class AudioIOEngine: ObservableObject {
     @Published private(set) var gainConfiguration = DSPGainConfiguration()
     @Published private(set) var bassManagementConfiguration = BassManagementConfiguration()
     @Published private(set) var multiOutputRoutingConfiguration: MultiOutputRoutingConfiguration?
+    @Published private(set) var outputDeviceProfileConfiguration: OutputDeviceProfileConfiguration?
     @Published private(set) var speakerDriverProcessingConfiguration = SpeakerDriverProcessingConfiguration()
     @Published private(set) var dynamicsConfiguration = DynamicsConfiguration()
     @Published private(set) var roomCorrectionConfiguration = RoomCorrectionConfiguration()
@@ -1092,6 +1094,8 @@ final class AudioIOEngine: ObservableObject {
         guard let routing = multiOutputRoutingConfiguration, routing.enabled else { return false }
         return routing.enabledRoutes.contains { !$0.bus.isFullRangeBus }
     }
+
+    var liveNChannelActive: Bool { nChannelTransportSession != nil }
 
     private func renderBassManagementConfiguration(
         _ source: BassManagementConfiguration? = nil
@@ -1364,10 +1368,31 @@ final class AudioIOEngine: ObservableObject {
         if let configuration {
             try configuration.validateStructure()
         }
+        if configuration?.enabled == true, outputDeviceProfileConfiguration?.enabled == true {
+            throw OutputDeviceProfileError.legacyPhysicalRoutingConflict
+        }
         guard lifecycle.state == .idle || configuration == multiOutputRoutingConfiguration else {
             throw MultiOutputRoutingError.routingChangeRequiresIdle
         }
         multiOutputRoutingConfiguration = configuration
+        lastErrorDescription = nil
+    }
+
+    func replaceOutputDeviceProfileConfiguration(
+        _ configuration: OutputDeviceProfileConfiguration?
+    ) throws {
+        if configuration?.enabled == true {
+            try configuration?.validateStructure(
+                bassManagementEnabled: bassManagementConfiguration.enabled
+            )
+            if multiOutputRoutingConfiguration?.enabled == true {
+                throw OutputDeviceProfileError.legacyPhysicalRoutingConflict
+            }
+        }
+        guard lifecycle.state == .idle || configuration == outputDeviceProfileConfiguration else {
+            throw LiveNChannelTransportError.configurationChangeRequiresRestart
+        }
+        outputDeviceProfileConfiguration = configuration
         lastErrorDescription = nil
     }
 
@@ -1407,6 +1432,12 @@ final class AudioIOEngine: ObservableObject {
                   upper > configuration.frequencyHz else {
                 throw BassManagementConfigurationError.invalidUpperFrequency(upper)
             }
+        }
+        if let outputDeviceProfile = outputDeviceProfileConfiguration, outputDeviceProfile.enabled {
+            try outputDeviceProfile.validateStructure(bassManagementEnabled: configuration.enabled)
+        }
+        if nChannelTransportSession != nil, configuration != bassManagementConfiguration {
+            throw LiveNChannelTransportError.configurationChangeRequiresRestart
         }
         if physicalSpeakerBusRoutingActive, lifecycle.state != .idle, configuration != bassManagementConfiguration {
             throw BassManagementConfigurationError.physicalCrossoverChangeRequiresIdle
@@ -1504,7 +1535,12 @@ final class AudioIOEngine: ObservableObject {
     }
 
     func replaceDynamicsConfiguration(_ configuration: DynamicsConfiguration) throws {
-        let validationRate = transportSession?.outputFormat.sampleRate ?? 48_000
+        if nChannelTransportSession != nil, configuration != dynamicsConfiguration {
+            throw LiveNChannelTransportError.configurationChangeRequiresRestart
+        }
+        let validationRate = transportSession?.outputFormat.sampleRate
+            ?? nChannelTransportSession?.outputFormat.sampleRate
+            ?? 48_000
         _ = try configuration.makeSnapshot(sampleRate: validationRate)
         let newProtection = try configuration.makeProtectionSnapshot(sampleRate: validationRate)
         if let session = transportSession {
@@ -1620,6 +1656,7 @@ final class AudioIOEngine: ObservableObject {
     }
 
     func setDetailedMeteringDemand(_ enabled: Bool) throws {
+        guard nChannelTransportSession == nil else { return }
         let previousDemand = N60RealtimeAudioBridgeMeteringDemand()
         guard previousDemand != enabled else { return }
 
@@ -1674,9 +1711,21 @@ final class AudioIOEngine: ObservableObject {
 
     func diagnosticsSnapshot() -> AudioDiagnosticsSnapshot {
         let selectedDevice = selectedOutputDevice
-        let currentCounters = transportSession?.counters() ?? AudioTransportCounters()
+        let currentCounters = transportSession?.counters()
+            ?? nChannelTransportSession?.counters()
+            ?? AudioTransportCounters()
         let processingSessionCounters = processingSessionArchivedCounters + currentCounters
         let lifetimeCounters = lifetimeArchivedCounters + currentCounters
+        let activeTapSampleRate = transportSession?.tapFormat.sampleRate
+            ?? nChannelTransportSession?.tapFormat.sampleRate
+        let activeOutputSampleRate = transportSession?.outputFormat.sampleRate
+            ?? nChannelTransportSession?.outputFormat.sampleRate
+        let startupGateOpened = transportSession?.startupGateOpened
+            ?? nChannelTransportSession?.startupGateOpened
+        let startupGateTargetFrames = transportSession?.startupGateTargetFrames
+            ?? nChannelTransportSession?.startupGateTargetFrames
+        let startupGateActivationFrames = transportSession?.startupGateActivationFrames
+            ?? nChannelTransportSession?.startupGateActivationFrames
         return AudioDiagnosticsSnapshot(
             lifecycleState: lifecycle.state,
             selectedOutputUID: routeConfiguration.selectedOutputUID,
@@ -1684,14 +1733,14 @@ final class AudioIOEngine: ObservableObject {
             selectedOutputPresent: selectedDevice != nil,
             selectedOutputNominalSampleRate: selectedDevice?.nominalSampleRate,
             discoveredOutputCount: outputDevices.count,
-            tapSampleRate: transportSession?.tapFormat.sampleRate,
-            outputSampleRate: transportSession?.outputFormat.sampleRate,
+            tapSampleRate: activeTapSampleRate,
+            outputSampleRate: activeOutputSampleRate,
             sessionTransportCounters: processingSessionCounters,
             lifetimeTransportCounters: lifetimeCounters,
             renderKernelDiagnostics: transportSession?.renderDiagnostics(),
-            startupGateOpened: transportSession?.startupGateOpened,
-            startupGateTargetFrames: transportSession?.startupGateTargetFrames,
-            startupGateActivationFrames: transportSession?.startupGateActivationFrames,
+            startupGateOpened: startupGateOpened,
+            startupGateTargetFrames: startupGateTargetFrames,
+            startupGateActivationFrames: startupGateActivationFrames,
             sampleRateChangesHandled: sampleRateChangesHandled,
             recoveryAttempts: recoveryAttempts,
             recoverySuccesses: recoverySuccesses,
@@ -1756,6 +1805,9 @@ final class AudioIOEngine: ObservableObject {
 
     private func applyStereoEQConfiguration(_ configuration: StereoEQConfiguration) throws {
         try validateStereoEQStorage(configuration)
+        if nChannelTransportSession != nil, configuration != stereoEQConfiguration {
+            throw LiveNChannelTransportError.configurationChangeRequiresRestart
+        }
 
         if let session = transportSession {
             var graph = try configuration.makeGraphSnapshot(
@@ -1817,6 +1869,9 @@ final class AudioIOEngine: ObservableObject {
         guard configuration.interChannelDelayMs.isFinite,
               PlaybackControlConfiguration.interChannelDelayRange.contains(configuration.interChannelDelayMs) else {
             throw PlaybackControlConfigurationError.invalidInterChannelDelay(configuration.interChannelDelayMs)
+        }
+        if nChannelTransportSession != nil, configuration != playbackControlConfiguration {
+            throw LiveNChannelTransportError.configurationChangeRequiresRestart
         }
 
         if let session = transportSession {
@@ -1926,6 +1981,9 @@ final class AudioIOEngine: ObservableObject {
             try attachActiveSpeakerIRProgramIfNeeded(to: &graph, playbackConfiguration: playbackControlConfiguration)
             try session.publishDSPGraph(graph)
         }
+        if let session = nChannelTransportSession, abs(oldSoftwareGain - newSoftwareGain) > 0.000_001 {
+            session.setOutputGain(newSoftwareGain)
+        }
 
         masterVolumeConfiguration = configuration
         lastErrorDescription = nil
@@ -1974,6 +2032,9 @@ final class AudioIOEngine: ObservableObject {
             try attachActiveSpeakerIRProgramIfNeeded(to: &graph, playbackConfiguration: playbackControlConfiguration)
             try session.publishDSPGraph(graph)
         }
+        if let session = nChannelTransportSession, abs(oldGain - newGain) > 0.000_001 {
+            session.setOutputGain(newGain)
+        }
         masterVolumeConfiguration = updated
     }
 
@@ -2019,6 +2080,9 @@ final class AudioIOEngine: ObservableObject {
     }
 
     private func applyGainConfiguration(_ configuration: DSPGainConfiguration) throws {
+        if nChannelTransportSession != nil, configuration != gainConfiguration {
+            throw LiveNChannelTransportError.configurationChangeRequiresRestart
+        }
         if let session = transportSession {
             var graph = try stereoEQConfiguration.makeGraphSnapshot(
                 sampleRate: session.outputFormat.sampleRate,
@@ -2048,6 +2112,9 @@ final class AudioIOEngine: ObservableObject {
     }
 
     private func applyRoomCorrectionConfiguration(_ configuration: RoomCorrectionConfiguration) throws {
+        if nChannelTransportSession != nil, configuration != roomCorrectionConfiguration {
+            throw LiveNChannelTransportError.configurationChangeRequiresRestart
+        }
         if configuration.enabled && configuration.filter == nil {
             throw RoomCorrectionConfigurationError.filterRequired
         }
@@ -2107,6 +2174,9 @@ final class AudioIOEngine: ObservableObject {
     }
 
     private func applySpeakerIRConfiguration(_ configuration: SpeakerIRConfiguration) throws {
+        if nChannelTransportSession != nil, configuration != speakerIRConfiguration {
+            throw LiveNChannelTransportError.configurationChangeRequiresRestart
+        }
         if configuration.enabled && configuration.filter == nil {
             throw SpeakerIRConfigurationError.filterRequired
         }
@@ -2495,6 +2565,81 @@ final class AudioIOEngine: ObservableObject {
     }
 
     private func buildTransport(output: AudioOutputDevice) throws {
+        if outputDeviceProfileConfiguration?.enabled == true {
+            try buildNChannelTransport(output: output)
+            return
+        }
+        try buildStereoTransport(output: output)
+    }
+
+    private func validateLiveNChannelActivation() throws {
+        if multiOutputRoutingConfiguration?.enabled == true {
+            throw OutputDeviceProfileError.legacyPhysicalRoutingConflict
+        }
+        if !speakerDriverProcessingConfiguration.isNeutral {
+            throw LiveNChannelTransportError.unsupportedActiveDSP("legacy per-driver speaker processing")
+        }
+        if !stereoEQConfiguration.bypassed {
+            if stereoEQConfiguration.channelMode != .linked
+                || stereoEQConfiguration.phaseMode != .minimumPhase
+                || stereoEQConfiguration.enabledBandCount != 0 {
+                throw LiveNChannelTransportError.unsupportedActiveDSP("stereo EQ")
+            }
+        }
+        if playbackControlConfiguration != PlaybackControlConfiguration() {
+            throw LiveNChannelTransportError.unsupportedActiveDSP("stereo playback/image controls")
+        }
+        if dynamicsConfiguration != DynamicsConfiguration() {
+            throw LiveNChannelTransportError.unsupportedActiveDSP("stereo dynamics/protection")
+        }
+        if roomCorrectionConfiguration.enabled {
+            throw LiveNChannelTransportError.unsupportedActiveDSP("legacy stereo room correction")
+        }
+        if speakerIRConfiguration.enabled {
+            throw LiveNChannelTransportError.unsupportedActiveDSP("legacy stereo Speaker IR")
+        }
+        if bassManagementConfiguration.physicalOutputMode != nil {
+            throw LiveNChannelTransportError.unsupportedActiveDSP("legacy physical crossover routing")
+        }
+        if bassManagementConfiguration.subPhaseAlignmentEnabled {
+            throw LiveNChannelTransportError.unsupportedActiveDSP("legacy single-sub phase alignment")
+        }
+        if bassManagementConfiguration.monitorMode != .recombined {
+            throw LiveNChannelTransportError.unsupportedActiveDSP("stereo crossover monitor audition")
+        }
+    }
+
+    private func buildNChannelTransport(output: AudioOutputDevice) throws {
+        guard let profile = outputDeviceProfileConfiguration, profile.enabled else {
+            throw OutputDeviceProfileError.profileDisabled
+        }
+        try validateLiveNChannelActivation()
+        let routePlan = try profile.makeLivePlan(
+            availableDevices: outputDevices,
+            sampleRate: output.nominalSampleRate,
+            selectedOutputUID: output.uid,
+            bassManagementEnabled: bassManagementConfiguration.enabled
+        )
+        let graph = try LiveNChannelRenderGraphCompiler.makeGraph(
+            routePlan: routePlan,
+            sampleRate: output.nominalSampleRate,
+            gainConfiguration: gainConfiguration,
+            bassManagementConfiguration: bassManagementConfiguration
+        )
+        let session = try CoreAudioNChannelTransportSession(
+            selectedOutput: output,
+            routePlan: routePlan,
+            renderGraph: graph,
+            outputGain: currentMasterSoftwareGain
+        )
+        activeEQFIRProgram = nil
+        activeRoomCorrectionProgram = nil
+        activeSpeakerIRProgram = nil
+        linearPhaseDesignInfo = nil
+        nChannelTransportSession = session
+    }
+
+    private func buildStereoTransport(output: AudioOutputDevice) throws {
         let sameDeviceOutputPlan: SameDeviceOutputRoutePlan?
         let aggregateDeviceOutputPlan: AggregateDeviceOutputRoutePlan?
         if let routing = multiOutputRoutingConfiguration, routing.enabled {
@@ -2621,6 +2766,15 @@ final class AudioIOEngine: ObservableObject {
             processingSessionArchivedCounters.bufferedFrames = 0
             session.stop(fadeOut: fadeOut)
             transportSession = nil
+        }
+        if let session = nChannelTransportSession {
+            let counters = session.counters()
+            lifetimeArchivedCounters = lifetimeArchivedCounters + counters
+            lifetimeArchivedCounters.bufferedFrames = 0
+            processingSessionArchivedCounters = processingSessionArchivedCounters + counters
+            processingSessionArchivedCounters.bufferedFrames = 0
+            session.stop(fadeOut: fadeOut)
+            nChannelTransportSession = nil
         }
         activeEQFIRProgram = nil
         activeRoomCorrectionProgram = nil

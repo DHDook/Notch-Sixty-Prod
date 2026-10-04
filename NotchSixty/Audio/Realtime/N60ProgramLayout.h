@@ -10,12 +10,14 @@ extern "C" {
 #endif
 
 /// Maximum semantic program-channel count supported by the post-v1 architecture.
-/// 16 channels covers the planned 9.1.6 program layout while keeping realtime
-/// storage fixed-size and allocation-free.
-#define N60_MAX_PROGRAM_CHANNELS 16u
+/// The realtime representation remains fixed-size/allocation-free while leaving
+/// substantial room beyond the currently named 9.1.6 standard layout.
+#define N60_MAX_PROGRAM_CHANNELS 32u
 
 /// Stable semantic identities for program channels. These are intentionally
 /// independent of Core Audio stream order and physical output channel numbers.
+/// Custom1...Custom16 are stable manually-assigned identities for future/custom
+/// layouts; automatic Core Audio label mapping must never infer them.
 typedef enum {
     N60ProgramChannelRoleUnused = 0,
     N60ProgramChannelRoleFrontLeft,
@@ -34,6 +36,22 @@ typedef enum {
     N60ProgramChannelRoleTopMiddleRight,
     N60ProgramChannelRoleTopRearLeft,
     N60ProgramChannelRoleTopRearRight,
+    N60ProgramChannelRoleCustom1,
+    N60ProgramChannelRoleCustom2,
+    N60ProgramChannelRoleCustom3,
+    N60ProgramChannelRoleCustom4,
+    N60ProgramChannelRoleCustom5,
+    N60ProgramChannelRoleCustom6,
+    N60ProgramChannelRoleCustom7,
+    N60ProgramChannelRoleCustom8,
+    N60ProgramChannelRoleCustom9,
+    N60ProgramChannelRoleCustom10,
+    N60ProgramChannelRoleCustom11,
+    N60ProgramChannelRoleCustom12,
+    N60ProgramChannelRoleCustom13,
+    N60ProgramChannelRoleCustom14,
+    N60ProgramChannelRoleCustom15,
+    N60ProgramChannelRoleCustom16,
 } N60ProgramChannelRole;
 
 /// Canonical internal layouts. A custom layout remains available for future
@@ -56,7 +74,15 @@ typedef struct {
 } N60ProgramChannelLayout;
 
 static inline bool N60ProgramChannelRoleIsSemantic(N60ProgramChannelRole role) {
+    return role > N60ProgramChannelRoleUnused && role <= N60ProgramChannelRoleCustom16;
+}
+
+static inline bool N60ProgramChannelRoleIsNamedSpeaker(N60ProgramChannelRole role) {
     return role > N60ProgramChannelRoleUnused && role <= N60ProgramChannelRoleTopRearRight;
+}
+
+static inline bool N60ProgramChannelRoleIsCustom(N60ProgramChannelRole role) {
+    return role >= N60ProgramChannelRoleCustom1 && role <= N60ProgramChannelRoleCustom16;
 }
 
 static inline N60ProgramChannelLayout N60ProgramChannelLayoutMakeCustom(
@@ -76,8 +102,8 @@ static inline N60ProgramChannelLayout N60ProgramChannelLayoutMakeCustom(
 }
 
 /// Internal canonical order is semantic and explicit; it must never be assumed
-/// to equal a device's Core Audio stream order. The Phase-2 router will perform
-/// that mapping explicitly from channel labels/layout metadata.
+/// to equal a device's Core Audio stream order. The router performs that mapping
+/// explicitly from channel labels/layout metadata.
 static inline N60ProgramChannelLayout N60ProgramChannelLayoutMakeStandard(
     N60ProgramLayoutIdentifier identifier
 ) {
@@ -187,7 +213,7 @@ static inline N60ProgramChannelLayout N60ProgramChannelLayoutMakeStandard(
 
 /// Structural validation is control-plane safe and allocation-free. Standard
 /// layouts must exactly match their canonical semantic order. Custom layouts may
-/// use any unique semantic roles within the fixed channel limit.
+/// use any unique semantic roles within the fixed 32-channel limit.
 static inline bool N60ProgramChannelLayoutIsValid(
     const N60ProgramChannelLayout * _Nullable layout
 ) {
@@ -237,9 +263,7 @@ static inline int32_t N60ProgramChannelLayoutIndexOfRole(
     return -1;
 }
 
-/// Compatibility gate for the existing shipping stereo render kernel. Phase 1
-/// defines N-channel identity but deliberately does not route non-stereo layouts
-/// into the stereo DSP path.
+/// Compatibility gate for the existing shipping stereo render kernel.
 static inline bool N60ProgramChannelLayoutIsStereoCompatible(
     const N60ProgramChannelLayout * _Nullable layout
 ) {

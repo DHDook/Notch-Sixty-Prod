@@ -40,7 +40,7 @@ typedef struct {
 } N60ProgramLaneGraphSnapshot;
 
 typedef struct {
-    uint16_t channelMask;
+    uint32_t channelMask;
 } N60ProgramChannelGroup;
 
 typedef struct {
@@ -283,11 +283,11 @@ static inline bool N60ProgramChannelGroupMake(
         return false;
     }
 
-    uint16_t mask = 0u;
+    uint32_t mask = 0u;
     for (uint32_t roleIndex = 0; roleIndex < roleCount; ++roleIndex) {
         const int32_t channel = N60ProgramChannelLayoutIndexOfRole(layout, roles[roleIndex]);
         if (channel < 0) return false;
-        const uint16_t bit = (uint16_t)(1u << (uint32_t)channel);
+        const uint32_t bit = 1u << (uint32_t)channel;
         if ((mask & bit) != 0u) return false;
         mask |= bit;
     }
@@ -300,7 +300,7 @@ static inline bool N60ProgramChannelGroupContains(
     uint32_t channelIndex
 ) {
     return channelIndex < N60_MAX_PROGRAM_CHANNELS
-        && (group.channelMask & (uint16_t)(1u << channelIndex)) != 0u;
+        && (group.channelMask & (1u << channelIndex)) != 0u;
 }
 
 static inline bool N60ProgramLaneGraphSetGroupGain(
