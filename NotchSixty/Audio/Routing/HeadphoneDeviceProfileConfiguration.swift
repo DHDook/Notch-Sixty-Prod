@@ -217,6 +217,8 @@ enum HeadphoneDeviceProfileError: Error, Equatable, LocalizedError {
     case invalidBinauralProfileReference
     case binauralProfileRequired
     case binauralProfileSampleRateMismatch(profile: Double, output: Double)
+    case programSourceUnavailable(String)
+    case programSourceChannelCountMismatch(expected: UInt32, actual: UInt32)
     case speakerProfileConflict
     case legacyPhysicalRoutingConflict
     case speakerProcessingConflict(String)
@@ -254,6 +256,10 @@ enum HeadphoneDeviceProfileError: Error, Equatable, LocalizedError {
             return "Virtual Speakers mode requires an imported normalized HRTF/BRIR profile."
         case .binauralProfileSampleRateMismatch(let profile, let output):
             return "The virtual-speaker profile is \(profile) Hz but the headphone output is \(output) Hz. Spatial SRC is not implicit."
+        case .programSourceUnavailable(let uid):
+            return "The Virtual Speakers program source is unavailable: \(uid)."
+        case .programSourceChannelCountMismatch(let expected, let actual):
+            return "Virtual Speakers expects \(expected) program channels, but the selected source exposes \(actual)."
         case .speakerProfileConflict:
             return "Disable the semantic speaker Output Device Profile before enabling the Headphone Device Profile."
         case .legacyPhysicalRoutingConflict:
@@ -283,6 +289,10 @@ struct HeadphoneDeviceProfileConfiguration: Codable, Equatable, Sendable {
     var right = HeadphoneChannelCorrection()
     var crossfeed = HeadphoneCrossfeedConfiguration()
     var spatialMode: HeadphoneSpatialMode = .stereo
+    /// Optional decoded-program endpoint used only by Virtual Speakers. Nil means
+    /// use the physical headphone output endpoint as the program source.
+    var programSourceDeviceUID: String?
+    var programLayout: OutputProgramLayout = .stereo
     var binauralProfile: BinauralProfileReference?
 
     var conservativeRequiredHeadroomDB: Double {
@@ -341,6 +351,24 @@ struct HeadphoneDeviceProfileConfiguration: Codable, Equatable, Sendable {
             throw HeadphoneDeviceProfileError.sampleRateUnsupported(sampleRate)
         }
         return output
+    }
+
+    func resolveProgramSource(
+        availableDevices: [AudioOutputDevice],
+        selectedOutput: AudioOutputDevice
+    ) throws -> AudioOutputDevice {
+        guard spatialMode == .virtualSpeakers else { return selectedOutput }
+        let uid = programSourceDeviceUID ?? selectedOutput.uid
+        guard let source = availableDevices.first(where: { $0.uid == uid }) else {
+            throw HeadphoneDeviceProfileError.programSourceUnavailable(uid)
+        }
+        let expected = UInt32(programLayout.roles.count)
+        guard source.outputChannelCount == expected else {
+            throw HeadphoneDeviceProfileError.programSourceChannelCountMismatch(
+                expected: expected, actual: source.outputChannelCount
+            )
+        }
+        return source
     }
 
     func makeRealtimeSnapshot(sampleRate: Double) throws -> N60HeadphoneDSPSnapshot {
