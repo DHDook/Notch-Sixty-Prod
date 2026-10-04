@@ -1,0 +1,35 @@
+name: PR61 Live N-Channel Render
+
+on:
+  pull_request:
+    branches:
+      - feature/pr60-nchannel-coreaudio-transport
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate-portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate live semantic render core
+        run: python3 ci/validate_pr61_live_nchannel_render.py
+
+  validate-macos-integration:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate live Core Audio N-channel bridge
+        run: python3 ci/validate_pr61_live_nchannel_render.py
+      - name: Build app with live N-channel ABI exposed to Swift
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          build
