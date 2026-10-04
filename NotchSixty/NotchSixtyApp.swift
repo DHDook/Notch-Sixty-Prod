@@ -68,25 +68,39 @@ final class ProductController: ObservableObject {
     let audioEngine: AudioIOEngine
     let profiles: ProductProfileController
     let calibration: RoomCorrectionCalibrationController
+    let multichannelCalibration: MultichannelCalibrationController
     let roomCorrectionProjects: RoomCorrectionProjectController
     private var audioEngineObservation: AnyCancellable?
     private var calibrationObservation: AnyCancellable?
+    private var multichannelCalibrationObservation: AnyCancellable?
 
     init() {
         let audioEngine = AudioIOEngine()
         let profiles = ProductProfileController(engine: audioEngine)
+        let calibration = RoomCorrectionCalibrationController(engine: audioEngine)
         self.audioEngine = audioEngine
         self.profiles = profiles
-        self.calibration = RoomCorrectionCalibrationController(engine: audioEngine)
+        self.calibration = calibration
+        self.multichannelCalibration = MultichannelCalibrationController(
+            engine: audioEngine,
+            profiles: profiles,
+            microphone: calibration
+        )
         self.roomCorrectionProjects = RoomCorrectionProjectController(profiles: profiles)
         observeAudioEngine()
     }
 
     init(audioEngine: AudioIOEngine) {
         let profiles = ProductProfileController(engine: audioEngine)
+        let calibration = RoomCorrectionCalibrationController(engine: audioEngine)
         self.audioEngine = audioEngine
         self.profiles = profiles
-        self.calibration = RoomCorrectionCalibrationController(engine: audioEngine)
+        self.calibration = calibration
+        self.multichannelCalibration = MultichannelCalibrationController(
+            engine: audioEngine,
+            profiles: profiles,
+            microphone: calibration
+        )
         self.roomCorrectionProjects = RoomCorrectionProjectController(profiles: profiles)
         observeAudioEngine()
     }
@@ -113,9 +127,11 @@ final class ProductController: ObservableObject {
         profiles.restoreSelectedLayers()
         roomCorrectionProjects.prepareForUse()
         calibration.prepareForUse()
+        multichannelCalibration.prepareForUse()
     }
 
     func shutdownForTermination() {
+        multichannelCalibration.cancelMeasurement()
         calibration.cancelMeasurement()
         audioEngine.shutdownForTermination()
     }
@@ -125,6 +141,9 @@ final class ProductController: ObservableObject {
             self?.objectWillChange.send()
         }
         calibrationObservation = calibration.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+        multichannelCalibrationObservation = multichannelCalibration.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
     }
