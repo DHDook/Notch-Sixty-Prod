@@ -219,6 +219,7 @@ enum HeadphoneDeviceProfileError: Error, Equatable, LocalizedError {
     case binauralProfileSampleRateMismatch(profile: Double, output: Double)
     case programSourceUnavailable(String)
     case programSourceChannelCountMismatch(expected: UInt32, actual: UInt32)
+    case headTrackingRequiresVirtualSpeakers
     case speakerProfileConflict
     case legacyPhysicalRoutingConflict
     case speakerProcessingConflict(String)
@@ -260,6 +261,8 @@ enum HeadphoneDeviceProfileError: Error, Equatable, LocalizedError {
             return "The Virtual Speakers program source is unavailable: \(uid)."
         case .programSourceChannelCountMismatch(let expected, let actual):
             return "Virtual Speakers expects \(expected) program channels, but the selected source exposes \(actual)."
+        case .headTrackingRequiresVirtualSpeakers:
+            return "Head tracking is available only in Virtual Speakers mode."
         case .speakerProfileConflict:
             return "Disable the semantic speaker Output Device Profile before enabling the Headphone Device Profile."
         case .legacyPhysicalRoutingConflict:
@@ -294,6 +297,7 @@ struct HeadphoneDeviceProfileConfiguration: Codable, Equatable, Sendable {
     var programSourceDeviceUID: String?
     var programLayout: OutputProgramLayout = .stereo
     var binauralProfile: BinauralProfileReference?
+    var headTracking: HeadTrackingConfiguration?
 
     var conservativeRequiredHeadroomDB: Double {
         max(left.conservativePositiveGainDB, right.conservativePositiveGainDB)
@@ -327,6 +331,12 @@ struct HeadphoneDeviceProfileConfiguration: Codable, Equatable, Sendable {
                     profile: binauralProfile.sampleRate,
                     output: sampleRate
                 )
+            }
+        }
+        if let headTracking {
+            try headTracking.validate()
+            if headTracking.enabled && spatialMode != .virtualSpeakers {
+                throw HeadphoneDeviceProfileError.headTrackingRequiresVirtualSpeakers
             }
         }
     }
