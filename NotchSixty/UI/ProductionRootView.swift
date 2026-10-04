@@ -107,8 +107,12 @@ enum ProductionVUScale {
         current + (target - current) * (target > current ? 0.39 : 0.15)
     }
 
+    static let startAngleDegrees = 224.0
+    static let sweepDegrees = 92.0
+    static var endAngleDegrees: Double { startAngleDegrees + sweepDegrees }
+
     static func angle(forVU vu: Double) -> Double {
-        205 + normalizedPosition(forVU: vu) * 130
+        startAngleDegrees + normalizedPosition(forVU: vu) * sweepDegrees
     }
 
     static func point(center: CGPoint, radius: CGFloat, angle: Double) -> CGPoint {
@@ -439,7 +443,7 @@ private struct ProductionDashboardView: View {
                     HStack {
                         Text("Master Volume").font(.subheadline.bold())
                         Spacer()
-                        Text("\(engine.masterVolumeConfiguration.level * 100, specifier: "%.0f")%")
+                        Text("\(engine.masterVolumeConfiguration.level * 100, specifier: "%.1f")%")
                             .monospacedDigit().foregroundStyle(.secondary)
                     }
                     Slider(
@@ -547,22 +551,55 @@ private struct StereoSignatureVUMeter: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let leftCenter = CGPoint(x: proxy.size.width * 0.28, y: proxy.size.height * 0.87)
-            let rightCenter = CGPoint(x: proxy.size.width * 0.72, y: proxy.size.height * 0.87)
-            let radius = min(proxy.size.width * 0.205, proxy.size.height * 0.74)
+            let width = proxy.size.width
+            let height = proxy.size.height
+            let leftCenter = CGPoint(x: width * 0.28, y: height * 1.14)
+            let rightCenter = CGPoint(x: width * 0.72, y: height * 1.14)
+            let radius = min(width * 0.19, height * 0.61)
+            let windowWidth = width * 0.94
+            let windowHeight = height * 0.74
+            let windowCenter = CGPoint(x: width * 0.50, y: height * 0.43)
 
             ZStack {
-                RoundedRectangle(cornerRadius: 26, style: .continuous)
-                    .fill(LinearGradient(
-                        colors: [
-                            Color(red: 0.94, green: 0.89, blue: 0.73),
-                            Color(red: 0.82, green: 0.75, blue: 0.57),
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    ))
-                    .overlay { RoundedRectangle(cornerRadius: 26).stroke(.black.opacity(0.28)) }
-                    .shadow(color: .black.opacity(0.16), radius: 12, y: 5)
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.13, green: 0.12, blue: 0.10),
+                                Color(red: 0.24, green: 0.21, blue: 0.16),
+                                Color(red: 0.10, green: 0.095, blue: 0.085),
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 28, style: .continuous)
+                            .stroke(.white.opacity(0.13), lineWidth: 0.8)
+                    }
+                    .shadow(color: .black.opacity(0.30), radius: 18, y: 8)
+
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.96, green: 0.91, blue: 0.76),
+                                Color(red: 0.88, green: 0.80, blue: 0.62),
+                                Color(red: 0.80, green: 0.71, blue: 0.53),
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .frame(width: windowWidth, height: windowHeight)
+                    .position(windowCenter)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .stroke(.black.opacity(0.38), lineWidth: 1.1)
+                            .frame(width: windowWidth, height: windowHeight)
+                            .position(windowCenter)
+                    }
+                    .shadow(color: .black.opacity(0.24), radius: 8, y: 4)
 
                 StereoSignatureVUScaleFace(
                     leftCenter: leftCenter,
@@ -572,37 +609,65 @@ private struct StereoSignatureVUMeter: View {
                 .equatable()
 
                 Canvas { context, _ in
-                    drawNeedle(
-                        context: &context,
-                        center: leftCenter,
-                        radius: radius,
-                        vu: leftVU
-                    )
-                    drawNeedle(
-                        context: &context,
-                        center: rightCenter,
-                        radius: radius,
-                        vu: rightVU
-                    )
+                    drawNeedle(context: &context, center: leftCenter, radius: radius, vu: leftVU)
+                    drawNeedle(context: &context, center: rightCenter, radius: radius, vu: rightVU)
                 }
 
                 Text("LEFT")
-                    .font(.caption.bold())
-                    .tracking(1.5)
-                    .foregroundStyle(.black.opacity(0.64))
-                    .position(x: proxy.size.width * 0.28, y: proxy.size.height * 0.67)
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .tracking(2.1)
+                    .foregroundStyle(.black.opacity(0.62))
+                    .position(x: width * 0.28, y: height * 0.69)
 
                 Text("RIGHT")
-                    .font(.caption.bold())
-                    .tracking(1.5)
-                    .foregroundStyle(.black.opacity(0.64))
-                    .position(x: proxy.size.width * 0.72, y: proxy.size.height * 0.67)
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .tracking(2.1)
+                    .foregroundStyle(.black.opacity(0.62))
+                    .position(x: width * 0.72, y: height * 0.69)
 
-                Text("NOTCH SIXTY")
-                    .font(.headline.bold())
-                    .tracking(3.2)
-                    .foregroundStyle(.black.opacity(0.72))
-                    .position(x: proxy.size.width * 0.5, y: proxy.size.height * 0.80)
+                // A deliberately restrained optical highlight underneath the real
+                // Liquid Glass surface gives the window a thick, polished lens feel.
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                .white.opacity(0.30),
+                                .white.opacity(0.09),
+                                .clear,
+                                .black.opacity(0.035),
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: windowWidth, height: windowHeight)
+                    .position(windowCenter)
+                    .allowsHitTesting(false)
+
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(.white.opacity(0.001))
+                    .frame(width: windowWidth, height: windowHeight)
+                    .position(windowCenter)
+                    .glassEffect(.regular, in: .rect(cornerRadius: 22))
+                    .opacity(0.24)
+                    .allowsHitTesting(false)
+
+                Capsule()
+                    .fill(.white.opacity(0.23))
+                    .frame(width: width * 0.36, height: 1.2)
+                    .blur(radius: 0.35)
+                    .position(x: width * 0.30, y: height * 0.105)
+                    .allowsHitTesting(false)
+
+                HStack(spacing: 10) {
+                    Rectangle().fill(.white.opacity(0.16)).frame(width: 30, height: 1)
+                    Text("NOTCH SIXTY")
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .tracking(3.4)
+                        .foregroundStyle(.white.opacity(0.68))
+                    Rectangle().fill(.white.opacity(0.16)).frame(width: 30, height: 1)
+                }
+                .position(x: width * 0.50, y: height * 0.90)
             }
         }
         .aspectRatio(3.2, contentMode: .fit)
@@ -619,12 +684,15 @@ private struct StereoSignatureVUMeter: View {
     ) {
         let angle = ProductionVUScale.angle(forVU: vu)
         var path = Path()
-        path.move(to: ProductionVUScale.point(center: center, radius: -radius * 0.10, angle: angle))
-        path.addLine(to: ProductionVUScale.point(center: center, radius: radius * 0.92, angle: angle))
-        context.stroke(path, with: .color(.red.opacity(0.92)), lineWidth: 2.2)
-        context.fill(
-            Path(ellipseIn: CGRect(x: center.x - 8, y: center.y - 8, width: 16, height: 16)),
-            with: .color(.black.opacity(0.8))
+        // The mechanical pivot intentionally lives below the visible glass. Only
+        // the upper needle segment is drawn, producing the shallow 1970s sweep.
+        path.move(to: ProductionVUScale.point(center: center, radius: radius * 0.62, angle: angle))
+        path.addLine(to: ProductionVUScale.point(center: center, radius: radius * 0.985, angle: angle))
+        context.stroke(path, with: .color(.black.opacity(0.24)), lineWidth: 4.4)
+        context.stroke(
+            path,
+            with: .color(Color(red: 0.76, green: 0.16, blue: 0.10).opacity(0.96)),
+            lineWidth: 2.15
         )
     }
 }
@@ -644,39 +712,57 @@ private struct StereoSignatureVUScaleFace: View, Equatable {
     private func drawScale(context: inout GraphicsContext, center: CGPoint) {
         let ticks: [Double] = [-40, -35, -30, -25, -20, -15, -10, -7, -5, -4, -3, -2, -1, 0, 1, 2, 3]
         let labels: Set<Double> = [-40, -30, -20, -10, -7, -5, -3, 0, 3]
+        let scaleRadius = radius * 0.985
+
         var arc = Path()
         arc.addArc(
             center: center,
-            radius: radius,
-            startAngle: .degrees(205),
-            endAngle: .degrees(335),
+            radius: scaleRadius,
+            startAngle: .degrees(ProductionVUScale.startAngleDegrees),
+            endAngle: .degrees(ProductionVUScale.endAngleDegrees),
             clockwise: false
         )
-        context.stroke(arc, with: .color(.black.opacity(0.62)), lineWidth: 1.3)
+        context.stroke(arc, with: .color(.black.opacity(0.64)), lineWidth: 1.25)
+
+        var hotArc = Path()
+        hotArc.addArc(
+            center: center,
+            radius: scaleRadius,
+            startAngle: .degrees(ProductionVUScale.angle(forVU: 0)),
+            endAngle: .degrees(ProductionVUScale.endAngleDegrees),
+            clockwise: false
+        )
+        context.stroke(
+            hotArc,
+            with: .color(Color(red: 0.63, green: 0.10, blue: 0.07).opacity(0.86)),
+            lineWidth: 2.0
+        )
 
         for value in ticks {
             let angle = ProductionVUScale.angle(forVU: value)
+            let major = labels.contains(value)
             let inner = ProductionVUScale.point(
                 center: center,
-                radius: radius * (labels.contains(value) ? 0.87 : 0.91),
+                radius: radius * (major ? 0.895 : 0.925),
                 angle: angle
             )
-            let outer = ProductionVUScale.point(center: center, radius: radius, angle: angle)
+            let outer = ProductionVUScale.point(center: center, radius: scaleRadius, angle: angle)
             var path = Path()
             path.move(to: inner)
             path.addLine(to: outer)
             context.stroke(
                 path,
-                with: .color(value > 0 ? .red.opacity(0.8) : .black.opacity(0.72)),
-                lineWidth: labels.contains(value) ? 2 : 1
+                with: .color(value > 0 ? Color.red.opacity(0.82) : .black.opacity(0.70)),
+                lineWidth: major ? 1.7 : 0.8
             )
-            if labels.contains(value) {
-                let point = ProductionVUScale.point(center: center, radius: radius * 0.76, angle: angle)
+
+            if major {
+                let point = ProductionVUScale.point(center: center, radius: radius * 0.815, angle: angle)
                 let label = value > 0 ? "+\(Int(value))" : "\(Int(value))"
                 context.draw(
                     Text(label)
-                        .font(.system(size: 11, weight: value == 0 ? .bold : .medium, design: .rounded))
-                        .foregroundStyle(value > 0 ? Color.red : Color.black.opacity(0.72)),
+                        .font(.system(size: 10, weight: value == 0 ? .bold : .semibold, design: .rounded))
+                        .foregroundStyle(value > 0 ? Color.red.opacity(0.86) : Color.black.opacity(0.70)),
                     at: point
                 )
             }
@@ -684,9 +770,10 @@ private struct StereoSignatureVUScaleFace: View, Equatable {
 
         context.draw(
             Text("VU")
-                .font(.system(size: 14, weight: .bold, design: .rounded))
-                .foregroundStyle(.black.opacity(0.72)),
-            at: CGPoint(x: center.x, y: center.y - radius * 0.43)
+                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .tracking(1.4)
+                .foregroundStyle(.black.opacity(0.58)),
+            at: CGPoint(x: center.x, y: center.y - radius * 0.72)
         )
     }
 }
