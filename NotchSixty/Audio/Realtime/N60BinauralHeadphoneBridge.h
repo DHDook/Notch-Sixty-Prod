@@ -42,6 +42,7 @@ typedef struct N60BinauralHeadphoneBridge {
     N60BinauralProfileDescriptor binauralDescriptor;
     N60HeadphoneDSPSnapshot headphoneSnapshot;
     N60ProtectionSnapshot protectionSnapshot;
+    float programGainLinear;
 
     uint32_t outputGateMinimumBufferedFrames;
     uint32_t startupFadeFrames;
@@ -104,6 +105,7 @@ static inline N60BinauralHeadphoneBridge * _Nullable N60BinauralHeadphoneBridgeC
     const float * _Nonnull rightIRs,
     N60HeadphoneDSPSnapshot headphoneSnapshot,
     N60ProtectionSnapshot protectionSnapshot,
+    float programGainLinear,
     uint32_t outputGateMinimumBufferedFrames,
     uint32_t startupFadeFrames
 ) {
@@ -120,7 +122,8 @@ static inline N60BinauralHeadphoneBridge * _Nullable N60BinauralHeadphoneBridgeC
         || !N60HeadphoneDSPSnapshotIsValid(&headphoneSnapshot)
         || fabs(headphoneSnapshot.sampleRate - binauralDescriptor.sampleRate) >= 0.5
         || !N60ProtectionSnapshotIsValid(&protectionSnapshot)
-        || fabs(protectionSnapshot.sampleRate - binauralDescriptor.sampleRate) >= 0.5) {
+        || fabs(protectionSnapshot.sampleRate - binauralDescriptor.sampleRate) >= 0.5
+        || !isfinite(programGainLinear) || programGainLinear < 0.0f || programGainLinear > 16.0f) {
         return NULL;
     }
 
@@ -160,6 +163,7 @@ static inline N60BinauralHeadphoneBridge * _Nullable N60BinauralHeadphoneBridgeC
     bridge->binauralDescriptor = binauralDescriptor;
     bridge->headphoneSnapshot = headphoneSnapshot;
     bridge->protectionSnapshot = protectionSnapshot;
+    bridge->programGainLinear = programGainLinear;
     bridge->outputGateMinimumBufferedFrames = outputGateMinimumBufferedFrames;
     bridge->startupFadeFrames = startupFadeFrames;
     bridge->startupFadeRemaining = 0u;
@@ -393,6 +397,10 @@ static inline OSStatus N60BinauralHeadphoneOutputIOProc(
     for (uint32_t frameIndex = 0; frameIndex < frameCount; ++frameIndex) {
         N60ProgramTransportFrame program = {0};
         (void)N60ProgramTransportDequeueFrame(bridge->transport, &program);
+
+        for (uint32_t channel = 0; channel < bridge->binauralDescriptor.programLayout.channelCount; ++channel) {
+            program.channels[channel] *= bridge->programGainLinear;
+        }
 
         float left = 0.0f;
         float right = 0.0f;

@@ -78,6 +78,7 @@ final class CoreAudioBinauralHeadphoneTransportSession {
         programLayout: OutputProgramLayout,
         preparedProfile: PreparedBinauralProfile,
         headphoneSnapshot: N60HeadphoneDSPSnapshot,
+        programGain: Float,
         outputGain: Float
     ) throws {
         self.selectedOutput = selectedOutput
@@ -213,6 +214,7 @@ final class CoreAudioBinauralHeadphoneTransportSession {
                             right.baseAddress!,
                             headphoneSnapshot,
                             protection,
+                            programGain,
                             gatePolicy.activationBufferedFrames,
                             gatePolicy.fadeInFrames
                         )

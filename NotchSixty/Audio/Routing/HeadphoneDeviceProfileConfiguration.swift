@@ -344,7 +344,7 @@ struct HeadphoneDeviceProfileConfiguration: Codable, Equatable, Sendable {
         guard let output = availableDevices.first(where: { $0.uid == outputDeviceUID }) else {
             throw HeadphoneDeviceProfileError.outputDeviceUnavailable(outputDeviceUID)
         }
-        guard output.outputChannelCount >= 2 else {
+        guard output.outputChannelCount == 2 else {
             throw HeadphoneDeviceProfileError.outputMustBeStereoCapable(output.outputChannelCount)
         }
         guard output.supports(sampleRate: sampleRate) else {
@@ -385,7 +385,7 @@ struct HeadphoneDeviceProfileConfiguration: Codable, Equatable, Sendable {
                 crossfeed.virtualSpeakerAngleDegrees,
                 crossfeed.headRadiusMeters,
                 crossfeed.headShadowFrequencyHz,
-                crossfeed.preset != .off && crossfeed.amount > 0
+                spatialMode == .stereo && crossfeed.preset != .off && crossfeed.amount > 0
               ),
               N60HeadphoneDSPSnapshotIsValid(&snapshot) else {
             throw HeadphoneDeviceProfileError.realtimeSnapshotCompilationFailed
