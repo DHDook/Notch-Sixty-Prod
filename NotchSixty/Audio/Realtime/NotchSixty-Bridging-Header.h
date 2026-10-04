@@ -2,6 +2,7 @@
 #import "N60RoomMeasurementBridge.h"
 #import "N60Convolution.h"
 #import "N60LinearPhaseEQ.h"
+#import "N60ProgramLayout.h"
 
 #import "N60SpectralDenoiser.h"
 #import "N60DynamicsLegacyAdvanced.h"
