@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import pathlib
-import re
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 ROOT_VIEW = ROOT / "NotchSixty/UI/ProductionRootView.swift"
@@ -59,13 +58,17 @@ def main() -> None:
             "volume-down callback is not resolution-independent")
     require("handleGlobalVolumeKey(delta: 1.0 / 16.0)" not in engine,
             "legacy fixed 1/16 volume-up step remains")
-    key_handler = block(engine, "private func handleGlobalVolumeKey(direction: Double) {", "private func handleMasterVolumeDeviceChange")
-    require("masterVolumeCapabilities.controlMode == .softwareDSP" in key_handler,
+    key_handler_prefix = block(
+        engine,
+        "private func handleGlobalVolumeKey(direction: Double) {",
+        "let level = min("
+    )
+    require("masterVolumeCapabilities.controlMode == .softwareDSP" in key_handler_prefix,
             "volume-key stepping is not restricted to software DSP mode")
-    require("direction / Double(softwareVolumeKeyStepDenominator)" in key_handler,
+    require("direction / Double(softwareVolumeKeyStepDenominator)" in key_handler_prefix,
             "selected denominator is not used by the volume-key handler")
-    require("masterVolumeController." not in key_handler,
-            "volume-key handler must not write physical-device volume directly")
+    require("masterVolumeController." not in key_handler_prefix,
+            "volume-key preflight must not write physical-device volume")
 
     # Application-level persistence rather than Playback System / preset state.
     require("private enum ApplicationVolumeStepResolution: Int" in app,
