@@ -16,7 +16,9 @@
 extern "C" {
 #endif
 
-#define N60_LIVE_MAX_PHYSICAL_CHANNELS 32u
+/// Bounded hardware-output ceiling. 40 leaves room for the full 32-channel
+/// semantic program plus four explicit physical subwoofer outputs and margin.
+#define N60_LIVE_MAX_PHYSICAL_CHANNELS 40u
 #define N60_LIVE_PHYSICAL_CHANNEL_UNMAPPED UINT32_MAX
 
 typedef struct {
