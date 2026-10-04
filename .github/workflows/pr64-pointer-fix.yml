@@ -1,0 +1,31 @@
+name: PR64 Pointer Fix
+
+on:
+  push:
+    branches:
+      - feature/pr64-multichannel-calibration-workflow
+    paths:
+      - ci/pr64_fix_designer_pointer.py
+      - .github/workflows/pr64-pointer-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feature/pr64-multichannel-calibration-workflow
+          fetch-depth: 0
+      - name: Apply asserted Swift pointer fix
+        run: python3 ci/pr64_fix_designer_pointer.py
+      - name: Commit fix and remove patch machinery
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -f ci/pr64_fix_designer_pointer.py .github/workflows/pr64-pointer-fix.yml
+          git add NotchSixty/Audio/MultichannelCalibrationDesigner.swift
+          git commit -m "PR64: fix Swift 27 calibration pointer interop"
+          git push origin HEAD:feature/pr64-multichannel-calibration-workflow
