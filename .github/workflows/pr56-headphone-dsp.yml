@@ -1,0 +1,35 @@
+name: PR56 Headphone DSP
+
+on:
+  pull_request:
+    branches:
+      - feature/pr55-multichannel-bass-management
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate-portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate headphone correction and acoustic crossfeed
+        run: python3 ci/validate_pr56_headphone_dsp.py
+
+  validate-macos-integration:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate headphone DSP with Apple Clang
+        run: python3 ci/validate_pr56_headphone_dsp.py
+      - name: Build app with headphone ABI exposed to Swift
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          build
