@@ -1,0 +1,39 @@
+name: PR55 Multichannel Bass Management
+
+on:
+  pull_request:
+    branches:
+      - feature/pr54-nchannel-dsp-lanes
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate-portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate multichannel bass management
+        run: python3 ci/validate_pr55_multichannel_bass_management.py
+      - name: Validate dedicated subwoofer tuning
+        run: python3 ci/validate_pr55_subwoofer_tuning.py
+
+  validate-macos-integration:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate multichannel bass management with Apple Clang
+        run: python3 ci/validate_pr55_multichannel_bass_management.py
+      - name: Validate dedicated subwoofer tuning with Apple Clang
+        run: python3 ci/validate_pr55_subwoofer_tuning.py
+      - name: Build app with bass-management ABI exposed to Swift
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          build
