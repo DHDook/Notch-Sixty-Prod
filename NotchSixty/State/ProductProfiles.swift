@@ -726,13 +726,16 @@ final class ProductProfileController: ObservableObject {
             }
         }
 
-        let previous = systemProfiles[index].state.outputDeviceProfile
-        systemProfiles[index].state.outputDeviceProfile = configuration
+        let previousEngineConfiguration = engine.outputDeviceProfileConfiguration
+        let previousState = systemProfiles[index].state
         do {
+            try engine.replaceOutputDeviceProfileConfiguration(configuration)
+            systemProfiles[index].state.outputDeviceProfile = configuration
             try persistThrowing()
             lastErrorDescription = nil
         } catch {
-            systemProfiles[index].state.outputDeviceProfile = previous
+            systemProfiles[index].state = previousState
+            try? engine.replaceOutputDeviceProfileConfiguration(previousEngineConfiguration)
             lastErrorDescription = error.localizedDescription
             throw error
         }
@@ -892,7 +895,7 @@ final class ProductProfileController: ObservableObject {
             roomCorrection: engine.roomCorrectionConfiguration,
             roomCorrectionCalibration: selectedSystemProfile?.state.roomCorrectionCalibration,
             outputRouting: engine.multiOutputRoutingConfiguration,
-            outputDeviceProfile: selectedSystemProfile?.state.outputDeviceProfile,
+            outputDeviceProfile: engine.outputDeviceProfileConfiguration,
             speakerDriverProcessing: engine.speakerDriverProcessingConfiguration.isNeutral
                 ? nil
                 : engine.speakerDriverProcessingConfiguration,
@@ -944,6 +947,7 @@ final class ProductProfileController: ObservableObject {
             )
             try engine.replacePlaybackControlConfiguration(playback)
             try engine.replaceBassManagementConfiguration(state.bassManagement)
+            try engine.replaceOutputDeviceProfileConfiguration(state.outputDeviceProfile)
             try engine.replaceGainConfiguration(gain)
             try engine.replaceRoomCorrectionConfiguration(state.roomCorrection)
             try engine.replaceSpeakerIRConfiguration(state.speakerIR)
@@ -959,7 +963,9 @@ final class ProductProfileController: ObservableObject {
                 previous.speakerDriverProcessing ?? SpeakerDriverProcessingConfiguration()
             )
             try? engine.replacePlaybackControlConfiguration(playback)
+            try? engine.replaceOutputDeviceProfileConfiguration(nil)
             try? engine.replaceBassManagementConfiguration(previous.bassManagement)
+            try? engine.replaceOutputDeviceProfileConfiguration(previous.outputDeviceProfile)
             try? engine.replaceGainConfiguration(gain)
             try? engine.replaceRoomCorrectionConfiguration(previous.roomCorrection)
             try? engine.replaceSpeakerIRConfiguration(previous.speakerIR)
