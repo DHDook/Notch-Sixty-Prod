@@ -114,7 +114,16 @@ struct BinauralProfileAsset: Codable, Equatable, Sendable, Identifiable {
         right.reserveCapacity(layout.roles.count * tapCount)
 
         for channel in 0..<layout.roles.count {
-            let target = descriptor.sources[channel]
+            let target: N60BinauralSourcePosition = withUnsafePointer(
+                to: &descriptor.sources
+            ) { tuplePointer in
+                tuplePointer.withMemoryRebound(
+                    to: N60BinauralSourcePosition.self,
+                    capacity: Int(N60_MAX_PROGRAM_CHANNELS)
+                ) { sourcePointer in
+                    sourcePointer[channel]
+                }
+            }
             guard let measurement = nearestMeasurement(
                 azimuthDegrees: target.azimuthDegrees,
                 elevationDegrees: target.elevationDegrees,
