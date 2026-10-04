@@ -10,6 +10,8 @@
 #import "N60ProgramLaneEngine.h"
 #import "N60MultichannelBassManagement.h"
 #import "N60SubwooferTuning.h"
+#import "N60NChannelDSPPipeline.h"
+#import "N60NChannelRenderBridge.h"
 #import "N60MultichannelCalibration.h"
 #import "N60MultichannelMeasurementCampaign.h"
 #import "N60SpeakerCorrectionDesigner.h"
