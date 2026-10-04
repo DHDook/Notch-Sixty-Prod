@@ -2,6 +2,7 @@
 from pathlib import Path
 
 # One-shot correction for the explicit one-line Routing PBXGroup anchor.
+# This file exists only to make the production patch fully asserted.
 path = Path(__file__).resolve().parent / "pr64_apply_integration_patch.py"
 text = path.read_text()
 old = '''project_insert(
