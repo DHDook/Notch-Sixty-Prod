@@ -17,6 +17,8 @@ render_c = text("NotchSixty/Audio/Realtime/N60RenderKernel.c")
 bridge_h = text("NotchSixty/Audio/Realtime/N60RealtimeAudioBridge.h")
 bridge_c = text("NotchSixty/Audio/Realtime/N60RealtimeAudioBridge.c")
 binaural_bridge = text("NotchSixty/Audio/Realtime/N60BinauralHeadphoneBridge.h")
+workspace = text("NotchSixty/UI/ProductionHeadphoneWorkspace.swift")
+root_view = text("NotchSixty/UI/ProductionRootView.swift")
 pbx = text("NotchSixty.xcodeproj/project.pbxproj")
 
 build_stereo_start = engine.index("private func buildStereoTransport")
@@ -35,6 +37,12 @@ checks = {
     "binaural asset target member": "BinauralProfileAsset.swift in Sources" in pbx,
     "binaural session target member": "CoreAudioBinauralHeadphoneTransportSession.swift in Sources" in pbx,
     "semantic support target member": "CoreAudioSemanticTransportSupport.swift in Sources" in pbx,
+    "headphones workspace target member": "ProductionHeadphoneWorkspace.swift in Sources" in pbx,
+    "headphones sidebar destination": "case headphones" in root_view and 'case .headphones: return "Headphones"' in root_view,
+    "headphones workspace routed": "ProductionHeadphoneWorkspace(engine: engine, profiles: product.profiles)" in root_view,
+    "workspace edits selected playback system": "replaceSelectedSystemHeadphoneDeviceProfile" in workspace,
+    "workspace normalized spatial import": "importNormalizedBinauralProfile" in workspace and "func importNormalizedBinauralProfile" in engine,
+    "workspace documents sofa boundary": "Native AES69 .sofa files" in workspace,
     "headphone profile persisted optional": "var headphoneDeviceProfile: HeadphoneDeviceProfileConfiguration?" in profiles,
     "playback schema remains v1": "struct PlaybackSystemState" in profiles and "static let currentSchemaVersion = 1" in profiles,
     "engine owns headphone profile": "var headphoneDeviceProfileConfiguration: HeadphoneDeviceProfileConfiguration?" in engine,
