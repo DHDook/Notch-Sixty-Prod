@@ -1,0 +1,29 @@
+name: PR63 Apply Engine Activation
+
+on:
+  push:
+    branches:
+      - feature/pr63-live-nchannel-activation
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: ${{ !contains(github.event.head_commit.message, '[pr63-engine-patched]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feature/pr63-live-nchannel-activation
+          fetch-depth: 0
+      - name: Apply asserted engine/profile activation patch
+        run: python3 ci/apply_pr63_engine_activation.py
+      - name: Commit patched sources and remove one-shot machinery
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "PR63: wire fail-closed live N-channel activation [pr63-engine-patched]"
+          git push origin HEAD:feature/pr63-live-nchannel-activation
