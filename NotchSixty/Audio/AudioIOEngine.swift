@@ -1056,6 +1056,7 @@ final class AudioIOEngine: ObservableObject {
     @Published private(set) var masterVolumeConfiguration = MasterVolumeConfiguration()
     @Published private(set) var masterVolumeCapabilities = MasterVolumeDeviceCapabilities.softwareOnly
     @Published private(set) var globalVolumeKeyMonitoringState: GlobalVolumeKeyMonitoringState = .stopped
+    private(set) var softwareVolumeKeyStepDenominator: Int = 16
     @Published private(set) var gainConfiguration = DSPGainConfiguration()
     @Published private(set) var bassManagementConfiguration = BassManagementConfiguration()
     @Published private(set) var multiOutputRoutingConfiguration: MultiOutputRoutingConfiguration?
@@ -1093,8 +1094,8 @@ final class AudioIOEngine: ObservableObject {
         eventMonitor.onWillSleep = { [weak self] in self?.handleWillSleep() }
         eventMonitor.onDidWake = { [weak self] in self?.handleDidWake() }
         masterVolumeController.onExternalChange = { [weak self] in self?.handleMasterVolumeDeviceChange() }
-        globalVolumeKeyMonitor.onVolumeIncrement = { [weak self] in self?.handleGlobalVolumeKey(delta: 1.0 / 16.0) }
-        globalVolumeKeyMonitor.onVolumeDecrement = { [weak self] in self?.handleGlobalVolumeKey(delta: -1.0 / 16.0) }
+        globalVolumeKeyMonitor.onVolumeIncrement = { [weak self] in self?.handleGlobalVolumeKey(direction: 1.0) }
+        globalVolumeKeyMonitor.onVolumeDecrement = { [weak self] in self?.handleGlobalVolumeKey(direction: -1.0) }
     }
 
     var physicalSpeakerBusRoutingActive: Bool {
@@ -1325,6 +1326,11 @@ final class AudioIOEngine: ObservableObject {
         var updated = playbackControlConfiguration
         updated.auditionMode = mode
         try applyPlaybackControlConfiguration(updated)
+    }
+
+    func setSoftwareVolumeKeyStepDenominator(_ denominator: Int) {
+        guard denominator == 16 || denominator == 32 || denominator == 64 else { return }
+        softwareVolumeKeyStepDenominator = denominator
     }
 
     func setMasterVolumeLevel(_ level: Double) throws {
@@ -2202,8 +2208,10 @@ final class AudioIOEngine: ObservableObject {
         }
     }
 
-    private func handleGlobalVolumeKey(delta: Double) {
-        guard masterVolumeCapabilities.controlMode == .softwareDSP else { return }
+    private func handleGlobalVolumeKey(direction: Double) {
+        guard masterVolumeCapabilities.controlMode == .softwareDSP,
+              direction == 1.0 || direction == -1.0 else { return }
+        let delta = direction / Double(softwareVolumeKeyStepDenominator)
         let level = min(
             max(masterVolumeConfiguration.level + delta, MasterVolumeConfiguration.levelRange.lowerBound),
             MasterVolumeConfiguration.levelRange.upperBound

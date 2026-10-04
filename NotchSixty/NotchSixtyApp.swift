@@ -1009,14 +1009,35 @@ private enum ApplicationPresenceMode: String, CaseIterable, Identifiable {
     }
 }
 
+private enum ApplicationVolumeStepResolution: Int, CaseIterable, Identifiable {
+    case standard = 16
+    case fine = 32
+    case precision = 64
+
+    var id: Int { rawValue }
+    var denominator: Int { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .standard: return "1/16"
+        case .fine: return "1/32"
+        case .precision: return "1/64"
+        }
+    }
+
+    var percentPerPress: Double { 100.0 / Double(rawValue) }
+}
+
 @MainActor
 private final class ApplicationPreferences: ObservableObject {
     private enum Key {
         static let appearance = "application.appearance"
         static let presence = "application.presence"
+        static let volumeStepResolution = "application.volumeStepResolution"
     }
 
     private let defaults: UserDefaults
+    private weak var audioEngine: AudioIOEngine?
 
     @Published var appearance: ApplicationAppearanceMode {
         didSet {
@@ -1029,6 +1050,13 @@ private final class ApplicationPreferences: ObservableObject {
         didSet {
             defaults.set(presence.rawValue, forKey: Key.presence)
             applyActivationPolicy()
+        }
+    }
+
+    @Published var volumeStepResolution: ApplicationVolumeStepResolution {
+        didSet {
+            defaults.set(volumeStepResolution.rawValue, forKey: Key.volumeStepResolution)
+            audioEngine?.setSoftwareVolumeKeyStepDenominator(volumeStepResolution.denominator)
         }
     }
 
@@ -1045,6 +1073,9 @@ private final class ApplicationPreferences: ObservableObject {
         presence = ApplicationPresenceMode(
             rawValue: defaults.string(forKey: Key.presence) ?? ""
         ) ?? .both
+        volumeStepResolution = ApplicationVolumeStepResolution(
+            rawValue: defaults.integer(forKey: Key.volumeStepResolution)
+        ) ?? .standard
         launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
         launchAtLoginError = nil
         appearanceObservation = NSApplication.shared.observe(\.effectiveAppearance, options: [.new]) { [weak self] _, _ in
@@ -1098,7 +1129,9 @@ private final class ApplicationPreferences: ObservableObject {
         }
     }
 
-    func apply() {
+    func apply(to audioEngine: AudioIOEngine) {
+        self.audioEngine = audioEngine
+        audioEngine.setSoftwareVolumeKeyStepDenominator(volumeStepResolution.denominator)
         guard !didApplyInitialPreferences else { return }
         didApplyInitialPreferences = true
         applyAppearance()
@@ -1392,6 +1425,26 @@ private struct ProductionSettingsView: View {
                         }
                     }
 
+                    settingsCard(title: "Volume Keys", systemImage: "speaker.wave.2") {
+                        HStack(spacing: 10) {
+                            Text("Step size")
+                            Spacer()
+                            Picker("Volume key step size", selection: $preferences.volumeStepResolution) {
+                                ForEach(ApplicationVolumeStepResolution.allCases) { resolution in
+                                    Text(resolution.displayName).tag(resolution)
+                                }
+                            }
+                            .labelsHidden()
+                            .productionGlassPickerChrome()
+                            .pickerStyle(.segmented)
+                            .frame(width: 220)
+                        }
+
+                        Text("Controls Notch Sixty's software master-volume change for each intercepted volume-key press. 1/16 = 6.25%, 1/32 = 3.125%, and 1/64 = 1.5625%. The physical output-device volume is not stepped by this setting.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
                     settingsCard(title: "App Presence", systemImage: "macwindow.on.rectangle") {
                         HStack(spacing: 10) {
                             Text("Show Notch Sixty in")
@@ -1475,7 +1528,10 @@ private struct ProductionSettingsView: View {
             }
             .padding(18)
         }
-        .task { preferences.refreshLaunchAtLoginStatus() }
+        .task {
+            preferences.apply(to: product.audioEngine)
+            preferences.refreshLaunchAtLoginStatus()
+        }
         .frame(width: 540)
         .frame(minHeight: 580)
     }
@@ -1526,7 +1582,7 @@ struct NotchSixtyApp: App {
             ProductionRootView(product: product)
                 .task {
                     product.prepareForUse()
-                    preferences.apply()
+                    preferences.apply(to: product.audioEngine)
                 }
         }
         .defaultSize(width: 1180, height: 780)
@@ -1539,7 +1595,10 @@ struct NotchSixtyApp: App {
             isInserted: trayInserted
         ) {
             ProductionMenuBarView(product: product)
-                .task { product.prepareForUse() }
+                .task {
+                    product.prepareForUse()
+                    preferences.apply(to: product.audioEngine)
+                }
         }
         .menuBarExtraStyle(.window)
 
