@@ -62,7 +62,7 @@ final class MultichannelCalibrationTransport {
     let physicalOutputChannelIndex: UInt32
 
     private let orderedOutputs: [AudioOutputDevice]
-    private var bridge: OpaquePointer?
+    private var bridge: UnsafeMutablePointer<N60TargetedRoomMeasurementBridge>?
     private var ioProcID: AudioDeviceIOProcID?
     private var calibrationDeviceID = AudioDeviceID(kAudioObjectUnknown)
     private var aggregateDeviceID = AudioDeviceID(kAudioObjectUnknown)
