@@ -1,0 +1,35 @@
+name: PR60 N-Channel Transport
+
+on:
+  pull_request:
+    branches:
+      - feature/pr59-advanced-spatial-mimo
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate-portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate portable semantic transport core
+        run: python3 ci/validate_pr60_nchannel_transport.py
+
+  validate-macos-integration:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate Core Audio semantic transport adapter
+        run: python3 ci/validate_pr60_nchannel_transport.py
+      - name: Build app with N-channel transport ABI exposed to Swift
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          build
