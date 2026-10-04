@@ -13,9 +13,13 @@
 #import "N60MultichannelMeasurementCampaign.h"
 #import "N60SpeakerCorrectionDesigner.h"
 #import "N60MultiSubOptimizer.h"
+#import "N60LinkedDynamics.h"
+#import "N60Downmix.h"
 #import "N60HeadphoneDSP.h"
 #import "N60BinauralProfile.h"
 #import "N60BinauralRenderer.h"
+#import "N60HeadTracking.h"
+#import "N60MIMOCorrection.h"
 
 #import "N60SpectralDenoiser.h"
 #import "N60DynamicsLegacyAdvanced.h"
