@@ -6,6 +6,7 @@ PROFILE = ROOT / "NotchSixty/Audio/Routing/OutputDeviceProfileConfiguration.swif
 CALIBRATION = ROOT / "NotchSixty/Audio/Routing/OutputDeviceCalibration.swift"
 DESIGNER = ROOT / "NotchSixty/Audio/MultichannelCalibrationDesigner.swift"
 SESSION = ROOT / "NotchSixty/Audio/CoreAudio/CoreAudioNChannelTransportSession.swift"
+TRANSPORT = ROOT / "NotchSixty/Audio/CoreAudio/MultichannelCalibrationTransport.swift"
 ANALYZER = ROOT / "NotchSixty/Audio/RoomCorrectionMeasurementAnalyzer.swift"
 PROJECT = ROOT / "NotchSixty.xcodeproj/project.pbxproj"
 
@@ -16,13 +17,14 @@ def require(value: bool, message: str) -> None:
 
 
 def main() -> None:
-    for path in (PROFILE, CALIBRATION, DESIGNER, SESSION, ANALYZER, PROJECT):
+    for path in (PROFILE, CALIBRATION, DESIGNER, SESSION, TRANSPORT, ANALYZER, PROJECT):
         require(path.exists(), f"missing {path}")
 
     profile = PROFILE.read_text()
     calibration = CALIBRATION.read_text()
     designer = DESIGNER.read_text()
     session = SESSION.read_text()
+    transport = TRANSPORT.read_text()
     analyzer = ANALYZER.read_text()
     project = PROJECT.read_text()
 
@@ -64,6 +66,21 @@ def main() -> None:
     require("calibratedPolarity" in session,
             "live subwoofer polarity calibration is not composed")
 
+    require("N60TargetedRoomMeasurementBridgeCreate" in transport,
+            "targeted measurement transport does not use the PR58 realtime bridge")
+    require("N60TargetedRoomMeasurementIOProc" in transport,
+            "targeted measurement IOProc is not connected")
+    require("physicalOutputChannelIndex" in transport,
+            "targeted transport does not own an explicit physical output lane")
+    require("routePlan.orderedDeviceUIDs" in transport,
+            "targeted transport does not preserve the Output Device Profile device order")
+    require("kAudioSubDeviceDriftCompensationKey" in transport,
+            "multi-device calibration aggregate lacks drift-compensation policy")
+    require("originalSampleRates" in transport and "restore calibration device sample rate" in transport,
+            "temporary measurement sample-rate changes are not restored")
+    require("snapshot.unsupportedBufferLayouts == 0" in transport,
+            "unsupported callback layouts are not fail-closed before materialization")
+
     require("func analyzeSingleChannel(" in analyzer,
             "targeted one-speaker measurement analysis entry point is missing")
 
@@ -71,6 +88,8 @@ def main() -> None:
             "OutputDeviceCalibration.swift is not in app target")
     require("MultichannelCalibrationDesigner.swift in Sources" in project,
             "MultichannelCalibrationDesigner.swift is not in app target")
+    require("MultichannelCalibrationTransport.swift in Sources" in project,
+            "MultichannelCalibrationTransport.swift is not in app target")
 
     print("PR64 multichannel calibration integration validation passed")
 
