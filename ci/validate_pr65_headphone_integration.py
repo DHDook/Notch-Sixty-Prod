@@ -16,6 +16,14 @@ bridge_h = text("NotchSixty/Audio/Realtime/N60RealtimeAudioBridge.h")
 bridge_c = text("NotchSixty/Audio/Realtime/N60RealtimeAudioBridge.c")
 pbx = text("NotchSixty.xcodeproj/project.pbxproj")
 
+build_stereo_start = engine.index("private func buildStereoTransport")
+build_stereo_end = engine.index("private func tearDownTransport", build_stereo_start)
+build_stereo = engine[build_stereo_start:build_stereo_end]
+
+process_start = render_c.index("void N60RenderKernelProcessStereoFrameInContext")
+process_end = render_c.index("void N60RenderKernelEndRender", process_start)
+process_body = render_c[process_start:process_end]
+
 checks = {
     "headphone profile target member": "HeadphoneDeviceProfileConfiguration.swift in Sources" in pbx,
     "headphone profile persisted optional": "var headphoneDeviceProfile: HeadphoneDeviceProfileConfiguration?" in profiles,
@@ -24,13 +32,13 @@ checks = {
     "engine replacement API": "func replaceHeadphoneDeviceProfileConfiguration" in engine,
     "speaker profile conflict": "HeadphoneDeviceProfileError.speakerProfileConflict" in engine,
     "legacy physical routing conflict": "HeadphoneDeviceProfileError.legacyPhysicalRoutingConflict" in engine,
-    "profile compiles realtime snapshot": "makeRealtimeSnapshot(sampleRate:" in engine,
-    "session config before graph publish": engine.index("session.configureHeadphoneDSP(headphoneSnapshot)") < engine.index("session.publishDSPGraph(graph)"),
+    "profile compiles realtime snapshot": "makeRealtimeSnapshot(sampleRate:" in build_stereo,
+    "session config before graph publish": build_stereo.index("session.configureHeadphoneDSP(headphoneSnapshot)") < build_stereo.index("session.publishDSPGraph(graph)"),
     "session stopped-only config": "!isOutputStarted, !isCaptureStarted" in session and "func configureHeadphoneDSP" in session,
     "bridge config API": "N60RealtimeAudioBridgeConfigureHeadphoneDSP" in bridge_h and "N60RenderKernelConfigureHeadphoneDSP" in bridge_c,
     "render kernel owns headphone runtime": "N60HeadphoneDSPRuntime *headphoneDSPRuntime" in render_c,
     "render kernel control-plane config": "N60RenderKernelConfigureHeadphoneDSP" in render_h and "N60HeadphoneDSPRuntimePrepare" in render_c,
-    "headphone processing before protection": render_c.index("N60HeadphoneDSPProcessStereoFrame") < render_c.index("N60ProtectionProcessStereoFrame"),
+    "headphone processing before protection": process_body.index("N60HeadphoneDSPProcessStereoFrame") < process_body.index("N60ProtectionProcessStereoFrame"),
     "virtual speakers fail closed until renderer integration": "HeadphoneDeviceProfileError.binauralRuntimeUnavailable" in engine,
     "crossfeed profile exposed": "HeadphoneCrossfeedConfiguration" in profile,
     "headroom guard exposed": "conservativeRequiredHeadroomDB" in profile and "insufficientHeadroom" in profile,
