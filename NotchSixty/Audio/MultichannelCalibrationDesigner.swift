@@ -206,16 +206,101 @@ struct MultichannelCalibrationDesigner: Sendable {
         }
 
         var subResult: N60MultiSubOptimizationResult?
+        var subOptimizationFrequencies = frequencies
         if bassManagementEnabled, !profile.subwooferAssignments.isEmpty {
+            let subFrequencies = Self.logFrequencyGrid(
+                minimumHz: Self.minimumFrequencyHz,
+                maximumHz: min(
+                    Self.subwooferMaximumFrequencyHz,
+                    sampleRate * 0.48
+                ),
+                count: Self.frequencyBinCount
+            )
+            var subMatrix = subFrequencies.withUnsafeBufferPointer { buffer in
+                N60MultichannelCalibrationMatrixMake(
+                    sampleRate,
+                    profile.programLayout.realtimeLayout,
+                    UInt32(profile.subwooferAssignments.count),
+                    UInt32(includedSeats.count),
+                    buffer.baseAddress,
+                    UInt32(buffer.count)
+                )
+            }
+            guard subMatrix.sourceCount > 0 else {
+                throw OutputDeviceCalibrationError.designFailed("low-frequency calibration matrix could not be created")
+            }
+            for (seatIndex, seat) in includedSeats.enumerated() {
+                guard N60MultichannelCalibrationSetSeat(
+                    &subMatrix,
+                    UInt32(seatIndex),
+                    true,
+                    Float(seat.weight)
+                ) else {
+                    throw OutputDeviceCalibrationError.designFailed("low-frequency seat weighting failed")
+                }
+                for role in profile.programLayout.roles where role != .lowFrequencyEffects {
+                    let item = try measurement(
+                        seatID: seat.id,
+                        source: .speaker(role),
+                        measurements: measurements,
+                        expectedSampleRate: sampleRate
+                    )
+                    let sourceIndex = N60MultichannelCalibrationSourceIndexForRole(
+                        &subMatrix,
+                        role.realtimeCType
+                    )
+                    guard sourceIndex >= 0 else {
+                        throw OutputDeviceCalibrationError.designFailed("low-frequency speaker source is missing")
+                    }
+                    try install(
+                        measurement: item,
+                        frequencies: subFrequencies,
+                        sourceIndex: UInt32(sourceIndex),
+                        seatIndex: UInt32(seatIndex),
+                        into: &subMatrix
+                    )
+                }
+                for sub in profile.subwooferAssignments.sorted(by: { $0.index < $1.index }) {
+                    let item = try measurement(
+                        seatID: seat.id,
+                        source: .subwoofer(sub.index),
+                        measurements: measurements,
+                        expectedSampleRate: sampleRate
+                    )
+                    let sourceIndex = N60MultichannelCalibrationSourceIndexForSubwoofer(
+                        &subMatrix,
+                        sub.index
+                    )
+                    guard sourceIndex >= 0 else {
+                        throw OutputDeviceCalibrationError.designFailed("low-frequency subwoofer source is missing")
+                    }
+                    try install(
+                        measurement: item,
+                        frequencies: subFrequencies,
+                        sourceIndex: UInt32(sourceIndex),
+                        seatIndex: UInt32(seatIndex),
+                        into: &subMatrix
+                    )
+                }
+            }
+            guard N60MultichannelCalibrationMatrixIsValid(
+                &subMatrix,
+                UInt32(profile.subwooferAssignments.count)
+            ) else {
+                throw OutputDeviceCalibrationError.designFailed("low-frequency measurement matrix is incomplete")
+            }
+            let subTargetMagnitude = subFrequencies.map {
+                Float(alignment.commonLevelDB) + Float(Self.targetGainDB(target, at: Double($0)))
+            }
             var settings = N60MultiSubOptimizationSettingsMakeDefault()
             settings.maximumGainDB = 0
             settings.minimumGainDB = -12
             settings.maximumEQDB = 0
             settings.minimumEQDB = -8
             var result = N60MultiSubOptimizationResult()
-            let optimized = targetMagnitude.withUnsafeBufferPointer { targetBuffer in
+            let optimized = subTargetMagnitude.withUnsafeBufferPointer { targetBuffer in
                 N60MultiSubOptimize(
-                    &matrix,
+                    &subMatrix,
                     UInt32(profile.subwooferAssignments.count),
                     targetBuffer.baseAddress,
                     settings,
@@ -225,6 +310,7 @@ struct MultichannelCalibrationDesigner: Sendable {
             guard optimized else {
                 throw OutputDeviceCalibrationError.designFailed("multi-sub optimization failed")
             }
+            subOptimizationFrequencies = subFrequencies
             subResult = result
         }
 
@@ -243,7 +329,7 @@ struct MultichannelCalibrationDesigner: Sendable {
         let subwoofers = try materializeSubwooferDesigns(
             result: subResult,
             matrix: &matrix,
-            frequencies: frequencies,
+            frequencies: subOptimizationFrequencies,
             count: profile.subwooferAssignments.count,
             commonDelayMilliseconds: timing.subwooferCommonDelayMilliseconds,
             sampleRate: sampleRate

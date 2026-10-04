@@ -66,9 +66,41 @@ enum LiveNChannelRenderGraphCompiler {
         guard combinedGain.isFinite, combinedGain >= 0, combinedGain <= 16 else {
             throw LiveNChannelTransportError.renderGraphInvalid
         }
+        let programRoles = routePlan.programLayout.roles
         for channel in 0..<layout.channelCount {
-            guard N60ProgramLaneGraphSetGain(&lanes, channel, combinedGain) else {
+            let role = programRoles[Int(channel)]
+            let calibration = routePlan.speakerCalibrations[role]
+            let calibratedGain = combinedGain * DSPGainConfiguration.linearGain(
+                forDB: calibration?.trimDB ?? 0
+            )
+            guard N60ProgramLaneGraphSetGain(&lanes, channel, calibratedGain),
+                  N60ProgramLaneGraphSetPolarityInverted(
+                    &lanes,
+                    channel,
+                    calibration?.polarityInverted ?? false
+                  ),
+                  N60ProgramLaneGraphSetDelayMs(
+                    &lanes,
+                    channel,
+                    calibration?.delayMilliseconds ?? 0
+                  ) else {
                 throw LiveNChannelTransportError.renderGraphInvalid
+            }
+            if let calibration {
+                for (bandIndex, band) in calibration.eqBands.enumerated() {
+                    guard N60ProgramLaneGraphSetEQBand(
+                        &lanes,
+                        channel,
+                        UInt32(bandIndex),
+                        N60BiquadFilterTypePeaking,
+                        band.frequencyHz,
+                        band.gainDB,
+                        band.q,
+                        true
+                    ) else {
+                        throw LiveNChannelTransportError.renderGraphInvalid
+                    }
+                }
             }
         }
         guard N60ProgramLaneGraphFinalize(&lanes) else {
@@ -84,7 +116,6 @@ enum LiveNChannelRenderGraphCompiler {
                 routePlan.subwooferCount
             )
             let routeGain = 1.0 / Float(max(routePlan.subwooferCount, 1))
-            let programRoles = routePlan.programLayout.roles
             for channel in 0..<layout.channelCount {
                 if programRoles[Int(channel)] == .lowFrequencyEffects {
                     continue
@@ -110,18 +141,44 @@ enum LiveNChannelRenderGraphCompiler {
                 }
             }
             for sub in 0..<routePlan.subwooferCount {
+                let calibration = routePlan.subwooferCalibrations[Int(sub)]
+                let calibratedGainDB = bassManagementConfiguration.subGainDB
+                    + (calibration?.gainDB ?? 0)
+                let calibratedPolarity = bassManagementConfiguration.subPolarityInverted
+                    != (calibration?.polarityInverted ?? false)
                 guard N60MultichannelBassManagementSetLFERoute(&bass, sub, routeGain),
                       N60SubwooferOutputSetGain(
                         &bass,
                         sub,
-                        DSPGainConfiguration.linearGain(forDB: bassManagementConfiguration.subGainDB)
+                        DSPGainConfiguration.linearGain(forDB: calibratedGainDB)
                       ),
                       N60SubwooferOutputSetPolarityInverted(
                         &bass,
                         sub,
-                        bassManagementConfiguration.subPolarityInverted
+                        calibratedPolarity
+                      ),
+                      N60SubwooferOutputSetDelayMs(
+                        &bass,
+                        sub,
+                        calibration?.delayMilliseconds ?? 0
                       ) else {
                     throw LiveNChannelTransportError.renderGraphInvalid
+                }
+                if let calibration {
+                    for (bandIndex, band) in calibration.eqBands.enumerated() {
+                        guard N60SubwooferOutputSetUserEQBand(
+                            &bass,
+                            sub,
+                            UInt32(bandIndex),
+                            N60BiquadFilterTypePeaking,
+                            band.frequencyHz,
+                            band.gainDB,
+                            band.q,
+                            true
+                        ) else {
+                            throw LiveNChannelTransportError.renderGraphInvalid
+                        }
+                    }
                 }
             }
             guard N60MultichannelBassManagementSnapshotIsValid(&bass) else {
