@@ -196,7 +196,7 @@ struct MultichannelCalibrationDesigner: Sendable {
         let speakerDesigned = targetMagnitude.withUnsafeBufferPointer { targetBuffer in
             N60SpeakerCorrectionDesignPlan(
                 &matrix,
-                targetBuffer.baseAddress,
+                targetBuffer.baseAddress!,
                 correctionSettings,
                 &speakerPlan
             )
@@ -302,7 +302,7 @@ struct MultichannelCalibrationDesigner: Sendable {
                 N60MultiSubOptimize(
                     &subMatrix,
                     UInt32(profile.subwooferAssignments.count),
-                    targetBuffer.baseAddress,
+                    targetBuffer.baseAddress!,
                     settings,
                     &result
                 )
