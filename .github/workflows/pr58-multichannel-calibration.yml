@@ -1,0 +1,35 @@
+name: PR58 Multichannel Calibration
+
+on:
+  pull_request:
+    branches:
+      - feature/pr57-binaural-virtual-speaker
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate-portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate speaker-by-seat calibration and multi-sub optimization
+        run: python3 ci/validate_pr58_multichannel_calibration.py
+
+  validate-macos-integration:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate calibration primitives with Apple Clang
+        run: python3 ci/validate_pr58_multichannel_calibration.py
+      - name: Build app with multichannel calibration ABI exposed to Swift
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          build
