@@ -1,0 +1,29 @@
+name: PR68 Apply UI + Volume Polish
+
+on:
+  push:
+    branches:
+      - feature/pr68-vu-volume-polish
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Apply asserted PR68 patch
+        run: python3 ci/pr68_apply_polish.py
+      - name: Commit production changes
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add NotchSixty/UI/ProductionRootView.swift NotchSixty/Audio/AudioIOEngine.swift NotchSixty/NotchSixtyApp.swift
+          git diff --cached --quiet && { echo 'No production changes staged'; exit 1; }
+          git commit -m 'PR68: polish dashboard VU meters and volume-key resolution'
+          git push origin HEAD:feature/pr68-vu-volume-polish
