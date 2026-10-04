@@ -219,6 +219,9 @@ struct ProductionHeadphoneWorkspace: View {
                 .buttonStyle(.glass)
             }
 
+            Divider()
+            headTrackingControls
+
             Text("Notch Sixty currently imports its documented normalized two-ear HRTF/BRIR JSON boundary. Native AES69 .sofa files use HDF5 and are intentionally not parsed until that dependency receives an explicit license, sandbox and provenance review. The realtime renderer itself is SOFA-oriented and uses the same normalized measurements.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -230,6 +233,55 @@ struct ProductionHeadphoneWorkspace: View {
             }
         }
         .productionCard()
+    }
+
+    private var headTrackingControls: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Head Tracking").font(.subheadline.bold())
+                    Text("Keeps virtual speakers fixed in space using supported Apple headphone motion sensors. If motion is unavailable, static Virtual Speakers remains active by default.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Toggle("Enabled", isOn: Binding(
+                    get: { draft.headTracking?.enabled ?? false },
+                    set: { enabled in
+                        var configuration = draft.headTracking ?? HeadTrackingConfiguration()
+                        configuration.enabled = enabled
+                        draft.headTracking = configuration
+                    }
+                ))
+                .toggleStyle(.switch)
+            }
+
+            if draft.headTracking?.enabled == true {
+                HStack {
+                    Label(engine.headTrackingRuntimeStatus.displayName, systemImage: engine.headTrackingRuntimeStatus.isActivelyTracking ? "gyroscope" : "headphones")
+                        .foregroundStyle(engine.headTrackingRuntimeStatus.isActivelyTracking ? .primary : .secondary)
+                    Spacer()
+                    Button("Recenter") { engine.recenterHeadTracking() }
+                        .buttonStyle(.glass)
+                        .disabled(!engine.headTrackingRuntimeStatus.isActivelyTracking)
+                }
+                if let detail = engine.headTrackingRuntimeStatus.detail {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+                Toggle("Fall back to static Virtual Speakers when tracking is unavailable", isOn: Binding(
+                    get: { draft.headTracking?.fallbackToStaticSpatial ?? true },
+                    set: { enabled in
+                        var configuration = draft.headTracking ?? HeadTrackingConfiguration()
+                        configuration.fallbackToStaticSpatial = enabled
+                        draft.headTracking = configuration
+                    }
+                ))
+                .toggleStyle(.switch)
+            }
+        }
     }
 
     private var deploymentCard: some View {

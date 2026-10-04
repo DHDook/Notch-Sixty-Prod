@@ -11,6 +11,7 @@ enum BinauralHeadphoneTransportError: Error, Equatable, LocalizedError {
     case ioProcUnavailable(role: String)
     case outputBufferExceedsBridgeCapacity(bufferFrames: UInt32, capacityFrames: UInt32)
     case captureBufferSizeMismatch(capture: UInt32, output: UInt32)
+    case headTrackingGenerationFailed
 
     var errorDescription: String? {
         switch self {
@@ -32,6 +33,8 @@ enum BinauralHeadphoneTransportError: Error, Equatable, LocalizedError {
             return "Virtual Speakers startup requires \(frames) buffered frames but bridge capacity is \(capacity)."
         case .captureBufferSizeMismatch(let capture, let output):
             return "Virtual Speakers capture quantum is \(capture) frames; headphone output quantum is \(output) frames."
+        case .headTrackingGenerationFailed:
+            return "Unable to prepare the next head-tracked binaural renderer generation."
         }
     }
 }
@@ -311,6 +314,42 @@ final class CoreAudioBinauralHeadphoneTransportSession {
 
     func setOutputGain(_ gain: Float) {
         N60BinauralHeadphoneBridgeSetOutputGain(bridge, gain)
+    }
+
+    func headTrackingSnapshot() -> N60HeadTrackedBinauralSnapshot? {
+        guard let bridge else { return nil }
+        return N60BinauralHeadphoneBridgeGetSnapshot(bridge).headTracking
+    }
+
+    func prepareHeadTrackedGeneration(
+        preparedProfile: PreparedBinauralProfile,
+        pose: N60HeadPose,
+        warmupFrames: UInt32,
+        crossfadeFrames: UInt32
+    ) throws -> Bool {
+        guard let bridge else {
+            throw BinauralHeadphoneTransportError.bridgeAllocationFailed
+        }
+        guard N60BinauralHeadphoneBridgeCanPrepareTrackedGeneration(bridge) else {
+            return false
+        }
+        let accepted = preparedProfile.leftIRs.withUnsafeBufferPointer { left in
+            preparedProfile.rightIRs.withUnsafeBufferPointer { right in
+                N60BinauralHeadphoneBridgePrepareTrackedGeneration(
+                    bridge,
+                    preparedProfile.descriptor,
+                    left.baseAddress!,
+                    right.baseAddress!,
+                    pose,
+                    warmupFrames,
+                    crossfadeFrames
+                )
+            }
+        }
+        guard accepted else {
+            throw BinauralHeadphoneTransportError.headTrackingGenerationFailed
+        }
+        return true
     }
 
     func counters() -> AudioTransportCounters {

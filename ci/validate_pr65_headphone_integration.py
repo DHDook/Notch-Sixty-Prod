@@ -31,6 +31,14 @@ process_body = render_c[process_start:process_end]
 
 binaural_output_start = binaural_bridge.index("static inline OSStatus N60BinauralHeadphoneOutputIOProc")
 binaural_output = binaural_bridge[binaural_output_start:]
+# PR65 owns the semantic->binaural->headphone->protection ordering. Later stacked
+# PRs may wrap the PR57 renderer in a prepared-generation runtime without changing
+# that ordering contract.
+binaural_render_call = (
+    "N60HeadTrackedBinauralRuntimeProcessFrame"
+    if "N60HeadTrackedBinauralRuntimeProcessFrame" in binaural_output
+    else "N60BinauralRendererProcessFrame"
+)
 
 checks = {
     "headphone profile target member": "HeadphoneDeviceProfileConfiguration.swift in Sources" in pbx,
@@ -62,8 +70,8 @@ checks = {
     "tap preserves decoded channel count": "description.isMixdown = false" in binaural_session,
     "semantic source layout never guessed": "resolveInputChannelDescriptions" in binaural_session and "programLayoutMismatch" in binaural_session,
     "native-rate only": "sampleRateMismatch(source:" in binaural_session,
-    "binaural bridge pipeline order": binaural_output.index("N60BinauralRendererProcessFrame") < binaural_output.index("N60HeadphoneDSPProcessStereoFrame") < binaural_output.index("N60ProtectionProcessStereoFrame"),
-    "content gain upstream of renderer": binaural_output.index("program.channels[channel] *= bridge->programGainLinear") < binaural_output.index("N60BinauralRendererProcessFrame"),
+    "binaural bridge pipeline order": binaural_output.index(binaural_render_call) < binaural_output.index("N60HeadphoneDSPProcessStereoFrame") < binaural_output.index("N60ProtectionProcessStereoFrame"),
+    "content gain upstream of renderer": binaural_output.index("program.channels[channel] *= bridge->programGainLinear") < binaural_output.index(binaural_render_call),
     "crossfeed bypassed for virtual speakers": "spatialMode == .stereo && crossfeed.preset != .off" in profile,
     "normalized asset boundary": "struct BinauralProfileAsset" in asset and "measurements: [BinauralMeasurement]" in asset,
     "native sofa not mislabeled": "nativeSOFAParserUnavailable" in asset and 'pathExtension.lowercased() == "sofa"' in asset,

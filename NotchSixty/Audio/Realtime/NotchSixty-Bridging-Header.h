@@ -23,6 +23,7 @@
 #import "N60BinauralProfile.h"
 #import "N60BinauralRenderer.h"
 #import "N60HeadTracking.h"
+#import "N60HeadTrackedBinauralRuntime.h"
 #import "N60MIMOCorrection.h"
 
 #import "N60SpectralDenoiser.h"

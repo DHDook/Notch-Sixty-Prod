@@ -1,0 +1,38 @@
+name: PR66 Head Tracking + Spatial Runtime
+
+on:
+  push:
+    branches:
+      - feature/pr66-head-tracking-spatial-runtime
+  pull_request:
+    branches:
+      - feature/pr65-headphone-binaural-integration
+  workflow_dispatch:
+
+jobs:
+  validate-portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate inherited headphone + binaural integration
+        run: python3 ci/validate_pr65_headphone_integration.py
+      - name: Validate head-tracking runtime and product integration
+        run: python3 ci/validate_pr66_head_tracking.py
+
+  validate-macos-integration:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate inherited headphone + binaural integration
+        run: python3 ci/validate_pr65_headphone_integration.py
+      - name: Validate head-tracking runtime and product integration
+        run: python3 ci/validate_pr66_head_tracking.py
+      - name: Build arm64 app with Core Motion head tracking
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            build

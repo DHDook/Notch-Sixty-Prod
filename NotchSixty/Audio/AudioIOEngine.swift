@@ -1028,6 +1028,7 @@ final class AudioIOEngine: ObservableObject {
     private var transportSession: CoreAudioTransportSession?
     private var nChannelTransportSession: CoreAudioNChannelTransportSession?
     private var binauralHeadphoneTransportSession: CoreAudioBinauralHeadphoneTransportSession?
+    private var headTrackingController: SpatialHeadTrackingController?
     private var lifetimeArchivedCounters = AudioTransportCounters()
     private var processingSessionArchivedCounters = AudioTransportCounters()
     private var reconfigurationWorkItem: DispatchWorkItem?
@@ -1065,6 +1066,7 @@ final class AudioIOEngine: ObservableObject {
     @Published private(set) var roomCorrectionConfiguration = RoomCorrectionConfiguration()
     @Published private(set) var speakerIRConfiguration = SpeakerIRConfiguration()
     @Published private(set) var linearPhaseDesignInfo: N60LinearPhaseEQDesignInfo?
+    @Published private(set) var headTrackingRuntimeStatus = HeadTrackingRuntimeStatus.disabled
     @Published private(set) var lastErrorDescription: String?
     @Published private(set) var lifecycleState: AudioLifecycleState
 
@@ -1441,7 +1443,18 @@ final class AudioIOEngine: ObservableObject {
             throw HeadphoneDeviceProfileError.configurationChangeRequiresRestart
         }
         headphoneDeviceProfileConfiguration = configuration
+        if configuration?.enabled == true,
+           configuration?.spatialMode == .virtualSpeakers,
+           configuration?.headTracking?.enabled == true {
+            headTrackingRuntimeStatus = .configuredStopped
+        } else {
+            headTrackingRuntimeStatus = .disabled
+        }
         lastErrorDescription = nil
+    }
+
+    func recenterHeadTracking() {
+        headTrackingController?.recenter()
     }
 
     func importNormalizedBinauralProfile(from url: URL) throws -> BinauralProfileReference {
@@ -2803,6 +2816,24 @@ final class AudioIOEngine: ObservableObject {
         activeSpeakerIRProgram = nil
         linearPhaseDesignInfo = nil
         binauralHeadphoneTransportSession = session
+
+        if let tracking = profile.headTracking, tracking.enabled {
+            let controller = SpatialHeadTrackingController(
+                configuration: tracking,
+                asset: asset,
+                layout: profile.programLayout,
+                session: session
+            ) { [weak self] status in
+                Task { @MainActor [weak self] in
+                    self?.headTrackingRuntimeStatus = status
+                }
+            }
+            headTrackingController = controller
+            try controller.start()
+        } else {
+            headTrackingController = nil
+            headTrackingRuntimeStatus = .disabled
+        }
     }
 
     private func buildStereoTransport(output: AudioOutputDevice) throws {
@@ -2956,6 +2987,18 @@ final class AudioIOEngine: ObservableObject {
     }
 
     private func tearDownTransport(fadeOut: Bool) {
+        if let controller = headTrackingController {
+            controller.stop()
+            headTrackingController = nil
+        }
+        if headphoneDeviceProfileConfiguration?.enabled == true,
+           headphoneDeviceProfileConfiguration?.spatialMode == .virtualSpeakers,
+           headphoneDeviceProfileConfiguration?.headTracking?.enabled == true {
+            headTrackingRuntimeStatus = .configuredStopped
+        } else {
+            headTrackingRuntimeStatus = .disabled
+        }
+
         if let session = transportSession {
             let counters = session.counters()
             lifetimeArchivedCounters = lifetimeArchivedCounters + counters
