@@ -113,6 +113,7 @@ let profile = OutputDeviceProfileConfiguration(
     calibrationSummary: summary
 )
 try profile.validateStructure(bassManagementEnabled: true)
+precondition(profile.systemDisplayName == "7.2.4")
 let plan = try profile.makeLivePlan(
     availableDevices: [device], sampleRate: 96_000,
     selectedOutputUID: "avr", bassManagementEnabled: true
