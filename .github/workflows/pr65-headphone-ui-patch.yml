@@ -26,7 +26,6 @@ jobs:
                   raise SystemExit(f"{label}: expected one match, found {count}")
               p.write_text(text.replace(old, new, 1))
 
-          # AudioIOEngine exposes the sandbox import boundary to product UI.
           replace_once(
               'NotchSixty/Audio/AudioIOEngine.swift',
               '        headphoneDeviceProfileConfiguration = configuration\n        lastErrorDescription = nil\n    }\n\n    func replaceSpeakerDriverProcessingConfiguration(',
@@ -34,59 +33,41 @@ jobs:
               'engine import boundary'
           )
 
-          # Sidebar/product routing.
           root = 'NotchSixty/UI/ProductionRootView.swift'
-          replace_once(
-              root,
+          replace_once(root,
               '    case activeCrossover\n    case speakerCalibration\n    case roomCorrection\n',
               '    case activeCrossover\n    case headphones\n    case speakerCalibration\n    case roomCorrection\n',
-              'root section enum'
-          )
-          replace_once(
-              root,
+              'root section enum')
+          replace_once(root,
               '        case .activeCrossover: return "Active Crossover"\n        case .speakerCalibration: return "Speaker Calibration"\n',
               '        case .activeCrossover: return "Active Crossover"\n        case .headphones: return "Headphones"\n        case .speakerCalibration: return "Speaker Calibration"\n',
-              'root section title'
-          )
-          replace_once(
-              root,
+              'root section title')
+          replace_once(root,
               '        case .activeCrossover: return "hifispeaker.2.fill"\n        case .speakerCalibration: return "speaker.wave.3.fill"\n',
               '        case .activeCrossover: return "hifispeaker.2.fill"\n        case .headphones: return "headphones"\n        case .speakerCalibration: return "speaker.wave.3.fill"\n',
-              'root section symbol'
-          )
-          replace_once(
-              root,
+              'root section symbol')
+          replace_once(root,
               '        case .activeCrossover:\n            ProductionActiveCrossoverView(engine: engine, profiles: product.profiles)\n        case .speakerCalibration:\n',
               '        case .activeCrossover:\n            ProductionActiveCrossoverView(engine: engine, profiles: product.profiles)\n        case .headphones:\n            ProductionHeadphoneWorkspace(engine: engine, profiles: product.profiles)\n        case .speakerCalibration:\n',
-              'root detail switch'
-          )
+              'root detail switch')
 
-          # Xcode membership.
           pbx = 'NotchSixty.xcodeproj/project.pbxproj'
-          replace_once(
-              pbx,
+          replace_once(pbx,
               '\t\tA40000000000000000000017 /* ProductionRoomCorrectionWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000027 /* ProductionRoomCorrectionWorkspace.swift */; };\n',
               '\t\tA40000000000000000000017 /* ProductionRoomCorrectionWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40000000000000000000027 /* ProductionRoomCorrectionWorkspace.swift */; };\n\t\tF65000000000000000000005 /* ProductionHeadphoneWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = F65000000000000000000015 /* ProductionHeadphoneWorkspace.swift */; };\n',
-              'headphone UI build file'
-          )
-          replace_once(
-              pbx,
+              'headphone UI build file')
+          replace_once(pbx,
               '\t\tA40000000000000000000027 /* ProductionRoomCorrectionWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionRoomCorrectionWorkspace.swift; sourceTree = "<group>"; };\n',
               '\t\tA40000000000000000000027 /* ProductionRoomCorrectionWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionRoomCorrectionWorkspace.swift; sourceTree = "<group>"; };\n\t\tF65000000000000000000015 /* ProductionHeadphoneWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionHeadphoneWorkspace.swift; sourceTree = "<group>"; };\n',
-              'headphone UI file ref'
-          )
-          replace_once(
-              pbx,
-              'A40000000000000000000020 /* ProductionRootView.swift */, A40000000000000000000021 /* ProductionEqualizerView.swift */, A40000000000000000000022 /* ProductionDynamicsView.swift */, A40000000000000000000023 /* ProductionDynamicsTelemetryView.swift */, A40000000000000000000024 /* ProductionMetersView.swift */, A40000000000000000000025 /* ProductionAnalysisViews.swift */, A40000000000000000000026 /* ProductionProfileToolbar.swift */, A40000000000000000000027 /* ProductionRoomCorrectionWorkspace.swift */, F64000000000000000000015 /* ProductionMultichannelCalibrationWorkspace.swift */,',
-              'A40000000000000000000020 /* ProductionRootView.swift */, A40000000000000000000021 /* ProductionEqualizerView.swift */, A40000000000000000000022 /* ProductionDynamicsView.swift */, A40000000000000000000023 /* ProductionDynamicsTelemetryView.swift */, A40000000000000000000024 /* ProductionMetersView.swift */, A40000000000000000000025 /* ProductionAnalysisViews.swift */, A40000000000000000000026 /* ProductionProfileToolbar.swift */, A40000000000000000000027 /* ProductionRoomCorrectionWorkspace.swift */, F65000000000000000000015 /* ProductionHeadphoneWorkspace.swift */, F64000000000000000000015 /* ProductionMultichannelCalibrationWorkspace.swift */,',
-              'headphone UI group'
-          )
-          replace_once(
-              pbx,
+              'headphone UI file ref')
+          replace_once(pbx,
+              'A40000000000000000000050 /* UI */ = {isa = PBXGroup; children = (A40000000000000000000020 /* ProductionRootView.swift */, A40000000000000000000021 /* ProductionEqualizerView.swift */, A40000000000000000000022 /* ProductionDynamicsView.swift */, A40000000000000000000023 /* ProductionDynamicsTelemetryView.swift */, A40000000000000000000024 /* ProductionMetersView.swift */, A40000000000000000000025 /* ProductionAnalysisViews.swift */, A40000000000000000000026 /* ProductionProfileToolbar.swift */, F64000000000000000000015 /* ProductionMultichannelCalibrationWorkspace.swift */, A40000000000000000000027 /* ProductionRoomCorrectionWorkspace.swift */,); path = UI; sourceTree = "<group>"; };',
+              'A40000000000000000000050 /* UI */ = {isa = PBXGroup; children = (A40000000000000000000020 /* ProductionRootView.swift */, A40000000000000000000021 /* ProductionEqualizerView.swift */, A40000000000000000000022 /* ProductionDynamicsView.swift */, A40000000000000000000023 /* ProductionDynamicsTelemetryView.swift */, A40000000000000000000024 /* ProductionMetersView.swift */, A40000000000000000000025 /* ProductionAnalysisViews.swift */, A40000000000000000000026 /* ProductionProfileToolbar.swift */, F65000000000000000000015 /* ProductionHeadphoneWorkspace.swift */, F64000000000000000000015 /* ProductionMultichannelCalibrationWorkspace.swift */, A40000000000000000000027 /* ProductionRoomCorrectionWorkspace.swift */,); path = UI; sourceTree = "<group>"; };',
+              'headphone UI group')
+          replace_once(pbx,
               '\t\t\t\tA40000000000000000000017 /* ProductionRoomCorrectionWorkspace.swift in Sources */,\n',
               '\t\t\t\tA40000000000000000000017 /* ProductionRoomCorrectionWorkspace.swift in Sources */,\n\t\t\t\tF65000000000000000000005 /* ProductionHeadphoneWorkspace.swift in Sources */,\n',
-              'headphone UI sources phase'
-          )
+              'headphone UI sources phase')
 
           Path('.github/workflows/pr65-headphone-ui-patch.yml').unlink()
       - name: Commit production wiring
