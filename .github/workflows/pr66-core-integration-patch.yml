@@ -1,0 +1,131 @@
+name: PR66 Core Integration Patch
+
+on:
+  push:
+    branches:
+      - feature/pr66-head-tracking-spatial-runtime
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+      - name: Apply asserted PR66 integration
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              s = p.read_text()
+              if old not in s:
+                  raise SystemExit(f"missing anchor in {path}: {old[:100]!r}")
+              if s.count(old) != 1:
+                  raise SystemExit(f"anchor count != 1 in {path}: {s.count(old)}")
+              p.write_text(s.replace(old, new, 1))
+
+          bridge = "NotchSixty/Audio/Realtime/N60BinauralHeadphoneBridge.h"
+          replace_once(bridge, '#include "N60BinauralRenderer.h"', '#include "N60HeadTrackedBinauralRuntime.h"')
+          replace_once(bridge,
+              '    N60ProtectionTelemetry protection;\n} N60BinauralHeadphoneBridgeSnapshot;',
+              '    N60ProtectionTelemetry protection;\n    N60HeadTrackedBinauralSnapshot headTracking;\n} N60BinauralHeadphoneBridgeSnapshot;')
+          replace_once(bridge,
+              '    N60BinauralRenderer * _Nullable binauralRenderer;',
+              '    N60HeadTrackedBinauralRuntime * _Nullable binauralRuntime;')
+          replace_once(bridge,
+              '    bridge->binauralRenderer = N60BinauralRendererCreate();',
+              '    bridge->binauralRuntime = N60HeadTrackedBinauralRuntimeCreate(\n        binauralDescriptor, leftIRs, rightIRs\n    );')
+          replace_once(bridge,
+              '        || bridge->binauralRenderer == NULL\n        || bridge->headphoneRuntime == NULL\n        || bridge->protectionRuntime == NULL\n        || !N60BinauralRendererPrepareProfile(\n            bridge->binauralRenderer,\n            binauralDescriptor,\n            leftIRs,\n            rightIRs\n        )\n        || !N60HeadphoneDSPRuntimePrepare(',
+              '        || bridge->binauralRuntime == NULL\n        || bridge->headphoneRuntime == NULL\n        || bridge->protectionRuntime == NULL\n        || !N60HeadphoneDSPRuntimePrepare(')
+          replace_once(bridge,
+              '        N60BinauralRendererDestroy(bridge->binauralRenderer);',
+              '        N60HeadTrackedBinauralRuntimeDestroy(bridge->binauralRuntime);')
+          replace_once(bridge,
+              '    N60BinauralRendererDestroy(bridge->binauralRenderer);',
+              '    N60HeadTrackedBinauralRuntimeDestroy(bridge->binauralRuntime);')
+          replace_once(bridge,
+              '    bridge->binauralRenderer = NULL;',
+              '    bridge->binauralRuntime = NULL;')
+          replace_once(bridge,
+              '        || bridge->binauralRenderer == NULL\n        || bridge->headphoneRuntime == NULL',
+              '        || bridge->binauralRuntime == NULL\n        || bridge->headphoneRuntime == NULL')
+          replace_once(bridge,
+              '    N60BinauralRendererResetRuntime(bridge->binauralRenderer);',
+              '    if (!N60HeadTrackedBinauralRuntimeReset(bridge->binauralRuntime)) return false;')
+          replace_once(bridge,
+              'static inline uint64_t N60BinauralHeadphoneBridgeLatencyFrames(\n    const N60BinauralHeadphoneBridge * _Nullable bridge\n) {\n    if (bridge == NULL || bridge->binauralRenderer == NULL) return 0u;\n    return N60BinauralRendererLatencyFrames(bridge->binauralRenderer)\n        + (uint64_t)N60ProtectionSnapshotLatencyFrames(&bridge->protectionSnapshot);\n}',
+              '''static inline bool N60BinauralHeadphoneBridgeCanPrepareTrackedGeneration(\n    const N60BinauralHeadphoneBridge * _Nullable bridge\n) {\n    return bridge != NULL\n        && bridge->binauralRuntime != NULL\n        && N60HeadTrackedBinauralRuntimeCanPrepareGeneration(bridge->binauralRuntime);\n}\n\nstatic inline bool N60BinauralHeadphoneBridgePrepareTrackedGeneration(\n    N60BinauralHeadphoneBridge * _Nonnull bridge,\n    N60BinauralProfileDescriptor descriptor,\n    const float * _Nonnull leftIRs,\n    const float * _Nonnull rightIRs,\n    N60HeadPose pose,\n    uint32_t warmupFrames,\n    uint32_t crossfadeFrames\n) {\n    if (bridge == NULL || bridge->binauralRuntime == NULL) return false;\n    return N60HeadTrackedBinauralRuntimePrepareGeneration(\n        bridge->binauralRuntime,\n        descriptor,\n        leftIRs,\n        rightIRs,\n        pose,\n        warmupFrames,\n        crossfadeFrames\n    );\n}\n\nstatic inline uint64_t N60BinauralHeadphoneBridgeLatencyFrames(\n    const N60BinauralHeadphoneBridge * _Nullable bridge\n) {\n    if (bridge == NULL || bridge->binauralRuntime == NULL) return 0u;\n    return N60HeadTrackedBinauralRuntimeLatencyFrames(bridge->binauralRuntime)\n        + (uint64_t)N60ProtectionSnapshotLatencyFrames(&bridge->protectionSnapshot);\n}''')
+          replace_once(bridge,
+              '        .protection = N60ProtectionRuntimeTelemetry(bridge->protectionRuntime),\n    };',
+              '        .protection = N60ProtectionRuntimeTelemetry(bridge->protectionRuntime),\n        .headTracking = N60HeadTrackedBinauralRuntimeGetSnapshot(bridge->binauralRuntime),\n    };')
+          replace_once(bridge,
+              '        || bridge->binauralRenderer == NULL\n        || bridge->headphoneRuntime == NULL',
+              '        || bridge->binauralRuntime == NULL\n        || bridge->headphoneRuntime == NULL')
+          replace_once(bridge,
+              '    N60ProtectionRuntimeBeginBuffer(bridge->protectionRuntime);\n\n    for (uint32_t frameIndex = 0; frameIndex < frameCount; ++frameIndex) {',
+              '    N60ProtectionRuntimeBeginBuffer(bridge->protectionRuntime);\n    N60HeadTrackedBinauralRuntimeBeginBuffer(bridge->binauralRuntime);\n\n    for (uint32_t frameIndex = 0; frameIndex < frameCount; ++frameIndex) {')
+          replace_once(bridge,
+              '        bool rendered = N60BinauralRendererProcessFrame(\n            bridge->binauralRenderer,',
+              '        bool rendered = N60HeadTrackedBinauralRuntimeProcessFrame(\n            bridge->binauralRuntime,')
+
+          asset = "NotchSixty/Audio/Routing/BinauralProfileAsset.swift"
+          old = '''    func prepare(for layout: OutputProgramLayout) throws -> PreparedBinauralProfile {\n        try validate()\n        var descriptor = N60BinauralProfileDescriptorMake(\n            sampleRate,\n            layout.realtimeLayout,\n            kind.realtimeCType,\n            UInt32(tapCount)\n        )\n        descriptor.declaredLatencyFrames = UInt32(declaredLatencyFrames)\n        guard N60BinauralProfileDescriptorIsValid(&descriptor, UInt32(N60_BINAURAL_MAX_TAPS)) else {\n            throw BinauralProfileAssetError.descriptorCompilationFailed\n        }\n\n        var left = [Float]()\n        var right = [Float]()\n        left.reserveCapacity(layout.roles.count * tapCount)\n        right.reserveCapacity(layout.roles.count * tapCount)\n\n        for role in layout.roles {\n            let target = N60BinauralDefaultPositionForRole(role.realtimeCType)\n            guard let measurement = nearestMeasurement(\n                azimuthDegrees: target.azimuthDegrees,\n                elevationDegrees: target.elevationDegrees,\n                distanceMeters: target.distanceMeters\n            ) else {\n                throw BinauralProfileAssetError.measurementUnavailable(role.displayName)\n            }\n            left.append(contentsOf: measurement.leftIR)\n            right.append(contentsOf: measurement.rightIR)\n        }\n        return PreparedBinauralProfile(\n            descriptor: descriptor,\n            leftIRs: left,\n            rightIRs: right\n        )\n    }'''
+          new = '''    func prepare(for layout: OutputProgramLayout) throws -> PreparedBinauralProfile {\n        try prepare(\n            for: layout,\n            headPose: N60HeadPose(yawDegrees: 0, pitchDegrees: 0, rollDegrees: 0)\n        )\n    }\n\n    func prepare(\n        for layout: OutputProgramLayout,\n        headPose: N60HeadPose\n    ) throws -> PreparedBinauralProfile {\n        try validate()\n        var worldDescriptor = N60BinauralProfileDescriptorMake(\n            sampleRate,\n            layout.realtimeLayout,\n            kind.realtimeCType,\n            UInt32(tapCount)\n        )\n        worldDescriptor.declaredLatencyFrames = UInt32(declaredLatencyFrames)\n        guard N60BinauralProfileDescriptorIsValid(\n            &worldDescriptor, UInt32(N60_BINAURAL_MAX_TAPS)\n        ) else {\n            throw BinauralProfileAssetError.descriptorCompilationFailed\n        }\n        var descriptor = N60BinauralProfileDescriptor()\n        guard N60BinauralProfileDescriptorApplyHeadPose(\n            &worldDescriptor, headPose, &descriptor\n        ), N60BinauralProfileDescriptorIsValid(\n            &descriptor, UInt32(N60_BINAURAL_MAX_TAPS)\n        ) else {\n            throw BinauralProfileAssetError.descriptorCompilationFailed\n        }\n\n        var left = [Float]()\n        var right = [Float]()\n        left.reserveCapacity(layout.roles.count * tapCount)\n        right.reserveCapacity(layout.roles.count * tapCount)\n\n        for channel in 0..<layout.roles.count {\n            let target = descriptor.sources[channel]\n            guard let measurement = nearestMeasurement(\n                azimuthDegrees: target.azimuthDegrees,\n                elevationDegrees: target.elevationDegrees,\n                distanceMeters: target.distanceMeters\n            ) else {\n                throw BinauralProfileAssetError.measurementUnavailable(\n                    layout.roles[channel].displayName\n                )\n            }\n            left.append(contentsOf: measurement.leftIR)\n            right.append(contentsOf: measurement.rightIR)\n        }\n        return PreparedBinauralProfile(\n            descriptor: descriptor,\n            leftIRs: left,\n            rightIRs: right\n        )\n    }'''
+          replace_once(asset, old, new)
+
+          session = "NotchSixty/Audio/CoreAudio/CoreAudioBinauralHeadphoneTransportSession.swift"
+          replace_once(session,
+              '    case captureBufferSizeMismatch(capture: UInt32, output: UInt32)\n',
+              '    case captureBufferSizeMismatch(capture: UInt32, output: UInt32)\n    case headTrackingGenerationFailed\n')
+          replace_once(session,
+              '        case .captureBufferSizeMismatch(let capture, let output):\n            return "Virtual Speakers capture quantum is \\(capture) frames; headphone output quantum is \\(output) frames."\n',
+              '        case .captureBufferSizeMismatch(let capture, let output):\n            return "Virtual Speakers capture quantum is \\(capture) frames; headphone output quantum is \\(output) frames."\n        case .headTrackingGenerationFailed:\n            return "Unable to prepare the next head-tracked binaural renderer generation."\n')
+          replace_once(session,
+              '    func counters() -> AudioTransportCounters {',
+              '''    func headTrackingSnapshot() -> N60HeadTrackedBinauralSnapshot? {\n        guard let bridge else { return nil }\n        return N60BinauralHeadphoneBridgeGetSnapshot(bridge).headTracking\n    }\n\n    func prepareHeadTrackedGeneration(\n        preparedProfile: PreparedBinauralProfile,\n        pose: N60HeadPose,\n        warmupFrames: UInt32,\n        crossfadeFrames: UInt32\n    ) throws -> Bool {\n        guard let bridge else {\n            throw BinauralHeadphoneTransportError.bridgeAllocationFailed\n        }\n        guard N60BinauralHeadphoneBridgeCanPrepareTrackedGeneration(bridge) else {\n            return false\n        }\n        let accepted = preparedProfile.leftIRs.withUnsafeBufferPointer { left in\n            preparedProfile.rightIRs.withUnsafeBufferPointer { right in\n                N60BinauralHeadphoneBridgePrepareTrackedGeneration(\n                    bridge,\n                    preparedProfile.descriptor,\n                    left.baseAddress!,\n                    right.baseAddress!,\n                    pose,\n                    warmupFrames,\n                    crossfadeFrames\n                )\n            }\n        }\n        guard accepted else {\n            throw BinauralHeadphoneTransportError.headTrackingGenerationFailed\n        }\n        return true\n    }\n\n    func counters() -> AudioTransportCounters {''')
+
+          header = "NotchSixty/Audio/Realtime/NotchSixty-Bridging-Header.h"
+          replace_once(header,
+              '#import "N60HeadTracking.h"\n',
+              '#import "N60HeadTracking.h"\n#import "N60HeadTrackedBinauralRuntime.h"\n')
+
+          pbx = "NotchSixty.xcodeproj/project.pbxproj"
+          replace_once(pbx,
+              '\t\tF65000000000000000000004 /* CoreAudioBinauralHeadphoneTransportSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = F65000000000000000000014 /* CoreAudioBinauralHeadphoneTransportSession.swift */; };\n',
+              '\t\tF65000000000000000000004 /* CoreAudioBinauralHeadphoneTransportSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = F65000000000000000000014 /* CoreAudioBinauralHeadphoneTransportSession.swift */; };\n\t\tF66000000000000000000001 /* HeadTrackingController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F66000000000000000000011 /* HeadTrackingController.swift */; };\n')
+          replace_once(pbx,
+              '\t\tF65000000000000000000014 /* CoreAudioBinauralHeadphoneTransportSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudioBinauralHeadphoneTransportSession.swift; sourceTree = "<group>"; };\n',
+              '\t\tF65000000000000000000014 /* CoreAudioBinauralHeadphoneTransportSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudioBinauralHeadphoneTransportSession.swift; sourceTree = "<group>"; };\n\t\tF66000000000000000000011 /* HeadTrackingController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeadTrackingController.swift; sourceTree = "<group>"; };\n')
+          replace_once(pbx,
+              '\t\t\t\tA20000000000000000000029 /* DynamicsConfiguration.swift */,\n',
+              '\t\t\t\tA20000000000000000000029 /* DynamicsConfiguration.swift */,\n\t\t\t\tF66000000000000000000011 /* HeadTrackingController.swift */,\n')
+          replace_once(pbx,
+              '\t\t\t\tF65000000000000000000004 /* CoreAudioBinauralHeadphoneTransportSession.swift in Sources */,\n',
+              '\t\t\t\tF65000000000000000000004 /* CoreAudioBinauralHeadphoneTransportSession.swift in Sources */,\n\t\t\t\tF66000000000000000000001 /* HeadTrackingController.swift in Sources */,\n')
+          # App target Debug and Release each already carry the microphone privacy key.
+          motion_line = '\t\t\t\tINFOPLIST_KEY_NSMotionUsageDescription = "Notch Sixty uses supported headphone motion sensors to keep virtual speakers fixed in space as you move your head.";\n'
+          p = Path(pbx)
+          s = p.read_text()
+          anchor = '\t\t\t\tINFOPLIST_KEY_NSMicrophoneUsageDescription = "Notch Sixty uses your selected measurement microphone to measure speaker and room response for room correction.";\n'
+          if s.count(anchor) != 2:
+              raise SystemExit(f"expected two app privacy anchors, got {s.count(anchor)}")
+          p.write_text(s.replace(anchor, anchor + motion_line))
+          PY
+      - name: Commit production changes
+        run: |
+          if git diff --quiet; then
+            echo "No patch changes to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add NotchSixty NotchSixty.xcodeproj
+          git commit -m "PR66: wire dual-generation runtime into Virtual Speakers"
+          git push
