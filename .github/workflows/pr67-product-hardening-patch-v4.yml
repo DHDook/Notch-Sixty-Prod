@@ -1,0 +1,54 @@
+name: PR67 Product Hardening Patch v4
+
+on:
+  push:
+    branches:
+      - feature/pr67-product-hardening-acceptance
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Apply corrected asserted patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          workflow = Path('.github/workflows/pr67-product-hardening-patch.yml').read_text(encoding='utf-8')
+          start_marker = "          python3 - <<'PY'\n"
+          end_marker = "\n          PY\n          git diff --check"
+          start = workflow.index(start_marker) + len(start_marker)
+          end = workflow.index(end_marker, start)
+          script = workflow[start:end]
+          script = '\n'.join(line[10:] if line.startswith('          ') else line for line in script.splitlines()) + '\n'
+          old = r"        guard let bridge else { return }\n        N60LiveNChannelBridgeSetOutputGain(bridge, gain)"
+          new = r"        N60LiveNChannelBridgeSetOutputGain(bridge, gain)"
+          count = script.count(old)
+          if count != 2:
+              raise SystemExit(f'expected two escaped N-channel session snippets, found {count}')
+          script = script.replace(old, new)
+          Path('/tmp/pr67_patch.py').write_text(script, encoding='utf-8')
+          PY
+          python3 /tmp/pr67_patch.py
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add NotchSixty/Audio/Realtime/N60LiveNChannelRenderCore.h \
+                  NotchSixty/Audio/Realtime/N60LiveNChannelBridge.h \
+                  NotchSixty/Audio/Realtime/N60BinauralHeadphoneBridge.h \
+                  NotchSixty/Audio/CoreAudio/CoreAudioNChannelTransportSession.swift \
+                  NotchSixty/Audio/CoreAudio/CoreAudioBinauralHeadphoneTransportSession.swift \
+                  NotchSixty/Diagnostics/AudioDiagnosticsSnapshot.swift \
+                  NotchSixty/Audio/AudioIOEngine.swift \
+                  NotchSixty/UI/ProductionMetersView.swift \
+                  NotchSixty/UI/ProductionRootView.swift \
+                  NotchSixty/State/ProductProfiles.swift
+          git commit -m 'PR67: integrate product transport diagnostics and hardening'
+          git push
