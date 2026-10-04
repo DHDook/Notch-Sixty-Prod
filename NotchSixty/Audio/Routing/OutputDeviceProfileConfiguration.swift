@@ -173,6 +173,7 @@ struct PhysicalSubwooferOutputAssignment: Codable, Equatable, Sendable {
 }
 
 enum OutputDeviceProfileError: Error, Equatable, LocalizedError {
+    case profileDisabled
     case missingSpeaker(OutputProgramRole)
     case duplicateSpeaker(OutputProgramRole)
     case unexpectedSpeaker(OutputProgramRole)
@@ -197,6 +198,8 @@ enum OutputDeviceProfileError: Error, Equatable, LocalizedError {
 
     var errorDescription: String? {
         switch self {
+        case .profileDisabled:
+            return "Enable the Output Device Profile before compiling a live N-channel route plan."
         case .missingSpeaker(let role):
             return "Output Device Profile is missing \(role.displayName)."
         case .duplicateSpeaker(let role):
@@ -341,6 +344,9 @@ struct OutputDeviceProfileConfiguration: Codable, Equatable, Sendable {
         selectedOutputUID: String,
         bassManagementEnabled: Bool
     ) throws -> LiveNChannelOutputRoutePlan {
+        guard enabled else {
+            throw OutputDeviceProfileError.profileDisabled
+        }
         try validateStructure(bassManagementEnabled: bassManagementEnabled)
         guard sampleRate.isFinite, sampleRate > 0 else {
             throw OutputDeviceProfileError.invalidSampleRate(sampleRate)
