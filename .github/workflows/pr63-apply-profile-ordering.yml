@@ -1,0 +1,28 @@
+name: PR63 Apply Profile Ordering
+
+on:
+  push:
+    branches:
+      - feature/pr63-live-nchannel-activation
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: ${{ !contains(github.event.head_commit.message, '[pr63-profile-ordering]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feature/pr63-live-nchannel-activation
+          fetch-depth: 0
+      - run: python3 ci/apply_pr63_profile_ordering.py
+      - name: Commit transactional ordering fix and remove one-shot machinery
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "PR63: make Playback System switching transactional [pr63-profile-ordering]"
+          git push origin HEAD:feature/pr63-live-nchannel-activation
