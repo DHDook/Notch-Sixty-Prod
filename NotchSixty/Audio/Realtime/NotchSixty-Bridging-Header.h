@@ -6,6 +6,8 @@
 #import "N60ChannelRouter.h"
 #import "N60CoreAudioChannelMapping.h"
 #import "N60ProgramLaneEngine.h"
+#import "N60MultichannelBassManagement.h"
+#import "N60SubwooferTuning.h"
 
 #import "N60SpectralDenoiser.h"
 #import "N60DynamicsLegacyAdvanced.h"
