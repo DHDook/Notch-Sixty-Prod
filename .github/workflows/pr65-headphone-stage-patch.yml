@@ -1,0 +1,83 @@
+name: PR65 Headphone Stage Patch
+
+on:
+  push:
+    branches:
+      - feature/pr65-headphone-binaural-integration
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feature/pr65-headphone-binaural-integration
+          fetch-depth: 0
+      - name: Apply asserted headphone stage integration
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected exactly one match, found {count}: {old[:80]!r}")
+              p.write_text(text.replace(old, new, 1))
+
+          h = "NotchSixty/Audio/Realtime/N60RenderKernel.h"
+          replace_once(h,
+              '#include "N60Spatial.h"\n#include "N60Protection.h"',
+              '#include "N60Spatial.h"\n#include "N60HeadphoneDSP.h"\n#include "N60Protection.h"')
+          replace_once(h,
+              'N60RenderKernel * _Nullable N60RenderKernelCreate(void);\nvoid N60RenderKernelDestroy(N60RenderKernel * _Nonnull kernel);',
+              'N60RenderKernel * _Nullable N60RenderKernelCreate(void);\n// Control-plane only. Configure/clear only while callbacks are stopped.\nbool N60RenderKernelConfigureHeadphoneDSP(\n    N60RenderKernel * _Nonnull kernel,\n    const N60HeadphoneDSPSnapshot * _Nonnull snapshot\n);\nvoid N60RenderKernelClearHeadphoneDSP(N60RenderKernel * _Nonnull kernel);\nvoid N60RenderKernelDestroy(N60RenderKernel * _Nonnull kernel);')
+
+          c = "NotchSixty/Audio/Realtime/N60RenderKernel.c"
+          replace_once(c,
+              '    N60ProtectionRuntime *protectionRuntime;\n    N60PartitionedConvolver *convolver;',
+              '    N60ProtectionRuntime *protectionRuntime;\n    // Optional immutable headphone hardware stage. Prepared off realtime and\n    // processed immediately before protection so true-peak safety remains final.\n    N60HeadphoneDSPRuntime *headphoneDSPRuntime;\n    N60HeadphoneDSPSnapshot headphoneDSPSnapshot;\n    bool headphoneDSPEnabled;\n    N60PartitionedConvolver *convolver;')
+          replace_once(c,
+              '    kernel->denoiserRuntime = N60SpectralDenoiserCreate();\n    if (kernel->denoiserRuntime == NULL) {\n        N60ProtectionRuntimeDestroy(kernel->protectionRuntime);',
+              '    kernel->headphoneDSPRuntime = N60HeadphoneDSPRuntimeCreate();\n    if (kernel->headphoneDSPRuntime == NULL) {\n        N60ProtectionRuntimeDestroy(kernel->protectionRuntime);\n        N60PartitionedConvolverDestroy(kernel->roomCorrectionConvolver);\n        N60PartitionedConvolverDestroy(kernel->convolver);\n        free(kernel);\n        return NULL;\n    }\n    kernel->denoiserRuntime = N60SpectralDenoiserCreate();\n    if (kernel->denoiserRuntime == NULL) {\n        N60HeadphoneDSPRuntimeDestroy(kernel->headphoneDSPRuntime);\n        N60ProtectionRuntimeDestroy(kernel->protectionRuntime);')
+          replace_once(c,
+              '    if (kernel->speakerIRConvolver == NULL) {\n        N60SpectralDenoiserDestroy(kernel->denoiserRuntime);\n        N60ProtectionRuntimeDestroy(kernel->protectionRuntime);',
+              '    if (kernel->speakerIRConvolver == NULL) {\n        N60SpectralDenoiserDestroy(kernel->denoiserRuntime);\n        N60HeadphoneDSPRuntimeDestroy(kernel->headphoneDSPRuntime);\n        N60ProtectionRuntimeDestroy(kernel->protectionRuntime);')
+          replace_once(c,
+              '    N60SpectralDenoiserDestroy(kernel->denoiserRuntime);\n    N60ProtectionRuntimeDestroy(kernel->protectionRuntime);',
+              '    N60SpectralDenoiserDestroy(kernel->denoiserRuntime);\n    N60HeadphoneDSPRuntimeDestroy(kernel->headphoneDSPRuntime);\n    N60ProtectionRuntimeDestroy(kernel->protectionRuntime);')
+          replace_once(c,
+              '    N60SpectralDenoiserReset(kernel->denoiserRuntime);\n    N60ProtectionRuntimeReset(kernel->protectionRuntime);',
+              '    N60SpectralDenoiserReset(kernel->denoiserRuntime);\n    if (kernel->headphoneDSPRuntime != NULL) {\n        if (kernel->headphoneDSPEnabled) {\n            (void)N60HeadphoneDSPRuntimePrepare(\n                kernel->headphoneDSPRuntime, &kernel->headphoneDSPSnapshot\n            );\n        } else {\n            memset(kernel->headphoneDSPRuntime, 0, sizeof(*kernel->headphoneDSPRuntime));\n        }\n    }\n    N60ProtectionRuntimeReset(kernel->protectionRuntime);')
+          replace_once(c,
+              'bool N60RenderKernelPrepareConvolutionProgram(\n    N60RenderKernel *kernel,',
+              'bool N60RenderKernelConfigureHeadphoneDSP(\n    N60RenderKernel *kernel,\n    const N60HeadphoneDSPSnapshot *snapshot\n) {\n    if (kernel == NULL || snapshot == NULL || kernel->headphoneDSPRuntime == NULL\n        || !N60HeadphoneDSPSnapshotIsValid(snapshot)) {\n        return false;\n    }\n    if (!N60HeadphoneDSPRuntimePrepare(kernel->headphoneDSPRuntime, snapshot)) return false;\n    kernel->headphoneDSPSnapshot = *snapshot;\n    kernel->headphoneDSPEnabled = true;\n    return true;\n}\n\nvoid N60RenderKernelClearHeadphoneDSP(N60RenderKernel *kernel) {\n    if (kernel == NULL) return;\n    kernel->headphoneDSPEnabled = false;\n    memset(&kernel->headphoneDSPSnapshot, 0, sizeof(kernel->headphoneDSPSnapshot));\n    if (kernel->headphoneDSPRuntime != NULL) {\n        memset(kernel->headphoneDSPRuntime, 0, sizeof(*kernel->headphoneDSPRuntime));\n    }\n}\n\nbool N60RenderKernelPrepareConvolutionProgram(\n    N60RenderKernel *kernel,')
+          replace_once(c,
+              '        float outputGain = next_gain_value(&kernel->outputGain);\n        left *= outputGain;\n        right *= outputGain;\n\n        N60ProtectionProcessStereoFrame(',
+              '        float outputGain = next_gain_value(&kernel->outputGain);\n        left *= outputGain;\n        right *= outputGain;\n\n        if (kernel->headphoneDSPEnabled) {\n            float headphoneLeft = 0.0f;\n            float headphoneRight = 0.0f;\n            if (N60HeadphoneDSPProcessStereoFrame(\n                    kernel->headphoneDSPRuntime,\n                    &kernel->headphoneDSPSnapshot,\n                    left, right, &headphoneLeft, &headphoneRight)) {\n                left = headphoneLeft;\n                right = headphoneRight;\n            } else {\n                // Fail closed if an impossible runtime/profile mismatch occurs.\n                left = 0.0f;\n                right = 0.0f;\n            }\n        }\n\n        N60ProtectionProcessStereoFrame(')
+
+          bh = "NotchSixty/Audio/Realtime/N60RealtimeAudioBridge.h"
+          replace_once(bh,
+              'bool N60RealtimeAudioBridgePublishDSPGraph(\n    N60RealtimeAudioBridge * _Nonnull bridge,\n    N60DSPGraphSnapshot snapshot\n);',
+              'bool N60RealtimeAudioBridgePublishDSPGraph(\n    N60RealtimeAudioBridge * _Nonnull bridge,\n    N60DSPGraphSnapshot snapshot\n);\n// Control-plane only. Configure/clear only before callbacks start or after stop.\nbool N60RealtimeAudioBridgeConfigureHeadphoneDSP(\n    N60RealtimeAudioBridge * _Nonnull bridge,\n    N60HeadphoneDSPSnapshot snapshot\n);\nvoid N60RealtimeAudioBridgeClearHeadphoneDSP(N60RealtimeAudioBridge * _Nonnull bridge);')
+
+          bc = "NotchSixty/Audio/Realtime/N60RealtimeAudioBridge.c"
+          replace_once(bc,
+              'bool N60RealtimeAudioBridgePublishDSPGraph(\n    N60RealtimeAudioBridge *bridge,\n    N60DSPGraphSnapshot snapshot\n) {\n    if (bridge == NULL || bridge->renderKernel == NULL) return false;\n    snapshot.meteringEnabled = N60RealtimeAudioBridgeMeteringDemand();\n    return N60RenderKernelPublishSnapshot(bridge->renderKernel, snapshot);\n}\n',
+              'bool N60RealtimeAudioBridgePublishDSPGraph(\n    N60RealtimeAudioBridge *bridge,\n    N60DSPGraphSnapshot snapshot\n) {\n    if (bridge == NULL || bridge->renderKernel == NULL) return false;\n    snapshot.meteringEnabled = N60RealtimeAudioBridgeMeteringDemand();\n    return N60RenderKernelPublishSnapshot(bridge->renderKernel, snapshot);\n}\n\nbool N60RealtimeAudioBridgeConfigureHeadphoneDSP(\n    N60RealtimeAudioBridge *bridge,\n    N60HeadphoneDSPSnapshot snapshot\n) {\n    if (bridge == NULL || bridge->renderKernel == NULL) return false;\n    return N60RenderKernelConfigureHeadphoneDSP(bridge->renderKernel, &snapshot);\n}\n\nvoid N60RealtimeAudioBridgeClearHeadphoneDSP(N60RealtimeAudioBridge *bridge) {\n    if (bridge == NULL || bridge->renderKernel == NULL) return;\n    N60RenderKernelClearHeadphoneDSP(bridge->renderKernel);\n}\n')
+
+          # Self-cleaning helper workflow; production commit contains only source changes.
+          Path('.github/workflows/pr65-headphone-stage-patch.yml').unlink()
+      - name: Commit production changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "PR65: integrate headphone correction before protection"
+          git push origin HEAD:feature/pr65-headphone-binaural-integration
