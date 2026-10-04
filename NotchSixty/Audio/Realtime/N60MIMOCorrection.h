@@ -156,8 +156,8 @@ static inline bool N60MIMODesignSettingsIsValid(N60MIMODesignSettings settings) 
 static inline bool N60MIMOSolveComplexSystem(
     uint32_t size,
     uint32_t rightHandColumns,
-    N60MIMOComplex matrix[N60_MIMO_MAX_SOURCES][N60_MIMO_MAX_SOURCES],
-    N60MIMOComplex right[N60_MIMO_MAX_SOURCES][N60_MIMO_MAX_SOURCES]
+    N60MIMOComplex (* _Nonnull matrix)[N60_MIMO_MAX_SOURCES],
+    N60MIMOComplex (* _Nonnull right)[N60_MIMO_MAX_SOURCES]
 ) {
     if (size == 0u || size > N60_MIMO_MAX_SOURCES || rightHandColumns > N60_MIMO_MAX_SOURCES) return false;
     for (uint32_t pivot = 0; pivot < size; ++pivot) {
@@ -245,8 +245,8 @@ static inline bool N60MIMODesignRegularizedCorrection(
     design.frequencyCount = transfer->frequencyCount;
 
     for (uint32_t frequency = 0; frequency < transfer->frequencyCount; ++frequency) {
-        N60MIMOComplex normal[N60_MIMO_MAX_SOURCES][N60_MIMO_MAX_SOURCES] = {{{0}}};
-        N60MIMOComplex rhs[N60_MIMO_MAX_SOURCES][N60_MIMO_MAX_SOURCES] = {{{0}}};
+        N60MIMOComplex normal[N60_MIMO_MAX_SOURCES][N60_MIMO_MAX_SOURCES] = {0};
+        N60MIMOComplex rhs[N60_MIMO_MAX_SOURCES][N60_MIMO_MAX_SOURCES] = {0};
 
         for (uint32_t row = 0; row < n; ++row) {
             for (uint32_t column = 0; column < n; ++column) {
