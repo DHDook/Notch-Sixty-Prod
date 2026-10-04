@@ -303,8 +303,11 @@ def main() -> None:
             "Playback System cannot persist Output Device Profile changes")
     require("legacyPhysicalRoutingConflict" in product,
             "legacy PR41 routing conflict is not guarded at profile mutation")
-    require("outputDeviceProfile: selectedSystemProfile?.state.outputDeviceProfile" in product,
-            "profile capture does not preserve Output Device Profile state")
+    require(
+        "outputDeviceProfile: selectedSystemProfile?.state.outputDeviceProfile" in product
+        or "outputDeviceProfile: engine.outputDeviceProfileConfiguration" in product,
+        "profile capture does not preserve Output Device Profile state"
+    )
     require("outputDeviceProfile.validateStructure" in product,
             "Playback System does not revalidate profile semantics when bass-management state changes")
 

@@ -162,7 +162,7 @@ struct ProductionProfileToolbar: View {
                             if profiles.selectedSystemProfileID == system.id {
                                 Image(systemName: "checkmark")
                             }
-                            Text(system.name)
+                            Text(displayName(for: system))
                         }
                     }
                 }
@@ -196,7 +196,7 @@ struct ProductionProfileToolbar: View {
                 Image(systemName: profiles.selectedSystemOutputMatches
                     ? "hifispeaker.2"
                     : "hifispeaker.2.fill")
-                Text("System: \(profiles.selectedSystemProfileName)\(profiles.selectedSystemProfileIsDirty ? " •" : "")")
+                Text("System: \(selectedSystemDisplayName)\(profiles.selectedSystemProfileIsDirty ? " •" : "")")
             }
         }
         .buttonStyle(.glass)
@@ -205,6 +205,20 @@ struct ProductionProfileToolbar: View {
                 ? "Playback System — unsaved changes"
                 : "Playback System: output association, crossover, alignment, output trim, room correction, and speaker correction"
         )
+    }
+
+    private var selectedSystemDisplayName: String {
+        guard let system = profiles.selectedSystemProfile else {
+            return profiles.selectedSystemProfileName
+        }
+        return displayName(for: system)
+    }
+
+    private func displayName(for system: PlaybackSystemProfile) -> String {
+        guard let outputProfile = system.state.outputDeviceProfile, outputProfile.enabled else {
+            return system.name
+        }
+        return "\(system.name) · \(outputProfile.systemDisplayName)"
     }
 
     private func begin(_ prompt: EditorPrompt, defaultName: String) {
