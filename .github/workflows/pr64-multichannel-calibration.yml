@@ -25,8 +25,8 @@ jobs:
     runs-on: xcode-27
     steps:
       - uses: actions/checkout@v7
-      - name: Validate Output Device Profile behavior
-        run: python3 ci/validate_pr62_output_device_profiles.py
+      - name: Validate calibrated Output Device Profile behavior
+        run: python3 ci/validate_pr64_profile_behavior.py
       - name: Validate PR63 capacity and multisub nomenclature
         run: python3 ci/validate_pr63_capacity_nomenclature.py
       - name: Validate PR64 calibration integration
