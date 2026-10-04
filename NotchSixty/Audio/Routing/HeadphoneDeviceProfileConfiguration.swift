@@ -219,6 +219,8 @@ enum HeadphoneDeviceProfileError: Error, Equatable, LocalizedError {
     case binauralProfileSampleRateMismatch(profile: Double, output: Double)
     case speakerProfileConflict
     case legacyPhysicalRoutingConflict
+    case speakerProcessingConflict(String)
+    case binauralRuntimeUnavailable
     case configurationChangeRequiresRestart
     case realtimeSnapshotCompilationFailed
 
@@ -256,6 +258,10 @@ enum HeadphoneDeviceProfileError: Error, Equatable, LocalizedError {
             return "Disable the semantic speaker Output Device Profile before enabling the Headphone Device Profile."
         case .legacyPhysicalRoutingConflict:
             return "Disable legacy physical speaker routing before enabling the Headphone Device Profile."
+        case .speakerProcessingConflict(let stage):
+            return "Disable \(stage) before enabling the Headphone Device Profile."
+        case .binauralRuntimeUnavailable:
+            return "Virtual Speakers is not available until a prepared binaural profile is activated by the spatial runtime."
         case .configurationChangeRequiresRestart:
             return "Stop processing before changing the active Headphone Device Profile."
         case .realtimeSnapshotCompilationFailed:

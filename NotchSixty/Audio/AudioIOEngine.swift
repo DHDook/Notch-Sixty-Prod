@@ -1057,6 +1057,7 @@ final class AudioIOEngine: ObservableObject {
     @Published private(set) var bassManagementConfiguration = BassManagementConfiguration()
     @Published private(set) var multiOutputRoutingConfiguration: MultiOutputRoutingConfiguration?
     @Published private(set) var outputDeviceProfileConfiguration: OutputDeviceProfileConfiguration?
+    @Published private(set) var headphoneDeviceProfileConfiguration: HeadphoneDeviceProfileConfiguration?
     @Published private(set) var speakerDriverProcessingConfiguration = SpeakerDriverProcessingConfiguration()
     @Published private(set) var dynamicsConfiguration = DynamicsConfiguration()
     @Published private(set) var roomCorrectionConfiguration = RoomCorrectionConfiguration()
@@ -1371,6 +1372,9 @@ final class AudioIOEngine: ObservableObject {
         if configuration?.enabled == true, outputDeviceProfileConfiguration?.enabled == true {
             throw OutputDeviceProfileError.legacyPhysicalRoutingConflict
         }
+        if configuration?.enabled == true, headphoneDeviceProfileConfiguration?.enabled == true {
+            throw HeadphoneDeviceProfileError.legacyPhysicalRoutingConflict
+        }
         guard lifecycle.state == .idle || configuration == multiOutputRoutingConfiguration else {
             throw MultiOutputRoutingError.routingChangeRequiresIdle
         }
@@ -1388,11 +1392,47 @@ final class AudioIOEngine: ObservableObject {
             if multiOutputRoutingConfiguration?.enabled == true {
                 throw OutputDeviceProfileError.legacyPhysicalRoutingConflict
             }
+            if headphoneDeviceProfileConfiguration?.enabled == true {
+                throw HeadphoneDeviceProfileError.speakerProfileConflict
+            }
         }
         guard lifecycle.state == .idle || configuration == outputDeviceProfileConfiguration else {
             throw LiveNChannelTransportError.configurationChangeRequiresRestart
         }
         outputDeviceProfileConfiguration = configuration
+        lastErrorDescription = nil
+    }
+
+    func replaceHeadphoneDeviceProfileConfiguration(
+        _ configuration: HeadphoneDeviceProfileConfiguration?
+    ) throws {
+        if let configuration, configuration.enabled {
+            if outputDeviceProfileConfiguration?.enabled == true {
+                throw HeadphoneDeviceProfileError.speakerProfileConflict
+            }
+            if multiOutputRoutingConfiguration?.enabled == true {
+                throw HeadphoneDeviceProfileError.legacyPhysicalRoutingConflict
+            }
+            if !speakerDriverProcessingConfiguration.isNeutral {
+                throw HeadphoneDeviceProfileError.speakerProcessingConflict("per-driver speaker processing")
+            }
+            if bassManagementConfiguration.enabled {
+                throw HeadphoneDeviceProfileError.speakerProcessingConflict("speaker bass management")
+            }
+            if roomCorrectionConfiguration.enabled {
+                throw HeadphoneDeviceProfileError.speakerProcessingConflict("speaker room correction")
+            }
+            if speakerIRConfiguration.enabled {
+                throw HeadphoneDeviceProfileError.speakerProcessingConflict("Speaker IR")
+            }
+            if let output = selectedOutputDevice {
+                try configuration.validateStructure(sampleRate: output.nominalSampleRate)
+            }
+        }
+        guard lifecycle.state == .idle || configuration == headphoneDeviceProfileConfiguration else {
+            throw HeadphoneDeviceProfileError.configurationChangeRequiresRestart
+        }
+        headphoneDeviceProfileConfiguration = configuration
         lastErrorDescription = nil
     }
 
@@ -2565,6 +2605,16 @@ final class AudioIOEngine: ObservableObject {
     }
 
     private func buildTransport(output: AudioOutputDevice) throws {
+        if let headphone = headphoneDeviceProfileConfiguration, headphone.enabled {
+            if outputDeviceProfileConfiguration?.enabled == true {
+                throw HeadphoneDeviceProfileError.speakerProfileConflict
+            }
+            guard headphone.spatialMode == .stereo else {
+                throw HeadphoneDeviceProfileError.binauralRuntimeUnavailable
+            }
+            try buildStereoTransport(output: output)
+            return
+        }
         if outputDeviceProfileConfiguration?.enabled == true {
             try buildNChannelTransport(output: output)
             return
@@ -2640,6 +2690,37 @@ final class AudioIOEngine: ObservableObject {
     }
 
     private func buildStereoTransport(output: AudioOutputDevice) throws {
+        var headphoneSnapshot: N60HeadphoneDSPSnapshot?
+        if let headphone = headphoneDeviceProfileConfiguration, headphone.enabled {
+            _ = try headphone.validateForActivation(
+                availableDevices: outputDevices,
+                selectedOutputUID: output.uid,
+                sampleRate: output.nominalSampleRate
+            )
+            guard headphone.spatialMode == .stereo else {
+                throw HeadphoneDeviceProfileError.binauralRuntimeUnavailable
+            }
+            guard multiOutputRoutingConfiguration?.enabled != true else {
+                throw HeadphoneDeviceProfileError.legacyPhysicalRoutingConflict
+            }
+            guard outputDeviceProfileConfiguration?.enabled != true else {
+                throw HeadphoneDeviceProfileError.speakerProfileConflict
+            }
+            guard speakerDriverProcessingConfiguration.isNeutral else {
+                throw HeadphoneDeviceProfileError.speakerProcessingConflict("per-driver speaker processing")
+            }
+            guard !bassManagementConfiguration.enabled else {
+                throw HeadphoneDeviceProfileError.speakerProcessingConflict("speaker bass management")
+            }
+            guard !roomCorrectionConfiguration.enabled else {
+                throw HeadphoneDeviceProfileError.speakerProcessingConflict("speaker room correction")
+            }
+            guard !speakerIRConfiguration.enabled else {
+                throw HeadphoneDeviceProfileError.speakerProcessingConflict("Speaker IR")
+            }
+            headphoneSnapshot = try headphone.makeRealtimeSnapshot(sampleRate: output.nominalSampleRate)
+        }
+
         let sameDeviceOutputPlan: SameDeviceOutputRoutePlan?
         let aggregateDeviceOutputPlan: AggregateDeviceOutputRoutePlan?
         if let routing = multiOutputRoutingConfiguration, routing.enabled {
@@ -2697,6 +2778,7 @@ final class AudioIOEngine: ObservableObject {
             speakerBusSplitterSnapshot: speakerBusSplitterSnapshot,
             speakerDriverProcessingSnapshot: speakerDriverProcessingSnapshot
         )
+        try session.configureHeadphoneDSP(headphoneSnapshot)
         activeEQFIRProgram = nil
         nextEQFIRProgramSlot = 0
         activeRoomCorrectionProgram = nil

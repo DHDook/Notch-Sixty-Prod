@@ -170,6 +170,7 @@ enum CoreAudioTransportError: Error, LocalizedError, Equatable {
     case aggregateDeviceNotReady
     case speakerBusSplitterConfigurationFailed
     case speakerDriverProcessingConfigurationFailed
+    case headphoneDSPConfigurationFailed
 
     var errorDescription: String? {
         switch self {
@@ -205,6 +206,8 @@ enum CoreAudioTransportError: Error, LocalizedError, Equatable {
             return "Unable to configure the immutable physical speaker crossover before audio callbacks start."
         case .speakerDriverProcessingConfigurationFailed:
             return "Unable to configure immutable per-driver speaker processing before audio callbacks start."
+        case .headphoneDSPConfigurationFailed:
+            return "Unable to configure the immutable headphone correction stage before audio callbacks start."
         }
     }
 }
@@ -806,6 +809,19 @@ final class CoreAudioTransportSession {
         }
         guard prepared else { throw CoreAudioTransportError.speakerIRProgramPreparationFailed }
         return info
+    }
+
+    func configureHeadphoneDSP(_ snapshot: N60HeadphoneDSPSnapshot?) throws {
+        guard let bridge, !isOutputStarted, !isCaptureStarted else {
+            throw CoreAudioTransportError.headphoneDSPConfigurationFailed
+        }
+        if let snapshot {
+            guard N60RealtimeAudioBridgeConfigureHeadphoneDSP(bridge, snapshot) else {
+                throw CoreAudioTransportError.headphoneDSPConfigurationFailed
+            }
+        } else {
+            N60RealtimeAudioBridgeClearHeadphoneDSP(bridge)
+        }
     }
 
     func publishDSPGraph(_ snapshot: N60DSPGraphSnapshot) throws {
