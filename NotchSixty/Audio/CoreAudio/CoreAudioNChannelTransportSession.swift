@@ -84,8 +84,9 @@ enum LiveNChannelRenderGraphCompiler {
                 routePlan.subwooferCount
             )
             let routeGain = 1.0 / Float(max(routePlan.subwooferCount, 1))
+            let programRoles = routePlan.programLayout.roles
             for channel in 0..<layout.channelCount {
-                if layout.channels[Int(channel)] == N60ProgramChannelRoleLowFrequencyEffects {
+                if programRoles[Int(channel)] == .lowFrequencyEffects {
                     continue
                 }
                 guard N60MultichannelBassManagementSetSourceCrossover(
@@ -543,7 +544,7 @@ final class CoreAudioNChannelTransportSession {
             var specifier = UInt32(0)
             if layout.pointee.mChannelLayoutTag == kAudioChannelLayoutTag_UseChannelBitmap {
                 property = kAudioFormatProperty_ChannelLayoutForBitmap
-                specifier = layout.pointee.mChannelBitmap
+                specifier = layout.pointee.mChannelBitmap.rawValue
             } else {
                 property = kAudioFormatProperty_ChannelLayoutForTag
                 specifier = layout.pointee.mChannelLayoutTag
