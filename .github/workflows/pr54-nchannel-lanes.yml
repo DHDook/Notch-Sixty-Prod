@@ -1,0 +1,35 @@
+name: PR54 N-channel DSP Lanes
+
+on:
+  pull_request:
+    branches:
+      - feature/pr53-channel-layout-router
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate-portable-lanes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate generalized N-channel DSP lanes
+        run: python3 ci/validate_pr54_nchannel_lanes.py
+
+  validate-macos-integration:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate N-channel lanes with Apple Clang
+        run: python3 ci/validate_pr54_nchannel_lanes.py
+      - name: Build app with lane ABI exposed to Swift
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          build
