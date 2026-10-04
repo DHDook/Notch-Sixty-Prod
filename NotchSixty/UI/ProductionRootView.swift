@@ -24,6 +24,7 @@ enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
     case dynamics
     case meters
     case activeCrossover
+    case headphones
     case speakerCalibration
     case roomCorrection
 
@@ -35,6 +36,7 @@ enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
         case .dynamics: return "Dynamics"
         case .meters: return "Meters"
         case .activeCrossover: return "Active Crossover"
+        case .headphones: return "Headphones"
         case .speakerCalibration: return "Speaker Calibration"
         case .roomCorrection: return "Room Correction"
         }
@@ -46,6 +48,7 @@ enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
         case .dynamics: return "waveform.path.ecg"
         case .meters: return "chart.xyaxis.line"
         case .activeCrossover: return "hifispeaker.2.fill"
+        case .headphones: return "headphones"
         case .speakerCalibration: return "speaker.wave.3.fill"
         case .roomCorrection: return "waveform.badge.magnifyingglass"
         }
@@ -184,6 +187,8 @@ struct ProductionRootView: View {
             ProductionMetersView(engine: engine)
         case .activeCrossover:
             ProductionActiveCrossoverView(engine: engine, profiles: product.profiles)
+        case .headphones:
+            ProductionHeadphoneWorkspace(engine: engine, profiles: product.profiles)
         case .speakerCalibration:
             ProductionMultichannelCalibrationWorkspace(
                 engine: engine,

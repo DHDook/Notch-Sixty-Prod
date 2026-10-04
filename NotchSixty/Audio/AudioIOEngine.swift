@@ -1444,6 +1444,12 @@ final class AudioIOEngine: ObservableObject {
         lastErrorDescription = nil
     }
 
+    func importNormalizedBinauralProfile(from url: URL) throws -> BinauralProfileReference {
+        let reference = try binauralProfileAssetStore.importNormalizedDocument(from: url)
+        lastErrorDescription = nil
+        return reference
+    }
+
     func replaceSpeakerDriverProcessingConfiguration(
         _ configuration: SpeakerDriverProcessingConfiguration
     ) throws {
