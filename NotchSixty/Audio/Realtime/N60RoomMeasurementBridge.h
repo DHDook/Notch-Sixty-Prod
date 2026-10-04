@@ -10,7 +10,6 @@ extern "C" {
 #endif
 
 typedef struct N60RoomMeasurementBridge N60RoomMeasurementBridge;
-typedef struct N60TargetedRoomMeasurementBridge N60TargetedRoomMeasurementBridge;
 
 typedef struct {
     uint32_t frameCursor;
@@ -21,16 +20,6 @@ typedef struct {
     uint64_t unsupportedBufferLayouts;
     bool complete;
 } N60RoomMeasurementBridgeSnapshot;
-
-typedef struct {
-    uint32_t frameCursor;
-    uint32_t totalFrameCount;
-    uint32_t capturedFrames;
-    uint32_t outputChannelIndex;
-    uint64_t callbacks;
-    uint64_t unsupportedBufferLayouts;
-    bool complete;
-} N60TargetedRoomMeasurementBridgeSnapshot;
 
 /// Allocates all sweep/capture storage on the control plane. The returned bridge
 /// owns a copy of `sweepSamples`, so Swift/worker memory may be released after
@@ -80,62 +69,6 @@ uint32_t N60RoomMeasurementBridgeCopyRightCapture(
 /// input channel, writes only the first physical stereo output pair, silences all
 /// other output channels, and advances the preallocated paired L/R measurement.
 OSStatus N60RoomMeasurementIOProc(
-    AudioDeviceID inDevice,
-    const AudioTimeStamp * _Nonnull inNow,
-    const AudioBufferList * _Nonnull inInputData,
-    const AudioTimeStamp * _Nonnull inInputTime,
-    AudioBufferList * _Nonnull outOutputData,
-    const AudioTimeStamp * _Nonnull inOutputTime,
-    void * _Nullable inClientData
-);
-
-// MARK: - PR58 targeted one-source calibration
-
-/// Allocates a single-source measurement bridge for one physical output channel.
-/// This is the primitive used by a multichannel campaign to iterate one semantic
-/// speaker or physical Sub N destination at a time. All device outputs other than
-/// `outputChannelIndex` are explicitly silenced by the IOProc.
-N60TargetedRoomMeasurementBridge * _Nullable N60TargetedRoomMeasurementBridgeCreate(
-    const float * _Nonnull sweepSamples,
-    uint32_t sweepFrameCount,
-    uint32_t leadInFrames,
-    uint32_t tailFrames,
-    uint32_t inputChannelIndex,
-    uint32_t outputChannelIndex
-);
-
-void N60TargetedRoomMeasurementBridgeDestroy(
-    N60TargetedRoomMeasurementBridge * _Nonnull bridge
-);
-
-/// Control-plane reset. Call only while the targeted calibration IOProc is stopped.
-void N60TargetedRoomMeasurementBridgeReset(
-    N60TargetedRoomMeasurementBridge * _Nonnull bridge
-);
-
-N60TargetedRoomMeasurementBridgeSnapshot N60TargetedRoomMeasurementBridgeGetSnapshot(
-    const N60TargetedRoomMeasurementBridge * _Nonnull bridge
-);
-
-/// Deterministic planar primitive for one microphone input and one physical
-/// output lane. Output beyond the measurement timeline is zero-filled.
-uint32_t N60TargetedRoomMeasurementBridgeProcessPlanar(
-    N60TargetedRoomMeasurementBridge * _Nonnull bridge,
-    const float * _Nonnull microphoneSamples,
-    float * _Nonnull outputSamples,
-    uint32_t frameCount
-);
-
-/// Control-plane materialization after completion / IOProc stop.
-uint32_t N60TargetedRoomMeasurementBridgeCopyCapture(
-    const N60TargetedRoomMeasurementBridge * _Nonnull bridge,
-    float * _Nonnull destination,
-    uint32_t capacityFrames
-);
-
-/// Full-duplex Core Audio IOProc for one physical calibration source. The IOProc
-/// silences the complete output device before writing the selected output channel.
-OSStatus N60TargetedRoomMeasurementIOProc(
     AudioDeviceID inDevice,
     const AudioTimeStamp * _Nonnull inNow,
     const AudioBufferList * _Nonnull inInputData,
