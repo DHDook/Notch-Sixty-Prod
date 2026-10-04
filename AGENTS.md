@@ -16,9 +16,9 @@ If provenance is uncertain, stop copying and reimplement from specification.
 
 ## 2. Product scope
 
-The product is a macOS DSP application for stereo speakers plus a subwoofer.
+Notch Sixty v1 ships as a macOS DSP application for stereo speakers plus a subwoofer.
 
-In scope:
+Existing v1 scope:
 - stereo playback
 - bass management
 - subwoofer integration
@@ -26,16 +26,26 @@ In scope:
 - multi-seat measurement/averaging
 - EQ, FIR, convolution, crossovers, dynamics, metering, and related loudspeaker DSP
 
-Out of scope unless explicitly approved:
-- headphone-only processing
+### Post-v1 explicitly approved expansion
+
+The project owner has explicitly approved a staged post-v1 architecture expansion for:
+- semantic N-channel program layouts and channel-aware DSP
+- conventional multichannel speaker playback/routing
+- multichannel bass management and per-channel/group processing
+- headphone device correction and channel matching
 - headphone crossfeed
-- actual multichannel output
-- surround rendering
-- driver installation
+- binaural / virtual-speaker rendering, including HRTF/SOFA-based processing
+- future head tracking and multi-input/multi-output room optimization
+
+This approval does not permit unsafe partial activation: each PR must preserve shipping stereo behavior until the relevant N-channel transport/DSP path is complete and validated.
+
+Still out of scope unless explicitly approved:
+- installing audio drivers
 - privileged helpers
 - kernel/system extensions
+- proprietary object/bitstream decoders (for example a Dolby Atmos decoder) without the required licensing/product decision
 
-Do not confuse multi-seat room correction with multichannel audio.
+Multi-seat room correction and multichannel program audio remain distinct concepts.
 
 ## 3. Transport architecture
 
