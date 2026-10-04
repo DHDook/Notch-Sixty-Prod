@@ -184,6 +184,17 @@ enum OutputProgramLayout: String, CaseIterable, Identifiable, Codable, Sendable 
 struct SemanticSpeakerOutputAssignment: Codable, Equatable, Sendable {
     var role: OutputProgramRole
     var destination: PhysicalOutputEndpoint
+    var calibration: SemanticSpeakerCalibration?
+
+    init(
+        role: OutputProgramRole,
+        destination: PhysicalOutputEndpoint,
+        calibration: SemanticSpeakerCalibration? = nil
+    ) {
+        self.role = role
+        self.destination = destination
+        self.calibration = calibration
+    }
 }
 
 /// Explicit physical Sub N destination. `index` is zero-based and must be dense
@@ -191,6 +202,17 @@ struct SemanticSpeakerOutputAssignment: Codable, Equatable, Sendable {
 struct PhysicalSubwooferOutputAssignment: Codable, Equatable, Sendable {
     var index: UInt32
     var destination: PhysicalOutputEndpoint
+    var calibration: PhysicalSubwooferCalibration?
+
+    init(
+        index: UInt32,
+        destination: PhysicalOutputEndpoint,
+        calibration: PhysicalSubwooferCalibration? = nil
+    ) {
+        self.index = index
+        self.destination = destination
+        self.calibration = calibration
+    }
 }
 
 enum OutputDeviceProfileError: Error, Equatable, LocalizedError {
@@ -276,6 +298,7 @@ struct OutputDeviceProfileConfiguration: Codable, Equatable, Sendable {
     var subwooferAssignments: [PhysicalSubwooferOutputAssignment]
     var synchronizationMode: MultiOutputSynchronizationMode
     var referenceDeviceUID: String?
+    var calibrationSummary: MultichannelCalibrationDeploymentSummary?
 
     init(
         enabled: Bool = false,
@@ -283,7 +306,8 @@ struct OutputDeviceProfileConfiguration: Codable, Equatable, Sendable {
         speakerAssignments: [SemanticSpeakerOutputAssignment] = [],
         subwooferAssignments: [PhysicalSubwooferOutputAssignment] = [],
         synchronizationMode: MultiOutputSynchronizationMode = .automatic,
-        referenceDeviceUID: String? = nil
+        referenceDeviceUID: String? = nil,
+        calibrationSummary: MultichannelCalibrationDeploymentSummary? = nil
     ) {
         self.enabled = enabled
         self.programLayout = programLayout
@@ -291,6 +315,7 @@ struct OutputDeviceProfileConfiguration: Codable, Equatable, Sendable {
         self.subwooferAssignments = subwooferAssignments
         self.synchronizationMode = synchronizationMode
         self.referenceDeviceUID = referenceDeviceUID
+        self.calibrationSummary = calibrationSummary
     }
 
     var requiredDeviceUIDs: Set<String> {
@@ -335,6 +360,7 @@ struct OutputDeviceProfileConfiguration: Codable, Equatable, Sendable {
             guard destinations.insert(assignment.destination).inserted else {
                 throw OutputDeviceProfileError.duplicateDestination(assignment.destination)
             }
+            try assignment.calibration?.validate()
         }
 
         for role in programLayout.roles where role != .lowFrequencyEffects {
@@ -370,7 +396,9 @@ struct OutputDeviceProfileConfiguration: Codable, Equatable, Sendable {
             guard destinations.insert(sub.destination).inserted else {
                 throw OutputDeviceProfileError.duplicateDestination(sub.destination)
             }
+            try sub.calibration?.validate()
         }
+        try calibrationSummary?.validate()
     }
 
     func makeLivePlan(
@@ -385,6 +413,21 @@ struct OutputDeviceProfileConfiguration: Codable, Equatable, Sendable {
         try validateStructure(bassManagementEnabled: bassManagementEnabled)
         guard sampleRate.isFinite, sampleRate > 0 else {
             throw OutputDeviceProfileError.invalidSampleRate(sampleRate)
+        }
+        for assignment in speakerAssignments {
+            try assignment.calibration?.validate(sampleRate: sampleRate)
+        }
+        for assignment in subwooferAssignments {
+            try assignment.calibration?.validate(sampleRate: sampleRate)
+        }
+        if let summary = calibrationSummary {
+            try summary.validate()
+            guard abs(summary.sampleRate - sampleRate) < 0.5 else {
+                throw OutputDeviceCalibrationError.sampleRateMismatch(
+                    expected: summary.sampleRate,
+                    actual: sampleRate
+                )
+            }
         }
         guard synchronizationMode != .softwarePLL else {
             throw OutputDeviceProfileError.softwarePLLSuperseded
@@ -473,6 +516,19 @@ struct OutputDeviceProfileConfiguration: Codable, Equatable, Sendable {
             subPhysical[Int(assignment.index)] = try flattened(assignment.destination)
         }
 
+        let speakerCalibrations = Dictionary(
+            uniqueKeysWithValues: speakerAssignments.compactMap { assignment in
+                assignment.calibration.map { (assignment.role, $0) }
+            }
+        )
+        var subwooferCalibrations = [PhysicalSubwooferCalibration?](
+            repeating: nil,
+            count: Int(N60_MAX_SUBWOOFER_OUTPUTS)
+        )
+        for assignment in subwooferAssignments {
+            subwooferCalibrations[Int(assignment.index)] = assignment.calibration
+        }
+
         let plan = LiveNChannelOutputRoutePlan(
             programLayout: programLayout,
             orderedDeviceUIDs: orderedUIDs,
@@ -481,7 +537,9 @@ struct OutputDeviceProfileConfiguration: Codable, Equatable, Sendable {
             programPhysicalChannels: programPhysical,
             subwooferPhysicalChannels: subPhysical,
             subwooferCount: UInt32(subwooferAssignments.count),
-            bassManagementEnabled: bassManagementEnabled
+            bassManagementEnabled: bassManagementEnabled,
+            speakerCalibrations: speakerCalibrations,
+            subwooferCalibrations: subwooferCalibrations
         )
         _ = try plan.makeRealtimeOutputMap()
         return plan
@@ -498,6 +556,8 @@ struct LiveNChannelOutputRoutePlan: Equatable, Sendable {
     let subwooferPhysicalChannels: [UInt32]
     let subwooferCount: UInt32
     let bassManagementEnabled: Bool
+    let speakerCalibrations: [OutputProgramRole: SemanticSpeakerCalibration]
+    let subwooferCalibrations: [PhysicalSubwooferCalibration?]
 
     var usesMultiplePhysicalDevices: Bool { orderedDeviceUIDs.count > 1 }
 

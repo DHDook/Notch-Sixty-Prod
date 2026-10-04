@@ -24,6 +24,7 @@ enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
     case dynamics
     case meters
     case activeCrossover
+    case speakerCalibration
     case roomCorrection
 
     var id: String { rawValue }
@@ -34,6 +35,7 @@ enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
         case .dynamics: return "Dynamics"
         case .meters: return "Meters"
         case .activeCrossover: return "Active Crossover"
+        case .speakerCalibration: return "Speaker Calibration"
         case .roomCorrection: return "Room Correction"
         }
     }
@@ -44,6 +46,7 @@ enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
         case .dynamics: return "waveform.path.ecg"
         case .meters: return "chart.xyaxis.line"
         case .activeCrossover: return "hifispeaker.2.fill"
+        case .speakerCalibration: return "speaker.wave.3.fill"
         case .roomCorrection: return "waveform.badge.magnifyingglass"
         }
     }
@@ -181,6 +184,13 @@ struct ProductionRootView: View {
             ProductionMetersView(engine: engine)
         case .activeCrossover:
             ProductionActiveCrossoverView(engine: engine, profiles: product.profiles)
+        case .speakerCalibration:
+            ProductionMultichannelCalibrationWorkspace(
+                engine: engine,
+                calibration: product.multichannelCalibration,
+                microphone: product.calibration,
+                profiles: product.profiles
+            )
         case .roomCorrection:
             ProductionRoomCorrectionWorkspace(
             engine: engine,

@@ -91,6 +91,27 @@ struct RoomCorrectionMeasurementAnalyzer: Sendable {
         )
     }
 
+    func analyzeSingleChannel(
+        rawCapture: [Float],
+        program: RoomCorrectionSweepProgram,
+        microphoneCalibration: RoomCorrectionMicrophoneCalibration? = nil,
+        capturedAt: Date = Date()
+    ) throws -> RoomCorrectionChannelMeasurement {
+        guard program.sampleRate.isFinite, program.sampleRate > 0 else {
+            throw RoomCorrectionMeasurementAnalysisError.invalidSampleRate(program.sampleRate)
+        }
+        try validateProgram(program)
+        try validateCalibration(microphoneCalibration)
+        return try analyzeChannel(
+            rawCapture: rawCapture,
+            pass: .left,
+            expectedFrameCount: program.captureFrameCount,
+            program: program,
+            calibration: microphoneCalibration,
+            capturedAt: capturedAt
+        )
+    }
+
     private func analyzeChannel(
         rawCapture: [Float],
         pass: RoomCorrectionMeasurementPass,
