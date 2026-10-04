@@ -1,0 +1,37 @@
+name: PR63 Live N-Channel Activation
+
+on:
+  pull_request:
+    branches:
+      - feature/pr62-output-device-profiles
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate-portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate 32-channel capacity and physical-system nomenclature
+        run: python3 ci/validate_pr63_capacity_nomenclature.py
+
+  validate-macos-integration:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate Output Device Profile behavior
+        run: python3 ci/validate_pr62_output_device_profiles.py
+      - name: Validate 32-channel capacity and multisub nomenclature
+        run: python3 ci/validate_pr63_capacity_nomenclature.py
+      - name: Build arm64 app
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          build
