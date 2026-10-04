@@ -16,6 +16,8 @@ jobs:
       - uses: actions/checkout@v7
       - name: Validate 32-channel capacity and physical-system nomenclature
         run: python3 ci/validate_pr63_capacity_nomenclature.py
+      - name: Validate live N-channel activation architecture
+        run: python3 ci/validate_pr63_live_activation.py
 
   validate-macos-integration:
     runs-on: xcode-27
@@ -25,7 +27,9 @@ jobs:
         run: python3 ci/validate_pr62_output_device_profiles.py
       - name: Validate 32-channel capacity and multisub nomenclature
         run: python3 ci/validate_pr63_capacity_nomenclature.py
-      - name: Build arm64 app
+      - name: Validate live N-channel activation architecture
+        run: python3 ci/validate_pr63_live_activation.py
+      - name: Build arm64 app with selectable N-channel transport
         run: >-
           xcodebuild
           -project NotchSixty.xcodeproj
