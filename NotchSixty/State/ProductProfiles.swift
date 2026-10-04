@@ -941,6 +941,10 @@ final class ProductProfileController: ObservableObject {
 
             let playback = state.playback.applying(to: engine.playbackControlConfiguration)
             let gain = state.composingGain(over: engine.gainConfiguration)
+            // Remove the previous system's semantic routing contract before
+            // applying bass/routing state owned by the target system. The target
+            // profile is reinstalled only after its bass-management dependency.
+            try engine.replaceOutputDeviceProfileConfiguration(nil)
             try engine.replaceMultiOutputRoutingConfiguration(state.outputRouting)
             try engine.replaceSpeakerDriverProcessingConfiguration(
                 state.speakerDriverProcessing ?? SpeakerDriverProcessingConfiguration()
@@ -958,12 +962,12 @@ final class ProductProfileController: ObservableObject {
             }
             let playback = previous.playback.applying(to: engine.playbackControlConfiguration)
             let gain = previous.composingGain(over: engine.gainConfiguration)
+            try? engine.replaceOutputDeviceProfileConfiguration(nil)
             try? engine.replaceMultiOutputRoutingConfiguration(previous.outputRouting)
             try? engine.replaceSpeakerDriverProcessingConfiguration(
                 previous.speakerDriverProcessing ?? SpeakerDriverProcessingConfiguration()
             )
             try? engine.replacePlaybackControlConfiguration(playback)
-            try? engine.replaceOutputDeviceProfileConfiguration(nil)
             try? engine.replaceBassManagementConfiguration(previous.bassManagement)
             try? engine.replaceOutputDeviceProfileConfiguration(previous.outputDeviceProfile)
             try? engine.replaceGainConfiguration(gain)
