@@ -1,13 +1,16 @@
 #ifndef N60TargetedRoomMeasurementBridge_h
 #define N60TargetedRoomMeasurementBridge_h
 
-#include <CoreAudio/CoreAudio.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
+
+#if defined(__APPLE__)
+#include <CoreAudio/CoreAudio.h>
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -39,18 +42,6 @@ typedef struct N60TargetedRoomMeasurementBridge {
     _Atomic bool complete;
 } N60TargetedRoomMeasurementBridge;
 
-typedef struct {
-    const float * _Nullable samples;
-    uint32_t stride;
-    uint32_t frameCount;
-} N60TargetedMeasurementInputView;
-
-typedef struct {
-    float * _Nullable samples;
-    uint32_t stride;
-    uint32_t frameCount;
-} N60TargetedMeasurementOutputView;
-
 static inline void N60TargetedRoomMeasurementBridgeReset(
     N60TargetedRoomMeasurementBridge * _Nullable bridge
 ) {
@@ -65,8 +56,6 @@ static inline void N60TargetedRoomMeasurementBridgeReset(
     atomic_store_explicit(&bridge->complete, false, memory_order_relaxed);
 }
 
-/// Control-plane creation. The bridge owns its sweep/capture allocations; the
-/// realtime process functions only read/write these fixed buffers.
 static inline N60TargetedRoomMeasurementBridge * _Nullable N60TargetedRoomMeasurementBridgeCreate(
     const float * _Nonnull sweepSamples,
     uint32_t sweepFrameCount,
@@ -182,7 +171,6 @@ static inline uint32_t N60TargetedRoomMeasurementProcessStrided(
     return consumed;
 }
 
-/// Deterministic one-source planar primitive used by tests and the IOProc.
 static inline uint32_t N60TargetedRoomMeasurementBridgeProcessPlanar(
     N60TargetedRoomMeasurementBridge * _Nonnull bridge,
     const float * _Nonnull microphoneSamples,
@@ -210,6 +198,20 @@ static inline uint32_t N60TargetedRoomMeasurementBridgeCopyCapture(
     memcpy(destination, bridge->capture, sizeof(float) * count);
     return count;
 }
+
+#if defined(__APPLE__)
+
+typedef struct {
+    const float * _Nullable samples;
+    uint32_t stride;
+    uint32_t frameCount;
+} N60TargetedMeasurementInputView;
+
+typedef struct {
+    float * _Nullable samples;
+    uint32_t stride;
+    uint32_t frameCount;
+} N60TargetedMeasurementOutputView;
 
 static inline void N60TargetedRoomMeasurementZeroOutput(AudioBufferList * _Nullable bufferList) {
     if (bufferList == NULL) return;
@@ -273,9 +275,6 @@ static inline bool N60TargetedRoomMeasurementMakeOutputView(
     return false;
 }
 
-/// Realtime-safe full-duplex one-source calibration callback. The entire device
-/// output is silenced first; only the selected physical output channel receives
-/// the sweep. This prevents stale signal from any unmeasured speaker/sub path.
 static inline OSStatus N60TargetedRoomMeasurementIOProc(
     AudioDeviceID inDevice,
     const AudioTimeStamp * _Nonnull inNow,
@@ -310,7 +309,7 @@ static inline OSStatus N60TargetedRoomMeasurementIOProc(
         return noErr;
     }
 
-    uint32_t frameCount = input.frameCount < output.frameCount
+    const uint32_t frameCount = input.frameCount < output.frameCount
         ? input.frameCount
         : output.frameCount;
     if (frameCount == 0u) return noErr;
@@ -324,6 +323,8 @@ static inline OSStatus N60TargetedRoomMeasurementIOProc(
     );
     return noErr;
 }
+
+#endif
 
 #ifdef __cplusplus
 }
