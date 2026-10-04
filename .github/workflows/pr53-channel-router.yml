@@ -1,0 +1,18 @@
+name: PR53 Channel Router
+
+on:
+  pull_request:
+    branches:
+      - feature/pr52-nchannel-core-foundation
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate semantic channel mapper and matrix router
+        run: python3 ci/validate_pr53_channel_router.py
