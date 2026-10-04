@@ -1,0 +1,43 @@
+name: PR64 Multichannel Calibration Workflow
+
+on:
+  pull_request:
+    branches:
+      - feature/pr63-live-nchannel-activation
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate-portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate PR58 calibration core
+        run: python3 ci/validate_pr58_multichannel_calibration.py
+      - name: Validate PR63 capacity and nomenclature
+        run: python3 ci/validate_pr63_capacity_nomenclature.py
+      - name: Validate PR64 calibration integration
+        run: python3 ci/validate_pr64_multichannel_calibration.py
+
+  validate-macos-integration:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate Output Device Profile behavior
+        run: python3 ci/validate_pr62_output_device_profiles.py
+      - name: Validate PR63 capacity and multisub nomenclature
+        run: python3 ci/validate_pr63_capacity_nomenclature.py
+      - name: Validate PR64 calibration integration
+        run: python3 ci/validate_pr64_multichannel_calibration.py
+      - name: Build arm64 app with deployed multichannel calibration
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty
+          -configuration Debug
+          -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO
+          ENABLE_TESTABILITY=YES
+          build
