@@ -1023,9 +1023,11 @@ final class AudioIOEngine: ObservableObject {
     private let eventMonitor: AudioHardwareEventMonitor
     private let masterVolumeController: any MasterVolumeDeviceControlling
     private let globalVolumeKeyMonitor: any GlobalVolumeKeyMonitoring
+    private let binauralProfileAssetStore: BinauralProfileAssetStore
     private var lifecycle: AudioLifecycleStateMachine
     private var transportSession: CoreAudioTransportSession?
     private var nChannelTransportSession: CoreAudioNChannelTransportSession?
+    private var binauralHeadphoneTransportSession: CoreAudioBinauralHeadphoneTransportSession?
     private var lifetimeArchivedCounters = AudioTransportCounters()
     private var processingSessionArchivedCounters = AudioTransportCounters()
     private var reconfigurationWorkItem: DispatchWorkItem?
@@ -1057,6 +1059,7 @@ final class AudioIOEngine: ObservableObject {
     @Published private(set) var bassManagementConfiguration = BassManagementConfiguration()
     @Published private(set) var multiOutputRoutingConfiguration: MultiOutputRoutingConfiguration?
     @Published private(set) var outputDeviceProfileConfiguration: OutputDeviceProfileConfiguration?
+    @Published private(set) var headphoneDeviceProfileConfiguration: HeadphoneDeviceProfileConfiguration?
     @Published private(set) var speakerDriverProcessingConfiguration = SpeakerDriverProcessingConfiguration()
     @Published private(set) var dynamicsConfiguration = DynamicsConfiguration()
     @Published private(set) var roomCorrectionConfiguration = RoomCorrectionConfiguration()
@@ -1070,13 +1073,15 @@ final class AudioIOEngine: ObservableObject {
         initialRouteConfiguration: AudioRouteConfiguration = AudioRouteConfiguration(),
         eventMonitor: AudioHardwareEventMonitor = AudioHardwareEventMonitor(),
         masterVolumeController: any MasterVolumeDeviceControlling = CoreAudioMasterVolumeController(),
-        globalVolumeKeyMonitor: any GlobalVolumeKeyMonitoring = CoreGraphicsGlobalVolumeKeyMonitor()
+        globalVolumeKeyMonitor: any GlobalVolumeKeyMonitoring = CoreGraphicsGlobalVolumeKeyMonitor(),
+        binauralProfileAssetStore: BinauralProfileAssetStore = BinauralProfileAssetStore()
     ) {
         self.deviceCatalog = deviceCatalog
         self.routeConfiguration = initialRouteConfiguration
         self.eventMonitor = eventMonitor
         self.masterVolumeController = masterVolumeController
         self.globalVolumeKeyMonitor = globalVolumeKeyMonitor
+        self.binauralProfileAssetStore = binauralProfileAssetStore
         let lifecycle = AudioLifecycleStateMachine()
         self.lifecycle = lifecycle
         self.lifecycleState = lifecycle.state
@@ -1096,6 +1101,10 @@ final class AudioIOEngine: ObservableObject {
     }
 
     var liveNChannelActive: Bool { nChannelTransportSession != nil }
+    var liveBinauralHeadphoneActive: Bool { binauralHeadphoneTransportSession != nil }
+    private var immutableSemanticTransportActive: Bool {
+        nChannelTransportSession != nil || binauralHeadphoneTransportSession != nil
+    }
 
     private func renderBassManagementConfiguration(
         _ source: BassManagementConfiguration? = nil
@@ -1371,6 +1380,9 @@ final class AudioIOEngine: ObservableObject {
         if configuration?.enabled == true, outputDeviceProfileConfiguration?.enabled == true {
             throw OutputDeviceProfileError.legacyPhysicalRoutingConflict
         }
+        if configuration?.enabled == true, headphoneDeviceProfileConfiguration?.enabled == true {
+            throw HeadphoneDeviceProfileError.legacyPhysicalRoutingConflict
+        }
         guard lifecycle.state == .idle || configuration == multiOutputRoutingConfiguration else {
             throw MultiOutputRoutingError.routingChangeRequiresIdle
         }
@@ -1388,12 +1400,54 @@ final class AudioIOEngine: ObservableObject {
             if multiOutputRoutingConfiguration?.enabled == true {
                 throw OutputDeviceProfileError.legacyPhysicalRoutingConflict
             }
+            if headphoneDeviceProfileConfiguration?.enabled == true {
+                throw HeadphoneDeviceProfileError.speakerProfileConflict
+            }
         }
         guard lifecycle.state == .idle || configuration == outputDeviceProfileConfiguration else {
             throw LiveNChannelTransportError.configurationChangeRequiresRestart
         }
         outputDeviceProfileConfiguration = configuration
         lastErrorDescription = nil
+    }
+
+    func replaceHeadphoneDeviceProfileConfiguration(
+        _ configuration: HeadphoneDeviceProfileConfiguration?
+    ) throws {
+        if let configuration, configuration.enabled {
+            if outputDeviceProfileConfiguration?.enabled == true {
+                throw HeadphoneDeviceProfileError.speakerProfileConflict
+            }
+            if multiOutputRoutingConfiguration?.enabled == true {
+                throw HeadphoneDeviceProfileError.legacyPhysicalRoutingConflict
+            }
+            if !speakerDriverProcessingConfiguration.isNeutral {
+                throw HeadphoneDeviceProfileError.speakerProcessingConflict("per-driver speaker processing")
+            }
+            if bassManagementConfiguration.enabled {
+                throw HeadphoneDeviceProfileError.speakerProcessingConflict("speaker bass management")
+            }
+            if roomCorrectionConfiguration.enabled {
+                throw HeadphoneDeviceProfileError.speakerProcessingConflict("speaker room correction")
+            }
+            if speakerIRConfiguration.enabled {
+                throw HeadphoneDeviceProfileError.speakerProcessingConflict("Speaker IR")
+            }
+            if let output = selectedOutputDevice {
+                try configuration.validateStructure(sampleRate: output.nominalSampleRate)
+            }
+        }
+        guard lifecycle.state == .idle || configuration == headphoneDeviceProfileConfiguration else {
+            throw HeadphoneDeviceProfileError.configurationChangeRequiresRestart
+        }
+        headphoneDeviceProfileConfiguration = configuration
+        lastErrorDescription = nil
+    }
+
+    func importNormalizedBinauralProfile(from url: URL) throws -> BinauralProfileReference {
+        let reference = try binauralProfileAssetStore.importNormalizedDocument(from: url)
+        lastErrorDescription = nil
+        return reference
     }
 
     func replaceSpeakerDriverProcessingConfiguration(
@@ -1436,7 +1490,7 @@ final class AudioIOEngine: ObservableObject {
         if let outputDeviceProfile = outputDeviceProfileConfiguration, outputDeviceProfile.enabled {
             try outputDeviceProfile.validateStructure(bassManagementEnabled: configuration.enabled)
         }
-        if nChannelTransportSession != nil, configuration != bassManagementConfiguration {
+        if immutableSemanticTransportActive, configuration != bassManagementConfiguration {
             throw LiveNChannelTransportError.configurationChangeRequiresRestart
         }
         if physicalSpeakerBusRoutingActive, lifecycle.state != .idle, configuration != bassManagementConfiguration {
@@ -1535,7 +1589,7 @@ final class AudioIOEngine: ObservableObject {
     }
 
     func replaceDynamicsConfiguration(_ configuration: DynamicsConfiguration) throws {
-        if nChannelTransportSession != nil, configuration != dynamicsConfiguration {
+        if immutableSemanticTransportActive, configuration != dynamicsConfiguration {
             throw LiveNChannelTransportError.configurationChangeRequiresRestart
         }
         let validationRate = transportSession?.outputFormat.sampleRate
@@ -1656,7 +1710,7 @@ final class AudioIOEngine: ObservableObject {
     }
 
     func setDetailedMeteringDemand(_ enabled: Bool) throws {
-        guard nChannelTransportSession == nil else { return }
+        guard !immutableSemanticTransportActive else { return }
         let previousDemand = N60RealtimeAudioBridgeMeteringDemand()
         guard previousDemand != enabled else { return }
 
@@ -1713,19 +1767,25 @@ final class AudioIOEngine: ObservableObject {
         let selectedDevice = selectedOutputDevice
         let currentCounters = transportSession?.counters()
             ?? nChannelTransportSession?.counters()
+            ?? binauralHeadphoneTransportSession?.counters()
             ?? AudioTransportCounters()
         let processingSessionCounters = processingSessionArchivedCounters + currentCounters
         let lifetimeCounters = lifetimeArchivedCounters + currentCounters
         let activeTapSampleRate = transportSession?.tapFormat.sampleRate
             ?? nChannelTransportSession?.tapFormat.sampleRate
+            ?? binauralHeadphoneTransportSession?.tapFormat.sampleRate
         let activeOutputSampleRate = transportSession?.outputFormat.sampleRate
             ?? nChannelTransportSession?.outputFormat.sampleRate
+            ?? binauralHeadphoneTransportSession?.outputFormat.sampleRate
         let startupGateOpened = transportSession?.startupGateOpened
             ?? nChannelTransportSession?.startupGateOpened
+            ?? binauralHeadphoneTransportSession?.startupGateOpened
         let startupGateTargetFrames = transportSession?.startupGateTargetFrames
             ?? nChannelTransportSession?.startupGateTargetFrames
+            ?? binauralHeadphoneTransportSession?.startupGateTargetFrames
         let startupGateActivationFrames = transportSession?.startupGateActivationFrames
             ?? nChannelTransportSession?.startupGateActivationFrames
+            ?? binauralHeadphoneTransportSession?.startupGateActivationFrames
         return AudioDiagnosticsSnapshot(
             lifecycleState: lifecycle.state,
             selectedOutputUID: routeConfiguration.selectedOutputUID,
@@ -1805,7 +1865,7 @@ final class AudioIOEngine: ObservableObject {
 
     private func applyStereoEQConfiguration(_ configuration: StereoEQConfiguration) throws {
         try validateStereoEQStorage(configuration)
-        if nChannelTransportSession != nil, configuration != stereoEQConfiguration {
+        if immutableSemanticTransportActive, configuration != stereoEQConfiguration {
             throw LiveNChannelTransportError.configurationChangeRequiresRestart
         }
 
@@ -1870,7 +1930,7 @@ final class AudioIOEngine: ObservableObject {
               PlaybackControlConfiguration.interChannelDelayRange.contains(configuration.interChannelDelayMs) else {
             throw PlaybackControlConfigurationError.invalidInterChannelDelay(configuration.interChannelDelayMs)
         }
-        if nChannelTransportSession != nil, configuration != playbackControlConfiguration {
+        if immutableSemanticTransportActive, configuration != playbackControlConfiguration {
             throw LiveNChannelTransportError.configurationChangeRequiresRestart
         }
 
@@ -1984,6 +2044,9 @@ final class AudioIOEngine: ObservableObject {
         if let session = nChannelTransportSession, abs(oldSoftwareGain - newSoftwareGain) > 0.000_001 {
             session.setOutputGain(newSoftwareGain)
         }
+        if let session = binauralHeadphoneTransportSession, abs(oldSoftwareGain - newSoftwareGain) > 0.000_001 {
+            session.setOutputGain(newSoftwareGain)
+        }
 
         masterVolumeConfiguration = configuration
         lastErrorDescription = nil
@@ -2080,7 +2143,7 @@ final class AudioIOEngine: ObservableObject {
     }
 
     private func applyGainConfiguration(_ configuration: DSPGainConfiguration) throws {
-        if nChannelTransportSession != nil, configuration != gainConfiguration {
+        if immutableSemanticTransportActive, configuration != gainConfiguration {
             throw LiveNChannelTransportError.configurationChangeRequiresRestart
         }
         if let session = transportSession {
@@ -2112,7 +2175,7 @@ final class AudioIOEngine: ObservableObject {
     }
 
     private func applyRoomCorrectionConfiguration(_ configuration: RoomCorrectionConfiguration) throws {
-        if nChannelTransportSession != nil, configuration != roomCorrectionConfiguration {
+        if immutableSemanticTransportActive, configuration != roomCorrectionConfiguration {
             throw LiveNChannelTransportError.configurationChangeRequiresRestart
         }
         if configuration.enabled && configuration.filter == nil {
@@ -2174,7 +2237,7 @@ final class AudioIOEngine: ObservableObject {
     }
 
     private func applySpeakerIRConfiguration(_ configuration: SpeakerIRConfiguration) throws {
-        if nChannelTransportSession != nil, configuration != speakerIRConfiguration {
+        if immutableSemanticTransportActive, configuration != speakerIRConfiguration {
             throw LiveNChannelTransportError.configurationChangeRequiresRestart
         }
         if configuration.enabled && configuration.filter == nil {
@@ -2565,6 +2628,17 @@ final class AudioIOEngine: ObservableObject {
     }
 
     private func buildTransport(output: AudioOutputDevice) throws {
+        if let headphone = headphoneDeviceProfileConfiguration, headphone.enabled {
+            if outputDeviceProfileConfiguration?.enabled == true {
+                throw HeadphoneDeviceProfileError.speakerProfileConflict
+            }
+            if headphone.spatialMode == .virtualSpeakers {
+                try buildBinauralHeadphoneTransport(output: output, profile: headphone)
+            } else {
+                try buildStereoTransport(output: output)
+            }
+            return
+        }
         if outputDeviceProfileConfiguration?.enabled == true {
             try buildNChannelTransport(output: output)
             return
@@ -2639,7 +2713,130 @@ final class AudioIOEngine: ObservableObject {
         nChannelTransportSession = session
     }
 
+    private func validateBinauralHeadphoneActivation() throws {
+        if multiOutputRoutingConfiguration?.enabled == true {
+            throw HeadphoneDeviceProfileError.legacyPhysicalRoutingConflict
+        }
+        if outputDeviceProfileConfiguration?.enabled == true {
+            throw HeadphoneDeviceProfileError.speakerProfileConflict
+        }
+        if !speakerDriverProcessingConfiguration.isNeutral {
+            throw LiveNChannelTransportError.unsupportedActiveDSP("per-driver speaker processing")
+        }
+        if !stereoEQConfiguration.bypassed {
+            if stereoEQConfiguration.channelMode != .linked
+                || stereoEQConfiguration.phaseMode != .minimumPhase
+                || stereoEQConfiguration.enabledBandCount != 0 {
+                throw LiveNChannelTransportError.unsupportedActiveDSP("stereo EQ in Virtual Speakers mode")
+            }
+        }
+        if playbackControlConfiguration != PlaybackControlConfiguration() {
+            throw LiveNChannelTransportError.unsupportedActiveDSP("stereo playback/image controls in Virtual Speakers mode")
+        }
+        if dynamicsConfiguration != DynamicsConfiguration() {
+            throw LiveNChannelTransportError.unsupportedActiveDSP("stereo dynamics in Virtual Speakers mode")
+        }
+        if bassManagementConfiguration.enabled
+            || bassManagementConfiguration.physicalOutputMode != nil
+            || bassManagementConfiguration.subPhaseAlignmentEnabled
+            || bassManagementConfiguration.monitorMode != .recombined {
+            throw LiveNChannelTransportError.unsupportedActiveDSP("speaker bass management in Virtual Speakers mode")
+        }
+        if roomCorrectionConfiguration.enabled {
+            throw LiveNChannelTransportError.unsupportedActiveDSP("speaker room correction in Virtual Speakers mode")
+        }
+        if speakerIRConfiguration.enabled {
+            throw LiveNChannelTransportError.unsupportedActiveDSP("Speaker IR in Virtual Speakers mode")
+        }
+    }
+
+    private func buildBinauralHeadphoneTransport(
+        output: AudioOutputDevice,
+        profile: HeadphoneDeviceProfileConfiguration
+    ) throws {
+        try validateBinauralHeadphoneActivation()
+        let selected = try profile.validateForActivation(
+            availableDevices: outputDevices,
+            selectedOutputUID: output.uid,
+            sampleRate: output.nominalSampleRate
+        )
+        let source = try profile.resolveProgramSource(
+            availableDevices: outputDevices,
+            selectedOutput: selected
+        )
+        guard source.supports(sampleRate: output.nominalSampleRate) else {
+            throw BinauralHeadphoneTransportError.sampleRateMismatch(
+                source: source.nominalSampleRate, output: output.nominalSampleRate
+            )
+        }
+        guard let reference = profile.binauralProfile else {
+            throw HeadphoneDeviceProfileError.binauralProfileRequired
+        }
+        let asset = try binauralProfileAssetStore.load(id: reference.assetID)
+        guard asset.id == reference.assetID,
+              abs(asset.sampleRate - reference.sampleRate) < 0.5,
+              asset.tapCount == reference.tapCount else {
+            throw HeadphoneDeviceProfileError.invalidBinauralProfileReference
+        }
+        let prepared = try asset.prepare(for: profile.programLayout)
+        let headphoneSnapshot = try profile.makeRealtimeSnapshot(
+            sampleRate: output.nominalSampleRate
+        )
+        let combinedGainDB = gainConfiguration.inputPreampDB
+            + gainConfiguration.headroomAttenuationDB
+            + gainConfiguration.outputGainDB
+        let programGain = DSPGainConfiguration.linearGain(forDB: combinedGainDB)
+        guard programGain.isFinite, programGain >= 0, programGain <= 16 else {
+            throw BinauralHeadphoneTransportError.bridgeAllocationFailed
+        }
+        let session = try CoreAudioBinauralHeadphoneTransportSession(
+            selectedOutput: output,
+            programSource: source,
+            programLayout: profile.programLayout,
+            preparedProfile: prepared,
+            headphoneSnapshot: headphoneSnapshot,
+            programGain: programGain,
+            outputGain: currentMasterSoftwareGain
+        )
+        activeEQFIRProgram = nil
+        activeRoomCorrectionProgram = nil
+        activeSpeakerIRProgram = nil
+        linearPhaseDesignInfo = nil
+        binauralHeadphoneTransportSession = session
+    }
+
     private func buildStereoTransport(output: AudioOutputDevice) throws {
+        var headphoneSnapshot: N60HeadphoneDSPSnapshot?
+        if let headphone = headphoneDeviceProfileConfiguration, headphone.enabled {
+            _ = try headphone.validateForActivation(
+                availableDevices: outputDevices,
+                selectedOutputUID: output.uid,
+                sampleRate: output.nominalSampleRate
+            )
+            guard headphone.spatialMode == .stereo else {
+                throw HeadphoneDeviceProfileError.binauralRuntimeUnavailable
+            }
+            guard multiOutputRoutingConfiguration?.enabled != true else {
+                throw HeadphoneDeviceProfileError.legacyPhysicalRoutingConflict
+            }
+            guard outputDeviceProfileConfiguration?.enabled != true else {
+                throw HeadphoneDeviceProfileError.speakerProfileConflict
+            }
+            guard speakerDriverProcessingConfiguration.isNeutral else {
+                throw HeadphoneDeviceProfileError.speakerProcessingConflict("per-driver speaker processing")
+            }
+            guard !bassManagementConfiguration.enabled else {
+                throw HeadphoneDeviceProfileError.speakerProcessingConflict("speaker bass management")
+            }
+            guard !roomCorrectionConfiguration.enabled else {
+                throw HeadphoneDeviceProfileError.speakerProcessingConflict("speaker room correction")
+            }
+            guard !speakerIRConfiguration.enabled else {
+                throw HeadphoneDeviceProfileError.speakerProcessingConflict("Speaker IR")
+            }
+            headphoneSnapshot = try headphone.makeRealtimeSnapshot(sampleRate: output.nominalSampleRate)
+        }
+
         let sameDeviceOutputPlan: SameDeviceOutputRoutePlan?
         let aggregateDeviceOutputPlan: AggregateDeviceOutputRoutePlan?
         if let routing = multiOutputRoutingConfiguration, routing.enabled {
@@ -2697,6 +2894,7 @@ final class AudioIOEngine: ObservableObject {
             speakerBusSplitterSnapshot: speakerBusSplitterSnapshot,
             speakerDriverProcessingSnapshot: speakerDriverProcessingSnapshot
         )
+        try session.configureHeadphoneDSP(headphoneSnapshot)
         activeEQFIRProgram = nil
         nextEQFIRProgramSlot = 0
         activeRoomCorrectionProgram = nil
@@ -2776,6 +2974,15 @@ final class AudioIOEngine: ObservableObject {
             session.stop(fadeOut: fadeOut)
             nChannelTransportSession = nil
         }
+        if let session = binauralHeadphoneTransportSession {
+            let counters = session.counters()
+            lifetimeArchivedCounters = lifetimeArchivedCounters + counters
+            lifetimeArchivedCounters.bufferedFrames = 0
+            processingSessionArchivedCounters = processingSessionArchivedCounters + counters
+            processingSessionArchivedCounters.bufferedFrames = 0
+            session.stop(fadeOut: fadeOut)
+            binauralHeadphoneTransportSession = nil
+        }
         activeEQFIRProgram = nil
         activeRoomCorrectionProgram = nil
         activeSpeakerIRProgram = nil
@@ -2793,6 +3000,10 @@ final class AudioIOEngine: ObservableObject {
         do { try refreshOutputDevices() } catch { return }
         guard let selectedUID = routeConfiguration.selectedOutputUID else { return }
         let selectedIsPresent = outputDevices.contains { $0.uid == selectedUID }
+        let spatialSourceUID = headphoneDeviceProfileConfiguration?.spatialMode == .virtualSpeakers
+            ? (headphoneDeviceProfileConfiguration?.programSourceDeviceUID ?? selectedUID)
+            : selectedUID
+        let spatialSourceIsPresent = outputDevices.contains { $0.uid == spatialSourceUID }
 
         if !selectedIsPresent {
             masterVolumeController.stopMonitoring()
@@ -2801,7 +3012,8 @@ final class AudioIOEngine: ObservableObject {
             try? syncMasterVolumeMonitorToSelectedOutput()
         }
 
-        if !selectedIsPresent && (lifecycle.state == .running || lifecycle.state == .reconfiguring) {
+        if (!selectedIsPresent || !spatialSourceIsPresent)
+            && (lifecycle.state == .running || lifecycle.state == .reconfiguring) {
             beginOutputRecovery()
             return
         }

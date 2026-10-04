@@ -111,6 +111,7 @@ struct PlaybackSystemState: Codable, Equatable, Sendable {
     var roomCorrectionCalibration: RoomCorrectionCalibrationSummary?
     var outputRouting: MultiOutputRoutingConfiguration?
     var outputDeviceProfile: OutputDeviceProfileConfiguration?
+    var headphoneDeviceProfile: HeadphoneDeviceProfileConfiguration?
     var speakerDriverProcessing: SpeakerDriverProcessingConfiguration?
     var speakerIR: SpeakerIRConfiguration
 
@@ -124,6 +125,7 @@ struct PlaybackSystemState: Codable, Equatable, Sendable {
         roomCorrectionCalibration: RoomCorrectionCalibrationSummary? = nil,
         outputRouting: MultiOutputRoutingConfiguration? = nil,
         outputDeviceProfile: OutputDeviceProfileConfiguration? = nil,
+        headphoneDeviceProfile: HeadphoneDeviceProfileConfiguration? = nil,
         speakerDriverProcessing: SpeakerDriverProcessingConfiguration? = nil,
         speakerIR: SpeakerIRConfiguration = SpeakerIRConfiguration()
     ) {
@@ -136,6 +138,7 @@ struct PlaybackSystemState: Codable, Equatable, Sendable {
         self.roomCorrectionCalibration = roomCorrectionCalibration
         self.outputRouting = outputRouting
         self.outputDeviceProfile = outputDeviceProfile
+        self.headphoneDeviceProfile = headphoneDeviceProfile
         self.speakerDriverProcessing = speakerDriverProcessing
         self.speakerIR = speakerIR
     }
@@ -521,6 +524,9 @@ final class ProductProfileController: ObservableObject {
     var selectedSystemOutputDeviceProfile: OutputDeviceProfileConfiguration? {
         selectedSystemProfile?.state.outputDeviceProfile
     }
+    var selectedSystemHeadphoneDeviceProfile: HeadphoneDeviceProfileConfiguration? {
+        selectedSystemProfile?.state.headphoneDeviceProfile
+    }
     var canOverwriteSelectedContentPreset: Bool { selectedContentPreset != nil }
 
     var selectedContentPresetIsDirty: Bool {
@@ -694,6 +700,10 @@ final class ProductProfileController: ObservableObject {
            systemProfiles[index].state.outputDeviceProfile?.enabled == true {
             throw OutputDeviceProfileError.legacyPhysicalRoutingConflict
         }
+        if configuration?.enabled == true,
+           systemProfiles[index].state.headphoneDeviceProfile?.enabled == true {
+            throw HeadphoneDeviceProfileError.legacyPhysicalRoutingConflict
+        }
 
         let previousEngineConfiguration = engine.multiOutputRoutingConfiguration
         let previousState = systemProfiles[index].state
@@ -724,6 +734,9 @@ final class ProductProfileController: ObservableObject {
             if systemProfiles[index].state.outputRouting?.enabled == true {
                 throw OutputDeviceProfileError.legacyPhysicalRoutingConflict
             }
+            if systemProfiles[index].state.headphoneDeviceProfile?.enabled == true {
+                throw HeadphoneDeviceProfileError.speakerProfileConflict
+            }
         }
 
         let previousEngineConfiguration = engine.outputDeviceProfileConfiguration
@@ -736,6 +749,36 @@ final class ProductProfileController: ObservableObject {
         } catch {
             systemProfiles[index].state = previousState
             try? engine.replaceOutputDeviceProfileConfiguration(previousEngineConfiguration)
+            lastErrorDescription = error.localizedDescription
+            throw error
+        }
+    }
+
+    func replaceSelectedSystemHeadphoneDeviceProfile(
+        _ configuration: HeadphoneDeviceProfileConfiguration?
+    ) throws {
+        guard let selectedSystemProfileID,
+              let index = systemProfiles.firstIndex(where: { $0.id == selectedSystemProfileID }) else {
+            throw ProductProfileError.selectedSystemProfileRequired
+        }
+        if configuration?.enabled == true {
+            if systemProfiles[index].state.outputDeviceProfile?.enabled == true {
+                throw HeadphoneDeviceProfileError.speakerProfileConflict
+            }
+            if systemProfiles[index].state.outputRouting?.enabled == true {
+                throw HeadphoneDeviceProfileError.legacyPhysicalRoutingConflict
+            }
+        }
+        let previousEngineConfiguration = engine.headphoneDeviceProfileConfiguration
+        let previousState = systemProfiles[index].state
+        do {
+            try engine.replaceHeadphoneDeviceProfileConfiguration(configuration)
+            systemProfiles[index].state.headphoneDeviceProfile = configuration
+            try persistThrowing()
+            lastErrorDescription = nil
+        } catch {
+            systemProfiles[index].state = previousState
+            try? engine.replaceHeadphoneDeviceProfileConfiguration(previousEngineConfiguration)
             lastErrorDescription = error.localizedDescription
             throw error
         }
@@ -896,6 +939,7 @@ final class ProductProfileController: ObservableObject {
             roomCorrectionCalibration: selectedSystemProfile?.state.roomCorrectionCalibration,
             outputRouting: engine.multiOutputRoutingConfiguration,
             outputDeviceProfile: engine.outputDeviceProfileConfiguration,
+            headphoneDeviceProfile: engine.headphoneDeviceProfileConfiguration,
             speakerDriverProcessing: engine.speakerDriverProcessingConfiguration.isNeutral
                 ? nil
                 : engine.speakerDriverProcessingConfiguration,
@@ -933,6 +977,14 @@ final class ProductProfileController: ObservableObject {
             if state.outputRouting?.enabled == true, state.outputDeviceProfile?.enabled == true {
                 throw OutputDeviceProfileError.legacyPhysicalRoutingConflict
             }
+            if state.headphoneDeviceProfile?.enabled == true {
+                if state.outputRouting?.enabled == true {
+                    throw HeadphoneDeviceProfileError.legacyPhysicalRoutingConflict
+                }
+                if state.outputDeviceProfile?.enabled == true {
+                    throw HeadphoneDeviceProfileError.speakerProfileConflict
+                }
+            }
             if let outputDeviceProfile = state.outputDeviceProfile, outputDeviceProfile.enabled {
                 try outputDeviceProfile.validateStructure(
                     bassManagementEnabled: state.bassManagement.enabled
@@ -944,6 +996,7 @@ final class ProductProfileController: ObservableObject {
             // Remove the previous system's semantic routing contract before
             // applying bass/routing state owned by the target system. The target
             // profile is reinstalled only after its bass-management dependency.
+            try engine.replaceHeadphoneDeviceProfileConfiguration(nil)
             try engine.replaceOutputDeviceProfileConfiguration(nil)
             try engine.replaceMultiOutputRoutingConfiguration(state.outputRouting)
             try engine.replaceSpeakerDriverProcessingConfiguration(
@@ -955,6 +1008,7 @@ final class ProductProfileController: ObservableObject {
             try engine.replaceGainConfiguration(gain)
             try engine.replaceRoomCorrectionConfiguration(state.roomCorrection)
             try engine.replaceSpeakerIRConfiguration(state.speakerIR)
+            try engine.replaceHeadphoneDeviceProfileConfiguration(state.headphoneDeviceProfile)
         } catch {
             if engine.lifecycleState == .idle,
                engine.routeConfiguration.selectedOutputUID != previousOutputUID {
@@ -962,6 +1016,7 @@ final class ProductProfileController: ObservableObject {
             }
             let playback = previous.playback.applying(to: engine.playbackControlConfiguration)
             let gain = previous.composingGain(over: engine.gainConfiguration)
+            try? engine.replaceHeadphoneDeviceProfileConfiguration(nil)
             try? engine.replaceOutputDeviceProfileConfiguration(nil)
             try? engine.replaceMultiOutputRoutingConfiguration(previous.outputRouting)
             try? engine.replaceSpeakerDriverProcessingConfiguration(
@@ -973,6 +1028,7 @@ final class ProductProfileController: ObservableObject {
             try? engine.replaceGainConfiguration(gain)
             try? engine.replaceRoomCorrectionConfiguration(previous.roomCorrection)
             try? engine.replaceSpeakerIRConfiguration(previous.speakerIR)
+            try? engine.replaceHeadphoneDeviceProfileConfiguration(previous.headphoneDeviceProfile)
             throw error
         }
     }

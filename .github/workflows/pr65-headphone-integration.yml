@@ -1,0 +1,42 @@
+name: PR65 Headphone + Binaural Integration
+
+on:
+  push:
+    branches:
+      - feature/pr65-headphone-binaural-integration
+  pull_request:
+    branches:
+      - feature/pr64-multichannel-calibration-workflow
+  workflow_dispatch:
+
+jobs:
+  validate-portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate PR56 headphone DSP core
+        run: python3 ci/validate_pr56_headphone_dsp.py
+      - name: Validate PR57 binaural renderer core
+        run: python3 ci/validate_pr57_binaural_renderer.py
+      - name: Validate PR65 headphone + binaural product integration
+        run: python3 ci/validate_pr65_headphone_integration.py
+
+  validate-macos-integration:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate PR56 headphone DSP core
+        run: python3 ci/validate_pr56_headphone_dsp.py
+      - name: Validate PR57 binaural renderer core
+        run: python3 ci/validate_pr57_binaural_renderer.py
+      - name: Validate PR65 headphone + binaural product integration
+        run: python3 ci/validate_pr65_headphone_integration.py
+      - name: Build arm64 app with live headphone and virtual-speaker modes
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
