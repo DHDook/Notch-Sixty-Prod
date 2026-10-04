@@ -79,6 +79,11 @@ struct N60RenderKernel {
     N60DynamicsRuntime dynamicsRuntime;
     N60SpectralDenoiserRuntime *denoiserRuntime;
     N60ProtectionRuntime *protectionRuntime;
+    // Optional immutable headphone hardware stage. Prepared off realtime and
+    // processed immediately before protection so true-peak safety remains final.
+    N60HeadphoneDSPRuntime *headphoneDSPRuntime;
+    N60HeadphoneDSPSnapshot headphoneDSPSnapshot;
+    bool headphoneDSPEnabled;
     N60PartitionedConvolver *convolver;
     N60PartitionedConvolver *roomCorrectionConvolver;
     N60PartitionedConvolver *speakerIRConvolver;
@@ -1111,8 +1116,17 @@ N60RenderKernel *N60RenderKernelCreate(void) {
         free(kernel);
         return NULL;
     }
+    kernel->headphoneDSPRuntime = N60HeadphoneDSPRuntimeCreate();
+    if (kernel->headphoneDSPRuntime == NULL) {
+        N60ProtectionRuntimeDestroy(kernel->protectionRuntime);
+        N60PartitionedConvolverDestroy(kernel->roomCorrectionConvolver);
+        N60PartitionedConvolverDestroy(kernel->convolver);
+        free(kernel);
+        return NULL;
+    }
     kernel->denoiserRuntime = N60SpectralDenoiserCreate();
     if (kernel->denoiserRuntime == NULL) {
+        N60HeadphoneDSPRuntimeDestroy(kernel->headphoneDSPRuntime);
         N60ProtectionRuntimeDestroy(kernel->protectionRuntime);
         N60PartitionedConvolverDestroy(kernel->roomCorrectionConvolver);
         N60PartitionedConvolverDestroy(kernel->convolver);
@@ -1122,6 +1136,7 @@ N60RenderKernel *N60RenderKernelCreate(void) {
     kernel->speakerIRConvolver = N60PartitionedConvolverCreate();
     if (kernel->speakerIRConvolver == NULL) {
         N60SpectralDenoiserDestroy(kernel->denoiserRuntime);
+        N60HeadphoneDSPRuntimeDestroy(kernel->headphoneDSPRuntime);
         N60ProtectionRuntimeDestroy(kernel->protectionRuntime);
         N60PartitionedConvolverDestroy(kernel->roomCorrectionConvolver);
         N60PartitionedConvolverDestroy(kernel->convolver);
@@ -1151,6 +1166,7 @@ N60RenderKernel *N60RenderKernelCreate(void) {
 void N60RenderKernelDestroy(N60RenderKernel *kernel) {
     if (kernel == NULL) return;
     N60SpectralDenoiserDestroy(kernel->denoiserRuntime);
+    N60HeadphoneDSPRuntimeDestroy(kernel->headphoneDSPRuntime);
     N60ProtectionRuntimeDestroy(kernel->protectionRuntime);
     N60PartitionedConvolverDestroy(kernel->speakerIRConvolver);
     N60PartitionedConvolverDestroy(kernel->roomCorrectionConvolver);
@@ -1164,6 +1180,15 @@ void N60RenderKernelReset(N60RenderKernel *kernel) {
     reset_crossover_runtime(&kernel->crossoverRuntime, N60CrossoverSnapshotMakeBypassed());
     N60DynamicsRuntimeReset(&kernel->dynamicsRuntime);
     N60SpectralDenoiserReset(kernel->denoiserRuntime);
+    if (kernel->headphoneDSPRuntime != NULL) {
+        if (kernel->headphoneDSPEnabled) {
+            (void)N60HeadphoneDSPRuntimePrepare(
+                kernel->headphoneDSPRuntime, &kernel->headphoneDSPSnapshot
+            );
+        } else {
+            memset(kernel->headphoneDSPRuntime, 0, sizeof(*kernel->headphoneDSPRuntime));
+        }
+    }
     N60ProtectionRuntimeReset(kernel->protectionRuntime);
     N60PartitionedConvolverReset(kernel->convolver);
     N60PartitionedConvolverReset(kernel->roomCorrectionConvolver);
@@ -1220,6 +1245,29 @@ void N60RenderKernelReset(N60RenderKernel *kernel) {
     atomic_store_explicit(&kernel->outputRMSLeftBits, 0, memory_order_relaxed);
     atomic_store_explicit(&kernel->outputRMSRightBits, 0, memory_order_relaxed);
     atomic_store_explicit(&kernel->outputOverRangeSamples, 0, memory_order_relaxed);
+}
+
+bool N60RenderKernelConfigureHeadphoneDSP(
+    N60RenderKernel *kernel,
+    const N60HeadphoneDSPSnapshot *snapshot
+) {
+    if (kernel == NULL || snapshot == NULL || kernel->headphoneDSPRuntime == NULL
+        || !N60HeadphoneDSPSnapshotIsValid(snapshot)) {
+        return false;
+    }
+    if (!N60HeadphoneDSPRuntimePrepare(kernel->headphoneDSPRuntime, snapshot)) return false;
+    kernel->headphoneDSPSnapshot = *snapshot;
+    kernel->headphoneDSPEnabled = true;
+    return true;
+}
+
+void N60RenderKernelClearHeadphoneDSP(N60RenderKernel *kernel) {
+    if (kernel == NULL) return;
+    kernel->headphoneDSPEnabled = false;
+    memset(&kernel->headphoneDSPSnapshot, 0, sizeof(kernel->headphoneDSPSnapshot));
+    if (kernel->headphoneDSPRuntime != NULL) {
+        memset(kernel->headphoneDSPRuntime, 0, sizeof(*kernel->headphoneDSPRuntime));
+    }
 }
 
 bool N60RenderKernelPrepareConvolutionProgram(
@@ -1489,6 +1537,22 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
         float outputGain = next_gain_value(&kernel->outputGain);
         left *= outputGain;
         right *= outputGain;
+
+        if (kernel->headphoneDSPEnabled) {
+            float headphoneLeft = 0.0f;
+            float headphoneRight = 0.0f;
+            if (N60HeadphoneDSPProcessStereoFrame(
+                    kernel->headphoneDSPRuntime,
+                    &kernel->headphoneDSPSnapshot,
+                    left, right, &headphoneLeft, &headphoneRight)) {
+                left = headphoneLeft;
+                right = headphoneRight;
+            } else {
+                // Fail closed if an impossible runtime/profile mismatch occurs.
+                left = 0.0f;
+                right = 0.0f;
+            }
+        }
 
         N60ProtectionProcessStereoFrame(
             kernel->protectionRuntime,

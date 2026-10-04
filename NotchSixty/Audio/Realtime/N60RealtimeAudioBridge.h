@@ -184,6 +184,12 @@ bool N60RealtimeAudioBridgePublishDSPGraph(
     N60RealtimeAudioBridge * _Nonnull bridge,
     N60DSPGraphSnapshot snapshot
 );
+// Control-plane only. Configure/clear only before callbacks start or after stop.
+bool N60RealtimeAudioBridgeConfigureHeadphoneDSP(
+    N60RealtimeAudioBridge * _Nonnull bridge,
+    N60HeadphoneDSPSnapshot snapshot
+);
+void N60RealtimeAudioBridgeClearHeadphoneDSP(N60RealtimeAudioBridge * _Nonnull bridge);
 N60RealtimeAudioBridgeSnapshot N60RealtimeAudioBridgeGetSnapshot(const N60RealtimeAudioBridge * _Nonnull bridge);
 N60RenderKernelDiagnostics N60RealtimeAudioBridgeGetRenderDiagnostics(
     const N60RealtimeAudioBridge * _Nonnull bridge

@@ -792,6 +792,19 @@ bool N60RealtimeAudioBridgePublishDSPGraph(
     return N60RenderKernelPublishSnapshot(bridge->renderKernel, snapshot);
 }
 
+bool N60RealtimeAudioBridgeConfigureHeadphoneDSP(
+    N60RealtimeAudioBridge *bridge,
+    N60HeadphoneDSPSnapshot snapshot
+) {
+    if (bridge == NULL || bridge->renderKernel == NULL) return false;
+    return N60RenderKernelConfigureHeadphoneDSP(bridge->renderKernel, &snapshot);
+}
+
+void N60RealtimeAudioBridgeClearHeadphoneDSP(N60RealtimeAudioBridge *bridge) {
+    if (bridge == NULL || bridge->renderKernel == NULL) return;
+    N60RenderKernelClearHeadphoneDSP(bridge->renderKernel);
+}
+
 N60RealtimeAudioBridgeSnapshot N60RealtimeAudioBridgeGetSnapshot(
     const N60RealtimeAudioBridge *bridge
 ) {

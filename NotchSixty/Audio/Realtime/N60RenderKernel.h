@@ -11,6 +11,7 @@
 #include "N60FractionalDelay.h"
 #include "N60MixedPhase.h"
 #include "N60Spatial.h"
+#include "N60HeadphoneDSP.h"
 #include "N60Protection.h"
 
 #ifdef __cplusplus
@@ -357,6 +358,12 @@ bool N60DSPGraphSnapshotSetSpeakerIRProgram(
 );
 
 N60RenderKernel * _Nullable N60RenderKernelCreate(void);
+// Control-plane only. Configure/clear only while callbacks are stopped.
+bool N60RenderKernelConfigureHeadphoneDSP(
+    N60RenderKernel * _Nonnull kernel,
+    const N60HeadphoneDSPSnapshot * _Nonnull snapshot
+);
+void N60RenderKernelClearHeadphoneDSP(N60RenderKernel * _Nonnull kernel);
 void N60RenderKernelDestroy(N60RenderKernel * _Nonnull kernel);
 void N60RenderKernelReset(N60RenderKernel * _Nonnull kernel);
 bool N60RenderKernelPrepareConvolutionProgram(
