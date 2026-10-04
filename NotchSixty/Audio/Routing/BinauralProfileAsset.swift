@@ -76,15 +76,35 @@ struct BinauralProfileAsset: Codable, Equatable, Sendable, Identifiable {
     }
 
     func prepare(for layout: OutputProgramLayout) throws -> PreparedBinauralProfile {
+        try prepare(
+            for: layout,
+            headPose: N60HeadPose(yawDegrees: 0, pitchDegrees: 0, rollDegrees: 0)
+        )
+    }
+
+    func prepare(
+        for layout: OutputProgramLayout,
+        headPose: N60HeadPose
+    ) throws -> PreparedBinauralProfile {
         try validate()
-        var descriptor = N60BinauralProfileDescriptorMake(
+        var worldDescriptor = N60BinauralProfileDescriptorMake(
             sampleRate,
             layout.realtimeLayout,
             kind.realtimeCType,
             UInt32(tapCount)
         )
-        descriptor.declaredLatencyFrames = UInt32(declaredLatencyFrames)
-        guard N60BinauralProfileDescriptorIsValid(&descriptor, UInt32(N60_BINAURAL_MAX_TAPS)) else {
+        worldDescriptor.declaredLatencyFrames = UInt32(declaredLatencyFrames)
+        guard N60BinauralProfileDescriptorIsValid(
+            &worldDescriptor, UInt32(N60_BINAURAL_MAX_TAPS)
+        ) else {
+            throw BinauralProfileAssetError.descriptorCompilationFailed
+        }
+        var descriptor = N60BinauralProfileDescriptor()
+        guard N60BinauralProfileDescriptorApplyHeadPose(
+            &worldDescriptor, headPose, &descriptor
+        ), N60BinauralProfileDescriptorIsValid(
+            &descriptor, UInt32(N60_BINAURAL_MAX_TAPS)
+        ) else {
             throw BinauralProfileAssetError.descriptorCompilationFailed
         }
 
@@ -93,14 +113,16 @@ struct BinauralProfileAsset: Codable, Equatable, Sendable, Identifiable {
         left.reserveCapacity(layout.roles.count * tapCount)
         right.reserveCapacity(layout.roles.count * tapCount)
 
-        for role in layout.roles {
-            let target = N60BinauralDefaultPositionForRole(role.realtimeCType)
+        for channel in 0..<layout.roles.count {
+            let target = descriptor.sources[channel]
             guard let measurement = nearestMeasurement(
                 azimuthDegrees: target.azimuthDegrees,
                 elevationDegrees: target.elevationDegrees,
                 distanceMeters: target.distanceMeters
             ) else {
-                throw BinauralProfileAssetError.measurementUnavailable(role.displayName)
+                throw BinauralProfileAssetError.measurementUnavailable(
+                    layout.roles[channel].displayName
+                )
             }
             left.append(contentsOf: measurement.leftIR)
             right.append(contentsOf: measurement.rightIR)

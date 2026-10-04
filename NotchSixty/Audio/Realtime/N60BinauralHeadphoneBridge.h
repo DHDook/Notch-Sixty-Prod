@@ -11,7 +11,7 @@
 #include <string.h>
 
 #include "N60ProgramTransport.h"
-#include "N60BinauralRenderer.h"
+#include "N60HeadTrackedBinauralRuntime.h"
 #include "N60HeadphoneDSP.h"
 #include "N60Protection.h"
 
@@ -31,11 +31,12 @@ typedef struct {
     uint64_t algorithmicLatencyFrames;
     N60ProgramTransportSnapshot transport;
     N60ProtectionTelemetry protection;
+    N60HeadTrackedBinauralSnapshot headTracking;
 } N60BinauralHeadphoneBridgeSnapshot;
 
 typedef struct N60BinauralHeadphoneBridge {
     N60ProgramTransport * _Nullable transport;
-    N60BinauralRenderer * _Nullable binauralRenderer;
+    N60HeadTrackedBinauralRuntime * _Nullable binauralRuntime;
     N60HeadphoneDSPRuntime * _Nullable headphoneRuntime;
     N60ProtectionRuntime * _Nullable protectionRuntime;
     N60ProgramInputMap inputMap;
@@ -134,25 +135,21 @@ static inline N60BinauralHeadphoneBridge * _Nullable N60BinauralHeadphoneBridgeC
     bridge->transport = N60ProgramTransportCreate(
         transportCapacityFrames, binauralDescriptor.programLayout
     );
-    bridge->binauralRenderer = N60BinauralRendererCreate();
+    bridge->binauralRuntime = N60HeadTrackedBinauralRuntimeCreate(
+        binauralDescriptor, leftIRs, rightIRs
+    );
     bridge->headphoneRuntime = N60HeadphoneDSPRuntimeCreate();
     bridge->protectionRuntime = N60ProtectionRuntimeCreate();
 
     if (bridge->transport == NULL
-        || bridge->binauralRenderer == NULL
+        || bridge->binauralRuntime == NULL
         || bridge->headphoneRuntime == NULL
         || bridge->protectionRuntime == NULL
-        || !N60BinauralRendererPrepareProfile(
-            bridge->binauralRenderer,
-            binauralDescriptor,
-            leftIRs,
-            rightIRs
-        )
         || !N60HeadphoneDSPRuntimePrepare(
             bridge->headphoneRuntime, &headphoneSnapshot
         )) {
         N60ProgramTransportDestroy(bridge->transport);
-        N60BinauralRendererDestroy(bridge->binauralRenderer);
+        N60HeadTrackedBinauralRuntimeDestroy(bridge->binauralRuntime);
         N60HeadphoneDSPRuntimeDestroy(bridge->headphoneRuntime);
         N60ProtectionRuntimeDestroy(bridge->protectionRuntime);
         free(bridge);
@@ -185,11 +182,11 @@ static inline void N60BinauralHeadphoneBridgeDestroy(
 ) {
     if (bridge == NULL) return;
     N60ProgramTransportDestroy(bridge->transport);
-    N60BinauralRendererDestroy(bridge->binauralRenderer);
+    N60HeadTrackedBinauralRuntimeDestroy(bridge->binauralRuntime);
     N60HeadphoneDSPRuntimeDestroy(bridge->headphoneRuntime);
     N60ProtectionRuntimeDestroy(bridge->protectionRuntime);
     bridge->transport = NULL;
-    bridge->binauralRenderer = NULL;
+    bridge->binauralRuntime = NULL;
     bridge->headphoneRuntime = NULL;
     bridge->protectionRuntime = NULL;
     free(bridge);
@@ -201,7 +198,7 @@ static inline bool N60BinauralHeadphoneBridgeReset(
 ) {
     if (bridge == NULL
         || bridge->transport == NULL
-        || bridge->binauralRenderer == NULL
+        || bridge->binauralRuntime == NULL
         || bridge->headphoneRuntime == NULL
         || bridge->protectionRuntime == NULL
         || !N60HeadphoneDSPRuntimePrepare(
@@ -210,7 +207,7 @@ static inline bool N60BinauralHeadphoneBridgeReset(
         return false;
     }
     N60ProgramTransportReset(bridge->transport);
-    N60BinauralRendererResetRuntime(bridge->binauralRenderer);
+    if (!N60HeadTrackedBinauralRuntimeReset(bridge->binauralRuntime)) return false;
     N60ProtectionRuntimeReset(bridge->protectionRuntime);
     bridge->startupFadeRemaining = 0u;
     atomic_store_explicit(
@@ -240,11 +237,40 @@ static inline void N60BinauralHeadphoneBridgeSetOutputGain(
     );
 }
 
+static inline bool N60BinauralHeadphoneBridgeCanPrepareTrackedGeneration(
+    const N60BinauralHeadphoneBridge * _Nullable bridge
+) {
+    return bridge != NULL
+        && bridge->binauralRuntime != NULL
+        && N60HeadTrackedBinauralRuntimeCanPrepareGeneration(bridge->binauralRuntime);
+}
+
+static inline bool N60BinauralHeadphoneBridgePrepareTrackedGeneration(
+    N60BinauralHeadphoneBridge * _Nonnull bridge,
+    N60BinauralProfileDescriptor descriptor,
+    const float * _Nonnull leftIRs,
+    const float * _Nonnull rightIRs,
+    N60HeadPose pose,
+    uint32_t warmupFrames,
+    uint32_t crossfadeFrames
+) {
+    if (bridge == NULL || bridge->binauralRuntime == NULL) return false;
+    return N60HeadTrackedBinauralRuntimePrepareGeneration(
+        bridge->binauralRuntime,
+        descriptor,
+        leftIRs,
+        rightIRs,
+        pose,
+        warmupFrames,
+        crossfadeFrames
+    );
+}
+
 static inline uint64_t N60BinauralHeadphoneBridgeLatencyFrames(
     const N60BinauralHeadphoneBridge * _Nullable bridge
 ) {
-    if (bridge == NULL || bridge->binauralRenderer == NULL) return 0u;
-    return N60BinauralRendererLatencyFrames(bridge->binauralRenderer)
+    if (bridge == NULL || bridge->binauralRuntime == NULL) return 0u;
+    return N60HeadTrackedBinauralRuntimeLatencyFrames(bridge->binauralRuntime)
         + (uint64_t)N60ProtectionSnapshotLatencyFrames(&bridge->protectionSnapshot);
 }
 
@@ -268,6 +294,7 @@ static inline N60BinauralHeadphoneBridgeSnapshot N60BinauralHeadphoneBridgeGetSn
         .algorithmicLatencyFrames = N60BinauralHeadphoneBridgeLatencyFrames(bridge),
         .transport = N60ProgramTransportGetSnapshot(bridge->transport),
         .protection = N60ProtectionRuntimeTelemetry(bridge->protectionRuntime),
+        .headTracking = N60HeadTrackedBinauralRuntimeGetSnapshot(bridge->binauralRuntime),
     };
 }
 
@@ -355,7 +382,7 @@ static inline OSStatus N60BinauralHeadphoneOutputIOProc(
     N60BinauralHeadphoneBridge *bridge = (N60BinauralHeadphoneBridge *)inClientData;
     if (bridge == NULL
         || bridge->transport == NULL
-        || bridge->binauralRenderer == NULL
+        || bridge->binauralRuntime == NULL
         || bridge->headphoneRuntime == NULL
         || bridge->protectionRuntime == NULL
         || outOutputData == NULL) {
@@ -393,6 +420,7 @@ static inline OSStatus N60BinauralHeadphoneOutputIOProc(
         atomic_load_explicit(&bridge->outputGainBits, memory_order_acquire)
     );
     N60ProtectionRuntimeBeginBuffer(bridge->protectionRuntime);
+    N60HeadTrackedBinauralRuntimeBeginBuffer(bridge->binauralRuntime);
 
     for (uint32_t frameIndex = 0; frameIndex < frameCount; ++frameIndex) {
         N60ProgramTransportFrame program = {0};
@@ -404,8 +432,8 @@ static inline OSStatus N60BinauralHeadphoneOutputIOProc(
 
         float left = 0.0f;
         float right = 0.0f;
-        bool rendered = N60BinauralRendererProcessFrame(
-            bridge->binauralRenderer,
+        bool rendered = N60HeadTrackedBinauralRuntimeProcessFrame(
+            bridge->binauralRuntime,
             program.channels,
             bridge->binauralDescriptor.programLayout.channelCount,
             &left,
