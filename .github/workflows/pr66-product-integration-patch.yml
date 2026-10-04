@@ -1,0 +1,75 @@
+name: PR66 Product Integration Patch
+
+on:
+  push:
+    branches:
+      - feature/pr66-head-tracking-spatial-runtime
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Apply asserted product integration
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              s = p.read_text()
+              count = s.count(old)
+              if count != 1:
+                  raise SystemExit(f"expected one anchor in {path}, got {count}: {old[:100]!r}")
+              p.write_text(s.replace(old, new, 1))
+
+          profile = "NotchSixty/Audio/Routing/HeadphoneDeviceProfileConfiguration.swift"
+          replace_once(profile,
+              '    case programSourceChannelCountMismatch(expected: UInt32, actual: UInt32)\n    case speakerProfileConflict\n',
+              '    case programSourceChannelCountMismatch(expected: UInt32, actual: UInt32)\n    case headTrackingRequiresVirtualSpeakers\n    case speakerProfileConflict\n')
+          replace_once(profile,
+              '        case .programSourceChannelCountMismatch(let expected, let actual):\n            return "Virtual Speakers expects \\(expected) program channels, but the selected source exposes \\(actual)."\n        case .speakerProfileConflict:\n',
+              '        case .programSourceChannelCountMismatch(let expected, let actual):\n            return "Virtual Speakers expects \\(expected) program channels, but the selected source exposes \\(actual)."\n        case .headTrackingRequiresVirtualSpeakers:\n            return "Head tracking is available only in Virtual Speakers mode."\n        case .speakerProfileConflict:\n')
+          replace_once(profile,
+              '    var programLayout: OutputProgramLayout = .stereo\n    var binauralProfile: BinauralProfileReference?\n',
+              '    var programLayout: OutputProgramLayout = .stereo\n    var binauralProfile: BinauralProfileReference?\n    var headTracking: HeadTrackingConfiguration?\n')
+          replace_once(profile,
+              '''        if spatialMode == .virtualSpeakers {\n            guard let binauralProfile else {\n                throw HeadphoneDeviceProfileError.binauralProfileRequired\n            }\n            try binauralProfile.validate()\n            guard abs(binauralProfile.sampleRate - sampleRate) < 0.5 else {\n                throw HeadphoneDeviceProfileError.binauralProfileSampleRateMismatch(\n                    profile: binauralProfile.sampleRate,\n                    output: sampleRate\n                )\n            }\n        }\n''',
+              '''        if spatialMode == .virtualSpeakers {\n            guard let binauralProfile else {\n                throw HeadphoneDeviceProfileError.binauralProfileRequired\n            }\n            try binauralProfile.validate()\n            guard abs(binauralProfile.sampleRate - sampleRate) < 0.5 else {\n                throw HeadphoneDeviceProfileError.binauralProfileSampleRateMismatch(\n                    profile: binauralProfile.sampleRate,\n                    output: sampleRate\n                )\n            }\n        }\n        if let headTracking {\n            try headTracking.validate()\n            if headTracking.enabled && spatialMode != .virtualSpeakers {\n                throw HeadphoneDeviceProfileError.headTrackingRequiresVirtualSpeakers\n            }\n        }\n''')
+
+          engine = "NotchSixty/Audio/AudioIOEngine.swift"
+          replace_once(engine,
+              '    private var binauralHeadphoneTransportSession: CoreAudioBinauralHeadphoneTransportSession?\n    private var lifetimeArchivedCounters = AudioTransportCounters()\n',
+              '    private var binauralHeadphoneTransportSession: CoreAudioBinauralHeadphoneTransportSession?\n    private var headTrackingController: SpatialHeadTrackingController?\n    private var lifetimeArchivedCounters = AudioTransportCounters()\n')
+          replace_once(engine,
+              '    @Published private(set) var linearPhaseDesignInfo: N60LinearPhaseEQDesignInfo?\n    @Published private(set) var lastErrorDescription: String?\n',
+              '    @Published private(set) var linearPhaseDesignInfo: N60LinearPhaseEQDesignInfo?\n    @Published private(set) var headTrackingRuntimeStatus = HeadTrackingRuntimeStatus.disabled\n    @Published private(set) var lastErrorDescription: String?\n')
+          replace_once(engine,
+              '''        headphoneDeviceProfileConfiguration = configuration\n        lastErrorDescription = nil\n    }\n\n    func importNormalizedBinauralProfile''',
+              '''        headphoneDeviceProfileConfiguration = configuration\n        if configuration?.enabled == true,\n           configuration?.spatialMode == .virtualSpeakers,\n           configuration?.headTracking?.enabled == true {\n            headTrackingRuntimeStatus = .configuredStopped\n        } else {\n            headTrackingRuntimeStatus = .disabled\n        }\n        lastErrorDescription = nil\n    }\n\n    func recenterHeadTracking() {\n        headTrackingController?.recenter()\n    }\n\n    func importNormalizedBinauralProfile''')
+          replace_once(engine,
+              '''        activeSpeakerIRProgram = nil\n        linearPhaseDesignInfo = nil\n        binauralHeadphoneTransportSession = session\n    }\n\n    private func buildStereoTransport''',
+              '''        activeSpeakerIRProgram = nil\n        linearPhaseDesignInfo = nil\n        binauralHeadphoneTransportSession = session\n\n        if let tracking = profile.headTracking, tracking.enabled {\n            let controller = SpatialHeadTrackingController(\n                configuration: tracking,\n                asset: asset,\n                layout: profile.programLayout,\n                session: session\n            ) { [weak self] status in\n                Task { @MainActor [weak self] in\n                    self?.headTrackingRuntimeStatus = status\n                }\n            }\n            headTrackingController = controller\n            try controller.start()\n        } else {\n            headTrackingController = nil\n            headTrackingRuntimeStatus = .disabled\n        }\n    }\n\n    private func buildStereoTransport''')
+          replace_once(engine,
+              '''    private func tearDownTransport(fadeOut: Bool) {\n        if let session = transportSession {''',
+              '''    private func tearDownTransport(fadeOut: Bool) {\n        if let controller = headTrackingController {\n            controller.stop()\n            headTrackingController = nil\n        }\n        if headphoneDeviceProfileConfiguration?.enabled == true,\n           headphoneDeviceProfileConfiguration?.spatialMode == .virtualSpeakers,\n           headphoneDeviceProfileConfiguration?.headTracking?.enabled == true {\n            headTrackingRuntimeStatus = .configuredStopped\n        } else {\n            headTrackingRuntimeStatus = .disabled\n        }\n\n        if let session = transportSession {''')
+
+          ui = "NotchSixty/UI/ProductionHeadphoneWorkspace.swift"
+          replace_once(ui,
+              '''            Text("Notch Sixty currently imports its documented normalized two-ear HRTF/BRIR JSON boundary. Native AES69 .sofa files use HDF5 and are intentionally not parsed until that dependency receives an explicit license, sandbox and provenance review. The realtime renderer itself is SOFA-oriented and uses the same normalized measurements.")\n                .font(.caption)\n                .foregroundStyle(.secondary)\n''',
+              '''            Divider()\n            headTrackingControls\n\n            Text("Notch Sixty currently imports its documented normalized two-ear HRTF/BRIR JSON boundary. Native AES69 .sofa files use HDF5 and are intentionally not parsed until that dependency receives an explicit license, sandbox and provenance review. The realtime renderer itself is SOFA-oriented and uses the same normalized measurements.")\n                .font(.caption)\n                .foregroundStyle(.secondary)\n''')
+          replace_once(ui,
+              '''    private var deploymentCard: some View {''',
+              '''    private var headTrackingControls: some View {\n        VStack(alignment: .leading, spacing: 12) {\n            HStack {\n                VStack(alignment: .leading, spacing: 3) {\n                    Text("Head Tracking").font(.subheadline.bold())\n                    Text("Keeps virtual speakers fixed in space using supported Apple headphone motion sensors. If motion is unavailable, static Virtual Speakers remains active by default.")\n                        .font(.caption)\n                        .foregroundStyle(.secondary)\n                }\n                Spacer()\n                Toggle("Enabled", isOn: Binding(\n                    get: { draft.headTracking?.enabled ?? false },\n                    set: { enabled in\n                        var configuration = draft.headTracking ?? HeadTrackingConfiguration()\n                        configuration.enabled = enabled\n                        draft.headTracking = configuration\n                    }\n                ))\n                .toggleStyle(.switch)\n            }\n\n            if draft.headTracking?.enabled == true {\n                HStack {\n                    Label(engine.headTrackingRuntimeStatus.displayName, systemImage: engine.headTrackingRuntimeStatus.isActivelyTracking ? "gyroscope" : "headphones")\n                        .foregroundStyle(engine.headTrackingRuntimeStatus.isActivelyTracking ? .primary : .secondary)\n                    Spacer()\n                    Button("Recenter") { engine.recenterHeadTracking() }\n                        .buttonStyle(.glass)\n                        .disabled(!engine.headTrackingRuntimeStatus.isActivelyTracking)\n                }\n                if let detail = engine.headTrackingRuntimeStatus.detail {\n                    Text(detail)\n                        .font(.caption)\n                        .foregroundStyle(.secondary)\n                        .textSelection(.enabled)\n                }\n                Toggle("Fall back to static Virtual Speakers when tracking is unavailable", isOn: Binding(\n                    get: { draft.headTracking?.fallbackToStaticSpatial ?? true },\n                    set: { enabled in\n                        var configuration = draft.headTracking ?? HeadTrackingConfiguration()\n                        configuration.fallbackToStaticSpatial = enabled\n                        draft.headTracking = configuration\n                    }\n                ))\n                .toggleStyle(.switch)\n            }\n        }\n    }\n\n    private var deploymentCard: some View {''')
+          PY
+      - name: Commit product integration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add NotchSixty
+          git commit -m "PR66: integrate head tracking with profiles engine and UI"
+          git push
