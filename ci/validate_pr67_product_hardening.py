@@ -171,8 +171,8 @@ int main(void) {
     N60ProgramLaneMeterAccumulatorReset(&meter, 2u);
     const float first[2] = {1.0f, 0.5f};
     const float second[2] = {0.0f, -0.5f};
-    N60ProgramLaneMeterAccumulatorAccumulate(&meter, first);
-    N60ProgramLaneMeterAccumulatorAccumulate(&meter, second);
+    N60ProgramLaneMeterAccumulatorAccumulate(&meter, first, 2u);
+    N60ProgramLaneMeterAccumulatorAccumulate(&meter, second, 2u);
     N60ProgramLaneMeterReading reading = N60ProgramLaneMeterAccumulatorReading(&meter);
     assert(reading.channelCount == 2u);
     closef(reading.peak[0], 1.0f, 1.0e-6f);
