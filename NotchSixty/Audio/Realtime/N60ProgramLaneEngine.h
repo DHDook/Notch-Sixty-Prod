@@ -60,7 +60,7 @@ typedef struct {
 
 typedef struct N60ProgramLaneRuntime {
     N60BiquadState eqStates[N60_MAX_PROGRAM_CHANNELS][N60_PROGRAM_LANE_MAX_EQ_SECTIONS];
-    float *delayBuffers[N60_MAX_PROGRAM_CHANNELS];
+    float * _Nullable delayBuffers[N60_MAX_PROGRAM_CHANNELS];
     uint32_t delayWriteIndex;
     N60ProgramChannelLayout preparedLayout;
     bool prepared;
@@ -333,7 +333,7 @@ static inline bool N60ProgramLaneGraphSetGroupMute(
 }
 
 static inline N60ProgramLaneRuntime * _Nullable N60ProgramLaneRuntimeCreate(void) {
-    N60ProgramLaneRuntime *runtime = (N60ProgramLaneRuntime *)calloc(1u, sizeof(N60ProgramLaneRuntime));
+    N60ProgramLaneRuntime * _Nullable runtime = (N60ProgramLaneRuntime *)calloc(1u, sizeof(N60ProgramLaneRuntime));
     if (runtime == NULL) return NULL;
 
     for (uint32_t channel = 0; channel < N60_MAX_PROGRAM_CHANNELS; ++channel) {
