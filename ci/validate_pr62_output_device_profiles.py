@@ -11,6 +11,7 @@ import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PROFILE = ROOT / "NotchSixty/Audio/Routing/OutputDeviceProfileConfiguration.swift"
+CALIBRATION = ROOT / "NotchSixty/Audio/Routing/OutputDeviceCalibration.swift"
 PRODUCT = ROOT / "NotchSixty/State/ProductProfiles.swift"
 PROJECT = ROOT / "NotchSixty.xcodeproj/project.pbxproj"
 BRIDGING = ROOT / "NotchSixty/Audio/Realtime/NotchSixty-Bridging-Header.h"
@@ -256,6 +257,7 @@ print("PR62 Swift behavior harness passed")
             "-Xcc",
             f"-I{REALTIME}",
             str(stubs_path),
+            str(CALIBRATION),
             str(PROFILE),
             str(main_path),
             "-framework",
@@ -267,7 +269,7 @@ print("PR62 Swift behavior harness passed")
 
 
 def main() -> None:
-    for path in (PROFILE, PRODUCT, PROJECT, BRIDGING):
+    for path in (PROFILE, CALIBRATION, PRODUCT, PROJECT, BRIDGING):
         require(path.exists(), f"{path.name} is missing")
 
     profile = PROFILE.read_text(encoding="utf-8")
