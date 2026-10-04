@@ -180,6 +180,18 @@ final class MultichannelCalibrationTransport {
                 availableChannels: Int(routePlan.physicalChannelCount)
             )
         }
+        let physicalInputChannelCount = try Self.readChannelCount(
+            deviceID: input.deviceID,
+            scope: kAudioObjectPropertyScopeInput,
+            operation: "read physical measurement microphone channel count"
+        )
+        guard selectedInputChannelIndex >= 0,
+              selectedInputChannelIndex < physicalInputChannelCount else {
+            throw MultichannelCalibrationTransportError.invalidInputChannel(
+                index: selectedInputChannelIndex,
+                availableChannels: physicalInputChannelCount
+            )
+        }
         guard let referenceOutput = orderedOutputs.first(where: { $0.uid == routePlan.referenceDeviceUID }) else {
             throw MultichannelCalibrationTransportError.outputDeviceUnavailable(routePlan.referenceDeviceUID)
         }
