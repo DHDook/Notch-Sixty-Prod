@@ -1,0 +1,45 @@
+name: PR65 Spatial Xcode Patch
+on:
+  push:
+    branches: [feature/pr65-headphone-binaural-integration]
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feature/pr65-headphone-binaural-integration
+          fetch-depth: 0
+      - name: Add spatial Swift files to app target
+        shell: python
+        run: |
+          from pathlib import Path
+          p=Path('NotchSixty.xcodeproj/project.pbxproj'); s=p.read_text()
+          def one(old,new,label):
+              global s
+              n=s.count(old)
+              if n!=1: raise SystemExit(f'{label}: expected one match, got {n}')
+              s=s.replace(old,new,1)
+          one('\t\tF65000000000000000000001 /* HeadphoneDeviceProfileConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = F65000000000000000000011 /* HeadphoneDeviceProfileConfiguration.swift */; };\n',
+              '\t\tF65000000000000000000001 /* HeadphoneDeviceProfileConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = F65000000000000000000011 /* HeadphoneDeviceProfileConfiguration.swift */; };\n\t\tF65000000000000000000002 /* BinauralProfileAsset.swift in Sources */ = {isa = PBXBuildFile; fileRef = F65000000000000000000012 /* BinauralProfileAsset.swift */; };\n\t\tF65000000000000000000003 /* CoreAudioSemanticTransportSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F65000000000000000000013 /* CoreAudioSemanticTransportSupport.swift */; };\n\t\tF65000000000000000000004 /* CoreAudioBinauralHeadphoneTransportSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = F65000000000000000000014 /* CoreAudioBinauralHeadphoneTransportSession.swift */; };\n', 'build files')
+          one('\t\tF65000000000000000000011 /* HeadphoneDeviceProfileConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeadphoneDeviceProfileConfiguration.swift; sourceTree = "<group>"; };\n',
+              '\t\tF65000000000000000000011 /* HeadphoneDeviceProfileConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeadphoneDeviceProfileConfiguration.swift; sourceTree = "<group>"; };\n\t\tF65000000000000000000012 /* BinauralProfileAsset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BinauralProfileAsset.swift; sourceTree = "<group>"; };\n\t\tF65000000000000000000013 /* CoreAudioSemanticTransportSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudioSemanticTransportSupport.swift; sourceTree = "<group>"; };\n\t\tF65000000000000000000014 /* CoreAudioBinauralHeadphoneTransportSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudioBinauralHeadphoneTransportSession.swift; sourceTree = "<group>"; };\n', 'file refs')
+          one('A20000000000000000000021 /* CoreAudioError.swift */, F63000000000000000000011 /* CoreAudioNChannelTransportSession.swift */, F64000000000000000000013 /* MultichannelCalibrationTransport.swift */,',
+              'A20000000000000000000021 /* CoreAudioError.swift */, F63000000000000000000011 /* CoreAudioNChannelTransportSession.swift */, F65000000000000000000013 /* CoreAudioSemanticTransportSupport.swift */, F65000000000000000000014 /* CoreAudioBinauralHeadphoneTransportSession.swift */, F64000000000000000000013 /* MultichannelCalibrationTransport.swift */,', 'coreaudio group')
+          one('A20000000000000000000024 /* AudioRouteConfiguration.swift */, F62000000000000000000011 /* OutputDeviceProfileConfiguration.swift */, F65000000000000000000011 /* HeadphoneDeviceProfileConfiguration.swift */, F64000000000000000000011 /* OutputDeviceCalibration.swift */,',
+              'A20000000000000000000024 /* AudioRouteConfiguration.swift */, F62000000000000000000011 /* OutputDeviceProfileConfiguration.swift */, F65000000000000000000011 /* HeadphoneDeviceProfileConfiguration.swift */, F65000000000000000000012 /* BinauralProfileAsset.swift */, F64000000000000000000011 /* OutputDeviceCalibration.swift */,', 'routing group')
+          one('\t\t\t\tF65000000000000000000001 /* HeadphoneDeviceProfileConfiguration.swift in Sources */,\n',
+              '\t\t\t\tF65000000000000000000001 /* HeadphoneDeviceProfileConfiguration.swift in Sources */,\n\t\t\t\tF65000000000000000000002 /* BinauralProfileAsset.swift in Sources */,\n\t\t\t\tF65000000000000000000003 /* CoreAudioSemanticTransportSupport.swift in Sources */,\n\t\t\t\tF65000000000000000000004 /* CoreAudioBinauralHeadphoneTransportSession.swift in Sources */,\n', 'sources phase')
+          p.write_text(s)
+          Path('.github/workflows/pr65-xcode-spatial-patch.yml').unlink()
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "PR65: compile spatial headphone integration in app target"
+          git push origin HEAD:feature/pr65-headphone-binaural-integration
