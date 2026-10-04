@@ -95,6 +95,9 @@ def main() -> None:
             "multi-device calibration aggregate lacks drift-compensation policy")
     require("originalSampleRates" in transport and "restore calibration device sample rate" in transport,
             "temporary measurement sample-rate changes are not restored")
+    require("physicalInputChannelCount" in transport
+            and "read physical measurement microphone channel count" in transport,
+            "physical microphone channel is not validated before aggregate flattening")
     require("snapshot.unsupportedBufferLayouts == 0" in transport,
             "unsupported callback layouts are not fail-closed before materialization")
     require("func analyzeSingleChannel(" in analyzer,
