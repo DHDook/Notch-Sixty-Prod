@@ -255,11 +255,18 @@ static bool build_phase_table(N60AdaptiveSRC *src) {
     return true;
 }
 
-static void publish_runtime_snapshot(N60AdaptiveSRC *src, uint64_t writeIndex) {
+static uint32_t current_buffered_frames(const N60AdaptiveSRC *src, uint64_t writeIndex) {
     uint64_t base = atomic_load_explicit(&src->sourceBaseIndex, memory_order_acquire);
     uint64_t buffered64 = writeIndex > base ? writeIndex - base : 0u;
-    uint32_t buffered = buffered64 > UINT32_MAX ? UINT32_MAX : (uint32_t)buffered64;
-    atomic_store_explicit(&src->bufferedFrames, buffered, memory_order_relaxed);
+    return buffered64 > UINT32_MAX ? UINT32_MAX : (uint32_t)buffered64;
+}
+
+static void publish_runtime_snapshot(N60AdaptiveSRC *src, uint64_t writeIndex) {
+    atomic_store_explicit(
+        &src->bufferedFrames,
+        current_buffered_frames(src, writeIndex),
+        memory_order_relaxed
+    );
     atomic_store_explicit(
         &src->effectiveStepBits,
         double_to_bits(src->nominalStep * (1.0 + src->clockController.correctionPPM * 1.0e-6)),
@@ -383,13 +390,6 @@ uint32_t N60AdaptiveSRCPushInterleaved(
         atomic_store_explicit(&src->writeIndex, publishedWrite, memory_order_release);
         atomic_fetch_add_explicit(&src->pushedInputFrames, accepted, memory_order_relaxed);
 
-        // Startup gating must observe producer fill before the first consumer
-        // pull. Use only atomically published consumer position here; never
-        // read sourcePosition from the producer callback.
-        uint64_t base = atomic_load_explicit(&src->sourceBaseIndex, memory_order_acquire);
-        uint64_t buffered64 = publishedWrite > base ? publishedWrite - base : 0u;
-        uint32_t buffered = buffered64 > UINT32_MAX ? UINT32_MAX : (uint32_t)buffered64;
-        atomic_store_explicit(&src->bufferedFrames, buffered, memory_order_relaxed);
     }
     if (accepted < inputFrames) {
         atomic_fetch_add_explicit(
@@ -504,7 +504,12 @@ N60AdaptiveSRCSnapshot N60AdaptiveSRCGetSnapshot(const N60AdaptiveSRC *src) {
             atomic_load_explicit(&src->normalizedErrorBits, memory_order_relaxed)
         ),
         .targetBufferedFrames = src->configuration.targetBufferedFrames,
-        .bufferedFrames = atomic_load_explicit(&src->bufferedFrames, memory_order_relaxed),
+        // Compute fill from separately published producer/consumer indices so
+        // startup can observe capture progress before the first Pull call.
+        .bufferedFrames = current_buffered_frames(
+            src,
+            atomic_load_explicit(&src->writeIndex, memory_order_acquire)
+        ),
         .pushedInputFrames = atomic_load_explicit(&src->pushedInputFrames, memory_order_relaxed),
         .producedOutputFrames = atomic_load_explicit(&src->producedOutputFrames, memory_order_relaxed),
         .droppedInputFrames = atomic_load_explicit(&src->droppedInputFrames, memory_order_relaxed),
