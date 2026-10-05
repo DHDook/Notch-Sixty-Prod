@@ -222,7 +222,9 @@ enum CoreAudioTransportError: Error, LocalizedError, Equatable {
         case .unsupportedFormat(let role, let format):
             return "Unsupported \(role) format: \(format.sampleRate) Hz, \(format.channelCount) channels, \(format.bitsPerChannel)-bit."
         case .sampleRateMismatch(let tap, let output):
-            return "Native sample-rate mismatch: tap \(tap) Hz, output \(output) Hz. Transport SRC is intentionally disabled."
+            return "Native sample-rate mismatch: tap \(tap) Hz, output \(output) Hz is not supported by this aggregate-clock transport."
+        case .adaptiveSampleRateConfigurationFailed(let tap, let output):
+            return "Unable to prepare adaptive sample-rate conversion from \(tap) Hz to \(output) Hz."
         case .realtimeBridgeAllocationFailed:
             return "Unable to allocate the preallocated realtime audio bridge."
         case .dspGraphPublicationFailed:
@@ -651,10 +653,10 @@ final class CoreAudioTransportSession {
                 try Self.waitForDeviceAlive(aggregateDeviceID)
             }
 
-            // Pin the aggregate to the physical reference output's clock rate and
-            // the physical output's clock rate and buffer size before installing
-            // callbacks so capture cannot wake at a much smaller cadence than the
-            // output path.
+            // Matched-rate sessions retain the original output-rate pinning.
+            // For PR70 ASRC sessions the tap aggregate remains in the tap's native
+            // clock domain so capture/output clocks are genuinely independent;
+            // the adaptive bridge owns rate conversion and drift correction.
             try Self.writeFloat64Property(
                 objectID: aggregateDeviceID,
                 selector: kAudioDevicePropertyNominalSampleRate,
