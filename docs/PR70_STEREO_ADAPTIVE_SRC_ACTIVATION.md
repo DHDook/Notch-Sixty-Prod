@@ -77,7 +77,7 @@ PR70 does not attempt to rebuild a running SRC from an audio callback. Existing 
 
 When a stereo bridge is reset on the control plane, the adaptive ring, fractional source position, PI integral/correction, and transport counters are reset together. The normal startup gate then re-primes before audio is emitted.
 
-If an adaptive output callback nevertheless cannot produce a complete physical-output block, PR70 fails that callback closed to silence, closes the startup gate, re-arms the startup fade, and requires the input-domain activation target to be buffered again before audio resumes. A partial SRC block is never sent through the production DSP graph.
+If an adaptive output callback nevertheless cannot produce a complete physical-output block, PR70 fails that callback closed to silence, resets only the consumer-owned PI correction to the nominal ratio, closes the startup gate, re-arms the startup fade, and requires the input-domain activation target to be buffered again before audio resumes. Ring contents, source position, producer state, and cumulative failure telemetry are preserved. A partial SRC block is never sent through the production DSP graph.
 
 This is deliberately conservative: a discontinuity or starvation is treated as a new lock acquisition rather than asking a marginal adaptive state to continue audibly.
 
