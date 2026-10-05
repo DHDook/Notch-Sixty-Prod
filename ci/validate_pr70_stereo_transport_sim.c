@@ -280,6 +280,15 @@ static void test_starvation_reset_and_reprime(void) {
     N60AdaptiveSRCSnapshot starved = N60AdaptiveSRCGetSnapshot(src);
     check(starved.starvedOutputFrames > 0u, "starvation is observable before relock");
 
+    N60AdaptiveSRCRelockConsumer(src);
+    N60AdaptiveSRCSnapshot relocked = N60AdaptiveSRCGetSnapshot(src);
+    check(fabs(relocked.correctionPPM) < 1.0e-9,
+          "consumer relock returns the PI correction to nominal");
+    check(relocked.starvedOutputFrames == starved.starvedOutputFrames,
+          "consumer relock preserves starvation telemetry");
+    check(relocked.bufferedFrames == starved.bufferedFrames,
+          "consumer relock preserves ring/source position");
+
     N60AdaptiveSRCReset(src);
     N60AdaptiveSRCSnapshot reset = N60AdaptiveSRCGetSnapshot(src);
     check(reset.starvedOutputFrames == 0u, "control-plane reset clears starvation telemetry");
