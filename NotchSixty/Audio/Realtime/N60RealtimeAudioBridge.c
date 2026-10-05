@@ -68,6 +68,9 @@ typedef struct {
 struct N60RealtimeAudioBridge {
     uint32_t capacityFrames;
     N60StereoFrame *frames;
+    N60AdaptiveSRC *adaptiveSRC;
+    float *adaptiveCaptureScratch;
+    float *adaptiveOutputScratch;
     N60RenderKernel *renderKernel;
     N60SameDeviceOutputMap sameDeviceOutputMap;
     N60SpeakerBusSplitterRuntime speakerBusSplitter;
@@ -506,7 +509,10 @@ N60RealtimeAudioBridge *N60RealtimeAudioBridgeCreate(uint32_t capacityFrames) {
 
 void N60RealtimeAudioBridgeDestroy(N60RealtimeAudioBridge *bridge) {
     if (bridge == NULL) return;
+    N60AdaptiveSRCDestroy(bridge->adaptiveSRC);
     N60RenderKernelDestroy(bridge->renderKernel);
+    free(bridge->adaptiveCaptureScratch);
+    free(bridge->adaptiveOutputScratch);
     free(bridge->analysisFrames);
     free(bridge->frames);
     free(bridge);
@@ -555,7 +561,57 @@ void N60RealtimeAudioBridgeReset(N60RealtimeAudioBridge *bridge) {
     atomic_store_explicit(&bridge->startupFadeFramesTotal, 0, memory_order_relaxed);
     bridge->startupFadeRuntime = (N60StartupFadeRuntime){0};
 
+    if (bridge->adaptiveSRC != NULL) {
+        N60AdaptiveSRCReset(bridge->adaptiveSRC);
+    }
     N60RenderKernelReset(bridge->renderKernel);
+}
+
+bool N60RealtimeAudioBridgeConfigureAdaptiveSampleRate(
+    N60RealtimeAudioBridge *bridge,
+    double inputSampleRate,
+    double outputSampleRate,
+    uint32_t targetBufferedInputFrames
+) {
+    if (bridge == NULL || bridge->adaptiveSRC != NULL
+        || !isfinite(inputSampleRate) || inputSampleRate <= 0.0
+        || !isfinite(outputSampleRate) || outputSampleRate <= 0.0) {
+        return false;
+    }
+    if (fabs(inputSampleRate - outputSampleRate) < 0.5) {
+        return true;
+    }
+
+    N60AdaptiveSRCConfiguration configuration = N60AdaptiveSRCConfigurationMakeDefault(
+        inputSampleRate,
+        outputSampleRate,
+        2u,
+        bridge->capacityFrames,
+        targetBufferedInputFrames
+    );
+    N60AdaptiveSRC *adaptiveSRC = N60AdaptiveSRCCreate(configuration);
+    if (adaptiveSRC == NULL) return false;
+
+    size_t scratchSamples = (size_t)bridge->capacityFrames * 2u;
+    float *captureScratch = (float *)calloc(scratchSamples, sizeof(float));
+    float *outputScratch = (float *)calloc(scratchSamples, sizeof(float));
+    if (captureScratch == NULL || outputScratch == NULL) {
+        free(captureScratch);
+        free(outputScratch);
+        N60AdaptiveSRCDestroy(adaptiveSRC);
+        return false;
+    }
+
+    bridge->adaptiveSRC = adaptiveSRC;
+    bridge->adaptiveCaptureScratch = captureScratch;
+    bridge->adaptiveOutputScratch = outputScratch;
+    return true;
+}
+
+bool N60RealtimeAudioBridgeAdaptiveSampleRateEnabled(
+    const N60RealtimeAudioBridge *bridge
+) {
+    return bridge != NULL && bridge->adaptiveSRC != NULL;
 }
 
 void N60RealtimeAudioBridgeSetOutputGain(N60RealtimeAudioBridge *bridge, float gain) {
@@ -838,6 +894,12 @@ N60RealtimeAudioBridgeSnapshot N60RealtimeAudioBridgeGetSnapshot(
         memory_order_acquire
     );
     snapshot.outputVUMeter = N60RealtimeAudioBridgeGetOutputVUMeterSnapshot(bridge);
+    snapshot.adaptiveSampleRateEnabled = bridge->adaptiveSRC != NULL;
+    if (bridge->adaptiveSRC != NULL) {
+        snapshot.adaptiveSampleRate = N60AdaptiveSRCGetSnapshot(bridge->adaptiveSRC);
+        snapshot.bufferedFrames = snapshot.adaptiveSampleRate.bufferedFrames;
+        return snapshot;
+    }
 
     uint64_t writeIndex = atomic_load_explicit(&bridge->writeIndex, memory_order_acquire);
     uint64_t readIndex = atomic_load_explicit(&bridge->readIndex, memory_order_acquire);
@@ -1063,6 +1125,34 @@ OSStatus N60CaptureIOProc(
         return noErr;
     }
     UInt32 frameCount = inputView.frameCount;
+    if (bridge->adaptiveSRC != NULL) {
+        UInt32 framesToStage = frameCount < bridge->capacityFrames
+            ? frameCount
+            : bridge->capacityFrames;
+        const float *inputLeft = inputView.left;
+        const float *inputRight = inputView.right;
+        for (UInt32 frameIndex = 0; frameIndex < framesToStage; ++frameIndex) {
+            size_t base = (size_t)frameIndex * 2u;
+            bridge->adaptiveCaptureScratch[base] = *inputLeft;
+            bridge->adaptiveCaptureScratch[base + 1u] = *inputRight;
+            inputLeft += inputView.leftStride;
+            inputRight += inputView.rightStride;
+        }
+        UInt32 accepted = N60AdaptiveSRCPushInterleaved(
+            bridge->adaptiveSRC,
+            bridge->adaptiveCaptureScratch,
+            framesToStage
+        );
+        atomic_fetch_add_explicit(&bridge->capturedFrames, accepted, memory_order_relaxed);
+        if (accepted < frameCount) {
+            atomic_fetch_add_explicit(
+                &bridge->overrunFrames,
+                frameCount - accepted,
+                memory_order_relaxed
+            );
+        }
+        return noErr;
+    }
 
     uint64_t writeIndex = atomic_load_explicit(&bridge->writeIndex, memory_order_relaxed);
     uint64_t readIndex = atomic_load_explicit(&bridge->readIndex, memory_order_acquire);
@@ -1135,16 +1225,25 @@ OSStatus N60OutputIOProc(
         frameCount = outputView.frameCount;
     }
 
+    bool adaptiveSampleRate = bridge->adaptiveSRC != NULL;
     uint64_t readIndex = atomic_load_explicit(&bridge->readIndex, memory_order_relaxed);
     uint64_t writeIndex = atomic_load_explicit(&bridge->writeIndex, memory_order_acquire);
-    uint64_t available = writeIndex >= readIndex ? writeIndex - readIndex : 0;
+    uint64_t available = 0u;
+    if (adaptiveSampleRate) {
+        available = N60AdaptiveSRCGetSnapshot(bridge->adaptiveSRC).bufferedFrames;
+    } else {
+        available = writeIndex >= readIndex ? writeIndex - readIndex : 0u;
+    }
 
     if (!atomic_load_explicit(&bridge->outputGateOpen, memory_order_acquire)) {
         uint32_t gateMinimum = atomic_load_explicit(
             &bridge->outputGateMinimumBufferedFrames,
             memory_order_relaxed
         );
-        if (available >= gateMinimum && available >= frameCount) {
+        bool gateReady = adaptiveSampleRate
+            ? available >= gateMinimum
+            : (available >= gateMinimum && available >= frameCount);
+        if (gateReady) {
             atomic_store_explicit(&bridge->outputGateOpen, true, memory_order_release);
         } else {
             zero_output(outOutputData);
@@ -1154,7 +1253,39 @@ OSStatus N60OutputIOProc(
         }
     }
 
-    UInt32 framesToRead = frameCount < available ? frameCount : (UInt32)available;
+    UInt32 framesToRead = adaptiveSampleRate
+        ? N60AdaptiveSRCPullInterleaved(
+            bridge->adaptiveSRC,
+            bridge->adaptiveOutputScratch,
+            frameCount
+        )
+        : (frameCount < available ? frameCount : (UInt32)available);
+
+    if (adaptiveSampleRate && framesToRead < frameCount) {
+        // A partial adaptive block means the FIR no longer has enough future
+        // input support. Fail the entire callback closed, re-arm the startup
+        // gate, and require a full input-domain re-prime before emitting audio
+        // again. Discarding the partial pull is preferable to leaking a
+        // discontinuous half-block into the production DSP graph.
+        zero_output(outOutputData);
+        N60AdaptiveSRCRelockConsumer(bridge->adaptiveSRC);
+        atomic_store_explicit(&bridge->outputGateOpen, false, memory_order_release);
+        uint32_t fadeFrames = atomic_load_explicit(
+            &bridge->startupFadeFramesTotal,
+            memory_order_relaxed
+        );
+        bridge->startupFadeRuntime.totalFrames = fadeFrames;
+        bridge->startupFadeRuntime.remainingFrames = fadeFrames;
+        atomic_fetch_add_explicit(
+            &bridge->underrunFrames,
+            frameCount - framesToRead,
+            memory_order_relaxed
+        );
+        atomic_fetch_add_explicit(&bridge->gatedOutputCallbacks, 1, memory_order_relaxed);
+        atomic_fetch_add_explicit(&bridge->gatedOutputFrames, frameCount, memory_order_relaxed);
+        return noErr;
+    }
+
     float masterGain = bits_to_float(
         atomic_load_explicit(&bridge->outputGainBits, memory_order_acquire)
     );
@@ -1192,9 +1323,18 @@ OSStatus N60OutputIOProc(
     float *outputLeft = outputView.left;
     float *outputRight = outputView.right;
     for (UInt32 frameIndex = 0; frameIndex < framesToRead; ++frameIndex) {
-        N60StereoFrame frame = bridge->frames[ringReadIndex];
-        ringReadIndex += 1u;
-        if (ringReadIndex == bridge->capacityFrames) ringReadIndex = 0u;
+        N60StereoFrame frame;
+        if (adaptiveSampleRate) {
+            size_t base = (size_t)frameIndex * 2u;
+            frame = (N60StereoFrame){
+                bridge->adaptiveOutputScratch[base],
+                bridge->adaptiveOutputScratch[base + 1u]
+            };
+        } else {
+            frame = bridge->frames[ringReadIndex];
+            ringReadIndex += 1u;
+            if (ringReadIndex == bridge->capacityFrames) ringReadIndex = 0u;
+        }
         N60StereoFrame processed;
         N60RenderKernelProcessStereoFrameInContext(
             bridge->renderKernel,
@@ -1307,7 +1447,9 @@ OSStatus N60OutputIOProc(
     bridge->startupFadeRuntime = startupFade;
     publish_transition_runtime(bridge, &transitionRamp);
 
-    atomic_store_explicit(&bridge->readIndex, readIndex + framesToRead, memory_order_release);
+    if (!adaptiveSampleRate) {
+        atomic_store_explicit(&bridge->readIndex, readIndex + framesToRead, memory_order_release);
+    }
     atomic_fetch_add_explicit(&bridge->deliveredFrames, framesToRead, memory_order_relaxed);
     if (framesToRead < frameCount) {
         atomic_fetch_add_explicit(

@@ -310,6 +310,24 @@ struct ProductionMetersView: View {
                     value: "\(diagnostics?.sessionTransportCounters.underrunFrames ?? 0)",
                     detail: "Overruns \(diagnostics?.sessionTransportCounters.overrunFrames ?? 0) frames"
                 )
+                if diagnostics?.sessionTransportCounters.adaptiveSampleRateEnabled == true {
+                    let transport = diagnostics?.sessionTransportCounters ?? AudioTransportCounters()
+                    metricCard(
+                        title: "Adaptive SRC",
+                        value: String(
+                            format: "%.1f → %.1f kHz",
+                            transport.adaptiveInputSampleRate / 1_000.0,
+                            transport.adaptiveOutputSampleRate / 1_000.0
+                        ),
+                        detail: String(
+                            format: "%+.1f ppm · target %u frames · %llu dropped · %llu starved",
+                            transport.adaptiveCorrectionPPM,
+                            transport.adaptiveTargetBufferedFrames,
+                            transport.adaptiveDroppedInputFrames,
+                            transport.adaptiveStarvedOutputFrames
+                        )
+                    )
+                }
                 metricCard(
                     title: "Recovery",
                     value: "\(diagnostics?.recoverySuccesses ?? 0) recovered",
