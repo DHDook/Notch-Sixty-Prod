@@ -285,7 +285,12 @@ final class CoreAudioNChannelTransportSession {
                     profile: expectedChannels
                 )
             }
-            guard abs(tapFormat.sampleRate - outputFormat.sampleRate) < 0.5 else {
+            let adaptiveSampleRateRequired = abs(tapFormat.sampleRate - outputFormat.sampleRate) >= 0.5
+            if adaptiveSampleRateRequired, routePlan.usesMultiplePhysicalDevices {
+                // The existing semantic multi-device output uses one HAL
+                // Aggregate Device as its output clock domain. PR71 activates
+                // adaptive SRC for the independent tap -> physical-output path;
+                // multi-device aggregate-clock mismatch remains fail-closed.
                 throw CoreAudioTransportError.sampleRateMismatch(
                     tap: tapFormat.sampleRate,
                     output: outputFormat.sampleRate
@@ -319,23 +324,68 @@ final class CoreAudioNChannelTransportSession {
                 outputBufferFrames: outputBufferFrames,
                 sampleRate: outputFormat.sampleRate
             )
-            guard gatePolicy.activationBufferedFrames <= Self.bridgeCapacityFrames else {
-                throw LiveNChannelTransportError.outputBufferExceedsBridgeCapacity(
-                    bufferFrames: gatePolicy.activationBufferedFrames,
-                    capacityFrames: Self.bridgeCapacityFrames
+            var gateMinimumFrames = gatePolicy.activationBufferedFrames
+            var adaptiveTargetInputFrames: UInt32?
+            if adaptiveSampleRateRequired {
+                let ratio = tapFormat.sampleRate / outputFormat.sampleRate
+                let inputFramesPerOutputBuffer = UInt32(
+                    min(
+                        ceil(Double(outputBufferFrames) * ratio),
+                        Double(UInt32.max)
+                    )
                 )
+                let lookahead = UInt32(N60_ADAPTIVE_SRC_DEFAULT_TAPS / 2)
+                let target64 = max(
+                    UInt64(256),
+                    UInt64(inputFramesPerOutputBuffer) * 3 + UInt64(lookahead) * 2
+                )
+                let activation64 = target64
+                    + UInt64(inputFramesPerOutputBuffer)
+                    + UInt64(lookahead)
+                guard target64 < UInt64(Self.bridgeCapacityFrames),
+                      activation64 <= UInt64(Self.bridgeCapacityFrames) else {
+                    throw LiveNChannelTransportError.outputBufferExceedsBridgeCapacity(
+                        bufferFrames: UInt32(min(activation64, UInt64(UInt32.max))),
+                        capacityFrames: Self.bridgeCapacityFrames
+                    )
+                }
+                adaptiveTargetInputFrames = UInt32(target64)
+                gateMinimumFrames = UInt32(activation64)
+                startupGateTargetFrames = UInt32(target64)
+                startupGateActivationFrames = gateMinimumFrames
+            } else {
+                guard gatePolicy.activationBufferedFrames <= Self.bridgeCapacityFrames else {
+                    throw LiveNChannelTransportError.outputBufferExceedsBridgeCapacity(
+                        bufferFrames: gatePolicy.activationBufferedFrames,
+                        capacityFrames: Self.bridgeCapacityFrames
+                    )
+                }
+                startupGateTargetFrames = gatePolicy.steadyStateTargetFrames
+                startupGateActivationFrames = gatePolicy.activationBufferedFrames
             }
-            startupGateTargetFrames = gatePolicy.steadyStateTargetFrames
-            startupGateActivationFrames = gatePolicy.activationBufferedFrames
 
             guard let newBridge = N60LiveNChannelBridgeCreate(
                 Self.bridgeCapacityFrames,
                 inputMap,
                 renderGraph,
-                gatePolicy.activationBufferedFrames,
+                gateMinimumFrames,
                 gatePolicy.fadeInFrames
             ) else {
                 throw LiveNChannelTransportError.realtimeBridgeAllocationFailed
+            }
+            if let adaptiveTargetInputFrames {
+                guard N60LiveNChannelBridgeConfigureAdaptiveSampleRate(
+                    newBridge,
+                    tapFormat.sampleRate,
+                    outputFormat.sampleRate,
+                    adaptiveTargetInputFrames
+                ) else {
+                    N60LiveNChannelBridgeDestroy(newBridge)
+                    throw CoreAudioTransportError.adaptiveSampleRateConfigurationFailed(
+                        tap: tapFormat.sampleRate,
+                        output: outputFormat.sampleRate
+                    )
+                }
             }
             bridge = newBridge
             N60LiveNChannelBridgeSetOutputGain(newBridge, outputGain)
@@ -377,7 +427,7 @@ final class CoreAudioNChannelTransportSession {
                 objectID: aggregateDeviceID,
                 selector: kAudioDevicePropertyNominalSampleRate,
                 scope: kAudioObjectPropertyScopeGlobal,
-                value: outputFormat.sampleRate,
+                value: adaptiveSampleRateRequired ? tapFormat.sampleRate : outputFormat.sampleRate,
                 operation: "set semantic aggregate sample rate"
             )
             try Self.writeUInt32Property(
@@ -456,18 +506,35 @@ final class CoreAudioNChannelTransportSession {
     func counters() -> AudioTransportCounters {
         guard let bridge else { return AudioTransportCounters() }
         let snapshot = N60LiveNChannelBridgeGetSnapshot(bridge)
+        let adaptive = snapshot.adaptiveSampleRate
         return AudioTransportCounters(
             captureCallbacks: snapshot.captureCallbacks,
             outputCallbacks: snapshot.outputCallbacks,
-            capturedFrames: snapshot.transport.capturedFrames,
+            capturedFrames: snapshot.adaptiveSampleRateEnabled
+                ? adaptive.pushedInputFrames
+                : snapshot.transport.capturedFrames,
             deliveredFrames: snapshot.renderedFrames,
-            underrunFrames: snapshot.transport.underrunFrames,
-            overrunFrames: snapshot.transport.overrunFrames,
+            underrunFrames: snapshot.adaptiveSampleRateEnabled
+                ? adaptive.starvedOutputFrames
+                : snapshot.transport.underrunFrames,
+            overrunFrames: snapshot.adaptiveSampleRateEnabled
+                ? adaptive.droppedInputFrames
+                : snapshot.transport.overrunFrames,
             unsupportedBufferLayouts: snapshot.transport.unsupportedBufferLayouts
                 + snapshot.outputWriteFailures,
             gatedOutputCallbacks: snapshot.gatedOutputCallbacks,
             gatedOutputFrames: snapshot.gatedOutputFrames,
-            bufferedFrames: snapshot.transport.bufferedFrames
+            bufferedFrames: snapshot.adaptiveSampleRateEnabled
+                ? adaptive.bufferedFrames
+                : snapshot.transport.bufferedFrames,
+            adaptiveSampleRateEnabled: snapshot.adaptiveSampleRateEnabled,
+            adaptiveInputSampleRate: adaptive.inputSampleRate,
+            adaptiveOutputSampleRate: adaptive.outputSampleRate,
+            adaptiveCorrectionPPM: adaptive.correctionPPM,
+            adaptiveTargetBufferedFrames: adaptive.targetBufferedFrames,
+            adaptiveDroppedInputFrames: adaptive.droppedInputFrames,
+            adaptiveStarvedOutputFrames: adaptive.starvedOutputFrames,
+            adaptiveControllerSaturationEvents: adaptive.controllerSaturationEvents
         )
     }
 
