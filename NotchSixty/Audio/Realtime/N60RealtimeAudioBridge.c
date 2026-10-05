@@ -1268,6 +1268,7 @@ OSStatus N60OutputIOProc(
         // again. Discarding the partial pull is preferable to leaking a
         // discontinuous half-block into the production DSP graph.
         zero_output(outOutputData);
+        N60AdaptiveSRCRelockConsumer(bridge->adaptiveSRC);
         atomic_store_explicit(&bridge->outputGateOpen, false, memory_order_release);
         uint32_t fadeFrames = atomic_load_explicit(
             &bridge->startupFadeFramesTotal,
