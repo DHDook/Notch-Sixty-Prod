@@ -578,9 +578,13 @@ final class CoreAudioTransportSession {
                     )
                 )
                 let lookahead = UInt32(N60_ADAPTIVE_SRC_DEFAULT_TAPS / 2)
+                // Keep three output quanta of input-domain headroom
+                // around the PI target. Two quanta proved too shallow under
+                // independently scheduled HAL callbacks because controller
+                // settling could consume the FIR look-ahead margin.
                 let target64 = max(
                     UInt64(256),
-                    UInt64(inputFramesPerOutputBuffer) * 2 + UInt64(lookahead) * 2
+                    UInt64(inputFramesPerOutputBuffer) * 3 + UInt64(lookahead) * 2
                 )
                 let activation64 = target64
                     + UInt64(inputFramesPerOutputBuffer)
