@@ -582,11 +582,15 @@ struct AmbientFieldAnalyzer: Sendable {
             ))
         }
 
+        // Prominence is the admission criterion; level is the ranking
+        // criterion. Otherwise a vanishingly small model/subtraction residue can
+        // outrank a materially louder ambient tone merely because the bins
+        // around the residue are even quieter.
         candidates.sort {
-            if $0.prominenceDB == $1.prominenceDB {
-                return $0.levelDBFS > $1.levelDBFS
+            if $0.levelDBFS == $1.levelDBFS {
+                return $0.prominenceDB > $1.prominenceDB
             }
-            return $0.prominenceDB > $1.prominenceDB
+            return $0.levelDBFS > $1.levelDBFS
         }
 
         var accepted: [AmbientTonalComponent] = []
