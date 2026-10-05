@@ -16,6 +16,22 @@ enum AmbientNoiseCharacter: String, Codable, Equatable, Sendable {
     case mixed
 }
 
+struct AmbientPlaybackSourceReference: Equatable, Sendable {
+    let id: String
+    let samples: [Float]
+    let acousticImpulseResponse: [Float]?
+
+    init(
+        id: String,
+        samples: [Float],
+        acousticImpulseResponse: [Float]? = nil
+    ) {
+        self.id = id
+        self.samples = samples
+        self.acousticImpulseResponse = acousticImpulseResponse
+    }
+}
+
 struct AmbientSpectrumBand: Identifiable, Equatable, Sendable {
     let lowerFrequencyHz: Double
     let centerFrequencyHz: Double
@@ -129,6 +145,34 @@ struct AmbientFieldAnalyzer: Sendable {
         acousticImpulseResponse: [Float]? = nil,
         sampleRate: Double
     ) throws -> AmbientAnalysisSnapshot {
+        let sources: [AmbientPlaybackSourceReference]
+        if let playbackReference {
+            sources = [
+                AmbientPlaybackSourceReference(
+                    id: "playback",
+                    samples: playbackReference,
+                    acousticImpulseResponse: acousticImpulseResponse
+                )
+            ]
+        } else {
+            sources = []
+        }
+        return try analyze(
+            microphone: microphone,
+            playbackSources: sources,
+            sampleRate: sampleRate
+        )
+    }
+
+    /// Multichannel-ready control-plane entry point. Each semantic speaker/source
+    /// contributes its known playback history and measured source-to-microphone
+    /// impulse response. Predictions are summed in the acoustic domain before one
+    /// bounded microphone/reference gain fit is estimated.
+    func analyze(
+        microphone: [Float],
+        playbackSources: [AmbientPlaybackSourceReference],
+        sampleRate: Double
+    ) throws -> AmbientAnalysisSnapshot {
         try validateConfiguration()
         guard sampleRate.isFinite, sampleRate > 0 else {
             throw AmbientAnalysisError.invalidSampleRate(sampleRate)
@@ -142,28 +186,34 @@ struct AmbientFieldAnalyzer: Sendable {
         guard microphone.allSatisfy(\.isFinite) else {
             throw AmbientAnalysisError.nonFiniteMicrophone
         }
-        if let playbackReference {
-            guard playbackReference.count == microphone.count else {
+        for source in playbackSources {
+            guard source.samples.count == microphone.count else {
                 throw AmbientAnalysisError.playbackLengthMismatch(
                     microphone: microphone.count,
-                    playback: playbackReference.count
+                    playback: source.samples.count
                 )
             }
-            guard playbackReference.allSatisfy(\.isFinite) else {
+            guard source.samples.allSatisfy(\.isFinite) else {
                 throw AmbientAnalysisError.nonFinitePlayback
             }
-        }
-        if let acousticImpulseResponse {
-            guard !acousticImpulseResponse.isEmpty,
-                  acousticImpulseResponse.allSatisfy(\.isFinite),
-                  acousticImpulseResponse.contains(where: { abs($0) > 1.0e-12 }) else {
-                throw AmbientAnalysisError.invalidAcousticModel
+            if let impulse = source.acousticImpulseResponse {
+                guard !impulse.isEmpty,
+                      impulse.allSatisfy(\.isFinite),
+                      impulse.contains(where: { abs($0) > 1.0e-12 }) else {
+                    throw AmbientAnalysisError.invalidAcousticModel
+                }
             }
         }
 
         let frameCount = min(microphone.count, configuration.maximumAnalysisFrames)
         let microphoneWindow = Array(microphone.suffix(frameCount))
-        let playbackWindow = playbackReference.map { Array($0.suffix(frameCount)) }
+        let sourceWindows = playbackSources.map { source in
+            AmbientPlaybackSourceReference(
+                id: source.id,
+                samples: Array(source.samples.suffix(frameCount)),
+                acousticImpulseResponse: source.acousticImpulseResponse
+            )
+        }
 
         let microphoneRMS = Self.rms(microphoneWindow)
         let microphoneLevel = Self.dbfs(amplitude: microphoneRMS)
@@ -174,34 +224,46 @@ struct AmbientFieldAnalyzer: Sendable {
         var predictedLevel: Double?
         var residual = microphoneWindow
 
-        if let playbackWindow {
-            let playbackLevel = Self.dbfs(amplitude: Self.rms(playbackWindow))
-            if playbackLevel > configuration.negligiblePlaybackDBFS {
-                if let acousticImpulseResponse {
+        let audibleSources = sourceWindows.filter {
+            Self.dbfs(amplitude: Self.rms($0.samples))
+                > configuration.negligiblePlaybackDBFS
+        }
+        if !audibleSources.isEmpty {
+            if audibleSources.contains(where: { $0.acousticImpulseResponse == nil }) {
+                // Never reinterpret known-but-unmodeled program audio as ambient
+                // noise. A later live controller must acquire/resolve the missing
+                // acoustic path before it can trust the residual field.
+                separationMode = .playbackModelUnavailable
+                confidence = 0.15
+            } else {
+                var predicted = [Float](repeating: 0, count: frameCount)
+                for source in audibleSources {
+                    guard let sourceImpulse = source.acousticImpulseResponse else { continue }
                     let impulse = Array(
-                        acousticImpulseResponse.prefix(configuration.maximumImpulseTaps)
+                        sourceImpulse.prefix(configuration.maximumImpulseTaps)
                     )
-                    let predicted = try predictPlayback(
-                        playback: playbackWindow,
+                    let contribution = try predictPlayback(
+                        playback: source.samples,
                         impulseResponse: impulse
                     )
-                    let estimate = estimatePlaybackScale(
-                        microphone: microphoneWindow,
-                        predictedPlayback: predicted
-                    )
-                    predictionGain = estimate.gain
-                    predictedLevel = Self.dbfs(
-                        amplitude: Self.rms(predicted) * estimate.gain
-                    )
-                    residual = zip(microphoneWindow, predicted).map {
-                        Float(Double($0.0) - estimate.gain * Double($0.1))
+                    for index in predicted.indices {
+                        predicted[index] += contribution[index]
                     }
-                    separationMode = .modeledPlaybackSubtraction
-                    confidence = estimate.confidence
-                } else {
-                    separationMode = .playbackModelUnavailable
-                    confidence = 0.15
                 }
+
+                let estimate = estimatePlaybackScale(
+                    microphone: microphoneWindow,
+                    predictedPlayback: predicted
+                )
+                predictionGain = estimate.gain
+                predictedLevel = Self.dbfs(
+                    amplitude: Self.rms(predicted) * estimate.gain
+                )
+                residual = zip(microphoneWindow, predicted).map {
+                    Float(Double($0.0) - estimate.gain * Double($0.1))
+                }
+                separationMode = .modeledPlaybackSubtraction
+                confidence = estimate.confidence
             }
         }
 
