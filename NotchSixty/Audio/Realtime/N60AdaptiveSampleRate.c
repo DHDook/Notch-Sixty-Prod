@@ -20,6 +20,9 @@ struct N60AdaptiveSRC {
 
     _Atomic uint64_t writeIndex;
     _Atomic uint64_t reclaimIndex;
+    // Consumer publishes the integer source position so the producer can
+    // publish startup fill safely without reading consumer-owned doubles.
+    _Atomic uint64_t sourceBaseIndex;
     _Atomic uint64_t pushedInputFrames;
     _Atomic uint64_t producedOutputFrames;
     _Atomic uint64_t droppedInputFrames;
@@ -253,7 +256,7 @@ static bool build_phase_table(N60AdaptiveSRC *src) {
 }
 
 static void publish_runtime_snapshot(N60AdaptiveSRC *src, uint64_t writeIndex) {
-    uint64_t base = src->sourcePosition > 0.0 ? (uint64_t)floor(src->sourcePosition) : 0u;
+    uint64_t base = atomic_load_explicit(&src->sourceBaseIndex, memory_order_acquire);
     uint64_t buffered64 = writeIndex > base ? writeIndex - base : 0u;
     uint32_t buffered = buffered64 > UINT32_MAX ? UINT32_MAX : (uint32_t)buffered64;
     atomic_store_explicit(&src->bufferedFrames, buffered, memory_order_relaxed);
@@ -312,6 +315,7 @@ N60AdaptiveSRC *N60AdaptiveSRCCreate(N60AdaptiveSRCConfiguration configuration) 
 
     atomic_init(&src->writeIndex, 0u);
     atomic_init(&src->reclaimIndex, 0u);
+    atomic_init(&src->sourceBaseIndex, 0u);
     atomic_init(&src->pushedInputFrames, 0u);
     atomic_init(&src->producedOutputFrames, 0u);
     atomic_init(&src->droppedInputFrames, 0u);
@@ -344,6 +348,7 @@ void N60AdaptiveSRCReset(N60AdaptiveSRC *src) {
     N60AdaptiveClockControllerReset(&src->clockController);
     atomic_store_explicit(&src->writeIndex, 0u, memory_order_release);
     atomic_store_explicit(&src->reclaimIndex, 0u, memory_order_release);
+    atomic_store_explicit(&src->sourceBaseIndex, 0u, memory_order_release);
     atomic_store_explicit(&src->pushedInputFrames, 0u, memory_order_relaxed);
     atomic_store_explicit(&src->producedOutputFrames, 0u, memory_order_relaxed);
     atomic_store_explicit(&src->droppedInputFrames, 0u, memory_order_relaxed);
@@ -374,8 +379,17 @@ uint32_t N60AdaptiveSRCPushInterleaved(
     }
 
     if (accepted > 0u) {
-        atomic_store_explicit(&src->writeIndex, write + accepted, memory_order_release);
+        uint64_t publishedWrite = write + accepted;
+        atomic_store_explicit(&src->writeIndex, publishedWrite, memory_order_release);
         atomic_fetch_add_explicit(&src->pushedInputFrames, accepted, memory_order_relaxed);
+
+        // Startup gating must observe producer fill before the first consumer
+        // pull. Use only atomically published consumer position here; never
+        // read sourcePosition from the producer callback.
+        uint64_t base = atomic_load_explicit(&src->sourceBaseIndex, memory_order_acquire);
+        uint64_t buffered64 = publishedWrite > base ? publishedWrite - base : 0u;
+        uint32_t buffered = buffered64 > UINT32_MAX ? UINT32_MAX : (uint32_t)buffered64;
+        atomic_store_explicit(&src->bufferedFrames, buffered, memory_order_relaxed);
     }
     if (accepted < inputFrames) {
         atomic_fetch_add_explicit(
@@ -453,7 +467,11 @@ uint32_t N60AdaptiveSRCPullInterleaved(
 
     if (produced > 0u) {
         atomic_fetch_add_explicit(&src->producedOutputFrames, produced, memory_order_relaxed);
-        int64_t reclaimSigned = (int64_t)floor(src->sourcePosition) - (int64_t)half - 2;
+        uint64_t sourceBase = src->sourcePosition > 0.0
+            ? (uint64_t)floor(src->sourcePosition)
+            : 0u;
+        atomic_store_explicit(&src->sourceBaseIndex, sourceBase, memory_order_release);
+        int64_t reclaimSigned = (int64_t)sourceBase - (int64_t)half - 2;
         uint64_t reclaim = reclaimSigned > 0 ? (uint64_t)reclaimSigned : 0u;
         atomic_store_explicit(&src->reclaimIndex, reclaim, memory_order_release);
     }
@@ -502,6 +520,7 @@ bool N60AdaptiveSRCRealtimeAtomicsAreLockFree(const N60AdaptiveSRC *src) {
     if (src == NULL) return false;
     return atomic_is_lock_free(&src->writeIndex)
         && atomic_is_lock_free(&src->reclaimIndex)
+        && atomic_is_lock_free(&src->sourceBaseIndex)
         && atomic_is_lock_free(&src->pushedInputFrames)
         && atomic_is_lock_free(&src->effectiveStepBits)
         && atomic_is_lock_free(&src->bufferedFrames);
