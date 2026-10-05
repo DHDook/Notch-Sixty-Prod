@@ -48,10 +48,10 @@ for token in (
     require(token in header, f"public contract missing {token}")
 
 require("N60_ADAPTIVE_SRC_MAX_CHANNELS 40u" in header, "physical channel ceiling must remain 40")
-require("N60_ADAPTIVE_SRC_DEFAULT_TAPS 64u" in header, "expected 64-tap default quality")
+require("N60_ADAPTIVE_SRC_DEFAULT_TAPS 96u" in header, "expected 96-tap default quality")
 require("N60_ADAPTIVE_SRC_DEFAULT_PHASES 2048u" in header, "expected 2048-phase default quality")
 require("N60_ASRC_KAISER_BETA 10.0" in source, "Kaiser design constant missing")
-require("N60_ASRC_NYQUIST_FRACTION 0.94" in source, "anti-alias transition margin missing")
+require("N60_ASRC_NYQUIST_FRACTION 0.95" in source, "anti-alias transition margin missing")
 require("Back-calculate the integral term" in source, "PI controller anti-windup missing")
 require("atomic_is_lock_free" in source, "runtime must reject non-lock-free atomic implementation")
 

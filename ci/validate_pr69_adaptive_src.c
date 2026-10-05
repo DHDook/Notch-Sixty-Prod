@@ -113,6 +113,16 @@ static void test_rate_conversion(void) {
     free(output);
 
     output = NULL;
+    produced = run_sine_conversion(44100.0, 48000.0, 20000.0, 44100u, &output);
+    if (output != NULL && produced > 4000u) {
+        double level = rms(output, produced, 2u, 0u, 2000u);
+        double reference = 0.5 / sqrt(2.0);
+        double levelDB = 20.0 * log10(level / reference);
+        check(levelDB > -0.30 && levelDB < 0.10, "44.1 to 48 keeps 20 kHz within reference passband tolerance");
+    }
+    free(output);
+
+    output = NULL;
     produced = run_sine_conversion(48000.0, 44100.0, 5000.0, 48000u, &output);
     check(produced > 43000u && produced < 44200u, "48 to 44.1 output frame count is plausible");
     if (output != NULL && produced > 4000u) {
@@ -124,7 +134,15 @@ static void test_rate_conversion(void) {
 
 static void test_downsample_alias_rejection(void) {
     float *output = NULL;
-    uint32_t produced = run_sine_conversion(48000.0, 32000.0, 20000.0, 48000u, &output);
+    uint32_t produced = run_sine_conversion(48000.0, 44100.0, 22500.0, 48000u, &output);
+    if (output != NULL && produced > 3000u) {
+        double level = rms(output, produced, 2u, 0u, 2000u);
+        check(level < 0.00010, "48 to 44.1 strongly rejects content above destination Nyquist");
+    }
+    free(output);
+
+    output = NULL;
+    produced = run_sine_conversion(48000.0, 32000.0, 20000.0, 48000u, &output);
     if (output != NULL && produced > 3000u) {
         double level = rms(output, produced, 2u, 0u, 2000u);
         check(level < 0.0025, "20 kHz aliases are strongly attenuated when downsampling to 32 kHz");

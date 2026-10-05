@@ -27,7 +27,7 @@ effective step = nominal step × (1 + correctionPPM × 1e-6)
 
 A positive buffer error increases source consumption; a negative error reduces it. Correction is bounded, slew-limited, and uses integral anti-windup so a long disturbance cannot leave the controller stuck at a large correction after the buffer recovers.
 
-The default interpolation kernel is 64 taps with 2048 precomputed fractional phases and linear interpolation between adjacent phase rows. The low-pass cutoff is reduced when downsampling so frequencies above the destination Nyquist limit are rejected rather than folded into the audible band. The same primitive accepts arbitrary positive nominal rates, including the product requirement for device-exposed operation through **384 kHz**.
+The default interpolation kernel is 96 taps with 2048 precomputed fractional phases and linear interpolation between adjacent phase rows. The low-pass cutoff is reduced when downsampling so frequencies above the destination Nyquist limit are rejected rather than folded into the audible band. The same primitive accepts arbitrary positive nominal rates, including the product requirement for device-exposed operation through **384 kHz**.
 
 ## DSP derivation / public source of truth
 
@@ -52,7 +52,7 @@ The streaming boundary is single-producer / single-consumer. Producer publicatio
 
 ### Latency
 
-The symmetric interpolation kernel requires future samples. Algorithmic look-ahead is `tapCount / 2` input frames (32 frames with the default 64-tap kernel), in addition to whatever target transport buffering a later activation PR selects.
+The symmetric interpolation kernel requires future samples. Algorithmic look-ahead is `tapCount / 2` input frames (48 frames with the default 96-tap kernel), in addition to whatever target transport buffering a later activation PR selects.
 
 ### Sample-rate assumptions
 
@@ -72,7 +72,9 @@ Portable C validation covers:
 
 - valid high-rate configuration through 384 kHz;
 - 44.1 → 48 kHz sine frequency and passband-level preservation;
+- 20 kHz passband tolerance during 44.1 → 48 kHz conversion;
 - 48 → 44.1 kHz conversion;
+- strong rejection above the 44.1 kHz destination Nyquist limit;
 - anti-alias rejection when downsampling 48 → 32 kHz;
 - bounded/slew-limited PI behavior;
 - controller saturation telemetry and reset behavior;

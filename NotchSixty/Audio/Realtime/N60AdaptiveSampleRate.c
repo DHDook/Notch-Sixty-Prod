@@ -7,7 +7,7 @@
 
 #define N60_PI 3.14159265358979323846264338327950288
 #define N60_ASRC_KAISER_BETA 10.0
-#define N60_ASRC_NYQUIST_FRACTION 0.94
+#define N60_ASRC_NYQUIST_FRACTION 0.95
 
 struct N60AdaptiveSRC {
     N60AdaptiveSRCConfiguration configuration;
