@@ -1,0 +1,68 @@
+name: PR69 Xcode Registration Staging
+
+on:
+  push:
+    branches:
+      - feature/pr69-adaptive-clock-src
+
+permissions:
+  contents: write
+
+jobs:
+  patch-project:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feature/pr69-adaptive-clock-src
+          fetch-depth: 0
+      - name: Register dormant PR69 source in app target
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('NotchSixty.xcodeproj/project.pbxproj')
+          s = p.read_text()
+
+          build_anchor = '\t\tA30000000000000000000010 /* N60RealtimeAudioBridge.c in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000020 /* N60RealtimeAudioBridge.c */; };\n'
+          build_insert = build_anchor + '\t\tF69000000000000000000001 /* N60AdaptiveSampleRate.c in Sources */ = {isa = PBXBuildFile; fileRef = F69000000000000000000011 /* N60AdaptiveSampleRate.c */; };\n'
+
+          file_anchor = '\t\tA30000000000000000000020 /* N60RealtimeAudioBridge.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = N60RealtimeAudioBridge.c; sourceTree = "<group>"; };\n'
+          file_insert = file_anchor + '\t\tF69000000000000000000011 /* N60AdaptiveSampleRate.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = N60AdaptiveSampleRate.c; sourceTree = "<group>"; };\n\t\tF69000000000000000000012 /* N60AdaptiveSampleRate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60AdaptiveSampleRate.h; sourceTree = "<group>"; };\n'
+
+          group_anchor = '\t\t\t\tA30000000000000000000020 /* N60RealtimeAudioBridge.c */,\n'
+          group_insert = group_anchor + '\t\t\t\tF69000000000000000000011 /* N60AdaptiveSampleRate.c */,\n\t\t\t\tF69000000000000000000012 /* N60AdaptiveSampleRate.h */,\n'
+
+          source_anchor = '\t\t\t\tA30000000000000000000010 /* N60RealtimeAudioBridge.c in Sources */,\n'
+          source_insert = source_anchor + '\t\t\t\tF69000000000000000000001 /* N60AdaptiveSampleRate.c in Sources */,\n'
+
+          for anchor, replacement, label in (
+              (build_anchor, build_insert, 'PBXBuildFile'),
+              (file_anchor, file_insert, 'PBXFileReference'),
+              (group_anchor, group_insert, 'Realtime group'),
+              (source_anchor, source_insert, 'Sources phase'),
+          ):
+              if replacement in s:
+                  continue
+              count = s.count(anchor)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly one source anchor, found {count}')
+              s = s.replace(anchor, replacement, 1)
+
+          required = [
+              'F69000000000000000000001 /* N60AdaptiveSampleRate.c in Sources */',
+              'F69000000000000000000011 /* N60AdaptiveSampleRate.c */',
+              'F69000000000000000000012 /* N60AdaptiveSampleRate.h */',
+          ]
+          for token in required:
+              if token not in s:
+                  raise SystemExit(f'missing expected Xcode registration: {token}')
+          p.write_text(s)
+          PY
+          rm .github/workflows/pr69-xcode-register-staging.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add NotchSixty.xcodeproj/project.pbxproj .github/workflows/pr69-xcode-register-staging.yml
+          git diff --cached --check
+          git commit -m "PR69: compile adaptive SRC in app target"
+          git push origin HEAD:feature/pr69-adaptive-clock-src
