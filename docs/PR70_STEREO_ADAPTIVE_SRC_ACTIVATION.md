@@ -25,9 +25,11 @@ For matched-rate sessions its policy is unchanged: two physical output callback 
 
 For an ASRC session the gate is expressed in **input-domain frames**. The target includes:
 
-- two output callback quanta converted to input-domain frames;
+- three output callback quanta converted to input-domain frames;
 - two PR69 half-kernel look-ahead margins;
 - one additional callback quantum plus one look-ahead margin before initial gate opening.
+
+The three-quantum steady-state target is deliberate. Deterministic independently scheduled HAL-callback simulation showed that a two-quantum target could let normal PI settling consume the symmetric FIR look-ahead margin after sustained playback. The deeper target eliminates that starvation case while remaining bounded by the existing bridge capacity.
 
 This gives the symmetric interpolation kernel enough future support at startup and leaves the PI controller meaningful headroom around its steady-state target. The gate still outputs deterministic silence until ready and then uses the existing click-free startup fade.
 
@@ -75,7 +77,9 @@ PR70 does not attempt to rebuild a running SRC from an audio callback. Existing 
 
 When a stereo bridge is reset on the control plane, the adaptive ring, fractional source position, PI integral/correction, and transport counters are reset together. The normal startup gate then re-primes before audio is emitted.
 
-This is deliberately conservative: a discontinuity is treated as a new clock relationship rather than asking a stale adaptive controller to extrapolate through it.
+If an adaptive output callback nevertheless cannot produce a complete physical-output block, PR70 fails that callback closed to silence, closes the startup gate, re-arms the startup fade, and requires the input-domain activation target to be buffered again before audio resumes. A partial SRC block is never sent through the production DSP graph.
+
+This is deliberately conservative: a discontinuity or starvation is treated as a new lock acquisition rather than asking a marginal adaptive state to continue audibly.
 
 ## Deterministic validation
 
@@ -85,6 +89,7 @@ CI retains the PR69 DSP-quality harness and adds a PR70 transport simulation cov
 - passband frequency and level preservation through callback-sized blocks;
 - no drops or starvation after startup under nominal cadence;
 - an independently drifting source clock at +220 ppm;
+- independently scheduled equal-frame HAL capture/output callbacks at different native rates;
 - correction moving in the expected direction while buffer fill remains bounded;
 - explicit starvation telemetry;
 - control-plane reset;
