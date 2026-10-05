@@ -179,6 +179,83 @@ static void test_independent_clock_drift(void) {
     N60AdaptiveSRCDestroy(src);
 }
 
+static void test_independent_callback_schedule(void) {
+    const uint32_t blockFrames = 512u;
+    const uint32_t target = 1600u;
+    const double inputRate = 44100.0;
+    const double outputRate = 48000.0;
+    const double sourceDriftPPM = 180.0;
+    const double physicalInputRate = inputRate * (1.0 + sourceDriftPPM * 1.0e-6);
+
+    N60AdaptiveSRCConfiguration configuration = N60AdaptiveSRCConfigurationMakeDefault(
+        inputRate, outputRate, 2u, 16384u, target
+    );
+    N60AdaptiveSRC *src = N60AdaptiveSRCCreate(configuration);
+    check(src != NULL, "create independently scheduled callback transport");
+    if (src == NULL) return;
+
+    float *capture = calloc((size_t)blockFrames * 2u, sizeof(float));
+    float *output = calloc((size_t)blockFrames * 2u, sizeof(float));
+    if (capture == NULL || output == NULL) {
+        check(0, "allocate independently scheduled callback buffers");
+        free(capture);
+        free(output);
+        N60AdaptiveSRCDestroy(src);
+        return;
+    }
+
+    const double capturePeriod = (double)blockFrames / physicalInputRate;
+    const double outputPeriod = (double)blockFrames / outputRate;
+    double nextCapture = 0.0;
+    double nextOutput = 0.0;
+    const double endTime = 60.0;
+    uint64_t inputFrame = 0u;
+    uint64_t suppliedOutputCallbacks = 0u;
+    int gateOpen = 0;
+
+    while (nextCapture < endTime || nextOutput < endTime) {
+        if (nextCapture <= nextOutput && nextCapture < endTime) {
+            fill_sine(capture, blockFrames, physicalInputRate, 733.0, inputFrame);
+            inputFrame += blockFrames;
+            check(
+                N60AdaptiveSRCPushInterleaved(src, capture, blockFrames) == blockFrames,
+                "independent capture callback does not overrun"
+            );
+            if (!gateOpen) {
+                N60AdaptiveSRCSnapshot snapshot = N60AdaptiveSRCGetSnapshot(src);
+                if (snapshot.bufferedFrames >= target + blockFrames) gateOpen = 1;
+            }
+            nextCapture += capturePeriod;
+        } else if (nextOutput < endTime) {
+            if (gateOpen) {
+                uint32_t produced = N60AdaptiveSRCPullInterleaved(src, output, blockFrames);
+                check(produced == blockFrames,
+                      "independently scheduled output callback remains fully supplied");
+                if (produced == blockFrames) suppliedOutputCallbacks += 1u;
+            }
+            nextOutput += outputPeriod;
+        } else {
+            break;
+        }
+    }
+
+    N60AdaptiveSRCSnapshot snapshot = N60AdaptiveSRCGetSnapshot(src);
+    check(suppliedOutputCallbacks > 5000u,
+          "independent callback simulation sustains long-run output");
+    check(snapshot.droppedInputFrames == 0u,
+          "independent callback simulation has no input drops");
+    check(snapshot.starvedOutputFrames == 0u,
+          "independent callback simulation has no output starvation");
+    check(snapshot.correctionPPM > 50.0 && snapshot.correctionPPM < 350.0,
+          "independent callback controller tracks faster source clock");
+    check(snapshot.bufferedFrames > 600u && snapshot.bufferedFrames < 3200u,
+          "independent callback fill remains bounded");
+
+    free(capture);
+    free(output);
+    N60AdaptiveSRCDestroy(src);
+}
+
 static void test_starvation_reset_and_reprime(void) {
     const uint32_t target = 900u;
     N60AdaptiveSRC *src = make_src(target);
@@ -215,6 +292,7 @@ static void test_starvation_reset_and_reprime(void) {
 int main(void) {
     test_nominal_callback_cadence();
     test_independent_clock_drift();
+    test_independent_callback_schedule();
     test_starvation_reset_and_reprime();
     if (failures != 0) {
         fprintf(stderr, "%d PR70 stereo transport simulation failure(s)\n", failures);
