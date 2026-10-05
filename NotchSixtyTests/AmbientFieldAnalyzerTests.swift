@@ -45,8 +45,12 @@ final class AmbientFieldAnalyzerTests: XCTestCase {
         let predicted = convolve(playback, impulse: impulse)
         let ambientTone = sine(frequency: 83, amplitude: 0.045, frames: frameCount)
         let ambientNoise = deterministicNoise(amplitude: 0.0035, frames: frameCount)
-        let ambient = zip(ambientTone, ambientNoise).map(+)
-        let microphone = zip(predicted, ambient).map(+)
+        let ambient = zip(ambientTone, ambientNoise).map { pair in
+            pair.0 + pair.1
+        }
+        let microphone = zip(predicted, ambient).map { pair in
+            pair.0 + pair.1
+        }
 
         let snapshot = try AmbientFieldAnalyzer().analyze(
             microphone: microphone,
@@ -74,6 +78,89 @@ final class AmbientFieldAnalyzerTests: XCTestCase {
         XCTAssertEqual(strongest.frequencyHz, 83, accuracy: 3.5)
         XCTAssertGreaterThan(snapshot.periodicityScore, 0.70)
         XCTAssertEqual(snapshot.periodicFrequencyHz ?? 0, 83, accuracy: 2.0)
+    }
+
+    func testSemanticPlaybackSourcesSumInTheAcousticDomain() throws {
+        let left = shapedPlayback(frames: frameCount)
+        let right = (0..<frameCount).map { frame in
+            Float(
+                0.11 * sin(
+                    2.0 * Double.pi * 1_463.0 * Double(frame) / sampleRate
+                )
+            )
+        }
+        let leftImpulse = delayedImpulse(
+            delay: 23,
+            taps: [(0, 0.52), (37, 0.08)]
+        )
+        let rightImpulse = delayedImpulse(
+            delay: 31,
+            taps: [(0, 0.41), (29, -0.06)]
+        )
+        let leftAtMic = convolve(left, impulse: leftImpulse)
+        let rightAtMic = convolve(right, impulse: rightImpulse)
+        let ambient = sine(frequency: 71, amplitude: 0.035, frames: frameCount)
+        let microphone = (0..<frameCount).map { index in
+            leftAtMic[index] + rightAtMic[index] + ambient[index]
+        }
+
+        let snapshot = try AmbientFieldAnalyzer().analyze(
+            microphone: microphone,
+            playbackSources: [
+                AmbientPlaybackSourceReference(
+                    id: "front-left",
+                    samples: left,
+                    acousticImpulseResponse: leftImpulse
+                ),
+                AmbientPlaybackSourceReference(
+                    id: "front-right",
+                    samples: right,
+                    acousticImpulseResponse: rightImpulse
+                ),
+            ],
+            sampleRate: sampleRate
+        )
+
+        XCTAssertEqual(snapshot.separationMode, .modeledPlaybackSubtraction)
+        XCTAssertGreaterThan(snapshot.separationConfidence, 0.70)
+        XCTAssertEqual(snapshot.predictionGain ?? 0, 1.0, accuracy: 0.04)
+        XCTAssertEqual(
+            snapshot.ambientLevelDBFS,
+            dbfs(rms(ambient)),
+            accuracy: 1.0
+        )
+        XCTAssertEqual(
+            snapshot.tonalComponents.first?.frequencyHz ?? 0,
+            71,
+            accuracy: 3.5
+        )
+    }
+
+    func testOneAudibleUnmodeledSemanticSourceFailsSeparationClosed() throws {
+        let left = shapedPlayback(frames: frameCount)
+        let right = sine(frequency: 1_700, amplitude: 0.05, frames: frameCount)
+        let microphone = (0..<frameCount).map { left[$0] + right[$0] }
+
+        let snapshot = try AmbientFieldAnalyzer().analyze(
+            microphone: microphone,
+            playbackSources: [
+                AmbientPlaybackSourceReference(
+                    id: "front-left",
+                    samples: left,
+                    acousticImpulseResponse: [1]
+                ),
+                AmbientPlaybackSourceReference(
+                    id: "front-right",
+                    samples: right,
+                    acousticImpulseResponse: nil
+                ),
+            ],
+            sampleRate: sampleRate
+        )
+
+        XCTAssertEqual(snapshot.separationMode, .playbackModelUnavailable)
+        XCTAssertLessThan(snapshot.separationConfidence, 0.25)
+        XCTAssertNil(snapshot.predictionGain)
     }
 
     func testAudiblePlaybackWithoutAcousticModelFailsConfidenceClosed() throws {
@@ -236,7 +323,7 @@ final class AmbientFieldAnalyzerTests: XCTestCase {
         delay: Int,
         taps: [(offset: Int, value: Float)]
     ) -> [Float] {
-        let length = delay + (taps.map(\.offset).max() ?? 0) + 1
+        let length = delay + (taps.map { $0.offset }.max() ?? 0) + 1
         var impulse = [Float](repeating: 0, count: length)
         for tap in taps {
             impulse[delay + tap.offset] = tap.value
