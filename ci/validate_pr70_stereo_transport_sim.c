@@ -87,6 +87,10 @@ static void test_nominal_callback_cadence(void) {
         check(accepted == captureFrames, "nominal capture callback has no drop");
 
         N60AdaptiveSRCSnapshot before = N60AdaptiveSRCGetSnapshot(src);
+        if (callback == 0u) {
+            check(before.bufferedFrames == captureFrames,
+                  "producer publishes startup fill before first consumer pull");
+        }
         if (!gateOpen && before.bufferedFrames >= target + 96u) gateOpen = 1;
         if (!gateOpen) continue;
 
