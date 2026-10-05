@@ -487,6 +487,21 @@ uint32_t N60AdaptiveSRCPullInterleaved(
     return produced;
 }
 
+void N60AdaptiveSRCRelockConsumer(N60AdaptiveSRC *src) {
+    if (src == NULL) return;
+
+    // The output callback is the sole owner of clockController and
+    // sourcePosition. Preserve cumulative saturation telemetry while returning
+    // the adaptive ratio to nominal; producer/ring state is untouched.
+    uint64_t saturationEvents = src->clockController.saturationEvents;
+    N60AdaptiveClockControllerReset(&src->clockController);
+    src->clockController.saturationEvents = saturationEvents;
+    publish_runtime_snapshot(
+        src,
+        atomic_load_explicit(&src->writeIndex, memory_order_acquire)
+    );
+}
+
 N60AdaptiveSRCSnapshot N60AdaptiveSRCGetSnapshot(const N60AdaptiveSRC *src) {
     if (src == NULL) return (N60AdaptiveSRCSnapshot){0};
     return (N60AdaptiveSRCSnapshot){
