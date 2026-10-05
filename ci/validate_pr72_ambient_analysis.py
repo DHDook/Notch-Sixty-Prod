@@ -76,7 +76,7 @@ for token in (
 
 for phrase in (
     "passive",
-    "does not generate anti-noise",
+    "generate anti-noise",
     "semantic",
     "multichannel",
     "confidence",
