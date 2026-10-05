@@ -453,14 +453,23 @@ uint32_t N60AdaptiveSRCPullInterleaved(
         const float *row1 = src->phaseTable + (size_t)(phase + 1u) * src->tablePhaseStride;
         int64_t leftEdge = center - ((int64_t)half - 1);
 
-        for (uint32_t channel = 0u; channel < channels; ++channel) {
-            double sum = 0.0;
-            for (uint32_t tap = 0u; tap < taps; ++tap) {
-                float coefficient = row0[tap] + (row1[tap] - row0[tap]) * phaseMix;
-                sum += (double)ring_sample(src, leftEdge + (int64_t)tap, channel)
-                    * (double)coefficient;
+        double sums[N60_ADAPTIVE_SRC_MAX_CHANNELS] = {0.0};
+        for (uint32_t tap = 0u; tap < taps; ++tap) {
+            // The fractional phase is shared by every channel. Interpolate the
+            // FIR coefficient once per tap, then apply it across the semantic
+            // channel vector. This is material for 7.1.4 through 32-channel
+            // program layouts and preserves bit-identical channel isolation.
+            const double coefficient = (double)(
+                row0[tap] + (row1[tap] - row0[tap]) * phaseMix
+            );
+            const int64_t absoluteFrame = leftEdge + (int64_t)tap;
+            for (uint32_t channel = 0u; channel < channels; ++channel) {
+                sums[channel] += (double)ring_sample(src, absoluteFrame, channel)
+                    * coefficient;
             }
-            output[(size_t)produced * channels + channel] = (float)sum;
+        }
+        for (uint32_t channel = 0u; channel < channels; ++channel) {
+            output[(size_t)produced * channels + channel] = (float)sums[channel];
         }
         src->sourcePosition += step;
     }

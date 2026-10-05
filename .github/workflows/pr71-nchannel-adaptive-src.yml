@@ -1,0 +1,88 @@
+name: PR71 N-Channel Adaptive SRC Activation
+
+on:
+  push:
+    branches:
+      - feature/pr71-nchannel-adaptive-src
+  pull_request:
+    branches:
+      - feature/pr70-stereo-adaptive-src
+  workflow_dispatch:
+
+jobs:
+  validate-portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate inherited product hardening
+        run: python3 ci/validate_pr67_product_hardening.py
+      - name: Validate inherited VU and software-volume polish
+        run: python3 ci/validate_pr68_vu_volume_polish.py
+      - name: Validate PR71 semantic N-channel activation structure
+        run: python3 ci/validate_pr71_nchannel_adaptive_src.py
+      - name: Retain PR69 SRC quality validation
+        run: |
+          clang -std=c11 -O2 -Wall -Wextra -Werror \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr69_adaptive_src.c \
+            NotchSixty/Audio/Realtime/N60AdaptiveSampleRate.c \
+            -lm -o /tmp/pr69-adaptive-src
+          /tmp/pr69-adaptive-src
+      - name: Retain PR70 stereo transport simulation
+        run: |
+          clang -std=c11 -O2 -Wall -Wextra -Werror \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr70_stereo_transport_sim.c \
+            NotchSixty/Audio/Realtime/N60AdaptiveSampleRate.c \
+            -lm -o /tmp/pr70-stereo-transport
+          /tmp/pr70-stereo-transport
+      - name: Run PR71 multichannel quality drift and performance harness
+        run: |
+          clang -std=c11 -O2 -Wall -Wextra -Werror \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr71_nchannel_adaptive_src.c \
+            NotchSixty/Audio/Realtime/N60AdaptiveSampleRate.c \
+            -lm -o /tmp/pr71-nchannel-asrc
+          /tmp/pr71-nchannel-asrc
+
+  validate-macos-integration:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate PR71 semantic N-channel activation structure
+        run: python3 ci/validate_pr71_nchannel_adaptive_src.py
+      - name: Run retained stereo and PR71 multichannel simulations on Apple clang
+        run: |
+          clang -std=c11 -O2 -Wall -Wextra -Werror \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr70_stereo_transport_sim.c \
+            NotchSixty/Audio/Realtime/N60AdaptiveSampleRate.c \
+            -lm -o /tmp/pr70-stereo-transport
+          /tmp/pr70-stereo-transport
+
+          clang -std=c11 -O2 -Wall -Wextra -Werror \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr71_nchannel_adaptive_src.c \
+            NotchSixty/Audio/Realtime/N60AdaptiveSampleRate.c \
+            -lm -o /tmp/pr71-nchannel-asrc
+          /tmp/pr71-nchannel-asrc
+      - name: Build arm64 app with live semantic N-channel adaptive SRC
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            build
+      - name: Run retained XCTest suite
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            test

@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "N60AdaptiveSampleRate.h"
 #include "N60LiveNChannelRenderCore.h"
 #include "N60ProgramTransport.h"
 
@@ -40,11 +41,17 @@ typedef struct {
     bool outputGateOpen;
     uint64_t algorithmicLatencyFrames;
     N60ProgramTransportSnapshot transport;
+    bool adaptiveSampleRateEnabled;
+    N60AdaptiveSRCSnapshot adaptiveSampleRate;
+    uint64_t adaptiveTransportLatencyFrames;
     N60LiveNChannelMeterSnapshot meter;
 } N60LiveNChannelBridgeSnapshot;
 
 typedef struct N60LiveNChannelBridge {
     N60ProgramTransport * _Nullable transport;
+    N60AdaptiveSRC * _Nullable adaptiveSRC;
+    float * _Nullable adaptiveCaptureScratch;
+    float * _Nullable adaptiveOutputScratch;
     N60LiveNChannelRenderRuntime * _Nullable renderRuntime;
     N60ProgramInputMap inputMap;
     N60LiveNChannelRenderGraph graph;
@@ -171,7 +178,10 @@ static inline void N60LiveNChannelBridgeDestroy(
 ) {
     if (bridge == NULL) return;
     N60ProgramTransportDestroy(bridge->transport);
+    N60AdaptiveSRCDestroy(bridge->adaptiveSRC);
     N60LiveNChannelRenderRuntimeDestroy(bridge->renderRuntime);
+    free(bridge->adaptiveCaptureScratch);
+    free(bridge->adaptiveOutputScratch);
     bridge->transport = NULL;
     bridge->renderRuntime = NULL;
     free(bridge);
@@ -188,6 +198,9 @@ static inline bool N60LiveNChannelBridgeReset(
         return false;
     }
     N60ProgramTransportReset(bridge->transport);
+    if (bridge->adaptiveSRC != NULL) {
+        N60AdaptiveSRCReset(bridge->adaptiveSRC);
+    }
     bridge->startupFadeRemaining = 0u;
     atomic_store_explicit(
         &bridge->outputGateOpen,
@@ -204,6 +217,55 @@ static inline bool N60LiveNChannelBridgeReset(
     atomic_store_explicit(&bridge->meteringDemand, false, memory_order_release);
     N60LiveNChannelBridgeClearMeterPublication(bridge);
     return true;
+}
+
+static inline bool N60LiveNChannelBridgeConfigureAdaptiveSampleRate(
+    N60LiveNChannelBridge * _Nonnull bridge,
+    double inputSampleRate,
+    double outputSampleRate,
+    uint32_t targetBufferedInputFrames
+) {
+    if (bridge == NULL
+        || bridge->adaptiveSRC != NULL
+        || !isfinite(inputSampleRate) || inputSampleRate <= 0.0
+        || !isfinite(outputSampleRate) || outputSampleRate <= 0.0
+        || bridge->graph.programLayout.channelCount == 0u
+        || bridge->graph.programLayout.channelCount > N60_ADAPTIVE_SRC_MAX_CHANNELS) {
+        return false;
+    }
+    if (fabs(inputSampleRate - outputSampleRate) < 0.5) return true;
+
+    const uint32_t channels = bridge->graph.programLayout.channelCount;
+    N60AdaptiveSRCConfiguration configuration = N60AdaptiveSRCConfigurationMakeDefault(
+        inputSampleRate,
+        outputSampleRate,
+        channels,
+        bridge->transport->capacityFrames,
+        targetBufferedInputFrames
+    );
+    N60AdaptiveSRC *adaptiveSRC = N60AdaptiveSRCCreate(configuration);
+    if (adaptiveSRC == NULL) return false;
+
+    const size_t sampleCount = (size_t)bridge->transport->capacityFrames * channels;
+    float *captureScratch = (float *)calloc(sampleCount, sizeof(float));
+    float *outputScratch = (float *)calloc(sampleCount, sizeof(float));
+    if (captureScratch == NULL || outputScratch == NULL) {
+        free(captureScratch);
+        free(outputScratch);
+        N60AdaptiveSRCDestroy(adaptiveSRC);
+        return false;
+    }
+
+    bridge->adaptiveSRC = adaptiveSRC;
+    bridge->adaptiveCaptureScratch = captureScratch;
+    bridge->adaptiveOutputScratch = outputScratch;
+    return true;
+}
+
+static inline bool N60LiveNChannelBridgeAdaptiveSampleRateEnabled(
+    const N60LiveNChannelBridge * _Nullable bridge
+) {
+    return bridge != NULL && bridge->adaptiveSRC != NULL;
 }
 
 static inline void N60LiveNChannelBridgeSetOutputGain(
@@ -307,7 +369,7 @@ static inline N60LiveNChannelBridgeSnapshot N60LiveNChannelBridgeGetSnapshot(
     const N60LiveNChannelBridge * _Nullable bridge
 ) {
     if (bridge == NULL) return (N60LiveNChannelBridgeSnapshot){0};
-    return (N60LiveNChannelBridgeSnapshot){
+    N60LiveNChannelBridgeSnapshot result = {
         .captureCallbacks = atomic_load_explicit(&bridge->captureCallbacks, memory_order_relaxed),
         .outputCallbacks = atomic_load_explicit(&bridge->outputCallbacks, memory_order_relaxed),
         .renderedFrames = atomic_load_explicit(&bridge->renderedFrames, memory_order_relaxed),
@@ -324,8 +386,18 @@ static inline N60LiveNChannelBridgeSnapshot N60LiveNChannelBridgeGetSnapshot(
         .outputGateOpen = atomic_load_explicit(&bridge->outputGateOpen, memory_order_acquire),
         .algorithmicLatencyFrames = N60LiveNChannelRenderGraphLatencyFrames(&bridge->graph),
         .transport = N60ProgramTransportGetSnapshot(bridge->transport),
+        .adaptiveSampleRateEnabled = bridge->adaptiveSRC != NULL,
         .meter = N60LiveNChannelBridgeGetMeterSnapshot(bridge),
     };
+    if (bridge->adaptiveSRC != NULL) {
+        result.adaptiveSampleRate = N60AdaptiveSRCGetSnapshot(bridge->adaptiveSRC);
+        result.adaptiveTransportLatencyFrames = (uint64_t)ceil(
+            (double)result.adaptiveSampleRate.targetBufferedFrames
+            * result.adaptiveSampleRate.outputSampleRate
+            / result.adaptiveSampleRate.inputSampleRate
+        );
+    }
+    return result;
 }
 
 static inline void N60LiveNChannelZeroOutput(AudioBufferList * _Nullable outputData) {
@@ -397,6 +469,46 @@ static inline OSStatus N60LiveNChannelCaptureIOProc(
     N60LiveNChannelBridge *bridge = (N60LiveNChannelBridge *)inClientData;
     if (bridge == NULL || bridge->transport == NULL || inInputData == NULL) return noErr;
     atomic_fetch_add_explicit(&bridge->captureCallbacks, 1u, memory_order_relaxed);
+
+    if (bridge->adaptiveSRC != NULL) {
+        uint32_t frameCount = 0u;
+        if (!N60ProgramTransportBufferFrameCount(
+                inInputData,
+                bridge->inputMap.streamChannelCount,
+                &frameCount)) {
+            N60ProgramTransportRecordUnsupportedBufferLayout(bridge->transport);
+            return noErr;
+        }
+        const uint32_t capacity = bridge->transport->capacityFrames;
+        const uint32_t framesToStage = frameCount < capacity ? frameCount : capacity;
+        const uint32_t channels = bridge->graph.programLayout.channelCount;
+        uint32_t staged = 0u;
+        for (; staged < framesToStage; ++staged) {
+            N60ProgramTransportFrame canonical = {0};
+            if (!N60ProgramInputMapReadFrame(
+                    &bridge->inputMap,
+                    inInputData,
+                    staged,
+                    &canonical)) {
+                N60ProgramTransportRecordUnsupportedBufferLayout(bridge->transport);
+                break;
+            }
+            memcpy(
+                bridge->adaptiveCaptureScratch + (size_t)staged * channels,
+                canonical.channels,
+                (size_t)channels * sizeof(float)
+            );
+        }
+        if (staged > 0u) {
+            (void)N60AdaptiveSRCPushInterleaved(
+                bridge->adaptiveSRC,
+                bridge->adaptiveCaptureScratch,
+                staged
+            );
+        }
+        return noErr;
+    }
+
     (void)N60ProgramTransportCaptureBuffer(
         bridge->transport,
         &bridge->inputMap,
@@ -442,14 +554,37 @@ static inline OSStatus N60LiveNChannelOutputIOProc(
         return noErr;
     }
 
+    const bool adaptiveSampleRate = bridge->adaptiveSRC != NULL;
     if (!atomic_load_explicit(&bridge->outputGateOpen, memory_order_acquire)) {
-        const N60ProgramTransportSnapshot transport = N60ProgramTransportGetSnapshot(bridge->transport);
-        if (transport.bufferedFrames >= bridge->outputGateMinimumBufferedFrames
-            && transport.bufferedFrames >= frameCount) {
+        const uint32_t bufferedFrames = adaptiveSampleRate
+            ? N60AdaptiveSRCGetSnapshot(bridge->adaptiveSRC).bufferedFrames
+            : N60ProgramTransportGetSnapshot(bridge->transport).bufferedFrames;
+        const bool gateReady = adaptiveSampleRate
+            ? bufferedFrames >= bridge->outputGateMinimumBufferedFrames
+            : (bufferedFrames >= bridge->outputGateMinimumBufferedFrames
+                && bufferedFrames >= frameCount);
+        if (gateReady) {
             atomic_store_explicit(&bridge->outputGateOpen, true, memory_order_release);
             bridge->startupFadeRemaining = bridge->startupFadeFrames;
         } else {
             N60LiveNChannelZeroOutput(outOutputData);
+            atomic_fetch_add_explicit(&bridge->gatedOutputCallbacks, 1u, memory_order_relaxed);
+            atomic_fetch_add_explicit(&bridge->gatedOutputFrames, frameCount, memory_order_relaxed);
+            return noErr;
+        }
+    }
+
+    if (adaptiveSampleRate) {
+        const uint32_t pulled = N60AdaptiveSRCPullInterleaved(
+            bridge->adaptiveSRC,
+            bridge->adaptiveOutputScratch,
+            frameCount
+        );
+        if (pulled < frameCount) {
+            N60LiveNChannelZeroOutput(outOutputData);
+            N60AdaptiveSRCRelockConsumer(bridge->adaptiveSRC);
+            atomic_store_explicit(&bridge->outputGateOpen, false, memory_order_release);
+            bridge->startupFadeRemaining = bridge->startupFadeFrames;
             atomic_fetch_add_explicit(&bridge->gatedOutputCallbacks, 1u, memory_order_relaxed);
             atomic_fetch_add_explicit(&bridge->gatedOutputFrames, frameCount, memory_order_relaxed);
             return noErr;
@@ -475,7 +610,16 @@ static inline OSStatus N60LiveNChannelOutputIOProc(
 
     for (uint32_t frameIndex = 0; frameIndex < frameCount; ++frameIndex) {
         N60ProgramTransportFrame input = {0};
-        (void)N60ProgramTransportDequeueFrame(bridge->transport, &input);
+        if (adaptiveSampleRate) {
+            const uint32_t channels = bridge->graph.programLayout.channelCount;
+            memcpy(
+                input.channels,
+                bridge->adaptiveOutputScratch + (size_t)frameIndex * channels,
+                (size_t)channels * sizeof(float)
+            );
+        } else {
+            (void)N60ProgramTransportDequeueFrame(bridge->transport, &input);
+        }
 
         N60LiveNChannelPhysicalFrame physical = {0};
         if (!N60LiveNChannelRenderProcessFrame(

@@ -1803,7 +1803,7 @@ final class AudioIOEngine: ObservableObject {
                     ?? session.routePlan.programLayout.displayName,
                 programLayoutName: session.routePlan.programLayout.displayName,
                 sampleRate: session.outputFormat.sampleRate,
-                latencyFrames: raw.algorithmicLatencyFrames,
+                latencyFrames: raw.algorithmicLatencyFrames + raw.adaptiveTransportLatencyFrames,
                 meteringEnabled: raw.meter.enabled,
                 programChannels: programChannels,
                 physicalOutputs: physicalOutputs,
