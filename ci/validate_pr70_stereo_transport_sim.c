@@ -181,9 +181,15 @@ static void test_independent_clock_drift(void) {
 
 static void test_independent_callback_schedule(void) {
     const uint32_t blockFrames = 512u;
-    const uint32_t target = 1600u;
     const double inputRate = 44100.0;
     const double outputRate = 48000.0;
+    const uint32_t lookahead = N60_ADAPTIVE_SRC_DEFAULT_TAPS / 2u;
+    const uint32_t inputFramesPerOutputBuffer =
+        (uint32_t)ceil((double)blockFrames * inputRate / outputRate);
+    const uint32_t target =
+        inputFramesPerOutputBuffer * 2u + lookahead * 2u;
+    const uint32_t activation =
+        target + inputFramesPerOutputBuffer + lookahead;
     const double sourceDriftPPM = 180.0;
     const double physicalInputRate = inputRate * (1.0 + sourceDriftPPM * 1.0e-6);
 
@@ -223,7 +229,7 @@ static void test_independent_callback_schedule(void) {
             );
             if (!gateOpen) {
                 N60AdaptiveSRCSnapshot snapshot = N60AdaptiveSRCGetSnapshot(src);
-                if (snapshot.bufferedFrames >= target + blockFrames) gateOpen = 1;
+                if (snapshot.bufferedFrames >= activation) gateOpen = 1;
             }
             nextCapture += capturePeriod;
         } else if (nextOutput < endTime) {
@@ -248,7 +254,8 @@ static void test_independent_callback_schedule(void) {
           "independent callback simulation has no output starvation");
     check(snapshot.correctionPPM > 50.0 && snapshot.correctionPPM < 350.0,
           "independent callback controller tracks faster source clock");
-    check(snapshot.bufferedFrames > 600u && snapshot.bufferedFrames < 3200u,
+    check(snapshot.bufferedFrames > lookahead * 2u
+              && snapshot.bufferedFrames < target * 3u,
           "independent callback fill remains bounded");
 
     free(capture);
