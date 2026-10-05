@@ -187,7 +187,7 @@ static void test_independent_callback_schedule(void) {
     const uint32_t inputFramesPerOutputBuffer =
         (uint32_t)ceil((double)blockFrames * inputRate / outputRate);
     const uint32_t target =
-        inputFramesPerOutputBuffer * 2u + lookahead * 2u;
+        inputFramesPerOutputBuffer * 3u + lookahead * 2u;
     const uint32_t activation =
         target + inputFramesPerOutputBuffer + lookahead;
     const double sourceDriftPPM = 180.0;
