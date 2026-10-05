@@ -107,6 +107,11 @@ uint32_t N60AdaptiveSRCPullInterleaved(
     uint32_t requestedOutputFrames
 );
 
+// Consumer-thread realtime relock. Preserves ring contents, source position,
+// producer indices, and transport failure counters while resetting only the PI
+// correction state to the nominal ratio.
+void N60AdaptiveSRCRelockConsumer(N60AdaptiveSRC *src);
+
 N60AdaptiveSRCSnapshot N60AdaptiveSRCGetSnapshot(const N60AdaptiveSRC *src);
 bool N60AdaptiveSRCRealtimeAtomicsAreLockFree(const N60AdaptiveSRC *src);
 uint32_t N60AdaptiveSRCLatencyInputFrames(const N60AdaptiveSRC *src);
