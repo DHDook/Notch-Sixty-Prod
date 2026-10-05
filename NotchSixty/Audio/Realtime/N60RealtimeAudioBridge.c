@@ -1260,6 +1260,31 @@ OSStatus N60OutputIOProc(
             frameCount
         )
         : (frameCount < available ? frameCount : (UInt32)available);
+
+    if (adaptiveSampleRate && framesToRead < frameCount) {
+        // A partial adaptive block means the FIR no longer has enough future
+        // input support. Fail the entire callback closed, re-arm the startup
+        // gate, and require a full input-domain re-prime before emitting audio
+        // again. Discarding the partial pull is preferable to leaking a
+        // discontinuous half-block into the production DSP graph.
+        zero_output(outOutputData);
+        atomic_store_explicit(&bridge->outputGateOpen, false, memory_order_release);
+        uint32_t fadeFrames = atomic_load_explicit(
+            &bridge->startupFadeFramesTotal,
+            memory_order_relaxed
+        );
+        bridge->startupFadeRuntime.totalFrames = fadeFrames;
+        bridge->startupFadeRuntime.remainingFrames = fadeFrames;
+        atomic_fetch_add_explicit(
+            &bridge->underrunFrames,
+            frameCount - framesToRead,
+            memory_order_relaxed
+        );
+        atomic_fetch_add_explicit(&bridge->gatedOutputCallbacks, 1, memory_order_relaxed);
+        atomic_fetch_add_explicit(&bridge->gatedOutputFrames, frameCount, memory_order_relaxed);
+        return noErr;
+    }
+
     float masterGain = bits_to_float(
         atomic_load_explicit(&bridge->outputGainBits, memory_order_acquire)
     );
