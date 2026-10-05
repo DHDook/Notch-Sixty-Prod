@@ -68,6 +68,14 @@ struct AudioTransportCounters: Equatable, Sendable {
     var graphPublicationFailures: UInt64 = 0
     var graphPublicationCoalescedUpdates: UInt64 = 0
     var graphTransitionsScheduled: UInt64 = 0
+    var adaptiveSampleRateEnabled = false
+    var adaptiveInputSampleRate = 0.0
+    var adaptiveOutputSampleRate = 0.0
+    var adaptiveCorrectionPPM = 0.0
+    var adaptiveTargetBufferedFrames: UInt32 = 0
+    var adaptiveDroppedInputFrames: UInt64 = 0
+    var adaptiveStarvedOutputFrames: UInt64 = 0
+    var adaptiveControllerSaturationEvents: UInt64 = 0
 
     init(snapshot: N60RealtimeAudioBridgeSnapshot) {
         captureCallbacks = snapshot.captureCallbacks
@@ -80,6 +88,14 @@ struct AudioTransportCounters: Equatable, Sendable {
         gatedOutputCallbacks = snapshot.gatedOutputCallbacks
         gatedOutputFrames = snapshot.gatedOutputFrames
         bufferedFrames = snapshot.bufferedFrames
+        adaptiveSampleRateEnabled = snapshot.adaptiveSampleRateEnabled
+        adaptiveInputSampleRate = snapshot.adaptiveSampleRate.inputSampleRate
+        adaptiveOutputSampleRate = snapshot.adaptiveSampleRate.outputSampleRate
+        adaptiveCorrectionPPM = snapshot.adaptiveSampleRate.correctionPPM
+        adaptiveTargetBufferedFrames = snapshot.adaptiveSampleRate.targetBufferedFrames
+        adaptiveDroppedInputFrames = snapshot.adaptiveSampleRate.droppedInputFrames
+        adaptiveStarvedOutputFrames = snapshot.adaptiveSampleRate.starvedOutputFrames
+        adaptiveControllerSaturationEvents = snapshot.adaptiveSampleRate.controllerSaturationEvents
     }
 
     init(
@@ -96,7 +112,15 @@ struct AudioTransportCounters: Equatable, Sendable {
         graphPublications: UInt64 = 0,
         graphPublicationFailures: UInt64 = 0,
         graphPublicationCoalescedUpdates: UInt64 = 0,
-        graphTransitionsScheduled: UInt64 = 0
+        graphTransitionsScheduled: UInt64 = 0,
+        adaptiveSampleRateEnabled: Bool = false,
+        adaptiveInputSampleRate: Double = 0,
+        adaptiveOutputSampleRate: Double = 0,
+        adaptiveCorrectionPPM: Double = 0,
+        adaptiveTargetBufferedFrames: UInt32 = 0,
+        adaptiveDroppedInputFrames: UInt64 = 0,
+        adaptiveStarvedOutputFrames: UInt64 = 0,
+        adaptiveControllerSaturationEvents: UInt64 = 0
     ) {
         self.captureCallbacks = captureCallbacks
         self.outputCallbacks = outputCallbacks
@@ -112,6 +136,14 @@ struct AudioTransportCounters: Equatable, Sendable {
         self.graphPublicationFailures = graphPublicationFailures
         self.graphPublicationCoalescedUpdates = graphPublicationCoalescedUpdates
         self.graphTransitionsScheduled = graphTransitionsScheduled
+        self.adaptiveSampleRateEnabled = adaptiveSampleRateEnabled
+        self.adaptiveInputSampleRate = adaptiveInputSampleRate
+        self.adaptiveOutputSampleRate = adaptiveOutputSampleRate
+        self.adaptiveCorrectionPPM = adaptiveCorrectionPPM
+        self.adaptiveTargetBufferedFrames = adaptiveTargetBufferedFrames
+        self.adaptiveDroppedInputFrames = adaptiveDroppedInputFrames
+        self.adaptiveStarvedOutputFrames = adaptiveStarvedOutputFrames
+        self.adaptiveControllerSaturationEvents = adaptiveControllerSaturationEvents
     }
 
     static func + (lhs: Self, rhs: Self) -> Self {
@@ -129,7 +161,15 @@ struct AudioTransportCounters: Equatable, Sendable {
             graphPublications: lhs.graphPublications + rhs.graphPublications,
             graphPublicationFailures: lhs.graphPublicationFailures + rhs.graphPublicationFailures,
             graphPublicationCoalescedUpdates: lhs.graphPublicationCoalescedUpdates + rhs.graphPublicationCoalescedUpdates,
-            graphTransitionsScheduled: lhs.graphTransitionsScheduled + rhs.graphTransitionsScheduled
+            graphTransitionsScheduled: lhs.graphTransitionsScheduled + rhs.graphTransitionsScheduled,
+            adaptiveSampleRateEnabled: rhs.adaptiveSampleRateEnabled,
+            adaptiveInputSampleRate: rhs.adaptiveInputSampleRate,
+            adaptiveOutputSampleRate: rhs.adaptiveOutputSampleRate,
+            adaptiveCorrectionPPM: rhs.adaptiveCorrectionPPM,
+            adaptiveTargetBufferedFrames: rhs.adaptiveTargetBufferedFrames,
+            adaptiveDroppedInputFrames: lhs.adaptiveDroppedInputFrames + rhs.adaptiveDroppedInputFrames,
+            adaptiveStarvedOutputFrames: lhs.adaptiveStarvedOutputFrames + rhs.adaptiveStarvedOutputFrames,
+            adaptiveControllerSaturationEvents: lhs.adaptiveControllerSaturationEvents + rhs.adaptiveControllerSaturationEvents
         )
     }
 }
@@ -158,6 +198,7 @@ enum CoreAudioTransportError: Error, LocalizedError, Equatable {
     case operationFailed(operation: String, status: OSStatus)
     case unsupportedFormat(role: String, format: AudioStreamFormatDescription)
     case sampleRateMismatch(tap: Double, output: Double)
+    case adaptiveSampleRateConfigurationFailed(tap: Double, output: Double)
     case realtimeBridgeAllocationFailed
     case dspGraphPublicationFailed
     case convolutionProgramPreparationFailed
@@ -455,8 +496,16 @@ final class CoreAudioTransportSession {
                     throw CoreAudioTransportError.unsupportedFormat(role: "multichannel output reference", format: outputFormat)
                 }
             }
-            guard abs(tapFormat.sampleRate - outputFormat.sampleRate) < 0.5 else {
-                throw CoreAudioTransportError.sampleRateMismatch(tap: tapFormat.sampleRate, output: outputFormat.sampleRate)
+            let adaptiveSampleRateRequired = abs(tapFormat.sampleRate - outputFormat.sampleRate) >= 0.5
+            if adaptiveSampleRateRequired, aggregateDeviceOutputPlan != nil {
+                // The legacy multi-device speaker path already runs capture and
+                // output inside one HAL Aggregate Device clock domain. PR70
+                // intentionally activates ASRC only for the independent stereo
+                // capture/output clocks; semantic N-channel activation is PR71.
+                throw CoreAudioTransportError.sampleRateMismatch(
+                    tap: tapFormat.sampleRate,
+                    output: outputFormat.sampleRate
+                )
             }
 
             if let sameDeviceOutputPlan {
@@ -517,14 +566,55 @@ final class CoreAudioTransportSession {
                 outputBufferFrames: outputBufferFrames,
                 sampleRate: outputFormat.sampleRate
             )
-            guard gatePolicy.activationBufferedFrames <= Self.bridgeCapacityFrames else {
-                throw CoreAudioTransportError.outputBufferExceedsBridgeCapacity(
-                    bufferFrames: gatePolicy.activationBufferedFrames,
-                    capacityFrames: Self.bridgeCapacityFrames
+            var gateMinimumFrames = gatePolicy.activationBufferedFrames
+            if adaptiveSampleRateRequired {
+                let ratio = tapFormat.sampleRate / outputFormat.sampleRate
+                let inputFramesPerOutputBuffer = UInt32(
+                    min(
+                        ceil(Double(outputBufferFrames) * ratio),
+                        Double(UInt32.max)
+                    )
                 )
+                let lookahead = UInt32(N60_ADAPTIVE_SRC_DEFAULT_TAPS / 2)
+                let target64 = max(
+                    UInt64(256),
+                    UInt64(inputFramesPerOutputBuffer) * 2 + UInt64(lookahead) * 2
+                )
+                let activation64 = target64
+                    + UInt64(inputFramesPerOutputBuffer)
+                    + UInt64(lookahead)
+                guard target64 < UInt64(Self.bridgeCapacityFrames),
+                      activation64 <= UInt64(Self.bridgeCapacityFrames) else {
+                    throw CoreAudioTransportError.outputBufferExceedsBridgeCapacity(
+                        bufferFrames: UInt32(min(activation64, UInt64(UInt32.max))),
+                        capacityFrames: Self.bridgeCapacityFrames
+                    )
+                }
+                let targetInputFrames = UInt32(target64)
+                gateMinimumFrames = UInt32(activation64)
+                guard N60RealtimeAudioBridgeConfigureAdaptiveSampleRate(
+                    newBridge,
+                    tapFormat.sampleRate,
+                    outputFormat.sampleRate,
+                    targetInputFrames
+                ) else {
+                    throw CoreAudioTransportError.adaptiveSampleRateConfigurationFailed(
+                        tap: tapFormat.sampleRate,
+                        output: outputFormat.sampleRate
+                    )
+                }
+                startupGateTargetFrames = targetInputFrames
+                startupGateActivationFrames = gateMinimumFrames
+            } else {
+                guard gatePolicy.activationBufferedFrames <= Self.bridgeCapacityFrames else {
+                    throw CoreAudioTransportError.outputBufferExceedsBridgeCapacity(
+                        bufferFrames: gatePolicy.activationBufferedFrames,
+                        capacityFrames: Self.bridgeCapacityFrames
+                    )
+                }
+                startupGateTargetFrames = gatePolicy.steadyStateTargetFrames
+                startupGateActivationFrames = gatePolicy.activationBufferedFrames
             }
-            startupGateTargetFrames = gatePolicy.steadyStateTargetFrames
-            startupGateActivationFrames = gatePolicy.activationBufferedFrames
 
             let tapEntry: [String: Any] = [
                 kAudioSubTapUIDKey: description.uuid.uuidString,
@@ -569,7 +659,7 @@ final class CoreAudioTransportSession {
                 objectID: aggregateDeviceID,
                 selector: kAudioDevicePropertyNominalSampleRate,
                 scope: kAudioObjectPropertyScopeGlobal,
-                value: outputFormat.sampleRate,
+                value: adaptiveSampleRateRequired ? tapFormat.sampleRate : outputFormat.sampleRate,
                 operation: "set tap aggregate sample rate"
             )
             try Self.writeUInt32Property(
@@ -614,7 +704,7 @@ final class CoreAudioTransportSession {
             N60RealtimeAudioBridgeSetTransitionGainImmediate(newBridge, 1.0)
             N60RealtimeAudioBridgeConfigureOutputGate(
                 newBridge,
-                gatePolicy.activationBufferedFrames,
+                gateMinimumFrames,
                 gatePolicy.fadeInFrames
             )
         } catch {
