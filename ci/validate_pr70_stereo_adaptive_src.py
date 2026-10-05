@@ -7,6 +7,7 @@ SOURCE = ROOT / "NotchSixty/Audio/Realtime/N60RealtimeAudioBridge.c"
 STEREO = ROOT / "NotchSixty/Audio/CoreAudio/CoreAudioError.swift"
 NCHANNEL = ROOT / "NotchSixty/Audio/CoreAudio/CoreAudioNChannelTransportSession.swift"
 METERS = ROOT / "NotchSixty/UI/ProductionMetersView.swift"
+PROJECT = ROOT / "NotchSixty.xcodeproj/project.pbxproj"
 DOC = ROOT / "docs/PR70_STEREO_ADAPTIVE_SRC_ACTIVATION.md"
 
 
@@ -37,6 +38,7 @@ source = SOURCE.read_text()
 stereo = STEREO.read_text()
 nchannel = NCHANNEL.read_text()
 meters = METERS.read_text()
+project = PROJECT.read_text()
 doc = DOC.read_text()
 
 for token in (
@@ -71,6 +73,8 @@ require("aggregateDeviceOutputPlan != nil" in stereo and "sampleRateMismatch" in
         "legacy aggregate-clock stereo path must remain fail-closed on mismatch")
 require("adaptiveSampleRateEnabled" in meters and "Adaptive SRC" in meters,
         "Transport diagnostics do not expose adaptive SRC state")
+require("N60AdaptiveSampleRate.c in Sources" in project,
+        "adaptive SRC implementation is not linked into the app target")
 
 # PR71 owns semantic N-channel activation. PR70 must not silently widen scope.
 require("sampleRateMismatch" in nchannel, "semantic N-channel mismatch guard disappeared")
