@@ -1,0 +1,58 @@
+name: PR69 Adaptive Clock + SRC Foundation
+
+on:
+  push:
+    branches:
+      - feature/pr69-adaptive-clock-src
+  pull_request:
+    branches:
+      - feature/pr68-vu-volume-polish
+  workflow_dispatch:
+
+jobs:
+  validate-portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate inherited product hardening
+        run: python3 ci/validate_pr67_product_hardening.py
+      - name: Validate inherited VU and software-volume polish
+        run: python3 ci/validate_pr68_vu_volume_polish.py
+      - name: Validate adaptive clock/SRC architecture
+        run: python3 ci/validate_pr69_adaptive_clock.py
+      - name: Build and run adaptive SRC portable harness
+        run: |
+          clang -std=c11 -O2 -Wall -Wextra -Werror \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr69_adaptive_src.c \
+            NotchSixty/Audio/Realtime/N60AdaptiveSampleRate.c \
+            -lm -o /tmp/pr69-adaptive-src
+          /tmp/pr69-adaptive-src
+
+  validate-macos-integration:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate inherited product hardening
+        run: python3 ci/validate_pr67_product_hardening.py
+      - name: Validate inherited VU and software-volume polish
+        run: python3 ci/validate_pr68_vu_volume_polish.py
+      - name: Validate adaptive clock/SRC architecture
+        run: python3 ci/validate_pr69_adaptive_clock.py
+      - name: Build and run adaptive SRC harness on Apple toolchain
+        run: |
+          clang -std=c11 -O2 -Wall -Wextra -Werror \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr69_adaptive_src.c \
+            NotchSixty/Audio/Realtime/N60AdaptiveSampleRate.c \
+            -lm -o /tmp/pr69-adaptive-src
+          /tmp/pr69-adaptive-src
+      - name: Build arm64 app with PR69 foundation present
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
