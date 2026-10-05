@@ -1,0 +1,60 @@
+name: PR72 Passive Ambient Analysis
+
+on:
+  push:
+    branches:
+      - feature/pr72-ambient-analysis
+  pull_request:
+    branches:
+      - feature/pr71-nchannel-adaptive-src
+  workflow_dispatch:
+
+jobs:
+  validate-portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate inherited product hardening
+        run: python3 ci/validate_pr67_product_hardening.py
+      - name: Validate inherited N-channel adaptive SRC structure
+        run: python3 ci/validate_pr71_nchannel_adaptive_src.py
+      - name: Validate passive ambient-analysis architecture
+        run: python3 ci/validate_pr72_ambient_analysis.py
+
+  validate-macos-integration:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate passive ambient-analysis architecture
+        run: python3 ci/validate_pr72_ambient_analysis.py
+      - name: Build arm64 app with passive ambient analyzer
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            build
+      - name: Run PR72 synthetic ambient-analysis tests
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            -only-testing:NotchSixtyTests/AmbientFieldAnalyzerTests \
+            test
+      - name: Run retained XCTest suite
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            test
