@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "N60AdaptiveSampleRate.h"
 #include "N60RenderKernel.h"
 
 #ifdef __cplusplus
@@ -93,6 +94,8 @@ typedef struct {
     float transitionGain;
     uint32_t transitionFramesRemaining;
     N60OutputVUMeterSnapshot outputVUMeter;
+    bool adaptiveSampleRateEnabled;
+    N60AdaptiveSRCSnapshot adaptiveSampleRate;
 } N60RealtimeAudioBridgeSnapshot;
 
 N60RealtimeAudioBridge * _Nullable N60RealtimeAudioBridgeCreate(uint32_t capacityFrames);
@@ -112,6 +115,20 @@ void N60RealtimeAudioBridgeConfigureOutputGate(
     N60RealtimeAudioBridge * _Nonnull bridge,
     uint32_t minimumBufferedFrames,
     uint32_t fadeInFrames
+);
+
+// Control-plane only. When configured, capture remains in the tap's native
+// clock domain and the output callback consumes stereo frames at the selected
+// output device's native rate through the PR69 adaptive SRC. Matched-rate
+// sessions leave this disabled and retain the original direct SPSC path.
+bool N60RealtimeAudioBridgeConfigureAdaptiveSampleRate(
+    N60RealtimeAudioBridge * _Nonnull bridge,
+    double inputSampleRate,
+    double outputSampleRate,
+    uint32_t targetBufferedInputFrames
+);
+bool N60RealtimeAudioBridgeAdaptiveSampleRateEnabled(
+    const N60RealtimeAudioBridge * _Nonnull bridge
 );
 // Full render-kernel metering remains available for engineering/detailed meter
 // surfaces. This is intentionally independent from the lightweight Dashboard VU
