@@ -51,8 +51,12 @@ for token in (
 require("N60AdaptiveSRCCreate" in source, "bridge never prepares PR69 adaptive SRC")
 require("N60AdaptiveSRCPushInterleaved" in function_body(source, "N60CaptureIOProc("),
         "capture callback does not feed adaptive SRC")
-require("N60AdaptiveSRCPullInterleaved" in function_body(source, "N60OutputIOProc("),
+output_body = function_body(source, "N60OutputIOProc(")
+require("N60AdaptiveSRCPullInterleaved" in output_body,
         "output callback does not consume adaptive SRC")
+require("framesToRead < frameCount" in output_body
+        and "outputGateOpen, false" in output_body,
+        "adaptive starvation does not fail closed and re-prime")
 require("adaptiveCaptureScratch" in source and "adaptiveOutputScratch" in source,
         "preallocated callback scratch buffers missing")
 
