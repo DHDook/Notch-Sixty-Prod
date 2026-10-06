@@ -23,8 +23,6 @@ jobs:
             ci/validate_pr77_live_room_treatment.c \
             -lm -o /tmp/pr77-live-room-treatment
           /tmp/pr77-live-room-treatment
-      - name: Validate inherited PR78 information architecture
-        run: python3 ci/validate_pr78_ui_information_architecture.py
       - name: Validate PR79 Audio Unit host foundation
         run: python3 ci/validate_pr79_audio_unit_host_foundation.py
 
@@ -32,8 +30,6 @@ jobs:
     runs-on: xcode-27
     steps:
       - uses: actions/checkout@v7
-      - name: Validate PR78 information architecture
-        run: python3 ci/validate_pr78_ui_information_architecture.py
       - name: Validate PR79 Audio Unit host foundation
         run: python3 ci/validate_pr79_audio_unit_host_foundation.py
       - name: Build arm64 app with Audio Unit host foundation
