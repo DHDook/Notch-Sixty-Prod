@@ -282,7 +282,7 @@ struct ProductionActiveAcousticsWorkspace: View {
         let milliseconds = transportSnapshot.map {
             Double(treatment.latencyFrames) / max($0.sampleRate, 1) * 1_000
         } ?? 0
-        return "\(treatment.latencyFrames) frames · \(milliseconds, specifier: "%.1f") ms"
+        return "\(treatment.latencyFrames) frames · \(String(format: "%.1f", milliseconds)) ms"
     }
 
     private var protectionValue: String {
