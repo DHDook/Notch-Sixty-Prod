@@ -23,34 +23,60 @@ enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
     case equalizer
     case dynamics
     case meters
-    case activeCrossover
+    case speakers
     case headphones
     case speakerCalibration
     case roomCorrection
+    case activeAcoustics
+    case plugins
+
+    static let playback: [ProductionSection] = [
+        .equalizer,
+        .dynamics,
+        .meters,
+    ]
+
+    static let system: [ProductionSection] = [
+        .speakers,
+        .headphones,
+        .speakerCalibration,
+        .roomCorrection,
+        .activeAcoustics,
+    ]
+
+    static let extensions: [ProductionSection] = [
+        .plugins,
+    ]
 
     var id: String { rawValue }
+
     var title: String {
         switch self {
         case .dashboard: return "Dashboard"
         case .equalizer: return "Equalizer"
         case .dynamics: return "Dynamics"
         case .meters: return "Meters"
-        case .activeCrossover: return "Active Crossover"
+        case .speakers: return "Speakers"
         case .headphones: return "Headphones"
         case .speakerCalibration: return "Speaker Calibration"
         case .roomCorrection: return "Room Correction"
+        case .activeAcoustics: return "Active Acoustics"
+        case .plugins: return "Plug-ins"
         }
     }
+
     var systemImage: String {
         switch self {
         case .dashboard: return "gauge.with.dots.needle.50percent"
         case .equalizer: return "slider.horizontal.3"
         case .dynamics: return "waveform.path.ecg"
         case .meters: return "chart.xyaxis.line"
-        case .activeCrossover: return "hifispeaker.2.fill"
+        case .speakers: return "hifispeaker.2.fill"
         case .headphones: return "headphones"
         case .speakerCalibration: return "speaker.wave.3.fill"
         case .roomCorrection: return "waveform.badge.magnifyingglass"
+        case .activeAcoustics: return "waveform.and.mic"
+        case .plugins: return "puzzlepiece.extension"
         }
     }
 }
@@ -164,8 +190,33 @@ struct ProductionRootView: View {
             VStack(spacing: 0) {
                 ProductionSidebarBrand()
                 Divider()
-                List(ProductionSection.allCases, selection: $selection) { section in
-                    Label(section.title, systemImage: section.systemImage).tag(section)
+                List(selection: $selection) {
+                    Label(
+                        ProductionSection.dashboard.title,
+                        systemImage: ProductionSection.dashboard.systemImage
+                    )
+                    .tag(ProductionSection.dashboard)
+
+                    Section("PLAYBACK") {
+                        ForEach(ProductionSection.playback) { section in
+                            Label(section.title, systemImage: section.systemImage)
+                                .tag(section)
+                        }
+                    }
+
+                    Section("SYSTEM") {
+                        ForEach(ProductionSection.system) { section in
+                            Label(section.title, systemImage: section.systemImage)
+                                .tag(section)
+                        }
+                    }
+
+                    Section("EXTENSIONS") {
+                        ForEach(ProductionSection.extensions) { section in
+                            Label(section.title, systemImage: section.systemImage)
+                                .tag(section)
+                        }
+                    }
                 }
                 .listStyle(.sidebar)
             }
@@ -189,8 +240,8 @@ struct ProductionRootView: View {
             ProductionDynamicsView(engine: engine)
         case .meters:
             ProductionMetersView(engine: engine)
-        case .activeCrossover:
-            ProductionActiveCrossoverView(engine: engine, profiles: product.profiles)
+        case .speakers:
+            ProductionSpeakersView(engine: engine, profiles: product.profiles)
         case .headphones:
             ProductionHeadphoneWorkspace(engine: engine, profiles: product.profiles)
         case .speakerCalibration:
@@ -202,11 +253,15 @@ struct ProductionRootView: View {
             )
         case .roomCorrection:
             ProductionRoomCorrectionWorkspace(
-            engine: engine,
-            calibration: product.calibration,
-            projects: product.roomCorrectionProjects,
-            profiles: product.profiles
-        )
+                engine: engine,
+                calibration: product.calibration,
+                projects: product.roomCorrectionProjects,
+                profiles: product.profiles
+            )
+        case .activeAcoustics:
+            ProductionActiveAcousticsWorkspace(engine: engine)
+        case .plugins:
+            ProductionPluginWorkspace()
         }
     }
 
@@ -290,7 +345,7 @@ private struct ProductionDashboardView: View {
             VStack(alignment: .leading, spacing: 24) {
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Listening Dashboard").font(.largeTitle.bold())
+                        Text("Dashboard").font(.largeTitle.bold())
                         Text(outputSummary).foregroundStyle(.secondary)
                     }
                     Spacer()
@@ -324,14 +379,19 @@ private struct ProductionDashboardView: View {
                         systemImage: "waveform.path.ecg"
                     )
                     summaryCard(
-                        title: "Active Crossover",
-                        text: crossoverSummary,
+                        title: "Speakers",
+                        text: speakerSummary,
                         systemImage: "hifispeaker.2.fill"
                     )
                     summaryCard(
                         title: "Room Correction",
                         text: roomCorrectionSummary,
                         systemImage: "waveform.badge.magnifyingglass"
+                    )
+                    summaryCard(
+                        title: "Active Acoustics",
+                        text: activeAcousticsSummary,
+                        systemImage: "waveform.and.mic"
                     )
                 }
             }
@@ -370,10 +430,35 @@ private struct ProductionDashboardView: View {
         return names.isEmpty ? "No dynamics processors enabled." : names.joined(separator: " · ")
     }
 
-    private var crossoverSummary: String {
-        let c = engine.bassManagementConfiguration
-        guard c.enabled else { return "Off" }
-        return "\(Int(c.frequencyHz.rounded())) Hz · \(c.topology.displayName)"
+    private var speakerSummary: String {
+        let systemName = engine.outputDeviceProfileConfiguration?.systemDisplayName
+            ?? (engine.headphoneDeviceProfileConfiguration?.enabled == true
+                ? "Headphones"
+                : "Stereo")
+        let crossover = engine.bassManagementConfiguration
+        guard crossover.enabled else {
+            return "\(systemName) · Bass management off"
+        }
+        return "\(systemName) · \(Int(crossover.frequencyHz.rounded())) Hz · \(crossover.topology.displayName)"
+    }
+
+    private var activeAcousticsSummary: String {
+        if let treatment = engine.productionTransportMeterSnapshot()?.roomTreatment {
+            if treatment.faulted {
+                return "Room Treatment faulted · safely bypassing"
+            }
+            if treatment.active {
+                return "Room Treatment active · \(treatment.treatmentSourceCount) sources · \(treatment.latencyFrames) frames"
+            }
+            if treatment.transitioning {
+                return "Room Treatment transitioning · \(Int((treatment.treatmentMix * 100).rounded()))%"
+            }
+            return "Room Treatment configured · latency-matched bypass"
+        }
+        if engine.roomTreatmentStagedForNextStart {
+            return "Room Treatment staged · hardware-gated"
+        }
+        return "Ambient Analysis ready · Room Treatment not staged"
     }
 
     private var roomCorrectionSummary: String {
@@ -778,7 +863,7 @@ private struct StereoSignatureVUScaleFace: View, Equatable {
     }
 }
 
-private struct ProductionActiveCrossoverView: View {
+private struct ProductionSpeakersView: View {
     @ObservedObject var engine: AudioIOEngine
     @ObservedObject var profiles: ProductProfileController
     @State private var actionError: String?
@@ -812,8 +897,8 @@ private struct ProductionActiveCrossoverView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 pageHeader(
-                    "Active Crossover",
-                    "Stereo program processing with persistent speaker-bus routing across one or more physical Core Audio devices."
+                    "Speakers",
+                    "Speaker topology, bass management, crossover design, physical routing, and driver-level processing."
                 )
 
                 playbackSystemCard
@@ -844,7 +929,7 @@ private struct ProductionActiveCrossoverView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Playback System").font(.caption).foregroundStyle(.secondary)
+                    Text("System").font(.caption).foregroundStyle(.secondary)
                     Text(profiles.selectedSystemProfileName).font(.headline)
                 }
                 Spacer()
@@ -856,7 +941,7 @@ private struct ProductionActiveCrossoverView: View {
                     .font(.caption.bold())
                 }
             }
-            Text("Crossover and physical-output routing are stored with this Playback System. Content Preset EQ, dynamics, preamp, and headroom remain independent.")
+            Text("Speaker topology, crossover, and physical-output routing are stored with this System profile. Playback EQ, dynamics, preamp, and headroom remain independent.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
