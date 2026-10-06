@@ -81,7 +81,8 @@ The default repeat-measurement gate requires:
 - at least **0.50 dB** improvement in aggregate spatial RMS error;
 - treated aggregate spatial RMS error no greater than **4.0 dB**;
 - no source/frequency weighted-mean level shift greater than **1.50 dB**;
-- no worst-seat target-error increase greater than **1.50 dB**.
+- no worst-seat target-error increase greater than **1.50 dB**;
+- no individual treatment source may worsen its spatial RMS error by more than **0.25 dB**.
 
 These thresholds are initial conservative software defaults and should be revisited after real-room datasets accumulate.
 
@@ -173,6 +174,7 @@ XCTest covers:
 
 - strong spatial improvement with stable mean level -> accepted;
 - apparent spatial improvement caused by a large overall level shift -> rejected;
+- strong aggregate improvement that hides one worsening source -> rejected;
 - missing treated source × seat measurement -> fail closed;
 - source-safety declarations required before any later gate;
 - treatment band/headroom/model completeness requirements;
