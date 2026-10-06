@@ -112,7 +112,7 @@ If the untreated field already matches the spatial target within numerical toler
 - minimum applied safety scale;
 - complete safe frequency-domain correction matrix.
 
-The plan is explicitly `simulationOnly == true`.
+The plan is explicitly **simulation-only** (`simulationOnly == true`).
 
 There is **no apply/deploy method** in PR73.
 
