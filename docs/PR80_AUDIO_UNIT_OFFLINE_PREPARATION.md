@@ -61,6 +61,8 @@ PR80 stores only bounded serializable evidence and captured state.
 
 The first preparation backend uses non-interleaved Float32 `AVAudioFormat` at the exact rack sample rate and symmetric channel count already accepted by PR79.
 
+The host explicitly enables the selected input bus before allocation/render. AUv3 input busses are not assumed connected merely because their format is configured.
+
 The same channel-count policy remains:
 
 `N input channels -> Audio Unit -> N output channels`
