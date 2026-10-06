@@ -82,6 +82,8 @@
 		F75000000000000000000002 /* MIMORoomTreatmentVerificationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F75000000000000000000012 /* MIMORoomTreatmentVerificationTests.swift */; };
 		F76000000000000000000001 /* MIMORoomTreatmentActivationPermit.swift in Sources */ = {isa = PBXBuildFile; fileRef = F76000000000000000000011 /* MIMORoomTreatmentActivationPermit.swift */; };
 		F76000000000000000000002 /* MIMORoomTreatmentActivationPermitTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F76000000000000000000012 /* MIMORoomTreatmentActivationPermitTests.swift */; };
+		F77000000000000000000001 /* ActiveQuietZoneFeasibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = F77000000000000000000011 /* ActiveQuietZoneFeasibility.swift */; };
+		F77000000000000000000002 /* ActiveQuietZoneFeasibilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F77000000000000000000012 /* ActiveQuietZoneFeasibilityTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -182,6 +184,8 @@
 		F75000000000000000000012 /* MIMORoomTreatmentVerificationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMORoomTreatmentVerificationTests.swift; sourceTree = "<group>"; };
 		F76000000000000000000011 /* MIMORoomTreatmentActivationPermit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMORoomTreatmentActivationPermit.swift; sourceTree = "<group>"; };
 		F76000000000000000000012 /* MIMORoomTreatmentActivationPermitTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMORoomTreatmentActivationPermitTests.swift; sourceTree = "<group>"; };
+		F77000000000000000000011 /* ActiveQuietZoneFeasibility.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveQuietZoneFeasibility.swift; sourceTree = "<group>"; };
+		F77000000000000000000012 /* ActiveQuietZoneFeasibilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveQuietZoneFeasibilityTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -235,6 +239,7 @@
 				F74000000000000000000012 /* MIMORoomTreatmentFIRCompilerTests.swift */,
 				F75000000000000000000012 /* MIMORoomTreatmentVerificationTests.swift */,
 				F76000000000000000000012 /* MIMORoomTreatmentActivationPermitTests.swift */,
+				F77000000000000000000012 /* ActiveQuietZoneFeasibilityTests.swift */,
 			);
 			path = NotchSixtyTests;
 			sourceTree = "<group>";
@@ -268,6 +273,7 @@
 				F74000000000000000000011 /* MIMORoomTreatmentFIRCompiler.swift */,
 				F75000000000000000000011 /* MIMORoomTreatmentVerification.swift */,
 				F76000000000000000000011 /* MIMORoomTreatmentActivationPermit.swift */,
+				F77000000000000000000011 /* ActiveQuietZoneFeasibility.swift */,
 			);
 			path = Audio;
 			sourceTree = "<group>";
@@ -422,6 +428,7 @@
 				F74000000000000000000001 /* MIMORoomTreatmentFIRCompiler.swift in Sources */,
 				F75000000000000000000001 /* MIMORoomTreatmentVerification.swift in Sources */,
 				F76000000000000000000001 /* MIMORoomTreatmentActivationPermit.swift in Sources */,
+				F77000000000000000000001 /* ActiveQuietZoneFeasibility.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -447,6 +454,7 @@
 				F74000000000000000000002 /* MIMORoomTreatmentFIRCompilerTests.swift in Sources */,
 				F75000000000000000000002 /* MIMORoomTreatmentVerificationTests.swift in Sources */,
 				F76000000000000000000002 /* MIMORoomTreatmentActivationPermitTests.swift in Sources */,
+				F77000000000000000000002 /* ActiveQuietZoneFeasibilityTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
