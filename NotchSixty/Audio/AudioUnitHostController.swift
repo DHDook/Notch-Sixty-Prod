@@ -297,13 +297,11 @@ final class AudioUnitHostController: ObservableObject {
                 reason = .validationFailed
             }
             let description = compatibility.reasons.joined(separator: " ")
-            quarantine.recordFailure(
-                component: identity,
+            quarantineComponent(
+                identity,
                 reason: reason,
                 description: description
             )
-            lifecycleByComponent[identity] = .quarantined
-            lastErrorDescription = description
             return
         }
 
@@ -331,14 +329,36 @@ final class AudioUnitHostController: ObservableObject {
             lastErrorDescription = nil
         } catch {
             let reason = Self.quarantineReason(for: error)
-            quarantine.recordFailure(
-                component: identity,
+            quarantineComponent(
+                identity,
                 reason: reason,
                 description: error.localizedDescription
             )
-            lifecycleByComponent[identity] = .quarantined
-            lastErrorDescription = error.localizedDescription
         }
+    }
+
+    func quarantineComponent(
+        _ identity: AudioUnitComponentIdentity,
+        reason: AudioUnitQuarantineReason,
+        description: String,
+        at date: Date = Date()
+    ) {
+        probesByComponent.removeValue(forKey: identity)
+        quarantine.recordFailure(
+            component: identity,
+            reason: reason,
+            description: description,
+            at: date
+        )
+
+        var updated = rackConfiguration
+        for index in updated.slots.indices
+        where updated.slots[index].component == identity {
+            updated.slots[index].bypassed = true
+        }
+        rackConfiguration = updated
+        lifecycleByComponent[identity] = .quarantined
+        lastErrorDescription = description
     }
 
     func clearQuarantine(
@@ -346,8 +366,9 @@ final class AudioUnitHostController: ObservableObject {
     ) {
         quarantine.clear(component: identity)
         if descriptor(for: identity) != nil {
-            lifecycleByComponent[identity] =
-                probesByComponent[identity] == nil ? .discovered : .prepared
+            // Quarantine invalidates any prior preparation. Clearing it only
+            // returns the component to discovery; a fresh probe is mandatory.
+            lifecycleByComponent[identity] = .discovered
         } else {
             lifecycleByComponent.removeValue(forKey: identity)
         }
