@@ -62,6 +62,8 @@ for token in (
     "installComponent",
     "setBypassed",
     "executionPlan",
+    "quarantineComponent",
+    "probesByComponent.removeValue",
 ):
     require(token in controller, f"host controller missing {token}")
 
@@ -152,6 +154,7 @@ for token in (
     "testQuarantinedComponentCannotProcess",
     "testHostControllerScanInstallProbeAndEnableLifecycle",
     "testProbeFailureQuarantinesComponent",
+    "testQuarantineInvalidatesPreparationAndForcesFreshProbe",
     "testOpaqueStateSizeIsBounded",
 ):
     require(token in tests, f"PR79 XCTest coverage missing {token}")
