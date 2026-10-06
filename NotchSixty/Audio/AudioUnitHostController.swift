@@ -126,6 +126,12 @@ final class AudioUnitHostController: ObservableObject {
     private var probesByComponent: [
         AudioUnitComponentIdentity: AudioUnitProbeResult
     ] = [:]
+    private var probesBySlotID: [
+        UUID: AudioUnitProbeResult
+    ] = [:]
+    private var offlineReportsBySlotID: [
+        UUID: AudioUnitOfflinePreparationReport
+    ] = [:]
 
     init(
         catalog: any AudioUnitComponentCataloging = SystemAudioUnitComponentCatalog(),
@@ -210,6 +216,8 @@ final class AudioUnitHostController: ObservableObject {
 
         var updated = rackConfiguration
         let existingID = updated.slots[index].id
+        probesBySlotID.removeValue(forKey: existingID)
+        offlineReportsBySlotID.removeValue(forKey: existingID)
         updated.slots[index] = AudioUnitRackSlotState(
             id: existingID,
             component: identity,
@@ -229,8 +237,14 @@ final class AudioUnitHostController: ObservableObject {
         }
         var updated = rackConfiguration
         let existingID = updated.slots[index].id
+        let removedComponent = updated.slots[index].component
+        probesBySlotID.removeValue(forKey: existingID)
+        offlineReportsBySlotID.removeValue(forKey: existingID)
         updated.slots[index] = AudioUnitRackSlotState(id: existingID)
         try replaceRackConfiguration(updated)
+        if let removedComponent {
+            refreshLifecycle(for: removedComponent)
+        }
     }
 
     func setBypassed(
@@ -242,9 +256,12 @@ final class AudioUnitHostController: ObservableObject {
         }
         var updated = rackConfiguration
         if !bypassed,
-           let component = updated.slots[index].component,
-           lifecycleByComponent[component] != .prepared {
-            throw AudioUnitRackError.componentNotPrepared(component)
+           let component = updated.slots[index].component {
+            let slotID = updated.slots[index].id
+            guard probesBySlotID[slotID] != nil,
+                  !quarantine.isQuarantined(component) else {
+                throw AudioUnitRackError.componentNotPrepared(component)
+            }
         }
         updated.slots[index].bypassed = bypassed
         try replaceRackConfiguration(updated)
@@ -270,8 +287,16 @@ final class AudioUnitHostController: ObservableObject {
             throw AudioUnitRackError.slotIndexOutOfRange(index)
         }
         var updated = rackConfiguration
+        let slotID = updated.slots[index].id
+        let component = updated.slots[index].component
         updated.slots[index].opaqueFullState = state
+        updated.slots[index].bypassed = true
+        probesBySlotID.removeValue(forKey: slotID)
+        offlineReportsBySlotID.removeValue(forKey: slotID)
         try replaceRackConfiguration(updated)
+        if let component {
+            refreshLifecycle(for: component)
+        }
     }
 
     func probe(
@@ -321,6 +346,7 @@ final class AudioUnitHostController: ObservableObject {
             for index in updated.slots.indices
             where updated.slots[index].component == identity {
                 updated.slots[index].recordProbe(result)
+                probesBySlotID[updated.slots[index].id] = result
             }
             try updated.validate()
             rackConfiguration = updated
@@ -337,6 +363,100 @@ final class AudioUnitHostController: ObservableObject {
         }
     }
 
+    func prepareSlotOffline(
+        _ index: Int,
+        format: AudioUnitRackProcessingFormat,
+        using backend: any AudioUnitOfflinePreparing
+    ) async {
+        guard rackConfiguration.slots.indices.contains(index) else {
+            lastErrorDescription =
+                AudioUnitRackError.slotIndexOutOfRange(index)
+                    .localizedDescription
+            return
+        }
+        let slot = rackConfiguration.slots[index]
+        guard let identity = slot.component,
+              let descriptor = descriptor(for: identity) else {
+            lastErrorDescription = slot.component.map {
+                AudioUnitRackError.componentNotDiscovered($0)
+                    .localizedDescription
+            } ?? AudioUnitRackError.slotIndexOutOfRange(index)
+                .localizedDescription
+            return
+        }
+
+        let compatibility = descriptor.compatibility(for: format)
+        guard compatibility.compatible else {
+            let reason: AudioUnitQuarantineReason
+            if !descriptor.sandboxSafe {
+                reason = .sandboxUnsafe
+            } else if !descriptor.supports(channelCount: format.channelCount) {
+                reason = .unsupportedChannelLayout
+            } else {
+                reason = .validationFailed
+            }
+            quarantineComponent(
+                identity,
+                reason: reason,
+                description: compatibility.reasons.joined(separator: " ")
+            )
+            return
+        }
+
+        lifecycleByComponent[identity] = .probing
+        do {
+            let report = try await backend.prepare(
+                component: descriptor,
+                format: format,
+                restoringState: slot.opaqueFullState
+            )
+            try report.validate()
+            guard report.component == identity else {
+                throw AudioUnitOfflinePreparationError
+                    .componentIdentityMismatch
+            }
+
+            var updated = rackConfiguration
+            let current = updated.slots[index]
+            guard current.id == slot.id,
+                  current.component == identity else {
+                throw AudioUnitOfflinePreparationError
+                    .componentIdentityMismatch
+            }
+            updated.slots[index].recordProbe(report.probe)
+            if let state = report.capturedFullState {
+                updated.slots[index].opaqueFullState = state
+            }
+            updated.slots[index].bypassed = true
+            try updated.validate()
+
+            rackConfiguration = updated
+            probesByComponent[identity] = report.probe
+            probesBySlotID[slot.id] = report.probe
+            offlineReportsBySlotID[slot.id] = report
+            quarantine.clear(component: identity)
+            lifecycleByComponent[identity] = .prepared
+            lastErrorDescription = nil
+        } catch {
+            quarantineComponent(
+                identity,
+                reason: Self.quarantineReason(for: error),
+                description: error.localizedDescription
+            )
+        }
+    }
+
+    func offlinePreparationReport(
+        forSlot index: Int
+    ) -> AudioUnitOfflinePreparationReport? {
+        guard rackConfiguration.slots.indices.contains(index) else {
+            return nil
+        }
+        return offlineReportsBySlotID[
+            rackConfiguration.slots[index].id
+        ]
+    }
+
     func quarantineComponent(
         _ identity: AudioUnitComponentIdentity,
         reason: AudioUnitQuarantineReason,
@@ -344,6 +464,13 @@ final class AudioUnitHostController: ObservableObject {
         at date: Date = Date()
     ) {
         probesByComponent.removeValue(forKey: identity)
+        let affectedSlotIDs = rackConfiguration.slots.compactMap {
+            $0.component == identity ? $0.id : nil
+        }
+        for slotID in affectedSlotIDs {
+            probesBySlotID.removeValue(forKey: slotID)
+            offlineReportsBySlotID.removeValue(forKey: slotID)
+        }
         quarantine.recordFailure(
             component: identity,
             reason: reason,
@@ -382,6 +509,7 @@ final class AudioUnitHostController: ObservableObject {
             configuration: rackConfiguration,
             descriptors: discoveredComponents,
             probes: Array(probesByComponent.values),
+            slotProbes: probesBySlotID,
             quarantine: quarantine,
             format: format
         )
@@ -393,9 +521,68 @@ final class AudioUnitHostController: ObservableObject {
         probesByComponent[identity]
     }
 
+    func probeResult(
+        forSlot index: Int
+    ) -> AudioUnitProbeResult? {
+        guard rackConfiguration.slots.indices.contains(index) else {
+            return nil
+        }
+        return probesBySlotID[rackConfiguration.slots[index].id]
+    }
+
+    private func refreshLifecycle(
+        for identity: AudioUnitComponentIdentity
+    ) {
+        if quarantine.isQuarantined(identity) {
+            lifecycleByComponent[identity] = .quarantined
+            return
+        }
+        let prepared = rackConfiguration.slots.contains {
+            $0.component == identity
+                && probesBySlotID[$0.id] != nil
+        }
+        lifecycleByComponent[identity] = prepared
+            ? .prepared
+            : .discovered
+        if !prepared {
+            probesByComponent.removeValue(forKey: identity)
+        }
+    }
+
     private static func quarantineReason(
         for error: Error
     ) -> AudioUnitQuarantineReason {
+        if let offlineError =
+            error as? AudioUnitOfflinePreparationError {
+            switch offlineError {
+            case .stateDecodeFailed,
+                 .stateRestoreFailed,
+                 .stateCaptureFailed,
+                 .stateTooLarge:
+                return .stateRestoreFailure
+            case .latencyChangedAcrossReset:
+                return .invalidLatency
+            case .tailChangedAcrossReset:
+                return .invalidTail
+            case .renderResourceAllocationFailed,
+                 .renderBlockUnavailable,
+                 .renderResourcesNotReleased:
+                return .renderResourceFailure
+            case .renderFailed,
+                 .invalidOfflineRender,
+                 .nonFiniteOutput:
+                return .runtimeFailure
+            case .incompatibleComponent:
+                return .unsupportedChannelLayout
+            case .instantiationFailed,
+                 .componentIdentityMismatch,
+                 .missingInputBus,
+                 .missingOutputBus,
+                 .formatConfigurationFailed:
+                return .instantiationFailed
+            }
+        }
+
         guard let rackError = error as? AudioUnitRackError else {
             return .instantiationFailed
         }

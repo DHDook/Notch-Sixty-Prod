@@ -88,6 +88,8 @@
 		F79000000000000000000001 /* AudioUnitHostFoundation.swift in Sources */ = {isa = PBXBuildFile; fileRef = F79000000000000000000011 /* AudioUnitHostFoundation.swift */; };
 		F79000000000000000000002 /* AudioUnitHostController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F79000000000000000000012 /* AudioUnitHostController.swift */; };
 		F79000000000000000000003 /* AudioUnitHostFoundationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F79000000000000000000013 /* AudioUnitHostFoundationTests.swift */; };
+		F80000000000000000000001 /* AudioUnitOfflinePreparation.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000011 /* AudioUnitOfflinePreparation.swift */; };
+		F80000000000000000000002 /* AudioUnitOfflinePreparationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000012 /* AudioUnitOfflinePreparationTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -194,6 +196,8 @@
 		F79000000000000000000011 /* AudioUnitHostFoundation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioUnitHostFoundation.swift; sourceTree = "<group>"; };
 		F79000000000000000000012 /* AudioUnitHostController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioUnitHostController.swift; sourceTree = "<group>"; };
 		F79000000000000000000013 /* AudioUnitHostFoundationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioUnitHostFoundationTests.swift; sourceTree = "<group>"; };
+		F80000000000000000000011 /* AudioUnitOfflinePreparation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioUnitOfflinePreparation.swift; sourceTree = "<group>"; };
+		F80000000000000000000012 /* AudioUnitOfflinePreparationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioUnitOfflinePreparationTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -249,6 +253,7 @@
 				F76000000000000000000012 /* MIMORoomTreatmentActivationPermitTests.swift */,
 				F78000000000000000000013 /* ProductionInformationArchitectureTests.swift */,
 				F79000000000000000000013 /* AudioUnitHostFoundationTests.swift */,
+				F80000000000000000000012 /* AudioUnitOfflinePreparationTests.swift */,
 			);
 			path = NotchSixtyTests;
 			sourceTree = "<group>";
@@ -284,6 +289,7 @@
 				F76000000000000000000011 /* MIMORoomTreatmentActivationPermit.swift */,
 				F79000000000000000000011 /* AudioUnitHostFoundation.swift */,
 				F79000000000000000000012 /* AudioUnitHostController.swift */,
+				F80000000000000000000011 /* AudioUnitOfflinePreparation.swift */,
 			);
 			path = Audio;
 			sourceTree = "<group>";
@@ -442,6 +448,7 @@
 				F76000000000000000000001 /* MIMORoomTreatmentActivationPermit.swift in Sources */,
 				F79000000000000000000001 /* AudioUnitHostFoundation.swift in Sources */,
 				F79000000000000000000002 /* AudioUnitHostController.swift in Sources */,
+				F80000000000000000000001 /* AudioUnitOfflinePreparation.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -469,6 +476,7 @@
 				F76000000000000000000002 /* MIMORoomTreatmentActivationPermitTests.swift in Sources */,
 				F78000000000000000000003 /* ProductionInformationArchitectureTests.swift in Sources */,
 				F79000000000000000000003 /* AudioUnitHostFoundationTests.swift in Sources */,
+				F80000000000000000000002 /* AudioUnitOfflinePreparationTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

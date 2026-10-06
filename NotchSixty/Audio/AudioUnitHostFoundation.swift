@@ -404,6 +404,7 @@ struct AudioUnitRackPreparationPlanner: Sendable {
         configuration: AudioUnitRackConfiguration,
         descriptors: [AudioUnitComponentDescriptor],
         probes: [AudioUnitProbeResult],
+        slotProbes: [UUID: AudioUnitProbeResult] = [:],
         quarantine: AudioUnitQuarantineRegistry,
         format: AudioUnitRackProcessingFormat
     ) throws -> AudioUnitRackExecutionPlan {
@@ -444,7 +445,7 @@ struct AudioUnitRackPreparationPlanner: Sendable {
                 continue
             }
 
-            let probe = probesByID[component]
+            let probe = slotProbes[slot.id] ?? probesByID[component]
             let descriptor = descriptorsByID[component]
 
             if let quarantineEntry = quarantine.entry(for: component) {
