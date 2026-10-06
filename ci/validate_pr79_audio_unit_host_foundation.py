@@ -163,7 +163,7 @@ for token in (
 ):
     require(token in project, f"Xcode target wiring missing {token}")
 
-normalized_doc = doc.lower()
+normalized_doc = doc.lower().replace("**", "")
 for phrase in (
     "playback/content state",
     "does not put third-party audio units in the realtime render graph",
