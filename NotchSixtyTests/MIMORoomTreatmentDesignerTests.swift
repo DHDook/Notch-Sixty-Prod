@@ -66,6 +66,7 @@ final class MIMORoomTreatmentDesignerTests: XCTestCase {
             XCTAssertLessThanOrEqual(result.frequencyHz, 150.000_001)
             XCTAssertLessThanOrEqual(result.maximumCoefficientMagnitude, 1.000_001)
             XCTAssertLessThanOrEqual(result.maximumColumnPower, 1.000_001)
+            XCTAssertLessThanOrEqual(result.maximumPerSourcePower, 1.000_001)
             XCTAssertGreaterThan(result.minimumAppliedSafetyScale, 0)
             XCTAssertLessThanOrEqual(result.minimumAppliedSafetyScale, 1)
         }
