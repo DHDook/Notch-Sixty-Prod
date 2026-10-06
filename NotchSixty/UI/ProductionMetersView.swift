@@ -275,7 +275,7 @@ struct ProductionMetersView: View {
                 }
             }
 
-            Text("Semantic program meters are measured after per-channel lane processing. Physical meters are measured after bass management, Sub N routing, startup fade, and master output gain. Meter work is demand-driven and parked when this Levels page is hidden.")
+            Text("Semantic program meters are measured after per-channel lane processing. Physical meters are measured after bass management, optional hardware-gated room treatment, Sub N routing, startup fade, and master output gain. Meter work is demand-driven and parked when this Levels page is hidden.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -310,6 +310,26 @@ struct ProductionMetersView: View {
                     value: "\(diagnostics?.sessionTransportCounters.underrunFrames ?? 0)",
                     detail: "Overruns \(diagnostics?.sessionTransportCounters.overrunFrames ?? 0) frames"
                 )
+                if let treatment = current?.roomTreatment {
+                    metricCard(
+                        title: "Room Treatment",
+                        value: treatment.faulted
+                            ? "FAULT"
+                            : (treatment.active
+                                ? "ACTIVE"
+                                : (treatment.transitioning
+                                    ? "TRANSITION"
+                                    : "BYPASSED")),
+                        detail: String(
+                            format: "%.0f%% mix · %u src · %u frames · %llu clamps · %llu failures",
+                            Double(treatment.treatmentMix * 100),
+                            treatment.treatmentSourceCount,
+                            treatment.latencyFrames,
+                            treatment.protectionClampSamples,
+                            treatment.integrationFailures
+                        )
+                    )
+                }
                 if diagnostics?.sessionTransportCounters.adaptiveSampleRateEnabled == true {
                     let transport = diagnostics?.sessionTransportCounters ?? AudioTransportCounters()
                     metricCard(

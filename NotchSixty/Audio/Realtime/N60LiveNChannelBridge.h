@@ -12,6 +12,7 @@
 
 #include "N60AdaptiveSampleRate.h"
 #include "N60LiveNChannelRenderCore.h"
+#include "N60MIMOTreatmentLiveIntegration.h"
 #include "N60ProgramTransport.h"
 
 #ifdef __cplusplus
@@ -44,6 +45,9 @@ typedef struct {
     bool adaptiveSampleRateEnabled;
     N60AdaptiveSRCSnapshot adaptiveSampleRate;
     uint64_t adaptiveTransportLatencyFrames;
+    bool roomTreatmentConfigured;
+    N60MIMOTreatmentLiveSnapshot roomTreatment;
+    uint64_t roomTreatmentLatencyFrames;
     N60LiveNChannelMeterSnapshot meter;
 } N60LiveNChannelBridgeSnapshot;
 
@@ -53,6 +57,7 @@ typedef struct N60LiveNChannelBridge {
     float * _Nullable adaptiveCaptureScratch;
     float * _Nullable adaptiveOutputScratch;
     N60LiveNChannelRenderRuntime * _Nullable renderRuntime;
+    N60MIMOTreatmentLiveIntegration * _Nullable roomTreatment;
     N60ProgramInputMap inputMap;
     N60LiveNChannelRenderGraph graph;
 
@@ -180,10 +185,12 @@ static inline void N60LiveNChannelBridgeDestroy(
     N60ProgramTransportDestroy(bridge->transport);
     N60AdaptiveSRCDestroy(bridge->adaptiveSRC);
     N60LiveNChannelRenderRuntimeDestroy(bridge->renderRuntime);
+    N60MIMOTreatmentLiveIntegrationDestroy(bridge->roomTreatment);
     free(bridge->adaptiveCaptureScratch);
     free(bridge->adaptiveOutputScratch);
     bridge->transport = NULL;
     bridge->renderRuntime = NULL;
+    bridge->roomTreatment = NULL;
     free(bridge);
 }
 
@@ -200,6 +207,9 @@ static inline bool N60LiveNChannelBridgeReset(
     N60ProgramTransportReset(bridge->transport);
     if (bridge->adaptiveSRC != NULL) {
         N60AdaptiveSRCReset(bridge->adaptiveSRC);
+    }
+    if (bridge->roomTreatment != NULL) {
+        N60MIMOTreatmentLiveIntegrationReset(bridge->roomTreatment);
     }
     bridge->startupFadeRemaining = 0u;
     atomic_store_explicit(
@@ -266,6 +276,83 @@ static inline bool N60LiveNChannelBridgeAdaptiveSampleRateEnabled(
     const N60LiveNChannelBridge * _Nullable bridge
 ) {
     return bridge != NULL && bridge->adaptiveSRC != NULL;
+}
+
+static inline bool N60LiveNChannelBridgeConfigureRoomTreatment(
+    N60LiveNChannelBridge * _Nonnull bridge,
+    uint32_t treatmentChannelCount,
+    const uint32_t * _Nonnull treatmentPhysicalChannels,
+    const float * _Nonnull taps,
+    uint32_t tapCount,
+    uint32_t declaredLatencyFrames,
+    uint32_t fadeFrames,
+    uint32_t faultFadeFrames
+) {
+    if (bridge == NULL
+        || bridge->roomTreatment != NULL
+        || treatmentPhysicalChannels == NULL
+        || taps == NULL) {
+        return false;
+    }
+    N60MIMOTreatmentLiveIntegration *integration =
+        N60MIMOTreatmentLiveIntegrationCreate(
+            bridge->graph.outputMap.physicalChannelCount,
+            treatmentChannelCount,
+            treatmentPhysicalChannels,
+            taps,
+            tapCount,
+            declaredLatencyFrames,
+            fadeFrames,
+            faultFadeFrames
+        );
+    if (integration == NULL) return false;
+    bridge->roomTreatment = integration;
+    return true;
+}
+
+static inline void N60LiveNChannelBridgeSetRoomTreatmentAuthorized(
+    N60LiveNChannelBridge * _Nullable bridge,
+    bool authorized
+) {
+    if (bridge == NULL || bridge->roomTreatment == NULL) return;
+    N60MIMOTreatmentLiveSetAuthorized(
+        bridge->roomTreatment,
+        authorized
+    );
+}
+
+static inline bool N60LiveNChannelBridgeRequestRoomTreatmentArm(
+    N60LiveNChannelBridge * _Nullable bridge
+) {
+    return bridge != NULL
+        && bridge->roomTreatment != NULL
+        && N60MIMOTreatmentLiveRequestArm(bridge->roomTreatment);
+}
+
+static inline void N60LiveNChannelBridgeRequestRoomTreatmentBypass(
+    N60LiveNChannelBridge * _Nullable bridge
+) {
+    if (bridge == NULL || bridge->roomTreatment == NULL) return;
+    N60MIMOTreatmentLiveRequestBypass(bridge->roomTreatment);
+}
+
+static inline bool N60LiveNChannelBridgeLatchRoomTreatmentFault(
+    N60LiveNChannelBridge * _Nullable bridge,
+    N60MIMOTreatmentFault fault
+) {
+    return bridge != NULL
+        && bridge->roomTreatment != NULL
+        && N60MIMOTreatmentLiveLatchFault(
+            bridge->roomTreatment,
+            fault
+        );
+}
+
+static inline void N60LiveNChannelBridgeRequestRoomTreatmentFaultClear(
+    N60LiveNChannelBridge * _Nullable bridge
+) {
+    if (bridge == NULL || bridge->roomTreatment == NULL) return;
+    N60MIMOTreatmentLiveRequestFaultClear(bridge->roomTreatment);
 }
 
 static inline void N60LiveNChannelBridgeSetOutputGain(
@@ -387,6 +474,7 @@ static inline N60LiveNChannelBridgeSnapshot N60LiveNChannelBridgeGetSnapshot(
         .algorithmicLatencyFrames = N60LiveNChannelRenderGraphLatencyFrames(&bridge->graph),
         .transport = N60ProgramTransportGetSnapshot(bridge->transport),
         .adaptiveSampleRateEnabled = bridge->adaptiveSRC != NULL,
+        .roomTreatmentConfigured = bridge->roomTreatment != NULL,
         .meter = N60LiveNChannelBridgeGetMeterSnapshot(bridge),
     };
     if (bridge->adaptiveSRC != NULL) {
@@ -396,6 +484,12 @@ static inline N60LiveNChannelBridgeSnapshot N60LiveNChannelBridgeGetSnapshot(
             * result.adaptiveSampleRate.outputSampleRate
             / result.adaptiveSampleRate.inputSampleRate
         );
+    }
+    if (bridge->roomTreatment != NULL) {
+        result.roomTreatment =
+            N60MIMOTreatmentLiveGetSnapshot(bridge->roomTreatment);
+        result.roomTreatmentLatencyFrames =
+            result.roomTreatment.totalLatencyFrames;
     }
     return result;
 }
@@ -628,6 +722,16 @@ static inline OSStatus N60LiveNChannelOutputIOProc(
                 &input,
                 &physical,
                 meterDemand ? &programMeter : NULL)) {
+            (void)N60ProgramTransportZeroOutputFrame(outOutputData, frameIndex);
+            atomic_fetch_add_explicit(&bridge->renderFailures, 1u, memory_order_relaxed);
+            continue;
+        }
+
+        if (bridge->roomTreatment != NULL
+            && !N60MIMOTreatmentLiveProcessPhysicalFrame(
+                bridge->roomTreatment,
+                physical.values,
+                physical.physicalChannelCount)) {
             (void)N60ProgramTransportZeroOutputFrame(outOutputData, frameIndex);
             atomic_fetch_add_explicit(&bridge->renderFailures, 1u, memory_order_relaxed);
             continue;
