@@ -1,0 +1,74 @@
+name: PR73 MIMO Active Room Treatment
+
+on:
+  push:
+    branches:
+      - feature/pr73-mimo-room-treatment
+  pull_request:
+    branches:
+      - feature/pr72-ambient-analysis
+  workflow_dispatch:
+
+jobs:
+  validate-portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate inherited PR59 MIMO foundation
+        run: python3 ci/validate_pr59_advanced_spatial.py
+      - name: Validate inherited PR72 ambient-analysis architecture
+        run: python3 ci/validate_pr72_ambient_analysis.py
+      - name: Validate PR73 room-treatment architecture
+        run: python3 ci/validate_pr73_mimo_room_treatment.py
+      - name: Run PR73 bounded MIMO simulator
+        run: |
+          clang -std=c11 -O2 -Wall -Wextra -Werror \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr73_mimo_room_treatment.c \
+            -lm -o /tmp/pr73-mimo-room-treatment
+          /tmp/pr73-mimo-room-treatment
+
+  validate-macos-integration:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate PR73 room-treatment architecture
+        run: python3 ci/validate_pr73_mimo_room_treatment.py
+      - name: Run PR73 bounded MIMO simulator on Apple clang
+        run: |
+          clang -std=c11 -O2 -Wall -Wextra -Werror \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr73_mimo_room_treatment.c \
+            -lm -o /tmp/pr73-mimo-room-treatment
+          /tmp/pr73-mimo-room-treatment
+      - name: Build arm64 app with MIMO room-treatment designer
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            build
+      - name: Run PR73 measured MIMO designer tests
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            -only-testing:NotchSixtyTests/MIMORoomTreatmentDesignerTests \
+            test
+      - name: Run retained XCTest suite
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            test
