@@ -61,8 +61,8 @@ static inline N60MIMORoomTreatmentSettings N60MIMORoomTreatmentSettingsMakeDefau
     return (N60MIMORoomTreatmentSettings){
         .regularization = 2.0e-2,
         .maximumCoefficientGainDB = 0.0,
-        .maximumAggregateSourceGainDB = 3.0,
-        .targetHeadroomDB = 3.0,
+        .maximumAggregateSourceGainDB = 0.0,
+        .targetHeadroomDB = 0.0,
         .minimumPredictedImprovementDB = 1.0,
         .maximumRobustnessDegradationDB = 1.0,
         .robustnessMagnitudeFraction = 0.10,
