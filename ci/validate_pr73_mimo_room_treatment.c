@@ -112,6 +112,7 @@ static void test_bounded_spatial_equalization(void) {
         assert(isfinite(report.worstCaseRelativeDegradationDB));
         assert(report.maximumCoefficientMagnitude <= maxCoefficient + 1.0e-9);
         assert(report.maximumColumnPower <= maxColumnPower + 1.0e-9);
+        assert(report.maximumPerSourcePower <= 1.000000001);
         assert(report.minimumAppliedSafetyScale > 0.0);
         assert(report.minimumAppliedSafetyScale <= 1.0);
 
@@ -212,6 +213,7 @@ static void test_singular_room_remains_finite_and_bounded(void) {
     assert(isfinite(report.maximumColumnPower));
     assert(report.maximumCoefficientMagnitude <= 1.000001);
     assert(report.maximumColumnPower <= 1.000001);
+    assert(report.maximumPerSourcePower <= 1.000001);
 }
 
 static void test_invalid_settings_fail_closed(void) {
