@@ -14,6 +14,9 @@ enum LiveNChannelTransportError: Error, Equatable, LocalizedError {
     case captureBufferSizeMismatch(capture: UInt32, output: UInt32)
     case aggregateDeviceNotReady
     case unsupportedActiveDSP(String)
+    case roomTreatmentPermitMismatch
+    case roomTreatmentSourceUnavailable(String)
+    case roomTreatmentConfigurationFailed
     case configurationChangeRequiresRestart
 
     var errorDescription: String? {
@@ -38,6 +41,12 @@ enum LiveNChannelTransportError: Error, Equatable, LocalizedError {
             return "Core Audio created the private N-channel aggregate device but it did not become ready for IO."
         case .unsupportedActiveDSP(let feature):
             return "Live N-channel activation currently requires \(feature) to be bypassed or disabled. Stop processing and use the supported semantic transport subset."
+        case .roomTreatmentPermitMismatch:
+            return "The room-treatment activation permit does not match the prepared FIR program or current output sample rate."
+        case .roomTreatmentSourceUnavailable(let source):
+            return "Room-treatment source \(source) is not mapped to a usable physical output in the active Output Device Profile."
+        case .roomTreatmentConfigurationFailed:
+            return "The hardware-gated room-treatment runtime could not be prepared."
         case .configurationChangeRequiresRestart:
             return "Stop N-channel processing before changing DSP or Output Device Profile configuration."
         }
@@ -49,6 +58,74 @@ enum LiveNChannelTransportError: Error, Equatable, LocalizedError {
 /// a semantic N-channel implementation: global gain, PR54 lanes, and PR55 bass
 /// management. Stereo-only stages fail closed in AudioIOEngine before this graph
 /// is created rather than being silently omitted.
+struct LiveMIMORoomTreatmentPreparation: Equatable, Sendable {
+    let firProgram: MIMORoomTreatmentFIRProgram
+    let permit: MIMORoomTreatmentActivationPermit
+    let transitionConfiguration: MIMORoomTreatmentTransitionConfiguration
+
+    init(
+        firProgram: MIMORoomTreatmentFIRProgram,
+        permit: MIMORoomTreatmentActivationPermit,
+        transitionConfiguration: MIMORoomTreatmentTransitionConfiguration = .conservative
+    ) {
+        self.firProgram = firProgram
+        self.permit = permit
+        self.transitionConfiguration = transitionConfiguration
+    }
+
+    func validate(sampleRate: Double) throws {
+        guard sampleRate.isFinite,
+              abs(sampleRate - firProgram.sampleRate) < 0.5,
+              permit.sampleRate == firProgram.sampleRate,
+              permit.sources == firProgram.sources,
+              permit.tapCount == firProgram.tapCount,
+              permit.declaredLatencyFrames == firProgram.declaredLatencyFrames,
+              permit.engineLatencyFrames == firProgram.engineLatencyFrames,
+              permit.totalLatencyFrames == firProgram.totalLatencyFrames,
+              transitionConfiguration.frameCounts(sampleRate: sampleRate) != nil else {
+            throw LiveNChannelTransportError.roomTreatmentPermitMismatch
+        }
+    }
+
+    func physicalChannels(
+        routePlan: LiveNChannelOutputRoutePlan
+    ) throws -> [UInt32] {
+        var result: [UInt32] = []
+        result.reserveCapacity(firProgram.sources.count)
+        for source in firProgram.sources {
+            let physical: UInt32
+            switch source {
+            case .speaker(let role):
+                guard let programIndex = routePlan.programLayout.roles.firstIndex(of: role),
+                      programIndex < routePlan.programPhysicalChannels.count else {
+                    throw LiveNChannelTransportError.roomTreatmentSourceUnavailable(
+                        source.displayName
+                    )
+                }
+                physical = routePlan.programPhysicalChannels[programIndex]
+            case .subwoofer(let index):
+                guard Int(index) < routePlan.subwooferPhysicalChannels.count else {
+                    throw LiveNChannelTransportError.roomTreatmentSourceUnavailable(
+                        source.displayName
+                    )
+                }
+                physical = routePlan.subwooferPhysicalChannels[Int(index)]
+            }
+            guard physical != UInt32.max,
+                  physical < routePlan.physicalChannelCount else {
+                throw LiveNChannelTransportError.roomTreatmentSourceUnavailable(
+                    source.displayName
+                )
+            }
+            result.append(physical)
+        }
+        guard Set(result).count == result.count else {
+            throw LiveNChannelTransportError.roomTreatmentConfigurationFailed
+        }
+        return result
+    }
+}
+
 enum LiveNChannelRenderGraphCompiler {
     static func makeGraph(
         routePlan: LiveNChannelOutputRoutePlan,
@@ -234,7 +311,8 @@ final class CoreAudioNChannelTransportSession {
         selectedOutput: AudioOutputDevice,
         routePlan: LiveNChannelOutputRoutePlan,
         renderGraph: N60LiveNChannelRenderGraph,
-        outputGain: Float
+        outputGain: Float,
+        roomTreatment: LiveMIMORoomTreatmentPreparation? = nil
     ) throws {
         self.selectedOutput = selectedOutput
         self.routePlan = routePlan
@@ -387,6 +465,43 @@ final class CoreAudioNChannelTransportSession {
                     )
                 }
             }
+            if let roomTreatment {
+                try roomTreatment.validate(sampleRate: outputFormat.sampleRate)
+                let physicalChannels = try roomTreatment.physicalChannels(
+                    routePlan: routePlan
+                )
+                guard let fades = roomTreatment.transitionConfiguration.frameCounts(
+                    sampleRate: outputFormat.sampleRate
+                ) else {
+                    N60LiveNChannelBridgeDestroy(newBridge)
+                    throw LiveNChannelTransportError.roomTreatmentPermitMismatch
+                }
+                var taps = roomTreatment.firProgram.taps
+                let configured = taps.withUnsafeBufferPointer { tapBuffer in
+                    physicalChannels.withUnsafeBufferPointer { physicalBuffer in
+                        N60LiveNChannelBridgeConfigureRoomTreatment(
+                            newBridge,
+                            UInt32(physicalChannels.count),
+                            physicalBuffer.baseAddress!,
+                            tapBuffer.baseAddress!,
+                            UInt32(roomTreatment.firProgram.tapCount),
+                            UInt32(roomTreatment.firProgram.declaredLatencyFrames),
+                            fades.armFadeFrames,
+                            fades.faultFadeFrames
+                        )
+                    }
+                }
+                guard configured else {
+                    N60LiveNChannelBridgeDestroy(newBridge)
+                    throw LiveNChannelTransportError.roomTreatmentConfigurationFailed
+                }
+                // Authorization is granted only after validating the PR76 permit
+                // against this exact FIR, source list, sample rate and route.
+                N60LiveNChannelBridgeSetRoomTreatmentAuthorized(
+                    newBridge,
+                    true
+                )
+            }
             bridge = newBridge
             N60LiveNChannelBridgeSetOutputGain(newBridge, outputGain)
 
@@ -488,6 +603,39 @@ final class CoreAudioNChannelTransportSession {
 
     deinit {
         stop(fadeOut: false)
+    }
+
+    func roomTreatmentSnapshot() -> N60MIMOTreatmentLiveSnapshot? {
+        guard let bridge else { return nil }
+        let snapshot = N60LiveNChannelBridgeGetSnapshot(bridge)
+        return snapshot.roomTreatmentConfigured
+            ? snapshot.roomTreatment
+            : nil
+    }
+
+    func requestRoomTreatmentArm() -> Bool {
+        guard let bridge else { return false }
+        return N60LiveNChannelBridgeRequestRoomTreatmentArm(bridge)
+    }
+
+    func requestRoomTreatmentBypass() {
+        N60LiveNChannelBridgeRequestRoomTreatmentBypass(bridge)
+    }
+
+    func latchRoomTreatmentFault(_ fault: N60MIMOTreatmentFault) -> Bool {
+        guard let bridge else { return false }
+        return N60LiveNChannelBridgeLatchRoomTreatmentFault(
+            bridge,
+            fault
+        )
+    }
+
+    func requestRoomTreatmentFaultClear() {
+        N60LiveNChannelBridgeRequestRoomTreatmentFaultClear(bridge)
+    }
+
+    func revokeRoomTreatmentAuthorization() {
+        N60LiveNChannelBridgeSetRoomTreatmentAuthorized(bridge, false)
     }
 
     func setOutputGain(_ gain: Float) {
