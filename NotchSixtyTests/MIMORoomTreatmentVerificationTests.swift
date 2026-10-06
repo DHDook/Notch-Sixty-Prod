@@ -66,6 +66,40 @@ final class MIMORoomTreatmentVerificationTests: XCTestCase {
         XCTAssertGreaterThan(report.maximumAbsoluteMeanLevelShiftDB, 1.5)
     }
 
+    func testAggregateImprovementCannotHideOneSourceGettingWorse() throws {
+        let seatA = MultichannelCalibrationSeat(name: "A")
+        let seatB = MultichannelCalibrationSeat(name: "B")
+        let sources = [source0, source1]
+
+        let baseline = [
+            measurement(seat: seatA, source: source0, levelDB: 8),
+            measurement(seat: seatB, source: source0, levelDB: -8),
+            measurement(seat: seatA, source: source1, levelDB: 1),
+            measurement(seat: seatB, source: source1, levelDB: -1),
+        ]
+        let treated = [
+            measurement(seat: seatA, source: source0, levelDB: 1),
+            measurement(seat: seatB, source: source0, levelDB: -1),
+            measurement(seat: seatA, source: source1, levelDB: 2),
+            measurement(seat: seatB, source: source1, levelDB: -2),
+        ]
+
+        let report = try MIMORoomTreatmentVerifier().verify(
+            sources: sources,
+            seats: [seatA, seatB],
+            baselineMeasurements: baseline,
+            treatedMeasurements: treated,
+            sampleRate: sampleRate
+        )
+
+        XCTAssertGreaterThan(report.spatialRMSErrorImprovementDB, 3)
+        XCTAssertFalse(report.accepted)
+        let worsened = try XCTUnwrap(
+            report.sourceReports.first(where: { $0.source == source1 })
+        )
+        XCTAssertLessThan(worsened.spatialRMSErrorImprovementDB, -0.25)
+    }
+
     func testMissingRepeatMeasurementFailsClosed() throws {
         let seatA = MultichannelCalibrationSeat(name: "A")
         let seatB = MultichannelCalibrationSeat(name: "B")
