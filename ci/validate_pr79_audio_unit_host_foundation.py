@@ -124,6 +124,20 @@ for forbidden in (
     require(forbidden not in ui,
             f"Plug-ins UI crosses a prohibited boundary with {forbidden}")
 
+for token in (
+    'case dashboard',
+    'case speakers',
+    'case activeAcoustics',
+    'case plugins',
+    'Section("PLAYBACK")',
+    'Section("SYSTEM")',
+    'Section("EXTENSIONS")',
+    'ProductionActiveAcousticsWorkspace(engine: engine)',
+):
+    require(token in root_view, f"inherited PR78 navigation invariant missing {token}")
+require('case activeCrossover' not in root_view,
+        "legacy Active Crossover navigation case returned")
+
 require("host: product.audioUnitHost" in root_view,
         "production Plug-ins route is not wired to the product host")
 
