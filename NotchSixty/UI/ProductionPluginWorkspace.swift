@@ -139,7 +139,7 @@ struct ProductionPluginWorkspace: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
             .background(
-                active ? .quaternary.opacity(0.22) : .quaternary.opacity(0.10),
+                Color.primary.opacity(active ? 0.10 : 0.05),
                 in: .capsule
             )
     }
