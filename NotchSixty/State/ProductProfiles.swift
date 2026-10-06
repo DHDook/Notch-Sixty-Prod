@@ -14,19 +14,69 @@ struct ContentPresetState: Codable, Equatable, Sendable {
     var inputPreampDB: Double
     var headroomAttenuationDB: Double
     var dynamics: DynamicsConfiguration
+    var audioUnitRack: AudioUnitRackConfiguration
 
     init(
         schemaVersion: Int = ContentPresetState.currentSchemaVersion,
         stereoEQ: StereoEQConfiguration = StereoEQConfiguration(),
         inputPreampDB: Double = 0,
         headroomAttenuationDB: Double = 0,
-        dynamics: DynamicsConfiguration = DynamicsConfiguration()
+        dynamics: DynamicsConfiguration = DynamicsConfiguration(),
+        audioUnitRack: AudioUnitRackConfiguration = AudioUnitRackConfiguration()
     ) {
         self.schemaVersion = schemaVersion
         self.stereoEQ = stereoEQ
         self.inputPreampDB = inputPreampDB
         self.headroomAttenuationDB = headroomAttenuationDB
         self.dynamics = dynamics
+        self.audioUnitRack = audioUnitRack
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion
+        case stereoEQ
+        case inputPreampDB
+        case headroomAttenuationDB
+        case dynamics
+        case audioUnitRack
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try values.decode(Int.self, forKey: .schemaVersion)
+        stereoEQ = try values.decode(
+            StereoEQConfiguration.self,
+            forKey: .stereoEQ
+        )
+        inputPreampDB = try values.decode(
+            Double.self,
+            forKey: .inputPreampDB
+        )
+        headroomAttenuationDB = try values.decode(
+            Double.self,
+            forKey: .headroomAttenuationDB
+        )
+        dynamics = try values.decode(
+            DynamicsConfiguration.self,
+            forKey: .dynamics
+        )
+        audioUnitRack = try values.decodeIfPresent(
+            AudioUnitRackConfiguration.self,
+            forKey: .audioUnitRack
+        ) ?? AudioUnitRackConfiguration()
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(schemaVersion, forKey: .schemaVersion)
+        try values.encode(stereoEQ, forKey: .stereoEQ)
+        try values.encode(inputPreampDB, forKey: .inputPreampDB)
+        try values.encode(
+            headroomAttenuationDB,
+            forKey: .headroomAttenuationDB
+        )
+        try values.encode(dynamics, forKey: .dynamics)
+        try values.encode(audioUnitRack, forKey: .audioUnitRack)
     }
 
     func composingGain(over base: DSPGainConfiguration) -> DSPGainConfiguration {
@@ -485,9 +535,11 @@ final class ProductProfileController: ObservableObject {
     ]
 
     let engine: AudioIOEngine
+    let audioUnitHost: AudioUnitHostController
     private let storageURL: URL
     private var didRestoreSelection = false
     private var didLoadArchive = false
+    private var audioUnitHostObservation: AnyCancellable?
 
     @Published private(set) var userContentPresets: [ContentPreset] = []
     @Published private(set) var systemProfiles: [PlaybackSystemProfile] = []
@@ -495,9 +547,18 @@ final class ProductProfileController: ObservableObject {
     @Published private(set) var selectedSystemProfileID: UUID?
     @Published private(set) var lastErrorDescription: String?
 
-    init(engine: AudioIOEngine, storageURL: URL? = nil) {
+    init(
+        engine: AudioIOEngine,
+        audioUnitHost: AudioUnitHostController? = nil,
+        storageURL: URL? = nil
+    ) {
         self.engine = engine
+        self.audioUnitHost = audioUnitHost ?? AudioUnitHostController()
         self.storageURL = storageURL ?? Self.defaultStorageURL()
+        audioUnitHostObservation = self.audioUnitHost.objectWillChange.sink {
+            [weak self] _ in
+            self?.objectWillChange.send()
+        }
         loadArchive()
         ensureContentPresetsSeeded()
         ensureDefaultSystemProfile()
@@ -924,7 +985,8 @@ final class ProductProfileController: ObservableObject {
             stereoEQ: eq,
             inputPreampDB: gain.inputPreampDB,
             headroomAttenuationDB: gain.headroomAttenuationDB,
-            dynamics: dynamics
+            dynamics: dynamics,
+            audioUnitRack: audioUnitHost.rackConfiguration
         )
     }
 
@@ -954,11 +1016,13 @@ final class ProductProfileController: ObservableObject {
             try engine.replaceStereoEQConfiguration(state.stereoEQ)
             try engine.replaceDynamicsConfiguration(state.dynamics)
             try engine.replaceGainConfiguration(gain)
+            try audioUnitHost.replaceRackConfiguration(state.audioUnitRack)
         } catch {
             let rollbackGain = previous.composingGain(over: engine.gainConfiguration)
             try? engine.replaceStereoEQConfiguration(previous.stereoEQ)
             try? engine.replaceDynamicsConfiguration(previous.dynamics)
             try? engine.replaceGainConfiguration(rollbackGain)
+            try? audioUnitHost.replaceRackConfiguration(previous.audioUnitRack)
             throw error
         }
     }
