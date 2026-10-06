@@ -173,6 +173,12 @@ struct SystemAudioUnitOfflinePreparationBackend: AudioUnitOfflinePreparing {
         do {
             try au.inputBusses[0].setFormat(avFormat)
             try au.outputBusses[0].setFormat(avFormat)
+
+            // AUv3 hosts must explicitly connect/enable effect inputs before
+            // asking the unit to render. This bridges to the AUv2 connection /
+            // render-callback properties and prevents kAudioUnitErr_NoConnection.
+            au.inputBusses[0].isEnabled = true
+
             au.maximumFramesToRender = AUAudioFrameCount(
                 format.maximumFramesPerSlice
             )
