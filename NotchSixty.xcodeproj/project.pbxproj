@@ -85,6 +85,9 @@
 		F78000000000000000000001 /* ProductionActiveAcousticsWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = F78000000000000000000011 /* ProductionActiveAcousticsWorkspace.swift */; };
 		F78000000000000000000002 /* ProductionPluginWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = F78000000000000000000012 /* ProductionPluginWorkspace.swift */; };
 		F78000000000000000000003 /* ProductionInformationArchitectureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F78000000000000000000013 /* ProductionInformationArchitectureTests.swift */; };
+		F79000000000000000000001 /* AudioUnitHostFoundation.swift in Sources */ = {isa = PBXBuildFile; fileRef = F79000000000000000000011 /* AudioUnitHostFoundation.swift */; };
+		F79000000000000000000002 /* AudioUnitHostController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F79000000000000000000012 /* AudioUnitHostController.swift */; };
+		F79000000000000000000003 /* AudioUnitHostFoundationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F79000000000000000000013 /* AudioUnitHostFoundationTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -188,6 +191,9 @@
 		F78000000000000000000011 /* ProductionActiveAcousticsWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionActiveAcousticsWorkspace.swift; sourceTree = "<group>"; };
 		F78000000000000000000012 /* ProductionPluginWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionPluginWorkspace.swift; sourceTree = "<group>"; };
 		F78000000000000000000013 /* ProductionInformationArchitectureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionInformationArchitectureTests.swift; sourceTree = "<group>"; };
+		F79000000000000000000011 /* AudioUnitHostFoundation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioUnitHostFoundation.swift; sourceTree = "<group>"; };
+		F79000000000000000000012 /* AudioUnitHostController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioUnitHostController.swift; sourceTree = "<group>"; };
+		F79000000000000000000013 /* AudioUnitHostFoundationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioUnitHostFoundationTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -242,6 +248,7 @@
 				F75000000000000000000012 /* MIMORoomTreatmentVerificationTests.swift */,
 				F76000000000000000000012 /* MIMORoomTreatmentActivationPermitTests.swift */,
 				F78000000000000000000013 /* ProductionInformationArchitectureTests.swift */,
+				F79000000000000000000013 /* AudioUnitHostFoundationTests.swift */,
 			);
 			path = NotchSixtyTests;
 			sourceTree = "<group>";
@@ -275,6 +282,8 @@
 				F74000000000000000000011 /* MIMORoomTreatmentFIRCompiler.swift */,
 				F75000000000000000000011 /* MIMORoomTreatmentVerification.swift */,
 				F76000000000000000000011 /* MIMORoomTreatmentActivationPermit.swift */,
+				F79000000000000000000011 /* AudioUnitHostFoundation.swift */,
+				F79000000000000000000012 /* AudioUnitHostController.swift */,
 			);
 			path = Audio;
 			sourceTree = "<group>";
@@ -431,6 +440,8 @@
 				F74000000000000000000001 /* MIMORoomTreatmentFIRCompiler.swift in Sources */,
 				F75000000000000000000001 /* MIMORoomTreatmentVerification.swift in Sources */,
 				F76000000000000000000001 /* MIMORoomTreatmentActivationPermit.swift in Sources */,
+				F79000000000000000000001 /* AudioUnitHostFoundation.swift in Sources */,
+				F79000000000000000000002 /* AudioUnitHostController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -457,6 +468,7 @@
 				F75000000000000000000002 /* MIMORoomTreatmentVerificationTests.swift in Sources */,
 				F76000000000000000000002 /* MIMORoomTreatmentActivationPermitTests.swift in Sources */,
 				F78000000000000000000003 /* ProductionInformationArchitectureTests.swift in Sources */,
+				F79000000000000000000003 /* AudioUnitHostFoundationTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

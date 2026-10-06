@@ -1,0 +1,65 @@
+name: PR79 Audio Unit Host Foundation
+
+on:
+  push:
+    branches:
+      - feature/pr79-audio-unit-host-foundation
+  pull_request:
+    branches:
+      - feature/pr78-ui-information-architecture
+  workflow_dispatch:
+
+jobs:
+  validate-portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate inherited PR77 live room-treatment safety
+        run: python3 ci/validate_pr77_live_room_treatment.py
+      - name: Run inherited PR77 physical-output simulation
+        run: |
+          clang -std=c11 -O2 -Wall -Wextra -Werror \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr77_live_room_treatment.c \
+            -lm -o /tmp/pr77-live-room-treatment
+          /tmp/pr77-live-room-treatment
+      - name: Validate PR79 Audio Unit host foundation
+        run: python3 ci/validate_pr79_audio_unit_host_foundation.py
+
+  validate-macos-integration:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate PR79 Audio Unit host foundation
+        run: python3 ci/validate_pr79_audio_unit_host_foundation.py
+      - name: Build arm64 app with Audio Unit host foundation
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            build
+      - name: Run PR79 Audio Unit host tests
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            -only-testing:NotchSixtyTests/AudioUnitHostFoundationTests \
+            test
+      - name: Run retained XCTest suite
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            test
