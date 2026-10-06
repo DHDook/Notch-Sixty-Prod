@@ -61,15 +61,21 @@ enum LiveNChannelTransportError: Error, Equatable, LocalizedError {
 struct LiveMIMORoomTreatmentPreparation: Equatable, Sendable {
     let firProgram: MIMORoomTreatmentFIRProgram
     let permit: MIMORoomTreatmentActivationPermit
+    let acceptedProfile: OutputDeviceProfileConfiguration
+    let acceptedSelectedOutputUID: String
     let transitionConfiguration: MIMORoomTreatmentTransitionConfiguration
 
     init(
         firProgram: MIMORoomTreatmentFIRProgram,
         permit: MIMORoomTreatmentActivationPermit,
+        acceptedProfile: OutputDeviceProfileConfiguration,
+        acceptedSelectedOutputUID: String,
         transitionConfiguration: MIMORoomTreatmentTransitionConfiguration = .conservative
     ) {
         self.firProgram = firProgram
         self.permit = permit
+        self.acceptedProfile = acceptedProfile
+        self.acceptedSelectedOutputUID = acceptedSelectedOutputUID
         self.transitionConfiguration = transitionConfiguration
     }
 
