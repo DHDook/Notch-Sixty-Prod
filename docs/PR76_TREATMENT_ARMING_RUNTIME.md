@@ -226,6 +226,8 @@ CI retains PR75 and PR74 guards, builds the arm64 app, runs dedicated PR76 tests
 
 ## Explicit non-goals
 
+PR76 has no user-facing enable button and cannot activate physical treatment output.
+
 PR76 does not:
 
 - connect the transition runtime to `AudioIOEngine`;
