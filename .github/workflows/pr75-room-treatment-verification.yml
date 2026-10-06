@@ -1,0 +1,65 @@
+name: PR75 Room Treatment Verification
+
+on:
+  push:
+    branches:
+      - feature/pr75-room-treatment-verification
+  pull_request:
+    branches:
+      - feature/pr74-mimo-fir-runtime
+  workflow_dispatch:
+
+jobs:
+  validate-portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate inherited PR74 MIMO FIR runtime
+        run: python3 ci/validate_pr74_mimo_fir_runtime.py
+      - name: Run inherited PR74 standalone runtime
+        run: |
+          clang -std=c11 -O2 -Wall -Wextra -Werror \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr74_mimo_fir_runtime.c \
+            -lm -o /tmp/pr74-mimo-fir
+          /tmp/pr74-mimo-fir
+      - name: Validate PR75 verification and hardware-safety gate
+        run: python3 ci/validate_pr75_room_treatment_verification.py
+
+  validate-macos-integration:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate PR75 verification and hardware-safety gate
+        run: python3 ci/validate_pr75_room_treatment_verification.py
+      - name: Build arm64 app with room-treatment verification gate
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            build
+      - name: Run PR75 verification tests
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            -only-testing:NotchSixtyTests/MIMORoomTreatmentVerificationTests \
+            test
+      - name: Run retained XCTest suite
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            test
