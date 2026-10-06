@@ -661,6 +661,7 @@ enum AudioUnitRackError: Error, Equatable, LocalizedError {
     case aggregateLatencyOrTailTooLarge
     case slotIndexOutOfRange(Int)
     case componentNotDiscovered(AudioUnitComponentIdentity)
+    case componentNotPrepared(AudioUnitComponentIdentity)
 
     var errorDescription: String? {
         switch self {
@@ -704,6 +705,8 @@ enum AudioUnitRackError: Error, Equatable, LocalizedError {
             return "Audio Unit rack slot index \(index) is out of range."
         case .componentNotDiscovered(let component):
             return "Audio Unit \(component.fourCCSummary) is not in the current component catalog."
+        case .componentNotPrepared(let component):
+            return "Audio Unit \(component.fourCCSummary) has not passed the off-realtime preparation probe."
         }
     }
 }
