@@ -45,20 +45,35 @@ struct MIMORoomTreatmentActivationPermit: Equatable, Sendable {
         hardwareAcceptance: MIMORoomTreatmentHardwareAcceptance?,
         issuedAt: Date = Date()
     ) -> MIMORoomTreatmentActivationPermit? {
+        let compilerLimits =
+            MIMORoomTreatmentFIRCompileConfiguration.conservative
         guard firProgram.sampleRate.isFinite,
               firProgram.sampleRate > 0,
               !firProgram.sources.isEmpty,
               firProgram.sources.count <= Int(N60_MIMO_FIR_MAX_CHANNELS),
-              firProgram.tapCount > 0,
+              firProgram.tapCount >= 512,
+              firProgram.tapCount <= Int(N60_MIMO_FIR_MAX_TAPS),
+              firProgram.tapCount.isMultiple(of: 2),
+              firProgram.tapCount.nonzeroBitCount == 1,
               firProgram.taps.count
                 == firProgram.sources.count
                     * firProgram.sources.count
                     * firProgram.tapCount,
-              firProgram.declaredLatencyFrames >= 0,
-              firProgram.engineLatencyFrames > 0,
+              firProgram.taps.allSatisfy(\.isFinite),
+              firProgram.declaredLatencyFrames == firProgram.tapCount / 2,
+              firProgram.engineLatencyFrames
+                == Int(N60_MIMO_FIR_PARTITION_FRAMES),
               firProgram.totalLatencyFrames
                 == firProgram.declaredLatencyFrames
-                    + firProgram.engineLatencyFrames else {
+                    + firProgram.engineLatencyFrames,
+              firProgram.diagnostics.maximumEdgeEnergyFraction
+                <= compilerLimits.maximumEdgeEnergyFraction,
+              firProgram.diagnostics.maximumCoefficientOvershootDB
+                <= compilerLimits.maximumCoefficientOvershootDB,
+              firProgram.diagnostics.maximumColumnPowerOvershootDB
+                <= compilerLimits.maximumColumnPowerOvershootDB,
+              firProgram.diagnostics.maximumPerSourcePowerOvershootDB
+                <= compilerLimits.maximumPerSourcePowerOvershootDB else {
             return nil
         }
 
