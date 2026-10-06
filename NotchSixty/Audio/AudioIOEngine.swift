@@ -1138,7 +1138,7 @@ final class AudioIOEngine: ObservableObject {
         guard let profile = outputDeviceProfileConfiguration,
               profile.enabled,
               let selectedOutputUID = routeConfiguration.selectedOutputUID else {
-            throw OutputDeviceProfileError.profileRequired
+            throw OutputDeviceProfileError.profileDisabled
         }
         let preparation = LiveMIMORoomTreatmentPreparation(
             firProgram: firProgram,
