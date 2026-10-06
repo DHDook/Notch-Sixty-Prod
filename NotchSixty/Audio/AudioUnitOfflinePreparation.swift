@@ -188,9 +188,6 @@ struct SystemAudioUnitOfflinePreparationBackend: AudioUnitOfflinePreparing {
             restored = true
         }
 
-        let latencyBeforeAllocation = au.latency
-        let tailBeforeAllocation = au.tailTime
-
         do {
             try au.allocateRenderResources()
         } catch {
@@ -254,11 +251,9 @@ struct SystemAudioUnitOfflinePreparationBackend: AudioUnitOfflinePreparing {
         try probe.validate(for: format)
 
         let latencyStable =
-            Self.nearlyEqual(latencyBeforeAllocation, latencyAfterAllocation)
-            && Self.nearlyEqual(latencyAfterAllocation, latencyAfterReset)
+            Self.nearlyEqual(latencyAfterAllocation, latencyAfterReset)
         let tailStable =
-            Self.nearlyEqual(tailBeforeAllocation, tailAfterAllocation)
-            && Self.nearlyEqual(tailAfterAllocation, tailAfterReset)
+            Self.nearlyEqual(tailAfterAllocation, tailAfterReset)
 
         if au.renderResourcesAllocated {
             au.deallocateRenderResources()
