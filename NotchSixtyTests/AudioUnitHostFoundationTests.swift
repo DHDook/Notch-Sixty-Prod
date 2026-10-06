@@ -335,6 +335,52 @@ final class AudioUnitHostFoundationTests: XCTestCase {
         XCTAssertEqual(host.lifecycleByComponent[identity], .discovered)
     }
 
+    func testQuarantineInvalidatesPreparationAndForcesFreshProbe() async throws {
+        let component = descriptor(identity: identity, channels: [2])
+        let host = AudioUnitHostController(
+            catalog: MockCatalog(components: [component])
+        )
+        let format = AudioUnitRackProcessingFormat(
+            sampleRate: 48_000,
+            channelCount: 2
+        )
+
+        host.scan(format: format)
+        try host.installComponent(identity, inSlot: 0)
+        await host.probe(
+            component: identity,
+            format: format,
+            using: MockProbeBackend(result: .success(probe(
+                identity: identity,
+                format: format,
+                latencySeconds: 0.002,
+                tailSeconds: 0.1
+            )))
+        )
+        try host.setBypassed(false, slot: 0)
+        XCTAssertEqual(host.lifecycleByComponent[identity], .prepared)
+        XCTAssertFalse(host.rackConfiguration.slots[0].bypassed)
+
+        host.quarantineComponent(
+            identity,
+            reason: .runtimeFailure,
+            description: "mock live fault",
+            at: Date(timeIntervalSince1970: 1_700_000_010)
+        )
+        XCTAssertEqual(host.lifecycleByComponent[identity], .quarantined)
+        XCTAssertTrue(host.rackConfiguration.slots[0].bypassed)
+        XCTAssertNil(host.probeResult(for: identity))
+
+        host.clearQuarantine(identity)
+        XCTAssertEqual(host.lifecycleByComponent[identity], .discovered)
+        XCTAssertThrowsError(try host.setBypassed(false, slot: 0)) { error in
+            XCTAssertEqual(
+                error as? AudioUnitRackError,
+                .componentNotPrepared(self.identity)
+            )
+        }
+    }
+
     func testOpaqueStateSizeIsBounded() {
         let oversized = Data(
             count: AudioUnitRackSlotState.maximumOpaqueStateBytes + 1
