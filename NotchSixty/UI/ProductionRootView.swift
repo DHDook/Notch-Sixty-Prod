@@ -261,7 +261,10 @@ struct ProductionRootView: View {
         case .activeAcoustics:
             ProductionActiveAcousticsWorkspace(engine: engine)
         case .plugins:
-            ProductionPluginWorkspace()
+            ProductionPluginWorkspace(
+                engine: engine,
+                host: product.audioUnitHost
+            )
         }
     }
 
