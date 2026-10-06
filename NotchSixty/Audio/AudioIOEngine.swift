@@ -1135,9 +1135,16 @@ final class AudioIOEngine: ObservableObject {
         guard lifecycle.state == .idle else {
             throw LiveNChannelTransportError.configurationChangeRequiresRestart
         }
+        guard let profile = outputDeviceProfileConfiguration,
+              profile.enabled,
+              let selectedOutputUID = routeConfiguration.selectedOutputUID else {
+            throw OutputDeviceProfileError.profileRequired
+        }
         let preparation = LiveMIMORoomTreatmentPreparation(
             firProgram: firProgram,
             permit: permit,
+            acceptedProfile: profile,
+            acceptedSelectedOutputUID: selectedOutputUID,
             transitionConfiguration: transitionConfiguration
         )
         try preparation.validate(sampleRate: firProgram.sampleRate)
@@ -2858,6 +2865,12 @@ final class AudioIOEngine: ObservableObject {
             selectedOutputUID: output.uid,
             bassManagementEnabled: bassManagementConfiguration.enabled
         )
+        if let stagedRoomTreatment {
+            guard stagedRoomTreatment.acceptedProfile == profile,
+                  stagedRoomTreatment.acceptedSelectedOutputUID == output.uid else {
+                throw LiveNChannelTransportError.roomTreatmentPermitMismatch
+            }
+        }
         let graph = try LiveNChannelRenderGraphCompiler.makeGraph(
             routePlan: routePlan,
             sampleRate: output.nominalSampleRate,
