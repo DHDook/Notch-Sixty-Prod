@@ -1,0 +1,81 @@
+name: PR76 Treatment Arming Runtime
+
+on:
+  push:
+    branches:
+      - feature/pr76-treatment-arming-runtime
+  pull_request:
+    branches:
+      - feature/pr75-room-treatment-verification
+  workflow_dispatch:
+
+jobs:
+  validate-portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate inherited PR75 verification gate
+        run: python3 ci/validate_pr75_room_treatment_verification.py
+      - name: Validate inherited PR74 MIMO FIR runtime
+        run: python3 ci/validate_pr74_mimo_fir_runtime.py
+      - name: Run inherited PR74 standalone runtime
+        run: |
+          clang -std=c11 -O2 -Wall -Wextra -Werror \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr74_mimo_fir_runtime.c \
+            -lm -o /tmp/pr74-mimo-fir
+          /tmp/pr74-mimo-fir
+      - name: Validate PR76 arming/runtime structure
+        run: python3 ci/validate_pr76_treatment_transition.py
+      - name: Run PR76 transition simulation
+        run: |
+          clang -std=c11 -O2 -Wall -Wextra -Werror \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr76_treatment_transition.c \
+            -lm -o /tmp/pr76-treatment-transition
+          /tmp/pr76-treatment-transition
+
+  validate-macos-integration:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate PR76 arming/runtime structure
+        run: python3 ci/validate_pr76_treatment_transition.py
+      - name: Run PR76 transition simulation on Apple clang
+        run: |
+          clang -std=c11 -O2 -Wall -Wextra -Werror \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr76_treatment_transition.c \
+            -lm -o /tmp/pr76-treatment-transition
+          /tmp/pr76-treatment-transition
+      - name: Build arm64 app with standalone treatment transition substrate
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            build
+      - name: Run PR76 activation permit and transition tests
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            -only-testing:NotchSixtyTests/MIMORoomTreatmentActivationPermitTests \
+            test
+      - name: Run retained XCTest suite
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            test

@@ -80,6 +80,8 @@
 		F74000000000000000000002 /* MIMORoomTreatmentFIRCompilerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F74000000000000000000012 /* MIMORoomTreatmentFIRCompilerTests.swift */; };
 		F75000000000000000000001 /* MIMORoomTreatmentVerification.swift in Sources */ = {isa = PBXBuildFile; fileRef = F75000000000000000000011 /* MIMORoomTreatmentVerification.swift */; };
 		F75000000000000000000002 /* MIMORoomTreatmentVerificationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F75000000000000000000012 /* MIMORoomTreatmentVerificationTests.swift */; };
+		F76000000000000000000001 /* MIMORoomTreatmentActivationPermit.swift in Sources */ = {isa = PBXBuildFile; fileRef = F76000000000000000000011 /* MIMORoomTreatmentActivationPermit.swift */; };
+		F76000000000000000000002 /* MIMORoomTreatmentActivationPermitTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F76000000000000000000012 /* MIMORoomTreatmentActivationPermitTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -178,6 +180,8 @@
 		F74000000000000000000012 /* MIMORoomTreatmentFIRCompilerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMORoomTreatmentFIRCompilerTests.swift; sourceTree = "<group>"; };
 		F75000000000000000000011 /* MIMORoomTreatmentVerification.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMORoomTreatmentVerification.swift; sourceTree = "<group>"; };
 		F75000000000000000000012 /* MIMORoomTreatmentVerificationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMORoomTreatmentVerificationTests.swift; sourceTree = "<group>"; };
+		F76000000000000000000011 /* MIMORoomTreatmentActivationPermit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMORoomTreatmentActivationPermit.swift; sourceTree = "<group>"; };
+		F76000000000000000000012 /* MIMORoomTreatmentActivationPermitTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMORoomTreatmentActivationPermitTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -230,6 +234,7 @@
 				F73000000000000000000012 /* MIMORoomTreatmentDesignerTests.swift */,
 				F74000000000000000000012 /* MIMORoomTreatmentFIRCompilerTests.swift */,
 				F75000000000000000000012 /* MIMORoomTreatmentVerificationTests.swift */,
+				F76000000000000000000012 /* MIMORoomTreatmentActivationPermitTests.swift */,
 			);
 			path = NotchSixtyTests;
 			sourceTree = "<group>";
@@ -262,6 +267,7 @@
 				F73000000000000000000011 /* MIMORoomTreatmentDesigner.swift */,
 				F74000000000000000000011 /* MIMORoomTreatmentFIRCompiler.swift */,
 				F75000000000000000000011 /* MIMORoomTreatmentVerification.swift */,
+				F76000000000000000000011 /* MIMORoomTreatmentActivationPermit.swift */,
 			);
 			path = Audio;
 			sourceTree = "<group>";
@@ -415,6 +421,7 @@
 				F73000000000000000000001 /* MIMORoomTreatmentDesigner.swift in Sources */,
 				F74000000000000000000001 /* MIMORoomTreatmentFIRCompiler.swift in Sources */,
 				F75000000000000000000001 /* MIMORoomTreatmentVerification.swift in Sources */,
+				F76000000000000000000001 /* MIMORoomTreatmentActivationPermit.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -439,6 +446,7 @@
 				F73000000000000000000002 /* MIMORoomTreatmentDesignerTests.swift in Sources */,
 				F74000000000000000000002 /* MIMORoomTreatmentFIRCompilerTests.swift in Sources */,
 				F75000000000000000000002 /* MIMORoomTreatmentVerificationTests.swift in Sources */,
+				F76000000000000000000002 /* MIMORoomTreatmentActivationPermitTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
