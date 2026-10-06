@@ -256,6 +256,13 @@ struct ProductionActiveAcousticsWorkspace: View {
         return "BYPASSED"
     }
 
+    private var hardwareGateLabel: String {
+        if transportSnapshot?.roomTreatment?.authorized == true {
+            return "Accepted"
+        }
+        return engine.roomTreatmentStagedForNextStart ? "Accepted" : "Required"
+    }
+
     private var treatmentSourceValue: String {
         if let count = transportSnapshot?.roomTreatment?.treatmentSourceCount {
             return "\(count)"
