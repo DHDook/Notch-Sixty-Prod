@@ -529,11 +529,31 @@ static inline bool N60MIMORoomTreatmentDesignSpatialEqualization(
         );
         if (!isfinite(untreated)
             || !isfinite(candidate)
-            || untreated <= 0.0
+            || untreated < 0.0
             || candidate < 0.0) {
             free(desired);
             memset(designOut, 0, sizeof(*designOut));
             return false;
+        }
+        if (untreated <= N60_MIMO_ROOM_TREATMENT_EPSILON) {
+            designOut->reports[frequency] = (N60MIMORoomTreatmentFrequencyReport){
+                .accepted = false,
+                .targetMagnitudeMean = targetMagnitudeMean[frequency],
+                .untreatedResidualPower = untreated,
+                .candidateResidualPower = candidate,
+                .candidateImprovementDB = 0.0,
+                .worstCaseRelativeDegradationDB = 0.0,
+                .maximumCoefficientMagnitude = maximumCoefficientMagnitude,
+                .maximumColumnPower = maximumColumnPower,
+                .minimumAppliedSafetyScale = minimumSafetyScale,
+            };
+            N60MIMORoomTreatmentSetIdentityAtFrequency(
+                frequency,
+                transfer->sourceCount,
+                &designOut->correction
+            );
+            designOut->correction.weightedResidualPower[frequency] = untreated;
+            continue;
         }
 
         const double improvement = N60MIMORoomTreatmentDBRatio(
