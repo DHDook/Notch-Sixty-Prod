@@ -522,10 +522,13 @@ struct ActiveQuietZoneFeasibilityAnalyzer: Sendable {
                 frequencies: observation.frequenciesHz,
                 at: frequency
             )
-            floor = min(floor, coherence)
             if coherence < threshold {
+                if lastPassing == 0 {
+                    floor = coherence
+                }
                 break
             }
+            floor = min(floor, coherence)
             lastPassing = frequency
         }
         return (lastPassing, floor)
