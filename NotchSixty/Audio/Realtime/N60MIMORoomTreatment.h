@@ -531,6 +531,8 @@ static inline bool N60MIMORoomTreatmentDesignSpatialEqualization(
             || !isfinite(candidate)
             || untreated <= 0.0
             || candidate < 0.0) {
+            free(desired);
+            memset(designOut, 0, sizeof(*designOut));
             return false;
         }
 
