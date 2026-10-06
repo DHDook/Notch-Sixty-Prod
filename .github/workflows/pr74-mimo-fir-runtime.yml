@@ -1,0 +1,79 @@
+name: PR74 MIMO FIR Compiler Runtime
+
+on:
+  push:
+    branches:
+      - feature/pr74-mimo-fir-runtime
+  pull_request:
+    branches:
+      - feature/pr73-mimo-room-treatment
+  workflow_dispatch:
+
+jobs:
+  validate-portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate inherited PR73 MIMO room treatment
+        run: python3 ci/validate_pr73_mimo_room_treatment.py
+      - name: Run inherited PR73 MIMO numerical harness
+        run: |
+          clang -std=c11 -O2 -Wall -Wextra -Werror \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr73_mimo_room_treatment.c \
+            -lm -o /tmp/pr73-mimo-room-treatment
+          /tmp/pr73-mimo-room-treatment
+      - name: Validate PR74 matrix FIR structure
+        run: python3 ci/validate_pr74_mimo_fir_runtime.py
+      - name: Run PR74 standalone matrix FIR runtime
+        run: |
+          clang -std=c11 -O2 -Wall -Wextra -Werror \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr74_mimo_fir_runtime.c \
+            -lm -o /tmp/pr74-mimo-fir
+          /tmp/pr74-mimo-fir
+
+  validate-macos-integration:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate PR74 matrix FIR structure
+        run: python3 ci/validate_pr74_mimo_fir_runtime.py
+      - name: Run PR74 standalone matrix FIR runtime on Apple clang
+        run: |
+          clang -std=c11 -O2 -Wall -Wextra -Werror \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr74_mimo_fir_runtime.c \
+            -lm -o /tmp/pr74-mimo-fir
+          /tmp/pr74-mimo-fir
+      - name: Build arm64 app with MIMO FIR compiler/runtime
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            build
+      - name: Run PR74 FIR compiler/runtime tests
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            -only-testing:NotchSixtyTests/MIMORoomTreatmentFIRCompilerTests \
+            test
+      - name: Run retained XCTest suite
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            test
