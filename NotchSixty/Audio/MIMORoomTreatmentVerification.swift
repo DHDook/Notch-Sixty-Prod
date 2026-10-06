@@ -7,6 +7,7 @@ struct MIMORoomTreatmentVerificationConfiguration: Equatable, Sendable {
     var minimumSpatialRMSErrorImprovementDB = 0.50
     var maximumAbsoluteMeanLevelShiftDB = 1.50
     var maximumWorstSeatErrorIncreaseDB = 1.50
+    var maximumPerSourceSpatialRMSErrorDegradationDB = 0.25
     var maximumTreatedSpatialRMSErrorDB = 4.0
 
     static let conservative = MIMORoomTreatmentVerificationConfiguration()
@@ -128,6 +129,8 @@ struct MIMORoomTreatmentVerifier: Sendable {
               configuration.maximumAbsoluteMeanLevelShiftDB >= 0,
               configuration.maximumWorstSeatErrorIncreaseDB.isFinite,
               configuration.maximumWorstSeatErrorIncreaseDB >= 0,
+              configuration.maximumPerSourceSpatialRMSErrorDegradationDB.isFinite,
+              configuration.maximumPerSourceSpatialRMSErrorDegradationDB >= 0,
               configuration.maximumTreatedSpatialRMSErrorDB.isFinite,
               configuration.maximumTreatedSpatialRMSErrorDB >= 0 else {
             throw MIMORoomTreatmentVerificationError.invalidConfiguration
@@ -274,6 +277,10 @@ struct MIMORoomTreatmentVerifier: Sendable {
             && treatedRMS <= configuration.maximumTreatedSpatialRMSErrorDB
             && globalMaxMeanShift <= configuration.maximumAbsoluteMeanLevelShiftDB
             && globalWorstSeatIncrease <= configuration.maximumWorstSeatErrorIncreaseDB
+            && sourceReports.allSatisfy {
+                $0.spatialRMSErrorImprovementDB
+                    >= -configuration.maximumPerSourceSpatialRMSErrorDegradationDB
+            }
 
         return MIMORoomTreatmentVerificationReport(
             sampleRate: sampleRate,
