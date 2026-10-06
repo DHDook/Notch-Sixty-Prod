@@ -58,6 +58,119 @@ typedef struct {
     N60MIMORoomTreatmentFrequencyReport reports[N60_MIMO_MAX_FREQUENCY_BINS];
 } N60MIMORoomTreatmentDesign;
 
+/// Control-plane allocation helpers. These exist so Swift does not copy the
+/// large fixed-capacity PR59 matrices through stack values. Never call from an
+/// audio callback.
+static inline N60MIMOTransferSet * _Nullable N60MIMORoomTreatmentTransferSetCreate(
+    double sampleRate,
+    uint32_t sourceCount,
+    uint32_t measurementCount,
+    const float * _Nonnull frequenciesHz,
+    uint32_t frequencyCount,
+    const float * _Nonnull measurementWeights
+) {
+    if (!isfinite(sampleRate)
+        || sampleRate <= 0.0
+        || sourceCount == 0u
+        || sourceCount > N60_MIMO_MAX_SOURCES
+        || measurementCount == 0u
+        || measurementCount > N60_MIMO_MAX_MEASUREMENTS
+        || frequencyCount == 0u
+        || frequencyCount > N60_MIMO_MAX_FREQUENCY_BINS
+        || frequenciesHz == NULL
+        || measurementWeights == NULL) {
+        return NULL;
+    }
+
+    N60MIMOTransferSet *transfer =
+        (N60MIMOTransferSet *)calloc(1u, sizeof(N60MIMOTransferSet));
+    if (transfer == NULL) return NULL;
+    transfer->sourceCount = sourceCount;
+    transfer->measurementCount = measurementCount;
+    transfer->frequencyCount = frequencyCount;
+    transfer->sampleRate = sampleRate;
+
+    for (uint32_t frequency = 0u; frequency < frequencyCount; ++frequency) {
+        transfer->frequenciesHz[frequency] = frequenciesHz[frequency];
+    }
+    for (uint32_t measurement = 0u; measurement < measurementCount; ++measurement) {
+        transfer->measurementWeights[measurement] = measurementWeights[measurement];
+    }
+    return transfer;
+}
+
+static inline void N60MIMORoomTreatmentTransferSetDestroy(
+    N60MIMOTransferSet * _Nullable transfer
+) {
+    free(transfer);
+}
+
+static inline bool N60MIMORoomTreatmentTransferSetMeasuredPolar(
+    N60MIMOTransferSet * _Nonnull transfer,
+    uint32_t frequency,
+    uint32_t measurement,
+    uint32_t source,
+    double magnitude,
+    double phaseRadians
+) {
+    if (transfer == NULL
+        || frequency >= transfer->frequencyCount
+        || measurement >= transfer->measurementCount
+        || source >= transfer->sourceCount
+        || !isfinite(magnitude)
+        || magnitude < 0.0
+        || !isfinite(phaseRadians)) {
+        return false;
+    }
+    transfer->measured[
+        N60MIMOMeasuredOffset(frequency, measurement, source)
+    ] = (N60MIMOComplex){
+        .real = magnitude * cos(phaseRadians),
+        .imaginary = magnitude * sin(phaseRadians),
+    };
+    return true;
+}
+
+static inline N60MIMORoomTreatmentDesign * _Nullable
+N60MIMORoomTreatmentDesignCreate(
+    const N60MIMOTransferSet * _Nonnull transfer,
+    N60MIMORoomTreatmentSettings settings
+);
+
+static inline void N60MIMORoomTreatmentDesignDestroy(
+    N60MIMORoomTreatmentDesign * _Nullable design
+) {
+    free(design);
+}
+
+static inline N60MIMORoomTreatmentFrequencyReport
+N60MIMORoomTreatmentDesignReport(
+    const N60MIMORoomTreatmentDesign * _Nullable design,
+    uint32_t frequency
+) {
+    if (design == NULL || frequency >= design->frequencyCount) {
+        return (N60MIMORoomTreatmentFrequencyReport){0};
+    }
+    return design->reports[frequency];
+}
+
+static inline N60MIMOComplex N60MIMORoomTreatmentDesignCoefficient(
+    const N60MIMORoomTreatmentDesign * _Nullable design,
+    uint32_t frequency,
+    uint32_t source,
+    uint32_t target
+) {
+    if (design == NULL
+        || frequency >= design->frequencyCount
+        || source >= design->sourceCount
+        || target >= design->sourceCount) {
+        return (N60MIMOComplex){0};
+    }
+    return design->correction.correction[
+        N60MIMOCorrectionOffset(frequency, source, target)
+    ];
+}
+
 static inline N60MIMORoomTreatmentSettings N60MIMORoomTreatmentSettingsMakeDefault(void) {
     return (N60MIMORoomTreatmentSettings){
         .regularization = 2.0e-2,
@@ -599,6 +712,27 @@ static inline bool N60MIMORoomTreatmentDesignSpatialEqualization(
 
     free(desired);
     return true;
+}
+
+static inline N60MIMORoomTreatmentDesign * _Nullable
+N60MIMORoomTreatmentDesignCreate(
+    const N60MIMOTransferSet * _Nonnull transfer,
+    N60MIMORoomTreatmentSettings settings
+) {
+    N60MIMORoomTreatmentDesign *design =
+        (N60MIMORoomTreatmentDesign *)calloc(
+            1u,
+            sizeof(N60MIMORoomTreatmentDesign)
+        );
+    if (design == NULL) return NULL;
+    if (!N60MIMORoomTreatmentDesignSpatialEqualization(
+            transfer,
+            settings,
+            design)) {
+        free(design);
+        return NULL;
+    }
+    return design;
 }
 
 #ifdef __cplusplus
