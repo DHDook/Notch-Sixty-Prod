@@ -128,7 +128,7 @@ For example:
 - excellent acoustic measurements cannot override missing excursion validation;
 - complete source safety cannot bypass the need for treated repeat measurements.
 
-`eligibleForFutureLiveIntegration` is **not an active state**.
+`eligibleForFutureLiveIntegration` is not an active state.
 
 It only means a future PR may consider connecting the candidate to the live graph.
 
