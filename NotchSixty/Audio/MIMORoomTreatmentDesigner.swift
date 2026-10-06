@@ -7,6 +7,7 @@ struct MIMORoomTreatmentConfiguration: Equatable, Sendable {
     var regularization = 0.02
     var maximumCoefficientGainDB = 0.0
     var maximumAggregateSourceGainDB = 0.0
+    var maximumPerSourcePowerGainDB = 0.0
     var targetHeadroomDB = 0.0
     var minimumPredictedImprovementDB = 1.0
     var maximumRobustnessDegradationDB = 1.0
@@ -44,6 +45,7 @@ struct MIMORoomTreatmentFrequencyResult: Equatable, Sendable {
     let worstCaseRelativeDegradationDB: Double
     let maximumCoefficientMagnitude: Double
     let maximumColumnPower: Double
+    let maximumPerSourcePower: Double
     let minimumAppliedSafetyScale: Double
 }
 
@@ -174,6 +176,7 @@ struct MIMORoomTreatmentDesigner: Sendable {
         cSettings.regularization = configuration.regularization
         cSettings.maximumCoefficientGainDB = configuration.maximumCoefficientGainDB
         cSettings.maximumAggregateSourceGainDB = configuration.maximumAggregateSourceGainDB
+        cSettings.maximumPerSourcePowerGainDB = configuration.maximumPerSourcePowerGainDB
         cSettings.targetHeadroomDB = configuration.targetHeadroomDB
         cSettings.minimumPredictedImprovementDB = configuration.minimumPredictedImprovementDB
         cSettings.maximumRobustnessDegradationDB = configuration.maximumRobustnessDegradationDB
@@ -300,6 +303,7 @@ struct MIMORoomTreatmentDesigner: Sendable {
                 worstCaseRelativeDegradationDB: report.worstCaseRelativeDegradationDB,
                 maximumCoefficientMagnitude: report.maximumCoefficientMagnitude,
                 maximumColumnPower: report.maximumColumnPower,
+                maximumPerSourcePower: report.maximumPerSourcePower,
                 minimumAppliedSafetyScale: report.minimumAppliedSafetyScale
             ))
         }
