@@ -284,6 +284,20 @@ struct ProductionTransportChannelMeter: Identifiable, Equatable, Sendable {
     let overRangeSamples: UInt64
 }
 
+struct ProductionRoomTreatmentDiagnostics: Equatable, Sendable {
+    let authorized: Bool
+    let armRequested: Bool
+    let active: Bool
+    let transitioning: Bool
+    let faulted: Bool
+    let treatmentMix: Float
+    let treatmentSourceCount: UInt32
+    let latencyFrames: UInt32
+    let processedFrames: UInt64
+    let protectionClampSamples: UInt64
+    let integrationFailures: UInt64
+}
+
 struct ProductionTransportMeterSnapshot: Equatable, Sendable {
     let kind: ProductionTransportMeterKind
     let displayName: String
@@ -295,6 +309,7 @@ struct ProductionTransportMeterSnapshot: Equatable, Sendable {
     let physicalOutputs: [ProductionTransportChannelMeter]
     let inputTruePeakLinear: Float?
     let outputTruePeakLinear: Float?
+    let roomTreatment: ProductionRoomTreatmentDiagnostics?
     let renderFailures: UInt64
     let outputWriteFailures: UInt64
 }
