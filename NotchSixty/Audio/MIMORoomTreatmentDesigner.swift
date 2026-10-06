@@ -165,10 +165,7 @@ struct MIMORoomTreatmentDesigner: Sendable {
         guard configuration.minimumFrequencyHz.isFinite,
               maximumFrequency.isFinite,
               configuration.minimumFrequencyHz >= N60_MIMO_ROOM_TREATMENT_DEFAULT_MIN_HZ,
-              maximumFrequency <= max(
-                N60_MIMO_ROOM_TREATMENT_DEFAULT_MAX_HZ,
-                configuration.maximumFrequencyHz
-              ),
+              configuration.maximumFrequencyHz <= N60_MIMO_ROOM_TREATMENT_DEFAULT_MAX_HZ,
               maximumFrequency > configuration.minimumFrequencyHz else {
             throw MIMORoomTreatmentDesignError.invalidFrequencyRange
         }
@@ -335,7 +332,7 @@ struct MIMORoomTreatmentDesigner: Sendable {
             frequenciesHz: frequencies,
             frequencyResults: results,
             coefficients: coefficients,
-            acceptedFrequencyCount: results.filter(\.accepted).count
+            acceptedFrequencyCount: results.filter { $0.accepted }.count
         )
     }
 
