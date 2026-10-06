@@ -185,6 +185,8 @@ CI retains PR73 and PR74 validation, builds arm64 and runs the full retained XCT
 
 ## Explicit non-goals
 
+PR75 does not connect the MIMO FIR runtime to the live render graph or any physical output.
+
 PR75 does not:
 
 - connect `N60MIMOFIRRuntime` to `N60LiveNChannelRenderCore`;
