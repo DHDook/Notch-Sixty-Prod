@@ -191,6 +191,10 @@ A quarantined component cannot receive a process disposition from the execution 
 
 If known latency exists it can only receive latency-matched dry bypass. Otherwise activation fails closed.
 
+Quarantine invalidates any cached successful preparation and forces every matching rack slot back to bypass.
+
+Clearing quarantine returns the component only to the `discovered` state. A **fresh off-realtime probe is mandatory** before the component can be enabled again.
+
 Quarantine can be explicitly cleared on the control plane.
 
 ## Host controller lifecycle
