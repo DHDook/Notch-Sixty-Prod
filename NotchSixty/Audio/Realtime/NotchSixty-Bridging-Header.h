@@ -27,6 +27,7 @@
 #import "N60MIMOCorrection.h"
 #import "N60MIMORoomTreatment.h"
 #import "N60MIMOFIRRuntime.h"
+#import "N60MIMOTreatmentTransition.h"
 
 #import "N60SpectralDenoiser.h"
 #import "N60DynamicsLegacyAdvanced.h"
