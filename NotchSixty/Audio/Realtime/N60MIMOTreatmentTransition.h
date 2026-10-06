@@ -102,7 +102,9 @@ static inline float N60MIMOTreatmentSmoothstep(float value) {
 
 static inline uint32_t N60MIMOTreatmentMixToQ24(float mix) {
     const float bounded = mix < 0.0f ? 0.0f : (mix > 1.0f ? 1.0f : mix);
-    return (uint32_t)lrintf(bounded * (float)N60_MIMO_TREATMENT_MIX_SCALE);
+    return (uint32_t)(
+        bounded * (float)N60_MIMO_TREATMENT_MIX_SCALE + 0.5f
+    );
 }
 
 static inline float N60MIMOTreatmentMixFromQ24(uint32_t value) {
@@ -190,6 +192,25 @@ static inline void N60MIMOTreatmentBeginTransition(
     runtime->transitionPosition = 0u;
 }
 
+static inline bool N60MIMOTreatmentTransitionAtomicsAreLockFree(
+    const N60MIMOTreatmentTransitionRuntime * _Nonnull runtime
+) {
+    return runtime != NULL
+        && atomic_is_lock_free(&runtime->authorized)
+        && atomic_is_lock_free(&runtime->armRequested)
+        && atomic_is_lock_free(&runtime->clearFaultRequested)
+        && atomic_is_lock_free(&runtime->pendingFault)
+        && atomic_is_lock_free(&runtime->publishedState)
+        && atomic_is_lock_free(&runtime->publishedFault)
+        && atomic_is_lock_free(&runtime->publishedMixQ24)
+        && atomic_is_lock_free(&runtime->processedFrames)
+        && atomic_is_lock_free(&runtime->armRequests)
+        && atomic_is_lock_free(&runtime->bypassRequests)
+        && atomic_is_lock_free(&runtime->faultRequests)
+        && atomic_is_lock_free(&runtime->completedTransitions)
+        && atomic_is_lock_free(&runtime->hardRuntimeFailures);
+}
+
 static inline N60MIMOTreatmentTransitionRuntime * _Nullable
 N60MIMOTreatmentTransitionRuntimeCreate(
     const N60MIMOFIRProgram * _Nonnull treatmentProgram,
@@ -255,6 +276,13 @@ N60MIMOTreatmentTransitionRuntimeCreate(
         memory_order_relaxed
     );
     N60MIMOTreatmentPublishRuntimeState(runtime);
+    if (!N60MIMOTreatmentTransitionAtomicsAreLockFree(runtime)) {
+        N60MIMOFIRRuntimeDestroy(runtime->identityRuntime);
+        N60MIMOFIRRuntimeDestroy(runtime->treatmentRuntime);
+        N60MIMOFIRProgramDestroy(runtime->identityProgram);
+        free(runtime);
+        return NULL;
+    }
     return runtime;
 }
 
