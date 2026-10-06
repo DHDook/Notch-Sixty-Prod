@@ -215,7 +215,7 @@ The test covers:
 - actual `AVAudioUnit` instantiation;
 - stereo format configuration;
 - real render-resource allocation;
-- direct internal render-block execution;
+- direct host render-block execution;
 - reset;
 - finite output;
 - teardown;
