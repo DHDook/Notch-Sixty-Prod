@@ -30,6 +30,7 @@ for token in (
     "SystemAudioUnitOfflinePreparationBackend",
     "AVAudioUnit.instantiate",
     "setFormat",
+    "au.inputBusses[0].isEnabled = true",
     "maximumFramesToRender",
     "fullState",
     "allocateRenderResources",
