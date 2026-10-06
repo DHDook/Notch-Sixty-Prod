@@ -33,7 +33,7 @@ for token in (
     "maximumFramesToRender",
     "fullState",
     "allocateRenderResources",
-    "internalRenderBlock",
+    "renderBlock",
     "AURenderPullInputBlock",
     "deallocateRenderResources",
     "au.reset()",
@@ -64,7 +64,7 @@ for token in (
 restricted = (
     "AVAudioUnit.instantiate(",
     ".allocateRenderResources()",
-    ".internalRenderBlock",
+    ".renderBlock",
 )
 for source in (ROOT / "NotchSixty").rglob("*.swift"):
     text = source.read_text()
