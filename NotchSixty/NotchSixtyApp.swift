@@ -66,6 +66,7 @@ final class ProductController: ObservableObject {
     nonisolated let objectWillChange = ObservableObjectPublisher()
 
     let audioEngine: AudioIOEngine
+    let audioUnitHost: AudioUnitHostController
     let profiles: ProductProfileController
     let calibration: RoomCorrectionCalibrationController
     let multichannelCalibration: MultichannelCalibrationController
@@ -73,12 +74,18 @@ final class ProductController: ObservableObject {
     private var audioEngineObservation: AnyCancellable?
     private var calibrationObservation: AnyCancellable?
     private var multichannelCalibrationObservation: AnyCancellable?
+    private var audioUnitHostObservation: AnyCancellable?
 
     init() {
         let audioEngine = AudioIOEngine()
-        let profiles = ProductProfileController(engine: audioEngine)
+        let audioUnitHost = AudioUnitHostController()
+        let profiles = ProductProfileController(
+            engine: audioEngine,
+            audioUnitHost: audioUnitHost
+        )
         let calibration = RoomCorrectionCalibrationController(engine: audioEngine)
         self.audioEngine = audioEngine
+        self.audioUnitHost = audioUnitHost
         self.profiles = profiles
         self.calibration = calibration
         self.multichannelCalibration = MultichannelCalibrationController(
@@ -91,9 +98,14 @@ final class ProductController: ObservableObject {
     }
 
     init(audioEngine: AudioIOEngine) {
-        let profiles = ProductProfileController(engine: audioEngine)
+        let audioUnitHost = AudioUnitHostController()
+        let profiles = ProductProfileController(
+            engine: audioEngine,
+            audioUnitHost: audioUnitHost
+        )
         let calibration = RoomCorrectionCalibrationController(engine: audioEngine)
         self.audioEngine = audioEngine
+        self.audioUnitHost = audioUnitHost
         self.profiles = profiles
         self.calibration = calibration
         self.multichannelCalibration = MultichannelCalibrationController(
@@ -144,6 +156,9 @@ final class ProductController: ObservableObject {
             self?.objectWillChange.send()
         }
         multichannelCalibrationObservation = multichannelCalibration.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+        audioUnitHostObservation = audioUnitHost.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
     }
