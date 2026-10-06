@@ -10,6 +10,24 @@ final class AudioUnitHostFoundationTests: XCTestCase {
         componentManufacturer: 0x6e363079 // n60y
     )
 
+    func testSystemCatalogMetadataDiscoveryIsStable() {
+        let components = SystemAudioUnitComponentCatalog().discoverEffects()
+        XCTAssertEqual(
+            Set(components.map(\.identity)).count,
+            components.count
+        )
+        for component in components {
+            XCTAssertTrue(
+                component.supportedSymmetricChannelCounts.allSatisfy {
+                    (1...AudioUnitRackProcessingFormat.maximumChannelCount)
+                        .contains($0)
+                }
+            )
+            XCTAssertFalse(component.name.isEmpty)
+            XCTAssertFalse(component.manufacturerName.isEmpty)
+        }
+    }
+
     func testRackRoundTripPreservesOpaqueStateAndLatencyMetadata() throws {
         var slot = AudioUnitRackSlotState(
             component: identity,
