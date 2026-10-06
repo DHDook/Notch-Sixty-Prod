@@ -149,7 +149,7 @@ struct SystemAudioUnitOfflinePreparationBackend: AudioUnitOfflinePreparing {
         }
 
         let unit = try await instantiate(component.identity)
-        let au = unit.auAudioUnit
+        return try unit.withAUAudioUnit { au in
 
         guard Self.identity(of: unit.audioComponentDescription)
                 == component.identity else {
@@ -275,6 +275,7 @@ struct SystemAudioUnitOfflinePreparationBackend: AudioUnitOfflinePreparing {
         )
         try report.validate()
         return report
+        }
     }
 
     private func instantiate(
@@ -391,7 +392,7 @@ struct SystemAudioUnitOfflinePreparationBackend: AudioUnitOfflinePreparing {
         var allFinite = true
         var renderedFrames = 0
 
-        let renderBlock = au.internalRenderBlock
+        let renderBlock = au.renderBlock
 
         for pass in 0..<passCount {
             output.frameLength = AVAudioFrameCount(frameCount)
@@ -407,7 +408,6 @@ struct SystemAudioUnitOfflinePreparationBackend: AudioUnitOfflinePreparing {
             let baseFrame = pass * frameCount
             let pullInput: AURenderPullInputBlock = {
                 _, _, requestedFrameCount, _, inputData in
-                guard let inputData else { return kAudio_ParamError }
                 let requested = Int(requestedFrameCount)
                 let buffers = UnsafeMutableAudioBufferListPointer(inputData)
                 guard buffers.count == channelCount else {
