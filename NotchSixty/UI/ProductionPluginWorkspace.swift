@@ -259,7 +259,11 @@ struct ProductionPluginWorkspace: View {
             Image(systemName: compatibility.compatible
                 ? "checkmark.circle.fill"
                 : "xmark.circle")
-                .foregroundStyle(compatibility.compatible ? .secondary : .orange)
+                .foregroundStyle(
+                    compatibility.compatible
+                        ? Color.primary.opacity(0.62)
+                        : Color.orange
+                )
                 .frame(width: 22)
 
             VStack(alignment: .leading, spacing: 3) {
