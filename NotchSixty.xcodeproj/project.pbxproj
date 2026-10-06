@@ -74,6 +74,8 @@
 		F70000000000000000000001 /* N60AdaptiveSampleRate.c in Sources */ = {isa = PBXBuildFile; fileRef = F70000000000000000000011 /* N60AdaptiveSampleRate.c */; };
 		F72000000000000000000001 /* AmbientFieldAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F72000000000000000000011 /* AmbientFieldAnalyzer.swift */; };
 		F72000000000000000000002 /* AmbientFieldAnalyzerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F72000000000000000000012 /* AmbientFieldAnalyzerTests.swift */; };
+		F73000000000000000000001 /* MIMORoomTreatmentDesigner.swift in Sources */ = {isa = PBXBuildFile; fileRef = F73000000000000000000011 /* MIMORoomTreatmentDesigner.swift */; };
+		F73000000000000000000002 /* MIMORoomTreatmentDesignerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F73000000000000000000012 /* MIMORoomTreatmentDesignerTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -166,6 +168,8 @@
 		F70000000000000000000012 /* N60AdaptiveSampleRate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60AdaptiveSampleRate.h; sourceTree = "<group>"; };
 		F72000000000000000000011 /* AmbientFieldAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AmbientFieldAnalyzer.swift; sourceTree = "<group>"; };
 		F72000000000000000000012 /* AmbientFieldAnalyzerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AmbientFieldAnalyzerTests.swift; sourceTree = "<group>"; };
+		F73000000000000000000011 /* MIMORoomTreatmentDesigner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMORoomTreatmentDesigner.swift; sourceTree = "<group>"; };
+		F73000000000000000000012 /* MIMORoomTreatmentDesignerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMORoomTreatmentDesignerTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -215,6 +219,7 @@
 				A10000000000000000000033 /* RoomCorrectionTargetDesignerTests.swift */,
 				E10000000000000000000012 /* RoomCorrectionFIRDesignerTests.swift */,
 				F72000000000000000000012 /* AmbientFieldAnalyzerTests.swift */,
+				F73000000000000000000012 /* MIMORoomTreatmentDesignerTests.swift */,
 			);
 			path = NotchSixtyTests;
 			sourceTree = "<group>";
@@ -244,6 +249,7 @@
 				A20000000000000000000030 /* RoomCorrectionTargetDesigner.swift */,
 				E20000000000000000000012 /* RoomCorrectionFIRDesigner.swift */,
 				F72000000000000000000011 /* AmbientFieldAnalyzer.swift */,
+				F73000000000000000000011 /* MIMORoomTreatmentDesigner.swift */,
 			);
 			path = Audio;
 			sourceTree = "<group>";
@@ -394,6 +400,7 @@
 				A30000000000000000000018 /* N60RoomMeasurementBridge.c in Sources */,
 				F70000000000000000000001 /* N60AdaptiveSampleRate.c in Sources */,
 				F72000000000000000000001 /* AmbientFieldAnalyzer.swift in Sources */,
+				F73000000000000000000001 /* MIMORoomTreatmentDesigner.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -415,6 +422,7 @@
 				A1000000000000000000001E /* RoomCorrectionTargetDesignerTests.swift in Sources */,
 				E10000000000000000000002 /* RoomCorrectionFIRDesignerTests.swift in Sources */,
 				F72000000000000000000002 /* AmbientFieldAnalyzerTests.swift in Sources */,
+				F73000000000000000000002 /* MIMORoomTreatmentDesignerTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
