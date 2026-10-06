@@ -24,6 +24,10 @@ typedef struct {
     double maximumCoefficientGainDB;
     /// Bound on sum_s |C[s,t]|^2 for every target column, expressed as power gain.
     double maximumAggregateSourceGainDB;
+    /// Bound on sum_t |C[s,t]|^2 for each physical actuator/source. This is a
+    /// frequency-domain source-effort proxy; a later hardware layer can tighten
+    /// it with measured driver excursion/thermal models.
+    double maximumPerSourcePowerGainDB;
     /// Conservative attenuation applied to the weighted geometric-mean target.
     double targetHeadroomDB;
     double minimumPredictedImprovementDB;
@@ -45,6 +49,7 @@ typedef struct {
     double worstCaseRelativeDegradationDB;
     double maximumCoefficientMagnitude;
     double maximumColumnPower;
+    double maximumPerSourcePower;
     double minimumAppliedSafetyScale;
 } N60MIMORoomTreatmentFrequencyReport;
 
@@ -176,6 +181,7 @@ static inline N60MIMORoomTreatmentSettings N60MIMORoomTreatmentSettingsMakeDefau
         .regularization = 2.0e-2,
         .maximumCoefficientGainDB = 0.0,
         .maximumAggregateSourceGainDB = 0.0,
+        .maximumPerSourcePowerGainDB = 0.0,
         .targetHeadroomDB = 0.0,
         .minimumPredictedImprovementDB = 1.0,
         .maximumRobustnessDegradationDB = 1.0,
@@ -197,6 +203,9 @@ static inline bool N60MIMORoomTreatmentSettingsIsValid(
         && isfinite(settings.maximumAggregateSourceGainDB)
         && settings.maximumAggregateSourceGainDB >= 0.0
         && settings.maximumAggregateSourceGainDB <= 12.0
+        && isfinite(settings.maximumPerSourcePowerGainDB)
+        && settings.maximumPerSourcePowerGainDB >= 0.0
+        && settings.maximumPerSourcePowerGainDB <= 12.0
         && isfinite(settings.targetHeadroomDB)
         && settings.targetHeadroomDB >= 0.0
         && settings.targetHeadroomDB <= 18.0
@@ -444,6 +453,50 @@ static inline void N60MIMORoomTreatmentApplyAggregatePowerBound(
     *minimumSafetyScaleOut = minimumSafetyScale;
 }
 
+static inline double N60MIMORoomTreatmentApplyPerSourcePowerBound(
+    uint32_t frequency,
+    uint32_t sourceCount,
+    N60MIMORoomTreatmentSettings settings,
+    N60MIMOCorrectionDesign * _Nonnull correction
+) {
+    const double maximumSourcePower = pow(
+        10.0,
+        settings.maximumPerSourcePowerGainDB / 10.0
+    );
+    double largestSourcePower = 0.0;
+    for (uint32_t source = 0u; source < sourceCount; ++source) {
+        double sourcePower = 0.0;
+        for (uint32_t target = 0u; target < sourceCount; ++target) {
+            sourcePower += N60MIMOComplexPower(
+                correction->correction[
+                    N60MIMOCorrectionOffset(frequency, source, target)
+                ]
+            );
+        }
+        if (sourcePower > largestSourcePower) largestSourcePower = sourcePower;
+    }
+
+    if (largestSourcePower > maximumSourcePower) {
+        const double scale = sqrt(maximumSourcePower / largestSourcePower);
+        for (uint32_t target = 0u; target < sourceCount; ++target) {
+            correction->targetSafetyScale[frequency][target] *= (float)scale;
+            for (uint32_t source = 0u; source < sourceCount; ++source) {
+                const size_t offset = N60MIMOCorrectionOffset(
+                    frequency,
+                    source,
+                    target
+                );
+                correction->correction[offset] = N60MIMOComplexScale(
+                    correction->correction[offset],
+                    scale
+                );
+            }
+        }
+        largestSourcePower = maximumSourcePower;
+    }
+    return largestSourcePower;
+}
+
 static inline N60MIMOComplex N60MIMORoomTreatmentPerturb(
     N60MIMOComplex value,
     uint32_t measurement,
@@ -627,6 +680,19 @@ static inline bool N60MIMORoomTreatmentDesignSpatialEqualization(
             &maximumColumnPower,
             &minimumSafetyScale
         );
+        const double maximumPerSourcePower =
+            N60MIMORoomTreatmentApplyPerSourcePowerBound(
+                frequency,
+                transfer->sourceCount,
+                settings,
+                &designOut->correction
+            );
+        minimumSafetyScale = 1.0;
+        for (uint32_t target = 0u; target < transfer->sourceCount; ++target) {
+            const double safety =
+                designOut->correction.targetSafetyScale[frequency][target];
+            if (safety < minimumSafetyScale) minimumSafetyScale = safety;
+        }
 
         const double untreated = N60MIMORoomTreatmentResidualPower(
             transfer,
@@ -658,6 +724,7 @@ static inline bool N60MIMORoomTreatmentDesignSpatialEqualization(
                 .worstCaseRelativeDegradationDB = 0.0,
                 .maximumCoefficientMagnitude = maximumCoefficientMagnitude,
                 .maximumColumnPower = maximumColumnPower,
+                .maximumPerSourcePower = maximumPerSourcePower,
                 .minimumAppliedSafetyScale = minimumSafetyScale,
             };
             N60MIMORoomTreatmentSetIdentityAtFrequency(
@@ -695,6 +762,7 @@ static inline bool N60MIMORoomTreatmentDesignSpatialEqualization(
             .worstCaseRelativeDegradationDB = worstCaseDegradation,
             .maximumCoefficientMagnitude = maximumCoefficientMagnitude,
             .maximumColumnPower = maximumColumnPower,
+            .maximumPerSourcePower = maximumPerSourcePower,
             .minimumAppliedSafetyScale = minimumSafetyScale,
         };
 
