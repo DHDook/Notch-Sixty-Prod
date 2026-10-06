@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "N60MIMOCorrection.h"
@@ -459,18 +460,23 @@ static inline bool N60MIMORoomTreatmentDesignSpatialEqualization(
         return false;
     }
 
-    N60MIMOComplex desired[
-        N60_MIMO_MAX_FREQUENCY_BINS
+    const size_t desiredCount =
+        (size_t)N60_MIMO_MAX_FREQUENCY_BINS
         * N60_MIMO_MAX_MEASUREMENTS
-        * N60_MIMO_MAX_SOURCES
-    ] = {0};
-    double targetMagnitudeMean[N60_MIMO_MAX_FREQUENCY_BINS] = {0};
+        * N60_MIMO_MAX_SOURCES;
+    N60MIMOComplex *desired = (N60MIMOComplex *)calloc(
+        desiredCount,
+        sizeof(N60MIMOComplex)
+    );
+    if (desired == NULL) return false;
 
+    double targetMagnitudeMean[N60_MIMO_MAX_FREQUENCY_BINS] = {0};
     if (!N60MIMORoomTreatmentBuildSpatialTarget(
             transfer,
             settings,
             desired,
             targetMagnitudeMean)) {
+        free(desired);
         return false;
     }
 
@@ -478,16 +484,18 @@ static inline bool N60MIMORoomTreatmentDesignSpatialEqualization(
     core.regularization = settings.regularization;
     core.maximumCoefficientGainDB = settings.maximumCoefficientGainDB;
 
-    N60MIMORoomTreatmentDesign result = {0};
-    result.sourceCount = transfer->sourceCount;
-    result.measurementCount = transfer->measurementCount;
-    result.frequencyCount = transfer->frequencyCount;
+    memset(designOut, 0, sizeof(*designOut));
+    designOut->sourceCount = transfer->sourceCount;
+    designOut->measurementCount = transfer->measurementCount;
+    designOut->frequencyCount = transfer->frequencyCount;
 
     if (!N60MIMODesignRegularizedCorrection(
             transfer,
             desired,
             core,
-            &result.correction)) {
+            &designOut->correction)) {
+        free(desired);
+        memset(designOut, 0, sizeof(*designOut));
         return false;
     }
 
@@ -501,7 +509,7 @@ static inline bool N60MIMORoomTreatmentDesignSpatialEqualization(
             frequency,
             transfer->sourceCount,
             settings,
-            &result.correction,
+            &designOut->correction,
             &maximumCoefficientMagnitude,
             &maximumColumnPower,
             &minimumSafetyScale
@@ -516,7 +524,7 @@ static inline bool N60MIMORoomTreatmentDesignSpatialEqualization(
         const double candidate = N60MIMORoomTreatmentResidualPower(
             transfer,
             desired,
-            &result.correction,
+            &designOut->correction,
             frequency
         );
         if (!isfinite(untreated)
@@ -534,7 +542,7 @@ static inline bool N60MIMORoomTreatmentDesignSpatialEqualization(
             N60MIMORoomTreatmentWorstCaseRelativeDegradationDB(
                 transfer,
                 desired,
-                &result.correction,
+                &designOut->correction,
                 frequency,
                 settings
             );
@@ -543,7 +551,7 @@ static inline bool N60MIMORoomTreatmentDesignSpatialEqualization(
             && worstCaseDegradation <= settings.maximumRobustnessDegradationDB
             && minimumSafetyScale >= settings.minimumColumnSafetyScale;
 
-        result.reports[frequency] = (N60MIMORoomTreatmentFrequencyReport){
+        designOut->reports[frequency] = (N60MIMORoomTreatmentFrequencyReport){
             .accepted = accepted,
             .targetMagnitudeMean = targetMagnitudeMean[frequency],
             .untreatedResidualPower = untreated,
@@ -556,18 +564,18 @@ static inline bool N60MIMORoomTreatmentDesignSpatialEqualization(
         };
 
         if (accepted) {
-            result.acceptedFrequencyCount += 1u;
+            designOut->acceptedFrequencyCount += 1u;
         } else {
             N60MIMORoomTreatmentSetIdentityAtFrequency(
                 frequency,
                 transfer->sourceCount,
-                &result.correction
+                &designOut->correction
             );
-            result.correction.weightedResidualPower[frequency] = untreated;
+            designOut->correction.weightedResidualPower[frequency] = untreated;
         }
     }
 
-    *designOut = result;
+    free(desired);
     return true;
 }
 
