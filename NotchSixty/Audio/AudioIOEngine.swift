@@ -1042,6 +1042,7 @@ final class AudioIOEngine: ObservableObject {
     private var nextRoomCorrectionProgramSlot: UInt32 = 0
     private var activeSpeakerIRProgram: PreparedSpeakerIRProgram?
     private var nextSpeakerIRProgramSlot: UInt32 = 0
+    private var stagedRoomTreatment: LiveMIMORoomTreatmentPreparation?
 
     private(set) var sampleRateChangesHandled: UInt64 = 0
     private(set) var recoveryAttempts: UInt64 = 0
@@ -1120,6 +1121,56 @@ final class AudioIOEngine: ObservableObject {
             render.subPhaseAlignmentEnabled = false
         }
         return render
+    }
+
+    var roomTreatmentStagedForNextStart: Bool {
+        stagedRoomTreatment != nil
+    }
+
+    func stageRoomTreatmentForNextStart(
+        firProgram: MIMORoomTreatmentFIRProgram,
+        permit: MIMORoomTreatmentActivationPermit,
+        transitionConfiguration: MIMORoomTreatmentTransitionConfiguration = .conservative
+    ) throws {
+        guard lifecycle.state == .idle else {
+            throw LiveNChannelTransportError.configurationChangeRequiresRestart
+        }
+        let preparation = LiveMIMORoomTreatmentPreparation(
+            firProgram: firProgram,
+            permit: permit,
+            transitionConfiguration: transitionConfiguration
+        )
+        try preparation.validate(sampleRate: firProgram.sampleRate)
+        stagedRoomTreatment = preparation
+    }
+
+    func clearStagedRoomTreatment() throws {
+        guard lifecycle.state == .idle else {
+            throw LiveNChannelTransportError.configurationChangeRequiresRestart
+        }
+        stagedRoomTreatment = nil
+    }
+
+    func requestRoomTreatmentArm() -> Bool {
+        nChannelTransportSession?.requestRoomTreatmentArm() ?? false
+    }
+
+    func requestRoomTreatmentBypass() {
+        nChannelTransportSession?.requestRoomTreatmentBypass()
+    }
+
+    func latchRoomTreatmentFault(
+        _ fault: N60MIMOTreatmentFault
+    ) -> Bool {
+        nChannelTransportSession?.latchRoomTreatmentFault(fault) ?? false
+    }
+
+    func requestRoomTreatmentFaultClear() {
+        nChannelTransportSession?.requestRoomTreatmentFaultClear()
+    }
+
+    func revokeRoomTreatmentAuthorization() {
+        nChannelTransportSession?.revokeRoomTreatmentAuthorization()
     }
 
     var selectedOutputDevice: AudioOutputDevice? {
@@ -1803,12 +1854,39 @@ final class AudioIOEngine: ObservableObject {
                     ?? session.routePlan.programLayout.displayName,
                 programLayoutName: session.routePlan.programLayout.displayName,
                 sampleRate: session.outputFormat.sampleRate,
-                latencyFrames: raw.algorithmicLatencyFrames + raw.adaptiveTransportLatencyFrames,
+                latencyFrames: raw.algorithmicLatencyFrames
+                    + raw.adaptiveTransportLatencyFrames
+                    + raw.roomTreatmentLatencyFrames,
                 meteringEnabled: raw.meter.enabled,
                 programChannels: programChannels,
                 physicalOutputs: physicalOutputs,
                 inputTruePeakLinear: nil,
                 outputTruePeakLinear: nil,
+                roomTreatment: raw.roomTreatmentConfigured
+                    ? ProductionRoomTreatmentDiagnostics(
+                        authorized: raw.roomTreatment.transition.authorized,
+                        armRequested: raw.roomTreatment.transition.armRequested,
+                        active: raw.roomTreatment.transition.state
+                            == N60MIMOTreatmentStateActive,
+                        transitioning:
+                            raw.roomTreatment.transition.state
+                                == N60MIMOTreatmentStateArming
+                            || raw.roomTreatment.transition.state
+                                == N60MIMOTreatmentStateDisarming
+                            || raw.roomTreatment.transition.state
+                                == N60MIMOTreatmentStateFaultFading,
+                        faulted: raw.roomTreatment.transition.fault
+                            != N60MIMOTreatmentFaultNone,
+                        treatmentMix: raw.roomTreatment.transition.treatmentMix,
+                        treatmentSourceCount: raw.roomTreatment.treatmentChannelCount,
+                        latencyFrames: raw.roomTreatment.totalLatencyFrames,
+                        processedFrames: raw.roomTreatment.processedFrames,
+                        protectionClampSamples:
+                            raw.roomTreatment.protectionClampSamples,
+                        integrationFailures:
+                            raw.roomTreatment.integrationFailures
+                    )
+                    : nil,
                 renderFailures: raw.renderFailures,
                 outputWriteFailures: raw.outputWriteFailures
             )
@@ -1839,6 +1917,7 @@ final class AudioIOEngine: ObservableObject {
                 physicalOutputs: outputs,
                 inputTruePeakLinear: raw.protection.inputTruePeakLinear,
                 outputTruePeakLinear: raw.protection.outputTruePeakLinear,
+                roomTreatment: nil,
                 renderFailures: raw.renderFailures,
                 outputWriteFailures: raw.outputWriteFailures
             )
@@ -2789,7 +2868,8 @@ final class AudioIOEngine: ObservableObject {
             selectedOutput: output,
             routePlan: routePlan,
             renderGraph: graph,
-            outputGain: currentMasterSoftwareGain
+            outputGain: currentMasterSoftwareGain,
+            roomTreatment: stagedRoomTreatment
         )
         activeEQFIRProgram = nil
         activeRoomCorrectionProgram = nil
