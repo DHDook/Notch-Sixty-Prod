@@ -1,0 +1,79 @@
+name: PR77 Live Room Treatment Integration
+
+on:
+  push:
+    branches:
+      - feature/pr77-live-room-treatment-integration
+  pull_request:
+    branches:
+      - feature/pr76-treatment-arming-runtime
+  workflow_dispatch:
+
+jobs:
+  validate-portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate inherited PR76 arming substrate
+        run: python3 ci/validate_pr76_treatment_transition.py
+      - name: Run inherited PR76 transition simulation
+        run: |
+          clang -std=c11 -O2 -Wall -Wextra -Werror \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr76_treatment_transition.c \
+            -lm -o /tmp/pr76-treatment-transition
+          /tmp/pr76-treatment-transition
+      - name: Validate PR77 live integration structure
+        run: python3 ci/validate_pr77_live_room_treatment.py
+      - name: Run PR77 physical-output integration simulation
+        run: |
+          clang -std=c11 -O2 -Wall -Wextra -Werror \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr77_live_room_treatment.c \
+            -lm -o /tmp/pr77-live-room-treatment
+          /tmp/pr77-live-room-treatment
+
+  validate-macos-integration:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate PR77 live integration structure
+        run: python3 ci/validate_pr77_live_room_treatment.py
+      - name: Run PR77 physical-output simulation on Apple clang
+        run: |
+          clang -std=c11 -O2 -Wall -Wextra -Werror \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr77_live_room_treatment.c \
+            -lm -o /tmp/pr77-live-room-treatment
+          /tmp/pr77-live-room-treatment
+      - name: Build arm64 app with hardware-gated live room treatment
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            build
+      - name: Run PR77 route/permit integration tests
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            -only-testing:NotchSixtyTests/LiveMIMORoomTreatmentIntegrationTests \
+            test
+      - name: Run retained XCTest suite
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            test
