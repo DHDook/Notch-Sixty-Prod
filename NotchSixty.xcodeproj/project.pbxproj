@@ -90,6 +90,8 @@
 		F79000000000000000000003 /* AudioUnitHostFoundationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F79000000000000000000013 /* AudioUnitHostFoundationTests.swift */; };
 		F80000000000000000000001 /* AudioUnitOfflinePreparation.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000011 /* AudioUnitOfflinePreparation.swift */; };
 		F80000000000000000000002 /* AudioUnitOfflinePreparationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000012 /* AudioUnitOfflinePreparationTests.swift */; };
+		F81000000000000000000001 /* N60AudioUnitLiveRackBridge.c in Sources */ = {isa = PBXBuildFile; fileRef = F81000000000000000000011 /* N60AudioUnitLiveRackBridge.c */; };
+		F81000000000000000000002 /* AudioUnitLiveRackRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = F81000000000000000000012 /* AudioUnitLiveRackRuntime.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -198,6 +200,8 @@
 		F79000000000000000000013 /* AudioUnitHostFoundationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioUnitHostFoundationTests.swift; sourceTree = "<group>"; };
 		F80000000000000000000011 /* AudioUnitOfflinePreparation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioUnitOfflinePreparation.swift; sourceTree = "<group>"; };
 		F80000000000000000000012 /* AudioUnitOfflinePreparationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioUnitOfflinePreparationTests.swift; sourceTree = "<group>"; };
+		F81000000000000000000011 /* N60AudioUnitLiveRackBridge.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = N60AudioUnitLiveRackBridge.c; sourceTree = "<group>"; };
+		F81000000000000000000012 /* AudioUnitLiveRackRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioUnitLiveRackRuntime.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -290,6 +294,7 @@
 				F79000000000000000000011 /* AudioUnitHostFoundation.swift */,
 				F79000000000000000000012 /* AudioUnitHostController.swift */,
 				F80000000000000000000011 /* AudioUnitOfflinePreparation.swift */,
+				F81000000000000000000012 /* AudioUnitLiveRackRuntime.swift */,
 			);
 			path = Audio;
 			sourceTree = "<group>";
@@ -302,6 +307,7 @@
 		A30000000000000000000050 /* Realtime */ = {
 			isa = PBXGroup;
 			children = (
+				F81000000000000000000011 /* N60AudioUnitLiveRackBridge.c */,
 				A30000000000000000000020 /* N60RealtimeAudioBridge.c */,
 				A30000000000000000000021 /* N60RenderKernel.c */,
 				A30000000000000000000022 /* N60RenderKernel.h */,
@@ -449,6 +455,8 @@
 				F79000000000000000000001 /* AudioUnitHostFoundation.swift in Sources */,
 				F79000000000000000000002 /* AudioUnitHostController.swift in Sources */,
 				F80000000000000000000001 /* AudioUnitOfflinePreparation.swift in Sources */,
+				F81000000000000000000002 /* AudioUnitLiveRackRuntime.swift in Sources */,
+				F81000000000000000000001 /* N60AudioUnitLiveRackBridge.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
