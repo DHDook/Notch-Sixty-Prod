@@ -90,7 +90,8 @@ private struct AmbientCompensationResponseCurveView: View {
             let fraction =
                 Double(index) / Double(horizontalGuides)
             let gain = maximumGainDB * (1 - fraction)
-            let y = plot.minY + plot.height * fraction
+            let y =
+                plot.minY + plot.height * CGFloat(fraction)
             var path = Path()
             path.move(to: CGPoint(x: plot.minX, y: y))
             path.addLine(to: CGPoint(x: plot.maxX, y: y))
@@ -131,7 +132,8 @@ private struct AmbientCompensationResponseCurveView: View {
                 max(point.gainDB / maximumGainDB, 0),
                 1
             )
-            let y = plot.maxY - normalized * plot.height
+            let y =
+                plot.maxY - CGFloat(normalized) * plot.height
             let position = CGPoint(x: x, y: y)
 
             if index == 0 {
@@ -181,7 +183,7 @@ private struct AmbientCompensationResponseCurveView: View {
         let fraction =
             log(clamped / minimumFrequencyHz)
             / log(maximumFrequencyHz / minimumFrequencyHz)
-        return plot.minX + plot.width * fraction
+        return plot.minX + plot.width * CGFloat(fraction)
     }
 }
 
