@@ -1048,7 +1048,10 @@ struct ProductionActiveAcousticsWorkspace: View {
                 )
                 metricCard(
                     title: "Target Reduction",
-                    value: "\(quietZone.configuration.targetReductionDB, specifier: "%.1f") dB",
+                    value: String(
+                        format: "%.1f dB",
+                        quietZone.configuration.targetReductionDB
+                    ),
                     detail: "The solver deliberately stops at this bounded target instead of chasing theoretical silence."
                 )
             }
