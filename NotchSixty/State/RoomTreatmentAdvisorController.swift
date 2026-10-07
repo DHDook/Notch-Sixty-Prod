@@ -9,7 +9,10 @@ import Foundation
 @MainActor
 final class RoomTreatmentAdvisorController: ObservableObject {
     let store: RoomCorrectionProjectStore
+    let geometryStore: RoomGeometryStore
     private let analyzer = RoomTreatmentAdvisorAnalyzer()
+    private let geometryAnalyzer =
+        RoomGeometryPlacementAnalyzer()
 
     @Published private(set) var availableProjects:
         [RoomCorrectionProject] = []
@@ -18,10 +21,23 @@ final class RoomTreatmentAdvisorController: ObservableObject {
         RoomCorrectionProject?
     @Published private(set) var report:
         RoomTreatmentAdvisorReport?
+    @Published var geometryDraft: RoomGeometryModel?
+    @Published private(set) var savedGeometry:
+        RoomGeometryModel?
+    @Published private(set) var geometryAnalysis:
+        RoomGeometryAnalysis?
+    @Published private(set) var geometryValidationMessage:
+        String?
     @Published private(set) var lastErrorDescription: String?
 
     init(store: RoomCorrectionProjectStore) {
         self.store = store
+        self.geometryStore =
+            RoomGeometryStore(projectStore: store)
+    }
+
+    var geometryHasUnsavedChanges: Bool {
+        geometryDraft != savedGeometry
     }
 
     func prepareForUse() {
@@ -86,9 +102,146 @@ final class RoomTreatmentAdvisorController: ObservableObject {
               ) else {
             selectedProject = nil
             report = nil
+            geometryDraft = nil
+            savedGeometry = nil
+            geometryAnalysis = nil
+            geometryValidationMessage = nil
             return
         }
         selectedProject = project
         report = analyzer.analyze(project: project)
+        loadGeometry(for: project.id)
+    }
+
+    func startGeometryTemplate() {
+        guard let projectID = selectedProjectID else {
+            geometryValidationMessage =
+                RoomGeometryError.noSelectedProject
+                    .localizedDescription
+            return
+        }
+        let model =
+            RoomGeometryModel.template(
+                projectID: projectID
+            )
+        geometryDraft = model
+        geometryValidationMessage = nil
+        refreshGeometryPreview()
+    }
+
+    func setGeometryValue(
+        _ keyPath:
+            WritableKeyPath<RoomGeometryModel, Double>,
+        _ value: Double
+    ) {
+        guard var model = geometryDraft else {
+            return
+        }
+        model[keyPath: keyPath] = value
+        model.modifiedAt = Date()
+        geometryDraft = model
+        refreshGeometryPreview()
+    }
+
+    func replaceGeometryDraft(
+        _ model: RoomGeometryModel
+    ) {
+        guard model.projectID == selectedProjectID else {
+            geometryValidationMessage =
+                RoomGeometryError.projectMismatch
+                    .localizedDescription
+            return
+        }
+        geometryDraft = model
+        refreshGeometryPreview()
+    }
+
+    func saveGeometry() {
+        guard var model = geometryDraft else {
+            geometryValidationMessage =
+                RoomGeometryError.noGeometry
+                    .localizedDescription
+            return
+        }
+        guard model.projectID == selectedProjectID else {
+            geometryValidationMessage =
+                RoomGeometryError.projectMismatch
+                    .localizedDescription
+            return
+        }
+        model.modifiedAt = Date()
+        do {
+            let valid = try model.validated()
+            try geometryStore.save(valid)
+            geometryDraft = valid
+            savedGeometry = valid
+            geometryValidationMessage = nil
+            refreshGeometryPreview()
+        } catch {
+            geometryValidationMessage =
+                error.localizedDescription
+        }
+    }
+
+    func revertGeometry() {
+        geometryDraft = savedGeometry
+        geometryValidationMessage = nil
+        refreshGeometryPreview()
+    }
+
+    func clearGeometry() {
+        guard let projectID = selectedProjectID else {
+            return
+        }
+        do {
+            try geometryStore.delete(
+                projectID: projectID
+            )
+            geometryDraft = nil
+            savedGeometry = nil
+            geometryAnalysis = nil
+            geometryValidationMessage = nil
+        } catch {
+            geometryValidationMessage =
+                error.localizedDescription
+        }
+    }
+
+    private func loadGeometry(for projectID: UUID) {
+        do {
+            let loaded =
+                try geometryStore.load(
+                    projectID: projectID
+                )
+            geometryDraft = loaded
+            savedGeometry = loaded
+            geometryValidationMessage = nil
+            refreshGeometryPreview()
+        } catch {
+            geometryDraft = nil
+            savedGeometry = nil
+            geometryAnalysis = nil
+            geometryValidationMessage =
+                error.localizedDescription
+        }
+    }
+
+    private func refreshGeometryPreview() {
+        guard let model = geometryDraft else {
+            geometryAnalysis = nil
+            return
+        }
+        do {
+            geometryAnalysis =
+                try geometryAnalyzer.analyze(
+                    model: model,
+                    advisorReport: report
+                )
+            geometryValidationMessage = nil
+        } catch {
+            geometryAnalysis = nil
+            geometryValidationMessage =
+                error.localizedDescription
+        }
     }
 }
