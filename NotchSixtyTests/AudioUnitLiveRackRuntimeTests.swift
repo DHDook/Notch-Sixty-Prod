@@ -342,6 +342,108 @@ final class AudioUnitLiveRackRuntimeTests: XCTestCase {
         )
     }
 
+    func testInitialLiveBuildFailureQuarantinesUnavailableComponent() async throws {
+        let identity = AudioUnitComponentIdentity(
+            componentType: 0x61756678,
+            componentSubType: 0x78383461,
+            componentManufacturer: 0x78383462
+        )
+        let descriptor = AudioUnitComponentDescriptor(
+            identity: identity,
+            kind: .effect,
+            name: "PR84A Missing Live Unit",
+            manufacturerName: "Notch Labs",
+            typeName: "Effect",
+            version: 0x00010000,
+            versionString: "1.0.0",
+            hasCustomView: false,
+            hasMIDIInput: false,
+            hasMIDIOutput: false,
+            passesAUVal: true,
+            sandboxSafe: true,
+            supportedSymmetricChannelCounts: [2]
+        )
+        let format = AudioUnitRackProcessingFormat(
+            sampleRate: 48_000,
+            channelCount: 2,
+            maximumFramesPerSlice: 64
+        )
+        let host = AudioUnitHostController(
+            catalog: PR84LiveMockCatalog(components: [descriptor])
+        )
+        host.scan()
+        try host.installComponent(identity, inSlot: 0)
+        await host.prepareSlotOffline(
+            0,
+            format: format,
+            using: PR84LiveFixedBackend(
+                report: pr84Report(
+                    identity: identity,
+                    format: format
+                )
+            )
+        )
+        XCTAssertEqual(host.lifecycleByComponent[identity], .prepared)
+        try host.setBypassed(false, slot: 0)
+
+        do {
+            _ = try await host.makeLiveRackRuntime(format: format)
+            XCTFail("Expected unavailable live Audio Unit failure.")
+        } catch let error as AudioUnitLiveRackBuildError {
+            guard case .liveInstantiationFailed(let slot, _) = error else {
+                return XCTFail("Unexpected live build error: \(error)")
+            }
+            XCTAssertEqual(slot, 0)
+        }
+
+        XCTAssertEqual(
+            host.quarantine.entry(for: identity)?.reason,
+            .instantiationFailed
+        )
+        XCTAssertTrue(host.rackConfiguration.slots[0].bypassed)
+        XCTAssertNil(host.probeResult(forSlot: 0))
+    }
+
+    private func pr84Report(
+        identity: AudioUnitComponentIdentity,
+        format: AudioUnitRackProcessingFormat
+    ) -> AudioUnitOfflinePreparationReport {
+        let metrics = AudioUnitOfflineRenderMetrics(
+            renderedFrames: 512,
+            renderPassCount: 2,
+            channelCount: format.channelCount,
+            maximumAbsoluteSample: 0.1,
+            rmsByChannel: Array(
+                repeating: 0.05,
+                count: format.channelCount
+            ),
+            allSamplesFinite: true
+        )
+        return AudioUnitOfflinePreparationReport(
+            component: identity,
+            format: format,
+            probe: AudioUnitProbeResult(
+                component: identity,
+                sampleRate: format.sampleRate,
+                inputChannelCount: format.channelCount,
+                outputChannelCount: format.channelCount,
+                maximumFramesToRender: format.maximumFramesPerSlice,
+                latencySeconds: 0,
+                tailTimeSeconds: 0,
+                supportsFullState: false,
+                supportsHostBypass: true
+            ),
+            capturedFullState: nil,
+            stateRestored: false,
+            stateRecaptured: false,
+            initialRender: metrics,
+            postResetRender: metrics,
+            latencyStableAcrossReset: true,
+            tailStableAcrossReset: true,
+            renderResourcesReleased: true
+        )
+    }
+
     func testStereoPlaybackSystemSplitMatchesLegacyWrapperWithoutRack() {
         guard let wrapperKernel = N60RenderKernelCreate(),
               let splitKernel = N60RenderKernelCreate() else {
@@ -467,3 +569,27 @@ private final class PR84InjectedHealthStage:
     }
 }
 
+
+
+private struct PR84LiveMockCatalog: AudioUnitComponentCataloging {
+    let components: [AudioUnitComponentDescriptor]
+
+    func discoverEffects() -> [AudioUnitComponentDescriptor] {
+        components
+    }
+}
+
+private struct PR84LiveFixedBackend: AudioUnitOfflinePreparing {
+    let report: AudioUnitOfflinePreparationReport
+
+    func prepare(
+        component: AudioUnitComponentDescriptor,
+        format: AudioUnitRackProcessingFormat,
+        restoringState: Data?
+    ) async throws -> AudioUnitOfflinePreparationReport {
+        _ = component
+        _ = format
+        _ = restoringState
+        return report
+    }
+}
