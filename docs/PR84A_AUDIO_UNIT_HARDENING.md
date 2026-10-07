@@ -9,10 +9,11 @@ PR84A is the deterministic, CI-testable half of Audio Unit qualification. It har
 3. A failed mutation candidate never alters the committed rack, preparation evidence, quarantine registry, or currently playing generation.
 4. Live render faults fail closed to the latency-matched dry path and are reported to the control plane.
 5. Latency or tail drift after live activation is a control-plane fault. Detection atomically trips a per-stage C11 fail-closed gate, so the very next render callback uses the already-prepared latency-matched dry path without querying the Audio Unit on realtime.
-6. The per-stage gate is created only when its atomic flag is lock-free on the current platform. Render faults and control-plane timing drift share the same idempotent latch.
-7. A runtime reports a given post-activation drift once per slot/generation so quarantine accounting cannot runaway.
-8. Clearing quarantine never restores stale preparation evidence; the component must pass fresh preparation before processing again.
-9. Hardening logic remains off the realtime callback. No AU property queries, allocation, locks, logging, dispatch, or serialization are added to render; realtime only loads/stores the preallocated lock-free fault gate.
+6. The per-stage gate is created only when its atomic flag is lock-free on the current platform. Render faults, sustained severe CPU overruns, and control-plane timing drift share the same idempotent latch.
+7. CPU abuse uses a conservative realtime watchdog: three consecutive renders must exceed the larger of 10 ms or four times the current buffer duration before the stage fails closed. Any healthy render resets the streak.
+8. A runtime reports a given post-activation drift once per slot/generation so quarantine accounting cannot runaway.
+9. Clearing quarantine never restores stale preparation evidence; the component must pass fresh preparation before processing again.
+10. Hardening logic remains off the realtime callback except for bounded realtime-safe checks: lock-free fault-gate access and monotonic render-duration sampling. No AU property queries, allocation, locks, logging, dispatch, or serialization are added to render; realtime only loads/stores the preallocated lock-free fault gate.
 
 ## Deterministic abuse matrix
 
@@ -25,6 +26,7 @@ PR84A covers:
 - format/resource-allocation failures
 - render status failures
 - non-finite render output
+- sustained pathological render CPU overruns with streak reset after healthy work
 - unstable latency across reset
 - unstable tail across reset
 - leaked render resources
