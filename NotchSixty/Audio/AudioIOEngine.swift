@@ -1043,6 +1043,7 @@ final class AudioIOEngine: ObservableObject {
     private var activeSpeakerIRProgram: PreparedSpeakerIRProgram?
     private var nextSpeakerIRProgramSlot: UInt32 = 0
     private var stagedRoomTreatment: LiveMIMORoomTreatmentPreparation?
+    private var stagedAudioUnitRack: AudioUnitLiveRackRuntime?
 
     private(set) var sampleRateChangesHandled: UInt64 = 0
     private(set) var recoveryAttempts: UInt64 = 0
@@ -1183,6 +1184,56 @@ final class AudioIOEngine: ObservableObject {
     var selectedOutputDevice: AudioOutputDevice? {
         guard let selectedOutputUID = routeConfiguration.selectedOutputUID else { return nil }
         return outputDevices.first { $0.uid == selectedOutputUID }
+    }
+
+    func audioUnitRackProcessingFormatForNextStart() throws
+        -> AudioUnitRackProcessingFormat {
+        guard lifecycle.state == .idle else {
+            throw LiveNChannelTransportError.configurationChangeRequiresRestart
+        }
+        try refreshOutputDevices()
+        guard let output = selectedOutputDevice else {
+            throw AudioRouteSelectionError.outputDeviceUnavailable(
+                uid: routeConfiguration.selectedOutputUID
+                    ?? "No output selected"
+            )
+        }
+
+        let channelCount: Int
+        if let headphone = headphoneDeviceProfileConfiguration,
+           headphone.enabled,
+           headphone.spatialMode == .virtualSpeakers {
+            channelCount = headphone.programLayout.roles.count
+        } else if let profile = outputDeviceProfileConfiguration,
+                  profile.enabled {
+            channelCount = profile.programLayout.roles.count
+        } else {
+            channelCount = 2
+        }
+
+        let format = AudioUnitRackProcessingFormat(
+            sampleRate: output.nominalSampleRate,
+            channelCount: channelCount,
+            maximumFramesPerSlice: 4_096
+        )
+        try format.validate()
+        return format
+    }
+
+    func stageAudioUnitRackForNextStart(
+        _ runtime: AudioUnitLiveRackRuntime?
+    ) throws {
+        guard lifecycle.state == .idle else {
+            throw LiveNChannelTransportError.configurationChangeRequiresRestart
+        }
+        stagedAudioUnitRack?.stopFaultMonitoring()
+        stagedAudioUnitRack = runtime
+    }
+
+    func clearStagedAudioUnitRack() {
+        guard lifecycle.state == .idle else { return }
+        stagedAudioUnitRack?.stopFaultMonitoring()
+        stagedAudioUnitRack = nil
     }
 
     func prepareForUse() {
@@ -1768,6 +1819,7 @@ final class AudioIOEngine: ObservableObject {
         if lifecycle.state != .stopping { try? setLifecycle(.stopping) }
         tearDownTransport(fadeOut: true)
         try? setLifecycle(.idle)
+        clearStagedAudioUnitRack()
     }
 
     func shutdownForTermination() {
@@ -1779,6 +1831,9 @@ final class AudioIOEngine: ObservableObject {
             if lifecycle.state != .stopping { try? setLifecycle(.stopping) }
             tearDownTransport(fadeOut: true)
             try? setLifecycle(.idle)
+        }
+        if lifecycle.state == .idle {
+            clearStagedAudioUnitRack()
         }
         masterVolumeController.stopMonitoring()
         globalVolumeKeyMonitor.stop()
@@ -2882,7 +2937,8 @@ final class AudioIOEngine: ObservableObject {
             routePlan: routePlan,
             renderGraph: graph,
             outputGain: currentMasterSoftwareGain,
-            roomTreatment: stagedRoomTreatment
+            roomTreatment: stagedRoomTreatment,
+            audioUnitRack: stagedAudioUnitRack
         )
         activeEQFIRProgram = nil
         activeRoomCorrectionProgram = nil
@@ -2974,7 +3030,8 @@ final class AudioIOEngine: ObservableObject {
             preparedProfile: prepared,
             headphoneSnapshot: headphoneSnapshot,
             programGain: programGain,
-            outputGain: currentMasterSoftwareGain
+            outputGain: currentMasterSoftwareGain,
+            audioUnitRack: stagedAudioUnitRack
         )
         activeEQFIRProgram = nil
         activeRoomCorrectionProgram = nil
@@ -3088,7 +3145,8 @@ final class AudioIOEngine: ObservableObject {
             aggregateDeviceOutputPlan: aggregateDeviceOutputPlan,
             speakerCrossoverMode: speakerCrossoverMode,
             speakerBusSplitterSnapshot: speakerBusSplitterSnapshot,
-            speakerDriverProcessingSnapshot: speakerDriverProcessingSnapshot
+            speakerDriverProcessingSnapshot: speakerDriverProcessingSnapshot,
+            audioUnitRack: stagedAudioUnitRack
         )
         try session.configureHeadphoneDSP(headphoneSnapshot)
         activeEQFIRProgram = nil
@@ -3145,6 +3203,22 @@ final class AudioIOEngine: ObservableObject {
                 activeSpeakerIRProgram = preparedProgram
                 try attachSpeakerIRProgram(preparedProgram, to: &graph)
             }
+        }
+
+        if let stagedAudioUnitRack {
+            let combinedLatency =
+                UInt64(graph.latencyFrames)
+                + UInt64(max(stagedAudioUnitRack.totalLatencyFrames, 0))
+            guard combinedLatency <= UInt64(UInt32.max) else {
+                session.stop(fadeOut: false)
+                throw CoreAudioTransportError.audioUnitRackConfigurationFailed
+            }
+            if graph.auditionMode != N60AuditionModeProcessed,
+               combinedLatency >= UInt64(N60_MAX_AUDITION_DELAY_FRAMES) {
+                session.stop(fadeOut: false)
+                throw CoreAudioTransportError.audioUnitRackConfigurationFailed
+            }
+            graph.latencyFrames = UInt32(combinedLatency)
         }
 
         try session.publishDSPGraph(graph)
