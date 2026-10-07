@@ -53,8 +53,28 @@ struct AudioUnitLiveRackFault: Equatable, Sendable {
     let component: AudioUnitComponentIdentity?
     let reason: N60AudioUnitLiveRackFaultReason
     let renderStatus: OSStatus
+    let detail: String?
+
+    init(
+        faultCount: UInt64,
+        slotIndex: Int,
+        component: AudioUnitComponentIdentity?,
+        reason: N60AudioUnitLiveRackFaultReason,
+        renderStatus: OSStatus,
+        detail: String? = nil
+    ) {
+        self.faultCount = faultCount
+        self.slotIndex = slotIndex
+        self.component = component
+        self.reason = reason
+        self.renderStatus = renderStatus
+        self.detail = detail
+    }
 
     var description: String {
+        if let detail {
+            return detail
+        }
         switch reason {
         case N60AudioUnitLiveRackFaultRenderStatus:
             return "Live Audio Unit render failed with OSStatus \(renderStatus)."
@@ -64,6 +84,64 @@ struct AudioUnitLiveRackFault: Equatable, Sendable {
             return "Live Audio Unit rack hit an impossible prepared-runtime invariant."
         default:
             return "Live Audio Unit rack reported an unknown runtime fault."
+        }
+    }
+}
+
+enum AudioUnitLiveRackControlPlaneIssue: Equatable, Sendable {
+    case invalidLatency(
+        slot: Int,
+        component: AudioUnitComponentIdentity,
+        seconds: Double
+    )
+    case invalidTail(
+        slot: Int,
+        component: AudioUnitComponentIdentity,
+        seconds: Double
+    )
+    case latencyChanged(
+        slot: Int,
+        component: AudioUnitComponentIdentity,
+        expected: Int,
+        actual: Int
+    )
+    case tailChanged(
+        slot: Int,
+        component: AudioUnitComponentIdentity,
+        expected: Int,
+        actual: Int
+    )
+
+    var slotIndex: Int {
+        switch self {
+        case .invalidLatency(let slot, _, _),
+             .invalidTail(let slot, _, _),
+             .latencyChanged(let slot, _, _, _),
+             .tailChanged(let slot, _, _, _):
+            return slot
+        }
+    }
+
+    var component: AudioUnitComponentIdentity {
+        switch self {
+        case .invalidLatency(_, let component, _),
+             .invalidTail(_, let component, _),
+             .latencyChanged(_, let component, _, _),
+             .tailChanged(_, let component, _, _):
+            return component
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .invalidLatency(let slot, _, let seconds):
+            return "Live Audio Unit rack slot \(slot + 1) reported invalid latency \(seconds) seconds after activation."
+        case .invalidTail(let slot, _, let seconds):
+            return "Live Audio Unit rack slot \(slot + 1) reported invalid tail \(seconds) seconds after activation."
+        case .latencyChanged(let slot, _, let expected, let actual):
+            return "Live Audio Unit rack slot \(slot + 1) changed latency after activation from \(expected) to \(actual) frames."
+        case .tailChanged(let slot, _, let expected, let actual):
+            return "Live Audio Unit rack slot \(slot + 1) changed tail after activation from \(expected) to \(actual) frames."
         }
     }
 }
@@ -91,6 +169,9 @@ protocol AudioUnitLiveRackStageProcessing: AnyObject {
     var component: AudioUnitComponentIdentity? { get }
     var latencyFrames: Int { get }
 
+    func controlPlaneHealthIssue()
+        -> AudioUnitLiveRackControlPlaneIssue?
+
     func process(
         inputInterleaved: UnsafePointer<Float>,
         outputInterleaved: UnsafeMutablePointer<Float>,
@@ -98,6 +179,13 @@ protocol AudioUnitLiveRackStageProcessing: AnyObject {
         channelCount: Int,
         sampleTime: Double
     ) -> AudioUnitLiveRackStageResult
+}
+
+extension AudioUnitLiveRackStageProcessing {
+    func controlPlaneHealthIssue()
+        -> AudioUnitLiveRackControlPlaneIssue? {
+        nil
+    }
 }
 
 private final class AudioUnitLiveDelayLine {
