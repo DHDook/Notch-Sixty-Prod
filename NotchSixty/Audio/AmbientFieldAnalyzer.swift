@@ -45,6 +45,21 @@ struct AmbientTonalComponent: Identifiable, Equatable, Sendable {
     let frequencyHz: Double
     let levelDBFS: Double
     let prominenceDB: Double
+    /// Complex phase of the separated residual at this detected tone.
+    /// Nil only for callers constructing legacy/test values without phase.
+    let phaseRadians: Double?
+
+    init(
+        frequencyHz: Double,
+        levelDBFS: Double,
+        prominenceDB: Double,
+        phaseRadians: Double? = nil
+    ) {
+        self.frequencyHz = frequencyHz
+        self.levelDBFS = levelDBFS
+        self.prominenceDB = prominenceDB
+        self.phaseRadians = phaseRadians
+    }
 
     var id: Double { frequencyHz }
 }
@@ -67,6 +82,16 @@ struct AmbientAnalysisSnapshot: Equatable, Sendable {
     let character: AmbientNoiseCharacter
     let spectrum: [AmbientSpectrumBand]
     let tonalComponents: [AmbientTonalComponent]
+}
+
+struct AmbientAnalysisDetailedResult: Equatable, Sendable {
+    let snapshot: AmbientAnalysisSnapshot
+    /// Exact residual window used for the published ambient statistics after
+    /// any trusted modeled-playback subtraction.
+    let separatedResidualSamples: [Float]
+    /// Positive means microphone[index] aligned best with modeledPlayback[index-lag].
+    let playbackAlignmentLagFrames: Int?
+    let playbackAlignmentConfidence: Double?
 }
 
 struct AmbientAnalysisConfiguration: Equatable, Sendable {
@@ -175,6 +200,21 @@ struct AmbientFieldAnalyzer: Sendable {
         playbackSources: [AmbientPlaybackSourceReference],
         sampleRate: Double
     ) throws -> AmbientAnalysisSnapshot {
+        try analyzeDetailed(
+            microphone: microphone,
+            playbackSources: playbackSources,
+            sampleRate: sampleRate
+        ).snapshot
+    }
+
+    /// PR90 control-plane entry point. Existing PR89 callers continue to use
+    /// analyze(...); Active Quiet Zone may consume the separated residual and
+    /// timing evidence without rerunning or reverse-engineering analysis.
+    func analyzeDetailed(
+        microphone: [Float],
+        playbackSources: [AmbientPlaybackSourceReference],
+        sampleRate: Double
+    ) throws -> AmbientAnalysisDetailedResult {
         try validateConfiguration()
         guard sampleRate.isFinite, sampleRate > 0 else {
             throw AmbientAnalysisError.invalidSampleRate(sampleRate)
@@ -225,6 +265,8 @@ struct AmbientFieldAnalyzer: Sendable {
         var predictionGain: Double?
         var predictedLevel: Double?
         var residual = microphoneWindow
+        var playbackAlignmentLagFrames: Int?
+        var playbackAlignmentConfidence: Double?
 
         let audibleSources = sourceWindows.filter {
             Self.dbfs(amplitude: Self.rms($0.samples))
@@ -259,6 +301,8 @@ struct AmbientFieldAnalyzer: Sendable {
                     sampleRate: sampleRate
                 )
                 let alignedPrediction = alignment.alignedPlayback
+                playbackAlignmentLagFrames = alignment.lagFrames
+                playbackAlignmentConfidence = alignment.confidence
                 let estimate = estimatePlaybackScale(
                     microphone: microphoneWindow,
                     predictedPlayback: alignedPrediction
@@ -319,7 +363,7 @@ struct AmbientFieldAnalyzer: Sendable {
         )
         let spl = configuration.optionalDBSPLAt0DBFS.map { ambientLevel + $0 }
 
-        return AmbientAnalysisSnapshot(
+        let snapshot = AmbientAnalysisSnapshot(
             sampleRate: sampleRate,
             analyzedFrames: frameCount,
             separationMode: separationMode,
@@ -337,6 +381,14 @@ struct AmbientFieldAnalyzer: Sendable {
             character: character,
             spectrum: spectrum,
             tonalComponents: tones
+        )
+        return AmbientAnalysisDetailedResult(
+            snapshot: snapshot,
+            separatedResidualSamples: residual,
+            playbackAlignmentLagFrames:
+                playbackAlignmentLagFrames,
+            playbackAlignmentConfidence:
+                playbackAlignmentConfidence
         )
     }
 
@@ -774,9 +826,15 @@ struct AmbientFieldAnalyzer: Sendable {
             guard prominence >= configuration.minimumTonalProminenceDB else { continue }
 
             candidates.append(AmbientTonalComponent(
-                frequencyHz: Double(bin) * sampleRate / Double(spectralFrame.size),
+                frequencyHz:
+                    Double(bin) * sampleRate
+                    / Double(spectralFrame.size),
                 levelDBFS: Self.dbfs(power: power),
-                prominenceDB: prominence
+                prominenceDB: prominence,
+                phaseRadians: atan2(
+                    Double(spectralFrame.imaginary[bin]),
+                    Double(spectralFrame.real[bin])
+                )
             ))
         }
 
