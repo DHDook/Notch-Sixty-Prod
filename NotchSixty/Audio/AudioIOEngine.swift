@@ -1127,35 +1127,47 @@ final class AudioIOEngine: ObservableObject {
             target.ambientDeltaDB,
         ]
         guard values.allSatisfy(\.isFinite),
-              target.levelDB >= 0,
+              target.levelDB >= -6.0,
               target.levelDB <=
                 AmbientCompensationConfiguration
                     .hardMaximumLevelCompensationDB,
-              target.lowSupportDB >= 0,
+              target.lowSupportDB >= -2.0,
               target.lowSupportDB <=
                 AmbientCompensationPlanner.maximumLowSupportDB,
-              target.presenceSupportDB >= 0,
+              target.presenceSupportDB >= -3.0,
               target.presenceSupportDB <=
                 AmbientCompensationPlanner.maximumPresenceSupportDB,
-              target.detailSupportDB >= 0,
+              target.detailSupportDB >= -1.5,
               target.detailSupportDB <=
-                AmbientCompensationPlanner.maximumDetailSupportDB else {
+                AmbientCompensationPlanner.maximumDetailSupportDB,
+              target.conversationEvidence.isFinite,
+              target.estimatedClearanceDB.isFinite else {
             throw AmbientCompensationError.invalidConfiguration
         }
 
+        if target.mode == .conversationFocus {
+            guard target.levelDB <= 0.000_1,
+                  target.lowSupportDB >= -0.000_1,
+                  target.presenceSupportDB <= 0.000_1,
+                  target.detailSupportDB >= -0.000_1 else {
+                throw AmbientCompensationError.invalidConfiguration
+            }
+        }
+
         let available = ambientCompensationAvailableHeadroomDB
-        guard target.levelDB <= available + 0.000_1 else {
+        let positiveRecovery = max(target.levelDB, 0)
+        guard positiveRecovery <= available + 0.000_1 else {
             throw AmbientCompensationError
                 .insufficientDigitalHeadroom(
-                    requested: target.levelDB,
+                    requested: positiveRecovery,
                     available: available
                 )
         }
 
-        let requestsDSP = target.levelDB > 0.000_1
-            || target.lowSupportDB > 0.000_1
-            || target.presenceSupportDB > 0.000_1
-            || target.detailSupportDB > 0.000_1
+        let requestsDSP = abs(target.levelDB) > 0.000_1
+            || abs(target.lowSupportDB) > 0.000_1
+            || abs(target.presenceSupportDB) > 0.000_1
+            || abs(target.detailSupportDB) > 0.000_1
         if requestsDSP,
            !ambientCompensationStereoSpeakerRuntimeAvailable {
             throw AmbientCompensationError.runtimeUnsupported
@@ -1226,7 +1238,10 @@ final class AudioIOEngine: ObservableObject {
             headroomAttenuationDB:
                 gainConfiguration.headroomAttenuationDB,
             ambientLevelRecoveryDB:
-                ambientCompensationRuntimeTarget.levelDB,
+                max(
+                    ambientCompensationRuntimeTarget.levelDB,
+                    0
+                ),
             configuration: ActiveQuietZoneConfiguration()
         )) ?? 0
     }
@@ -1252,7 +1267,10 @@ final class AudioIOEngine: ObservableObject {
                 headroomAttenuationDB:
                     gainConfiguration.headroomAttenuationDB,
                 ambientLevelRecoveryDB:
-                    ambientCompensationRuntimeTarget.levelDB,
+                    max(
+                        ambientCompensationRuntimeTarget.levelDB,
+                        0
+                    ),
                 configuration:
                     ActiveQuietZoneConfiguration()
             )
@@ -3289,11 +3307,11 @@ final class AudioIOEngine: ObservableObject {
         _ target: AmbientCompensationTarget,
         to graph: inout N60DSPGraphSnapshot
     ) throws {
-        let enabled = target.levelDB > 0.000_1
-            || target.lowSupportDB > 0.000_1
-            || target.presenceSupportDB > 0.000_1
-            || target.detailSupportDB > 0.000_1
-        guard N60DSPGraphSnapshotSetAmbientCompensation(
+        let enabled = abs(target.levelDB) > 0.000_1
+            || abs(target.lowSupportDB) > 0.000_1
+            || abs(target.presenceSupportDB) > 0.000_1
+            || abs(target.detailSupportDB) > 0.000_1
+        guard N60DSPGraphSnapshotSetActiveAcousticsAdaptation(
             &graph,
             target.levelDB,
             target.lowSupportDB,
@@ -3323,12 +3341,16 @@ final class AudioIOEngine: ObservableObject {
             -gainConfiguration.headroomAttenuationDB,
             0
         )
-        clamped.levelDB = min(
-            max(target.levelDB, 0),
-            available,
-            AmbientCompensationConfiguration
-                .hardMaximumLevelCompensationDB
-        )
+        if target.levelDB > 0 {
+            clamped.levelDB = min(
+                target.levelDB,
+                available,
+                AmbientCompensationConfiguration
+                    .hardMaximumLevelCompensationDB
+            )
+        } else {
+            clamped.levelDB = max(target.levelDB, -6.0)
+        }
         return clamped
     }
 
@@ -3425,7 +3447,7 @@ final class AudioIOEngine: ObservableObject {
                             gainConfiguration
                                 .headroomAttenuationDB,
                         ambientLevelRecoveryDB:
-                            ambientTarget.levelDB,
+                            max(ambientTarget.levelDB, 0),
                         configuration:
                             ActiveQuietZoneConfiguration()
                     )
