@@ -316,40 +316,32 @@ struct ProductionActiveAcousticsWorkspace: View {
                 GridRow {
                     Text("Input channel")
                         .foregroundStyle(.secondary)
-                    Picker(
-                        "Input channel",
-                        selection: Binding(
+                    Stepper(
+                        "Input \(microphone.selectedInputChannelIndex + 1)",
+                        value: Binding(
                             get: {
-                                microphone.selectedInputChannelIndex
+                                microphone.selectedInputChannelIndex + 1
                             },
-                            set: { channel in
+                            set: { value in
                                 let wasEnabled =
                                     ambient.configuration.enabled
                                 ambient.stopMonitoring()
                                 performAmbient {
                                     try microphone
                                         .selectInputChannel(
-                                            index: channel
+                                            index: value - 1
                                         )
                                     if wasEnabled {
                                         try ambient.startMonitoring()
                                     }
                                 }
                             }
-                        )
-                    ) {
-                        let count = max(
-                            microphone.selectedInputDevice?
-                                .inputChannelCount ?? 1,
-                            1
-                        )
-                        ForEach(0..<count, id: \.self) { index in
-                            Text("Channel \(index + 1)")
-                                .tag(index)
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(width: 170)
+                        ),
+                        in: 1...32
+                    )
+                    .disabled(
+                        microphone.selectedInputDevice == nil
+                    )
                 }
 
                 GridRow {
