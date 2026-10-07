@@ -431,7 +431,7 @@ final class CoreAudioTransportSession {
     private var bridge: OpaquePointer?
     private var graphPublicationCoordinator: DSPGraphPublicationCoordinator?
     private var analysisWorker: ProductionAnalysisWorker?
-    private var audioUnitRack: AudioUnitLiveRackRuntime?
+    private var audioUnitRack: AudioUnitLiveRackSwitchboard?
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateDeviceID = AudioDeviceID(kAudioObjectUnknown)
     private var captureIOProcID: AudioDeviceIOProcID?
@@ -448,7 +448,7 @@ final class CoreAudioTransportSession {
         speakerCrossoverMode: SpeakerCrossoverMode? = nil,
         speakerBusSplitterSnapshot: N60SpeakerBusSplitterSnapshot? = nil,
         speakerDriverProcessingSnapshot: N60SpeakerDriverProcessingSnapshot? = nil,
-        audioUnitRack: AudioUnitLiveRackRuntime? = nil
+        audioUnitRack: AudioUnitLiveRackSwitchboard? = nil
     ) throws {
         precondition(sameDeviceOutputPlan == nil || aggregateDeviceOutputPlan == nil)
         self.selectedOutput = selectedOutput
@@ -1029,7 +1029,6 @@ final class CoreAudioTransportSession {
             N60RealtimeAudioBridgeDestroy(bridge)
             self.bridge = nil
         }
-        audioUnitRack?.stopFaultMonitoring()
         audioUnitRack = nil
         graphPublicationCoordinator = nil
     }
