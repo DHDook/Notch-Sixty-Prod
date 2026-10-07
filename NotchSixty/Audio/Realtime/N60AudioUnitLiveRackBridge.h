@@ -16,6 +16,7 @@ typedef enum {
     N60AudioUnitLiveRackFaultRenderStatus = 1,
     N60AudioUnitLiveRackFaultNonFiniteOutput = 2,
     N60AudioUnitLiveRackFaultRuntimeInvariant = 3,
+    N60AudioUnitLiveRackFaultCPUOverrun = 4,
 } N60AudioUnitLiveRackFaultReason;
 
 typedef struct N60AudioUnitLiveRackFaultLatch N60AudioUnitLiveRackFaultLatch;
