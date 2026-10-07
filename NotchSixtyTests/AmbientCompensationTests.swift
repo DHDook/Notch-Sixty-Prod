@@ -319,4 +319,125 @@ final class AmbientCompensationTests: XCTestCase {
             levelDBFS: level
         )
     }
+    func testAmbientMonitorBridgePreservesUnreadFramesAndCountsDrops() throws {
+        guard let bridge = N60AmbientMonitorBridgeCreate(256, 0) else {
+            return XCTFail("bridge allocation failed")
+        }
+        defer { N60AmbientMonitorBridgeDestroy(bridge) }
+
+        let first = (0..<200).map { Float($0) }
+        let acceptedFirst = first.withUnsafeBufferPointer {
+            N60AmbientMonitorBridgeProcessPlanar(
+                bridge,
+                $0.baseAddress!,
+                UInt32($0.count)
+            )
+        }
+        XCTAssertEqual(acceptedFirst, 200)
+
+        let second = (200..<300).map { Float($0) }
+        let acceptedSecond = second.withUnsafeBufferPointer {
+            N60AmbientMonitorBridgeProcessPlanar(
+                bridge,
+                $0.baseAddress!,
+                UInt32($0.count)
+            )
+        }
+        XCTAssertEqual(acceptedSecond, 56)
+
+        let state = N60AmbientMonitorBridgeGetSnapshot(bridge)
+        XCTAssertEqual(state.availableFrames, 256)
+        XCTAssertEqual(state.capturedFrames, 256)
+        XCTAssertEqual(state.droppedFrames, 44)
+
+        var drained = [Float](repeating: 0, count: 256)
+        let read = drained.withUnsafeMutableBufferPointer {
+            N60AmbientMonitorBridgeReadFrames(
+                bridge,
+                $0.baseAddress!,
+                UInt32($0.count)
+            )
+        }
+        XCTAssertEqual(read, 256)
+        XCTAssertEqual(drained.first, 0)
+        XCTAssertEqual(drained.last, 255)
+        XCTAssertEqual(
+            N60AmbientMonitorBridgeGetSnapshot(bridge).availableFrames,
+            0
+        )
+    }
+
+    func testAmbientMonitorBridgeWrapsWithoutReordering() throws {
+        guard let bridge = N60AmbientMonitorBridgeCreate(256, 0) else {
+            return XCTFail("bridge allocation failed")
+        }
+        defer { N60AmbientMonitorBridgeDestroy(bridge) }
+
+        let first = (0..<180).map(Float.init)
+        _ = first.withUnsafeBufferPointer {
+            N60AmbientMonitorBridgeProcessPlanar(
+                bridge,
+                $0.baseAddress!,
+                UInt32($0.count)
+            )
+        }
+
+        var prefix = [Float](repeating: 0, count: 140)
+        _ = prefix.withUnsafeMutableBufferPointer {
+            N60AmbientMonitorBridgeReadFrames(
+                bridge,
+                $0.baseAddress!,
+                UInt32($0.count)
+            )
+        }
+
+        let second = (180..<320).map(Float.init)
+        _ = second.withUnsafeBufferPointer {
+            N60AmbientMonitorBridgeProcessPlanar(
+                bridge,
+                $0.baseAddress!,
+                UInt32($0.count)
+            )
+        }
+
+        var remainder = [Float](repeating: 0, count: 180)
+        let count = remainder.withUnsafeMutableBufferPointer {
+            N60AmbientMonitorBridgeReadFrames(
+                bridge,
+                $0.baseAddress!,
+                UInt32($0.count)
+            )
+        }
+        XCTAssertEqual(count, 180)
+        XCTAssertEqual(
+            remainder,
+            (140..<320).map(Float.init)
+        )
+    }
+
+    func testAmbientMonitorBridgeDiscardMovesConsumerToProducer() throws {
+        guard let bridge = N60AmbientMonitorBridgeCreate(256, 0) else {
+            return XCTFail("bridge allocation failed")
+        }
+        defer { N60AmbientMonitorBridgeDestroy(bridge) }
+
+        let samples = [Float](repeating: 0.25, count: 128)
+        _ = samples.withUnsafeBufferPointer {
+            N60AmbientMonitorBridgeProcessPlanar(
+                bridge,
+                $0.baseAddress!,
+                UInt32($0.count)
+            )
+        }
+        XCTAssertEqual(
+            N60AmbientMonitorBridgeGetSnapshot(bridge).availableFrames,
+            128
+        )
+        N60AmbientMonitorBridgeDiscardFrames(bridge)
+        XCTAssertEqual(
+            N60AmbientMonitorBridgeGetSnapshot(bridge).availableFrames,
+            0
+        )
+    }
+
 }
