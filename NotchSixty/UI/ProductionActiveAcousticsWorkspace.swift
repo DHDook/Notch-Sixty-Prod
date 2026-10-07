@@ -1030,7 +1030,11 @@ struct ProductionActiveAcousticsWorkspace: View {
                 metricCard(
                     title: "Controlled Frequencies",
                     value: quietZoneFrequencyValue,
-                    detail: "Stable components admitted inside the configured \(quietZone.configuration.minimumFrequencyHz, specifier: "%.0f")–\(quietZone.configuration.maximumFrequencyHz, specifier: "%.0f") Hz band."
+                    detail: String(
+                        format: "Stable components admitted inside the configured %.0f–%.0f Hz band.",
+                        quietZone.configuration.minimumFrequencyHz,
+                        quietZone.configuration.maximumFrequencyHz
+                    )
                 )
                 metricCard(
                     title: "Measured Attenuation",
