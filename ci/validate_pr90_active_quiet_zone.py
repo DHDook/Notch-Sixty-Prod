@@ -14,6 +14,7 @@ PROFILES = ROOT / "NotchSixty/State/ProductProfiles.swift"
 UI = ROOT / "NotchSixty/UI/ProductionActiveAcousticsWorkspace.swift"
 APP = ROOT / "NotchSixty/NotchSixtyApp.swift"
 TESTS = ROOT / "NotchSixtyTests/ActiveQuietZoneTests.swift"
+PROFILE_TESTS = ROOT / "NotchSixtyTests/RoomCorrectionProjectControllerTests.swift"
 DOC = ROOT / "docs/PR90_ACTIVE_QUIET_ZONE.md"
 
 def require(condition, message):
@@ -32,6 +33,7 @@ profiles = PROFILES.read_text()
 ui = UI.read_text()
 app = APP.read_text()
 tests = TESTS.read_text()
+profile_tests = PROFILE_TESTS.read_text()
 doc = DOC.read_text().lower()
 
 for token in (
@@ -150,6 +152,12 @@ for token in (
     "testRenderGraphRejectsQuietZoneToneBeyondHardFrequencyBand",
 ):
     require(token in tests, f"ANC tests missing {token}")
+
+require(
+    "testActiveQuietZonePersistsPolicyButNeverRuntimeCoefficients"
+    in profile_tests,
+    "Quiet Zone Playback System persistence/runtime-disarm test missing",
+)
 
 for phrase in (
     "25–150 hz",
