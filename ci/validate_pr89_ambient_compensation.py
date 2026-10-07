@@ -333,7 +333,7 @@ require(
 )
 
 for phrase in (
-    "must never mistake",
+    "never treat",
     "known existing digital headroom",
     "attack/rise time",
     "release/fall time",
