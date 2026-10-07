@@ -242,6 +242,136 @@ final class AudioUnitRackMutationTests: XCTestCase {
         XCTAssertFalse(host.quarantine.isQuarantined(identity))
     }
 
+    func testInjectedPreparationFailureMatrixPreservesCommittedRack() async throws {
+        let descriptor = mockDescriptor()
+        let host = AudioUnitHostController(
+            catalog: PR82MockCatalog(components: [descriptor])
+        )
+        let format = AudioUnitRackProcessingFormat(
+            sampleRate: 48_000,
+            channelCount: 2,
+            maximumFramesPerSlice: 64
+        )
+        host.scan(format: format)
+
+        let install = try await host.makeMutationCandidate(
+            applying: .install(
+                component: identity,
+                slot: 0,
+                initiallyBypassed: true
+            ),
+            format: format,
+            using: PR82UnexpectedPreparationBackend()
+        )
+        try host.commitMutationCandidate(install)
+
+        let failures: [AudioUnitOfflinePreparationError] = [
+            .instantiationFailed("Injected instantiation failure."),
+            .renderResourceAllocationFailed(
+                "Injected resource-allocation failure."
+            ),
+            .renderFailed(-50),
+            .nonFiniteOutput,
+            .latencyChangedAcrossReset,
+            .tailChangedAcrossReset,
+            .renderResourcesNotReleased,
+            .stateRestoreFailed,
+        ]
+
+        for failure in failures {
+            let before = host.rackConfiguration
+            do {
+                _ = try await host.makeMutationCandidate(
+                    applying: .setBypassed(
+                        slot: 0,
+                        bypassed: false
+                    ),
+                    format: format,
+                    using: PR84FaultPreparationBackend(
+                        error: failure
+                    )
+                )
+                XCTFail("Expected injected failure: \(failure)")
+            } catch let error as AudioUnitRackMutationError {
+                guard case .candidatePreparationFailed(
+                    let slot,
+                    _
+                ) = error else {
+                    return XCTFail(
+                        "Unexpected mutation error: \(error)"
+                    )
+                }
+                XCTAssertEqual(slot, 0)
+            }
+
+            XCTAssertEqual(host.rackConfiguration, before)
+            XCTAssertTrue(host.rackConfiguration.slots[0].bypassed)
+            XCTAssertFalse(host.quarantine.isQuarantined(identity))
+            XCTAssertNil(host.preparationReport(
+                forSlotID: host.rackConfiguration.slots[0].id
+            ))
+        }
+    }
+
+    func testMalformedReplacementStateFailsBeforeBackendAndStaysAtomic() async throws {
+        let descriptor = mockDescriptor()
+        let host = AudioUnitHostController(
+            catalog: PR82MockCatalog(components: [descriptor])
+        )
+        let format = AudioUnitRackProcessingFormat(
+            sampleRate: 48_000,
+            channelCount: 2,
+            maximumFramesPerSlice: 64
+        )
+        host.scan(format: format)
+
+        let install = try await host.makeMutationCandidate(
+            applying: .install(
+                component: identity,
+                slot: 0,
+                initiallyBypassed: true
+            ),
+            format: format,
+            using: PR82UnexpectedPreparationBackend()
+        )
+        try host.commitMutationCandidate(install)
+        let before = host.rackConfiguration
+
+        var target = before
+        target.slots[0].bypassed = false
+        target.slots[0].opaqueFullState =
+            Data([0xde, 0xad, 0xbe, 0xef])
+
+        do {
+            _ = try await host.makeMutationCandidate(
+                applying: .replaceConfiguration(target),
+                format: format,
+                using: PR84FaultPreparationBackend(
+                    error: .instantiationFailed(
+                        "Backend must not receive malformed state."
+                    )
+                )
+            )
+            XCTFail("Expected malformed state rejection.")
+        } catch let error as AudioUnitRackMutationError {
+            guard case .candidatePreparationFailed(
+                let slot,
+                let reason
+            ) = error else {
+                return XCTFail("Unexpected mutation error: \(error)")
+            }
+            XCTAssertEqual(slot, 0)
+            XCTAssertTrue(
+                reason.contains(
+                    "valid property-list dictionary"
+                )
+            )
+        }
+
+        XCTAssertEqual(host.rackConfiguration, before)
+        XCTAssertFalse(host.quarantine.isQuarantined(identity))
+    }
+
     func testAppendAddsSlotTransactionallyAndRespectsMaximum() async throws {
         let descriptor = mockDescriptor()
         let host = AudioUnitHostController(
@@ -426,5 +556,22 @@ private struct PR82ThrowingPreparationBackend:
         restoringState: Data?
     ) async throws -> AudioUnitOfflinePreparationReport {
         throw PR82MockPreparationError.deliberateFailure
+    }
+}
+
+
+private struct PR84FaultPreparationBackend:
+    AudioUnitOfflinePreparing {
+    let error: AudioUnitOfflinePreparationError
+
+    func prepare(
+        component: AudioUnitComponentDescriptor,
+        format: AudioUnitRackProcessingFormat,
+        restoringState: Data?
+    ) async throws -> AudioUnitOfflinePreparationReport {
+        _ = component
+        _ = format
+        _ = restoringState
+        throw error
     }
 }
