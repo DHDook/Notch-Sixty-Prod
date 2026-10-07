@@ -146,8 +146,8 @@ for token in (
     require(token in project, f"Xcode target integration missing {token}")
 
 for phrase in (
-    "not content preset state",
-    "not playback system state",
+    "content preset state",
+    "playback system state",
     "tools",
     "one microphone moved between positions",
     "no recommendation is automatically applied",
