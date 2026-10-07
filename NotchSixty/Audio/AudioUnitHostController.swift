@@ -947,7 +947,8 @@ final class AudioUnitHostController: ObservableObject {
              .liveInvalidLatency(let slot, _),
              .liveInvalidTail(let slot, _),
              .liveLatencyChanged(let slot, _, _),
-             .liveTailChanged(let slot, _, _):
+             .liveTailChanged(let slot, _, _),
+             .stageFaultGateAllocationFailed(let slot):
             return slot
         case .invalidExecutionPlan,
              .delayMemoryBudgetExceeded,
@@ -968,7 +969,8 @@ final class AudioUnitHostController: ObservableObject {
              .liveTailChanged:
             return .invalidTail
         case .liveResourceAllocationFailed,
-             .liveFormatFailed:
+             .liveFormatFailed,
+             .stageFaultGateAllocationFailed:
             return .renderResourceFailure
         case .liveInstantiationFailed,
              .componentUnavailable:
