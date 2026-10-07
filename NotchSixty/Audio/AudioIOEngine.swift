@@ -1243,13 +1243,16 @@ final class AudioIOEngine: ObservableObject {
 
     func audioUnitRackProcessingFormatForMutation() throws
         -> AudioUnitRackProcessingFormat {
-        if let stagedAudioUnitRack {
-            return stagedAudioUnitRack.format
-        }
         switch lifecycle.state {
         case .idle:
+            if let stagedAudioUnitRack {
+                return stagedAudioUnitRack.format
+            }
             return try audioUnitRackProcessingFormatForNextStart()
         case .running:
+            if let stagedAudioUnitRack {
+                return stagedAudioUnitRack.format
+            }
             guard let output = selectedOutputDevice else {
                 throw AudioRouteSelectionError.outputDeviceUnavailable(
                     uid: routeConfiguration.selectedOutputUID
