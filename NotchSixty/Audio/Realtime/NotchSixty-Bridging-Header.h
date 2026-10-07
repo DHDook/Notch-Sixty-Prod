@@ -1,3 +1,4 @@
+#import "N60AudioUnitLiveRackBridge.h"
 #import "N60RealtimeAudioBridge.h"
 #import "N60RoomMeasurementBridge.h"
 #import "N60TargetedRoomMeasurementBridge.h"
