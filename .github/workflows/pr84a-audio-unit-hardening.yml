@@ -28,6 +28,14 @@ jobs:
             NotchSixty/Audio/Realtime/N60AudioUnitRackExchange.c \
             -lm -o /tmp/pr84a-rack-exchange
           /tmp/pr84a-rack-exchange
+      - name: Prove PR84A lock-free stage fault gate
+        run: |
+          clang -std=c11 -O2 -Wall -Wextra -Werror \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr84a_audio_unit_stage_fault_gate.c \
+            NotchSixty/Audio/Realtime/N60AudioUnitRackExchange.c \
+            -lm -o /tmp/pr84a-stage-fault-gate
+          /tmp/pr84a-stage-fault-gate
 
   validate-macos-integration:
     runs-on: xcode-27
@@ -39,6 +47,22 @@ jobs:
         run: python3 ci/validate_pr83_plugin_rack_ux.py
       - name: Validate inherited PR82 mutation architecture
         run: python3 ci/validate_pr82_live_audio_unit_rack_mutation.py
+      - name: Run inherited lock-free rack exchange simulator
+        run: |
+          clang -std=c11 -O2 -Wall -Wextra -Werror \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr82_audio_unit_rack_exchange.c \
+            NotchSixty/Audio/Realtime/N60AudioUnitRackExchange.c \
+            -lm -o /tmp/pr84a-rack-exchange
+          /tmp/pr84a-rack-exchange
+      - name: Prove PR84A lock-free stage fault gate on arm64
+        run: |
+          clang -std=c11 -O2 -Wall -Wextra -Werror \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr84a_audio_unit_stage_fault_gate.c \
+            NotchSixty/Audio/Realtime/N60AudioUnitRackExchange.c \
+            -lm -o /tmp/pr84a-stage-fault-gate
+          /tmp/pr84a-stage-fault-gate
       - name: Build arm64 app with AU hardening
         run: |
           xcodebuild \
