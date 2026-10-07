@@ -187,6 +187,8 @@ enum RoomCorrectionProjectControllerError: Error, Equatable, LocalizedError {
     case designNotFound(UUID)
     case measurementNotDesignable(positionID: UUID, pass: RoomCorrectionMeasurementPass)
     case noUsableMeasurementRange
+    case designVerificationRequired
+    case designVerificationRejected([String])
 
     var errorDescription: String? {
         switch self {
@@ -218,6 +220,10 @@ enum RoomCorrectionProjectControllerError: Error, Equatable, LocalizedError {
             return "Room measurement \(positionID.uuidString) has insufficient \(pass.rawValue) quality for correction design. Re-measure or exclude that position."
         case .noUsableMeasurementRange:
             return "The included measurements do not share a usable frequency range for correction design."
+        case .designVerificationRequired:
+            return "Verify the selected room-correction design before deployment."
+        case .designVerificationRejected(let reasons):
+            return "Room-correction verification blocked deployment: " + reasons.joined(separator: " ")
         }
     }
 }
@@ -228,8 +234,11 @@ final class RoomCorrectionProjectController: ObservableObject {
     let store: RoomCorrectionProjectStore
 
     private let aggregator = RoomCorrectionSpatialAggregator()
+    private let designVerifier = RoomCorrectionDesignPredictionVerifier()
 
     @Published private(set) var project: RoomCorrectionProject?
+    @Published private(set) var selectedDesignVerification:
+        RoomCorrectionDesignVerificationReport?
     @Published private(set) var lastErrorDescription: String?
 
     init(
@@ -278,6 +287,7 @@ final class RoomCorrectionProjectController: ObservableObject {
             lastErrorDescription = nil
         } catch {
             project = nil
+            selectedDesignVerification = nil
             lastErrorDescription = error.localizedDescription
         }
     }
@@ -285,6 +295,7 @@ final class RoomCorrectionProjectController: ObservableObject {
     func reloadForSelectedPlaybackSystem() throws {
         guard let systemID = selectedPlaybackSystemID else {
             project = nil
+            selectedDesignVerification = nil
             throw RoomCorrectionProjectControllerError.noSelectedPlaybackSystem
         }
 
@@ -299,6 +310,7 @@ final class RoomCorrectionProjectController: ObservableObject {
                 )
             }
             project = loaded
+            refreshSelectedDesignVerification(in: loaded)
             lastErrorDescription = nil
             return
         }
@@ -309,6 +321,11 @@ final class RoomCorrectionProjectController: ObservableObject {
             candidates.append(loaded)
         }
         project = candidates.max { lhs, rhs in lhs.modifiedAt < rhs.modifiedAt }
+        if let project {
+            refreshSelectedDesignVerification(in: project)
+        } else {
+            selectedDesignVerification = nil
+        }
         lastErrorDescription = nil
     }
 
@@ -502,6 +519,47 @@ final class RoomCorrectionProjectController: ObservableObject {
         )
     }
 
+    func verification(
+        for design: RoomCorrectionDesign
+    ) throws -> RoomCorrectionDesignVerificationReport {
+        let current = try requiredProject()
+        guard current.designs.contains(where: { $0.id == design.id }) else {
+            throw RoomCorrectionProjectControllerError.designNotFound(
+                design.id
+            )
+        }
+        return try designVerifier.verify(
+            design: design,
+            positions: current.measurements
+        )
+    }
+
+    /// The only controller-owned deployment path for a generated room design.
+    /// Verification is recomputed immediately before commit so stale UI
+    /// evidence cannot authorize a changed/corrupted filter.
+    func deploySelectedDesign() throws {
+        guard let design = selectedDesign else {
+            throw RoomCorrectionProjectControllerError
+                .designVerificationRequired
+        }
+        let report = try verification(for: design)
+        selectedDesignVerification = report
+        guard report.accepted else {
+            throw RoomCorrectionProjectControllerError
+                .designVerificationRejected(report.blockingReasons)
+        }
+        let filter = try design.deploymentFilter()
+        let summary = try deploymentSummary(for: design)
+        try profiles.replaceSelectedSystemRoomCorrection(
+            RoomCorrectionConfiguration(
+                enabled: true,
+                filter: filter
+            ),
+            calibrationSummary: summary
+        )
+        lastErrorDescription = nil
+    }
+
     func selectDesign(id: UUID, modifiedAt: Date = Date()) throws {
         var updated = try requiredProject()
         guard updated.designs.contains(where: { $0.id == id }) else {
@@ -640,7 +698,24 @@ final class RoomCorrectionProjectController: ObservableObject {
     private func persistAndPublish(_ updated: RoomCorrectionProject) throws {
         try store.save(updated)
         project = updated
+        refreshSelectedDesignVerification(in: updated)
         lastErrorDescription = nil
+    }
+
+    private func refreshSelectedDesignVerification(
+        in project: RoomCorrectionProject
+    ) {
+        guard let selectedID = project.selectedDesignID,
+              let design = project.designs.first(where: {
+                  $0.id == selectedID
+              }) else {
+            selectedDesignVerification = nil
+            return
+        }
+        selectedDesignVerification = try? designVerifier.verify(
+            design: design,
+            positions: project.measurements
+        )
     }
 
     private func normalizedPositionName(_ proposedName: String) throws -> String {
