@@ -71,6 +71,7 @@ final class ProductController: ObservableObject {
     let calibration: RoomCorrectionCalibrationController
     let multichannelCalibration: MultichannelCalibrationController
     let roomCorrectionProjects: RoomCorrectionProjectController
+    let roomTreatmentAdvisor: RoomTreatmentAdvisorController
     let ambientCompensation: AmbientCompensationController
     let activeQuietZone: ActiveQuietZoneController
     private var audioEngineObservation: AnyCancellable?
@@ -100,6 +101,10 @@ final class ProductController: ObservableObject {
         let roomProjects =
             RoomCorrectionProjectController(profiles: profiles)
         self.roomCorrectionProjects = roomProjects
+        self.roomTreatmentAdvisor =
+            RoomTreatmentAdvisorController(
+                store: roomProjects.store
+            )
         let ambientCompensation = AmbientCompensationController(
             engine: audioEngine,
             profiles: profiles,
@@ -134,6 +139,10 @@ final class ProductController: ObservableObject {
         let roomProjects =
             RoomCorrectionProjectController(profiles: profiles)
         self.roomCorrectionProjects = roomProjects
+        self.roomTreatmentAdvisor =
+            RoomTreatmentAdvisorController(
+                store: roomProjects.store
+            )
         let ambientCompensation = AmbientCompensationController(
             engine: audioEngine,
             profiles: profiles,
@@ -170,6 +179,7 @@ final class ProductController: ObservableObject {
         audioEngine.prepareForUse()
         profiles.restoreSelectedLayers()
         roomCorrectionProjects.prepareForUse()
+        roomTreatmentAdvisor.prepareForUse()
         calibration.prepareForUse()
         multichannelCalibration.prepareForUse()
         ambientCompensation.prepareForUse()
