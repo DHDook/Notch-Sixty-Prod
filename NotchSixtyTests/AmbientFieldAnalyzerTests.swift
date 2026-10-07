@@ -80,6 +80,56 @@ final class AmbientFieldAnalyzerTests: XCTestCase {
         XCTAssertEqual(snapshot.periodicFrequencyHz ?? 0, 83, accuracy: 2.0)
     }
 
+    func testPlaybackSubtractionRecoversFromIndependentClockWindowOffset() throws {
+        let playback = shapedPlayback(frames: frameCount)
+        let impulse = delayedImpulse(
+            delay: 37,
+            taps: [
+                (0, 0.58),
+                (21, -0.09),
+                (67, 0.05),
+            ]
+        )
+        let predicted = convolve(playback, impulse: impulse)
+        let ambient = sine(
+            frequency: 91,
+            amplitude: 0.035,
+            frames: frameCount
+        )
+        let offset = 1_200
+        var microphone = ambient
+        for index in microphone.indices where index >= offset {
+            microphone[index] += predicted[index - offset]
+        }
+
+        let snapshot = try AmbientFieldAnalyzer().analyze(
+            microphone: microphone,
+            playbackReference: playback,
+            acousticImpulseResponse: impulse,
+            sampleRate: sampleRate
+        )
+
+        XCTAssertEqual(
+            snapshot.separationMode,
+            .modeledPlaybackSubtraction
+        )
+        XCTAssertGreaterThan(snapshot.separationConfidence, 0.70)
+        XCTAssertEqual(
+            snapshot.predictionGain ?? 0,
+            1.0,
+            accuracy: 0.08
+        )
+        XCTAssertEqual(
+            snapshot.ambientLevelDBFS,
+            dbfs(rms(ambient)),
+            accuracy: 1.5
+        )
+        XCTAssertLessThan(
+            snapshot.ambientLevelDBFS,
+            snapshot.microphoneLevelDBFS - 3
+        )
+    }
+
     func testSemanticPlaybackSourcesSumInTheAcousticDomain() throws {
         let left = shapedPlayback(frames: frameCount)
         let right = (0..<frameCount).map { frame in

@@ -771,6 +771,65 @@ final class CoreAudioTransportSession {
         return N60RealtimeAudioBridgeGetAnalysisCaptureSnapshot(bridge)
     }
 
+    func setAmbientReferenceDemand(_ enabled: Bool) {
+        guard let bridge else { return }
+        N60RealtimeAudioBridgeSetAmbientReferenceDemand(
+            bridge,
+            enabled
+        )
+    }
+
+    func ambientReferenceSnapshot()
+        -> N60AmbientPlaybackReferenceSnapshot? {
+        guard let bridge else { return nil }
+        return N60RealtimeAudioBridgeGetAmbientReferenceSnapshot(
+            bridge
+        )
+    }
+
+    func discardAmbientReferenceFrames() {
+        guard let bridge else { return }
+        N60RealtimeAudioBridgeDiscardAmbientReferenceFrames(
+            bridge
+        )
+    }
+
+    func readAmbientReferenceFrames(
+        maximumFrames: Int =
+            Int(N60_AMBIENT_REFERENCE_CAPACITY_FRAMES)
+    ) -> [N60AmbientPlaybackReferenceFrame] {
+        guard let bridge, maximumFrames > 0 else { return [] }
+        let snapshot =
+            N60RealtimeAudioBridgeGetAmbientReferenceSnapshot(
+                bridge
+            )
+        let capacity = min(
+            maximumFrames,
+            Int(snapshot.availableFrames)
+        )
+        guard capacity > 0 else { return [] }
+
+        var result = [N60AmbientPlaybackReferenceFrame](
+            repeating: N60AmbientPlaybackReferenceFrame(),
+            count: capacity
+        )
+        let count = result.withUnsafeMutableBufferPointer {
+            N60RealtimeAudioBridgeReadAmbientReferenceFrames(
+                bridge,
+                $0.baseAddress!,
+                UInt32($0.count)
+            )
+        }
+        if Int(count) < result.count {
+            result.removeLast(result.count - Int(count))
+        }
+        return result
+    }
+
+    var ambientReferenceSampleRate: Double {
+        outputFormat.sampleRate
+    }
+
     func renderDiagnostics() -> RenderKernelDiagnostics? {
         guard let bridge else { return nil }
         return RenderKernelDiagnostics(N60RealtimeAudioBridgeGetRenderDiagnostics(bridge))

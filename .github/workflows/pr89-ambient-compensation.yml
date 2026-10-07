@@ -1,0 +1,112 @@
+name: PR89 Ambient Compensation
+
+on:
+  push:
+    branches:
+      - feature/pr89-ambient-compensation
+  pull_request:
+    branches:
+      - feature/pr88-intelligent-target-generation
+  workflow_dispatch:
+
+concurrency:
+  group: pr89-ambient-compensation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate PR89 Ambient Compensation architecture
+        run: python3 ci/validate_pr89_ambient_compensation.py
+      - name: Validate inherited PR88 intelligent targets
+        run: python3 ci/validate_pr88_intelligent_target.py
+      - name: Validate inherited PR86 calibration prediction
+        run: python3 ci/validate_pr86_calibration_prediction.py
+      - name: Validate inherited PR85 SOFA architecture
+        run: python3 ci/validate_pr85_native_sofa.py
+      - name: Validate inherited PR84A hardening
+        run: python3 ci/validate_pr84a_audio_unit_hardening.py
+
+  validate-macos-integration:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate PR89 Ambient Compensation architecture
+        run: python3 ci/validate_pr89_ambient_compensation.py
+      - name: Build arm64 app with Ambient Compensation
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            build
+      - name: Run ambient field analyzer tests
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            -only-testing:NotchSixtyTests/AmbientFieldAnalyzerTests \
+            test
+      - name: Run PR89 ambient compensation tests
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            -only-testing:NotchSixtyTests/AmbientCompensationTests \
+            test
+      - name: Run Playback System persistence tests
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            -only-testing:NotchSixtyTests/RoomCorrectionProjectControllerTests \
+            test
+      - name: Run retained PR88 target tests
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            -only-testing:NotchSixtyTests/RoomCorrectionTargetDesignerTests \
+            test
+      - name: Run retained PR86 prediction tests
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            -only-testing:NotchSixtyTests/CalibrationPredictionVerifierTests \
+            test
+      - name: Run retained XCTest suite
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            test

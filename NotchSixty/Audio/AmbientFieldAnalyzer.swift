@@ -82,6 +82,8 @@ struct AmbientAnalysisConfiguration: Equatable, Sendable {
     var minimumTonalProminenceDB = 8.0
     var maximumTonalComponents = 8
     var negligiblePlaybackDBFS = -70.0
+    var maximumPlaybackAlignmentSeconds = 0.35
+    var alignmentSearchRateHz = 2_000.0
     var optionalDBSPLAt0DBFS: Double?
 
     static let production = AmbientAnalysisConfiguration()
@@ -251,19 +253,33 @@ struct AmbientFieldAnalyzer: Sendable {
                     }
                 }
 
+                let alignment = estimatePlaybackAlignment(
+                    microphone: microphoneWindow,
+                    predictedPlayback: predicted,
+                    sampleRate: sampleRate
+                )
+                let alignedPrediction = alignment.alignedPlayback
                 let estimate = estimatePlaybackScale(
                     microphone: microphoneWindow,
-                    predictedPlayback: predicted
+                    predictedPlayback: alignedPrediction
                 )
                 predictionGain = estimate.gain
                 predictedLevel = Self.dbfs(
-                    amplitude: Self.rms(predicted) * estimate.gain
+                    amplitude: Self.rms(alignedPrediction)
+                        * estimate.gain
                 )
-                residual = zip(microphoneWindow, predicted).map {
-                    Float(Double($0.0) - estimate.gain * Double($0.1))
+                residual = zip(
+                    microphoneWindow,
+                    alignedPrediction
+                ).map {
+                    Float(
+                        Double($0.0)
+                            - estimate.gain * Double($0.1)
+                    )
                 }
                 separationMode = .modeledPlaybackSubtraction
                 confidence = estimate.confidence
+                    * alignment.confidence
             }
         }
 
@@ -343,7 +359,13 @@ struct AmbientFieldAnalyzer: Sendable {
               configuration.tonalSearchUpperHz.isFinite,
               configuration.tonalSearchUpperHz > configuration.minimumFrequencyHz,
               configuration.minimumTonalProminenceDB.isFinite,
-              configuration.maximumTonalComponents > 0 else {
+              configuration.maximumTonalComponents > 0,
+              configuration.maximumPlaybackAlignmentSeconds.isFinite,
+              configuration.maximumPlaybackAlignmentSeconds >= 0,
+              configuration.maximumPlaybackAlignmentSeconds <= 1.0,
+              configuration.alignmentSearchRateHz.isFinite,
+              configuration.alignmentSearchRateHz >= 500,
+              configuration.alignmentSearchRateHz <= 8_000 else {
             throw AmbientAnalysisError.invalidConfiguration
         }
     }
@@ -370,6 +392,182 @@ struct AmbientFieldAnalyzer: Sendable {
         }
         let convolved = dft.inverse(real: productReal, imaginary: productImaginary)
         return Array(convolved.prefix(playback.count))
+    }
+
+    private struct PlaybackAlignmentEstimate {
+        var alignedPlayback: [Float]
+        var lagFrames: Int
+        var confidence: Double
+    }
+
+    /// Estimate the bounded timing offset between the independently clocked
+    /// microphone capture and the rendered-playback history. The retained room
+    /// impulse already contains acoustic propagation delay; this search only
+    /// compensates transport/history offset and slow clock drift.
+    ///
+    /// A coarse decimated normalized correlation keeps the search bounded, then
+    /// a one-stride full-rate refinement provides sample-level alignment. The
+    /// analyzer remains entirely off the realtime thread.
+    private func estimatePlaybackAlignment(
+        microphone: [Float],
+        predictedPlayback: [Float],
+        sampleRate: Double
+    ) -> PlaybackAlignmentEstimate {
+        guard microphone.count == predictedPlayback.count,
+              !microphone.isEmpty,
+              configuration.maximumPlaybackAlignmentSeconds > 0 else {
+            return PlaybackAlignmentEstimate(
+                alignedPlayback: predictedPlayback,
+                lagFrames: 0,
+                confidence: 1
+            )
+        }
+
+        let maximumLag = min(
+            Int(
+                (
+                    sampleRate
+                        * configuration
+                            .maximumPlaybackAlignmentSeconds
+                ).rounded()
+            ),
+            max(microphone.count / 3, 0)
+        )
+        guard maximumLag > 0 else {
+            return PlaybackAlignmentEstimate(
+                alignedPlayback: predictedPlayback,
+                lagFrames: 0,
+                confidence: 1
+            )
+        }
+
+        let stride = max(
+            Int(
+                (
+                    sampleRate
+                        / configuration.alignmentSearchRateHz
+                ).rounded()
+            ),
+            1
+        )
+        let coarseMaximum =
+            max(maximumLag / stride, 1)
+
+        var bestLag = 0
+        var bestCorrelation = -Double.infinity
+
+        for coarse in (-coarseMaximum)...coarseMaximum {
+            let lag = coarse * stride
+            let correlation = normalizedCorrelation(
+                microphone: microphone,
+                reference: predictedPlayback,
+                lagFrames: lag,
+                sampleStride: stride
+            )
+            if correlation > bestCorrelation {
+                bestCorrelation = correlation
+                bestLag = lag
+            }
+        }
+
+        let refineLow = max(
+            -maximumLag,
+            bestLag - stride
+        )
+        let refineHigh = min(
+            maximumLag,
+            bestLag + stride
+        )
+        if refineLow <= refineHigh {
+            for lag in refineLow...refineHigh {
+                let correlation = normalizedCorrelation(
+                    microphone: microphone,
+                    reference: predictedPlayback,
+                    lagFrames: lag,
+                    sampleStride: 1
+                )
+                if correlation > bestCorrelation {
+                    bestCorrelation = correlation
+                    bestLag = lag
+                }
+            }
+        }
+
+        var aligned = [Float](
+            repeating: 0,
+            count: predictedPlayback.count
+        )
+        var overlap = 0
+        for index in aligned.indices {
+            let sourceIndex = index - bestLag
+            guard sourceIndex >= 0,
+                  sourceIndex < predictedPlayback.count else {
+                continue
+            }
+            aligned[index] = predictedPlayback[sourceIndex]
+            overlap += 1
+        }
+
+        let overlapFraction =
+            Double(overlap) / Double(max(aligned.count, 1))
+        let correlationConfidence = Self.clamp01(
+            (max(bestCorrelation, 0) - 0.05) / 0.55
+        )
+        let boundaryFraction =
+            maximumLag > 0
+                ? Double(abs(bestLag)) / Double(maximumLag)
+                : 0
+        let boundaryConfidence = Self.clamp01(
+            (1.0 - boundaryFraction) / 0.15
+        )
+        let confidence = Self.clamp01(
+            correlationConfidence
+                * overlapFraction
+                * max(boundaryConfidence, 0.15)
+        )
+
+        return PlaybackAlignmentEstimate(
+            alignedPlayback: aligned,
+            lagFrames: bestLag,
+            confidence: confidence
+        )
+    }
+
+    /// Correlates microphone[index] with reference[index - lag].
+    private func normalizedCorrelation(
+        microphone: [Float],
+        reference: [Float],
+        lagFrames: Int,
+        sampleStride: Int
+    ) -> Double {
+        var dot = 0.0
+        var microphoneEnergy = 0.0
+        var referenceEnergy = 0.0
+        var count = 0
+
+        var index = 0
+        while index < microphone.count {
+            let referenceIndex = index - lagFrames
+            if referenceIndex >= 0,
+               referenceIndex < reference.count {
+                let observed = Double(microphone[index])
+                let modeled = Double(reference[referenceIndex])
+                dot += observed * modeled
+                microphoneEnergy += observed * observed
+                referenceEnergy += modeled * modeled
+                count += 1
+            }
+            index += max(sampleStride, 1)
+        }
+
+        guard count >= 64,
+              microphoneEnergy > 1.0e-18,
+              referenceEnergy > 1.0e-18 else {
+            return -1
+        }
+        return dot / sqrt(
+            microphoneEnergy * referenceEnergy
+        )
     }
 
     private func estimatePlaybackScale(
