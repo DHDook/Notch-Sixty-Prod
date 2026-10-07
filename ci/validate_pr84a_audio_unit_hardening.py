@@ -5,6 +5,7 @@ ROOT = Path(__file__).resolve().parents[1]
 OFFLINE = ROOT / "NotchSixty/Audio/AudioUnitOfflinePreparation.swift"
 HOST = ROOT / "NotchSixty/Audio/AudioUnitHostController.swift"
 LIVE = ROOT / "NotchSixty/Audio/AudioUnitLiveRackRuntime.swift"
+LIVE_BRIDGE = ROOT / "NotchSixty/Audio/Realtime/N60AudioUnitLiveRackBridge.h"
 EXCHANGE_H = ROOT / "NotchSixty/Audio/Realtime/N60AudioUnitRackExchange.h"
 EXCHANGE_C = ROOT / "NotchSixty/Audio/Realtime/N60AudioUnitRackExchange.c"
 GATE_TEST = ROOT / "ci/validate_pr84a_audio_unit_stage_fault_gate.c"
@@ -40,6 +41,7 @@ def function_body_after(text: str, anchor: str, name: str) -> str:
 offline = OFFLINE.read_text()
 host = HOST.read_text()
 live = LIVE.read_text()
+live_bridge = LIVE_BRIDGE.read_text()
 exchange_h = EXCHANGE_H.read_text()
 exchange_c = EXCHANGE_C.read_text()
 offline_tests = OFFLINE_TESTS.read_text()
@@ -86,8 +88,19 @@ for token in (
     "N60AudioUnitStageFaultGateDestroy",
     "N60AudioUnitStageFaultGateTrip",
     "N60AudioUnitStageFaultGateIsTripped",
+    "struct AudioUnitLiveRenderWatchdog",
+    "severeOverrunMultiplier = 4.0",
+    "minimumBudgetSeconds = 0.010",
+    "consecutiveOverrunLimit = 3",
+    "mach_absolute_time()",
+    "N60AudioUnitLiveRackFaultCPUOverrun",
 ):
     require(token in live, f"live hardening missing {token}")
+
+require(
+    "N60AudioUnitLiveRackFaultCPUOverrun = 4" in live_bridge,
+    "live fault ABI missing CPU-overrun reason",
+)
 
 for token in (
     "N60AudioUnitStageFaultGateCreate",
@@ -120,6 +133,11 @@ require(
 require(
     "N60AudioUnitStageFaultGateTrip(faultGate)" in stage_render,
     "live process stage does not latch realtime render faults",
+)
+require(
+    "renderWatchdog.observe" in stage_render
+    and "N60AudioUnitLiveRackFaultCPUOverrun" in stage_render,
+    "live process stage does not fail closed on sustained CPU abuse",
 )
 for forbidden in (
     "controlPlaneHealthIssue",
@@ -166,6 +184,7 @@ for token in (
     require(token in offline_tests, f"offline abuse coverage missing {token}")
 
 for token in (
+    "testRenderWatchdogRequiresSustainedSevereOverrun",
     "testLiveTimingValidatorRejectsPathologicalValues",
     "testControlPlaneHealthCollectionSurfacesInjectedLatencyDrift",
     "testControlPlaneHealthCollectionSurfacesInjectedInvalidTail",
