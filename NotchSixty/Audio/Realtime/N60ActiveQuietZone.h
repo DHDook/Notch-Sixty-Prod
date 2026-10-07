@@ -20,6 +20,9 @@ typedef struct {
     float leftImaginary;
     float rightReal;
     float rightImaginary;
+    // Prepared by SnapshotSet; callers may leave these zero in input values.
+    double incrementCosine;
+    double incrementSine;
 } N60ActiveQuietZoneToneSnapshot;
 
 typedef struct {
@@ -72,6 +75,7 @@ bool N60ActiveQuietZoneSnapshotSet(
     const N60ActiveQuietZoneToneSnapshot * _Nullable tones,
     uint32_t toneCount,
     uint32_t transitionFrames,
+    double sampleRate,
     bool enabled
 );
 
