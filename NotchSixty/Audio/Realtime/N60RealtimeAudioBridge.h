@@ -29,6 +29,7 @@ typedef struct {
 #define N60_ANALYSIS_DEMAND_STEREO (1u << 1)
 #define N60_ANALYSIS_DEMAND_ALL (N60_ANALYSIS_DEMAND_SPECTRUM | N60_ANALYSIS_DEMAND_STEREO)
 #define N60_ANALYSIS_CAPTURE_CAPACITY_FRAMES 65536u
+#define N60_AMBIENT_REFERENCE_CAPACITY_FRAMES 131072u
 
 // PR41 Slice C2a: immutable same-device speaker-output routing. The control
 // plane compiles at most eight logical-bus routes; the realtime writer only
@@ -79,6 +80,18 @@ typedef struct {
     uint64_t capturedFrames;
     uint64_t droppedFrames;
 } N60AnalysisCaptureSnapshot;
+
+typedef struct {
+    float left;
+    float right;
+} N60AmbientPlaybackReferenceFrame;
+
+typedef struct {
+    bool enabled;
+    uint32_t availableFrames;
+    uint64_t capturedFrames;
+    uint64_t droppedFrames;
+} N60AmbientPlaybackReferenceSnapshot;
 
 typedef struct {
     uint64_t captureCallbacks;
@@ -174,6 +187,30 @@ N60AnalysisCaptureSnapshot N60RealtimeAudioBridgeGetAnalysisCaptureSnapshot(
 uint32_t N60RealtimeAudioBridgeReadAnalysisFrames(
     N60RealtimeAudioBridge * _Nonnull bridge,
     N60AnalysisFrame * _Nonnull destination,
+    uint32_t capacityFrames
+);
+
+// PR89 uses a second SPSC ring so Ambient Compensation never competes with
+// ProductionAnalysisWorker for the analysis-ring read index. Frames contain the
+// final stereo values after normal DSP/output gain/transition gain and before
+// physical speaker-bus mapping.
+void N60RealtimeAudioBridgeSetAmbientReferenceDemand(
+    N60RealtimeAudioBridge * _Nonnull bridge,
+    bool enabled
+);
+bool N60RealtimeAudioBridgeAmbientReferenceDemand(
+    const N60RealtimeAudioBridge * _Nonnull bridge
+);
+void N60RealtimeAudioBridgeDiscardAmbientReferenceFrames(
+    N60RealtimeAudioBridge * _Nonnull bridge
+);
+N60AmbientPlaybackReferenceSnapshot
+N60RealtimeAudioBridgeGetAmbientReferenceSnapshot(
+    const N60RealtimeAudioBridge * _Nonnull bridge
+);
+uint32_t N60RealtimeAudioBridgeReadAmbientReferenceFrames(
+    N60RealtimeAudioBridge * _Nonnull bridge,
+    N60AmbientPlaybackReferenceFrame * _Nonnull destination,
     uint32_t capacityFrames
 );
 
