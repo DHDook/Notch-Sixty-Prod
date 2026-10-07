@@ -113,8 +113,8 @@ private final class AudioUnitPluginEditorSession: ObservableObject, Identifiable
             throw AudioUnitPluginEditorError.stateUnavailable
         }
         guard let state =
-                unit.auAudioUnit.fullStateForDocument
-                    ?? unit.auAudioUnit.fullState else {
+                unit.auAudioUnit.fullState
+                    ?? unit.auAudioUnit.fullStateForDocument else {
             throw AudioUnitPluginEditorError.stateUnavailable
         }
         guard PropertyListSerialization.propertyList(
