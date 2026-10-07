@@ -440,4 +440,97 @@ final class AmbientCompensationTests: XCTestCase {
         )
     }
 
+
+    func testAmbientGraphSnapshotAcceptsOnlyBoundedOverlay() {
+        var graph = N60DSPGraphSnapshotMakeUnity(48_000)
+        XCTAssertTrue(
+            N60DSPGraphSnapshotSetAmbientCompensation(
+                &graph,
+                3.0,
+                2.0,
+                2.0,
+                1.5,
+                true
+            )
+        )
+        XCTAssertTrue(graph.ambientCompensation.enabled)
+        XCTAssertEqual(
+            graph.ambientCompensation.levelGainLinear,
+            Float(pow(10.0, 3.0 / 20.0)),
+            accuracy: 0.000_001
+        )
+
+        XCTAssertFalse(
+            N60DSPGraphSnapshotSetAmbientCompensation(
+                &graph,
+                6.1,
+                0,
+                0,
+                0,
+                true
+            )
+        )
+        XCTAssertFalse(
+            N60DSPGraphSnapshotSetAmbientCompensation(
+                &graph,
+                0,
+                2.1,
+                0,
+                0,
+                true
+            )
+        )
+        XCTAssertFalse(
+            N60DSPGraphSnapshotSetAmbientCompensation(
+                &graph,
+                0,
+                0,
+                2.1,
+                0,
+                true
+            )
+        )
+        XCTAssertFalse(
+            N60DSPGraphSnapshotSetAmbientCompensation(
+                &graph,
+                0,
+                0,
+                0,
+                1.6,
+                true
+            )
+        )
+    }
+
+    func testAmbientGraphOverlayDoesNotConsumeUserEQSlots() throws {
+        let userBand = EQBand(
+            type: .peaking,
+            frequencyHz: 1_000,
+            gainDB: 2,
+            q: 1
+        )
+        var graph = try StereoEQConfiguration(
+            linkedBands: [userBand]
+        ).makeGraphSnapshot(
+            sampleRate: 48_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(),
+            playbackConfiguration: PlaybackControlConfiguration()
+        )
+        let countBefore = graph.eqBandCount
+
+        XCTAssertTrue(
+            N60DSPGraphSnapshotSetAmbientCompensation(
+                &graph,
+                1.5,
+                1.0,
+                0.8,
+                0.5,
+                true
+            )
+        )
+        XCTAssertEqual(graph.eqBandCount, countBefore)
+        XCTAssertTrue(graph.ambientCompensation.enabled)
+    }
+
 }
