@@ -818,7 +818,7 @@ struct ProductionRoomCorrectionWorkspace: View {
                         .foregroundStyle(.secondary)
                     }
                     HStack(spacing: 22) {
-                        status(
+                        statusValue(
                             "Independent RMS",
                             String(
                                 format: "%.2f → %.2f dB",
@@ -826,21 +826,21 @@ struct ProductionRoomCorrectionWorkspace: View {
                                 verification.rmsErrorAfterDB
                             )
                         )
-                        status(
+                        statusValue(
                             "Improvement",
                             String(
                                 format: "%+.2f dB",
                                 verification.improvementDB
                             )
                         )
-                        status(
+                        statusValue(
                             "Max Residual",
                             String(
                                 format: "%.2f dB",
                                 verification.maximumAbsoluteErrorAfterDB
                             )
                         )
-                        status(
+                        statusValue(
                             "Stereo Match",
                             String(
                                 format: "%.2f → %.2f dB",
@@ -850,21 +850,21 @@ struct ProductionRoomCorrectionWorkspace: View {
                         )
                     }
                     HStack(spacing: 22) {
-                        status(
+                        statusValue(
                             "FIR Peak",
                             String(
                                 format: "%.2f dB",
                                 verification.maximumUnscaledFilterGainDB
                             )
                         )
-                        status(
+                        statusValue(
                             "Deployed Peak",
                             String(
                                 format: "%.2f dB",
                                 verification.maximumDeploymentFilterGainDB
                             )
                         )
-                        status(
+                        statusValue(
                             "Out-of-band",
                             String(
                                 format: "%.2f dB",
@@ -972,7 +972,7 @@ struct ProductionRoomCorrectionWorkspace: View {
 
     private func deploySelectedDesign() {
         actionError = nil
-        guard let selected = projects.selectedDesign else {
+        guard projects.selectedDesign != nil else {
             actionError = "Select a generated room-correction design before deploying."
             return
         }
