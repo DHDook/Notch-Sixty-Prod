@@ -56,6 +56,14 @@ typedef enum {
 
 typedef struct N60RenderKernel N60RenderKernel;
 
+#define N60_AMBIENT_COMPENSATION_BAND_COUNT 3u
+
+typedef struct {
+    bool enabled;
+    N60BiquadBandSnapshot bands[N60_AMBIENT_COMPENSATION_BAND_COUNT];
+    uint32_t transitionFrames;
+} N60AmbientCompensationSnapshot;
+
 typedef struct {
     bool enabled;
     uint32_t programSlot;
@@ -99,6 +107,7 @@ typedef struct {
     N60CrossoverSnapshot crossover;
     N60DynamicsSnapshot dynamics;
     N60ProtectionSnapshot protection;
+    N60AmbientCompensationSnapshot ambientCompensation;
     N60ConvolutionGraphState convolution;
     N60ConvolutionGraphState roomCorrection;
     N60ConvolutionGraphState speakerIR;
@@ -331,6 +340,13 @@ bool N60DSPGraphSnapshotSetEQPreparedBand(
     double gainDB,
     double q,
     N60BiquadCoefficients coefficients,
+    bool enabled
+);
+bool N60DSPGraphSnapshotSetAmbientCompensation(
+    N60DSPGraphSnapshot * _Nonnull snapshot,
+    double lowSupportDB,
+    double presenceSupportDB,
+    double detailSupportDB,
     bool enabled
 );
 bool N60DSPGraphSnapshotSetCrossover(
