@@ -134,6 +134,16 @@ typedef struct {
 } N60RenderKernelRenderContext;
 
 typedef struct {
+    float sourceLeft;
+    float sourceRight;
+    float left;
+    float right;
+    float referenceLeft;
+    float referenceRight;
+    bool processingActive;
+} N60StereoPlaybackFrame;
+
+typedef struct {
     float peakLeft;
     float peakRight;
     float rmsLeft;
@@ -398,6 +408,22 @@ bool N60RenderKernelPublishSnapshot(
     N60DSPGraphSnapshot snapshot
 );
 N60RenderKernelRenderContext N60RenderKernelBeginRender(N60RenderKernel * _Nonnull kernel);
+void N60RenderKernelProcessStereoPlaybackFrameInContext(
+    N60RenderKernel * _Nonnull kernel,
+    N60RenderKernelRenderContext * _Nonnull context,
+    float inputLeft,
+    float inputRight,
+    N60StereoPlaybackFrame * _Nonnull playbackFrame
+);
+void N60RenderKernelProcessStereoSystemFrameInContext(
+    N60RenderKernel * _Nonnull kernel,
+    N60RenderKernelRenderContext * _Nonnull context,
+    const N60StereoPlaybackFrame * _Nonnull playbackFrame,
+    float rackLeft,
+    float rackRight,
+    float * _Nonnull outputLeft,
+    float * _Nonnull outputRight
+);
 void N60RenderKernelProcessStereoFrameInContext(
     N60RenderKernel * _Nonnull kernel,
     N60RenderKernelRenderContext * _Nonnull context,

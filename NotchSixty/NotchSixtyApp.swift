@@ -142,6 +142,23 @@ final class ProductController: ObservableObject {
         multichannelCalibration.prepareForUse()
     }
 
+    func startProcessing() async throws {
+        let format =
+            try audioEngine.audioUnitRackProcessingFormatForNextStart()
+        await audioUnitHost.prepareActiveSlotsForLive(format: format)
+        let liveRack =
+            try await audioUnitHost.makeLiveRackRuntime(format: format)
+        try audioEngine.stageAudioUnitRackForNextStart(liveRack)
+        do {
+            try audioEngine.start()
+        } catch {
+            // AudioIOEngine owns any staged live rack until the failed state is
+            // explicitly stopped. Do not tear it out from under a transport
+            // teardown that may still be completing.
+            throw error
+        }
+    }
+
     func shutdownForTermination() {
         multichannelCalibration.cancelMeasurement()
         calibration.cancelMeasurement()
@@ -1238,7 +1255,7 @@ private struct ProductionMenuBarView: View {
                         if engine.lifecycleState == .failed { engine.stop() }
                         guard engine.lifecycleState == .idle else { return }
                         do {
-                            try engine.start()
+                            try await product.startProcessing()
                             commandError = nil
                         } catch {
                             commandError = error.localizedDescription

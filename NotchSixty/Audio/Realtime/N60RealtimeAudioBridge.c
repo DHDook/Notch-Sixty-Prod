@@ -72,6 +72,9 @@ struct N60RealtimeAudioBridge {
     float *adaptiveCaptureScratch;
     float *adaptiveOutputScratch;
     N60RenderKernel *renderKernel;
+    N60AudioUnitLiveRackProcessor audioUnitRack;
+    float *audioUnitRackScratch;
+    N60StereoPlaybackFrame *audioUnitRackPlaybackFrames;
     N60SameDeviceOutputMap sameDeviceOutputMap;
     N60SpeakerBusSplitterRuntime speakerBusSplitter;
     N60SpeakerDriverProcessingRuntime speakerDriverProcessing;
@@ -513,6 +516,8 @@ void N60RealtimeAudioBridgeDestroy(N60RealtimeAudioBridge *bridge) {
     N60RenderKernelDestroy(bridge->renderKernel);
     free(bridge->adaptiveCaptureScratch);
     free(bridge->adaptiveOutputScratch);
+    free(bridge->audioUnitRackScratch);
+    free(bridge->audioUnitRackPlaybackFrames);
     free(bridge->analysisFrames);
     free(bridge->frames);
     free(bridge);
@@ -612,6 +617,39 @@ bool N60RealtimeAudioBridgeAdaptiveSampleRateEnabled(
     const N60RealtimeAudioBridge *bridge
 ) {
     return bridge != NULL && bridge->adaptiveSRC != NULL;
+}
+
+bool N60RealtimeAudioBridgeConfigureAudioUnitRack(
+    N60RealtimeAudioBridge *bridge,
+    N60AudioUnitLiveRackProcessor processor
+) {
+    if (bridge == NULL
+        || bridge->audioUnitRack.context != NULL
+        || !N60AudioUnitLiveRackProcessorIsValid(&processor)
+        || processor.channelCount != 2u
+        || processor.maximumFramesPerSlice > bridge->capacityFrames) {
+        return false;
+    }
+
+    float *scratch = (float *)calloc(
+        (size_t)bridge->capacityFrames * 2u,
+        sizeof(float)
+    );
+    N60StereoPlaybackFrame *playbackFrames =
+        (N60StereoPlaybackFrame *)calloc(
+            bridge->capacityFrames,
+            sizeof(N60StereoPlaybackFrame)
+        );
+    if (scratch == NULL || playbackFrames == NULL) {
+        free(scratch);
+        free(playbackFrames);
+        return false;
+    }
+
+    bridge->audioUnitRack = processor;
+    bridge->audioUnitRackScratch = scratch;
+    bridge->audioUnitRackPlaybackFrames = playbackFrames;
+    return true;
 }
 
 void N60RealtimeAudioBridgeSetOutputGain(N60RealtimeAudioBridge *bridge, float gain) {
@@ -1113,8 +1151,6 @@ OSStatus N60CaptureIOProc(
     (void)inNow;
     (void)inInputTime;
     (void)outOutputData;
-    (void)inOutputTime;
-
     N60RealtimeAudioBridge *bridge = (N60RealtimeAudioBridge *)inClientData;
     if (bridge == NULL || inInputData == NULL) return noErr;
     atomic_fetch_add_explicit(&bridge->captureCallbacks, 1, memory_order_relaxed);
@@ -1317,83 +1353,305 @@ OSStatus N60OutputIOProc(
     N60TransitionRampRuntime transitionRamp = bridge->transitionRuntime;
     N60StartupFadeRuntime startupFade = bridge->startupFadeRuntime;
 
-    N60RenderKernelRenderContext renderContext = N60RenderKernelBeginRender(bridge->renderKernel);
+    N60RenderKernelRenderContext renderContext =
+        N60RenderKernelBeginRender(bridge->renderKernel);
     UInt32 renderedFrames = 0;
-    uint32_t ringReadIndex = (uint32_t)(readIndex % bridge->capacityFrames);
+    uint32_t ringReadIndex =
+        (uint32_t)(readIndex % bridge->capacityFrames);
     float *outputLeft = outputView.left;
     float *outputRight = outputView.right;
-    for (UInt32 frameIndex = 0; frameIndex < framesToRead; ++frameIndex) {
-        N60StereoFrame frame;
-        if (adaptiveSampleRate) {
-            size_t base = (size_t)frameIndex * 2u;
-            frame = (N60StereoFrame){
-                bridge->adaptiveOutputScratch[base],
-                bridge->adaptiveOutputScratch[base + 1u]
-            };
-        } else {
-            frame = bridge->frames[ringReadIndex];
-            ringReadIndex += 1u;
-            if (ringReadIndex == bridge->capacityFrames) ringReadIndex = 0u;
-        }
-        N60StereoFrame processed;
-        N60RenderKernelProcessStereoFrameInContext(
-            bridge->renderKernel,
-            &renderContext,
-            frame.left,
-            frame.right,
-            &processed.left,
-            &processed.right
-        );
+    const bool rackConfigured =
+        N60AudioUnitLiveRackProcessorIsValid(&bridge->audioUnitRack);
+    const double outputSampleTime =
+        inOutputTime != NULL
+        && (inOutputTime->mFlags & kAudioTimeStampSampleTimeValid) != 0
+            ? inOutputTime->mSampleTime
+            : 0.0;
 
-        if (frameIndex < analysisFramesToWrite) {
-            bridge->analysisFrames[analysisRingIndex] = (N60AnalysisFrame){
-                frame.left, frame.right, processed.left, processed.right
-            };
-            analysisRingIndex = (analysisRingIndex + 1u) & N60_ANALYSIS_CAPTURE_MASK;
+    if (rackConfigured) {
+        if (framesToRead > bridge->audioUnitRack.maximumFramesPerSlice
+            || bridge->audioUnitRackScratch == NULL
+            || bridge->audioUnitRackPlaybackFrames == NULL) {
+            zero_output(outOutputData);
+            atomic_fetch_add_explicit(
+                &bridge->unsupportedBufferLayouts,
+                1u,
+                memory_order_relaxed
+            );
+            N60RenderKernelEndRender(
+                bridge->renderKernel,
+                &renderContext,
+                0u
+            );
+            return noErr;
         }
 
-        float transitionGain = next_transition_gain(&transitionRamp);
-        float gain = startup_fade_gain(&startupFade, masterGain) * transitionGain;
-        float finalLeft = processed.left * gain;
-        float finalRight = processed.right * gain;
-        if (sameDeviceMultiOutput) {
-            N60SpeakerBusFrame busFrame;
-            process_speaker_bus_splitter(
-                &bridge->speakerBusSplitter, finalLeft, finalRight, &busFrame
-            );
-            // PR43 invariant: mandatory crossover/speaker-bus splitting happens
-            // before any optional per-driver processing. Driver bypass can never
-            // restore full-range content to a protected Low/Mid/High/Sub bus.
-            N60SpeakerDriverProcessingRuntimeProcessValues(
-                &bridge->speakerDriverProcessing, busFrame.values
-            );
-            if (!N60SameDeviceOutputMapWriteFrame(
-                &bridge->sameDeviceOutputMap, &busFrame, outOutputData, frameIndex
-            )) {
-                zero_output(outOutputData);
-                atomic_fetch_add_explicit(&bridge->unsupportedBufferLayouts, 1, memory_order_relaxed);
-                N60RenderKernelEndRender(bridge->renderKernel, &renderContext, renderedFrames);
-                return noErr;
+        for (UInt32 frameIndex = 0;
+             frameIndex < framesToRead;
+             ++frameIndex) {
+            N60StereoFrame frame;
+            if (adaptiveSampleRate) {
+                const size_t base = (size_t)frameIndex * 2u;
+                frame = (N60StereoFrame){
+                    bridge->adaptiveOutputScratch[base],
+                    bridge->adaptiveOutputScratch[base + 1u]
+                };
+            } else {
+                frame = bridge->frames[ringReadIndex];
+                ringReadIndex += 1u;
+                if (ringReadIndex == bridge->capacityFrames) {
+                    ringReadIndex = 0u;
+                }
             }
-        } else {
-            *outputLeft = finalLeft;
-            *outputRight = finalRight;
+
+            N60StereoPlaybackFrame *playback =
+                &bridge->audioUnitRackPlaybackFrames[frameIndex];
+            N60RenderKernelProcessStereoPlaybackFrameInContext(
+                bridge->renderKernel,
+                &renderContext,
+                frame.left,
+                frame.right,
+                playback
+            );
+            const size_t base = (size_t)frameIndex * 2u;
+            bridge->audioUnitRackScratch[base] = playback->left;
+            bridge->audioUnitRackScratch[base + 1u] = playback->right;
         }
-        if (outputVUMeterEnabled) {
-            float absLeft = fabsf(finalLeft);
-            float absRight = fabsf(finalRight);
-            if (absLeft > outputVUPeakLeft) outputVUPeakLeft = absLeft;
-            if (absRight > outputVUPeakRight) outputVUPeakRight = absRight;
-            outputVUSquareSumLeft += (double)finalLeft * (double)finalLeft;
-            outputVUSquareSumRight += (double)finalRight * (double)finalRight;
-            if (absLeft > 1.0f) outputVUOverRangeSamples += 1;
-            if (absRight > 1.0f) outputVUOverRangeSamples += 1;
+
+        const bool processingActive =
+            framesToRead > 0u
+            && bridge->audioUnitRackPlaybackFrames[0].processingActive;
+        if (processingActive
+            && !N60AudioUnitLiveRackProcess(
+                &bridge->audioUnitRack,
+                bridge->audioUnitRackScratch,
+                bridge->audioUnitRackScratch,
+                framesToRead,
+                2u,
+                outputSampleTime)) {
+            zero_output(outOutputData);
+            atomic_fetch_add_explicit(
+                &bridge->unsupportedBufferLayouts,
+                1u,
+                memory_order_relaxed
+            );
+            N60RenderKernelEndRender(
+                bridge->renderKernel,
+                &renderContext,
+                0u
+            );
+            return noErr;
         }
-        if (!sameDeviceMultiOutput) {
-            outputLeft += outputView.leftStride;
-            outputRight += outputView.rightStride;
+
+        for (UInt32 frameIndex = 0;
+             frameIndex < framesToRead;
+             ++frameIndex) {
+            const N60StereoPlaybackFrame *playback =
+                &bridge->audioUnitRackPlaybackFrames[frameIndex];
+            const size_t base = (size_t)frameIndex * 2u;
+            N60StereoFrame processed = {0};
+            N60RenderKernelProcessStereoSystemFrameInContext(
+                bridge->renderKernel,
+                &renderContext,
+                playback,
+                processingActive
+                    ? bridge->audioUnitRackScratch[base]
+                    : playback->left,
+                processingActive
+                    ? bridge->audioUnitRackScratch[base + 1u]
+                    : playback->right,
+                &processed.left,
+                &processed.right
+            );
+
+            if (frameIndex < analysisFramesToWrite) {
+                bridge->analysisFrames[analysisRingIndex] =
+                    (N60AnalysisFrame){
+                        playback->sourceLeft,
+                        playback->sourceRight,
+                        processed.left,
+                        processed.right
+                    };
+                analysisRingIndex =
+                    (analysisRingIndex + 1u)
+                    & N60_ANALYSIS_CAPTURE_MASK;
+            }
+
+            const float transitionGain =
+                next_transition_gain(&transitionRamp);
+            const float gain =
+                startup_fade_gain(&startupFade, masterGain)
+                * transitionGain;
+            const float finalLeft = processed.left * gain;
+            const float finalRight = processed.right * gain;
+            if (sameDeviceMultiOutput) {
+                N60SpeakerBusFrame busFrame;
+                process_speaker_bus_splitter(
+                    &bridge->speakerBusSplitter,
+                    finalLeft,
+                    finalRight,
+                    &busFrame
+                );
+                N60SpeakerDriverProcessingRuntimeProcessValues(
+                    &bridge->speakerDriverProcessing,
+                    busFrame.values
+                );
+                if (!N60SameDeviceOutputMapWriteFrame(
+                        &bridge->sameDeviceOutputMap,
+                        &busFrame,
+                        outOutputData,
+                        frameIndex)) {
+                    zero_output(outOutputData);
+                    atomic_fetch_add_explicit(
+                        &bridge->unsupportedBufferLayouts,
+                        1u,
+                        memory_order_relaxed
+                    );
+                    N60RenderKernelEndRender(
+                        bridge->renderKernel,
+                        &renderContext,
+                        renderedFrames
+                    );
+                    return noErr;
+                }
+            } else {
+                *outputLeft = finalLeft;
+                *outputRight = finalRight;
+            }
+            if (outputVUMeterEnabled) {
+                const float absLeft = fabsf(finalLeft);
+                const float absRight = fabsf(finalRight);
+                if (absLeft > outputVUPeakLeft) {
+                    outputVUPeakLeft = absLeft;
+                }
+                if (absRight > outputVUPeakRight) {
+                    outputVUPeakRight = absRight;
+                }
+                outputVUSquareSumLeft +=
+                    (double)finalLeft * (double)finalLeft;
+                outputVUSquareSumRight +=
+                    (double)finalRight * (double)finalRight;
+                if (absLeft > 1.0f) {
+                    outputVUOverRangeSamples += 1u;
+                }
+                if (absRight > 1.0f) {
+                    outputVUOverRangeSamples += 1u;
+                }
+            }
+            if (!sameDeviceMultiOutput) {
+                outputLeft += outputView.leftStride;
+                outputRight += outputView.rightStride;
+            }
+            renderedFrames += 1u;
         }
-        renderedFrames += 1;
+    } else {
+        for (UInt32 frameIndex = 0;
+             frameIndex < framesToRead;
+             ++frameIndex) {
+            N60StereoFrame frame;
+            if (adaptiveSampleRate) {
+                const size_t base = (size_t)frameIndex * 2u;
+                frame = (N60StereoFrame){
+                    bridge->adaptiveOutputScratch[base],
+                    bridge->adaptiveOutputScratch[base + 1u]
+                };
+            } else {
+                frame = bridge->frames[ringReadIndex];
+                ringReadIndex += 1u;
+                if (ringReadIndex == bridge->capacityFrames) {
+                    ringReadIndex = 0u;
+                }
+            }
+            N60StereoFrame processed;
+            N60RenderKernelProcessStereoFrameInContext(
+                bridge->renderKernel,
+                &renderContext,
+                frame.left,
+                frame.right,
+                &processed.left,
+                &processed.right
+            );
+
+            if (frameIndex < analysisFramesToWrite) {
+                bridge->analysisFrames[analysisRingIndex] =
+                    (N60AnalysisFrame){
+                        frame.left,
+                        frame.right,
+                        processed.left,
+                        processed.right
+                    };
+                analysisRingIndex =
+                    (analysisRingIndex + 1u)
+                    & N60_ANALYSIS_CAPTURE_MASK;
+            }
+
+            const float transitionGain =
+                next_transition_gain(&transitionRamp);
+            const float gain =
+                startup_fade_gain(&startupFade, masterGain)
+                * transitionGain;
+            const float finalLeft = processed.left * gain;
+            const float finalRight = processed.right * gain;
+            if (sameDeviceMultiOutput) {
+                N60SpeakerBusFrame busFrame;
+                process_speaker_bus_splitter(
+                    &bridge->speakerBusSplitter,
+                    finalLeft,
+                    finalRight,
+                    &busFrame
+                );
+                N60SpeakerDriverProcessingRuntimeProcessValues(
+                    &bridge->speakerDriverProcessing,
+                    busFrame.values
+                );
+                if (!N60SameDeviceOutputMapWriteFrame(
+                        &bridge->sameDeviceOutputMap,
+                        &busFrame,
+                        outOutputData,
+                        frameIndex)) {
+                    zero_output(outOutputData);
+                    atomic_fetch_add_explicit(
+                        &bridge->unsupportedBufferLayouts,
+                        1u,
+                        memory_order_relaxed
+                    );
+                    N60RenderKernelEndRender(
+                        bridge->renderKernel,
+                        &renderContext,
+                        renderedFrames
+                    );
+                    return noErr;
+                }
+            } else {
+                *outputLeft = finalLeft;
+                *outputRight = finalRight;
+            }
+            if (outputVUMeterEnabled) {
+                const float absLeft = fabsf(finalLeft);
+                const float absRight = fabsf(finalRight);
+                if (absLeft > outputVUPeakLeft) {
+                    outputVUPeakLeft = absLeft;
+                }
+                if (absRight > outputVUPeakRight) {
+                    outputVUPeakRight = absRight;
+                }
+                outputVUSquareSumLeft +=
+                    (double)finalLeft * (double)finalLeft;
+                outputVUSquareSumRight +=
+                    (double)finalRight * (double)finalRight;
+                if (absLeft > 1.0f) {
+                    outputVUOverRangeSamples += 1u;
+                }
+                if (absRight > 1.0f) {
+                    outputVUOverRangeSamples += 1u;
+                }
+            }
+            if (!sameDeviceMultiOutput) {
+                outputLeft += outputView.leftStride;
+                outputRight += outputView.rightStride;
+            }
+            renderedFrames += 1u;
+        }
     }
 
     N60RenderKernelEndRender(bridge->renderKernel, &renderContext, renderedFrames);

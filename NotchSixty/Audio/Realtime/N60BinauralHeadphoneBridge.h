@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "N60ProgramTransport.h"
+#include "N60AudioUnitLiveRackBridge.h"
 #include "N60HeadTrackedBinauralRuntime.h"
 #include "N60HeadphoneDSP.h"
 #include "N60Protection.h"
@@ -50,6 +51,8 @@ typedef struct N60BinauralHeadphoneBridge {
     N60HeadTrackedBinauralRuntime * _Nullable binauralRuntime;
     N60HeadphoneDSPRuntime * _Nullable headphoneRuntime;
     N60ProtectionRuntime * _Nullable protectionRuntime;
+    N60AudioUnitLiveRackProcessor audioUnitRack;
+    float * _Nullable audioUnitRackScratch;
     N60ProgramInputMap inputMap;
     N60BinauralProfileDescriptor binauralDescriptor;
     N60HeadphoneDSPSnapshot headphoneSnapshot;
@@ -215,6 +218,7 @@ static inline void N60BinauralHeadphoneBridgeDestroy(
     N60HeadTrackedBinauralRuntimeDestroy(bridge->binauralRuntime);
     N60HeadphoneDSPRuntimeDestroy(bridge->headphoneRuntime);
     N60ProtectionRuntimeDestroy(bridge->protectionRuntime);
+    free(bridge->audioUnitRackScratch);
     bridge->transport = NULL;
     bridge->binauralRuntime = NULL;
     bridge->headphoneRuntime = NULL;
@@ -254,6 +258,35 @@ static inline bool N60BinauralHeadphoneBridgeReset(
     atomic_store_explicit(&bridge->gatedOutputFrames, 0u, memory_order_relaxed);
     atomic_store_explicit(&bridge->meteringDemand, false, memory_order_release);
     N60BinauralHeadphoneBridgeClearMeterPublication(bridge);
+    return true;
+}
+
+static inline bool N60BinauralHeadphoneBridgeConfigureAudioUnitRack(
+    N60BinauralHeadphoneBridge * _Nonnull bridge,
+    N60AudioUnitLiveRackProcessor processor
+) {
+    if (bridge == NULL
+        || bridge->transport == NULL
+        || bridge->audioUnitRack.context != NULL
+        || !N60AudioUnitLiveRackProcessorIsValid(&processor)
+        || processor.channelCount
+            != bridge->binauralDescriptor.programLayout.channelCount
+        || processor.maximumFramesPerSlice
+            > bridge->transport->capacityFrames) {
+        return false;
+    }
+
+    const size_t sampleCount =
+        (size_t)bridge->transport->capacityFrames
+        * bridge->binauralDescriptor.programLayout.channelCount;
+    float *scratch = (float *)calloc(
+        sampleCount,
+        sizeof(float)
+    );
+    if (scratch == NULL) return false;
+
+    bridge->audioUnitRack = processor;
+    bridge->audioUnitRackScratch = scratch;
     return true;
 }
 
@@ -334,7 +367,10 @@ static inline uint64_t N60BinauralHeadphoneBridgeLatencyFrames(
         > bridge->headphoneSnapshot.channels[1].delayFrames
         ? bridge->headphoneSnapshot.channels[0].delayFrames
         : bridge->headphoneSnapshot.channels[1].delayFrames;
-    return N60HeadTrackedBinauralRuntimeLatencyFrames(bridge->binauralRuntime)
+    return (N60AudioUnitLiveRackProcessorIsValid(&bridge->audioUnitRack)
+            ? bridge->audioUnitRack.latencyFrames
+            : 0u)
+        + N60HeadTrackedBinauralRuntimeLatencyFrames(bridge->binauralRuntime)
         + correctionDelay
         + (uint64_t)N60ProtectionSnapshotLatencyFrames(&bridge->protectionSnapshot);
 }
@@ -497,12 +533,82 @@ static inline OSStatus N60BinauralHeadphoneOutputIOProc(
     N60ProtectionRuntimeBeginBuffer(bridge->protectionRuntime);
     N60HeadTrackedBinauralRuntimeBeginBuffer(bridge->binauralRuntime);
 
+    const uint32_t programChannels =
+        bridge->binauralDescriptor.programLayout.channelCount;
+    const bool rackConfigured =
+        N60AudioUnitLiveRackProcessorIsValid(&bridge->audioUnitRack);
+
+    if (rackConfigured) {
+        if (frameCount > bridge->audioUnitRack.maximumFramesPerSlice
+            || bridge->audioUnitRackScratch == NULL) {
+            N60BinauralHeadphoneZeroOutput(outOutputData);
+            atomic_fetch_add_explicit(
+                &bridge->renderFailures, 1u, memory_order_relaxed
+            );
+            return noErr;
+        }
+
+        for (uint32_t frameIndex = 0;
+             frameIndex < frameCount;
+             ++frameIndex) {
+            N60ProgramTransportFrame program = {0};
+            (void)N60ProgramTransportDequeueFrame(
+                bridge->transport,
+                &program
+            );
+            float *destination =
+                bridge->audioUnitRackScratch
+                + (size_t)frameIndex * programChannels;
+            for (uint32_t channel = 0;
+                 channel < programChannels;
+                 ++channel) {
+                destination[channel] =
+                    program.channels[channel]
+                    * bridge->programGainLinear;
+            }
+        }
+
+        const double sampleTime =
+            inOutputTime != NULL
+            && (inOutputTime->mFlags
+                & kAudioTimeStampSampleTimeValid) != 0
+                ? inOutputTime->mSampleTime
+                : 0.0;
+        if (!N60AudioUnitLiveRackProcess(
+                &bridge->audioUnitRack,
+                bridge->audioUnitRackScratch,
+                bridge->audioUnitRackScratch,
+                frameCount,
+                programChannels,
+                sampleTime)) {
+            N60BinauralHeadphoneZeroOutput(outOutputData);
+            atomic_fetch_add_explicit(
+                &bridge->renderFailures, 1u, memory_order_relaxed
+            );
+            return noErr;
+        }
+    }
+
     for (uint32_t frameIndex = 0; frameIndex < frameCount; ++frameIndex) {
         N60ProgramTransportFrame program = {0};
-        (void)N60ProgramTransportDequeueFrame(bridge->transport, &program);
-
-        for (uint32_t channel = 0; channel < bridge->binauralDescriptor.programLayout.channelCount; ++channel) {
-            program.channels[channel] *= bridge->programGainLinear;
+        if (rackConfigured) {
+            memcpy(
+                program.channels,
+                bridge->audioUnitRackScratch
+                    + (size_t)frameIndex * programChannels,
+                (size_t)programChannels * sizeof(float)
+            );
+        } else {
+            (void)N60ProgramTransportDequeueFrame(
+                bridge->transport,
+                &program
+            );
+            for (uint32_t channel = 0;
+                 channel < programChannels;
+                 ++channel) {
+                program.channels[channel] *=
+                    bridge->programGainLinear;
+            }
         }
 
         float left = 0.0f;

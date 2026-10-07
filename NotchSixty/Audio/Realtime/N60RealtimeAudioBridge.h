@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 #include "N60AdaptiveSampleRate.h"
+#include "N60AudioUnitLiveRackBridge.h"
 #include "N60RenderKernel.h"
 
 #ifdef __cplusplus
@@ -129,6 +130,12 @@ bool N60RealtimeAudioBridgeConfigureAdaptiveSampleRate(
 );
 bool N60RealtimeAudioBridgeAdaptiveSampleRateEnabled(
     const N60RealtimeAudioBridge * _Nonnull bridge
+);
+// Control-plane only. Configure before callbacks start. The processor context
+// remains owned by the Swift transport session for the entire IOProc lifetime.
+bool N60RealtimeAudioBridgeConfigureAudioUnitRack(
+    N60RealtimeAudioBridge * _Nonnull bridge,
+    N60AudioUnitLiveRackProcessor processor
 );
 // Full render-kernel metering remains available for engineering/detailed meter
 // surfaces. This is intentionally independent from the lightweight Dashboard VU
