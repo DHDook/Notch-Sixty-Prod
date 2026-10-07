@@ -324,16 +324,42 @@ struct AudioUnitProbeResult: Codable, Equatable, Sendable {
     let supportsFullState: Bool
     let supportsHostBypass: Bool
 
-    var latencyFrames: Int {
+    static func conservativeFrameCount(
+        seconds: Double,
+        sampleRate: Double
+    ) -> Int {
         guard sampleRate.isFinite,
-              latencySeconds.isFinite else { return 0 }
-        return Int(ceil(max(0, latencySeconds) * sampleRate))
+              sampleRate > 0,
+              seconds.isFinite else {
+            return 0
+        }
+
+        let frames = max(0, seconds) * sampleRate
+        guard frames.isFinite,
+              frames <= Double(Int.max) else {
+            return 0
+        }
+
+        let nearest = frames.rounded()
+        let tolerance = max(1.0e-9, abs(frames) * 1.0e-12)
+        if abs(frames - nearest) <= tolerance {
+            return Int(nearest)
+        }
+        return Int(ceil(frames))
+    }
+
+    var latencyFrames: Int {
+        Self.conservativeFrameCount(
+            seconds: latencySeconds,
+            sampleRate: sampleRate
+        )
     }
 
     var tailFrames: Int {
-        guard sampleRate.isFinite,
-              tailTimeSeconds.isFinite else { return 0 }
-        return Int(ceil(max(0, tailTimeSeconds) * sampleRate))
+        Self.conservativeFrameCount(
+            seconds: tailTimeSeconds,
+            sampleRate: sampleRate
+        )
     }
 
     func validate(
