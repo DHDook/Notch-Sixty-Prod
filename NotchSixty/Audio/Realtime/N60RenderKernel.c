@@ -78,6 +78,7 @@ struct N60RenderKernel {
     N60EQBandRuntime ambientCompensationRuntime[
         N60_AMBIENT_COMPENSATION_BAND_COUNT
     ];
+    N60SmoothedGain ambientCompensationLevelGain;
     N60CrossoverRuntime crossoverRuntime;
     N60DynamicsRuntime dynamicsRuntime;
     N60SpectralDenoiserRuntime *denoiserRuntime;
@@ -302,6 +303,9 @@ static bool snapshot_is_valid(N60DSPGraphSnapshot snapshot) {
         || !N60DynamicsSnapshotIsValid(snapshot.dynamics)
         || !N60SpectralDenoiserSnapshotIsValid(snapshot.dynamics.spectralDenoiser, snapshot.sampleRate)
         || !N60ProtectionSnapshotIsValid(&snapshot.protection)
+        || !isfinite(snapshot.ambientCompensation.levelGainLinear)
+        || snapshot.ambientCompensation.levelGainLinear < 0.0f
+        || snapshot.ambientCompensation.levelGainLinear > 2.0f
         || snapshot.ambientCompensation.transitionFrames > 8192u
         || !convolution_snapshot_is_valid(snapshot.convolution)
         || !convolution_snapshot_is_valid(snapshot.roomCorrection)
@@ -519,6 +523,12 @@ static void prepare_runtime_for_snapshot(N60RenderKernel *kernel, const N60DSPGr
         reset_smoothed_gain(&kernel->speakerCrossfeedAmount, snapshot->speakerCrossfeed.enabled ? snapshot->speakerCrossfeed.amount : 0.0f);
         reset_smoothed_gain(&kernel->crosstalkCancellationAmount, snapshot->crosstalkCancellation.enabled ? snapshot->crosstalkCancellation.amount : 0.0f);
         reset_smoothed_gain(&kernel->crosstalkHeadShadowAlpha, snapshot->crosstalkCancellation.enabled ? snapshot->crosstalkCancellation.headShadowAlpha : 0.0f);
+        reset_smoothed_gain(
+            &kernel->ambientCompensationLevelGain,
+            snapshot->ambientCompensation.enabled
+                ? snapshot->ambientCompensation.levelGainLinear
+                : 1.0f
+        );
         kernel->crosstalkShadowLeft = 0.0f;
         kernel->crosstalkShadowRight = 0.0f;
         N60InterChannelDelayRuntimeReset(&kernel->interChannelDelayRuntime, snapshot->interChannelDelay);
@@ -534,6 +544,13 @@ static void prepare_runtime_for_snapshot(N60RenderKernel *kernel, const N60DSPGr
         schedule_gain_transition(&kernel->speakerCrossfeedAmount, snapshot->speakerCrossfeed.enabled ? snapshot->speakerCrossfeed.amount : 0.0f, gainFrames);
         schedule_gain_transition(&kernel->crosstalkCancellationAmount, snapshot->crosstalkCancellation.enabled ? snapshot->crosstalkCancellation.amount : 0.0f, gainFrames);
         schedule_gain_transition(&kernel->crosstalkHeadShadowAlpha, snapshot->crosstalkCancellation.enabled ? snapshot->crosstalkCancellation.headShadowAlpha : 0.0f, gainFrames);
+        schedule_gain_transition(
+            &kernel->ambientCompensationLevelGain,
+            snapshot->ambientCompensation.enabled
+                ? snapshot->ambientCompensation.levelGainLinear
+                : 1.0f,
+            gainFrames
+        );
         N60InterChannelDelayRuntimeSchedule(&kernel->interChannelDelayRuntime, snapshot->interChannelDelay, gainFrames);
     }
 
@@ -922,6 +939,7 @@ N60DSPGraphSnapshot N60DSPGraphSnapshotMakeUnity(double sampleRate) {
     snapshot.dynamics = N60DynamicsSnapshotMakeBypassed(sampleRate);
     snapshot.protection = N60ProtectionSnapshotMakeBypassed(sampleRate);
     snapshot.ambientCompensation.enabled = false;
+    snapshot.ambientCompensation.levelGainLinear = 1.0f;
     snapshot.ambientCompensation.transitionFrames =
         gain_transition_frames_for_sample_rate(sampleRate);
     snapshot.convolution.enabled = false;
@@ -1083,12 +1101,15 @@ bool N60DSPGraphSnapshotSetEQBand(N60DSPGraphSnapshot *snapshot, uint32_t bandIn
 
 bool N60DSPGraphSnapshotSetAmbientCompensation(
     N60DSPGraphSnapshot *snapshot,
+    double levelDB,
     double lowSupportDB,
     double presenceSupportDB,
     double detailSupportDB,
     bool enabled
 ) {
     if (snapshot == NULL
+        || !isfinite(levelDB)
+        || levelDB < 0.0 || levelDB > 6.0
         || !isfinite(lowSupportDB)
         || !isfinite(presenceSupportDB)
         || !isfinite(detailSupportDB)
@@ -1117,6 +1138,9 @@ bool N60DSPGraphSnapshotSetAmbientCompensation(
 
     N60AmbientCompensationSnapshot prepared = {0};
     prepared.enabled = enabled;
+    prepared.levelGainLinear = enabled
+        ? (float)pow(10.0, levelDB / 20.0)
+        : 1.0f;
     prepared.transitionFrames =
         gain_transition_frames_for_sample_rate(snapshot->sampleRate);
     for (uint32_t index = 0;
@@ -1270,6 +1294,8 @@ N60RenderKernel *N60RenderKernelCreate(void) {
     reset_smoothed_gain(&kernel->headroomGain, 1.0f);
     reset_smoothed_gain(&kernel->outputGain, 1.0f);
     reset_smoothed_gain(&kernel->masterGain, 1.0f);
+    reset_smoothed_gain(&kernel->ambientCompensationLevelGain, 1.0f);
+    reset_smoothed_gain(&kernel->ambientCompensationLevelGain, 1.0f);
     reset_smoothed_gain(&kernel->balanceGainLeft, 1.0f);
     reset_smoothed_gain(&kernel->balanceGainRight, 1.0f);
     N60InterChannelDelayRuntimeReset(&kernel->interChannelDelayRuntime, initial.interChannelDelay);
@@ -1312,6 +1338,7 @@ void N60RenderKernelReset(N60RenderKernel *kernel) {
     reset_smoothed_gain(&kernel->headroomGain, 1.0f);
     reset_smoothed_gain(&kernel->outputGain, 1.0f);
     reset_smoothed_gain(&kernel->masterGain, 1.0f);
+    reset_smoothed_gain(&kernel->ambientCompensationLevelGain, 1.0f);
     reset_smoothed_gain(&kernel->balanceGainLeft, 1.0f);
     reset_smoothed_gain(&kernel->balanceGainRight, 1.0f);
     N60InterChannelDelayRuntimeReset(&kernel->interChannelDelayRuntime, N60InterChannelDelaySnapshotMakeBypassed());
@@ -1762,6 +1789,13 @@ void N60RenderKernelProcessStereoSystemFrameInContext(
                 }
             }
         }
+
+        const float ambientLevelGain =
+            next_gain_value(
+                &kernel->ambientCompensationLevelGain
+            );
+        left *= ambientLevelGain;
+        right *= ambientLevelGain;
 
         N60DynamicsProcessCoreStereoFrameWithMasterGain(
             &kernel->dynamicsRuntime,
