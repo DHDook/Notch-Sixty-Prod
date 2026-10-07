@@ -60,6 +60,7 @@ typedef struct N60RenderKernel N60RenderKernel;
 
 typedef struct {
     bool enabled;
+    float levelGainLinear;
     N60BiquadBandSnapshot bands[N60_AMBIENT_COMPENSATION_BAND_COUNT];
     uint32_t transitionFrames;
 } N60AmbientCompensationSnapshot;
@@ -344,6 +345,7 @@ bool N60DSPGraphSnapshotSetEQPreparedBand(
 );
 bool N60DSPGraphSnapshotSetAmbientCompensation(
     N60DSPGraphSnapshot * _Nonnull snapshot,
+    double levelDB,
     double lowSupportDB,
     double presenceSupportDB,
     double detailSupportDB,
