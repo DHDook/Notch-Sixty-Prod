@@ -3,12 +3,20 @@ import Foundation
 import SwiftUI
 
 struct ProductionProfileToolbar: View {
-    @ObservedObject var profiles: ProductProfileController
-    @ObservedObject var engine: AudioIOEngine
+    let product: ProductController
+    @ObservedObject private var profiles: ProductProfileController
+    @ObservedObject private var engine: AudioIOEngine
 
     @State private var editorPrompt: EditorPrompt?
     @State private var draftName = ""
     @State private var interchangeMessage: String?
+    @State private var presetSelectionError: String?
+
+    init(product: ProductController) {
+        self.product = product
+        _profiles = ObservedObject(wrappedValue: product.profiles)
+        _engine = ObservedObject(wrappedValue: product.audioEngine)
+    }
 
     private enum EditorPrompt {
         case newContent
@@ -89,6 +97,17 @@ struct ProductionProfileToolbar: View {
         } message: {
             Text(interchangeMessage ?? "")
         }
+        .alert(
+            "Preset Change Failed",
+            isPresented: Binding(
+                get: { presetSelectionError != nil },
+                set: { if !$0 { presetSelectionError = nil } }
+            )
+        ) {
+            Button("OK") { presetSelectionError = nil }
+        } message: {
+            Text(presetSelectionError ?? "")
+        }
     }
 
     private var contentPresetMenu: some View {
@@ -96,7 +115,17 @@ struct ProductionProfileToolbar: View {
             Section("Content Presets") {
                 ForEach(profiles.contentPresets) { preset in
                     Button {
-                        profiles.selectContentPreset(preset.id)
+                        Task { @MainActor in
+                            do {
+                                try await product.selectContentPreset(
+                                    preset.id
+                                )
+                                presetSelectionError = nil
+                            } catch {
+                                presetSelectionError =
+                                    error.localizedDescription
+                            }
+                        }
                     } label: {
                         HStack {
                             if profiles.selectedContentPresetID == preset.id {
