@@ -20,6 +20,7 @@ UI = ROOT / "NotchSixty/UI/ProductionActiveAcousticsWorkspace.swift"
 ROOT_UI = ROOT / "NotchSixty/UI/ProductionRootView.swift"
 APP = ROOT / "NotchSixty/NotchSixtyApp.swift"
 TESTS = ROOT / "NotchSixtyTests/AmbientCompensationTests.swift"
+ANALYZER_TESTS = ROOT / "NotchSixtyTests/AmbientFieldAnalyzerTests.swift"
 PROFILE_TESTS = ROOT / "NotchSixtyTests/RoomCorrectionProjectControllerTests.swift"
 DOC = ROOT / "docs/PR89_AMBIENT_COMPENSATION.md"
 
@@ -50,6 +51,7 @@ ui = text(UI)
 root_ui = text(ROOT_UI)
 app = text(APP)
 tests = text(TESTS)
+analyzer_tests = text(ANALYZER_TESTS)
 profile_tests = text(PROFILE_TESTS)
 doc = text(DOC).lower()
 
@@ -90,6 +92,10 @@ for token in (
     "case playbackModelUnavailable",
     "AmbientPlaybackSourceReference",
     "acousticImpulseResponse",
+    "maximumPlaybackAlignmentSeconds",
+    "alignmentSearchRateHz",
+    "estimatePlaybackAlignment",
+    "normalizedCorrelation",
 ):
     require(token in analyzer, f"ambient analyzer missing {token}")
 
@@ -194,6 +200,7 @@ for token in (
     "replaceAmbientCompensationRuntimeTarget",
     "insufficientDigitalHeadroom",
     "attachAmbientCompensation(to: &graph)",
+    "ambientTargetClampedToHeadroom",
 ):
     require(token in engine, f"engine overlay integration missing {token}")
 
@@ -205,6 +212,28 @@ require(finalizer is not None, "central graph finalizer missing")
 require(
     "attachAmbientCompensation(to: &graph)" in finalizer.group(0),
     "ambient overlay is not centrally attached to every stereo graph rebuild",
+)
+
+replace_target = re.search(
+    r"func replaceAmbientCompensationRuntimeTarget[\s\S]*?func clearAmbientCompensationRuntimeTarget",
+    engine,
+)
+require(replace_target is not None, "ambient runtime target method missing")
+replace_text = replace_target.group(0)
+require(
+    replace_text.find("try session.publishDSPGraph(graph)")
+    < replace_text.rfind("ambientCompensationRuntimeTarget = target"),
+    "ambient target commits before live graph publication",
+)
+gain_apply = re.search(
+    r"private func applyGainConfiguration[\s\S]*?private func applyRoomCorrectionConfiguration",
+    engine,
+)
+require(gain_apply is not None, "gain configuration method missing")
+require(
+    "ambientTargetClampedToHeadroom" in gain_apply.group(0)
+    and "ambientCompensationRuntimeTarget =" in gain_apply.group(0),
+    "headroom changes do not atomically clamp ambient level recovery",
 )
 
 # Live monitor transport/controller.
@@ -237,6 +266,16 @@ for token in (
 require(
     "running playback must never use a microphone-only" in controller.lower(),
     "running playback lacks explicit mic-only startup hold",
+)
+require(
+    "holdReason: .invalidEvidence" in controller,
+    "incomplete rendered-reference evidence does not fail closed",
+)
+require(
+    "engine.setAmbientPlaybackReferenceDemand(false)" in controller
+    and "monitor?.stop()" in controller
+    and "resetAnalysisHistory()" in controller,
+    "fault path does not release ambient monitoring resources",
 )
 
 # Product/UI.
@@ -280,6 +319,12 @@ for token in (
     "testAmbientGraphOverlayDoesNotConsumeUserEQSlots",
 ):
     require(token in tests, f"ambient tests missing {token}")
+
+require(
+    "testPlaybackSubtractionRecoversFromIndependentClockWindowOffset"
+    in analyzer_tests,
+    "bounded mic/playback timing-alignment regression test missing",
+)
 
 require(
     "testAmbientCompensationPersistsWithPlaybackSystemOnly"
