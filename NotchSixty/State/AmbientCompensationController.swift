@@ -97,6 +97,8 @@ final class AmbientCompensationController: ObservableObject {
     private var playbackRightHistory: [Float] = []
     private var quietZoneLeftHistory: [Float] = []
     private var quietZoneRightHistory: [Float] = []
+    private var latestQuietZoneRawLeft: [Float] = []
+    private var latestQuietZoneRawRight: [Float] = []
     private var activeSystemID: UUID?
     private var quietZoneObservationDemand = false
 
@@ -110,6 +112,7 @@ final class AmbientCompensationController: ObservableObject {
     /// residual sample window is control data, not UI state.
     private(set) var latestDetailedAnalysis:
         AmbientAnalysisDetailedResult?
+    private(set) var analysisRevision: UInt64 = 0
     @Published private(set) var appliedTarget =
         AmbientCompensationTarget.unity
     @Published private(set) var lastErrorDescription: String?
@@ -484,6 +487,7 @@ final class AmbientCompensationController: ObservableObject {
             let analysis = detailed.snapshot
             latestDetailedAnalysis = detailed
             latestAnalysis = analysis
+            analysisRevision &+= 1
 
             let planned: AmbientCompensationTarget
             if !configuration.enabled {
@@ -651,6 +655,9 @@ final class AmbientCompensationController: ObservableObject {
         let right = zip(renderedRight, quietRight).map {
             $0.0 - $0.1
         }
+        latestQuietZoneRawLeft = quietLeft
+        latestQuietZoneRawRight = quietRight
+
         let sourceModel = try acousticModel(
             monitorSampleRate: monitorSampleRate
         )
@@ -790,12 +797,45 @@ final class AmbientCompensationController: ObservableObject {
         monitorStatus = .stopped
     }
 
+    func quietZoneReferenceAlignedToLatestAnalysis()
+        -> (left: [Float], right: [Float])? {
+        guard let detailed = latestDetailedAnalysis else {
+            return nil
+        }
+        let count = detailed.separatedResidualSamples.count
+        guard count > 0,
+              latestQuietZoneRawLeft.count == count,
+              latestQuietZoneRawRight.count == count else {
+            return nil
+        }
+        let lag = detailed.playbackAlignmentLagFrames ?? 0
+
+        func aligned(_ source: [Float]) -> [Float] {
+            var result = [Float](repeating: 0, count: count)
+            for index in result.indices {
+                let sourceIndex = index - lag
+                if sourceIndex >= 0,
+                   sourceIndex < source.count {
+                    result[index] = source[sourceIndex]
+                }
+            }
+            return result
+        }
+
+        return (
+            aligned(latestQuietZoneRawLeft),
+            aligned(latestQuietZoneRawRight)
+        )
+    }
+
     private func resetAnalysisHistory() {
         microphoneHistory.removeAll(keepingCapacity: true)
         playbackLeftHistory.removeAll(keepingCapacity: true)
         playbackRightHistory.removeAll(keepingCapacity: true)
         quietZoneLeftHistory.removeAll(keepingCapacity: true)
         quietZoneRightHistory.removeAll(keepingCapacity: true)
+        latestQuietZoneRawLeft.removeAll(keepingCapacity: true)
+        latestQuietZoneRawRight.removeAll(keepingCapacity: true)
         latestAnalysis = nil
         latestDetailedAnalysis = nil
     }
