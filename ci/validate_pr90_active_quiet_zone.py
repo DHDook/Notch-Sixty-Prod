@@ -103,7 +103,7 @@ for token in (
     "cancellationProbe",
     "ambient.analysisRevision",
     "quietZoneReferenceAlignedToLatestAnalysis",
-    "minimumProbeImprovementDB",
+    "planner.verify(",
     "faultFadeMilliseconds",
     "replaceActiveQuietZoneRuntimeTarget",
 ):
