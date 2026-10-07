@@ -456,7 +456,7 @@ struct RoomTreatmentAdvisorAnalyzer: Sendable {
                             frequencyHz: $0
                         )
                     }
-                guard neighborhood.count >= 8 else {
+                guard neighborhood.count >= 6 else {
                     continue
                 }
                 let baseline = median(neighborhood)
