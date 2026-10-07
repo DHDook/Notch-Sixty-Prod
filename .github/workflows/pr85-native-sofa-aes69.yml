@@ -1,0 +1,96 @@
+name: PR85 Native SOFA AES69
+
+on:
+  push:
+    branches:
+      - feature/pr85-native-sofa-aes69
+  pull_request:
+    branches:
+      - feature/pr84a-au-hardening
+  workflow_dispatch:
+
+concurrency:
+  group: pr85-native-sofa-aes69-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate PR85 SOFA architecture
+        run: python3 ci/validate_pr85_native_sofa.py
+      - name: Validate inherited PR84A hardening
+        run: python3 ci/validate_pr84a_audio_unit_hardening.py
+      - name: Compile strict product SOFA bridge
+        run: |
+          clang -std=c11 -Wall -Wextra -Werror \
+            -INotchSixty/Audio/SOFA \
+            -INotchSixty/Audio/SOFA/Vendor/libmysofa/hrtf \
+            -INotchSixty/Audio/SOFA/Vendor/libmysofa/hdf \
+            -c NotchSixty/Audio/SOFA/N60SOFABridge.c \
+            -o /tmp/n60-sofa-bridge.o
+      - name: Link vendored SOFA reader subset
+        run: |
+          clang -std=c11 -O2 -Wall -Wextra \
+            -INotchSixty/Audio/SOFA \
+            -INotchSixty/Audio/SOFA/Vendor/libmysofa/hrtf \
+            -INotchSixty/Audio/SOFA/Vendor/libmysofa/hdf \
+            ci/validate_pr85_sofa_bridge.c \
+            NotchSixty/Audio/SOFA/N60SOFABridge.c \
+            NotchSixty/Audio/SOFA/Vendor/libmysofa/hrtf/reader.c \
+            NotchSixty/Audio/SOFA/Vendor/libmysofa/hrtf/tools.c \
+            NotchSixty/Audio/SOFA/Vendor/libmysofa/hrtf/spherical.c \
+            NotchSixty/Audio/SOFA/Vendor/libmysofa/hdf/superblock.c \
+            NotchSixty/Audio/SOFA/Vendor/libmysofa/hdf/dataobject.c \
+            NotchSixty/Audio/SOFA/Vendor/libmysofa/hdf/btree.c \
+            NotchSixty/Audio/SOFA/Vendor/libmysofa/hdf/fractalhead.c \
+            NotchSixty/Audio/SOFA/Vendor/libmysofa/hdf/gunzip.c \
+            NotchSixty/Audio/SOFA/Vendor/libmysofa/hdf/gcol.c \
+            -lz -lm -o /tmp/pr85-sofa-bridge
+          /tmp/pr85-sofa-bridge
+
+  validate-macos-integration:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate PR85 SOFA architecture
+        run: python3 ci/validate_pr85_native_sofa.py
+      - name: Install fixture generator dependency
+        run: python3 -m pip install --quiet netCDF4 numpy
+      - name: Generate license-clean AES69/SOFA fixture
+        run: |
+          python3 ci/generate_pr85_sofa_fixture.py "$RUNNER_TEMP/pr85-generated.sofa"
+      - name: Build arm64 app with native SOFA reader
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            build
+      - name: Run PR85 native SOFA tests
+        env:
+          PR85_SOFA_FIXTURE: ${{ runner.temp }}/pr85-generated.sofa
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            -only-testing:NotchSixtyTests/NativeSOFAImporterTests \
+            test
+      - name: Run retained XCTest suite
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            test
