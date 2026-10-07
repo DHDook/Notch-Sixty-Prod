@@ -502,6 +502,53 @@ final class AudioUnitHostController: ObservableObject {
         lastErrorDescription = nil
     }
 
+    func makeLiveRackRuntime(
+        format: AudioUnitRackProcessingFormat
+    ) async throws -> AudioUnitLiveRackRuntime? {
+        let plan = try executionPlan(for: format)
+        var buildSlots: [AudioUnitLiveRackBuildSlot] = []
+        buildSlots.reserveCapacity(rackConfiguration.slots.count)
+
+        for (index, slot) in rackConfiguration.slots.enumerated() {
+            let execution = plan.slots[index]
+            let descriptor = slot.component.flatMap {
+                descriptor(for: $0)
+            }
+            let report = offlineReportsBySlotID[slot.id]
+            if execution.mode == .process {
+                guard report != nil else {
+                    throw AudioUnitLiveRackBuildError
+                        .missingPreparedSlot(index)
+                }
+            }
+            buildSlots.append(AudioUnitLiveRackBuildSlot(
+                slotIndex: index,
+                slot: slot,
+                execution: execution,
+                descriptor: descriptor,
+                offlineReport: report
+            ))
+        }
+
+        let runtime = try await AudioUnitLiveRackRuntime.build(
+            format: format,
+            plan: plan,
+            slots: buildSlots
+        )
+        runtime?.startFaultMonitoring { [weak self] fault in
+            guard let component = fault.component else { return }
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.quarantineComponent(
+                    component,
+                    reason: .runtimeFailure,
+                    description: fault.description
+                )
+            }
+        }
+        return runtime
+    }
+
     func executionPlan(
         for format: AudioUnitRackProcessingFormat
     ) throws -> AudioUnitRackExecutionPlan {
