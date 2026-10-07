@@ -212,6 +212,7 @@ enum CoreAudioTransportError: Error, LocalizedError, Equatable {
     case speakerBusSplitterConfigurationFailed
     case speakerDriverProcessingConfigurationFailed
     case headphoneDSPConfigurationFailed
+    case audioUnitRackConfigurationFailed
 
     var errorDescription: String? {
         switch self {
@@ -251,6 +252,8 @@ enum CoreAudioTransportError: Error, LocalizedError, Equatable {
             return "Unable to configure immutable per-driver speaker processing before audio callbacks start."
         case .headphoneDSPConfigurationFailed:
             return "Unable to configure the immutable headphone correction stage before audio callbacks start."
+        case .audioUnitRackConfigurationFailed:
+            return "Unable to configure the immutable live Audio Unit rack before audio callbacks start."
         }
     }
 }
@@ -428,6 +431,7 @@ final class CoreAudioTransportSession {
     private var bridge: OpaquePointer?
     private var graphPublicationCoordinator: DSPGraphPublicationCoordinator?
     private var analysisWorker: ProductionAnalysisWorker?
+    private var audioUnitRack: AudioUnitLiveRackRuntime?
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateDeviceID = AudioDeviceID(kAudioObjectUnknown)
     private var captureIOProcID: AudioDeviceIOProcID?
@@ -443,12 +447,14 @@ final class CoreAudioTransportSession {
         aggregateDeviceOutputPlan: AggregateDeviceOutputRoutePlan? = nil,
         speakerCrossoverMode: SpeakerCrossoverMode? = nil,
         speakerBusSplitterSnapshot: N60SpeakerBusSplitterSnapshot? = nil,
-        speakerDriverProcessingSnapshot: N60SpeakerDriverProcessingSnapshot? = nil
+        speakerDriverProcessingSnapshot: N60SpeakerDriverProcessingSnapshot? = nil,
+        audioUnitRack: AudioUnitLiveRackRuntime? = nil
     ) throws {
         precondition(sameDeviceOutputPlan == nil || aggregateDeviceOutputPlan == nil)
         self.selectedOutput = selectedOutput
         self.sameDeviceOutputPlan = sameDeviceOutputPlan
         self.aggregateDeviceOutputPlan = aggregateDeviceOutputPlan
+        self.audioUnitRack = audioUnitRack
         guard let newBridge = N60RealtimeAudioBridgeCreate(Self.bridgeCapacityFrames) else {
             throw CoreAudioTransportError.realtimeBridgeAllocationFailed
         }
@@ -564,6 +570,17 @@ final class CoreAudioTransportSession {
                 scope: kAudioObjectPropertyScopeGlobal,
                 operation: "read physical output buffer size"
             )
+            if let audioUnitRack {
+                guard abs(audioUnitRack.format.sampleRate - outputFormat.sampleRate) < 0.5,
+                      audioUnitRack.format.channelCount == 2,
+                      outputBufferFrames <= UInt32(audioUnitRack.format.maximumFramesPerSlice),
+                      N60RealtimeAudioBridgeConfigureAudioUnitRack(
+                        newBridge,
+                        audioUnitRack.processor
+                      ) else {
+                    throw CoreAudioTransportError.audioUnitRackConfigurationFailed
+                }
+            }
             let gatePolicy = AudioStartupGatePolicy(
                 outputBufferFrames: outputBufferFrames,
                 sampleRate: outputFormat.sampleRate
@@ -1012,6 +1029,8 @@ final class CoreAudioTransportSession {
             N60RealtimeAudioBridgeDestroy(bridge)
             self.bridge = nil
         }
+        audioUnitRack?.stopFaultMonitoring()
+        audioUnitRack = nil
         graphPublicationCoordinator = nil
     }
 
