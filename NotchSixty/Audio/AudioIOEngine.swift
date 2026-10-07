@@ -1646,6 +1646,7 @@ final class AudioIOEngine: ObservableObject {
                 to: &graph,
                 playbackConfiguration: playbackControlConfiguration
             )
+            try applyAudioUnitRackLatency(to: &graph)
             try session.publishDSPGraph(graph)
         }
         bassManagementConfiguration = configuration
@@ -1756,9 +1757,11 @@ final class AudioIOEngine: ObservableObject {
                 || (configuration.spectralDenoiser.enabled
                     && dynamicsConfiguration.spectralDenoiser.quality != configuration.spectralDenoiser.quality)
             if protectionStructureChanged || denoiserStructureChanged {
+                try applyAudioUnitRackLatency(to: &graph)
                 try session.transitionDSPGraph(graph)
             } else {
-                try session.publishDSPGraph(graph)
+                try applyAudioUnitRackLatency(to: &graph)
+            try session.publishDSPGraph(graph)
             }
         }
         dynamicsConfiguration = configuration
@@ -2106,7 +2109,8 @@ final class AudioIOEngine: ObservableObject {
             if processingIsBypassed(playbackControlConfiguration) {
                 // The raw path is already active. Update state without rotating FIR
                 // programs or fading an audibly identical raw graph.
-                try session.publishDSPGraph(graph)
+                try applyAudioUnitRackLatency(to: &graph)
+            try session.publishDSPGraph(graph)
                 activeEQFIRProgram = nil
                 linearPhaseDesignInfo = nil
             } else {
@@ -2129,9 +2133,11 @@ final class AudioIOEngine: ObservableObject {
                     && (!configuration.requiresEQFIRProgram || configuration.bypassed)
                 let enteringOrReplacingEQFIR = preparedEQFIRProgram != nil
                 if leavingEQFIR || enteringOrReplacingEQFIR {
-                    try session.transitionDSPGraph(graph)
+                    try applyAudioUnitRackLatency(to: &graph)
+                try session.transitionDSPGraph(graph)
                 } else {
-                    try session.publishDSPGraph(graph)
+                    try applyAudioUnitRackLatency(to: &graph)
+            try session.publishDSPGraph(graph)
                 }
                 activeEQFIRProgram = preparedEQFIRProgram
             }
@@ -2217,9 +2223,11 @@ final class AudioIOEngine: ObservableObject {
 
             let auditionModeChanged = playbackControlConfiguration.auditionMode != configuration.auditionMode
             if wasBypassed != willBeBypassed || auditionModeChanged {
+                try applyAudioUnitRackLatency(to: &graph)
                 try session.transitionDSPGraph(graph)
             } else {
-                try session.publishDSPGraph(graph)
+                try applyAudioUnitRackLatency(to: &graph)
+            try session.publishDSPGraph(graph)
             }
         }
 
@@ -2263,6 +2271,7 @@ final class AudioIOEngine: ObservableObject {
             try attachActiveEQFIRProgramIfNeeded(to: &graph, stereoConfiguration: stereoEQConfiguration, playbackConfiguration: playbackControlConfiguration)
             try attachActiveRoomCorrectionProgramIfNeeded(to: &graph, playbackConfiguration: playbackControlConfiguration)
             try attachActiveSpeakerIRProgramIfNeeded(to: &graph, playbackConfiguration: playbackControlConfiguration)
+            try applyAudioUnitRackLatency(to: &graph)
             try session.publishDSPGraph(graph)
         }
         if let session = nChannelTransportSession, abs(oldSoftwareGain - newSoftwareGain) > 0.000_001 {
@@ -2317,6 +2326,7 @@ final class AudioIOEngine: ObservableObject {
             try attachActiveEQFIRProgramIfNeeded(to: &graph, stereoConfiguration: stereoEQConfiguration, playbackConfiguration: playbackControlConfiguration)
             try attachActiveRoomCorrectionProgramIfNeeded(to: &graph, playbackConfiguration: playbackControlConfiguration)
             try attachActiveSpeakerIRProgramIfNeeded(to: &graph, playbackConfiguration: playbackControlConfiguration)
+            try applyAudioUnitRackLatency(to: &graph)
             try session.publishDSPGraph(graph)
         }
         if let session = nChannelTransportSession, abs(oldGain - newGain) > 0.000_001 {
@@ -2394,6 +2404,7 @@ final class AudioIOEngine: ObservableObject {
                 to: &graph,
                 playbackConfiguration: playbackControlConfiguration
             )
+            try applyAudioUnitRackLatency(to: &graph)
             try session.publishDSPGraph(graph)
         }
         gainConfiguration = configuration
@@ -2436,7 +2447,8 @@ final class AudioIOEngine: ObservableObject {
                 }
                 // Stay on the untreated path without rotating a stale FIR slot or
                 // invoking a fade-through-silence transition.
-                try session.publishDSPGraph(graph)
+                try applyAudioUnitRackLatency(to: &graph)
+            try session.publishDSPGraph(graph)
                 activeRoomCorrectionProgram = nil
             } else if configuration.enabled {
                 guard let filter = configuration.filter else {
@@ -2444,13 +2456,16 @@ final class AudioIOEngine: ObservableObject {
                 }
                 let preparedProgram = try prepareRoomCorrectionProgram(filter, for: session)
                 try attachRoomCorrectionProgram(preparedProgram, to: &graph)
+                try applyAudioUnitRackLatency(to: &graph)
                 try session.transitionDSPGraph(graph)
                 activeRoomCorrectionProgram = preparedProgram
             } else {
                 if activeRoomCorrectionProgram != nil {
-                    try session.transitionDSPGraph(graph)
+                    try applyAudioUnitRackLatency(to: &graph)
+                try session.transitionDSPGraph(graph)
                 } else {
-                    try session.publishDSPGraph(graph)
+                    try applyAudioUnitRackLatency(to: &graph)
+            try session.publishDSPGraph(graph)
                 }
                 activeRoomCorrectionProgram = nil
             }
@@ -2496,7 +2511,8 @@ final class AudioIOEngine: ObservableObject {
                         outputSampleRate: session.outputFormat.sampleRate
                     )
                 }
-                try session.publishDSPGraph(graph)
+                try applyAudioUnitRackLatency(to: &graph)
+            try session.publishDSPGraph(graph)
                 activeSpeakerIRProgram = nil
             } else if configuration.enabled {
                 guard let filter = configuration.filter else {
@@ -2504,13 +2520,16 @@ final class AudioIOEngine: ObservableObject {
                 }
                 let preparedProgram = try prepareSpeakerIRProgram(filter, for: session)
                 try attachSpeakerIRProgram(preparedProgram, to: &graph)
+                try applyAudioUnitRackLatency(to: &graph)
                 try session.transitionDSPGraph(graph)
                 activeSpeakerIRProgram = preparedProgram
             } else {
                 if activeSpeakerIRProgram != nil {
-                    try session.transitionDSPGraph(graph)
+                    try applyAudioUnitRackLatency(to: &graph)
+                try session.transitionDSPGraph(graph)
                 } else {
-                    try session.publishDSPGraph(graph)
+                    try applyAudioUnitRackLatency(to: &graph)
+            try session.publishDSPGraph(graph)
                 }
                 activeSpeakerIRProgram = nil
             }
@@ -2789,6 +2808,23 @@ final class AudioIOEngine: ObservableObject {
             throw RoomCorrectionConfigurationError.convolutionProgramUnavailable
         }
         try attachRoomCorrectionProgram(activeRoomCorrectionProgram, to: &graph)
+    }
+
+    private func applyAudioUnitRackLatency(
+        to graph: inout N60DSPGraphSnapshot
+    ) throws {
+        guard let stagedAudioUnitRack else { return }
+        let combinedLatency =
+            UInt64(graph.latencyFrames)
+            + UInt64(max(stagedAudioUnitRack.totalLatencyFrames, 0))
+        guard combinedLatency <= UInt64(UInt32.max) else {
+            throw CoreAudioTransportError.audioUnitRackConfigurationFailed
+        }
+        if graph.auditionMode != N60AuditionModeProcessed,
+           combinedLatency >= UInt64(N60_MAX_AUDITION_DELAY_FRAMES) {
+            throw CoreAudioTransportError.audioUnitRackConfigurationFailed
+        }
+        graph.latencyFrames = UInt32(combinedLatency)
     }
 
     private func attachSpeakerIRProgram(
@@ -3205,22 +3241,7 @@ final class AudioIOEngine: ObservableObject {
             }
         }
 
-        if let stagedAudioUnitRack {
-            let combinedLatency =
-                UInt64(graph.latencyFrames)
-                + UInt64(max(stagedAudioUnitRack.totalLatencyFrames, 0))
-            guard combinedLatency <= UInt64(UInt32.max) else {
-                session.stop(fadeOut: false)
-                throw CoreAudioTransportError.audioUnitRackConfigurationFailed
-            }
-            if graph.auditionMode != N60AuditionModeProcessed,
-               combinedLatency >= UInt64(N60_MAX_AUDITION_DELAY_FRAMES) {
-                session.stop(fadeOut: false)
-                throw CoreAudioTransportError.audioUnitRackConfigurationFailed
-            }
-            graph.latencyFrames = UInt32(combinedLatency)
-        }
-
+        try applyAudioUnitRackLatency(to: &graph)
         try session.publishDSPGraph(graph)
         transportSession = session
     }
