@@ -86,11 +86,21 @@ Candidate scoring uses:
 - very-early reflection timing penalties;
 - movement distance / practicality penalty.
 
-The result is a short ranked list of **predicted placement experiments**.
+The result is a short ranked list of **predicted placement experiments** with
+target coordinates.
 
-No candidate is applied automatically. The workflow explicitly asks the user to
-move the speaker/listener, repeat a measurement with the same microphone, and
-verify the result.
+A candidate may be previewed in the Advisor room-model draft, but previewing does
+not change the saved room model, Playback System, Content Preset or DSP state.
+The user must explicitly save geometry after physically moving hardware.
+
+The verification sequence is:
+1. preview one candidate;
+2. physically make only that move;
+3. save the actual new geometry;
+4. repeat the same measurement positions with the same microphone;
+5. keep the move only if the measured PR92 problem improves.
+
+No candidate is applied automatically.
 
 ## UI
 
@@ -104,6 +114,8 @@ PR93 adds a **Geometry & Placement** section after measurement readiness:
 - strongest mode / reflection / boundary predictions;
 - measurement corroboration badges;
 - ranked placement experiments with expected direction of improvement;
+- target coordinates and non-destructive room-model preview;
+- guided physical move → re-measure → verify sequence;
 - explicit “Prediction — verify with measurement” labeling.
 
 Geometry is occasional-use analysis data. It never appears in Content Preset or
