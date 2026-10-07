@@ -74,6 +74,8 @@
 		F70000000000000000000001 /* N60AdaptiveSampleRate.c in Sources */ = {isa = PBXBuildFile; fileRef = F70000000000000000000011 /* N60AdaptiveSampleRate.c */; };
 		F72000000000000000000001 /* AmbientFieldAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F72000000000000000000011 /* AmbientFieldAnalyzer.swift */; };
 		F72000000000000000000002 /* AmbientFieldAnalyzerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F72000000000000000000012 /* AmbientFieldAnalyzerTests.swift */; };
+		F89000000000000000000001 /* AmbientCompensation.swift in Sources */ = {isa = PBXBuildFile; fileRef = F89000000000000000000011 /* AmbientCompensation.swift */; };
+		F89000000000000000000002 /* AmbientCompensationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F89000000000000000000012 /* AmbientCompensationTests.swift */; };
 		F73000000000000000000001 /* MIMORoomTreatmentDesigner.swift in Sources */ = {isa = PBXBuildFile; fileRef = F73000000000000000000011 /* MIMORoomTreatmentDesigner.swift */; };
 		F73000000000000000000002 /* MIMORoomTreatmentDesignerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F73000000000000000000012 /* MIMORoomTreatmentDesignerTests.swift */; };
 		F74000000000000000000001 /* MIMORoomTreatmentFIRCompiler.swift in Sources */ = {isa = PBXBuildFile; fileRef = F74000000000000000000011 /* MIMORoomTreatmentFIRCompiler.swift */; };
@@ -203,6 +205,8 @@
 		F70000000000000000000012 /* N60AdaptiveSampleRate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60AdaptiveSampleRate.h; sourceTree = "<group>"; };
 		F72000000000000000000011 /* AmbientFieldAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AmbientFieldAnalyzer.swift; sourceTree = "<group>"; };
 		F72000000000000000000012 /* AmbientFieldAnalyzerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AmbientFieldAnalyzerTests.swift; sourceTree = "<group>"; };
+		F89000000000000000000011 /* AmbientCompensation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AmbientCompensation.swift; sourceTree = "<group>"; };
+		F89000000000000000000012 /* AmbientCompensationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AmbientCompensationTests.swift; sourceTree = "<group>"; };
 		F73000000000000000000011 /* MIMORoomTreatmentDesigner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMORoomTreatmentDesigner.swift; sourceTree = "<group>"; };
 		F73000000000000000000012 /* MIMORoomTreatmentDesignerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMORoomTreatmentDesignerTests.swift; sourceTree = "<group>"; };
 		F74000000000000000000011 /* MIMORoomTreatmentFIRCompiler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMORoomTreatmentFIRCompiler.swift; sourceTree = "<group>"; };
@@ -299,6 +303,7 @@
 				A10000000000000000000033 /* RoomCorrectionTargetDesignerTests.swift */,
 				E10000000000000000000012 /* RoomCorrectionFIRDesignerTests.swift */,
 				F72000000000000000000012 /* AmbientFieldAnalyzerTests.swift */,
+				F89000000000000000000012 /* AmbientCompensationTests.swift */,
 				F73000000000000000000012 /* MIMORoomTreatmentDesignerTests.swift */,
 				F74000000000000000000012 /* MIMORoomTreatmentFIRCompilerTests.swift */,
 				F75000000000000000000012 /* MIMORoomTreatmentVerificationTests.swift */,
@@ -339,6 +344,7 @@
 				A20000000000000000000030 /* RoomCorrectionTargetDesigner.swift */,
 				E20000000000000000000012 /* RoomCorrectionFIRDesigner.swift */,
 				F72000000000000000000011 /* AmbientFieldAnalyzer.swift */,
+				F89000000000000000000011 /* AmbientCompensation.swift */,
 				F73000000000000000000011 /* MIMORoomTreatmentDesigner.swift */,
 				F74000000000000000000011 /* MIMORoomTreatmentFIRCompiler.swift */,
 				F75000000000000000000011 /* MIMORoomTreatmentVerification.swift */,
@@ -503,6 +509,7 @@
 				A30000000000000000000018 /* N60RoomMeasurementBridge.c in Sources */,
 				F70000000000000000000001 /* N60AdaptiveSampleRate.c in Sources */,
 				F72000000000000000000001 /* AmbientFieldAnalyzer.swift in Sources */,
+				F89000000000000000000001 /* AmbientCompensation.swift in Sources */,
 				F73000000000000000000001 /* MIMORoomTreatmentDesigner.swift in Sources */,
 				F74000000000000000000001 /* MIMORoomTreatmentFIRCompiler.swift in Sources */,
 				F75000000000000000000001 /* MIMORoomTreatmentVerification.swift in Sources */,
@@ -547,6 +554,7 @@
 				A1000000000000000000001E /* RoomCorrectionTargetDesignerTests.swift in Sources */,
 				E10000000000000000000002 /* RoomCorrectionFIRDesignerTests.swift in Sources */,
 				F72000000000000000000002 /* AmbientFieldAnalyzerTests.swift in Sources */,
+				F89000000000000000000002 /* AmbientCompensationTests.swift in Sources */,
 				F73000000000000000000002 /* MIMORoomTreatmentDesignerTests.swift in Sources */,
 				F74000000000000000000002 /* MIMORoomTreatmentFIRCompilerTests.swift in Sources */,
 				F75000000000000000000002 /* MIMORoomTreatmentVerificationTests.swift in Sources */,
