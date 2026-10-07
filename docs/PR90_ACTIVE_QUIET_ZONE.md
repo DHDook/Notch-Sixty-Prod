@@ -91,7 +91,7 @@ A component is eligible only when all are true:
 
 Anti-noise is additive energy and must not bypass output protection.
 
-The realtime generator is inserted upstream of dynamics/protection. Its output
+The realtime generator is inserted after program dynamics and immediately upstream of final protection. Its output
 is included in the final rendered playback reference.
 
 Initial hard bounds:
