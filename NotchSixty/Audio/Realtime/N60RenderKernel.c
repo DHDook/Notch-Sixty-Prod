@@ -1116,7 +1116,7 @@ bool N60DSPGraphSnapshotSetEQBand(N60DSPGraphSnapshot *snapshot, uint32_t bandIn
     );
 }
 
-bool N60DSPGraphSnapshotSetAmbientCompensation(
+bool N60DSPGraphSnapshotSetActiveAcousticsAdaptation(
     N60DSPGraphSnapshot *snapshot,
     double levelDB,
     double lowSupportDB,
@@ -1126,13 +1126,13 @@ bool N60DSPGraphSnapshotSetAmbientCompensation(
 ) {
     if (snapshot == NULL
         || !isfinite(levelDB)
-        || levelDB < 0.0 || levelDB > 6.0
+        || levelDB < -6.0 || levelDB > 6.0
         || !isfinite(lowSupportDB)
         || !isfinite(presenceSupportDB)
         || !isfinite(detailSupportDB)
-        || lowSupportDB < 0.0 || lowSupportDB > 2.0
-        || presenceSupportDB < 0.0 || presenceSupportDB > 2.0
-        || detailSupportDB < 0.0 || detailSupportDB > 1.5) {
+        || lowSupportDB < -2.0 || lowSupportDB > 2.0
+        || presenceSupportDB < -3.0 || presenceSupportDB > 2.0
+        || detailSupportDB < -1.5 || detailSupportDB > 1.5) {
         return false;
     }
 
@@ -1164,7 +1164,7 @@ bool N60DSPGraphSnapshotSetAmbientCompensation(
          index < N60_AMBIENT_COMPENSATION_BAND_COUNT;
          ++index) {
         const bool bandEnabled =
-            enabled && gains[index] > 0.0001;
+            enabled && fabs(gains[index]) > 0.0001;
         if (!N60BiquadBandSnapshotMake(
                 types[index],
                 snapshot->sampleRate,
@@ -1179,6 +1179,34 @@ bool N60DSPGraphSnapshotSetAmbientCompensation(
     }
     snapshot->ambientCompensation = prepared;
     return true;
+}
+
+bool N60DSPGraphSnapshotSetAmbientCompensation(
+    N60DSPGraphSnapshot *snapshot,
+    double levelDB,
+    double lowSupportDB,
+    double presenceSupportDB,
+    double detailSupportDB,
+    bool enabled
+) {
+    if (!isfinite(levelDB)
+        || levelDB < 0.0 || levelDB > 6.0
+        || !isfinite(lowSupportDB)
+        || !isfinite(presenceSupportDB)
+        || !isfinite(detailSupportDB)
+        || lowSupportDB < 0.0 || lowSupportDB > 2.0
+        || presenceSupportDB < 0.0 || presenceSupportDB > 2.0
+        || detailSupportDB < 0.0 || detailSupportDB > 1.5) {
+        return false;
+    }
+    return N60DSPGraphSnapshotSetActiveAcousticsAdaptation(
+        snapshot,
+        levelDB,
+        lowSupportDB,
+        presenceSupportDB,
+        detailSupportDB,
+        enabled
+    );
 }
 
 bool N60DSPGraphSnapshotSetActiveQuietZone(

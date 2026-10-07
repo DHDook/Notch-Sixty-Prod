@@ -307,7 +307,8 @@ for token in (
     require(token in root_ui, f"Active Acoustics route missing {token}")
 
 for token in (
-    'Text("Ambient Compensation")',
+    'Text("Playback Adaptation")',
+    "Music Focus",
     "Set Current Room as Quiet Baseline",
     "Allow bounded level compensation",
     "Available Content Preset headroom",
@@ -319,13 +320,12 @@ for token in (
     "holdReasonText",
     'Text("Adaptation Detail")',
     "AmbientCompensationResponseCurveView",
-    "Peak %+.2f dB",
-    "Cuts: none",
+    "Music Focus only restores energy masked by added room noise",
     "Low shelf · %.0f Hz · Q %.3f",
     "Bell · %.1f kHz · Q %.2f",
     "High shelf · %.1f kHz · Q %.3f",
 ):
-    require(token in ui, f"Ambient Compensation UI missing {token}")
+    require(token in ui, f"retained PR89/Music Focus UI missing {token}")
 
 # Required tests.
 for token in (

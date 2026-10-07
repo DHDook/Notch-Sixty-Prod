@@ -351,6 +351,14 @@ bool N60DSPGraphSnapshotSetEQPreparedBand(
     N60BiquadCoefficients coefficients,
     bool enabled
 );
+bool N60DSPGraphSnapshotSetActiveAcousticsAdaptation(
+    N60DSPGraphSnapshot * _Nonnull snapshot,
+    double levelDB,
+    double lowSupportDB,
+    double presenceSupportDB,
+    double detailSupportDB,
+    bool enabled
+);
 bool N60DSPGraphSnapshotSetAmbientCompensation(
     N60DSPGraphSnapshot * _Nonnull snapshot,
     double levelDB,

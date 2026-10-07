@@ -1,5 +1,21 @@
 import Foundation
 
+enum ActiveAcousticsPlaybackAdaptationMode:
+    String, CaseIterable, Codable, Equatable, Sendable
+{
+    case off
+    case musicFocus
+    case conversationFocus
+
+    var displayName: String {
+        switch self {
+        case .off: return "Off"
+        case .musicFocus: return "Music Focus"
+        case .conversationFocus: return "Conversation Focus"
+        }
+    }
+}
+
 enum AmbientActivityClass: String, CaseIterable, Codable, Equatable, Sendable {
     case quiet
     case normal
@@ -26,6 +42,44 @@ enum AmbientCompensationHoldReason: String, Codable, Equatable, Sendable {
     case noAvailableHeadroom
 }
 
+struct ConversationPreservationConfiguration:
+    Codable, Equatable, Sendable
+{
+    static let attenuationRangeDB = 0.0...6.0
+    static let presenceCutRangeDB = 0.0...3.0
+    static let restorationRangeDB = 0.0...2.0
+    static let evidenceThresholdRange = 0.20...0.90
+    static let timeRangeSeconds = 0.25...60.0
+
+    var maximumOverallAttenuationDB = 4.0
+    var maximumPresenceCutDB = 3.0
+    var maximumLowRestorationDB = 1.75
+    var maximumDetailRestorationDB = 0.75
+    var minimumConversationEvidence = 0.42
+    var attackSeconds = 1.5
+    var releaseSeconds = 8.0
+
+    func validated() throws -> ConversationPreservationConfiguration {
+        guard maximumOverallAttenuationDB.isFinite,
+              Self.attenuationRangeDB.contains(maximumOverallAttenuationDB),
+              maximumPresenceCutDB.isFinite,
+              Self.presenceCutRangeDB.contains(maximumPresenceCutDB),
+              maximumLowRestorationDB.isFinite,
+              Self.restorationRangeDB.contains(maximumLowRestorationDB),
+              maximumDetailRestorationDB.isFinite,
+              Self.restorationRangeDB.contains(maximumDetailRestorationDB),
+              minimumConversationEvidence.isFinite,
+              Self.evidenceThresholdRange.contains(minimumConversationEvidence),
+              attackSeconds.isFinite,
+              Self.timeRangeSeconds.contains(attackSeconds),
+              releaseSeconds.isFinite,
+              Self.timeRangeSeconds.contains(releaseSeconds) else {
+            throw AmbientCompensationError.invalidConfiguration
+        }
+        return self
+    }
+}
+
 struct AmbientCompensationConfiguration: Codable, Equatable, Sendable {
     static let hardMaximumLevelCompensationDB = 6.0
     static let strengthRange = 0.0...1.0
@@ -33,6 +87,12 @@ struct AmbientCompensationConfiguration: Codable, Equatable, Sendable {
     static let timeRangeSeconds = 1.0...120.0
 
     var enabled = false
+    /// Optional for backward-compatible decoding of PR89/PR90 saved profiles.
+    /// Nil maps legacy enabled=true to Music Focus and enabled=false to Off.
+    var playbackAdaptationMode:
+        ActiveAcousticsPlaybackAdaptationMode?
+    var conversationPreservation:
+        ConversationPreservationConfiguration?
     var strength = 0.75
     var levelCompensationEnabled = true
     var maximumLevelCompensationDB = 3.0
@@ -43,6 +103,17 @@ struct AmbientCompensationConfiguration: Codable, Equatable, Sendable {
     var attackSeconds = 6.0
     var releaseSeconds = 20.0
     var transientHoldSeconds = 3.0
+
+    var effectivePlaybackAdaptationMode:
+        ActiveAcousticsPlaybackAdaptationMode {
+        playbackAdaptationMode ?? (enabled ? .musicFocus : .off)
+    }
+
+    var effectiveConversationPreservation:
+        ConversationPreservationConfiguration {
+        conversationPreservation
+            ?? ConversationPreservationConfiguration()
+    }
 
     func validated() throws -> AmbientCompensationConfiguration {
         guard strength.isFinite,
@@ -63,6 +134,7 @@ struct AmbientCompensationConfiguration: Codable, Equatable, Sendable {
               optionalDBSPLAt0DBFS?.isFinite ?? true else {
             throw AmbientCompensationError.invalidConfiguration
         }
+        _ = try effectiveConversationPreservation.validated()
         return self
     }
 }
@@ -76,7 +148,8 @@ struct AmbientCompensationTarget: Equatable, Sendable {
         detailSupportDB: 0,
         confidence: 0,
         ambientDeltaDB: 0,
-        holdReason: nil
+        holdReason: nil,
+        mode: .off
     )
 
     var activity: AmbientActivityClass
@@ -87,6 +160,9 @@ struct AmbientCompensationTarget: Equatable, Sendable {
     var confidence: Double
     var ambientDeltaDB: Double
     var holdReason: AmbientCompensationHoldReason?
+    var mode: ActiveAcousticsPlaybackAdaptationMode = .musicFocus
+    var conversationEvidence: Double = 0
+    var estimatedClearanceDB: Double = 0
 
     var active: Bool {
         holdReason == nil
@@ -210,6 +286,20 @@ enum AmbientCompensationResponseModel {
         }
     }
 
+    static func minimumAppliedGainDB(
+        target: AmbientCompensationTarget,
+        sampleRate: Double
+    ) -> Double {
+        response(
+            target: target,
+            sampleRate: sampleRate,
+            pointCount: 256
+        )
+        .map(\.gainDB)
+        .min()
+        ?? target.levelDB
+    }
+
     static func maximumAppliedGainDB(
         target: AmbientCompensationTarget,
         sampleRate: Double
@@ -319,7 +409,8 @@ struct AmbientCompensationPlanner: Sendable {
         guard Self.snapshotIsFinite(snapshot) else {
             throw AmbientCompensationError.nonFiniteSnapshot
         }
-        guard configuration.enabled else {
+        guard configuration.effectivePlaybackAdaptationMode
+                == .musicFocus else {
             return held(.disabled, snapshot: snapshot)
         }
         guard let baseline = configuration.baselineAmbientLevelDBFS,
@@ -440,7 +531,7 @@ struct AmbientCompensationPlanner: Sendable {
         )
     }
 
-    private static func activity(
+    static func activity(
         deltaDB: Double,
         previous: AmbientActivityClass?
     ) -> AmbientActivityClass {
@@ -540,6 +631,241 @@ struct AmbientCompensationPlanner: Sendable {
     }
 }
 
+/// Explainable social-listening policy. It consumes only the separated
+/// environmental residual summarized by AmbientFieldAnalyzer; it never performs
+/// speech recognition, transcription, or speaker identification.
+struct ConversationPreservationPlanner: Sendable {
+    static let minimumAmbientDeltaDB = 2.5
+    static let minimumConversationStationarity = 0.18
+
+    func plan(
+        snapshot: AmbientAnalysisSnapshot,
+        configuration rawConfiguration: AmbientCompensationConfiguration,
+        previousActivity: AmbientActivityClass? = nil
+    ) throws -> AmbientCompensationTarget {
+        let configuration = try rawConfiguration.validated()
+        let social = try configuration
+            .effectiveConversationPreservation.validated()
+        guard configuration.effectivePlaybackAdaptationMode
+                == .conversationFocus else {
+            return held(.disabled, snapshot: snapshot)
+        }
+
+        guard snapshot.sampleRate.isFinite,
+              snapshot.separationConfidence.isFinite,
+              snapshot.ambientLevelDBFS.isFinite,
+              snapshot.stationarityScore.isFinite,
+              snapshot.periodicityScore.isFinite,
+              snapshot.spectrum.allSatisfy({
+                  $0.centerFrequencyHz.isFinite
+                      && $0.levelDBFS.isFinite
+              }) else {
+            throw AmbientCompensationError.nonFiniteSnapshot
+        }
+
+        guard let baseline =
+                configuration.baselineAmbientLevelDBFS,
+              baseline.isFinite else {
+            return held(.baselineRequired, snapshot: snapshot)
+        }
+        guard snapshot.separationMode
+                == .modeledPlaybackSubtraction else {
+            return held(.playbackModelRequired, snapshot: snapshot)
+        }
+        guard snapshot.separationConfidence
+                >= configuration.minimumSeparationConfidence else {
+            return held(
+                .lowSeparationConfidence,
+                snapshot: snapshot
+            )
+        }
+        guard snapshot.character != .nonstationary,
+              snapshot.stationarityScore
+                >= Self.minimumConversationStationarity else {
+            return held(
+                .nonstationaryTransient,
+                snapshot: snapshot
+            )
+        }
+
+        let delta = max(snapshot.ambientLevelDBFS - baseline, 0)
+        let activity = AmbientCompensationPlanner.activity(
+            deltaDB: delta,
+            previous: previousActivity
+        )
+        let evidence = conversationEvidence(snapshot)
+        let threshold = social.minimumConversationEvidence
+
+        guard delta >= Self.minimumAmbientDeltaDB,
+              evidence >= threshold else {
+            return AmbientCompensationTarget(
+                activity: activity,
+                levelDB: 0,
+                lowSupportDB: 0,
+                presenceSupportDB: 0,
+                detailSupportDB: 0,
+                confidence: snapshot.separationConfidence,
+                ambientDeltaDB: delta,
+                holdReason: nil,
+                mode: .conversationFocus,
+                conversationEvidence: evidence,
+                estimatedClearanceDB: 0
+            )
+        }
+
+        let evidenceAmount = clamp01(
+            (evidence - threshold)
+                / max(1.0 - threshold, 0.001)
+        )
+        let levelAmount = clamp01(
+            (delta - Self.minimumAmbientDeltaDB) / 12.0
+        )
+        let amount =
+            configuration.strength
+            * (0.35 + 0.65 * evidenceAmount)
+            * levelAmount
+
+        let attenuation =
+            social.maximumOverallAttenuationDB * amount
+        let presenceCut =
+            social.maximumPresenceCutDB
+            * amount
+            * (0.55 + 0.45 * evidence)
+
+        // Restoration is relative to the full-band attenuation, never a net
+        // boost above unity. This preserves musical weight/air while speech
+        // receives the largest clearance in its critical band.
+        let lowRestore = min(
+            social.maximumLowRestorationDB * amount,
+            attenuation * 0.72
+        )
+        let detailRestore = min(
+            social.maximumDetailRestorationDB * amount,
+            attenuation * 0.40
+        )
+
+        return AmbientCompensationTarget(
+            activity: activity,
+            levelDB: -attenuation,
+            lowSupportDB: lowRestore,
+            presenceSupportDB: -presenceCut,
+            detailSupportDB: detailRestore,
+            confidence: snapshot.separationConfidence,
+            ambientDeltaDB: delta,
+            holdReason: nil,
+            mode: .conversationFocus,
+            conversationEvidence: evidence,
+            estimatedClearanceDB:
+                attenuation + presenceCut
+        )
+    }
+
+    func conversationEvidence(
+        _ snapshot: AmbientAnalysisSnapshot
+    ) -> Double {
+        let speech = energyFraction(
+            snapshot.spectrum,
+            lowHz: 250,
+            highHz: 4_000,
+            denominatorLowHz: 100,
+            denominatorHighHz: 12_000
+        )
+        let veryLow = energyFraction(
+            snapshot.spectrum,
+            lowHz: 20,
+            highHz: 180,
+            denominatorLowHz: 20,
+            denominatorHighHz: 12_000
+        )
+
+        // Conversation usually concentrates substantial residual energy in the
+        // speech band, varies over time, and is not dominated by one persistent
+        // low-frequency periodic component. These are intentionally broad,
+        // deterministic acoustic cues rather than semantic inference.
+        let speechShape = clamp01(
+            (speech - 0.32) / 0.48
+        )
+        let temporalVariation = clamp01(
+            1.0
+                - abs(snapshot.stationarityScore - 0.52)
+                    / 0.52
+        )
+        let periodicPenalty =
+            1.0 - 0.70 * clamp01(snapshot.periodicityScore)
+        let lowFrequencyPenalty =
+            1.0 - 0.75 * clamp01(veryLow)
+
+        let strongestProminence =
+            snapshot.tonalComponents
+                .map(\.prominenceDB)
+                .filter(\.isFinite)
+                .max()
+                ?? 0
+        let tonalPenalty = 1.0 - 0.45 * clamp01(
+            (strongestProminence - 10.0) / 18.0
+        )
+
+        return clamp01(
+            speechShape
+                * (0.55 + 0.45 * temporalVariation)
+                * periodicPenalty
+                * lowFrequencyPenalty
+                * tonalPenalty
+        )
+    }
+
+    private func held(
+        _ reason: AmbientCompensationHoldReason,
+        snapshot: AmbientAnalysisSnapshot
+    ) -> AmbientCompensationTarget {
+        AmbientCompensationTarget(
+            activity: .quiet,
+            levelDB: 0,
+            lowSupportDB: 0,
+            presenceSupportDB: 0,
+            detailSupportDB: 0,
+            confidence: min(
+                max(snapshot.separationConfidence, 0),
+                1
+            ),
+            ambientDeltaDB: 0,
+            holdReason: reason,
+            mode: .conversationFocus
+        )
+    }
+
+    private func energyFraction(
+        _ spectrum: [AmbientSpectrumBand],
+        lowHz: Double,
+        highHz: Double,
+        denominatorLowHz: Double,
+        denominatorHighHz: Double
+    ) -> Double {
+        var numerator = 0.0
+        var denominator = 0.0
+        for band in spectrum {
+            guard band.centerFrequencyHz.isFinite,
+                  band.levelDBFS.isFinite else { continue }
+            let power = pow(10.0, band.levelDBFS / 10.0)
+            guard power.isFinite else { continue }
+            if band.centerFrequencyHz >= denominatorLowHz,
+               band.centerFrequencyHz <= denominatorHighHz {
+                denominator += power
+            }
+            if band.centerFrequencyHz >= lowHz,
+               band.centerFrequencyHz <= highHz {
+                numerator += power
+            }
+        }
+        guard denominator > 1.0e-30 else { return 0 }
+        return clamp01(numerator / denominator)
+    }
+
+    private func clamp01(_ value: Double) -> Double {
+        min(max(value, 0), 1)
+    }
+}
+
 /// Stateful smoothing lives off the audio thread. The same time constants are
 /// applied independently to each requested compensation dimension.
 struct AmbientCompensationEnvelope: Equatable, Sendable {
@@ -589,39 +915,54 @@ struct AmbientCompensationEnvelope: Equatable, Sendable {
             resolved = target
         }
 
+        let timingMode =
+            resolved.mode == .off ? current.mode : resolved.mode
+        let timing =
+            timingMode == .conversationFocus
+                ? configuration.effectiveConversationPreservation
+                : ConversationPreservationConfiguration(
+                    attackSeconds: configuration.attackSeconds,
+                    releaseSeconds: configuration.releaseSeconds
+                )
+
         current = AmbientCompensationTarget(
             activity: resolved.activity,
             levelDB: Self.smooth(
                 current.levelDB,
                 resolved.levelDB,
                 elapsed: elapsedSeconds,
-                rise: configuration.attackSeconds,
-                fall: configuration.releaseSeconds
+                rise: timing.attackSeconds,
+                fall: timing.releaseSeconds
             ),
             lowSupportDB: Self.smooth(
                 current.lowSupportDB,
                 resolved.lowSupportDB,
                 elapsed: elapsedSeconds,
-                rise: configuration.attackSeconds,
-                fall: configuration.releaseSeconds
+                rise: timing.attackSeconds,
+                fall: timing.releaseSeconds
             ),
             presenceSupportDB: Self.smooth(
                 current.presenceSupportDB,
                 resolved.presenceSupportDB,
                 elapsed: elapsedSeconds,
-                rise: configuration.attackSeconds,
-                fall: configuration.releaseSeconds
+                rise: timing.attackSeconds,
+                fall: timing.releaseSeconds
             ),
             detailSupportDB: Self.smooth(
                 current.detailSupportDB,
                 resolved.detailSupportDB,
                 elapsed: elapsedSeconds,
-                rise: configuration.attackSeconds,
-                fall: configuration.releaseSeconds
+                rise: timing.attackSeconds,
+                fall: timing.releaseSeconds
             ),
             confidence: resolved.confidence,
             ambientDeltaDB: resolved.ambientDeltaDB,
-            holdReason: resolved.holdReason
+            holdReason: resolved.holdReason,
+            mode: resolved.mode,
+            conversationEvidence:
+                resolved.conversationEvidence,
+            estimatedClearanceDB:
+                resolved.estimatedClearanceDB
         )
         return current
     }
@@ -634,7 +975,9 @@ struct AmbientCompensationEnvelope: Equatable, Sendable {
         fall: Double
     ) -> Double {
         guard elapsed > 0 else { return current }
-        let timeConstant = target > current ? rise : fall
+        let increasingMagnitude =
+            abs(target) > abs(current) + 0.000_001
+        let timeConstant = increasingMagnitude ? rise : fall
         let alpha = 1 - exp(-elapsed / max(timeConstant, 0.001))
         return current + (target - current) * alpha
     }

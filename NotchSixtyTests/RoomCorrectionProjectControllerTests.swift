@@ -1514,6 +1514,17 @@ final class RoomCorrectionProjectControllerTests: XCTestCase {
         let beforeContent = profiles.captureContentState()
         var ambient = AmbientCompensationConfiguration()
         ambient.enabled = true
+        ambient.playbackAdaptationMode = .conversationFocus
+        ambient.conversationPreservation =
+            ConversationPreservationConfiguration(
+                maximumOverallAttenuationDB: 3.5,
+                maximumPresenceCutDB: 2.5,
+                maximumLowRestorationDB: 1.5,
+                maximumDetailRestorationDB: 0.6,
+                minimumConversationEvidence: 0.48,
+                attackSeconds: 1.25,
+                releaseSeconds: 9
+            )
         ambient.strength = 0.65
         ambient.levelCompensationEnabled = true
         ambient.maximumLevelCompensationDB = 2.5

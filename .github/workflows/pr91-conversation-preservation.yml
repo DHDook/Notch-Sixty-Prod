@@ -1,0 +1,84 @@
+name: PR91 Conversation Preservation
+
+on:
+  push:
+    branches:
+      - feature/pr91-conversation-preservation
+  pull_request:
+    branches:
+      - feature/pr90-active-quiet-zone
+  workflow_dispatch:
+
+concurrency:
+  group: pr91-conversation-preservation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate PR91 Conversation Preservation architecture
+        run: python3 ci/validate_pr91_conversation_preservation.py
+      - name: Validate inherited PR90 Active Quiet Zone
+        run: python3 ci/validate_pr90_active_quiet_zone.py
+      - name: Validate inherited PR89 Ambient Compensation
+        run: python3 ci/validate_pr89_ambient_compensation.py
+      - name: Validate inherited PR88 intelligent targets
+        run: python3 ci/validate_pr88_intelligent_target.py
+      - name: Validate inherited PR86 calibration prediction
+        run: python3 ci/validate_pr86_calibration_prediction.py
+      - name: Validate inherited PR85 SOFA architecture
+        run: python3 ci/validate_pr85_native_sofa.py
+      - name: Validate inherited PR84A hardening
+        run: python3 ci/validate_pr84a_audio_unit_hardening.py
+
+  validate-macos-integration:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate PR91 Conversation Preservation architecture
+        run: python3 ci/validate_pr91_conversation_preservation.py
+      - name: Build arm64 app with unified Active Acoustics
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            build
+      - name: Run Conversation Preservation and PR89 adaptation tests
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            -only-testing:NotchSixtyTests/AmbientCompensationTests \
+            -only-testing:NotchSixtyTests/AmbientFieldAnalyzerTests \
+            test
+      - name: Run retained PR90 Active Quiet Zone tests
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            -only-testing:NotchSixtyTests/ActiveQuietZoneTests \
+            test
+      - name: Run retained XCTest suite
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            test

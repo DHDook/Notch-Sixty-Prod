@@ -2,13 +2,14 @@ import SwiftUI
 
 private struct AmbientCompensationResponseCurveView: View {
     let points: [AmbientCompensationResponsePoint]
+    let minimumGainDB: Double
     let maximumGainDB: Double
 
     private let minimumFrequencyHz = 20.0
     private let maximumFrequencyHz = 20_000.0
 
     var body: some View {
-        GeometryReader { geometry in
+        GeometryReader { _ in
             Canvas { context, size in
                 let plot = CGRect(
                     x: 46,
@@ -16,28 +17,39 @@ private struct AmbientCompensationResponseCurveView: View {
                     width: max(size.width - 60, 1),
                     height: max(size.height - 40, 1)
                 )
-                let yMaximum = max(
-                    ceil(maximumGainDB + 0.5),
-                    2
+                var yMinimum = min(
+                    floor(minimumGainDB - 0.5),
+                    0
                 )
+                var yMaximum = max(
+                    ceil(maximumGainDB + 0.5),
+                    0
+                )
+                if yMaximum - yMinimum < 2 {
+                    yMaximum += 1
+                    yMinimum -= 1
+                }
 
                 drawGrid(
                     context: &context,
                     plot: plot,
+                    minimumGainDB: yMinimum,
                     maximumGainDB: yMaximum
                 )
                 drawResponse(
                     context: &context,
                     plot: plot,
+                    minimumGainDB: yMinimum,
                     maximumGainDB: yMaximum
                 )
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Ambient Compensation response curve")
+        .accessibilityLabel("Active Acoustics adaptation response curve")
         .accessibilityValue(
             String(
-                format: "Peak applied gain %.2f decibels",
+                format: "Applied response ranges from %.2f to %.2f decibels",
+                minimumGainDB,
                 maximumGainDB
             )
         )
@@ -46,6 +58,7 @@ private struct AmbientCompensationResponseCurveView: View {
     private func drawGrid(
         context: inout GraphicsContext,
         plot: CGRect,
+        minimumGainDB: Double,
         maximumGainDB: Double
     ) {
         let frequencyGuides = [
@@ -89,9 +102,12 @@ private struct AmbientCompensationResponseCurveView: View {
         for index in 0...horizontalGuides {
             let fraction =
                 Double(index) / Double(horizontalGuides)
-            let gain = maximumGainDB * (1 - fraction)
+            let gain =
+                maximumGainDB
+                - (maximumGainDB - minimumGainDB) * fraction
             let y =
                 plot.minY + plot.height * CGFloat(fraction)
+            let isZero = abs(gain) < 0.01
             var path = Path()
             path.move(to: CGPoint(x: plot.minX, y: y))
             path.addLine(to: CGPoint(x: plot.maxX, y: y))
@@ -99,11 +115,10 @@ private struct AmbientCompensationResponseCurveView: View {
                 path,
                 with: .color(
                     Color.secondary.opacity(
-                        index == horizontalGuides ? 0.30 : 0.13
+                        isZero ? 0.34 : 0.13
                     )
                 ),
-                lineWidth:
-                    index == horizontalGuides ? 1.25 : 1
+                lineWidth: isZero ? 1.25 : 1
             )
             context.draw(
                 Text(String(format: "%+.1f", gain))
@@ -118,31 +133,36 @@ private struct AmbientCompensationResponseCurveView: View {
     private func drawResponse(
         context: inout GraphicsContext,
         plot: CGRect,
+        minimumGainDB: Double,
         maximumGainDB: Double
     ) {
         guard !points.isEmpty else { return }
 
         var fill = Path()
         var line = Path()
+        let zeroY = yPosition(
+            gainDB: 0,
+            plot: plot,
+            minimumGainDB: minimumGainDB,
+            maximumGainDB: maximumGainDB
+        )
 
         for (index, point) in points.enumerated() {
             let x = xPosition(
                 frequencyHz: point.frequencyHz,
                 plot: plot
             )
-            let normalized = min(
-                max(point.gainDB / maximumGainDB, 0),
-                1
+            let y = yPosition(
+                gainDB: point.gainDB,
+                plot: plot,
+                minimumGainDB: minimumGainDB,
+                maximumGainDB: maximumGainDB
             )
-            let y =
-                plot.maxY - CGFloat(normalized) * plot.height
             let position = CGPoint(x: x, y: y)
 
             if index == 0 {
                 line.move(to: position)
-                fill.move(
-                    to: CGPoint(x: x, y: plot.maxY)
-                )
+                fill.move(to: CGPoint(x: x, y: zeroY))
                 fill.addLine(to: position)
             } else {
                 line.addLine(to: position)
@@ -157,7 +177,7 @@ private struct AmbientCompensationResponseCurveView: View {
                         frequencyHz: last.frequencyHz,
                         plot: plot
                     ),
-                    y: plot.maxY
+                    y: zeroY
                 )
             )
             fill.closeSubpath()
@@ -172,6 +192,20 @@ private struct AmbientCompensationResponseCurveView: View {
             with: .color(Color.accentColor),
             lineWidth: 2
         )
+    }
+
+    private func yPosition(
+        gainDB: Double,
+        plot: CGRect,
+        minimumGainDB: Double,
+        maximumGainDB: Double
+    ) -> CGFloat {
+        let range = max(maximumGainDB - minimumGainDB, 0.001)
+        let normalized = min(
+            max((gainDB - minimumGainDB) / range, 0),
+            1
+        )
+        return plot.maxY - CGFloat(normalized) * plot.height
     }
 
     private func xPosition(
@@ -198,7 +232,7 @@ private enum ActiveAcousticsTab: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .ambientAnalysis: return "Ambient Analysis"
+        case .ambientAnalysis: return "Playback Adaptation"
         case .quietZone: return "Quiet Zone"
         case .roomTreatment: return "Room Treatment"
         }
@@ -253,7 +287,7 @@ struct ProductionActiveAcousticsWorkspace: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Active Acoustics")
                     .font(.largeTitle.bold())
-                Text("Analyze the acoustic environment and manage hardware-gated low-frequency room treatment.")
+                Text("Adapt playback to the room, preserve conversation, and optionally suppress stable low-frequency noise.")
                     .foregroundStyle(.secondary)
             }
             Spacer()
@@ -269,46 +303,89 @@ struct ProductionActiveAcousticsWorkspace: View {
 
     private var ambientAnalysis: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .center, spacing: 14) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Ambient Compensation")
-                        .font(.headline)
-                    Text(
-                        "Slow, bounded adaptation for conversation, parties, HVAC and other changing room noise."
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .center, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Playback Adaptation")
+                            .font(.headline)
+                        Text(playbackAdaptationDescription)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text(ambient.monitorStatus.displayName.uppercased())
+                        .font(.caption.bold())
+                        .tracking(1.0)
+                        .foregroundStyle(
+                            ambient.monitorStatus == .failed
+                                ? .red
+                                : ambient.monitorStatus == .compensating
+                                    ? .green
+                                    : .secondary
+                        )
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .glassEffect(.regular, in: .capsule)
                 }
-                Spacer()
-                Text(ambient.monitorStatus.displayName.uppercased())
-                    .font(.caption.bold())
-                    .tracking(1.0)
-                    .foregroundStyle(
-                        ambient.monitorStatus == .failed
-                            ? .red
-                            : ambient.monitorStatus == .compensating
-                                ? .green
-                                : .secondary
-                    )
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .glassEffect(.regular, in: .capsule)
 
-                Toggle(
-                    "Enable",
-                    isOn: Binding(
-                        get: {
-                            ambient.configuration.enabled
-                        },
-                        set: { value in
+                Picker(
+                    "Playback Adaptation",
+                    selection: Binding(
+                        get: { ambient.playbackAdaptationMode },
+                        set: { mode in
                             performAmbient {
-                                try ambient.setEnabled(value)
+                                try ambient
+                                    .setPlaybackAdaptationMode(mode)
                             }
                         }
                     )
-                )
-                .toggleStyle(.switch)
-                .labelsHidden()
+                ) {
+                    ForEach(
+                        ActiveAcousticsPlaybackAdaptationMode.allCases,
+                        id: \.self
+                    ) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .productionGlassPickerChrome()
+
+                Divider()
+
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Active Quiet Zone")
+                            .font(.subheadline.bold())
+                        Text(
+                            "Independently suppress eligible stable 25–150 Hz environmental tones."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text(quietZone.status.displayName.uppercased())
+                        .font(.caption.bold())
+                        .foregroundStyle(
+                            quietZone.status == .fault
+                                ? .red
+                                : quietZone.status == .cancelling
+                                    ? .green
+                                    : .secondary
+                        )
+                    Toggle(
+                        "Active Quiet Zone",
+                        isOn: Binding(
+                            get: { quietZone.configuration.enabled },
+                            set: { enabled in
+                                performQuietZone {
+                                    try quietZone.setEnabled(enabled)
+                                }
+                            }
+                        )
+                    )
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+                }
             }
             .padding(18)
             .glassEffect(.regular, in: .rect(cornerRadius: 18))
@@ -316,7 +393,7 @@ struct ProductionActiveAcousticsWorkspace: View {
             if microphone.permissionStatus != .authorized {
                 statusBanner(
                     title: "Microphone access required",
-                    detail: "Ambient Compensation needs a live room microphone. Playback is never adapted until access is authorized and a microphone is selected.",
+                    detail: "Active Acoustics needs a live room microphone for playback adaptation and Quiet Zone verification. Playback is never adapted until access is authorized and a microphone is selected.",
                     systemImage: "mic.slash"
                 )
                 Button("Request Microphone Access") {
@@ -366,8 +443,25 @@ struct ProductionActiveAcousticsWorkspace: View {
                         ambient.appliedTarget.levelDB
                     ),
                     detail:
-                        "Never exceeds the Content Preset's available digital headroom."
+                        ambient.playbackAdaptationMode == .conversationFocus
+                            ? "Subtractive social-listening adaptation; never a net level boost."
+                            : "Never exceeds the Content Preset's available digital headroom."
                 )
+                if ambient.playbackAdaptationMode == .conversationFocus {
+                    metricCard(
+                        title: "Conversation Evidence",
+                        value: "\(Int((ambient.appliedTarget.conversationEvidence * 100).rounded()))%",
+                        detail: "Acoustic speech-likelihood evidence only; no recognition or transcription."
+                    )
+                    metricCard(
+                        title: "Estimated Clearance",
+                        value: String(
+                            format: "+%.2f dB",
+                            ambient.appliedTarget.estimatedClearanceDB
+                        ),
+                        detail: "Approximate playback reduction through the speech-critical region."
+                    )
+                }
             }
 
             if let analysis = ambient.latestAnalysis {
@@ -380,28 +474,46 @@ struct ProductionActiveAcousticsWorkspace: View {
                     spacing: 12
                 ) {
                     metricCard(
-                        title: "Low Support",
+                        title:
+                            ambient.playbackAdaptationMode == .conversationFocus
+                                ? "Bass Preservation"
+                                : "Low Support",
                         value: String(
-                            format: "+%.2f dB",
+                            format: "%+.2f dB",
                             ambient.appliedTarget.lowSupportDB
                         ),
-                        detail: "Broad 30–250 Hz masking support."
+                        detail:
+                            ambient.playbackAdaptationMode == .conversationFocus
+                                ? "Relative restoration keeps musical weight while total gain stays below unity."
+                                : "Broad 30–250 Hz masking support."
                     )
                     metricCard(
-                        title: "Presence",
+                        title:
+                            ambient.playbackAdaptationMode == .conversationFocus
+                                ? "Speech-band Carve"
+                                : "Presence",
                         value: String(
-                            format: "+%.2f dB",
+                            format: "%+.2f dB",
                             ambient.appliedTarget.presenceSupportDB
                         ),
-                        detail: "Broad vocal/intelligibility support."
+                        detail:
+                            ambient.playbackAdaptationMode == .conversationFocus
+                                ? "Broad subtractive clearance centered in the intelligibility region."
+                                : "Broad vocal/intelligibility support."
                     )
                     metricCard(
-                        title: "Detail",
+                        title:
+                            ambient.playbackAdaptationMode == .conversationFocus
+                                ? "Air Preservation"
+                                : "Detail",
                         value: String(
-                            format: "+%.2f dB",
+                            format: "%+.2f dB",
                             ambient.appliedTarget.detailSupportDB
                         ),
-                        detail: "Bounded high-frequency masking support."
+                        detail:
+                            ambient.playbackAdaptationMode == .conversationFocus
+                                ? "Relative high-frequency restoration keeps ambience without a net boost."
+                                : "Bounded high-frequency masking support."
                     )
                 }
 
@@ -461,9 +573,7 @@ struct ProductionActiveAcousticsWorkspace: View {
                 )
             }
 
-            safetyNote(
-                "Ambient Compensation reacts over seconds, not milliseconds. Claps, dropped objects and nearby shouts are rejected as nonstationary events. Automatic level recovery can only consume digital headroom already reserved by the active Content Preset."
-            )
+            safetyNote(activeAcousticsSafetyNote)
         }
     }
 
@@ -488,7 +598,8 @@ struct ProductionActiveAcousticsWorkspace: View {
                             },
                             set: { uid in
                                 let wasEnabled =
-                                    ambient.configuration.enabled
+                                    ambient.playbackAdaptationActive
+                                    || quietZone.configuration.enabled
                                 ambient.stopMonitoring()
                                 microphone.selectInput(uid: uid)
                                 if wasEnabled {
@@ -521,7 +632,8 @@ struct ProductionActiveAcousticsWorkspace: View {
                             },
                             set: { value in
                                 let wasEnabled =
-                                    ambient.configuration.enabled
+                                    ambient.playbackAdaptationActive
+                                    || quietZone.configuration.enabled
                                 ambient.stopMonitoring()
                                 performAmbient {
                                     try microphone
@@ -644,7 +756,8 @@ struct ProductionActiveAcousticsWorkspace: View {
                 .frame(width: 54)
             }
 
-            Toggle(
+            if ambient.playbackAdaptationMode == .musicFocus {
+                Toggle(
                 "Allow bounded level compensation",
                 isOn: Binding(
                     get: {
@@ -689,11 +802,35 @@ struct ProductionActiveAcousticsWorkspace: View {
                 .frame(width: 62)
             }
 
-            Text(
-                "Available Content Preset headroom: \(engine.ambientCompensationAvailableHeadroomDB, specifier: "%.1f") dB. Ambient level lift is clamped to the smaller of this reserve and the maximum above."
-            )
-            .font(.caption)
-            .foregroundStyle(.secondary)
+                Text(
+                    "Available Content Preset headroom: \(engine.ambientCompensationAvailableHeadroomDB, specifier: "%.1f") dB. Music Focus level lift is clamped to the smaller of this reserve and the maximum above."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            } else if ambient.playbackAdaptationMode == .conversationFocus {
+                let social =
+                    ambient.configuration
+                        .effectiveConversationPreservation
+                VStack(alignment: .leading, spacing: 6) {
+                    LabeledContent("Maximum music reduction") {
+                        Text(
+                            "\(social.maximumOverallAttenuationDB, specifier: "%.1f") dB"
+                        )
+                        .monospacedDigit()
+                    }
+                    LabeledContent("Maximum speech-band carve") {
+                        Text(
+                            "\(social.maximumPresenceCutDB, specifier: "%.1f") dB"
+                        )
+                        .monospacedDigit()
+                    }
+                    Text(
+                        "Conversation Focus never applies net positive playback gain. Bass and air are only restored relative to the bounded full-band reduction."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+            }
         }
         .padding(18)
         .glassEffect(.regular, in: .rect(cornerRadius: 18))
@@ -706,6 +843,13 @@ struct ProductionActiveAcousticsWorkspace: View {
     private var ambientResponsePoints:
         [AmbientCompensationResponsePoint] {
         AmbientCompensationResponseModel.response(
+            target: ambient.appliedTarget,
+            sampleRate: ambientResponseSampleRate
+        )
+    }
+
+    private var minimumAmbientAppliedGainDB: Double {
+        AmbientCompensationResponseModel.minimumAppliedGainDB(
             target: ambient.appliedTarget,
             sampleRate: ambientResponseSampleRate
         )
@@ -725,7 +869,7 @@ struct ProductionActiveAcousticsWorkspace: View {
                     Text("Adaptation Detail")
                         .font(.headline)
                     Text(
-                        "Exact response of the live PR89 overlay, including full-band level recovery and the three dedicated masking-compensation filters."
+                        adaptationDetailDescription
                     )
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -733,7 +877,8 @@ struct ProductionActiveAcousticsWorkspace: View {
                 Spacer()
                 Text(
                     String(
-                        format: "Peak %+.2f dB",
+                        format: "%+.2f / %+.2f dB",
+                        minimumAmbientAppliedGainDB,
                         maximumAmbientAppliedGainDB
                     )
                 )
@@ -745,10 +890,8 @@ struct ProductionActiveAcousticsWorkspace: View {
 
             AmbientCompensationResponseCurveView(
                 points: ambientResponsePoints,
-                maximumGainDB: max(
-                    maximumAmbientAppliedGainDB,
-                    1
-                )
+                minimumGainDB: minimumAmbientAppliedGainDB,
+                maximumGainDB: maximumAmbientAppliedGainDB
             )
             .frame(height: 220)
 
@@ -770,12 +913,16 @@ struct ProductionActiveAcousticsWorkspace: View {
                 }
 
                 adaptationRow(
-                    name: "Level recovery",
+                    name: ambient.playbackAdaptationMode == .conversationFocus
+                        ? "Overall level"
+                        : "Level recovery",
                     shape: "Full band",
                     gainDB: ambient.appliedTarget.levelDB
                 )
                 adaptationRow(
-                    name: "Low support",
+                    name: ambient.playbackAdaptationMode == .conversationFocus
+                        ? "Bass preservation"
+                        : "Low support",
                     shape: String(
                         format: "Low shelf · %.0f Hz · Q %.3f",
                         AmbientCompensationResponseModel
@@ -785,7 +932,9 @@ struct ProductionActiveAcousticsWorkspace: View {
                     gainDB: ambient.appliedTarget.lowSupportDB
                 )
                 adaptationRow(
-                    name: "Presence",
+                    name: ambient.playbackAdaptationMode == .conversationFocus
+                        ? "Speech-band carve"
+                        : "Presence",
                     shape: String(
                         format: "Bell · %.1f kHz · Q %.2f",
                         AmbientCompensationResponseModel
@@ -796,7 +945,9 @@ struct ProductionActiveAcousticsWorkspace: View {
                         ambient.appliedTarget.presenceSupportDB
                 )
                 adaptationRow(
-                    name: "Detail",
+                    name: ambient.playbackAdaptationMode == .conversationFocus
+                        ? "Air preservation"
+                        : "Detail",
                     shape: String(
                         format: "High shelf · %.1f kHz · Q %.3f",
                         AmbientCompensationResponseModel
@@ -808,16 +959,19 @@ struct ProductionActiveAcousticsWorkspace: View {
             }
 
             HStack(spacing: 8) {
-                Image(systemName: "minus.circle")
-                Text(
-                    "Cuts: none. PR89 only restores energy masked by added room noise; it never applies automatic subtractive EQ."
+                Image(
+                    systemName:
+                        ambient.playbackAdaptationMode == .conversationFocus
+                            ? "person.2.wave.2"
+                            : "plus.circle"
                 )
+                Text(adaptationPolicyNote)
             }
             .font(.caption)
             .foregroundStyle(.secondary)
 
             Text(
-                "The curve is the combined live transfer function of the four applied adjustments. It excludes the user's normal EQ, Room Correction and other DSP so you can see exactly what Ambient Compensation itself is adding."
+                "The curve is the exact combined live transfer function of the shared Active Acoustics overlay. It excludes the user's normal EQ, Room Correction and other DSP."
             )
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -840,6 +994,50 @@ struct ProductionActiveAcousticsWorkspace: View {
                 .monospacedDigit()
         }
         .font(.subheadline)
+    }
+
+    private var playbackAdaptationDescription: String {
+        switch ambient.playbackAdaptationMode {
+        case .off:
+            return "Monitor the room without automatically changing playback."
+        case .musicFocus:
+            return "Preserve musical clarity and presence as environmental masking rises."
+        case .conversationFocus:
+            return "Keep music present while reducing interference with nearby conversation."
+        }
+    }
+
+    private var adaptationDetailDescription: String {
+        switch ambient.playbackAdaptationMode {
+        case .conversationFocus:
+            return "Exact subtractive response used to create conversational clearance while preserving musical weight and air."
+        case .musicFocus:
+            return "Exact PR89 response, including bounded full-band recovery and the three masking-compensation filters."
+        case .off:
+            return "The shared adaptation overlay is at unity while Playback Adaptation is off."
+        }
+    }
+
+    private var adaptationPolicyNote: String {
+        switch ambient.playbackAdaptationMode {
+        case .conversationFocus:
+            return "Conversation Focus uses bounded attenuation and a broad speech-band carve. Relative bass/air restoration is constrained so the combined response never intentionally exceeds unity."
+        case .musicFocus:
+            return "Music Focus only restores energy masked by added room noise; it does not apply automatic subtractive EQ."
+        case .off:
+            return "Playback Adaptation is off; no automatic boost or cut is requested."
+        }
+    }
+
+    private var activeAcousticsSafetyNote: String {
+        switch ambient.playbackAdaptationMode {
+        case .conversationFocus:
+            return "Conversation Focus uses only separated acoustic evidence. It performs no speech recognition or transcription, never stores microphone audio, and releases smoothly toward unity when conversation evidence disappears."
+        case .musicFocus:
+            return "Music Focus reacts over seconds, not milliseconds. Transient events are rejected and automatic level recovery can consume only digital headroom already reserved by the active Content Preset."
+        case .off:
+            return "Playback Adaptation is off. Active Quiet Zone may still use the shared microphone observation independently when enabled."
+        }
     }
 
     private var ambientLevelValue: String {
