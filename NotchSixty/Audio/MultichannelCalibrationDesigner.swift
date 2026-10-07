@@ -773,3 +773,1005 @@ extension OutputProgramRole {
         }
     }
 }
+
+
+// MARK: - PR86 independent calibration prediction / verification
+
+enum CalibrationPredictionStatus: String, Equatable, Sendable {
+    case accepted
+    case rejected
+}
+
+struct CalibrationPredictionSourceReport: Equatable, Sendable {
+    var source: MultichannelCalibrationSource
+    var weightedRMSErrorBeforeDB: Double
+    var weightedRMSErrorAfterDB: Double
+    var improvementDB: Double
+    var worstSeatRegressionDB: Double
+    var maximumAbsoluteErrorAfterDB: Double
+    var confidence: Double
+}
+
+struct CalibrationPredictionSeatReport: Equatable, Sendable {
+    var seatID: UUID
+    var seatName: String
+    var speakerRMSErrorBeforeDB: Double
+    var speakerRMSErrorAfterDB: Double
+    var speakerImprovementDB: Double
+    var speakerLevelSpreadBeforeDB: Double
+    var speakerLevelSpreadAfterDB: Double
+    var speakerTimingSpreadBeforeMs: Double
+    var speakerTimingSpreadAfterMs: Double
+    var subCombinedRMSErrorBeforeDB: Double?
+    var subCombinedRMSErrorAfterDB: Double?
+    var confidence: Double
+}
+
+struct CalibrationPredictionReport: Equatable, Sendable {
+    var sampleRate: Double
+    var confidence: Double
+    var speakerRMSErrorBeforeDB: Double
+    var speakerRMSErrorAfterDB: Double
+    var speakerImprovementDB: Double
+    var maximumAbsoluteErrorAfterDB: Double
+    var worstSourceRegressionDB: Double
+    var worstSeatRegressionDB: Double
+    var maximumSpeakerLevelSpreadBeforeDB: Double
+    var maximumSpeakerLevelSpreadAfterDB: Double
+    var maximumSpeakerTimingSpreadBeforeMs: Double
+    var maximumSpeakerTimingSpreadAfterMs: Double
+    var subCombinedRMSErrorBeforeDB: Double?
+    var subCombinedRMSErrorAfterDB: Double?
+    var sourceReports: [CalibrationPredictionSourceReport]
+    var seatReports: [CalibrationPredictionSeatReport]
+    var blockingReasons: [String]
+    var warnings: [String]
+
+    var status: CalibrationPredictionStatus {
+        blockingReasons.isEmpty ? .accepted : .rejected
+    }
+
+    var accepted: Bool { status == .accepted }
+}
+
+enum CalibrationPredictionError: Error, Equatable, LocalizedError {
+    case invalidSampleRate(Double)
+    case noIncludedSeats
+    case missingMeasurement(seatID: UUID, source: MultichannelCalibrationSource)
+    case invalidResponse(seatID: UUID, source: MultichannelCalibrationSource)
+    case missingCalibration(MultichannelCalibrationSource)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidSampleRate(let rate):
+            return "Calibration prediction sample rate \(rate) Hz is invalid."
+        case .noIncludedSeats:
+            return "Calibration prediction requires at least one included listening seat."
+        case .missingMeasurement(let seatID, let source):
+            return "Calibration prediction is missing \(source.displayName) measurement for seat \(seatID.uuidString)."
+        case .invalidResponse(let seatID, let source):
+            return "Calibration prediction found invalid transfer data for \(source.displayName) at seat \(seatID.uuidString)."
+        case .missingCalibration(let source):
+            return "Calibration prediction cannot find the deployable calibration for \(source.displayName)."
+        }
+    }
+}
+
+/// Independent offline verifier for the deployable multichannel calibration.
+///
+/// This deliberately does not reuse the C designer's internal error metrics.
+/// It starts from persisted seat/source transfer functions, applies the
+/// materialized calibration that will actually be deployed, and predicts the
+/// resulting complex response. This gives deployment a second implementation
+/// path that can catch designer/materialization drift.
+struct MultichannelCalibrationPredictionVerifier: Sendable {
+    static let gridPointCount = 128
+    static let minimumConfidence = 0.70
+    static let minimumMeaningfulImprovementDB = 0.25
+    static let excellentResidualDB = 0.75
+    static let maximumSourceRegressionDB = 0.25
+    static let maximumSeatRegressionDB = 0.75
+    static let maximumAbsoluteResidualDB = 12.0
+    static let maximumLevelSpreadRegressionDB = 0.50
+    static let maximumTimingSpreadRegressionMs = 0.25
+    static let minimumMeasurementSNRDB = 30.0
+
+    func verify(
+        design: MultichannelCalibrationDesign,
+        seats: [MultichannelCalibrationSeat],
+        measurements: [MultichannelCalibrationMeasurement],
+        target: RoomCorrectionTargetCurve? = nil
+    ) throws -> CalibrationPredictionReport {
+        let sampleRate = design.sampleRate
+        guard sampleRate.isFinite, sampleRate > 0 else {
+            throw CalibrationPredictionError.invalidSampleRate(sampleRate)
+        }
+
+        let includedSeats = seats.filter {
+            $0.included && $0.weight.isFinite && $0.weight > 0
+        }
+        guard !includedSeats.isEmpty else {
+            throw CalibrationPredictionError.noIncludedSeats
+        }
+
+        let speakerSources = design.speakers.map {
+            MultichannelCalibrationSource.speaker($0.role)
+        }
+        let subSources = design.subwoofers.map {
+            MultichannelCalibrationSource.subwoofer($0.index)
+        }
+        let allSources = speakerSources + subSources
+
+        var measurementBySeatSource: [
+            PR86SeatSourceKey: MultichannelCalibrationMeasurement
+        ] = [:]
+        for seat in includedSeats {
+            for source in allSources {
+                guard let measurement = measurements.last(where: {
+                    $0.seatID == seat.id && $0.source == source
+                }) else {
+                    throw CalibrationPredictionError.missingMeasurement(
+                        seatID: seat.id,
+                        source: source
+                    )
+                }
+                try validate(
+                    measurement: measurement,
+                    seatID: seat.id,
+                    source: source,
+                    expectedSampleRate: sampleRate
+                )
+                measurementBySeatSource[
+                    PR86SeatSourceKey(seatID: seat.id, source: source)
+                ] = measurement
+            }
+        }
+
+        let speakerGrid = Self.logGrid(
+            low: MultichannelCalibrationDesigner.minimumFrequencyHz,
+            high: min(
+                MultichannelCalibrationDesigner.nominalMaximumFrequencyHz,
+                sampleRate * 0.48
+            ),
+            count: Self.gridPointCount
+        )
+        let subGrid = Self.logGrid(
+            low: MultichannelCalibrationDesigner.minimumFrequencyHz,
+            high: min(
+                MultichannelCalibrationDesigner.subwooferMaximumFrequencyHz,
+                sampleRate * 0.48
+            ),
+            count: 96
+        )
+
+        var sourceReports: [CalibrationPredictionSourceReport] = []
+        var seatAccumulator: [UUID: PR86SeatAccumulator] = [:]
+        for seat in includedSeats {
+            seatAccumulator[seat.id] = PR86SeatAccumulator(
+                seatID: seat.id,
+                seatName: seat.name,
+                seatWeight: seat.weight
+            )
+        }
+
+        var blocking: [String] = []
+        var warnings: [String] = []
+        var confidenceWeighted = 0.0
+        var confidenceWeight = 0.0
+        var overallBeforeSquares = 0.0
+        var overallAfterSquares = 0.0
+        var overallErrorWeight = 0.0
+        var maximumAbsoluteAfter = 0.0
+        var worstSourceRegression = 0.0
+
+        for speakerDesign in design.speakers {
+            let source = MultichannelCalibrationSource.speaker(
+                speakerDesign.role
+            )
+            var beforeSquares = 0.0
+            var afterSquares = 0.0
+            var sourceWeight = 0.0
+            var sourceMaxAfter = 0.0
+            var sourceWorstSeatRegression = 0.0
+            var sourceConfidenceWeighted = 0.0
+            var sourceConfidenceWeight = 0.0
+
+            for seat in includedSeats {
+                let measurement = try requiredMeasurement(
+                    seatID: seat.id,
+                    source: source,
+                    from: measurementBySeatSource
+                )
+                let evaluation = try evaluateSpeaker(
+                    measurement: measurement,
+                    calibration: speakerDesign.calibration,
+                    target: target,
+                    grid: speakerGrid,
+                    sampleRate: sampleRate
+                )
+                let weight = seat.weight
+                beforeSquares += evaluation.rmsBeforeDB
+                    * evaluation.rmsBeforeDB * weight
+                afterSquares += evaluation.rmsAfterDB
+                    * evaluation.rmsAfterDB * weight
+                sourceWeight += weight
+                sourceMaxAfter = max(
+                    sourceMaxAfter,
+                    evaluation.maximumAbsoluteAfterDB
+                )
+                sourceWorstSeatRegression = max(
+                    sourceWorstSeatRegression,
+                    evaluation.rmsAfterDB - evaluation.rmsBeforeDB
+                )
+                sourceConfidenceWeighted += evaluation.confidence * weight
+                sourceConfidenceWeight += weight
+                confidenceWeighted += evaluation.confidence * weight
+                confidenceWeight += weight
+
+                seatAccumulator[seat.id]?.speakerEvaluations.append(
+                    evaluation
+                )
+            }
+
+            let before = sqrt(beforeSquares / max(sourceWeight, 1.0e-12))
+            let after = sqrt(afterSquares / max(sourceWeight, 1.0e-12))
+            let improvement = before - after
+            let confidence = sourceConfidenceWeighted
+                / max(sourceConfidenceWeight, 1.0e-12)
+            worstSourceRegression = max(worstSourceRegression, -improvement)
+            maximumAbsoluteAfter = max(maximumAbsoluteAfter, sourceMaxAfter)
+            sourceReports.append(
+                CalibrationPredictionSourceReport(
+                    source: source,
+                    weightedRMSErrorBeforeDB: before,
+                    weightedRMSErrorAfterDB: after,
+                    improvementDB: improvement,
+                    worstSeatRegressionDB: sourceWorstSeatRegression,
+                    maximumAbsoluteErrorAfterDB: sourceMaxAfter,
+                    confidence: confidence
+                )
+            )
+            overallBeforeSquares += before * before * sourceWeight
+            overallAfterSquares += after * after * sourceWeight
+            overallErrorWeight += sourceWeight
+
+            if improvement < -Self.maximumSourceRegressionDB {
+                blocking.append(
+                    "\(source.displayName) is predicted to regress by \(Self.formatDB(-improvement)) RMS."
+                )
+            }
+            if sourceMaxAfter > Self.maximumAbsoluteResidualDB {
+                blocking.append(
+                    "\(source.displayName) retains \(Self.formatDB(sourceMaxAfter)) maximum target error."
+                )
+            }
+
+            // Cross-check only trend, not absolute RMS, because the designer's
+            // internal objective and this verifier intentionally use different
+            // independent metrics.
+            let designerImprovement =
+                speakerDesign.errorBeforeDB - speakerDesign.errorAfterDB
+            if designerImprovement > 0.25 && improvement < -0.10 {
+                blocking.append(
+                    "\(source.displayName) designer/verifier trends disagree."
+                )
+            } else if abs(designerImprovement - improvement) > 2.0 {
+                warnings.append(
+                    "\(source.displayName) independent prediction differs materially from the designer's internal RMS estimate."
+                )
+            }
+        }
+
+        // Predict the coherent summed subwoofer field at each seat. This catches
+        // cancellation/regression that per-sub magnitude inspection cannot.
+        var subBeforeSquares = 0.0
+        var subAfterSquares = 0.0
+        var subWeight = 0.0
+        if !design.subwoofers.isEmpty {
+            for seat in includedSeats {
+                let evaluation = try evaluateSummedSubwoofers(
+                    seat: seat,
+                    designs: design.subwoofers,
+                    measurements: measurementBySeatSource,
+                    target: target,
+                    grid: subGrid,
+                    sampleRate: sampleRate
+                )
+                seatAccumulator[seat.id]?.subEvaluation = evaluation
+                let weight = seat.weight
+                subBeforeSquares += evaluation.rmsBeforeDB
+                    * evaluation.rmsBeforeDB * weight
+                subAfterSquares += evaluation.rmsAfterDB
+                    * evaluation.rmsAfterDB * weight
+                subWeight += weight
+                confidenceWeighted += evaluation.confidence * weight
+                confidenceWeight += weight
+                if evaluation.rmsAfterDB
+                    > evaluation.rmsBeforeDB + Self.maximumSeatRegressionDB {
+                    blocking.append(
+                        "\(seat.name) summed subwoofer response is predicted to regress by \(Self.formatDB(evaluation.rmsAfterDB - evaluation.rmsBeforeDB)) RMS."
+                    )
+                }
+            }
+        }
+
+        var seatReports: [CalibrationPredictionSeatReport] = []
+        var worstSeatRegression = 0.0
+        var maxLevelBefore = 0.0
+        var maxLevelAfter = 0.0
+        var maxTimingBefore = 0.0
+        var maxTimingAfter = 0.0
+
+        for seat in includedSeats {
+            guard let accumulator = seatAccumulator[seat.id] else {
+                continue
+            }
+            let evaluations = accumulator.speakerEvaluations
+            let seatBefore = Self.rms(evaluations.map(\.rmsBeforeDB))
+            let seatAfter = Self.rms(evaluations.map(\.rmsAfterDB))
+            let seatImprovement = seatBefore - seatAfter
+            worstSeatRegression = max(
+                worstSeatRegression,
+                seatAfter - seatBefore
+            )
+
+            let levelBefore = Self.spread(
+                evaluations.map(\.broadbandLevelBeforeDB)
+            )
+            let levelAfter = Self.spread(
+                evaluations.map(\.broadbandLevelAfterDB)
+            )
+            let timingBefore = Self.spread(
+                evaluations.map(\.arrivalBeforeMs)
+            )
+            let timingAfter = Self.spread(
+                evaluations.map(\.arrivalAfterMs)
+            )
+            maxLevelBefore = max(maxLevelBefore, levelBefore)
+            maxLevelAfter = max(maxLevelAfter, levelAfter)
+            maxTimingBefore = max(maxTimingBefore, timingBefore)
+            maxTimingAfter = max(maxTimingAfter, timingAfter)
+
+            if seatAfter > seatBefore + Self.maximumSeatRegressionDB {
+                blocking.append(
+                    "\(seat.name) is predicted to regress by \(Self.formatDB(seatAfter - seatBefore)) RMS."
+                )
+            }
+            let confidence = evaluations.isEmpty
+                ? 0
+                : evaluations.map(\.confidence).reduce(0, +)
+                    / Double(evaluations.count)
+            seatReports.append(
+                CalibrationPredictionSeatReport(
+                    seatID: seat.id,
+                    seatName: seat.name,
+                    speakerRMSErrorBeforeDB: seatBefore,
+                    speakerRMSErrorAfterDB: seatAfter,
+                    speakerImprovementDB: seatImprovement,
+                    speakerLevelSpreadBeforeDB: levelBefore,
+                    speakerLevelSpreadAfterDB: levelAfter,
+                    speakerTimingSpreadBeforeMs: timingBefore,
+                    speakerTimingSpreadAfterMs: timingAfter,
+                    subCombinedRMSErrorBeforeDB:
+                        accumulator.subEvaluation?.rmsBeforeDB,
+                    subCombinedRMSErrorAfterDB:
+                        accumulator.subEvaluation?.rmsAfterDB,
+                    confidence: confidence
+                )
+            )
+        }
+
+        let before = sqrt(
+            overallBeforeSquares / max(overallErrorWeight, 1.0e-12)
+        )
+        let after = sqrt(
+            overallAfterSquares / max(overallErrorWeight, 1.0e-12)
+        )
+        let improvement = before - after
+
+        var confidence = confidenceWeighted
+            / max(confidenceWeight, 1.0e-12)
+        let seatCoverage = min(
+            1.0,
+            0.85 + 0.075 * Double(max(0, includedSeats.count - 1))
+        )
+        confidence *= seatCoverage
+        confidence = min(max(confidence, 0), 1)
+
+        if confidence < Self.minimumConfidence {
+            blocking.append(
+                "Prediction confidence \(Int((confidence * 100).rounded()))% is below the \(Int(Self.minimumConfidence * 100))% deployment threshold."
+            )
+        }
+
+        let alreadyExcellent = after <= Self.excellentResidualDB
+            && after <= before + 0.10
+        if improvement < Self.minimumMeaningfulImprovementDB
+            && !alreadyExcellent {
+            blocking.append(
+                "Predicted speaker RMS improves by only \(Self.formatDB(improvement)); at least \(Self.formatDB(Self.minimumMeaningfulImprovementDB)) is required unless residual error is already excellent."
+            )
+        }
+        if maximumAbsoluteAfter > Self.maximumAbsoluteResidualDB {
+            blocking.append(
+                "Predicted maximum target error is \(Self.formatDB(maximumAbsoluteAfter)), above the \(Self.formatDB(Self.maximumAbsoluteResidualDB)) limit."
+            )
+        }
+        if maxLevelAfter
+            > maxLevelBefore + Self.maximumLevelSpreadRegressionDB {
+            blocking.append(
+                "Speaker level alignment is predicted to worsen from \(Self.formatDB(maxLevelBefore)) to \(Self.formatDB(maxLevelAfter)) spread."
+            )
+        }
+        if maxTimingAfter
+            > maxTimingBefore + Self.maximumTimingSpreadRegressionMs {
+            blocking.append(
+                "Speaker timing alignment is predicted to worsen from \(Self.formatMS(maxTimingBefore)) to \(Self.formatMS(maxTimingAfter)) spread."
+            )
+        }
+
+        let subBefore = subWeight > 0
+            ? sqrt(subBeforeSquares / subWeight)
+            : nil
+        let subAfter = subWeight > 0
+            ? sqrt(subAfterSquares / subWeight)
+            : nil
+        if let subBefore, let subAfter,
+           subAfter > subBefore + 0.50 {
+            blocking.append(
+                "Coherent summed-sub prediction regresses by \(Self.formatDB(subAfter - subBefore)) RMS."
+            )
+        }
+
+        // De-duplicate deterministic human-readable reasons.
+        blocking = Array(NSOrderedSet(array: blocking)) as? [String]
+            ?? blocking
+        warnings = Array(NSOrderedSet(array: warnings)) as? [String]
+            ?? warnings
+
+        return CalibrationPredictionReport(
+            sampleRate: sampleRate,
+            confidence: confidence,
+            speakerRMSErrorBeforeDB: before,
+            speakerRMSErrorAfterDB: after,
+            speakerImprovementDB: improvement,
+            maximumAbsoluteErrorAfterDB: maximumAbsoluteAfter,
+            worstSourceRegressionDB: worstSourceRegression,
+            worstSeatRegressionDB: worstSeatRegression,
+            maximumSpeakerLevelSpreadBeforeDB: maxLevelBefore,
+            maximumSpeakerLevelSpreadAfterDB: maxLevelAfter,
+            maximumSpeakerTimingSpreadBeforeMs: maxTimingBefore,
+            maximumSpeakerTimingSpreadAfterMs: maxTimingAfter,
+            subCombinedRMSErrorBeforeDB: subBefore,
+            subCombinedRMSErrorAfterDB: subAfter,
+            sourceReports: sourceReports,
+            seatReports: seatReports,
+            blockingReasons: blocking,
+            warnings: warnings
+        )
+    }
+
+    private func validate(
+        measurement: MultichannelCalibrationMeasurement,
+        seatID: UUID,
+        source: MultichannelCalibrationSource,
+        expectedSampleRate: Double
+    ) throws {
+        guard measurement.sampleRate.isFinite,
+              abs(measurement.sampleRate - expectedSampleRate) < 0.5,
+              let response = measurement.channel.transferFunction,
+              response.frequenciesHz.count >= 2,
+              response.frequenciesHz.count == response.magnitudeDB.count,
+              response.frequenciesHz.allSatisfy({ $0.isFinite && $0 > 0 }),
+              response.magnitudeDB.allSatisfy(\.isFinite),
+              zip(
+                response.frequenciesHz,
+                response.frequenciesHz.dropFirst()
+              ).allSatisfy({ $0 < $1 }),
+              measurement.channel.quality.sweepComplete else {
+            throw CalibrationPredictionError.invalidResponse(
+                seatID: seatID,
+                source: source
+            )
+        }
+    }
+
+    private func requiredMeasurement(
+        seatID: UUID,
+        source: MultichannelCalibrationSource,
+        from lookup: [PR86SeatSourceKey: MultichannelCalibrationMeasurement]
+    ) throws -> MultichannelCalibrationMeasurement {
+        guard let measurement = lookup[
+            PR86SeatSourceKey(seatID: seatID, source: source)
+        ] else {
+            throw CalibrationPredictionError.missingMeasurement(
+                seatID: seatID,
+                source: source
+            )
+        }
+        return measurement
+    }
+
+    private func evaluateSpeaker(
+        measurement: MultichannelCalibrationMeasurement,
+        calibration: SemanticSpeakerCalibration,
+        target: RoomCorrectionTargetCurve?,
+        grid: [Double],
+        sampleRate: Double
+    ) throws -> PR86ResponseEvaluation {
+        try calibration.validate(sampleRate: sampleRate)
+        let source = measurement.source
+        let usable = usableGrid(
+            grid,
+            quality: measurement.channel.quality
+        )
+        guard usable.count >= 8,
+              let response = measurement.channel.transferFunction else {
+            throw CalibrationPredictionError.invalidResponse(
+                seatID: measurement.seatID,
+                source: source
+            )
+        }
+
+        var before: [Double] = []
+        var after: [Double] = []
+        var targetValues: [Double] = []
+        before.reserveCapacity(usable.count)
+        after.reserveCapacity(usable.count)
+        targetValues.reserveCapacity(usable.count)
+
+        for frequency in usable {
+            let measuredDB = try Self.interpolate(
+                response.magnitudeDB,
+                response: response,
+                at: frequency
+            )
+            let correction = Self.eqMagnitudeDB(
+                bands: calibration.eqBands,
+                frequency: frequency,
+                sampleRate: sampleRate
+            ) + calibration.trimDB
+            before.append(measuredDB)
+            after.append(measuredDB + correction)
+            targetValues.append(Self.targetGainDB(target, at: frequency))
+        }
+
+        let beforeErrors = Self.normalizedErrors(
+            responseDB: before,
+            targetDB: targetValues
+        )
+        let afterErrors = Self.normalizedErrors(
+            responseDB: after,
+            targetDB: targetValues
+        )
+        let beforeRMS = Self.rms(beforeErrors)
+        let afterRMS = Self.rms(afterErrors)
+        let maxAfter = afterErrors.map(abs).max() ?? 0
+        let confidence = Self.measurementConfidence(
+            measurement.channel.quality,
+            evaluatedLow: usable.first ?? grid.first ?? 20,
+            evaluatedHigh: usable.last ?? grid.last ?? 20,
+            phaseAvailable:
+                response.phaseRadians?.count == response.frequenciesHz.count
+        )
+        let arrivalBefore = (measurement.channel.quality.directArrivalSeconds
+            ?? 0) * 1_000
+        let arrivalAfter = arrivalBefore + calibration.delayMilliseconds
+
+        return PR86ResponseEvaluation(
+            rmsBeforeDB: beforeRMS,
+            rmsAfterDB: afterRMS,
+            maximumAbsoluteAfterDB: maxAfter,
+            broadbandLevelBeforeDB: Self.mean(before),
+            broadbandLevelAfterDB: Self.mean(after),
+            arrivalBeforeMs: arrivalBefore,
+            arrivalAfterMs: arrivalAfter,
+            confidence: confidence
+        )
+    }
+
+    private func evaluateSummedSubwoofers(
+        seat: MultichannelCalibrationSeat,
+        designs: [MultichannelSubwooferDesign],
+        measurements: [PR86SeatSourceKey: MultichannelCalibrationMeasurement],
+        target: RoomCorrectionTargetCurve?,
+        grid: [Double],
+        sampleRate: Double
+    ) throws -> PR86SubEvaluation {
+        var beforeDB: [Double] = []
+        var afterDB: [Double] = []
+        var targetDB: [Double] = []
+        var confidences: [Double] = []
+
+        for frequency in grid {
+            var beforeSum = PR86Complex.zero
+            var afterSum = PR86Complex.zero
+            var valid = true
+
+            for design in designs {
+                let source = MultichannelCalibrationSource.subwoofer(
+                    design.index
+                )
+                let measurement = try requiredMeasurement(
+                    seatID: seat.id,
+                    source: source,
+                    from: measurements
+                )
+                guard let response = measurement.channel.transferFunction,
+                      let phases = response.phaseRadians,
+                      phases.count == response.frequenciesHz.count,
+                      let usableLow = measurement.channel.quality.usableLowHz,
+                      let usableHigh = measurement.channel.quality.usableHighHz,
+                      frequency >= usableLow,
+                      frequency <= usableHigh else {
+                    valid = false
+                    continue
+                }
+                let magnitudeDB = try Self.interpolate(
+                    response.magnitudeDB,
+                    response: response,
+                    at: frequency
+                )
+                let phase = try Self.interpolate(
+                    phases,
+                    response: response,
+                    at: frequency
+                )
+                let measured = PR86Complex.polar(
+                    magnitude: pow(10, magnitudeDB / 20),
+                    phase: phase
+                )
+                beforeSum = beforeSum + measured
+
+                try design.calibration.validate(sampleRate: sampleRate)
+                var correction = PR86Complex.polar(
+                    magnitude: pow(
+                        10,
+                        design.calibration.gainDB / 20
+                    ),
+                    phase: design.calibration.polarityInverted ? .pi : 0
+                )
+                for band in design.calibration.eqBands {
+                    correction = correction * Self.peakingResponse(
+                        band: band,
+                        frequency: frequency,
+                        sampleRate: sampleRate
+                    )
+                }
+                let delayPhase = -2 * Double.pi * frequency
+                    * design.calibration.delayMilliseconds / 1_000
+                correction = correction * PR86Complex.polar(
+                    magnitude: 1,
+                    phase: delayPhase
+                )
+                afterSum = afterSum + measured * correction
+
+                confidences.append(
+                    Self.measurementConfidence(
+                        measurement.channel.quality,
+                        evaluatedLow: grid.first ?? 20,
+                        evaluatedHigh: grid.last ?? 300,
+                        phaseAvailable: true
+                    )
+                )
+            }
+
+            if valid && beforeSum.magnitude > 1.0e-12
+                && afterSum.magnitude > 1.0e-12 {
+                beforeDB.append(
+                    20 * log10(beforeSum.magnitude)
+                )
+                afterDB.append(
+                    20 * log10(afterSum.magnitude)
+                )
+                targetDB.append(
+                    Self.targetGainDB(target, at: frequency)
+                )
+            }
+        }
+
+        guard beforeDB.count >= 8,
+              beforeDB.count == afterDB.count else {
+            throw CalibrationPredictionError.invalidResponse(
+                seatID: seat.id,
+                source: .subwoofer(designs.first?.index ?? 0)
+            )
+        }
+        let beforeErrors = Self.normalizedErrors(
+            responseDB: beforeDB,
+            targetDB: targetDB
+        )
+        let afterErrors = Self.normalizedErrors(
+            responseDB: afterDB,
+            targetDB: targetDB
+        )
+        return PR86SubEvaluation(
+            rmsBeforeDB: Self.rms(beforeErrors),
+            rmsAfterDB: Self.rms(afterErrors),
+            confidence: confidences.isEmpty
+                ? 0
+                : confidences.reduce(0, +) / Double(confidences.count)
+        )
+    }
+
+    private func usableGrid(
+        _ grid: [Double],
+        quality: RoomCorrectionMeasurementQuality
+    ) -> [Double] {
+        let low = quality.usableLowHz ?? grid.first ?? 20
+        let high = quality.usableHighHz ?? grid.last ?? 20
+        return grid.filter { $0 >= low && $0 <= high }
+    }
+
+    private static func measurementConfidence(
+        _ quality: RoomCorrectionMeasurementQuality,
+        evaluatedLow: Double,
+        evaluatedHigh: Double,
+        phaseAvailable: Bool
+    ) -> Double {
+        guard !quality.clipped, quality.sweepComplete else { return 0 }
+        let snr: Double
+        if let value = quality.estimatedSNRDB, value.isFinite {
+            snr = min(max((value - 20) / 30, 0), 1)
+        } else {
+            snr = 0.55
+        }
+        let usableLow = quality.usableLowHz ?? evaluatedLow
+        let usableHigh = quality.usableHighHz ?? evaluatedHigh
+        let requestedOctaves = max(
+            log2(max(evaluatedHigh / max(evaluatedLow, 1), 1)),
+            1.0e-9
+        )
+        let overlapLow = max(evaluatedLow, usableLow)
+        let overlapHigh = min(evaluatedHigh, usableHigh)
+        let overlapOctaves = overlapHigh > overlapLow
+            ? log2(overlapHigh / overlapLow)
+            : 0
+        let coverage = min(max(overlapOctaves / requestedOctaves, 0), 1)
+        let phase = phaseAvailable ? 1.0 : 0.65
+        let arrival = quality.directArrivalSeconds == nil ? 0.75 : 1.0
+        return min(max(
+            0.45 * snr + 0.30 * coverage + 0.15 * phase + 0.10 * arrival,
+            0
+        ), 1)
+    }
+
+    private static func eqMagnitudeDB(
+        bands: [OutputCalibrationEQBand],
+        frequency: Double,
+        sampleRate: Double
+    ) -> Double {
+        bands.reduce(0) { partial, band in
+            let response = peakingResponse(
+                band: band,
+                frequency: frequency,
+                sampleRate: sampleRate
+            )
+            return partial + 20 * log10(max(response.magnitude, 1.0e-12))
+        }
+    }
+
+    private static func peakingResponse(
+        band: OutputCalibrationEQBand,
+        frequency: Double,
+        sampleRate: Double
+    ) -> PR86Complex {
+        let a = pow(10.0, band.gainDB / 40.0)
+        let w0 = 2.0 * Double.pi * band.frequencyHz / sampleRate
+        let alpha = sin(w0) / (2.0 * band.q)
+        let b0 = 1.0 + alpha * a
+        let b1 = -2.0 * cos(w0)
+        let b2 = 1.0 - alpha * a
+        let a0 = 1.0 + alpha / a
+        let a1 = -2.0 * cos(w0)
+        let a2 = 1.0 - alpha / a
+
+        let w = 2.0 * Double.pi * frequency / sampleRate
+        let z1 = PR86Complex.polar(magnitude: 1, phase: -w)
+        let z2 = PR86Complex.polar(magnitude: 1, phase: -2 * w)
+        let numerator = PR86Complex(real: b0, imaginary: 0)
+            + z1 * b1 + z2 * b2
+        let denominator = PR86Complex(real: a0, imaginary: 0)
+            + z1 * a1 + z2 * a2
+        return numerator / denominator
+    }
+
+    private static func normalizedErrors(
+        responseDB: [Double],
+        targetDB: [Double]
+    ) -> [Double] {
+        guard responseDB.count == targetDB.count,
+              !responseDB.isEmpty else {
+            return []
+        }
+        let raw = zip(responseDB, targetDB).map { response, target in
+            response - target
+        }
+        let offset = mean(raw)
+        return raw.map { $0 - offset }
+    }
+
+    private static func targetGainDB(
+        _ target: RoomCorrectionTargetCurve?,
+        at frequency: Double
+    ) -> Double {
+        guard let target, target.points.count >= 2 else { return 0 }
+        let points = target.points
+        if frequency <= points[0].frequencyHz {
+            return points[0].gainDB
+        }
+        if frequency >= points[points.count - 1].frequencyHz {
+            return points[points.count - 1].gainDB
+        }
+        for index in 1..<points.count
+            where frequency <= points[index].frequencyHz {
+            let lower = points[index - 1]
+            let upper = points[index]
+            let denominator = log(
+                upper.frequencyHz / lower.frequencyHz
+            )
+            guard denominator > 0 else { return lower.gainDB }
+            let fraction = log(frequency / lower.frequencyHz)
+                / denominator
+            return lower.gainDB
+                + (upper.gainDB - lower.gainDB) * fraction
+        }
+        return 0
+    }
+
+    private static func interpolate(
+        _ values: [Double],
+        response: RoomCorrectionFrequencyResponse,
+        at frequency: Double
+    ) throws -> Double {
+        let frequencies = response.frequenciesHz
+        guard frequencies.count == values.count,
+              frequencies.count >= 2,
+              frequency.isFinite,
+              frequency > 0 else {
+            throw OutputDeviceCalibrationError.designFailed(
+                "prediction frequency response arrays are invalid"
+            )
+        }
+        if frequency <= frequencies[0] { return values[0] }
+        if frequency >= frequencies[frequencies.count - 1] {
+            return values[values.count - 1]
+        }
+        var low = 0
+        var high = frequencies.count - 1
+        while high - low > 1 {
+            let middle = (low + high) / 2
+            if frequencies[middle] <= frequency {
+                low = middle
+            } else {
+                high = middle
+            }
+        }
+        let lowerFrequency = frequencies[low]
+        let upperFrequency = frequencies[high]
+        let denominator = log(upperFrequency / lowerFrequency)
+        guard denominator > 0 else { return values[low] }
+        let fraction = log(frequency / lowerFrequency) / denominator
+        return values[low] + (values[high] - values[low]) * fraction
+    }
+
+    private static func logGrid(
+        low: Double,
+        high: Double,
+        count: Int
+    ) -> [Double] {
+        guard low.isFinite, high.isFinite, high > low, count > 1 else {
+            return []
+        }
+        let ratio = high / low
+        return (0..<count).map {
+            low * pow(ratio, Double($0) / Double(count - 1))
+        }
+    }
+
+    private static func rms(_ values: [Double]) -> Double {
+        guard !values.isEmpty else { return 0 }
+        let square = values.reduce(0) { $0 + $1 * $1 }
+        return sqrt(square / Double(values.count))
+    }
+
+    private static func mean(_ values: [Double]) -> Double {
+        guard !values.isEmpty else { return 0 }
+        return values.reduce(0, +) / Double(values.count)
+    }
+
+    private static func spread(_ values: [Double]) -> Double {
+        guard let minimum = values.min(),
+              let maximum = values.max() else {
+            return 0
+        }
+        return maximum - minimum
+    }
+
+    private static func formatDB(_ value: Double) -> String {
+        String(format: "%.2f dB", value)
+    }
+
+    private static func formatMS(_ value: Double) -> String {
+        String(format: "%.2f ms", value)
+    }
+}
+
+private struct PR86SeatSourceKey: Hashable {
+    var seatID: UUID
+    var source: MultichannelCalibrationSource
+}
+
+private struct PR86ResponseEvaluation {
+    var rmsBeforeDB: Double
+    var rmsAfterDB: Double
+    var maximumAbsoluteAfterDB: Double
+    var broadbandLevelBeforeDB: Double
+    var broadbandLevelAfterDB: Double
+    var arrivalBeforeMs: Double
+    var arrivalAfterMs: Double
+    var confidence: Double
+}
+
+private struct PR86SubEvaluation {
+    var rmsBeforeDB: Double
+    var rmsAfterDB: Double
+    var confidence: Double
+}
+
+private struct PR86SeatAccumulator {
+    var seatID: UUID
+    var seatName: String
+    var seatWeight: Double
+    var speakerEvaluations: [PR86ResponseEvaluation] = []
+    var subEvaluation: PR86SubEvaluation?
+}
+
+private struct PR86Complex {
+    var real: Double
+    var imaginary: Double
+
+    static let zero = PR86Complex(real: 0, imaginary: 0)
+
+    var magnitude: Double { hypot(real, imaginary) }
+
+    static func polar(magnitude: Double, phase: Double) -> Self {
+        Self(
+            real: magnitude * cos(phase),
+            imaginary: magnitude * sin(phase)
+        )
+    }
+
+    static func + (lhs: Self, rhs: Self) -> Self {
+        Self(
+            real: lhs.real + rhs.real,
+            imaginary: lhs.imaginary + rhs.imaginary
+        )
+    }
+
+    static func * (lhs: Self, rhs: Self) -> Self {
+        Self(
+            real: lhs.real * rhs.real - lhs.imaginary * rhs.imaginary,
+            imaginary:
+                lhs.real * rhs.imaginary + lhs.imaginary * rhs.real
+        )
+    }
+
+    static func * (lhs: Self, rhs: Double) -> Self {
+        Self(real: lhs.real * rhs, imaginary: lhs.imaginary * rhs)
+    }
+
+    static func / (lhs: Self, rhs: Self) -> Self {
+        let denominator = rhs.real * rhs.real
+            + rhs.imaginary * rhs.imaginary
+        guard denominator > 1.0e-24 else { return .zero }
+        return Self(
+            real: (
+                lhs.real * rhs.real + lhs.imaginary * rhs.imaginary
+            ) / denominator,
+            imaginary: (
+                lhs.imaginary * rhs.real - lhs.real * rhs.imaginary
+            ) / denominator
+        )
+    }
+}

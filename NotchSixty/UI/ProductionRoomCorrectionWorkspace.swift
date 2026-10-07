@@ -796,6 +796,119 @@ struct ProductionRoomCorrectionWorkspace: View {
 
             if let selected = projects.selectedDesign {
                 Divider()
+                if let verification = projects.selectedDesignVerification {
+                    HStack(spacing: 12) {
+                        Label(
+                            verification.accepted
+                                ? "Prediction Verified"
+                                : "Prediction Blocked",
+                            systemImage: verification.accepted
+                                ? "checkmark.shield.fill"
+                                : "exclamationmark.shield.fill"
+                        )
+                        .font(.callout.bold())
+                        .foregroundStyle(
+                            verification.accepted ? .green : .red
+                        )
+                        Spacer()
+                        Text(
+                            "Confidence \(Int((verification.confidence * 100).rounded()))%"
+                        )
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    }
+                    HStack(spacing: 22) {
+                        statusValue(
+                            "Independent RMS",
+                            String(
+                                format: "%.2f → %.2f dB",
+                                verification.rmsErrorBeforeDB,
+                                verification.rmsErrorAfterDB
+                            )
+                        )
+                        statusValue(
+                            "Improvement",
+                            String(
+                                format: "%+.2f dB",
+                                verification.improvementDB
+                            )
+                        )
+                        statusValue(
+                            "Max Residual",
+                            String(
+                                format: "%.2f dB",
+                                verification.maximumAbsoluteErrorAfterDB
+                            )
+                        )
+                        statusValue(
+                            "Stereo Match",
+                            String(
+                                format: "%.2f → %.2f dB",
+                                verification.stereoMismatchBeforeDB,
+                                verification.stereoMismatchAfterDB
+                            )
+                        )
+                    }
+                    HStack(spacing: 22) {
+                        statusValue(
+                            "FIR Peak",
+                            String(
+                                format: "%.2f dB",
+                                verification.maximumUnscaledFilterGainDB
+                            )
+                        )
+                        statusValue(
+                            "Deployed Peak",
+                            String(
+                                format: "%.2f dB",
+                                verification.maximumDeploymentFilterGainDB
+                            )
+                        )
+                        statusValue(
+                            "Out-of-band",
+                            String(
+                                format: "%.2f dB",
+                                verification.maximumOutOfBandDeviationDB
+                            )
+                        )
+                    }
+                    if !verification.blockingReasons.isEmpty {
+                        VStack(alignment: .leading, spacing: 5) {
+                            ForEach(
+                                Array(
+                                    verification.blockingReasons.enumerated()
+                                ),
+                                id: \.offset
+                            ) { _, reason in
+                                Label(
+                                    reason,
+                                    systemImage: "xmark.octagon.fill"
+                                )
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                            }
+                        }
+                    }
+                    if !verification.warnings.isEmpty {
+                        VStack(alignment: .leading, spacing: 5) {
+                            ForEach(
+                                Array(
+                                    verification.warnings.enumerated()
+                                ),
+                                id: \.offset
+                            ) { _, warning in
+                                Label(
+                                    warning,
+                                    systemImage:
+                                        "exclamationmark.triangle"
+                                )
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+
                 HStack(alignment: .center, spacing: 14) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Selected candidate: \(selected.name)")
@@ -824,7 +937,11 @@ struct ProductionRoomCorrectionWorkspace: View {
                         )
                     }
                     .buttonStyle(.glassProminent)
-                    .disabled(selectedDesignIsDeployed || profiles.selectedSystemProfile == nil)
+                    .disabled(
+                        selectedDesignIsDeployed
+                            || profiles.selectedSystemProfile == nil
+                            || projects.selectedDesignVerification?.accepted != true
+                    )
                 }
                 Text("Deployment embeds the design's recommended safety attenuation in the room-owned FIR. Content Preset preamp/headroom remain unchanged, and the deployed filter remains available even if the room-project sidecar is later unavailable.")
                     .font(.caption)
@@ -855,17 +972,12 @@ struct ProductionRoomCorrectionWorkspace: View {
 
     private func deploySelectedDesign() {
         actionError = nil
-        guard let selected = projects.selectedDesign else {
+        guard projects.selectedDesign != nil else {
             actionError = "Select a generated room-correction design before deploying."
             return
         }
         do {
-            let filter = try selected.deploymentFilter()
-            let summary = try projects.deploymentSummary(for: selected)
-            try profiles.replaceSelectedSystemRoomCorrection(
-                RoomCorrectionConfiguration(enabled: true, filter: filter),
-                calibrationSummary: summary
-            )
+            try projects.deploySelectedDesign()
         } catch {
             actionError = error.localizedDescription
         }

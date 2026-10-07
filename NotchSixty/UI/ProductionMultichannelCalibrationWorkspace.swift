@@ -384,17 +384,137 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                     }
                     HStack(spacing: 24) {
                         status(
-                            "Worst RMS Before",
+                            "Designer Worst RMS Before",
                             design.summary.maximumSpeakerErrorBeforeDB.map { String(format: "%.2f dB", $0) } ?? "—"
                         )
                         status(
-                            "Worst RMS After",
+                            "Designer Worst RMS After",
                             design.summary.maximumSpeakerErrorAfterDB.map { String(format: "%.2f dB", $0) } ?? "—"
                         )
                         status(
                             "Multi-Sub Objective",
                             design.summary.multiSubObjective.map { String(format: "%.3f", $0) } ?? "—"
                         )
+                    }
+                }
+
+                if let prediction = calibration.latestPrediction {
+                    Divider()
+                    HStack(spacing: 10) {
+                        Label(
+                            prediction.accepted
+                                ? "Prediction Verified"
+                                : "Prediction Blocked",
+                            systemImage: prediction.accepted
+                                ? "checkmark.shield.fill"
+                                : "exclamationmark.shield.fill"
+                        )
+                        .font(.callout.bold())
+                        .foregroundStyle(
+                            prediction.accepted ? .green : .red
+                        )
+                        Spacer()
+                        Text(
+                            "Confidence \(Int((prediction.confidence * 100).rounded()))%"
+                        )
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    }
+
+                    HStack(spacing: 24) {
+                        status(
+                            "Independent RMS Before",
+                            String(
+                                format: "%.2f dB",
+                                prediction.speakerRMSErrorBeforeDB
+                            )
+                        )
+                        status(
+                            "Independent RMS After",
+                            String(
+                                format: "%.2f dB",
+                                prediction.speakerRMSErrorAfterDB
+                            )
+                        )
+                        status(
+                            "Predicted Improvement",
+                            String(
+                                format: "%+.2f dB",
+                                prediction.speakerImprovementDB
+                            )
+                        )
+                        status(
+                            "Max Residual",
+                            String(
+                                format: "%.2f dB",
+                                prediction.maximumAbsoluteErrorAfterDB
+                            )
+                        )
+                    }
+
+                    HStack(spacing: 24) {
+                        status(
+                            "Worst Level Spread",
+                            String(
+                                format: "%.2f → %.2f dB",
+                                prediction.maximumSpeakerLevelSpreadBeforeDB,
+                                prediction.maximumSpeakerLevelSpreadAfterDB
+                            )
+                        )
+                        status(
+                            "Worst Timing Spread",
+                            String(
+                                format: "%.2f → %.2f ms",
+                                prediction.maximumSpeakerTimingSpreadBeforeMs,
+                                prediction.maximumSpeakerTimingSpreadAfterMs
+                            )
+                        )
+                        if let before = prediction.subCombinedRMSErrorBeforeDB,
+                           let after = prediction.subCombinedRMSErrorAfterDB {
+                            status(
+                                "Summed Subs",
+                                String(
+                                    format: "%.2f → %.2f dB RMS",
+                                    before,
+                                    after
+                                )
+                            )
+                        }
+                    }
+
+                    if !prediction.blockingReasons.isEmpty {
+                        VStack(alignment: .leading, spacing: 5) {
+                            ForEach(
+                                Array(
+                                    prediction.blockingReasons.enumerated()
+                                ),
+                                id: \.offset
+                            ) { _, reason in
+                                Label(
+                                    reason,
+                                    systemImage:
+                                        "xmark.octagon.fill"
+                                )
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                            }
+                        }
+                    }
+                    if !prediction.warnings.isEmpty {
+                        VStack(alignment: .leading, spacing: 5) {
+                            ForEach(
+                                Array(prediction.warnings.enumerated()),
+                                id: \.offset
+                            ) { _, warning in
+                                Label(
+                                    warning,
+                                    systemImage:
+                                        "exclamationmark.triangle"
+                                )
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            }
+                        }
                     }
                 }
 
@@ -413,7 +533,11 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                         perform { try calibration.deployLatestDesign() }
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(calibration.latestDesign == nil || engine.lifecycleState != .idle)
+                    .disabled(
+                        calibration.latestDesign == nil
+                            || calibration.latestPrediction?.accepted != true
+                            || engine.lifecycleState != .idle
+                    )
                 }
             }
             .padding(6)

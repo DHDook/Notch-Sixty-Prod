@@ -1,0 +1,97 @@
+name: PR86 Calibration Prediction
+
+on:
+  push:
+    branches:
+      - feature/pr86-calibration-prediction
+  pull_request:
+    branches:
+      - feature/pr85-native-sofa-aes69
+  workflow_dispatch:
+
+concurrency:
+  group: pr86-calibration-prediction-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate PR86 prediction architecture
+        run: python3 ci/validate_pr86_calibration_prediction.py
+      - name: Validate inherited PR85 SOFA architecture
+        run: python3 ci/validate_pr85_native_sofa.py
+      - name: Validate inherited PR84A hardening
+        run: python3 ci/validate_pr84a_audio_unit_hardening.py
+
+  validate-macos-integration:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate PR86 prediction architecture
+        run: python3 ci/validate_pr86_calibration_prediction.py
+      - name: Build arm64 app with prediction gate
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            build
+      - name: Run PR86 calibration prediction tests
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            -only-testing:NotchSixtyTests/CalibrationPredictionVerifierTests \
+            test
+      - name: Run retained multichannel calibration tests
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            -only-testing:NotchSixtyTests/NotchSixtyTests \
+            test
+      - name: Run PR86 room-correction FIR verification tests
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            -only-testing:NotchSixtyTests/RoomCorrectionFIRDesignerTests \
+            test
+      - name: Run PR86 room-correction deployment-gate tests
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            -only-testing:NotchSixtyTests/RoomCorrectionProjectControllerTests \
+            test
+      - name: Run retained XCTest suite
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            test
