@@ -635,7 +635,7 @@ final class MultichannelCalibrationController: ObservableObject {
         let speakerCount = max(speakerSources.count, 1)
         let speakerSet = Set(speakerSources)
 
-        let evidence = try measurements.compactMap {
+        let evidence = measurements.compactMap {
             measurement -> IntelligentTargetEvidenceSample? in
             guard speakerSet.contains(measurement.source),
                   let seat = seatByID[measurement.seatID],
@@ -648,6 +648,14 @@ final class MultichannelCalibrationController: ObservableObject {
                 quality: measurement.channel.quality,
                 weight: seat.weight / Double(speakerCount)
             )
+        }
+
+        let expectedEvidenceCount =
+            included.count * speakerSources.count
+        guard evidence.count == expectedEvidenceCount,
+              expectedEvidenceCount > 0 else {
+            throw IntelligentTargetGenerationError
+                .invalidEvidence("speaker calibration campaign")
         }
 
         let parameters = RoomCorrectionDesignParameters(
