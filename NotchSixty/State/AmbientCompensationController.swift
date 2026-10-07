@@ -127,11 +127,6 @@ final class AmbientCompensationController: ObservableObject {
         self.transportFactory = transportFactory
     }
 
-    deinit {
-        pollTask?.cancel()
-        monitor?.stop()
-    }
-
     var availableModelPositions: [RoomCorrectionMeasurementPosition] {
         guard roomProjectMatchesSelectedMicrophone else { return [] }
         return projects.positions.filter {
