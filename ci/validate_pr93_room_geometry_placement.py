@@ -61,6 +61,7 @@ for token in (
     "saveGeometry()",
     "revertGeometry()",
     "clearGeometry()",
+    "previewPlacementCandidate(",
     "geometryStore.load(",
     "geometryStore.save(",
 ):
@@ -76,7 +77,9 @@ for token in (
     '"Top-Down Room Plan"',
     '"Geometry × Measurement"',
     '"Placement Experiments"',
+    '"Verify a Placement Change"',
     '"Prediction only · verify by re-measuring"',
+    "advisor.previewPlacementCandidate(",
     "advisor.setGeometryValue",
     "advisor.saveGeometry()",
 ):
@@ -110,6 +113,7 @@ for token in (
     "testGeometryValidationRejectsPointOutsideRoom",
     "testGeometryStoreIsSeparateFromRoomCorrectionProjectState",
     "testAdvisorGeometrySelectionDoesNotRequireProfileController",
+    "testPlacementPreviewChangesDraftWithoutMutatingSavedGeometry",
 ):
     require(token in tests, f"geometry test missing {token}")
 
@@ -127,6 +131,8 @@ for phrase in (
     "first-order reflection",
     "boundary/sbir",
     "placement optimization",
+    "previewed in the advisor room-model draft",
+    "verification sequence",
     "prediction — verify with measurement",
     "content preset",
     "playback system",
