@@ -304,7 +304,7 @@ final class CoreAudioNChannelTransportSession {
     }
 
     private var bridge: UnsafeMutablePointer<N60LiveNChannelBridge>?
-    private var audioUnitRack: AudioUnitLiveRackRuntime?
+    private var audioUnitRack: AudioUnitLiveRackSwitchboard?
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateDeviceID = AudioDeviceID(kAudioObjectUnknown)
     private var captureIOProcID: AudioDeviceIOProcID?
@@ -320,7 +320,7 @@ final class CoreAudioNChannelTransportSession {
         renderGraph: N60LiveNChannelRenderGraph,
         outputGain: Float,
         roomTreatment: LiveMIMORoomTreatmentPreparation? = nil,
-        audioUnitRack: AudioUnitLiveRackRuntime? = nil
+        audioUnitRack: AudioUnitLiveRackSwitchboard? = nil
     ) throws {
         self.selectedOutput = selectedOutput
         self.routePlan = routePlan
@@ -747,7 +747,6 @@ final class CoreAudioNChannelTransportSession {
             N60LiveNChannelBridgeDestroy(bridge)
             self.bridge = nil
         }
-        audioUnitRack?.stopFaultMonitoring()
         audioUnitRack = nil
     }
 
