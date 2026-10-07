@@ -39,3 +39,22 @@ Initial conservative defaults:
 - designer/verifier post-RMS disagreement tolerance: 0.75 dB
 
 These gates validate expected behavior before deployment; they do not replace later repeat-measurement verification on physical hardware.
+
+
+## Room Correction deployment verification
+
+PR86 applies the same commit-barrier principle to generated Room Correction FIR designs.
+
+The room verifier does not trust the design's stored predicted response as its source of truth. It:
+- computes the frequency response of the exact FIR taps that will be deployed;
+- applies the deployed, headroom-scaled left/right FIR response to every source listening-position transfer function;
+- evaluates weighted before/after target-shape RMS, per-position regressions, maximum residual and stereo response matching;
+- scores confidence from clipping, sweep completeness, SNR, usable-band coverage and source-position coverage;
+- audits unscaled FIR positive gain against declared headroom;
+- confirms the actual scaled deployment FIR has no material positive gain;
+- checks out-of-band FIR leakage;
+- reconstructs the weighted source aggregate and cross-checks stored prediction metadata against the actual unscaled FIR.
+
+Room Correction deployment is controller-owned and fail closed: a fresh accepted verification report is recomputed immediately before the Playback System profile is changed. A stale UI badge cannot authorize deployment.
+
+This remains a pre-deployment prediction layer. Physical repeat-measurement after correction remains the later empirical verification step when hardware access is available.
