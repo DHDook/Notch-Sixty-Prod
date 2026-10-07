@@ -1167,6 +1167,13 @@ final class AudioIOEngine: ObservableObject {
             return
         }
 
+        let candidateQuietZone =
+            activeQuietZoneTargetAfterHeadroomChange(
+                activeQuietZoneRuntimeTarget,
+                gainConfiguration: gainConfiguration,
+                ambientTarget: target
+            )
+
         var graph = try stereoEQConfiguration.makeGraphSnapshot(
             sampleRate: session.outputFormat.sampleRate,
             gainConfiguration: gainConfiguration,
@@ -1191,8 +1198,13 @@ final class AudioIOEngine: ObservableObject {
         )
         try applyAudioUnitRackLatency(to: &graph)
         try attachAmbientCompensation(target, to: &graph)
+        try attachActiveQuietZone(
+            candidateQuietZone,
+            to: &graph
+        )
         try session.publishDSPGraph(graph)
         ambientCompensationRuntimeTarget = target
+        activeQuietZoneRuntimeTarget = candidateQuietZone
         lastErrorDescription = nil
     }
 
@@ -2825,6 +2837,13 @@ final class AudioIOEngine: ObservableObject {
                 gainConfiguration: configuration
             )
 
+        let candidateQuietZone =
+            activeQuietZoneTargetAfterHeadroomChange(
+                activeQuietZoneRuntimeTarget,
+                gainConfiguration: configuration,
+                ambientTarget: clampedAmbientTarget
+            )
+
         if let session = transportSession {
             var graph = try stereoEQConfiguration.makeGraphSnapshot(
                 sampleRate: session.outputFormat.sampleRate,
@@ -2852,12 +2871,18 @@ final class AudioIOEngine: ObservableObject {
                 clampedAmbientTarget,
                 to: &graph
             )
+            try attachActiveQuietZone(
+                candidateQuietZone,
+                to: &graph
+            )
             try session.publishDSPGraph(graph)
         }
 
         gainConfiguration = configuration
         ambientCompensationRuntimeTarget =
             clampedAmbientTarget
+        activeQuietZoneRuntimeTarget =
+            candidateQuietZone
         lastErrorDescription = nil
     }
 
