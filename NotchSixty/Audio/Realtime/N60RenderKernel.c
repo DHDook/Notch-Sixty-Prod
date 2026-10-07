@@ -1295,7 +1295,6 @@ N60RenderKernel *N60RenderKernelCreate(void) {
     reset_smoothed_gain(&kernel->outputGain, 1.0f);
     reset_smoothed_gain(&kernel->masterGain, 1.0f);
     reset_smoothed_gain(&kernel->ambientCompensationLevelGain, 1.0f);
-    reset_smoothed_gain(&kernel->ambientCompensationLevelGain, 1.0f);
     reset_smoothed_gain(&kernel->balanceGainLeft, 1.0f);
     reset_smoothed_gain(&kernel->balanceGainRight, 1.0f);
     N60InterChannelDelayRuntimeReset(&kernel->interChannelDelayRuntime, initial.interChannelDelay);
