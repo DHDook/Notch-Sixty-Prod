@@ -186,6 +186,54 @@ final class ActiveQuietZoneTests: XCTestCase {
         )
     }
 
+    func testOscillatorPhaseBasisRecoversIndependentWindowPhase() throws {
+        let planner = ActiveQuietZonePlanner()
+        let scheduled = ActiveQuietZoneComplex(
+            real: 0.006,
+            imaginary: -0.002
+        )
+        let basis = ActiveQuietZoneComplex(
+            real: cos(0.73),
+            imaginary: sin(0.73)
+        )
+        let observed = scheduled * basis * 0.47
+
+        let recovered = try planner.oscillatorPhaseBasis(
+            observedSourcePhasor: observed,
+            scheduledCoefficient: scheduled
+        )
+        XCTAssertEqual(
+            wrappedPhase(
+                recovered.phaseRadians - basis.phaseRadians
+            ),
+            0,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(recovered.magnitude, 1, accuracy: 0.000_001)
+
+        let desiredInMicrophoneBasis =
+            ActiveQuietZoneComplex(
+                real: 0.015,
+                imaginary: 0.008
+            )
+        let runtime = try planner.runtimeCoefficient(
+            sourcePhasorInMicrophoneBasis:
+                desiredInMicrophoneBasis,
+            oscillatorPhaseBasis: recovered
+        )
+        let reconstructed = runtime * recovered
+        XCTAssertEqual(
+            reconstructed.real,
+            desiredInMicrophoneBasis.real,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            reconstructed.imaginary,
+            desiredInMicrophoneBasis.imaginary,
+            accuracy: 0.000_001
+        )
+    }
+
     func testRegularizedStereoSolutionTargetsBoundedReduction() throws {
         var configuration = ActiveQuietZoneConfiguration()
         configuration.maximumPerSourceTonePeakDBFS = -18
