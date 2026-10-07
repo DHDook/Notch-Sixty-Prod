@@ -40,7 +40,7 @@ static N60AudioUnitLiveRackProcessor make_processor(
     result.context = context;
     result.process = process_gain;
     result.channelCount = 2u;
-    result.maximumFramesPerSlice = 8u;
+    result.maximumFramesPerSlice = 16u;
     result.latencyFrames = latency;
     return result;
 }
@@ -58,7 +58,7 @@ int main(void) {
         make_processor(&a, 0u);
     N60AudioUnitRackExchange *exchange =
         N60AudioUnitRackExchangeCreate(
-            2u, 8u, 0u, &initial, 1u
+            2u, 16u, 0u, &initial, 1u
         );
     if (exchange == NULL) return fail("create");
     if (!N60AudioUnitRackExchangeAtomicsAreLockFree(exchange)) {
