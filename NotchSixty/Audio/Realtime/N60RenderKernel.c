@@ -1723,34 +1723,41 @@ void N60RenderKernelProcessStereoSystemFrameInContext(
             }
         }
 
-        if (context->snapshot->ambientCompensation.enabled) {
-            for (uint32_t index = 0;
-                 index < N60_AMBIENT_COMPENSATION_BAND_COUNT;
-                 ++index) {
-                N60EQBandRuntime *runtime =
-                    &kernel->ambientCompensationRuntime[index];
-                if (!runtime->currentEnabled
-                    && runtime->transitionFramesRemaining == 0u) {
-                    continue;
-                }
-                left = process_eq_band(
-                    runtime, left, N60_EQ_CHANNEL_LEFT
-                );
-                right = process_eq_band(
-                    runtime, right, N60_EQ_CHANNEL_RIGHT
-                );
-                if (runtime->transitionFramesRemaining > 0u) {
-                    runtime->transitionFramesRemaining -= 1u;
-                    if (runtime->transitionFramesRemaining == 0u) {
-                        runtime->currentCoefficients =
-                            runtime->pendingCoefficients;
-                        runtime->currentLeft = runtime->pendingLeft;
-                        runtime->currentRight = runtime->pendingRight;
-                        runtime->currentEnabled =
-                            runtime->pendingEnabled;
-                        runtime->currentChannelMask =
-                            runtime->pendingChannelMask;
-                        runtime->transitionFramesTotal = 0u;
+        // Always visit the three fixed runtimes while processing is
+        // active. A disabled incoming snapshot may still have a short pending
+        // transition from the previous enabled state; skipping the runtimes
+        // here would turn "Off" into a hard filter discontinuity.
+        for (uint32_t index = 0;
+             index < N60_AMBIENT_COMPENSATION_BAND_COUNT;
+             ++index) {
+            N60EQBandRuntime *runtime =
+                &kernel->ambientCompensationRuntime[index];
+            if (!runtime->currentEnabled
+                && !runtime->pendingEnabled
+                && runtime->transitionFramesRemaining == 0u) {
+                continue;
+            }
+            left = process_eq_band(
+                runtime, left, N60_EQ_CHANNEL_LEFT
+            );
+            right = process_eq_band(
+                runtime, right, N60_EQ_CHANNEL_RIGHT
+            );
+            if (runtime->transitionFramesRemaining > 0u) {
+                runtime->transitionFramesRemaining -= 1u;
+                if (runtime->transitionFramesRemaining == 0u) {
+                    runtime->currentCoefficients =
+                        runtime->pendingCoefficients;
+                    runtime->currentLeft = runtime->pendingLeft;
+                    runtime->currentRight = runtime->pendingRight;
+                    runtime->currentEnabled =
+                        runtime->pendingEnabled;
+                    runtime->currentChannelMask =
+                        runtime->pendingChannelMask;
+                    runtime->transitionFramesTotal = 0u;
+                    if (!runtime->currentEnabled) {
+                        clear_state(&runtime->currentLeft);
+                        clear_state(&runtime->currentRight);
                     }
                 }
             }
