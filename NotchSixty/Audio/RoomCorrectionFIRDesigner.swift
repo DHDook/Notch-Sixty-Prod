@@ -780,7 +780,6 @@ struct RoomCorrectionDesignPredictionVerifier: Sendable {
             design: design,
             sourcePositions: sourcePositions,
             positions: positions,
-            targetGrid: grid,
             unscaledLeftTaps: unscaledLeft,
             unscaledRightTaps: unscaledRight
         )
@@ -894,7 +893,6 @@ struct RoomCorrectionDesignPredictionVerifier: Sendable {
         design: RoomCorrectionDesign,
         sourcePositions: [RoomCorrectionDesignSourcePosition],
         positions: [RoomCorrectionMeasurementPosition],
-        targetGrid: [Double],
         unscaledLeftTaps: [Float],
         unscaledRightTaps: [Float]
     ) throws -> Double? {
@@ -908,20 +906,32 @@ struct RoomCorrectionDesignPredictionVerifier: Sendable {
             return nil
         }
 
+        guard storedLeft.frequenciesHz.count
+                == storedLeft.magnitudeDB.count,
+              storedRight.frequenciesHz.count
+                == storedRight.magnitudeDB.count,
+              storedLeft.frequenciesHz == storedRight.frequenciesHz,
+              !storedLeft.frequenciesHz.isEmpty else {
+            return nil
+        }
+        let auditFrequencies = storedLeft.frequenciesHz.filter {
+            $0.isFinite && $0 > 0 && $0 < design.sampleRate * 0.5
+        }
+        guard auditFrequencies.count >= 2 else { return nil }
         let leftGain = try Self.firMagnitudeDB(
             taps: unscaledLeftTaps,
-            frequencies: targetGrid,
+            frequencies: auditFrequencies,
             sampleRate: design.sampleRate
         )
         let rightGain = try Self.firMagnitudeDB(
             taps: unscaledRightTaps,
-            frequencies: targetGrid,
+            frequencies: auditFrequencies,
             sampleRate: design.sampleRate
         )
 
         var disagreement = 0.0
-        for index in targetGrid.indices {
-            let frequency = targetGrid[index]
+        for index in auditFrequencies.indices {
+            let frequency = auditFrequencies[index]
             var aggregateLeft = 0.0
             var aggregateRight = 0.0
             for source in sourcePositions {
