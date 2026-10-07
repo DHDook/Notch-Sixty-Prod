@@ -1,7 +1,7 @@
 import Foundation
 
 enum RoomTreatmentAdvisorRemedy:
-    String, CaseIterable, Equatable, Sendable, Identifiable
+    String, CaseIterable, Equatable, Hashable, Sendable, Identifiable
 {
     case measureMore
     case placement
