@@ -63,6 +63,28 @@ jobs:
             ENABLE_TESTABILITY=YES \
             -only-testing:NotchSixtyTests/NotchSixtyTests \
             test
+      - name: Run PR86 room-correction FIR verification tests
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            -only-testing:NotchSixtyTests/RoomCorrectionFIRDesignerTests \
+            test
+      - name: Run PR86 room-correction deployment-gate tests
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            -only-testing:NotchSixtyTests/RoomCorrectionProjectControllerTests \
+            test
       - name: Run retained XCTest suite
         run: |
           xcodebuild \
