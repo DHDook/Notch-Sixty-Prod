@@ -55,39 +55,39 @@ const char * _Nullable N60SOFADocumentGetAttribute(
 bool N60SOFADocumentCopyListenerPosition(
     const N60SOFADocument * _Nonnull document,
     uint32_t measurement,
-    double outXYZ[3]
+    double * _Nonnull outXYZ
 );
 
 bool N60SOFADocumentCopyListenerView(
     const N60SOFADocument * _Nonnull document,
     uint32_t measurement,
-    double outXYZ[3]
+    double * _Nonnull outXYZ
 );
 
 bool N60SOFADocumentCopyListenerUp(
     const N60SOFADocument * _Nonnull document,
     uint32_t measurement,
-    double outXYZ[3]
+    double * _Nonnull outXYZ
 );
 
 bool N60SOFADocumentCopySourcePosition(
     const N60SOFADocument * _Nonnull document,
     uint32_t measurement,
-    double outXYZ[3]
+    double * _Nonnull outXYZ
 );
 
 bool N60SOFADocumentCopyReceiverPosition(
     const N60SOFADocument * _Nonnull document,
     uint32_t measurement,
     uint32_t receiver,
-    double outXYZ[3]
+    double * _Nonnull outXYZ
 );
 
 bool N60SOFADocumentCopyEmitterPosition(
     const N60SOFADocument * _Nonnull document,
     uint32_t measurement,
     uint32_t emitter,
-    double outXYZ[3]
+    double * _Nonnull outXYZ
 );
 
 bool N60SOFADocumentGetDelaySamples(
