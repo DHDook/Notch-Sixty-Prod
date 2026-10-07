@@ -152,6 +152,29 @@ enum AudioUnitLiveRackControlPlaneIssue: Equatable, Sendable {
     }
 }
 
+enum AudioUnitLiveTimingValidator {
+    static func frameCount(
+        seconds: Double,
+        sampleRate: Double,
+        maximumSeconds: Double
+    ) -> Int? {
+        guard seconds.isFinite,
+              seconds >= 0,
+              seconds <= maximumSeconds,
+              sampleRate.isFinite,
+              sampleRate > 0 else {
+            return nil
+        }
+        let frames = ceil(seconds * sampleRate)
+        guard frames.isFinite,
+              frames >= 0,
+              frames <= Double(Int.max) else {
+            return nil
+        }
+        return Int(frames)
+    }
+}
+
 struct AudioUnitLiveRackBuildSlot {
     let slotIndex: Int
     let slot: AudioUnitRackSlotState
@@ -496,7 +519,7 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
                 }
 
                 let latencySeconds = au.latency
-                guard let latency = validatedFrameCount(
+                guard let latency = AudioUnitLiveTimingValidator.frameCount(
                     seconds: latencySeconds,
                     sampleRate: format.sampleRate,
                     maximumSeconds:
@@ -509,7 +532,7 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
                 }
 
                 let tailSeconds = au.tailTime
-                guard let tail = validatedFrameCount(
+                guard let tail = AudioUnitLiveTimingValidator.frameCount(
                     seconds: tailSeconds,
                     sampleRate: format.sampleRate,
                     maximumSeconds:
@@ -579,7 +602,7 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
 
         return unit.withAUAudioUnit { au in
             let latencySeconds = au.latency
-            guard let currentLatency = Self.validatedFrameCount(
+            guard let currentLatency = AudioUnitLiveTimingValidator.frameCount(
                 seconds: latencySeconds,
                 sampleRate: sampleRate,
                 maximumSeconds:
@@ -601,7 +624,7 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
             }
 
             let tailSeconds = au.tailTime
-            guard let currentTail = Self.validatedFrameCount(
+            guard let currentTail = AudioUnitLiveTimingValidator.frameCount(
                 seconds: tailSeconds,
                 sampleRate: sampleRate,
                 maximumSeconds:
@@ -756,27 +779,6 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
                 }
             }
         }
-    }
-
-    private static func validatedFrameCount(
-        seconds: Double,
-        sampleRate: Double,
-        maximumSeconds: Double
-    ) -> Int? {
-        guard seconds.isFinite,
-              seconds >= 0,
-              seconds <= maximumSeconds,
-              sampleRate.isFinite,
-              sampleRate > 0 else {
-            return nil
-        }
-        let frames = ceil(seconds * sampleRate)
-        guard frames.isFinite,
-              frames >= 0,
-              frames <= Double(Int.max) else {
-            return nil
-        }
-        return Int(frames)
     }
 
     private static func restoreState(
