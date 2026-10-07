@@ -95,6 +95,8 @@ final class AmbientCompensationController: ObservableObject {
     private var microphoneHistory: [Float] = []
     private var playbackLeftHistory: [Float] = []
     private var playbackRightHistory: [Float] = []
+    private var quietZoneLeftHistory: [Float] = []
+    private var quietZoneRightHistory: [Float] = []
     private var activeSystemID: UUID?
 
     @Published private(set) var configuration =
@@ -299,8 +301,12 @@ final class AmbientCompensationController: ObservableObject {
         monitor = created
         resetAnalysisHistory()
         engine.discardAmbientPlaybackReferenceFrames()
+        engine.discardActiveQuietZoneReferenceFrames()
         engine.setAmbientPlaybackReferenceDemand(
             engine.ambientPlaybackReferenceAvailable
+        )
+        engine.setActiveQuietZoneReferenceDemand(
+            engine.activeQuietZoneReferenceAvailable
         )
         monitorStatus = .observing
         lastErrorDescription = nil
@@ -325,7 +331,9 @@ final class AmbientCompensationController: ObservableObject {
         monitor?.stop()
         monitor = nil
         engine.setAmbientPlaybackReferenceDemand(false)
+        engine.setActiveQuietZoneReferenceDemand(false)
         engine.discardAmbientPlaybackReferenceFrames()
+        engine.discardActiveQuietZoneReferenceFrames()
         resetAnalysisHistory()
         envelope.reset()
         appliedTarget = .unity
@@ -374,11 +382,33 @@ final class AmbientCompensationController: ObservableObject {
                         to: &playbackRightHistory
                     )
                 }
+
+                let quietFrames =
+                    engine.readActiveQuietZoneReferenceFrames(
+                        maximumFrames:
+                            Self.preferredAnalysisFrames
+                    )
+                if !quietFrames.isEmpty {
+                    Self.appendCapped(
+                        quietFrames.map(\.left),
+                        to: &quietZoneLeftHistory
+                    )
+                    Self.appendCapped(
+                        quietFrames.map(\.right),
+                        to: &quietZoneRightHistory
+                    )
+                }
             } else {
                 playbackLeftHistory.removeAll(
                     keepingCapacity: true
                 )
                 playbackRightHistory.removeAll(
+                    keepingCapacity: true
+                )
+                quietZoneLeftHistory.removeAll(
+                    keepingCapacity: true
+                )
+                quietZoneRightHistory.removeAll(
                     keepingCapacity: true
                 )
             }
@@ -548,10 +578,20 @@ final class AmbientCompensationController: ObservableObject {
                 )
         }
 
+        let quietReferenceRequired =
+            engine.activeQuietZoneRuntimeTarget.active
+        let quietCount =
+            quietReferenceRequired
+                ? min(
+                    quietZoneLeftHistory.count,
+                    quietZoneRightHistory.count
+                )
+                : Int.max
         let count = min(
             microphoneHistory.count,
             playbackLeftHistory.count,
             playbackRightHistory.count,
+            quietCount,
             Self.preferredAnalysisFrames
         )
         guard count >= Self.minimumAnalysisFrames else {
@@ -562,8 +602,24 @@ final class AmbientCompensationController: ObservableObject {
         }
 
         let mic = Array(microphoneHistory.suffix(count))
-        let left = Array(playbackLeftHistory.suffix(count))
-        let right = Array(playbackRightHistory.suffix(count))
+        let renderedLeft =
+            Array(playbackLeftHistory.suffix(count))
+        let renderedRight =
+            Array(playbackRightHistory.suffix(count))
+        let quietLeft =
+            quietZoneLeftHistory.count >= count
+                ? Array(quietZoneLeftHistory.suffix(count))
+                : [Float](repeating: 0, count: count)
+        let quietRight =
+            quietZoneRightHistory.count >= count
+                ? Array(quietZoneRightHistory.suffix(count))
+                : [Float](repeating: 0, count: count)
+
+        // PR90 verification must observe the physical d + anti-noise residual.
+        // Model/subtract program playback only; never subtract the anti-noise
+        // contribution from the error microphone.
+        let left = zip(renderedLeft, quietLeft).map(-)
+        let right = zip(renderedRight, quietRight).map(-)
         let sourceModel = try acousticModel(
             monitorSampleRate: monitorSampleRate
         )
@@ -689,6 +745,7 @@ final class AmbientCompensationController: ObservableObject {
         pollTask?.cancel()
         pollTask = nil
         engine.setAmbientPlaybackReferenceDemand(false)
+        engine.setActiveQuietZoneReferenceDemand(false)
         try? engine.clearAmbientCompensationRuntimeTarget()
         envelope.reset()
         resetAnalysisHistory()
@@ -706,6 +763,8 @@ final class AmbientCompensationController: ObservableObject {
         microphoneHistory.removeAll(keepingCapacity: true)
         playbackLeftHistory.removeAll(keepingCapacity: true)
         playbackRightHistory.removeAll(keepingCapacity: true)
+        quietZoneLeftHistory.removeAll(keepingCapacity: true)
+        quietZoneRightHistory.removeAll(keepingCapacity: true)
         latestAnalysis = nil
         latestDetailedAnalysis = nil
     }
