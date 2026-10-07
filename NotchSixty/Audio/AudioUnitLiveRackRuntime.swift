@@ -810,6 +810,8 @@ final class AudioUnitLiveRackRuntime: @unchecked Sendable {
     )
     private var faultTimer: DispatchSourceTimer?
     private var observedFaultCount: UInt64 = 0
+    private var emittedFaultCount: UInt64 = 0
+    private var reportedControlPlaneFaultSlots: Set<Int> = []
 
     init(
         format: AudioUnitRackProcessingFormat,
@@ -946,6 +948,11 @@ final class AudioUnitLiveRackRuntime: @unchecked Sendable {
         return result
     }
 
+    func controlPlaneHealthIssues()
+        -> [AudioUnitLiveRackControlPlaneIssue] {
+        stages.compactMap { $0.controlPlaneHealthIssue() }
+    }
+
     func startFaultMonitoring(
         includeExistingFaults: Bool = false,
         handler: @escaping @Sendable (AudioUnitLiveRackFault) -> Void
@@ -955,6 +962,9 @@ final class AudioUnitLiveRackRuntime: @unchecked Sendable {
             N60AudioUnitLiveRackFaultLatchGetSnapshot(faultLatch)
         observedFaultCount =
             includeExistingFaults ? 0 : snapshot.faultCount
+        emittedFaultCount = 0
+        reportedControlPlaneFaultSlots.removeAll(keepingCapacity: true)
+
         let timer = DispatchSource.makeTimerSource(queue: monitorQueue)
         timer.schedule(
             deadline: .now() + .milliseconds(100),
@@ -966,22 +976,46 @@ final class AudioUnitLiveRackRuntime: @unchecked Sendable {
                 N60AudioUnitLiveRackFaultLatchGetSnapshot(
                     self.faultLatch
                 )
-            guard snapshot.faultCount > self.observedFaultCount else {
-                return
+
+            if snapshot.faultCount > self.observedFaultCount {
+                self.observedFaultCount = snapshot.faultCount
+                self.emittedFaultCount = max(
+                    self.emittedFaultCount + 1,
+                    snapshot.faultCount
+                )
+                let slotIndex = Int(snapshot.lastSlotIndex)
+                let component =
+                    self.componentsBySlot.indices.contains(slotIndex)
+                    ? self.componentsBySlot[slotIndex]
+                    : nil
+                handler(AudioUnitLiveRackFault(
+                    faultCount: self.emittedFaultCount,
+                    slotIndex: slotIndex,
+                    component: component,
+                    reason: snapshot.lastReason,
+                    renderStatus: snapshot.lastRenderStatus
+                ))
             }
-            self.observedFaultCount = snapshot.faultCount
-            let slotIndex = Int(snapshot.lastSlotIndex)
-            let component =
-                self.componentsBySlot.indices.contains(slotIndex)
-                ? self.componentsBySlot[slotIndex]
-                : nil
-            handler(AudioUnitLiveRackFault(
-                faultCount: snapshot.faultCount,
-                slotIndex: slotIndex,
-                component: component,
-                reason: snapshot.lastReason,
-                renderStatus: snapshot.lastRenderStatus
-            ))
+
+            for issue in self.controlPlaneHealthIssues() {
+                guard !self.reportedControlPlaneFaultSlots.contains(
+                    issue.slotIndex
+                ) else {
+                    continue
+                }
+                self.reportedControlPlaneFaultSlots.insert(
+                    issue.slotIndex
+                )
+                self.emittedFaultCount += 1
+                handler(AudioUnitLiveRackFault(
+                    faultCount: self.emittedFaultCount,
+                    slotIndex: issue.slotIndex,
+                    component: issue.component,
+                    reason: N60AudioUnitLiveRackFaultRuntimeInvariant,
+                    renderStatus: noErr,
+                    detail: issue.description
+                ))
+            }
         }
         faultTimer = timer
         timer.resume()
