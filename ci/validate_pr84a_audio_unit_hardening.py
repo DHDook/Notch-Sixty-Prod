@@ -8,6 +8,7 @@ LIVE = ROOT / "NotchSixty/Audio/AudioUnitLiveRackRuntime.swift"
 LIVE_BRIDGE = ROOT / "NotchSixty/Audio/Realtime/N60AudioUnitLiveRackBridge.h"
 EXCHANGE_H = ROOT / "NotchSixty/Audio/Realtime/N60AudioUnitRackExchange.h"
 EXCHANGE_C = ROOT / "NotchSixty/Audio/Realtime/N60AudioUnitRackExchange.c"
+EXCHANGE_TEST = ROOT / "ci/validate_pr82_audio_unit_rack_exchange.c"
 GATE_TEST = ROOT / "ci/validate_pr84a_audio_unit_stage_fault_gate.c"
 OFFLINE_TESTS = ROOT / "NotchSixtyTests/AudioUnitOfflinePreparationTests.swift"
 LIVE_TESTS = ROOT / "NotchSixtyTests/AudioUnitLiveRackRuntimeTests.swift"
@@ -44,6 +45,7 @@ live = LIVE.read_text()
 live_bridge = LIVE_BRIDGE.read_text()
 exchange_h = EXCHANGE_H.read_text()
 exchange_c = EXCHANGE_C.read_text()
+exchange_test = EXCHANGE_TEST.read_text()
 offline_tests = OFFLINE_TESTS.read_text()
 live_tests = LIVE_TESTS.read_text()
 mutation_tests = MUTATION_TESTS.read_text()
@@ -120,6 +122,23 @@ for token in (
     require(token in exchange_c, f"stage fault gate implementation missing {token}")
 
 require(GATE_TEST.exists(), "portable stage fault gate proof missing")
+for token in (
+    "N60AudioUnitLiveRackProcessorHasFault(processor)",
+    "N60AudioUnitLiveRackProcessorHasFault(\n            &requested->processor)",
+):
+    require(
+        token in exchange_c,
+        f"generation exchange missing candidate fault rejection {token}",
+    )
+for token in (
+    "recordFault",
+    "softFaultLatch",
+    "fault-latched candidate replaced active generation",
+):
+    require(
+        token in exchange_test,
+        f"exchange simulator missing fault-latched candidate coverage {token}",
+    )
 
 stage_render = function_body_after(
     live,
