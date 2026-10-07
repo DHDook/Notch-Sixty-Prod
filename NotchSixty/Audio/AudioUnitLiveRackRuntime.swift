@@ -15,6 +15,7 @@ enum AudioUnitLiveRackBuildError: Error, Equatable, LocalizedError {
     case liveInvalidTail(Int, seconds: Double)
     case liveLatencyChanged(Int, expected: Int, actual: Int)
     case liveTailChanged(Int, expected: Int, actual: Int)
+    case stageFaultGateAllocationFailed(Int)
     case delayMemoryBudgetExceeded(Int)
     case scratchAllocationFailed
     case faultLatchAllocationFailed
@@ -43,6 +44,8 @@ enum AudioUnitLiveRackBuildError: Error, Equatable, LocalizedError {
             return "Audio Unit rack slot \(slot + 1) changed latency from \(expected) to \(actual) frames."
         case .liveTailChanged(let slot, let expected, let actual):
             return "Audio Unit rack slot \(slot + 1) changed tail from \(expected) to \(actual) frames."
+        case .stageFaultGateAllocationFailed(let slot):
+            return "Audio Unit rack slot \(slot + 1) could not allocate a lock-free fail-closed gate."
         case .delayMemoryBudgetExceeded(let bytes):
             return "Audio Unit rack requires \(bytes) bytes of latency compensation, exceeding the live memory budget."
         case .scratchAllocationFailed:
@@ -343,10 +346,10 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
     private let wetDryMix: Float
     private let delay: AudioUnitLiveDelayLine
     private let dryScratch: UnsafeMutablePointer<Float>
+    private let faultGate: OpaquePointer
 
     private var currentInput: UnsafePointer<Float>?
     private var currentFrameCount = 0
-    private var faulted = false
 
     private lazy var pullInputBlock: AURenderPullInputBlock = {
         [unowned self] _, _, requestedFrameCount, _, inputData in
@@ -395,7 +398,8 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
         sampleRate: Double,
         latencyFrames: Int,
         tailFrames: Int,
-        wetDryMix: Float
+        wetDryMix: Float,
+        faultGate: OpaquePointer
     ) {
         self.slotIndex = slotIndex
         self.component = component
@@ -409,6 +413,7 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
         self.latencyFrames = latencyFrames
         self.tailFrames = tailFrames
         self.wetDryMix = wetDryMix
+        self.faultGate = faultGate
         self.delay = AudioUnitLiveDelayLine(
             channelCount: channelCount,
             latencyFrames: latencyFrames
@@ -425,6 +430,7 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
     }
 
     deinit {
+        N60AudioUnitStageFaultGateDestroy(faultGate)
         dryScratch.deinitialize(
             count: maximumFramesPerSlice * channelCount
         )
@@ -581,6 +587,16 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
             )
         }
 
+        guard let faultGate = N60AudioUnitStageFaultGateCreate() else {
+            unit.withAUAudioUnit { au in
+                if au.renderResourcesAllocated {
+                    au.deallocateRenderResources()
+                }
+            }
+            throw AudioUnitLiveRackBuildError
+                .stageFaultGateAllocationFailed(slotIndex)
+        }
+
         return AudioUnitLiveProcessStage(
             slotIndex: slotIndex,
             component: descriptor.identity,
@@ -592,7 +608,8 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
             sampleRate: format.sampleRate,
             latencyFrames: expectedLatency,
             tailFrames: expectedTail,
-            wetDryMix: Float(slot.wetDryMix)
+            wetDryMix: Float(slot.wetDryMix),
+            faultGate: faultGate
         )
     }
 
@@ -600,52 +617,60 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
         -> AudioUnitLiveRackControlPlaneIssue? {
         guard let component else { return nil }
 
-        return unit.withAUAudioUnit { au in
-            let latencySeconds = au.latency
-            guard let currentLatency = AudioUnitLiveTimingValidator.frameCount(
-                seconds: latencySeconds,
-                sampleRate: sampleRate,
-                maximumSeconds:
-                    AudioUnitProbeResult.maximumLatencySeconds
-            ) else {
-                return .invalidLatency(
-                    slot: slotIndex,
-                    component: component,
-                    seconds: latencySeconds
-                )
-            }
-            if abs(currentLatency - latencyFrames) > 1 {
-                return .latencyChanged(
-                    slot: slotIndex,
-                    component: component,
-                    expected: latencyFrames,
-                    actual: currentLatency
-                )
+        let issue: AudioUnitLiveRackControlPlaneIssue? =
+            unit.withAUAudioUnit { au in
+                let latencySeconds = au.latency
+                guard let currentLatency =
+                    AudioUnitLiveTimingValidator.frameCount(
+                        seconds: latencySeconds,
+                        sampleRate: sampleRate,
+                        maximumSeconds:
+                            AudioUnitProbeResult.maximumLatencySeconds
+                    ) else {
+                    return .invalidLatency(
+                        slot: slotIndex,
+                        component: component,
+                        seconds: latencySeconds
+                    )
+                }
+                if abs(currentLatency - latencyFrames) > 1 {
+                    return .latencyChanged(
+                        slot: slotIndex,
+                        component: component,
+                        expected: latencyFrames,
+                        actual: currentLatency
+                    )
+                }
+
+                let tailSeconds = au.tailTime
+                guard let currentTail =
+                    AudioUnitLiveTimingValidator.frameCount(
+                        seconds: tailSeconds,
+                        sampleRate: sampleRate,
+                        maximumSeconds:
+                            AudioUnitProbeResult.maximumTailSeconds
+                    ) else {
+                    return .invalidTail(
+                        slot: slotIndex,
+                        component: component,
+                        seconds: tailSeconds
+                    )
+                }
+                if abs(currentTail - tailFrames) > 1 {
+                    return .tailChanged(
+                        slot: slotIndex,
+                        component: component,
+                        expected: tailFrames,
+                        actual: currentTail
+                    )
+                }
+                return nil
             }
 
-            let tailSeconds = au.tailTime
-            guard let currentTail = AudioUnitLiveTimingValidator.frameCount(
-                seconds: tailSeconds,
-                sampleRate: sampleRate,
-                maximumSeconds:
-                    AudioUnitProbeResult.maximumTailSeconds
-            ) else {
-                return .invalidTail(
-                    slot: slotIndex,
-                    component: component,
-                    seconds: tailSeconds
-                )
-            }
-            if abs(currentTail - tailFrames) > 1 {
-                return .tailChanged(
-                    slot: slotIndex,
-                    component: component,
-                    expected: tailFrames,
-                    actual: currentTail
-                )
-            }
-            return nil
+        if issue != nil {
+            N60AudioUnitStageFaultGateTrip(faultGate)
         }
+        return issue
     }
 
     func process(
@@ -676,7 +701,7 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
             frameCount: frameCount
         )
 
-        if faulted {
+        if N60AudioUnitStageFaultGateIsTripped(faultGate) {
             memcpy(
                 outputInterleaved,
                 dryScratch,
@@ -706,7 +731,7 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
         currentFrameCount = 0
 
         if status != noErr {
-            faulted = true
+            N60AudioUnitStageFaultGateTrip(faultGate)
             memcpy(
                 outputInterleaved,
                 dryScratch,
@@ -727,7 +752,7 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
             while channel < channelCount {
                 let rendered = outputChannels[channel][frame]
                 if !rendered.isFinite {
-                    faulted = true
+                    N60AudioUnitStageFaultGateTrip(faultGate)
                     memcpy(
                         outputInterleaved,
                         dryScratch,
