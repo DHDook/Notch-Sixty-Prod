@@ -110,6 +110,7 @@
 		F8500000000000000000000A /* libmysofa gunzip.c in Sources */ = {isa = PBXBuildFile; fileRef = F8500000000000000000001A /* libmysofa gunzip.c */; };
 		F8500000000000000000000B /* libmysofa gcol.c in Sources */ = {isa = PBXBuildFile; fileRef = F8500000000000000000001B /* libmysofa gcol.c */; };
 		F8500000000000000000000C /* NativeSOFAImporterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8500000000000000000001C /* NativeSOFAImporterTests.swift */; };
+		F86000000000000000000001 /* CalibrationPredictionVerifierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F86000000000000000000011 /* CalibrationPredictionVerifierTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -237,6 +238,7 @@
 		F85000000000000000000019 /* libmysofa fractalhead.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "Audio/SOFA/Vendor/libmysofa/hdf/fractalhead.c"; sourceTree = "<group>"; };
 		F8500000000000000000001A /* libmysofa gunzip.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "Audio/SOFA/Vendor/libmysofa/hdf/gunzip.c"; sourceTree = "<group>"; };
 		F8500000000000000000001B /* libmysofa gcol.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "Audio/SOFA/Vendor/libmysofa/hdf/gcol.c"; sourceTree = "<group>"; };
+		F86000000000000000000011 /* CalibrationPredictionVerifierTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalibrationPredictionVerifierTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -307,6 +309,7 @@
 				F81000000000000000000013 /* AudioUnitLiveRackRuntimeTests.swift */,
 				F82000000000000000000014 /* AudioUnitRackMutationTests.swift */,
 				F8500000000000000000001C /* NativeSOFAImporterTests.swift */,
+				F86000000000000000000011 /* CalibrationPredictionVerifierTests.swift */,
 			);
 			path = NotchSixtyTests;
 			sourceTree = "<group>";
@@ -554,6 +557,7 @@
 				F81000000000000000000003 /* AudioUnitLiveRackRuntimeTests.swift in Sources */,
 				F82000000000000000000004 /* AudioUnitRackMutationTests.swift in Sources */,
 				F8500000000000000000000C /* NativeSOFAImporterTests.swift in Sources */,
+				F86000000000000000000001 /* CalibrationPredictionVerifierTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
