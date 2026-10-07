@@ -61,7 +61,7 @@ private struct AmbientCompensationResponseCurveView: View {
             path.addLine(to: CGPoint(x: x, y: plot.maxY))
             context.stroke(
                 path,
-                with: .foreground.opacity(0.13),
+                with: .color(Color.secondary.opacity(0.13)),
                 lineWidth: 1
             )
 
@@ -97,8 +97,10 @@ private struct AmbientCompensationResponseCurveView: View {
             path.addLine(to: CGPoint(x: plot.maxX, y: y))
             context.stroke(
                 path,
-                with: .foreground.opacity(
-                    index == horizontalGuides ? 0.30 : 0.13
+                with: .color(
+                    Color.secondary.opacity(
+                        index == horizontalGuides ? 0.30 : 0.13
+                    )
                 ),
                 lineWidth:
                     index == horizontalGuides ? 1.25 : 1
@@ -163,11 +165,11 @@ private struct AmbientCompensationResponseCurveView: View {
 
         context.fill(
             fill,
-            with: .foreground.opacity(0.07)
+            with: .color(Color.accentColor.opacity(0.10))
         )
         context.stroke(
             line,
-            with: .foreground,
+            with: .color(Color.accentColor),
             lineWidth: 2
         )
     }
