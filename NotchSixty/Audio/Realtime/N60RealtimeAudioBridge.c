@@ -121,6 +121,16 @@ struct N60RealtimeAudioBridge {
     _Atomic uint64_t ambientReferenceCapturedFrames;
     _Atomic uint64_t ambientReferenceDroppedFrames;
 
+    // Independent PR90 synthesized anti-noise reference. The control plane
+    // uses this phase basis without competing with PR89's program-reference
+    // consumer.
+    N60ActiveQuietZoneReferenceFrame *activeQuietZoneReferenceFrames;
+    _Atomic bool activeQuietZoneReferenceDemand;
+    _Atomic uint64_t activeQuietZoneReferenceWriteIndex;
+    _Atomic uint64_t activeQuietZoneReferenceReadIndex;
+    _Atomic uint64_t activeQuietZoneReferenceCapturedFrames;
+    _Atomic uint64_t activeQuietZoneReferenceDroppedFrames;
+
     // Control-plane command payload plus an even/odd sequence. The output
     // callback latches a stable command once per callback and then advances a
     // plain callback-local runtime. This keeps atomics out of the per-sample
@@ -511,8 +521,21 @@ N60RealtimeAudioBridge *N60RealtimeAudioBridgeCreate(uint32_t capacityFrames) {
         return NULL;
     }
 
+    bridge->activeQuietZoneReferenceFrames = calloc(
+        N60_ACTIVE_QUIET_ZONE_REFERENCE_CAPACITY_FRAMES,
+        sizeof(N60ActiveQuietZoneReferenceFrame)
+    );
+    if (bridge->activeQuietZoneReferenceFrames == NULL) {
+        free(bridge->ambientReferenceFrames);
+        free(bridge->analysisFrames);
+        free(bridge->frames);
+        free(bridge);
+        return NULL;
+    }
+
     bridge->renderKernel = N60RenderKernelCreate();
     if (bridge->renderKernel == NULL) {
+        free(bridge->activeQuietZoneReferenceFrames);
         free(bridge->ambientReferenceFrames);
         free(bridge->analysisFrames);
         free(bridge->frames);
@@ -539,6 +562,7 @@ void N60RealtimeAudioBridgeDestroy(N60RealtimeAudioBridge *bridge) {
     free(bridge->adaptiveOutputScratch);
     free(bridge->audioUnitRackScratch);
     free(bridge->audioUnitRackPlaybackFrames);
+    free(bridge->activeQuietZoneReferenceFrames);
     free(bridge->ambientReferenceFrames);
     free(bridge->analysisFrames);
     free(bridge->frames);
@@ -575,6 +599,11 @@ void N60RealtimeAudioBridgeReset(N60RealtimeAudioBridge *bridge) {
     atomic_store_explicit(&bridge->ambientReferenceReadIndex, 0, memory_order_release);
     atomic_store_explicit(&bridge->ambientReferenceCapturedFrames, 0, memory_order_relaxed);
     atomic_store_explicit(&bridge->ambientReferenceDroppedFrames, 0, memory_order_relaxed);
+    atomic_store_explicit(&bridge->activeQuietZoneReferenceDemand, false, memory_order_release);
+    atomic_store_explicit(&bridge->activeQuietZoneReferenceWriteIndex, 0, memory_order_release);
+    atomic_store_explicit(&bridge->activeQuietZoneReferenceReadIndex, 0, memory_order_release);
+    atomic_store_explicit(&bridge->activeQuietZoneReferenceCapturedFrames, 0, memory_order_relaxed);
+    atomic_store_explicit(&bridge->activeQuietZoneReferenceDroppedFrames, 0, memory_order_relaxed);
 
     atomic_store_explicit(&bridge->transitionCommandSequence, 0, memory_order_relaxed);
     atomic_store_explicit(&bridge->transitionTargetGainBits, float_to_bits(1.0f), memory_order_relaxed);
