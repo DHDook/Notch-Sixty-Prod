@@ -98,6 +98,7 @@ final class AmbientCompensationController: ObservableObject {
     private var quietZoneLeftHistory: [Float] = []
     private var quietZoneRightHistory: [Float] = []
     private var activeSystemID: UUID?
+    private var quietZoneObservationDemand = false
 
     @Published private(set) var configuration =
         AmbientCompensationConfiguration()
@@ -172,7 +173,8 @@ final class AmbientCompensationController: ObservableObject {
     func prepareForUse() {
         do {
             try synchronizeSelectedPlaybackSystem()
-            if configuration.enabled,
+            if (configuration.enabled
+                    || quietZoneObservationDemand),
                microphone.permissionStatus == .authorized,
                microphone.selectedInputDevice != nil {
                 try startMonitoring()
@@ -193,6 +195,24 @@ final class AmbientCompensationController: ObservableObject {
         if enabled {
             try startMonitoring()
         } else {
+            envelope.reset()
+            appliedTarget = .unity
+            try? engine.clearAmbientCompensationRuntimeTarget()
+            if quietZoneObservationDemand {
+                try startMonitoring()
+            } else {
+                stopMonitoring()
+            }
+        }
+    }
+
+    func setQuietZoneObservationDemand(
+        _ enabled: Bool
+    ) throws {
+        quietZoneObservationDemand = enabled
+        if enabled {
+            try startMonitoring()
+        } else if !configuration.enabled {
             stopMonitoring()
         }
     }
@@ -279,7 +299,10 @@ final class AmbientCompensationController: ObservableObject {
 
     func startMonitoring() throws {
         try synchronizeSelectedPlaybackSystem()
-        guard configuration.enabled else { return }
+        guard configuration.enabled
+                || quietZoneObservationDemand else {
+            return
+        }
         guard microphone.permissionStatus == .authorized else {
             throw AmbientCompensationControllerError
                 .microphonePermissionRequired
@@ -349,7 +372,8 @@ final class AmbientCompensationController: ObservableObject {
     private func pollOnce() async {
         do {
             try synchronizeSelectedPlaybackSystem()
-            guard configuration.enabled,
+            guard configuration.enabled
+                    || quietZoneObservationDemand,
                   let monitor else {
                 return
             }
@@ -462,7 +486,10 @@ final class AmbientCompensationController: ObservableObject {
             latestAnalysis = analysis
 
             let planned: AmbientCompensationTarget
-            if !running {
+            if !configuration.enabled {
+                planned = .unity
+                monitorStatus = .observing
+            } else if !running {
                 planned = AmbientCompensationTarget(
                     activity: .quiet,
                     levelDB: 0,
