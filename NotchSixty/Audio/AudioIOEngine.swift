@@ -1070,6 +1070,8 @@ final class AudioIOEngine: ObservableObject {
     @Published private(set) var speakerIRConfiguration = SpeakerIRConfiguration()
     @Published private(set) var ambientCompensationRuntimeTarget =
         AmbientCompensationTarget.unity
+    @Published private(set) var activeQuietZoneRuntimeTarget =
+        ActiveQuietZoneRuntimeTarget.bypassed
     @Published private(set) var linearPhaseDesignInfo: N60LinearPhaseEQDesignInfo?
     @Published private(set) var headTrackingRuntimeStatus = HeadTrackingRuntimeStatus.disabled
     @Published private(set) var lastErrorDescription: String?
@@ -1196,6 +1198,108 @@ final class AudioIOEngine: ObservableObject {
 
     func clearAmbientCompensationRuntimeTarget() throws {
         try replaceAmbientCompensationRuntimeTarget(.unity)
+    }
+
+    var activeQuietZoneStereoSpeakerRuntimeAvailable: Bool {
+        transportSession != nil
+            && nChannelTransportSession == nil
+            && binauralHeadphoneTransportSession == nil
+            && headphoneDeviceProfileConfiguration?.enabled != true
+            && outputDeviceProfileConfiguration?.enabled != true
+            && multiOutputRoutingConfiguration?.enabled != true
+    }
+
+    var activeQuietZoneAvailableInjectionPeak: Double {
+        (try? ActiveQuietZonePlanner().availableInjectionPeak(
+            headroomAttenuationDB:
+                gainConfiguration.headroomAttenuationDB,
+            ambientLevelRecoveryDB:
+                ambientCompensationRuntimeTarget.levelDB,
+            configuration: ActiveQuietZoneConfiguration()
+        )) ?? 0
+    }
+
+    func replaceActiveQuietZoneRuntimeTarget(
+        _ rawTarget: ActiveQuietZoneRuntimeTarget
+    ) throws {
+        let target = try rawTarget.validated()
+        if target.active,
+           !activeQuietZoneStereoSpeakerRuntimeAvailable {
+            throw ActiveQuietZoneError.runtimeUnsupported
+        }
+        if activeQuietZoneRuntimeTarget.active,
+           target.active,
+           !activeQuietZoneRuntimeTarget
+                .sameFrequencies(as: target) {
+            throw ActiveQuietZoneError
+                .frequencyChangeRequiresDisarm
+        }
+
+        let available = try ActiveQuietZonePlanner()
+            .availableInjectionPeak(
+                headroomAttenuationDB:
+                    gainConfiguration.headroomAttenuationDB,
+                ambientLevelRecoveryDB:
+                    ambientCompensationRuntimeTarget.levelDB,
+                configuration:
+                    ActiveQuietZoneConfiguration()
+            )
+        if target.active,
+           target.maximumSourceMagnitude
+                > available + 1.0e-7 {
+            throw ActiveQuietZoneError
+                .insufficientOutputHeadroom
+        }
+
+        guard let session = transportSession else {
+            guard !target.active else {
+                throw ActiveQuietZoneError.runtimeUnsupported
+            }
+            activeQuietZoneRuntimeTarget = target
+            lastErrorDescription = nil
+            return
+        }
+
+        var graph = try stereoEQConfiguration.makeGraphSnapshot(
+            sampleRate: session.outputFormat.sampleRate,
+            gainConfiguration: gainConfiguration,
+            bassManagementConfiguration:
+                renderBassManagementConfiguration(),
+            dynamicsConfiguration: dynamicsConfiguration,
+            playbackConfiguration:
+                playbackControlConfiguration,
+            masterGainLinear: currentMasterSoftwareGain
+        )
+        try attachActiveEQFIRProgramIfNeeded(
+            to: &graph,
+            stereoConfiguration: stereoEQConfiguration,
+            playbackConfiguration: playbackControlConfiguration
+        )
+        try attachActiveRoomCorrectionProgramIfNeeded(
+            to: &graph,
+            playbackConfiguration: playbackControlConfiguration
+        )
+        try attachActiveSpeakerIRProgramIfNeeded(
+            to: &graph,
+            playbackConfiguration: playbackControlConfiguration
+        )
+        try applyAudioUnitRackLatency(to: &graph)
+        try attachActiveQuietZone(target, to: &graph)
+        try session.publishDSPGraph(graph)
+        activeQuietZoneRuntimeTarget = target
+        lastErrorDescription = nil
+    }
+
+    func clearActiveQuietZoneRuntimeTarget(
+        fadeMilliseconds: Double = 100
+    ) throws {
+        try replaceActiveQuietZoneRuntimeTarget(
+            ActiveQuietZoneRuntimeTarget(
+                tones: [],
+                transitionMilliseconds:
+                    fadeMilliseconds
+            )
+        )
     }
 
     var physicalSpeakerBusRoutingActive: Bool {
@@ -2145,6 +2249,58 @@ final class AudioIOEngine: ObservableObject {
         return transportSession?.readAmbientReferenceFrames(
             maximumFrames: maximumFrames
         ) ?? []
+    }
+
+    var activeQuietZoneReferenceAvailable: Bool {
+        activeQuietZoneStereoSpeakerRuntimeAvailable
+    }
+
+    var activeQuietZoneReferenceSampleRate: Double? {
+        guard activeQuietZoneReferenceAvailable else {
+            return nil
+        }
+        return transportSession?
+            .activeQuietZoneReferenceSampleRate
+    }
+
+    func setActiveQuietZoneReferenceDemand(_ enabled: Bool) {
+        guard activeQuietZoneReferenceAvailable else {
+            transportSession?
+                .setActiveQuietZoneReferenceDemand(false)
+            return
+        }
+        transportSession?
+            .setActiveQuietZoneReferenceDemand(enabled)
+    }
+
+    func activeQuietZoneReferenceSnapshot()
+        -> N60ActiveQuietZoneReferenceSnapshot? {
+        guard activeQuietZoneReferenceAvailable else {
+            return nil
+        }
+        return transportSession?
+            .activeQuietZoneReferenceSnapshot()
+    }
+
+    func discardActiveQuietZoneReferenceFrames() {
+        transportSession?
+            .discardActiveQuietZoneReferenceFrames()
+    }
+
+    func readActiveQuietZoneReferenceFrames(
+        maximumFrames: Int =
+            Int(
+                N60_ACTIVE_QUIET_ZONE_REFERENCE_CAPACITY_FRAMES
+            )
+    ) -> [N60ActiveQuietZoneReferenceFrame] {
+        guard activeQuietZoneReferenceAvailable else {
+            return []
+        }
+        return transportSession?
+            .readActiveQuietZoneReferenceFrames(
+                maximumFrames: maximumFrames
+            )
+            ?? []
     }
 
     func productionAnalysisSnapshot() -> ProductionAnalysisSnapshot {
@@ -3151,10 +3307,121 @@ final class AudioIOEngine: ObservableObject {
         return clamped
     }
 
+    private func attachActiveQuietZone(
+        _ target: ActiveQuietZoneRuntimeTarget,
+        to graph: inout N60DSPGraphSnapshot
+    ) throws {
+        let resolved =
+            processingIsBypassed(
+                playbackControlConfiguration
+            )
+            ? ActiveQuietZoneRuntimeTarget(
+                tones: [],
+                transitionMilliseconds:
+                    target.transitionMilliseconds
+            )
+            : target
+        let transitionFramesDouble =
+            graph.sampleRate
+            * resolved.transitionMilliseconds
+            / 1_000
+        guard transitionFramesDouble.isFinite,
+              transitionFramesDouble >= 1,
+              transitionFramesDouble
+                <= Double(UInt32.max) else {
+            throw ActiveQuietZoneError.invalidConfiguration
+        }
+        let transitionFrames =
+            UInt32(transitionFramesDouble.rounded())
+
+        var tones = resolved.tones.map { tone in
+            var value =
+                N60ActiveQuietZoneToneSnapshot()
+            value.frequencyHz = tone.frequencyHz
+            value.leftReal =
+                Float(tone.leftOutput.real)
+            value.leftImaginary =
+                Float(tone.leftOutput.imaginary)
+            value.rightReal =
+                Float(tone.rightOutput.real)
+            value.rightImaginary =
+                Float(tone.rightOutput.imaginary)
+            return value
+        }
+
+        let attached: Bool
+        if tones.isEmpty {
+            attached =
+                N60DSPGraphSnapshotSetActiveQuietZone(
+                    &graph,
+                    nil,
+                    0,
+                    transitionFrames,
+                    false
+                )
+        } else {
+            attached =
+                tones.withUnsafeMutableBufferPointer {
+                    N60DSPGraphSnapshotSetActiveQuietZone(
+                        &graph,
+                        $0.baseAddress,
+                        UInt32($0.count),
+                        transitionFrames,
+                        true
+                    )
+                }
+        }
+        guard attached else {
+            throw ActiveQuietZoneError
+                .invalidConfiguration
+        }
+    }
+
+    private func attachActiveQuietZone(
+        to graph: inout N60DSPGraphSnapshot
+    ) throws {
+        try attachActiveQuietZone(
+            activeQuietZoneRuntimeTarget,
+            to: &graph
+        )
+    }
+
+    private func activeQuietZoneTargetAfterHeadroomChange(
+        _ target: ActiveQuietZoneRuntimeTarget,
+        gainConfiguration: DSPGainConfiguration,
+        ambientTarget: AmbientCompensationTarget
+    ) -> ActiveQuietZoneRuntimeTarget {
+        guard target.active else { return target }
+        let available =
+            (
+                try? ActiveQuietZonePlanner()
+                    .availableInjectionPeak(
+                        headroomAttenuationDB:
+                            gainConfiguration
+                                .headroomAttenuationDB,
+                        ambientLevelRecoveryDB:
+                            ambientTarget.levelDB,
+                        configuration:
+                            ActiveQuietZoneConfiguration()
+                    )
+            )
+            ?? 0
+        guard target.maximumSourceMagnitude
+                <= available + 1.0e-7 else {
+            // Never rescale solved phasors behind the controller's back.
+            return ActiveQuietZoneRuntimeTarget(
+                tones: [],
+                transitionMilliseconds: 100
+            )
+        }
+        return target
+    }
+
     private func applyAudioUnitRackLatency(
         to graph: inout N60DSPGraphSnapshot
     ) throws {
         try attachAmbientCompensation(to: &graph)
+        try attachActiveQuietZone(to: &graph)
         guard let stagedAudioUnitRack else { return }
         let combinedLatency =
             UInt64(graph.latencyFrames)
