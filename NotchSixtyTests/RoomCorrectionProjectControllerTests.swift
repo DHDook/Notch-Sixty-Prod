@@ -1562,4 +1562,55 @@ final class RoomCorrectionProjectControllerTests: XCTestCase {
         )
     }
 
+
+    func testActiveQuietZonePersistsPolicyButNeverRuntimeCoefficients() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+
+        let profiles = fixture.profiles
+        let beforeContent = profiles.captureContentState()
+        var quietZone = ActiveQuietZoneConfiguration()
+        quietZone.enabled = true
+        quietZone.minimumFrequencyHz = 30
+        quietZone.maximumFrequencyHz = 120
+        quietZone.maximumToneCount = 3
+        quietZone.minimumSeparationConfidence = 0.88
+        quietZone.targetReductionDB = 5
+        quietZone.maximumPerSourceTonePeakDBFS = -26
+        quietZone.maximumAggregateSourcePeakDBFS = -20
+
+        try profiles.replaceSelectedSystemActiveQuietZone(
+            quietZone
+        )
+
+        XCTAssertEqual(
+            profiles.selectedSystemProfile?.state.activeQuietZone,
+            quietZone
+        )
+        XCTAssertEqual(
+            profiles.captureContentState(),
+            beforeContent,
+            "Active Quiet Zone policy belongs to the Playback System, not the Content Preset."
+        )
+
+        let restoredEngine = AudioIOEngine(
+            deviceCatalog: OutputCatalogFixture()
+        )
+        let restoredProfiles = ProductProfileController(
+            engine: restoredEngine,
+            storageURL: fixture.root.appendingPathComponent(
+                "profiles-v1.json"
+            )
+        )
+        XCTAssertEqual(
+            restoredProfiles.selectedSystemProfile?.state.activeQuietZone,
+            quietZone
+        )
+        XCTAssertEqual(
+            restoredEngine.activeQuietZoneRuntimeTarget,
+            .bypassed,
+            "Anti-noise coefficients are ephemeral and must be rebuilt from fresh physical evidence."
+        )
+    }
+
 }
