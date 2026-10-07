@@ -101,6 +101,7 @@ for token in (
     "testIntelligentTargetSpatialVarianceReducesAggressiveness",
     "testIntelligentTargetDoesNotTraceNarrowRoomNull",
     "testIntelligentTargetClampsToConfiguredCorrectionLimits",
+    "testIntelligentTargetDoesNotDemandUnsupportedDeepBass",
 ):
     require(token in target_tests, f"adaptive target tests missing {token}")
 
