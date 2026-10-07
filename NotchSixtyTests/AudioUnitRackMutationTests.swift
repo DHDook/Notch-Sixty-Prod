@@ -242,6 +242,94 @@ final class AudioUnitRackMutationTests: XCTestCase {
         XCTAssertFalse(host.quarantine.isQuarantined(identity))
     }
 
+    func testAppendAddsSlotTransactionallyAndRespectsMaximum() async throws {
+        let descriptor = mockDescriptor()
+        let host = AudioUnitHostController(
+            catalog: PR82MockCatalog(components: [descriptor])
+        )
+        let format = AudioUnitRackProcessingFormat(
+            sampleRate: 48_000,
+            channelCount: 2,
+            maximumFramesPerSlice: 64
+        )
+        host.scan(format: format)
+
+        for expectedCount in 5...AudioUnitRackConfiguration.maximumSlotCount {
+            let candidate = try await host.makeMutationCandidate(
+                applying: .append(
+                    component: identity,
+                    initiallyBypassed: true
+                ),
+                format: format,
+                using: PR82UnexpectedPreparationBackend()
+            )
+            XCTAssertEqual(
+                candidate.configuration.slots.count,
+                expectedCount
+            )
+            XCTAssertEqual(
+                host.rackConfiguration.slots.count,
+                expectedCount - 1
+            )
+            try host.commitMutationCandidate(candidate)
+        }
+
+        do {
+            _ = try await host.makeMutationCandidate(
+                applying: .append(
+                    component: identity,
+                    initiallyBypassed: true
+                ),
+                format: format,
+                using: PR82UnexpectedPreparationBackend()
+            )
+            XCTFail("Expected full rack rejection.")
+        } catch let error as AudioUnitRackMutationError {
+            XCTAssertEqual(
+                error,
+                .rackFull(
+                    maximum:
+                        AudioUnitRackConfiguration.maximumSlotCount
+                )
+            )
+        }
+    }
+
+    func testReplaceConfigurationDefersWholeRackCommit() async throws {
+        let descriptor = mockDescriptor()
+        let host = AudioUnitHostController(
+            catalog: PR82MockCatalog(components: [descriptor])
+        )
+        let format = AudioUnitRackProcessingFormat(
+            sampleRate: 48_000,
+            channelCount: 2,
+            maximumFramesPerSlice: 64
+        )
+        host.scan(format: format)
+
+        var target = AudioUnitRackConfiguration()
+        target.slots[1] = AudioUnitRackSlotState(
+            component: identity,
+            displayName: descriptor.name,
+            manufacturerName: descriptor.manufacturerName,
+            bypassed: true,
+            wetDryMix: 0.35
+        )
+
+        let original = host.rackConfiguration
+        let candidate = try await host.makeMutationCandidate(
+            applying: .replaceConfiguration(target),
+            format: format,
+            using: PR82UnexpectedPreparationBackend()
+        )
+
+        XCTAssertEqual(host.rackConfiguration, original)
+        XCTAssertEqual(candidate.configuration, target)
+
+        try host.commitMutationCandidate(candidate)
+        XCTAssertEqual(host.rackConfiguration, target)
+    }
+
     private func mockDescriptor() -> AudioUnitComponentDescriptor {
         AudioUnitComponentDescriptor(
             identity: identity,
