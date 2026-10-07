@@ -232,7 +232,7 @@ struct SOFAFIRDataset: Sendable {
 }
 
 enum SOFAImportError: Error, Equatable, LocalizedError {
-    case nativeReader(Int, String)
+    case nativeReader(String)
     case invalidDataset
     case unsupportedReceiverCount(Int)
     case unsupportedEmitterCount(Int)
@@ -244,7 +244,7 @@ enum SOFAImportError: Error, Equatable, LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .nativeReader(_, let description):
+        case .nativeReader(let description):
             return description
         case .invalidDataset:
             return "The SOFA FIR dataset is internally inconsistent."
@@ -278,10 +278,7 @@ struct NativeSOFAImporter: Sendable {
             let description = String(
                 cString: N60SOFAStatusDescription(status)
             )
-            throw SOFAImportError.nativeReader(
-                Int(status.rawValue),
-                description
-            )
+            throw SOFAImportError.nativeReader(description)
         }
         defer { N60SOFADocumentDestroy(document) }
 
