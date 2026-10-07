@@ -618,8 +618,12 @@ final class AmbientCompensationController: ObservableObject {
         // PR90 verification must observe the physical d + anti-noise residual.
         // Model/subtract program playback only; never subtract the anti-noise
         // contribution from the error microphone.
-        let left = zip(renderedLeft, quietLeft).map(-)
-        let right = zip(renderedRight, quietRight).map(-)
+        let left = zip(renderedLeft, quietLeft).map {
+            $0.0 - $0.1
+        }
+        let right = zip(renderedRight, quietRight).map {
+            $0.0 - $0.1
+        }
         let sourceModel = try acousticModel(
             monitorSampleRate: monitorSampleRate
         )
