@@ -409,7 +409,8 @@ struct AmbientCompensationPlanner: Sendable {
         guard Self.snapshotIsFinite(snapshot) else {
             throw AmbientCompensationError.nonFiniteSnapshot
         }
-        guard configuration.enabled else {
+        guard configuration.effectivePlaybackAdaptationMode
+                == .musicFocus else {
             return held(.disabled, snapshot: snapshot)
         }
         guard let baseline = configuration.baselineAmbientLevelDBFS,
@@ -644,6 +645,10 @@ struct ConversationPreservationPlanner: Sendable {
         let configuration = try rawConfiguration.validated()
         let social = try configuration
             .effectiveConversationPreservation.validated()
+        guard configuration.effectivePlaybackAdaptationMode
+                == .conversationFocus else {
+            return held(.disabled, snapshot: snapshot)
+        }
 
         guard snapshot.sampleRate.isFinite,
               snapshot.separationConfidence.isFinite,
