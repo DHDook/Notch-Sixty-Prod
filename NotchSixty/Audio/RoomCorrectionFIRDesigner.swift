@@ -778,6 +778,8 @@ struct RoomCorrectionDesignPredictionVerifier: Sendable {
 
         let disagreement = try storedPredictionDisagreement(
             design: design,
+            sourcePositions: sourcePositions,
+            positions: positions,
             targetGrid: grid,
             unscaledLeftTaps: unscaledLeft,
             unscaledRightTaps: unscaledRight
@@ -890,19 +892,22 @@ struct RoomCorrectionDesignPredictionVerifier: Sendable {
 
     private func storedPredictionDisagreement(
         design: RoomCorrectionDesign,
+        sourcePositions: [RoomCorrectionDesignSourcePosition],
+        positions: [RoomCorrectionMeasurementPosition],
         targetGrid: [Double],
         unscaledLeftTaps: [Float],
         unscaledRightTaps: [Float]
     ) throws -> Double? {
         guard let storedLeft = design.predictedLeftResponse,
               let storedRight = design.predictedRightResponse,
-              let sourceIDs = design.sourcePositions?.map(\.id),
-              !sourceIDs.isEmpty else {
+              !sourcePositions.isEmpty else {
             return nil
         }
-        // Stored predicted responses were produced from the aggregate and the
-        // unscaled FIR. Recompute just the FIR contribution and compare shape;
-        // source-measurement verification above remains the deployment truth.
+        let totalWeight = sourcePositions.reduce(0) { $0 + $1.weight }
+        guard totalWeight.isFinite, totalWeight > 0 else {
+            return nil
+        }
+
         let leftGain = try Self.firMagnitudeDB(
             taps: unscaledLeftTaps,
             frequencies: targetGrid,
@@ -913,23 +918,36 @@ struct RoomCorrectionDesignPredictionVerifier: Sendable {
             frequencies: targetGrid,
             sampleRate: design.sampleRate
         )
-        guard storedLeft.frequenciesHz.count >= 2,
-              storedRight.frequenciesHz.count >= 2 else {
-            return nil
-        }
+
         var disagreement = 0.0
         for index in targetGrid.indices {
             let frequency = targetGrid[index]
+            var aggregateLeft = 0.0
+            var aggregateRight = 0.0
+            for source in sourcePositions {
+                guard let position = positions.first(where: {
+                    $0.id == source.id
+                }), let left = position.left.transferFunction,
+                   let right = position.right.transferFunction else {
+                    throw RoomCorrectionDesignVerificationError
+                        .sourcePositionMissing(source.id)
+                }
+                aggregateLeft += try Self.interpolate(
+                    left, at: frequency
+                ) * source.weight / totalWeight
+                aggregateRight += try Self.interpolate(
+                    right, at: frequency
+                ) * source.weight / totalWeight
+            }
+
+            let recomputedLeft = aggregateLeft + leftGain[index]
+            let recomputedRight = aggregateRight + rightGain[index]
             let storedL = try Self.interpolate(storedLeft, at: frequency)
             let storedR = try Self.interpolate(storedRight, at: frequency)
-            // We do not have the historical aggregate embedded in the design,
-            // so compare left/right correction delta. Common measured level
-            // cancels, making this a useful corruption/materialization check.
-            let storedDelta = storedL - storedR
-            let recomputedDelta = leftGain[index] - rightGain[index]
             disagreement = max(
                 disagreement,
-                abs(storedDelta - recomputedDelta)
+                abs(storedL - recomputedLeft),
+                abs(storedR - recomputedRight)
             )
         }
         return disagreement
