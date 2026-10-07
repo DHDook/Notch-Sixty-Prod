@@ -149,7 +149,7 @@ final class ActiveQuietZoneController: ObservableObject {
             }
             lastErrorDescription = nil
         } catch {
-            fail(error, reason: .ambientEvidenceUnavailable)
+            fault(error, reason: .ambientEvidenceUnavailable)
         }
     }
 
@@ -749,7 +749,7 @@ final class ActiveQuietZoneController: ObservableObject {
                 )
             )
 
-            let verification = planner.verify(
+            let verification = try planner.verify(
                 beforeLevelDBFS:
                     disturbance.magnitudeDB,
                 afterLevelDBFS:
