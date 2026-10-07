@@ -170,13 +170,11 @@ enum AudioUnitLiveTimingValidator {
               sampleRate > 0 else {
             return nil
         }
-        let frames = ceil(seconds * sampleRate)
-        guard frames.isFinite,
-              frames >= 0,
-              frames <= Double(Int.max) else {
-            return nil
-        }
-        return Int(frames)
+        let frames = AudioUnitProbeResult.conservativeFrameCount(
+            seconds: seconds,
+            sampleRate: sampleRate
+        )
+        return frames
     }
 }
 
