@@ -194,6 +194,14 @@ bool N60ActiveQuietZoneRuntimeSchedule(
             if (!tone->active || runtime_is_silent(tone)) {
                 tone->frequencyHz = target->frequencyHz;
                 tone->phaseRadians = 0.0;
+                tone->oscillatorCosine = 1.0;
+                tone->oscillatorSine = 0.0;
+                const double phaseIncrement =
+                    N60_AQZ_TWO_PI
+                    * tone->frequencyHz
+                    / runtime->sampleRate;
+                tone->incrementCosine = cos(phaseIncrement);
+                tone->incrementSine = sin(phaseIncrement);
                 tone->currentLeftReal = 0.0f;
                 tone->currentLeftImaginary = 0.0f;
                 tone->currentRightReal = 0.0f;
@@ -254,6 +262,10 @@ static void advance_coefficient_transition(
         if (runtime_is_silent(tone)) {
             tone->active = false;
             tone->phaseRadians = 0.0;
+            tone->oscillatorCosine = 1.0;
+            tone->oscillatorSine = 0.0;
+            tone->incrementCosine = 1.0;
+            tone->incrementSine = 0.0;
             tone->frequencyHz = 0.0;
         }
     }
@@ -276,16 +288,23 @@ void N60ActiveQuietZoneRuntimeProcessFrame(
         if (!tone->active) continue;
 
         advance_coefficient_transition(tone);
-        const double phase = tone->phaseRadians;
-        const float cosine = (float)cos(phase);
-        const float sine = (float)sin(phase);
+        const double cosine = tone->oscillatorCosine;
+        const double sine = tone->oscillatorSine;
         outputLeft +=
-            tone->currentLeftReal * cosine
-            - tone->currentLeftImaginary * sine;
+            tone->currentLeftReal * (float)cosine
+            - tone->currentLeftImaginary * (float)sine;
         outputRight +=
-            tone->currentRightReal * cosine
-            - tone->currentRightImaginary * sine;
+            tone->currentRightReal * (float)cosine
+            - tone->currentRightImaginary * (float)sine;
 
+        const double nextCosine =
+            cosine * tone->incrementCosine
+            - sine * tone->incrementSine;
+        const double nextSine =
+            sine * tone->incrementCosine
+            + cosine * tone->incrementSine;
+        tone->oscillatorCosine = nextCosine;
+        tone->oscillatorSine = nextSine;
         tone->phaseRadians +=
             N60_AQZ_TWO_PI
             * tone->frequencyHz
