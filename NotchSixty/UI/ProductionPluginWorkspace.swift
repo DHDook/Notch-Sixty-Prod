@@ -51,11 +51,11 @@ struct ProductionPluginWorkspace: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Plug-ins")
                     .font(.largeTitle.bold())
-                Text("Audio Unit discovery, compatibility, rack state, and safe-host preparation.")
+                Text("Audio Unit discovery, offline validation, live hosting, and rack state.")
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Text("HOST FOUNDATION")
+            Text("LIVE HOST READY")
                 .font(.caption.bold())
                 .tracking(1.3)
                 .foregroundStyle(.secondary)
@@ -74,7 +74,7 @@ struct ProductionPluginWorkspace: View {
                 chainNode("Playback DSP", active: true)
                 Image(systemName: "arrow.right")
                     .foregroundStyle(.tertiary)
-                chainNode("Plug-in Rack", active: false)
+                chainNode("Plug-in Rack", active: true)
                 Image(systemName: "arrow.right")
                     .foregroundStyle(.tertiary)
                 chainNode("System Correction", active: true)
@@ -147,7 +147,7 @@ struct ProductionPluginWorkspace: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Text("NOT IN LIVE PATH")
+                Text("LIVE ENGINE READY")
                     .font(.caption.bold())
                     .tracking(1.0)
                     .foregroundStyle(.secondary)
@@ -194,13 +194,13 @@ struct ProductionPluginWorkspace: View {
 
             HStack {
                 Button {
-                    // Live insertion intentionally deferred beyond PR79.
+                    // Rack editing UI is intentionally deferred beyond PR81.
                 } label: {
                     Label("Add Plug-in", systemImage: "plus")
                 }
                 .buttonStyle(.glass)
                 .disabled(true)
-                .help("PR79 discovers and validates Audio Units but does not insert them into the realtime graph.")
+                .help("PR81 activates already-saved, validated rack state at processing start. Add/reorder/vendor UI remains deferred.")
 
                 Spacer()
 
@@ -307,9 +307,9 @@ struct ProductionPluginWorkspace: View {
     private var safetyCard: some View {
         Label {
             VStack(alignment: .leading, spacing: 5) {
-                Text("Foundation only — no third-party code in the audio callback")
+                Text("Live host with an off-realtime preparation boundary")
                     .font(.subheadline.weight(.semibold))
-                Text("PR79 only queries registered component metadata and prepares bounded host state. Every plug-in must later pass an off-realtime instantiation/render-resource probe before it can enter a live execution plan. Missing, incompatible, or quarantined units can only use a known latency-matched dry bypass; otherwise activation fails closed.")
+                Text("PR81 revalidates active saved slots before startup, constructs immutable Audio Unit instances and buffers off realtime, then renders them at the Playback/System boundary. Runtime plug-in faults fall back immediately to latency-matched dry audio and are quarantined on the control plane. Discovery, instantiation, state restore, allocation, logging, and UI work never occur in the production callback.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
