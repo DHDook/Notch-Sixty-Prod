@@ -984,13 +984,24 @@ struct RoomCorrectionDesignPredictionVerifier: Sendable {
                 throw RoomCorrectionDesignVerificationError.invalidFilter
             }
             let omega = 2 * Double.pi * frequency / sampleRate
+            let stepReal = cos(omega)
+            let stepImaginary = -sin(omega)
+            var oscillatorReal = 1.0
+            var oscillatorImaginary = 0.0
             var real = 0.0
             var imaginary = 0.0
-            for index in taps.indices {
-                let phase = -omega * Double(index)
-                let tap = Double(taps[index])
-                real += tap * cos(phase)
-                imaginary += tap * sin(phase)
+            for tapValue in taps {
+                let tap = Double(tapValue)
+                real += tap * oscillatorReal
+                imaginary += tap * oscillatorImaginary
+                let nextReal =
+                    oscillatorReal * stepReal
+                    - oscillatorImaginary * stepImaginary
+                let nextImaginary =
+                    oscillatorReal * stepImaginary
+                    + oscillatorImaginary * stepReal
+                oscillatorReal = nextReal
+                oscillatorImaginary = nextImaginary
             }
             let magnitude = hypot(real, imaginary)
             guard magnitude.isFinite else {
