@@ -246,7 +246,14 @@ final class AmbientFieldAnalyzerTests: XCTestCase {
     }
 
     func testDetailedAnalysisExposesSeparatedResidualAndAlignmentEvidence() throws {
-        let playback = shapedPlayback(frames: frameCount)
+        // Use broadband deterministic playback so the requested transport lag
+        // is uniquely observable. A sparse tonal reference can have multiple
+        // phase-equivalent correlation peaks and is therefore inappropriate for
+        // asserting an exact lag value.
+        let playback = deterministicNoise(
+            amplitude: 0.12,
+            frames: frameCount
+        )
         let impulse = delayedImpulse(
             delay: 37,
             taps: [(0, 0.55), (23, -0.08)]
