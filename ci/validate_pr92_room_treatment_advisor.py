@@ -40,6 +40,13 @@ for token in (
     "strongestSpatialBassVariation",
     "deepestBassCancellation",
     "strongestEarlyReflection",
+    "t20DerivedDecay",
+    "bandpass(",
+    "linearRegression(",
+    "lowFrequencyRinging",
+    "boundaryInterferenceCandidate",
+    "prioritizedActions(",
+    "RoomTreatmentAdvisorActionPriority",
 ):
     require(token in core, f"advisor model missing {token}")
 
@@ -98,6 +105,8 @@ for token in (
     '"Measurement Source"',
     '"Measurement Readiness"',
     '"Diagnosis & Recommendations"',
+    '"Recommended Order"',
+    "report.actionPriorities",
     "advisor.selectedProjectID",
     "advisor.reloadProjects()",
 ):
@@ -127,6 +136,9 @@ for token in (
     "testSinglePositionDeepNullRequiresMoreMeasurementBeforeBoost",
     "testStrongEarlyReflectionPrefersPassiveTreatment",
     "testClippedOrLowSNRMeasurementFailsTowardMeasureMore",
+    "testLongLowFrequencyDecayPrefersPassiveTreatment",
+    "testDeepNullWithNormalDecayBecomesBoundaryInterferenceCandidate",
+    "testMeasurementQualityTakesFirstActionPriority",
     "testControllerLoadsProjectsWithoutPlaybackProfileSelection",
 ):
     require(token in tests, f"Room Advisor test missing {token}")
@@ -153,6 +165,9 @@ for phrase in (
     "no recommendation is automatically applied",
     "strong early reflection",
     "deep low-frequency cancellation",
+    "t20-derived rt60",
+    "boundary-interference candidate",
+    "recommended order",
 ):
     require(phrase in doc, f"PR92 contract missing '{phrase}'")
 
