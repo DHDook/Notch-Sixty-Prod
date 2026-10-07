@@ -502,6 +502,35 @@ final class AudioUnitHostController: ObservableObject {
         lastErrorDescription = nil
     }
 
+    func prepareActiveSlotsForLive(
+        format: AudioUnitRackProcessingFormat,
+        using backend: any AudioUnitOfflinePreparing =
+            SystemAudioUnitOfflinePreparationBackend()
+    ) async {
+        scan(format: format)
+        for index in rackConfiguration.slots.indices {
+            let slot = rackConfiguration.slots[index]
+            guard let component = slot.component,
+                  !slot.bypassed,
+                  !quarantine.isQuarantined(component) else {
+                continue
+            }
+
+            if let report = offlineReportsBySlotID[slot.id],
+               report.format == format,
+               report.component == component,
+               report.capturedFullState == slot.opaqueFullState {
+                continue
+            }
+
+            await prepareSlotOffline(
+                index,
+                format: format,
+                using: backend
+            )
+        }
+    }
+
     func makeLiveRackRuntime(
         format: AudioUnitRackProcessingFormat
     ) async throws -> AudioUnitLiveRackRuntime? {
