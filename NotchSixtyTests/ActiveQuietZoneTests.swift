@@ -367,4 +367,246 @@ final class ActiveQuietZoneTests: XCTestCase {
     private func wrappedPhase(_ phase: Double) -> Double {
         atan2(sin(phase), cos(phase))
     }
+
+    func testRealtimeSnapshotRejectsUnsafeToneAndAggregateLevels() {
+        var snapshot = N60ActiveQuietZoneSnapshotMakeBypassed()
+        var tooLoud = cTone(
+            frequency: 60,
+            leftReal: 0.08,
+            rightReal: 0
+        )
+        XCTAssertFalse(
+            N60ActiveQuietZoneSnapshotSet(
+                &snapshot,
+                &tooLoud,
+                1,
+                128,
+                sampleRate,
+                true
+            )
+        )
+
+        var tones = [
+            cTone(frequency: 50, leftReal: 0.05, rightReal: 0.05),
+            cTone(frequency: 70, leftReal: 0.05, rightReal: 0.05),
+            cTone(frequency: 90, leftReal: 0.04, rightReal: 0.04),
+        ]
+        XCTAssertFalse(
+            tones.withUnsafeMutableBufferPointer { buffer in
+                N60ActiveQuietZoneSnapshotSet(
+                    &snapshot,
+                    buffer.baseAddress,
+                    UInt32(buffer.count),
+                    128,
+                    sampleRate,
+                    true
+                )
+            },
+            "Sum of source phasor magnitudes must remain below -18 dBFS."
+        )
+    }
+
+    func testRealtimeOscillatorRampsAndPublishesExactReference() {
+        var snapshot = N60ActiveQuietZoneSnapshotMakeBypassed()
+        var tone = cTone(
+            frequency: 100,
+            leftReal: 0.04,
+            rightReal: -0.02
+        )
+        XCTAssertTrue(
+            N60ActiveQuietZoneSnapshotSet(
+                &snapshot,
+                &tone,
+                1,
+                4,
+                sampleRate,
+                true
+            )
+        )
+
+        var runtime = N60ActiveQuietZoneRuntime()
+        N60ActiveQuietZoneRuntimeReset(&runtime, sampleRate)
+        XCTAssertTrue(
+            N60ActiveQuietZoneRuntimeSchedule(
+                &runtime,
+                &snapshot,
+                sampleRate
+            )
+        )
+
+        var generated: [(Float, Float)] = []
+        for _ in 0..<16 {
+            var left: Float = 0
+            var right: Float = 0
+            N60ActiveQuietZoneRuntimeProcessFrame(
+                &runtime,
+                &left,
+                &right
+            )
+            generated.append((left, right))
+        }
+
+        XCTAssertLessThan(
+            abs(generated[0].0),
+            abs(generated[3].0)
+        )
+        XCTAssertLessThanOrEqual(
+            generated.map { abs($0.0) }.max() ?? 0,
+            0.040_001
+        )
+        XCTAssertLessThanOrEqual(
+            generated.map { abs($0.1) }.max() ?? 0,
+            0.020_001
+        )
+
+        var referenceLeft: Float = 0
+        var referenceRight: Float = 0
+        N60ActiveQuietZoneRuntimeLastFrame(
+            &runtime,
+            &referenceLeft,
+            &referenceRight
+        )
+        XCTAssertEqual(
+            referenceLeft,
+            generated.last?.0 ?? .nan,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            referenceRight,
+            generated.last?.1 ?? .nan,
+            accuracy: 0.000_001
+        )
+    }
+
+    func testRealtimeRuntimeRequiresFadeOutBeforeFrequencyChange() {
+        var first = N60ActiveQuietZoneSnapshotMakeBypassed()
+        var tone60 = cTone(
+            frequency: 60,
+            leftReal: 0.03,
+            rightReal: 0.02
+        )
+        XCTAssertTrue(
+            N60ActiveQuietZoneSnapshotSet(
+                &first,
+                &tone60,
+                1,
+                4,
+                sampleRate,
+                true
+            )
+        )
+
+        var runtime = N60ActiveQuietZoneRuntime()
+        N60ActiveQuietZoneRuntimeReset(&runtime, sampleRate)
+        XCTAssertTrue(
+            N60ActiveQuietZoneRuntimeSchedule(
+                &runtime,
+                &first,
+                sampleRate
+            )
+        )
+        for _ in 0..<8 {
+            var left: Float = 0
+            var right: Float = 0
+            N60ActiveQuietZoneRuntimeProcessFrame(
+                &runtime,
+                &left,
+                &right
+            )
+        }
+
+        var changed = N60ActiveQuietZoneSnapshotMakeBypassed()
+        var tone61 = cTone(
+            frequency: 61,
+            leftReal: 0.03,
+            rightReal: 0.02
+        )
+        XCTAssertTrue(
+            N60ActiveQuietZoneSnapshotSet(
+                &changed,
+                &tone61,
+                1,
+                4,
+                sampleRate,
+                true
+            )
+        )
+        XCTAssertFalse(
+            N60ActiveQuietZoneRuntimeSchedule(
+                &runtime,
+                &changed,
+                sampleRate
+            )
+        )
+
+        var bypass = N60ActiveQuietZoneSnapshotMakeBypassed()
+        XCTAssertTrue(
+            N60ActiveQuietZoneSnapshotSet(
+                &bypass,
+                nil,
+                0,
+                4,
+                sampleRate,
+                false
+            )
+        )
+        XCTAssertTrue(
+            N60ActiveQuietZoneRuntimeSchedule(
+                &runtime,
+                &bypass,
+                sampleRate
+            )
+        )
+        for _ in 0..<4 {
+            var left: Float = 0
+            var right: Float = 0
+            N60ActiveQuietZoneRuntimeProcessFrame(
+                &runtime,
+                &left,
+                &right
+            )
+        }
+        XCTAssertTrue(
+            N60ActiveQuietZoneRuntimeSchedule(
+                &runtime,
+                &changed,
+                sampleRate
+            )
+        )
+    }
+
+    func testRenderGraphRejectsQuietZoneToneBeyondHardFrequencyBand() {
+        var graph = N60DSPGraphSnapshotMakeUnity(sampleRate)
+        var tone = cTone(
+            frequency: 180,
+            leftReal: 0.01,
+            rightReal: 0.01
+        )
+        XCTAssertFalse(
+            N60DSPGraphSnapshotSetActiveQuietZone(
+                &graph,
+                &tone,
+                1,
+                128,
+                true
+            )
+        )
+    }
+
+    private func cTone(
+        frequency: Double,
+        leftReal: Float,
+        leftImaginary: Float = 0,
+        rightReal: Float,
+        rightImaginary: Float = 0
+    ) -> N60ActiveQuietZoneToneSnapshot {
+        var tone = N60ActiveQuietZoneToneSnapshot()
+        tone.frequencyHz = frequency
+        tone.leftReal = leftReal
+        tone.leftImaginary = leftImaginary
+        tone.rightReal = rightReal
+        tone.rightImaginary = rightImaginary
+        return tone
+    }
+
 }
