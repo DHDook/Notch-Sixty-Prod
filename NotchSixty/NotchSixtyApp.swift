@@ -159,6 +159,30 @@ final class ProductController: ObservableObject {
         }
     }
 
+    func mutateAudioUnitRack(
+        _ mutation: AudioUnitRackMutation,
+        crossfadeFrames: Int =
+            AudioUnitLiveRackSwitchboard.defaultCrossfadeFrames
+    ) async throws -> AudioUnitRackMutationActivation {
+        let format =
+            try audioEngine.audioUnitRackProcessingFormatForMutation()
+        let candidate =
+            try await audioUnitHost.makeMutationCandidate(
+                applying: mutation,
+                format: format
+            )
+
+        // Activation is the commit barrier. Host/preset-visible state remains
+        // unchanged until the live exchange or controlled restart succeeds.
+        let activation =
+            try await audioEngine.activateAudioUnitRackMutation(
+                candidate,
+                crossfadeFrames: crossfadeFrames
+            )
+        try audioUnitHost.commitMutationCandidate(candidate)
+        return activation
+    }
+
     func shutdownForTermination() {
         multichannelCalibration.cancelMeasurement()
         calibration.cancelMeasurement()
