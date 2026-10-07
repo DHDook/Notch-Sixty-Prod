@@ -1005,6 +1005,147 @@ uint32_t N60RealtimeAudioBridgeReadAmbientReferenceFrames(
     return framesToRead;
 }
 
+void N60RealtimeAudioBridgeSetActiveQuietZoneReferenceDemand(
+    N60RealtimeAudioBridge *bridge,
+    bool enabled
+) {
+    if (bridge == NULL) return;
+    bool previous = atomic_exchange_explicit(
+        &bridge->activeQuietZoneReferenceDemand,
+        enabled,
+        memory_order_acq_rel
+    );
+    if (previous != enabled) {
+        uint64_t writeIndex = atomic_load_explicit(
+            &bridge->activeQuietZoneReferenceWriteIndex,
+            memory_order_acquire
+        );
+        atomic_store_explicit(
+            &bridge->activeQuietZoneReferenceReadIndex,
+            writeIndex,
+            memory_order_release
+        );
+    }
+}
+
+bool N60RealtimeAudioBridgeActiveQuietZoneReferenceDemand(
+    const N60RealtimeAudioBridge *bridge
+) {
+    return bridge != NULL
+        && atomic_load_explicit(
+            &bridge->activeQuietZoneReferenceDemand,
+            memory_order_acquire
+        );
+}
+
+void N60RealtimeAudioBridgeDiscardActiveQuietZoneReferenceFrames(
+    N60RealtimeAudioBridge *bridge
+) {
+    if (bridge == NULL) return;
+    uint64_t writeIndex = atomic_load_explicit(
+        &bridge->activeQuietZoneReferenceWriteIndex,
+        memory_order_acquire
+    );
+    atomic_store_explicit(
+        &bridge->activeQuietZoneReferenceReadIndex,
+        writeIndex,
+        memory_order_release
+    );
+}
+
+N60ActiveQuietZoneReferenceSnapshot
+N60RealtimeAudioBridgeGetActiveQuietZoneReferenceSnapshot(
+    const N60RealtimeAudioBridge *bridge
+) {
+    N60ActiveQuietZoneReferenceSnapshot snapshot = {0};
+    if (bridge == NULL) return snapshot;
+    snapshot.enabled =
+        N60RealtimeAudioBridgeActiveQuietZoneReferenceDemand(
+            bridge
+        );
+    uint64_t readIndex = atomic_load_explicit(
+        &bridge->activeQuietZoneReferenceReadIndex,
+        memory_order_acquire
+    );
+    uint64_t writeIndex = atomic_load_explicit(
+        &bridge->activeQuietZoneReferenceWriteIndex,
+        memory_order_acquire
+    );
+    uint64_t available =
+        writeIndex >= readIndex ? writeIndex - readIndex : 0;
+    if (available
+        > N60_ACTIVE_QUIET_ZONE_REFERENCE_CAPACITY_FRAMES) {
+        available =
+            N60_ACTIVE_QUIET_ZONE_REFERENCE_CAPACITY_FRAMES;
+    }
+    snapshot.availableFrames = (uint32_t)available;
+    snapshot.capturedFrames = atomic_load_explicit(
+        &bridge->activeQuietZoneReferenceCapturedFrames,
+        memory_order_relaxed
+    );
+    snapshot.droppedFrames = atomic_load_explicit(
+        &bridge->activeQuietZoneReferenceDroppedFrames,
+        memory_order_relaxed
+    );
+    return snapshot;
+}
+
+uint32_t N60RealtimeAudioBridgeReadActiveQuietZoneReferenceFrames(
+    N60RealtimeAudioBridge *bridge,
+    N60ActiveQuietZoneReferenceFrame *destination,
+    uint32_t capacityFrames
+) {
+    if (bridge == NULL || destination == NULL || capacityFrames == 0) {
+        return 0;
+    }
+    uint64_t readIndex = atomic_load_explicit(
+        &bridge->activeQuietZoneReferenceReadIndex,
+        memory_order_relaxed
+    );
+    uint64_t writeIndex = atomic_load_explicit(
+        &bridge->activeQuietZoneReferenceWriteIndex,
+        memory_order_acquire
+    );
+    uint64_t available =
+        writeIndex >= readIndex ? writeIndex - readIndex : 0;
+    uint32_t framesToRead =
+        capacityFrames < available
+            ? capacityFrames
+            : (uint32_t)available;
+    if (framesToRead == 0) return 0;
+
+    uint32_t ringIndex =
+        (uint32_t)readIndex
+        & (
+            N60_ACTIVE_QUIET_ZONE_REFERENCE_CAPACITY_FRAMES
+            - 1u
+        );
+    uint32_t first = framesToRead;
+    uint32_t untilWrap =
+        N60_ACTIVE_QUIET_ZONE_REFERENCE_CAPACITY_FRAMES
+        - ringIndex;
+    if (first > untilWrap) first = untilWrap;
+    memcpy(
+        destination,
+        bridge->activeQuietZoneReferenceFrames + ringIndex,
+        first * sizeof(N60ActiveQuietZoneReferenceFrame)
+    );
+    if (first < framesToRead) {
+        memcpy(
+            destination + first,
+            bridge->activeQuietZoneReferenceFrames,
+            (framesToRead - first)
+                * sizeof(N60ActiveQuietZoneReferenceFrame)
+        );
+    }
+    atomic_store_explicit(
+        &bridge->activeQuietZoneReferenceReadIndex,
+        readIndex + framesToRead,
+        memory_order_release
+    );
+    return framesToRead;
+}
+
 bool N60RealtimeAudioBridgePrepareConvolutionProgram(
     N60RealtimeAudioBridge *bridge,
     uint32_t slot,
