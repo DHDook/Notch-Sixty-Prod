@@ -1708,6 +1708,48 @@ OSStatus N60OutputIOProc(
             (uint32_t)ambientReferenceWriteIndex
             & (N60_AMBIENT_REFERENCE_CAPACITY_FRAMES - 1u);
     }
+
+    bool activeQuietZoneReferenceDemand =
+        atomic_load_explicit(
+            &bridge->activeQuietZoneReferenceDemand,
+            memory_order_acquire
+        );
+    uint64_t activeQuietZoneReferenceWriteIndex = 0;
+    uint32_t activeQuietZoneReferenceFramesToWrite = 0;
+    uint32_t activeQuietZoneReferenceRingIndex = 0;
+    if (activeQuietZoneReferenceDemand) {
+        activeQuietZoneReferenceWriteIndex =
+            atomic_load_explicit(
+                &bridge->activeQuietZoneReferenceWriteIndex,
+                memory_order_relaxed
+            );
+        uint64_t activeQuietZoneReferenceReadIndex =
+            atomic_load_explicit(
+                &bridge->activeQuietZoneReferenceReadIndex,
+                memory_order_acquire
+            );
+        uint64_t used =
+            activeQuietZoneReferenceWriteIndex
+                    >= activeQuietZoneReferenceReadIndex
+                ? activeQuietZoneReferenceWriteIndex
+                    - activeQuietZoneReferenceReadIndex
+                : N60_ACTIVE_QUIET_ZONE_REFERENCE_CAPACITY_FRAMES;
+        uint64_t freeFrames =
+            used < N60_ACTIVE_QUIET_ZONE_REFERENCE_CAPACITY_FRAMES
+                ? N60_ACTIVE_QUIET_ZONE_REFERENCE_CAPACITY_FRAMES
+                    - used
+                : 0;
+        activeQuietZoneReferenceFramesToWrite =
+            framesToRead < freeFrames
+                ? framesToRead
+                : (uint32_t)freeFrames;
+        activeQuietZoneReferenceRingIndex =
+            (uint32_t)activeQuietZoneReferenceWriteIndex
+            & (
+                N60_ACTIVE_QUIET_ZONE_REFERENCE_CAPACITY_FRAMES
+                - 1u
+            );
+    }
     float outputVUPeakLeft = 0.0f;
     float outputVUPeakRight = 0.0f;
     double outputVUSquareSumLeft = 0.0;
@@ -1850,6 +1892,28 @@ OSStatus N60OutputIOProc(
                 * transitionGain;
             const float finalLeft = processed.left * gain;
             const float finalRight = processed.right * gain;
+            if (frameIndex
+                    < activeQuietZoneReferenceFramesToWrite) {
+                float quietZoneLeft = 0.0f;
+                float quietZoneRight = 0.0f;
+                N60RenderKernelGetActiveQuietZoneReferenceFrame(
+                    bridge->renderKernel,
+                    &quietZoneLeft,
+                    &quietZoneRight
+                );
+                bridge->activeQuietZoneReferenceFrames[
+                    activeQuietZoneReferenceRingIndex
+                ] = (N60ActiveQuietZoneReferenceFrame){
+                    quietZoneLeft * gain,
+                    quietZoneRight * gain
+                };
+                activeQuietZoneReferenceRingIndex =
+                    (activeQuietZoneReferenceRingIndex + 1u)
+                    & (
+                        N60_ACTIVE_QUIET_ZONE_REFERENCE_CAPACITY_FRAMES
+                        - 1u
+                    );
+            }
             if (frameIndex < ambientReferenceFramesToWrite) {
                 bridge->ambientReferenceFrames[
                     ambientReferenceRingIndex
@@ -1969,6 +2033,28 @@ OSStatus N60OutputIOProc(
                 * transitionGain;
             const float finalLeft = processed.left * gain;
             const float finalRight = processed.right * gain;
+            if (frameIndex
+                    < activeQuietZoneReferenceFramesToWrite) {
+                float quietZoneLeft = 0.0f;
+                float quietZoneRight = 0.0f;
+                N60RenderKernelGetActiveQuietZoneReferenceFrame(
+                    bridge->renderKernel,
+                    &quietZoneLeft,
+                    &quietZoneRight
+                );
+                bridge->activeQuietZoneReferenceFrames[
+                    activeQuietZoneReferenceRingIndex
+                ] = (N60ActiveQuietZoneReferenceFrame){
+                    quietZoneLeft * gain,
+                    quietZoneRight * gain
+                };
+                activeQuietZoneReferenceRingIndex =
+                    (activeQuietZoneReferenceRingIndex + 1u)
+                    & (
+                        N60_ACTIVE_QUIET_ZONE_REFERENCE_CAPACITY_FRAMES
+                        - 1u
+                    );
+            }
             if (frameIndex < ambientReferenceFramesToWrite) {
                 bridge->ambientReferenceFrames[
                     ambientReferenceRingIndex
@@ -2078,6 +2164,28 @@ OSStatus N60OutputIOProc(
             atomic_fetch_add_explicit(
                 &bridge->ambientReferenceDroppedFrames,
                 framesToRead - ambientReferenceFramesToWrite,
+                memory_order_relaxed
+            );
+        }
+    }
+
+    if (activeQuietZoneReferenceDemand) {
+        atomic_store_explicit(
+            &bridge->activeQuietZoneReferenceWriteIndex,
+            activeQuietZoneReferenceWriteIndex
+                + activeQuietZoneReferenceFramesToWrite,
+            memory_order_release
+        );
+        atomic_fetch_add_explicit(
+            &bridge->activeQuietZoneReferenceCapturedFrames,
+            activeQuietZoneReferenceFramesToWrite,
+            memory_order_relaxed
+        );
+        if (activeQuietZoneReferenceFramesToWrite < framesToRead) {
+            atomic_fetch_add_explicit(
+                &bridge->activeQuietZoneReferenceDroppedFrames,
+                framesToRead
+                    - activeQuietZoneReferenceFramesToWrite,
                 memory_order_relaxed
             );
         }
