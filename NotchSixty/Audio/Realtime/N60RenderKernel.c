@@ -1194,6 +1194,7 @@ bool N60DSPGraphSnapshotSetActiveQuietZone(
             tones,
             toneCount,
             transitionFrames,
+            snapshot->sampleRate,
             enabled)) {
         return false;
     }
