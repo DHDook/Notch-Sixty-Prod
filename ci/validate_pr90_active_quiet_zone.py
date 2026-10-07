@@ -8,6 +8,11 @@ RT_C = ROOT / "NotchSixty/Audio/Realtime/N60ActiveQuietZone.c"
 ENGINE = ROOT / "NotchSixty/Audio/AudioIOEngine.swift"
 KERNEL_H = ROOT / "NotchSixty/Audio/Realtime/N60RenderKernel.h"
 KERNEL_C = ROOT / "NotchSixty/Audio/Realtime/N60RenderKernel.c"
+CONTROLLER = ROOT / "NotchSixty/State/ActiveQuietZoneController.swift"
+AMBIENT_CONTROLLER = ROOT / "NotchSixty/State/AmbientCompensationController.swift"
+PROFILES = ROOT / "NotchSixty/State/ProductProfiles.swift"
+UI = ROOT / "NotchSixty/UI/ProductionActiveAcousticsWorkspace.swift"
+APP = ROOT / "NotchSixty/NotchSixtyApp.swift"
 TESTS = ROOT / "NotchSixtyTests/ActiveQuietZoneTests.swift"
 DOC = ROOT / "docs/PR90_ACTIVE_QUIET_ZONE.md"
 
@@ -21,6 +26,11 @@ rt_c = RT_C.read_text()
 engine = ENGINE.read_text()
 kernel_h = KERNEL_H.read_text()
 kernel_c = KERNEL_C.read_text()
+controller = CONTROLLER.read_text()
+ambient_controller = AMBIENT_CONTROLLER.read_text()
+profiles = PROFILES.read_text()
+ui = UI.read_text()
+app = APP.read_text()
 tests = TESTS.read_text()
 doc = DOC.read_text().lower()
 
@@ -74,9 +84,61 @@ for token in (
 ):
     require(token in kernel_h + kernel_c, f"render graph ANC integration missing {token}")
 
-quiet_pos = kernel_c.find("N60ActiveQuietZoneRuntimeProcessFrame")
-dyn_pos = kernel_c.find("N60DynamicsProcessCoreStereoFrameWithMasterGain")
-require(quiet_pos >= 0 and dyn_pos > quiet_pos, "anti-noise is not upstream of dynamics/protection")
+render_start = kernel_c.find("void N60RenderKernelProcessStereoSystemFrameInContext")
+require(render_start >= 0, "stereo system render body missing")
+render_body = kernel_c[render_start:]
+dyn_pos = render_body.find("N60DynamicsProcessCoreStereoFrameWithMasterGain")
+quiet_pos = render_body.find("N60ActiveQuietZoneRuntimeProcessFrame")
+protection_pos = render_body.find("N60ProtectionProcessStereoFrame")
+require(
+    dyn_pos >= 0
+    and quiet_pos > dyn_pos
+    and protection_pos > quiet_pos,
+    "anti-noise must be injected after program dynamics and before final protection",
+)
+
+for token in (
+    "final class ActiveQuietZoneController",
+    "phaseCalibration",
+    "cancellationProbe",
+    "ambient.analysisRevision",
+    "quietZoneReferenceAlignedToLatestAnalysis",
+    "minimumProbeImprovementDB",
+    "faultFadeMilliseconds",
+    "replaceActiveQuietZoneRuntimeTarget",
+):
+    require(token in controller, f"closed-loop controller missing {token}")
+
+for token in (
+    "quietZoneObservationDemand",
+    "setQuietZoneObservationDemand",
+    "quietZoneLeftHistory",
+    "readActiveQuietZoneReferenceFrames",
+):
+    require(token in ambient_controller, f"PR89 sensor handoff missing {token}")
+
+for token in (
+    "var activeQuietZone: ActiveQuietZoneConfiguration?",
+    "replaceSelectedSystemActiveQuietZone",
+):
+    require(token in profiles, f"Playback System Quiet Zone persistence missing {token}")
+
+for token in (
+    "let activeQuietZone: ActiveQuietZoneController",
+    "activeQuietZone.prepareForUse()",
+    "activeQuietZone.stop()",
+):
+    require(token in app, f"product Quiet Zone lifecycle missing {token}")
+
+for token in (
+    'case quietZone',
+    'Text("Active Quiet Zone")',
+    "Live Cancellation Detail",
+    "Measured Attenuation",
+    "Injection Reserve",
+    "ERROR MIC VERIFIED",
+):
+    require(token in ui, f"Quiet Zone UI missing {token}")
 
 for token in (
     "testConfigurationRejectsBroadbandOrUnsafeLimits",
@@ -94,7 +156,7 @@ for phrase in (
     "closed-loop",
     "error microphone",
     "maximum 4 simultaneous tones",
-    "upstream of dynamics/protection",
+    "after program dynamics and immediately upstream of final protection",
     "no claim of whole-room silence",
     "no speech cancellation",
 ):
