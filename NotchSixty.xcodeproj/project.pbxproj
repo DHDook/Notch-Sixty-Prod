@@ -92,6 +92,7 @@
 		F80000000000000000000002 /* AudioUnitOfflinePreparationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000012 /* AudioUnitOfflinePreparationTests.swift */; };
 		F81000000000000000000001 /* N60AudioUnitLiveRackBridge.c in Sources */ = {isa = PBXBuildFile; fileRef = F81000000000000000000011 /* N60AudioUnitLiveRackBridge.c */; };
 		F81000000000000000000002 /* AudioUnitLiveRackRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = F81000000000000000000012 /* AudioUnitLiveRackRuntime.swift */; };
+		F81000000000000000000003 /* AudioUnitLiveRackRuntimeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F81000000000000000000013 /* AudioUnitLiveRackRuntimeTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -202,6 +203,7 @@
 		F80000000000000000000012 /* AudioUnitOfflinePreparationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioUnitOfflinePreparationTests.swift; sourceTree = "<group>"; };
 		F81000000000000000000011 /* N60AudioUnitLiveRackBridge.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = N60AudioUnitLiveRackBridge.c; sourceTree = "<group>"; };
 		F81000000000000000000012 /* AudioUnitLiveRackRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioUnitLiveRackRuntime.swift; sourceTree = "<group>"; };
+		F81000000000000000000013 /* AudioUnitLiveRackRuntimeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioUnitLiveRackRuntimeTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -258,6 +260,7 @@
 				F78000000000000000000013 /* ProductionInformationArchitectureTests.swift */,
 				F79000000000000000000013 /* AudioUnitHostFoundationTests.swift */,
 				F80000000000000000000012 /* AudioUnitOfflinePreparationTests.swift */,
+				F81000000000000000000013 /* AudioUnitLiveRackRuntimeTests.swift */,
 			);
 			path = NotchSixtyTests;
 			sourceTree = "<group>";
@@ -485,6 +488,7 @@
 				F78000000000000000000003 /* ProductionInformationArchitectureTests.swift in Sources */,
 				F79000000000000000000003 /* AudioUnitHostFoundationTests.swift in Sources */,
 				F80000000000000000000002 /* AudioUnitOfflinePreparationTests.swift in Sources */,
+				F81000000000000000000003 /* AudioUnitLiveRackRuntimeTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
