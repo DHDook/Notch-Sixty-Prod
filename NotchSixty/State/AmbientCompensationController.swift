@@ -881,7 +881,9 @@ final class AmbientCompensationController: ObservableObject {
         monitor?.stop()
         monitor = nil
         engine.setAmbientPlaybackReferenceDemand(false)
+        engine.setActiveQuietZoneReferenceDemand(false)
         engine.discardAmbientPlaybackReferenceFrames()
+        engine.discardActiveQuietZoneReferenceFrames()
         resetAnalysisHistory()
         lastErrorDescription = error.localizedDescription
         monitorStatus = .failed
