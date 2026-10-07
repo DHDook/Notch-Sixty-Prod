@@ -59,6 +59,7 @@ typedef bool (*N60AudioUnitLiveRackProcessFunction)(
 typedef struct {
     void * _Nullable context;
     N60AudioUnitLiveRackProcessFunction _Nullable process;
+    const N60AudioUnitLiveRackFaultLatch * _Nullable faultLatch;
     uint32_t channelCount;
     uint32_t maximumFramesPerSlice;
     uint64_t latencyFrames;
@@ -74,6 +75,17 @@ static inline bool N60AudioUnitLiveRackProcessorIsValid(
         && processor->channelCount <= 32u
         && processor->maximumFramesPerSlice >= 16u
         && processor->maximumFramesPerSlice <= 65536u;
+}
+
+static inline bool N60AudioUnitLiveRackProcessorHasFault(
+    const N60AudioUnitLiveRackProcessor * _Nullable processor
+) {
+    if (processor == NULL || processor->faultLatch == NULL) {
+        return false;
+    }
+    return N60AudioUnitLiveRackFaultLatchGetSnapshot(
+        processor->faultLatch
+    ).faultCount > 0u;
 }
 
 static inline bool N60AudioUnitLiveRackProcess(
