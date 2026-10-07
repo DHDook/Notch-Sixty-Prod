@@ -192,11 +192,7 @@ private final class AudioUnitPluginEditorSession: ObservableObject, Identifiable
     private static func requestViewController(
         for audioUnit: AUAudioUnit
     ) async -> NSViewController? {
-        await withCheckedContinuation { continuation in
-            audioUnit.requestViewController { controller in
-                continuation.resume(returning: controller)
-            }
-        }
+        await audioUnit.requestViewController()
     }
 }
 
