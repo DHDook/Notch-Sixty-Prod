@@ -146,6 +146,122 @@ final class AudioUnitLiveRackRuntimeTests: XCTestCase {
         XCTAssertTrue(output.allSatisfy { $0 == 0 })
     }
 
+    func testLiveTimingValidatorRejectsPathologicalValues() {
+        XCTAssertNil(
+            AudioUnitLiveTimingValidator.frameCount(
+                seconds: .nan,
+                sampleRate: 48_000,
+                maximumSeconds:
+                    AudioUnitProbeResult.maximumLatencySeconds
+            )
+        )
+        XCTAssertNil(
+            AudioUnitLiveTimingValidator.frameCount(
+                seconds: .infinity,
+                sampleRate: 48_000,
+                maximumSeconds:
+                    AudioUnitProbeResult.maximumLatencySeconds
+            )
+        )
+        XCTAssertNil(
+            AudioUnitLiveTimingValidator.frameCount(
+                seconds: -0.001,
+                sampleRate: 48_000,
+                maximumSeconds:
+                    AudioUnitProbeResult.maximumLatencySeconds
+            )
+        )
+        XCTAssertNil(
+            AudioUnitLiveTimingValidator.frameCount(
+                seconds:
+                    AudioUnitProbeResult.maximumTailSeconds + 0.001,
+                sampleRate: 48_000,
+                maximumSeconds:
+                    AudioUnitProbeResult.maximumTailSeconds
+            )
+        )
+        XCTAssertEqual(
+            AudioUnitLiveTimingValidator.frameCount(
+                seconds: 0.001,
+                sampleRate: 48_000,
+                maximumSeconds:
+                    AudioUnitProbeResult.maximumLatencySeconds
+            ),
+            48
+        )
+    }
+
+    func testControlPlaneHealthCollectionSurfacesInjectedLatencyDrift() throws {
+        let identity = AudioUnitComponentIdentity(
+            componentType: 0x61756678,
+            componentSubType: 0x68383461,
+            componentManufacturer: 0x6e363079
+        )
+        let issue = AudioUnitLiveRackControlPlaneIssue.latencyChanged(
+            slot: 0,
+            component: identity,
+            expected: 64,
+            actual: 96
+        )
+        let stage = PR84InjectedHealthStage(
+            slotIndex: 0,
+            component: identity,
+            latencyFrames: 64,
+            issue: issue
+        )
+        let runtime = try AudioUnitLiveRackRuntime(
+            format: AudioUnitRackProcessingFormat(
+                sampleRate: 48_000,
+                channelCount: 2,
+                maximumFramesPerSlice: 64
+            ),
+            totalLatencyFrames: 64,
+            stages: [stage],
+            componentsBySlot: [identity]
+        )
+
+        XCTAssertEqual(
+            runtime.controlPlaneHealthIssues(),
+            [issue]
+        )
+        XCTAssertTrue(
+            runtime.controlPlaneHealthIssues()[0]
+                .description.contains("changed latency after activation")
+        )
+    }
+
+    func testControlPlaneHealthCollectionSurfacesInjectedInvalidTail() throws {
+        let identity = AudioUnitComponentIdentity(
+            componentType: 0x61756678,
+            componentSubType: 0x68383462,
+            componentManufacturer: 0x6e363079
+        )
+        let issue = AudioUnitLiveRackControlPlaneIssue.invalidTail(
+            slot: 0,
+            component: identity,
+            seconds: .infinity
+        )
+        let runtime = try AudioUnitLiveRackRuntime(
+            format: AudioUnitRackProcessingFormat(
+                sampleRate: 96_000,
+                channelCount: 8,
+                maximumFramesPerSlice: 256
+            ),
+            totalLatencyFrames: 0,
+            stages: [
+                PR84InjectedHealthStage(
+                    slotIndex: 0,
+                    component: identity,
+                    latencyFrames: 0,
+                    issue: issue
+                ),
+            ],
+            componentsBySlot: [identity]
+        )
+
+        XCTAssertEqual(runtime.controlPlaneHealthIssues(), [issue])
+    }
+
     func testRealAppleLowPassCanRunThroughPreparedLiveRack() async throws {
         let identity = AudioUnitComponentIdentity(
             componentType: kAudioUnitType_Effect,
@@ -309,3 +425,45 @@ final class AudioUnitLiveRackRuntimeTests: XCTestCase {
         )
     }
 }
+
+private final class PR84InjectedHealthStage:
+    AudioUnitLiveRackStageProcessing {
+    let slotIndex: Int
+    let component: AudioUnitComponentIdentity?
+    let latencyFrames: Int
+    let issue: AudioUnitLiveRackControlPlaneIssue?
+
+    init(
+        slotIndex: Int,
+        component: AudioUnitComponentIdentity?,
+        latencyFrames: Int,
+        issue: AudioUnitLiveRackControlPlaneIssue?
+    ) {
+        self.slotIndex = slotIndex
+        self.component = component
+        self.latencyFrames = latencyFrames
+        self.issue = issue
+    }
+
+    func controlPlaneHealthIssue()
+        -> AudioUnitLiveRackControlPlaneIssue? {
+        issue
+    }
+
+    func process(
+        inputInterleaved: UnsafePointer<Float>,
+        outputInterleaved: UnsafeMutablePointer<Float>,
+        frameCount: Int,
+        channelCount: Int,
+        sampleTime: Double
+    ) -> AudioUnitLiveRackStageResult {
+        _ = sampleTime
+        memcpy(
+            outputInterleaved,
+            inputInterleaved,
+            frameCount * channelCount * MemoryLayout<Float>.size
+        )
+        return .success
+    }
+}
+
