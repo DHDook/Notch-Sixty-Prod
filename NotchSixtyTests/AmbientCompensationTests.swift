@@ -533,4 +533,118 @@ final class AmbientCompensationTests: XCTestCase {
         XCTAssertTrue(graph.ambientCompensation.enabled)
     }
 
+
+    func testAmbientResponseModelUnityIsFlatAtZeroDB() {
+        let points = AmbientCompensationResponseModel.response(
+            target: .unity,
+            sampleRate: 48_000,
+            pointCount: 64
+        )
+
+        XCTAssertEqual(points.count, 64)
+        XCTAssertTrue(
+            points.allSatisfy { abs($0.gainDB) < 0.000_001 }
+        )
+    }
+
+    func testAmbientResponseModelLevelRecoveryIsFlatFullBand() {
+        var target = AmbientCompensationTarget.unity
+        target.levelDB = 2.25
+        let points = AmbientCompensationResponseModel.response(
+            target: target,
+            sampleRate: 96_000,
+            pointCount: 96
+        )
+
+        XCTAssertEqual(points.count, 96)
+        for point in points {
+            XCTAssertEqual(
+                point.gainDB,
+                2.25,
+                accuracy: 0.000_01
+            )
+        }
+    }
+
+    func testAmbientResponseModelReflectsAllThreeRealtimeBands() {
+        let target = AmbientCompensationTarget(
+            activity: .party,
+            levelDB: 1.0,
+            lowSupportDB: 1.5,
+            presenceSupportDB: 1.25,
+            detailSupportDB: 0.9,
+            confidence: 0.95,
+            ambientDeltaDB: 16,
+            holdReason: nil
+        )
+        let points = AmbientCompensationResponseModel.response(
+            target: target,
+            sampleRate: 48_000,
+            pointCount: 512
+        )
+
+        XCTAssertEqual(points.count, 512)
+        XCTAssertTrue(
+            points.allSatisfy {
+                $0.frequencyHz.isFinite
+                    && $0.gainDB.isFinite
+            }
+        )
+
+        func nearest(_ frequency: Double) -> Double {
+            points.min {
+                abs($0.frequencyHz - frequency)
+                    < abs($1.frequencyHz - frequency)
+            }?.gainDB ?? -.infinity
+        }
+
+        XCTAssertGreaterThan(nearest(40), target.levelDB + 0.8)
+        XCTAssertGreaterThan(
+            nearest(
+                AmbientCompensationResponseModel
+                    .presenceFrequencyHz
+            ),
+            target.levelDB + 0.7
+        )
+        XCTAssertGreaterThan(nearest(16_000), target.levelDB + 0.45)
+    }
+
+    func testAmbientResponseModelMaximumMatchesDenseCurve() {
+        let target = AmbientCompensationTarget(
+            activity: .busy,
+            levelDB: 1.4,
+            lowSupportDB: 1.2,
+            presenceSupportDB: 1.0,
+            detailSupportDB: 0.6,
+            confidence: 0.9,
+            ambientDeltaDB: 11,
+            holdReason: nil
+        )
+        let dense = AmbientCompensationResponseModel.response(
+            target: target,
+            sampleRate: 48_000,
+            pointCount: 256
+        )
+        let expected = dense.map(\.gainDB).max() ?? 0
+
+        XCTAssertEqual(
+            AmbientCompensationResponseModel
+                .maximumAppliedGainDB(
+                    target: target,
+                    sampleRate: 48_000
+                ),
+            expected,
+            accuracy: 0.000_001
+        )
+    }
+
+    func testAmbientResponseModelRejectsInvalidDisplaySampleRate() {
+        XCTAssertTrue(
+            AmbientCompensationResponseModel.response(
+                target: .unity,
+                sampleRate: 8_000
+            ).isEmpty
+        )
+    }
+
 }
