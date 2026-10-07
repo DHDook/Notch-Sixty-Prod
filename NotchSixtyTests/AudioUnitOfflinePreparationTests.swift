@@ -274,6 +274,30 @@ final class AudioUnitOfflinePreparationTests: XCTestCase {
         }
     }
 
+    func testConservativeFrameRoundingPreservesExactFrameRoundTrips() {
+        for sampleRate in [44_100.0, 48_000.0, 96_000.0] {
+            for frames in 0...512 {
+                let seconds = Double(frames) / sampleRate
+                XCTAssertEqual(
+                    AudioUnitProbeResult.conservativeFrameCount(
+                        seconds: seconds,
+                        sampleRate: sampleRate
+                    ),
+                    frames,
+                    "\(frames) frames at \(sampleRate) Hz"
+                )
+            }
+        }
+
+        XCTAssertEqual(
+            AudioUnitProbeResult.conservativeFrameCount(
+                seconds: 28.25 / 48_000.0,
+                sampleRate: 48_000.0
+            ),
+            29
+        )
+    }
+
     func testOpaqueStateCodecRejectsMalformedAndNonDictionaryState() throws {
         XCTAssertThrowsError(
             try AudioUnitOpaqueStateCodec.validate(
