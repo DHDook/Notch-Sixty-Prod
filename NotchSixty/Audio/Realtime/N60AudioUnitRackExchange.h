@@ -61,6 +61,10 @@ N60AudioUnitRackExchangeStatus N60AudioUnitRackExchangeGetStatus(
     const N60AudioUnitRackExchange * _Nonnull exchange
 );
 
+bool N60AudioUnitRackExchangeAtomicsAreLockFree(
+    const N60AudioUnitRackExchange * _Nonnull exchange
+);
+
 N60AudioUnitLiveRackProcessor N60AudioUnitRackExchangeGetProcessor(
     N60AudioUnitRackExchange * _Nonnull exchange
 );
