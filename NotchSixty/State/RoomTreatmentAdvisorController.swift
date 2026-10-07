@@ -3,7 +3,7 @@ import Foundation
 
 /// Session-scoped, read-only ownership for the Room Advisor.
 ///
-/// This controller deliberately has no ProductProfileController dependency.
+/// This controller deliberately has no preset/profile-controller dependency.
 /// It reads Room Correction projects directly from their store so selecting a
 /// project here cannot select or mutate a Playback System.
 @MainActor
