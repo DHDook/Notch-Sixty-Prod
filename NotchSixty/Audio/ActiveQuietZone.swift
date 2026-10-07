@@ -231,6 +231,103 @@ struct ActiveQuietZoneComplex:
     }
 }
 
+struct ActiveQuietZoneRuntimeTone:
+    Equatable, Sendable, Identifiable
+{
+    let frequencyHz: Double
+    let leftOutput: ActiveQuietZoneComplex
+    let rightOutput: ActiveQuietZoneComplex
+
+    var id: Double { frequencyHz }
+}
+
+struct ActiveQuietZoneRuntimeTarget: Equatable, Sendable {
+    var tones: [ActiveQuietZoneRuntimeTone]
+    var transitionMilliseconds: Double
+
+    static let bypassed = ActiveQuietZoneRuntimeTarget(
+        tones: [],
+        transitionMilliseconds: 100
+    )
+
+    var active: Bool { !tones.isEmpty }
+
+    func validated(
+        configuration:
+            ActiveQuietZoneConfiguration =
+                ActiveQuietZoneConfiguration()
+    ) throws -> ActiveQuietZoneRuntimeTarget {
+        let configuration = try configuration.validated()
+        guard tones.count <= configuration.maximumToneCount,
+              transitionMilliseconds.isFinite,
+              transitionMilliseconds >= 20,
+              transitionMilliseconds <= 5_000 else {
+            throw ActiveQuietZoneError.invalidConfiguration
+        }
+
+        let maximumPerTone = pow(
+            10,
+            configuration.maximumPerSourceTonePeakDBFS / 20
+        )
+        let maximumAggregate = pow(
+            10,
+            configuration.maximumAggregateSourcePeakDBFS / 20
+        )
+        var leftAggregate = 0.0
+        var rightAggregate = 0.0
+        var seen: [Double] = []
+
+        for tone in tones {
+            guard tone.frequencyHz.isFinite,
+                  tone.frequencyHz >= configuration.minimumFrequencyHz,
+                  tone.frequencyHz <= configuration.maximumFrequencyHz,
+                  tone.leftOutput.real.isFinite,
+                  tone.leftOutput.imaginary.isFinite,
+                  tone.rightOutput.real.isFinite,
+                  tone.rightOutput.imaginary.isFinite,
+                  tone.leftOutput.magnitude
+                    <= maximumPerTone + 1.0e-9,
+                  tone.rightOutput.magnitude
+                    <= maximumPerTone + 1.0e-9,
+                  !seen.contains(where: {
+                      abs($0 - tone.frequencyHz) < 0.001
+                  }) else {
+                throw ActiveQuietZoneError.invalidConfiguration
+            }
+            seen.append(tone.frequencyHz)
+            leftAggregate += tone.leftOutput.magnitude
+            rightAggregate += tone.rightOutput.magnitude
+        }
+        guard leftAggregate <= maximumAggregate + 1.0e-9,
+              rightAggregate <= maximumAggregate + 1.0e-9 else {
+            throw ActiveQuietZoneError.invalidConfiguration
+        }
+        return self
+    }
+
+    var maximumSourceMagnitude: Double {
+        max(
+            tones.reduce(0.0) {
+                $0 + $1.leftOutput.magnitude
+            },
+            tones.reduce(0.0) {
+                $0 + $1.rightOutput.magnitude
+            }
+        )
+    }
+
+    func sameFrequencies(
+        as other: ActiveQuietZoneRuntimeTarget
+    ) -> Bool {
+        guard tones.count == other.tones.count else {
+            return false
+        }
+        return zip(tones, other.tones).allSatisfy {
+            abs($0.frequencyHz - $1.frequencyHz) < 0.001
+        }
+    }
+}
+
 struct ActiveQuietZoneCandidateTone:
     Equatable, Sendable, Identifiable
 {
@@ -280,6 +377,8 @@ enum ActiveQuietZoneError:
     case invalidDisturbance
     case unusableSecondaryPath
     case insufficientOutputHeadroom
+    case runtimeUnsupported
+    case frequencyChangeRequiresDisarm
     case nonFiniteSolution
 
     var errorDescription: String? {
@@ -298,6 +397,10 @@ enum ActiveQuietZoneError:
             return "The measured speaker-to-monitor path cannot support a stable cancellation solution at this frequency."
         case .insufficientOutputHeadroom:
             return "The active Content Preset does not reserve enough output headroom for bounded anti-noise injection."
+        case .runtimeUnsupported:
+            return "Active Quiet Zone currently requires the direct stereo speaker transport."
+        case .frequencyChangeRequiresDisarm:
+            return "Active Quiet Zone must fade the current tone to silence before changing cancellation frequency."
         case .nonFiniteSolution:
             return "Active Quiet Zone produced a non-finite cancellation candidate."
         }
