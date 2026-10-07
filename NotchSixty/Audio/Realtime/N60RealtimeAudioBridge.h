@@ -30,6 +30,7 @@ typedef struct {
 #define N60_ANALYSIS_DEMAND_ALL (N60_ANALYSIS_DEMAND_SPECTRUM | N60_ANALYSIS_DEMAND_STEREO)
 #define N60_ANALYSIS_CAPTURE_CAPACITY_FRAMES 65536u
 #define N60_AMBIENT_REFERENCE_CAPACITY_FRAMES 131072u
+#define N60_ACTIVE_QUIET_ZONE_REFERENCE_CAPACITY_FRAMES 131072u
 
 // PR41 Slice C2a: immutable same-device speaker-output routing. The control
 // plane compiles at most eight logical-bus routes; the realtime writer only
@@ -92,6 +93,18 @@ typedef struct {
     uint64_t capturedFrames;
     uint64_t droppedFrames;
 } N60AmbientPlaybackReferenceSnapshot;
+
+typedef struct {
+    float left;
+    float right;
+} N60ActiveQuietZoneReferenceFrame;
+
+typedef struct {
+    bool enabled;
+    uint32_t availableFrames;
+    uint64_t capturedFrames;
+    uint64_t droppedFrames;
+} N60ActiveQuietZoneReferenceSnapshot;
 
 typedef struct {
     uint64_t captureCallbacks;
@@ -211,6 +224,26 @@ N60RealtimeAudioBridgeGetAmbientReferenceSnapshot(
 uint32_t N60RealtimeAudioBridgeReadAmbientReferenceFrames(
     N60RealtimeAudioBridge * _Nonnull bridge,
     N60AmbientPlaybackReferenceFrame * _Nonnull destination,
+    uint32_t capacityFrames
+);
+
+void N60RealtimeAudioBridgeSetActiveQuietZoneReferenceDemand(
+    N60RealtimeAudioBridge * _Nonnull bridge,
+    bool enabled
+);
+bool N60RealtimeAudioBridgeActiveQuietZoneReferenceDemand(
+    const N60RealtimeAudioBridge * _Nonnull bridge
+);
+void N60RealtimeAudioBridgeDiscardActiveQuietZoneReferenceFrames(
+    N60RealtimeAudioBridge * _Nonnull bridge
+);
+N60ActiveQuietZoneReferenceSnapshot
+N60RealtimeAudioBridgeGetActiveQuietZoneReferenceSnapshot(
+    const N60RealtimeAudioBridge * _Nonnull bridge
+);
+uint32_t N60RealtimeAudioBridgeReadActiveQuietZoneReferenceFrames(
+    N60RealtimeAudioBridge * _Nonnull bridge,
+    N60ActiveQuietZoneReferenceFrame * _Nonnull destination,
     uint32_t capacityFrames
 );
 
