@@ -149,6 +149,12 @@ final class AudioUnitHostController: ObservableObject {
         quarantine.entries.count
     }
 
+    func preparationReport(
+        forSlotID slotID: UUID
+    ) -> AudioUnitOfflinePreparationReport? {
+        offlineReportsBySlotID[slotID]
+    }
+
     func scan(
         format: AudioUnitRackProcessingFormat? = nil
     ) {
@@ -691,6 +697,34 @@ final class AudioUnitHostController: ObservableObject {
                 bypassed: initiallyBypassed,
                 wetDryMix: 1
             )
+
+        case .append(
+            let component,
+            let initiallyBypassed
+        ):
+            guard updated.slots.count
+                    < AudioUnitRackConfiguration.maximumSlotCount else {
+                throw AudioUnitRackMutationError.rackFull(
+                    maximum: AudioUnitRackConfiguration.maximumSlotCount
+                )
+            }
+            guard let descriptor = descriptor(for: component) else {
+                throw AudioUnitRackMutationError
+                    .componentNotDiscovered(component)
+            }
+            updated.slots.append(
+                AudioUnitRackSlotState(
+                    component: component,
+                    displayName: descriptor.name,
+                    manufacturerName: descriptor.manufacturerName,
+                    bypassed: initiallyBypassed,
+                    wetDryMix: 1
+                )
+            )
+
+        case .replaceConfiguration(let configuration):
+            try configuration.validate()
+            updated = configuration
 
         case .remove(let slot):
             try requireSlot(slot)
