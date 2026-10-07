@@ -565,17 +565,14 @@ private struct GeometryRoomPlanView: View {
                 let canvasAspect =
                     Double(width / height)
 
-                let roomWidth: CGFloat
-                let roomHeight: CGFloat
-                if roomAspect > canvasAspect {
-                    roomWidth = width
-                    roomHeight =
-                        width / CGFloat(roomAspect)
-                } else {
-                    roomHeight = height
-                    roomWidth =
-                        height * CGFloat(roomAspect)
-                }
+                let roomWidth: CGFloat =
+                    roomAspect > canvasAspect
+                    ? width
+                    : height * CGFloat(roomAspect)
+                let roomHeight: CGFloat =
+                    roomAspect > canvasAspect
+                    ? width / CGFloat(roomAspect)
+                    : height
 
                 let origin = CGPoint(
                     x:
