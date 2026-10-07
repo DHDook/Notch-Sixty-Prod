@@ -218,6 +218,42 @@ struct ActiveQuietZoneComplex:
         )
     }
 
+    static func / (
+        lhs: ActiveQuietZoneComplex,
+        rhs: ActiveQuietZoneComplex
+    ) -> ActiveQuietZoneComplex {
+        let denominator =
+            rhs.real * rhs.real
+            + rhs.imaginary * rhs.imaginary
+        guard denominator.isFinite,
+              denominator > 1.0e-24 else {
+            return ActiveQuietZoneComplex(
+                real: .nan,
+                imaginary: .nan
+            )
+        }
+        return ActiveQuietZoneComplex(
+            real:
+                (
+                    lhs.real * rhs.real
+                    + lhs.imaginary * rhs.imaginary
+                ) / denominator,
+            imaginary:
+                (
+                    lhs.imaginary * rhs.real
+                    - lhs.real * rhs.imaginary
+                ) / denominator
+        )
+    }
+
+    var unitPhase: ActiveQuietZoneComplex? {
+        let size = magnitude
+        guard size.isFinite, size > 1.0e-12 else {
+            return nil
+        }
+        return self / size
+    }
+
     func scaled(toMaximumMagnitude maximum: Double)
         -> ActiveQuietZoneComplex
     {
@@ -408,6 +444,47 @@ enum ActiveQuietZoneError:
 }
 
 struct ActiveQuietZonePlanner: Sendable {
+    /// Recover the realtime oscillator phase basis from an anti-noise reference
+    /// measured in the microphone analysis window. Positive ramp gain cancels
+    /// out because only the unit phase ratio is retained.
+    func oscillatorPhaseBasis(
+        observedSourcePhasor: ActiveQuietZoneComplex,
+        scheduledCoefficient: ActiveQuietZoneComplex
+    ) throws -> ActiveQuietZoneComplex {
+        guard observedSourcePhasor.real.isFinite,
+              observedSourcePhasor.imaginary.isFinite,
+              scheduledCoefficient.real.isFinite,
+              scheduledCoefficient.imaginary.isFinite,
+              observedSourcePhasor.magnitude > 1.0e-8,
+              scheduledCoefficient.magnitude > 1.0e-8,
+              let phase = (
+                observedSourcePhasor
+                    / scheduledCoefficient
+              ).unitPhase else {
+            throw ActiveQuietZoneError.invalidDisturbance
+        }
+        return phase
+    }
+
+    func runtimeCoefficient(
+        sourcePhasorInMicrophoneBasis:
+            ActiveQuietZoneComplex,
+        oscillatorPhaseBasis:
+            ActiveQuietZoneComplex
+    ) throws -> ActiveQuietZoneComplex {
+        guard let basis = oscillatorPhaseBasis.unitPhase else {
+            throw ActiveQuietZoneError.invalidDisturbance
+        }
+        let result =
+            sourcePhasorInMicrophoneBasis
+            * basis.conjugate
+        guard result.real.isFinite,
+              result.imaginary.isFinite else {
+            throw ActiveQuietZoneError.nonFiniteSolution
+        }
+        return result
+    }
+
     func eligibleTones(
         snapshot: AmbientAnalysisSnapshot,
         allowMicrophoneOnly: Bool,
