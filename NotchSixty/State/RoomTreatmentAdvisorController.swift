@@ -156,6 +156,23 @@ final class RoomTreatmentAdvisorController: ObservableObject {
         refreshGeometryPreview()
     }
 
+    func previewPlacementCandidate(
+        _ candidate: RoomPlacementCandidate
+    ) {
+        guard var model = geometryDraft else {
+            geometryValidationMessage =
+                RoomGeometryError.noGeometry
+                    .localizedDescription
+            return
+        }
+        model.listener = candidate.listener
+        model.leftSpeaker = candidate.leftSpeaker
+        model.rightSpeaker = candidate.rightSpeaker
+        model.modifiedAt = Date()
+        geometryDraft = model
+        refreshGeometryPreview()
+    }
+
     func saveGeometry() {
         guard var model = geometryDraft else {
             geometryValidationMessage =
