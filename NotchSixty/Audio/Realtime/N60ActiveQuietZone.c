@@ -39,11 +39,14 @@ bool N60ActiveQuietZoneSnapshotSet(
     const N60ActiveQuietZoneToneSnapshot *tones,
     uint32_t toneCount,
     uint32_t transitionFrames,
+    double sampleRate,
     bool enabled
 ) {
     if (snapshot == NULL
         || toneCount > N60_ACTIVE_QUIET_ZONE_MAX_TONES
         || transitionFrames == 0u
+        || !isfinite(sampleRate)
+        || sampleRate <= 0.0
         || (enabled && (toneCount == 0u || tones == NULL))) {
         return false;
     }
@@ -88,7 +91,16 @@ bool N60ActiveQuietZoneSnapshotSet(
             || aggregateRight > maximumAggregatePeak + 1.0e-7f) {
             return false;
         }
-        prepared.tones[index] = tone;
+        N60ActiveQuietZoneToneSnapshot preparedTone = tone;
+        const double phaseIncrement =
+            N60_AQZ_TWO_PI * tone.frequencyHz / sampleRate;
+        preparedTone.incrementCosine = cos(phaseIncrement);
+        preparedTone.incrementSine = sin(phaseIncrement);
+        if (!isfinite(preparedTone.incrementCosine)
+            || !isfinite(preparedTone.incrementSine)) {
+            return false;
+        }
+        prepared.tones[index] = preparedTone;
     }
 
     *snapshot = prepared;
@@ -196,12 +208,10 @@ bool N60ActiveQuietZoneRuntimeSchedule(
                 tone->phaseRadians = 0.0;
                 tone->oscillatorCosine = 1.0;
                 tone->oscillatorSine = 0.0;
-                const double phaseIncrement =
-                    N60_AQZ_TWO_PI
-                    * tone->frequencyHz
-                    / runtime->sampleRate;
-                tone->incrementCosine = cos(phaseIncrement);
-                tone->incrementSine = sin(phaseIncrement);
+                tone->incrementCosine =
+                    target->incrementCosine;
+                tone->incrementSine =
+                    target->incrementSine;
                 tone->currentLeftReal = 0.0f;
                 tone->currentLeftImaginary = 0.0f;
                 tone->currentRightReal = 0.0f;
