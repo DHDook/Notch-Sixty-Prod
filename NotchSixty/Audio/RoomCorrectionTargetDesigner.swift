@@ -223,6 +223,712 @@ struct RoomCorrectionMagnitudeSmoother: Sendable {
     }
 }
 
+
+enum IntelligentTargetPreference: String, CaseIterable, Identifiable, Sendable {
+    case neutral
+    case warm
+    case studio
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .neutral: return "Neutral"
+        case .warm: return "Warm"
+        case .studio: return "Studio"
+        }
+    }
+
+    fileprivate var nominalBassShelfDB: Double {
+        switch self {
+        case .neutral: return 2.0
+        case .warm: return 3.0
+        case .studio: return 1.0
+        }
+    }
+
+    fileprivate var nominalTrebleAt20KDB: Double {
+        switch self {
+        case .neutral: return -2.5
+        case .warm: return -3.0
+        case .studio: return -1.5
+        }
+    }
+
+    fileprivate var stableTargetID: UUID {
+        switch self {
+        case .neutral:
+            return UUID(uuidString: "6A782AB6-492B-46C9-A0A0-000000000201")!
+        case .warm:
+            return UUID(uuidString: "6A782AB6-492B-46C9-A0A0-000000000202")!
+        case .studio:
+            return UUID(uuidString: "6A782AB6-492B-46C9-A0A0-000000000203")!
+        }
+    }
+}
+
+struct IntelligentTargetEvidenceSample: Sendable {
+    var label: String
+    var response: RoomCorrectionFrequencyResponse
+    var quality: RoomCorrectionMeasurementQuality
+    var weight: Double
+}
+
+struct IntelligentTargetGenerationReport: Equatable, Sendable {
+    var preference: IntelligentTargetPreference
+    var target: RoomCorrectionTargetCurve
+    var confidence: Double
+    var referenceLevelDB: Double
+    var estimatedBassExtensionHz: Double
+    var generatedBassShelfDB: Double
+    var generatedTrebleAt20KDB: Double
+    var effectiveLowHz: Double
+    var effectiveHighHz: Double
+    var meanSpatialDeviationDB: Double
+    var maximumRequestedBoostDB: Double
+    var maximumRequestedCutDB: Double
+    var fallbackUsed: Bool
+    var clampDecisions: [String]
+    var warnings: [String]
+}
+
+enum IntelligentTargetGenerationError: Error, Equatable, LocalizedError {
+    case noEvidence
+    case invalidEvidence(String)
+    case noUsableBand
+    case invalidParameters
+
+    var errorDescription: String? {
+        switch self {
+        case .noEvidence:
+            return "Automatic target generation requires measured acoustic evidence."
+        case .invalidEvidence(let label):
+            return "Automatic target generation found invalid response data for \(label)."
+        case .noUsableBand:
+            return "Automatic target generation could not find a trustworthy common correction band."
+        case .invalidParameters:
+            return "Automatic target generation received invalid correction limits."
+        }
+    }
+}
+
+/// Deterministic, explainable target generation from measured acoustic evidence.
+///
+/// The generator deliberately models only broad tonal trend. It uses heavy
+/// smoothing and robust statistics so room modes, combing and narrow nulls do
+/// not become target features. The output is an ordinary editable
+/// RoomCorrectionTargetCurve and remains subject to PR86 verification.
+struct IntelligentRoomTargetGenerator: Sendable {
+    static let analysisSmoothingOctaves = 2.0 / 3.0
+    static let minimumConfidence = 0.70
+    static let maximumBassShelfDB = 4.0
+    static let minimumTrebleAt20KDB = -4.0
+    static let maximumTrebleAt20KDB = -1.0
+    static let bassRollOffThresholdDB = -6.0
+    static let referenceBandLowHz = 300.0
+    static let referenceBandHighHz = 2_000.0
+
+    private let smoother = RoomCorrectionMagnitudeSmoother()
+
+    func generate(
+        aggregate: RoomCorrectionAggregateResponse,
+        positions: [RoomCorrectionMeasurementPosition],
+        parameters: RoomCorrectionDesignParameters,
+        preference: IntelligentTargetPreference
+    ) throws -> IntelligentTargetGenerationReport {
+        try RoomCorrectionTargetMath.validateResponse(aggregate.leftResponse)
+        try RoomCorrectionTargetMath.validateResponse(aggregate.rightResponse)
+        guard RoomCorrectionTargetMath.frequencyGridsMatch(
+            aggregate.leftResponse.frequenciesHz,
+            aggregate.rightResponse.frequenciesHz
+        ) else {
+            throw IntelligentTargetGenerationError
+                .invalidEvidence("room aggregate")
+        }
+
+        let samples = positions
+            .filter { $0.included && $0.weight.isFinite && $0.weight > 0 }
+            .flatMap { position -> [IntelligentTargetEvidenceSample] in
+                var result: [IntelligentTargetEvidenceSample] = []
+                if let left = position.left.transferFunction {
+                    result.append(
+                        IntelligentTargetEvidenceSample(
+                            label: "\(position.name) Left",
+                            response: left,
+                            quality: position.left.quality,
+                            weight: position.weight * 0.5
+                        )
+                    )
+                }
+                if let right = position.right.transferFunction {
+                    result.append(
+                        IntelligentTargetEvidenceSample(
+                            label: "\(position.name) Right",
+                            response: right,
+                            quality: position.right.quality,
+                            weight: position.weight * 0.5
+                        )
+                    )
+                }
+                return result
+            }
+
+        let combined = RoomCorrectionFrequencyResponse(
+            frequenciesHz: aggregate.leftResponse.frequenciesHz,
+            magnitudeDB: zip(
+                aggregate.leftResponse.magnitudeDB,
+                aggregate.rightResponse.magnitudeDB
+            ).map { ($0 + $1) * 0.5 },
+            phaseRadians: nil
+        )
+        return try generate(
+            aggregate: combined,
+            samples: samples,
+            parameters: parameters,
+            preference: preference
+        )
+    }
+
+    func generate(
+        samples: [IntelligentTargetEvidenceSample],
+        parameters: RoomCorrectionDesignParameters,
+        preference: IntelligentTargetPreference
+    ) throws -> IntelligentTargetGenerationReport {
+        guard let first = samples.first else {
+            throw IntelligentTargetGenerationError.noEvidence
+        }
+        try validate(sample: first)
+        let referenceFrequencies = first.response.frequenciesHz
+        let totalWeight = samples.reduce(0.0) { partial, sample in
+            partial + max(sample.weight, 0)
+        }
+        guard totalWeight.isFinite, totalWeight > 0 else {
+            throw IntelligentTargetGenerationError.noEvidence
+        }
+
+        var aggregateMagnitude = [Double](
+            repeating: 0,
+            count: referenceFrequencies.count
+        )
+        for sample in samples {
+            try validate(sample: sample)
+            let normalizedWeight = max(sample.weight, 0) / totalWeight
+            for index in referenceFrequencies.indices {
+                let value = try Self.interpolate(
+                    sample.response,
+                    at: referenceFrequencies[index]
+                )
+                aggregateMagnitude[index] += value * normalizedWeight
+            }
+        }
+        let aggregate = RoomCorrectionFrequencyResponse(
+            frequenciesHz: referenceFrequencies,
+            magnitudeDB: aggregateMagnitude,
+            phaseRadians: nil
+        )
+        return try generate(
+            aggregate: aggregate,
+            samples: samples,
+            parameters: parameters,
+            preference: preference
+        )
+    }
+
+    private func generate(
+        aggregate: RoomCorrectionFrequencyResponse,
+        samples: [IntelligentTargetEvidenceSample],
+        parameters: RoomCorrectionDesignParameters,
+        preference: IntelligentTargetPreference
+    ) throws -> IntelligentTargetGenerationReport {
+        guard parameters.correctionLowHz.isFinite,
+              parameters.correctionHighHz.isFinite,
+              parameters.correctionLowHz > 0,
+              parameters.correctionHighHz > parameters.correctionLowHz,
+              parameters.maximumBoostDB.isFinite,
+              parameters.maximumBoostDB >= 0,
+              parameters.maximumCutDB.isFinite,
+              parameters.maximumCutDB >= 0 else {
+            throw IntelligentTargetGenerationError.invalidParameters
+        }
+        guard !samples.isEmpty else {
+            throw IntelligentTargetGenerationError.noEvidence
+        }
+        try RoomCorrectionTargetMath.validateResponse(aggregate)
+
+        var usableLow = max(
+            parameters.correctionLowHz,
+            aggregate.frequenciesHz.first ?? parameters.correctionLowHz
+        )
+        var usableHigh = min(
+            parameters.correctionHighHz,
+            aggregate.frequenciesHz.last ?? parameters.correctionHighHz
+        )
+        for sample in samples {
+            if let low = sample.quality.usableLowHz, low.isFinite {
+                usableLow = max(usableLow, low)
+            }
+            if let high = sample.quality.usableHighHz, high.isFinite {
+                usableHigh = min(usableHigh, high)
+            }
+        }
+        guard usableHigh > usableLow else {
+            throw IntelligentTargetGenerationError.noUsableBand
+        }
+
+        let smoothed = try smoother.smooth(
+            aggregate,
+            octaves: Self.analysisSmoothingOctaves
+        )
+        let referenceValues = zip(
+            smoothed.frequenciesHz,
+            smoothed.magnitudeDB
+        )
+        .filter {
+            $0.0 >= max(Self.referenceBandLowHz, usableLow)
+                && $0.0 <= min(Self.referenceBandHighHz, usableHigh)
+        }
+        .map(\.1)
+        let referenceLevel = Self.median(
+            referenceValues.isEmpty
+                ? smoothed.magnitudeDB
+                : referenceValues
+        )
+
+        let normalizedMagnitude = smoothed.magnitudeDB.map {
+            $0 - referenceLevel
+        }
+        let normalized = RoomCorrectionFrequencyResponse(
+            frequenciesHz: smoothed.frequenciesHz,
+            magnitudeDB: normalizedMagnitude,
+            phaseRadians: nil
+        )
+
+        let spatialDeviation = try meanSpatialDeviation(
+            samples: samples,
+            frequencies: normalized.frequenciesHz,
+            low: usableLow,
+            high: usableHigh
+        )
+        let confidence = measurementConfidence(
+            samples: samples,
+            low: usableLow,
+            high: usableHigh,
+            spatialDeviation: spatialDeviation
+        )
+        let fallback = confidence < Self.minimumConfidence
+        var warnings: [String] = []
+        var decisions: [String] = []
+        if fallback {
+            warnings.append(
+                "Measurement confidence is below 70%; target aggressiveness was reduced."
+            )
+        }
+        if spatialDeviation > 3.0 {
+            warnings.append(
+                "Listening-position variance is high; broad target shaping was reduced."
+            )
+        }
+
+        let bassExtension = try estimateBassExtension(
+            normalized: normalized,
+            low: usableLow,
+            high: usableHigh
+        )
+        if bassExtension > 80 {
+            warnings.append(
+                "Measured bass extension is limited; the generated low-frequency shelf was reduced."
+            )
+        }
+
+        let bassTrend = try robustBandLevel(
+            normalized,
+            low: max(usableLow, 40),
+            high: min(usableHigh, 160)
+        ) ?? 0
+        let support = Self.clamp(
+            (120.0 - bassExtension) / 80.0,
+            low: 0,
+            high: 1
+        )
+        let varianceAggressiveness = Self.clamp(
+            1.0 - max(spatialDeviation - 1.5, 0) / 8.0,
+            low: 0.45,
+            high: 1
+        )
+        let confidenceAggressiveness = 0.45 + 0.55 * confidence
+        let measuredBassPrior = Self.clamp(
+            bassTrend,
+            low: 0,
+            high: Self.maximumBassShelfDB
+        )
+        var bassShelf = (
+            preference.nominalBassShelfDB * 0.75
+                + measuredBassPrior * 0.25
+        ) * support * varianceAggressiveness * confidenceAggressiveness
+        if preference == .warm, support > 0.60, confidence >= 0.60 {
+            bassShelf = max(bassShelf, 0.5)
+        }
+        bassShelf = Self.clamp(
+            bassShelf,
+            low: 0,
+            high: Self.maximumBassShelfDB
+        )
+
+        let measuredTreble = try robustBandLevel(
+            normalized,
+            low: max(usableLow, 4_000),
+            high: min(usableHigh, 12_000)
+        ) ?? preference.nominalTrebleAt20KDB
+        let measuredTrebleBounded = Self.clamp(
+            measuredTreble,
+            low: Self.minimumTrebleAt20KDB,
+            high: Self.maximumTrebleAt20KDB
+        )
+        var trebleAt20K = (
+            preference.nominalTrebleAt20KDB * 0.70
+                + measuredTrebleBounded * 0.30
+        )
+        let tonalAggressiveness = varianceAggressiveness
+            * confidenceAggressiveness
+        trebleAt20K = Self.maximumTrebleAt20KDB
+            + (
+                trebleAt20K - Self.maximumTrebleAt20KDB
+            ) * tonalAggressiveness
+        trebleAt20K = Self.clamp(
+            trebleAt20K,
+            low: Self.minimumTrebleAt20KDB,
+            high: Self.maximumTrebleAt20KDB
+        )
+
+        var anchors = [
+            usableLow, 40, 80, 200, 300, 1_000, 4_000, 10_000, usableHigh,
+        ]
+        anchors = Array(
+            Set(
+                anchors
+                    .filter { $0 >= usableLow && $0 <= usableHigh }
+                    .map { ($0 * 1_000).rounded() / 1_000 }
+            )
+        ).sorted()
+        if anchors.count < 2 {
+            anchors = [usableLow, usableHigh]
+        }
+
+        var points: [RoomCorrectionTargetPoint] = []
+        var maximumBoost = 0.0
+        var maximumCut = 0.0
+        for frequency in anchors {
+            let desired = Self.desiredGainDB(
+                frequency: frequency,
+                bassShelfDB: bassShelf,
+                trebleAt20KDB: trebleAt20K
+            )
+            let measured = try Self.interpolate(normalized, at: frequency)
+            let minimumFeasible = measured - parameters.maximumCutDB
+            let maximumFeasible = measured + parameters.maximumBoostDB
+            let feasible = Self.clamp(
+                desired,
+                low: minimumFeasible,
+                high: maximumFeasible
+            )
+            if abs(feasible - desired) > 0.05 {
+                decisions.append(
+                    "\(Self.frequencyLabel(frequency)) target was clamped from \(Self.db(desired)) to \(Self.db(feasible)) to respect correction limits."
+                )
+            }
+            maximumBoost = max(maximumBoost, feasible - measured)
+            maximumCut = max(maximumCut, measured - feasible)
+            points.append(
+                RoomCorrectionTargetPoint(
+                    frequencyHz: frequency,
+                    gainDB: feasible
+                )
+            )
+        }
+
+        // Keep the broad target itself perceptually bounded after feasibility
+        // clamping. If a boundary cannot be met without exceeding correction
+        // limits, move the effective boundary inward instead of inventing a
+        // pathological target shape.
+        while points.count > 2,
+              let first = points.first,
+              (first.gainDB < -0.5
+                || first.gainDB > Self.maximumBassShelfDB + 0.5) {
+            decisions.append(
+                "Low-frequency target boundary moved upward because the measured response cannot reach a bounded target within configured correction limits."
+            )
+            points.removeFirst()
+            usableLow = points[0].frequencyHz
+        }
+        while points.count > 2,
+              let last = points.last,
+              (last.gainDB < Self.minimumTrebleAt20KDB - 0.5
+                || last.gainDB > 0.5) {
+            decisions.append(
+                "High-frequency target boundary moved downward because the measured response cannot reach a bounded target within configured correction limits."
+            )
+            points.removeLast()
+            usableHigh = points[points.count - 1].frequencyHz
+        }
+
+        let target = RoomCorrectionTargetCurve(
+            id: preference.stableTargetID,
+            name: "Adaptive \(preference.displayName)",
+            points: points
+        )
+        try RoomCorrectionTargetMath.validateTarget(target)
+
+        if maximumBoost > parameters.maximumBoostDB + 0.001
+            || maximumCut > parameters.maximumCutDB + 0.001 {
+            warnings.append(
+                "Generated target required safety clamping at one or more frequencies."
+            )
+        }
+
+        return IntelligentTargetGenerationReport(
+            preference: preference,
+            target: target,
+            confidence: confidence,
+            referenceLevelDB: referenceLevel,
+            estimatedBassExtensionHz: bassExtension,
+            generatedBassShelfDB: bassShelf,
+            generatedTrebleAt20KDB: trebleAt20K,
+            effectiveLowHz: usableLow,
+            effectiveHighHz: usableHigh,
+            meanSpatialDeviationDB: spatialDeviation,
+            maximumRequestedBoostDB: maximumBoost,
+            maximumRequestedCutDB: maximumCut,
+            fallbackUsed: fallback,
+            clampDecisions: Self.unique(decisions),
+            warnings: Self.unique(warnings)
+        )
+    }
+
+    private func validate(
+        sample: IntelligentTargetEvidenceSample
+    ) throws {
+        guard sample.weight.isFinite, sample.weight >= 0 else {
+            throw IntelligentTargetGenerationError
+                .invalidEvidence(sample.label)
+        }
+        do {
+            try RoomCorrectionTargetMath.validateResponse(sample.response)
+        } catch {
+            throw IntelligentTargetGenerationError
+                .invalidEvidence(sample.label)
+        }
+    }
+
+    private func meanSpatialDeviation(
+        samples: [IntelligentTargetEvidenceSample],
+        frequencies: [Double],
+        low: Double,
+        high: Double
+    ) throws -> Double {
+        let selected = frequencies.filter { $0 >= low && $0 <= high }
+        guard !selected.isEmpty else { return 0 }
+        var deviations: [Double] = []
+        for frequency in selected {
+            var values: [(Double, Double)] = []
+            for sample in samples where sample.weight > 0 {
+                values.append(
+                    (
+                        try Self.interpolate(sample.response, at: frequency),
+                        sample.weight
+                    )
+                )
+            }
+            let total = values.reduce(0) { $0 + $1.1 }
+            guard total > 0 else { continue }
+            let mean = values.reduce(0) {
+                $0 + $1.0 * $1.1 / total
+            }
+            let variance = values.reduce(0) {
+                $0 + pow($1.0 - mean, 2) * $1.1 / total
+            }
+            deviations.append(sqrt(max(variance, 0)))
+        }
+        return deviations.isEmpty
+            ? 0
+            : deviations.reduce(0, +) / Double(deviations.count)
+    }
+
+    private func measurementConfidence(
+        samples: [IntelligentTargetEvidenceSample],
+        low: Double,
+        high: Double,
+        spatialDeviation: Double
+    ) -> Double {
+        var weighted = 0.0
+        var totalWeight = 0.0
+        for sample in samples where sample.weight > 0 {
+            let quality = sample.quality
+            let base: Double
+            if quality.clipped || !quality.sweepComplete {
+                base = 0
+            } else {
+                let snr = quality.estimatedSNRDB.map {
+                    Self.clamp(($0 - 20) / 30, low: 0, high: 1)
+                } ?? 0.55
+                let qLow = quality.usableLowHz ?? low
+                let qHigh = quality.usableHighHz ?? high
+                let requested = max(log2(high / low), 1.0e-9)
+                let overlapLow = max(low, qLow)
+                let overlapHigh = min(high, qHigh)
+                let overlap = overlapHigh > overlapLow
+                    ? log2(overlapHigh / overlapLow) : 0
+                let coverage = Self.clamp(
+                    overlap / requested,
+                    low: 0,
+                    high: 1
+                )
+                let arrival = quality.directArrivalSeconds == nil
+                    ? 0.75 : 1.0
+                base = 0.55 * snr + 0.35 * coverage + 0.10 * arrival
+            }
+            weighted += base * sample.weight
+            totalWeight += sample.weight
+        }
+        guard totalWeight > 0 else { return 0 }
+        let evidence = weighted / totalWeight
+        let sampleFactor = min(
+            1.0,
+            0.85 + 0.025 * Double(max(samples.count - 1, 0))
+        )
+        let spatialFactor = Self.clamp(
+            1.0 - max(spatialDeviation - 2.0, 0) / 12.0,
+            low: 0.65,
+            high: 1
+        )
+        return Self.clamp(
+            evidence * sampleFactor * spatialFactor,
+            low: 0,
+            high: 1
+        )
+    }
+
+    private func estimateBassExtension(
+        normalized: RoomCorrectionFrequencyResponse,
+        low: Double,
+        high: Double
+    ) throws -> Double {
+        let upper = min(high, 200)
+        let candidates = normalized.frequenciesHz.filter {
+            $0 >= low && $0 <= upper
+        }
+        for frequency in candidates {
+            let level = try Self.interpolate(normalized, at: frequency)
+            if level >= Self.bassRollOffThresholdDB {
+                return frequency
+            }
+        }
+        return min(max(low, upper), high)
+    }
+
+    private func robustBandLevel(
+        _ response: RoomCorrectionFrequencyResponse,
+        low: Double,
+        high: Double
+    ) throws -> Double? {
+        guard high > low else { return nil }
+        let values = zip(
+            response.frequenciesHz,
+            response.magnitudeDB
+        )
+        .filter { $0.0 >= low && $0.0 <= high }
+        .map(\.1)
+        guard !values.isEmpty else { return nil }
+        return Self.median(values)
+    }
+
+    private static func desiredGainDB(
+        frequency: Double,
+        bassShelfDB: Double,
+        trebleAt20KDB: Double
+    ) -> Double {
+        if frequency <= 80 {
+            return bassShelfDB
+        }
+        if frequency < 300 {
+            let fraction = log(frequency / 80) / log(300.0 / 80.0)
+            return bassShelfDB * (1 - clamp(fraction, low: 0, high: 1))
+        }
+        if frequency <= 1_000 {
+            return 0
+        }
+        let fraction = log(frequency / 1_000)
+            / log(20_000.0 / 1_000.0)
+        return trebleAt20KDB * clamp(fraction, low: 0, high: 1)
+    }
+
+    private static func interpolate(
+        _ response: RoomCorrectionFrequencyResponse,
+        at frequency: Double
+    ) throws -> Double {
+        let frequencies = response.frequenciesHz
+        let values = response.magnitudeDB
+        guard frequencies.count == values.count,
+              frequencies.count >= 2,
+              frequency.isFinite,
+              frequency > 0 else {
+            throw IntelligentTargetGenerationError
+                .invalidEvidence("frequency response")
+        }
+        if frequency <= frequencies[0] { return values[0] }
+        if frequency >= frequencies[frequencies.count - 1] {
+            return values[values.count - 1]
+        }
+        var low = 0
+        var high = frequencies.count - 1
+        while high - low > 1 {
+            let middle = (low + high) / 2
+            if frequencies[middle] <= frequency {
+                low = middle
+            } else {
+                high = middle
+            }
+        }
+        let denominator = log(frequencies[high] / frequencies[low])
+        guard denominator > 0 else { return values[low] }
+        let fraction = log(frequency / frequencies[low]) / denominator
+        return values[low] + (values[high] - values[low]) * fraction
+    }
+
+    private static func median(_ values: [Double]) -> Double {
+        guard !values.isEmpty else { return 0 }
+        let sorted = values.sorted()
+        let middle = sorted.count / 2
+        if sorted.count.isMultiple(of: 2) {
+            return (sorted[middle - 1] + sorted[middle]) * 0.5
+        }
+        return sorted[middle]
+    }
+
+    private static func clamp(
+        _ value: Double,
+        low: Double,
+        high: Double
+    ) -> Double {
+        min(max(value, low), high)
+    }
+
+    private static func db(_ value: Double) -> String {
+        String(format: "%.2f dB", value)
+    }
+
+    private static func frequencyLabel(_ value: Double) -> String {
+        if value >= 1_000 {
+            return String(format: "%.1f kHz", value / 1_000)
+        }
+        return String(format: "%.0f Hz", value)
+    }
+
+    private static func unique(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        return values.filter { seen.insert($0).inserted }
+    }
+}
+
 struct RoomCorrectionCorrectionPreview: Equatable, Sendable {
     var targetResponse: RoomCorrectionFrequencyResponse
     var smoothedLeftResponse: RoomCorrectionFrequencyResponse
