@@ -502,6 +502,230 @@ final class AudioUnitHostController: ObservableObject {
         lastErrorDescription = nil
     }
 
+    func makeMutationCandidate(
+        applying mutation: AudioUnitRackMutation,
+        format: AudioUnitRackProcessingFormat,
+        using backend: any AudioUnitOfflinePreparing =
+            SystemAudioUnitOfflinePreparationBackend()
+    ) async throws -> AudioUnitRackMutationCandidate {
+        try format.validate()
+        scan(format: format)
+
+        var configuration = try configuration(
+            byApplying: mutation
+        )
+        var reports: [
+            UUID: AudioUnitOfflinePreparationReport
+        ] = [:]
+        var slotProbes: [
+            UUID: AudioUnitProbeResult
+        ] = [:]
+
+        for index in configuration.slots.indices {
+            let slot = configuration.slots[index]
+            guard let component = slot.component else {
+                continue
+            }
+
+            if let existing = offlineReportsBySlotID[slot.id],
+               existing.format == format,
+               existing.component == component,
+               existing.capturedFullState == slot.opaqueFullState {
+                reports[slot.id] = existing
+                slotProbes[slot.id] = existing.probe
+                configuration.slots[index].recordProbe(
+                    existing.probe
+                )
+                continue
+            }
+
+            guard !slot.bypassed,
+                  !quarantine.isQuarantined(component),
+                  let descriptor = descriptor(for: component),
+                  descriptor.compatibility(for: format).compatible else {
+                continue
+            }
+
+            do {
+                let report = try await backend.prepare(
+                    component: descriptor,
+                    format: format,
+                    restoringState: slot.opaqueFullState
+                )
+                try report.validate()
+                guard report.component == component else {
+                    throw AudioUnitOfflinePreparationError
+                        .componentIdentityMismatch
+                }
+
+                configuration.slots[index].recordProbe(
+                    report.probe
+                )
+                if let captured = report.capturedFullState {
+                    configuration.slots[index].opaqueFullState =
+                        captured
+                }
+                reports[slot.id] = report
+                slotProbes[slot.id] = report.probe
+            } catch {
+                throw AudioUnitRackMutationError
+                    .candidatePreparationFailed(
+                        slot: index,
+                        reason: error.localizedDescription
+                    )
+            }
+        }
+
+        try configuration.validate()
+        let plan = try AudioUnitRackPreparationPlanner().prepare(
+            configuration: configuration,
+            descriptors: discoveredComponents,
+            probes: [],
+            slotProbes: slotProbes,
+            quarantine: quarantine,
+            format: format
+        )
+
+        var buildSlots: [AudioUnitLiveRackBuildSlot] = []
+        buildSlots.reserveCapacity(configuration.slots.count)
+        for (index, slot) in configuration.slots.enumerated() {
+            let execution = plan.slots[index]
+            let report = reports[slot.id]
+            if execution.mode == .process, report == nil {
+                throw AudioUnitLiveRackBuildError
+                    .missingPreparedSlot(index)
+            }
+            buildSlots.append(AudioUnitLiveRackBuildSlot(
+                slotIndex: index,
+                slot: slot,
+                execution: execution,
+                descriptor: slot.component.flatMap {
+                    descriptor(for: $0)
+                },
+                offlineReport: report
+            ))
+        }
+
+        let runtime = try await AudioUnitLiveRackRuntime.build(
+            format: format,
+            plan: plan,
+            slots: buildSlots
+        )
+
+        return AudioUnitRackMutationCandidate(
+            configuration: configuration,
+            format: format,
+            plan: plan,
+            reportsBySlotID: reports,
+            runtime: runtime
+        )
+    }
+
+    func commitMutationCandidate(
+        _ candidate: AudioUnitRackMutationCandidate
+    ) throws {
+        try candidate.configuration.validate()
+        rackConfiguration = candidate.configuration
+        offlineReportsBySlotID = candidate.reportsBySlotID
+        probesBySlotID = candidate.reportsBySlotID.mapValues {
+            $0.probe
+        }
+
+        probesByComponent.removeAll(keepingCapacity: true)
+        for report in candidate.reportsBySlotID.values {
+            probesByComponent[report.component] = report.probe
+        }
+
+        var nextLifecycle: [
+            AudioUnitComponentIdentity:
+                AudioUnitComponentLifecycleState
+        ] = [:]
+        for descriptor in discoveredComponents {
+            let identity = descriptor.identity
+            if quarantine.isQuarantined(identity) {
+                nextLifecycle[identity] = .quarantined
+            } else if probesByComponent[identity] != nil {
+                nextLifecycle[identity] = .prepared
+            } else {
+                nextLifecycle[identity] = .discovered
+            }
+        }
+        lifecycleByComponent = nextLifecycle
+        lastErrorDescription = nil
+
+        attachFaultMonitoring(
+            to: candidate.runtime,
+            includeExistingFaults: true
+        )
+    }
+
+    private func configuration(
+        byApplying mutation: AudioUnitRackMutation
+    ) throws -> AudioUnitRackConfiguration {
+        var updated = rackConfiguration
+
+        func requireSlot(_ index: Int) throws {
+            guard updated.slots.indices.contains(index) else {
+                throw AudioUnitRackMutationError
+                    .slotIndexOutOfRange(index)
+            }
+        }
+
+        switch mutation {
+        case .install(
+            let component,
+            let slot,
+            let initiallyBypassed
+        ):
+            try requireSlot(slot)
+            guard let descriptor = descriptor(for: component) else {
+                throw AudioUnitRackMutationError
+                    .componentNotDiscovered(component)
+            }
+            let id = updated.slots[slot].id
+            updated.slots[slot] = AudioUnitRackSlotState(
+                id: id,
+                component: component,
+                displayName: descriptor.name,
+                manufacturerName: descriptor.manufacturerName,
+                bypassed: initiallyBypassed,
+                wetDryMix: 1
+            )
+
+        case .remove(let slot):
+            try requireSlot(slot)
+            let id = updated.slots[slot].id
+            updated.slots[slot] =
+                AudioUnitRackSlotState(id: id)
+
+        case .move(let from, let to):
+            try requireSlot(from)
+            guard updated.slots.indices.contains(to) else {
+                throw AudioUnitRackMutationError
+                    .destinationSlotIndexOutOfRange(to)
+            }
+            if from != to {
+                let moved = updated.slots.remove(at: from)
+                updated.slots.insert(moved, at: to)
+            }
+
+        case .setBypassed(let slot, let bypassed):
+            try requireSlot(slot)
+            updated.slots[slot].bypassed = bypassed
+
+        case .setWetDryMix(let slot, let mix):
+            try requireSlot(slot)
+            updated.slots[slot].wetDryMix = mix
+
+        case .setOpaqueFullState(let slot, let state):
+            try requireSlot(slot)
+            updated.slots[slot].opaqueFullState = state
+        }
+
+        try updated.validate()
+        return updated
+    }
+
     func prepareActiveSlotsForLive(
         format: AudioUnitRackProcessingFormat,
         using backend: any AudioUnitOfflinePreparing =
@@ -564,7 +788,20 @@ final class AudioUnitHostController: ObservableObject {
             plan: plan,
             slots: buildSlots
         )
-        runtime?.startFaultMonitoring { [weak self] fault in
+        attachFaultMonitoring(
+            to: runtime,
+            includeExistingFaults: false
+        )
+        return runtime
+    }
+
+    private func attachFaultMonitoring(
+        to runtime: AudioUnitLiveRackRuntime?,
+        includeExistingFaults: Bool
+    ) {
+        runtime?.startFaultMonitoring(
+            includeExistingFaults: includeExistingFaults
+        ) { [weak self] fault in
             guard let component = fault.component else { return }
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -575,7 +812,6 @@ final class AudioUnitHostController: ObservableObject {
                 )
             }
         }
-        return runtime
     }
 
     func executionPlan(

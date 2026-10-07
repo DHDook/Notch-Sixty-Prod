@@ -93,6 +93,10 @@
 		F81000000000000000000001 /* N60AudioUnitLiveRackBridge.c in Sources */ = {isa = PBXBuildFile; fileRef = F81000000000000000000011 /* N60AudioUnitLiveRackBridge.c */; };
 		F81000000000000000000002 /* AudioUnitLiveRackRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = F81000000000000000000012 /* AudioUnitLiveRackRuntime.swift */; };
 		F81000000000000000000003 /* AudioUnitLiveRackRuntimeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F81000000000000000000013 /* AudioUnitLiveRackRuntimeTests.swift */; };
+		F82000000000000000000001 /* N60AudioUnitRackExchange.c in Sources */ = {isa = PBXBuildFile; fileRef = F82000000000000000000011 /* N60AudioUnitRackExchange.c */; };
+		F82000000000000000000002 /* AudioUnitLiveRackSwitchboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F82000000000000000000012 /* AudioUnitLiveRackSwitchboard.swift */; };
+		F82000000000000000000003 /* AudioUnitRackMutation.swift in Sources */ = {isa = PBXBuildFile; fileRef = F82000000000000000000013 /* AudioUnitRackMutation.swift */; };
+		F82000000000000000000004 /* AudioUnitRackMutationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F82000000000000000000014 /* AudioUnitRackMutationTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -204,6 +208,10 @@
 		F81000000000000000000011 /* N60AudioUnitLiveRackBridge.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = N60AudioUnitLiveRackBridge.c; sourceTree = "<group>"; };
 		F81000000000000000000012 /* AudioUnitLiveRackRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioUnitLiveRackRuntime.swift; sourceTree = "<group>"; };
 		F81000000000000000000013 /* AudioUnitLiveRackRuntimeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioUnitLiveRackRuntimeTests.swift; sourceTree = "<group>"; };
+		F82000000000000000000011 /* N60AudioUnitRackExchange.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = N60AudioUnitRackExchange.c; sourceTree = "<group>"; };
+		F82000000000000000000012 /* AudioUnitLiveRackSwitchboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioUnitLiveRackSwitchboard.swift; sourceTree = "<group>"; };
+		F82000000000000000000013 /* AudioUnitRackMutation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioUnitRackMutation.swift; sourceTree = "<group>"; };
+		F82000000000000000000014 /* AudioUnitRackMutationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioUnitRackMutationTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -261,6 +269,7 @@
 				F79000000000000000000013 /* AudioUnitHostFoundationTests.swift */,
 				F80000000000000000000012 /* AudioUnitOfflinePreparationTests.swift */,
 				F81000000000000000000013 /* AudioUnitLiveRackRuntimeTests.swift */,
+				F82000000000000000000014 /* AudioUnitRackMutationTests.swift */,
 			);
 			path = NotchSixtyTests;
 			sourceTree = "<group>";
@@ -298,6 +307,8 @@
 				F79000000000000000000012 /* AudioUnitHostController.swift */,
 				F80000000000000000000011 /* AudioUnitOfflinePreparation.swift */,
 				F81000000000000000000012 /* AudioUnitLiveRackRuntime.swift */,
+				F82000000000000000000012 /* AudioUnitLiveRackSwitchboard.swift */,
+				F82000000000000000000013 /* AudioUnitRackMutation.swift */,
 			);
 			path = Audio;
 			sourceTree = "<group>";
@@ -311,6 +322,7 @@
 			isa = PBXGroup;
 			children = (
 				F81000000000000000000011 /* N60AudioUnitLiveRackBridge.c */,
+				F82000000000000000000011 /* N60AudioUnitRackExchange.c */,
 				A30000000000000000000020 /* N60RealtimeAudioBridge.c */,
 				A30000000000000000000021 /* N60RenderKernel.c */,
 				A30000000000000000000022 /* N60RenderKernel.h */,
@@ -460,6 +472,9 @@
 				F80000000000000000000001 /* AudioUnitOfflinePreparation.swift in Sources */,
 				F81000000000000000000002 /* AudioUnitLiveRackRuntime.swift in Sources */,
 				F81000000000000000000001 /* N60AudioUnitLiveRackBridge.c in Sources */,
+				F82000000000000000000001 /* N60AudioUnitRackExchange.c in Sources */,
+				F82000000000000000000002 /* AudioUnitLiveRackSwitchboard.swift in Sources */,
+				F82000000000000000000003 /* AudioUnitRackMutation.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -489,6 +504,7 @@
 				F79000000000000000000003 /* AudioUnitHostFoundationTests.swift in Sources */,
 				F80000000000000000000002 /* AudioUnitOfflinePreparationTests.swift in Sources */,
 				F81000000000000000000003 /* AudioUnitLiveRackRuntimeTests.swift in Sources */,
+				F82000000000000000000004 /* AudioUnitRackMutationTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

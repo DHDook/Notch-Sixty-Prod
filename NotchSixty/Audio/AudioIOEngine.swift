@@ -1043,7 +1043,7 @@ final class AudioIOEngine: ObservableObject {
     private var activeSpeakerIRProgram: PreparedSpeakerIRProgram?
     private var nextSpeakerIRProgramSlot: UInt32 = 0
     private var stagedRoomTreatment: LiveMIMORoomTreatmentPreparation?
-    private var stagedAudioUnitRack: AudioUnitLiveRackRuntime?
+    private var stagedAudioUnitRack: AudioUnitLiveRackSwitchboard?
 
     private(set) var sampleRateChangesHandled: UInt64 = 0
     private(set) var recoveryAttempts: UInt64 = 0
@@ -1226,14 +1226,157 @@ final class AudioIOEngine: ObservableObject {
         guard lifecycle.state == .idle else {
             throw LiveNChannelTransportError.configurationChangeRequiresRestart
         }
-        stagedAudioUnitRack?.stopFaultMonitoring()
-        stagedAudioUnitRack = runtime
+        if let runtime {
+            stagedAudioUnitRack = try AudioUnitLiveRackSwitchboard(
+                format: runtime.format,
+                initialRuntime: runtime
+            )
+        } else {
+            stagedAudioUnitRack = nil
+        }
     }
 
     func clearStagedAudioUnitRack() {
         guard lifecycle.state == .idle else { return }
-        stagedAudioUnitRack?.stopFaultMonitoring()
         stagedAudioUnitRack = nil
+    }
+
+    func audioUnitRackProcessingFormatForMutation() throws
+        -> AudioUnitRackProcessingFormat {
+        switch lifecycle.state {
+        case .idle:
+            if let stagedAudioUnitRack {
+                return stagedAudioUnitRack.format
+            }
+            return try audioUnitRackProcessingFormatForNextStart()
+        case .running:
+            if let stagedAudioUnitRack {
+                return stagedAudioUnitRack.format
+            }
+            guard let output = selectedOutputDevice else {
+                throw AudioRouteSelectionError.outputDeviceUnavailable(
+                    uid: routeConfiguration.selectedOutputUID
+                        ?? "No output selected"
+                )
+            }
+            let channelCount: Int
+            if let headphone = headphoneDeviceProfileConfiguration,
+               headphone.enabled,
+               headphone.spatialMode == .virtualSpeakers {
+                channelCount = headphone.programLayout.roles.count
+            } else if let profile = outputDeviceProfileConfiguration,
+                      profile.enabled {
+                channelCount = profile.programLayout.roles.count
+            } else {
+                channelCount = 2
+            }
+            let format = AudioUnitRackProcessingFormat(
+                sampleRate: output.nominalSampleRate,
+                channelCount: channelCount,
+                maximumFramesPerSlice: 4_096
+            )
+            try format.validate()
+            return format
+        default:
+            throw AudioUnitRackMutationError
+                .liveMutationRequiresRunningOrIdle(lifecycle.state)
+        }
+    }
+
+    func activateAudioUnitRackMutation(
+        _ candidate: AudioUnitRackMutationCandidate,
+        crossfadeFrames: Int =
+            AudioUnitLiveRackSwitchboard.defaultCrossfadeFrames
+    ) async throws -> AudioUnitRackMutationActivation {
+        switch lifecycle.state {
+        case .idle:
+            try stageAudioUnitRackForNextStart(candidate.runtime)
+            return .stagedForNextStart
+
+        case .running:
+            if candidate.runtime == nil,
+               stagedAudioUnitRack == nil {
+                return .noAudioChange
+            }
+
+            if let switchboard = stagedAudioUnitRack,
+               switchboard.format == candidate.format,
+               switchboard.latencyFrames
+                    == candidate.totalLatencyFrames {
+                try await switchboard.transition(
+                    to: candidate.runtime,
+                    crossfadeFrames: crossfadeFrames
+                )
+                return .seamlessCrossfade(
+                    generation:
+                        switchboard.status.renderedGeneration
+                )
+            }
+
+            try controlledRestartForAudioUnitRackMutation(
+                candidate.runtime
+            )
+            return .controlledRestart
+
+        default:
+            throw AudioUnitRackMutationError
+                .liveMutationRequiresRunningOrIdle(lifecycle.state)
+        }
+    }
+
+    private func controlledRestartForAudioUnitRackMutation(
+        _ runtime: AudioUnitLiveRackRuntime?
+    ) throws {
+        guard lifecycle.state == .running else {
+            throw AudioUnitRackMutationError
+                .liveMutationRequiresRunningOrIdle(lifecycle.state)
+        }
+
+        let previousSwitchboard = stagedAudioUnitRack
+        let replacementSwitchboard: AudioUnitLiveRackSwitchboard?
+        if let runtime {
+            replacementSwitchboard =
+                try AudioUnitLiveRackSwitchboard(
+                    format: runtime.format,
+                    initialRuntime: runtime
+                )
+        } else {
+            replacementSwitchboard = nil
+        }
+
+        stop()
+        stagedAudioUnitRack = replacementSwitchboard
+
+        do {
+            try start(resetProcessingSessionCounters: false)
+        } catch {
+            let activationError = error
+            if lifecycle.state == .failed {
+                if AudioLifecycleStateMachine.canTransition(
+                    from: lifecycle.state,
+                    to: .stopping
+                ) {
+                    try? setLifecycle(.stopping)
+                }
+                tearDownTransport(fadeOut: false)
+                if AudioLifecycleStateMachine.canTransition(
+                    from: lifecycle.state,
+                    to: .idle
+                ) {
+                    try? setLifecycle(.idle)
+                }
+            }
+
+            stagedAudioUnitRack = previousSwitchboard
+            do {
+                try start(resetProcessingSessionCounters: false)
+            } catch {
+                throw AudioUnitRackMutationError.rollbackFailed(
+                    error.localizedDescription
+                )
+            }
+            throw activationError
+        }
     }
 
     func prepareForUse() {
@@ -2816,7 +2959,7 @@ final class AudioIOEngine: ObservableObject {
         guard let stagedAudioUnitRack else { return }
         let combinedLatency =
             UInt64(graph.latencyFrames)
-            + UInt64(max(stagedAudioUnitRack.totalLatencyFrames, 0))
+            + UInt64(max(stagedAudioUnitRack.latencyFrames, 0))
         guard combinedLatency <= UInt64(UInt32.max) else {
             throw CoreAudioTransportError.audioUnitRackConfigurationFailed
         }

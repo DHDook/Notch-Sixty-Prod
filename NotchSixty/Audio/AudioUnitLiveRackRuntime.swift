@@ -763,12 +763,14 @@ final class AudioUnitLiveRackRuntime: @unchecked Sendable {
     }
 
     func startFaultMonitoring(
+        includeExistingFaults: Bool = false,
         handler: @escaping @Sendable (AudioUnitLiveRackFault) -> Void
     ) {
         guard faultTimer == nil else { return }
-        observedFaultCount =
+        let snapshot =
             N60AudioUnitLiveRackFaultLatchGetSnapshot(faultLatch)
-                .faultCount
+        observedFaultCount =
+            includeExistingFaults ? 0 : snapshot.faultCount
         let timer = DispatchSource.makeTimerSource(queue: monitorQueue)
         timer.schedule(
             deadline: .now() + .milliseconds(100),
