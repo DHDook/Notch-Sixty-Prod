@@ -297,11 +297,11 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
             }
 
             ForEach(
-                Array(
-                    report.actionPriorities.enumerated()
-                ),
-                id: \.element.id
-            ) { index, priority in
+                report.actionPriorities.indices,
+                id: \.self
+            ) { index in
+                let priority =
+                    report.actionPriorities[index]
                 HStack(alignment: .top, spacing: 12) {
                     Text("\(index + 1)")
                         .font(.headline.monospacedDigit())
