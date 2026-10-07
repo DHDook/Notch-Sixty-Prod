@@ -385,6 +385,39 @@ final class AmbientCompensationController: ObservableObject {
             }
 
             let running = engine.lifecycleState == .running
+            if running,
+               referenceAvailable,
+               min(
+                    playbackLeftHistory.count,
+                    playbackRightHistory.count
+               ) < Self.minimumAnalysisFrames {
+                let held = AmbientCompensationTarget(
+                    activity: appliedTarget.activity,
+                    levelDB: 0,
+                    lowSupportDB: 0,
+                    presenceSupportDB: 0,
+                    detailSupportDB: 0,
+                    confidence: 0,
+                    ambientDeltaDB: appliedTarget.ambientDeltaDB,
+                    holdReason: .invalidEvidence
+                )
+                let smoothed = try envelope.update(
+                    toward: held,
+                    configuration: configuration,
+                    elapsedSeconds:
+                        Double(Self.pollIntervalNanoseconds)
+                            / 1_000_000_000
+                )
+                try engine
+                    .replaceAmbientCompensationRuntimeTarget(
+                        smoothed
+                    )
+                appliedTarget = smoothed
+                monitorStatus = .held
+                lastErrorDescription = nil
+                return
+            }
+
             let analysis = try await makeAnalysis(
                 monitorSampleRate: monitor.sampleRate,
                 playbackRunning: running,
@@ -516,23 +549,10 @@ final class AmbientCompensationController: ObservableObject {
             Self.preferredAnalysisFrames
         )
         guard count >= Self.minimumAnalysisFrames else {
-            let microphoneWindow = Array(
-                microphoneHistory.suffix(
-                    min(
-                        microphoneHistory.count,
-                        Self.preferredAnalysisFrames
-                    )
-                )
+            throw AmbientAnalysisError.insufficientSamples(
+                minimum: Self.minimumAnalysisFrames,
+                actual: count
             )
-            return try await Task.detached(
-                priority: .utility
-            ) {
-                try analyzer.analyze(
-                    microphone: microphoneWindow,
-                    playbackSources: [],
-                    sampleRate: monitorSampleRate
-                )
-            }.value
         }
 
         let mic = Array(microphoneHistory.suffix(count))
@@ -725,6 +745,7 @@ final class AmbientCompensationController: ObservableObject {
         monitor = nil
         engine.setAmbientPlaybackReferenceDemand(false)
         engine.discardAmbientPlaybackReferenceFrames()
+        resetAnalysisHistory()
         lastErrorDescription = error.localizedDescription
         monitorStatus = .failed
         envelope.reset()
