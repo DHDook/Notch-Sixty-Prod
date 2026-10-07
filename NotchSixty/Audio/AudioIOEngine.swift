@@ -2010,6 +2010,45 @@ final class AudioIOEngine: ObservableObject {
         transportSession?.analysisCaptureSnapshot()
     }
 
+    var ambientPlaybackReferenceAvailable: Bool {
+        transportSession != nil
+            && nChannelTransportSession == nil
+            && binauralHeadphoneTransportSession == nil
+    }
+
+    var ambientPlaybackReferenceSampleRate: Double? {
+        guard ambientPlaybackReferenceAvailable else { return nil }
+        return transportSession?.ambientReferenceSampleRate
+    }
+
+    func setAmbientPlaybackReferenceDemand(_ enabled: Bool) {
+        guard ambientPlaybackReferenceAvailable else {
+            transportSession?.setAmbientReferenceDemand(false)
+            return
+        }
+        transportSession?.setAmbientReferenceDemand(enabled)
+    }
+
+    func ambientPlaybackReferenceSnapshot()
+        -> N60AmbientPlaybackReferenceSnapshot? {
+        guard ambientPlaybackReferenceAvailable else { return nil }
+        return transportSession?.ambientReferenceSnapshot()
+    }
+
+    func discardAmbientPlaybackReferenceFrames() {
+        transportSession?.discardAmbientReferenceFrames()
+    }
+
+    func readAmbientPlaybackReferenceFrames(
+        maximumFrames: Int =
+            Int(N60_AMBIENT_REFERENCE_CAPACITY_FRAMES)
+    ) -> [N60AmbientPlaybackReferenceFrame] {
+        guard ambientPlaybackReferenceAvailable else { return [] }
+        return transportSession?.readAmbientReferenceFrames(
+            maximumFrames: maximumFrames
+        ) ?? []
+    }
+
     func productionAnalysisSnapshot() -> ProductionAnalysisSnapshot {
         transportSession?.productionAnalysisSnapshot() ?? .empty
     }
