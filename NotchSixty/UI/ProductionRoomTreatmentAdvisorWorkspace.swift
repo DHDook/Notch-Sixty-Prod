@@ -12,6 +12,9 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
 
                 if let report = advisor.report {
                     readinessCard(report)
+                    if !report.actionPriorities.isEmpty {
+                        actionPlanCard(report)
+                    }
                     findingsSection(report)
                 } else if advisor.availableProjects.isEmpty {
                     emptyState
@@ -96,7 +99,10 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
                     number: 3,
                     title: "Actions",
                     detail: "Choose the right remedy",
-                    active: false
+                    active:
+                        advisor.report?
+                            .actionPriorities.isEmpty
+                            == false
                 )
                 workflowConnector
                 workflowStep(
@@ -266,6 +272,62 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                }
+            }
+        }
+        .padding(18)
+        .glassEffect(
+            .regular,
+            in: .rect(cornerRadius: 18)
+        )
+    }
+
+    private func actionPlanCard(
+        _ report: RoomTreatmentAdvisorReport
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Recommended Order")
+                    .font(.headline)
+                Text(
+                    "Priorities combine severity, confidence and measurement readiness. Nothing is applied automatically."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            ForEach(
+                Array(
+                    report.actionPriorities.enumerated()
+                ),
+                id: \.element.id
+            ) { index, priority in
+                HStack(alignment: .top, spacing: 12) {
+                    Text("\(index + 1)")
+                        .font(.headline.monospacedDigit())
+                        .frame(width: 30, height: 30)
+                        .background(
+                            Color.accentColor.opacity(0.12),
+                            in: Circle()
+                        )
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(priority.remedy.displayName)
+                            .font(.subheadline.bold())
+                        Text(priority.rationale)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(
+                                horizontal: false,
+                                vertical: true
+                            )
+                    }
+                    Spacer(minLength: 12)
+                }
+
+                if index
+                    < report.actionPriorities.count - 1 {
+                    Divider()
                 }
             }
         }
