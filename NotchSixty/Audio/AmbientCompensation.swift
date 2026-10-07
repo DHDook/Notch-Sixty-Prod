@@ -102,6 +102,8 @@ enum AmbientCompensationError: Error, Equatable, LocalizedError {
     case invalidConfiguration
     case invalidAvailableHeadroom(Double)
     case nonFiniteSnapshot
+    case runtimeUnsupported
+    case insufficientDigitalHeadroom(requested: Double, available: Double)
 
     var errorDescription: String? {
         switch self {
@@ -111,6 +113,10 @@ enum AmbientCompensationError: Error, Equatable, LocalizedError {
             return "Ambient Compensation available headroom \(value) dB is invalid."
         case .nonFiniteSnapshot:
             return "Ambient Compensation received non-finite ambient-analysis evidence."
+        case .runtimeUnsupported:
+            return "Ambient Compensation is available only on the stereo speaker transport."
+        case .insufficientDigitalHeadroom(let requested, let available):
+            return "Ambient Compensation requested \(requested) dB of level recovery with only \(available) dB of digital headroom available."
         }
     }
 }
