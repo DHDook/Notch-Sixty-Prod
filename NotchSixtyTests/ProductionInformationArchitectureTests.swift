@@ -6,6 +6,7 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         let grouped =
             ProductionSection.playback
             + ProductionSection.system
+            + ProductionSection.tools
             + ProductionSection.extensions
 
         XCTAssertFalse(grouped.contains(.dashboard))
@@ -36,6 +37,13 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         )
     }
 
+    func testToolsGroupContainsOccasionalRoomAdvisor() {
+        XCTAssertEqual(
+            ProductionSection.tools,
+            [.roomAdvisor]
+        )
+    }
+
     func testExtensionsGroupContainsPluginRackEntryPoint() {
         XCTAssertEqual(
             ProductionSection.extensions,
@@ -49,6 +57,10 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         XCTAssertEqual(
             ProductionSection.activeAcoustics.title,
             "Active Acoustics"
+        )
+        XCTAssertEqual(
+            ProductionSection.roomAdvisor.title,
+            "Room Advisor"
         )
         XCTAssertEqual(ProductionSection.plugins.title, "Plug-ins")
     }
