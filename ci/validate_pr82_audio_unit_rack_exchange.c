@@ -252,7 +252,7 @@ int main(void) {
             exchange,
             (uint32_t)slotPass,
             NULL,
-            4u,
+            5u,
             4u)) {
         N60AudioUnitRackExchangeDestroy(exchange);
         return fail("publish passthrough");
