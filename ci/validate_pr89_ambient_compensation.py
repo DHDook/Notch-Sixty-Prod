@@ -229,7 +229,7 @@ for token in (
     "== .microphoneOnly",
     "minimumSeparationConfidence",
     "captureQuietBaseline",
-    "engine.ambientCompensationAvailableHeadroomDB",
+    "ambientCompensationAvailableHeadroomDB",
     "Task.detached",
 ):
     require(token in controller, f"ambient controller missing {token}")
