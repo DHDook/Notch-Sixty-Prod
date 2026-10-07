@@ -11,6 +11,50 @@ typedef struct {
     _Atomic uint32_t readers;
 } N60AudioUnitRackExchangeSlot;
 
+struct N60AudioUnitStageFaultGate {
+    _Atomic bool tripped;
+};
+
+N60AudioUnitStageFaultGate *
+N60AudioUnitStageFaultGateCreate(void) {
+    N60AudioUnitStageFaultGate *gate =
+        (N60AudioUnitStageFaultGate *)calloc(1u, sizeof(*gate));
+    if (gate == NULL) return NULL;
+    atomic_init(&gate->tripped, false);
+    if (!atomic_is_lock_free(&gate->tripped)) {
+        free(gate);
+        return NULL;
+    }
+    return gate;
+}
+
+void N60AudioUnitStageFaultGateDestroy(
+    N60AudioUnitStageFaultGate *gate
+) {
+    free(gate);
+}
+
+void N60AudioUnitStageFaultGateTrip(
+    N60AudioUnitStageFaultGate *gate
+) {
+    if (gate == NULL) return;
+    atomic_store_explicit(
+        &gate->tripped,
+        true,
+        memory_order_release
+    );
+}
+
+bool N60AudioUnitStageFaultGateIsTripped(
+    const N60AudioUnitStageFaultGate *gate
+) {
+    if (gate == NULL) return true;
+    return atomic_load_explicit(
+        &gate->tripped,
+        memory_order_acquire
+    );
+}
+
 struct N60AudioUnitRackExchange {
     uint32_t channelCount;
     uint32_t maximumFramesPerSlice;
