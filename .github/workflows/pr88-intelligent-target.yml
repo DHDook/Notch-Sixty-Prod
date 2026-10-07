@@ -1,0 +1,88 @@
+name: PR88 Intelligent Target Generation
+
+on:
+  push:
+    branches:
+      - feature/pr88-intelligent-target-generation
+  pull_request:
+    branches:
+      - feature/pr86-calibration-prediction
+  workflow_dispatch:
+
+concurrency:
+  group: pr88-intelligent-target-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate PR88 intelligent target architecture
+        run: python3 ci/validate_pr88_intelligent_target.py
+      - name: Validate inherited PR86 calibration prediction
+        run: python3 ci/validate_pr86_calibration_prediction.py
+      - name: Validate inherited PR85 SOFA architecture
+        run: python3 ci/validate_pr85_native_sofa.py
+      - name: Validate inherited PR84A hardening
+        run: python3 ci/validate_pr84a_audio_unit_hardening.py
+
+  validate-macos-integration:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate PR88 intelligent target architecture
+        run: python3 ci/validate_pr88_intelligent_target.py
+      - name: Build arm64 app with adaptive target generation
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            build
+      - name: Run PR88 target generation tests
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            -only-testing:NotchSixtyTests/RoomCorrectionTargetDesignerTests \
+            test
+      - name: Run PR88 room target controller tests
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            -only-testing:NotchSixtyTests/RoomCorrectionProjectControllerTests \
+            test
+      - name: Run retained PR86 prediction tests
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            -only-testing:NotchSixtyTests/CalibrationPredictionVerifierTests \
+            test
+      - name: Run retained XCTest suite
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            test
