@@ -1,56 +1,77 @@
-name: PR82 Live Audio Unit Rack Mutation
+name: PR84A Audio Unit Hardening
 
 on:
   push:
     branches:
-      - feature/pr82-live-au-rack-mutation
+      - feature/pr84a-au-hardening
   pull_request:
     branches:
-      - feature/pr81-live-audio-unit-rack
+      - feature/pr83-plugin-rack-ux
   workflow_dispatch:
+
+concurrency:
+  group: pr84a-audio-unit-hardening-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   validate-portable:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Validate inherited PR77 live room-treatment safety
-        run: python3 ci/validate_pr77_live_room_treatment.py
-      - name: Run inherited PR77 physical-output simulation
-        run: |
-          clang -std=c11 -O2 -Wall -Wextra -Werror \
-            -INotchSixty/Audio/Realtime \
-            ci/validate_pr77_live_room_treatment.c \
-            -lm -o /tmp/pr77-live-room-treatment
-          /tmp/pr77-live-room-treatment
-      - name: Validate PR82 mutation architecture
+      - name: Validate PR84A hardening contract
+        run: python3 ci/validate_pr84a_audio_unit_hardening.py
+      - name: Validate inherited PR83 Plug-in Rack UX
+        run: python3 ci/validate_pr83_plugin_rack_ux.py
+      - name: Validate inherited PR82 mutation architecture
         run: python3 ci/validate_pr82_live_audio_unit_rack_mutation.py
-      - name: Run PR82 lock-free rack exchange simulator
+      - name: Run inherited lock-free rack exchange simulator
         run: |
           clang -std=c11 -O2 -Wall -Wextra -Werror \
             -INotchSixty/Audio/Realtime \
             ci/validate_pr82_audio_unit_rack_exchange.c \
             NotchSixty/Audio/Realtime/N60AudioUnitRackExchange.c \
             NotchSixty/Audio/Realtime/N60AudioUnitLiveRackBridge.c \
-            -lm -o /tmp/pr82-rack-exchange
-          /tmp/pr82-rack-exchange
+            -lm -o /tmp/pr84a-rack-exchange
+          /tmp/pr84a-rack-exchange
+      - name: Prove PR84A lock-free stage fault gate
+        run: |
+          clang -std=c11 -O2 -Wall -Wextra -Werror \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr84a_audio_unit_stage_fault_gate.c \
+            NotchSixty/Audio/Realtime/N60AudioUnitRackExchange.c \
+            NotchSixty/Audio/Realtime/N60AudioUnitLiveRackBridge.c \
+            -lm -o /tmp/pr84a-stage-fault-gate
+          /tmp/pr84a-stage-fault-gate
 
   validate-macos-integration:
     runs-on: xcode-27
     steps:
       - uses: actions/checkout@v7
-      - name: Validate PR82 mutation architecture
+      - name: Validate PR84A hardening contract
+        run: python3 ci/validate_pr84a_audio_unit_hardening.py
+      - name: Validate inherited PR83 Plug-in Rack UX
+        run: python3 ci/validate_pr83_plugin_rack_ux.py
+      - name: Validate inherited PR82 mutation architecture
         run: python3 ci/validate_pr82_live_audio_unit_rack_mutation.py
-      - name: Run PR82 lock-free rack exchange simulator
+      - name: Run inherited lock-free rack exchange simulator
         run: |
           clang -std=c11 -O2 -Wall -Wextra -Werror \
             -INotchSixty/Audio/Realtime \
             ci/validate_pr82_audio_unit_rack_exchange.c \
             NotchSixty/Audio/Realtime/N60AudioUnitRackExchange.c \
             NotchSixty/Audio/Realtime/N60AudioUnitLiveRackBridge.c \
-            -lm -o /tmp/pr82-rack-exchange
-          /tmp/pr82-rack-exchange
-      - name: Build arm64 app with transactional rack mutation
+            -lm -o /tmp/pr84a-rack-exchange
+          /tmp/pr84a-rack-exchange
+      - name: Prove PR84A lock-free stage fault gate on arm64
+        run: |
+          clang -std=c11 -O2 -Wall -Wextra -Werror \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr84a_audio_unit_stage_fault_gate.c \
+            NotchSixty/Audio/Realtime/N60AudioUnitRackExchange.c \
+            NotchSixty/Audio/Realtime/N60AudioUnitLiveRackBridge.c \
+            -lm -o /tmp/pr84a-stage-fault-gate
+          /tmp/pr84a-stage-fault-gate
+      - name: Build arm64 app with AU hardening
         run: |
           xcodebuild \
             -project NotchSixty.xcodeproj \
@@ -60,7 +81,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             ENABLE_TESTABILITY=YES \
             build
-      - name: Run retained PR79 host-foundation tests
+      - name: Run retained host-foundation tests
         run: |
           xcodebuild \
             -project NotchSixty.xcodeproj \
@@ -71,7 +92,7 @@ jobs:
             ENABLE_TESTABILITY=YES \
             -only-testing:NotchSixtyTests/AudioUnitHostFoundationTests \
             test
-      - name: Run retained PR80 offline preparation tests
+      - name: Run PR84A offline abuse tests
         run: |
           xcodebuild \
             -project NotchSixty.xcodeproj \
@@ -82,7 +103,7 @@ jobs:
             ENABLE_TESTABILITY=YES \
             -only-testing:NotchSixtyTests/AudioUnitOfflinePreparationTests \
             test
-      - name: Run retained PR81 live rack tests
+      - name: Run PR84A live runtime hardening tests
         run: |
           xcodebuild \
             -project NotchSixty.xcodeproj \
@@ -93,7 +114,7 @@ jobs:
             ENABLE_TESTABILITY=YES \
             -only-testing:NotchSixtyTests/AudioUnitLiveRackRuntimeTests \
             test
-      - name: Run PR82 rack mutation tests
+      - name: Run PR84A transaction fault tests
         run: |
           xcodebuild \
             -project NotchSixty.xcodeproj \

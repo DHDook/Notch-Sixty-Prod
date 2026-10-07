@@ -11,8 +11,11 @@ enum AudioUnitLiveRackBuildError: Error, Equatable, LocalizedError {
     case liveInstantiationFailed(Int, String)
     case liveFormatFailed(Int, String)
     case liveResourceAllocationFailed(Int, String)
+    case liveInvalidLatency(Int, seconds: Double)
+    case liveInvalidTail(Int, seconds: Double)
     case liveLatencyChanged(Int, expected: Int, actual: Int)
     case liveTailChanged(Int, expected: Int, actual: Int)
+    case stageFaultGateAllocationFailed(Int)
     case delayMemoryBudgetExceeded(Int)
     case scratchAllocationFailed
     case faultLatchAllocationFailed
@@ -33,10 +36,16 @@ enum AudioUnitLiveRackBuildError: Error, Equatable, LocalizedError {
             return "Audio Unit rack slot \(slot + 1) rejected the live format. \(reason)"
         case .liveResourceAllocationFailed(let slot, let reason):
             return "Audio Unit rack slot \(slot + 1) could not allocate live render resources. \(reason)"
+        case .liveInvalidLatency(let slot, let seconds):
+            return "Audio Unit rack slot \(slot + 1) reported invalid live latency \(seconds) seconds."
+        case .liveInvalidTail(let slot, let seconds):
+            return "Audio Unit rack slot \(slot + 1) reported invalid live tail \(seconds) seconds."
         case .liveLatencyChanged(let slot, let expected, let actual):
             return "Audio Unit rack slot \(slot + 1) changed latency from \(expected) to \(actual) frames."
         case .liveTailChanged(let slot, let expected, let actual):
             return "Audio Unit rack slot \(slot + 1) changed tail from \(expected) to \(actual) frames."
+        case .stageFaultGateAllocationFailed(let slot):
+            return "Audio Unit rack slot \(slot + 1) could not allocate a lock-free fail-closed gate."
         case .delayMemoryBudgetExceeded(let bytes):
             return "Audio Unit rack requires \(bytes) bytes of latency compensation, exceeding the live memory budget."
         case .scratchAllocationFailed:
@@ -53,8 +62,28 @@ struct AudioUnitLiveRackFault: Equatable, Sendable {
     let component: AudioUnitComponentIdentity?
     let reason: N60AudioUnitLiveRackFaultReason
     let renderStatus: OSStatus
+    let detail: String?
+
+    init(
+        faultCount: UInt64,
+        slotIndex: Int,
+        component: AudioUnitComponentIdentity?,
+        reason: N60AudioUnitLiveRackFaultReason,
+        renderStatus: OSStatus,
+        detail: String? = nil
+    ) {
+        self.faultCount = faultCount
+        self.slotIndex = slotIndex
+        self.component = component
+        self.reason = reason
+        self.renderStatus = renderStatus
+        self.detail = detail
+    }
 
     var description: String {
+        if let detail {
+            return detail
+        }
         switch reason {
         case N60AudioUnitLiveRackFaultRenderStatus:
             return "Live Audio Unit render failed with OSStatus \(renderStatus)."
@@ -62,9 +91,140 @@ struct AudioUnitLiveRackFault: Equatable, Sendable {
             return "Live Audio Unit produced a non-finite output sample."
         case N60AudioUnitLiveRackFaultRuntimeInvariant:
             return "Live Audio Unit rack hit an impossible prepared-runtime invariant."
+        case N60AudioUnitLiveRackFaultCPUOverrun:
+            return "Live Audio Unit exceeded the severe realtime CPU budget repeatedly."
         default:
             return "Live Audio Unit rack reported an unknown runtime fault."
         }
+    }
+}
+
+enum AudioUnitLiveRackControlPlaneIssue: Equatable, Sendable {
+    case invalidLatency(
+        slot: Int,
+        component: AudioUnitComponentIdentity,
+        seconds: Double
+    )
+    case invalidTail(
+        slot: Int,
+        component: AudioUnitComponentIdentity,
+        seconds: Double
+    )
+    case latencyChanged(
+        slot: Int,
+        component: AudioUnitComponentIdentity,
+        expected: Int,
+        actual: Int
+    )
+    case tailChanged(
+        slot: Int,
+        component: AudioUnitComponentIdentity,
+        expected: Int,
+        actual: Int
+    )
+
+    var slotIndex: Int {
+        switch self {
+        case .invalidLatency(let slot, _, _),
+             .invalidTail(let slot, _, _),
+             .latencyChanged(let slot, _, _, _),
+             .tailChanged(let slot, _, _, _):
+            return slot
+        }
+    }
+
+    var component: AudioUnitComponentIdentity {
+        switch self {
+        case .invalidLatency(_, let component, _),
+             .invalidTail(_, let component, _),
+             .latencyChanged(_, let component, _, _),
+             .tailChanged(_, let component, _, _):
+            return component
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .invalidLatency(let slot, _, let seconds):
+            return "Live Audio Unit rack slot \(slot + 1) reported invalid latency \(seconds) seconds after activation."
+        case .invalidTail(let slot, _, let seconds):
+            return "Live Audio Unit rack slot \(slot + 1) reported invalid tail \(seconds) seconds after activation."
+        case .latencyChanged(let slot, _, let expected, let actual):
+            return "Live Audio Unit rack slot \(slot + 1) changed latency after activation from \(expected) to \(actual) frames."
+        case .tailChanged(let slot, _, let expected, let actual):
+            return "Live Audio Unit rack slot \(slot + 1) changed tail after activation from \(expected) to \(actual) frames."
+        }
+    }
+}
+
+enum AudioUnitLiveTimingValidator {
+    static func frameCount(
+        seconds: Double,
+        sampleRate: Double,
+        maximumSeconds: Double
+    ) -> Int? {
+        guard seconds.isFinite,
+              seconds >= 0,
+              seconds <= maximumSeconds,
+              sampleRate.isFinite,
+              sampleRate > 0 else {
+            return nil
+        }
+        let frames = AudioUnitProbeResult.conservativeFrameCount(
+            seconds: seconds,
+            sampleRate: sampleRate
+        )
+        return frames
+    }
+}
+
+struct AudioUnitLiveRenderWatchdog {
+    static let severeOverrunMultiplier = 4.0
+    static let minimumBudgetSeconds = 0.010
+    static let consecutiveOverrunLimit = 3
+
+    private(set) var consecutiveOverruns = 0
+
+    static func budgetTicks(
+        frameCount: Int,
+        sampleRate: Double,
+        ticksPerSecond: Double
+    ) -> UInt64 {
+        guard frameCount > 0,
+              sampleRate.isFinite,
+              sampleRate > 0,
+              ticksPerSecond.isFinite,
+              ticksPerSecond > 0 else {
+            return UInt64.max
+        }
+
+        let bufferSeconds = Double(frameCount) / sampleRate
+        let budgetSeconds = max(
+            minimumBudgetSeconds,
+            bufferSeconds * severeOverrunMultiplier
+        )
+        let ticks = ceil(budgetSeconds * ticksPerSecond)
+        guard ticks.isFinite,
+              ticks > 0,
+              ticks < Double(UInt64.max) else {
+            return UInt64.max
+        }
+        return UInt64(ticks)
+    }
+
+    mutating func observe(
+        elapsedTicks: UInt64,
+        budgetTicks: UInt64
+    ) -> Bool {
+        if elapsedTicks > budgetTicks {
+            consecutiveOverruns = min(
+                consecutiveOverruns + 1,
+                Self.consecutiveOverrunLimit
+            )
+        } else {
+            consecutiveOverruns = 0
+        }
+        return consecutiveOverruns >= Self.consecutiveOverrunLimit
     }
 }
 
@@ -91,6 +251,9 @@ protocol AudioUnitLiveRackStageProcessing: AnyObject {
     var component: AudioUnitComponentIdentity? { get }
     var latencyFrames: Int { get }
 
+    func controlPlaneHealthIssue()
+        -> AudioUnitLiveRackControlPlaneIssue?
+
     func process(
         inputInterleaved: UnsafePointer<Float>,
         outputInterleaved: UnsafeMutablePointer<Float>,
@@ -98,6 +261,13 @@ protocol AudioUnitLiveRackStageProcessing: AnyObject {
         channelCount: Int,
         sampleTime: Double
     ) -> AudioUnitLiveRackStageResult
+}
+
+extension AudioUnitLiveRackStageProcessing {
+    func controlPlaneHealthIssue()
+        -> AudioUnitLiveRackControlPlaneIssue? {
+        nil
+    }
 }
 
 private final class AudioUnitLiveDelayLine {
@@ -214,6 +384,7 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
     let slotIndex: Int
     let component: AudioUnitComponentIdentity?
     let latencyFrames: Int
+    let tailFrames: Int
 
     private let unit: AVAudioUnit
     private let renderBlock: AURenderBlock
@@ -221,13 +392,16 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
     private let outputChannels: UnsafePointer<UnsafeMutablePointer<Float>>
     private let channelCount: Int
     private let maximumFramesPerSlice: Int
+    private let sampleRate: Double
+    private let ticksPerSecond: Double
     private let wetDryMix: Float
     private let delay: AudioUnitLiveDelayLine
     private let dryScratch: UnsafeMutablePointer<Float>
+    private let faultGate: OpaquePointer
 
     private var currentInput: UnsafePointer<Float>?
     private var currentFrameCount = 0
-    private var faulted = false
+    private var renderWatchdog = AudioUnitLiveRenderWatchdog()
 
     private lazy var pullInputBlock: AURenderPullInputBlock = {
         [unowned self] _, _, requestedFrameCount, _, inputData in
@@ -273,8 +447,11 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
         outputBuffer: AVAudioPCMBuffer,
         channelCount: Int,
         maximumFramesPerSlice: Int,
+        sampleRate: Double,
         latencyFrames: Int,
-        wetDryMix: Float
+        tailFrames: Int,
+        wetDryMix: Float,
+        faultGate: OpaquePointer
     ) {
         self.slotIndex = slotIndex
         self.component = component
@@ -284,8 +461,12 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
         self.outputChannels = outputBuffer.floatChannelData!
         self.channelCount = channelCount
         self.maximumFramesPerSlice = maximumFramesPerSlice
+        self.sampleRate = sampleRate
+        self.ticksPerSecond = Self.currentTicksPerSecond()
         self.latencyFrames = latencyFrames
+        self.tailFrames = tailFrames
         self.wetDryMix = wetDryMix
+        self.faultGate = faultGate
         self.delay = AudioUnitLiveDelayLine(
             channelCount: channelCount,
             latencyFrames: latencyFrames
@@ -302,6 +483,7 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
     }
 
     deinit {
+        N60AudioUnitStageFaultGateDestroy(faultGate)
         dryScratch.deinitialize(
             count: maximumFramesPerSlice * channelCount
         )
@@ -395,12 +577,31 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
                         )
                 }
 
-                let latency = Int(
-                    ceil(max(0, au.latency) * format.sampleRate)
-                )
-                let tail = Int(
-                    ceil(max(0, au.tailTime) * format.sampleRate)
-                )
+                let latencySeconds = au.latency
+                guard let latency = AudioUnitLiveTimingValidator.frameCount(
+                    seconds: latencySeconds,
+                    sampleRate: format.sampleRate,
+                    maximumSeconds:
+                        AudioUnitProbeResult.maximumLatencySeconds
+                ) else {
+                    throw AudioUnitLiveRackBuildError.liveInvalidLatency(
+                        slotIndex,
+                        seconds: latencySeconds
+                    )
+                }
+
+                let tailSeconds = au.tailTime
+                guard let tail = AudioUnitLiveTimingValidator.frameCount(
+                    seconds: tailSeconds,
+                    sampleRate: format.sampleRate,
+                    maximumSeconds:
+                        AudioUnitProbeResult.maximumTailSeconds
+                ) else {
+                    throw AudioUnitLiveRackBuildError.liveInvalidTail(
+                        slotIndex,
+                        seconds: tailSeconds
+                    )
+                }
                 return (au.renderBlock, buffer, latency, tail)
             }
         } catch {
@@ -439,6 +640,16 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
             )
         }
 
+        guard let faultGate = N60AudioUnitStageFaultGateCreate() else {
+            unit.withAUAudioUnit { au in
+                if au.renderResourcesAllocated {
+                    au.deallocateRenderResources()
+                }
+            }
+            throw AudioUnitLiveRackBuildError
+                .stageFaultGateAllocationFailed(slotIndex)
+        }
+
         return AudioUnitLiveProcessStage(
             slotIndex: slotIndex,
             component: descriptor.identity,
@@ -447,9 +658,72 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
             outputBuffer: configured.buffer,
             channelCount: format.channelCount,
             maximumFramesPerSlice: format.maximumFramesPerSlice,
+            sampleRate: format.sampleRate,
             latencyFrames: expectedLatency,
-            wetDryMix: Float(slot.wetDryMix)
+            tailFrames: expectedTail,
+            wetDryMix: Float(slot.wetDryMix),
+            faultGate: faultGate
         )
+    }
+
+    func controlPlaneHealthIssue()
+        -> AudioUnitLiveRackControlPlaneIssue? {
+        guard let component else { return nil }
+
+        let issue: AudioUnitLiveRackControlPlaneIssue? =
+            unit.withAUAudioUnit { au in
+                let latencySeconds = au.latency
+                guard let currentLatency =
+                    AudioUnitLiveTimingValidator.frameCount(
+                        seconds: latencySeconds,
+                        sampleRate: sampleRate,
+                        maximumSeconds:
+                            AudioUnitProbeResult.maximumLatencySeconds
+                    ) else {
+                    return .invalidLatency(
+                        slot: slotIndex,
+                        component: component,
+                        seconds: latencySeconds
+                    )
+                }
+                if abs(currentLatency - latencyFrames) > 1 {
+                    return .latencyChanged(
+                        slot: slotIndex,
+                        component: component,
+                        expected: latencyFrames,
+                        actual: currentLatency
+                    )
+                }
+
+                let tailSeconds = au.tailTime
+                guard let currentTail =
+                    AudioUnitLiveTimingValidator.frameCount(
+                        seconds: tailSeconds,
+                        sampleRate: sampleRate,
+                        maximumSeconds:
+                            AudioUnitProbeResult.maximumTailSeconds
+                    ) else {
+                    return .invalidTail(
+                        slot: slotIndex,
+                        component: component,
+                        seconds: tailSeconds
+                    )
+                }
+                if abs(currentTail - tailFrames) > 1 {
+                    return .tailChanged(
+                        slot: slotIndex,
+                        component: component,
+                        expected: tailFrames,
+                        actual: currentTail
+                    )
+                }
+                return nil
+            }
+
+        if issue != nil {
+            N60AudioUnitStageFaultGateTrip(faultGate)
+        }
+        return issue
     }
 
     func process(
@@ -480,7 +754,7 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
             frameCount: frameCount
         )
 
-        if faulted {
+        if N60AudioUnitStageFaultGateIsTripped(faultGate) {
             memcpy(
                 outputInterleaved,
                 dryScratch,
@@ -498,6 +772,7 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
         timestamp.mSampleTime = sampleTime
         timestamp.mFlags = .sampleTimeValid
 
+        let renderStart = mach_absolute_time()
         let status = renderBlock(
             &flags,
             &timestamp,
@@ -506,11 +781,12 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
             outputBuffer.mutableAudioBufferList,
             pullInputBlock
         )
+        let renderElapsed = mach_absolute_time() &- renderStart
         currentInput = nil
         currentFrameCount = 0
 
         if status != noErr {
-            faulted = true
+            N60AudioUnitStageFaultGateTrip(faultGate)
             memcpy(
                 outputInterleaved,
                 dryScratch,
@@ -522,6 +798,29 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
             )
         }
 
+        if frameCount > 0 {
+            let budgetTicks = AudioUnitLiveRenderWatchdog.budgetTicks(
+                frameCount: frameCount,
+                sampleRate: sampleRate,
+                ticksPerSecond: ticksPerSecond
+            )
+            if renderWatchdog.observe(
+                elapsedTicks: renderElapsed,
+                budgetTicks: budgetTicks
+            ) {
+                N60AudioUnitStageFaultGateTrip(faultGate)
+                memcpy(
+                    outputInterleaved,
+                    dryScratch,
+                    frameCount * channelCount * MemoryLayout<Float>.size
+                )
+                return AudioUnitLiveRackStageResult(
+                    faultReason: N60AudioUnitLiveRackFaultCPUOverrun,
+                    renderStatus: noErr
+                )
+            }
+        }
+
         let wet = wetDryMix
         let dry = 1.0 - wet
         var frame = 0
@@ -531,7 +830,7 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
             while channel < channelCount {
                 let rendered = outputChannels[channel][frame]
                 if !rendered.isFinite {
-                    faulted = true
+                    N60AudioUnitStageFaultGateTrip(faultGate)
                     memcpy(
                         outputInterleaved,
                         dryScratch,
@@ -551,6 +850,19 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
             frame += 1
         }
         return .success
+    }
+
+    private static func currentTicksPerSecond() -> Double {
+        var info = mach_timebase_info_data_t()
+        let status = mach_timebase_info(&info)
+        guard status == KERN_SUCCESS,
+              info.numer > 0,
+              info.denom > 0 else {
+            return 1_000_000_000
+        }
+        return 1_000_000_000
+            * Double(info.denom)
+            / Double(info.numer)
     }
 
     private static func instantiate(
@@ -589,17 +901,7 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
         _ data: Data,
         to au: AUAudioUnit
     ) throws {
-        guard data.count <= AudioUnitRackSlotState.maximumOpaqueStateBytes else {
-            throw AudioUnitOfflinePreparationError.stateTooLarge(data.count)
-        }
-        let object = try PropertyListSerialization.propertyList(
-            from: data,
-            options: [],
-            format: nil
-        )
-        guard let state = object as? [String: Any] else {
-            throw AudioUnitOfflinePreparationError.stateDecodeFailed
-        }
+        let state = try AudioUnitOpaqueStateCodec.decodeDictionary(data)
         au.fullState = state
         guard au.fullState != nil else {
             throw AudioUnitOfflinePreparationError.stateRestoreFailed
@@ -626,6 +928,8 @@ final class AudioUnitLiveRackRuntime: @unchecked Sendable {
     )
     private var faultTimer: DispatchSourceTimer?
     private var observedFaultCount: UInt64 = 0
+    private var emittedFaultCount: UInt64 = 0
+    private var reportedControlPlaneFaultSlots: Set<Int> = []
 
     init(
         format: AudioUnitRackProcessingFormat,
@@ -755,11 +1059,17 @@ final class AudioUnitLiveRackRuntime: @unchecked Sendable {
         var result = N60AudioUnitLiveRackProcessor()
         result.context = Unmanaged.passUnretained(self).toOpaque()
         result.process = N60AudioUnitLiveRackSwiftProcess
+        result.faultLatch = faultLatch
         result.channelCount = UInt32(format.channelCount)
         result.maximumFramesPerSlice =
             UInt32(format.maximumFramesPerSlice)
         result.latencyFrames = UInt64(max(totalLatencyFrames, 0))
         return result
+    }
+
+    func controlPlaneHealthIssues()
+        -> [AudioUnitLiveRackControlPlaneIssue] {
+        stages.compactMap { $0.controlPlaneHealthIssue() }
     }
 
     func startFaultMonitoring(
@@ -771,6 +1081,9 @@ final class AudioUnitLiveRackRuntime: @unchecked Sendable {
             N60AudioUnitLiveRackFaultLatchGetSnapshot(faultLatch)
         observedFaultCount =
             includeExistingFaults ? 0 : snapshot.faultCount
+        emittedFaultCount = 0
+        reportedControlPlaneFaultSlots.removeAll(keepingCapacity: true)
+
         let timer = DispatchSource.makeTimerSource(queue: monitorQueue)
         timer.schedule(
             deadline: .now() + .milliseconds(100),
@@ -782,22 +1095,46 @@ final class AudioUnitLiveRackRuntime: @unchecked Sendable {
                 N60AudioUnitLiveRackFaultLatchGetSnapshot(
                     self.faultLatch
                 )
-            guard snapshot.faultCount > self.observedFaultCount else {
-                return
+
+            if snapshot.faultCount > self.observedFaultCount {
+                self.observedFaultCount = snapshot.faultCount
+                self.emittedFaultCount = max(
+                    self.emittedFaultCount + 1,
+                    snapshot.faultCount
+                )
+                let slotIndex = Int(snapshot.lastSlotIndex)
+                let component =
+                    self.componentsBySlot.indices.contains(slotIndex)
+                    ? self.componentsBySlot[slotIndex]
+                    : nil
+                handler(AudioUnitLiveRackFault(
+                    faultCount: self.emittedFaultCount,
+                    slotIndex: slotIndex,
+                    component: component,
+                    reason: snapshot.lastReason,
+                    renderStatus: snapshot.lastRenderStatus
+                ))
             }
-            self.observedFaultCount = snapshot.faultCount
-            let slotIndex = Int(snapshot.lastSlotIndex)
-            let component =
-                self.componentsBySlot.indices.contains(slotIndex)
-                ? self.componentsBySlot[slotIndex]
-                : nil
-            handler(AudioUnitLiveRackFault(
-                faultCount: snapshot.faultCount,
-                slotIndex: slotIndex,
-                component: component,
-                reason: snapshot.lastReason,
-                renderStatus: snapshot.lastRenderStatus
-            ))
+
+            for issue in self.controlPlaneHealthIssues() {
+                guard !self.reportedControlPlaneFaultSlots.contains(
+                    issue.slotIndex
+                ) else {
+                    continue
+                }
+                self.reportedControlPlaneFaultSlots.insert(
+                    issue.slotIndex
+                )
+                self.emittedFaultCount += 1
+                handler(AudioUnitLiveRackFault(
+                    faultCount: self.emittedFaultCount,
+                    slotIndex: issue.slotIndex,
+                    component: issue.component,
+                    reason: N60AudioUnitLiveRackFaultRuntimeInvariant,
+                    renderStatus: noErr,
+                    detail: issue.description
+                ))
+            }
         }
         faultTimer = timer
         timer.resume()

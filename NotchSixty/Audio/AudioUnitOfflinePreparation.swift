@@ -2,6 +2,66 @@ import AudioToolbox
 import AVFAudio
 import Foundation
 
+enum AudioUnitOpaqueStateCodec {
+    static func decodeDictionary(
+        _ data: Data
+    ) throws -> [String: Any] {
+        guard data.count <= AudioUnitRackSlotState.maximumOpaqueStateBytes else {
+            throw AudioUnitOfflinePreparationError.stateTooLarge(data.count)
+        }
+
+        let object: Any
+        do {
+            object = try PropertyListSerialization.propertyList(
+                from: data,
+                options: [],
+                format: nil
+            )
+        } catch {
+            throw AudioUnitOfflinePreparationError.stateDecodeFailed
+        }
+
+        guard let dictionary = object as? [String: Any] else {
+            throw AudioUnitOfflinePreparationError.stateDecodeFailed
+        }
+        return dictionary
+    }
+
+    static func encodeDictionary(
+        _ dictionary: [String: Any]
+    ) throws -> Data {
+        guard PropertyListSerialization.propertyList(
+            dictionary,
+            isValidFor: .binary
+        ) else {
+            throw AudioUnitOfflinePreparationError.stateCaptureFailed
+        }
+
+        let data: Data
+        do {
+            data = try PropertyListSerialization.data(
+                fromPropertyList: dictionary,
+                format: .binary,
+                options: 0
+            )
+        } catch {
+            throw AudioUnitOfflinePreparationError.stateCaptureFailed
+        }
+
+        guard data.count <= AudioUnitRackSlotState.maximumOpaqueStateBytes else {
+            throw AudioUnitOfflinePreparationError.stateTooLarge(data.count)
+        }
+        return data
+    }
+
+    static func validate(
+        _ data: Data?
+    ) throws {
+        guard let data else { return }
+        _ = try decodeDictionary(data)
+    }
+}
+
 struct AudioUnitOfflineRenderMetrics: Codable, Equatable, Sendable {
     let renderedFrames: Int
     let renderPassCount: Int
@@ -9,6 +69,21 @@ struct AudioUnitOfflineRenderMetrics: Codable, Equatable, Sendable {
     let maximumAbsoluteSample: Double
     let rmsByChannel: [Double]
     let allSamplesFinite: Bool
+
+    func validate(
+        for format: AudioUnitRackProcessingFormat
+    ) throws {
+        guard renderedFrames > 0,
+              renderPassCount > 0,
+              channelCount == format.channelCount,
+              rmsByChannel.count == format.channelCount,
+              allSamplesFinite,
+              maximumAbsoluteSample.isFinite,
+              maximumAbsoluteSample >= 0,
+              rmsByChannel.allSatisfy({ $0.isFinite && $0 >= 0 }) else {
+            throw AudioUnitOfflinePreparationError.invalidOfflineRender
+        }
+    }
 }
 
 struct AudioUnitOfflinePreparationReport: Codable, Equatable, Sendable {
@@ -29,14 +104,10 @@ struct AudioUnitOfflinePreparationReport: Codable, Equatable, Sendable {
         guard probe.component == component else {
             throw AudioUnitOfflinePreparationError.componentIdentityMismatch
         }
-        guard initialRender.channelCount == format.channelCount,
-              postResetRender.channelCount == format.channelCount,
-              initialRender.renderedFrames > 0,
-              postResetRender.renderedFrames > 0,
-              initialRender.allSamplesFinite,
-              postResetRender.allSamplesFinite else {
-            throw AudioUnitOfflinePreparationError.invalidOfflineRender
-        }
+
+        try initialRender.validate(for: format)
+        try postResetRender.validate(for: format)
+
         guard latencyStableAcrossReset else {
             throw AudioUnitOfflinePreparationError.latencyChangedAcrossReset
         }
@@ -46,12 +117,13 @@ struct AudioUnitOfflinePreparationReport: Codable, Equatable, Sendable {
         guard renderResourcesReleased else {
             throw AudioUnitOfflinePreparationError.renderResourcesNotReleased
         }
-        if let capturedFullState,
-           capturedFullState.count
-            > AudioUnitRackSlotState.maximumOpaqueStateBytes {
-            throw AudioUnitOfflinePreparationError.stateTooLarge(
-                capturedFullState.count
-            )
+
+        try AudioUnitOpaqueStateCodec.validate(capturedFullState)
+        let hasCapturedState = capturedFullState != nil
+        guard stateRecaptured == hasCapturedState,
+              probe.supportsFullState == hasCapturedState,
+              !stateRestored || hasCapturedState else {
+            throw AudioUnitOfflinePreparationError.stateCaptureFailed
         }
     }
 }
@@ -334,22 +406,7 @@ struct SystemAudioUnitOfflinePreparationBackend: AudioUnitOfflinePreparing {
         _ data: Data,
         to au: AUAudioUnit
     ) throws {
-        guard data.count <= AudioUnitRackSlotState.maximumOpaqueStateBytes else {
-            throw AudioUnitOfflinePreparationError.stateTooLarge(data.count)
-        }
-        let object: Any
-        do {
-            object = try PropertyListSerialization.propertyList(
-                from: data,
-                options: [],
-                format: nil
-            )
-        } catch {
-            throw AudioUnitOfflinePreparationError.stateDecodeFailed
-        }
-        guard let state = object as? [String: Any] else {
-            throw AudioUnitOfflinePreparationError.stateDecodeFailed
-        }
+        let state = try AudioUnitOpaqueStateCodec.decodeDictionary(data)
         au.fullState = state
         guard au.fullState != nil else {
             throw AudioUnitOfflinePreparationError.stateRestoreFailed
@@ -360,21 +417,7 @@ struct SystemAudioUnitOfflinePreparationBackend: AudioUnitOfflinePreparing {
         from au: AUAudioUnit
     ) throws -> Data? {
         guard let state = au.fullState else { return nil }
-        guard PropertyListSerialization.propertyList(
-            state,
-            isValidFor: .binary
-        ) else {
-            throw AudioUnitOfflinePreparationError.stateCaptureFailed
-        }
-        do {
-            return try PropertyListSerialization.data(
-                fromPropertyList: state,
-                format: .binary,
-                options: 0
-            )
-        } catch {
-            throw AudioUnitOfflinePreparationError.stateCaptureFailed
-        }
+        return try AudioUnitOpaqueStateCodec.encodeDictionary(state)
     }
 
     private static func renderDeterministically(

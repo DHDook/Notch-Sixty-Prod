@@ -7,6 +7,8 @@
 typedef struct {
     float gain;
     bool fail;
+    bool recordFault;
+    N60AudioUnitLiveRackFaultLatch *faultLatch;
 } GainProcessor;
 
 static bool process_gain(
@@ -20,6 +22,14 @@ static bool process_gain(
     (void)sampleTime;
     GainProcessor *processor = (GainProcessor *)context;
     if (processor == NULL || processor->fail) return false;
+    if (processor->recordFault && processor->faultLatch != NULL) {
+        N60AudioUnitLiveRackFaultLatchRecord(
+            processor->faultLatch,
+            0u,
+            N60AudioUnitLiveRackFaultRuntimeInvariant,
+            0
+        );
+    }
     const size_t count = (size_t)frameCount * channelCount;
     for (size_t index = 0; index < count; ++index) {
         output[index] = input[index] * processor->gain;
@@ -39,6 +49,7 @@ static N60AudioUnitLiveRackProcessor make_processor(
     N60AudioUnitLiveRackProcessor result = {0};
     result.context = context;
     result.process = process_gain;
+    result.faultLatch = context->faultLatch;
     result.channelCount = 2u;
     result.maximumFramesPerSlice = 16u;
     result.latencyFrames = latency;
@@ -53,6 +64,17 @@ int main(void) {
     GainProcessor a = {.gain = 1.0f, .fail = false};
     GainProcessor b = {.gain = 3.0f, .fail = false};
     GainProcessor bad = {.gain = 9.0f, .fail = true};
+    N60AudioUnitLiveRackFaultLatch *softFaultLatch =
+        N60AudioUnitLiveRackFaultLatchCreate();
+    if (softFaultLatch == NULL) {
+        return fail("create soft-fault latch");
+    }
+    GainProcessor softFault = {
+        .gain = 7.0f,
+        .fail = false,
+        .recordFault = true,
+        .faultLatch = softFaultLatch,
+    };
 
     N60AudioUnitLiveRackProcessor initial =
         make_processor(&a, 0u);
@@ -174,7 +196,50 @@ int main(void) {
         || status.requestedSlot
             != N60_AUDIO_UNIT_RACK_EXCHANGE_NO_SLOT) {
         N60AudioUnitRackExchangeDestroy(exchange);
+        N60AudioUnitLiveRackFaultLatchDestroy(softFaultLatch);
         return fail("candidate failure acknowledgement");
+    }
+
+    const int32_t slotSoftFault =
+        N60AudioUnitRackExchangeFindWritableSlot(exchange);
+    if (slotSoftFault < 0) {
+        N60AudioUnitRackExchangeDestroy(exchange);
+        N60AudioUnitLiveRackFaultLatchDestroy(softFaultLatch);
+        return fail("find soft-fault slot");
+    }
+    N60AudioUnitLiveRackProcessor softFaultProcessor =
+        make_processor(&softFault, 0u);
+    if (!N60AudioUnitRackExchangePublish(
+            exchange,
+            (uint32_t)slotSoftFault,
+            &softFaultProcessor,
+            4u,
+            4u)) {
+        N60AudioUnitRackExchangeDestroy(exchange);
+        N60AudioUnitLiveRackFaultLatchDestroy(softFaultLatch);
+        return fail("publish soft-fault processor");
+    }
+    if (!N60AudioUnitLiveRackProcess(
+            &outer, input, output, 4u, 2u, 10.0)) {
+        N60AudioUnitRackExchangeDestroy(exchange);
+        N60AudioUnitLiveRackFaultLatchDestroy(softFaultLatch);
+        return fail("soft-fault fallback render");
+    }
+    for (size_t i = 0; i < 8u; ++i) {
+        if (!near(output[i], 3.0f)) {
+            N60AudioUnitRackExchangeDestroy(exchange);
+            N60AudioUnitLiveRackFaultLatchDestroy(softFaultLatch);
+            return fail("fault-latched candidate replaced active generation");
+        }
+    }
+    status = N60AudioUnitRackExchangeGetStatus(exchange);
+    if (status.renderedGeneration != 2u
+        || status.transitionFailureCount != 2u
+        || status.requestedSlot
+            != N60_AUDIO_UNIT_RACK_EXCHANGE_NO_SLOT) {
+        N60AudioUnitRackExchangeDestroy(exchange);
+        N60AudioUnitLiveRackFaultLatchDestroy(softFaultLatch);
+        return fail("soft-fault candidate rejection acknowledgement");
     }
 
     const int32_t slotPass =
@@ -187,7 +252,7 @@ int main(void) {
             exchange,
             (uint32_t)slotPass,
             NULL,
-            4u,
+            5u,
             4u)) {
         N60AudioUnitRackExchangeDestroy(exchange);
         return fail("publish passthrough");
@@ -222,13 +287,14 @@ int main(void) {
             exchange,
             (uint32_t)mismatchSlot,
             &mismatch,
-            5u,
+            6u,
             4u)) {
         N60AudioUnitRackExchangeDestroy(exchange);
         return fail("latency-changing publish was accepted");
     }
 
     N60AudioUnitRackExchangeDestroy(exchange);
+    N60AudioUnitLiveRackFaultLatchDestroy(softFaultLatch);
     puts("PR82 rack exchange: PASS");
     return EXIT_SUCCESS;
 }
