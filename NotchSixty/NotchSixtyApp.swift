@@ -72,10 +72,12 @@ final class ProductController: ObservableObject {
     let multichannelCalibration: MultichannelCalibrationController
     let roomCorrectionProjects: RoomCorrectionProjectController
     let ambientCompensation: AmbientCompensationController
+    let activeQuietZone: ActiveQuietZoneController
     private var audioEngineObservation: AnyCancellable?
     private var calibrationObservation: AnyCancellable?
     private var multichannelCalibrationObservation: AnyCancellable?
     private var ambientCompensationObservation: AnyCancellable?
+    private var activeQuietZoneObservation: AnyCancellable?
     private var audioUnitHostObservation: AnyCancellable?
 
     init() {
@@ -98,11 +100,17 @@ final class ProductController: ObservableObject {
         let roomProjects =
             RoomCorrectionProjectController(profiles: profiles)
         self.roomCorrectionProjects = roomProjects
-        self.ambientCompensation = AmbientCompensationController(
+        let ambientCompensation = AmbientCompensationController(
             engine: audioEngine,
             profiles: profiles,
             microphone: calibration,
             projects: roomProjects
+        )
+        self.ambientCompensation = ambientCompensation
+        self.activeQuietZone = ActiveQuietZoneController(
+            engine: audioEngine,
+            profiles: profiles,
+            ambient: ambientCompensation
         )
         observeAudioEngine()
     }
@@ -126,11 +134,17 @@ final class ProductController: ObservableObject {
         let roomProjects =
             RoomCorrectionProjectController(profiles: profiles)
         self.roomCorrectionProjects = roomProjects
-        self.ambientCompensation = AmbientCompensationController(
+        let ambientCompensation = AmbientCompensationController(
             engine: audioEngine,
             profiles: profiles,
             microphone: calibration,
             projects: roomProjects
+        )
+        self.ambientCompensation = ambientCompensation
+        self.activeQuietZone = ActiveQuietZoneController(
+            engine: audioEngine,
+            profiles: profiles,
+            ambient: ambientCompensation
         )
         observeAudioEngine()
     }
@@ -159,6 +173,7 @@ final class ProductController: ObservableObject {
         calibration.prepareForUse()
         multichannelCalibration.prepareForUse()
         ambientCompensation.prepareForUse()
+        activeQuietZone.prepareForUse()
     }
 
     func startProcessing() async throws {
@@ -246,6 +261,7 @@ final class ProductController: ObservableObject {
     }
 
     func shutdownForTermination() {
+        activeQuietZone.stop()
         ambientCompensation.stopMonitoring()
         multichannelCalibration.cancelMeasurement()
         calibration.cancelMeasurement()
@@ -263,6 +279,9 @@ final class ProductController: ObservableObject {
             self?.objectWillChange.send()
         }
         ambientCompensationObservation = ambientCompensation.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+        activeQuietZoneObservation = activeQuietZone.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
         audioUnitHostObservation = audioUnitHost.objectWillChange.sink { [weak self] _ in

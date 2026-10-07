@@ -262,6 +262,7 @@ struct ProductionRootView: View {
             ProductionActiveAcousticsWorkspace(
                 engine: engine,
                 ambient: product.ambientCompensation,
+                quietZone: product.activeQuietZone,
                 microphone: product.calibration,
                 projects: product.roomCorrectionProjects
             )

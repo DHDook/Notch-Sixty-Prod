@@ -165,6 +165,7 @@ struct PlaybackSystemState: Codable, Equatable, Sendable {
     var speakerDriverProcessing: SpeakerDriverProcessingConfiguration?
     var speakerIR: SpeakerIRConfiguration
     var ambientCompensation: AmbientCompensationConfiguration?
+    var activeQuietZone: ActiveQuietZoneConfiguration?
 
     init(
         schemaVersion: Int = PlaybackSystemState.currentSchemaVersion,
@@ -179,7 +180,8 @@ struct PlaybackSystemState: Codable, Equatable, Sendable {
         headphoneDeviceProfile: HeadphoneDeviceProfileConfiguration? = nil,
         speakerDriverProcessing: SpeakerDriverProcessingConfiguration? = nil,
         speakerIR: SpeakerIRConfiguration = SpeakerIRConfiguration(),
-        ambientCompensation: AmbientCompensationConfiguration? = nil
+        ambientCompensation: AmbientCompensationConfiguration? = nil,
+        activeQuietZone: ActiveQuietZoneConfiguration? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.associatedOutputUID = associatedOutputUID
@@ -194,6 +196,7 @@ struct PlaybackSystemState: Codable, Equatable, Sendable {
         self.speakerDriverProcessing = speakerDriverProcessing
         self.speakerIR = speakerIR
         self.ambientCompensation = ambientCompensation
+        self.activeQuietZone = activeQuietZone
     }
 
     func composingGain(over base: DSPGainConfiguration) -> DSPGainConfiguration {
@@ -909,6 +912,29 @@ final class ProductProfileController: ObservableObject {
         try replaceSelectedSystemBassManagement(configuration)
     }
 
+    func replaceSelectedSystemActiveQuietZone(
+        _ configuration: ActiveQuietZoneConfiguration
+    ) throws {
+        guard let selectedSystemProfileID,
+              let index = systemProfiles.firstIndex(
+                where: { $0.id == selectedSystemProfileID }
+              ) else {
+            throw ProductProfileError.selectedSystemProfileRequired
+        }
+        _ = try configuration.validated()
+        let previousState = systemProfiles[index].state
+        do {
+            systemProfiles[index].state.activeQuietZone =
+                configuration
+            try persistThrowing()
+            lastErrorDescription = nil
+        } catch {
+            systemProfiles[index].state = previousState
+            lastErrorDescription = error.localizedDescription
+            throw error
+        }
+    }
+
     func replaceSelectedSystemAmbientCompensation(
         _ configuration: AmbientCompensationConfiguration
     ) throws {
@@ -1032,7 +1058,9 @@ final class ProductProfileController: ObservableObject {
                 : engine.speakerDriverProcessingConfiguration,
             speakerIR: engine.speakerIRConfiguration,
             ambientCompensation:
-                selectedSystemProfile?.state.ambientCompensation
+                selectedSystemProfile?.state.ambientCompensation,
+            activeQuietZone:
+                selectedSystemProfile?.state.activeQuietZone
         )
     }
 
@@ -1224,6 +1252,9 @@ final class ProductProfileController: ObservableObject {
             }
             if let ambient = state.ambientCompensation {
                 _ = try ambient.validated()
+            }
+            if let quietZone = state.activeQuietZone {
+                _ = try quietZone.validated()
             }
             if let headphone = state.headphoneDeviceProfile, headphone.enabled {
                 guard headphone.outputDeviceUID?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,

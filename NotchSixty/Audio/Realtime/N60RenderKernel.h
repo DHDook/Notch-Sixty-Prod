@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "N60Biquad.h"
+#include "N60ActiveQuietZone.h"
 #include "N60Convolution.h"
 #include "N60Crossover.h"
 #include "N60Dynamics.h"
@@ -109,6 +110,7 @@ typedef struct {
     N60DynamicsSnapshot dynamics;
     N60ProtectionSnapshot protection;
     N60AmbientCompensationSnapshot ambientCompensation;
+    N60ActiveQuietZoneSnapshot activeQuietZone;
     N60ConvolutionGraphState convolution;
     N60ConvolutionGraphState roomCorrection;
     N60ConvolutionGraphState speakerIR;
@@ -265,6 +267,12 @@ typedef struct {
     uint32_t roomCorrectionPartitionCount;
     uint32_t roomCorrectionEngineLatencyFrames;
     uint32_t roomCorrectionDeclaredLatencyFrames;
+    bool activeQuietZoneEnabled;
+    uint32_t activeQuietZoneToneCount;
+    float activeQuietZoneLastLeft;
+    float activeQuietZoneLastRight;
+    uint64_t activeQuietZoneProcessedFrames;
+    uint64_t activeQuietZoneSanitizedSamples;
     bool speakerIREnabled;
     uint32_t speakerIRProgramSlot;
     uint64_t speakerIRProgramGeneration;
@@ -349,6 +357,14 @@ bool N60DSPGraphSnapshotSetAmbientCompensation(
     double lowSupportDB,
     double presenceSupportDB,
     double detailSupportDB,
+    bool enabled
+);
+
+bool N60DSPGraphSnapshotSetActiveQuietZone(
+    N60DSPGraphSnapshot * _Nonnull snapshot,
+    const N60ActiveQuietZoneToneSnapshot * _Nullable tones,
+    uint32_t toneCount,
+    uint32_t transitionFrames,
     bool enabled
 );
 bool N60DSPGraphSnapshotSetCrossover(
@@ -441,6 +457,11 @@ void N60RenderKernelProcessStereoSystemFrameInContext(
     float rackRight,
     float * _Nonnull outputLeft,
     float * _Nonnull outputRight
+);
+void N60RenderKernelGetActiveQuietZoneReferenceFrame(
+    const N60RenderKernel * _Nonnull kernel,
+    float * _Nonnull left,
+    float * _Nonnull right
 );
 void N60RenderKernelProcessStereoFrameInContext(
     N60RenderKernel * _Nonnull kernel,

@@ -95,7 +95,12 @@ final class AmbientCompensationController: ObservableObject {
     private var microphoneHistory: [Float] = []
     private var playbackLeftHistory: [Float] = []
     private var playbackRightHistory: [Float] = []
+    private var quietZoneLeftHistory: [Float] = []
+    private var quietZoneRightHistory: [Float] = []
+    private var latestQuietZoneRawLeft: [Float] = []
+    private var latestQuietZoneRawRight: [Float] = []
     private var activeSystemID: UUID?
+    private var quietZoneObservationDemand = false
 
     @Published private(set) var configuration =
         AmbientCompensationConfiguration()
@@ -103,6 +108,11 @@ final class AmbientCompensationController: ObservableObject {
         AmbientCompensationMonitorStatus = .stopped
     @Published private(set) var latestAnalysis:
         AmbientAnalysisSnapshot?
+    /// Shared control observation for PR90. Kept out of @Published because the
+    /// residual sample window is control data, not UI state.
+    private(set) var latestDetailedAnalysis:
+        AmbientAnalysisDetailedResult?
+    private(set) var analysisRevision: UInt64 = 0
     @Published private(set) var appliedTarget =
         AmbientCompensationTarget.unity
     @Published private(set) var lastErrorDescription: String?
@@ -166,7 +176,8 @@ final class AmbientCompensationController: ObservableObject {
     func prepareForUse() {
         do {
             try synchronizeSelectedPlaybackSystem()
-            if configuration.enabled,
+            if (configuration.enabled
+                    || quietZoneObservationDemand),
                microphone.permissionStatus == .authorized,
                microphone.selectedInputDevice != nil {
                 try startMonitoring()
@@ -187,6 +198,24 @@ final class AmbientCompensationController: ObservableObject {
         if enabled {
             try startMonitoring()
         } else {
+            envelope.reset()
+            appliedTarget = .unity
+            try? engine.clearAmbientCompensationRuntimeTarget()
+            if quietZoneObservationDemand {
+                try startMonitoring()
+            } else {
+                stopMonitoring()
+            }
+        }
+    }
+
+    func setQuietZoneObservationDemand(
+        _ enabled: Bool
+    ) throws {
+        quietZoneObservationDemand = enabled
+        if enabled {
+            try startMonitoring()
+        } else if !configuration.enabled {
             stopMonitoring()
         }
     }
@@ -273,7 +302,10 @@ final class AmbientCompensationController: ObservableObject {
 
     func startMonitoring() throws {
         try synchronizeSelectedPlaybackSystem()
-        guard configuration.enabled else { return }
+        guard configuration.enabled
+                || quietZoneObservationDemand else {
+            return
+        }
         guard microphone.permissionStatus == .authorized else {
             throw AmbientCompensationControllerError
                 .microphonePermissionRequired
@@ -295,8 +327,12 @@ final class AmbientCompensationController: ObservableObject {
         monitor = created
         resetAnalysisHistory()
         engine.discardAmbientPlaybackReferenceFrames()
+        engine.discardActiveQuietZoneReferenceFrames()
         engine.setAmbientPlaybackReferenceDemand(
             engine.ambientPlaybackReferenceAvailable
+        )
+        engine.setActiveQuietZoneReferenceDemand(
+            engine.activeQuietZoneReferenceAvailable
         )
         monitorStatus = .observing
         lastErrorDescription = nil
@@ -321,7 +357,9 @@ final class AmbientCompensationController: ObservableObject {
         monitor?.stop()
         monitor = nil
         engine.setAmbientPlaybackReferenceDemand(false)
+        engine.setActiveQuietZoneReferenceDemand(false)
         engine.discardAmbientPlaybackReferenceFrames()
+        engine.discardActiveQuietZoneReferenceFrames()
         resetAnalysisHistory()
         envelope.reset()
         appliedTarget = .unity
@@ -337,7 +375,8 @@ final class AmbientCompensationController: ObservableObject {
     private func pollOnce() async {
         do {
             try synchronizeSelectedPlaybackSystem()
-            guard configuration.enabled,
+            guard configuration.enabled
+                    || quietZoneObservationDemand,
                   let monitor else {
                 return
             }
@@ -370,11 +409,33 @@ final class AmbientCompensationController: ObservableObject {
                         to: &playbackRightHistory
                     )
                 }
+
+                let quietFrames =
+                    engine.readActiveQuietZoneReferenceFrames(
+                        maximumFrames:
+                            Self.preferredAnalysisFrames
+                    )
+                if !quietFrames.isEmpty {
+                    Self.appendCapped(
+                        quietFrames.map(\.left),
+                        to: &quietZoneLeftHistory
+                    )
+                    Self.appendCapped(
+                        quietFrames.map(\.right),
+                        to: &quietZoneRightHistory
+                    )
+                }
             } else {
                 playbackLeftHistory.removeAll(
                     keepingCapacity: true
                 )
                 playbackRightHistory.removeAll(
+                    keepingCapacity: true
+                )
+                quietZoneLeftHistory.removeAll(
+                    keepingCapacity: true
+                )
+                quietZoneRightHistory.removeAll(
                     keepingCapacity: true
                 )
             }
@@ -418,15 +479,21 @@ final class AmbientCompensationController: ObservableObject {
                 return
             }
 
-            let analysis = try await makeAnalysis(
+            let detailed = try await makeAnalysis(
                 monitorSampleRate: monitor.sampleRate,
                 playbackRunning: running,
                 playbackReferenceAvailable: referenceAvailable
             )
+            let analysis = detailed.snapshot
+            latestDetailedAnalysis = detailed
             latestAnalysis = analysis
+            analysisRevision &+= 1
 
             let planned: AmbientCompensationTarget
-            if !running {
+            if !configuration.enabled {
+                planned = .unity
+                monitorStatus = .observing
+            } else if !running {
                 planned = AmbientCompensationTarget(
                     activity: .quiet,
                     levelDB: 0,
@@ -488,7 +555,7 @@ final class AmbientCompensationController: ObservableObject {
         monitorSampleRate: Double,
         playbackRunning: Bool,
         playbackReferenceAvailable: Bool
-    ) async throws -> AmbientAnalysisSnapshot {
+    ) async throws -> AmbientAnalysisDetailedResult {
         var analysisConfiguration =
             AmbientAnalysisConfiguration.production
         analysisConfiguration.optionalDBSPLAt0DBFS =
@@ -507,7 +574,7 @@ final class AmbientCompensationController: ObservableObject {
             return try await Task.detached(
                 priority: .utility
             ) {
-                try analyzer.analyze(
+                try analyzer.analyzeDetailed(
                     microphone: microphoneWindow,
                     playbackSources: [],
                     sampleRate: monitorSampleRate
@@ -527,7 +594,7 @@ final class AmbientCompensationController: ObservableObject {
             return try await Task.detached(
                 priority: .utility
             ) {
-                try analyzer.analyze(
+                try analyzer.analyzeDetailed(
                     microphone: microphoneWindow,
                     playbackSources: [],
                     sampleRate: monitorSampleRate
@@ -542,10 +609,20 @@ final class AmbientCompensationController: ObservableObject {
                 )
         }
 
+        let quietReferenceRequired =
+            engine.activeQuietZoneRuntimeTarget.active
+        let quietCount =
+            quietReferenceRequired
+                ? min(
+                    quietZoneLeftHistory.count,
+                    quietZoneRightHistory.count
+                )
+                : Int.max
         let count = min(
             microphoneHistory.count,
             playbackLeftHistory.count,
             playbackRightHistory.count,
+            quietCount,
             Self.preferredAnalysisFrames
         )
         guard count >= Self.minimumAnalysisFrames else {
@@ -556,8 +633,31 @@ final class AmbientCompensationController: ObservableObject {
         }
 
         let mic = Array(microphoneHistory.suffix(count))
-        let left = Array(playbackLeftHistory.suffix(count))
-        let right = Array(playbackRightHistory.suffix(count))
+        let renderedLeft =
+            Array(playbackLeftHistory.suffix(count))
+        let renderedRight =
+            Array(playbackRightHistory.suffix(count))
+        let quietLeft =
+            quietZoneLeftHistory.count >= count
+                ? Array(quietZoneLeftHistory.suffix(count))
+                : [Float](repeating: 0, count: count)
+        let quietRight =
+            quietZoneRightHistory.count >= count
+                ? Array(quietZoneRightHistory.suffix(count))
+                : [Float](repeating: 0, count: count)
+
+        // PR90 verification must observe the physical d + anti-noise residual.
+        // Model/subtract program playback only; never subtract the anti-noise
+        // contribution from the error microphone.
+        let left = zip(renderedLeft, quietLeft).map {
+            $0.0 - $0.1
+        }
+        let right = zip(renderedRight, quietRight).map {
+            $0.0 - $0.1
+        }
+        latestQuietZoneRawLeft = quietLeft
+        latestQuietZoneRawRight = quietRight
+
         let sourceModel = try acousticModel(
             monitorSampleRate: monitorSampleRate
         )
@@ -598,7 +698,7 @@ final class AmbientCompensationController: ObservableObject {
         return try await Task.detached(
             priority: .utility
         ) {
-            try analyzer.analyze(
+            try analyzer.analyzeDetailed(
                 microphone: mic,
                 playbackSources: sources,
                 sampleRate: monitorSampleRate
@@ -683,6 +783,7 @@ final class AmbientCompensationController: ObservableObject {
         pollTask?.cancel()
         pollTask = nil
         engine.setAmbientPlaybackReferenceDemand(false)
+        engine.setActiveQuietZoneReferenceDemand(false)
         try? engine.clearAmbientCompensationRuntimeTarget()
         envelope.reset()
         resetAnalysisHistory()
@@ -696,11 +797,47 @@ final class AmbientCompensationController: ObservableObject {
         monitorStatus = .stopped
     }
 
+    func quietZoneReferenceAlignedToLatestAnalysis()
+        -> (left: [Float], right: [Float])? {
+        guard let detailed = latestDetailedAnalysis else {
+            return nil
+        }
+        let count = detailed.separatedResidualSamples.count
+        guard count > 0,
+              latestQuietZoneRawLeft.count == count,
+              latestQuietZoneRawRight.count == count else {
+            return nil
+        }
+        let lag = detailed.playbackAlignmentLagFrames ?? 0
+
+        func aligned(_ source: [Float]) -> [Float] {
+            var result = [Float](repeating: 0, count: count)
+            for index in result.indices {
+                let sourceIndex = index - lag
+                if sourceIndex >= 0,
+                   sourceIndex < source.count {
+                    result[index] = source[sourceIndex]
+                }
+            }
+            return result
+        }
+
+        return (
+            aligned(latestQuietZoneRawLeft),
+            aligned(latestQuietZoneRawRight)
+        )
+    }
+
     private func resetAnalysisHistory() {
         microphoneHistory.removeAll(keepingCapacity: true)
         playbackLeftHistory.removeAll(keepingCapacity: true)
         playbackRightHistory.removeAll(keepingCapacity: true)
+        quietZoneLeftHistory.removeAll(keepingCapacity: true)
+        quietZoneRightHistory.removeAll(keepingCapacity: true)
+        latestQuietZoneRawLeft.removeAll(keepingCapacity: true)
+        latestQuietZoneRawRight.removeAll(keepingCapacity: true)
         latestAnalysis = nil
+        latestDetailedAnalysis = nil
     }
 
     private static func appendCapped(
@@ -744,7 +881,9 @@ final class AmbientCompensationController: ObservableObject {
         monitor?.stop()
         monitor = nil
         engine.setAmbientPlaybackReferenceDemand(false)
+        engine.setActiveQuietZoneReferenceDemand(false)
         engine.discardAmbientPlaybackReferenceFrames()
+        engine.discardActiveQuietZoneReferenceFrames()
         resetAnalysisHistory()
         lastErrorDescription = error.localizedDescription
         monitorStatus = .failed

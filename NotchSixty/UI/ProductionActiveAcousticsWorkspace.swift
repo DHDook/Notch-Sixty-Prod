@@ -191,6 +191,7 @@ private struct AmbientCompensationResponseCurveView: View {
 
 private enum ActiveAcousticsTab: String, CaseIterable, Identifiable {
     case ambientAnalysis
+    case quietZone
     case roomTreatment
 
     var id: String { rawValue }
@@ -198,6 +199,7 @@ private enum ActiveAcousticsTab: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .ambientAnalysis: return "Ambient Analysis"
+        case .quietZone: return "Quiet Zone"
         case .roomTreatment: return "Room Treatment"
         }
     }
@@ -206,12 +208,14 @@ private enum ActiveAcousticsTab: String, CaseIterable, Identifiable {
 struct ProductionActiveAcousticsWorkspace: View {
     @ObservedObject var engine: AudioIOEngine
     @ObservedObject var ambient: AmbientCompensationController
+    @ObservedObject var quietZone: ActiveQuietZoneController
     @ObservedObject var microphone: RoomCorrectionCalibrationController
     @ObservedObject var projects: RoomCorrectionProjectController
 
     @State private var selection: ActiveAcousticsTab = .ambientAnalysis
     @State private var transportSnapshot: ProductionTransportMeterSnapshot?
     @State private var ambientActionError: String?
+    @State private var quietZoneActionError: String?
 
     var body: some View {
         ScrollView {
@@ -230,6 +234,8 @@ struct ProductionActiveAcousticsWorkspace: View {
                 switch selection {
                 case .ambientAnalysis:
                     ambientAnalysis
+                case .quietZone:
+                    quietZoneView
                 case .roomTreatment:
                     roomTreatment
                 }
@@ -899,6 +905,339 @@ struct ProductionActiveAcousticsWorkspace: View {
             try operation()
         } catch {
             ambientActionError = error.localizedDescription
+        }
+    }
+
+    private var quietZoneView: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .center, spacing: 14) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Active Quiet Zone")
+                        .font(.headline)
+                    Text(
+                        "Closed-loop low-frequency anti-noise for stable 25–150 Hz environmental tones."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text(quietZone.status.displayName.uppercased())
+                    .font(.caption.bold())
+                    .tracking(1)
+                    .foregroundStyle(
+                        quietZone.status == .fault
+                            ? .red
+                            : quietZone.status == .cancelling
+                                ? .green
+                                : .secondary
+                    )
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .glassEffect(.regular, in: .capsule)
+
+                Toggle(
+                    "Enable",
+                    isOn: Binding(
+                        get: { quietZone.configuration.enabled },
+                        set: { enabled in
+                            performQuietZone {
+                                try quietZone.setEnabled(enabled)
+                            }
+                        }
+                    )
+                )
+                .toggleStyle(.switch)
+                .labelsHidden()
+            }
+            .padding(18)
+            .glassEffect(.regular, in: .rect(cornerRadius: 18))
+
+            if engine.lifecycleState != .running {
+                statusBanner(
+                    title: "Playback engine must be running",
+                    detail: "Quiet Zone generates bounded anti-noise through the active stereo speaker route. Start processing before arming it.",
+                    systemImage: "speaker.slash"
+                )
+            }
+
+            if ambient.selectedModelPosition == nil {
+                statusBanner(
+                    title: "Measured speaker-to-microphone model required",
+                    detail: "Choose a retained Room Correction position below. The microphone identity, channel, calibration and sample rate must match.",
+                    systemImage: "waveform.badge.exclamationmark"
+                )
+            }
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Error Microphone & Acoustic Model")
+                    .font(.headline)
+
+                HStack(spacing: 12) {
+                    Text("Playback model")
+                        .foregroundStyle(.secondary)
+                        .frame(width: 120, alignment: .leading)
+                    Picker(
+                        "Playback model",
+                        selection: Binding(
+                            get: {
+                                ambient.configuration
+                                    .playbackModelPositionID
+                            },
+                            set: { id in
+                                performQuietZone {
+                                    try ambient
+                                        .setPlaybackModelPosition(id)
+                                }
+                            }
+                        )
+                    ) {
+                        Text("Select…").tag(UUID?.none)
+                        ForEach(ambient.availableModelPositions) {
+                            position in
+                            Text(position.name)
+                                .tag(UUID?.some(position.id))
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: 320)
+
+                    Spacer()
+                    if let model = ambient.selectedModelPosition {
+                        Text(
+                            "\(model.name) · \(model.sampleRate / 1_000, specifier: "%.1f") kHz"
+                        )
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    }
+                }
+
+                Text(
+                    "Quiet Zone reuses PR89's playback separation and the retained Room Correction impulse responses. The live error microphone—not the acoustic prediction—is the commit authority."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            .padding(18)
+            .glassEffect(.regular, in: .rect(cornerRadius: 18))
+
+            LazyVGrid(
+                columns: [
+                    GridItem(.flexible()),
+                    GridItem(.flexible()),
+                ],
+                spacing: 14
+            ) {
+                metricCard(
+                    title: "Controlled Frequencies",
+                    value: quietZoneFrequencyValue,
+                    detail: String(
+                        format: "Stable components admitted inside the configured %.0f–%.0f Hz band.",
+                        quietZone.configuration.minimumFrequencyHz,
+                        quietZone.configuration.maximumFrequencyHz
+                    )
+                )
+                metricCard(
+                    title: "Measured Attenuation",
+                    value: quietZoneReductionValue,
+                    detail: "Physical error-microphone improvement, not predicted cancellation."
+                )
+                metricCard(
+                    title: "Injection Reserve",
+                    value: quietZoneInjectionValue,
+                    detail: "Remaining anti-noise source peak after Content Preset headroom and PR89 level recovery."
+                )
+                metricCard(
+                    title: "Target Reduction",
+                    value: String(
+                        format: "%.1f dB",
+                        quietZone.configuration.targetReductionDB
+                    ),
+                    detail: "The solver deliberately stops at this bounded target instead of chasing theoretical silence."
+                )
+            }
+
+            if !quietZone.toneTelemetry.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Text("Live Cancellation Detail")
+                            .font(.headline)
+                        Spacer()
+                        Text("ERROR MIC VERIFIED")
+                            .font(.caption.bold())
+                            .tracking(0.8)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Grid(
+                        alignment: .leading,
+                        horizontalSpacing: 18,
+                        verticalSpacing: 8
+                    ) {
+                        GridRow {
+                            Text("Tone").foregroundStyle(.secondary)
+                            Text("Disturbance").foregroundStyle(.secondary)
+                            Text("Residual").foregroundStyle(.secondary)
+                            Text("Measured").foregroundStyle(.secondary)
+                            Text("Predicted").foregroundStyle(.secondary)
+                            Text("L source").foregroundStyle(.secondary)
+                            Text("R source").foregroundStyle(.secondary)
+                        }
+                        .font(.caption.bold())
+
+                        ForEach(quietZone.toneTelemetry) { tone in
+                            GridRow {
+                                Text(
+                                    "\(tone.frequencyHz, specifier: "%.1f") Hz"
+                                )
+                                Text(
+                                    "\(tone.disturbanceLevelDBFS, specifier: "%.1f") dBFS"
+                                )
+                                Text(
+                                    "\(tone.residualLevelDBFS, specifier: "%.1f") dBFS"
+                                )
+                                Text(
+                                    "\(tone.measuredReductionDB, specifier: "%+.1f") dB"
+                                )
+                                .foregroundStyle(
+                                    tone.measuredReductionDB >= 1
+                                        ? .green
+                                        : tone.measuredReductionDB < -1
+                                            ? .red
+                                            : .secondary
+                                )
+                                Text(
+                                    "\(tone.predictedReductionDB, specifier: "%.1f") dB"
+                                )
+                                Text(
+                                    "\(tone.leftSourceLevelDBFS, specifier: "%.1f") dBFS"
+                                )
+                                Text(
+                                    "\(tone.rightSourceLevelDBFS, specifier: "%.1f") dBFS"
+                                )
+                            }
+                            .font(.caption.monospacedDigit())
+                        }
+                    }
+                }
+                .padding(18)
+                .glassEffect(.regular, in: .rect(cornerRadius: 18))
+            }
+
+            if let reason = quietZone.holdReason {
+                Label(
+                    quietZoneHoldReasonText(reason),
+                    systemImage:
+                        quietZone.status == .fault
+                            ? "exclamationmark.octagon.fill"
+                            : "pause.circle.fill"
+                )
+                .font(.callout)
+                .foregroundStyle(
+                    quietZone.status == .fault
+                        ? .red
+                        : .secondary
+                )
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    (quietZone.status == .fault
+                        ? Color.red
+                        : Color.secondary)
+                        .opacity(0.08),
+                    in: RoundedRectangle(cornerRadius: 12)
+                )
+            }
+
+            if let error =
+                quietZoneActionError
+                    ?? quietZone.lastErrorDescription {
+                Label(
+                    error,
+                    systemImage: "exclamationmark.triangle.fill"
+                )
+                .font(.callout)
+                .foregroundStyle(.red)
+                .textSelection(.enabled)
+            }
+
+            safetyNote(
+                "Active Quiet Zone is deliberately limited to stable low-frequency components. It does not cancel speech, claps or broadband room sound and makes no claim of whole-room silence. A low-level probe must measurably improve the physical error microphone before full cancellation is allowed."
+            )
+        }
+    }
+
+    private var quietZoneFrequencyValue: String {
+        guard !quietZone.controlledFrequenciesHz.isEmpty else {
+            return "—"
+        }
+        return quietZone.controlledFrequenciesHz
+            .map { String(format: "%.1f Hz", $0) }
+            .joined(separator: " · ")
+    }
+
+    private var quietZoneReductionValue: String {
+        guard !quietZone.toneTelemetry.isEmpty else {
+            return "—"
+        }
+        let reduction =
+            quietZone.toneTelemetry
+                .map(\.measuredReductionDB)
+                .reduce(0, +)
+                / Double(quietZone.toneTelemetry.count)
+        return String(format: "%+.1f dB", reduction)
+    }
+
+    private var quietZoneInjectionValue: String {
+        guard quietZone.availableInjectionPeak > 0 else {
+            return "0 dBFS reserve"
+        }
+        return String(
+            format: "%.1f dBFS peak",
+            20 * log10(quietZone.availableInjectionPeak)
+        )
+    }
+
+    private func quietZoneHoldReasonText(
+        _ reason: ActiveQuietZoneHoldReason
+    ) -> String {
+        switch reason {
+        case .disabled:
+            return "Active Quiet Zone is disabled."
+        case .ambientEvidenceUnavailable:
+            return "Waiting for fresh trusted error-microphone evidence."
+        case .playbackSeparationUntrusted:
+            return "Playback separation is not trustworthy enough to generate anti-noise."
+        case .noiseNotStationary:
+            return "The environmental sound is changing too quickly for stable cancellation."
+        case .noEligibleTone:
+            return "No stable low-frequency component currently meets the cancellation gates."
+        case .toneNotPersistent:
+            return "A candidate tone is present but has not remained frequency-stable long enough."
+        case .acousticModelRequired:
+            return "Select a matching retained speaker-to-microphone Room Correction model."
+        case .insufficientOutputHeadroom:
+            return "Not enough reserved digital headroom remains for bounded anti-noise injection."
+        case .verificationPending:
+            return "A low-level cancellation probe is being verified by the live error microphone."
+        case .verificationRegression:
+            return "The live probe increased the target component; anti-noise was fault-faded."
+        case .phaseReferenceUnavailable:
+            return "The rendered anti-noise phase reference is not trustworthy enough to update cancellation."
+        case .protectionActive:
+            return "Output protection or a realtime safety condition disarmed the Quiet Zone."
+        case .unsupportedRoute:
+            return "Quiet Zone currently requires the direct stereo speaker transport."
+        }
+    }
+
+    private func performQuietZone(
+        _ operation: () throws -> Void
+    ) {
+        quietZoneActionError = nil
+        do {
+            try operation()
+        } catch {
+            quietZoneActionError = error.localizedDescription
         }
     }
 

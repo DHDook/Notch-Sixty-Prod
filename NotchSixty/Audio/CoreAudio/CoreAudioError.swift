@@ -830,6 +830,65 @@ final class CoreAudioTransportSession {
         outputFormat.sampleRate
     }
 
+    func setActiveQuietZoneReferenceDemand(_ enabled: Bool) {
+        guard let bridge else { return }
+        N60RealtimeAudioBridgeSetActiveQuietZoneReferenceDemand(
+            bridge,
+            enabled
+        )
+    }
+
+    func activeQuietZoneReferenceSnapshot()
+        -> N60ActiveQuietZoneReferenceSnapshot? {
+        guard let bridge else { return nil }
+        return N60RealtimeAudioBridgeGetActiveQuietZoneReferenceSnapshot(
+            bridge
+        )
+    }
+
+    func discardActiveQuietZoneReferenceFrames() {
+        guard let bridge else { return }
+        N60RealtimeAudioBridgeDiscardActiveQuietZoneReferenceFrames(
+            bridge
+        )
+    }
+
+    func readActiveQuietZoneReferenceFrames(
+        maximumFrames: Int =
+            Int(N60_ACTIVE_QUIET_ZONE_REFERENCE_CAPACITY_FRAMES)
+    ) -> [N60ActiveQuietZoneReferenceFrame] {
+        guard let bridge, maximumFrames > 0 else { return [] }
+        let snapshot =
+            N60RealtimeAudioBridgeGetActiveQuietZoneReferenceSnapshot(
+                bridge
+            )
+        let capacity = min(
+            maximumFrames,
+            Int(snapshot.availableFrames)
+        )
+        guard capacity > 0 else { return [] }
+
+        var result = [N60ActiveQuietZoneReferenceFrame](
+            repeating: N60ActiveQuietZoneReferenceFrame(),
+            count: capacity
+        )
+        let count = result.withUnsafeMutableBufferPointer {
+            N60RealtimeAudioBridgeReadActiveQuietZoneReferenceFrames(
+                bridge,
+                $0.baseAddress!,
+                UInt32($0.count)
+            )
+        }
+        if Int(count) < result.count {
+            result.removeLast(result.count - Int(count))
+        }
+        return result
+    }
+
+    var activeQuietZoneReferenceSampleRate: Double {
+        outputFormat.sampleRate
+    }
+
     func renderDiagnostics() -> RenderKernelDiagnostics? {
         guard let bridge else { return nil }
         return RenderKernelDiagnostics(N60RealtimeAudioBridgeGetRenderDiagnostics(bridge))

@@ -121,6 +121,16 @@ struct N60RealtimeAudioBridge {
     _Atomic uint64_t ambientReferenceCapturedFrames;
     _Atomic uint64_t ambientReferenceDroppedFrames;
 
+    // Independent PR90 synthesized anti-noise reference. The control plane
+    // uses this phase basis without competing with PR89's program-reference
+    // consumer.
+    N60ActiveQuietZoneReferenceFrame *activeQuietZoneReferenceFrames;
+    _Atomic bool activeQuietZoneReferenceDemand;
+    _Atomic uint64_t activeQuietZoneReferenceWriteIndex;
+    _Atomic uint64_t activeQuietZoneReferenceReadIndex;
+    _Atomic uint64_t activeQuietZoneReferenceCapturedFrames;
+    _Atomic uint64_t activeQuietZoneReferenceDroppedFrames;
+
     // Control-plane command payload plus an even/odd sequence. The output
     // callback latches a stable command once per callback and then advances a
     // plain callback-local runtime. This keeps atomics out of the per-sample
@@ -511,8 +521,21 @@ N60RealtimeAudioBridge *N60RealtimeAudioBridgeCreate(uint32_t capacityFrames) {
         return NULL;
     }
 
+    bridge->activeQuietZoneReferenceFrames = calloc(
+        N60_ACTIVE_QUIET_ZONE_REFERENCE_CAPACITY_FRAMES,
+        sizeof(N60ActiveQuietZoneReferenceFrame)
+    );
+    if (bridge->activeQuietZoneReferenceFrames == NULL) {
+        free(bridge->ambientReferenceFrames);
+        free(bridge->analysisFrames);
+        free(bridge->frames);
+        free(bridge);
+        return NULL;
+    }
+
     bridge->renderKernel = N60RenderKernelCreate();
     if (bridge->renderKernel == NULL) {
+        free(bridge->activeQuietZoneReferenceFrames);
         free(bridge->ambientReferenceFrames);
         free(bridge->analysisFrames);
         free(bridge->frames);
@@ -539,6 +562,7 @@ void N60RealtimeAudioBridgeDestroy(N60RealtimeAudioBridge *bridge) {
     free(bridge->adaptiveOutputScratch);
     free(bridge->audioUnitRackScratch);
     free(bridge->audioUnitRackPlaybackFrames);
+    free(bridge->activeQuietZoneReferenceFrames);
     free(bridge->ambientReferenceFrames);
     free(bridge->analysisFrames);
     free(bridge->frames);
@@ -575,6 +599,11 @@ void N60RealtimeAudioBridgeReset(N60RealtimeAudioBridge *bridge) {
     atomic_store_explicit(&bridge->ambientReferenceReadIndex, 0, memory_order_release);
     atomic_store_explicit(&bridge->ambientReferenceCapturedFrames, 0, memory_order_relaxed);
     atomic_store_explicit(&bridge->ambientReferenceDroppedFrames, 0, memory_order_relaxed);
+    atomic_store_explicit(&bridge->activeQuietZoneReferenceDemand, false, memory_order_release);
+    atomic_store_explicit(&bridge->activeQuietZoneReferenceWriteIndex, 0, memory_order_release);
+    atomic_store_explicit(&bridge->activeQuietZoneReferenceReadIndex, 0, memory_order_release);
+    atomic_store_explicit(&bridge->activeQuietZoneReferenceCapturedFrames, 0, memory_order_relaxed);
+    atomic_store_explicit(&bridge->activeQuietZoneReferenceDroppedFrames, 0, memory_order_relaxed);
 
     atomic_store_explicit(&bridge->transitionCommandSequence, 0, memory_order_relaxed);
     atomic_store_explicit(&bridge->transitionTargetGainBits, float_to_bits(1.0f), memory_order_relaxed);
@@ -970,6 +999,147 @@ uint32_t N60RealtimeAudioBridgeReadAmbientReferenceFrames(
     }
     atomic_store_explicit(
         &bridge->ambientReferenceReadIndex,
+        readIndex + framesToRead,
+        memory_order_release
+    );
+    return framesToRead;
+}
+
+void N60RealtimeAudioBridgeSetActiveQuietZoneReferenceDemand(
+    N60RealtimeAudioBridge *bridge,
+    bool enabled
+) {
+    if (bridge == NULL) return;
+    bool previous = atomic_exchange_explicit(
+        &bridge->activeQuietZoneReferenceDemand,
+        enabled,
+        memory_order_acq_rel
+    );
+    if (previous != enabled) {
+        uint64_t writeIndex = atomic_load_explicit(
+            &bridge->activeQuietZoneReferenceWriteIndex,
+            memory_order_acquire
+        );
+        atomic_store_explicit(
+            &bridge->activeQuietZoneReferenceReadIndex,
+            writeIndex,
+            memory_order_release
+        );
+    }
+}
+
+bool N60RealtimeAudioBridgeActiveQuietZoneReferenceDemand(
+    const N60RealtimeAudioBridge *bridge
+) {
+    return bridge != NULL
+        && atomic_load_explicit(
+            &bridge->activeQuietZoneReferenceDemand,
+            memory_order_acquire
+        );
+}
+
+void N60RealtimeAudioBridgeDiscardActiveQuietZoneReferenceFrames(
+    N60RealtimeAudioBridge *bridge
+) {
+    if (bridge == NULL) return;
+    uint64_t writeIndex = atomic_load_explicit(
+        &bridge->activeQuietZoneReferenceWriteIndex,
+        memory_order_acquire
+    );
+    atomic_store_explicit(
+        &bridge->activeQuietZoneReferenceReadIndex,
+        writeIndex,
+        memory_order_release
+    );
+}
+
+N60ActiveQuietZoneReferenceSnapshot
+N60RealtimeAudioBridgeGetActiveQuietZoneReferenceSnapshot(
+    const N60RealtimeAudioBridge *bridge
+) {
+    N60ActiveQuietZoneReferenceSnapshot snapshot = {0};
+    if (bridge == NULL) return snapshot;
+    snapshot.enabled =
+        N60RealtimeAudioBridgeActiveQuietZoneReferenceDemand(
+            bridge
+        );
+    uint64_t readIndex = atomic_load_explicit(
+        &bridge->activeQuietZoneReferenceReadIndex,
+        memory_order_acquire
+    );
+    uint64_t writeIndex = atomic_load_explicit(
+        &bridge->activeQuietZoneReferenceWriteIndex,
+        memory_order_acquire
+    );
+    uint64_t available =
+        writeIndex >= readIndex ? writeIndex - readIndex : 0;
+    if (available
+        > N60_ACTIVE_QUIET_ZONE_REFERENCE_CAPACITY_FRAMES) {
+        available =
+            N60_ACTIVE_QUIET_ZONE_REFERENCE_CAPACITY_FRAMES;
+    }
+    snapshot.availableFrames = (uint32_t)available;
+    snapshot.capturedFrames = atomic_load_explicit(
+        &bridge->activeQuietZoneReferenceCapturedFrames,
+        memory_order_relaxed
+    );
+    snapshot.droppedFrames = atomic_load_explicit(
+        &bridge->activeQuietZoneReferenceDroppedFrames,
+        memory_order_relaxed
+    );
+    return snapshot;
+}
+
+uint32_t N60RealtimeAudioBridgeReadActiveQuietZoneReferenceFrames(
+    N60RealtimeAudioBridge *bridge,
+    N60ActiveQuietZoneReferenceFrame *destination,
+    uint32_t capacityFrames
+) {
+    if (bridge == NULL || destination == NULL || capacityFrames == 0) {
+        return 0;
+    }
+    uint64_t readIndex = atomic_load_explicit(
+        &bridge->activeQuietZoneReferenceReadIndex,
+        memory_order_relaxed
+    );
+    uint64_t writeIndex = atomic_load_explicit(
+        &bridge->activeQuietZoneReferenceWriteIndex,
+        memory_order_acquire
+    );
+    uint64_t available =
+        writeIndex >= readIndex ? writeIndex - readIndex : 0;
+    uint32_t framesToRead =
+        capacityFrames < available
+            ? capacityFrames
+            : (uint32_t)available;
+    if (framesToRead == 0) return 0;
+
+    uint32_t ringIndex =
+        (uint32_t)readIndex
+        & (
+            N60_ACTIVE_QUIET_ZONE_REFERENCE_CAPACITY_FRAMES
+            - 1u
+        );
+    uint32_t first = framesToRead;
+    uint32_t untilWrap =
+        N60_ACTIVE_QUIET_ZONE_REFERENCE_CAPACITY_FRAMES
+        - ringIndex;
+    if (first > untilWrap) first = untilWrap;
+    memcpy(
+        destination,
+        bridge->activeQuietZoneReferenceFrames + ringIndex,
+        first * sizeof(N60ActiveQuietZoneReferenceFrame)
+    );
+    if (first < framesToRead) {
+        memcpy(
+            destination + first,
+            bridge->activeQuietZoneReferenceFrames,
+            (framesToRead - first)
+                * sizeof(N60ActiveQuietZoneReferenceFrame)
+        );
+    }
+    atomic_store_explicit(
+        &bridge->activeQuietZoneReferenceReadIndex,
         readIndex + framesToRead,
         memory_order_release
     );
@@ -1538,6 +1708,48 @@ OSStatus N60OutputIOProc(
             (uint32_t)ambientReferenceWriteIndex
             & (N60_AMBIENT_REFERENCE_CAPACITY_FRAMES - 1u);
     }
+
+    bool activeQuietZoneReferenceDemand =
+        atomic_load_explicit(
+            &bridge->activeQuietZoneReferenceDemand,
+            memory_order_acquire
+        );
+    uint64_t activeQuietZoneReferenceWriteIndex = 0;
+    uint32_t activeQuietZoneReferenceFramesToWrite = 0;
+    uint32_t activeQuietZoneReferenceRingIndex = 0;
+    if (activeQuietZoneReferenceDemand) {
+        activeQuietZoneReferenceWriteIndex =
+            atomic_load_explicit(
+                &bridge->activeQuietZoneReferenceWriteIndex,
+                memory_order_relaxed
+            );
+        uint64_t activeQuietZoneReferenceReadIndex =
+            atomic_load_explicit(
+                &bridge->activeQuietZoneReferenceReadIndex,
+                memory_order_acquire
+            );
+        uint64_t used =
+            activeQuietZoneReferenceWriteIndex
+                    >= activeQuietZoneReferenceReadIndex
+                ? activeQuietZoneReferenceWriteIndex
+                    - activeQuietZoneReferenceReadIndex
+                : N60_ACTIVE_QUIET_ZONE_REFERENCE_CAPACITY_FRAMES;
+        uint64_t freeFrames =
+            used < N60_ACTIVE_QUIET_ZONE_REFERENCE_CAPACITY_FRAMES
+                ? N60_ACTIVE_QUIET_ZONE_REFERENCE_CAPACITY_FRAMES
+                    - used
+                : 0;
+        activeQuietZoneReferenceFramesToWrite =
+            framesToRead < freeFrames
+                ? framesToRead
+                : (uint32_t)freeFrames;
+        activeQuietZoneReferenceRingIndex =
+            (uint32_t)activeQuietZoneReferenceWriteIndex
+            & (
+                N60_ACTIVE_QUIET_ZONE_REFERENCE_CAPACITY_FRAMES
+                - 1u
+            );
+    }
     float outputVUPeakLeft = 0.0f;
     float outputVUPeakRight = 0.0f;
     double outputVUSquareSumLeft = 0.0;
@@ -1680,6 +1892,28 @@ OSStatus N60OutputIOProc(
                 * transitionGain;
             const float finalLeft = processed.left * gain;
             const float finalRight = processed.right * gain;
+            if (frameIndex
+                    < activeQuietZoneReferenceFramesToWrite) {
+                float quietZoneLeft = 0.0f;
+                float quietZoneRight = 0.0f;
+                N60RenderKernelGetActiveQuietZoneReferenceFrame(
+                    bridge->renderKernel,
+                    &quietZoneLeft,
+                    &quietZoneRight
+                );
+                bridge->activeQuietZoneReferenceFrames[
+                    activeQuietZoneReferenceRingIndex
+                ] = (N60ActiveQuietZoneReferenceFrame){
+                    quietZoneLeft * gain,
+                    quietZoneRight * gain
+                };
+                activeQuietZoneReferenceRingIndex =
+                    (activeQuietZoneReferenceRingIndex + 1u)
+                    & (
+                        N60_ACTIVE_QUIET_ZONE_REFERENCE_CAPACITY_FRAMES
+                        - 1u
+                    );
+            }
             if (frameIndex < ambientReferenceFramesToWrite) {
                 bridge->ambientReferenceFrames[
                     ambientReferenceRingIndex
@@ -1799,6 +2033,28 @@ OSStatus N60OutputIOProc(
                 * transitionGain;
             const float finalLeft = processed.left * gain;
             const float finalRight = processed.right * gain;
+            if (frameIndex
+                    < activeQuietZoneReferenceFramesToWrite) {
+                float quietZoneLeft = 0.0f;
+                float quietZoneRight = 0.0f;
+                N60RenderKernelGetActiveQuietZoneReferenceFrame(
+                    bridge->renderKernel,
+                    &quietZoneLeft,
+                    &quietZoneRight
+                );
+                bridge->activeQuietZoneReferenceFrames[
+                    activeQuietZoneReferenceRingIndex
+                ] = (N60ActiveQuietZoneReferenceFrame){
+                    quietZoneLeft * gain,
+                    quietZoneRight * gain
+                };
+                activeQuietZoneReferenceRingIndex =
+                    (activeQuietZoneReferenceRingIndex + 1u)
+                    & (
+                        N60_ACTIVE_QUIET_ZONE_REFERENCE_CAPACITY_FRAMES
+                        - 1u
+                    );
+            }
             if (frameIndex < ambientReferenceFramesToWrite) {
                 bridge->ambientReferenceFrames[
                     ambientReferenceRingIndex
@@ -1908,6 +2164,28 @@ OSStatus N60OutputIOProc(
             atomic_fetch_add_explicit(
                 &bridge->ambientReferenceDroppedFrames,
                 framesToRead - ambientReferenceFramesToWrite,
+                memory_order_relaxed
+            );
+        }
+    }
+
+    if (activeQuietZoneReferenceDemand) {
+        atomic_store_explicit(
+            &bridge->activeQuietZoneReferenceWriteIndex,
+            activeQuietZoneReferenceWriteIndex
+                + activeQuietZoneReferenceFramesToWrite,
+            memory_order_release
+        );
+        atomic_fetch_add_explicit(
+            &bridge->activeQuietZoneReferenceCapturedFrames,
+            activeQuietZoneReferenceFramesToWrite,
+            memory_order_relaxed
+        );
+        if (activeQuietZoneReferenceFramesToWrite < framesToRead) {
+            atomic_fetch_add_explicit(
+                &bridge->activeQuietZoneReferenceDroppedFrames,
+                framesToRead
+                    - activeQuietZoneReferenceFramesToWrite,
                 memory_order_relaxed
             );
         }
