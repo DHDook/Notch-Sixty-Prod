@@ -103,6 +103,10 @@ final class AmbientCompensationController: ObservableObject {
         AmbientCompensationMonitorStatus = .stopped
     @Published private(set) var latestAnalysis:
         AmbientAnalysisSnapshot?
+    /// Shared control observation for PR90. Kept out of @Published because the
+    /// residual sample window is control data, not UI state.
+    private(set) var latestDetailedAnalysis:
+        AmbientAnalysisDetailedResult?
     @Published private(set) var appliedTarget =
         AmbientCompensationTarget.unity
     @Published private(set) var lastErrorDescription: String?
@@ -418,11 +422,13 @@ final class AmbientCompensationController: ObservableObject {
                 return
             }
 
-            let analysis = try await makeAnalysis(
+            let detailed = try await makeAnalysis(
                 monitorSampleRate: monitor.sampleRate,
                 playbackRunning: running,
                 playbackReferenceAvailable: referenceAvailable
             )
+            let analysis = detailed.snapshot
+            latestDetailedAnalysis = detailed
             latestAnalysis = analysis
 
             let planned: AmbientCompensationTarget
@@ -488,7 +494,7 @@ final class AmbientCompensationController: ObservableObject {
         monitorSampleRate: Double,
         playbackRunning: Bool,
         playbackReferenceAvailable: Bool
-    ) async throws -> AmbientAnalysisSnapshot {
+    ) async throws -> AmbientAnalysisDetailedResult {
         var analysisConfiguration =
             AmbientAnalysisConfiguration.production
         analysisConfiguration.optionalDBSPLAt0DBFS =
@@ -507,7 +513,7 @@ final class AmbientCompensationController: ObservableObject {
             return try await Task.detached(
                 priority: .utility
             ) {
-                try analyzer.analyze(
+                try analyzer.analyzeDetailed(
                     microphone: microphoneWindow,
                     playbackSources: [],
                     sampleRate: monitorSampleRate
@@ -527,7 +533,7 @@ final class AmbientCompensationController: ObservableObject {
             return try await Task.detached(
                 priority: .utility
             ) {
-                try analyzer.analyze(
+                try analyzer.analyzeDetailed(
                     microphone: microphoneWindow,
                     playbackSources: [],
                     sampleRate: monitorSampleRate
@@ -598,7 +604,7 @@ final class AmbientCompensationController: ObservableObject {
         return try await Task.detached(
             priority: .utility
         ) {
-            try analyzer.analyze(
+            try analyzer.analyzeDetailed(
                 microphone: mic,
                 playbackSources: sources,
                 sampleRate: monitorSampleRate
@@ -701,6 +707,7 @@ final class AmbientCompensationController: ObservableObject {
         playbackLeftHistory.removeAll(keepingCapacity: true)
         playbackRightHistory.removeAll(keepingCapacity: true)
         latestAnalysis = nil
+        latestDetailedAnalysis = nil
     }
 
     private static func appendCapped(
