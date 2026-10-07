@@ -8,6 +8,8 @@ struct ProductionMultichannelCalibrationWorkspace: View {
 
     @State private var actionError: String?
     @State private var resetConfirmation = false
+    @State private var intelligentTargetPreference:
+        IntelligentTargetPreference = .neutral
 
     private var selectedInputBinding: Binding<String?> {
         Binding(
@@ -374,6 +376,134 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                 Text("The product deployment is intentionally headroom-safe: speaker trims, speaker EQ, sub gain and sub EQ are attenuation-only. Timing and polarity remain fully available, and multi-sub relative relationships are preserved without positive digital gain.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                GroupBox("Adaptive Target") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 10) {
+                            Picker(
+                                "Voicing",
+                                selection: $intelligentTargetPreference
+                            ) {
+                                ForEach(
+                                    IntelligentTargetPreference.allCases
+                                ) { preference in
+                                    Text(preference.displayName)
+                                        .tag(preference)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            .frame(maxWidth: 340)
+
+                            Button {
+                                actionError = nil
+                                do {
+                                    _ = try calibration
+                                        .generateIntelligentTarget(
+                                            preference:
+                                                intelligentTargetPreference
+                                        )
+                                } catch {
+                                    actionError = error.localizedDescription
+                                }
+                            } label: {
+                                Label(
+                                    "Generate from Campaign",
+                                    systemImage:
+                                        "waveform.badge.magnifyingglass"
+                                )
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(!calibration.campaignComplete)
+
+                            if calibration.intelligentTargetReport != nil {
+                                Button("Use Flat") {
+                                    calibration.clearIntelligentTarget()
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+
+                        Text(
+                            "Uses the completed full-range speaker measurements across all included seats. Subwoofer measurements do not shape the broadband target. The resulting curve is still independently checked by PR86 when the calibration design is generated."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                        if let report =
+                            calibration.intelligentTargetReport {
+                            HStack(spacing: 22) {
+                                status(
+                                    "Target",
+                                    report.target.name
+                                )
+                                status(
+                                    "Confidence",
+                                    "\(Int((report.confidence * 100).rounded()))%"
+                                )
+                                status(
+                                    "Bass Shelf",
+                                    String(
+                                        format: "%+.2f dB",
+                                        report.generatedBassShelfDB
+                                    )
+                                )
+                                status(
+                                    "20 kHz Tilt",
+                                    String(
+                                        format: "%+.2f dB",
+                                        report.generatedTrebleAt20KDB
+                                    )
+                                )
+                            }
+                            HStack(spacing: 22) {
+                                status(
+                                    "Bass Extension",
+                                    String(
+                                        format: "%.0f Hz",
+                                        report.estimatedBassExtensionHz
+                                    )
+                                )
+                                status(
+                                    "Target Band",
+                                    String(
+                                        format: "%.0f–%.0f Hz",
+                                        report.effectiveLowHz,
+                                        report.effectiveHighHz
+                                    )
+                                )
+                                status(
+                                    "Spatial Variation",
+                                    String(
+                                        format: "%.2f dB",
+                                        report.meanSpatialDeviationDB
+                                    )
+                                )
+                            }
+                            if report.fallbackUsed {
+                                Label(
+                                    "Conservative fallback shaping is active because measurement confidence is limited.",
+                                    systemImage:
+                                        "shield.lefthalf.filled"
+                                )
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            }
+                            ForEach(
+                                Array(report.warnings.enumerated()),
+                                id: \.offset
+                            ) { _, warning in
+                                Label(
+                                    warning,
+                                    systemImage:
+                                        "exclamationmark.triangle"
+                                )
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .padding(4)
+                }
 
                 if let design = calibration.latestDesign {
                     HStack(spacing: 24) {
