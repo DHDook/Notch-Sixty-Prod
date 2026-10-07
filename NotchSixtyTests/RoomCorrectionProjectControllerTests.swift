@@ -1505,4 +1505,61 @@ final class RoomCorrectionProjectControllerTests: XCTestCase {
     }
 
 
+
+    func testAmbientCompensationPersistsWithPlaybackSystemOnly() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+
+        let profiles = fixture.profiles
+        let beforeContent = profiles.captureContentState()
+        var ambient = AmbientCompensationConfiguration()
+        ambient.enabled = true
+        ambient.strength = 0.65
+        ambient.levelCompensationEnabled = true
+        ambient.maximumLevelCompensationDB = 2.5
+        ambient.baselineAmbientLevelDBFS = -47.5
+        ambient.optionalDBSPLAt0DBFS = 103.0
+        ambient.playbackModelPositionID = UUID(
+            uuidString: "6B4B61CC-7700-47C3-B807-B6DB7A64A789"
+        )
+        ambient.minimumSeparationConfidence = 0.82
+        ambient.attackSeconds = 8
+        ambient.releaseSeconds = 24
+
+        try profiles.replaceSelectedSystemAmbientCompensation(
+            ambient
+        )
+
+        XCTAssertEqual(
+            profiles.selectedSystemProfile?.state
+                .ambientCompensation,
+            ambient
+        )
+        XCTAssertEqual(
+            profiles.captureContentState(),
+            beforeContent,
+            "Ambient Compensation must never become Content Preset state."
+        )
+
+        let restoredEngine = AudioIOEngine(
+            deviceCatalog: OutputCatalogFixture()
+        )
+        let restoredProfiles = ProductProfileController(
+            engine: restoredEngine,
+            storageURL: fixture.root.appendingPathComponent(
+                "profiles-v1.json"
+            )
+        )
+        XCTAssertEqual(
+            restoredProfiles.selectedSystemProfile?.state
+                .ambientCompensation,
+            ambient
+        )
+        XCTAssertEqual(
+            restoredEngine.ambientCompensationRuntimeTarget,
+            .unity,
+            "Persisted policy must not masquerade as a live runtime overlay."
+        )
+    }
+
 }
