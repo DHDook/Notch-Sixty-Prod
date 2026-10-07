@@ -112,6 +112,15 @@ struct N60RealtimeAudioBridge {
     _Atomic uint64_t analysisCapturedFrames;
     _Atomic uint64_t analysisDroppedFrames;
 
+    // Independent PR89 rendered-playback reference ring. It has its own sole
+    // consumer and therefore never contends with ProductionAnalysisWorker.
+    N60AmbientPlaybackReferenceFrame *ambientReferenceFrames;
+    _Atomic bool ambientReferenceDemand;
+    _Atomic uint64_t ambientReferenceWriteIndex;
+    _Atomic uint64_t ambientReferenceReadIndex;
+    _Atomic uint64_t ambientReferenceCapturedFrames;
+    _Atomic uint64_t ambientReferenceDroppedFrames;
+
     // Control-plane command payload plus an even/odd sequence. The output
     // callback latches a stable command once per callback and then advances a
     // plain callback-local runtime. This keeps atomics out of the per-sample
@@ -491,8 +500,20 @@ N60RealtimeAudioBridge *N60RealtimeAudioBridgeCreate(uint32_t capacityFrames) {
         return NULL;
     }
 
+    bridge->ambientReferenceFrames = calloc(
+        N60_AMBIENT_REFERENCE_CAPACITY_FRAMES,
+        sizeof(N60AmbientPlaybackReferenceFrame)
+    );
+    if (bridge->ambientReferenceFrames == NULL) {
+        free(bridge->analysisFrames);
+        free(bridge->frames);
+        free(bridge);
+        return NULL;
+    }
+
     bridge->renderKernel = N60RenderKernelCreate();
     if (bridge->renderKernel == NULL) {
+        free(bridge->ambientReferenceFrames);
         free(bridge->analysisFrames);
         free(bridge->frames);
         free(bridge);
@@ -518,6 +539,7 @@ void N60RealtimeAudioBridgeDestroy(N60RealtimeAudioBridge *bridge) {
     free(bridge->adaptiveOutputScratch);
     free(bridge->audioUnitRackScratch);
     free(bridge->audioUnitRackPlaybackFrames);
+    free(bridge->ambientReferenceFrames);
     free(bridge->analysisFrames);
     free(bridge->frames);
     free(bridge);
@@ -548,6 +570,11 @@ void N60RealtimeAudioBridgeReset(N60RealtimeAudioBridge *bridge) {
     atomic_store_explicit(&bridge->analysisReadIndex, 0, memory_order_release);
     atomic_store_explicit(&bridge->analysisCapturedFrames, 0, memory_order_relaxed);
     atomic_store_explicit(&bridge->analysisDroppedFrames, 0, memory_order_relaxed);
+    atomic_store_explicit(&bridge->ambientReferenceDemand, false, memory_order_release);
+    atomic_store_explicit(&bridge->ambientReferenceWriteIndex, 0, memory_order_release);
+    atomic_store_explicit(&bridge->ambientReferenceReadIndex, 0, memory_order_release);
+    atomic_store_explicit(&bridge->ambientReferenceCapturedFrames, 0, memory_order_relaxed);
+    atomic_store_explicit(&bridge->ambientReferenceDroppedFrames, 0, memory_order_relaxed);
 
     atomic_store_explicit(&bridge->transitionCommandSequence, 0, memory_order_relaxed);
     atomic_store_explicit(&bridge->transitionTargetGainBits, float_to_bits(1.0f), memory_order_relaxed);
@@ -811,6 +838,141 @@ uint32_t N60RealtimeAudioBridgeReadAnalysisFrames(
         );
     }
     atomic_store_explicit(&bridge->analysisReadIndex, readIndex + framesToRead, memory_order_release);
+    return framesToRead;
+}
+
+void N60RealtimeAudioBridgeSetAmbientReferenceDemand(
+    N60RealtimeAudioBridge *bridge,
+    bool enabled
+) {
+    if (bridge == NULL) return;
+    bool previous = atomic_exchange_explicit(
+        &bridge->ambientReferenceDemand,
+        enabled,
+        memory_order_acq_rel
+    );
+    if (previous != enabled) {
+        uint64_t writeIndex = atomic_load_explicit(
+            &bridge->ambientReferenceWriteIndex,
+            memory_order_acquire
+        );
+        atomic_store_explicit(
+            &bridge->ambientReferenceReadIndex,
+            writeIndex,
+            memory_order_release
+        );
+    }
+}
+
+bool N60RealtimeAudioBridgeAmbientReferenceDemand(
+    const N60RealtimeAudioBridge *bridge
+) {
+    return bridge != NULL
+        && atomic_load_explicit(
+            &bridge->ambientReferenceDemand,
+            memory_order_acquire
+        );
+}
+
+void N60RealtimeAudioBridgeDiscardAmbientReferenceFrames(
+    N60RealtimeAudioBridge *bridge
+) {
+    if (bridge == NULL) return;
+    uint64_t writeIndex = atomic_load_explicit(
+        &bridge->ambientReferenceWriteIndex,
+        memory_order_acquire
+    );
+    atomic_store_explicit(
+        &bridge->ambientReferenceReadIndex,
+        writeIndex,
+        memory_order_release
+    );
+}
+
+N60AmbientPlaybackReferenceSnapshot
+N60RealtimeAudioBridgeGetAmbientReferenceSnapshot(
+    const N60RealtimeAudioBridge *bridge
+) {
+    N60AmbientPlaybackReferenceSnapshot snapshot = {0};
+    if (bridge == NULL) return snapshot;
+
+    snapshot.enabled = N60RealtimeAudioBridgeAmbientReferenceDemand(
+        bridge
+    );
+    uint64_t readIndex = atomic_load_explicit(
+        &bridge->ambientReferenceReadIndex,
+        memory_order_acquire
+    );
+    uint64_t writeIndex = atomic_load_explicit(
+        &bridge->ambientReferenceWriteIndex,
+        memory_order_acquire
+    );
+    uint64_t available =
+        writeIndex >= readIndex ? writeIndex - readIndex : 0;
+    if (available > N60_AMBIENT_REFERENCE_CAPACITY_FRAMES) {
+        available = N60_AMBIENT_REFERENCE_CAPACITY_FRAMES;
+    }
+    snapshot.availableFrames = (uint32_t)available;
+    snapshot.capturedFrames = atomic_load_explicit(
+        &bridge->ambientReferenceCapturedFrames,
+        memory_order_relaxed
+    );
+    snapshot.droppedFrames = atomic_load_explicit(
+        &bridge->ambientReferenceDroppedFrames,
+        memory_order_relaxed
+    );
+    return snapshot;
+}
+
+uint32_t N60RealtimeAudioBridgeReadAmbientReferenceFrames(
+    N60RealtimeAudioBridge *bridge,
+    N60AmbientPlaybackReferenceFrame *destination,
+    uint32_t capacityFrames
+) {
+    if (bridge == NULL || destination == NULL || capacityFrames == 0) {
+        return 0;
+    }
+    uint64_t readIndex = atomic_load_explicit(
+        &bridge->ambientReferenceReadIndex,
+        memory_order_relaxed
+    );
+    uint64_t writeIndex = atomic_load_explicit(
+        &bridge->ambientReferenceWriteIndex,
+        memory_order_acquire
+    );
+    uint64_t available =
+        writeIndex >= readIndex ? writeIndex - readIndex : 0;
+    uint32_t framesToRead =
+        capacityFrames < available
+            ? capacityFrames
+            : (uint32_t)available;
+    if (framesToRead == 0) return 0;
+
+    uint32_t ringIndex =
+        (uint32_t)readIndex
+        & (N60_AMBIENT_REFERENCE_CAPACITY_FRAMES - 1u);
+    uint32_t first = framesToRead;
+    uint32_t untilWrap =
+        N60_AMBIENT_REFERENCE_CAPACITY_FRAMES - ringIndex;
+    if (first > untilWrap) first = untilWrap;
+    memcpy(
+        destination,
+        bridge->ambientReferenceFrames + ringIndex,
+        first * sizeof(N60AmbientPlaybackReferenceFrame)
+    );
+    if (first < framesToRead) {
+        memcpy(
+            destination + first,
+            bridge->ambientReferenceFrames,
+            (framesToRead - first)
+                * sizeof(N60AmbientPlaybackReferenceFrame)
+        );
+    }
+    atomic_store_explicit(
+        &bridge->ambientReferenceReadIndex,
+        readIndex + framesToRead,
+        memory_order_release
+    );
     return framesToRead;
 }
 
@@ -1342,6 +1504,40 @@ OSStatus N60OutputIOProc(
         analysisFramesToWrite = framesToRead < freeFrames ? framesToRead : (uint32_t)freeFrames;
         analysisRingIndex = (uint32_t)analysisWriteIndex & N60_ANALYSIS_CAPTURE_MASK;
     }
+
+    bool ambientReferenceDemand = atomic_load_explicit(
+        &bridge->ambientReferenceDemand,
+        memory_order_acquire
+    );
+    uint64_t ambientReferenceWriteIndex = 0;
+    uint32_t ambientReferenceFramesToWrite = 0;
+    uint32_t ambientReferenceRingIndex = 0;
+    if (ambientReferenceDemand) {
+        ambientReferenceWriteIndex = atomic_load_explicit(
+            &bridge->ambientReferenceWriteIndex,
+            memory_order_relaxed
+        );
+        uint64_t ambientReferenceReadIndex = atomic_load_explicit(
+            &bridge->ambientReferenceReadIndex,
+            memory_order_acquire
+        );
+        uint64_t used =
+            ambientReferenceWriteIndex >= ambientReferenceReadIndex
+                ? ambientReferenceWriteIndex
+                    - ambientReferenceReadIndex
+                : N60_AMBIENT_REFERENCE_CAPACITY_FRAMES;
+        uint64_t freeFrames =
+            used < N60_AMBIENT_REFERENCE_CAPACITY_FRAMES
+                ? N60_AMBIENT_REFERENCE_CAPACITY_FRAMES - used
+                : 0;
+        ambientReferenceFramesToWrite =
+            framesToRead < freeFrames
+                ? framesToRead
+                : (uint32_t)freeFrames;
+        ambientReferenceRingIndex =
+            (uint32_t)ambientReferenceWriteIndex
+            & (N60_AMBIENT_REFERENCE_CAPACITY_FRAMES - 1u);
+    }
     float outputVUPeakLeft = 0.0f;
     float outputVUPeakRight = 0.0f;
     double outputVUSquareSumLeft = 0.0;
@@ -1484,6 +1680,17 @@ OSStatus N60OutputIOProc(
                 * transitionGain;
             const float finalLeft = processed.left * gain;
             const float finalRight = processed.right * gain;
+            if (frameIndex < ambientReferenceFramesToWrite) {
+                bridge->ambientReferenceFrames[
+                    ambientReferenceRingIndex
+                ] = (N60AmbientPlaybackReferenceFrame){
+                    finalLeft,
+                    finalRight
+                };
+                ambientReferenceRingIndex =
+                    (ambientReferenceRingIndex + 1u)
+                    & (N60_AMBIENT_REFERENCE_CAPACITY_FRAMES - 1u);
+            }
             if (sameDeviceMultiOutput) {
                 N60SpeakerBusFrame busFrame;
                 process_speaker_bus_splitter(
@@ -1592,6 +1799,17 @@ OSStatus N60OutputIOProc(
                 * transitionGain;
             const float finalLeft = processed.left * gain;
             const float finalRight = processed.right * gain;
+            if (frameIndex < ambientReferenceFramesToWrite) {
+                bridge->ambientReferenceFrames[
+                    ambientReferenceRingIndex
+                ] = (N60AmbientPlaybackReferenceFrame){
+                    finalLeft,
+                    finalRight
+                };
+                ambientReferenceRingIndex =
+                    (ambientReferenceRingIndex + 1u)
+                    & (N60_AMBIENT_REFERENCE_CAPACITY_FRAMES - 1u);
+            }
             if (sameDeviceMultiOutput) {
                 N60SpeakerBusFrame busFrame;
                 process_speaker_bus_splitter(
@@ -1669,6 +1887,27 @@ OSStatus N60OutputIOProc(
             atomic_fetch_add_explicit(
                 &bridge->analysisDroppedFrames,
                 framesToRead - analysisFramesToWrite,
+                memory_order_relaxed
+            );
+        }
+    }
+
+    if (ambientReferenceDemand) {
+        atomic_store_explicit(
+            &bridge->ambientReferenceWriteIndex,
+            ambientReferenceWriteIndex
+                + ambientReferenceFramesToWrite,
+            memory_order_release
+        );
+        atomic_fetch_add_explicit(
+            &bridge->ambientReferenceCapturedFrames,
+            ambientReferenceFramesToWrite,
+            memory_order_relaxed
+        );
+        if (ambientReferenceFramesToWrite < framesToRead) {
+            atomic_fetch_add_explicit(
+                &bridge->ambientReferenceDroppedFrames,
+                framesToRead - ambientReferenceFramesToWrite,
                 memory_order_relaxed
             );
         }
