@@ -1061,6 +1061,7 @@ final class AudioUnitLiveRackRuntime: @unchecked Sendable {
         var result = N60AudioUnitLiveRackProcessor()
         result.context = Unmanaged.passUnretained(self).toOpaque()
         result.process = N60AudioUnitLiveRackSwiftProcess
+        result.faultLatch = faultLatch
         result.channelCount = UInt32(format.channelCount)
         result.maximumFramesPerSlice =
             UInt32(format.maximumFramesPerSlice)
