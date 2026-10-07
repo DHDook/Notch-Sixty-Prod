@@ -32,7 +32,7 @@ jobs:
             -o /tmp/n60-sofa-bridge.o
       - name: Link vendored SOFA reader subset
         run: |
-          clang -std=c11 -O2 -Wall -Wextra \
+          clang -std=gnu11 -O2 -Wall -Wextra \
             -INotchSixty/Audio/SOFA \
             -INotchSixty/Audio/SOFA/Vendor/libmysofa/hrtf \
             -INotchSixty/Audio/SOFA/Vendor/libmysofa/hdf \
@@ -57,10 +57,14 @@ jobs:
       - name: Validate PR85 SOFA architecture
         run: python3 ci/validate_pr85_native_sofa.py
       - name: Install fixture generator dependency
-        run: python3 -m pip install --quiet netCDF4 numpy
+        run: |
+          python3 -m venv "$RUNNER_TEMP/pr85-python"
+          "$RUNNER_TEMP/pr85-python/bin/python" -m pip install --quiet netCDF4 numpy
       - name: Generate license-clean AES69/SOFA fixture
         run: |
-          python3 ci/generate_pr85_sofa_fixture.py "$RUNNER_TEMP/pr85-generated.sofa"
+          "$RUNNER_TEMP/pr85-python/bin/python" \
+            ci/generate_pr85_sofa_fixture.py \
+            "$RUNNER_TEMP/pr85-generated.sofa"
       - name: Build arm64 app with native SOFA reader
         run: |
           xcodebuild \
