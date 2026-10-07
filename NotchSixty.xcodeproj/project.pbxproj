@@ -109,6 +109,7 @@
 		F85000000000000000000009 /* libmysofa fractalhead.c in Sources */ = {isa = PBXBuildFile; fileRef = F85000000000000000000019 /* libmysofa fractalhead.c */; };
 		F8500000000000000000000A /* libmysofa gunzip.c in Sources */ = {isa = PBXBuildFile; fileRef = F8500000000000000000001A /* libmysofa gunzip.c */; };
 		F8500000000000000000000B /* libmysofa gcol.c in Sources */ = {isa = PBXBuildFile; fileRef = F8500000000000000000001B /* libmysofa gcol.c */; };
+		F8500000000000000000000C /* NativeSOFAImporterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8500000000000000000001C /* NativeSOFAImporterTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -305,6 +306,7 @@
 				F80000000000000000000012 /* AudioUnitOfflinePreparationTests.swift */,
 				F81000000000000000000013 /* AudioUnitLiveRackRuntimeTests.swift */,
 				F82000000000000000000014 /* AudioUnitRackMutationTests.swift */,
+				F8500000000000000000001C /* NativeSOFAImporterTests.swift */,
 			);
 			path = NotchSixtyTests;
 			sourceTree = "<group>";
@@ -551,6 +553,7 @@
 				F80000000000000000000002 /* AudioUnitOfflinePreparationTests.swift in Sources */,
 				F81000000000000000000003 /* AudioUnitLiveRackRuntimeTests.swift in Sources */,
 				F82000000000000000000004 /* AudioUnitRackMutationTests.swift in Sources */,
+				F8500000000000000000000C /* NativeSOFAImporterTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
