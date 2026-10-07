@@ -67,6 +67,7 @@ final class CoreAudioBinauralHeadphoneTransportSession {
     }
 
     private var bridge: UnsafeMutablePointer<N60BinauralHeadphoneBridge>?
+    private var audioUnitRack: AudioUnitLiveRackRuntime?
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateDeviceID = AudioDeviceID(kAudioObjectUnknown)
     private var captureIOProcID: AudioDeviceIOProcID?
@@ -82,11 +83,13 @@ final class CoreAudioBinauralHeadphoneTransportSession {
         preparedProfile: PreparedBinauralProfile,
         headphoneSnapshot: N60HeadphoneDSPSnapshot,
         programGain: Float,
-        outputGain: Float
+        outputGain: Float,
+        audioUnitRack: AudioUnitLiveRackRuntime? = nil
     ) throws {
         self.selectedOutput = selectedOutput
         self.programSource = programSource
         self.programLayout = programLayout
+        self.audioUnitRack = audioUnitRack
 
         do {
             let processObject = try CoreAudioSemanticTransportSupport.currentProcessObjectID(
@@ -225,6 +228,18 @@ final class CoreAudioBinauralHeadphoneTransportSession {
                 }
             guard let newBridge else {
                 throw BinauralHeadphoneTransportError.bridgeAllocationFailed
+            }
+            if let audioUnitRack {
+                guard abs(audioUnitRack.format.sampleRate - outputFormat.sampleRate) < 0.5,
+                      audioUnitRack.format.channelCount == Int(expectedChannels),
+                      outputBufferFrames <= UInt32(audioUnitRack.format.maximumFramesPerSlice),
+                      N60BinauralHeadphoneBridgeConfigureAudioUnitRack(
+                        newBridge,
+                        audioUnitRack.processor
+                      ) else {
+                    N60BinauralHeadphoneBridgeDestroy(newBridge)
+                    throw CoreAudioTransportError.audioUnitRackConfigurationFailed
+                }
             }
             bridge = newBridge
             N60BinauralHeadphoneBridgeSetOutputGain(newBridge, outputGain)
@@ -414,6 +429,8 @@ final class CoreAudioBinauralHeadphoneTransportSession {
             N60BinauralHeadphoneBridgeDestroy(bridge)
             self.bridge = nil
         }
+        audioUnitRack?.stopFaultMonitoring()
+        audioUnitRack = nil
     }
 
     private func startIO() throws {
