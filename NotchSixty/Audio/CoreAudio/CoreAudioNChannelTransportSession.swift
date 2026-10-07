@@ -304,6 +304,7 @@ final class CoreAudioNChannelTransportSession {
     }
 
     private var bridge: UnsafeMutablePointer<N60LiveNChannelBridge>?
+    private var audioUnitRack: AudioUnitLiveRackRuntime?
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateDeviceID = AudioDeviceID(kAudioObjectUnknown)
     private var captureIOProcID: AudioDeviceIOProcID?
@@ -318,10 +319,12 @@ final class CoreAudioNChannelTransportSession {
         routePlan: LiveNChannelOutputRoutePlan,
         renderGraph: N60LiveNChannelRenderGraph,
         outputGain: Float,
-        roomTreatment: LiveMIMORoomTreatmentPreparation? = nil
+        roomTreatment: LiveMIMORoomTreatmentPreparation? = nil,
+        audioUnitRack: AudioUnitLiveRackRuntime? = nil
     ) throws {
         self.selectedOutput = selectedOutput
         self.routePlan = routePlan
+        self.audioUnitRack = audioUnitRack
 
         do {
             let processObject = try Self.currentProcessObjectID()
@@ -469,6 +472,20 @@ final class CoreAudioNChannelTransportSession {
                         tap: tapFormat.sampleRate,
                         output: outputFormat.sampleRate
                     )
+                }
+            }
+            if let audioUnitRack {
+                guard abs(audioUnitRack.format.sampleRate - outputFormat.sampleRate) < 0.5,
+                      audioUnitRack.format.channelCount
+                        == Int(renderGraph.programLayout.channelCount),
+                      outputBufferFrames
+                        <= UInt32(audioUnitRack.format.maximumFramesPerSlice),
+                      N60LiveNChannelBridgeConfigureAudioUnitRack(
+                        newBridge,
+                        audioUnitRack.processor
+                      ) else {
+                    N60LiveNChannelBridgeDestroy(newBridge)
+                    throw CoreAudioTransportError.audioUnitRackConfigurationFailed
                 }
             }
             if let roomTreatment {
@@ -730,6 +747,8 @@ final class CoreAudioNChannelTransportSession {
             N60LiveNChannelBridgeDestroy(bridge)
             self.bridge = nil
         }
+        audioUnitRack?.stopFaultMonitoring()
+        audioUnitRack = nil
     }
 
     private func startIO() throws {
