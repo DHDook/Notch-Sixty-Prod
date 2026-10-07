@@ -636,6 +636,7 @@ struct AmbientCompensationPlanner: Sendable {
 /// speech recognition, transcription, or speaker identification.
 struct ConversationPreservationPlanner: Sendable {
     static let minimumAmbientDeltaDB = 2.5
+    static let minimumConversationStationarity = 0.18
 
     func plan(
         snapshot: AmbientAnalysisSnapshot,
@@ -675,6 +676,14 @@ struct ConversationPreservationPlanner: Sendable {
                 >= configuration.minimumSeparationConfidence else {
             return held(
                 .lowSeparationConfidence,
+                snapshot: snapshot
+            )
+        }
+        guard snapshot.character != .nonstationary,
+              snapshot.stationarityScore
+                >= Self.minimumConversationStationarity else {
+            return held(
+                .nonstationaryTransient,
                 snapshot: snapshot
             )
         }
