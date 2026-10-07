@@ -191,6 +191,32 @@ struct AmbientFieldAnalyzer: Sendable {
         )
     }
 
+    func analyzeDetailed(
+        microphone: [Float],
+        playbackReference: [Float]? = nil,
+        acousticImpulseResponse: [Float]? = nil,
+        sampleRate: Double
+    ) throws -> AmbientAnalysisDetailedResult {
+        let sources: [AmbientPlaybackSourceReference]
+        if let playbackReference {
+            sources = [
+                AmbientPlaybackSourceReference(
+                    id: "playback",
+                    samples: playbackReference,
+                    acousticImpulseResponse:
+                        acousticImpulseResponse
+                )
+            ]
+        } else {
+            sources = []
+        }
+        return try analyzeDetailed(
+            microphone: microphone,
+            playbackSources: sources,
+            sampleRate: sampleRate
+        )
+    }
+
     /// Multichannel-ready control-plane entry point. Each semantic speaker/source
     /// contributes its known playback history and measured source-to-microphone
     /// impulse response. Predictions are summed in the acoustic domain before one
