@@ -427,6 +427,7 @@ final class MultichannelCalibrationController: ObservableObject {
         measurements.removeAll { $0.seatID == id }
         latestDesign = nil
         latestPrediction = nil
+        intelligentTargetReport = nil
         state = campaignComplete ? .reviewing : .ready
         try persistCampaign()
     }
@@ -604,6 +605,7 @@ final class MultichannelCalibrationController: ObservableObject {
         measurements.removeAll { $0.seatID == seatID && $0.source == source }
         latestDesign = nil
         latestPrediction = nil
+        intelligentTargetReport = nil
         state = .ready
         try persistCampaign()
     }
@@ -669,7 +671,6 @@ final class MultichannelCalibrationController: ObservableObject {
         intelligentTargetReport = report
         latestDesign = nil
         latestPrediction = nil
-        intelligentTargetReport = nil
         lastErrorDescription = nil
         return report
     }
@@ -684,6 +685,7 @@ final class MultichannelCalibrationController: ObservableObject {
     @discardableResult
     func designCalibration(target: RoomCorrectionTargetCurve? = nil) async throws -> MultichannelCalibrationDesign {
         try synchronizeCampaign()
+        let resolvedTarget = target ?? intelligentTargetReport?.target
         guard let profile, let output = engine.selectedOutputDevice else {
             throw MultichannelCalibrationCampaignError.outputDeviceProfileRequired
         }
@@ -702,7 +704,7 @@ final class MultichannelCalibrationController: ObservableObject {
                     seats: seats,
                     measurements: measurements,
                     sampleRate: output.nominalSampleRate,
-                    target: target,
+                    target: resolvedTarget,
                     measuredAt: measuredAt,
                     deployedAt: Date()
                 )
@@ -710,7 +712,7 @@ final class MultichannelCalibrationController: ObservableObject {
                     design: design,
                     seats: seats,
                     measurements: measurements,
-                    target: target
+                    target: resolvedTarget
                 )
                 return (design, prediction)
             }.value
