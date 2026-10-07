@@ -80,6 +80,8 @@ struct N60RenderKernel {
     ];
     N60SmoothedGain ambientCompensationLevelGain;
     N60ActiveQuietZoneRuntime activeQuietZoneRuntime;
+    float activeQuietZoneReferenceLeft;
+    float activeQuietZoneReferenceRight;
     N60CrossoverRuntime crossoverRuntime;
     N60DynamicsRuntime dynamicsRuntime;
     N60SpectralDenoiserRuntime *denoiserRuntime;
@@ -1345,6 +1347,8 @@ N60RenderKernel *N60RenderKernelCreate(void) {
         &kernel->activeQuietZoneRuntime,
         initial.sampleRate
     );
+    kernel->activeQuietZoneReferenceLeft = 0.0f;
+    kernel->activeQuietZoneReferenceRight = 0.0f;
     reset_smoothed_gain(&kernel->balanceGainLeft, 1.0f);
     reset_smoothed_gain(&kernel->balanceGainRight, 1.0f);
     N60InterChannelDelayRuntimeReset(&kernel->interChannelDelayRuntime, initial.interChannelDelay);
@@ -1392,6 +1396,8 @@ void N60RenderKernelReset(N60RenderKernel *kernel) {
         &kernel->activeQuietZoneRuntime,
         48000.0
     );
+    kernel->activeQuietZoneReferenceLeft = 0.0f;
+    kernel->activeQuietZoneReferenceRight = 0.0f;
     reset_smoothed_gain(&kernel->balanceGainLeft, 1.0f);
     reset_smoothed_gain(&kernel->balanceGainRight, 1.0f);
     N60InterChannelDelayRuntimeReset(&kernel->interChannelDelayRuntime, N60InterChannelDelaySnapshotMakeBypassed());
@@ -2000,6 +2006,17 @@ void N60RenderKernelProcessStereoSystemFrameInContext(
     const float masterGain = next_gain_value(&kernel->masterGain);
     left *= masterGain;
     right *= masterGain;
+    float activeQuietZoneLeft = 0.0f;
+    float activeQuietZoneRight = 0.0f;
+    N60ActiveQuietZoneRuntimeLastFrame(
+        &kernel->activeQuietZoneRuntime,
+        &activeQuietZoneLeft,
+        &activeQuietZoneRight
+    );
+    kernel->activeQuietZoneReferenceLeft =
+        activeQuietZoneLeft * masterGain;
+    kernel->activeQuietZoneReferenceRight =
+        activeQuietZoneRight * masterGain;
     left = sanitize_sample(kernel, left);
     right = sanitize_sample(kernel, right);
     if (meteringEnabled) {
@@ -2022,11 +2039,8 @@ void N60RenderKernelGetActiveQuietZoneReferenceFrame(
     float *right
 ) {
     if (kernel == NULL || left == NULL || right == NULL) return;
-    N60ActiveQuietZoneRuntimeLastFrame(
-        &kernel->activeQuietZoneRuntime,
-        left,
-        right
-    );
+    *left = kernel->activeQuietZoneReferenceLeft;
+    *right = kernel->activeQuietZoneReferenceRight;
 }
 
 void N60RenderKernelProcessStereoFrameInContext(
