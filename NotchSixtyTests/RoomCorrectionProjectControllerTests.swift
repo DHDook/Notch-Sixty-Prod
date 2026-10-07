@@ -1429,8 +1429,10 @@ final class RoomCorrectionProjectControllerTests: XCTestCase {
         XCTAssertThrowsError(
             try fixture.controller.deploySelectedDesign()
         ) { error in
-            guard case .designVerificationRejected(let reasons) =
-                    error as? RoomCorrectionProjectControllerError else {
+            guard let controllerError =
+                    error as? RoomCorrectionProjectControllerError,
+                  case .designVerificationRejected(let reasons) =
+                    controllerError else {
                 return XCTFail("Unexpected deployment error: \(error)")
             }
             XCTAssertFalse(reasons.isEmpty)
