@@ -145,10 +145,10 @@ for token in (
 for token in (
     "testConfigurationRejectsBroadbandOrUnsafeLimits",
     "testEligibilityRequiresTrustedStationaryProminentLowFrequencyTone",
-    "testStereoSolveCancelsModeledDisturbanceWithinBounds",
+    "testRegularizedStereoSolutionTargetsBoundedReduction",
     "testVerificationAcceptsImprovementAndFaultsRegression",
     "testTonePersistenceRequiresStableWindows",
-    "testRealtimeRuntimeRejectsFrequencyChangeUntilDisarmed",
+    "testRealtimeRuntimeRequiresFadeOutBeforeFrequencyChange",
     "testRenderGraphRejectsQuietZoneToneBeyondHardFrequencyBand",
 ):
     require(token in tests, f"ANC tests missing {token}")
