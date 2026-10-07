@@ -6,6 +6,11 @@ enum AudioUnitRackMutation: Equatable, Sendable {
         slot: Int,
         initiallyBypassed: Bool
     )
+    case append(
+        component: AudioUnitComponentIdentity,
+        initiallyBypassed: Bool
+    )
+    case replaceConfiguration(AudioUnitRackConfiguration)
     case remove(slot: Int)
     case move(from: Int, to: Int)
     case setBypassed(slot: Int, bypassed: Bool)
@@ -35,6 +40,7 @@ enum AudioUnitRackMutationError: Error, Equatable, LocalizedError {
     case slotIndexOutOfRange(Int)
     case destinationSlotIndexOutOfRange(Int)
     case componentNotDiscovered(AudioUnitComponentIdentity)
+    case rackFull(maximum: Int)
     case candidatePreparationFailed(slot: Int, reason: String)
     case liveMutationRequiresRunningOrIdle(AudioLifecycleState)
     case liveTransitionUnavailable
@@ -48,6 +54,8 @@ enum AudioUnitRackMutationError: Error, Equatable, LocalizedError {
             return "Audio Unit rack destination slot \(slot + 1) is out of range."
         case .componentNotDiscovered(let component):
             return "Audio Unit \(component.fourCCSummary) is not in the current component catalog."
+        case .rackFull(let maximum):
+            return "The Audio Unit rack is full (maximum \(maximum) slots)."
         case .candidatePreparationFailed(let slot, let reason):
             return "Audio Unit rack candidate slot \(slot + 1) failed offline preparation. \(reason)"
         case .liveMutationRequiresRunningOrIdle(let state):
