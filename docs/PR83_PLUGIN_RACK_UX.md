@@ -38,7 +38,7 @@ The detached copy:
 1. restores the slot's persisted full state;
 2. presents the vendor custom view when available;
 3. otherwise presents host-visible Audio Unit parameters;
-4. captures `fullStateForDocument` / `fullState` only when the user chooses Apply.
+4. captures preset-oriented `fullState` (falling back to `fullStateForDocument`) only when the user chooses Apply.
 
 Apply then submits the serialized state through PR82's `setOpaqueFullState` mutation. PR80 offline preparation is rerun before a new live generation can be published.
 
