@@ -29,7 +29,7 @@ struct N60AudioUnitRackExchange {
     _Atomic uint64_t transitionFailureCount;
 
     // Realtime-thread-owned transition cursor.
-    uint32_t transitionPosition;
+    _Atomic uint32_t transitionPosition;
 };
 
 static bool N60AudioUnitRackExchangeProcessorCompatible(
@@ -168,7 +168,7 @@ N60AudioUnitRackExchangeCreate(
     atomic_init(&exchange->publishedGeneration, initialGeneration);
     atomic_init(&exchange->renderedGeneration, initialGeneration);
     atomic_init(&exchange->transitionFailureCount, 0u);
-    exchange->transitionPosition = 0u;
+    atomic_init(&exchange->transitionPosition, 0u);
     return exchange;
 }
 
@@ -317,10 +317,12 @@ N60AudioUnitRackExchangeStatus N60AudioUnitRackExchangeGetStatus(
             &exchange->requestedTransitionFrames,
             memory_order_relaxed
         );
+        const uint32_t position = atomic_load_explicit(
+            &exchange->transitionPosition,
+            memory_order_acquire
+        );
         result.transitionFramesRemaining =
-            exchange->transitionPosition >= total
-                ? 0u
-                : total - exchange->transitionPosition;
+            position >= total ? 0u : total - position;
     }
     return result;
 }
@@ -401,7 +403,11 @@ bool N60AudioUnitRackExchangeProcess(
             exchange->scratchOld,
             (size_t)frameCount * channelCount * sizeof(float)
         );
-        exchange->transitionPosition = 0u;
+        atomic_store_explicit(
+            &exchange->transitionPosition,
+            0u,
+            memory_order_relaxed
+        );
         atomic_fetch_add_explicit(
             &exchange->transitionFailureCount,
             1u,
@@ -423,7 +429,11 @@ bool N60AudioUnitRackExchangeProcess(
             exchange->scratchNew,
             (size_t)frameCount * channelCount * sizeof(float)
         );
-        exchange->transitionPosition = 0u;
+        atomic_store_explicit(
+            &exchange->transitionPosition,
+            0u,
+            memory_order_relaxed
+        );
         atomic_store_explicit(
             &exchange->activeSlot,
             requestedIndex,
@@ -460,7 +470,11 @@ bool N60AudioUnitRackExchangeProcess(
             exchange->scratchNew,
             (size_t)frameCount * channelCount * sizeof(float)
         );
-        exchange->transitionPosition = 0u;
+        atomic_store_explicit(
+            &exchange->transitionPosition,
+            0u,
+            memory_order_relaxed
+        );
         atomic_store_explicit(
             &exchange->activeSlot,
             requestedIndex,
@@ -478,8 +492,13 @@ bool N60AudioUnitRackExchangeProcess(
         );
     } else {
         for (uint32_t frame = 0u; frame < frameCount; ++frame) {
+            const uint32_t transitionPosition =
+                atomic_load_explicit(
+                    &exchange->transitionPosition,
+                    memory_order_relaxed
+                );
             const uint64_t absolute =
-                (uint64_t)exchange->transitionPosition + frame + 1u;
+                (uint64_t)transitionPosition + frame + 1u;
             float alpha =
                 absolute >= transitionFrames
                     ? 1.0f
@@ -496,14 +515,28 @@ bool N60AudioUnitRackExchangeProcess(
             }
         }
 
+        const uint32_t priorPosition =
+            atomic_load_explicit(
+                &exchange->transitionPosition,
+                memory_order_relaxed
+            );
         const uint64_t next =
-            (uint64_t)exchange->transitionPosition + frameCount;
-        exchange->transitionPosition =
+            (uint64_t)priorPosition + frameCount;
+        const uint32_t nextPosition =
             next >= transitionFrames
                 ? transitionFrames
                 : (uint32_t)next;
-        if (exchange->transitionPosition >= transitionFrames) {
-            exchange->transitionPosition = 0u;
+        atomic_store_explicit(
+            &exchange->transitionPosition,
+            nextPosition,
+            memory_order_release
+        );
+        if (nextPosition >= transitionFrames) {
+            atomic_store_explicit(
+                &exchange->transitionPosition,
+                0u,
+                memory_order_relaxed
+            );
             atomic_store_explicit(
                 &exchange->activeSlot,
                 requestedIndex,
