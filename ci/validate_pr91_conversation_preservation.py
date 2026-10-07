@@ -35,6 +35,8 @@ for token in (
     "func conversationEvidence(",
     "maximumOverallAttenuationDB = 4.0",
     "maximumPresenceCutDB = 3.0",
+    "minimumConversationStationarity = 0.18",
+    "snapshot.character != .nonstationary",
     "estimatedClearanceDB",
     "minimumAppliedGainDB",
 ):
@@ -102,6 +104,9 @@ for token in (
     "testConversationEvidencePrefersSpeechShapedResidual",
     "testConversationFocusCreatesBoundedSubtractiveAdaptation",
     "testConversationFocusStaysAtUnityWithoutConversationEvidence",
+    "testConversationFocusRejectsTransientApplauseOrClatter",
+    "testConversationFocusSurvivesSpeechPlusHVACTone",
+    "testConversationFocusRejectsSpeechLikePlaybackLeakageWhenSeparationIsWeak",
     "testConversationEnvelopeUsesFastOnsetAndSlowRecovery",
     "testSignedActiveAcousticsGraphAcceptsConversationTarget",
 ):
