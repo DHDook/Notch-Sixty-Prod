@@ -216,7 +216,8 @@ struct ProductionRoomGeometrySection: View {
                 ForEach(
                     Array(fields.enumerated()),
                     id: \.offset
-                ) { _, field in
+                ) { item in
+                    let field = item.element
                     VStack(alignment: .leading, spacing: 4) {
                         Text(field.0)
                             .font(.caption2)
@@ -387,13 +388,12 @@ struct ProductionRoomGeometrySection: View {
                 .foregroundStyle(.secondary)
             } else {
                 ForEach(
-                    Array(
-                        analysis
-                            .placementCandidates
-                            .enumerated()
-                    ),
-                    id: \.element.id
-                ) { index, candidate in
+                    analysis
+                        .placementCandidates.indices,
+                    id: \.self
+                ) { index in
+                    let candidate =
+                        analysis.placementCandidates[index]
                     HStack(alignment: .top, spacing: 11) {
                         Text("\(index + 1)")
                             .font(
