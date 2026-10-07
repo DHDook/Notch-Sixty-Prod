@@ -83,6 +83,7 @@ static bool N60AudioUnitRackExchangeProcessorCompatible(
 ) {
     if (processor == NULL) return true;
     return N60AudioUnitLiveRackProcessorIsValid(processor)
+        && !N60AudioUnitLiveRackProcessorHasFault(processor)
         && processor->channelCount == exchange->channelCount
         && processor->maximumFramesPerSlice
             >= exchange->maximumFramesPerSlice
@@ -532,7 +533,7 @@ bool N60AudioUnitRackExchangeProcess(
         channelCount,
         sampleTime
     );
-    const bool newOK = N60AudioUnitRackExchangeRunSlot(
+    bool newOK = N60AudioUnitRackExchangeRunSlot(
         requested,
         inputInterleaved,
         exchange->scratchNew,
@@ -540,6 +541,12 @@ bool N60AudioUnitRackExchangeProcess(
         channelCount,
         sampleTime
     );
+    if (newOK
+        && !requested->passthrough
+        && N60AudioUnitLiveRackProcessorHasFault(
+            &requested->processor)) {
+        newOK = false;
+    }
 
     const uint64_t cancelledAfterRender = atomic_load_explicit(
         &exchange->cancelledGeneration,
