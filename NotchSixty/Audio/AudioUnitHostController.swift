@@ -317,6 +317,17 @@ final class AudioUnitHostController: ObservableObject {
             return
         }
 
+        do {
+            try AudioUnitOpaqueStateCodec.validate(slot.opaqueFullState)
+        } catch {
+            quarantineComponent(
+                identity,
+                reason: Self.quarantineReason(for: error),
+                description: error.localizedDescription
+            )
+            return
+        }
+
         let compatibility = descriptor.compatibility(for: format)
         guard compatibility.compatible else {
             let reason: AudioUnitQuarantineReason
@@ -531,6 +542,18 @@ final class AudioUnitHostController: ObservableObject {
             let slot = configuration.slots[index]
             guard let component = slot.component else {
                 continue
+            }
+
+            do {
+                try AudioUnitOpaqueStateCodec.validate(
+                    slot.opaqueFullState
+                )
+            } catch {
+                throw AudioUnitRackMutationError
+                    .candidatePreparationFailed(
+                        slot: index,
+                        reason: error.localizedDescription
+                    )
             }
 
             if let existing = offlineReportsBySlotID[slot.id],
