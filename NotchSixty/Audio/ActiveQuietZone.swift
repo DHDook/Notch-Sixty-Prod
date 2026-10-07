@@ -652,6 +652,39 @@ struct ActiveQuietZonePlanner: Sendable {
         left = left * safetyScale
         right = right * safetyScale
 
+        let cancellationContribution =
+            leftSecondaryPath * left
+            + rightSecondaryPath * right
+
+        // Do not chase theoretical silence. If the regularized/headroom-bounded
+        // solution can exceed the requested reduction, scale it back to the
+        // smallest injection that reaches the configured target. This preserves
+        // reserve for program peaks and reduces sensitivity to model error.
+        let targetMagnitude =
+            disturbance.magnitude
+            * pow(10, -configuration.targetReductionDB / 20)
+        var targetScale = 1.0
+        let fullResidual =
+            disturbance + cancellationContribution
+        if fullResidual.magnitude < targetMagnitude {
+            var low = 0.0
+            var high = 1.0
+            for _ in 0..<48 {
+                let middle = (low + high) * 0.5
+                let residual =
+                    disturbance
+                    + cancellationContribution * middle
+                if residual.magnitude <= targetMagnitude {
+                    high = middle
+                } else {
+                    low = middle
+                }
+            }
+            targetScale = high
+            left = left * targetScale
+            right = right * targetScale
+        }
+
         let predictedResidual =
             disturbance
             + leftSecondaryPath * left
@@ -665,6 +698,7 @@ struct ActiveQuietZonePlanner: Sendable {
                         1.0e-15
                     )
             )
+        let combinedScale = safetyScale * targetScale
 
         guard left.real.isFinite,
               left.imaginary.isFinite,
@@ -673,9 +707,9 @@ struct ActiveQuietZonePlanner: Sendable {
               predictedResidual.real.isFinite,
               predictedResidual.imaginary.isFinite,
               predictedReductionDB.isFinite,
-              safetyScale.isFinite,
-              safetyScale > 0,
-              safetyScale <= 1 else {
+              combinedScale.isFinite,
+              combinedScale > 0,
+              combinedScale <= 1 else {
             throw ActiveQuietZoneError.nonFiniteSolution
         }
 
@@ -686,7 +720,7 @@ struct ActiveQuietZonePlanner: Sendable {
             rightSecondaryPath: rightSecondaryPath,
             leftOutput: left,
             rightOutput: right,
-            safetyScale: safetyScale,
+            safetyScale: combinedScale,
             predictedResidual: predictedResidual,
             predictedReductionDB: predictedReductionDB,
             availableInjectionPeak: aggregateMaximum
