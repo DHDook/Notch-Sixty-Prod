@@ -16,9 +16,13 @@ private enum ActiveAcousticsTab: String, CaseIterable, Identifiable {
 
 struct ProductionActiveAcousticsWorkspace: View {
     @ObservedObject var engine: AudioIOEngine
+    @ObservedObject var ambient: AmbientCompensationController
+    @ObservedObject var microphone: RoomCorrectionCalibrationController
+    @ObservedObject var projects: RoomCorrectionProjectController
 
     @State private var selection: ActiveAcousticsTab = .ambientAnalysis
     @State private var transportSnapshot: ProductionTransportMeterSnapshot?
+    @State private var ambientActionError: String?
 
     var body: some View {
         ScrollView {
@@ -70,51 +74,505 @@ struct ProductionActiveAcousticsWorkspace: View {
 
     private var ambientAnalysis: some View {
         VStack(alignment: .leading, spacing: 16) {
-            statusBanner(
-                title: "Passive analysis foundation ready",
-                detail: "Ambient Analysis can separate modeled playback from environmental sound and characterize low-frequency energy, tones, periodicity, and stationarity. Continuous room-microphone monitoring is not activated in the production path yet.",
-                systemImage: "waveform.and.mic"
-            )
+            HStack(alignment: .center, spacing: 14) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Ambient Compensation")
+                        .font(.headline)
+                    Text(
+                        "Slow, bounded adaptation for conversation, parties, HVAC and other changing room noise."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text(ambient.monitorStatus.displayName.uppercased())
+                    .font(.caption.bold())
+                    .tracking(1.0)
+                    .foregroundStyle(
+                        ambient.monitorStatus == .failed
+                            ? .red
+                            : ambient.monitorStatus == .compensating
+                                ? .green
+                                : .secondary
+                    )
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .glassEffect(.regular, in: .capsule)
+
+                Toggle(
+                    "Enable",
+                    isOn: Binding(
+                        get: {
+                            ambient.configuration.enabled
+                        },
+                        set: { value in
+                            performAmbient {
+                                try ambient.setEnabled(value)
+                            }
+                        }
+                    )
+                )
+                .toggleStyle(.switch)
+                .labelsHidden()
+            }
+            .padding(18)
+            .glassEffect(.regular, in: .rect(cornerRadius: 18))
+
+            if microphone.permissionStatus != .authorized {
+                statusBanner(
+                    title: "Microphone access required",
+                    detail: "Ambient Compensation needs a live room microphone. Playback is never adapted until access is authorized and a microphone is selected.",
+                    systemImage: "mic.slash"
+                )
+                Button("Request Microphone Access") {
+                    Task {
+                        await microphone.requestMicrophonePermission()
+                        if microphone.permissionStatus == .authorized {
+                            ambient.prepareForUse()
+                        }
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+            } else {
+                ambientSetupCard
+            }
 
             LazyVGrid(
-                columns: [GridItem(.flexible()), GridItem(.flexible())],
+                columns: [
+                    GridItem(.flexible()),
+                    GridItem(.flexible()),
+                ],
                 spacing: 14
             ) {
                 metricCard(
                     title: "Ambient Level",
-                    value: "—",
-                    detail: "Requires a live calibrated microphone feed."
+                    value: ambientLevelValue,
+                    detail: ambientLevelDetail
                 )
                 metricCard(
-                    title: "Analysis Confidence",
-                    value: "—",
-                    detail: "Playback subtraction fails closed when a required acoustic model is missing."
+                    title: "Room Activity",
+                    value: ambient.appliedTarget.activity.displayName,
+                    detail: String(
+                        format: "%+.1f dB from quiet baseline",
+                        ambient.appliedTarget.ambientDeltaDB
+                    )
                 )
                 metricCard(
-                    title: "Low-Frequency Energy",
-                    value: "20–250 Hz",
-                    detail: "The passive analyzer scores stable low-frequency content for future acoustic-control workflows."
+                    title: "Separation Confidence",
+                    value: ambient.latestAnalysis.map {
+                        "\(Int(($0.separationConfidence * 100).rounded()))%"
+                    } ?? "—",
+                    detail: separationDetail
                 )
                 metricCard(
-                    title: "Detected Character",
-                    value: "Standby",
-                    detail: "Broadband, tonal, periodic, mixed, and nonstationary classifications are available offline."
+                    title: "Applied Level",
+                    value: String(
+                        format: "%+.2f dB",
+                        ambient.appliedTarget.levelDB
+                    ),
+                    detail:
+                        "Never exceeds the Content Preset's available digital headroom."
                 )
             }
 
-            informationCard(
-                title: "What this page will show",
-                items: [
-                    "Residual environmental spectrum after modeled playback subtraction.",
-                    "Stable tonal components such as HVAC, fan, appliance, or road-noise fundamentals.",
-                    "Stationarity and periodicity confidence over time.",
-                    "A descriptive low-frequency control-candidate score — never an automatic anti-noise command.",
-                ]
-            )
+            if let analysis = ambient.latestAnalysis {
+                LazyVGrid(
+                    columns: [
+                        GridItem(.flexible()),
+                        GridItem(.flexible()),
+                        GridItem(.flexible()),
+                    ],
+                    spacing: 12
+                ) {
+                    metricCard(
+                        title: "Low Support",
+                        value: String(
+                            format: "+%.2f dB",
+                            ambient.appliedTarget.lowSupportDB
+                        ),
+                        detail: "Broad 30–250 Hz masking support."
+                    )
+                    metricCard(
+                        title: "Presence",
+                        value: String(
+                            format: "+%.2f dB",
+                            ambient.appliedTarget.presenceSupportDB
+                        ),
+                        detail: "Broad vocal/intelligibility support."
+                    )
+                    metricCard(
+                        title: "Detail",
+                        value: String(
+                            format: "+%.2f dB",
+                            ambient.appliedTarget.detailSupportDB
+                        ),
+                        detail: "Bounded high-frequency masking support."
+                    )
+                }
+
+                HStack(spacing: 20) {
+                    LabeledContent("Character") {
+                        Text(analysis.character.rawValue)
+                    }
+                    LabeledContent("Stationarity") {
+                        Text(
+                            "\(Int((analysis.stationarityScore * 100).rounded()))%"
+                        )
+                        .monospacedDigit()
+                    }
+                    LabeledContent("LF Energy") {
+                        Text(
+                            "\(Int((analysis.lowFrequencyEnergyFraction * 100).rounded()))%"
+                        )
+                        .monospacedDigit()
+                    }
+                }
+                .font(.subheadline)
+                .padding(14)
+                .glassEffect(.regular, in: .rect(cornerRadius: 14))
+            }
+
+            if let reason = ambient.appliedTarget.holdReason {
+                Label(
+                    holdReasonText(reason),
+                    systemImage: "pause.circle.fill"
+                )
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    .secondary.opacity(0.08),
+                    in: RoundedRectangle(cornerRadius: 12)
+                )
+            }
+
+            if let error =
+                ambientActionError ?? ambient.lastErrorDescription {
+                Label(
+                    error,
+                    systemImage: "exclamationmark.triangle.fill"
+                )
+                .font(.callout)
+                .foregroundStyle(.red)
+                .textSelection(.enabled)
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    .red.opacity(0.08),
+                    in: RoundedRectangle(cornerRadius: 12)
+                )
+            }
 
             safetyNote(
-                "Ambient Analysis is observation-only. It does not generate anti-noise, alter playback, or arm the room-treatment runtime."
+                "Ambient Compensation reacts over seconds, not milliseconds. Claps, dropped objects and nearby shouts are rejected as nonstationary events. Automatic level recovery can only consume digital headroom already reserved by the active Content Preset."
             )
+        }
+    }
+
+    private var ambientSetupCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Monitoring & Adaptation")
+                .font(.headline)
+
+            Grid(
+                alignment: .leading,
+                horizontalSpacing: 18,
+                verticalSpacing: 12
+            ) {
+                GridRow {
+                    Text("Microphone")
+                        .foregroundStyle(.secondary)
+                    Picker(
+                        "Microphone",
+                        selection: Binding(
+                            get: {
+                                microphone.selectedInputUID
+                            },
+                            set: { uid in
+                                let wasEnabled =
+                                    ambient.configuration.enabled
+                                ambient.stopMonitoring()
+                                microphone.selectInput(uid: uid)
+                                if wasEnabled {
+                                    performAmbient {
+                                        try ambient.startMonitoring()
+                                    }
+                                }
+                            }
+                        )
+                    ) {
+                        Text("Select…")
+                            .tag(String?.none)
+                        ForEach(microphone.inputDevices) { device in
+                            Text(device.name)
+                                .tag(String?.some(device.uid))
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: 360)
+                }
+
+                GridRow {
+                    Text("Input channel")
+                        .foregroundStyle(.secondary)
+                    Picker(
+                        "Input channel",
+                        selection: Binding(
+                            get: {
+                                microphone.selectedInputChannelIndex
+                            },
+                            set: { channel in
+                                let wasEnabled =
+                                    ambient.configuration.enabled
+                                ambient.stopMonitoring()
+                                performAmbient {
+                                    try microphone
+                                        .selectInputChannel(
+                                            index: channel
+                                        )
+                                    if wasEnabled {
+                                        try ambient.startMonitoring()
+                                    }
+                                }
+                            }
+                        )
+                    ) {
+                        let count = max(
+                            microphone.selectedInputDevice?
+                                .inputChannelCount ?? 1,
+                            1
+                        )
+                        ForEach(0..<count, id: \.self) { index in
+                            Text("Channel \(index + 1)")
+                                .tag(index)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 170)
+                }
+
+                GridRow {
+                    Text("Playback model")
+                        .foregroundStyle(.secondary)
+                    Picker(
+                        "Playback model",
+                        selection: Binding(
+                            get: {
+                                ambient.configuration
+                                    .playbackModelPositionID
+                            },
+                            set: { id in
+                                performAmbient {
+                                    try ambient
+                                        .setPlaybackModelPosition(id)
+                                }
+                            }
+                        )
+                    ) {
+                        Text("Observe only")
+                            .tag(UUID?.none)
+                        ForEach(ambient.availableModelPositions) {
+                            position in
+                            Text(position.name)
+                                .tag(UUID?.some(position.id))
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: 300)
+                }
+            }
+
+            if !ambient.roomProjectMatchesSelectedMicrophone,
+               !projects.positions.isEmpty {
+                Label(
+                    "The current Room Correction project was measured with a different microphone/channel. Choose the matching microphone or re-measure before enabling modeled playback subtraction.",
+                    systemImage: "waveform.badge.exclamationmark"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            Divider()
+
+            HStack(spacing: 18) {
+                Button("Set Current Room as Quiet Baseline") {
+                    performAmbient {
+                        try ambient.captureQuietBaseline()
+                    }
+                }
+                .buttonStyle(.bordered)
+                .disabled(ambient.latestAnalysis == nil)
+
+                if let baseline =
+                    ambient.configuration
+                        .baselineAmbientLevelDBFS {
+                    Text(
+                        String(
+                            format: "Baseline %.1f dBFS",
+                            baseline
+                        )
+                    )
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+
+                    Button("Clear") {
+                        performAmbient {
+                            try ambient.clearQuietBaseline()
+                        }
+                    }
+                    .buttonStyle(.borderless)
+                } else {
+                    Text("Baseline required before automatic adaptation.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Divider()
+
+            HStack(spacing: 12) {
+                Text("Strength")
+                    .frame(width: 100, alignment: .leading)
+                Slider(
+                    value: Binding(
+                        get: {
+                            ambient.configuration.strength
+                        },
+                        set: { value in
+                            performAmbient {
+                                try ambient.setStrength(value)
+                            }
+                        }
+                    ),
+                    in: 0...1,
+                    step: 0.05
+                )
+                Text(
+                    "\(Int((ambient.configuration.strength * 100).rounded()))%"
+                )
+                .monospacedDigit()
+                .frame(width: 54)
+            }
+
+            Toggle(
+                "Allow bounded level compensation",
+                isOn: Binding(
+                    get: {
+                        ambient.configuration
+                            .levelCompensationEnabled
+                    },
+                    set: { value in
+                        performAmbient {
+                            try ambient
+                                .setLevelCompensationEnabled(value)
+                        }
+                    }
+                )
+            )
+            .toggleStyle(.switch)
+
+            HStack(spacing: 12) {
+                Text("Maximum lift")
+                    .frame(width: 100, alignment: .leading)
+                Slider(
+                    value: Binding(
+                        get: {
+                            ambient.configuration
+                                .maximumLevelCompensationDB
+                        },
+                        set: { value in
+                            performAmbient {
+                                try ambient
+                                    .setMaximumLevelCompensationDB(
+                                        value
+                                    )
+                            }
+                        }
+                    ),
+                    in: 0...6,
+                    step: 0.5
+                )
+                Text(
+                    "\(ambient.configuration.maximumLevelCompensationDB, specifier: "%.1f") dB"
+                )
+                .monospacedDigit()
+                .frame(width: 62)
+            }
+
+            Text(
+                "Available Content Preset headroom: \(engine.ambientCompensationAvailableHeadroomDB, specifier: "%.1f") dB. Ambient level lift is clamped to the smaller of this reserve and the maximum above."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .padding(18)
+        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+    }
+
+    private var ambientLevelValue: String {
+        guard let analysis = ambient.latestAnalysis else {
+            return "—"
+        }
+        if let spl = analysis.ambientLevelDBSPL {
+            return String(format: "%.1f dB SPL", spl)
+        }
+        return String(
+            format: "%.1f dBFS",
+            analysis.ambientLevelDBFS
+        )
+    }
+
+    private var ambientLevelDetail: String {
+        if ambient.currentAmbientDisplayUsesSPL {
+            return "Absolute SPL uses the configured microphone level reference."
+        }
+        return "Relative level; no absolute SPL calibration is claimed."
+    }
+
+    private var separationDetail: String {
+        guard let analysis = ambient.latestAnalysis else {
+            return "Waiting for a complete analysis window."
+        }
+        switch analysis.separationMode {
+        case .microphoneOnly:
+            return "Microphone-only observation."
+        case .modeledPlaybackSubtraction:
+            return "Rendered playback is subtracted through the selected measured room model."
+        case .playbackModelUnavailable:
+            return "Playback is audible but no trustworthy matching acoustic model is available."
+        }
+    }
+
+    private func holdReasonText(
+        _ reason: AmbientCompensationHoldReason
+    ) -> String {
+        switch reason {
+        case .disabled:
+            return "Ambient Compensation is disabled."
+        case .baselineRequired:
+            return "Set a quiet-room baseline before automatic adaptation."
+        case .playbackModelRequired:
+            return "Automatic adaptation is held until a matching measured playback-to-microphone model is selected."
+        case .lowSeparationConfidence:
+            return "Playback subtraction confidence is below the configured threshold; compensation is held."
+        case .nonstationaryTransient:
+            return "A transient/nonstationary event was detected. Compensation is temporarily held."
+        case .invalidEvidence:
+            return "Ambient evidence is invalid or stale; compensation is held."
+        case .noAvailableHeadroom:
+            return "No digital headroom is available for level recovery."
+        }
+    }
+
+    private func performAmbient(
+        _ operation: () throws -> Void
+    ) {
+        ambientActionError = nil
+        do {
+            try operation()
+        } catch {
+            ambientActionError = error.localizedDescription
         }
     }
 
