@@ -122,6 +122,175 @@ enum AmbientCompensationError: Error, Equatable, LocalizedError {
     }
 }
 
+struct AmbientCompensationResponsePoint: Equatable, Sendable {
+    let frequencyHz: Double
+    let gainDB: Double
+}
+
+/// Control-plane response model for the exact PR89 realtime overlay topology.
+///
+/// Frequencies/Q values intentionally mirror
+/// N60DSPGraphSnapshotSetAmbientCompensation. Coefficients are designed through
+/// the same N60BiquadDesign implementation consumed by the render snapshot, so
+/// the UI curve is an acoustic transfer-function view of the applied overlay,
+/// not a decorative interpolation between the three control values.
+enum AmbientCompensationResponseModel {
+    static let lowShelfFrequencyHz = 120.0
+    static let lowShelfQ = 0.707
+    static let presenceFrequencyHz = 2_200.0
+    static let presenceQ = 0.85
+    static let detailShelfFrequencyHz = 6_500.0
+    static let detailShelfQ = 0.707
+
+    static func response(
+        target: AmbientCompensationTarget,
+        sampleRate: Double,
+        pointCount: Int = 160
+    ) -> [AmbientCompensationResponsePoint] {
+        guard sampleRate.isFinite,
+              sampleRate > detailShelfFrequencyHz * 2,
+              pointCount >= 8 else {
+            return []
+        }
+
+        guard let low = coefficients(
+                  type: N60BiquadFilterTypeLowShelf,
+                  frequencyHz: lowShelfFrequencyHz,
+                  gainDB: target.lowSupportDB,
+                  q: lowShelfQ,
+                  sampleRate: sampleRate
+              ),
+              let presence = coefficients(
+                  type: N60BiquadFilterTypePeaking,
+                  frequencyHz: presenceFrequencyHz,
+                  gainDB: target.presenceSupportDB,
+                  q: presenceQ,
+                  sampleRate: sampleRate
+              ),
+              let detail = coefficients(
+                  type: N60BiquadFilterTypeHighShelf,
+                  frequencyHz: detailShelfFrequencyHz,
+                  gainDB: target.detailSupportDB,
+                  q: detailShelfQ,
+                  sampleRate: sampleRate
+              ) else {
+            return []
+        }
+
+        let lowHz = 20.0
+        let highHz = min(20_000.0, sampleRate * 0.48)
+        guard highHz > lowHz else { return [] }
+        let ratio = highHz / lowHz
+
+        return (0..<pointCount).map { index in
+            let fraction = pointCount == 1
+                ? 0
+                : Double(index) / Double(pointCount - 1)
+            let frequency = lowHz * pow(ratio, fraction)
+            let spectralGain =
+                magnitudeDB(
+                    low,
+                    frequencyHz: frequency,
+                    sampleRate: sampleRate
+                )
+                + magnitudeDB(
+                    presence,
+                    frequencyHz: frequency,
+                    sampleRate: sampleRate
+                )
+                + magnitudeDB(
+                    detail,
+                    frequencyHz: frequency,
+                    sampleRate: sampleRate
+                )
+            return AmbientCompensationResponsePoint(
+                frequencyHz: frequency,
+                gainDB: target.levelDB + spectralGain
+            )
+        }
+    }
+
+    static func maximumAppliedGainDB(
+        target: AmbientCompensationTarget,
+        sampleRate: Double
+    ) -> Double {
+        response(
+            target: target,
+            sampleRate: sampleRate,
+            pointCount: 256
+        )
+        .map(\.gainDB)
+        .max()
+        ?? target.levelDB
+    }
+
+    private static func coefficients(
+        type: N60BiquadFilterType,
+        frequencyHz: Double,
+        gainDB: Double,
+        q: Double,
+        sampleRate: Double
+    ) -> N60BiquadCoefficients? {
+        if abs(gainDB) <= 0.000_1 {
+            return N60BiquadCoefficientsMakeIdentity()
+        }
+        var result = N60BiquadCoefficients()
+        guard N60BiquadDesign(
+            type,
+            sampleRate,
+            frequencyHz,
+            gainDB,
+            q,
+            &result
+        ) else {
+            return nil
+        }
+        return result
+    }
+
+    private static func magnitudeDB(
+        _ coefficients: N60BiquadCoefficients,
+        frequencyHz: Double,
+        sampleRate: Double
+    ) -> Double {
+        let omega = 2.0 * Double.pi * frequencyHz / sampleRate
+        let cosine = cos(omega)
+        let sine = sin(omega)
+        let cosine2 = cos(2.0 * omega)
+        let sine2 = sin(2.0 * omega)
+
+        let numeratorReal =
+            Double(coefficients.b0)
+            + Double(coefficients.b1) * cosine
+            + Double(coefficients.b2) * cosine2
+        let numeratorImaginary =
+            -Double(coefficients.b1) * sine
+            - Double(coefficients.b2) * sine2
+        let denominatorReal =
+            1.0
+            + Double(coefficients.a1) * cosine
+            + Double(coefficients.a2) * cosine2
+        let denominatorImaginary =
+            -Double(coefficients.a1) * sine
+            - Double(coefficients.a2) * sine2
+
+        let numeratorPower =
+            numeratorReal * numeratorReal
+            + numeratorImaginary * numeratorImaginary
+        let denominatorPower =
+            denominatorReal * denominatorReal
+            + denominatorImaginary * denominatorImaginary
+        guard numeratorPower.isFinite,
+              denominatorPower.isFinite,
+              denominatorPower > 1.0e-30 else {
+            return 0
+        }
+        return 10.0 * log10(
+            max(numeratorPower / denominatorPower, 1.0e-30)
+        )
+    }
+}
+
 /// Slow, bounded control-plane policy for converting trusted ambient analysis
 /// into a small playback compensation request. It never mutates DSP state.
 struct AmbientCompensationPlanner: Sendable {
