@@ -1921,16 +1921,6 @@ void N60RenderKernelProcessStereoSystemFrameInContext(
         left *= outputGain;
         right *= outputGain;
 
-        float quietZoneLeft = 0.0f;
-        float quietZoneRight = 0.0f;
-        N60ActiveQuietZoneRuntimeProcessFrame(
-            &kernel->activeQuietZoneRuntime,
-            &quietZoneLeft,
-            &quietZoneRight
-        );
-        left += quietZoneLeft;
-        right += quietZoneRight;
-
         if (kernel->headphoneDSPEnabled) {
             float headphoneLeft = 0.0f;
             float headphoneRight = 0.0f;
@@ -1949,16 +1939,29 @@ void N60RenderKernelProcessStereoSystemFrameInContext(
             }
         }
 
-        N60ProtectionProcessStereoFrame(
-            kernel->protectionRuntime,
-            &context->snapshot->protection,
+        // Pause gating belongs to program content. Active Quiet Zone must remain
+        // audible when content is paused, then the combined program + anti-noise
+        // signal passes through final speaker/true-peak protection.
+        N60DynamicsProcessPauseGateStereoFrame(
+            &kernel->dynamicsRuntime,
+            &context->snapshot->dynamics,
             &left,
             &right
         );
 
-        N60DynamicsProcessPauseGateStereoFrame(
-            &kernel->dynamicsRuntime,
-            &context->snapshot->dynamics,
+        float quietZoneLeft = 0.0f;
+        float quietZoneRight = 0.0f;
+        N60ActiveQuietZoneRuntimeProcessFrame(
+            &kernel->activeQuietZoneRuntime,
+            &quietZoneLeft,
+            &quietZoneRight
+        );
+        left += quietZoneLeft;
+        right += quietZoneRight;
+
+        N60ProtectionProcessStereoFrame(
+            kernel->protectionRuntime,
+            &context->snapshot->protection,
             &left,
             &right
         );
