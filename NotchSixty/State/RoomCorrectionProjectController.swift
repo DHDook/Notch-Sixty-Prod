@@ -239,6 +239,8 @@ final class RoomCorrectionProjectController: ObservableObject {
     @Published private(set) var project: RoomCorrectionProject?
     @Published private(set) var selectedDesignVerification:
         RoomCorrectionDesignVerificationReport?
+    @Published private(set) var lastGeneratedTargetReport:
+        IntelligentTargetGenerationReport?
     @Published private(set) var lastErrorDescription: String?
 
     init(
@@ -278,6 +280,7 @@ final class RoomCorrectionProjectController: ObservableObject {
             createdAt: now,
             modifiedAt: now
         )
+        lastGeneratedTargetReport = nil
         try persistAndPublish(fresh)
     }
 
@@ -288,6 +291,7 @@ final class RoomCorrectionProjectController: ObservableObject {
         } catch {
             project = nil
             selectedDesignVerification = nil
+            lastGeneratedTargetReport = nil
             lastErrorDescription = error.localizedDescription
         }
     }
@@ -296,6 +300,7 @@ final class RoomCorrectionProjectController: ObservableObject {
         guard let systemID = selectedPlaybackSystemID else {
             project = nil
             selectedDesignVerification = nil
+            lastGeneratedTargetReport = nil
             throw RoomCorrectionProjectControllerError.noSelectedPlaybackSystem
         }
 
@@ -310,6 +315,7 @@ final class RoomCorrectionProjectController: ObservableObject {
                 )
             }
             project = loaded
+            lastGeneratedTargetReport = nil
             refreshSelectedDesignVerification(in: loaded)
             lastErrorDescription = nil
             return
@@ -321,6 +327,7 @@ final class RoomCorrectionProjectController: ObservableObject {
             candidates.append(loaded)
         }
         project = candidates.max { lhs, rhs in lhs.modifiedAt < rhs.modifiedAt }
+        lastGeneratedTargetReport = nil
         if let project {
             refreshSelectedDesignVerification(in: project)
         } else {
@@ -379,6 +386,7 @@ final class RoomCorrectionProjectController: ObservableObject {
         updated.modifiedAt = retainedAt
         updated.aggregate = try aggregateOrNil(updated.measurements, generatedAt: retainedAt)
         updated.selectedDesignID = nil
+        lastGeneratedTargetReport = nil
         try persistAndPublish(updated)
         return position.id
     }
@@ -390,6 +398,7 @@ final class RoomCorrectionProjectController: ObservableObject {
         }
         updated.measurements[index].name = try normalizedPositionName(proposedName)
         updated.modifiedAt = modifiedAt
+        lastGeneratedTargetReport = nil
         try persistAndPublish(updated)
     }
 
@@ -402,6 +411,7 @@ final class RoomCorrectionProjectController: ObservableObject {
         updated.modifiedAt = modifiedAt
         updated.aggregate = try aggregateOrNil(updated.measurements, generatedAt: modifiedAt)
         updated.selectedDesignID = nil
+        lastGeneratedTargetReport = nil
         try persistAndPublish(updated)
     }
 
@@ -417,11 +427,13 @@ final class RoomCorrectionProjectController: ObservableObject {
         updated.modifiedAt = modifiedAt
         updated.aggregate = try aggregateOrNil(updated.measurements, generatedAt: modifiedAt)
         updated.selectedDesignID = nil
+        lastGeneratedTargetReport = nil
         try persistAndPublish(updated)
     }
 
     func setTarget(_ target: RoomCorrectionTargetCurve, modifiedAt: Date = Date()) throws {
         var updated = try requiredProject()
+        lastGeneratedTargetReport = nil
         updated.target = target
         // A target edit invalidates candidate selection, but retained historical
         // designs remain reproducibility assets. Deployed playback is owned by
@@ -429,6 +441,31 @@ final class RoomCorrectionProjectController: ObservableObject {
         updated.selectedDesignID = nil
         updated.modifiedAt = modifiedAt
         try persistAndPublish(updated)
+    }
+
+    @discardableResult
+    func generateIntelligentTarget(
+        preference: IntelligentTargetPreference,
+        parameters: RoomCorrectionDesignParameters,
+        modifiedAt: Date = Date()
+    ) throws -> IntelligentTargetGenerationReport {
+        var updated = try requiredProject()
+        guard let aggregate = updated.aggregate else {
+            throw RoomCorrectionProjectControllerError.aggregateUnavailable
+        }
+        _ = try usableDesignRange(in: updated)
+        let report = try IntelligentRoomTargetGenerator().generate(
+            aggregate: aggregate,
+            positions: updated.measurements,
+            parameters: parameters,
+            preference: preference
+        )
+        updated.target = report.target
+        updated.selectedDesignID = nil
+        updated.modifiedAt = modifiedAt
+        try persistAndPublish(updated)
+        lastGeneratedTargetReport = report
+        return report
     }
 
     func previewDesign(

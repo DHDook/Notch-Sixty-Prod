@@ -21,6 +21,8 @@ struct ProductionRoomCorrectionWorkspace: View {
     @State private var requestedTapCount = 4_096
     @State private var designName = ""
     @State private var designPreview: RoomCorrectionCorrectionPreview?
+    @State private var intelligentTargetPreference:
+        IntelligentTargetPreference = .neutral
 
     private var selectedInputBinding: Binding<String?> {
         Binding(
@@ -618,6 +620,144 @@ struct ProductionRoomCorrectionWorkspace: View {
                 .buttonStyle(.bordered)
             }
 
+            GroupBox("Adaptive Target") {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 12) {
+                        Picker(
+                            "Voicing",
+                            selection: $intelligentTargetPreference
+                        ) {
+                            ForEach(IntelligentTargetPreference.allCases) {
+                                preference in
+                                Text(preference.displayName)
+                                    .tag(preference)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(maxWidth: 360)
+
+                        Button {
+                            generateIntelligentTarget()
+                        } label: {
+                            Label(
+                                "Generate from Measurements",
+                                systemImage: "waveform.badge.magnifyingglass"
+                            )
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(projects.aggregate == nil)
+                    }
+
+                    Text(
+                        "Analyzes the measured system's broad tonal trend, usable bandwidth and listening-position variance. It does not trace narrow room modes, and the resulting target remains editable."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                    if let report = projects.lastGeneratedTargetReport {
+                        Divider()
+                        HStack(spacing: 22) {
+                            statusValue(
+                                "Confidence",
+                                "\(Int((report.confidence * 100).rounded()))%"
+                            )
+                            statusValue(
+                                "Bass Extension",
+                                formattedFrequency(
+                                    report.estimatedBassExtensionHz
+                                )
+                            )
+                            statusValue(
+                                "Bass Shelf",
+                                String(
+                                    format: "%+.2f dB",
+                                    report.generatedBassShelfDB
+                                )
+                            )
+                            statusValue(
+                                "20 kHz Tilt",
+                                String(
+                                    format: "%+.2f dB",
+                                    report.generatedTrebleAt20KDB
+                                )
+                            )
+                        }
+                        HStack(spacing: 22) {
+                            statusValue(
+                                "Target Band",
+                                "\(formattedFrequency(report.effectiveLowHz)) – \(formattedFrequency(report.effectiveHighHz))"
+                            )
+                            statusValue(
+                                "Spatial Variation",
+                                String(
+                                    format: "%.2f dB",
+                                    report.meanSpatialDeviationDB
+                                )
+                            )
+                            statusValue(
+                                "Max Requested Boost",
+                                String(
+                                    format: "%.2f dB",
+                                    report.maximumRequestedBoostDB
+                                )
+                            )
+                            statusValue(
+                                "Max Requested Cut",
+                                String(
+                                    format: "%.2f dB",
+                                    report.maximumRequestedCutDB
+                                )
+                            )
+                        }
+
+                        if report.fallbackUsed {
+                            Label(
+                                "Conservative fallback shaping is active because measurement confidence is limited.",
+                                systemImage: "shield.lefthalf.filled"
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        }
+
+                        if !report.clampDecisions.isEmpty {
+                            VStack(alignment: .leading, spacing: 5) {
+                                ForEach(
+                                    Array(
+                                        report.clampDecisions.enumerated()
+                                    ),
+                                    id: \.offset
+                                ) { _, decision in
+                                    Label(
+                                        decision,
+                                        systemImage: "arrow.left.and.right"
+                                    )
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+
+                        if !report.warnings.isEmpty {
+                            VStack(alignment: .leading, spacing: 5) {
+                                ForEach(
+                                    Array(report.warnings.enumerated()),
+                                    id: \.offset
+                                ) { _, warning in
+                                    Label(
+                                        warning,
+                                        systemImage:
+                                            "exclamationmark.triangle"
+                                    )
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(4)
+            }
+
             if let target = projects.target {
                 HStack(spacing: 20) {
                     statusValue("Target", target.name)
@@ -1001,6 +1141,25 @@ struct ProductionRoomCorrectionWorkspace: View {
             maximumCutDB: maximumCutDB,
             requestedTapCount: requestedTapCount
         )
+    }
+
+    private func generateIntelligentTarget() {
+        actionError = nil
+        do {
+            let report = try projects.generateIntelligentTarget(
+                preference: intelligentTargetPreference,
+                parameters: currentDesignParameters
+            )
+            targetEditorText = serializedTarget(report.target)
+            designPreview = nil
+            if designName.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            ).isEmpty {
+                designName = "\(report.target.name) Correction"
+            }
+        } catch {
+            actionError = error.localizedDescription
+        }
     }
 
     private func applyTarget(_ target: RoomCorrectionTargetCurve) {

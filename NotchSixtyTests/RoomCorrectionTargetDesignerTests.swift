@@ -229,4 +229,271 @@ final class RoomCorrectionTargetDesignerTests: XCTestCase {
             )
         }
     }
+
+    func testIntelligentTargetsAreDeterministicBoundedAndPreferenceOrdered() throws {
+        let frequencies = [
+            20.0, 40, 80, 160, 300, 1_000,
+            4_000, 10_000, 20_000,
+        ]
+        let magnitudes = [0.0, 0, 0, 0, 0, 0, -1, -2, -2.5]
+        let sample = intelligentSample(
+            frequencies: frequencies,
+            magnitudes: magnitudes,
+            snrDB: 60
+        )
+        let generator = IntelligentRoomTargetGenerator()
+        let neutral = try generator.generate(
+            samples: [sample],
+            parameters: parameters(maximumBoost: 4, maximumCut: 8),
+            preference: .neutral
+        )
+        let neutralAgain = try generator.generate(
+            samples: [sample],
+            parameters: parameters(maximumBoost: 4, maximumCut: 8),
+            preference: .neutral
+        )
+        let warm = try generator.generate(
+            samples: [sample],
+            parameters: parameters(maximumBoost: 4, maximumCut: 8),
+            preference: .warm
+        )
+        let studio = try generator.generate(
+            samples: [sample],
+            parameters: parameters(maximumBoost: 4, maximumCut: 8),
+            preference: .studio
+        )
+
+        XCTAssertEqual(neutral, neutralAgain)
+        XCTAssertGreaterThan(warm.generatedBassShelfDB, neutral.generatedBassShelfDB)
+        XCTAssertGreaterThan(neutral.generatedBassShelfDB, studio.generatedBassShelfDB)
+        XCTAssertLessThan(warm.generatedTrebleAt20KDB, neutral.generatedTrebleAt20KDB)
+        XCTAssertLessThan(neutral.generatedTrebleAt20KDB, studio.generatedTrebleAt20KDB)
+        XCTAssertLessThanOrEqual(
+            warm.generatedBassShelfDB,
+            IntelligentRoomTargetGenerator.maximumBassShelfDB
+        )
+        XCTAssertGreaterThanOrEqual(
+            warm.generatedTrebleAt20KDB,
+            IntelligentRoomTargetGenerator.minimumTrebleAt20KDB
+        )
+        XCTAssertLessThanOrEqual(
+            studio.generatedTrebleAt20KDB,
+            IntelligentRoomTargetGenerator.maximumTrebleAt20KDB
+        )
+        XCTAssertLessThanOrEqual(neutral.maximumRequestedBoostDB, 4.000_1)
+        XCTAssertLessThanOrEqual(neutral.maximumRequestedCutDB, 8.000_1)
+    }
+
+    func testIntelligentTargetLowConfidenceFallsBackConservatively() throws {
+        let sample = intelligentSample(
+            frequencies: [20, 40, 80, 160, 300, 1_000, 4_000, 10_000, 20_000],
+            magnitudes: [0, 0, 0, 0, 0, 0, -1, -2, -3],
+            snrDB: 20
+        )
+
+        let report = try IntelligentRoomTargetGenerator().generate(
+            samples: [sample],
+            parameters: parameters(maximumBoost: 4, maximumCut: 8),
+            preference: .warm
+        )
+
+        XCTAssertTrue(report.fallbackUsed)
+        XCTAssertLessThan(
+            report.confidence,
+            IntelligentRoomTargetGenerator.minimumConfidence
+        )
+        XCTAssertTrue(
+            report.warnings.contains {
+                $0.localizedCaseInsensitiveContains("confidence")
+            }
+        )
+        XCTAssertGreaterThanOrEqual(report.generatedBassShelfDB, 0)
+        XCTAssertLessThanOrEqual(
+            report.generatedBassShelfDB,
+            IntelligentRoomTargetGenerator.maximumBassShelfDB
+        )
+    }
+
+    func testIntelligentTargetSpatialVarianceReducesAggressiveness() throws {
+        let frequencies = [
+            20.0, 40, 80, 160, 300, 1_000,
+            4_000, 10_000, 20_000,
+        ]
+        let stable = intelligentSample(
+            label: "Stable",
+            frequencies: frequencies,
+            magnitudes: Array(repeating: 0, count: frequencies.count),
+            snrDB: 60
+        )
+        let high = intelligentSample(
+            label: "High",
+            frequencies: frequencies,
+            magnitudes: Array(repeating: 6, count: frequencies.count),
+            snrDB: 60,
+            weight: 0.5
+        )
+        let low = intelligentSample(
+            label: "Low",
+            frequencies: frequencies,
+            magnitudes: Array(repeating: -6, count: frequencies.count),
+            snrDB: 60,
+            weight: 0.5
+        )
+
+        let generator = IntelligentRoomTargetGenerator()
+        let stableReport = try generator.generate(
+            samples: [stable],
+            parameters: parameters(maximumBoost: 4, maximumCut: 8),
+            preference: .warm
+        )
+        let variableReport = try generator.generate(
+            samples: [high, low],
+            parameters: parameters(maximumBoost: 4, maximumCut: 8),
+            preference: .warm
+        )
+
+        XCTAssertGreaterThan(variableReport.meanSpatialDeviationDB, 5)
+        XCTAssertLessThan(variableReport.confidence, stableReport.confidence)
+        XCTAssertLessThan(
+            variableReport.generatedBassShelfDB,
+            stableReport.generatedBassShelfDB
+        )
+        XCTAssertTrue(
+            variableReport.warnings.contains {
+                $0.localizedCaseInsensitiveContains("variance")
+            }
+        )
+    }
+
+    func testIntelligentTargetDoesNotTraceNarrowRoomNull() throws {
+        let frequencies = [
+            20.0, 40, 80, 160, 300, 700, 1_000,
+            4_000, 10_000, 20_000,
+        ]
+        let magnitudes = [0.0, 0, 0, 0, 0, -20, 0, -1, -2, -2.5]
+        let sample = intelligentSample(
+            frequencies: frequencies,
+            magnitudes: magnitudes,
+            snrDB: 60
+        )
+
+        let report = try IntelligentRoomTargetGenerator().generate(
+            samples: [sample],
+            parameters: parameters(maximumBoost: 4, maximumCut: 8),
+            preference: .neutral
+        )
+
+        XCTAssertFalse(
+            report.target.points.contains {
+                abs($0.frequencyHz - 700) < 0.001
+            },
+            "A narrow measurement null must not become a target anchor."
+        )
+        XCTAssertLessThanOrEqual(report.target.points.count, 9)
+        XCTAssertTrue(
+            report.target.points.allSatisfy {
+                $0.gainDB.isFinite
+            }
+        )
+    }
+
+    func testIntelligentTargetClampsToConfiguredCorrectionLimits() throws {
+        let sample = intelligentSample(
+            frequencies: [20, 40, 80, 160, 300, 1_000, 4_000, 10_000, 20_000],
+            magnitudes: [-8, -6, -4, 0, 0, 0, 4, 6, 8],
+            snrDB: 60
+        )
+
+        let report = try IntelligentRoomTargetGenerator().generate(
+            samples: [sample],
+            parameters: parameters(
+                maximumBoost: 1,
+                maximumCut: 2
+            ),
+            preference: .warm
+        )
+
+        XCTAssertLessThanOrEqual(report.maximumRequestedBoostDB, 1.000_1)
+        XCTAssertLessThanOrEqual(report.maximumRequestedCutDB, 2.000_1)
+        XCTAssertFalse(report.clampDecisions.isEmpty)
+        XCTAssertGreaterThanOrEqual(report.effectiveLowHz, 20)
+        XCTAssertLessThanOrEqual(report.effectiveHighHz, 20_000)
+    }
+
+    func testIntelligentTargetDoesNotDemandUnsupportedDeepBass() throws {
+        let frequencies = [
+            20.0, 40, 80, 160, 300, 1_000,
+            4_000, 10_000, 20_000,
+        ]
+        let deep = intelligentSample(
+            label: "Deep Extension",
+            frequencies: frequencies,
+            magnitudes: [0, 0, 0, 0, 0, 0, -1, -2, -2.5],
+            snrDB: 60
+        )
+        let limited = intelligentSample(
+            label: "Limited Extension",
+            frequencies: frequencies,
+            magnitudes: [-14, -12, -9, -3, 0, 0, -1, -2, -2.5],
+            snrDB: 60
+        )
+        let generator = IntelligentRoomTargetGenerator()
+        let parameters = parameters(maximumBoost: 4, maximumCut: 8)
+
+        let deepReport = try generator.generate(
+            samples: [deep],
+            parameters: parameters,
+            preference: .warm
+        )
+        let limitedReport = try generator.generate(
+            samples: [limited],
+            parameters: parameters,
+            preference: .warm
+        )
+
+        XCTAssertGreaterThan(
+            limitedReport.estimatedBassExtensionHz,
+            deepReport.estimatedBassExtensionHz
+        )
+        XCTAssertLessThan(
+            limitedReport.generatedBassShelfDB,
+            deepReport.generatedBassShelfDB
+        )
+        XCTAssertLessThanOrEqual(
+            limitedReport.maximumRequestedBoostDB,
+            parameters.maximumBoostDB + 0.000_1
+        )
+    }
+
+
+    private func intelligentSample(
+        label: String = "Fixture",
+        frequencies: [Double],
+        magnitudes: [Double],
+        snrDB: Double,
+        weight: Double = 1
+    ) -> IntelligentTargetEvidenceSample {
+        IntelligentTargetEvidenceSample(
+            label: label,
+            response: RoomCorrectionFrequencyResponse(
+                frequenciesHz: frequencies,
+                magnitudeDB: magnitudes,
+                phaseRadians: nil
+            ),
+            quality: RoomCorrectionMeasurementQuality(
+                clipped: false,
+                playbackPeakDBFS: -18,
+                capturePeakDBFS: -12,
+                estimatedNoiseFloorDBFS: -72,
+                estimatedSNRDB: snrDB,
+                sweepComplete: true,
+                directArrivalSeconds: 0.01,
+                usableLowHz: frequencies.first,
+                usableHighHz: frequencies.last,
+                warnings: []
+            ),
+            weight: weight
+        )
+    }
+
 }

@@ -59,6 +59,7 @@ enum MultichannelCalibrationCampaignError: Error, Equatable, LocalizedError {
     case designRequired
     case predictionRequired
     case predictionRejected([String])
+    case intelligentTargetRequiresCompleteCampaign
 
     var errorDescription: String? {
         switch self {
@@ -94,6 +95,8 @@ enum MultichannelCalibrationCampaignError: Error, Equatable, LocalizedError {
             return "Run calibration prediction verification before deployment."
         case .predictionRejected(let reasons):
             return "Calibration prediction blocked deployment: " + reasons.joined(separator: " ")
+        case .intelligentTargetRequiresCompleteCampaign:
+            return "Complete all included speaker measurements before generating an adaptive calibration target."
         }
     }
 }
@@ -221,6 +224,8 @@ final class MultichannelCalibrationController: ObservableObject {
     @Published private(set) var latestDesign: MultichannelCalibrationDesign?
     @Published private(set) var latestPrediction:
         CalibrationPredictionReport?
+    @Published private(set) var intelligentTargetReport:
+        IntelligentTargetGenerationReport?
     @Published private(set) var lastErrorDescription: String?
 
     init(
@@ -349,6 +354,7 @@ final class MultichannelCalibrationController: ObservableObject {
         campaignSampleRate = sampleRate
         latestDesign = nil
         latestPrediction = nil
+        intelligentTargetReport = nil
         if let archive = try store.load(systemID),
            archive.routingSignature == signature,
            abs(archive.sampleRate - sampleRate) < 0.5 {
@@ -380,6 +386,7 @@ final class MultichannelCalibrationController: ObservableObject {
         ))
         latestDesign = nil
         latestPrediction = nil
+        intelligentTargetReport = nil
         state = .ready
         try persistCampaign()
     }
@@ -404,6 +411,7 @@ final class MultichannelCalibrationController: ObservableObject {
         seats[index].weight = weight
         latestDesign = nil
         latestPrediction = nil
+        intelligentTargetReport = nil
         state = campaignComplete ? .reviewing : .ready
         try persistCampaign()
     }
@@ -419,6 +427,7 @@ final class MultichannelCalibrationController: ObservableObject {
         measurements.removeAll { $0.seatID == id }
         latestDesign = nil
         latestPrediction = nil
+        intelligentTargetReport = nil
         state = campaignComplete ? .reviewing : .ready
         try persistCampaign()
     }
@@ -428,6 +437,7 @@ final class MultichannelCalibrationController: ObservableObject {
         measurements = []
         latestDesign = nil
         latestPrediction = nil
+        intelligentTargetReport = nil
         state = profile == nil ? .idle : .ready
         try persistCampaign()
     }
@@ -496,6 +506,7 @@ final class MultichannelCalibrationController: ObservableObject {
         activeTransport = transport
         latestDesign = nil
         latestPrediction = nil
+        intelligentTargetReport = nil
         do {
             try transport.start()
             state = .measuring
@@ -562,6 +573,9 @@ final class MultichannelCalibrationController: ObservableObject {
                 sampleRate: program.sampleRate,
                 channel: compact
             ))
+            latestDesign = nil
+            latestPrediction = nil
+            intelligentTargetReport = nil
             activeTarget = nil
             try persistCampaign()
             state = campaignComplete ? .reviewing : .ready
@@ -591,13 +605,95 @@ final class MultichannelCalibrationController: ObservableObject {
         measurements.removeAll { $0.seatID == seatID && $0.source == source }
         latestDesign = nil
         latestPrediction = nil
+        intelligentTargetReport = nil
         state = .ready
         try persistCampaign()
     }
 
     @discardableResult
+    func generateIntelligentTarget(
+        preference: IntelligentTargetPreference
+    ) throws -> IntelligentTargetGenerationReport {
+        try synchronizeCampaign()
+        guard campaignComplete else {
+            throw MultichannelCalibrationCampaignError
+                .intelligentTargetRequiresCompleteCampaign
+        }
+        guard let output = engine.selectedOutputDevice else {
+            throw MultichannelCalibrationCampaignError.outputRequired
+        }
+
+        let included = includedSeats
+        let seatByID = Dictionary(
+            uniqueKeysWithValues: included.map { ($0.id, $0) }
+        )
+        let speakerSources = sources.compactMap {
+            source -> MultichannelCalibrationSource? in
+            if case .speaker = source { return source }
+            return nil
+        }
+        let speakerCount = max(speakerSources.count, 1)
+        let speakerSet = Set(speakerSources)
+
+        let evidence = measurements.compactMap {
+            measurement -> IntelligentTargetEvidenceSample? in
+            guard speakerSet.contains(measurement.source),
+                  let seat = seatByID[measurement.seatID],
+                  let response = measurement.channel.transferFunction else {
+                return nil
+            }
+            return IntelligentTargetEvidenceSample(
+                label: "\(seat.name) \(measurement.source.displayName)",
+                response: response,
+                quality: measurement.channel.quality,
+                weight: seat.weight / Double(speakerCount)
+            )
+        }
+
+        let expectedEvidenceCount =
+            included.count * speakerSources.count
+        guard evidence.count == expectedEvidenceCount,
+              expectedEvidenceCount > 0 else {
+            throw IntelligentTargetGenerationError
+                .invalidEvidence("speaker calibration campaign")
+        }
+
+        let parameters = RoomCorrectionDesignParameters(
+            correctionLowHz:
+                MultichannelCalibrationDesigner.minimumFrequencyHz,
+            correctionHighHz: min(
+                MultichannelCalibrationDesigner
+                    .nominalMaximumFrequencyHz,
+                output.nominalSampleRate * 0.48
+            ),
+            smoothingOctaves: 1.0 / 6.0,
+            maximumBoostDB: 4.0,
+            maximumCutDB: 8.0,
+            requestedTapCount: 4_096
+        )
+        let report = try IntelligentRoomTargetGenerator().generate(
+            samples: evidence,
+            parameters: parameters,
+            preference: preference
+        )
+        intelligentTargetReport = report
+        latestDesign = nil
+        latestPrediction = nil
+        lastErrorDescription = nil
+        return report
+    }
+
+    func clearIntelligentTarget() {
+        intelligentTargetReport = nil
+        latestDesign = nil
+        latestPrediction = nil
+        state = campaignComplete ? .reviewing : .ready
+    }
+
+    @discardableResult
     func designCalibration(target: RoomCorrectionTargetCurve? = nil) async throws -> MultichannelCalibrationDesign {
         try synchronizeCampaign()
+        let resolvedTarget = target ?? intelligentTargetReport?.target
         guard let profile, let output = engine.selectedOutputDevice else {
             throw MultichannelCalibrationCampaignError.outputDeviceProfileRequired
         }
@@ -616,7 +712,7 @@ final class MultichannelCalibrationController: ObservableObject {
                     seats: seats,
                     measurements: measurements,
                     sampleRate: output.nominalSampleRate,
-                    target: target,
+                    target: resolvedTarget,
                     measuredAt: measuredAt,
                     deployedAt: Date()
                 )
@@ -624,7 +720,7 @@ final class MultichannelCalibrationController: ObservableObject {
                     design: design,
                     seats: seats,
                     measurements: measurements,
-                    target: target
+                    target: resolvedTarget
                 )
                 return (design, prediction)
             }.value
