@@ -147,7 +147,7 @@ for token in (
     "testEligibilityRequiresTrustedStationaryProminentLowFrequencyTone",
     "testRegularizedStereoSolutionTargetsBoundedReduction",
     "testVerificationAcceptsImprovementAndFaultsRegression",
-    "testTonePersistenceRequiresStableWindows",
+    "testTonePersistenceRequiresFourStableWindowsAndResetsOnDrift",
     "testRealtimeRuntimeRequiresFadeOutBeforeFrequencyChange",
     "testRenderGraphRejectsQuietZoneToneBeyondHardFrequencyBand",
 ):
