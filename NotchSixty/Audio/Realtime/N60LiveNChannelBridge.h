@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "N60AdaptiveSampleRate.h"
+#include "N60AudioUnitLiveRackBridge.h"
 #include "N60LiveNChannelRenderCore.h"
 #include "N60MIMOTreatmentLiveIntegration.h"
 #include "N60ProgramTransport.h"
@@ -58,6 +59,8 @@ typedef struct N60LiveNChannelBridge {
     float * _Nullable adaptiveOutputScratch;
     N60LiveNChannelRenderRuntime * _Nullable renderRuntime;
     N60MIMOTreatmentLiveIntegration * _Nullable roomTreatment;
+    N60AudioUnitLiveRackProcessor audioUnitRack;
+    float * _Nullable audioUnitRackScratch;
     N60ProgramInputMap inputMap;
     N60LiveNChannelRenderGraph graph;
 
@@ -188,6 +191,7 @@ static inline void N60LiveNChannelBridgeDestroy(
     N60MIMOTreatmentLiveIntegrationDestroy(bridge->roomTreatment);
     free(bridge->adaptiveCaptureScratch);
     free(bridge->adaptiveOutputScratch);
+    free(bridge->audioUnitRackScratch);
     bridge->transport = NULL;
     bridge->renderRuntime = NULL;
     bridge->roomTreatment = NULL;
@@ -276,6 +280,35 @@ static inline bool N60LiveNChannelBridgeAdaptiveSampleRateEnabled(
     const N60LiveNChannelBridge * _Nullable bridge
 ) {
     return bridge != NULL && bridge->adaptiveSRC != NULL;
+}
+
+static inline bool N60LiveNChannelBridgeConfigureAudioUnitRack(
+    N60LiveNChannelBridge * _Nonnull bridge,
+    N60AudioUnitLiveRackProcessor processor
+) {
+    if (bridge == NULL
+        || bridge->transport == NULL
+        || bridge->audioUnitRack.context != NULL
+        || !N60AudioUnitLiveRackProcessorIsValid(&processor)
+        || processor.channelCount
+            != bridge->graph.programLayout.channelCount
+        || processor.maximumFramesPerSlice
+            > bridge->transport->capacityFrames) {
+        return false;
+    }
+
+    const size_t sampleCount =
+        (size_t)bridge->transport->capacityFrames
+        * bridge->graph.programLayout.channelCount;
+    float *scratch = (float *)calloc(
+        sampleCount,
+        sizeof(float)
+    );
+    if (scratch == NULL) return false;
+
+    bridge->audioUnitRack = processor;
+    bridge->audioUnitRackScratch = scratch;
+    return true;
 }
 
 static inline bool N60LiveNChannelBridgeConfigureRoomTreatment(
@@ -471,7 +504,11 @@ static inline N60LiveNChannelBridgeSnapshot N60LiveNChannelBridgeGetSnapshot(
             memory_order_relaxed
         ),
         .outputGateOpen = atomic_load_explicit(&bridge->outputGateOpen, memory_order_acquire),
-        .algorithmicLatencyFrames = N60LiveNChannelRenderGraphLatencyFrames(&bridge->graph),
+        .algorithmicLatencyFrames =
+            N60LiveNChannelRenderGraphLatencyFrames(&bridge->graph)
+            + (N60AudioUnitLiveRackProcessorIsValid(&bridge->audioUnitRack)
+                ? bridge->audioUnitRack.latencyFrames
+                : 0u),
         .transport = N60ProgramTransportGetSnapshot(bridge->transport),
         .adaptiveSampleRateEnabled = bridge->adaptiveSRC != NULL,
         .roomTreatmentConfigured = bridge->roomTreatment != NULL,
@@ -702,17 +739,89 @@ static inline OSStatus N60LiveNChannelOutputIOProc(
         );
     }
 
+    const uint32_t programChannels =
+        bridge->graph.programLayout.channelCount;
+    const bool rackConfigured =
+        N60AudioUnitLiveRackProcessorIsValid(&bridge->audioUnitRack);
+    if (rackConfigured) {
+        if (frameCount > bridge->audioUnitRack.maximumFramesPerSlice
+            || bridge->audioUnitRackScratch == NULL) {
+            N60LiveNChannelZeroOutput(outOutputData);
+            atomic_fetch_add_explicit(
+                &bridge->renderFailures, 1u, memory_order_relaxed
+            );
+            return noErr;
+        }
+
+        for (uint32_t frameIndex = 0;
+             frameIndex < frameCount;
+             ++frameIndex) {
+            float *destination =
+                bridge->audioUnitRackScratch
+                + (size_t)frameIndex * programChannels;
+            if (adaptiveSampleRate) {
+                memcpy(
+                    destination,
+                    bridge->adaptiveOutputScratch
+                        + (size_t)frameIndex * programChannels,
+                    (size_t)programChannels * sizeof(float)
+                );
+            } else {
+                N60ProgramTransportFrame canonical = {0};
+                (void)N60ProgramTransportDequeueFrame(
+                    bridge->transport,
+                    &canonical
+                );
+                memcpy(
+                    destination,
+                    canonical.channels,
+                    (size_t)programChannels * sizeof(float)
+                );
+            }
+        }
+
+        const double sampleTime =
+            inOutputTime != NULL
+            && (inOutputTime->mFlags
+                & kAudioTimeStampSampleTimeValid) != 0
+                ? inOutputTime->mSampleTime
+                : 0.0;
+        if (!N60AudioUnitLiveRackProcess(
+                &bridge->audioUnitRack,
+                bridge->audioUnitRackScratch,
+                bridge->audioUnitRackScratch,
+                frameCount,
+                programChannels,
+                sampleTime)) {
+            N60LiveNChannelZeroOutput(outOutputData);
+            atomic_fetch_add_explicit(
+                &bridge->renderFailures, 1u, memory_order_relaxed
+            );
+            return noErr;
+        }
+    }
+
     for (uint32_t frameIndex = 0; frameIndex < frameCount; ++frameIndex) {
         N60ProgramTransportFrame input = {0};
-        if (adaptiveSampleRate) {
-            const uint32_t channels = bridge->graph.programLayout.channelCount;
+        if (rackConfigured) {
             memcpy(
                 input.channels,
-                bridge->adaptiveOutputScratch + (size_t)frameIndex * channels,
-                (size_t)channels * sizeof(float)
+                bridge->audioUnitRackScratch
+                    + (size_t)frameIndex * programChannels,
+                (size_t)programChannels * sizeof(float)
+            );
+        } else if (adaptiveSampleRate) {
+            memcpy(
+                input.channels,
+                bridge->adaptiveOutputScratch
+                    + (size_t)frameIndex * programChannels,
+                (size_t)programChannels * sizeof(float)
             );
         } else {
-            (void)N60ProgramTransportDequeueFrame(bridge->transport, &input);
+            (void)N60ProgramTransportDequeueFrame(
+                bridge->transport,
+                &input
+            );
         }
 
         N60LiveNChannelPhysicalFrame physical = {0};
