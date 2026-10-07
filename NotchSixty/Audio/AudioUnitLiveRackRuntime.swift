@@ -91,6 +91,8 @@ struct AudioUnitLiveRackFault: Equatable, Sendable {
             return "Live Audio Unit produced a non-finite output sample."
         case N60AudioUnitLiveRackFaultRuntimeInvariant:
             return "Live Audio Unit rack hit an impossible prepared-runtime invariant."
+        case N60AudioUnitLiveRackFaultCPUOverrun:
+            return "Live Audio Unit exceeded the severe realtime CPU budget repeatedly."
         default:
             return "Live Audio Unit rack reported an unknown runtime fault."
         }
@@ -175,6 +177,56 @@ enum AudioUnitLiveTimingValidator {
             return nil
         }
         return Int(frames)
+    }
+}
+
+struct AudioUnitLiveRenderWatchdog {
+    static let severeOverrunMultiplier = 4.0
+    static let minimumBudgetSeconds = 0.010
+    static let consecutiveOverrunLimit = 3
+
+    private(set) var consecutiveOverruns = 0
+
+    static func budgetTicks(
+        frameCount: Int,
+        sampleRate: Double,
+        ticksPerSecond: Double
+    ) -> UInt64 {
+        guard frameCount > 0,
+              sampleRate.isFinite,
+              sampleRate > 0,
+              ticksPerSecond.isFinite,
+              ticksPerSecond > 0 else {
+            return UInt64.max
+        }
+
+        let bufferSeconds = Double(frameCount) / sampleRate
+        let budgetSeconds = max(
+            minimumBudgetSeconds,
+            bufferSeconds * severeOverrunMultiplier
+        )
+        let ticks = ceil(budgetSeconds * ticksPerSecond)
+        guard ticks.isFinite,
+              ticks > 0,
+              ticks < Double(UInt64.max) else {
+            return UInt64.max
+        }
+        return UInt64(ticks)
+    }
+
+    mutating func observe(
+        elapsedTicks: UInt64,
+        budgetTicks: UInt64
+    ) -> Bool {
+        if elapsedTicks > budgetTicks {
+            consecutiveOverruns = min(
+                consecutiveOverruns + 1,
+                Self.consecutiveOverrunLimit
+            )
+        } else {
+            consecutiveOverruns = 0
+        }
+        return consecutiveOverruns >= Self.consecutiveOverrunLimit
     }
 }
 
@@ -343,6 +395,7 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
     private let channelCount: Int
     private let maximumFramesPerSlice: Int
     private let sampleRate: Double
+    private let ticksPerSecond: Double
     private let wetDryMix: Float
     private let delay: AudioUnitLiveDelayLine
     private let dryScratch: UnsafeMutablePointer<Float>
@@ -350,6 +403,7 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
 
     private var currentInput: UnsafePointer<Float>?
     private var currentFrameCount = 0
+    private var renderWatchdog = AudioUnitLiveRenderWatchdog()
 
     private lazy var pullInputBlock: AURenderPullInputBlock = {
         [unowned self] _, _, requestedFrameCount, _, inputData in
@@ -410,6 +464,7 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
         self.channelCount = channelCount
         self.maximumFramesPerSlice = maximumFramesPerSlice
         self.sampleRate = sampleRate
+        self.ticksPerSecond = Self.currentTicksPerSecond()
         self.latencyFrames = latencyFrames
         self.tailFrames = tailFrames
         self.wetDryMix = wetDryMix
@@ -719,6 +774,7 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
         timestamp.mSampleTime = sampleTime
         timestamp.mFlags = .sampleTimeValid
 
+        let renderStart = mach_absolute_time()
         let status = renderBlock(
             &flags,
             &timestamp,
@@ -727,6 +783,7 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
             outputBuffer.mutableAudioBufferList,
             pullInputBlock
         )
+        let renderElapsed = mach_absolute_time() &- renderStart
         currentInput = nil
         currentFrameCount = 0
 
@@ -741,6 +798,29 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
                 faultReason: N60AudioUnitLiveRackFaultRenderStatus,
                 renderStatus: status
             )
+        }
+
+        if frameCount > 0 {
+            let budgetTicks = AudioUnitLiveRenderWatchdog.budgetTicks(
+                frameCount: frameCount,
+                sampleRate: sampleRate,
+                ticksPerSecond: ticksPerSecond
+            )
+            if renderWatchdog.observe(
+                elapsedTicks: renderElapsed,
+                budgetTicks: budgetTicks
+            ) {
+                N60AudioUnitStageFaultGateTrip(faultGate)
+                memcpy(
+                    outputInterleaved,
+                    dryScratch,
+                    frameCount * channelCount * MemoryLayout<Float>.size
+                )
+                return AudioUnitLiveRackStageResult(
+                    faultReason: N60AudioUnitLiveRackFaultCPUOverrun,
+                    renderStatus: noErr
+                )
+            }
         }
 
         let wet = wetDryMix
@@ -772,6 +852,19 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
             frame += 1
         }
         return .success
+    }
+
+    private static func currentTicksPerSecond() -> Double {
+        var info = mach_timebase_info_data_t()
+        let status = mach_timebase_info(&info)
+        guard status == KERN_SUCCESS,
+              info.numer > 0,
+              info.denom > 0 else {
+            return 1_000_000_000
+        }
+        return 1_000_000_000
+            * Double(info.denom)
+            / Double(info.numer)
     }
 
     private static func instantiate(
