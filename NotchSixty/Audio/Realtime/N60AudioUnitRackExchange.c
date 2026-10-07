@@ -287,6 +287,29 @@ bool N60AudioUnitRackExchangeSlotIsReclaimable(
             memory_order_acquire) == 0u;
 }
 
+bool N60AudioUnitRackExchangeAtomicsAreLockFree(
+    const N60AudioUnitRackExchange *exchange
+) {
+    if (exchange == NULL) return false;
+    if (!atomic_is_lock_free(&exchange->activeSlot)
+        || !atomic_is_lock_free(&exchange->requestedSlot)
+        || !atomic_is_lock_free(&exchange->requestedTransitionFrames)
+        || !atomic_is_lock_free(&exchange->publishedGeneration)
+        || !atomic_is_lock_free(&exchange->renderedGeneration)
+        || !atomic_is_lock_free(&exchange->transitionFailureCount)
+        || !atomic_is_lock_free(&exchange->transitionPosition)) {
+        return false;
+    }
+    for (uint32_t index = 0u;
+         index < N60_AUDIO_UNIT_RACK_EXCHANGE_SLOT_COUNT;
+         ++index) {
+        if (!atomic_is_lock_free(&exchange->slots[index].readers)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 N60AudioUnitRackExchangeStatus N60AudioUnitRackExchangeGetStatus(
     const N60AudioUnitRackExchange *exchange
 ) {
