@@ -1,0 +1,4 @@
+#ifndef N60_LIBMYSOFA_EXPORT_H
+#define N60_LIBMYSOFA_EXPORT_H
+#define MYSOFA_EXPORT
+#endif

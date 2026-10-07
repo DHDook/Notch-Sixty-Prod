@@ -97,6 +97,19 @@
 		F82000000000000000000002 /* AudioUnitLiveRackSwitchboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F82000000000000000000012 /* AudioUnitLiveRackSwitchboard.swift */; };
 		F82000000000000000000003 /* AudioUnitRackMutation.swift in Sources */ = {isa = PBXBuildFile; fileRef = F82000000000000000000013 /* AudioUnitRackMutation.swift */; };
 		F82000000000000000000004 /* AudioUnitRackMutationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F82000000000000000000014 /* AudioUnitRackMutationTests.swift */; };
+
+		F85000000000000000000001 /* NativeSOFAImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F85000000000000000000011 /* NativeSOFAImporter.swift */; };
+		F85000000000000000000002 /* N60SOFABridge.c in Sources */ = {isa = PBXBuildFile; fileRef = F85000000000000000000012 /* N60SOFABridge.c */; };
+		F85000000000000000000003 /* libmysofa reader.c in Sources */ = {isa = PBXBuildFile; fileRef = F85000000000000000000013 /* libmysofa reader.c */; };
+		F85000000000000000000004 /* libmysofa tools.c in Sources */ = {isa = PBXBuildFile; fileRef = F85000000000000000000014 /* libmysofa tools.c */; };
+		F85000000000000000000005 /* libmysofa spherical.c in Sources */ = {isa = PBXBuildFile; fileRef = F85000000000000000000015 /* libmysofa spherical.c */; };
+		F85000000000000000000006 /* libmysofa superblock.c in Sources */ = {isa = PBXBuildFile; fileRef = F85000000000000000000016 /* libmysofa superblock.c */; };
+		F85000000000000000000007 /* libmysofa dataobject.c in Sources */ = {isa = PBXBuildFile; fileRef = F85000000000000000000017 /* libmysofa dataobject.c */; };
+		F85000000000000000000008 /* libmysofa btree.c in Sources */ = {isa = PBXBuildFile; fileRef = F85000000000000000000018 /* libmysofa btree.c */; };
+		F85000000000000000000009 /* libmysofa fractalhead.c in Sources */ = {isa = PBXBuildFile; fileRef = F85000000000000000000019 /* libmysofa fractalhead.c */; };
+		F8500000000000000000000A /* libmysofa gunzip.c in Sources */ = {isa = PBXBuildFile; fileRef = F8500000000000000000001A /* libmysofa gunzip.c */; };
+		F8500000000000000000000B /* libmysofa gcol.c in Sources */ = {isa = PBXBuildFile; fileRef = F8500000000000000000001B /* libmysofa gcol.c */; };
+		F8500000000000000000000C /* NativeSOFAImporterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8500000000000000000001C /* NativeSOFAImporterTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -212,6 +225,18 @@
 		F82000000000000000000012 /* AudioUnitLiveRackSwitchboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioUnitLiveRackSwitchboard.swift; sourceTree = "<group>"; };
 		F82000000000000000000013 /* AudioUnitRackMutation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioUnitRackMutation.swift; sourceTree = "<group>"; };
 		F82000000000000000000014 /* AudioUnitRackMutationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioUnitRackMutationTests.swift; sourceTree = "<group>"; };
+
+		F85000000000000000000011 /* NativeSOFAImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Audio/SOFA/NativeSOFAImporter.swift"; sourceTree = "<group>"; };
+		F85000000000000000000012 /* N60SOFABridge.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "Audio/SOFA/N60SOFABridge.c"; sourceTree = "<group>"; };
+		F85000000000000000000013 /* libmysofa reader.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "Audio/SOFA/Vendor/libmysofa/hrtf/reader.c"; sourceTree = "<group>"; };
+		F85000000000000000000014 /* libmysofa tools.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "Audio/SOFA/Vendor/libmysofa/hrtf/tools.c"; sourceTree = "<group>"; };
+		F85000000000000000000015 /* libmysofa spherical.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "Audio/SOFA/Vendor/libmysofa/hrtf/spherical.c"; sourceTree = "<group>"; };
+		F85000000000000000000016 /* libmysofa superblock.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "Audio/SOFA/Vendor/libmysofa/hdf/superblock.c"; sourceTree = "<group>"; };
+		F85000000000000000000017 /* libmysofa dataobject.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "Audio/SOFA/Vendor/libmysofa/hdf/dataobject.c"; sourceTree = "<group>"; };
+		F85000000000000000000018 /* libmysofa btree.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "Audio/SOFA/Vendor/libmysofa/hdf/btree.c"; sourceTree = "<group>"; };
+		F85000000000000000000019 /* libmysofa fractalhead.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "Audio/SOFA/Vendor/libmysofa/hdf/fractalhead.c"; sourceTree = "<group>"; };
+		F8500000000000000000001A /* libmysofa gunzip.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "Audio/SOFA/Vendor/libmysofa/hdf/gunzip.c"; sourceTree = "<group>"; };
+		F8500000000000000000001B /* libmysofa gcol.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "Audio/SOFA/Vendor/libmysofa/hdf/gcol.c"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -240,6 +265,17 @@
 				A10000000000000000000021 /* ContentView.swift */,
 				A10000000000000000000022 /* Assets.xcassets */,
 				A10000000000000000000023 /* NotchSixty.entitlements */,
+				F85000000000000000000011 /* NativeSOFAImporter.swift */,
+				F85000000000000000000012 /* N60SOFABridge.c */,
+				F85000000000000000000013 /* libmysofa reader.c */,
+				F85000000000000000000014 /* libmysofa tools.c */,
+				F85000000000000000000015 /* libmysofa spherical.c */,
+				F85000000000000000000016 /* libmysofa superblock.c */,
+				F85000000000000000000017 /* libmysofa dataobject.c */,
+				F85000000000000000000018 /* libmysofa btree.c */,
+				F85000000000000000000019 /* libmysofa fractalhead.c */,
+				F8500000000000000000001A /* libmysofa gunzip.c */,
+				F8500000000000000000001B /* libmysofa gcol.c */,
 			);
 			path = NotchSixty;
 			sourceTree = "<group>";
@@ -270,6 +306,7 @@
 				F80000000000000000000012 /* AudioUnitOfflinePreparationTests.swift */,
 				F81000000000000000000013 /* AudioUnitLiveRackRuntimeTests.swift */,
 				F82000000000000000000014 /* AudioUnitRackMutationTests.swift */,
+				F8500000000000000000001C /* NativeSOFAImporterTests.swift */,
 			);
 			path = NotchSixtyTests;
 			sourceTree = "<group>";
@@ -475,6 +512,17 @@
 				F82000000000000000000001 /* N60AudioUnitRackExchange.c in Sources */,
 				F82000000000000000000002 /* AudioUnitLiveRackSwitchboard.swift in Sources */,
 				F82000000000000000000003 /* AudioUnitRackMutation.swift in Sources */,
+				F85000000000000000000001 /* NativeSOFAImporter.swift in Sources */,
+				F85000000000000000000002 /* N60SOFABridge.c in Sources */,
+				F85000000000000000000003 /* libmysofa reader.c in Sources */,
+				F85000000000000000000004 /* libmysofa tools.c in Sources */,
+				F85000000000000000000005 /* libmysofa spherical.c in Sources */,
+				F85000000000000000000006 /* libmysofa superblock.c in Sources */,
+				F85000000000000000000007 /* libmysofa dataobject.c in Sources */,
+				F85000000000000000000008 /* libmysofa btree.c in Sources */,
+				F85000000000000000000009 /* libmysofa fractalhead.c in Sources */,
+				F8500000000000000000000A /* libmysofa gunzip.c in Sources */,
+				F8500000000000000000000B /* libmysofa gcol.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -505,6 +553,7 @@
 				F80000000000000000000002 /* AudioUnitOfflinePreparationTests.swift in Sources */,
 				F81000000000000000000003 /* AudioUnitLiveRackRuntimeTests.swift in Sources */,
 				F82000000000000000000004 /* AudioUnitRackMutationTests.swift in Sources */,
+				F8500000000000000000000C /* NativeSOFAImporterTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -536,6 +585,10 @@
 				PRODUCT_MODULE_NAME = NotchSixty;
 				PRODUCT_NAME = "Notch Sixty";
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lz",
+				);
 				SWIFT_OBJC_BRIDGING_HEADER = "NotchSixty/Audio/Realtime/NotchSixty-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 			};
@@ -561,6 +614,10 @@
 				PRODUCT_MODULE_NAME = NotchSixty;
 				PRODUCT_NAME = "Notch Sixty";
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lz",
+				);
 				SWIFT_OBJC_BRIDGING_HEADER = "NotchSixty/Audio/Realtime/NotchSixty-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 			};

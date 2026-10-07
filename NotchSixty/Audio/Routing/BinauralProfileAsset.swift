@@ -47,6 +47,7 @@ struct BinauralProfileAsset: Codable, Equatable, Sendable, Identifiable {
     var declaredLatencyFrames: Int = 0
     var kind: BinauralAssetKind = .hrtf
     var measurements: [BinauralMeasurement]
+    var importProvenance: SOFAImportProvenance? = nil
 
     func validate() throws {
         guard schemaVersion == Self.currentSchemaVersion else {
@@ -229,7 +230,7 @@ enum BinauralProfileAssetError: Error, LocalizedError, Equatable {
     case descriptorCompilationFailed
     case measurementUnavailable(String)
     case assetNotFound(UUID)
-    case nativeSOFAParserUnavailable
+    case sofaImportFailed(String)
     case persistenceFailed
 
     var errorDescription: String? {
@@ -246,8 +247,8 @@ enum BinauralProfileAssetError: Error, LocalizedError, Equatable {
             return "The normalized spatial profile cannot provide a measurement for \(role)."
         case .assetNotFound(let id):
             return "The spatial profile asset \(id.uuidString) is not available in the app sandbox."
-        case .nativeSOFAParserUnavailable:
-            return "Native .sofa/HDF5 import is not enabled in this build. Normalize the two-ear dataset first; the renderer itself remains SOFA-compatible."
+        case .sofaImportFailed(let reason):
+            return "SOFA import failed. \(reason)"
         case .persistenceFailed:
             return "Unable to persist the normalized spatial profile in the app sandbox."
         }
@@ -314,13 +315,32 @@ final class BinauralProfileAssetStore {
         }
     }
 
-    /// Imports Notch Sixty's documented normalized JSON boundary. Native SOFA is
-    /// intentionally rejected until an HDF5 parser/dependency has an explicit
-    /// license, sandbox and provenance review.
-    func importNormalizedDocument(from sourceURL: URL) throws -> BinauralProfileReference {
+    /// Imports either a native AES69/SOFA FIR document or Notch Sixty's
+    /// normalized JSON boundary. All file parsing stays on the control plane;
+    /// only the normalized asset is persisted for later realtime preparation.
+    func importNormalizedDocument(
+        from sourceURL: URL
+    ) throws -> BinauralProfileReference {
         if sourceURL.pathExtension.lowercased() == "sofa" {
-            throw BinauralProfileAssetError.nativeSOFAParserUnavailable
+            do {
+                let dataset = try NativeSOFAImporter()
+                    .load(from: sourceURL)
+                var asset = try SOFABinauralAssetAdapter()
+                    .makeAsset(
+                        from: dataset,
+                        sourceURL: sourceURL
+                    )
+                asset.id = UUID()
+                return try save(asset)
+            } catch let error as BinauralProfileAssetError {
+                throw error
+            } catch {
+                throw BinauralProfileAssetError.sofaImportFailed(
+                    error.localizedDescription
+                )
+            }
         }
+
         do {
             var asset = try decoder.decode(
                 BinauralProfileAsset.self,
