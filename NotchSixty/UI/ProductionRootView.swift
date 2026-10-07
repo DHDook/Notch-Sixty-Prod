@@ -261,17 +261,14 @@ struct ProductionRootView: View {
         case .activeAcoustics:
             ProductionActiveAcousticsWorkspace(engine: engine)
         case .plugins:
-            ProductionPluginWorkspace(
-                engine: engine,
-                host: product.audioUnitHost
-            )
+            ProductionPluginWorkspace(product: product)
         }
     }
 
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
         ToolbarItemGroup(placement: .primaryAction) {
-            ProductionProfileToolbar(profiles: product.profiles, engine: engine)
+            ProductionProfileToolbar(product: product)
 
             if let output = engine.selectedOutputDevice {
                 HStack(spacing: 5) {
