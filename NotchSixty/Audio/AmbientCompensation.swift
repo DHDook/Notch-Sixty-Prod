@@ -148,7 +148,8 @@ struct AmbientCompensationTarget: Equatable, Sendable {
         detailSupportDB: 0,
         confidence: 0,
         ambientDeltaDB: 0,
-        holdReason: nil
+        holdReason: nil,
+        mode: .off
     )
 
     var activity: AmbientActivityClass
@@ -900,8 +901,10 @@ struct AmbientCompensationEnvelope: Equatable, Sendable {
             resolved = target
         }
 
+        let timingMode =
+            resolved.mode == .off ? current.mode : resolved.mode
         let timing =
-            resolved.mode == .conversationFocus
+            timingMode == .conversationFocus
                 ? configuration.effectiveConversationPreservation
                 : ConversationPreservationConfiguration(
                     attackSeconds: configuration.attackSeconds,
