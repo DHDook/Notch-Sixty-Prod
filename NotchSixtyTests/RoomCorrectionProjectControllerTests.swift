@@ -88,7 +88,9 @@ final class RoomCorrectionProjectControllerTests: XCTestCase {
             transferFunction: RoomCorrectionFrequencyResponse(
                 frequenciesHz: frequencies,
                 magnitudeDB: leftMagnitude,
-                phaseRadians: [0.1, 0.2]
+                phaseRadians: frequencies.indices.map {
+                    0.1 * Double($0 + 1)
+                }
             ),
             quality: quality
         )
@@ -99,7 +101,9 @@ final class RoomCorrectionProjectControllerTests: XCTestCase {
             transferFunction: RoomCorrectionFrequencyResponse(
                 frequenciesHz: frequencies,
                 magnitudeDB: rightMagnitude,
-                phaseRadians: [-0.1, -0.2]
+                phaseRadians: frequencies.indices.map {
+                    -0.1 * Double($0 + 1)
+                }
             ),
             quality: quality
         )
