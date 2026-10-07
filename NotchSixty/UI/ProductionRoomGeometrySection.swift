@@ -78,6 +78,7 @@ struct ProductionRoomGeometrySection: View {
 
                     evidenceCard(analysis)
                     placementCard(analysis)
+                    placementVerificationCard
 
                     DisclosureGroup(
                         "Detailed Geometry Predictions",
@@ -433,8 +434,37 @@ struct ProductionRoomGeometrySection: View {
                                     horizontal: false,
                                     vertical: true
                                 )
+
+                            Text(
+                                candidateTargetSummary(
+                                    candidate
+                                )
+                            )
+                            .font(
+                                .system(
+                                    .caption2,
+                                    design: .monospaced
+                                )
+                            )
+                            .foregroundStyle(.secondary)
                         }
                         Spacer()
+
+                        Button {
+                            advisor.previewPlacementCandidate(
+                                candidate
+                            )
+                        } label: {
+                            Label(
+                                "Preview",
+                                systemImage:
+                                    "eye"
+                            )
+                        }
+                        .buttonStyle(.bordered)
+                        .help(
+                            "Load this predicted placement into the room-model draft. This does not change playback or move hardware."
+                        )
                     }
 
                     if index
@@ -459,6 +489,94 @@ struct ProductionRoomGeometrySection: View {
         .background(
             .secondary.opacity(0.045),
             in: RoundedRectangle(cornerRadius: 13)
+        )
+    }
+
+    private var placementVerificationCard: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text("Verify a Placement Change")
+                .font(.subheadline.bold())
+
+            verificationStep(
+                1,
+                "Choose one placement experiment and preview its target coordinates."
+            )
+            verificationStep(
+                2,
+                "Physically move only that speaker/listener element; keep other variables unchanged."
+            )
+            verificationStep(
+                3,
+                "Save the updated geometry, then repeat the same acoustic measurement positions with the same microphone."
+            )
+            verificationStep(
+                4,
+                "Keep the move only if the new measurement improves the original PR92 problem—not merely the geometry score."
+            )
+
+            Label(
+                "The saved room model records where the hardware actually is; it does not apply a DSP setting.",
+                systemImage: "ruler"
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.top, 2)
+        }
+        .padding(14)
+        .background(
+            .secondary.opacity(0.045),
+            in: RoundedRectangle(cornerRadius: 13)
+        )
+    }
+
+    private func verificationStep(
+        _ number: Int,
+        _ text: String
+    ) -> some View {
+        HStack(alignment: .top, spacing: 9) {
+            Text("\(number)")
+                .font(.caption.bold())
+                .frame(width: 22, height: 22)
+                .background(
+                    .secondary.opacity(0.09),
+                    in: Circle()
+                )
+            Text(text)
+                .font(.caption)
+                .fixedSize(
+                    horizontal: false,
+                    vertical: true
+                )
+        }
+    }
+
+    private func candidateTargetSummary(
+        _ candidate: RoomPlacementCandidate
+    ) -> String {
+        switch candidate.kind {
+        case .listener:
+            return "Target listener: "
+                + formattedPoint(candidate.listener)
+        case .speakerPair,
+             .speakerSpacing:
+            return "Target L: "
+                + formattedPoint(candidate.leftSpeaker)
+                + " · R: "
+                + formattedPoint(candidate.rightSpeaker)
+        }
+    }
+
+    private func formattedPoint(
+        _ point: RoomGeometryPoint3D
+    ) -> String {
+        let factor = unit.fromMeters
+        return String(
+            format:
+                "(%.2f, %.2f, %.2f) %@",
+            point.x * factor,
+            point.y * factor,
+            point.z * factor,
+            unit.title
         )
     }
 
