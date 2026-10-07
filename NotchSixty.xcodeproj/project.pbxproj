@@ -72,6 +72,7 @@
 		A30000000000000000000017 /* N60DynamicsLegacyAdvanced.c in Sources */ = {isa = PBXBuildFile; fileRef = A3000000000000000000002D /* N60DynamicsLegacyAdvanced.c */; };
 		A30000000000000000000018 /* N60RoomMeasurementBridge.c in Sources */ = {isa = PBXBuildFile; fileRef = A3000000000000000000002F /* N60RoomMeasurementBridge.c */; };
 		F89100000000000000000001 /* N60AmbientMonitorBridge.c in Sources */ = {isa = PBXBuildFile; fileRef = F89100000000000000000011 /* N60AmbientMonitorBridge.c */; };
+		F89200000000000000000001 /* AmbientMonitorTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F89200000000000000000011 /* AmbientMonitorTransport.swift */; };
 		F70000000000000000000001 /* N60AdaptiveSampleRate.c in Sources */ = {isa = PBXBuildFile; fileRef = F70000000000000000000011 /* N60AdaptiveSampleRate.c */; };
 		F72000000000000000000001 /* AmbientFieldAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F72000000000000000000011 /* AmbientFieldAnalyzer.swift */; };
 		F72000000000000000000002 /* AmbientFieldAnalyzerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F72000000000000000000012 /* AmbientFieldAnalyzerTests.swift */; };
@@ -204,6 +205,7 @@
 		A30000000000000000000030 /* N60RoomMeasurementBridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60RoomMeasurementBridge.h; sourceTree = "<group>"; };
 		F89100000000000000000011 /* N60AmbientMonitorBridge.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = N60AmbientMonitorBridge.c; sourceTree = "<group>"; };
 		F89100000000000000000012 /* N60AmbientMonitorBridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60AmbientMonitorBridge.h; sourceTree = "<group>"; };
+		F89200000000000000000011 /* AmbientMonitorTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AmbientMonitorTransport.swift; sourceTree = "<group>"; };
 		F70000000000000000000011 /* N60AdaptiveSampleRate.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = N60AdaptiveSampleRate.c; sourceTree = "<group>"; };
 		F70000000000000000000012 /* N60AdaptiveSampleRate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60AdaptiveSampleRate.h; sourceTree = "<group>"; };
 		F72000000000000000000011 /* AmbientFieldAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AmbientFieldAnalyzer.swift; sourceTree = "<group>"; };
@@ -339,6 +341,7 @@
 				A20000000000000000000053 /* Routing */,
 				A30000000000000000000050 /* Realtime */,
 				A20000000000000000000020 /* AudioIOEngine.swift */,
+				F89200000000000000000011 /* AmbientMonitorTransport.swift */,
 				A20000000000000000000027 /* StereoPlaybackControl.swift */,
 				A20000000000000000000029 /* DynamicsConfiguration.swift */,
 				F66000000000000000000011 /* HeadTrackingController.swift */,
@@ -504,6 +507,7 @@
 				A20000000000000000000019 /* DynamicsConfiguration.swift in Sources */,
 				A20000000000000000000018 /* MasterVolumeDeviceController.swift in Sources */,
 				A30000000000000000000010 /* N60RealtimeAudioBridge.c in Sources */,
+				F89200000000000000000001 /* AmbientMonitorTransport.swift in Sources */,
 				A30000000000000000000011 /* N60RenderKernel.c in Sources */,
 				A30000000000000000000012 /* N60Convolution.c in Sources */,
 				A30000000000000000000013 /* N60Dynamics.c in Sources */,
