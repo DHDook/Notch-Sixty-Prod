@@ -1289,7 +1289,14 @@ private struct ProductionMenuBarView: View {
             get: { profiles.selectedContentPresetID },
             set: { id in
                 guard let id else { return }
-                profiles.selectContentPreset(id)
+                Task { @MainActor in
+                    do {
+                        try await product.selectContentPreset(id)
+                        commandError = nil
+                    } catch {
+                        commandError = error.localizedDescription
+                    }
+                }
             }
         )
     }
