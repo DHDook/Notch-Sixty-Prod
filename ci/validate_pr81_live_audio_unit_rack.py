@@ -112,38 +112,38 @@ require(
 stereo_output = function_body(stereo_c, "OSStatus N60OutputIOProc")
 for token in (
     "N60RenderKernelProcessStereoPlaybackFrameInContext",
-    "N60AudioUnitLiveRackProcess",
+    "N60AudioUnitLiveRackProcess(",
     "N60RenderKernelProcessStereoSystemFrameInContext",
 ):
     require(token in stereo_output, f"stereo output missing {token}")
 require(
     stereo_output.find("N60RenderKernelProcessStereoPlaybackFrameInContext")
-    < stereo_output.find("N60AudioUnitLiveRackProcess")
+    < stereo_output.find("N60AudioUnitLiveRackProcess(")
     < stereo_output.find("N60RenderKernelProcessStereoSystemFrameInContext"),
     "stereo rack is not between Playback and System stages"
 )
 
 n_output = function_body(nchannel, "N60LiveNChannelOutputIOProc")
-require("N60AudioUnitLiveRackProcess" in n_output,
+require("N60AudioUnitLiveRackProcess(" in n_output,
         "semantic callback does not run AU rack")
 require("N60LiveNChannelRenderProcessFrame" in n_output,
         "semantic callback lost System render core")
 require(
-    n_output.find("N60AudioUnitLiveRackProcess")
+    n_output.find("N60AudioUnitLiveRackProcess(")
     < n_output.find("N60LiveNChannelRenderProcessFrame"),
     "semantic rack must run before per-channel/System render core"
 )
 
 b_output = function_body(binaural, "N60BinauralHeadphoneOutputIOProc")
 for token in (
-    "N60AudioUnitLiveRackProcess",
+    "N60AudioUnitLiveRackProcess(",
     "N60HeadTrackedBinauralRuntimeProcessFrame",
     "N60HeadphoneDSPProcessStereoFrame",
     "N60ProtectionProcessStereoFrame",
 ):
     require(token in b_output, f"Virtual Speakers callback missing {token}")
 require(
-    b_output.find("N60AudioUnitLiveRackProcess")
+    b_output.find("N60AudioUnitLiveRackProcess(")
     < b_output.find("N60HeadTrackedBinauralRuntimeProcessFrame")
     < b_output.find("N60HeadphoneDSPProcessStereoFrame")
     < b_output.find("N60ProtectionProcessStereoFrame"),
