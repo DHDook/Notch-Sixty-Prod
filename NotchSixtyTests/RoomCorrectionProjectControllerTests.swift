@@ -1385,4 +1385,61 @@ final class RoomCorrectionProjectControllerTests: XCTestCase {
             XCTAssertEqual(error as? BassManagementConfigurationError, .invalidUpperFrequency(1_000))
         }
     }
+    func testRoomCorrectionDeploymentIsBlockedByFreshPredictionGate() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+
+        _ = try fixture.controller.retainMeasurement(
+            analysis(
+                capturedAt: 1,
+                leftMagnitude: [0, 5],
+                rightMagnitude: [0, 5],
+                frequencies: [100, 1_000],
+                snr: 20
+            ),
+            sweep: sweep(),
+            microphone: microphone()
+        )
+        try fixture.controller.setTarget(
+            RoomCorrectionBuiltInTarget.flat.curve
+        )
+        let design = try fixture.controller.generateDesign(
+            parameters: RoomCorrectionDesignParameters(
+                correctionLowHz: 100,
+                correctionHighHz: 1_000,
+                smoothingOctaves: 0,
+                maximumBoostDB: 4,
+                maximumCutDB: 6,
+                requestedTapCount: 1_024
+            ),
+            name: "Low Confidence Candidate"
+        )
+
+        XCTAssertEqual(fixture.controller.selectedDesign?.id, design.id)
+        let report = try XCTUnwrap(
+            fixture.controller.selectedDesignVerification
+        )
+        XCTAssertFalse(report.accepted)
+        XCTAssertLessThan(
+            report.confidence,
+            RoomCorrectionDesignPredictionVerifier.minimumConfidence
+        )
+
+        let before = fixture.profiles.selectedSystemProfile?.state
+        XCTAssertThrowsError(
+            try fixture.controller.deploySelectedDesign()
+        ) { error in
+            guard case .designVerificationRejected(let reasons) =
+                    error as? RoomCorrectionProjectControllerError else {
+                return XCTFail("Unexpected deployment error: \(error)")
+            }
+            XCTAssertFalse(reasons.isEmpty)
+        }
+        XCTAssertEqual(
+            fixture.profiles.selectedSystemProfile?.state,
+            before
+        )
+    }
+
+
 }
