@@ -333,7 +333,7 @@ require(
 )
 
 for phrase in (
-    "never treat",
+    "own loudspeakers",
     "known existing digital headroom",
     "attack/rise time",
     "release/fall time",
