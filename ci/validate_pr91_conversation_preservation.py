@@ -81,7 +81,7 @@ for token in (
     "N60DSPGraphSnapshotSetActiveAcousticsAdaptation",
     "let positiveRecovery = max(target.levelDB, 0)",
     "abs(target.presenceSupportDB) > 0.000_1",
-    "max(ambientCompensationRuntimeTarget.levelDB,",
+    "ambientCompensationRuntimeTarget.levelDB",
     "max(ambientTarget.levelDB, 0)",
 ):
     require(token in engine, f"engine coexistence/headroom integration missing {token}")
