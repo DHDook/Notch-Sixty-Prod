@@ -186,7 +186,7 @@ final class ActiveQuietZoneTests: XCTestCase {
         )
     }
 
-    func testRegularizedStereoSolutionCancelsModeledDisturbance() throws {
+    func testRegularizedStereoSolutionTargetsBoundedReduction() throws {
         var configuration = ActiveQuietZoneConfiguration()
         configuration.maximumPerSourceTonePeakDBFS = -18
         configuration.maximumAggregateSourcePeakDBFS = -12
@@ -209,10 +209,19 @@ final class ActiveQuietZoneTests: XCTestCase {
             configuration: configuration
         )
 
-        XCTAssertGreaterThan(solution.predictedReductionDB, 15)
-        XCTAssertLessThan(
+        XCTAssertEqual(
+            solution.predictedReductionDB,
+            configuration.targetReductionDB,
+            accuracy: 0.05
+        )
+        XCTAssertEqual(
             solution.predictedResidual.magnitude,
-            solution.disturbance.magnitude * 0.20
+            solution.disturbance.magnitude
+                * pow(
+                    10,
+                    -configuration.targetReductionDB / 20
+                ),
+            accuracy: 0.001
         )
         XCTAssertLessThanOrEqual(
             solution.leftOutput.magnitude,
