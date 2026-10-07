@@ -60,10 +60,9 @@ final class AudioUnitLiveRackSwitchboard: @unchecked Sendable {
         self.format = format
         self.latencyFrames = initialRuntime?.totalLatencyFrames ?? 0
 
-        var initialProcessor = initialRuntime?.processor
         let created: OpaquePointer?
-        if initialProcessor != nil {
-            created = withUnsafePointer(to: &initialProcessor!) {
+        if var initialProcessor = initialRuntime?.processor {
+            created = withUnsafePointer(to: &initialProcessor) {
                 N60AudioUnitRackExchangeCreate(
                     UInt32(format.channelCount),
                     UInt32(format.maximumFramesPerSlice),
