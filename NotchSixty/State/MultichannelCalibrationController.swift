@@ -57,6 +57,8 @@ enum MultichannelCalibrationCampaignError: Error, Equatable, LocalizedError {
     case staleCampaign
     case physicalRouteUnavailable(String)
     case designRequired
+    case predictionRequired
+    case predictionRejected([String])
 
     var errorDescription: String? {
         switch self {
@@ -88,6 +90,10 @@ enum MultichannelCalibrationCampaignError: Error, Equatable, LocalizedError {
             return "No unique physical output route is available for \(source)."
         case .designRequired:
             return "Generate a calibration design before deployment."
+        case .predictionRequired:
+            return "Run calibration prediction verification before deployment."
+        case .predictionRejected(let reasons):
+            return "Calibration prediction blocked deployment: " + reasons.joined(separator: " ")
         }
     }
 }
@@ -198,6 +204,8 @@ final class MultichannelCalibrationController: ObservableObject {
     private let transportFactory: MultichannelCalibrationTransportFactory
     private let analysisOperation: MultichannelCalibrationAnalysisOperation
     private let designer = MultichannelCalibrationDesigner()
+    private let predictionVerifier =
+        MultichannelCalibrationPredictionVerifier()
     private let sweepGenerator = RoomCorrectionSweepGenerator()
     private var activeTransport: (any MultichannelCalibrationTransporting)?
     private var activeProgram: RoomCorrectionSweepProgram?
@@ -211,6 +219,8 @@ final class MultichannelCalibrationController: ObservableObject {
     @Published private(set) var seats: [MultichannelCalibrationSeat] = []
     @Published private(set) var measurements: [MultichannelCalibrationMeasurement] = []
     @Published private(set) var latestDesign: MultichannelCalibrationDesign?
+    @Published private(set) var latestPrediction:
+        CalibrationPredictionReport?
     @Published private(set) var lastErrorDescription: String?
 
     init(
@@ -338,6 +348,7 @@ final class MultichannelCalibrationController: ObservableObject {
         campaignSignature = signature
         campaignSampleRate = sampleRate
         latestDesign = nil
+        latestPrediction = nil
         if let archive = try store.load(systemID),
            archive.routingSignature == signature,
            abs(archive.sampleRate - sampleRate) < 0.5 {
@@ -368,6 +379,7 @@ final class MultichannelCalibrationController: ObservableObject {
             name: trimmed.isEmpty ? "Seat \(index)" : trimmed
         ))
         latestDesign = nil
+        latestPrediction = nil
         state = .ready
         try persistCampaign()
     }
@@ -391,6 +403,7 @@ final class MultichannelCalibrationController: ObservableObject {
         seats[index].included = included
         seats[index].weight = weight
         latestDesign = nil
+        latestPrediction = nil
         state = campaignComplete ? .reviewing : .ready
         try persistCampaign()
     }
@@ -405,6 +418,7 @@ final class MultichannelCalibrationController: ObservableObject {
         seats.removeAll { $0.id == id }
         measurements.removeAll { $0.seatID == id }
         latestDesign = nil
+        latestPrediction = nil
         state = campaignComplete ? .reviewing : .ready
         try persistCampaign()
     }
@@ -413,6 +427,7 @@ final class MultichannelCalibrationController: ObservableObject {
         cancelMeasurement()
         measurements = []
         latestDesign = nil
+        latestPrediction = nil
         state = profile == nil ? .idle : .ready
         try persistCampaign()
     }
@@ -480,6 +495,7 @@ final class MultichannelCalibrationController: ObservableObject {
         )
         activeTransport = transport
         latestDesign = nil
+        latestPrediction = nil
         do {
             try transport.start()
             state = .measuring
@@ -574,6 +590,7 @@ final class MultichannelCalibrationController: ObservableObject {
         }
         measurements.removeAll { $0.seatID == seatID && $0.source == source }
         latestDesign = nil
+        latestPrediction = nil
         state = .ready
         try persistCampaign()
     }
@@ -590,8 +607,10 @@ final class MultichannelCalibrationController: ObservableObject {
             ?? engine.bassManagementConfiguration.enabled
         let measuredAt = measurements.compactMap { $0.channel.capturedAt }.max() ?? Date()
         do {
-            let design = try await Task.detached(priority: .userInitiated) { [designer] in
-                try designer.design(
+            let result = try await Task.detached(
+                priority: .userInitiated
+            ) { [designer, predictionVerifier] in
+                let design = try designer.design(
                     profile: profile,
                     bassManagementEnabled: bassEnabled,
                     seats: seats,
@@ -601,11 +620,19 @@ final class MultichannelCalibrationController: ObservableObject {
                     measuredAt: measuredAt,
                     deployedAt: Date()
                 )
+                let prediction = try predictionVerifier.verify(
+                    design: design,
+                    seats: seats,
+                    measurements: measurements,
+                    target: target
+                )
+                return (design, prediction)
             }.value
-            latestDesign = design
+            latestDesign = result.0
+            latestPrediction = result.1
             state = .reviewing
             lastErrorDescription = nil
-            return design
+            return result.0
         } catch {
             fail(error)
             throw error
@@ -618,6 +645,14 @@ final class MultichannelCalibrationController: ObservableObject {
         }
         guard let design = latestDesign else {
             throw MultichannelCalibrationCampaignError.designRequired
+        }
+        guard let prediction = latestPrediction else {
+            throw MultichannelCalibrationCampaignError.predictionRequired
+        }
+        guard prediction.accepted else {
+            throw MultichannelCalibrationCampaignError.predictionRejected(
+                prediction.blockingReasons
+            )
         }
         guard let profile else {
             throw MultichannelCalibrationCampaignError.outputDeviceProfileRequired
@@ -728,6 +763,7 @@ final class MultichannelCalibrationController: ObservableObject {
         seats = []
         measurements = []
         latestDesign = nil
+        latestPrediction = nil
         lastErrorDescription = nil
     }
 
