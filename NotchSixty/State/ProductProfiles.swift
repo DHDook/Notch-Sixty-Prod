@@ -1009,19 +1009,38 @@ final class ProductProfileController: ObservableObject {
         )
     }
 
-    private func applyContentState(_ state: ContentPresetState) throws {
+    func applyContentStateWithoutAudioUnitRack(
+        _ state: ContentPresetState
+    ) throws {
         let previous = captureContentState()
         do {
             let gain = state.composingGain(over: engine.gainConfiguration)
             try engine.replaceStereoEQConfiguration(state.stereoEQ)
             try engine.replaceDynamicsConfiguration(state.dynamics)
             try engine.replaceGainConfiguration(gain)
-            try audioUnitHost.replaceRackConfiguration(state.audioUnitRack)
         } catch {
             let rollbackGain = previous.composingGain(over: engine.gainConfiguration)
             try? engine.replaceStereoEQConfiguration(previous.stereoEQ)
             try? engine.replaceDynamicsConfiguration(previous.dynamics)
             try? engine.replaceGainConfiguration(rollbackGain)
+            throw error
+        }
+    }
+
+    func commitContentPresetSelection(_ id: UUID) {
+        guard contentPresets.contains(where: { $0.id == id }) else { return }
+        selectedContentPresetID = id
+        lastErrorDescription = nil
+        persist()
+    }
+
+    private func applyContentState(_ state: ContentPresetState) throws {
+        let previous = captureContentState()
+        do {
+            try applyContentStateWithoutAudioUnitRack(state)
+            try audioUnitHost.replaceRackConfiguration(state.audioUnitRack)
+        } catch {
+            try? applyContentStateWithoutAudioUnitRack(previous)
             try? audioUnitHost.replaceRackConfiguration(previous.audioUnitRack)
             throw error
         }
