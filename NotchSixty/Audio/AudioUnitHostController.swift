@@ -317,17 +317,6 @@ final class AudioUnitHostController: ObservableObject {
             return
         }
 
-        do {
-            try AudioUnitOpaqueStateCodec.validate(slot.opaqueFullState)
-        } catch {
-            quarantineComponent(
-                identity,
-                reason: Self.quarantineReason(for: error),
-                description: error.localizedDescription
-            )
-            return
-        }
-
         let compatibility = descriptor.compatibility(for: format)
         guard compatibility.compatible else {
             let reason: AudioUnitQuarantineReason
@@ -399,6 +388,17 @@ final class AudioUnitHostController: ObservableObject {
                     .localizedDescription
             } ?? AudioUnitRackError.slotIndexOutOfRange(index)
                 .localizedDescription
+            return
+        }
+
+        do {
+            try AudioUnitOpaqueStateCodec.validate(slot.opaqueFullState)
+        } catch {
+            quarantineComponent(
+                identity,
+                reason: Self.quarantineReason(for: error),
+                description: error.localizedDescription
+            )
             return
         }
 
