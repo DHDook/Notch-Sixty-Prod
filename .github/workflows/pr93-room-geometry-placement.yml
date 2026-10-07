@@ -1,0 +1,84 @@
+name: PR93 Room Geometry and Placement
+
+on:
+  push:
+    branches:
+      - feature/pr93-room-geometry-placement
+  pull_request:
+    branches:
+      - feature/pr92-room-treatment-advisor
+  workflow_dispatch:
+
+concurrency:
+  group: pr93-room-geometry-placement-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate PR93 geometry and placement architecture
+        run: python3 ci/validate_pr93_room_geometry_placement.py
+      - name: Validate inherited PR92 Room Treatment Advisor
+        run: python3 ci/validate_pr92_room_treatment_advisor.py
+      - name: Validate inherited PR91 Conversation Preservation
+        run: python3 ci/validate_pr91_conversation_preservation.py
+      - name: Validate inherited PR90 Active Quiet Zone
+        run: python3 ci/validate_pr90_active_quiet_zone.py
+      - name: Validate inherited PR89 Ambient Compensation
+        run: python3 ci/validate_pr89_ambient_compensation.py
+      - name: Validate inherited PR88 intelligent targets
+        run: python3 ci/validate_pr88_intelligent_target.py
+
+  validate-macos-integration:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate PR93 geometry and placement architecture
+        run: python3 ci/validate_pr93_room_geometry_placement.py
+      - name: Build arm64 app with Geometry and Placement
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            build
+      - name: Run geometry, Room Advisor and information architecture tests
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            -only-testing:NotchSixtyTests/RoomGeometryPlacementTests \
+            -only-testing:NotchSixtyTests/RoomTreatmentAdvisorTests \
+            -only-testing:NotchSixtyTests/ProductionInformationArchitectureTests \
+            test
+      - name: Run retained PR91 and PR90 Active Acoustics tests
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            -only-testing:NotchSixtyTests/AmbientCompensationTests \
+            -only-testing:NotchSixtyTests/ActiveQuietZoneTests \
+            test
+      - name: Run retained XCTest suite
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            test
