@@ -59,8 +59,10 @@ for token in (
     "AudioUnitOpaqueStateCodec.validate(slot.opaqueFullState)",
     "AudioUnitOpaqueStateCodec.validate(\n                    slot.opaqueFullState",
     "candidatePreparationFailed",
+    "liveBuildFailureSlot",
+    "forLiveBuildError",
 ):
-    require(token in host, f"host state preflight missing {token}")
+    require(token in host, f"host state/live-build hardening missing {token}")
 
 for token in (
     "case liveInvalidLatency",
@@ -111,6 +113,7 @@ for token in (
     "testLiveTimingValidatorRejectsPathologicalValues",
     "testControlPlaneHealthCollectionSurfacesInjectedLatencyDrift",
     "testControlPlaneHealthCollectionSurfacesInjectedInvalidTail",
+    "testInitialLiveBuildFailureQuarantinesUnavailableComponent",
     "PR84InjectedHealthStage",
 ):
     require(token in live_tests, f"live abuse coverage missing {token}")
