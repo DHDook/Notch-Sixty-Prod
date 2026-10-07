@@ -337,7 +337,7 @@ for phrase in (
     "known existing digital headroom",
     "attack/rise time",
     "release/fall time",
-    "playback model unavailable",
+    "model required",
     "control-plane only",
     "active quiet zone",
 ):
