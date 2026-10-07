@@ -617,7 +617,7 @@ final class AudioUnitLiveRackRuntime: @unchecked Sendable {
     private let scratchA: UnsafeMutablePointer<Float>
     private let scratchB: UnsafeMutablePointer<Float>
     private let scratchSampleCount: Int
-    private let faultLatch: UnsafeMutablePointer<N60AudioUnitLiveRackFaultLatch>
+    private let faultLatch: OpaquePointer
     private let componentsBySlot: [AudioUnitComponentIdentity?]
 
     private let monitorQueue = DispatchQueue(
