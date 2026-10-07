@@ -840,16 +840,32 @@ final class AudioUnitHostController: ObservableObject {
             ))
         }
 
-        let runtime = try await AudioUnitLiveRackRuntime.build(
-            format: format,
-            plan: plan,
-            slots: buildSlots
-        )
-        attachFaultMonitoring(
-            to: runtime,
-            includeExistingFaults: false
-        )
-        return runtime
+        do {
+            let runtime = try await AudioUnitLiveRackRuntime.build(
+                format: format,
+                plan: plan,
+                slots: buildSlots
+            )
+            attachFaultMonitoring(
+                to: runtime,
+                includeExistingFaults: false
+            )
+            return runtime
+        } catch let error as AudioUnitLiveRackBuildError {
+            if let slotIndex = Self.liveBuildFailureSlot(error),
+               rackConfiguration.slots.indices.contains(slotIndex),
+               let component =
+                    rackConfiguration.slots[slotIndex].component {
+                quarantineComponent(
+                    component,
+                    reason: Self.quarantineReason(
+                        forLiveBuildError: error
+                    ),
+                    description: error.localizedDescription
+                )
+            }
+            throw error
+        }
     }
 
     private func attachFaultMonitoring(
@@ -915,6 +931,56 @@ final class AudioUnitHostController: ObservableObject {
             : .discovered
         if !prepared {
             probesByComponent.removeValue(forKey: identity)
+        }
+    }
+
+    private static func liveBuildFailureSlot(
+        _ error: AudioUnitLiveRackBuildError
+    ) -> Int? {
+        switch error {
+        case .missingPreparedSlot(let slot),
+             .preparedStateChanged(let slot),
+             .componentUnavailable(let slot),
+             .liveInstantiationFailed(let slot, _),
+             .liveFormatFailed(let slot, _),
+             .liveResourceAllocationFailed(let slot, _),
+             .liveInvalidLatency(let slot, _),
+             .liveInvalidTail(let slot, _),
+             .liveLatencyChanged(let slot, _, _),
+             .liveTailChanged(let slot, _, _):
+            return slot
+        case .invalidExecutionPlan,
+             .delayMemoryBudgetExceeded,
+             .scratchAllocationFailed,
+             .faultLatchAllocationFailed:
+            return nil
+        }
+    }
+
+    private static func quarantineReason(
+        forLiveBuildError error: AudioUnitLiveRackBuildError
+    ) -> AudioUnitQuarantineReason {
+        switch error {
+        case .liveInvalidLatency,
+             .liveLatencyChanged:
+            return .invalidLatency
+        case .liveInvalidTail,
+             .liveTailChanged:
+            return .invalidTail
+        case .liveResourceAllocationFailed,
+             .liveFormatFailed:
+            return .renderResourceFailure
+        case .liveInstantiationFailed,
+             .componentUnavailable:
+            return .instantiationFailed
+        case .missingPreparedSlot,
+             .preparedStateChanged,
+             .invalidExecutionPlan:
+            return .validationFailed
+        case .delayMemoryBudgetExceeded,
+             .scratchAllocationFailed,
+             .faultLatchAllocationFailed:
+            return .renderResourceFailure
         }
     }
 
