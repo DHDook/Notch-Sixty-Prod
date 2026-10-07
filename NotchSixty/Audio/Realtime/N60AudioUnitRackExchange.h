@@ -14,6 +14,25 @@ extern "C" {
 #define N60_AUDIO_UNIT_RACK_EXCHANGE_NO_SLOT UINT32_MAX
 
 typedef struct N60AudioUnitRackExchange N60AudioUnitRackExchange;
+typedef struct N60AudioUnitStageFaultGate N60AudioUnitStageFaultGate;
+
+// Per-stage fail-closed gate. Created/destroyed on the control plane. A gate
+// is only returned when its atomic flag is lock-free on the current platform.
+N60AudioUnitStageFaultGate * _Nullable
+N60AudioUnitStageFaultGateCreate(void);
+
+void N60AudioUnitStageFaultGateDestroy(
+    N60AudioUnitStageFaultGate * _Nullable gate
+);
+
+void N60AudioUnitStageFaultGateTrip(
+    N60AudioUnitStageFaultGate * _Nonnull gate
+);
+
+bool N60AudioUnitStageFaultGateIsTripped(
+    const N60AudioUnitStageFaultGate * _Nonnull gate
+);
+
 
 typedef struct {
     uint64_t publishedGeneration;
