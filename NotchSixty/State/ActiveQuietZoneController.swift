@@ -174,7 +174,7 @@ final class ActiveQuietZoneController: ObservableObject {
         }
         try persist(validated)
         resetRuntimeState()
-        if validated.enabled || wasEnabled && validated.enabled {
+        if validated.enabled {
             try start()
         } else {
             try ambient.setQuietZoneObservationDemand(false)
@@ -335,7 +335,7 @@ final class ActiveQuietZoneController: ObservableObject {
                     fault(
                         ActiveQuietZoneControllerError
                             .runtimeTargetLost,
-                        reason: .protectionActive
+                        reason: .verificationRegression
                     )
                     return
                 }
@@ -597,8 +597,10 @@ final class ActiveQuietZoneController: ObservableObject {
         let largestTone = fullTarget.tones.reduce(0.0) {
             max(
                 $0,
-                $1.leftOutput.magnitude,
-                $1.rightOutput.magnitude
+                max(
+                    $1.leftOutput.magnitude,
+                    $1.rightOutput.magnitude
+                )
             )
         }
         let aggregate = fullTarget.maximumSourceMagnitude
