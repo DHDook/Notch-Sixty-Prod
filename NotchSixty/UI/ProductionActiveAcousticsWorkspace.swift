@@ -1,5 +1,190 @@
 import SwiftUI
 
+private struct AmbientCompensationResponseCurveView: View {
+    let points: [AmbientCompensationResponsePoint]
+    let maximumGainDB: Double
+
+    private let minimumFrequencyHz = 20.0
+    private let maximumFrequencyHz = 20_000.0
+
+    var body: some View {
+        GeometryReader { geometry in
+            Canvas { context, size in
+                let plot = CGRect(
+                    x: 46,
+                    y: 12,
+                    width: max(size.width - 60, 1),
+                    height: max(size.height - 40, 1)
+                )
+                let yMaximum = max(
+                    ceil(maximumGainDB + 0.5),
+                    2
+                )
+
+                drawGrid(
+                    context: &context,
+                    plot: plot,
+                    maximumGainDB: yMaximum
+                )
+                drawResponse(
+                    context: &context,
+                    plot: plot,
+                    maximumGainDB: yMaximum
+                )
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Ambient Compensation response curve")
+        .accessibilityValue(
+            String(
+                format: "Peak applied gain %.2f decibels",
+                maximumGainDB
+            )
+        )
+    }
+
+    private func drawGrid(
+        context: inout GraphicsContext,
+        plot: CGRect,
+        maximumGainDB: Double
+    ) {
+        let frequencyGuides = [
+            20.0, 100, 1_000, 10_000, 20_000,
+        ]
+        for frequency in frequencyGuides {
+            let x = xPosition(
+                frequencyHz: frequency,
+                plot: plot
+            )
+            var path = Path()
+            path.move(to: CGPoint(x: x, y: plot.minY))
+            path.addLine(to: CGPoint(x: x, y: plot.maxY))
+            context.stroke(
+                path,
+                with: .foreground.opacity(0.13),
+                lineWidth: 1
+            )
+
+            let label: String
+            switch frequency {
+            case 1_000:
+                label = "1k"
+            case 10_000:
+                label = "10k"
+            case 20_000:
+                label = "20k"
+            default:
+                label = String(format: "%.0f", frequency)
+            }
+            context.draw(
+                Text(label)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary),
+                at: CGPoint(x: x, y: plot.maxY + 13),
+                anchor: .center
+            )
+        }
+
+        let horizontalGuides = 4
+        for index in 0...horizontalGuides {
+            let fraction =
+                Double(index) / Double(horizontalGuides)
+            let gain = maximumGainDB * (1 - fraction)
+            let y = plot.minY + plot.height * fraction
+            var path = Path()
+            path.move(to: CGPoint(x: plot.minX, y: y))
+            path.addLine(to: CGPoint(x: plot.maxX, y: y))
+            context.stroke(
+                path,
+                with: .foreground.opacity(
+                    index == horizontalGuides ? 0.30 : 0.13
+                ),
+                lineWidth:
+                    index == horizontalGuides ? 1.25 : 1
+            )
+            context.draw(
+                Text(String(format: "%+.1f", gain))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary),
+                at: CGPoint(x: plot.minX - 7, y: y),
+                anchor: .trailing
+            )
+        }
+    }
+
+    private func drawResponse(
+        context: inout GraphicsContext,
+        plot: CGRect,
+        maximumGainDB: Double
+    ) {
+        guard !points.isEmpty else { return }
+
+        var fill = Path()
+        var line = Path()
+
+        for (index, point) in points.enumerated() {
+            let x = xPosition(
+                frequencyHz: point.frequencyHz,
+                plot: plot
+            )
+            let normalized = min(
+                max(point.gainDB / maximumGainDB, 0),
+                1
+            )
+            let y = plot.maxY - normalized * plot.height
+            let position = CGPoint(x: x, y: y)
+
+            if index == 0 {
+                line.move(to: position)
+                fill.move(
+                    to: CGPoint(x: x, y: plot.maxY)
+                )
+                fill.addLine(to: position)
+            } else {
+                line.addLine(to: position)
+                fill.addLine(to: position)
+            }
+        }
+
+        if let last = points.last {
+            fill.addLine(
+                to: CGPoint(
+                    x: xPosition(
+                        frequencyHz: last.frequencyHz,
+                        plot: plot
+                    ),
+                    y: plot.maxY
+                )
+            )
+            fill.closeSubpath()
+        }
+
+        context.fill(
+            fill,
+            with: .foreground.opacity(0.07)
+        )
+        context.stroke(
+            line,
+            with: .foreground,
+            lineWidth: 2
+        )
+    }
+
+    private func xPosition(
+        frequencyHz: Double,
+        plot: CGRect
+    ) -> CGFloat {
+        let clamped = min(
+            max(frequencyHz, minimumFrequencyHz),
+            maximumFrequencyHz
+        )
+        let fraction =
+            log(clamped / minimumFrequencyHz)
+            / log(maximumFrequencyHz / minimumFrequencyHz)
+        return plot.minX + plot.width * fraction
+    }
+}
+
 private enum ActiveAcousticsTab: String, CaseIterable, Identifiable {
     case ambientAnalysis
     case roomTreatment
@@ -209,6 +394,8 @@ struct ProductionActiveAcousticsWorkspace: View {
                         detail: "Bounded high-frequency masking support."
                     )
                 }
+
+                adaptationDetailCard
 
                 HStack(spacing: 20) {
                     LabeledContent("Character") {
@@ -500,6 +687,149 @@ struct ProductionActiveAcousticsWorkspace: View {
         }
         .padding(18)
         .glassEffect(.regular, in: .rect(cornerRadius: 18))
+    }
+
+    private var ambientResponseSampleRate: Double {
+        engine.selectedOutputDevice?.nominalSampleRate ?? 48_000
+    }
+
+    private var ambientResponsePoints:
+        [AmbientCompensationResponsePoint] {
+        AmbientCompensationResponseModel.response(
+            target: ambient.appliedTarget,
+            sampleRate: ambientResponseSampleRate
+        )
+    }
+
+    private var maximumAmbientAppliedGainDB: Double {
+        AmbientCompensationResponseModel.maximumAppliedGainDB(
+            target: ambient.appliedTarget,
+            sampleRate: ambientResponseSampleRate
+        )
+    }
+
+    private var adaptationDetailCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Adaptation Detail")
+                        .font(.headline)
+                    Text(
+                        "Exact response of the live PR89 overlay, including full-band level recovery and the three dedicated masking-compensation filters."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text(
+                    String(
+                        format: "Peak %+.2f dB",
+                        maximumAmbientAppliedGainDB
+                    )
+                )
+                .font(.caption.bold().monospacedDigit())
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .glassEffect(.regular, in: .capsule)
+            }
+
+            AmbientCompensationResponseCurveView(
+                points: ambientResponsePoints,
+                maximumGainDB: max(
+                    maximumAmbientAppliedGainDB,
+                    1
+                )
+            )
+            .frame(height: 220)
+
+            Grid(
+                alignment: .leading,
+                horizontalSpacing: 20,
+                verticalSpacing: 8
+            ) {
+                GridRow {
+                    Text("Stage")
+                        .font(.caption.bold())
+                        .foregroundStyle(.secondary)
+                    Text("Shape")
+                        .font(.caption.bold())
+                        .foregroundStyle(.secondary)
+                    Text("Applied")
+                        .font(.caption.bold())
+                        .foregroundStyle(.secondary)
+                }
+
+                adaptationRow(
+                    name: "Level recovery",
+                    shape: "Full band",
+                    gainDB: ambient.appliedTarget.levelDB
+                )
+                adaptationRow(
+                    name: "Low support",
+                    shape: String(
+                        format: "Low shelf · %.0f Hz · Q %.3f",
+                        AmbientCompensationResponseModel
+                            .lowShelfFrequencyHz,
+                        AmbientCompensationResponseModel.lowShelfQ
+                    ),
+                    gainDB: ambient.appliedTarget.lowSupportDB
+                )
+                adaptationRow(
+                    name: "Presence",
+                    shape: String(
+                        format: "Bell · %.1f kHz · Q %.2f",
+                        AmbientCompensationResponseModel
+                            .presenceFrequencyHz / 1_000,
+                        AmbientCompensationResponseModel.presenceQ
+                    ),
+                    gainDB:
+                        ambient.appliedTarget.presenceSupportDB
+                )
+                adaptationRow(
+                    name: "Detail",
+                    shape: String(
+                        format: "High shelf · %.1f kHz · Q %.3f",
+                        AmbientCompensationResponseModel
+                            .detailShelfFrequencyHz / 1_000,
+                        AmbientCompensationResponseModel.detailShelfQ
+                    ),
+                    gainDB: ambient.appliedTarget.detailSupportDB
+                )
+            }
+
+            HStack(spacing: 8) {
+                Image(systemName: "minus.circle")
+                Text(
+                    "Cuts: none. PR89 only restores energy masked by added room noise; it never applies automatic subtractive EQ."
+                )
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+            Text(
+                "The curve is the combined live transfer function of the four applied adjustments. It excludes the user's normal EQ, Room Correction and other DSP so you can see exactly what Ambient Compensation itself is adding."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .padding(18)
+        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+    }
+
+    @ViewBuilder
+    private func adaptationRow(
+        name: String,
+        shape: String,
+        gainDB: Double
+    ) -> some View {
+        GridRow {
+            Text(name)
+            Text(shape)
+                .foregroundStyle(.secondary)
+            Text(String(format: "%+.2f dB", gainDB))
+                .monospacedDigit()
+        }
+        .font(.subheadline)
     }
 
     private var ambientLevelValue: String {
