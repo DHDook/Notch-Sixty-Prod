@@ -1444,4 +1444,61 @@ final class RoomCorrectionProjectControllerTests: XCTestCase {
     }
 
 
+    func testIntelligentTargetGenerationPersistsAndManualTargetInvalidatesReport() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+
+        let frequencies = [
+            20.0, 40, 80, 160, 300, 1_000,
+            4_000, 10_000, 20_000,
+        ]
+        let magnitudes = [0.0, 0, 0, 0, 0, 0, -1, -2, -2.5]
+        _ = try fixture.controller.retainMeasurement(
+            analysis(
+                capturedAt: 1,
+                leftMagnitude: magnitudes,
+                rightMagnitude: magnitudes,
+                frequencies: frequencies,
+                snr: 60
+            ),
+            sweep: sweep(),
+            microphone: microphone()
+        )
+
+        let report = try fixture.controller.generateIntelligentTarget(
+            preference: .warm,
+            parameters: RoomCorrectionDesignParameters(
+                correctionLowHz: 20,
+                correctionHighHz: 20_000,
+                smoothingOctaves: 1.0 / 6.0,
+                maximumBoostDB: 4,
+                maximumCutDB: 8,
+                requestedTapCount: 4_096
+            ),
+            modifiedAt: Date(timeIntervalSince1970: 500)
+        )
+
+        XCTAssertEqual(fixture.controller.target, report.target)
+        XCTAssertEqual(
+            fixture.controller.lastGeneratedTargetReport,
+            report
+        )
+        XCTAssertNil(fixture.controller.selectedDesign)
+        let projectID = try XCTUnwrap(fixture.controller.project?.id)
+        let persisted = try fixture.controller.store.load(projectID)
+        XCTAssertEqual(persisted.target, report.target)
+        XCTAssertEqual(persisted.modifiedAt, Date(timeIntervalSince1970: 500))
+
+        try fixture.controller.setTarget(
+            RoomCorrectionBuiltInTarget.flat.curve,
+            modifiedAt: Date(timeIntervalSince1970: 600)
+        )
+        XCTAssertNil(fixture.controller.lastGeneratedTargetReport)
+        XCTAssertEqual(
+            fixture.controller.target,
+            RoomCorrectionBuiltInTarget.flat.curve
+        )
+    }
+
+
 }
