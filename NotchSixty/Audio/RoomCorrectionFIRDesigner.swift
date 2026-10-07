@@ -578,7 +578,8 @@ struct RoomCorrectionDesignPredictionVerifier: Sendable {
         guard !unscaledLeft.isEmpty, !unscaledRight.isEmpty,
               unscaledLeft.allSatisfy(\.isFinite),
               unscaledRight.allSatisfy(\.isFinite),
-              abs(design.filter.sampleRate - design.sampleRate) < 0.5 else {
+              let filterSampleRate = design.filter.sampleRate,
+              abs(filterSampleRate - design.sampleRate) < 0.5 else {
             throw RoomCorrectionDesignVerificationError.invalidFilter
         }
         let deployed = try design.deploymentFilter()
@@ -766,8 +767,10 @@ struct RoomCorrectionDesignPredictionVerifier: Sendable {
             guard frequency < low || frequency > high else { continue }
             maximumOutOfBand = max(
                 maximumOutOfBand,
-                abs(unscaledLGain[index]),
-                abs(unscaledRGain[index])
+                max(
+                    abs(unscaledLGain[index]),
+                    abs(unscaledRGain[index])
+                )
             )
         }
         if maximumOutOfBand > Self.maximumOutOfBandDeviationDB {
@@ -956,8 +959,10 @@ struct RoomCorrectionDesignPredictionVerifier: Sendable {
             let storedR = try Self.interpolate(storedRight, at: frequency)
             disagreement = max(
                 disagreement,
-                abs(storedL - recomputedLeft),
-                abs(storedR - recomputedRight)
+                max(
+                    abs(storedL - recomputedLeft),
+                    abs(storedR - recomputedRight)
+                )
             )
         }
         return disagreement
