@@ -347,7 +347,7 @@ final class AmbientCompensationController: ObservableObject {
                 return
             }
 
-            appendCapped(
+            Self.appendCapped(
                 try monitor.readAvailableFrames(
                     maximumFrames: Self.preferredAnalysisFrames
                 ),
@@ -366,11 +366,11 @@ final class AmbientCompensationController: ObservableObject {
                             Self.preferredAnalysisFrames
                     )
                 if !frames.isEmpty {
-                    appendCapped(
+                    Self.appendCapped(
                         frames.map(\.left),
                         to: &playbackLeftHistory
                     )
-                    appendCapped(
+                    Self.appendCapped(
                         frames.map(\.right),
                         to: &playbackRightHistory
                     )
@@ -410,7 +410,13 @@ final class AmbientCompensationController: ObservableObject {
                     holdReason: nil
                 )
                 monitorStatus = .observing
-            } else if !referenceAvailable {
+            } else if !referenceAvailable
+                        || analysis.separationMode
+                            == .microphoneOnly {
+                // Running playback must never use a microphone-only
+                // estimate for automatic adaptation. This also covers
+                // startup windows where the independent rendered
+                // reference ring has not accumulated enough frames yet.
                 planned = heldTarget(
                     reason: .playbackModelRequired,
                     analysis: analysis
@@ -682,7 +688,7 @@ final class AmbientCompensationController: ObservableObject {
         latestAnalysis = nil
     }
 
-    private func appendCapped(
+    private static func appendCapped(
         _ new: [Float],
         to history: inout [Float]
     ) {
@@ -718,6 +724,12 @@ final class AmbientCompensationController: ObservableObject {
     }
 
     private func fail(_ error: Error) {
+        pollTask?.cancel()
+        pollTask = nil
+        monitor?.stop()
+        monitor = nil
+        engine.setAmbientPlaybackReferenceDemand(false)
+        engine.discardAmbientPlaybackReferenceFrames()
         lastErrorDescription = error.localizedDescription
         monitorStatus = .failed
         envelope.reset()
