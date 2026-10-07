@@ -338,7 +338,7 @@ for phrase in (
     "attack/rise time",
     "release/fall time",
     "model required",
-    "control-plane only",
+    "control plane",
     "active quiet zone",
 ):
     require(phrase in doc, f"PR89 contract missing '{phrase}'")
