@@ -899,7 +899,8 @@ struct RoomCorrectionDesignPredictionVerifier: Sendable {
         unscaledLeftTaps: [Float],
         unscaledRightTaps: [Float]
     ) throws -> Double? {
-        guard let storedLeft = design.predictedLeftResponse,
+        guard design.sourcePositions != nil,
+              let storedLeft = design.predictedLeftResponse,
               let storedRight = design.predictedRightResponse,
               !sourcePositions.isEmpty else {
             return nil
