@@ -61,6 +61,7 @@ enum AudioUnitRackMutationError: Error, Equatable, LocalizedError {
 }
 
 enum AudioUnitRackMutationActivation: Equatable, Sendable {
+    case noAudioChange
     case stagedForNextStart
     case seamlessCrossfade(generation: UInt64)
     case controlledRestart
