@@ -1,0 +1,87 @@
+name: PR81 Live Audio Unit Rack
+
+on:
+  push:
+    branches:
+      - feature/pr81-live-audio-unit-rack
+  pull_request:
+    branches:
+      - feature/pr80-audio-unit-offline-preparation
+  workflow_dispatch:
+
+jobs:
+  validate-portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate inherited PR77 live room-treatment safety
+        run: python3 ci/validate_pr77_live_room_treatment.py
+      - name: Run inherited PR77 physical-output simulation
+        run: |
+          clang -std=c11 -O2 -Wall -Wextra -Werror \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr77_live_room_treatment.c \
+            -lm -o /tmp/pr77-live-room-treatment
+          /tmp/pr77-live-room-treatment
+      - name: Validate PR81 live Audio Unit rack
+        run: python3 ci/validate_pr81_live_audio_unit_rack.py
+
+  validate-macos-integration:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate PR81 live Audio Unit rack
+        run: python3 ci/validate_pr81_live_audio_unit_rack.py
+      - name: Build arm64 app with live Audio Unit rack
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            build
+      - name: Run retained PR79 host-foundation tests
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            -only-testing:NotchSixtyTests/AudioUnitHostFoundationTests \
+            test
+      - name: Run retained PR80 offline preparation tests
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            -only-testing:NotchSixtyTests/AudioUnitOfflinePreparationTests \
+            test
+      - name: Run PR81 live rack tests
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            -only-testing:NotchSixtyTests/AudioUnitLiveRackRuntimeTests \
+            test
+      - name: Run retained XCTest suite
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            test
