@@ -89,6 +89,8 @@ final class AmbientCompensationController: ObservableObject {
 
     private let transportFactory: AmbientMonitorTransportFactory
     private let planner = AmbientCompensationPlanner()
+    private let conversationPlanner =
+        ConversationPreservationPlanner()
     private var envelope = AmbientCompensationEnvelope()
     private var monitor: (any AmbientMonitorTransporting)?
     private var pollTask: Task<Void, Never>?
@@ -173,10 +175,19 @@ final class AmbientCompensationController: ObservableObject {
         latestAnalysis?.ambientLevelDBSPL != nil
     }
 
+    var playbackAdaptationMode:
+        ActiveAcousticsPlaybackAdaptationMode {
+        configuration.effectivePlaybackAdaptationMode
+    }
+
+    var playbackAdaptationActive: Bool {
+        playbackAdaptationMode != .off
+    }
+
     func prepareForUse() {
         do {
             try synchronizeSelectedPlaybackSystem()
-            if (configuration.enabled
+            if (playbackAdaptationActive
                     || quietZoneObservationDemand),
                microphone.permissionStatus == .authorized,
                microphone.selectedInputDevice != nil {
@@ -191,21 +202,37 @@ final class AmbientCompensationController: ObservableObject {
         }
     }
 
+    /// Legacy PR89 compatibility. New UI should select an explicit playback
+    /// adaptation mode instead of toggling Ambient Compensation directly.
     func setEnabled(_ enabled: Bool) throws {
+        try setPlaybackAdaptationMode(
+            enabled ? .musicFocus : .off
+        )
+    }
+
+    func setPlaybackAdaptationMode(
+        _ mode: ActiveAcousticsPlaybackAdaptationMode
+    ) throws {
+        guard mode != playbackAdaptationMode else { return }
+
         var updated = configuration
-        updated.enabled = enabled
+        updated.playbackAdaptationMode = mode
+        // Keep the legacy bit coherent for older exported/system-profile
+        // readers while the optional mode is the authoritative PR91 value.
+        updated.enabled = mode != .off
         try persist(updated)
-        if enabled {
+
+        envelope.reset()
+        appliedTarget = .unity
+        try? engine.clearAmbientCompensationRuntimeTarget()
+        resetAnalysisHistory()
+
+        if mode != .off {
+            try startMonitoring()
+        } else if quietZoneObservationDemand {
             try startMonitoring()
         } else {
-            envelope.reset()
-            appliedTarget = .unity
-            try? engine.clearAmbientCompensationRuntimeTarget()
-            if quietZoneObservationDemand {
-                try startMonitoring()
-            } else {
-                stopMonitoring()
-            }
+            stopMonitoring()
         }
     }
 
@@ -215,7 +242,7 @@ final class AmbientCompensationController: ObservableObject {
         quietZoneObservationDemand = enabled
         if enabled {
             try startMonitoring()
-        } else if !configuration.enabled {
+        } else if !playbackAdaptationActive {
             stopMonitoring()
         }
     }
@@ -302,7 +329,7 @@ final class AmbientCompensationController: ObservableObject {
 
     func startMonitoring() throws {
         try synchronizeSelectedPlaybackSystem()
-        guard configuration.enabled
+        guard playbackAdaptationActive
                 || quietZoneObservationDemand else {
             return
         }
@@ -375,7 +402,7 @@ final class AmbientCompensationController: ObservableObject {
     private func pollOnce() async {
         do {
             try synchronizeSelectedPlaybackSystem()
-            guard configuration.enabled
+            guard playbackAdaptationActive
                     || quietZoneObservationDemand,
                   let monitor else {
                 return
@@ -460,7 +487,8 @@ final class AmbientCompensationController: ObservableObject {
                     detailSupportDB: 0,
                     confidence: 0,
                     ambientDeltaDB: appliedTarget.ambientDeltaDB,
-                    holdReason: .invalidEvidence
+                    holdReason: .invalidEvidence,
+                    mode: playbackAdaptationMode
                 )
                 let smoothed = try envelope.update(
                     toward: held,
@@ -489,8 +517,9 @@ final class AmbientCompensationController: ObservableObject {
             latestAnalysis = analysis
             analysisRevision &+= 1
 
+            let mode = playbackAdaptationMode
             let planned: AmbientCompensationTarget
-            if !configuration.enabled {
+            if mode == .off {
                 planned = .unity
                 monitorStatus = .observing
             } else if !running {
@@ -502,7 +531,8 @@ final class AmbientCompensationController: ObservableObject {
                     detailSupportDB: 0,
                     confidence: analysis.separationConfidence,
                     ambientDeltaDB: 0,
-                    holdReason: nil
+                    holdReason: nil,
+                    mode: mode
                 )
                 monitorStatus = .observing
             } else if !referenceAvailable
@@ -517,14 +547,25 @@ final class AmbientCompensationController: ObservableObject {
                     analysis: analysis
                 )
             } else {
-                planned = try planner.plan(
-                    snapshot: analysis,
-                    configuration: configuration,
-                    availableHeadroomDB:
-                        engine
-                            .ambientCompensationAvailableHeadroomDB,
-                    previousActivity: appliedTarget.activity
-                )
+                switch mode {
+                case .off:
+                    planned = .unity
+                case .musicFocus:
+                    planned = try planner.plan(
+                        snapshot: analysis,
+                        configuration: configuration,
+                        availableHeadroomDB:
+                            engine
+                                .ambientCompensationAvailableHeadroomDB,
+                        previousActivity: appliedTarget.activity
+                    )
+                case .conversationFocus:
+                    planned = try conversationPlanner.plan(
+                        snapshot: analysis,
+                        configuration: configuration,
+                        previousActivity: appliedTarget.activity
+                    )
+                }
             }
 
             let smoothed = try envelope.update(
@@ -871,7 +912,12 @@ final class AmbientCompensationController: ObservableObject {
                         ?? analysis.ambientLevelDBFS),
                 0
             ),
-            holdReason: reason
+            holdReason: reason,
+            mode: playbackAdaptationMode,
+            conversationEvidence:
+                appliedTarget.conversationEvidence,
+            estimatedClearanceDB:
+                appliedTarget.estimatedClearanceDB
         )
     }
 
