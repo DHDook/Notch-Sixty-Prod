@@ -27,6 +27,7 @@ enum ActiveQuietZoneControllerError:
     case phaseReferenceUnavailable(Double)
     case frequencySetChanged
     case runtimeTargetLost
+    case verificationRegression
 
     var errorDescription: String? {
         switch self {
@@ -47,6 +48,8 @@ enum ActiveQuietZoneControllerError:
             return "The stable cancellation-frequency set changed and must be re-armed from silence."
         case .runtimeTargetLost:
             return "The realtime Quiet Zone target was removed by a route or headroom safety gate."
+        case .verificationRegression:
+            return "The physical error microphone measured a cancellation regression, so Active Quiet Zone was fault-faded and latched."
         }
     }
 }
@@ -68,6 +71,7 @@ final class ActiveQuietZoneController: ObservableObject {
     private var persistence: [PersistenceState] = []
     private var stage: Stage = .observing
     private var weakActiveWindows = 0
+    private var faultLatched = false
 
     @Published private(set) var configuration =
         ActiveQuietZoneConfiguration()
@@ -155,6 +159,7 @@ final class ActiveQuietZoneController: ObservableObject {
         try persist(updated)
 
         if enabled {
+            faultLatched = false
             try start()
         } else {
             stop()
@@ -177,7 +182,7 @@ final class ActiveQuietZoneController: ObservableObject {
         if validated.enabled {
             try start()
         } else {
-            try ambient.setQuietZoneObservationDemand(false)
+            stop()
         }
     }
 
@@ -230,6 +235,7 @@ final class ActiveQuietZoneController: ObservableObject {
         do {
             try synchronizeSelectedPlaybackSystem()
             guard configuration.enabled else { return }
+            guard !faultLatched else { return }
 
             guard engine.lifecycleState == .running,
                   engine.activeQuietZoneStereoSpeakerRuntimeAvailable else {
@@ -334,7 +340,7 @@ final class ActiveQuietZoneController: ObservableObject {
                 ) || evaluation.decisions.contains(.invalid) {
                     fault(
                         ActiveQuietZoneControllerError
-                            .runtimeTargetLost,
+                            .verificationRegression,
                         reason: .verificationRegression
                     )
                     return
@@ -930,6 +936,7 @@ final class ActiveQuietZoneController: ObservableObject {
         controlledFrequenciesHz = []
         persistence.removeAll()
         weakActiveWindows = 0
+        faultLatched = true
         status = .fault
         holdReason = reason
         lastErrorDescription = error.localizedDescription
@@ -943,5 +950,6 @@ final class ActiveQuietZoneController: ObservableObject {
         availableInjectionPeak = 0
         lastAnalysisRevision = 0
         weakActiveWindows = 0
+        faultLatched = false
     }
 }
