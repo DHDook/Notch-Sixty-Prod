@@ -80,8 +80,34 @@ The initial advisor is deliberately conservative and explainable.
    - reports reflection delay and level relative to the direct arrival;
    - recommends physical reflection/placement investigation rather than EQ.
 
-These are advisory classifications, not claims that a wall, surface or room mode
-has been uniquely identified without geometry/directional evidence.
+4. **Frequency-dependent decay / ringing**
+   - band-limits the retained impulse response around standard low and midband
+     centers;
+   - forms a reverse-integrated Schroeder energy decay curve;
+   - performs a linear fit over the -5 to -25 dB interval;
+   - reports a T20-derived RT60 estimate only when the fit clears the minimum
+     R² gate and the fitted interval is long enough;
+   - compares low-frequency decay with the same measurement's midband baseline
+     so the Advisor does not assume one universal target reverberation time;
+   - unusually long low-frequency decay is treated as evidence of stored room
+     energy that physical low-frequency treatment/placement should address
+     before aggressive EQ.
+
+5. **Modal/resonant-like behavior**
+   - combines elevated low-frequency response with independently measured excess
+     decay near the same frequency;
+   - labels the result as modal/resonant-like rather than naming a geometric room
+     mode without room dimensions.
+
+6. **Boundary-interference candidate**
+   - a deep 70–250 Hz cancellation without corresponding excess decay may be
+     classified as a boundary/SBIR-style interference candidate;
+   - the Advisor explicitly avoids claiming a unique boundary path until PR93
+     room geometry or placement re-measurement provides confirming evidence;
+   - large EQ boost into the cancellation is discouraged.
+
+These are advisory classifications, not claims that a wall, surface or geometric
+room mode has been uniquely identified without geometry/directional evidence.
 
 ## Recommendation classes
 
@@ -95,9 +121,13 @@ PR92 uses explicit remedy categories:
 - **Active Quiet Zone**
 - **No Action**
 
-The UI explains *why* each category was selected. Later PR92 slices may add more
-diagnostics, but must preserve the distinction between measured fact,
-interpretation, and recommendation.
+The UI explains *why* each category was selected and separately ranks a
+**Recommended Order** of remedies. Measurement-readiness failures outrank
+treatment recommendations, so clipping/low-SNR/incomplete data sends the user
+back to measurement before subtle acoustic conclusions are acted on.
+
+The distinction between measured fact, interpretation, and recommendation must
+remain explicit.
 
 ## Safety / truthfulness
 
@@ -106,8 +136,10 @@ interpretation, and recommendation.
 - no automatic Room Treatment arming;
 - no physical-treatment claim based only on frequency response;
 - no unique reflection-surface claim without room geometry;
-- no claim of RT60/EDT until the corresponding decay estimator is implemented
-  and validated;
+- T20-derived RT60 is reported only from the validated -5 to -25 dB regression
+  path and is labeled as derived rather than a direct 60 dB observation;
+- EDT is not inferred in PR92;
+- no unique SBIR boundary or geometric room-mode claim without room geometry;
 - low-confidence or incompatible measurement sets fail toward “measure more,”
   not aggressive recommendations.
 
