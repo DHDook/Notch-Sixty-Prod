@@ -427,6 +427,115 @@ final class AmbientCompensationTests: XCTestCase {
         XCTAssertNil(target.holdReason)
     }
 
+    func testConversationFocusRejectsTransientApplauseOrClatter() throws {
+        var configuration = configured()
+        configuration.playbackAdaptationMode = .conversationFocus
+
+        let target = try ConversationPreservationPlanner().plan(
+            snapshot: snapshot(
+                ambientDBFS: -27,
+                confidence: 0.95,
+                stationarity: 0.08,
+                character: .nonstationary,
+                spectrum: [
+                    band(120, -42),
+                    band(300, -33),
+                    band(600, -31),
+                    band(1_000, -30),
+                    band(2_000, -31),
+                    band(3_500, -32),
+                    band(6_000, -34),
+                    band(10_000, -36),
+                ],
+                periodicity: 0.08
+            ),
+            configuration: configuration
+        )
+
+        XCTAssertEqual(
+            target.holdReason,
+            .nonstationaryTransient
+        )
+        XCTAssertFalse(target.active)
+    }
+
+    func testConversationFocusSurvivesSpeechPlusHVACTone() throws {
+        var configuration = configured()
+        configuration.playbackAdaptationMode = .conversationFocus
+        var social = ConversationPreservationConfiguration()
+        social.minimumConversationEvidence = 0.30
+        configuration.conversationPreservation = social
+
+        let target = try ConversationPreservationPlanner().plan(
+            snapshot: snapshot(
+                ambientDBFS: -27,
+                confidence: 0.95,
+                stationarity: 0.58,
+                character: .mixed,
+                spectrum: [
+                    band(60, -38),
+                    band(120, -46),
+                    band(300, -42),
+                    band(600, -36),
+                    band(1_000, -31),
+                    band(2_000, -30),
+                    band(3_500, -33),
+                    band(6_000, -50),
+                    band(10_000, -58),
+                ],
+                periodicity: 0.30,
+                tonalComponents: [
+                    AmbientTonalComponent(
+                        frequencyHz: 60,
+                        levelDBFS: -38,
+                        prominenceDB: 16
+                    ),
+                ]
+            ),
+            configuration: configuration
+        )
+
+        XCTAssertNil(target.holdReason)
+        XCTAssertTrue(target.active)
+        XCTAssertGreaterThan(
+            target.conversationEvidence,
+            social.minimumConversationEvidence
+        )
+        XCTAssertLessThan(target.levelDB, 0)
+        XCTAssertLessThan(target.presenceSupportDB, 0)
+    }
+
+    func testConversationFocusRejectsSpeechLikePlaybackLeakageWhenSeparationIsWeak() throws {
+        var configuration = configured()
+        configuration.playbackAdaptationMode = .conversationFocus
+
+        let target = try ConversationPreservationPlanner().plan(
+            snapshot: snapshot(
+                ambientDBFS: -27,
+                mode: .modeledPlaybackSubtraction,
+                confidence: 0.68,
+                stationarity: 0.52,
+                spectrum: [
+                    band(120, -58),
+                    band(300, -42),
+                    band(600, -35),
+                    band(1_000, -31),
+                    band(2_000, -30),
+                    band(3_500, -33),
+                    band(6_000, -51),
+                ],
+                periodicity: 0.08
+            ),
+            configuration: configuration
+        )
+
+        XCTAssertEqual(
+            target.holdReason,
+            .lowSeparationConfidence
+        )
+        XCTAssertFalse(target.active)
+    }
+
     func testConversationEnvelopeUsesFastOnsetAndSlowRecovery() throws {
         var configuration = configured()
         configuration.playbackAdaptationMode = .conversationFocus
