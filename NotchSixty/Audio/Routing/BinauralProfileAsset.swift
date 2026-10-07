@@ -47,7 +47,7 @@ struct BinauralProfileAsset: Codable, Equatable, Sendable, Identifiable {
     var declaredLatencyFrames: Int = 0
     var kind: BinauralAssetKind = .hrtf
     var measurements: [BinauralMeasurement]
-    var importProvenance: SOFAImportProvenance?
+    var importProvenance: SOFAImportProvenance? = nil
 
     func validate() throws {
         guard schemaVersion == Self.currentSchemaVersion else {
