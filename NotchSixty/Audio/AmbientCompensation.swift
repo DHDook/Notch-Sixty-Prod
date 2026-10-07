@@ -38,6 +38,7 @@ struct AmbientCompensationConfiguration: Codable, Equatable, Sendable {
     var maximumLevelCompensationDB = 3.0
     var baselineAmbientLevelDBFS: Double?
     var optionalDBSPLAt0DBFS: Double?
+    var playbackModelPositionID: UUID?
     var minimumSeparationConfidence = 0.75
     var attackSeconds = 6.0
     var releaseSeconds = 20.0
