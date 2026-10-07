@@ -75,8 +75,8 @@ final class AmbientMonitorTransport {
               description.bitsPerChannel == 32 else {
             throw AmbientMonitorTransportError.unsupportedPCMFormat(
                 sampleRate: description.sampleRate,
-                channels: description.channelCount,
-                bits: description.bitsPerChannel
+                channels: Int(description.channelCount),
+                bits: Int(description.bitsPerChannel)
             )
         }
         guard description.sampleRate.isFinite,
