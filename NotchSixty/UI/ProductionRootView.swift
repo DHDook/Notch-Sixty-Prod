@@ -259,7 +259,12 @@ struct ProductionRootView: View {
                 profiles: product.profiles
             )
         case .activeAcoustics:
-            ProductionActiveAcousticsWorkspace(engine: engine)
+            ProductionActiveAcousticsWorkspace(
+                engine: engine,
+                ambient: product.ambientCompensation,
+                microphone: product.calibration,
+                projects: product.roomCorrectionProjects
+            )
         case .plugins:
             ProductionPluginWorkspace(product: product)
         }
