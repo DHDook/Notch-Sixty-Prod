@@ -71,9 +71,11 @@ final class ProductController: ObservableObject {
     let calibration: RoomCorrectionCalibrationController
     let multichannelCalibration: MultichannelCalibrationController
     let roomCorrectionProjects: RoomCorrectionProjectController
+    let ambientCompensation: AmbientCompensationController
     private var audioEngineObservation: AnyCancellable?
     private var calibrationObservation: AnyCancellable?
     private var multichannelCalibrationObservation: AnyCancellable?
+    private var ambientCompensationObservation: AnyCancellable?
     private var audioUnitHostObservation: AnyCancellable?
 
     init() {
@@ -93,7 +95,15 @@ final class ProductController: ObservableObject {
             profiles: profiles,
             microphone: calibration
         )
-        self.roomCorrectionProjects = RoomCorrectionProjectController(profiles: profiles)
+        let roomProjects =
+            RoomCorrectionProjectController(profiles: profiles)
+        self.roomCorrectionProjects = roomProjects
+        self.ambientCompensation = AmbientCompensationController(
+            engine: audioEngine,
+            profiles: profiles,
+            microphone: calibration,
+            projects: roomProjects
+        )
         observeAudioEngine()
     }
 
@@ -113,7 +123,15 @@ final class ProductController: ObservableObject {
             profiles: profiles,
             microphone: calibration
         )
-        self.roomCorrectionProjects = RoomCorrectionProjectController(profiles: profiles)
+        let roomProjects =
+            RoomCorrectionProjectController(profiles: profiles)
+        self.roomCorrectionProjects = roomProjects
+        self.ambientCompensation = AmbientCompensationController(
+            engine: audioEngine,
+            profiles: profiles,
+            microphone: calibration,
+            projects: roomProjects
+        )
         observeAudioEngine()
     }
 
@@ -140,6 +158,7 @@ final class ProductController: ObservableObject {
         roomCorrectionProjects.prepareForUse()
         calibration.prepareForUse()
         multichannelCalibration.prepareForUse()
+        ambientCompensation.prepareForUse()
     }
 
     func startProcessing() async throws {
@@ -227,6 +246,7 @@ final class ProductController: ObservableObject {
     }
 
     func shutdownForTermination() {
+        ambientCompensation.stopMonitoring()
         multichannelCalibration.cancelMeasurement()
         calibration.cancelMeasurement()
         audioEngine.shutdownForTermination()
@@ -240,6 +260,9 @@ final class ProductController: ObservableObject {
             self?.objectWillChange.send()
         }
         multichannelCalibrationObservation = multichannelCalibration.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+        ambientCompensationObservation = ambientCompensation.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
         audioUnitHostObservation = audioUnitHost.objectWillChange.sink { [weak self] _ in
