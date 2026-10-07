@@ -246,4 +246,295 @@ final class RoomCorrectionFIRDesignerTests: XCTestCase {
         }
     }
 
+    func testIndependentRoomDesignVerificationAcceptsActualDeploymentFIR() throws {
+        let frequencies = [
+            20.0, 40, 80, 160, 400, 1_000,
+            2_500, 5_000, 10_000, 15_000, 20_000,
+        ]
+        let magnitudes = [0.0, 0, 0.2, 1, 3, 6, 3, 1, 0.2, 0, 0]
+        let position = verificationPosition(
+            frequencies: frequencies,
+            left: magnitudes,
+            right: magnitudes,
+            snrDB: 60
+        )
+        let aggregate = RoomCorrectionAggregateResponse(
+            generatedAt: Date(),
+            includedPositionIDs: [position.id],
+            leftResponse: response(
+                frequencies: frequencies,
+                magnitudes: magnitudes
+            ),
+            rightResponse: response(
+                frequencies: frequencies,
+                magnitudes: magnitudes
+            )
+        )
+        let result = try RoomCorrectionFIRDesigner().design(
+            aggregate: aggregate,
+            target: RoomCorrectionBuiltInTarget.flat.curve,
+            parameters: parameters(taps: 4_096),
+            sampleRate: 48_000,
+            usableLowHz: 20,
+            usableHighHz: 20_000,
+            sourcePositions: [
+                RoomCorrectionDesignSourcePosition(
+                    id: position.id,
+                    weight: 1
+                ),
+            ],
+            name: "PR86 Verified"
+        )
+
+        let report = try RoomCorrectionDesignPredictionVerifier().verify(
+            design: result.design,
+            positions: [position]
+        )
+
+        XCTAssertTrue(
+            report.accepted,
+            report.blockingReasons.joined(separator: "\n")
+        )
+        XCTAssertGreaterThanOrEqual(report.confidence, 0.80)
+        XCTAssertLessThan(
+            report.rmsErrorAfterDB,
+            report.rmsErrorBeforeDB
+        )
+        XCTAssertLessThanOrEqual(
+            report.maximumDeploymentFilterGainDB,
+            RoomCorrectionDesignPredictionVerifier.headroomToleranceDB
+        )
+        XCTAssertLessThanOrEqual(
+            report.maximumOutOfBandDeviationDB,
+            RoomCorrectionDesignPredictionVerifier
+                .maximumOutOfBandDeviationDB
+        )
+        XCTAssertLessThanOrEqual(
+            report.storedPredictionDisagreementDB ?? 99,
+            RoomCorrectionDesignPredictionVerifier
+                .maximumStoredPredictionDisagreementDB
+        )
+    }
+
+    func testRoomDesignVerificationFailsClosedOnLowConfidenceCapture() throws {
+        let frequencies = [
+            20.0, 40, 80, 160, 400, 1_000,
+            2_500, 5_000, 10_000, 15_000, 20_000,
+        ]
+        let magnitudes = [0.0, 0, 0.2, 1, 3, 6, 3, 1, 0.2, 0, 0]
+        let highQuality = verificationPosition(
+            frequencies: frequencies,
+            left: magnitudes,
+            right: magnitudes,
+            snrDB: 60
+        )
+        let aggregate = RoomCorrectionAggregateResponse(
+            generatedAt: Date(),
+            includedPositionIDs: [highQuality.id],
+            leftResponse: response(
+                frequencies: frequencies,
+                magnitudes: magnitudes
+            ),
+            rightResponse: response(
+                frequencies: frequencies,
+                magnitudes: magnitudes
+            )
+        )
+        let result = try RoomCorrectionFIRDesigner().design(
+            aggregate: aggregate,
+            target: RoomCorrectionBuiltInTarget.flat.curve,
+            parameters: parameters(taps: 2_048),
+            sampleRate: 48_000,
+            sourcePositions: [
+                RoomCorrectionDesignSourcePosition(
+                    id: highQuality.id,
+                    weight: 1
+                ),
+            ]
+        )
+        let lowQuality = verificationPosition(
+            id: highQuality.id,
+            frequencies: frequencies,
+            left: magnitudes,
+            right: magnitudes,
+            snrDB: 20
+        )
+
+        let report = try RoomCorrectionDesignPredictionVerifier().verify(
+            design: result.design,
+            positions: [lowQuality]
+        )
+
+        XCTAssertFalse(report.accepted)
+        XCTAssertLessThan(
+            report.confidence,
+            RoomCorrectionDesignPredictionVerifier.minimumConfidence
+        )
+        XCTAssertTrue(
+            report.blockingReasons.contains {
+                $0.localizedCaseInsensitiveContains("confidence")
+            }
+        )
+    }
+
+    func testRoomDesignVerificationRejectsInsufficientHeadroom() throws {
+        let frequencies = [20.0, 80, 200, 1_000, 5_000, 10_000, 20_000]
+        let measured = Array(repeating: -4.0, count: frequencies.count)
+        let position = verificationPosition(
+            frequencies: frequencies,
+            left: measured,
+            right: measured,
+            snrDB: 60
+        )
+        let aggregate = RoomCorrectionAggregateResponse(
+            generatedAt: Date(),
+            includedPositionIDs: [position.id],
+            leftResponse: response(
+                frequencies: frequencies,
+                magnitudes: measured
+            ),
+            rightResponse: response(
+                frequencies: frequencies,
+                magnitudes: measured
+            )
+        )
+        var design = try RoomCorrectionFIRDesigner().design(
+            aggregate: aggregate,
+            target: RoomCorrectionBuiltInTarget.flat.curve,
+            parameters: parameters(taps: 2_048),
+            sampleRate: 48_000,
+            sourcePositions: [
+                RoomCorrectionDesignSourcePosition(
+                    id: position.id,
+                    weight: 1
+                ),
+            ]
+        ).design
+        XCTAssertGreaterThan(design.recommendedHeadroomDB, 0)
+        design.recommendedHeadroomDB = 0
+
+        let report = try RoomCorrectionDesignPredictionVerifier().verify(
+            design: design,
+            positions: [position]
+        )
+
+        XCTAssertFalse(report.accepted)
+        XCTAssertGreaterThan(report.maximumDeploymentFilterGainDB, 1)
+        XCTAssertTrue(
+            report.blockingReasons.contains {
+                $0.localizedCaseInsensitiveContains("headroom")
+                    || $0.localizedCaseInsensitiveContains("positive gain")
+            }
+        )
+    }
+
+    func testRoomDesignVerificationRejectsTamperedStoredPrediction() throws {
+        let frequencies = [
+            20.0, 40, 80, 160, 400, 1_000,
+            2_500, 5_000, 10_000, 15_000, 20_000,
+        ]
+        let magnitudes = [0.0, 0, 0.2, 1, 3, 6, 3, 1, 0.2, 0, 0]
+        let position = verificationPosition(
+            frequencies: frequencies,
+            left: magnitudes,
+            right: magnitudes,
+            snrDB: 60
+        )
+        let aggregate = RoomCorrectionAggregateResponse(
+            generatedAt: Date(),
+            includedPositionIDs: [position.id],
+            leftResponse: response(
+                frequencies: frequencies,
+                magnitudes: magnitudes
+            ),
+            rightResponse: response(
+                frequencies: frequencies,
+                magnitudes: magnitudes
+            )
+        )
+        var design = try RoomCorrectionFIRDesigner().design(
+            aggregate: aggregate,
+            target: RoomCorrectionBuiltInTarget.flat.curve,
+            parameters: parameters(taps: 2_048),
+            sampleRate: 48_000,
+            sourcePositions: [
+                RoomCorrectionDesignSourcePosition(
+                    id: position.id,
+                    weight: 1
+                ),
+            ]
+        ).design
+        design.predictedLeftResponse?.magnitudeDB = design
+            .predictedLeftResponse?.magnitudeDB.map { $0 + 2.0 }
+            ?? []
+
+        let report = try RoomCorrectionDesignPredictionVerifier().verify(
+            design: design,
+            positions: [position]
+        )
+
+        XCTAssertFalse(report.accepted)
+        XCTAssertGreaterThan(
+            report.storedPredictionDisagreementDB ?? 0,
+            RoomCorrectionDesignPredictionVerifier
+                .maximumStoredPredictionDisagreementDB
+        )
+        XCTAssertTrue(
+            report.blockingReasons.contains {
+                $0.localizedCaseInsensitiveContains("predictions disagree")
+            }
+        )
+    }
+
+    private func verificationPosition(
+        id: UUID = UUID(),
+        frequencies: [Double],
+        left: [Double],
+        right: [Double],
+        snrDB: Double
+    ) -> RoomCorrectionMeasurementPosition {
+        let quality = RoomCorrectionMeasurementQuality(
+            clipped: false,
+            playbackPeakDBFS: -18,
+            capturePeakDBFS: -12,
+            estimatedNoiseFloorDBFS: -72,
+            estimatedSNRDB: snrDB,
+            sweepComplete: true,
+            directArrivalSeconds: 0.01,
+            usableLowHz: frequencies.first,
+            usableHighHz: frequencies.last,
+            warnings: []
+        )
+        return RoomCorrectionMeasurementPosition(
+            id: id,
+            name: "Verification Seat",
+            included: true,
+            weight: 1,
+            sampleRate: 48_000,
+            left: RoomCorrectionChannelMeasurement(
+                capturedAt: Date(),
+                rawCapture: [],
+                impulseResponse: [1],
+                transferFunction: RoomCorrectionFrequencyResponse(
+                    frequenciesHz: frequencies,
+                    magnitudeDB: left,
+                    phaseRadians: nil
+                ),
+                quality: quality
+            ),
+            right: RoomCorrectionChannelMeasurement(
+                capturedAt: Date(),
+                rawCapture: [],
+                impulseResponse: [1],
+                transferFunction: RoomCorrectionFrequencyResponse(
+                    frequenciesHz: frequencies,
+                    magnitudeDB: right,
+                    phaseRadians: nil
+                ),
+                quality: quality
+            )
+        )
+    }
+
+
 }
