@@ -146,6 +146,78 @@ final class AudioUnitLiveRackRuntimeTests: XCTestCase {
         XCTAssertTrue(output.allSatisfy { $0 == 0 })
     }
 
+    func testRenderWatchdogRequiresSustainedSevereOverrun() {
+        var watchdog = AudioUnitLiveRenderWatchdog()
+        let budget: UInt64 = 100
+
+        XCTAssertFalse(
+            watchdog.observe(
+                elapsedTicks: 101,
+                budgetTicks: budget
+            )
+        )
+        XCTAssertFalse(
+            watchdog.observe(
+                elapsedTicks: 150,
+                budgetTicks: budget
+            )
+        )
+        XCTAssertEqual(watchdog.consecutiveOverruns, 2)
+
+        // A healthy render resets the streak so a one-off scheduler hiccup
+        // cannot quarantine a plug-in.
+        XCTAssertFalse(
+            watchdog.observe(
+                elapsedTicks: 100,
+                budgetTicks: budget
+            )
+        )
+        XCTAssertEqual(watchdog.consecutiveOverruns, 0)
+
+        XCTAssertFalse(
+            watchdog.observe(
+                elapsedTicks: 101,
+                budgetTicks: budget
+            )
+        )
+        XCTAssertFalse(
+            watchdog.observe(
+                elapsedTicks: 101,
+                budgetTicks: budget
+            )
+        )
+        XCTAssertTrue(
+            watchdog.observe(
+                elapsedTicks: 101,
+                budgetTicks: budget
+            )
+        )
+        XCTAssertEqual(
+            watchdog.consecutiveOverruns,
+            AudioUnitLiveRenderWatchdog.consecutiveOverrunLimit
+        )
+
+        // Small buffers retain a generous 10 ms floor.
+        XCTAssertEqual(
+            AudioUnitLiveRenderWatchdog.budgetTicks(
+                frameCount: 64,
+                sampleRate: 48_000,
+                ticksPerSecond: 1_000_000_000
+            ),
+            10_000_000
+        )
+
+        // Larger buffers use the four-times-buffer-duration threshold.
+        XCTAssertGreaterThan(
+            AudioUnitLiveRenderWatchdog.budgetTicks(
+                frameCount: 512,
+                sampleRate: 48_000,
+                ticksPerSecond: 1_000_000_000
+            ),
+            40_000_000
+        )
+    }
+
     func testLiveTimingValidatorRejectsPathologicalValues() {
         XCTAssertNil(
             AudioUnitLiveTimingValidator.frameCount(
