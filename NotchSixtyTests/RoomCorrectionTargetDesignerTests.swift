@@ -420,6 +420,52 @@ final class RoomCorrectionTargetDesignerTests: XCTestCase {
         XCTAssertLessThanOrEqual(report.effectiveHighHz, 20_000)
     }
 
+    func testIntelligentTargetDoesNotDemandUnsupportedDeepBass() throws {
+        let frequencies = [
+            20.0, 40, 80, 160, 300, 1_000,
+            4_000, 10_000, 20_000,
+        ]
+        let deep = intelligentSample(
+            label: "Deep Extension",
+            frequencies: frequencies,
+            magnitudes: [0, 0, 0, 0, 0, 0, -1, -2, -2.5],
+            snrDB: 60
+        )
+        let limited = intelligentSample(
+            label: "Limited Extension",
+            frequencies: frequencies,
+            magnitudes: [-14, -12, -9, -3, 0, 0, -1, -2, -2.5],
+            snrDB: 60
+        )
+        let generator = IntelligentRoomTargetGenerator()
+        let parameters = parameters(maximumBoost: 4, maximumCut: 8)
+
+        let deepReport = try generator.generate(
+            samples: [deep],
+            parameters: parameters,
+            preference: .warm
+        )
+        let limitedReport = try generator.generate(
+            samples: [limited],
+            parameters: parameters,
+            preference: .warm
+        )
+
+        XCTAssertGreaterThan(
+            limitedReport.estimatedBassExtensionHz,
+            deepReport.estimatedBassExtensionHz
+        )
+        XCTAssertLessThan(
+            limitedReport.generatedBassShelfDB,
+            deepReport.generatedBassShelfDB
+        )
+        XCTAssertLessThanOrEqual(
+            limitedReport.maximumRequestedBoostDB,
+            parameters.maximumBoostDB + 0.000_1
+        )
+    }
+
+
     private func intelligentSample(
         label: String = "Fixture",
         frequencies: [Double],
