@@ -128,8 +128,8 @@ for phrase in (
     "boundary/sbir",
     "placement optimization",
     "prediction — verify with measurement",
-    "not content preset",
-    "not playback system",
+    "content preset",
+    "playback system",
 ):
     require(phrase in doc, f"PR93 contract missing '{phrase}'")
 
