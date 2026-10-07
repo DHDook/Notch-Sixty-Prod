@@ -5,6 +5,9 @@ ROOT = Path(__file__).resolve().parents[1]
 OFFLINE = ROOT / "NotchSixty/Audio/AudioUnitOfflinePreparation.swift"
 HOST = ROOT / "NotchSixty/Audio/AudioUnitHostController.swift"
 LIVE = ROOT / "NotchSixty/Audio/AudioUnitLiveRackRuntime.swift"
+EXCHANGE_H = ROOT / "NotchSixty/Audio/Realtime/N60AudioUnitRackExchange.h"
+EXCHANGE_C = ROOT / "NotchSixty/Audio/Realtime/N60AudioUnitRackExchange.c"
+GATE_TEST = ROOT / "ci/validate_pr84a_audio_unit_stage_fault_gate.c"
 OFFLINE_TESTS = ROOT / "NotchSixtyTests/AudioUnitOfflinePreparationTests.swift"
 LIVE_TESTS = ROOT / "NotchSixtyTests/AudioUnitLiveRackRuntimeTests.swift"
 MUTATION_TESTS = ROOT / "NotchSixtyTests/AudioUnitRackMutationTests.swift"
@@ -37,6 +40,8 @@ def function_body_after(text: str, anchor: str, name: str) -> str:
 offline = OFFLINE.read_text()
 host = HOST.read_text()
 live = LIVE.read_text()
+exchange_h = EXCHANGE_H.read_text()
+exchange_c = EXCHANGE_C.read_text()
 offline_tests = OFFLINE_TESTS.read_text()
 live_tests = LIVE_TESTS.read_text()
 mutation_tests = MUTATION_TESTS.read_text()
@@ -76,8 +81,59 @@ for token in (
     "func controlPlaneHealthIssues()",
     "reportedControlPlaneFaultSlots",
     "issue.description",
+    "case stageFaultGateAllocationFailed",
+    "N60AudioUnitStageFaultGateCreate",
+    "N60AudioUnitStageFaultGateDestroy",
+    "N60AudioUnitStageFaultGateTrip",
+    "N60AudioUnitStageFaultGateIsTripped",
 ):
     require(token in live, f"live hardening missing {token}")
+
+for token in (
+    "N60AudioUnitStageFaultGateCreate",
+    "N60AudioUnitStageFaultGateDestroy",
+    "N60AudioUnitStageFaultGateTrip",
+    "N60AudioUnitStageFaultGateIsTripped",
+):
+    require(token in exchange_h, f"stage fault gate header missing {token}")
+
+for token in (
+    "struct N60AudioUnitStageFaultGate",
+    "_Atomic bool tripped",
+    "atomic_is_lock_free(&gate->tripped)",
+    "memory_order_release",
+    "memory_order_acquire",
+):
+    require(token in exchange_c, f"stage fault gate implementation missing {token}")
+
+require(GATE_TEST.exists(), "portable stage fault gate proof missing")
+
+stage_render = function_body_after(
+    live,
+    "final class AudioUnitLiveProcessStage",
+    "func process("
+)
+require(
+    "N60AudioUnitStageFaultGateIsTripped(faultGate)" in stage_render,
+    "live process stage does not fail closed through the atomic gate",
+)
+require(
+    "N60AudioUnitStageFaultGateTrip(faultGate)" in stage_render,
+    "live process stage does not latch realtime render faults",
+)
+for forbidden in (
+    "controlPlaneHealthIssue",
+    "withAUAudioUnit",
+    ".latency",
+    ".tailTime",
+    "DispatchQueue",
+    "PropertyListSerialization",
+    "AudioUnitOpaqueStateCodec",
+):
+    require(
+        forbidden not in stage_render,
+        f"realtime stage process contains control-plane token {forbidden}",
+    )
 
 render = function_body_after(
     live,
