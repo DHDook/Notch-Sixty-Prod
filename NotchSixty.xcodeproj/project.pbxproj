@@ -120,6 +120,10 @@
 		F8500000000000000000000B /* libmysofa gcol.c in Sources */ = {isa = PBXBuildFile; fileRef = F8500000000000000000001B /* libmysofa gcol.c */; };
 		F8500000000000000000000C /* NativeSOFAImporterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8500000000000000000001C /* NativeSOFAImporterTests.swift */; };
 		F86000000000000000000001 /* CalibrationPredictionVerifierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F86000000000000000000011 /* CalibrationPredictionVerifierTests.swift */; };
+		F92000000000000000000001 /* RoomTreatmentAdvisor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F92000000000000000000011 /* RoomTreatmentAdvisor.swift */; };
+		F92000000000000000000002 /* RoomTreatmentAdvisorController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F92000000000000000000012 /* RoomTreatmentAdvisorController.swift */; };
+		F92000000000000000000003 /* ProductionRoomTreatmentAdvisorWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = F92000000000000000000013 /* ProductionRoomTreatmentAdvisorWorkspace.swift */; };
+		F92000000000000000000004 /* RoomTreatmentAdvisorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F92000000000000000000014 /* RoomTreatmentAdvisorTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -259,6 +263,10 @@
 		F8500000000000000000001A /* libmysofa gunzip.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "Audio/SOFA/Vendor/libmysofa/hdf/gunzip.c"; sourceTree = "<group>"; };
 		F8500000000000000000001B /* libmysofa gcol.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = "Audio/SOFA/Vendor/libmysofa/hdf/gcol.c"; sourceTree = "<group>"; };
 		F86000000000000000000011 /* CalibrationPredictionVerifierTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalibrationPredictionVerifierTests.swift; sourceTree = "<group>"; };
+		F92000000000000000000011 /* RoomTreatmentAdvisor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomTreatmentAdvisor.swift; sourceTree = "<group>"; };
+		F92000000000000000000012 /* RoomTreatmentAdvisorController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomTreatmentAdvisorController.swift; sourceTree = "<group>"; };
+		F92000000000000000000013 /* ProductionRoomTreatmentAdvisorWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionRoomTreatmentAdvisorWorkspace.swift; sourceTree = "<group>"; };
+		F92000000000000000000014 /* RoomTreatmentAdvisorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomTreatmentAdvisorTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -332,6 +340,7 @@
 				F82000000000000000000014 /* AudioUnitRackMutationTests.swift */,
 				F8500000000000000000001C /* NativeSOFAImporterTests.swift */,
 				F86000000000000000000011 /* CalibrationPredictionVerifierTests.swift */,
+				F92000000000000000000014 /* RoomTreatmentAdvisorTests.swift */,
 			);
 			path = NotchSixtyTests;
 			sourceTree = "<group>";
@@ -368,6 +377,7 @@
 				F74000000000000000000011 /* MIMORoomTreatmentFIRCompiler.swift */,
 				F75000000000000000000011 /* MIMORoomTreatmentVerification.swift */,
 				F76000000000000000000011 /* MIMORoomTreatmentActivationPermit.swift */,
+				F92000000000000000000011 /* RoomTreatmentAdvisor.swift */,
 				F79000000000000000000011 /* AudioUnitHostFoundation.swift */,
 				F79000000000000000000012 /* AudioUnitHostController.swift */,
 				F80000000000000000000011 /* AudioUnitOfflinePreparation.swift */,
@@ -381,7 +391,7 @@
 		A20000000000000000000051 /* CoreAudio */ = {isa = PBXGroup; children = (A20000000000000000000021 /* CoreAudioError.swift */, F63000000000000000000011 /* CoreAudioNChannelTransportSession.swift */, F65000000000000000000013 /* CoreAudioSemanticTransportSupport.swift */, F65000000000000000000014 /* CoreAudioBinauralHeadphoneTransportSession.swift */, F64000000000000000000013 /* MultichannelCalibrationTransport.swift */, A20000000000000000000028 /* MasterVolumeDeviceController.swift */, A2000000000000000000002C /* RoomCorrectionCalibrationTransport.swift */,); path = CoreAudio; sourceTree = "<group>"; };
 		A20000000000000000000052 /* Devices */ = {isa = PBXGroup; children = (A20000000000000000000022 /* AudioOutputDevice.swift */, A20000000000000000000023 /* OutputDeviceCatalog.swift */,); path = Devices; sourceTree = "<group>"; };
 		A20000000000000000000053 /* Routing */ = {isa = PBXGroup; children = (A20000000000000000000024 /* AudioRouteConfiguration.swift */, F62000000000000000000011 /* OutputDeviceProfileConfiguration.swift */, F65000000000000000000011 /* HeadphoneDeviceProfileConfiguration.swift */, F65000000000000000000012 /* BinauralProfileAsset.swift */, F64000000000000000000011 /* OutputDeviceCalibration.swift */,); path = Routing; sourceTree = "<group>"; };
-		A20000000000000000000054 /* State */ = {isa = PBXGroup; children = (A20000000000000000000025 /* AudioLifecycleState.swift */, A2000000000000000000002B /* ProductProfiles.swift */, F64000000000000000000014 /* MultichannelCalibrationController.swift */, A2000000000000000000002D /* RoomCorrectionCalibrationController.swift */, A2000000000000000000002F /* RoomCorrectionProjectController.swift */, F89300000000000000000011 /* AmbientCompensationController.swift */, F90200000000000000000011 /* ActiveQuietZoneController.swift */,); path = State; sourceTree = "<group>"; };
+		A20000000000000000000054 /* State */ = {isa = PBXGroup; children = (A20000000000000000000025 /* AudioLifecycleState.swift */, A2000000000000000000002B /* ProductProfiles.swift */, F64000000000000000000014 /* MultichannelCalibrationController.swift */, A2000000000000000000002D /* RoomCorrectionCalibrationController.swift */, A2000000000000000000002F /* RoomCorrectionProjectController.swift */, F89300000000000000000011 /* AmbientCompensationController.swift */, F90200000000000000000011 /* ActiveQuietZoneController.swift */, F92000000000000000000012 /* RoomTreatmentAdvisorController.swift */,); path = State; sourceTree = "<group>"; };
 		A20000000000000000000055 /* Diagnostics */ = {isa = PBXGroup; children = (A20000000000000000000026 /* AudioDiagnosticsSnapshot.swift */, A2000000000000000000002A /* ProductionAnalysisWorker.swift */,); path = Diagnostics; sourceTree = "<group>"; };
 		A30000000000000000000050 /* Realtime */ = {
 			isa = PBXGroup;
@@ -415,7 +425,7 @@
 			path = Realtime;
 			sourceTree = "<group>";
 		};
-		A40000000000000000000050 /* UI */ = {isa = PBXGroup; children = (A40000000000000000000020 /* ProductionRootView.swift */, A40000000000000000000021 /* ProductionEqualizerView.swift */, A40000000000000000000022 /* ProductionDynamicsView.swift */, A40000000000000000000023 /* ProductionDynamicsTelemetryView.swift */, A40000000000000000000024 /* ProductionMetersView.swift */, A40000000000000000000025 /* ProductionAnalysisViews.swift */, A40000000000000000000026 /* ProductionProfileToolbar.swift */, F65000000000000000000015 /* ProductionHeadphoneWorkspace.swift */, F64000000000000000000015 /* ProductionMultichannelCalibrationWorkspace.swift */, A40000000000000000000027 /* ProductionRoomCorrectionWorkspace.swift */, F78000000000000000000011 /* ProductionActiveAcousticsWorkspace.swift */, F78000000000000000000012 /* ProductionPluginWorkspace.swift */,); path = UI; sourceTree = "<group>"; };
+		A40000000000000000000050 /* UI */ = {isa = PBXGroup; children = (A40000000000000000000020 /* ProductionRootView.swift */, A40000000000000000000021 /* ProductionEqualizerView.swift */, A40000000000000000000022 /* ProductionDynamicsView.swift */, A40000000000000000000023 /* ProductionDynamicsTelemetryView.swift */, A40000000000000000000024 /* ProductionMetersView.swift */, A40000000000000000000025 /* ProductionAnalysisViews.swift */, A40000000000000000000026 /* ProductionProfileToolbar.swift */, F65000000000000000000015 /* ProductionHeadphoneWorkspace.swift */, F64000000000000000000015 /* ProductionMultichannelCalibrationWorkspace.swift */, A40000000000000000000027 /* ProductionRoomCorrectionWorkspace.swift */, F78000000000000000000011 /* ProductionActiveAcousticsWorkspace.swift */, F92000000000000000000013 /* ProductionRoomTreatmentAdvisorWorkspace.swift */, F78000000000000000000012 /* ProductionPluginWorkspace.swift */,); path = UI; sourceTree = "<group>"; };
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -543,6 +553,9 @@
 				F74000000000000000000001 /* MIMORoomTreatmentFIRCompiler.swift in Sources */,
 				F75000000000000000000001 /* MIMORoomTreatmentVerification.swift in Sources */,
 				F76000000000000000000001 /* MIMORoomTreatmentActivationPermit.swift in Sources */,
+				F92000000000000000000001 /* RoomTreatmentAdvisor.swift in Sources */,
+				F92000000000000000000002 /* RoomTreatmentAdvisorController.swift in Sources */,
+				F92000000000000000000003 /* ProductionRoomTreatmentAdvisorWorkspace.swift in Sources */,
 				F79000000000000000000001 /* AudioUnitHostFoundation.swift in Sources */,
 				F79000000000000000000002 /* AudioUnitHostController.swift in Sources */,
 				F80000000000000000000001 /* AudioUnitOfflinePreparation.swift in Sources */,
@@ -596,6 +609,7 @@
 				F82000000000000000000004 /* AudioUnitRackMutationTests.swift in Sources */,
 				F8500000000000000000000C /* NativeSOFAImporterTests.swift in Sources */,
 				F86000000000000000000001 /* CalibrationPredictionVerifierTests.swift in Sources */,
+				F92000000000000000000004 /* RoomTreatmentAdvisorTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
