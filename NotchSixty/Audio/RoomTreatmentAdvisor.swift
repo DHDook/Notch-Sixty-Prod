@@ -41,6 +41,8 @@ enum RoomTreatmentAdvisorFindingKind:
     case measurementQuality
     case spatialBassVariation
     case deepBassCancellation
+    case lowFrequencyRinging
+    case boundaryInterferenceCandidate
     case earlyReflection
     case noInitialFlag
 }
@@ -60,6 +62,17 @@ struct RoomTreatmentAdvisorFinding:
     var confidence: Double
     var frequencyHz: Double?
     var delayMilliseconds: Double?
+    var decaySeconds: Double?
+}
+
+struct RoomTreatmentAdvisorActionPriority:
+    Identifiable, Equatable, Sendable
+{
+    var remedy: RoomTreatmentAdvisorRemedy
+    var score: Double
+    var rationale: String
+
+    var id: String { remedy.rawValue }
 }
 
 enum RoomTreatmentAdvisorAnalysisMode:
@@ -90,6 +103,8 @@ struct RoomTreatmentAdvisorReport:
     var calibratedMicrophone: Bool
     var qualityWarnings: [String]
     var findings: [RoomTreatmentAdvisorFinding]
+    var actionPriorities:
+        [RoomTreatmentAdvisorActionPriority]
 
     var actionableFindings: [RoomTreatmentAdvisorFinding] {
         findings.filter {
@@ -109,6 +124,12 @@ struct RoomTreatmentAdvisorAnalyzer: Sendable {
     static let deepCancellationThresholdDB = -8.0
     static let strongEarlyReflectionThresholdDB = -12.0
     static let minimumAdvisorySNRDB = 20.0
+    static let minimumDecayFitR2 = 0.82
+    static let lowFrequencyDecayRatioThreshold = 1.55
+    static let minimumLowFrequencyRingingSeconds = 0.38
+    static let resonantResponseContrastDB = 4.0
+    static let boundaryCandidateLowHz = 70.0
+    static let boundaryCandidateHighHz = 250.0
 
     func analyze(
         project: RoomCorrectionProject
@@ -124,6 +145,7 @@ struct RoomTreatmentAdvisorAnalyzer: Sendable {
         }
 
         let warnings = measurementWarnings(included)
+        let decay = decaySummary(included)
         var findings: [RoomTreatmentAdvisorFinding] = []
 
         if included.isEmpty {
@@ -289,6 +311,110 @@ struct RoomTreatmentAdvisorAnalyzer: Sendable {
                     )
                 )
             }
+
+            if let ringing = decay.longestLowFrequency,
+               let baseline = decay.midbandMedianSeconds,
+               ringing.rt60Seconds
+                    >= max(
+                        Self.minimumLowFrequencyRingingSeconds,
+                        baseline
+                            * Self.lowFrequencyDecayRatioThreshold
+                    ) {
+                let contrast = aggregateLocalResponseContrast(
+                    included,
+                    frequencyHz: ringing.frequencyHz
+                )
+                let responseSupportsResonance =
+                    (contrast ?? 0)
+                    >= Self.resonantResponseContrastDB
+                findings.append(
+                    RoomTreatmentAdvisorFinding(
+                        id: "low-frequency-ringing",
+                        kind: .lowFrequencyRinging,
+                        severity: .important,
+                        title: String(
+                            format:
+                                "Low-frequency ringing near %.0f Hz",
+                            ringing.frequencyHz
+                        ),
+                        measuredEvidence: String(
+                            format:
+                                "T20-derived decay is %.2f s near %.0f Hz versus a %.2f s midband baseline (fit R² %.2f).",
+                            ringing.rt60Seconds,
+                            ringing.frequencyHz,
+                            baseline,
+                            ringing.fitR2
+                        ),
+                        interpretation:
+                            responseSupportsResonance
+                                ? "The unusually long decay coincides with elevated response energy, which is consistent with resonant/modal-like room behavior. Geometry is still required before naming a specific room mode."
+                                : "The room stores low-frequency energy substantially longer than it stores midband energy. EQ can reduce excitation, but it does not directly remove the room's acoustic decay.",
+                        recommendation:
+                            responseSupportsResonance
+                                ? "Prioritize bass trapping and speaker/listener placement experiments. Use bounded DSP only for residual level error after the decay problem is addressed."
+                                : "Investigate substantial low-frequency absorption and placement before relying on EQ. Re-measure after any physical change to confirm shorter decay.",
+                        primaryRemedy: .passiveTreatment,
+                        secondaryRemedies: [
+                            .placement,
+                            .dspCorrection,
+                        ],
+                        confidence:
+                            responseSupportsResonance
+                                ? 0.90
+                                : 0.84,
+                        frequencyHz: ringing.frequencyHz,
+                        decaySeconds: ringing.rt60Seconds
+                    )
+                )
+            }
+
+            if let cancellation = deepestBassCancellation(
+                included
+            ),
+               cancellation.frequencyHz
+                    >= Self.boundaryCandidateLowHz,
+               cancellation.frequencyHz
+                    <= Self.boundaryCandidateHighHz,
+               cancellation.depthDB <= -6.0,
+               let baseline = decay.midbandMedianSeconds,
+               let nearbyDecay = decay.nearest(
+                    to: cancellation.frequencyHz
+               ),
+               nearbyDecay.rt60Seconds
+                    <= baseline * 1.25 {
+                findings.append(
+                    RoomTreatmentAdvisorFinding(
+                        id: "boundary-interference-candidate",
+                        kind: .boundaryInterferenceCandidate,
+                        severity: .opportunity,
+                        title: String(
+                            format:
+                                "Boundary-interference candidate near %.0f Hz",
+                            cancellation.frequencyHz
+                        ),
+                        measuredEvidence: String(
+                            format:
+                                "A %.1f dB cancellation near %.0f Hz is not accompanied by unusually long decay (%.2f s versus %.2f s midband).",
+                            abs(cancellation.depthDB),
+                            cancellation.frequencyHz,
+                            nearbyDecay.rt60Seconds,
+                            baseline
+                        ),
+                        interpretation:
+                            "A deep response null without matching excess decay is more consistent with destructive path interference than with stored resonant energy. Without room geometry this remains an SBIR/boundary-interference candidate, not a unique diagnosis.",
+                        recommendation:
+                            "Prioritize speaker and listening-position movement and re-measure. Avoid large EQ boost into the null. PR93 room geometry can test likely boundary path lengths.",
+                        primaryRemedy: .placement,
+                        secondaryRemedies: [.measureMore],
+                        confidence:
+                            included.count > 1 ? 0.78 : 0.64,
+                        frequencyHz:
+                            cancellation.frequencyHz,
+                        decaySeconds:
+                            nearbyDecay.rt60Seconds
+                    )
+                )
+            }
         }
 
         let meaningful = findings.contains {
@@ -305,11 +431,11 @@ struct RoomTreatmentAdvisorAnalyzer: Sendable {
                     severity: .information,
                     title: "No major issue in the initial checks",
                     measuredEvidence:
-                        "The current PR92 checks did not cross the spatial-bass, deep-null, or early-reflection thresholds.",
+                        "The current PR92 checks did not cross the spatial-bass, deep-null, early-reflection, or excess-decay thresholds.",
                     interpretation:
-                        "This is not a claim that the room needs no treatment. Frequency-dependent decay and geometry-assisted diagnosis are intentionally not inferred until those estimators are implemented and validated.",
+                        "This is not a claim that the room needs no treatment. The current measurements simply do not show a strong problem in the validated checks.",
                     recommendation:
-                        "Keep the current measurements as a baseline. Later PR92/PR93 analysis can add validated decay and room-geometry evidence.",
+                        "Keep the current measurements as a baseline. PR93 room geometry can add placement and reflection-path specificity without changing this measurement record.",
                     primaryRemedy: .noAction,
                     confidence: 0.75
                 )
@@ -324,6 +450,9 @@ struct RoomTreatmentAdvisorAnalyzer: Sendable {
             return $0.title < $1.title
         }
 
+        let actionPriorities =
+            prioritizedActions(from: findings)
+
         return RoomTreatmentAdvisorReport(
             projectID: project.id,
             projectName: project.name,
@@ -334,7 +463,8 @@ struct RoomTreatmentAdvisorAnalyzer: Sendable {
             calibratedMicrophone:
                 project.microphone?.calibration != nil,
             qualityWarnings: warnings,
-            findings: findings
+            findings: findings,
+            actionPriorities: actionPriorities
         )
     }
 
@@ -471,6 +601,425 @@ struct RoomTreatmentAdvisorAnalyzer: Sendable {
             }
         }
         return best
+    }
+
+    private struct DecayEstimate: Sendable {
+        var frequencyHz: Double
+        var rt60Seconds: Double
+        var fitR2: Double
+        var positionName: String
+        var channelName: String
+    }
+
+    private struct DecaySummary: Sendable {
+        var estimates: [DecayEstimate]
+        var midbandMedianSeconds: Double?
+        var longestLowFrequency: DecayEstimate?
+
+        func nearest(
+            to frequencyHz: Double
+        ) -> DecayEstimate? {
+            estimates.min {
+                abs(log($0.frequencyHz / frequencyHz))
+                    < abs(log($1.frequencyHz / frequencyHz))
+            }
+        }
+    }
+
+    private func decaySummary(
+        _ positions: [RoomCorrectionMeasurementPosition]
+    ) -> DecaySummary {
+        let centers = [
+            63.0, 80, 100, 125, 160, 200,
+            500, 1_000, 2_000,
+        ]
+        var estimates: [DecayEstimate] = []
+
+        for position in positions {
+            for (channelName, measurement) in [
+                ("Left", position.left),
+                ("Right", position.right),
+            ] {
+                guard let directSeconds =
+                        measurement.quality
+                            .directArrivalSeconds,
+                      directSeconds.isFinite,
+                      directSeconds >= 0 else {
+                    continue
+                }
+                let directIndex = Int(
+                    (
+                        directSeconds
+                        * position.sampleRate
+                    ).rounded()
+                )
+                guard directIndex >= 0,
+                      directIndex
+                        < measurement.impulseResponse.count
+                else {
+                    continue
+                }
+
+                for center in centers {
+                    guard center
+                            < position.sampleRate * 0.45,
+                          let estimate =
+                            t20DerivedDecay(
+                                impulse:
+                                    measurement
+                                        .impulseResponse,
+                                sampleRate:
+                                    position.sampleRate,
+                                directIndex: directIndex,
+                                centerFrequencyHz:
+                                    center
+                            ) else {
+                        continue
+                    }
+                    estimates.append(
+                        DecayEstimate(
+                            frequencyHz: center,
+                            rt60Seconds:
+                                estimate.rt60Seconds,
+                            fitR2: estimate.fitR2,
+                            positionName: position.name,
+                            channelName: channelName
+                        )
+                    )
+                }
+            }
+        }
+
+        let midband = estimates
+            .filter {
+                $0.frequencyHz >= 500
+                    && $0.frequencyHz <= 2_000
+                    && $0.fitR2
+                        >= Self.minimumDecayFitR2
+            }
+            .map(\.rt60Seconds)
+        let low = estimates
+            .filter {
+                $0.frequencyHz >= 63
+                    && $0.frequencyHz <= 200
+                    && $0.fitR2
+                        >= Self.minimumDecayFitR2
+            }
+        return DecaySummary(
+            estimates: estimates,
+            midbandMedianSeconds:
+                midband.isEmpty
+                    ? nil
+                    : median(midband),
+            longestLowFrequency:
+                low.max {
+                    $0.rt60Seconds < $1.rt60Seconds
+                }
+        )
+    }
+
+    private func t20DerivedDecay(
+        impulse: [Float],
+        sampleRate: Double,
+        directIndex: Int,
+        centerFrequencyHz: Double
+    ) -> (
+        rt60Seconds: Double,
+        fitR2: Double
+    )? {
+        guard sampleRate.isFinite,
+              sampleRate > 0,
+              centerFrequencyHz.isFinite,
+              centerFrequencyHz > 0,
+              directIndex >= 0,
+              directIndex < impulse.count,
+              impulse.count - directIndex
+                >= Int(sampleRate * 0.06)
+        else {
+            return nil
+        }
+
+        let filtered = bandpass(
+            impulse,
+            sampleRate: sampleRate,
+            centerFrequencyHz:
+                centerFrequencyHz,
+            q: 4.318
+        )
+        guard filtered.count == impulse.count else {
+            return nil
+        }
+
+        var integrated = [Double](
+            repeating: 0,
+            count: filtered.count
+        )
+        var running = 0.0
+        if directIndex < filtered.count {
+            for index in stride(
+                from: filtered.count - 1,
+                through: directIndex,
+                by: -1
+            ) {
+                let value = filtered[index]
+                running += value * value
+                integrated[index] = running
+            }
+        }
+
+        let reference = integrated[directIndex]
+        guard reference.isFinite,
+              reference > 1.0e-18 else {
+            return nil
+        }
+
+        var times: [Double] = []
+        var levels: [Double] = []
+        for index in directIndex..<integrated.count {
+            let ratio =
+                max(integrated[index] / reference, 1.0e-15)
+            let db = 10 * log10(ratio)
+            if db <= -5, db >= -25 {
+                times.append(
+                    Double(index - directIndex)
+                        / sampleRate
+                )
+                levels.append(db)
+            }
+        }
+
+        guard times.count >= 24,
+              let first = times.first,
+              let last = times.last,
+              last - first >= 0.025
+        else {
+            return nil
+        }
+
+        let fit = linearRegression(
+            x: times,
+            y: levels
+        )
+        guard fit.slope.isFinite,
+              fit.slope < -1,
+              fit.r2 >= Self.minimumDecayFitR2 else {
+            return nil
+        }
+
+        let rt60 = -60 / fit.slope
+        guard rt60.isFinite,
+              rt60 >= 0.05,
+              rt60 <= 5 else {
+            return nil
+        }
+        return (rt60, fit.r2)
+    }
+
+    private func bandpass(
+        _ samples: [Float],
+        sampleRate: Double,
+        centerFrequencyHz: Double,
+        q: Double
+    ) -> [Double] {
+        guard !samples.isEmpty,
+              sampleRate > 0,
+              centerFrequencyHz > 0,
+              centerFrequencyHz
+                < sampleRate * 0.5,
+              q > 0 else {
+            return []
+        }
+
+        let omega =
+            2 * Double.pi
+            * centerFrequencyHz / sampleRate
+        let alpha = sin(omega) / (2 * q)
+        let a0 = 1 + alpha
+        let b0 = alpha / a0
+        let b1 = 0.0
+        let b2 = -alpha / a0
+        let a1 = -2 * cos(omega) / a0
+        let a2 = (1 - alpha) / a0
+
+        var result = [Double](
+            repeating: 0,
+            count: samples.count
+        )
+        var x1 = 0.0
+        var x2 = 0.0
+        var y1 = 0.0
+        var y2 = 0.0
+        for index in samples.indices {
+            let x0 = Double(samples[index])
+            let y0 =
+                b0 * x0
+                + b1 * x1
+                + b2 * x2
+                - a1 * y1
+                - a2 * y2
+            result[index] = y0
+            x2 = x1
+            x1 = x0
+            y2 = y1
+            y1 = y0
+        }
+        return result
+    }
+
+    private func linearRegression(
+        x: [Double],
+        y: [Double]
+    ) -> (
+        slope: Double,
+        r2: Double
+    ) {
+        guard x.count == y.count,
+              x.count >= 2 else {
+            return (.nan, 0)
+        }
+        let count = Double(x.count)
+        let meanX = x.reduce(0, +) / count
+        let meanY = y.reduce(0, +) / count
+        var numerator = 0.0
+        var denominator = 0.0
+        var totalY = 0.0
+        for index in x.indices {
+            let dx = x[index] - meanX
+            let dy = y[index] - meanY
+            numerator += dx * dy
+            denominator += dx * dx
+            totalY += dy * dy
+        }
+        guard denominator > 1.0e-18,
+              totalY > 1.0e-18 else {
+            return (.nan, 0)
+        }
+        let slope = numerator / denominator
+        let intercept = meanY - slope * meanX
+        var residual = 0.0
+        for index in x.indices {
+            let predicted =
+                intercept + slope * x[index]
+            let error = y[index] - predicted
+            residual += error * error
+        }
+        return (
+            slope,
+            max(0, min(1, 1 - residual / totalY))
+        )
+    }
+
+    private func aggregateLocalResponseContrast(
+        _ positions: [RoomCorrectionMeasurementPosition],
+        frequencyHz: Double
+    ) -> Double? {
+        let values = positions.compactMap {
+            localResponseContrast(
+                position: $0,
+                frequencyHz: frequencyHz
+            )
+        }
+        guard !values.isEmpty else { return nil }
+        return median(values)
+    }
+
+    private func localResponseContrast(
+        position: RoomCorrectionMeasurementPosition,
+        frequencyHz: Double
+    ) -> Double? {
+        guard let center = stereoMagnitude(
+            position: position,
+            frequencyHz: frequencyHz
+        ),
+        let response = position.left.transferFunction
+        else {
+            return nil
+        }
+        let lower = frequencyHz / sqrt(2)
+        let upper = frequencyHz * sqrt(2)
+        let neighborhood =
+            response.frequenciesHz
+                .filter {
+                    $0 >= lower
+                        && $0 <= upper
+                }
+                .compactMap {
+                    stereoMagnitude(
+                        position: position,
+                        frequencyHz: $0
+                    )
+                }
+        guard neighborhood.count >= 6 else {
+            return nil
+        }
+        return center - median(neighborhood)
+    }
+
+    private func prioritizedActions(
+        from findings: [RoomTreatmentAdvisorFinding]
+    ) -> [RoomTreatmentAdvisorActionPriority] {
+        var scores:
+            [RoomTreatmentAdvisorRemedy: Double] = [:]
+        var rationales:
+            [RoomTreatmentAdvisorRemedy: String] = [:]
+
+        for finding in findings {
+            guard finding.primaryRemedy != .noAction else {
+                continue
+            }
+            let severityWeight: Double
+            switch finding.severity {
+            case .important: severityWeight = 3
+            case .opportunity: severityWeight = 2
+            case .information: severityWeight = 1
+            }
+            var primaryScore =
+                severityWeight
+                * max(finding.confidence, 0.1)
+            if finding.kind == .measurementQuality {
+                primaryScore += 6
+            } else if finding.kind
+                        == .measurementReadiness,
+                      finding.primaryRemedy == .measureMore {
+                primaryScore += 2
+            }
+            scores[finding.primaryRemedy, default: 0]
+                += primaryScore
+            if rationales[finding.primaryRemedy] == nil {
+                rationales[finding.primaryRemedy] =
+                    finding.recommendation
+            }
+
+            for remedy in finding.secondaryRemedies
+                where remedy != .noAction {
+                scores[remedy, default: 0]
+                    += primaryScore * 0.30
+                if rationales[remedy] == nil {
+                    rationales[remedy] =
+                        finding.recommendation
+                }
+            }
+        }
+
+        return scores
+            .map {
+                RoomTreatmentAdvisorActionPriority(
+                    remedy: $0.key,
+                    score: $0.value,
+                    rationale:
+                        rationales[$0.key]
+                        ?? "Supported by the current measured findings."
+                )
+            }
+            .sorted {
+                if $0.score != $1.score {
+                    return $0.score > $1.score
+                }
+                return $0.remedy.rawValue
+                    < $1.remedy.rawValue
+            }
+            .prefix(3)
+            .map { $0 }
     }
 
     private func strongestEarlyReflection(
