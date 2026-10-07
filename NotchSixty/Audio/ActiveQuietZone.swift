@@ -30,6 +30,8 @@ enum ActiveQuietZoneHoldReason: String, Codable, Equatable, Sendable {
     case acousticModelRequired
     case insufficientOutputHeadroom
     case verificationPending
+    case verificationRegression
+    case phaseReferenceUnavailable
     case protectionActive
     case unsupportedRoute
 }
