@@ -28,6 +28,7 @@ enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
     case speakerCalibration
     case roomCorrection
     case activeAcoustics
+    case roomAdvisor
     case plugins
 
     static let playback: [ProductionSection] = [
@@ -42,6 +43,10 @@ enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
         .speakerCalibration,
         .roomCorrection,
         .activeAcoustics,
+    ]
+
+    static let tools: [ProductionSection] = [
+        .roomAdvisor,
     ]
 
     static let extensions: [ProductionSection] = [
@@ -61,6 +66,7 @@ enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
         case .speakerCalibration: return "Speaker Calibration"
         case .roomCorrection: return "Room Correction"
         case .activeAcoustics: return "Active Acoustics"
+        case .roomAdvisor: return "Room Advisor"
         case .plugins: return "Plug-ins"
         }
     }
@@ -76,6 +82,7 @@ enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
         case .speakerCalibration: return "speaker.wave.3.fill"
         case .roomCorrection: return "waveform.badge.magnifyingglass"
         case .activeAcoustics: return "waveform.and.mic"
+        case .roomAdvisor: return "wand.and.stars.inverse"
         case .plugins: return "puzzlepiece.extension"
         }
     }
@@ -211,6 +218,13 @@ struct ProductionRootView: View {
                         }
                     }
 
+                    Section("TOOLS") {
+                        ForEach(ProductionSection.tools) { section in
+                            Label(section.title, systemImage: section.systemImage)
+                                .tag(section)
+                        }
+                    }
+
                     Section("EXTENSIONS") {
                         ForEach(ProductionSection.extensions) { section in
                             Label(section.title, systemImage: section.systemImage)
@@ -266,6 +280,10 @@ struct ProductionRootView: View {
                 microphone: product.calibration,
                 projects: product.roomCorrectionProjects
             )
+        case .roomAdvisor:
+            ProductionRoomTreatmentAdvisorWorkspace(
+                advisor: product.roomTreatmentAdvisor
+            )
         case .plugins:
             ProductionPluginWorkspace(product: product)
         }
@@ -274,44 +292,56 @@ struct ProductionRootView: View {
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
         ToolbarItemGroup(placement: .primaryAction) {
-            ProductionProfileToolbar(product: product)
-
-            if let output = engine.selectedOutputDevice {
-                HStack(spacing: 5) {
-                    Image(systemName: "hifispeaker")
-                    Text("\(output.name) · \(output.nominalSampleRate / 1_000, specifier: "%.1f") kHz")
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .padding(.horizontal, 8)
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("Output \(output.name), \(output.nominalSampleRate / 1_000, specifier: "%.1f") kilohertz")
-            }
-            #if DEBUG
-            Button {
-                openWindow(id: "engineering-validation")
-            } label: {
-                Label("Engineering Validation", systemImage: "wrench.and.screwdriver")
-            }
-            .buttonStyle(.glass)
-            .help("Open the retained engineering validation tools")
-            #endif
-
-            Button {
-                Task { @MainActor in
-                    await Task.yield()
-                    if engine.lifecycleState == .running { engine.stop() }
-                    else if engine.lifecycleState == .idle { try? engine.start() }
-                }
-            } label: {
+            if selection == .roomAdvisor {
                 Label(
-                    engine.lifecycleState == .running ? "Stop Processing" : "Start Processing",
-                    systemImage: engine.lifecycleState == .running ? "stop.fill" : "play.fill"
+                    "Room Advisor · Read Only",
+                    systemImage: "lock.shield"
                 )
+                .font(.caption.bold())
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .glassEffect(.regular, in: .capsule)
+            } else {
+                ProductionProfileToolbar(product: product)
+
+                if let output = engine.selectedOutputDevice {
+                    HStack(spacing: 5) {
+                        Image(systemName: "hifispeaker")
+                        Text("\(output.name) · \(output.nominalSampleRate / 1_000, specifier: "%.1f") kHz")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .padding(.horizontal, 8)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("Output \(output.name), \(output.nominalSampleRate / 1_000, specifier: "%.1f") kilohertz")
+                }
+                #if DEBUG
+                Button {
+                    openWindow(id: "engineering-validation")
+                } label: {
+                    Label("Engineering Validation", systemImage: "wrench.and.screwdriver")
+                }
+                .buttonStyle(.glass)
+                .help("Open the retained engineering validation tools")
+                #endif
+
+                Button {
+                    Task { @MainActor in
+                        await Task.yield()
+                        if engine.lifecycleState == .running { engine.stop() }
+                        else if engine.lifecycleState == .idle { try? engine.start() }
+                    }
+                } label: {
+                    Label(
+                        engine.lifecycleState == .running ? "Stop Processing" : "Start Processing",
+                        systemImage: engine.lifecycleState == .running ? "stop.fill" : "play.fill"
+                    )
+                }
+                .buttonStyle(.glassProminent)
+                .disabled(engine.lifecycleState != .idle && engine.lifecycleState != .running)
             }
-            .buttonStyle(.glassProminent)
-            .disabled(engine.lifecycleState != .idle && engine.lifecycleState != .running)
         }
 
         ToolbarSpacer(.flexible)
