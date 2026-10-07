@@ -183,6 +183,49 @@ final class ProductController: ObservableObject {
         return activation
     }
 
+    func selectContentPreset(_ id: UUID) async throws {
+        guard let preset = profiles.contentPresets.first(where: {
+            $0.id == id
+        }) else {
+            return
+        }
+
+        let previous = profiles.captureContentState()
+        let targetRack = preset.state.audioUnitRack
+        let rackChanged = targetRack != audioUnitHost.rackConfiguration
+
+        var candidate: AudioUnitRackMutationCandidate?
+        if rackChanged {
+            let format =
+                try audioEngine.audioUnitRackProcessingFormatForMutation()
+            candidate =
+                try await audioUnitHost.makeMutationCandidate(
+                    applying: .replaceConfiguration(targetRack),
+                    format: format
+                )
+        }
+
+        do {
+            try profiles.applyContentStateWithoutAudioUnitRack(
+                preset.state
+            )
+
+            if let candidate {
+                _ = try await audioEngine.activateAudioUnitRackMutation(
+                    candidate,
+                    crossfadeFrames:
+                        AudioUnitLiveRackSwitchboard.defaultCrossfadeFrames
+                )
+                try audioUnitHost.commitMutationCandidate(candidate)
+            }
+
+            profiles.commitContentPresetSelection(id)
+        } catch {
+            try? profiles.applyContentStateWithoutAudioUnitRack(previous)
+            throw error
+        }
+    }
+
     func shutdownForTermination() {
         multichannelCalibration.cancelMeasurement()
         calibration.cancelMeasurement()
