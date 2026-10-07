@@ -31,6 +31,7 @@ jobs:
             -INotchSixty/Audio/Realtime \
             ci/validate_pr82_audio_unit_rack_exchange.c \
             NotchSixty/Audio/Realtime/N60AudioUnitRackExchange.c \
+            NotchSixty/Audio/Realtime/N60AudioUnitLiveRackBridge.c \
             -lm -o /tmp/pr82-rack-exchange
           /tmp/pr82-rack-exchange
 
@@ -46,6 +47,7 @@ jobs:
             -INotchSixty/Audio/Realtime \
             ci/validate_pr82_audio_unit_rack_exchange.c \
             NotchSixty/Audio/Realtime/N60AudioUnitRackExchange.c \
+            NotchSixty/Audio/Realtime/N60AudioUnitLiveRackBridge.c \
             -lm -o /tmp/pr82-rack-exchange
           /tmp/pr82-rack-exchange
       - name: Build arm64 app with transactional rack mutation
