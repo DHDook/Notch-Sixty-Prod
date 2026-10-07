@@ -9,6 +9,10 @@ on:
       - feature/pr83-plugin-rack-ux
   workflow_dispatch:
 
+concurrency:
+  group: pr84a-audio-unit-hardening-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate-portable:
     runs-on: ubuntu-latest
