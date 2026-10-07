@@ -274,6 +274,301 @@ final class AudioUnitOfflinePreparationTests: XCTestCase {
         }
     }
 
+    func testOpaqueStateCodecRejectsMalformedAndNonDictionaryState() throws {
+        XCTAssertThrowsError(
+            try AudioUnitOpaqueStateCodec.validate(
+                Data([0x00, 0xff, 0x13, 0x37])
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? AudioUnitOfflinePreparationError,
+                .stateDecodeFailed
+            )
+        }
+
+        let arrayState = try PropertyListSerialization.data(
+            fromPropertyList: ["not", "a", "dictionary"],
+            format: .binary,
+            options: 0
+        )
+        XCTAssertThrowsError(
+            try AudioUnitOpaqueStateCodec.validate(arrayState)
+        ) { error in
+            XCTAssertEqual(
+                error as? AudioUnitOfflinePreparationError,
+                .stateDecodeFailed
+            )
+        }
+    }
+
+    func testOpaqueStateCodecRoundTripsDictionaryWithinBound() throws {
+        let state: [String: Any] = [
+            "preset": "PR84A",
+            "gain": 0.75,
+            "enabled": true,
+        ]
+        let encoded = try AudioUnitOpaqueStateCodec.encodeDictionary(state)
+        XCTAssertLessThanOrEqual(
+            encoded.count,
+            AudioUnitRackSlotState.maximumOpaqueStateBytes
+        )
+
+        let decoded = try AudioUnitOpaqueStateCodec.decodeDictionary(
+            encoded
+        )
+        XCTAssertEqual(decoded["preset"] as? String, "PR84A")
+        XCTAssertEqual(decoded["gain"] as? Double, 0.75)
+        XCTAssertEqual(decoded["enabled"] as? Bool, true)
+    }
+
+    func testPreparationReportRejectsForgedNonFiniteMetrics() throws {
+        let format = AudioUnitRackProcessingFormat(
+            sampleRate: sampleRate,
+            channelCount: 2
+        )
+        let valid = makeReport(
+            identity: mockIdentity,
+            format: format,
+            latencyFrames: 32
+        )
+        let forgedMetrics = AudioUnitOfflineRenderMetrics(
+            renderedFrames: 1_024,
+            renderPassCount: 2,
+            channelCount: 2,
+            maximumAbsoluteSample: .nan,
+            rmsByChannel: [0.05, 0.05],
+            allSamplesFinite: true
+        )
+        let forged = AudioUnitOfflinePreparationReport(
+            component: valid.component,
+            format: valid.format,
+            probe: valid.probe,
+            capturedFullState: nil,
+            stateRestored: false,
+            stateRecaptured: false,
+            initialRender: forgedMetrics,
+            postResetRender: valid.postResetRender,
+            latencyStableAcrossReset: true,
+            tailStableAcrossReset: true,
+            renderResourcesReleased: true
+        )
+
+        XCTAssertThrowsError(try forged.validate()) { error in
+            XCTAssertEqual(
+                error as? AudioUnitOfflinePreparationError,
+                .invalidOfflineRender
+            )
+        }
+    }
+
+    func testPreparationReportRejectsIncoherentStateEvidence() throws {
+        let format = AudioUnitRackProcessingFormat(
+            sampleRate: sampleRate,
+            channelCount: 2
+        )
+        let valid = makeReport(
+            identity: mockIdentity,
+            format: format,
+            latencyFrames: 32
+        )
+        let forged = AudioUnitOfflinePreparationReport(
+            component: valid.component,
+            format: valid.format,
+            probe: valid.probe,
+            capturedFullState: nil,
+            stateRestored: true,
+            stateRecaptured: false,
+            initialRender: valid.initialRender,
+            postResetRender: valid.postResetRender,
+            latencyStableAcrossReset: true,
+            tailStableAcrossReset: true,
+            renderResourcesReleased: true
+        )
+
+        XCTAssertThrowsError(try forged.validate()) { error in
+            XCTAssertEqual(
+                error as? AudioUnitOfflinePreparationError,
+                .stateCaptureFailed
+            )
+        }
+    }
+
+    func testMalformedStoredStateQuarantinesBeforeBackendPreparation() async throws {
+        let descriptor = mockDescriptor(channels: [2])
+        let host = AudioUnitHostController(
+            catalog: OfflineMockCatalog(components: [descriptor])
+        )
+        host.scan()
+        try host.installComponent(mockIdentity, inSlot: 0)
+        try host.setOpaqueFullState(
+            Data([0xde, 0xad, 0xbe, 0xef]),
+            slot: 0
+        )
+
+        await host.prepareSlotOffline(
+            0,
+            format: AudioUnitRackProcessingFormat(
+                sampleRate: sampleRate,
+                channelCount: 2
+            ),
+            using: ThrowingOfflineBackend(
+                error: .instantiationFailed(
+                    "Backend must not see malformed state."
+                )
+            )
+        )
+
+        XCTAssertEqual(
+            host.quarantine.entry(for: mockIdentity)?.reason,
+            .stateRestoreFailure
+        )
+        XCTAssertEqual(
+            host.lifecycleByComponent[mockIdentity],
+            .quarantined
+        )
+        XCTAssertTrue(host.rackConfiguration.slots[0].bypassed)
+        XCTAssertNil(host.probeResult(forSlot: 0))
+    }
+
+    func testClearingQuarantineStillRequiresFreshPreparation() async throws {
+        let descriptor = mockDescriptor(channels: [2])
+        let host = AudioUnitHostController(
+            catalog: OfflineMockCatalog(components: [descriptor])
+        )
+        let format = AudioUnitRackProcessingFormat(
+            sampleRate: sampleRate,
+            channelCount: 2
+        )
+        host.scan()
+        try host.installComponent(mockIdentity, inSlot: 0)
+
+        await host.prepareSlotOffline(
+            0,
+            format: format,
+            using: ThrowingOfflineBackend(
+                error: .renderResourceAllocationFailed(
+                    "Injected PR84A resource failure."
+                )
+            )
+        )
+        XCTAssertTrue(host.quarantine.isQuarantined(mockIdentity))
+
+        host.clearQuarantine(mockIdentity)
+        XCTAssertFalse(host.quarantine.isQuarantined(mockIdentity))
+        XCTAssertEqual(
+            host.lifecycleByComponent[mockIdentity],
+            .discovered
+        )
+        XCTAssertNil(host.probeResult(forSlot: 0))
+        XCTAssertThrowsError(try host.setBypassed(false, slot: 0))
+
+        await host.prepareSlotOffline(
+            0,
+            format: format,
+            using: FixedOfflineBackend(
+                report: makeReport(
+                    identity: mockIdentity,
+                    format: format,
+                    latencyFrames: 16
+                )
+            )
+        )
+        XCTAssertEqual(
+            host.lifecycleByComponent[mockIdentity],
+            .prepared
+        )
+        XCTAssertNoThrow(try host.setBypassed(false, slot: 0))
+    }
+
+    func testDeterministicFormatMatrixPreparesAcrossRatesAndLayouts() async throws {
+        let cases: [(Double, Int)] = [
+            (44_100, 1),
+            (48_000, 2),
+            (48_000, 6),
+            (96_000, 8),
+        ]
+        let descriptor = mockDescriptor(channels: [1, 2, 6, 8])
+
+        for (rate, channels) in cases {
+            let host = AudioUnitHostController(
+                catalog: OfflineMockCatalog(components: [descriptor])
+            )
+            host.scan()
+            try host.installComponent(mockIdentity, inSlot: 0)
+            let format = AudioUnitRackProcessingFormat(
+                sampleRate: rate,
+                channelCount: channels,
+                maximumFramesPerSlice: 512
+            )
+            await host.prepareSlotOffline(
+                0,
+                format: format,
+                using: FixedOfflineBackend(
+                    report: makeReport(
+                        identity: mockIdentity,
+                        format: format,
+                        latencyFrames: 24
+                    )
+                )
+            )
+
+            XCTAssertEqual(
+                host.lifecycleByComponent[mockIdentity],
+                .prepared,
+                "Failed \(Int(rate)) Hz / \(channels) ch"
+            )
+            XCTAssertEqual(
+                host.preparationReport(forSlotID:
+                    host.rackConfiguration.slots[0].id
+                )?.format,
+                format
+            )
+        }
+    }
+
+    func testRepeatedStatePreparationCyclesDoNotReuseStaleEvidence() async throws {
+        let descriptor = mockDescriptor(channels: [2])
+        let host = AudioUnitHostController(
+            catalog: OfflineMockCatalog(components: [descriptor])
+        )
+        let format = AudioUnitRackProcessingFormat(
+            sampleRate: sampleRate,
+            channelCount: 2,
+            maximumFramesPerSlice: 512
+        )
+        host.scan()
+        try host.installComponent(mockIdentity, inSlot: 0)
+
+        for cycle in 0..<32 {
+            let expectedLatency = 16 + cycle
+            let state = try PropertyListSerialization.data(
+                fromPropertyList: [
+                    "cycle": cycle,
+                    "latencyFrames": expectedLatency,
+                ],
+                format: .binary,
+                options: 0
+            )
+            try host.setOpaqueFullState(state, slot: 0)
+            XCTAssertNil(host.probeResult(forSlot: 0))
+
+            await host.prepareSlotOffline(
+                0,
+                format: format,
+                using: StateSensitiveOfflineBackend()
+            )
+            XCTAssertEqual(
+                host.probeResult(forSlot: 0)?.latencyFrames,
+                expectedLatency
+            )
+            XCTAssertEqual(
+                host.offlinePreparationReport(forSlot: 0)?
+                    .capturedFullState,
+                state
+            )
+        }
+    }
+
     private func mockDescriptor(
         channels: [Int]
     ) -> AudioUnitComponentDescriptor {
