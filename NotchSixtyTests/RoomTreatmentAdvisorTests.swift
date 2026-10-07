@@ -169,6 +169,144 @@ final class RoomTreatmentAdvisorTests: XCTestCase {
         )
     }
 
+    func testLongLowFrequencyDecayPrefersPassiveTreatment() {
+        let sampleRate = 48_000.0
+        let impulse = syntheticDecayImpulse(
+            sampleRate: sampleRate,
+            lowFrequencyHz: 80,
+            lowRT60Seconds: 0.95,
+            midRT60Seconds: 0.28
+        )
+        var magnitudes = Array(
+            repeating: 0.0,
+            count: bassFrequencies.count
+        )
+        magnitudes[
+            bassFrequencies.firstIndex(of: 80)!
+        ] = 6
+
+        let report =
+            RoomTreatmentAdvisorAnalyzer()
+                .analyze(
+                    project: project(
+                        measurements: [
+                            position(
+                                name: "Center",
+                                frequencies:
+                                    bassFrequencies,
+                                magnitudes: magnitudes,
+                                sampleRate: sampleRate,
+                                impulse: impulse,
+                                directArrivalSeconds: 0
+                            ),
+                        ]
+                    )
+                )
+
+        let finding = report.findings.first {
+            $0.kind == .lowFrequencyRinging
+        }
+        XCTAssertNotNil(finding)
+        XCTAssertEqual(
+            finding?.primaryRemedy,
+            .passiveTreatment
+        )
+        XCTAssertEqual(
+            finding?.frequencyHz ?? 0,
+            80,
+            accuracy: 20
+        )
+        XCTAssertGreaterThan(
+            finding?.decaySeconds ?? 0,
+            0.5
+        )
+        XCTAssertTrue(
+            finding?.interpretation.contains(
+                "resonant"
+            ) == true
+        )
+    }
+
+    func testDeepNullWithNormalDecayBecomesBoundaryInterferenceCandidate() {
+        let sampleRate = 48_000.0
+        let impulse = syntheticDecayImpulse(
+            sampleRate: sampleRate,
+            lowFrequencyHz: 100,
+            lowRT60Seconds: 0.58,
+            midRT60Seconds: 0.58
+        )
+        var magnitudes = Array(
+            repeating: 0.0,
+            count: bassFrequencies.count
+        )
+        magnitudes[
+            bassFrequencies.firstIndex(of: 100)!
+        ] = -12
+
+        let report =
+            RoomTreatmentAdvisorAnalyzer()
+                .analyze(
+                    project: project(
+                        measurements: [
+                            position(
+                                name: "Center",
+                                frequencies:
+                                    bassFrequencies,
+                                magnitudes: magnitudes,
+                                sampleRate: sampleRate,
+                                impulse: impulse,
+                                directArrivalSeconds: 0
+                            ),
+                        ]
+                    )
+                )
+
+        let finding = report.findings.first {
+            $0.kind
+                == .boundaryInterferenceCandidate
+        }
+        XCTAssertNotNil(finding)
+        XCTAssertEqual(
+            finding?.primaryRemedy,
+            .placement
+        )
+        XCTAssertTrue(
+            finding?.interpretation.contains(
+                "candidate"
+            ) == true
+        )
+        XCTAssertTrue(
+            finding?.recommendation.contains(
+                "Avoid large EQ boost"
+            ) == true
+        )
+    }
+
+    func testMeasurementQualityTakesFirstActionPriority() {
+        let measured = position(
+            name: "Center",
+            frequencies: bassFrequencies,
+            magnitudes: Array(
+                repeating: 0,
+                count: bassFrequencies.count
+            ),
+            clipped: true,
+            snrDB: 10
+        )
+        let report =
+            RoomTreatmentAdvisorAnalyzer()
+                .analyze(
+                    project: project(
+                        measurements: [measured]
+                    )
+                )
+
+        XCTAssertEqual(
+            report.actionPriorities.first?.remedy,
+            .measureMore
+        )
+    }
+
     @MainActor
     func testControllerLoadsProjectsWithoutPlaybackProfileSelection() throws {
         let root = FileManager.default
@@ -220,6 +358,54 @@ final class RoomTreatmentAdvisorTests: XCTestCase {
             controller.report?.projectName,
             "Newer Room"
         )
+    }
+
+    private func syntheticDecayImpulse(
+        sampleRate: Double,
+        lowFrequencyHz: Double,
+        lowRT60Seconds: Double,
+        midRT60Seconds: Double
+    ) -> [Float] {
+        let duration = max(
+            1.4,
+            max(
+                lowRT60Seconds,
+                midRT60Seconds
+            ) * 1.35
+        )
+        let count = Int(
+            (duration * sampleRate).rounded()
+        )
+        var result = [Float](
+            repeating: 0,
+            count: count
+        )
+        result[0] = 1
+
+        let components: [
+            (frequency: Double, rt60: Double, gain: Double)
+        ] = [
+            (lowFrequencyHz, lowRT60Seconds, 0.22),
+            (500, midRT60Seconds, 0.08),
+            (1_000, midRT60Seconds, 0.08),
+            (2_000, midRT60Seconds, 0.08),
+        ]
+        for index in 1..<count {
+            let t = Double(index) / sampleRate
+            var value = 0.0
+            for component in components {
+                let tau =
+                    component.rt60 / log(1_000)
+                value += component.gain
+                    * exp(-t / tau)
+                    * sin(
+                        2 * Double.pi
+                        * component.frequency * t
+                    )
+            }
+            result[index] = Float(value)
+        }
+        return result
     }
 
     private var bassFrequencies: [Double] {
