@@ -145,8 +145,9 @@ for path in (ROOT / "NotchSixty/Audio/Realtime").glob("*"):
     if path.is_file():
         text = path.read_text(errors="ignore").lower()
         require(
-            "mysofa_load" not in text and "hdf5" not in text,
-            f"realtime source unexpectedly parses SOFA/HDF: {path.name}",
+            "mysofa_load" not in text
+            and "n60sofadocumentopen" not in text,
+            f"realtime source unexpectedly invokes a SOFA parser: {path.name}",
         )
 
 print("PR85 native AES69/SOFA infrastructure validation passed")
