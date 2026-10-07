@@ -260,6 +260,245 @@ final class AmbientCompensationTests: XCTestCase {
         }
     }
 
+    func testLegacyEnabledStateMapsToMusicFocus() {
+        var configuration = AmbientCompensationConfiguration()
+        configuration.enabled = true
+        configuration.playbackAdaptationMode = nil
+        XCTAssertEqual(
+            configuration.effectivePlaybackAdaptationMode,
+            .musicFocus
+        )
+
+        configuration.enabled = false
+        XCTAssertEqual(
+            configuration.effectivePlaybackAdaptationMode,
+            .off
+        )
+    }
+
+    func testExplicitConversationModeOverridesLegacyEnabledBit() {
+        var configuration = AmbientCompensationConfiguration()
+        configuration.enabled = false
+        configuration.playbackAdaptationMode = .conversationFocus
+        XCTAssertEqual(
+            configuration.effectivePlaybackAdaptationMode,
+            .conversationFocus
+        )
+    }
+
+    func testConversationEvidencePrefersSpeechShapedResidual() {
+        let planner = ConversationPreservationPlanner()
+        let speech = snapshot(
+            ambientDBFS: -28,
+            confidence: 0.95,
+            stationarity: 0.52,
+            spectrum: [
+                band(80, -62),
+                band(160, -56),
+                band(300, -41),
+                band(600, -35),
+                band(1_000, -31),
+                band(2_000, -30),
+                band(3_500, -33),
+                band(6_000, -50),
+                band(10_000, -58),
+            ],
+            periodicity: 0.08
+        )
+        let mechanical = snapshot(
+            ambientDBFS: -28,
+            confidence: 0.95,
+            stationarity: 0.98,
+            spectrum: [
+                band(60, -24),
+                band(120, -48),
+                band(300, -62),
+                band(1_000, -66),
+                band(2_500, -68),
+                band(6_000, -70),
+            ],
+            periodicity: 0.96,
+            tonalComponents: [
+                AmbientTonalComponent(
+                    frequencyHz: 60,
+                    levelDBFS: -24,
+                    prominenceDB: 32
+                ),
+            ]
+        )
+
+        XCTAssertGreaterThan(
+            planner.conversationEvidence(speech),
+            0.60
+        )
+        XCTAssertLessThan(
+            planner.conversationEvidence(mechanical),
+            0.10
+        )
+    }
+
+    func testConversationFocusCreatesBoundedSubtractiveAdaptation() throws {
+        var configuration = configured()
+        configuration.playbackAdaptationMode = .conversationFocus
+        configuration.conversationPreservation =
+            ConversationPreservationConfiguration(
+                maximumOverallAttenuationDB: 4,
+                maximumPresenceCutDB: 3,
+                maximumLowRestorationDB: 1.75,
+                maximumDetailRestorationDB: 0.75,
+                minimumConversationEvidence: 0.35,
+                attackSeconds: 1.5,
+                releaseSeconds: 8
+            )
+
+        let target = try ConversationPreservationPlanner().plan(
+            snapshot: snapshot(
+                ambientDBFS: -28,
+                confidence: 0.95,
+                stationarity: 0.52,
+                spectrum: [
+                    band(80, -62),
+                    band(160, -56),
+                    band(300, -41),
+                    band(600, -35),
+                    band(1_000, -31),
+                    band(2_000, -30),
+                    band(3_500, -33),
+                    band(6_000, -50),
+                    band(10_000, -58),
+                ],
+                periodicity: 0.08
+            ),
+            configuration: configuration
+        )
+
+        XCTAssertEqual(target.mode, .conversationFocus)
+        XCTAssertGreaterThan(target.conversationEvidence, 0.35)
+        XCTAssertLessThan(target.levelDB, 0)
+        XCTAssertLessThan(target.presenceSupportDB, 0)
+        XCTAssertGreaterThanOrEqual(target.lowSupportDB, 0)
+        XCTAssertGreaterThanOrEqual(target.detailSupportDB, 0)
+        XCTAssertGreaterThan(target.estimatedClearanceDB, 0)
+        XCTAssertLessThanOrEqual(target.levelDB, -target.lowSupportDB)
+        XCTAssertLessThanOrEqual(target.levelDB, -target.detailSupportDB)
+
+        let maximum = AmbientCompensationResponseModel
+            .maximumAppliedGainDB(
+                target: target,
+                sampleRate: 48_000
+            )
+        XCTAssertLessThanOrEqual(
+            maximum,
+            0.05,
+            "Conversation Focus must not create net positive playback gain"
+        )
+    }
+
+    func testConversationFocusStaysAtUnityWithoutConversationEvidence() throws {
+        var configuration = configured()
+        configuration.playbackAdaptationMode = .conversationFocus
+
+        let target = try ConversationPreservationPlanner().plan(
+            snapshot: snapshot(
+                ambientDBFS: -28,
+                confidence: 0.95,
+                stationarity: 0.98,
+                spectrum: [
+                    band(60, -24),
+                    band(120, -48),
+                    band(1_000, -66),
+                    band(2_500, -68),
+                ],
+                periodicity: 0.96,
+                tonalComponents: [
+                    AmbientTonalComponent(
+                        frequencyHz: 60,
+                        levelDBFS: -24,
+                        prominenceDB: 30
+                    ),
+                ]
+            ),
+            configuration: configuration
+        )
+
+        XCTAssertEqual(target.mode, .conversationFocus)
+        XCTAssertFalse(target.active)
+        XCTAssertEqual(target.levelDB, 0, accuracy: 0.000_001)
+        XCTAssertNil(target.holdReason)
+    }
+
+    func testConversationEnvelopeUsesFastOnsetAndSlowRecovery() throws {
+        var configuration = configured()
+        configuration.playbackAdaptationMode = .conversationFocus
+        var social = ConversationPreservationConfiguration()
+        social.attackSeconds = 1
+        social.releaseSeconds = 10
+        configuration.conversationPreservation = social
+
+        var envelope = AmbientCompensationEnvelope()
+        let target = AmbientCompensationTarget(
+            activity: .party,
+            levelDB: -4,
+            lowSupportDB: 1.5,
+            presenceSupportDB: -3,
+            detailSupportDB: 0.5,
+            confidence: 0.95,
+            ambientDeltaDB: 18,
+            holdReason: nil,
+            mode: .conversationFocus,
+            conversationEvidence: 0.9,
+            estimatedClearanceDB: 7
+        )
+
+        let onset = try envelope.update(
+            toward: target,
+            configuration: configuration,
+            elapsedSeconds: 1
+        )
+        XCTAssertLessThan(onset.levelDB, -2)
+
+        let recovery = try envelope.update(
+            toward: .unity,
+            configuration: configuration,
+            elapsedSeconds: 1
+        )
+        XCTAssertLessThan(
+            recovery.levelDB,
+            onset.levelDB * 0.85
+        )
+    }
+
+    func testSignedActiveAcousticsGraphAcceptsConversationTarget() {
+        var graph = N60DSPGraphSnapshotMakeUnity(48_000)
+        XCTAssertTrue(
+            N60DSPGraphSnapshotSetActiveAcousticsAdaptation(
+                &graph,
+                -2.5,
+                1.25,
+                -2.0,
+                0.4,
+                true
+            )
+        )
+        XCTAssertTrue(graph.ambientCompensation.enabled)
+        XCTAssertLessThan(
+            graph.ambientCompensation.levelGainLinear,
+            1
+        )
+
+        XCTAssertFalse(
+            N60DSPGraphSnapshotSetAmbientCompensation(
+                &graph,
+                -2.5,
+                1.25,
+                -2.0,
+                0.4,
+                true
+            ),
+            "The retained PR89 API must remain boost-only"
+        )
+    }
+
     private func configured() -> AmbientCompensationConfiguration {
         var configuration = AmbientCompensationConfiguration()
         configuration.enabled = true
@@ -277,7 +516,9 @@ final class AmbientCompensationTests: XCTestCase {
         confidence: Double = 0.9,
         stationarity: Double = 0.9,
         character: AmbientNoiseCharacter = .broadband,
-        spectrum: [AmbientSpectrumBand]? = nil
+        spectrum: [AmbientSpectrumBand]? = nil,
+        periodicity: Double = 0.2,
+        tonalComponents: [AmbientTonalComponent] = []
     ) -> AmbientAnalysisSnapshot {
         AmbientAnalysisSnapshot(
             sampleRate: 48_000,
@@ -291,7 +532,7 @@ final class AmbientCompensationTests: XCTestCase {
             ambientLevelDBFS: ambientDBFS,
             ambientLevelDBSPL: nil,
             stationarityScore: stationarity,
-            periodicityScore: 0.2,
+            periodicityScore: periodicity,
             periodicFrequencyHz: nil,
             lowFrequencyEnergyFraction: 0.3,
             cancellationCandidateScore: 0.2,
@@ -304,7 +545,7 @@ final class AmbientCompensationTests: XCTestCase {
                 band(6_000, ambientDBFS - 2),
                 band(12_000, ambientDBFS - 4),
             ],
-            tonalComponents: []
+            tonalComponents: tonalComponents
         )
     }
 
