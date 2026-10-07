@@ -246,14 +246,22 @@ final class AmbientFieldAnalyzerTests: XCTestCase {
     }
 
     func testDetailedAnalysisExposesSeparatedResidualAndAlignmentEvidence() throws {
-        // Use broadband deterministic playback so the requested transport lag
-        // is uniquely observable. A sparse tonal reference can have multiple
-        // phase-equivalent correlation peaks and is therefore inappropriate for
-        // asserting an exact lag value.
-        let playback = deterministicNoise(
-            amplitude: 0.12,
-            frames: frameCount
-        )
+        // Use a deterministic band-limited chirp so the requested transport
+        // lag is uniquely observable by both the coarse and fine alignment
+        // searches. A sparse tonal reference can have multiple phase-equivalent
+        // correlation peaks and is inappropriate for asserting an exact lag.
+        let chirpStartHz = 180.0
+        let chirpEndHz = 1_000.0
+        let chirpDuration = Double(frameCount) / sampleRate
+        let chirpRate = (chirpEndHz - chirpStartHz) / chirpDuration
+        let playback = (0..<frameCount).map { frame in
+            let time = Double(frame) / sampleRate
+            let phase = 2.0 * Double.pi * (
+                chirpStartHz * time
+                    + 0.5 * chirpRate * time * time
+            )
+            return Float(0.12 * sin(phase))
+        }
         let impulse = delayedImpulse(
             delay: 37,
             taps: [(0, 0.55), (23, -0.08)]
