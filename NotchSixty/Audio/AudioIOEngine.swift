@@ -1068,6 +1068,8 @@ final class AudioIOEngine: ObservableObject {
     @Published private(set) var dynamicsConfiguration = DynamicsConfiguration()
     @Published private(set) var roomCorrectionConfiguration = RoomCorrectionConfiguration()
     @Published private(set) var speakerIRConfiguration = SpeakerIRConfiguration()
+    @Published private(set) var ambientCompensationRuntimeTarget =
+        AmbientCompensationTarget.unity
     @Published private(set) var linearPhaseDesignInfo: N60LinearPhaseEQDesignInfo?
     @Published private(set) var headTrackingRuntimeStatus = HeadTrackingRuntimeStatus.disabled
     @Published private(set) var lastErrorDescription: String?
@@ -1098,6 +1100,97 @@ final class AudioIOEngine: ObservableObject {
         masterVolumeController.onExternalChange = { [weak self] in self?.handleMasterVolumeDeviceChange() }
         globalVolumeKeyMonitor.onVolumeIncrement = { [weak self] in self?.handleGlobalVolumeKey(direction: 1.0) }
         globalVolumeKeyMonitor.onVolumeDecrement = { [weak self] in self?.handleGlobalVolumeKey(direction: -1.0) }
+    }
+
+    var ambientCompensationAvailableHeadroomDB: Double {
+        max(-gainConfiguration.headroomAttenuationDB, 0)
+    }
+
+    var ambientCompensationStereoSpeakerRuntimeAvailable: Bool {
+        transportSession != nil
+            && nChannelTransportSession == nil
+            && binauralHeadphoneTransportSession == nil
+            && headphoneDeviceProfileConfiguration?.enabled != true
+    }
+
+    func replaceAmbientCompensationRuntimeTarget(
+        _ target: AmbientCompensationTarget
+    ) throws {
+        let values = [
+            target.levelDB,
+            target.lowSupportDB,
+            target.presenceSupportDB,
+            target.detailSupportDB,
+            target.confidence,
+            target.ambientDeltaDB,
+        ]
+        guard values.allSatisfy(\.isFinite),
+              target.levelDB >= 0,
+              target.levelDB <=
+                AmbientCompensationConfiguration
+                    .hardMaximumLevelCompensationDB,
+              target.lowSupportDB >= 0,
+              target.lowSupportDB <=
+                AmbientCompensationPlanner.maximumLowSupportDB,
+              target.presenceSupportDB >= 0,
+              target.presenceSupportDB <=
+                AmbientCompensationPlanner.maximumPresenceSupportDB,
+              target.detailSupportDB >= 0,
+              target.detailSupportDB <=
+                AmbientCompensationPlanner.maximumDetailSupportDB else {
+            throw AmbientCompensationError.invalidConfiguration
+        }
+
+        let available = ambientCompensationAvailableHeadroomDB
+        guard target.levelDB <= available + 0.000_1 else {
+            throw AmbientCompensationError
+                .insufficientDigitalHeadroom(
+                    requested: target.levelDB,
+                    available: available
+                )
+        }
+
+        let requestsDSP = target.levelDB > 0.000_1
+            || target.lowSupportDB > 0.000_1
+            || target.presenceSupportDB > 0.000_1
+            || target.detailSupportDB > 0.000_1
+        if requestsDSP,
+           !ambientCompensationStereoSpeakerRuntimeAvailable {
+            throw AmbientCompensationError.runtimeUnsupported
+        }
+
+        ambientCompensationRuntimeTarget = target
+
+        guard let session = transportSession else { return }
+        var graph = try stereoEQConfiguration.makeGraphSnapshot(
+            sampleRate: session.outputFormat.sampleRate,
+            gainConfiguration: gainConfiguration,
+            bassManagementConfiguration:
+                renderBassManagementConfiguration(),
+            dynamicsConfiguration: dynamicsConfiguration,
+            playbackConfiguration: playbackControlConfiguration,
+            masterGainLinear: currentMasterSoftwareGain
+        )
+        try attachActiveEQFIRProgramIfNeeded(
+            to: &graph,
+            stereoConfiguration: stereoEQConfiguration,
+            playbackConfiguration: playbackControlConfiguration
+        )
+        try attachActiveRoomCorrectionProgramIfNeeded(
+            to: &graph,
+            playbackConfiguration: playbackControlConfiguration
+        )
+        try attachActiveSpeakerIRProgramIfNeeded(
+            to: &graph,
+            playbackConfiguration: playbackControlConfiguration
+        )
+        try applyAudioUnitRackLatency(to: &graph)
+        try session.publishDSPGraph(graph)
+        lastErrorDescription = nil
+    }
+
+    func clearAmbientCompensationRuntimeTarget() throws {
+        try replaceAmbientCompensationRuntimeTarget(.unity)
     }
 
     var physicalSpeakerBusRoutingActive: Bool {
@@ -2992,9 +3085,30 @@ final class AudioIOEngine: ObservableObject {
         try attachRoomCorrectionProgram(activeRoomCorrectionProgram, to: &graph)
     }
 
+    private func attachAmbientCompensation(
+        to graph: inout N60DSPGraphSnapshot
+    ) throws {
+        let target = ambientCompensationRuntimeTarget
+        let enabled = target.levelDB > 0.000_1
+            || target.lowSupportDB > 0.000_1
+            || target.presenceSupportDB > 0.000_1
+            || target.detailSupportDB > 0.000_1
+        guard N60DSPGraphSnapshotSetAmbientCompensation(
+            &graph,
+            target.levelDB,
+            target.lowSupportDB,
+            target.presenceSupportDB,
+            target.detailSupportDB,
+            enabled
+        ) else {
+            throw AmbientCompensationError.invalidConfiguration
+        }
+    }
+
     private func applyAudioUnitRackLatency(
         to graph: inout N60DSPGraphSnapshot
     ) throws {
+        try attachAmbientCompensation(to: &graph)
         guard let stagedAudioUnitRack else { return }
         let combinedLatency =
             UInt64(graph.latencyFrames)
