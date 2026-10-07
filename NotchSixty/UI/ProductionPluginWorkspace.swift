@@ -784,7 +784,7 @@ struct ProductionPluginWorkspace: View {
     private var nextAddTarget: PluginAddTarget? {
         if let index =
             host.rackConfiguration.slots.firstIndex(
-                where: \.isEmpty
+                where: { $0.isEmpty }
             ) {
             return PluginAddTarget(slotIndex: index)
         }
