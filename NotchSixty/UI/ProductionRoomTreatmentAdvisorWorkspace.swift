@@ -12,6 +12,9 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
 
                 if let report = advisor.report {
                     readinessCard(report)
+                    ProductionRoomGeometrySection(
+                        advisor: advisor
+                    )
                     if !report.actionPriorities.isEmpty {
                         actionPlanCard(report)
                     }
