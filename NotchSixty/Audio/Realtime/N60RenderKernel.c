@@ -1359,27 +1359,62 @@ N60RenderKernelRenderContext N60RenderKernelBeginRender(N60RenderKernel *kernel)
     return context;
 }
 
-void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60RenderKernelRenderContext *context, float inputLeft, float inputRight, float *outputLeft, float *outputRight) {
-    if (kernel == NULL || context == NULL || outputLeft == NULL || outputRight == NULL) return;
+void N60RenderKernelProcessStereoPlaybackFrameInContext(
+    N60RenderKernel *kernel,
+    N60RenderKernelRenderContext *context,
+    float inputLeft,
+    float inputRight,
+    N60StereoPlaybackFrame *playbackFrame
+) {
+    if (kernel == NULL || context == NULL || playbackFrame == NULL) return;
 
     float left = sanitize_sample(kernel, inputLeft);
     float right = sanitize_sample(kernel, inputRight);
     float referenceLeft = 0.0f;
     float referenceRight = 0.0f;
-    uint32_t referenceDelayFrames = context->acquired && context->snapshot != NULL ? context->snapshot->latencyFrames : 0;
-    process_reference_delay(kernel, referenceDelayFrames, left, right, &referenceLeft, &referenceRight);
-    bool meteringEnabled = context->acquired && context->snapshot != NULL && context->snapshot->meteringEnabled;
+    const uint32_t referenceDelayFrames =
+        context->acquired && context->snapshot != NULL
+            ? context->snapshot->latencyFrames
+            : 0u;
+    process_reference_delay(
+        kernel,
+        referenceDelayFrames,
+        left,
+        right,
+        &referenceLeft,
+        &referenceRight
+    );
+
+    const bool meteringEnabled =
+        context->acquired
+        && context->snapshot != NULL
+        && context->snapshot->meteringEnabled;
     if (meteringEnabled) {
-        meter_sample(left, right, &context->inputPeakLeft, &context->inputPeakRight, &context->inputSquareSumLeft, &context->inputSquareSumRight, &context->inputOverRangeSamples);
+        meter_sample(
+            left, right,
+            &context->inputPeakLeft, &context->inputPeakRight,
+            &context->inputSquareSumLeft, &context->inputSquareSumRight,
+            &context->inputOverRangeSamples
+        );
     }
 
-    if (context->acquired && context->snapshot != NULL && !context->snapshot->bypassed) {
-        float inputGain = next_gain_value(&kernel->inputGain);
-        float headroomGain = next_gain_value(&kernel->headroomGain);
+    const bool processingActive =
+        context->acquired
+        && context->snapshot != NULL
+        && !context->snapshot->bypassed;
+
+    if (processingActive) {
+        const float inputGain = next_gain_value(&kernel->inputGain);
+        const float headroomGain = next_gain_value(&kernel->headroomGain);
         left *= inputGain * headroomGain;
         right *= inputGain * headroomGain;
 
-        N60DynamicsProcessPreEQStereoFrame(&kernel->dynamicsRuntime, &context->snapshot->dynamics, &left, &right);
+        N60DynamicsProcessPreEQStereoFrame(
+            &kernel->dynamicsRuntime,
+            &context->snapshot->dynamics,
+            &left,
+            &right
+        );
 
         N60SpectralDenoiserProcessStereoFrameValidated(
             kernel->denoiserRuntime,
@@ -1391,7 +1426,9 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
             &right
         );
 
-        bool midSideEQ = !context->snapshot->eqBypassed && context->snapshot->eqMidSideMode;
+        const bool midSideEQ =
+            !context->snapshot->eqBypassed
+            && context->snapshot->eqMidSideMode;
         if (midSideEQ) {
             float mid = 0.0f;
             float side = 0.0f;
@@ -1401,11 +1438,20 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
         }
 
         if (!context->snapshot->eqBypassed) {
-            for (uint32_t index = 0; index < kernel->eqRuntimeHighWaterMark; ++index) {
+            for (uint32_t index = 0;
+                 index < kernel->eqRuntimeHighWaterMark;
+                 ++index) {
                 N60EQBandRuntime *runtime = &kernel->eqRuntime[index];
-                if (!runtime->currentEnabled && runtime->transitionFramesRemaining == 0) continue;
-                left = process_eq_band(runtime, left, N60_EQ_CHANNEL_LEFT);
-                right = process_eq_band(runtime, right, N60_EQ_CHANNEL_RIGHT);
+                if (!runtime->currentEnabled
+                    && runtime->transitionFramesRemaining == 0u) {
+                    continue;
+                }
+                left = process_eq_band(
+                    runtime, left, N60_EQ_CHANNEL_LEFT
+                );
+                right = process_eq_band(
+                    runtime, right, N60_EQ_CHANNEL_RIGHT
+                );
             }
             advance_eq_transitions(kernel);
         }
@@ -1424,21 +1470,25 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
                 left = convolvedLeft;
                 right = convolvedRight;
             } else {
-                atomic_fetch_add_explicit(&kernel->convolutionProgramMisses, 1, memory_order_relaxed);
+                atomic_fetch_add_explicit(
+                    &kernel->convolutionProgramMisses,
+                    1u,
+                    memory_order_relaxed
+                );
             }
         }
 
         if (midSideEQ) {
             float physicalLeft = 0.0f;
             float physicalRight = 0.0f;
-            N60MidSideDecode(left, right, &physicalLeft, &physicalRight);
+            N60MidSideDecode(
+                left, right, &physicalLeft, &physicalRight
+            );
             left = physicalLeft;
             right = physicalRight;
         }
 
         if (!context->snapshot->eqBypassed) {
-            // Dynamic EQ follows the active EQ channel domain: linked stereo,
-            // independent L/R, or independent Mid/Side lanes before decode.
             N60DynamicsProcessDynamicEQStereoFrame(
                 &kernel->dynamicsRuntime,
                 &context->snapshot->dynamics,
@@ -1448,9 +1498,71 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
         }
 
         if (meteringEnabled) {
-            meter_sample(left, right, &context->postEQPeakLeft, &context->postEQPeakRight, &context->postEQSquareSumLeft, &context->postEQSquareSumRight, &context->postEQOverRangeSamples);
+            meter_sample(
+                left, right,
+                &context->postEQPeakLeft, &context->postEQPeakRight,
+                &context->postEQSquareSumLeft,
+                &context->postEQSquareSumRight,
+                &context->postEQOverRangeSamples
+            );
         }
-        process_crossover(&kernel->crossoverRuntime, left, right, &left, &right);
+    } else if (meteringEnabled) {
+        meter_sample(
+            left, right,
+            &context->postEQPeakLeft, &context->postEQPeakRight,
+            &context->postEQSquareSumLeft,
+            &context->postEQSquareSumRight,
+            &context->postEQOverRangeSamples
+        );
+    }
+
+    *playbackFrame = (N60StereoPlaybackFrame){
+        .sourceLeft = inputLeft,
+        .sourceRight = inputRight,
+        .left = left,
+        .right = right,
+        .referenceLeft = referenceLeft,
+        .referenceRight = referenceRight,
+        .processingActive = processingActive,
+    };
+}
+
+void N60RenderKernelProcessStereoSystemFrameInContext(
+    N60RenderKernel *kernel,
+    N60RenderKernelRenderContext *context,
+    const N60StereoPlaybackFrame *playbackFrame,
+    float rackLeft,
+    float rackRight,
+    float *outputLeft,
+    float *outputRight
+) {
+    if (kernel == NULL
+        || context == NULL
+        || playbackFrame == NULL
+        || outputLeft == NULL
+        || outputRight == NULL) {
+        return;
+    }
+
+    const bool meteringEnabled =
+        context->acquired
+        && context->snapshot != NULL
+        && context->snapshot->meteringEnabled;
+    float left = playbackFrame->processingActive
+        ? rackLeft
+        : playbackFrame->left;
+    float right = playbackFrame->processingActive
+        ? rackRight
+        : playbackFrame->right;
+
+    if (playbackFrame->processingActive) {
+        process_crossover(
+            &kernel->crossoverRuntime,
+            left,
+            right,
+            &left,
+            &right
+        );
 
         if (context->snapshot->roomCorrection.enabled) {
             float correctedLeft = left;
@@ -1466,13 +1578,14 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
                 left = correctedLeft;
                 right = correctedRight;
             } else {
-                atomic_fetch_add_explicit(&kernel->roomCorrectionProgramMisses, 1, memory_order_relaxed);
+                atomic_fetch_add_explicit(
+                    &kernel->roomCorrectionProgramMisses,
+                    1u,
+                    memory_order_relaxed
+                );
             }
         }
 
-        // Independent global speaker impulse-response slot. This deliberately
-        // remains separate from main-EQ FIR and room correction so all three
-        // audited FIR workflows can coexist in the current stereo graph.
         if (context->snapshot->speakerIR.enabled) {
             float convolvedLeft = left;
             float convolvedRight = right;
@@ -1487,46 +1600,73 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
                 left = convolvedLeft;
                 right = convolvedRight;
             } else {
-                atomic_fetch_add_explicit(&kernel->speakerIRProgramMisses, 1, memory_order_relaxed);
+                atomic_fetch_add_explicit(
+                    &kernel->speakerIRProgramMisses,
+                    1u,
+                    memory_order_relaxed
+                );
             }
         }
 
-        N60DynamicsProcessCoreStereoFrameWithMasterGain(&kernel->dynamicsRuntime, &context->snapshot->dynamics, context->snapshot->masterGainLinear, &left, &right);
+        N60DynamicsProcessCoreStereoFrameWithMasterGain(
+            &kernel->dynamicsRuntime,
+            &context->snapshot->dynamics,
+            context->snapshot->masterGainLinear,
+            &left,
+            &right
+        );
 
-        // Listening-position symmetry compensation is intentionally separate
-        // from ordinary attenuation-style Balance. It feeds the speaker-spatial
-        // chain and is gain-smoothed so live position changes remain click-free.
-        if (!smoothed_gain_is_settled_at(&kernel->symmetryBalanceGainLeft, 1.0f)
-            || !smoothed_gain_is_settled_at(&kernel->symmetryBalanceGainRight, 1.0f)) {
-            left *= next_gain_value(&kernel->symmetryBalanceGainLeft);
-            right *= next_gain_value(&kernel->symmetryBalanceGainRight);
+        if (!smoothed_gain_is_settled_at(
+                &kernel->symmetryBalanceGainLeft, 1.0f)
+            || !smoothed_gain_is_settled_at(
+                &kernel->symmetryBalanceGainRight, 1.0f)) {
+            left *= next_gain_value(
+                &kernel->symmetryBalanceGainLeft
+            );
+            right *= next_gain_value(
+                &kernel->symmetryBalanceGainRight
+            );
         }
 
-        // Speaker crossfeed / Panning Gain Matrix. Once its disable ramp has
-        // reached zero the processor is computationally parked.
-        if (!smoothed_gain_is_settled_at(&kernel->speakerCrossfeedAmount, 0.0f)) {
-            const float crossfeed = next_gain_value(&kernel->speakerCrossfeedAmount);
+        if (!smoothed_gain_is_settled_at(
+                &kernel->speakerCrossfeedAmount, 0.0f)) {
+            const float crossfeed =
+                next_gain_value(&kernel->speakerCrossfeedAmount);
             const float direct = 1.0f - crossfeed;
             const float spatialLeft = left;
             const float spatialRight = right;
-            left = direct * spatialLeft + crossfeed * spatialRight;
-            right = direct * spatialRight + crossfeed * spatialLeft;
+            left =
+                direct * spatialLeft + crossfeed * spatialRight;
+            right =
+                direct * spatialRight + crossfeed * spatialLeft;
         }
 
-        // Gentle feed-forward speaker crosstalk cancellation. The shadow filter
-        // and cancellation matrix park completely after the disable ramp reaches 0.
-        if (!smoothed_gain_is_settled_at(&kernel->crosstalkCancellationAmount, 0.0f)
-            || !smoothed_gain_is_settled_at(&kernel->crosstalkHeadShadowAlpha, 0.0f)) {
-            const float shadowAlpha = next_gain_value(&kernel->crosstalkHeadShadowAlpha);
-            kernel->crosstalkShadowLeft += shadowAlpha * (left - kernel->crosstalkShadowLeft);
-            kernel->crosstalkShadowRight += shadowAlpha * (right - kernel->crosstalkShadowRight);
-            const float cancellationAmount = next_gain_value(&kernel->crosstalkCancellationAmount);
+        if (!smoothed_gain_is_settled_at(
+                &kernel->crosstalkCancellationAmount, 0.0f)
+            || !smoothed_gain_is_settled_at(
+                &kernel->crosstalkHeadShadowAlpha, 0.0f)) {
+            const float shadowAlpha =
+                next_gain_value(&kernel->crosstalkHeadShadowAlpha);
+            kernel->crosstalkShadowLeft +=
+                shadowAlpha * (left - kernel->crosstalkShadowLeft);
+            kernel->crosstalkShadowRight +=
+                shadowAlpha * (right - kernel->crosstalkShadowRight);
+            const float cancellationAmount =
+                next_gain_value(
+                    &kernel->crosstalkCancellationAmount
+                );
             const float cancellationLeft = left;
             const float cancellationRight = right;
-            left = cancellationLeft - cancellationAmount * kernel->crosstalkShadowRight;
-            right = cancellationRight - cancellationAmount * kernel->crosstalkShadowLeft;
-            if (smoothed_gain_is_settled_at(&kernel->crosstalkCancellationAmount, 0.0f)
-                && smoothed_gain_is_settled_at(&kernel->crosstalkHeadShadowAlpha, 0.0f)) {
+            left = cancellationLeft
+                - cancellationAmount
+                    * kernel->crosstalkShadowRight;
+            right = cancellationRight
+                - cancellationAmount
+                    * kernel->crosstalkShadowLeft;
+            if (smoothed_gain_is_settled_at(
+                    &kernel->crosstalkCancellationAmount, 0.0f)
+                && smoothed_gain_is_settled_at(
+                    &kernel->crosstalkHeadShadowAlpha, 0.0f)) {
                 kernel->crosstalkShadowLeft = 0.0f;
                 kernel->crosstalkShadowRight = 0.0f;
             }
@@ -1534,7 +1674,8 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
 
         left *= next_gain_value(&kernel->balanceGainLeft);
         right *= next_gain_value(&kernel->balanceGainRight);
-        float outputGain = next_gain_value(&kernel->outputGain);
+        const float outputGain =
+            next_gain_value(&kernel->outputGain);
         left *= outputGain;
         right *= outputGain;
 
@@ -1544,11 +1685,13 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
             if (N60HeadphoneDSPProcessStereoFrame(
                     kernel->headphoneDSPRuntime,
                     &kernel->headphoneDSPSnapshot,
-                    left, right, &headphoneLeft, &headphoneRight)) {
+                    left,
+                    right,
+                    &headphoneLeft,
+                    &headphoneRight)) {
                 left = headphoneLeft;
                 right = headphoneRight;
             } else {
-                // Fail closed if an impossible runtime/profile mismatch occurs.
                 left = 0.0f;
                 right = 0.0f;
             }
@@ -1570,48 +1713,85 @@ void N60RenderKernelProcessStereoFrameInContext(N60RenderKernel *kernel, N60Rend
 
         switch (context->snapshot->auditionMode) {
         case N60AuditionModeReference:
-            left = referenceLeft;
-            right = referenceRight;
+            left = playbackFrame->referenceLeft;
+            right = playbackFrame->referenceRight;
             break;
         case N60AuditionModeDelta:
-            left -= referenceLeft;
-            right -= referenceRight;
+            left -= playbackFrame->referenceLeft;
+            right -= playbackFrame->referenceRight;
             break;
         case N60AuditionModeProcessed:
         default:
             break;
         }
-    } else {
-        if (meteringEnabled) {
-            meter_sample(left, right, &context->postEQPeakLeft, &context->postEQPeakRight, &context->postEQSquareSumLeft, &context->postEQSquareSumRight, &context->postEQOverRangeSamples);
-        }
     }
 
-    // Keep the alignment history warm even during Global Bypass, but discard the
-    // aligned copy while bypassed so Global Bypass remains the true raw escape path.
-    // Processed / Reference / Delta all receive the same speaker-alignment stage.
     if (context->acquired && context->snapshot != NULL) {
         float alignedLeft = left;
         float alignedRight = right;
         N60InterChannelDelayRuntimeProcess(
-            &kernel->interChannelDelayRuntime, left, right, &alignedLeft, &alignedRight);
+            &kernel->interChannelDelayRuntime,
+            left,
+            right,
+            &alignedLeft,
+            &alignedRight
+        );
         if (!context->snapshot->bypassed) {
             left = alignedLeft;
             right = alignedRight;
         }
     }
 
-    float masterGain = next_gain_value(&kernel->masterGain);
+    const float masterGain = next_gain_value(&kernel->masterGain);
     left *= masterGain;
     right *= masterGain;
     left = sanitize_sample(kernel, left);
     right = sanitize_sample(kernel, right);
     if (meteringEnabled) {
-        meter_sample(left, right, &context->outputPeakLeft, &context->outputPeakRight, &context->outputSquareSumLeft, &context->outputSquareSumRight, &context->outputOverRangeSamples);
-        context->meteredFrames += 1;
+        meter_sample(
+            left, right,
+            &context->outputPeakLeft, &context->outputPeakRight,
+            &context->outputSquareSumLeft,
+            &context->outputSquareSumRight,
+            &context->outputOverRangeSamples
+        );
+        context->meteredFrames += 1u;
     }
     *outputLeft = left;
     *outputRight = right;
+}
+
+void N60RenderKernelProcessStereoFrameInContext(
+    N60RenderKernel *kernel,
+    N60RenderKernelRenderContext *context,
+    float inputLeft,
+    float inputRight,
+    float *outputLeft,
+    float *outputRight
+) {
+    if (kernel == NULL
+        || context == NULL
+        || outputLeft == NULL
+        || outputRight == NULL) {
+        return;
+    }
+    N60StereoPlaybackFrame playbackFrame = {0};
+    N60RenderKernelProcessStereoPlaybackFrameInContext(
+        kernel,
+        context,
+        inputLeft,
+        inputRight,
+        &playbackFrame
+    );
+    N60RenderKernelProcessStereoSystemFrameInContext(
+        kernel,
+        context,
+        &playbackFrame,
+        playbackFrame.left,
+        playbackFrame.right,
+        outputLeft,
+        outputRight
+    );
 }
 
 void N60RenderKernelEndRender(N60RenderKernel *kernel, N60RenderKernelRenderContext *context, uint32_t renderedFrames) {
