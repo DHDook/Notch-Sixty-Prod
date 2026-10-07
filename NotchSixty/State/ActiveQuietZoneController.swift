@@ -170,7 +170,6 @@ final class ActiveQuietZoneController: ObservableObject {
         _ rawConfiguration: ActiveQuietZoneConfiguration
     ) throws {
         let validated = try rawConfiguration.validated()
-        let wasEnabled = configuration.enabled
         if engine.activeQuietZoneRuntimeTarget.active {
             try engine.clearActiveQuietZoneRuntimeTarget(
                 fadeMilliseconds:
@@ -189,11 +188,6 @@ final class ActiveQuietZoneController: ObservableObject {
     func start() throws {
         try synchronizeSelectedPlaybackSystem()
         guard configuration.enabled else { return }
-        guard engine.lifecycleState == .running,
-              engine.activeQuietZoneStereoSpeakerRuntimeAvailable else {
-            hold(.unsupportedRoute)
-            return
-        }
 
         try ambient.setQuietZoneObservationDemand(true)
         task?.cancel()
@@ -208,8 +202,14 @@ final class ActiveQuietZoneController: ObservableObject {
                 await self?.pollOnce()
             }
         }
-        status = .observe
-        holdReason = nil
+        if engine.lifecycleState == .running,
+           engine.activeQuietZoneStereoSpeakerRuntimeAvailable {
+            status = .observe
+            holdReason = nil
+        } else {
+            status = .hold
+            holdReason = .unsupportedRoute
+        }
         lastErrorDescription = nil
     }
 
@@ -889,12 +889,12 @@ final class ActiveQuietZoneController: ObservableObject {
         }
         guard activeSystemID != systemID else { return }
 
-        task?.cancel()
-        task = nil
-        try? engine.clearActiveQuietZoneRuntimeTarget(
-            fadeMilliseconds:
-                configuration.faultFadeMilliseconds
-        )
+        if engine.activeQuietZoneRuntimeTarget.active {
+            try? engine.clearActiveQuietZoneRuntimeTarget(
+                fadeMilliseconds:
+                    configuration.faultFadeMilliseconds
+            )
+        }
         try? ambient.setQuietZoneObservationDemand(false)
         resetRuntimeState()
         configuration =
@@ -905,16 +905,21 @@ final class ActiveQuietZoneController: ObservableObject {
         activeSystemID = systemID
         if configuration.enabled {
             try ambient.setQuietZoneObservationDemand(true)
+        } else {
+            task?.cancel()
+            task = nil
         }
     }
 
     private func hold(
         _ reason: ActiveQuietZoneHoldReason
     ) {
-        try? engine.clearActiveQuietZoneRuntimeTarget(
-            fadeMilliseconds:
-                configuration.faultFadeMilliseconds
-        )
+        if engine.activeQuietZoneRuntimeTarget.active {
+            try? engine.clearActiveQuietZoneRuntimeTarget(
+                fadeMilliseconds:
+                    configuration.faultFadeMilliseconds
+            )
+        }
         stage = .observing
         controlledFrequenciesHz = []
         toneTelemetry = []
@@ -928,10 +933,12 @@ final class ActiveQuietZoneController: ObservableObject {
         _ error: Error,
         reason: ActiveQuietZoneHoldReason
     ) {
-        try? engine.clearActiveQuietZoneRuntimeTarget(
-            fadeMilliseconds:
-                configuration.faultFadeMilliseconds
-        )
+        if engine.activeQuietZoneRuntimeTarget.active {
+            try? engine.clearActiveQuietZoneRuntimeTarget(
+                fadeMilliseconds:
+                    configuration.faultFadeMilliseconds
+            )
+        }
         stage = .observing
         controlledFrequenciesHz = []
         persistence.removeAll()
