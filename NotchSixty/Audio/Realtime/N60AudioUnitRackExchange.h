@@ -19,6 +19,7 @@ typedef struct {
     uint64_t publishedGeneration;
     uint64_t renderedGeneration;
     uint64_t transitionFailureCount;
+    uint64_t cancelledGeneration;
     uint32_t activeSlot;
     uint32_t requestedSlot;
     uint32_t transitionFramesRemaining;
@@ -50,6 +51,11 @@ bool N60AudioUnitRackExchangePublish(
     const N60AudioUnitLiveRackProcessor * _Nullable processor,
     uint64_t generation,
     uint32_t transitionFrames
+);
+
+bool N60AudioUnitRackExchangeCancelPending(
+    N60AudioUnitRackExchange * _Nonnull exchange,
+    uint64_t generation
 );
 
 bool N60AudioUnitRackExchangeSlotIsReclaimable(
