@@ -75,6 +75,9 @@ struct N60RenderKernel {
 
     N60EQBandRuntime eqRuntime[N60_MAX_EQ_RENDER_SLOTS];
     uint32_t eqRuntimeHighWaterMark;
+    N60EQBandRuntime ambientCompensationRuntime[
+        N60_AMBIENT_COMPENSATION_BAND_COUNT
+    ];
     N60CrossoverRuntime crossoverRuntime;
     N60DynamicsRuntime dynamicsRuntime;
     N60SpectralDenoiserRuntime *denoiserRuntime;
@@ -299,6 +302,7 @@ static bool snapshot_is_valid(N60DSPGraphSnapshot snapshot) {
         || !N60DynamicsSnapshotIsValid(snapshot.dynamics)
         || !N60SpectralDenoiserSnapshotIsValid(snapshot.dynamics.spectralDenoiser, snapshot.sampleRate)
         || !N60ProtectionSnapshotIsValid(&snapshot.protection)
+        || snapshot.ambientCompensation.transitionFrames > 8192u
         || !convolution_snapshot_is_valid(snapshot.convolution)
         || !convolution_snapshot_is_valid(snapshot.roomCorrection)
         || !convolution_snapshot_is_valid(snapshot.speakerIR)) {
@@ -308,6 +312,16 @@ static bool snapshot_is_valid(N60DSPGraphSnapshot snapshot) {
     for (uint32_t index = 0; index < snapshot.eqBandCount; ++index) {
         if (!band_snapshot_is_valid(snapshot.eqBands[index], snapshot.sampleRate)) return false;
         if (snapshot.eqBands[index].enabled && !channel_mask_is_valid(snapshot.eqBandChannelMasks[index])) return false;
+    }
+    for (uint32_t index = 0;
+         index < N60_AMBIENT_COMPENSATION_BAND_COUNT;
+         ++index) {
+        if (!band_snapshot_is_valid(
+                snapshot.ambientCompensation.bands[index],
+                snapshot.sampleRate
+            )) {
+            return false;
+        }
     }
     return true;
 }
@@ -354,6 +368,18 @@ static void reset_band_runtime(N60EQBandRuntime *runtime) {
 static void reset_eq_runtime(N60RenderKernel *kernel) {
     for (uint32_t index = 0; index < N60_MAX_EQ_RENDER_SLOTS; ++index) reset_band_runtime(&kernel->eqRuntime[index]);
     kernel->eqRuntimeHighWaterMark = 0;
+}
+
+static void reset_ambient_compensation_runtime(
+    N60RenderKernel *kernel
+) {
+    for (uint32_t index = 0;
+         index < N60_AMBIENT_COMPENSATION_BAND_COUNT;
+         ++index) {
+        reset_band_runtime(
+            &kernel->ambientCompensationRuntime[index]
+        );
+    }
 }
 
 static void reset_smoothed_gain(N60SmoothedGain *gain, float value) {
@@ -531,6 +557,31 @@ static void prepare_runtime_for_snapshot(N60RenderKernel *kernel, const N60DSPGr
         kernel->eqRuntimeHighWaterMark = scheduleCount;
     } else {
         reset_eq_runtime(kernel);
+    }
+
+    if (firstPreparation || sampleRateChanged || leavingGraphBypass) {
+        reset_ambient_compensation_runtime(kernel);
+    }
+    uint32_t ambientFrames =
+        snapshot->ambientCompensation.transitionFrames > 0
+            ? snapshot->ambientCompensation.transitionFrames
+            : gainFrames;
+    for (uint32_t index = 0;
+         index < N60_AMBIENT_COMPENSATION_BAND_COUNT;
+         ++index) {
+        bool enabled = snapshot->ambientCompensation.enabled
+            && snapshot->ambientCompensation.bands[index].enabled;
+        N60BiquadCoefficients coefficients =
+            enabled
+                ? snapshot->ambientCompensation.bands[index].coefficients
+                : N60BiquadCoefficientsMakeIdentity();
+        schedule_band_transition(
+            &kernel->ambientCompensationRuntime[index],
+            enabled,
+            enabled ? N60_EQ_CHANNEL_STEREO : 0,
+            coefficients,
+            ambientFrames
+        );
     }
 
     bool protectionStructureChanged = kernel->preparedProtectionFactor != snapshot->protection.effectiveFactor
@@ -870,6 +921,9 @@ N60DSPGraphSnapshot N60DSPGraphSnapshotMakeUnity(double sampleRate) {
     snapshot.crossover = N60CrossoverSnapshotMakeBypassed();
     snapshot.dynamics = N60DynamicsSnapshotMakeBypassed(sampleRate);
     snapshot.protection = N60ProtectionSnapshotMakeBypassed(sampleRate);
+    snapshot.ambientCompensation.enabled = false;
+    snapshot.ambientCompensation.transitionFrames =
+        gain_transition_frames_for_sample_rate(sampleRate);
     snapshot.convolution.enabled = false;
     snapshot.convolution.programSlot = N60_CONVOLUTION_NO_PROGRAM;
     snapshot.roomCorrection.enabled = false;
@@ -1027,6 +1081,65 @@ bool N60DSPGraphSnapshotSetEQBand(N60DSPGraphSnapshot *snapshot, uint32_t bandIn
     );
 }
 
+bool N60DSPGraphSnapshotSetAmbientCompensation(
+    N60DSPGraphSnapshot *snapshot,
+    double lowSupportDB,
+    double presenceSupportDB,
+    double detailSupportDB,
+    bool enabled
+) {
+    if (snapshot == NULL
+        || !isfinite(lowSupportDB)
+        || !isfinite(presenceSupportDB)
+        || !isfinite(detailSupportDB)
+        || lowSupportDB < 0.0 || lowSupportDB > 2.0
+        || presenceSupportDB < 0.0 || presenceSupportDB > 2.0
+        || detailSupportDB < 0.0 || detailSupportDB > 1.5) {
+        return false;
+    }
+
+    const N60BiquadFilterType types[
+        N60_AMBIENT_COMPENSATION_BAND_COUNT
+    ] = {
+        N60BiquadFilterTypeLowShelf,
+        N60BiquadFilterTypePeaking,
+        N60BiquadFilterTypeHighShelf,
+    };
+    const double frequencies[
+        N60_AMBIENT_COMPENSATION_BAND_COUNT
+    ] = {120.0, 2200.0, 6500.0};
+    const double gains[
+        N60_AMBIENT_COMPENSATION_BAND_COUNT
+    ] = {lowSupportDB, presenceSupportDB, detailSupportDB};
+    const double qs[
+        N60_AMBIENT_COMPENSATION_BAND_COUNT
+    ] = {0.707, 0.85, 0.707};
+
+    N60AmbientCompensationSnapshot prepared = {0};
+    prepared.enabled = enabled;
+    prepared.transitionFrames =
+        gain_transition_frames_for_sample_rate(snapshot->sampleRate);
+    for (uint32_t index = 0;
+         index < N60_AMBIENT_COMPENSATION_BAND_COUNT;
+         ++index) {
+        const bool bandEnabled =
+            enabled && gains[index] > 0.0001;
+        if (!N60BiquadBandSnapshotMake(
+                types[index],
+                snapshot->sampleRate,
+                frequencies[index],
+                gains[index],
+                qs[index],
+                bandEnabled,
+                &prepared.bands[index]
+            )) {
+            return false;
+        }
+    }
+    snapshot->ambientCompensation = prepared;
+    return true;
+}
+
 bool N60DSPGraphSnapshotSetCrossover(N60DSPGraphSnapshot *snapshot, double frequencyHz, N60CrossoverTopology topology, N60CrossoverMonitorMode monitorMode, float subGainLinear, bool subPolarityInverted, bool enabled) {
     if (snapshot == NULL) return false;
     N60CrossoverSnapshot crossover = {0};
@@ -1150,6 +1263,7 @@ N60RenderKernel *N60RenderKernelCreate(void) {
     atomic_store_explicit(&kernel->activeSlot, 0, memory_order_relaxed);
     atomic_store_explicit(&kernel->nextGeneration, 1, memory_order_relaxed);
     reset_eq_runtime(kernel);
+    reset_ambient_compensation_runtime(kernel);
     reset_crossover_runtime(&kernel->crossoverRuntime, initial.crossover);
     N60DynamicsRuntimeReset(&kernel->dynamicsRuntime);
     reset_smoothed_gain(&kernel->inputGain, 1.0f);
@@ -1177,6 +1291,7 @@ void N60RenderKernelDestroy(N60RenderKernel *kernel) {
 void N60RenderKernelReset(N60RenderKernel *kernel) {
     if (kernel == NULL) return;
     reset_eq_runtime(kernel);
+    reset_ambient_compensation_runtime(kernel);
     reset_crossover_runtime(&kernel->crossoverRuntime, N60CrossoverSnapshotMakeBypassed());
     N60DynamicsRuntimeReset(&kernel->dynamicsRuntime);
     N60SpectralDenoiserReset(kernel->denoiserRuntime);
@@ -1605,6 +1720,39 @@ void N60RenderKernelProcessStereoSystemFrameInContext(
                     1u,
                     memory_order_relaxed
                 );
+            }
+        }
+
+        if (context->snapshot->ambientCompensation.enabled) {
+            for (uint32_t index = 0;
+                 index < N60_AMBIENT_COMPENSATION_BAND_COUNT;
+                 ++index) {
+                N60EQBandRuntime *runtime =
+                    &kernel->ambientCompensationRuntime[index];
+                if (!runtime->currentEnabled
+                    && runtime->transitionFramesRemaining == 0u) {
+                    continue;
+                }
+                left = process_eq_band(
+                    runtime, left, N60_EQ_CHANNEL_LEFT
+                );
+                right = process_eq_band(
+                    runtime, right, N60_EQ_CHANNEL_RIGHT
+                );
+                if (runtime->transitionFramesRemaining > 0u) {
+                    runtime->transitionFramesRemaining -= 1u;
+                    if (runtime->transitionFramesRemaining == 0u) {
+                        runtime->currentCoefficients =
+                            runtime->pendingCoefficients;
+                        runtime->currentLeft = runtime->pendingLeft;
+                        runtime->currentRight = runtime->pendingRight;
+                        runtime->currentEnabled =
+                            runtime->pendingEnabled;
+                        runtime->currentChannelMask =
+                            runtime->pendingChannelMask;
+                        runtime->transitionFramesTotal = 0u;
+                    }
+                }
             }
         }
 
