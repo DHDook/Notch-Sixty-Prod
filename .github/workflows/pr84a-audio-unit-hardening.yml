@@ -30,6 +30,7 @@ jobs:
             -INotchSixty/Audio/Realtime \
             ci/validate_pr82_audio_unit_rack_exchange.c \
             NotchSixty/Audio/Realtime/N60AudioUnitRackExchange.c \
+            NotchSixty/Audio/Realtime/N60AudioUnitLiveRackBridge.c \
             -lm -o /tmp/pr84a-rack-exchange
           /tmp/pr84a-rack-exchange
       - name: Prove PR84A lock-free stage fault gate
@@ -38,6 +39,7 @@ jobs:
             -INotchSixty/Audio/Realtime \
             ci/validate_pr84a_audio_unit_stage_fault_gate.c \
             NotchSixty/Audio/Realtime/N60AudioUnitRackExchange.c \
+            NotchSixty/Audio/Realtime/N60AudioUnitLiveRackBridge.c \
             -lm -o /tmp/pr84a-stage-fault-gate
           /tmp/pr84a-stage-fault-gate
 
@@ -57,6 +59,7 @@ jobs:
             -INotchSixty/Audio/Realtime \
             ci/validate_pr82_audio_unit_rack_exchange.c \
             NotchSixty/Audio/Realtime/N60AudioUnitRackExchange.c \
+            NotchSixty/Audio/Realtime/N60AudioUnitLiveRackBridge.c \
             -lm -o /tmp/pr84a-rack-exchange
           /tmp/pr84a-rack-exchange
       - name: Prove PR84A lock-free stage fault gate on arm64
@@ -65,6 +68,7 @@ jobs:
             -INotchSixty/Audio/Realtime \
             ci/validate_pr84a_audio_unit_stage_fault_gate.c \
             NotchSixty/Audio/Realtime/N60AudioUnitRackExchange.c \
+            NotchSixty/Audio/Realtime/N60AudioUnitLiveRackBridge.c \
             -lm -o /tmp/pr84a-stage-fault-gate
           /tmp/pr84a-stage-fault-gate
       - name: Build arm64 app with AU hardening
