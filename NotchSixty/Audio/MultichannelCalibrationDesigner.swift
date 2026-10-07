@@ -1584,7 +1584,9 @@ struct MultichannelCalibrationPredictionVerifier: Sendable {
               !responseDB.isEmpty else {
             return []
         }
-        let raw = zip(responseDB, targetDB).map(-)
+        let raw = zip(responseDB, targetDB).map { response, target in
+            response - target
+        }
         let offset = mean(raw)
         return raw.map { $0 - offset }
     }
