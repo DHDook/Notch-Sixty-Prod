@@ -430,6 +430,76 @@ final class RoomGeometryPlacementTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testPlacementPreviewChangesDraftWithoutMutatingSavedGeometry() throws {
+        let root =
+            FileManager.default
+            .temporaryDirectory
+            .appendingPathComponent(
+                "PR93-Preview-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer {
+            try? FileManager.default
+                .removeItem(at: root)
+        }
+
+        let store =
+            RoomCorrectionProjectStore(
+                rootDirectory: root
+            )
+        let project = RoomCorrectionProject(
+            id: UUID(),
+            playbackSystemID: UUID(),
+            name: "Preview Geometry"
+        )
+        try store.save(project)
+
+        let controller =
+            RoomTreatmentAdvisorController(
+                store: store
+            )
+        controller.prepareForUse()
+        controller.startGeometryTemplate()
+        controller.saveGeometry()
+
+        let baseline = try XCTUnwrap(
+            controller.savedGeometry
+        )
+        var movedListener = baseline.listener
+        movedListener.y -= 0.3
+
+        let candidate = RoomPlacementCandidate(
+            id: "preview-test",
+            kind: .listener,
+            title: "Move listener forward",
+            detail: "Test move",
+            listener: movedListener,
+            leftSpeaker: baseline.leftSpeaker,
+            rightSpeaker: baseline.rightSpeaker,
+            score: 1,
+            currentScore: 2,
+            expectedImprovementPercent: 50,
+            rationale: "Test"
+        )
+
+        controller.previewPlacementCandidate(
+            candidate
+        )
+
+        XCTAssertEqual(
+            controller.savedGeometry,
+            baseline
+        )
+        XCTAssertEqual(
+            controller.geometryDraft?.listener,
+            movedListener
+        )
+        XCTAssertTrue(
+            controller.geometryHasUnsavedChanges
+        )
+    }
+
     private func roomModel() -> RoomGeometryModel {
         RoomGeometryModel(
             projectID: UUID(),
