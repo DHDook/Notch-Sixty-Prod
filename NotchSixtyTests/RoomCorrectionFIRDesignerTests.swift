@@ -464,9 +464,10 @@ final class RoomCorrectionFIRDesignerTests: XCTestCase {
                 ),
             ]
         ).design
-        design.predictedLeftResponse?.magnitudeDB = design
-            .predictedLeftResponse?.magnitudeDB.map { $0 + 2.0 }
-            ?? []
+        if var tampered = design.predictedLeftResponse {
+            tampered.magnitudeDB = tampered.magnitudeDB.map { $0 + 2.0 }
+            design.predictedLeftResponse = tampered
+        }
 
         let report = try RoomCorrectionDesignPredictionVerifier().verify(
             design: design,
