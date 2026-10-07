@@ -1,3 +1,4 @@
+#import "../SOFA/N60SOFABridge.h"
 #import "N60AudioUnitLiveRackBridge.h"
 #import "N60AudioUnitRackExchange.h"
 #import "N60RealtimeAudioBridge.h"
