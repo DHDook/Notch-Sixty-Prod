@@ -1159,9 +1159,12 @@ final class AudioIOEngine: ObservableObject {
             throw AmbientCompensationError.runtimeUnsupported
         }
 
-        ambientCompensationRuntimeTarget = target
+        guard let session = transportSession else {
+            ambientCompensationRuntimeTarget = target
+            lastErrorDescription = nil
+            return
+        }
 
-        guard let session = transportSession else { return }
         var graph = try stereoEQConfiguration.makeGraphSnapshot(
             sampleRate: session.outputFormat.sampleRate,
             gainConfiguration: gainConfiguration,
@@ -1185,7 +1188,9 @@ final class AudioIOEngine: ObservableObject {
             playbackConfiguration: playbackControlConfiguration
         )
         try applyAudioUnitRackLatency(to: &graph)
+        try attachAmbientCompensation(target, to: &graph)
         try session.publishDSPGraph(graph)
+        ambientCompensationRuntimeTarget = target
         lastErrorDescription = nil
     }
 
@@ -2657,6 +2662,13 @@ final class AudioIOEngine: ObservableObject {
         if immutableSemanticTransportActive, configuration != gainConfiguration {
             throw LiveNChannelTransportError.configurationChangeRequiresRestart
         }
+
+        let clampedAmbientTarget =
+            ambientTargetClampedToHeadroom(
+                ambientCompensationRuntimeTarget,
+                gainConfiguration: configuration
+            )
+
         if let session = transportSession {
             var graph = try stereoEQConfiguration.makeGraphSnapshot(
                 sampleRate: session.outputFormat.sampleRate,
@@ -2680,9 +2692,16 @@ final class AudioIOEngine: ObservableObject {
                 playbackConfiguration: playbackControlConfiguration
             )
             try applyAudioUnitRackLatency(to: &graph)
+            try attachAmbientCompensation(
+                clampedAmbientTarget,
+                to: &graph
+            )
             try session.publishDSPGraph(graph)
         }
+
         gainConfiguration = configuration
+        ambientCompensationRuntimeTarget =
+            clampedAmbientTarget
         lastErrorDescription = nil
     }
 
@@ -3086,9 +3105,9 @@ final class AudioIOEngine: ObservableObject {
     }
 
     private func attachAmbientCompensation(
+        _ target: AmbientCompensationTarget,
         to graph: inout N60DSPGraphSnapshot
     ) throws {
-        let target = ambientCompensationRuntimeTarget
         let enabled = target.levelDB > 0.000_1
             || target.lowSupportDB > 0.000_1
             || target.presenceSupportDB > 0.000_1
@@ -3103,6 +3122,33 @@ final class AudioIOEngine: ObservableObject {
         ) else {
             throw AmbientCompensationError.invalidConfiguration
         }
+    }
+
+    private func attachAmbientCompensation(
+        to graph: inout N60DSPGraphSnapshot
+    ) throws {
+        try attachAmbientCompensation(
+            ambientCompensationRuntimeTarget,
+            to: &graph
+        )
+    }
+
+    private func ambientTargetClampedToHeadroom(
+        _ target: AmbientCompensationTarget,
+        gainConfiguration: DSPGainConfiguration
+    ) -> AmbientCompensationTarget {
+        var clamped = target
+        let available = max(
+            -gainConfiguration.headroomAttenuationDB,
+            0
+        )
+        clamped.levelDB = min(
+            max(target.levelDB, 0),
+            available,
+            AmbientCompensationConfiguration
+                .hardMaximumLevelCompensationDB
+        )
+        return clamped
     }
 
     private func applyAudioUnitRackLatency(
