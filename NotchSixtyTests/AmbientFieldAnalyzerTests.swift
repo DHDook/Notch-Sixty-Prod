@@ -245,6 +245,123 @@ final class AmbientFieldAnalyzerTests: XCTestCase {
         XCTAssertEqual(snapshot.separationConfidence, 1, accuracy: 0.000_001)
     }
 
+    func testDetailedAnalysisExposesSeparatedResidualAndAlignmentEvidence() throws {
+        let playback = shapedPlayback(frames: frameCount)
+        let impulse = delayedImpulse(
+            delay: 37,
+            taps: [(0, 0.55), (23, -0.08)]
+        )
+        let predicted = convolve(playback, impulse: impulse)
+        let ambient = sine(
+            frequency: 91,
+            amplitude: 0.035,
+            frames: frameCount
+        )
+        let transportOffset = 900
+        var microphone = ambient
+        for index in microphone.indices
+        where index >= transportOffset {
+            microphone[index] +=
+                predicted[index - transportOffset]
+        }
+
+        let result = try AmbientFieldAnalyzer().analyzeDetailed(
+            microphone: microphone,
+            playbackReference: playback,
+            acousticImpulseResponse: impulse,
+            sampleRate: sampleRate
+        )
+
+        XCTAssertEqual(
+            result.snapshot.separationMode,
+            .modeledPlaybackSubtraction
+        )
+        XCTAssertEqual(
+            result.playbackAlignmentLagFrames ?? 0,
+            transportOffset,
+            accuracy: 3
+        )
+        XCTAssertGreaterThan(
+            result.playbackAlignmentConfidence ?? 0,
+            0.70
+        )
+        XCTAssertEqual(
+            result.separatedResidualSamples.count,
+            result.snapshot.analyzedFrames
+        )
+        XCTAssertEqual(
+            dbfs(rms(result.separatedResidualSamples)),
+            dbfs(rms(ambient)),
+            accuracy: 1.5
+        )
+    }
+
+    func testDetectedTonalComponentPublishesFiniteResidualPhase() throws {
+        let transformAlignedBin = 40.0
+        let frequency =
+            transformAlignedBin * sampleRate
+            / Double(frameCount)
+        let phase = 0.43
+        let samples = (0..<frameCount).map { frame in
+            Float(
+                0.06 * cos(
+                    2 * Double.pi * frequency
+                        * Double(frame) / sampleRate
+                        + phase
+                )
+            )
+        }
+
+        let result = try AmbientFieldAnalyzer().analyzeDetailed(
+            microphone: samples,
+            sampleRate: sampleRate
+        )
+        let component = try XCTUnwrap(
+            result.snapshot.tonalComponents.first
+        )
+
+        XCTAssertEqual(
+            component.frequencyHz,
+            frequency,
+            accuracy: sampleRate / Double(frameCount)
+        )
+        XCTAssertNotNil(component.phaseRadians)
+        XCTAssertTrue(component.phaseRadians?.isFinite == true)
+        XCTAssertEqual(
+            atan2(
+                sin((component.phaseRadians ?? 0) - phase),
+                cos((component.phaseRadians ?? 0) - phase)
+            ),
+            0,
+            accuracy: 0.08
+        )
+    }
+
+    func testDetailedAndLegacySnapshotAPIsRemainEquivalent() throws {
+        let microphone = sine(
+            frequency: 75,
+            amplitude: 0.04,
+            frames: frameCount
+        )
+        let analyzer = AmbientFieldAnalyzer()
+        let legacy = try analyzer.analyze(
+            microphone: microphone,
+            sampleRate: sampleRate
+        )
+        let detailed = try analyzer.analyzeDetailed(
+            microphone: microphone,
+            sampleRate: sampleRate
+        )
+
+        XCTAssertEqual(legacy, detailed.snapshot)
+        XCTAssertEqual(
+            detailed.separatedResidualSamples,
+            microphone
+        )
+        XCTAssertNil(detailed.playbackAlignmentLagFrames)
+        XCTAssertNil(detailed.playbackAlignmentConfidence)
+    }
+
     func testStationarityDistinguishesSteadyFromBurstingNoise() throws {
         let steady = deterministicNoise(amplitude: 0.04, frames: frameCount)
         var bursting = [Float](repeating: 0, count: frameCount)
