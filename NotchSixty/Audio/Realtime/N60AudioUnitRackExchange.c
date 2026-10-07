@@ -27,6 +27,7 @@ struct N60AudioUnitRackExchange {
     _Atomic uint64_t publishedGeneration;
     _Atomic uint64_t renderedGeneration;
     _Atomic uint64_t transitionFailureCount;
+    _Atomic uint64_t cancelledGeneration;
 
     // Realtime-thread-owned transition cursor.
     _Atomic uint32_t transitionPosition;
@@ -168,6 +169,7 @@ N60AudioUnitRackExchangeCreate(
     atomic_init(&exchange->publishedGeneration, initialGeneration);
     atomic_init(&exchange->renderedGeneration, initialGeneration);
     atomic_init(&exchange->transitionFailureCount, 0u);
+    atomic_init(&exchange->cancelledGeneration, 0u);
     atomic_init(&exchange->transitionPosition, 0u);
     return exchange;
 }
@@ -266,6 +268,46 @@ bool N60AudioUnitRackExchangePublish(
     return true;
 }
 
+bool N60AudioUnitRackExchangeCancelPending(
+    N60AudioUnitRackExchange *exchange,
+    uint64_t generation
+) {
+    if (exchange == NULL || generation == 0u) return false;
+
+    const uint32_t requested = atomic_load_explicit(
+        &exchange->requestedSlot, memory_order_acquire
+    );
+    if (requested == N60_AUDIO_UNIT_RACK_EXCHANGE_NO_SLOT
+        || requested >= N60_AUDIO_UNIT_RACK_EXCHANGE_SLOT_COUNT
+        || exchange->slots[requested].generation != generation) {
+        return false;
+    }
+
+    // Publish cancellation before clearing the request. A callback that already
+    // observed requestedSlot must see this generation marker before it can
+    // promote the candidate to active.
+    atomic_store_explicit(
+        &exchange->cancelledGeneration,
+        generation,
+        memory_order_release
+    );
+
+    uint32_t expected = requested;
+    (void)atomic_compare_exchange_strong_explicit(
+        &exchange->requestedSlot,
+        &expected,
+        N60_AUDIO_UNIT_RACK_EXCHANGE_NO_SLOT,
+        memory_order_acq_rel,
+        memory_order_acquire
+    );
+    atomic_store_explicit(
+        &exchange->transitionPosition,
+        0u,
+        memory_order_release
+    );
+    return true;
+}
+
 bool N60AudioUnitRackExchangeSlotIsReclaimable(
     const N60AudioUnitRackExchange *exchange,
     uint32_t slotIndex
@@ -297,6 +339,7 @@ bool N60AudioUnitRackExchangeAtomicsAreLockFree(
         || !atomic_is_lock_free(&exchange->publishedGeneration)
         || !atomic_is_lock_free(&exchange->renderedGeneration)
         || !atomic_is_lock_free(&exchange->transitionFailureCount)
+        || !atomic_is_lock_free(&exchange->cancelledGeneration)
         || !atomic_is_lock_free(&exchange->transitionPosition)) {
         return false;
     }
@@ -326,6 +369,9 @@ N60AudioUnitRackExchangeStatus N60AudioUnitRackExchangeGetStatus(
     );
     result.transitionFailureCount = atomic_load_explicit(
         &exchange->transitionFailureCount, memory_order_acquire
+    );
+    result.cancelledGeneration = atomic_load_explicit(
+        &exchange->cancelledGeneration, memory_order_acquire
     );
     result.activeSlot = atomic_load_explicit(
         &exchange->activeSlot, memory_order_acquire
@@ -403,6 +449,37 @@ bool N60AudioUnitRackExchangeProcess(
         return false;
     }
 
+    const uint64_t cancelledBeforeRender = atomic_load_explicit(
+        &exchange->cancelledGeneration,
+        memory_order_acquire
+    );
+    if (cancelledBeforeRender == requested->generation) {
+        const bool ok = N60AudioUnitRackExchangeRunSlot(
+            active,
+            inputInterleaved,
+            outputInterleaved,
+            frameCount,
+            channelCount,
+            sampleTime
+        );
+        uint32_t expected = requestedIndex;
+        (void)atomic_compare_exchange_strong_explicit(
+            &exchange->requestedSlot,
+            &expected,
+            N60_AUDIO_UNIT_RACK_EXCHANGE_NO_SLOT,
+            memory_order_acq_rel,
+            memory_order_acquire
+        );
+        atomic_store_explicit(
+            &exchange->transitionPosition,
+            0u,
+            memory_order_release
+        );
+        N60AudioUnitRackExchangeReleaseSlot(requested);
+        N60AudioUnitRackExchangeReleaseSlot(active);
+        return ok;
+    }
+
     const bool oldOK = N60AudioUnitRackExchangeRunSlot(
         active,
         inputInterleaved,
@@ -419,6 +496,36 @@ bool N60AudioUnitRackExchangeProcess(
         channelCount,
         sampleTime
     );
+
+    const uint64_t cancelledAfterRender = atomic_load_explicit(
+        &exchange->cancelledGeneration,
+        memory_order_acquire
+    );
+    if (cancelledAfterRender == requested->generation) {
+        if (oldOK) {
+            memcpy(
+                outputInterleaved,
+                exchange->scratchOld,
+                (size_t)frameCount * channelCount * sizeof(float)
+            );
+        }
+        uint32_t expected = requestedIndex;
+        (void)atomic_compare_exchange_strong_explicit(
+            &exchange->requestedSlot,
+            &expected,
+            N60_AUDIO_UNIT_RACK_EXCHANGE_NO_SLOT,
+            memory_order_acq_rel,
+            memory_order_acquire
+        );
+        atomic_store_explicit(
+            &exchange->transitionPosition,
+            0u,
+            memory_order_release
+        );
+        N60AudioUnitRackExchangeReleaseSlot(requested);
+        N60AudioUnitRackExchangeReleaseSlot(active);
+        return oldOK;
+    }
 
     if (!newOK && oldOK) {
         memcpy(
