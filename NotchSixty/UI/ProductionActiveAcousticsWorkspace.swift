@@ -393,7 +393,7 @@ struct ProductionActiveAcousticsWorkspace: View {
             if microphone.permissionStatus != .authorized {
                 statusBanner(
                     title: "Microphone access required",
-                    detail: "Ambient Compensation needs a live room microphone. Playback is never adapted until access is authorized and a microphone is selected.",
+                    detail: "Active Acoustics needs a live room microphone for playback adaptation and Quiet Zone verification. Playback is never adapted until access is authorized and a microphone is selected.",
                     systemImage: "mic.slash"
                 )
                 Button("Request Microphone Access") {
@@ -474,28 +474,46 @@ struct ProductionActiveAcousticsWorkspace: View {
                     spacing: 12
                 ) {
                     metricCard(
-                        title: "Low Support",
+                        title:
+                            ambient.playbackAdaptationMode == .conversationFocus
+                                ? "Bass Preservation"
+                                : "Low Support",
                         value: String(
-                            format: "+%.2f dB",
+                            format: "%+.2f dB",
                             ambient.appliedTarget.lowSupportDB
                         ),
-                        detail: "Broad 30–250 Hz masking support."
+                        detail:
+                            ambient.playbackAdaptationMode == .conversationFocus
+                                ? "Relative restoration keeps musical weight while total gain stays below unity."
+                                : "Broad 30–250 Hz masking support."
                     )
                     metricCard(
-                        title: "Presence",
+                        title:
+                            ambient.playbackAdaptationMode == .conversationFocus
+                                ? "Speech-band Carve"
+                                : "Presence",
                         value: String(
-                            format: "+%.2f dB",
+                            format: "%+.2f dB",
                             ambient.appliedTarget.presenceSupportDB
                         ),
-                        detail: "Broad vocal/intelligibility support."
+                        detail:
+                            ambient.playbackAdaptationMode == .conversationFocus
+                                ? "Broad subtractive clearance centered in the intelligibility region."
+                                : "Broad vocal/intelligibility support."
                     )
                     metricCard(
-                        title: "Detail",
+                        title:
+                            ambient.playbackAdaptationMode == .conversationFocus
+                                ? "Air Preservation"
+                                : "Detail",
                         value: String(
-                            format: "+%.2f dB",
+                            format: "%+.2f dB",
                             ambient.appliedTarget.detailSupportDB
                         ),
-                        detail: "Bounded high-frequency masking support."
+                        detail:
+                            ambient.playbackAdaptationMode == .conversationFocus
+                                ? "Relative high-frequency restoration keeps ambience without a net boost."
+                                : "Bounded high-frequency masking support."
                     )
                 }
 
@@ -581,6 +599,7 @@ struct ProductionActiveAcousticsWorkspace: View {
                             set: { uid in
                                 let wasEnabled =
                                     ambient.playbackAdaptationActive
+                                    || quietZone.configuration.enabled
                                 ambient.stopMonitoring()
                                 microphone.selectInput(uid: uid)
                                 if wasEnabled {
@@ -614,6 +633,7 @@ struct ProductionActiveAcousticsWorkspace: View {
                             set: { value in
                                 let wasEnabled =
                                     ambient.playbackAdaptationActive
+                                    || quietZone.configuration.enabled
                                 ambient.stopMonitoring()
                                 performAmbient {
                                     try microphone
