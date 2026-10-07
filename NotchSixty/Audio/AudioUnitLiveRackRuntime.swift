@@ -11,6 +11,8 @@ enum AudioUnitLiveRackBuildError: Error, Equatable, LocalizedError {
     case liveInstantiationFailed(Int, String)
     case liveFormatFailed(Int, String)
     case liveResourceAllocationFailed(Int, String)
+    case liveInvalidLatency(Int, seconds: Double)
+    case liveInvalidTail(Int, seconds: Double)
     case liveLatencyChanged(Int, expected: Int, actual: Int)
     case liveTailChanged(Int, expected: Int, actual: Int)
     case delayMemoryBudgetExceeded(Int)
@@ -33,6 +35,10 @@ enum AudioUnitLiveRackBuildError: Error, Equatable, LocalizedError {
             return "Audio Unit rack slot \(slot + 1) rejected the live format. \(reason)"
         case .liveResourceAllocationFailed(let slot, let reason):
             return "Audio Unit rack slot \(slot + 1) could not allocate live render resources. \(reason)"
+        case .liveInvalidLatency(let slot, let seconds):
+            return "Audio Unit rack slot \(slot + 1) reported invalid live latency \(seconds) seconds."
+        case .liveInvalidTail(let slot, let seconds):
+            return "Audio Unit rack slot \(slot + 1) reported invalid live tail \(seconds) seconds."
         case .liveLatencyChanged(let slot, let expected, let actual):
             return "Audio Unit rack slot \(slot + 1) changed latency from \(expected) to \(actual) frames."
         case .liveTailChanged(let slot, let expected, let actual):
@@ -302,6 +308,7 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
     let slotIndex: Int
     let component: AudioUnitComponentIdentity?
     let latencyFrames: Int
+    let tailFrames: Int
 
     private let unit: AVAudioUnit
     private let renderBlock: AURenderBlock
@@ -309,6 +316,7 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
     private let outputChannels: UnsafePointer<UnsafeMutablePointer<Float>>
     private let channelCount: Int
     private let maximumFramesPerSlice: Int
+    private let sampleRate: Double
     private let wetDryMix: Float
     private let delay: AudioUnitLiveDelayLine
     private let dryScratch: UnsafeMutablePointer<Float>
@@ -361,7 +369,9 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
         outputBuffer: AVAudioPCMBuffer,
         channelCount: Int,
         maximumFramesPerSlice: Int,
+        sampleRate: Double,
         latencyFrames: Int,
+        tailFrames: Int,
         wetDryMix: Float
     ) {
         self.slotIndex = slotIndex
@@ -372,7 +382,9 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
         self.outputChannels = outputBuffer.floatChannelData!
         self.channelCount = channelCount
         self.maximumFramesPerSlice = maximumFramesPerSlice
+        self.sampleRate = sampleRate
         self.latencyFrames = latencyFrames
+        self.tailFrames = tailFrames
         self.wetDryMix = wetDryMix
         self.delay = AudioUnitLiveDelayLine(
             channelCount: channelCount,
@@ -483,12 +495,31 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
                         )
                 }
 
-                let latency = Int(
-                    ceil(max(0, au.latency) * format.sampleRate)
-                )
-                let tail = Int(
-                    ceil(max(0, au.tailTime) * format.sampleRate)
-                )
+                let latencySeconds = au.latency
+                guard let latency = validatedFrameCount(
+                    seconds: latencySeconds,
+                    sampleRate: format.sampleRate,
+                    maximumSeconds:
+                        AudioUnitProbeResult.maximumLatencySeconds
+                ) else {
+                    throw AudioUnitLiveRackBuildError.liveInvalidLatency(
+                        slotIndex,
+                        seconds: latencySeconds
+                    )
+                }
+
+                let tailSeconds = au.tailTime
+                guard let tail = validatedFrameCount(
+                    seconds: tailSeconds,
+                    sampleRate: format.sampleRate,
+                    maximumSeconds:
+                        AudioUnitProbeResult.maximumTailSeconds
+                ) else {
+                    throw AudioUnitLiveRackBuildError.liveInvalidTail(
+                        slotIndex,
+                        seconds: tailSeconds
+                    )
+                }
                 return (au.renderBlock, buffer, latency, tail)
             }
         } catch {
@@ -535,9 +566,63 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
             outputBuffer: configured.buffer,
             channelCount: format.channelCount,
             maximumFramesPerSlice: format.maximumFramesPerSlice,
+            sampleRate: format.sampleRate,
             latencyFrames: expectedLatency,
+            tailFrames: expectedTail,
             wetDryMix: Float(slot.wetDryMix)
         )
+    }
+
+    func controlPlaneHealthIssue()
+        -> AudioUnitLiveRackControlPlaneIssue? {
+        guard let component else { return nil }
+
+        return unit.withAUAudioUnit { au in
+            let latencySeconds = au.latency
+            guard let currentLatency = Self.validatedFrameCount(
+                seconds: latencySeconds,
+                sampleRate: sampleRate,
+                maximumSeconds:
+                    AudioUnitProbeResult.maximumLatencySeconds
+            ) else {
+                return .invalidLatency(
+                    slot: slotIndex,
+                    component: component,
+                    seconds: latencySeconds
+                )
+            }
+            if abs(currentLatency - latencyFrames) > 1 {
+                return .latencyChanged(
+                    slot: slotIndex,
+                    component: component,
+                    expected: latencyFrames,
+                    actual: currentLatency
+                )
+            }
+
+            let tailSeconds = au.tailTime
+            guard let currentTail = Self.validatedFrameCount(
+                seconds: tailSeconds,
+                sampleRate: sampleRate,
+                maximumSeconds:
+                    AudioUnitProbeResult.maximumTailSeconds
+            ) else {
+                return .invalidTail(
+                    slot: slotIndex,
+                    component: component,
+                    seconds: tailSeconds
+                )
+            }
+            if abs(currentTail - tailFrames) > 1 {
+                return .tailChanged(
+                    slot: slotIndex,
+                    component: component,
+                    expected: tailFrames,
+                    actual: currentTail
+                )
+            }
+            return nil
+        }
     }
 
     func process(
@@ -673,21 +758,32 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
         }
     }
 
+    private static func validatedFrameCount(
+        seconds: Double,
+        sampleRate: Double,
+        maximumSeconds: Double
+    ) -> Int? {
+        guard seconds.isFinite,
+              seconds >= 0,
+              seconds <= maximumSeconds,
+              sampleRate.isFinite,
+              sampleRate > 0 else {
+            return nil
+        }
+        let frames = ceil(seconds * sampleRate)
+        guard frames.isFinite,
+              frames >= 0,
+              frames <= Double(Int.max) else {
+            return nil
+        }
+        return Int(frames)
+    }
+
     private static func restoreState(
         _ data: Data,
         to au: AUAudioUnit
     ) throws {
-        guard data.count <= AudioUnitRackSlotState.maximumOpaqueStateBytes else {
-            throw AudioUnitOfflinePreparationError.stateTooLarge(data.count)
-        }
-        let object = try PropertyListSerialization.propertyList(
-            from: data,
-            options: [],
-            format: nil
-        )
-        guard let state = object as? [String: Any] else {
-            throw AudioUnitOfflinePreparationError.stateDecodeFailed
-        }
+        let state = try AudioUnitOpaqueStateCodec.decodeDictionary(data)
         au.fullState = state
         guard au.fullState != nil else {
             throw AudioUnitOfflinePreparationError.stateRestoreFailed
