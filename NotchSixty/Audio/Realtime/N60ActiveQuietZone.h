@@ -33,6 +33,10 @@ typedef struct {
 typedef struct {
     double frequencyHz;
     double phaseRadians;
+    double oscillatorCosine;
+    double oscillatorSine;
+    double incrementCosine;
+    double incrementSine;
     float currentLeftReal;
     float currentLeftImaginary;
     float currentRightReal;
