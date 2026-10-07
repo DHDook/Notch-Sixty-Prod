@@ -59,6 +59,16 @@ bounded conversation-evidence score from the separated residual using:
 This is an acoustic conversation detector, not speaker identification, speech
 recognition, transcription, or content analysis.
 
+Production false-positive policy:
+- nonstationary/transient events such as applause, clatter, or dropped objects
+  fail closed rather than triggering a music duck
+- strongly tonal/periodic low-frequency disturbances are down-weighted
+- speech-shaped residuals may remain eligible when a moderate HVAC/mechanical
+  tone is also present
+- speech-like program leakage is ineligible when modeled playback separation
+  confidence falls below the configured threshold
+- the detector never bypasses the existing playback-model trust requirement
+
 No microphone audio is persisted by this feature.
 
 ## Playback policy
