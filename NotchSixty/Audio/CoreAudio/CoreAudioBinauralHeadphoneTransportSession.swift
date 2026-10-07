@@ -67,7 +67,7 @@ final class CoreAudioBinauralHeadphoneTransportSession {
     }
 
     private var bridge: UnsafeMutablePointer<N60BinauralHeadphoneBridge>?
-    private var audioUnitRack: AudioUnitLiveRackRuntime?
+    private var audioUnitRack: AudioUnitLiveRackSwitchboard?
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateDeviceID = AudioDeviceID(kAudioObjectUnknown)
     private var captureIOProcID: AudioDeviceIOProcID?
@@ -84,7 +84,7 @@ final class CoreAudioBinauralHeadphoneTransportSession {
         headphoneSnapshot: N60HeadphoneDSPSnapshot,
         programGain: Float,
         outputGain: Float,
-        audioUnitRack: AudioUnitLiveRackRuntime? = nil
+        audioUnitRack: AudioUnitLiveRackSwitchboard? = nil
     ) throws {
         self.selectedOutput = selectedOutput
         self.programSource = programSource
@@ -429,7 +429,6 @@ final class CoreAudioBinauralHeadphoneTransportSession {
             N60BinauralHeadphoneBridgeDestroy(bridge)
             self.bridge = nil
         }
-        audioUnitRack?.stopFaultMonitoring()
         audioUnitRack = nil
     }
 
