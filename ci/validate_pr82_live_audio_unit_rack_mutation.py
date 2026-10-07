@@ -187,13 +187,19 @@ require(
     "product transaction must prepare -> activate -> commit"
 )
 
-require('Label("Add Plug-in", systemImage: "plus")' in ui,
-        "Add Plug-in affordance disappeared")
-require(".disabled(true)" in ui,
-        "PR82 must not enable rack editing UI")
-for forbidden in ("requestViewController", "NSViewController", "viewConfiguration"):
-    require(forbidden not in ui,
-            f"vendor UI crossed PR82 scope with {forbidden}")
+# PR82 itself intentionally stopped at an engine-only mutation surface. Preserve
+# those original UI-scope assertions on the PR82 branch, but do not make an
+# inherited engine validator forbid PR83+ from deliberately consuming that
+# surface. PR83 has its own stricter UI/editor boundary validator.
+pr83_or_later = (ROOT / "docs/PR83_PLUGIN_RACK_UX.md").exists()
+if not pr83_or_later:
+    require('Label("Add Plug-in", systemImage: "plus")' in ui,
+            "Add Plug-in affordance disappeared")
+    require(".disabled(true)" in ui,
+            "PR82 must not enable rack editing UI")
+    for forbidden in ("requestViewController", "NSViewController", "viewConfiguration"):
+        require(forbidden not in ui,
+                f"vendor UI crossed PR82 scope with {forbidden}")
 
 for token in (
     "testSwitchboardCrossfadesEqualLatencyGenerations",
