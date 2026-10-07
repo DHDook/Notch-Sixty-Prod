@@ -74,6 +74,11 @@ for token in (
     "maximumDetailSupportDB = 1.5",
     "activityHysteresisDB = 1.5",
     "struct AmbientCompensationEnvelope",
+    "enum AmbientCompensationResponseModel",
+    "lowShelfFrequencyHz = 120.0",
+    "presenceFrequencyHz = 2_200.0",
+    "detailShelfFrequencyHz = 6_500.0",
+    "N60BiquadDesign(",
     "case playbackModelRequired",
     "case lowSeparationConfidence",
     "case nonstationaryTransient",
@@ -179,6 +184,14 @@ require(
     ambient_process >= 0 and dynamics_process > ambient_process,
     "ambient stage is not upstream of dynamics/protection",
 )
+require(
+    "{120.0, 2200.0, 6500.0}" in kernel_c
+    and "lowShelfFrequencyHz = 120.0" in policy
+    and "presenceFrequencyHz = 2_200.0" in policy
+    and "detailShelfFrequencyHz = 6_500.0" in policy,
+    "UI response model frequency anchors drifted from realtime overlay",
+)
+
 require(
     "levelDB < 0.0 || levelDB > 6.0" in kernel_c
     and "lowSupportDB < 0.0 || lowSupportDB > 2.0" in kernel_c
@@ -304,6 +317,13 @@ for token in (
     "Presence",
     "Detail",
     "holdReasonText",
+    'Text("Adaptation Detail")',
+    "AmbientCompensationResponseCurveView",
+    "Peak %+.2f dB",
+    "Cuts: none",
+    "Low shelf · %.0f Hz · Q %.3f",
+    "Bell · %.1f kHz · Q %.2f",
+    "High shelf · %.1f kHz · Q %.3f",
 ):
     require(token in ui, f"Ambient Compensation UI missing {token}")
 
@@ -317,6 +337,9 @@ for token in (
     "testAmbientMonitorBridgeWrapsWithoutReordering",
     "testAmbientGraphSnapshotAcceptsOnlyBoundedOverlay",
     "testAmbientGraphOverlayDoesNotConsumeUserEQSlots",
+    "testAmbientResponseModelUnityIsFlatAtZeroDB",
+    "testAmbientResponseModelLevelRecoveryIsFlatFullBand",
+    "testAmbientResponseModelReflectsAllThreeRealtimeBands",
 ):
     require(token in tests, f"ambient tests missing {token}")
 
