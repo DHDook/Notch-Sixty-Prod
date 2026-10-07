@@ -79,6 +79,7 @@ struct N60RenderKernel {
         N60_AMBIENT_COMPENSATION_BAND_COUNT
     ];
     N60SmoothedGain ambientCompensationLevelGain;
+    N60ActiveQuietZoneRuntime activeQuietZoneRuntime;
     N60CrossoverRuntime crossoverRuntime;
     N60DynamicsRuntime dynamicsRuntime;
     N60SpectralDenoiserRuntime *denoiserRuntime;
@@ -601,6 +602,18 @@ static void prepare_runtime_for_snapshot(N60RenderKernel *kernel, const N60DSPGr
         );
     }
 
+    if (!N60ActiveQuietZoneRuntimeSchedule(
+            &kernel->activeQuietZoneRuntime,
+            &snapshot->activeQuietZone,
+            snapshot->sampleRate)) {
+        // Invalid live transition is fail-closed. Active frequency changes
+        // must be disarmed/faded first by the control plane.
+        N60ActiveQuietZoneRuntimeReset(
+            &kernel->activeQuietZoneRuntime,
+            snapshot->sampleRate
+        );
+    }
+
     bool protectionStructureChanged = kernel->preparedProtectionFactor != snapshot->protection.effectiveFactor
         || kernel->preparedLimiterEnabled != snapshot->protection.limiterEnabled
         || kernel->preparedLimiterLookAheadHighSamples != snapshot->protection.limiterLookAheadHighSamples;
@@ -942,6 +955,8 @@ N60DSPGraphSnapshot N60DSPGraphSnapshotMakeUnity(double sampleRate) {
     snapshot.ambientCompensation.levelGainLinear = 1.0f;
     snapshot.ambientCompensation.transitionFrames =
         gain_transition_frames_for_sample_rate(sampleRate);
+    snapshot.activeQuietZone =
+        N60ActiveQuietZoneSnapshotMakeBypassed();
     snapshot.convolution.enabled = false;
     snapshot.convolution.programSlot = N60_CONVOLUTION_NO_PROGRAM;
     snapshot.roomCorrection.enabled = false;
@@ -1164,6 +1179,36 @@ bool N60DSPGraphSnapshotSetAmbientCompensation(
     return true;
 }
 
+bool N60DSPGraphSnapshotSetActiveQuietZone(
+    N60DSPGraphSnapshot *snapshot,
+    const N60ActiveQuietZoneToneSnapshot *tones,
+    uint32_t toneCount,
+    uint32_t transitionFrames,
+    bool enabled
+) {
+    if (snapshot == NULL) return false;
+    N60ActiveQuietZoneSnapshot prepared =
+        N60ActiveQuietZoneSnapshotMakeBypassed();
+    if (!N60ActiveQuietZoneSnapshotSet(
+            &prepared,
+            tones,
+            toneCount,
+            transitionFrames,
+            enabled)) {
+        return false;
+    }
+    for (uint32_t index = 0u;
+         index < prepared.toneCount;
+         ++index) {
+        if (prepared.tones[index].frequencyHz
+                >= snapshot->sampleRate * 0.5) {
+            return false;
+        }
+    }
+    snapshot->activeQuietZone = prepared;
+    return true;
+}
+
 bool N60DSPGraphSnapshotSetCrossover(N60DSPGraphSnapshot *snapshot, double frequencyHz, N60CrossoverTopology topology, N60CrossoverMonitorMode monitorMode, float subGainLinear, bool subPolarityInverted, bool enabled) {
     if (snapshot == NULL) return false;
     N60CrossoverSnapshot crossover = {0};
@@ -1295,6 +1340,10 @@ N60RenderKernel *N60RenderKernelCreate(void) {
     reset_smoothed_gain(&kernel->outputGain, 1.0f);
     reset_smoothed_gain(&kernel->masterGain, 1.0f);
     reset_smoothed_gain(&kernel->ambientCompensationLevelGain, 1.0f);
+    N60ActiveQuietZoneRuntimeReset(
+        &kernel->activeQuietZoneRuntime,
+        initial.sampleRate
+    );
     reset_smoothed_gain(&kernel->balanceGainLeft, 1.0f);
     reset_smoothed_gain(&kernel->balanceGainRight, 1.0f);
     N60InterChannelDelayRuntimeReset(&kernel->interChannelDelayRuntime, initial.interChannelDelay);
@@ -1338,6 +1387,10 @@ void N60RenderKernelReset(N60RenderKernel *kernel) {
     reset_smoothed_gain(&kernel->outputGain, 1.0f);
     reset_smoothed_gain(&kernel->masterGain, 1.0f);
     reset_smoothed_gain(&kernel->ambientCompensationLevelGain, 1.0f);
+    N60ActiveQuietZoneRuntimeReset(
+        &kernel->activeQuietZoneRuntime,
+        48000.0
+    );
     reset_smoothed_gain(&kernel->balanceGainLeft, 1.0f);
     reset_smoothed_gain(&kernel->balanceGainRight, 1.0f);
     N60InterChannelDelayRuntimeReset(&kernel->interChannelDelayRuntime, N60InterChannelDelaySnapshotMakeBypassed());
@@ -1867,6 +1920,16 @@ void N60RenderKernelProcessStereoSystemFrameInContext(
         left *= outputGain;
         right *= outputGain;
 
+        float quietZoneLeft = 0.0f;
+        float quietZoneRight = 0.0f;
+        N60ActiveQuietZoneRuntimeProcessFrame(
+            &kernel->activeQuietZoneRuntime,
+            &quietZoneLeft,
+            &quietZoneRight
+        );
+        left += quietZoneLeft;
+        right += quietZoneRight;
+
         if (kernel->headphoneDSPEnabled) {
             float headphoneLeft = 0.0f;
             float headphoneRight = 0.0f;
@@ -1947,6 +2010,19 @@ void N60RenderKernelProcessStereoSystemFrameInContext(
     }
     *outputLeft = left;
     *outputRight = right;
+}
+
+void N60RenderKernelGetActiveQuietZoneReferenceFrame(
+    const N60RenderKernel *kernel,
+    float *left,
+    float *right
+) {
+    if (kernel == NULL || left == NULL || right == NULL) return;
+    N60ActiveQuietZoneRuntimeLastFrame(
+        &kernel->activeQuietZoneRuntime,
+        left,
+        right
+    );
 }
 
 void N60RenderKernelProcessStereoFrameInContext(
