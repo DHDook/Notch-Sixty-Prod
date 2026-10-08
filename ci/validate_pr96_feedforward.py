@@ -13,6 +13,10 @@ dry_h=(r/"NotchSixty/Audio/Realtime/N60FeedForwardPreviewFIR.h").read_text()
 dry_tests=(r/"NotchSixtyTests/FeedForwardPreviewFIRTests.swift").read_text()
 survey=(r/"NotchSixty/Audio/QuietZoneFeedForwardSurvey.swift").read_text()
 reference_c=(r/"NotchSixty/Audio/Realtime/N60FeedForwardReferenceBridge.c").read_text()
+output_timing=(r/"NotchSixty/Audio/Realtime/N60FeedForwardOutputTiming.h").read_text()
+output_bridge_c=(r/"NotchSixty/Audio/Realtime/N60RealtimeAudioBridge.c").read_text()
+output_bridge_h=(r/"NotchSixty/Audio/Realtime/N60RealtimeAudioBridge.h").read_text()
+output_smoke=(r/"ci/pr96_output_timing_smoke.c").read_text()
 reference_h=(r/"NotchSixty/Audio/Realtime/N60FeedForwardReferenceBridge.h").read_text()
 reference_swift=(r/"NotchSixty/Audio/CoreAudio/FeedForwardReferenceTransport.swift").read_text()
 survey_tests=(r/"NotchSixtyTests/QuietZoneFeedForwardSurveyTests.swift").read_text()
@@ -92,6 +96,13 @@ for token in ("testCallbackReferenceFramesEnterDryRunButNeverPlayback",
 "testGapInReferenceStreamImmediatelyStopsRehearsal",
 "testClockRewindCannotBeIgnored"):
     assert token in rehearsal_tests,token
+for token in ("N60FeedForwardOutputTimingObserve", "N60FeedForwardOutputTimingRead",
+"invalidCount", "firstFrameHostTime", "firstFrameSampleTime"):
+    assert token in output_timing, token
+assert "N60FeedForwardOutputTimingObserve(" in output_bridge_c
+assert "N60RealtimeAudioBridgeGetFeedForwardOutputTimingSnapshot" in output_bridge_c
+assert "N60RealtimeAudioBridgeGetFeedForwardOutputTimingSnapshot" in output_bridge_h
+assert "PR96 passive output timestamp smoke passed" in output_smoke
 for token in ("prepareFeedForwardPlan()","refreshFeedForwardCalibration()",
 "importMeasuredFeedForwardCalibration","feedForwardBudget"):
     assert token in controller,token
