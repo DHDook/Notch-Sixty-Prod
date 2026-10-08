@@ -1218,6 +1218,8 @@ struct ProductionActiveAcousticsWorkspace: View {
             .padding(18)
             .glassEffect(.regular, in: .rect(cornerRadius: 18))
 
+            spatialQuietZoneCard
+
             LazyVGrid(
                 columns: [
                     GridItem(.flexible()),
@@ -1362,6 +1364,133 @@ struct ProductionActiveAcousticsWorkspace: View {
                 "Active Quiet Zone is deliberately limited to stable low-frequency components. It does not cancel speech, claps or broadband room sound and makes no claim of whole-room silence. A low-level probe must measurably improve the physical error microphone before full cancellation is allowed."
             )
         }
+    }
+
+    private var spatialQuietZoneCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Multi-Position Quiet Zone")
+                        .font(.headline)
+                    Text(
+                        "Move one microphone between 2–5 positions. Spatial noise cancellation requires a shared phase reference—not just multiple room sweeps."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("PR95")
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 12) {
+                Button {
+                    performQuietZone {
+                        try quietZone.prepareSpatialPositions()
+                    }
+                } label: {
+                    Label("Save Spatial Positions", systemImage: "point.3.connected.trianglepath.dotted")
+                }
+                .buttonStyle(.bordered)
+                .disabled(
+                    ambient.selectedModelPosition == nil
+                        || !ambient.roomProjectMatchesSelectedMicrophone
+                )
+
+                Button {
+                    quietZone.refreshSpatialCalibration()
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                Spacer()
+
+                Toggle(
+                    "Spatial Control",
+                    isOn: Binding(
+                        get: {
+                            quietZone.spatialCalibration?
+                                .settings.enabled ?? false
+                        },
+                        set: { enabled in
+                            performQuietZone {
+                                try quietZone.setSpatialEnabled(enabled)
+                            }
+                        }
+                    )
+                )
+                .toggleStyle(.switch)
+                .disabled(
+                    quietZone.spatialCalibration?.surveys.isEmpty
+                        != false
+                )
+            }
+
+            if let calibration = quietZone.spatialCalibration {
+                HStack(spacing: 16) {
+                    Label(
+                        "\(calibration.positions.count) measured positions",
+                        systemImage: "mappin.and.ellipse"
+                    )
+                    Label(
+                        "\(calibration.surveys.count) coherent surveys",
+                        systemImage: "waveform.path"
+                    )
+                }
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                if let anchor = ambient.selectedModelPosition,
+                   calibration.anchorPositionID != anchor.id {
+                    Label(
+                        "Live microphone is not at the calibrated anchor; spatial control cannot operate.",
+                        systemImage: "exclamationmark.triangle"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                }
+            }
+
+            Text(quietZone.spatialReadinessMessage)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if !quietZone.spatialPredictions.isEmpty {
+                Text("Modeled spatial effect — not simultaneous physical verification")
+                    .font(.caption.bold())
+                ForEach(quietZone.spatialPredictions) { seat in
+                    HStack {
+                        Text(
+                            quietZone.spatialCalibration?
+                                .positions.first(where: {
+                                    $0.id == seat.positionID
+                                }).flatMap { calibrated in
+                                    ambient.availableModelPositions.first {
+                                        $0.id == calibrated.id
+                                    }?.name
+                                } ?? "Measured seat"
+                        )
+                        Spacer()
+                        Text(
+                            String(
+                                format: "%+.1f dB predicted reduction",
+                                seat.predictedReductionDB
+                            )
+                        )
+                        .monospacedDigit()
+                    }
+                    .font(.caption)
+                }
+            }
+
+            Text(
+                "Ordinary sequential measurement sweeps provide speaker transfer paths but cannot establish external-noise phase between seats. Until a genuinely coherent source survey and sequential before/after verification are available, use PR90 single-point Quiet Zone. Spatial mode must never be described as verified whole-room ANC."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .padding(18)
+        .glassEffect(.regular, in: .rect(cornerRadius: 18))
     }
 
     private var quietZoneFrequencyValue: String {
