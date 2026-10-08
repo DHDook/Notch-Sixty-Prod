@@ -87,6 +87,107 @@ final class ActiveQuietZoneSpatialTests: XCTestCase {
         XCTAssertEqual(try store.load(project.id), project)
     }
 
+    func testSubBinToneEstimatorResolves60Point04Hz() throws {
+        let rate = 48_000.0
+        let count = 32_768
+        let samples = (0..<count).map { frame -> Float in
+            Float(0.1 * sin(2 * Double.pi * 60.04
+                * Double(frame) / rate))
+        }
+        let refined = try ActiveQuietZoneSpatialSurveyBuilder()
+            .refinedToneFrequency(
+                samples: samples,
+                sampleRate: rate,
+                near: 60
+            )
+        XCTAssertEqual(refined, 60.04, accuracy: 0.06)
+    }
+
+    func testSequentialMicSurveyClosesStableAnchorAndUsesSharedPhaseClock() throws {
+        let (_, configuration) = fixture()
+        let captures = try makeSurveyCaptures(
+            calibration: configuration,
+            returnPhaseOffset: 0
+        )
+        let survey = try ActiveQuietZoneSpatialSurveyBuilder()
+            .finish(calibration: configuration, captures: captures)
+        XCTAssertTrue(survey.commonPhaseReferenceValidated)
+        XCTAssertEqual(survey.disturbances.count, 2)
+        let neighbor = try XCTUnwrap(survey.disturbances.first {
+            $0.positionID != configuration.anchorPositionID
+        })
+        XCTAssertEqual(neighbor.ratioToAnchor.magnitude, 0.75, accuracy: 0.10)
+        XCTAssertGreaterThanOrEqual(neighbor.coherence, 0.95)
+    }
+
+    func testSequentialMicSurveyRejectsAnchorReturnPhaseDrift() throws {
+        let (_, configuration) = fixture()
+        let captures = try makeSurveyCaptures(
+            calibration: configuration,
+            returnPhaseOffset: 0.70
+        )
+        XCTAssertThrowsError(try ActiveQuietZoneSpatialSurveyBuilder()
+            .finish(calibration: configuration, captures: captures))
+    }
+
+    func testSequentialMicSurveyRejectsInterruptedInputClock() throws {
+        let (_, configuration) = fixture()
+        var captures = try makeSurveyCaptures(
+            calibration: configuration,
+            returnPhaseOffset: 0
+        )
+        captures[2].epoch = UUID()
+        XCTAssertThrowsError(try ActiveQuietZoneSpatialSurveyBuilder()
+            .finish(calibration: configuration, captures: captures))
+    }
+
+    private func makeSurveyCaptures(
+        calibration: ActiveQuietZoneSpatialCalibration,
+        returnPhaseOffset: Double
+    ) throws -> [ActiveQuietZoneSpatialPhaseCapture] {
+        let ids = calibration.positions.map(\.id)
+        let order = [
+            calibration.anchorPositionID,
+            ids.first { $0 != calibration.anchorPositionID }!,
+            calibration.anchorPositionID
+        ]
+        let rate = 48_000.0
+        let frequency = 80.0
+        let framesPerCapture = 32_768
+        var captures: [ActiveQuietZoneSpatialPhaseCapture] = []
+        let epoch = UUID()
+        for (visit, positionID) in order.enumerated() {
+            for repeatIndex in 0..<2 {
+                let firstFrame = UInt64(
+                    (visit * 2 + repeatIndex) * framesPerCapture
+                )
+                let level = visit == 1 ? 0.075 : 0.1
+                let phase = visit == 2 ? returnPhaseOffset : 0
+                let data = (0..<framesPerCapture).map { frame -> Float in
+                    Float(level * sin(
+                        2 * Double.pi * frequency
+                        * (Double(firstFrame) + Double(frame)) / rate
+                        + phase
+                    ))
+                }
+                captures.append(
+                    try ActiveQuietZoneSpatialSurveyBuilder().capture(
+                        positionID: positionID,
+                        epoch: epoch,
+                        firstSampleIndex: firstFrame,
+                        samples: data,
+                        sampleRate: rate,
+                        frequencyHz: frequency,
+                        detectedFrequencyHz: frequency,
+                        tonalProminenceDB: 30,
+                        stationaryScore: 0.99
+                    )
+                )
+            }
+        }
+        return captures
+    }
+
     private func permissiveConfiguration() -> ActiveQuietZoneConfiguration {
         var config = ActiveQuietZoneConfiguration()
         config.maximumPerSourceTonePeakDBFS = -12
