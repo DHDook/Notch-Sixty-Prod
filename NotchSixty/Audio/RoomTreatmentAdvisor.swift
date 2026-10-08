@@ -91,6 +91,14 @@ enum RoomTreatmentAdvisorAnalysisMode:
     }
 }
 
+struct RoomTreatmentAdvisorBandDecay: Equatable, Sendable {
+    var positionName: String
+    var channelName: String
+    var frequencyHz: Double
+    var t20DerivedRT60Seconds: Double
+    var fitR2: Double
+}
+
 struct RoomTreatmentAdvisorReport:
     Equatable, Sendable
 {
@@ -105,6 +113,7 @@ struct RoomTreatmentAdvisorReport:
     var findings: [RoomTreatmentAdvisorFinding]
     var actionPriorities:
         [RoomTreatmentAdvisorActionPriority]
+    var bandDecayMeasurements: [RoomTreatmentAdvisorBandDecay] = []
 
     var actionableFindings: [RoomTreatmentAdvisorFinding] {
         findings.filter {
@@ -464,7 +473,17 @@ struct RoomTreatmentAdvisorAnalyzer: Sendable {
                 project.microphone?.calibration != nil,
             qualityWarnings: warnings,
             findings: findings,
-            actionPriorities: actionPriorities
+            actionPriorities: actionPriorities,
+            bandDecayMeasurements: warnings.isEmpty
+                ? decay.estimates.map {
+                    RoomTreatmentAdvisorBandDecay(
+                        positionName: $0.positionName,
+                        channelName: $0.channelName,
+                        frequencyHz: $0.frequencyHz,
+                        t20DerivedRT60Seconds: $0.rt60Seconds,
+                        fitR2: $0.fitR2
+                    )
+                } : []
         )
     }
 

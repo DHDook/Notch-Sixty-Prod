@@ -1,0 +1,87 @@
+name: PR94 Physical Treatment Design and Verification
+
+on:
+  push:
+    branches:
+      - feature/pr94-treatment-design-verification
+  pull_request:
+    branches:
+      - feature/pr93-room-geometry-placement
+  workflow_dispatch:
+
+concurrency:
+  group: pr94-treatment-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate PR94 Treatment Design and Verification
+        run: python3 ci/validate_pr94_treatment_design_verification.py
+      - name: Validate inherited PR93 room geometry
+        run: python3 ci/validate_pr93_room_geometry_placement.py
+      - name: Validate inherited PR92 advisor
+        run: python3 ci/validate_pr92_room_treatment_advisor.py
+      - name: Validate inherited PR91 active acoustics
+        run: python3 ci/validate_pr91_conversation_preservation.py
+      - name: Validate inherited PR90 ANC
+        run: python3 ci/validate_pr90_active_quiet_zone.py
+      - name: Validate inherited PR89 compensation
+        run: python3 ci/validate_pr89_ambient_compensation.py
+      - name: Validate inherited PR88 targets
+        run: python3 ci/validate_pr88_intelligent_target.py
+
+  validate-macos-integration:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate PR94 Treatment Design and Verification
+        run: python3 ci/validate_pr94_treatment_design_verification.py
+      - name: Build arm64 app with treatment design and verification
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            build
+      - name: Run treatment, geometry and Advisor tests
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            -only-testing:NotchSixtyTests/RoomTreatmentDesignVerificationTests \
+            -only-testing:NotchSixtyTests/RoomGeometryPlacementTests \
+            -only-testing:NotchSixtyTests/RoomTreatmentAdvisorTests \
+            -only-testing:NotchSixtyTests/ProductionInformationArchitectureTests \
+            test
+      - name: Run retained Active Acoustics tests
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            -only-testing:NotchSixtyTests/AmbientCompensationTests \
+            -only-testing:NotchSixtyTests/ActiveQuietZoneTests \
+            test
+      - name: Run retained full XCTest suite
+        run: |
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            test
