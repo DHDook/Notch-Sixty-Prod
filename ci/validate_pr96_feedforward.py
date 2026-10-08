@@ -2,6 +2,13 @@
 from pathlib import Path
 r=Path(__file__).resolve().parents[1]
 core=(r/"NotchSixty/Audio/QuietZoneFeedForward.swift").read_text()
+survey=(r/"NotchSixty/Audio/QuietZoneFeedForwardSurvey.swift").read_text()
+reference_c=(r/"NotchSixty/Audio/Realtime/N60FeedForwardReferenceBridge.c").read_text()
+reference_h=(r/"NotchSixty/Audio/Realtime/N60FeedForwardReferenceBridge.h").read_text()
+reference_swift=(r/"NotchSixty/Audio/CoreAudio/FeedForwardReferenceTransport.swift").read_text()
+survey_tests=(r/"NotchSixtyTests/QuietZoneFeedForwardSurveyTests.swift").read_text()
+reference_tests=(r/"NotchSixtyTests/FeedForwardReferenceBridgeTests.swift").read_text()
+bridging=(r/"NotchSixty/Audio/Realtime/NotchSixty-Bridging-Header.h").read_text()
 tests=(r/"NotchSixtyTests/QuietZoneFeedForwardTests.swift").read_text()
 probe=(r/"NotchSixty/Audio/QuietZoneFeedForwardProbe.swift").read_text()
 probe_tests=(r/"NotchSixtyTests/QuietZoneFeedForwardProbeTests.swift").read_text()
@@ -26,6 +33,22 @@ for token in ("testKnownCodedProbeArrivalIsRecovered",
 "testRelativeHallwayAndListenerPreviewFromOneMic",
 "testUncorrelatedCaptureNeverInventsArrival"):
     assert token in probe_tests,token
+for token in ("QuietZoneFeedForwardSurveySession", "maximumSurveyDuration",
+"maximumListenerRepeatDifferenceSeconds", "committed("):
+    assert token in survey,token
+for token in ("N60FeedForwardReferenceBridgeProcessPlanar",
+"N60FeedForwardReferenceBridgeRead", "invalidTimestamps", "droppedFrames"):
+    assert token in reference_c and token in reference_h,token
+for token in ("FeedForwardReferenceTransport", "N60FeedForwardReferenceIOProc",
+"AudioDeviceStart", "read(maximumFrames:"):
+    assert token in reference_swift,token
+for token in ("testSequentialSurveyCollectsOnlyListenerUpstreamListener",
+"testListenerReturnDriftInvalidatesSurvey"):
+    assert token in survey_tests,token
+for token in ("testTimestampedRingPreservesSamplesAndInputClock",
+"testFullRingDropsExcessWithoutOverwritingUnreadSamples"):
+    assert token in reference_tests,token
+assert '#import "N60FeedForwardReferenceBridge.h"' in bridging
 for token in ("prepareFeedForwardPlan()","refreshFeedForwardCalibration()",
 "importMeasuredFeedForwardCalibration","feedForwardBudget"):
     assert token in controller,token
@@ -37,7 +60,12 @@ for token in ("QuietZoneFeedForward.swift in Sources",
 "QuietZoneFeedForwardTests.swift in Sources",
 "ProductionFeedForwardReadinessCard.swift in Sources",
 "QuietZoneFeedForwardProbe.swift in Sources",
-"QuietZoneFeedForwardProbeTests.swift in Sources"):
+"QuietZoneFeedForwardProbeTests.swift in Sources",
+"QuietZoneFeedForwardSurvey.swift in Sources",
+"QuietZoneFeedForwardSurveyTests.swift in Sources",
+"N60FeedForwardReferenceBridge.c in Sources",
+"FeedForwardReferenceTransport.swift in Sources",
+"FeedForwardReferenceBridgeTests.swift in Sources"):
     assert token in pbx,token
 for forbidden in ("replaceActiveQuietZoneRuntimeTarget","setEnabled(","requestArm","stageRoomTreatment"):
     assert forbidden not in core,"Unsafe runtime path in diagnostics: "+forbidden
