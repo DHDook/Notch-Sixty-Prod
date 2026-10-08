@@ -74,7 +74,19 @@ struct QuietZoneHALClockAnalyzer: Sendable {
 
         let input = try evaluate(trace.inputObservations)
         let output = try evaluate(trace.outputObservations)
-        let duration = min(input.duration, output.duration)
+        let inputStart = trace.inputObservations[0].hostTimeSeconds
+        let outputStart = trace.outputObservations[0].hostTimeSeconds
+        let inputEnd = trace.inputObservations[trace.inputObservations.count - 1]
+            .hostTimeSeconds
+        let outputEnd = trace.outputObservations[trace.outputObservations.count - 1]
+            .hostTimeSeconds
+        let overlap = min(inputEnd, outputEnd) - max(inputStart, outputStart)
+        // Independent, non-overlapping captures are not proof that two
+        // devices maintained clock stability at the same point in time.
+        guard overlap >= Self.minimumObservationDuration else {
+            throw QuietZoneHALClockError.invalidTimebase
+        }
+        let duration = overlap
         let relative = abs(input.rate - output.rate)
             / trace.nominalSampleRate * 1_000_000
         let inputOffset = abs(input.rate - trace.nominalSampleRate)
