@@ -1455,6 +1455,89 @@ struct ProductionActiveAcousticsWorkspace: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
+            VStack(alignment: .leading, spacing: 10) {
+                Text("One-Microphone Coherent Tone Survey")
+                    .font(.subheadline.bold())
+                Text(
+                    "Stop playback and Quiet Zone. Leave a stable external 25–150 Hz tone running. Capture twice at the anchor, twice at each other measured position, then twice again at the anchor without interrupting the Mac microphone stream."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+                HStack(spacing: 10) {
+                    Text(
+                        String(
+                            format: "Survey tone %.0f Hz",
+                            quietZone.requestedSpatialSurveyFrequencyHz
+                        )
+                    )
+                    .font(.caption.monospacedDigit())
+                    Slider(
+                        value: $quietZone.requestedSpatialSurveyFrequencyHz,
+                        in: 25...150,
+                        step: 1
+                    )
+                    .frame(maxWidth: 250)
+                    .disabled(quietZone.spatialSurveyActive)
+
+                    if quietZone.spatialSurveyActive {
+                        Button {
+                            performQuietZone {
+                                try quietZone.captureSpatialSurveyWindow()
+                            }
+                        } label: {
+                            Label(
+                                "Capture This Position",
+                                systemImage: "mic.fill"
+                            )
+                        }
+                        .buttonStyle(.borderedProminent)
+
+                        Button("Cancel") {
+                            quietZone.cancelSpatialSurvey()
+                        }
+                        .buttonStyle(.bordered)
+                    } else {
+                        Button {
+                            performQuietZone {
+                                try quietZone.beginSpatialSurvey()
+                            }
+                        } label: {
+                            Label(
+                                "Begin Survey",
+                                systemImage: "waveform.badge.mic"
+                            )
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(
+                            quietZone.spatialCalibration == nil
+                                || quietZone.configuration.enabled
+                                || engine.lifecycleState == .running
+                        )
+                    }
+                }
+
+                if quietZone.spatialSurveyActive {
+                    Text(
+                        quietZone.nextSpatialSurveyPositionName
+                            ?? "Return microphone to the anchor"
+                    )
+                    .font(.callout.bold())
+                    Text(
+                        "Capture \(quietZone.spatialSurveyProgress) of \((quietZone.spatialCalibration?.positions.count ?? 0 + 1) * 2 + 2)"
+                    )
+                    .font(.caption.monospacedDigit())
+                }
+                Text(quietZone.spatialSurveyMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(12)
+            .background(
+                .secondary.opacity(0.05),
+                in: RoundedRectangle(cornerRadius: 12)
+            )
+
             if !quietZone.spatialPredictions.isEmpty {
                 Text("Modeled spatial effect — not simultaneous physical verification")
                     .font(.caption.bold())
@@ -1484,7 +1567,7 @@ struct ProductionActiveAcousticsWorkspace: View {
             }
 
             Text(
-                "Ordinary sequential measurement sweeps provide speaker transfer paths but cannot establish external-noise phase between seats. Until a genuinely coherent source survey and sequential before/after verification are available, use PR90 single-point Quiet Zone. Spatial mode must never be described as verified whole-room ANC."
+                "Ordinary Room Correction sweeps do not establish external-noise phase. The one-mic tone survey attempts to preserve a shared clock and validates stationarity with an anchor-return capture; if it cannot, spatial ANC stays off. One physical mic verifies only its current seat, so re-measure all seats before claiming area-wide improvement."
             )
             .font(.caption)
             .foregroundStyle(.secondary)
