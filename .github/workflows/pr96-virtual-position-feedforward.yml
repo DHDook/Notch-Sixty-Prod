@@ -36,7 +36,7 @@ jobs:
           xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES build
       - name: Run PR96 and inherited ANC tests
         run: |
-          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES -only-testing:NotchSixtyTests/QuietZoneFeedForwardTests -only-testing:NotchSixtyTests/QuietZoneFeedForwardProbeTests -only-testing:NotchSixtyTests/ActiveQuietZoneSpatialTests -only-testing:NotchSixtyTests/ActiveQuietZoneTests test
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES -only-testing:NotchSixtyTests/QuietZoneFeedForwardTests -only-testing:NotchSixtyTests/QuietZoneFeedForwardProbeTests -only-testing:NotchSixtyTests/QuietZoneFeedForwardSurveyTests -only-testing:NotchSixtyTests/FeedForwardReferenceBridgeTests -only-testing:NotchSixtyTests/ActiveQuietZoneSpatialTests -only-testing:NotchSixtyTests/ActiveQuietZoneTests test
       - name: Run full XCTest suite
         run: |
           xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES test
