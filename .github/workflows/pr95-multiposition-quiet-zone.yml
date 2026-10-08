@@ -1,0 +1,41 @@
+name: PR95 Multi-Position Quiet Zone
+
+on:
+  push:
+    branches:
+      - feature/pr95-multiposition-quiet-zone
+  pull_request:
+    branches:
+      - feature/pr94-treatment-design-verification
+  workflow_dispatch:
+
+concurrency:
+  group: pr95-quiet-zone-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: python3 ci/validate_pr95_multiposition_quiet_zone.py
+      - run: python3 ci/validate_pr94_treatment_design_verification.py
+      - run: python3 ci/validate_pr93_room_geometry_placement.py
+      - run: python3 ci/validate_pr92_room_treatment_advisor.py
+      - run: python3 ci/validate_pr91_conversation_preservation.py
+      - run: python3 ci/validate_pr90_active_quiet_zone.py
+
+  validate-macos:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - run: python3 ci/validate_pr95_multiposition_quiet_zone.py
+      - name: Build app
+        run: |
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES build
+      - name: Spatial and retained ANC tests
+        run: |
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES -only-testing:NotchSixtyTests/QuietZoneSpatialPlannerTests -only-testing:NotchSixtyTests/ActiveQuietZoneTests test
+      - name: Full XCTest
+        run: |
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES test
