@@ -31,6 +31,11 @@ int main(void) {
     ASSERT(snap.invalidCount == 1, "invalid timestamp must be counted");
     ASSERT(snap.valid && snap.firstFrameHostTime == 91234567,
            "invalid timestamp must not overwrite latest valid clock");
+    N60FeedForwardOutputTimingReset(&witness);
+    snap = N60FeedForwardOutputTimingRead(&witness);
+    ASSERT(!snap.valid, "reset must invalidate previous output route");
+    ASSERT(snap.callbackCount == 0 && snap.invalidCount == 0,
+           "reset must clear timing counters");
     printf("PR96 passive output timestamp smoke passed\n");
     return 0;
 }
