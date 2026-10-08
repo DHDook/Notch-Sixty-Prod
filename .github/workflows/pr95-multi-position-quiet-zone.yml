@@ -1,0 +1,61 @@
+name: PR95 Multi-Position Quiet Zone
+
+on:
+  push:
+    branches:
+      - feature/pr95-multi-position-quiet-zone
+  pull_request:
+    branches:
+      - feature/pr94-treatment-design-verification
+  workflow_dispatch:
+
+concurrency:
+  group: pr95-spatial-quiet-zone-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate PR95 spatial ANC architecture
+        run: python3 ci/validate_pr95_multi_position_quiet_zone.py
+      - name: Validate inherited PR94 Treatment Design
+        run: python3 ci/validate_pr94_treatment_design_verification.py
+      - name: Validate inherited PR93 Geometry & Placement
+        run: python3 ci/validate_pr93_room_geometry_placement.py
+      - name: Validate inherited PR92 Room Advisor
+        run: python3 ci/validate_pr92_room_treatment_advisor.py
+      - name: Validate inherited PR91 Conversation Preservation
+        run: python3 ci/validate_pr91_conversation_preservation.py
+      - name: Validate inherited PR90 Active Quiet Zone
+        run: python3 ci/validate_pr90_active_quiet_zone.py
+      - name: Validate inherited PR89 Ambient Compensation
+        run: python3 ci/validate_pr89_ambient_compensation.py
+      - name: Validate inherited PR88 Target Intelligence
+        run: python3 ci/validate_pr88_intelligent_target.py
+
+  validate-macos-integration:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - name: PR95 spatial ANC architecture
+        run: python3 ci/validate_pr95_multi_position_quiet_zone.py
+      - name: Build arm64 app
+        run: |
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty \
+            -configuration Debug -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES build
+      - name: Run PR95 and inherited Quiet Zone tests
+        run: |
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty \
+            -configuration Debug -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES \
+            -only-testing:NotchSixtyTests/ActiveQuietZoneSpatialTests \
+            -only-testing:NotchSixtyTests/ActiveQuietZoneTests \
+            test
+      - name: Run retained XCTest suite
+        run: |
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty \
+            -configuration Debug -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES test
