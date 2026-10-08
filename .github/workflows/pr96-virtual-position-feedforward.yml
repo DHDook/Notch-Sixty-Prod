@@ -31,6 +31,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: python3 ci/validate_pr96_feedforward.py
+      - name: Verify passive output timestamp witness
+        run: |
+          xcrun clang -std=c11 -I NotchSixty/Audio/Realtime -framework CoreAudio ci/pr96_output_timing_smoke.c -o /tmp/pr96_output_timing_smoke
+          /tmp/pr96_output_timing_smoke
       - name: Build macOS arm64 app
         run: |
           xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES build
