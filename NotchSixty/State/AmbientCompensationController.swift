@@ -95,6 +95,11 @@ final class AmbientCompensationController: ObservableObject {
     private var monitor: (any AmbientMonitorTransporting)?
     private var pollTask: Task<Void, Never>?
     private var microphoneHistory: [Float] = []
+    /// Monotonic count of frames pulled from this uninterrupted monitor session.
+    /// A monitor reset changes epoch; never phase-compare across epochs.
+    private var spatialMicrophoneFrameEnd: UInt64 = 0
+    private var spatialMicrophoneEpoch: UUID = UUID()
+    private var spatialLatestWindowEndFrame: UInt64 = 0
     private var playbackLeftHistory: [Float] = []
     private var playbackRightHistory: [Float] = []
     private var quietZoneLeftHistory: [Float] = []
@@ -115,6 +120,38 @@ final class AmbientCompensationController: ObservableObject {
     private(set) var latestDetailedAnalysis:
         AmbientAnalysisDetailedResult?
     private(set) var analysisRevision: UInt64 = 0
+
+    struct PhaseReferencedMicWindow: Sendable {
+        var epoch: UUID
+        var revision: UInt64
+        var firstSampleIndex: UInt64
+        var sampleRate: Double
+        var samples: [Float]
+        var stationarity: Double
+        var toneCandidates: [AmbientTonalComponent]
+    }
+
+    /// Only live microphone-only observation. Playing audio through the
+    /// speakers while moving the mic invalidates the shared-phase survey.
+    func phaseReferencedMicWindow() -> PhaseReferencedMicWindow? {
+        guard engine.lifecycleState != .running,
+              let detailed = latestDetailedAnalysis,
+              detailed.snapshot.separationMode == .microphoneOnly,
+              detailed.snapshot.stationarityScore >= 0.85,
+              spatialLatestWindowEndFrame
+                >= UInt64(detailed.separatedResidualSamples.count)
+        else { return nil }
+        return PhaseReferencedMicWindow(
+            epoch: spatialMicrophoneEpoch,
+            revision: analysisRevision,
+            firstSampleIndex: spatialLatestWindowEndFrame
+                - UInt64(detailed.separatedResidualSamples.count),
+            sampleRate: detailed.snapshot.sampleRate,
+            samples: detailed.separatedResidualSamples,
+            stationarity: detailed.snapshot.stationarityScore,
+            toneCandidates: detailed.snapshot.tonalComponents
+        )
+    }
     @Published private(set) var appliedTarget =
         AmbientCompensationTarget.unity
     @Published private(set) var lastErrorDescription: String?
@@ -408,10 +445,12 @@ final class AmbientCompensationController: ObservableObject {
                 return
             }
 
+            let newlyCaptured = try monitor.readAvailableFrames(
+                maximumFrames: Self.preferredAnalysisFrames
+            )
+            spatialMicrophoneFrameEnd &+= UInt64(newlyCaptured.count)
             Self.appendCapped(
-                try monitor.readAvailableFrames(
-                    maximumFrames: Self.preferredAnalysisFrames
-                ),
+                newlyCaptured,
                 to: &microphoneHistory
             )
 
@@ -515,6 +554,7 @@ final class AmbientCompensationController: ObservableObject {
             let analysis = detailed.snapshot
             latestDetailedAnalysis = detailed
             latestAnalysis = analysis
+            spatialLatestWindowEndFrame = spatialMicrophoneFrameEnd
             analysisRevision &+= 1
 
             let mode = playbackAdaptationMode
@@ -870,6 +910,9 @@ final class AmbientCompensationController: ObservableObject {
     }
 
     private func resetAnalysisHistory() {
+        spatialMicrophoneEpoch = UUID()
+        spatialMicrophoneFrameEnd = 0
+        spatialLatestWindowEndFrame = 0
         microphoneHistory.removeAll(keepingCapacity: true)
         playbackLeftHistory.removeAll(keepingCapacity: true)
         playbackRightHistory.removeAll(keepingCapacity: true)
