@@ -88,6 +88,11 @@
 		F96000000000000000000003 /* ProductionFeedForwardReadinessCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F96000000000000000000013 /* ProductionFeedForwardReadinessCard.swift */; };
 		F96000000000000000000004 /* QuietZoneFeedForwardProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = F96000000000000000000014 /* QuietZoneFeedForwardProbe.swift */; };
 		F96000000000000000000005 /* QuietZoneFeedForwardProbeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F96000000000000000000015 /* QuietZoneFeedForwardProbeTests.swift */; };
+		F96100000000000000000001 /* QuietZoneFeedForwardSurvey.swift in Sources */ = {isa = PBXBuildFile; fileRef = F96100000000000000000011 /* QuietZoneFeedForwardSurvey.swift */; };
+		F96100000000000000000002 /* QuietZoneFeedForwardSurveyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F96100000000000000000012 /* QuietZoneFeedForwardSurveyTests.swift */; };
+		F96100000000000000000003 /* N60FeedForwardReferenceBridge.c in Sources */ = {isa = PBXBuildFile; fileRef = F96100000000000000000013 /* N60FeedForwardReferenceBridge.c */; };
+		F96100000000000000000004 /* FeedForwardReferenceTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F96100000000000000000015 /* FeedForwardReferenceTransport.swift */; };
+		F96100000000000000000005 /* FeedForwardReferenceBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F96100000000000000000016 /* FeedForwardReferenceBridgeTests.swift */; };
 		F73000000000000000000001 /* MIMORoomTreatmentDesigner.swift in Sources */ = {isa = PBXBuildFile; fileRef = F73000000000000000000011 /* MIMORoomTreatmentDesigner.swift */; };
 		F73000000000000000000002 /* MIMORoomTreatmentDesignerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F73000000000000000000012 /* MIMORoomTreatmentDesignerTests.swift */; };
 		F74000000000000000000001 /* MIMORoomTreatmentFIRCompiler.swift in Sources */ = {isa = PBXBuildFile; fileRef = F74000000000000000000011 /* MIMORoomTreatmentFIRCompiler.swift */; };
@@ -247,6 +252,12 @@
 		F96000000000000000000013 /* ProductionFeedForwardReadinessCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionFeedForwardReadinessCard.swift; sourceTree = "<group>"; };
 		F96000000000000000000014 /* QuietZoneFeedForwardProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForwardProbe.swift; sourceTree = "<group>"; };
 		F96000000000000000000015 /* QuietZoneFeedForwardProbeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForwardProbeTests.swift; sourceTree = "<group>"; };
+		F96100000000000000000011 /* QuietZoneFeedForwardSurvey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForwardSurvey.swift; sourceTree = "<group>"; };
+		F96100000000000000000012 /* QuietZoneFeedForwardSurveyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForwardSurveyTests.swift; sourceTree = "<group>"; };
+		F96100000000000000000013 /* N60FeedForwardReferenceBridge.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = N60FeedForwardReferenceBridge.c; sourceTree = "<group>"; };
+		F96100000000000000000014 /* N60FeedForwardReferenceBridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60FeedForwardReferenceBridge.h; sourceTree = "<group>"; };
+		F96100000000000000000015 /* FeedForwardReferenceTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudio/FeedForwardReferenceTransport.swift; sourceTree = "<group>"; };
+		F96100000000000000000016 /* FeedForwardReferenceBridgeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedForwardReferenceBridgeTests.swift; sourceTree = "<group>"; };
 		F73000000000000000000011 /* MIMORoomTreatmentDesigner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMORoomTreatmentDesigner.swift; sourceTree = "<group>"; };
 		F73000000000000000000012 /* MIMORoomTreatmentDesignerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMORoomTreatmentDesignerTests.swift; sourceTree = "<group>"; };
 		F74000000000000000000011 /* MIMORoomTreatmentFIRCompiler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMORoomTreatmentFIRCompiler.swift; sourceTree = "<group>"; };
@@ -361,6 +372,8 @@
 				F90000000000000000000012 /* ActiveQuietZoneTests.swift */,
 				F96000000000000000000012 /* QuietZoneFeedForwardTests.swift */,
 				F96000000000000000000015 /* QuietZoneFeedForwardProbeTests.swift */,
+				F96100000000000000000012 /* QuietZoneFeedForwardSurveyTests.swift */,
+				F96100000000000000000016 /* FeedForwardReferenceBridgeTests.swift */,
 				F73000000000000000000012 /* MIMORoomTreatmentDesignerTests.swift */,
 				F74000000000000000000012 /* MIMORoomTreatmentFIRCompilerTests.swift */,
 				F75000000000000000000012 /* MIMORoomTreatmentVerificationTests.swift */,
@@ -398,6 +411,7 @@
 				A30000000000000000000050 /* Realtime */,
 				A20000000000000000000020 /* AudioIOEngine.swift */,
 				F89200000000000000000011 /* AmbientMonitorTransport.swift */,
+				F96100000000000000000015 /* FeedForwardReferenceTransport.swift */,
 				A20000000000000000000027 /* StereoPlaybackControl.swift */,
 				A20000000000000000000029 /* DynamicsConfiguration.swift */,
 				F66000000000000000000011 /* HeadTrackingController.swift */,
@@ -410,6 +424,7 @@
 				F90000000000000000000011 /* ActiveQuietZone.swift */,
 				F96000000000000000000011 /* QuietZoneFeedForward.swift */,
 				F96000000000000000000014 /* QuietZoneFeedForwardProbe.swift */,
+				F96100000000000000000011 /* QuietZoneFeedForwardSurvey.swift */,
 				F95000000000000000000011 /* ActiveQuietZoneSpatial.swift */,
 				F95000000000000000000013 /* ActiveQuietZoneSpatialSurvey.swift */,
 				F73000000000000000000011 /* MIMORoomTreatmentDesigner.swift */,
@@ -430,7 +445,7 @@
 			path = Audio;
 			sourceTree = "<group>";
 		};
-		A20000000000000000000051 /* CoreAudio */ = {isa = PBXGroup; children = (A20000000000000000000021 /* CoreAudioError.swift */, F63000000000000000000011 /* CoreAudioNChannelTransportSession.swift */, F65000000000000000000013 /* CoreAudioSemanticTransportSupport.swift */, F65000000000000000000014 /* CoreAudioBinauralHeadphoneTransportSession.swift */, F64000000000000000000013 /* MultichannelCalibrationTransport.swift */, A20000000000000000000028 /* MasterVolumeDeviceController.swift */, A2000000000000000000002C /* RoomCorrectionCalibrationTransport.swift */,); path = CoreAudio; sourceTree = "<group>"; };
+		A20000000000000000000051 /* CoreAudio */ = {isa = PBXGroup; children = (A20000000000000000000021 /* CoreAudioError.swift */, F63000000000000000000011 /* CoreAudioNChannelTransportSession.swift */, F65000000000000000000013 /* CoreAudioSemanticTransportSupport.swift */, F65000000000000000000014 /* CoreAudioBinauralHeadphoneTransportSession.swift */, F64000000000000000000013 /* MultichannelCalibrationTransport.swift */, A20000000000000000000028 /* MasterVolumeDeviceController.swift */, A2000000000000000000002C /* RoomCorrectionCalibrationTransport.swift */, F96100000000000000000015 /* FeedForwardReferenceTransport.swift */,); path = CoreAudio; sourceTree = "<group>"; };
 		A20000000000000000000052 /* Devices */ = {isa = PBXGroup; children = (A20000000000000000000022 /* AudioOutputDevice.swift */, A20000000000000000000023 /* OutputDeviceCatalog.swift */,); path = Devices; sourceTree = "<group>"; };
 		A20000000000000000000053 /* Routing */ = {isa = PBXGroup; children = (A20000000000000000000024 /* AudioRouteConfiguration.swift */, F62000000000000000000011 /* OutputDeviceProfileConfiguration.swift */, F65000000000000000000011 /* HeadphoneDeviceProfileConfiguration.swift */, F65000000000000000000012 /* BinauralProfileAsset.swift */, F64000000000000000000011 /* OutputDeviceCalibration.swift */,); path = Routing; sourceTree = "<group>"; };
 		A20000000000000000000054 /* State */ = {isa = PBXGroup; children = (A20000000000000000000025 /* AudioLifecycleState.swift */, A2000000000000000000002B /* ProductProfiles.swift */, F64000000000000000000014 /* MultichannelCalibrationController.swift */, A2000000000000000000002D /* RoomCorrectionCalibrationController.swift */, A2000000000000000000002F /* RoomCorrectionProjectController.swift */, F89300000000000000000011 /* AmbientCompensationController.swift */, F90200000000000000000011 /* ActiveQuietZoneController.swift */, F92000000000000000000012 /* RoomTreatmentAdvisorController.swift */,); path = State; sourceTree = "<group>"; };
@@ -461,6 +476,8 @@
 				F89100000000000000000012 /* N60AmbientMonitorBridge.h */,
 				F90100000000000000000011 /* N60ActiveQuietZone.c */,
 				F90100000000000000000012 /* N60ActiveQuietZone.h */,
+				F96100000000000000000013 /* N60FeedForwardReferenceBridge.c */,
+				F96100000000000000000014 /* N60FeedForwardReferenceBridge.h */,
 				F70000000000000000000011 /* N60AdaptiveSampleRate.c */,
 				F70000000000000000000012 /* N60AdaptiveSampleRate.h */,
 			);
@@ -594,6 +611,9 @@
 				F96000000000000000000003 /* ProductionFeedForwardReadinessCard.swift in Sources */,
 				F96000000000000000000001 /* QuietZoneFeedForward.swift in Sources */,
 				F96000000000000000000004 /* QuietZoneFeedForwardProbe.swift in Sources */,
+				F96100000000000000000001 /* QuietZoneFeedForwardSurvey.swift in Sources */,
+				F96100000000000000000003 /* N60FeedForwardReferenceBridge.c in Sources */,
+				F96100000000000000000004 /* FeedForwardReferenceTransport.swift in Sources */,
 				F73000000000000000000001 /* MIMORoomTreatmentDesigner.swift in Sources */,
 				F74000000000000000000001 /* MIMORoomTreatmentFIRCompiler.swift in Sources */,
 				F75000000000000000000001 /* MIMORoomTreatmentVerification.swift in Sources */,
@@ -652,6 +672,8 @@
 				F90000000000000000000002 /* ActiveQuietZoneTests.swift in Sources */,
 				F96000000000000000000002 /* QuietZoneFeedForwardTests.swift in Sources */,
 				F96000000000000000000005 /* QuietZoneFeedForwardProbeTests.swift in Sources */,
+				F96100000000000000000002 /* QuietZoneFeedForwardSurveyTests.swift in Sources */,
+				F96100000000000000000005 /* FeedForwardReferenceBridgeTests.swift in Sources */,
 				F73000000000000000000002 /* MIMORoomTreatmentDesignerTests.swift in Sources */,
 				F74000000000000000000002 /* MIMORoomTreatmentFIRCompilerTests.swift in Sources */,
 				F75000000000000000000002 /* MIMORoomTreatmentVerificationTests.swift in Sources */,
