@@ -102,6 +102,45 @@ struct ProductionFeedForwardReadinessCard: View {
                 .font(.caption)
             }
 
+            if let trace = quietZone.feedForwardCalibration?.halClockTrace {
+                if let clock = try? QuietZoneHALClockAnalyzer().analyze(trace) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label(
+                            "HAL clock stability: qualified for loopback bench only",
+                            systemImage: "clock"
+                        )
+                        .font(.caption.bold())
+                        Text(
+                            String(
+                                format:
+                                    "Input %.2f Hz · Output %.2f Hz · relative drift %.1f ppm · worst timestamp residual %.3f ms",
+                                clock.measuredInputRateHz,
+                                clock.measuredOutputRateHz,
+                                clock.relativeDriftPPM,
+                                1000 * max(
+                                    clock.worstInputResidualSeconds,
+                                    clock.worstOutputResidualSeconds
+                                )
+                            )
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        Text(
+                            "Clock stability is not ADC/DAC latency or proof of live cancellation."
+                        )
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Label(
+                        "HAL clock observations failed qualification. Re-capture timing evidence.",
+                        systemImage: "exclamationmark.triangle"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+            }
+
             if quietZone.feedForwardBudget.acousticPreviewSeconds != nil {
                 LazyVGrid(
                     columns: [
