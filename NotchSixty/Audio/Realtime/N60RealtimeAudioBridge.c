@@ -577,6 +577,7 @@ void N60RealtimeAudioBridgeReset(N60RealtimeAudioBridge *bridge) {
     atomic_store_explicit(&bridge->readIndex, 0, memory_order_release);
     atomic_store_explicit(&bridge->captureCallbacks, 0, memory_order_relaxed);
     atomic_store_explicit(&bridge->outputCallbacks, 0, memory_order_relaxed);
+    N60FeedForwardOutputTimingReset(&bridge->feedForwardOutputTiming);
     atomic_store_explicit(&bridge->capturedFrames, 0, memory_order_relaxed);
     atomic_store_explicit(&bridge->deliveredFrames, 0, memory_order_relaxed);
     atomic_store_explicit(&bridge->underrunFrames, 0, memory_order_relaxed);
