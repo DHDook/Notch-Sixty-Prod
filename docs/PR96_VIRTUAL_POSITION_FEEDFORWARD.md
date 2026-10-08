@@ -66,3 +66,32 @@ control remains unchanged and does not automatically switch to feed-forward.
 
 The current PR96 diagnostics can be verified without activating potentially
 unsafe live feed-forward processing.
+
+
+## Second PR96 implementation slice — controlled survey and native reference stream
+
+- `QuietZoneFeedForwardSurveySession` coordinates the actual order **listener →
+  upstream → listener**, refusing incomplete, incorrectly timed, incompatible
+  microphone/source/clock/route recordings. It explicitly takes a
+  `QuietZoneFeedForwardProbeCapture` from a separately *instrumented*
+  calibrated trigger; the survey coordinator does not pretend a smartphone or
+  an ordinary sweep offers synchronized timing.
+- An unrepeatable listener-return arrival invalidates the entire survey.
+  Sound samples remain transient; only the arrival metadata can be saved.
+- `N60FeedForwardReferenceBridge` is a new native realtime-safe HAL
+  **input-only** timestamped SPSC ring. It retains physical input host time,
+  sample time and callback-relative frame offset; rejects missing timestamps,
+  non-finite samples, unsupported buffers and FIFO overflow. No callback
+  allocation, blocking, logging, or DAC output is permitted.
+- `FeedForwardReferenceTransport` creates/starts/stops the independent
+  timestamped microphone callback. Its ring can be drained in smaller frame
+  batches without waiting for PR90's ambient FFT/polling cycle.
+- New deterministic Swift and native-bridge XCTest cases cover capture order,
+  return-drift failure, unsynchronized clocks, FIFO ordering, overflow and
+  invalid timestamps.
+
+**Still missing:** instrumented external-source playback controller with
+cross-device clock calibration; measured reference-to-DAC latency and jitter;
+causal native reference-to-output anti-noise; disturbance field and virtual
+seat model; leakage control; hardware sign-off. This input-only substrate
+does not itself make ANC operational and must not enable an Arm control.
