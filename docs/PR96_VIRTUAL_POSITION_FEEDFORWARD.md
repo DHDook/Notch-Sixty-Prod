@@ -172,3 +172,29 @@ These HAL callback timestamps allow subsequent clock and scheduling
 characterization. They are **not** the physical anti-noise wave's arrival time
 at the listener, and do not establish ADC→DAC causality. A calibrated loopback
 and actual speaker→listener impulse capture remain required.
+
+
+## Fifth PR96 milestone — input/output clock stability qualification
+
+`QuietZoneHALClockAnalyzer` independently fits the observed input and output
+HAL sample frame counters against a shared monotonic host timebase. A hardware
+qualification trace requires at least eight observations per device spanning
+two seconds, stable increasing counters, a credible nominal sample rate,
+bounded relative clock drift (100 ppm) and sub-0.5-ms timestamp-fit residuals.
+The limits are conservative **bench-screening heuristics**, not claimed
+real-time ANC performance limits.
+
+Optional measured traces may be retained alongside PR96's project-scoped
+calibration; mismatched microphone IDs, clock discontinuities, drift or
+unreliable timing are rejected. The Quiet Zone diagnostics UI reports the
+observed clock rates, ppm difference and maximum timestamp residual.
+
+Clock consistency can qualify a rig for additional **wired loopback** testing
+only. It does **not** measure acoustic propagation, ADC/DAC conversion delay,
+scheduler-to-speaker latency, source-to-listener spatial coherence, or actual
+ANC benefit. Both `physicalLatencyMeasured` and `liveANCQualified` are
+explicitly false. Live feed-forward ANC remains unarmed.
+
+The current code does not yet provide a UI button that automatically records
+these input/output traces from an attached hardware bench; an instrumented
+capture path is still required to obtain them.
