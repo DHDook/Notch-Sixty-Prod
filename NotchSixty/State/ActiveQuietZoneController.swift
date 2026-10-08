@@ -843,21 +843,29 @@ final class ActiveQuietZoneController: ObservableObject {
         let selected: [ActiveQuietZoneCandidateTone]
         if let calibration = spatialCalibration,
            calibration.settings.enabled {
-            guard let candidate = candidates.max(by: {
-                $0.levelDBFS < $1.levelDBFS
-            }),
-                  let survey = calibration.surveys.min(by: {
-                      abs($0.frequencyHz - candidate.frequencyHz)
-                          < abs($1.frequencyHz - candidate.frequencyHz)
-                  }),
-                  abs(survey.frequencyHz - candidate.frequencyHz) <= 2.0,
-                  Date().timeIntervalSince(survey.capturedAt) < 1800,
-                  (try? calibration.validatedSurvey(
-                    for: survey.frequencyHz
-                  )) != nil
-            else {
+            let matching = candidates.compactMap {
+                candidate -> (
+                    ActiveQuietZoneCandidateTone,
+                    ActiveQuietZoneSpatialToneSurvey
+                )? in
+                guard let survey = calibration.surveys.first(where: {
+                    abs($0.frequencyHz - candidate.frequencyHz) <= 2.0
+                        && Date().timeIntervalSince($0.capturedAt) >= 0
+                        && Date().timeIntervalSince($0.capturedAt) < 1800
+                        && (try? calibration.validatedSurvey(
+                            for: $0.frequencyHz
+                        )) != nil
+                }) else {
+                    return nil
+                }
+                return (candidate, survey)
+            }
+            guard let match = matching.max(by: {
+                $0.0.levelDBFS < $1.0.levelDBFS
+            }) else {
                 throw ActiveQuietZoneSpatialError.inadequatePhaseReference
             }
+            let (candidate, survey) = match
             selected = [
                 ActiveQuietZoneCandidateTone(
                     frequencyHz: survey.frequencyHz,
