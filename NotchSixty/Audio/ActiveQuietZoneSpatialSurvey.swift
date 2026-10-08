@@ -18,6 +18,65 @@ struct ActiveQuietZoneSpatialPhaseCapture: Equatable, Sendable {
 struct ActiveQuietZoneSpatialSurveyBuilder: Sendable {
     private let planner = ActiveQuietZonePlanner()
 
+    /// Sub-bin refinement for a strong isolated LF tone. The existing ambient
+    /// detector supplies only a coarse FFT-bin peak, which is insufficient for
+    /// comparing microphone phases after moving the sensor.
+    func refinedToneFrequency(
+        samples: [Float],
+        sampleRate: Double,
+        near coarseFrequencyHz: Double
+    ) throws -> Double {
+        guard samples.count >= 8_192,
+              sampleRate.isFinite, sampleRate > 8_000,
+              coarseFrequencyHz.isFinite,
+              (20...150).contains(coarseFrequencyHz)
+        else { throw ActiveQuietZoneSpatialError.inadequatePhaseReference }
+        let strideLength = max(1, samples.count / 4_096)
+        let radius = max(0.9, sampleRate / Double(samples.count))
+        let steps = 60
+        let spacing = 2 * radius / Double(steps)
+        var bestIndex = 0
+        var powers: [Double] = []
+
+        for step in 0...steps {
+            let frequency = coarseFrequencyHz - radius
+                + Double(step) * spacing
+            var re = 0.0
+            var im = 0.0
+            for frame in stride(
+                from: 0, to: samples.count, by: strideLength
+            ) {
+                let window = 0.5 - 0.5 * cos(
+                    2 * Double.pi * Double(frame)
+                        / Double(samples.count - 1)
+                )
+                let sample = Double(samples[frame]) * window
+                let angle = 2 * Double.pi * frequency
+                    * Double(frame) / sampleRate
+                re += sample * cos(angle)
+                im -= sample * sin(angle)
+            }
+            powers.append(re * re + im * im)
+            if powers[step] > powers[bestIndex] {
+                bestIndex = step
+            }
+        }
+        guard bestIndex > 0, bestIndex < steps,
+              powers[bestIndex].isFinite,
+              powers[bestIndex] > 1.0e-12
+        else { throw ActiveQuietZoneSpatialError.inadequatePhaseReference }
+        // Parabolic refinement within the already small 0.03–0.1 Hz grid.
+        let before = powers[bestIndex - 1]
+        let center = powers[bestIndex]
+        let after = powers[bestIndex + 1]
+        let denominator = before - 2 * center + after
+        let adjustment = abs(denominator) > 1.0e-12
+            ? max(-1, min(1, 0.5 * (before - after) / denominator))
+            : 0
+        return coarseFrequencyHz - radius
+            + (Double(bestIndex) + adjustment) * spacing
+    }
+
     func capture(
         positionID: UUID,
         epoch: UUID,
