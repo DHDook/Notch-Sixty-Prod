@@ -2,6 +2,10 @@
 from pathlib import Path
 r=Path(__file__).resolve().parents[1]
 core=(r/"NotchSixty/Audio/QuietZoneFeedForward.swift").read_text()
+clock=(r/"NotchSixty/Audio/QuietZoneHALClockAnalysis.swift").read_text()
+clock_tests=(r/"NotchSixtyTests/QuietZoneHALClockAnalysisTests.swift").read_text()
+feedforward_tests=(r/"NotchSixtyTests/QuietZoneFeedForwardTests.swift").read_text()
+readiness_ui=(r/"NotchSixty/UI/ProductionFeedForwardReadinessCard.swift").read_text()
 compiler=(r/"NotchSixty/Audio/QuietZoneCausalFIRCompiler.swift").read_text()
 rehearsal=(r/"NotchSixty/Audio/QuietZoneFeedForwardRehearsal.swift").read_text()
 compiler_tests=(r/"NotchSixtyTests/QuietZoneCausalFIRCompilerTests.swift").read_text()
@@ -103,6 +107,22 @@ assert "N60FeedForwardOutputTimingObserve(" in output_bridge_c
 assert "N60RealtimeAudioBridgeGetFeedForwardOutputTimingSnapshot" in output_bridge_c
 assert "N60RealtimeAudioBridgeGetFeedForwardOutputTimingSnapshot" in output_bridge_h
 assert "PR96 passive output timestamp smoke passed" in output_smoke
+for token in ("QuietZoneHALClockAnalyzer", "maximumRelativeDriftPPM",
+"maximumWorstResidualSeconds", "physicalLatencyMeasured: Bool { false }",
+"liveANCQualified: Bool { false }"):
+    assert token in clock,token
+for token in ("testStableIndependentClocksQualifyForLoopbackOnly",
+"testSignificantDriftRejectsBenchQualification",
+"testDiscontinuityWithinClockStreamFailsClosed",
+"testTimestampJitterBeyondBoundRejectsQualification"):
+    assert token in clock_tests,token
+for token in ("testQualifiedClockTraceDoesNotArmFeedForward",
+"testMisidentifiedAndDriftingHALClocksFailClosed",
+"testClockTracePersistsWithoutMutatingRoomProject"):
+    assert token in feedforward_tests,token
+for token in ("clock.measuredInputRateHz", "clock.relativeDriftPPM",
+"Clock stability is not ADC/DAC latency"):
+    assert token in readiness_ui,token
 for token in ("prepareFeedForwardPlan()","refreshFeedForwardCalibration()",
 "importMeasuredFeedForwardCalibration","feedForwardBudget"):
     assert token in controller,token
@@ -127,7 +147,9 @@ for token in ("QuietZoneFeedForward.swift in Sources",
 "QuietZoneCausalFIRCompiler.swift in Sources",
 "QuietZoneFeedForwardRehearsal.swift in Sources",
 "QuietZoneCausalFIRCompilerTests.swift in Sources",
-"QuietZoneFeedForwardRehearsalTests.swift in Sources"):
+"QuietZoneFeedForwardRehearsalTests.swift in Sources",
+"QuietZoneHALClockAnalysis.swift in Sources",
+"QuietZoneHALClockAnalysisTests.swift in Sources"):
     assert token in pbx,token
 for forbidden in ("replaceActiveQuietZoneRuntimeTarget","setEnabled(","requestArm","stageRoomTreatment"):
     assert forbidden not in core,"Unsafe runtime path in diagnostics: "+forbidden
