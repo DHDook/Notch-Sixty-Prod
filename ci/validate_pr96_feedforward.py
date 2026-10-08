@@ -2,6 +2,10 @@
 from pathlib import Path
 r=Path(__file__).resolve().parents[1]
 core=(r/"NotchSixty/Audio/QuietZoneFeedForward.swift").read_text()
+compiler=(r/"NotchSixty/Audio/QuietZoneCausalFIRCompiler.swift").read_text()
+rehearsal=(r/"NotchSixty/Audio/QuietZoneFeedForwardRehearsal.swift").read_text()
+compiler_tests=(r/"NotchSixtyTests/QuietZoneCausalFIRCompilerTests.swift").read_text()
+rehearsal_tests=(r/"NotchSixtyTests/QuietZoneFeedForwardRehearsalTests.swift").read_text()
 virtual=(r/"NotchSixty/Audio/QuietZoneVirtualSeatDesigner.swift").read_text()
 virtual_tests=(r/"NotchSixtyTests/QuietZoneVirtualSeatDesignerTests.swift").read_text()
 dry_c=(r/"NotchSixty/Audio/Realtime/N60FeedForwardPreviewFIR.c").read_text()
@@ -71,6 +75,23 @@ for token in ("testImpulseResponseIsCausalAndMatchesTaps",
 "testNonFiniteMicrophoneInputSilencesAndFlushesHistory"):
     assert token in dry_tests,token
 assert '#import "N60FeedForwardPreviewFIR.h"' in bridging
+for token in ("QuietZoneCausalFIRCompiler", "nonCausalTarget",
+"minimumModeledReductionDB", "excessiveGain", "safePreviewOnly",
+"worstPredictedReductionDB"):
+    assert token in compiler,token
+for token in ("QuietZoneFeedForwardRehearsal", "referenceTransport.read",
+"N60FeedForwardPreviewFIRProcessFrame", "outputConnected: Bool = false",
+"incompatibleClock"):
+    assert token in rehearsal,token
+for token in ("testCausalShortFIRReproducesSimpleLowFrequencyModel",
+"testNeverCompileWithoutPositiveMeasuredBudget",
+"testImpossibleFastPhaseFlipCannotClaimCausalFilter",
+"testCompiledTapsCanBeLoadedIntoNativeDryRun"):
+    assert token in compiler_tests,token
+for token in ("testCallbackReferenceFramesEnterDryRunButNeverPlayback",
+"testGapInReferenceStreamImmediatelyStopsRehearsal",
+"testClockRewindCannotBeIgnored"):
+    assert token in rehearsal_tests,token
 for token in ("prepareFeedForwardPlan()","refreshFeedForwardCalibration()",
 "importMeasuredFeedForwardCalibration","feedForwardBudget"):
     assert token in controller,token
@@ -91,7 +112,11 @@ for token in ("QuietZoneFeedForward.swift in Sources",
 "QuietZoneVirtualSeatDesigner.swift in Sources",
 "QuietZoneVirtualSeatDesignerTests.swift in Sources",
 "N60FeedForwardPreviewFIR.c in Sources",
-"FeedForwardPreviewFIRTests.swift in Sources"):
+"FeedForwardPreviewFIRTests.swift in Sources",
+"QuietZoneCausalFIRCompiler.swift in Sources",
+"QuietZoneFeedForwardRehearsal.swift in Sources",
+"QuietZoneCausalFIRCompilerTests.swift in Sources",
+"QuietZoneFeedForwardRehearsalTests.swift in Sources"):
     assert token in pbx,token
 for forbidden in ("replaceActiveQuietZoneRuntimeTarget","setEnabled(","requestArm","stageRoomTreatment"):
     assert forbidden not in core,"Unsafe runtime path in diagnostics: "+forbidden
