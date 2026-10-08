@@ -1524,7 +1524,7 @@ struct ProductionActiveAcousticsWorkspace: View {
                     )
                     .font(.callout.bold())
                     Text(
-                        "Capture \(quietZone.spatialSurveyProgress) of \((quietZone.spatialCalibration?.positions.count ?? 0 + 1) * 2 + 2)"
+                        "Capture \(quietZone.spatialSurveyProgress) of \(((quietZone.spatialCalibration?.positions.count ?? 0) + 1) * 2)"
                     )
                     .font(.caption.monospacedDigit())
                 }
