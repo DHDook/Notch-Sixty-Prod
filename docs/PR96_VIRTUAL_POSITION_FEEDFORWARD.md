@@ -158,3 +158,17 @@ are mandatory commissioning checks.
 Unpredictable high-frequency speech is spatially and temporally incoherent
 in many ordinary rooms; even measured low-frequency causality does not imply
 broadband party-noise cancellation.
+
+
+## Passive Core Audio physical-output clock telemetry
+
+PR96 also installs a lightweight, **read-only** clock witness in the existing
+stereo Core Audio output callback. It atomically captures the output callback's
+host time, sample time and buffer frame count; invalid timestamps are counted,
+not silently accepted. The witness does not touch playback data, graph state
+or speaker injection, and synthetic timestamp tests run in CI.
+
+These HAL callback timestamps allow subsequent clock and scheduling
+characterization. They are **not** the physical anti-noise wave's arrival time
+at the listener, and do not establish ADC→DAC causality. A calibrated loopback
+and actual speaker→listener impulse capture remain required.
