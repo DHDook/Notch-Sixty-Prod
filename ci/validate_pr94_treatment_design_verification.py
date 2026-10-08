@@ -29,11 +29,8 @@ for needle in ("RoomPassiveTreatmentPlan", "RoomPassiveTreatmentPlacement",
 for needle in ("RoomTreatmentVerifier", "RoomTreatmentVerificationMetric",
                "RoomTreatmentVerificationReport", "matchedPositionCount",
                "beforeReport.bandDecayMeasurements", "meanSeatSpread",
-               "reflectionPeak", "uniqueKeysWithValues"):
-    if needle == "uniqueKeysWithValues":
-        require(needle not in verification, "duplicate listening-position names could trap")
-    else:
-        require(needle in verification, f"verification missing {needle}")
+               "reflectionPeak", "var afterByName:"):
+    require(needle in verification, f"verification missing {needle}")
 
 for needle in ("bandDecayMeasurements", "RoomTreatmentAdvisorBandDecay"):
     require(needle in room, f"PR92 reusable decay evidence missing {needle}")
