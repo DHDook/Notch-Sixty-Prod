@@ -27,7 +27,11 @@ speaker/seat acoustic delay, input/DSP/output latency and worst-case uncertainty
 - Active Acoustics → Quiet Zone → Virtual-Position Feed-Forward ANC:
   guided one-mic workflow, read-only budget metrics and hard **Diagnostics**
   status. There is deliberately **no feed-forward Arm switch**.
-- Synthetic causality, clock drift, route, clipping, stale-data and
+- A calibrated `QuietZoneFeedForwardProbeDetector` that extracts coded-probe
+  arrival from a synchronized controlled-source recording, using normalized
+  matched filtering and a pre-event SNR gate. It refuses uncorrelated,
+  clipped or unclocked recordings; it **cannot itself** supply clock sync.
+- Synthetic probe-delay, causality, clock drift, route, clipping, stale-data and
   independent persistence tests.
 
 ## Important physical constraints
