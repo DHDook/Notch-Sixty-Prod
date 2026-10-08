@@ -15,6 +15,9 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
                     ProductionRoomGeometrySection(
                         advisor: advisor
                     )
+                    ProductionRoomTreatmentDesignSection(
+                        advisor: advisor
+                    )
                     if !report.actionPriorities.isEmpty {
                         actionPlanCard(report)
                     }
