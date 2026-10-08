@@ -114,7 +114,8 @@ for token in ("QuietZoneHALClockAnalyzer", "maximumRelativeDriftPPM",
 for token in ("testStableIndependentClocksQualifyForLoopbackOnly",
 "testSignificantDriftRejectsBenchQualification",
 "testDiscontinuityWithinClockStreamFailsClosed",
-"testTimestampJitterBeyondBoundRejectsQualification"):
+"testTimestampJitterBeyondBoundRejectsQualification",
+"testNonOverlappingStableClockTracesCannotQualify"):
     assert token in clock_tests,token
 for token in ("testQualifiedClockTraceDoesNotArmFeedForward",
 "testMisidentifiedAndDriftingHALClocksFailClosed",
