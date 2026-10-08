@@ -100,7 +100,7 @@ final class QuietZoneFeedForwardTests: XCTestCase {
     func testShortMarginReportsLimitedRatherThanGreen() throws {
         let (project, session) = fixture()
         var limited = session
-        limited.timingPath?.referenceProcessingSeconds = 0.010
+        limited.timingPath?.referenceProcessingSeconds = 0.0065
         let result = try analyzer.analyze(limited, project: project)
         XCTAssertEqual(result.readiness, .limitedMargin)
         XCTAssertGreaterThan(result.conservativeReserveSeconds ?? 0, 0)
