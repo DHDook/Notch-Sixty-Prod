@@ -151,6 +151,66 @@ final class QuietZoneFeedForwardTests: XCTestCase {
         XCTAssertThrowsError(try analyzer.analyze(mismatch, project: project))
     }
 
+    private func clockTrace(
+        outputRate: Double = 48_000
+    ) -> QuietZoneHALClockTrace {
+        func observations(rate: Double) -> [QuietZoneHALClockObservation] {
+            (0..<12).map { index in
+                let time = Double(index) * 0.25
+                return QuietZoneHALClockObservation(
+                    hostTimeSeconds: 1_500 + time,
+                    sampleFrame: 48_000 + time * rate
+                )
+            }
+        }
+        return QuietZoneHALClockTrace(
+            inputDeviceID: "usb-mic",
+            outputDeviceID: "output-DAC",
+            nominalSampleRate: 48_000,
+            inputObservations: observations(rate: 48_000),
+            outputObservations: observations(rate: outputRate)
+        )
+    }
+
+    func testQualifiedClockTraceDoesNotArmFeedForward() throws {
+        let (project, calibration) = fixture()
+        var qualified = calibration
+        qualified.halClockTrace = clockTrace()
+        let budget = try analyzer.analyze(qualified, project: project)
+        XCTAssertEqual(budget.readiness, .physicallyPlausible)
+        XCTAssertFalse(budget.runtimeAvailable)
+    }
+
+    func testMisidentifiedAndDriftingHALClocksFailClosed() {
+        let (project, calibration) = fixture()
+        var wrong = calibration
+        wrong.halClockTrace = clockTrace()
+        wrong.halClockTrace?.inputDeviceID = "different-microphone"
+        XCTAssertThrowsError(try analyzer.analyze(wrong, project: project)) {
+            XCTAssertEqual($0 as? QuietZoneFeedForwardError, .incompatibleClock)
+        }
+        wrong = calibration
+        wrong.halClockTrace = clockTrace(outputRate: 48_020)
+        XCTAssertThrowsError(try analyzer.analyze(wrong, project: project)) {
+            XCTAssertEqual($0 as? QuietZoneFeedForwardError, .incompatibleClock)
+        }
+    }
+
+    func testClockTracePersistsWithoutMutatingRoomProject() throws {
+        let (project, calibration) = fixture()
+        var withClocks = calibration
+        withClocks.halClockTrace = clockTrace()
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("PR96-Clock-\\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = RoomCorrectionProjectStore(rootDirectory: root)
+        try store.save(project)
+        let sidecar = QuietZoneFeedForwardStore(roomStore: store)
+        try sidecar.save(withClocks, project: project)
+        XCTAssertEqual(try sidecar.load(for: project), withClocks)
+        XCTAssertEqual(try store.load(project.id), project)
+    }
+
     func testSidecarDoesNotChangePlaybackOrRoomProjectState() throws {
         let (project, session) = fixture()
         let directory = FileManager.default.temporaryDirectory
