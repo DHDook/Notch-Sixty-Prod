@@ -45,7 +45,7 @@ for token in (
     '"Multi-Position Quiet Zone"',
     "quietZone.prepareSpatialPositions()",
     "quietZone.setSpatialEnabled(",
-    "common-phase disturbance survey",
+    "requires a shared phase reference",
     "Modeled spatial effect",
 ):
     require(token in ui, "spatial UI contract missing " + token)
