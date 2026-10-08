@@ -61,6 +61,9 @@ struct QuietZoneFeedForwardCalibration: Codable, Equatable, Sendable {
     var capturedAt: Date = Date()
     var arrivals: [QuietZoneFeedForwardArrival] = []
     var timingPath: QuietZoneFeedForwardTimingPath?
+    /// Optional actual HAL input/output clock traces. Historical records
+    /// without these stay diagnostic, NEVER runtime-authorized.
+    var halClockTrace: QuietZoneHALClockTrace? = nil
 
     /// Raw noisy measurement data are not persisted; only bounded timing
     /// evidence and provenance are kept.
@@ -148,6 +151,18 @@ struct QuietZoneFeedForwardBudgetAnalyzer: Sendable {
         guard now.timeIntervalSince(calibration.capturedAt) >= -120,
               now.timeIntervalSince(calibration.capturedAt) < Self.maximumSurveyAge
         else { throw QuietZoneFeedForwardError.staleData }
+
+        if let trace = calibration.halClockTrace {
+            // Refuse a clock trace from another physical microphone or rate.
+            guard trace.inputDeviceID == calibration.microphoneStableID else {
+                throw QuietZoneFeedForwardError.incompatibleClock
+            }
+            do {
+                _ = try QuietZoneHALClockAnalyzer().analyze(trace)
+            } catch {
+                throw QuietZoneFeedForwardError.incompatibleClock
+            }
+        }
 
         guard calibration.arrivals.count == 3,
               calibration.arrivals.map(\.position) == [
@@ -297,6 +312,18 @@ struct QuietZoneFeedForwardStore: Sendable {
               calibration.microphoneStableID == project.microphone?.stableID,
               project.measurements.contains(where: { $0.id == calibration.listenerPositionID })
         else { throw QuietZoneFeedForwardError.incompatibleProject }
+        // Optional clock data is validated even while the A/B/A survey is
+        // incomplete; nothing here can authorize runtime ANC.
+        if let trace = calibration.halClockTrace {
+            guard trace.inputDeviceID == calibration.microphoneStableID else {
+                throw QuietZoneFeedForwardError.incompatibleClock
+            }
+            do {
+                _ = try QuietZoneHALClockAnalyzer().analyze(trace)
+            } catch {
+                throw QuietZoneFeedForwardError.incompatibleClock
+            }
+        }
         if !calibration.arrivals.isEmpty {
             _ = try QuietZoneFeedForwardBudgetAnalyzer().analyze(calibration, project: project)
         }
