@@ -65,6 +65,11 @@ final class ActiveQuietZoneController: ObservableObject {
     let ambient: AmbientCompensationController
 
     private let planner = ActiveQuietZonePlanner()
+    private let spatialPlanner = ActiveQuietZoneSpatialPlanner()
+    private let spatialSurveyBuilder = ActiveQuietZoneSpatialSurveyBuilder()
+    private var surveyCaptures: [ActiveQuietZoneSpatialPhaseCapture] = []
+    private var surveyToneHz: Double?
+    private var lastSurveyCaptureRevision: UInt64 = 0
     private var task: Task<Void, Never>?
     private var activeSystemID: UUID?
     private var lastAnalysisRevision: UInt64 = 0
@@ -84,6 +89,23 @@ final class ActiveQuietZoneController: ObservableObject {
         [ActiveQuietZoneToneTelemetry] = []
     @Published private(set) var availableInjectionPeak: Double = 0
     @Published private(set) var lastErrorDescription: String?
+    @Published private(set) var spatialCalibration:
+        ActiveQuietZoneSpatialCalibration?
+    @Published private(set) var spatialReadinessMessage:
+        String = "Select a measurement project and at least two included positions."
+    @Published private(set) var spatialPredictions:
+        [ActiveQuietZoneSpatialSeatPrediction] = []
+    @Published private(set) var spatialSurveyActive = false
+    @Published private(set) var spatialSurveyProgress = 0
+    @Published private(set) var spatialSurveyMessage =
+        "Speaker-path positions must be prepared before a live noise survey."
+    @Published var requestedSpatialSurveyFrequencyHz: Double = 60
+
+    private var spatialStore: ActiveQuietZoneSpatialStore {
+        ActiveQuietZoneSpatialStore(
+            roomStore: ambient.projects.store
+        )
+    }
 
     private struct PersistenceState {
         var candidate: ActiveQuietZoneCandidateTone
@@ -141,6 +163,7 @@ final class ActiveQuietZoneController: ObservableObject {
     func prepareForUse() {
         do {
             try synchronizeSelectedPlaybackSystem()
+            refreshSpatialCalibration()
             if configuration.enabled {
                 try start()
             } else {
@@ -151,6 +174,236 @@ final class ActiveQuietZoneController: ObservableObject {
         } catch {
             fault(error, reason: .ambientEvidenceUnavailable)
         }
+    }
+
+    /// Saves a draft spatial measurement plan. This does not fabricate the
+    /// common-phase disturbance survey required for actual spatial ANC.
+    func prepareSpatialPositions() throws {
+        guard let project = ambient.projects.project,
+              let anchor = ambient.selectedModelPosition,
+              project.playbackSystemID == profiles.selectedSystemProfileID,
+              ambient.roomProjectMatchesSelectedMicrophone,
+              let microphone = project.microphone,
+              let uid = microphone.stableID, !uid.isEmpty
+        else {
+            throw ActiveQuietZoneSpatialError.incompatibleMeasurement
+        }
+        let included = project.measurements.filter {
+            $0.included && $0.weight > 0
+        }
+        guard (2...5).contains(included.count),
+              included.contains(where: { $0.id == anchor.id })
+        else {
+            throw ActiveQuietZoneSpatialError.insufficientPositions
+        }
+        let plan = ActiveQuietZoneSpatialCalibration(
+            projectID: project.id,
+            playbackSystemID: project.playbackSystemID,
+            anchorPositionID: anchor.id,
+            microphoneStableID: uid,
+            microphoneInputChannelIndex: microphone.inputChannelIndex,
+            sampleRate: anchor.sampleRate,
+            positions: included.map {
+                ActiveQuietZoneSpatialPosition(
+                    id: $0.id,
+                    weight: min(1, max(0.05, $0.weight))
+                )
+            }
+        )
+        try spatialStore.save(plan, for: project)
+        spatialCalibration = plan
+        spatialReadinessMessage =
+            "Speaker-path survey ready. A common-phase environmental tone survey and physical multi-seat verification are still required."
+    }
+
+    func refreshSpatialCalibration() {
+        guard let project = ambient.projects.project,
+              project.playbackSystemID == profiles.selectedSystemProfileID else {
+            spatialCalibration = nil
+            spatialReadinessMessage = "A matching Room Correction project is required."
+            return
+        }
+        do {
+            spatialCalibration = try spatialStore.load(for: project)
+            if spatialCalibration == nil {
+                spatialReadinessMessage = "Configure 2–5 included Room Correction positions and choose the live mic anchor."
+            } else if spatialCalibration?.surveys.isEmpty == true {
+                spatialReadinessMessage = "Spatial positions saved, but no common-phase disturbance survey is available. Spatial ANC cannot arm."
+            } else {
+                spatialReadinessMessage = "Coherent survey retained. A spatial candidate still requires a physical probe and measured re-verification."
+            }
+        } catch {
+            spatialCalibration = nil
+            spatialReadinessMessage = error.localizedDescription
+        }
+    }
+
+    private var spatialSurveyOrder: [UUID] {
+        guard let calibration = spatialCalibration else { return [] }
+        let other = calibration.positions.map(\.id).filter {
+            $0 != calibration.anchorPositionID
+        }
+        let perVisit = [calibration.anchorPositionID] + other
+            + [calibration.anchorPositionID]
+        return perVisit.flatMap { [$0, $0] }
+    }
+
+    var nextSpatialSurveyPositionName: String? {
+        guard spatialSurveyActive,
+              surveyCaptures.count < spatialSurveyOrder.count,
+              let project = ambient.projects.project
+        else { return nil }
+        let id = spatialSurveyOrder[surveyCaptures.count]
+        let name = project.measurements.first(where: {
+            $0.id == id
+        })?.name ?? "Measured seat"
+        return "\(name) · sample \(surveyCaptures.count % 2 + 1) of 2"
+    }
+
+    /// A quiet, uninterrupted input session is mandatory. The mic can move,
+    /// but the Mac must not play music or antinoise during this phase survey.
+    func beginSpatialSurvey() throws {
+        guard !configuration.enabled,
+              engine.lifecycleState != .running,
+              let calibration = spatialCalibration,
+              let project = ambient.projects.project,
+              calibration.anchorPositionID == ambient.selectedModelPosition?.id,
+              ambient.roomProjectMatchesSelectedMicrophone
+        else { throw ActiveQuietZoneSpatialError.mismatchedAnchor }
+        _ = try calibration.validated(against: project)
+        guard (20...150).contains(requestedSpatialSurveyFrequencyHz)
+        else { throw ActiveQuietZoneSpatialError.invalidSurvey }
+        try ambient.setQuietZoneObservationDemand(true)
+        surveyCaptures = []
+        spatialSurveyProgress = 0
+        surveyToneHz = requestedSpatialSurveyFrequencyHz
+        lastSurveyCaptureRevision = 0
+        spatialSurveyActive = true
+        spatialSurveyMessage =
+            "With playback stopped, keep the external LF tone steady. Move the mic to the displayed position, allow the input window to settle, then capture twice."
+    }
+
+    func captureSpatialSurveyWindow() throws {
+        guard spatialSurveyActive,
+              let calibration = spatialCalibration,
+              let project = ambient.projects.project,
+              let frequency = surveyToneHz,
+              surveyCaptures.count < spatialSurveyOrder.count,
+              engine.lifecycleState != .running,
+              let observation = ambient.phaseReferencedMicWindow(),
+              observation.revision != lastSurveyCaptureRevision,
+              abs(observation.sampleRate - calibration.sampleRate) < 0.5
+        else { throw ActiveQuietZoneSpatialError.inadequatePhaseReference }
+
+        let closestTone = observation.toneCandidates.min(by: {
+            abs($0.frequencyHz - frequency)
+                < abs($1.frequencyHz - frequency)
+        })
+        guard let closestTone,
+              abs(closestTone.frequencyHz - frequency) <= 2.0 else {
+            throw ActiveQuietZoneSpatialError.inadequatePhaseReference
+        }
+        let measuredFrequency = try spatialSurveyBuilder
+            .refinedToneFrequency(
+                samples: observation.samples,
+                sampleRate: observation.sampleRate,
+                near: closestTone.frequencyHz
+            )
+        // First capture locks the shared frequency estimate. Later captures
+        // must agree independently or the survey cannot be finalized.
+        let referenceFrequency = surveyCaptures.isEmpty
+            ? measuredFrequency : frequency
+        guard abs(measuredFrequency - referenceFrequency)
+                <= calibration.settings.maximumFrequencyDriftHz
+        else { throw ActiveQuietZoneSpatialError.inadequatePhaseReference }
+        if surveyCaptures.isEmpty {
+            surveyToneHz = referenceFrequency
+        }
+        let positionID = spatialSurveyOrder[surveyCaptures.count]
+        let captured = try spatialSurveyBuilder.capture(
+            positionID: positionID,
+            epoch: observation.epoch,
+            firstSampleIndex: observation.firstSampleIndex,
+            samples: observation.samples,
+            sampleRate: observation.sampleRate,
+            frequencyHz: referenceFrequency,
+            detectedFrequencyHz: measuredFrequency,
+            tonalProminenceDB: closestTone.prominenceDB,
+            stationaryScore: observation.stationarity
+        )
+        if let first = surveyCaptures.first,
+           first.epoch != captured.epoch {
+            throw ActiveQuietZoneSpatialError.inadequatePhaseReference
+        }
+        if let last = surveyCaptures.last,
+           captured.firstSampleIndex <= last.firstSampleIndex {
+            throw ActiveQuietZoneSpatialError.inadequatePhaseReference
+        }
+        surveyCaptures.append(captured)
+        lastSurveyCaptureRevision = observation.revision
+        spatialSurveyProgress = surveyCaptures.count
+        if surveyCaptures.count == spatialSurveyOrder.count {
+            do {
+                let result = try spatialSurveyBuilder.finish(
+                    calibration: calibration,
+                    captures: surveyCaptures
+                )
+                var updated = calibration
+                updated.surveys.removeAll {
+                    abs($0.frequencyHz - result.frequencyHz) < 0.1
+                }
+                updated.surveys.append(result)
+                try spatialStore.save(updated, for: project)
+                spatialCalibration = updated
+                spatialSurveyMessage =
+                    "Phase-closure survey accepted. Return the microphone to the anchor to use physical live verification. Sequential spatial reductions are still predictions until remeasured."
+                spatialSurveyActive = false
+                surveyToneHz = nil
+                surveyCaptures.removeAll()
+                try? ambient.setQuietZoneObservationDemand(false)
+                refreshSpatialCalibration()
+            } catch {
+                cancelSpatialSurvey()
+                throw error
+            }
+        }
+    }
+
+    func cancelSpatialSurvey() {
+        spatialSurveyActive = false
+        spatialSurveyProgress = 0
+        surveyToneHz = nil
+        surveyCaptures.removeAll()
+        lastSurveyCaptureRevision = 0
+        if !configuration.enabled {
+            try? ambient.setQuietZoneObservationDemand(false)
+        }
+        spatialSurveyMessage =
+            "Spatial survey cancelled or rejected. No phase coefficients were saved."
+    }
+
+    func setSpatialEnabled(_ enabled: Bool) throws {
+        guard let project = ambient.projects.project,
+              var calibration = spatialCalibration else {
+            throw ActiveQuietZoneSpatialError.incompatibleMeasurement
+        }
+        _ = try calibration.validated(against: project)
+        if enabled {
+            guard !calibration.surveys.isEmpty else {
+                throw ActiveQuietZoneSpatialError.inadequatePhaseReference
+            }
+        }
+        if engine.activeQuietZoneRuntimeTarget.active {
+            try engine.clearActiveQuietZoneRuntimeTarget(
+                fadeMilliseconds: configuration.faultFadeMilliseconds
+            )
+        }
+        resetRuntimeState()
+        calibration.settings.enabled = enabled
+        try spatialStore.save(calibration, for: project)
+        spatialCalibration = calibration
+        spatialPredictions = []
+        refreshSpatialCalibration()
     }
 
     func setEnabled(_ enabled: Bool) throws {
@@ -214,6 +467,7 @@ final class ActiveQuietZoneController: ObservableObject {
     }
 
     func stop() {
+        if spatialSurveyActive { cancelSpatialSurvey() }
         task?.cancel()
         task = nil
         try? engine.clearActiveQuietZoneRuntimeTarget(
@@ -457,6 +711,27 @@ final class ActiveQuietZoneController: ObservableObject {
             hold(.acousticModelRequired)
             return
         }
+        if spatialCalibration?.settings.enabled == true {
+            guard let calibration = spatialCalibration,
+                  let project = ambient.projects.project,
+                  calibration.projectID == project.id,
+                  calibration.playbackSystemID
+                    == profiles.selectedSystemProfileID,
+                  calibration.anchorPositionID == position.id,
+                  ambient.roomProjectMatchesSelectedMicrophone,
+                  (try? calibration.validated(against: project)) != nil,
+                  calibration.surveys.contains(where: {
+                      let age = Date().timeIntervalSince(
+                          $0.capturedAt
+                      )
+                      return age >= 0 && age < 1800
+                          && $0.commonPhaseReferenceValidated
+                  })
+            else {
+                hold(.phaseReferenceUnavailable)
+                return
+            }
+        }
         guard abs(
             position.sampleRate
                 - detailed.snapshot.sampleRate
@@ -561,11 +836,51 @@ final class ActiveQuietZoneController: ObservableObject {
     private func phaseCalibrationTarget(
         candidates: [ActiveQuietZoneCandidateTone]
     ) throws -> ActiveQuietZoneRuntimeTarget {
+        // The ambient FFT peak is a coarse bin center. A validated PR95
+        // survey provides the finer stationary oscillator frequency. Choose
+        // only one spatial tone so the per-seat predictions correspond to
+        // the eventual PR90 aggregate headroom-limited output.
+        let selected: [ActiveQuietZoneCandidateTone]
+        if let calibration = spatialCalibration,
+           calibration.settings.enabled {
+            let matching = candidates.compactMap {
+                candidate -> (
+                    ActiveQuietZoneCandidateTone,
+                    ActiveQuietZoneSpatialToneSurvey
+                )? in
+                guard let survey = calibration.surveys.first(where: {
+                    abs($0.frequencyHz - candidate.frequencyHz) <= 2.0
+                        && Date().timeIntervalSince($0.capturedAt) >= 0
+                        && Date().timeIntervalSince($0.capturedAt) < 1800
+                        && (try? calibration.validatedSurvey(
+                            for: $0.frequencyHz
+                        )) != nil
+                }) else {
+                    return nil
+                }
+                return (candidate, survey)
+            }
+            guard let match = matching.max(by: {
+                $0.0.levelDBFS < $1.0.levelDBFS
+            }) else {
+                throw ActiveQuietZoneSpatialError.inadequatePhaseReference
+            }
+            let (candidate, survey) = match
+            selected = [
+                ActiveQuietZoneCandidateTone(
+                    frequencyHz: survey.frequencyHz,
+                    levelDBFS: candidate.levelDBFS,
+                    prominenceDB: candidate.prominenceDB
+                )
+            ]
+        } else {
+            selected = candidates
+        }
         let probePeak = pow(
             10,
             configuration.probePeakDBFS / 20
         )
-        let count = max(candidates.count, 1)
+        let count = max(selected.count, 1)
         let aggregateShare =
             availableInjectionPeak / Double(count) * 0.75
         let amplitude = min(probePeak, aggregateShare)
@@ -575,7 +890,7 @@ final class ActiveQuietZoneController: ObservableObject {
         }
 
         let target = ActiveQuietZoneRuntimeTarget(
-            tones: candidates.map {
+            tones: selected.map {
                 ActiveQuietZoneRuntimeTone(
                     frequencyHz: $0.frequencyHz,
                     leftOutput: ActiveQuietZoneComplex(
@@ -659,7 +974,20 @@ final class ActiveQuietZoneController: ObservableObject {
         }
 
         let sampleRate = detailed.snapshot.sampleRate
+        let spatial = spatialCalibration?.settings.enabled == true
+        if spatial {
+            guard let calibration = spatialCalibration,
+                  let project = ambient.projects.project,
+                  calibration.projectID == project.id,
+                  calibration.playbackSystemID == profiles.selectedSystemProfileID,
+                  calibration.anchorPositionID == model.id,
+                  ambient.roomProjectMatchesSelectedMicrophone
+            else { throw ActiveQuietZoneSpatialError.mismatchedAnchor }
+            _ = try calibration.validated(against: project)
+        }
         var desiredTones: [ActiveQuietZoneRuntimeTone] = []
+        var latestSpatialPredictions:
+            [ActiveQuietZoneSpatialSeatPrediction] = []
         var telemetry: [ActiveQuietZoneToneTelemetry] = []
         var decisions:
             [ActiveQuietZoneVerification.Decision] = []
@@ -719,26 +1047,55 @@ final class ActiveQuietZoneController: ObservableObject {
                 errorPhasor
                 - leftPath * leftReference
                 - rightPath * rightReference
-            let solution = try planner.solveStereo(
-                frequencyHz: frequency,
-                disturbance: disturbance,
-                leftSecondaryPath: leftPath,
-                rightSecondaryPath: rightPath,
-                availableInjectionPeak:
-                    availableInjectionPeak,
-                configuration: configuration
-            )
+            let outputLeft: ActiveQuietZoneComplex
+            let outputRight: ActiveQuietZoneComplex
+            let predictedDB: Double
+            if spatial {
+                guard let calibration = spatialCalibration,
+                      let project = ambient.projects.project,
+                      let survey = try? calibration.validatedSurvey(
+                        for: frequency
+                      ),
+                      Date().timeIntervalSince(survey.capturedAt) < 1800,
+                      Date().timeIntervalSince(survey.capturedAt) >= 0
+                else { throw ActiveQuietZoneSpatialError.inadequatePhaseReference }
+                let candidate = try spatialPlanner.solve(
+                    calibration: calibration,
+                    project: project,
+                    frequencyHz: frequency,
+                    liveAnchorDisturbance: disturbance,
+                    availableInjectionPeak: availableInjectionPeak,
+                    quietZoneConfiguration: configuration
+                )
+                outputLeft = candidate.leftOutput
+                outputRight = candidate.rightOutput
+                predictedDB = candidate.weightedReductionDB
+                latestSpatialPredictions = candidate.predictions
+            } else {
+                let solution = try planner.solveStereo(
+                    frequencyHz: frequency,
+                    disturbance: disturbance,
+                    leftSecondaryPath: leftPath,
+                    rightSecondaryPath: rightPath,
+                    availableInjectionPeak:
+                        availableInjectionPeak,
+                    configuration: configuration
+                )
+                outputLeft = solution.leftOutput
+                outputRight = solution.rightOutput
+                predictedDB = solution.predictedReductionDB
+            }
 
             let desiredLeft =
                 try planner.runtimeCoefficient(
                     sourcePhasorInMicrophoneBasis:
-                        solution.leftOutput,
+                        outputLeft,
                     oscillatorPhaseBasis: basis
                 )
             let desiredRight =
                 try planner.runtimeCoefficient(
                     sourcePhasorInMicrophoneBasis:
-                        solution.rightOutput,
+                        outputRight,
                     oscillatorPhaseBasis: basis
                 )
             desiredTones.append(
@@ -767,7 +1124,7 @@ final class ActiveQuietZoneController: ObservableObject {
                     measuredReductionDB:
                         verification.measuredReductionDB,
                     predictedReductionDB:
-                        solution.predictedReductionDB,
+                        predictedDB,
                     leftSourceLevelDBFS:
                         desiredLeft.magnitudeDB,
                     rightSourceLevelDBFS:
@@ -776,6 +1133,7 @@ final class ActiveQuietZoneController: ObservableObject {
             )
         }
 
+        spatialPredictions = latestSpatialPredictions
         let desired = try aggregateLimitedTarget(
             tones: desiredTones
         )
@@ -902,6 +1260,9 @@ final class ActiveQuietZoneController: ObservableObject {
                 .activeQuietZone
             ?? ActiveQuietZoneConfiguration()
         _ = try configuration.validated()
+        spatialCalibration = nil
+        spatialPredictions = []
+        if spatialSurveyActive { cancelSpatialSurvey() }
         activeSystemID = systemID
         if configuration.enabled {
             try ambient.setQuietZoneObservationDemand(true)
@@ -954,6 +1315,7 @@ final class ActiveQuietZoneController: ObservableObject {
         persistence.removeAll()
         controlledFrequenciesHz = []
         toneTelemetry = []
+        spatialPredictions = []
         availableInjectionPeak = 0
         lastAnalysisRevision = 0
         weakActiveWindows = 0

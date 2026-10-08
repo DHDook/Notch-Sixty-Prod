@@ -131,6 +131,9 @@
 		F94000000000000000000002 /* RoomTreatmentVerification.swift in Sources */ = {isa = PBXBuildFile; fileRef = F94000000000000000000012 /* RoomTreatmentVerification.swift */; };
 		F94000000000000000000003 /* ProductionRoomTreatmentDesignSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = F94000000000000000000013 /* ProductionRoomTreatmentDesignSection.swift */; };
 		F94000000000000000000004 /* RoomTreatmentDesignVerificationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F94000000000000000000014 /* RoomTreatmentDesignVerificationTests.swift */; };
+		F95000000000000000000001 /* ActiveQuietZoneSpatial.swift in Sources */ = {isa = PBXBuildFile; fileRef = F95000000000000000000011 /* ActiveQuietZoneSpatial.swift */; };
+		F95000000000000000000002 /* ActiveQuietZoneSpatialTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F95000000000000000000012 /* ActiveQuietZoneSpatialTests.swift */; };
+		F95000000000000000000003 /* ActiveQuietZoneSpatialSurvey.swift in Sources */ = {isa = PBXBuildFile; fileRef = F95000000000000000000013 /* ActiveQuietZoneSpatialSurvey.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -281,6 +284,9 @@
 		F94000000000000000000012 /* RoomTreatmentVerification.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomTreatmentVerification.swift; sourceTree = "<group>"; };
 		F94000000000000000000013 /* ProductionRoomTreatmentDesignSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionRoomTreatmentDesignSection.swift; sourceTree = "<group>"; };
 		F94000000000000000000014 /* RoomTreatmentDesignVerificationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomTreatmentDesignVerificationTests.swift; sourceTree = "<group>"; };
+		F95000000000000000000011 /* ActiveQuietZoneSpatial.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveQuietZoneSpatial.swift; sourceTree = "<group>"; };
+		F95000000000000000000012 /* ActiveQuietZoneSpatialTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveQuietZoneSpatialTests.swift; sourceTree = "<group>"; };
+		F95000000000000000000013 /* ActiveQuietZoneSpatialSurvey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveQuietZoneSpatialSurvey.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -357,6 +363,7 @@
 				F92000000000000000000014 /* RoomTreatmentAdvisorTests.swift */,
 				F93000000000000000000013 /* RoomGeometryPlacementTests.swift */,
 				F94000000000000000000014 /* RoomTreatmentDesignVerificationTests.swift */,
+				F95000000000000000000012 /* ActiveQuietZoneSpatialTests.swift */,
 			);
 			path = NotchSixtyTests;
 			sourceTree = "<group>";
@@ -389,6 +396,8 @@
 				F72000000000000000000011 /* AmbientFieldAnalyzer.swift */,
 				F89000000000000000000011 /* AmbientCompensation.swift */,
 				F90000000000000000000011 /* ActiveQuietZone.swift */,
+				F95000000000000000000011 /* ActiveQuietZoneSpatial.swift */,
+				F95000000000000000000013 /* ActiveQuietZoneSpatialSurvey.swift */,
 				F73000000000000000000011 /* MIMORoomTreatmentDesigner.swift */,
 				F74000000000000000000011 /* MIMORoomTreatmentFIRCompiler.swift */,
 				F75000000000000000000011 /* MIMORoomTreatmentVerification.swift */,
@@ -578,6 +587,8 @@
 				F93000000000000000000001 /* RoomGeometryPlacement.swift in Sources */,
 				F93000000000000000000002 /* ProductionRoomGeometrySection.swift in Sources */,
 				F94000000000000000000001 /* RoomPassiveTreatment.swift in Sources */,
+				F95000000000000000000001 /* ActiveQuietZoneSpatial.swift in Sources */,
+				F95000000000000000000003 /* ActiveQuietZoneSpatialSurvey.swift in Sources */,
 				F94000000000000000000002 /* RoomTreatmentVerification.swift in Sources */,
 				F94000000000000000000003 /* ProductionRoomTreatmentDesignSection.swift in Sources */,
 				F79000000000000000000001 /* AudioUnitHostFoundation.swift in Sources */,
@@ -636,6 +647,7 @@
 				F92000000000000000000004 /* RoomTreatmentAdvisorTests.swift in Sources */,
 				F93000000000000000000003 /* RoomGeometryPlacementTests.swift in Sources */,
 				F94000000000000000000004 /* RoomTreatmentDesignVerificationTests.swift in Sources */,
+				F95000000000000000000002 /* ActiveQuietZoneSpatialTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
