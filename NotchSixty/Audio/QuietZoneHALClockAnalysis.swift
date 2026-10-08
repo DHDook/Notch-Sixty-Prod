@@ -94,15 +94,17 @@ struct QuietZoneHALClockAnalyzer: Sendable {
         let outputOffset = abs(output.rate - trace.nominalSampleRate)
             / trace.nominalSampleRate * 1_000_000
 
+        // Diagnose clock timestamp instability first: large jitter can bias
+        // a finite-window rate fit, making an unstable clock appear to drift.
+        guard input.worstResidual <= Self.maximumWorstResidualSeconds,
+              output.worstResidual <= Self.maximumWorstResidualSeconds else {
+            throw QuietZoneHALClockError.excessiveJitter
+        }
+
         guard relative <= Self.maximumRelativeDriftPPM,
               inputOffset <= Self.maximumNominalRateErrorPPM,
               outputOffset <= Self.maximumNominalRateErrorPPM else {
             throw QuietZoneHALClockError.excessiveDrift
-        }
-
-        guard input.worstResidual <= Self.maximumWorstResidualSeconds,
-              output.worstResidual <= Self.maximumWorstResidualSeconds else {
-            throw QuietZoneHALClockError.excessiveJitter
         }
         return QuietZoneHALClockHealth(
             measuredInputRateHz: input.rate,
