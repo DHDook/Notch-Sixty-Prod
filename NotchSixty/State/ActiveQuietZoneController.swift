@@ -302,6 +302,22 @@ final class ActiveQuietZoneController: ObservableObject {
         guard let closestTone else {
             throw ActiveQuietZoneSpatialError.inadequatePhaseReference
         }
+        let measuredFrequency = try spatialSurveyBuilder
+            .refinedToneFrequency(
+                samples: observation.samples,
+                sampleRate: observation.sampleRate,
+                near: closestTone.frequencyHz
+            )
+        // First capture locks the shared frequency estimate. Later captures
+        // must agree independently or the survey cannot be finalized.
+        let referenceFrequency = surveyCaptures.isEmpty
+            ? measuredFrequency : frequency
+        guard abs(measuredFrequency - referenceFrequency)
+                <= spatialCalibration!.settings.maximumFrequencyDriftHz
+        else { throw ActiveQuietZoneSpatialError.inadequatePhaseReference }
+        if surveyCaptures.isEmpty {
+            surveyToneHz = referenceFrequency
+        }
         let positionID = spatialSurveyOrder[surveyCaptures.count]
         let captured = try spatialSurveyBuilder.capture(
             positionID: positionID,
@@ -309,8 +325,8 @@ final class ActiveQuietZoneController: ObservableObject {
             firstSampleIndex: observation.firstSampleIndex,
             samples: observation.samples,
             sampleRate: observation.sampleRate,
-            frequencyHz: frequency,
-            detectedFrequencyHz: closestTone.frequencyHz,
+            frequencyHz: referenceFrequency,
+            detectedFrequencyHz: measuredFrequency,
             tonalProminenceDB: closestTone.prominenceDB,
             stationaryScore: observation.stationarity
         )
