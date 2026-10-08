@@ -65,6 +65,7 @@ final class ActiveQuietZoneController: ObservableObject {
     let ambient: AmbientCompensationController
 
     private let planner = ActiveQuietZonePlanner()
+    private let spatialPlanner = ActiveQuietZoneSpatialPlanner()
     private var task: Task<Void, Never>?
     private var activeSystemID: UUID?
     private var lastAnalysisRevision: UInt64 = 0
@@ -84,6 +85,18 @@ final class ActiveQuietZoneController: ObservableObject {
         [ActiveQuietZoneToneTelemetry] = []
     @Published private(set) var availableInjectionPeak: Double = 0
     @Published private(set) var lastErrorDescription: String?
+    @Published private(set) var spatialCalibration:
+        ActiveQuietZoneSpatialCalibration?
+    @Published private(set) var spatialReadinessMessage:
+        String = "Select a measurement project and at least two included positions."
+    @Published private(set) var spatialPredictions:
+        [ActiveQuietZoneSpatialSeatPrediction] = []
+
+    private var spatialStore: ActiveQuietZoneSpatialStore {
+        ActiveQuietZoneSpatialStore(
+            roomStore: ambient.projects.store
+        )
+    }
 
     private struct PersistenceState {
         var candidate: ActiveQuietZoneCandidateTone
@@ -141,6 +154,7 @@ final class ActiveQuietZoneController: ObservableObject {
     func prepareForUse() {
         do {
             try synchronizeSelectedPlaybackSystem()
+            refreshSpatialCalibration()
             if configuration.enabled {
                 try start()
             } else {
@@ -151,6 +165,92 @@ final class ActiveQuietZoneController: ObservableObject {
         } catch {
             fault(error, reason: .ambientEvidenceUnavailable)
         }
+    }
+
+    /// Saves a draft spatial measurement plan. This does not fabricate the
+    /// common-phase disturbance survey required for actual spatial ANC.
+    func prepareSpatialPositions() throws {
+        guard let project = ambient.projects.project,
+              let anchor = ambient.selectedModelPosition,
+              project.playbackSystemID == profiles.selectedSystemProfileID,
+              ambient.roomProjectMatchesSelectedMicrophone,
+              let microphone = project.microphone,
+              let uid = microphone.stableID, !uid.isEmpty
+        else {
+            throw ActiveQuietZoneSpatialError.incompatibleMeasurement
+        }
+        let included = project.measurements.filter {
+            $0.included && $0.weight > 0
+        }
+        guard (2...5).contains(included.count),
+              included.contains(where: { $0.id == anchor.id })
+        else {
+            throw ActiveQuietZoneSpatialError.insufficientPositions
+        }
+        let plan = ActiveQuietZoneSpatialCalibration(
+            projectID: project.id,
+            playbackSystemID: project.playbackSystemID,
+            anchorPositionID: anchor.id,
+            microphoneStableID: uid,
+            microphoneInputChannelIndex: microphone.inputChannelIndex,
+            sampleRate: anchor.sampleRate,
+            positions: included.map {
+                ActiveQuietZoneSpatialPosition(
+                    id: $0.id,
+                    weight: min(1, max(0.05, $0.weight))
+                )
+            }
+        )
+        try spatialStore.save(plan, for: project)
+        spatialCalibration = plan
+        spatialReadinessMessage =
+            "Speaker-path survey ready. A common-phase environmental tone survey and physical multi-seat verification are still required."
+    }
+
+    func refreshSpatialCalibration() {
+        guard let project = ambient.projects.project,
+              project.playbackSystemID == profiles.selectedSystemProfileID else {
+            spatialCalibration = nil
+            spatialReadinessMessage = "A matching Room Correction project is required."
+            return
+        }
+        do {
+            spatialCalibration = try spatialStore.load(for: project)
+            if spatialCalibration == nil {
+                spatialReadinessMessage = "Configure 2–5 included Room Correction positions and choose the live mic anchor."
+            } else if spatialCalibration?.surveys.isEmpty == true {
+                spatialReadinessMessage = "Spatial positions saved, but no common-phase disturbance survey is available. Spatial ANC cannot arm."
+            } else {
+                spatialReadinessMessage = "Coherent survey retained. A spatial candidate still requires a physical probe and measured re-verification."
+            }
+        } catch {
+            spatialCalibration = nil
+            spatialReadinessMessage = error.localizedDescription
+        }
+    }
+
+    func setSpatialEnabled(_ enabled: Bool) throws {
+        guard let project = ambient.projects.project,
+              var calibration = spatialCalibration else {
+            throw ActiveQuietZoneSpatialError.incompatibleMeasurement
+        }
+        _ = try calibration.validated(against: project)
+        if enabled {
+            guard !calibration.surveys.isEmpty else {
+                throw ActiveQuietZoneSpatialError.inadequatePhaseReference
+            }
+        }
+        if engine.activeQuietZoneRuntimeTarget.active {
+            try engine.clearActiveQuietZoneRuntimeTarget(
+                fadeMilliseconds: configuration.faultFadeMilliseconds
+            )
+        }
+        resetRuntimeState()
+        calibration.settings.enabled = enabled
+        try spatialStore.save(calibration, for: project)
+        spatialCalibration = calibration
+        spatialPredictions = []
+        refreshSpatialCalibration()
     }
 
     func setEnabled(_ enabled: Bool) throws {
@@ -659,7 +759,20 @@ final class ActiveQuietZoneController: ObservableObject {
         }
 
         let sampleRate = detailed.snapshot.sampleRate
+        let spatial = spatialCalibration?.settings.enabled == true
+        if spatial {
+            guard let calibration = spatialCalibration,
+                  let project = ambient.projects.project,
+                  calibration.projectID == project.id,
+                  calibration.playbackSystemID == profiles.selectedSystemProfileID,
+                  calibration.anchorPositionID == model.id,
+                  ambient.roomProjectMatchesSelectedMicrophone
+            else { throw ActiveQuietZoneSpatialError.mismatchedAnchor }
+            _ = try calibration.validated(against: project)
+        }
         var desiredTones: [ActiveQuietZoneRuntimeTone] = []
+        var latestSpatialPredictions:
+            [ActiveQuietZoneSpatialSeatPrediction] = []
         var telemetry: [ActiveQuietZoneToneTelemetry] = []
         var decisions:
             [ActiveQuietZoneVerification.Decision] = []
@@ -719,26 +832,55 @@ final class ActiveQuietZoneController: ObservableObject {
                 errorPhasor
                 - leftPath * leftReference
                 - rightPath * rightReference
-            let solution = try planner.solveStereo(
-                frequencyHz: frequency,
-                disturbance: disturbance,
-                leftSecondaryPath: leftPath,
-                rightSecondaryPath: rightPath,
-                availableInjectionPeak:
-                    availableInjectionPeak,
-                configuration: configuration
-            )
+            let outputLeft: ActiveQuietZoneComplex
+            let outputRight: ActiveQuietZoneComplex
+            let predictedDB: Double
+            if spatial {
+                guard let calibration = spatialCalibration,
+                      let project = ambient.projects.project,
+                      let survey = try? calibration.validatedSurvey(
+                        for: frequency
+                      ),
+                      Date().timeIntervalSince(survey.capturedAt) < 1800,
+                      Date().timeIntervalSince(survey.capturedAt) >= 0
+                else { throw ActiveQuietZoneSpatialError.inadequatePhaseReference }
+                let candidate = try spatialPlanner.solve(
+                    calibration: calibration,
+                    project: project,
+                    frequencyHz: frequency,
+                    liveAnchorDisturbance: disturbance,
+                    availableInjectionPeak: availableInjectionPeak,
+                    quietZoneConfiguration: configuration
+                )
+                outputLeft = candidate.leftOutput
+                outputRight = candidate.rightOutput
+                predictedDB = candidate.weightedReductionDB
+                latestSpatialPredictions = candidate.predictions
+            } else {
+                let solution = try planner.solveStereo(
+                    frequencyHz: frequency,
+                    disturbance: disturbance,
+                    leftSecondaryPath: leftPath,
+                    rightSecondaryPath: rightPath,
+                    availableInjectionPeak:
+                        availableInjectionPeak,
+                    configuration: configuration
+                )
+                outputLeft = solution.leftOutput
+                outputRight = solution.rightOutput
+                predictedDB = solution.predictedReductionDB
+            }
 
             let desiredLeft =
                 try planner.runtimeCoefficient(
                     sourcePhasorInMicrophoneBasis:
-                        solution.leftOutput,
+                        outputLeft,
                     oscillatorPhaseBasis: basis
                 )
             let desiredRight =
                 try planner.runtimeCoefficient(
                     sourcePhasorInMicrophoneBasis:
-                        solution.rightOutput,
+                        outputRight,
                     oscillatorPhaseBasis: basis
                 )
             desiredTones.append(
@@ -767,7 +909,7 @@ final class ActiveQuietZoneController: ObservableObject {
                     measuredReductionDB:
                         verification.measuredReductionDB,
                     predictedReductionDB:
-                        solution.predictedReductionDB,
+                        predictedDB,
                     leftSourceLevelDBFS:
                         desiredLeft.magnitudeDB,
                     rightSourceLevelDBFS:
@@ -776,6 +918,7 @@ final class ActiveQuietZoneController: ObservableObject {
             )
         }
 
+        spatialPredictions = latestSpatialPredictions
         let desired = try aggregateLimitedTarget(
             tones: desiredTones
         )
@@ -902,6 +1045,8 @@ final class ActiveQuietZoneController: ObservableObject {
                 .activeQuietZone
             ?? ActiveQuietZoneConfiguration()
         _ = try configuration.validated()
+        spatialCalibration = nil
+        spatialPredictions = []
         activeSystemID = systemID
         if configuration.enabled {
             try ambient.setQuietZoneObservationDemand(true)
@@ -954,6 +1099,7 @@ final class ActiveQuietZoneController: ObservableObject {
         persistence.removeAll()
         controlledFrequenciesHz = []
         toneTelemetry = []
+        spatialPredictions = []
         availableInjectionPeak = 0
         lastAnalysisRevision = 0
         weakActiveWindows = 0
