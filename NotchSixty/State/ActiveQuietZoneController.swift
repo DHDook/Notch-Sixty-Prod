@@ -299,7 +299,8 @@ final class ActiveQuietZoneController: ObservableObject {
             abs($0.frequencyHz - frequency)
                 < abs($1.frequencyHz - frequency)
         })
-        guard let closestTone else {
+        guard let closestTone,
+              abs(closestTone.frequencyHz - frequency) <= 2.0 else {
             throw ActiveQuietZoneSpatialError.inadequatePhaseReference
         }
         let measuredFrequency = try spatialSurveyBuilder
@@ -709,6 +710,27 @@ final class ActiveQuietZoneController: ObservableObject {
         guard let position = ambient.selectedModelPosition else {
             hold(.acousticModelRequired)
             return
+        }
+        if spatialCalibration?.settings.enabled == true {
+            guard let calibration = spatialCalibration,
+                  let project = ambient.projects.project,
+                  calibration.projectID == project.id,
+                  calibration.playbackSystemID
+                    == profiles.selectedSystemProfileID,
+                  calibration.anchorPositionID == position.id,
+                  ambient.roomProjectMatchesSelectedMicrophone,
+                  (try? calibration.validated(against: project)) != nil,
+                  calibration.surveys.contains(where: {
+                      let age = Date().timeIntervalSince(
+                          $0.capturedAt
+                      )
+                      return age >= 0 && age < 1800
+                          && $0.commonPhaseReferenceValidated
+                  })
+            else {
+                hold(.phaseReferenceUnavailable)
+                return
+            }
         }
         guard abs(
             position.sampleRate
