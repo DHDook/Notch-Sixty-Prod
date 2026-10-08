@@ -82,6 +82,20 @@ final class QuietZoneHALClockAnalysisTests: XCTestCase {
         }
     }
 
+    func testNonOverlappingStableClockTracesCannotQualify() {
+        let delayed = observations().map {
+            QuietZoneHALClockObservation(
+                hostTimeSeconds: $0.hostTimeSeconds + 60,
+                sampleFrame: $0.sampleFrame
+            )
+        }
+        XCTAssertThrowsError(try analyzer.analyze(
+            trace(output: delayed)
+        )) { error in
+            XCTAssertEqual(error as? QuietZoneHALClockError, .invalidTimebase)
+        }
+    }
+
     func testUnrelatedOrInvalidTimebaseCannotQualify() {
         var bad = trace()
         bad.nominalSampleRate = .nan
