@@ -83,6 +83,8 @@
 		F89000000000000000000002 /* AmbientCompensationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F89000000000000000000012 /* AmbientCompensationTests.swift */; };
 		F90000000000000000000001 /* ActiveQuietZone.swift in Sources */ = {isa = PBXBuildFile; fileRef = F90000000000000000000011 /* ActiveQuietZone.swift */; };
 		F90000000000000000000002 /* ActiveQuietZoneTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F90000000000000000000012 /* ActiveQuietZoneTests.swift */; };
+		F96000000000000000000001 /* QuietZoneFeedForward.swift in Sources */ = {isa = PBXBuildFile; fileRef = F96000000000000000000011 /* QuietZoneFeedForward.swift */; };
+		F96000000000000000000002 /* QuietZoneFeedForwardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F96000000000000000000012 /* QuietZoneFeedForwardTests.swift */; };
 		F73000000000000000000001 /* MIMORoomTreatmentDesigner.swift in Sources */ = {isa = PBXBuildFile; fileRef = F73000000000000000000011 /* MIMORoomTreatmentDesigner.swift */; };
 		F73000000000000000000002 /* MIMORoomTreatmentDesignerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F73000000000000000000012 /* MIMORoomTreatmentDesignerTests.swift */; };
 		F74000000000000000000001 /* MIMORoomTreatmentFIRCompiler.swift in Sources */ = {isa = PBXBuildFile; fileRef = F74000000000000000000011 /* MIMORoomTreatmentFIRCompiler.swift */; };
@@ -237,6 +239,8 @@
 		F89000000000000000000012 /* AmbientCompensationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AmbientCompensationTests.swift; sourceTree = "<group>"; };
 		F90000000000000000000011 /* ActiveQuietZone.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveQuietZone.swift; sourceTree = "<group>"; };
 		F90000000000000000000012 /* ActiveQuietZoneTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveQuietZoneTests.swift; sourceTree = "<group>"; };
+		F96000000000000000000011 /* QuietZoneFeedForward.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForward.swift; sourceTree = "<group>"; };
+		F96000000000000000000012 /* QuietZoneFeedForwardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForwardTests.swift; sourceTree = "<group>"; };
 		F73000000000000000000011 /* MIMORoomTreatmentDesigner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMORoomTreatmentDesigner.swift; sourceTree = "<group>"; };
 		F73000000000000000000012 /* MIMORoomTreatmentDesignerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMORoomTreatmentDesignerTests.swift; sourceTree = "<group>"; };
 		F74000000000000000000011 /* MIMORoomTreatmentFIRCompiler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMORoomTreatmentFIRCompiler.swift; sourceTree = "<group>"; };
@@ -349,6 +353,7 @@
 				F72000000000000000000012 /* AmbientFieldAnalyzerTests.swift */,
 				F89000000000000000000012 /* AmbientCompensationTests.swift */,
 				F90000000000000000000012 /* ActiveQuietZoneTests.swift */,
+				F96000000000000000000012 /* QuietZoneFeedForwardTests.swift */,
 				F73000000000000000000012 /* MIMORoomTreatmentDesignerTests.swift */,
 				F74000000000000000000012 /* MIMORoomTreatmentFIRCompilerTests.swift */,
 				F75000000000000000000012 /* MIMORoomTreatmentVerificationTests.swift */,
@@ -396,6 +401,7 @@
 				F72000000000000000000011 /* AmbientFieldAnalyzer.swift */,
 				F89000000000000000000011 /* AmbientCompensation.swift */,
 				F90000000000000000000011 /* ActiveQuietZone.swift */,
+				F96000000000000000000011 /* QuietZoneFeedForward.swift */,
 				F95000000000000000000011 /* ActiveQuietZoneSpatial.swift */,
 				F95000000000000000000013 /* ActiveQuietZoneSpatialSurvey.swift */,
 				F73000000000000000000011 /* MIMORoomTreatmentDesigner.swift */,
@@ -577,6 +583,7 @@
 				F72000000000000000000001 /* AmbientFieldAnalyzer.swift in Sources */,
 				F89000000000000000000001 /* AmbientCompensation.swift in Sources */,
 				F90000000000000000000001 /* ActiveQuietZone.swift in Sources */,
+				F96000000000000000000001 /* QuietZoneFeedForward.swift in Sources */,
 				F73000000000000000000001 /* MIMORoomTreatmentDesigner.swift in Sources */,
 				F74000000000000000000001 /* MIMORoomTreatmentFIRCompiler.swift in Sources */,
 				F75000000000000000000001 /* MIMORoomTreatmentVerification.swift in Sources */,
@@ -633,6 +640,7 @@
 				F72000000000000000000002 /* AmbientFieldAnalyzerTests.swift in Sources */,
 				F89000000000000000000002 /* AmbientCompensationTests.swift in Sources */,
 				F90000000000000000000002 /* ActiveQuietZoneTests.swift in Sources */,
+				F96000000000000000000002 /* QuietZoneFeedForwardTests.swift in Sources */,
 				F73000000000000000000002 /* MIMORoomTreatmentDesignerTests.swift in Sources */,
 				F74000000000000000000002 /* MIMORoomTreatmentFIRCompilerTests.swift in Sources */,
 				F75000000000000000000002 /* MIMORoomTreatmentVerificationTests.swift in Sources */,
