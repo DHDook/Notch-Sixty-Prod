@@ -123,3 +123,38 @@ FIR**. A subsequent stable FIR compilation with actual latency/phase limits
 is needed, together with live echo control, clock synchronization, reference
 input→output scheduling and physical verification. The current project
 continues to refuse live feed-forward arming.
+
+
+## Fourth PR96 engineering slice — causal FIR compiler + monitored no-output rehearsal
+
+- `QuietZoneCausalFIRCompiler` maps offline complex LF targets into a
+  **real, causal short FIR**, using damped real-valued least squares,
+  substantial penalties on late taps and pivoted elimination. The result is
+  rejected if the causal fit is poor or if replaying its actual FIR response
+  through the measured left/right speaker-to-listener model no longer gives
+  plausible benefit with bounded output/headroom and reference leakage.
+- The compiler produces `QuietZoneCausalFIRCandidate` carrying actual
+  coefficients and provenance. **liveDeploymentAuthorized is always false**:
+  this is not a hardware-output permit.
+- `QuietZoneFeedForwardRehearsal` connects the already-implemented native
+  microphone ring to the native FIR, tracking callback frame timing,
+  discontinuities, input faults and dry-run processing cost. Its computed
+  left/right anti-noise samples are explicitly **discarded** and never mixed
+  into the audio render graph.
+- Separate tests verify the causal fit, physical-model regression checks,
+  input clock rewind, dropped sample discontinuities, dry-run silence and
+  native FIR configuration.
+
+### Why the software still cannot responsibly arm live feed-forward ANC
+
+The app has not yet demonstrated **independently timestamped output sample
+deadlines** or clock-aligned ADC/DAC scheduling on the actual route. Neither
+a successfully compiled causal FIR nor rapid reference acquisition proves
+that the anti-noise wave can reach the listener ahead of a changing physical
+disturbance. A genuine synchronized controlled source, measured anti-noise
+speaker impulse response and measured listener-seat before/after reduction
+are mandatory commissioning checks.
+
+Unpredictable high-frequency speech is spatially and temporally incoherent
+in many ordinary rooms; even measured low-frequency causality does not imply
+broadband party-noise cancellation.
