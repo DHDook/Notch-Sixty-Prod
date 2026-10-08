@@ -26,3 +26,51 @@ The solver optimizes weighted LF complex residual energy with regularization and
 6. Only then explicitly arm the validated multi-position strategy, with one live physical monitor at the anchor; fail closed on source drift or changed routing.
 
 PR95 must not be marketed as whole-room ANC.
+## Implemented single-microphone survey
+
+The microphone-only observation path now retains the frame index and a
+session epoch for each published residual window. Playback must be stopped
+during this survey; PR89 modeled playback subtraction is not used as an
+acceptable substitute for a stationary external source.
+
+A capture takes the strongest nearby tone, refines its frequency below FFT
+bin resolution, and rotates its complex phasor into the continuous input
+clock basis. The user sequentially makes **two observations at each location**,
+beginning and ending with the anchor. The survey builder checks:
+- an uninterrupted input session epoch;
+- source frequency and stationarity across captures;
+- narrowband prominence and adequate capture length;
+- duplicate observations at each location for phase/level stability;
+- a final return-to-anchor phase and level closure;
+- no more than three minutes in the full sequence.
+
+A failed gate prevents saving a phase-coherent survey. Successful records are
+kept in the project-scoped sidecar. Mic audio itself is not persisted.
+
+This method is appropriate for a strongly stationary LF tone and requires the
+source to be stable over the entire mic movement. It is not appropriate for
+moving speakers, party conversations, broadband interruptions or shifting
+mechanical noise. The user must then return the mic to the calibrated anchor
+for realtime PR90 verification.
+
+**Caveat:** software-side counters cannot by themselves prove that the
+hardware input experienced zero lost samples or that the source remained
+globally phase coherent between captures. Return-to-anchor and
+within-position coherence guards are necessary but not a substitute for
+simultaneous reference and error microphones.
+
+## Spatial live operation
+
+With an explicit enabled spatial strategy and a recent passing survey,
+the PR90 probe/controller solves regularized weighted complex residuals
+for all sampled positions, respects the same per-source/aggregate headroom
+and frequency limits, and rejects candidates that predict unacceptable
+seat regression. A passing model is not independent physical measurement
+of the other seats.
+
+The runtime physical microphone at the anchor still gates all coefficient
+updates and faults on measured regression. The spatial model expires after
+30 minutes; a change in the noise field can invalidate its predictions even
+sooner. Multi-position before/after verification requires physically moving
+and remeasuring the mic between seats; PR95 does not claim simultaneous
+verification or whole-room broadband cancellation.
