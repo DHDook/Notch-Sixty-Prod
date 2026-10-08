@@ -10,6 +10,9 @@ import Foundation
 final class RoomTreatmentAdvisorController: ObservableObject {
     let store: RoomCorrectionProjectStore
     let geometryStore: RoomGeometryStore
+    let treatmentStore: RoomPassiveTreatmentStore
+    private let treatmentDesigner = RoomPassiveTreatmentDesigner()
+    private let treatmentVerifier = RoomTreatmentVerifier()
     private let analyzer = RoomTreatmentAdvisorAnalyzer()
     private let geometryAnalyzer =
         RoomGeometryPlacementAnalyzer()
@@ -28,12 +31,33 @@ final class RoomTreatmentAdvisorController: ObservableObject {
         RoomGeometryAnalysis?
     @Published private(set) var geometryValidationMessage:
         String?
+    @Published var treatmentDraft: RoomPassiveTreatmentPlan?
+    @Published private(set) var savedTreatmentPlan: RoomPassiveTreatmentPlan?
+    @Published private(set) var treatmentAnalysis: RoomPassiveTreatmentDesignSummary?
+    @Published private(set) var treatmentMessage: String?
+    @Published private(set) var verificationReport: RoomTreatmentVerificationReport?
+    @Published var verificationFollowUpID: UUID?
     @Published private(set) var lastErrorDescription: String?
 
     init(store: RoomCorrectionProjectStore) {
         self.store = store
         self.geometryStore =
             RoomGeometryStore(projectStore: store)
+        self.treatmentStore = RoomPassiveTreatmentStore(projectStore: store)
+    }
+
+    var treatmentHasUnsavedChanges: Bool {
+        treatmentDraft != savedTreatmentPlan
+    }
+
+    var canEditTreatment: Bool {
+        geometryDraft != nil &&
+        geometryDraft == savedGeometry &&
+        selectedProjectID != nil
+    }
+
+    var treatmentFollowUpProjects: [RoomCorrectionProject] {
+        availableProjects.filter { $0.id != selectedProjectID }
     }
 
     var geometryHasUnsavedChanges: Bool {
@@ -90,6 +114,10 @@ final class RoomTreatmentAdvisorController: ObservableObject {
             selectedProjectID = nil
             selectedProject = nil
             report = nil
+            treatmentDraft = nil
+            savedTreatmentPlan = nil
+            treatmentAnalysis = nil
+            verificationReport = nil
             lastErrorDescription = error.localizedDescription
         }
     }
@@ -106,11 +134,20 @@ final class RoomTreatmentAdvisorController: ObservableObject {
             savedGeometry = nil
             geometryAnalysis = nil
             geometryValidationMessage = nil
+            treatmentDraft = nil
+            savedTreatmentPlan = nil
+            treatmentAnalysis = nil
+            treatmentMessage = nil
+            verificationFollowUpID = nil
+            verificationReport = nil
             return
         }
         selectedProject = project
         report = analyzer.analyze(project: project)
         loadGeometry(for: project.id)
+        loadTreatment(for: project.id)
+        verificationFollowUpID = nil
+        verificationReport = nil
     }
 
     func startGeometryTemplate() {
@@ -194,6 +231,7 @@ final class RoomTreatmentAdvisorController: ObservableObject {
             savedGeometry = valid
             geometryValidationMessage = nil
             refreshGeometryPreview()
+            refreshTreatmentAnalysis()
         } catch {
             geometryValidationMessage =
                 error.localizedDescription
@@ -218,6 +256,8 @@ final class RoomTreatmentAdvisorController: ObservableObject {
             savedGeometry = nil
             geometryAnalysis = nil
             geometryValidationMessage = nil
+            treatmentAnalysis = nil
+            treatmentMessage = "Geometry was cleared. Save room geometry before editing physical treatment."
         } catch {
             geometryValidationMessage =
                 error.localizedDescription
@@ -246,6 +286,7 @@ final class RoomTreatmentAdvisorController: ObservableObject {
     private func refreshGeometryPreview() {
         guard let model = geometryDraft else {
             geometryAnalysis = nil
+            treatmentAnalysis = nil
             return
         }
         do {
@@ -260,5 +301,138 @@ final class RoomTreatmentAdvisorController: ObservableObject {
             geometryValidationMessage =
                 error.localizedDescription
         }
+        refreshTreatmentAnalysis()
+    }
+
+    func createTreatmentPlan() {
+        guard let id = selectedProjectID, canEditTreatment else {
+            treatmentMessage = RoomPassiveTreatmentError.geometryRequired.localizedDescription
+            return
+        }
+        treatmentDraft = RoomPassiveTreatmentPlan(projectID: id)
+        treatmentMessage = nil
+        refreshTreatmentAnalysis()
+    }
+
+    func addTreatmentSuggestion(_ suggestion: RoomPassiveTreatmentSuggestion) {
+        guard var plan = treatmentDraft, let geometry = savedGeometry,
+              canEditTreatment else { return }
+        var item = suggestion.placement
+        item.id = UUID()
+        plan.placements.append(item)
+        do {
+            _ = try plan.validated(in: geometry)
+            treatmentDraft = plan
+            treatmentMessage = nil
+            refreshTreatmentAnalysis()
+        } catch {
+            treatmentMessage = error.localizedDescription
+        }
+    }
+
+    func addManualTreatment(kind: RoomPassiveTreatmentKind, surface: RoomGeometrySurface) {
+        guard var plan = treatmentDraft, let geometry = savedGeometry,
+              canEditTreatment else { return }
+        let extent = RoomPassiveTreatmentPlacement.surfaceSize(surface, dimensions: geometry.dimensions)
+        let new = RoomPassiveTreatmentPlacement(
+            kind: kind, surface: surface, u: 0.5, v: 0.5,
+            widthMeters: min(0.5, extent.0 * 0.4),
+            heightMeters: min(0.5, extent.1 * 0.4),
+            thicknessMeters: kind == .bassTrap ? 0.30 : 0.10,
+            airGapMeters: 0.10
+        )
+        plan.placements.append(new)
+        do {
+            _ = try plan.validated(in: geometry)
+            treatmentDraft = plan
+            treatmentMessage = nil
+            refreshTreatmentAnalysis()
+        } catch { treatmentMessage = error.localizedDescription }
+    }
+
+    func updateTreatmentPlacement(_ changed: RoomPassiveTreatmentPlacement) {
+        guard var plan = treatmentDraft,
+              let index = plan.placements.firstIndex(where: { $0.id == changed.id })
+        else { return }
+        plan.placements[index] = changed
+        treatmentDraft = plan
+        refreshTreatmentAnalysis()
+    }
+
+    func removeTreatmentPlacement(_ id: UUID) {
+        guard var plan = treatmentDraft else { return }
+        plan.placements.removeAll { $0.id == id }
+        treatmentDraft = plan
+        refreshTreatmentAnalysis()
+    }
+
+    func saveTreatmentPlan() {
+        guard var plan = treatmentDraft, let geometry = savedGeometry,
+              canEditTreatment else {
+            treatmentMessage = RoomPassiveTreatmentError.geometryRequired.localizedDescription
+            return
+        }
+        plan.modifiedAt = Date()
+        do {
+            try treatmentStore.save(plan, geometry: geometry)
+            treatmentDraft = plan
+            savedTreatmentPlan = plan
+            treatmentMessage = nil
+            refreshTreatmentAnalysis()
+        } catch { treatmentMessage = error.localizedDescription }
+    }
+
+    func revertTreatmentPlan() {
+        treatmentDraft = savedTreatmentPlan
+        treatmentMessage = nil
+        refreshTreatmentAnalysis()
+    }
+
+    private func loadTreatment(for projectID: UUID) {
+        treatmentDraft = nil
+        savedTreatmentPlan = nil
+        treatmentAnalysis = nil
+        treatmentMessage = nil
+        guard let geometry = savedGeometry else { return }
+        do {
+            let plan = try treatmentStore.load(projectID: projectID, geometry: geometry)
+            treatmentDraft = plan
+            savedTreatmentPlan = plan
+            refreshTreatmentAnalysis()
+        } catch {
+            treatmentMessage = error.localizedDescription
+        }
+    }
+
+    private func refreshTreatmentAnalysis() {
+        guard let plan = treatmentDraft,
+              let geometry = geometryDraft,
+              let report,
+              let geometryAnalysis else {
+            treatmentAnalysis = nil
+            return
+        }
+        do {
+            treatmentAnalysis = try treatmentDesigner.evaluate(
+                plan: plan, geometry: geometry,
+                report: report, predictions: geometryAnalysis
+            )
+            treatmentMessage = nil
+        } catch {
+            treatmentAnalysis = nil
+            treatmentMessage = error.localizedDescription
+        }
+    }
+
+    func verifyTreatmentFollowUp(_ id: UUID?) {
+        verificationFollowUpID = id
+        guard let source = selectedProject,
+              let id,
+              let target = availableProjects.first(where: { $0.id == id })
+        else {
+            verificationReport = nil
+            return
+        }
+        verificationReport = treatmentVerifier.compare(baseline: source, followUp: target)
     }
 }
