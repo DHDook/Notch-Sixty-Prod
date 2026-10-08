@@ -95,3 +95,31 @@ cross-device clock calibration; measured reference-to-DAC latency and jitter;
 causal native reference-to-output anti-noise; disturbance field and virtual
 seat model; leakage control; hardware sign-off. This input-only substrate
 does not itself make ANC operational and must not enable an Arm control.
+
+
+## Third PR96 slice — offline virtual-listener model and bounded FIR dry-run
+
+- `QuietZoneVirtualSeatDesigner` accepts **measured phase-referenced complex
+  source→upstream and source→listener transfer**, independent left/right
+  loudspeaker→listener secondary paths, loudspeaker→upstream leakage paths,
+  and repeated-measurement coherence.
+- The offline regularized stereo least-squares candidate is only considered
+  for LF bands supported by PR90; low coherence, noncausal timing, weak
+  actuator authority, excessive upstream reference contamination, non-finite
+  transfer values or unhelpful candidate reduction all fail closed.
+- Applies a conservative *global* magnitude budget across modeled bands, not
+  a separate unlimited filter at every bin. Modeled reduction is not presented
+  as a real-world measurement.
+- `N60FeedForwardPreviewFIR` is a separate native, allocation-free
+  **dry-run-only** two-channel causal FIR executor (max 256 taps). Each side
+  has strict -24 dBFS L1 gain bound, nonfinite input flushing, and an output
+  limiter. It starts unconfigured/silent, with no route to actual loudspeakers.
+- Swift/C XCTest covers coherent and incoherent transfer models, causal
+  budget, leakage, headroom, FIR time-domain impulse response, invalid taps,
+  nonfinite reference samples and default silence.
+
+The per-bin ideal transfer targets are **not a physically deployable causal
+FIR**. A subsequent stable FIR compilation with actual latency/phase limits
+is needed, together with live echo control, clock synchronization, reference
+input→output scheduling and physical verification. The current project
+continues to refuse live feed-forward arming.
