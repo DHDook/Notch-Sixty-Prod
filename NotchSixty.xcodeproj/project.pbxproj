@@ -270,6 +270,7 @@
 		F96200000000000000000012 /* QuietZoneVirtualSeatDesignerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneVirtualSeatDesignerTests.swift; sourceTree = "<group>"; };
 		F96200000000000000000013 /* N60FeedForwardPreviewFIR.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = N60FeedForwardPreviewFIR.c; sourceTree = "<group>"; };
 		F96200000000000000000014 /* N60FeedForwardPreviewFIR.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60FeedForwardPreviewFIR.h; sourceTree = "<group>"; };
+		F96400000000000000000011 /* N60FeedForwardOutputTiming.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60FeedForwardOutputTiming.h; sourceTree = "<group>"; };
 		F96200000000000000000015 /* FeedForwardPreviewFIRTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedForwardPreviewFIRTests.swift; sourceTree = "<group>"; };
 		F96300000000000000000011 /* QuietZoneCausalFIRCompiler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneCausalFIRCompiler.swift; sourceTree = "<group>"; };
 		F96300000000000000000012 /* QuietZoneFeedForwardRehearsal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForwardRehearsal.swift; sourceTree = "<group>"; };
@@ -504,6 +505,7 @@
 				F96100000000000000000014 /* N60FeedForwardReferenceBridge.h */,
 				F96200000000000000000013 /* N60FeedForwardPreviewFIR.c */,
 				F96200000000000000000014 /* N60FeedForwardPreviewFIR.h */,
+				F96400000000000000000011 /* N60FeedForwardOutputTiming.h */,
 				F70000000000000000000011 /* N60AdaptiveSampleRate.c */,
 				F70000000000000000000012 /* N60AdaptiveSampleRate.h */,
 			);
