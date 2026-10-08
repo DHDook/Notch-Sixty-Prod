@@ -201,7 +201,7 @@ final class QuietZoneFeedForwardTests: XCTestCase {
         var withClocks = calibration
         withClocks.halClockTrace = clockTrace()
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("PR96-Clock-\\(UUID().uuidString)")
+            .appendingPathComponent("PR96-Clock-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
         let store = RoomCorrectionProjectStore(rootDirectory: root)
         try store.save(project)
