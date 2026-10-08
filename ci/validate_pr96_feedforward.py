@@ -3,6 +3,8 @@ from pathlib import Path
 r=Path(__file__).resolve().parents[1]
 core=(r/"NotchSixty/Audio/QuietZoneFeedForward.swift").read_text()
 tests=(r/"NotchSixtyTests/QuietZoneFeedForwardTests.swift").read_text()
+probe=(r/"NotchSixty/Audio/QuietZoneFeedForwardProbe.swift").read_text()
+probe_tests=(r/"NotchSixtyTests/QuietZoneFeedForwardProbeTests.swift").read_text()
 controller=(r/"NotchSixty/State/ActiveQuietZoneController.swift").read_text()
 ui=(r/"NotchSixty/UI/ProductionFeedForwardReadinessCard.swift").read_text()
 root=(r/"NotchSixty/UI/ProductionActiveAcousticsWorkspace.swift").read_text()
@@ -17,6 +19,13 @@ for token in ("testPositiveMeasuredMarginIsPlausibleButNeverArmsLiveANC",
 "testNegativeMarginFailsCausality","testRejectsTriggerClockMismatchAndListenerDrift",
 "testSidecarDoesNotChangePlaybackOrRoomProjectState"):
     assert token in tests,token
+for token in ("QuietZoneFeedForwardProbeDetector", "synchronizedClockID",
+"firstInputFrameAfterTriggerSeconds", "minimumRecoveredSNRDB"):
+    assert token in probe,token
+for token in ("testKnownCodedProbeArrivalIsRecovered",
+"testRelativeHallwayAndListenerPreviewFromOneMic",
+"testUncorrelatedCaptureNeverInventsArrival"):
+    assert token in probe_tests,token
 for token in ("prepareFeedForwardPlan()","refreshFeedForwardCalibration()",
 "importMeasuredFeedForwardCalibration","feedForwardBudget"):
     assert token in controller,token
@@ -26,7 +35,9 @@ for token in ('Text("Virtual-Position Feed-Forward ANC")',"Causality reserve",
 assert "ProductionFeedForwardReadinessCard(quietZone: quietZone)" in root
 for token in ("QuietZoneFeedForward.swift in Sources",
 "QuietZoneFeedForwardTests.swift in Sources",
-"ProductionFeedForwardReadinessCard.swift in Sources"):
+"ProductionFeedForwardReadinessCard.swift in Sources",
+"QuietZoneFeedForwardProbe.swift in Sources",
+"QuietZoneFeedForwardProbeTests.swift in Sources"):
     assert token in pbx,token
 for forbidden in ("replaceActiveQuietZoneRuntimeTarget","setEnabled(","requestArm","stageRoomTreatment"):
     assert forbidden not in core,"Unsafe runtime path in diagnostics: "+forbidden
