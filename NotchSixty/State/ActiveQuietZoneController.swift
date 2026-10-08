@@ -836,11 +836,43 @@ final class ActiveQuietZoneController: ObservableObject {
     private func phaseCalibrationTarget(
         candidates: [ActiveQuietZoneCandidateTone]
     ) throws -> ActiveQuietZoneRuntimeTarget {
+        // The ambient FFT peak is a coarse bin center. A validated PR95
+        // survey provides the finer stationary oscillator frequency. Choose
+        // only one spatial tone so the per-seat predictions correspond to
+        // the eventual PR90 aggregate headroom-limited output.
+        let selected: [ActiveQuietZoneCandidateTone]
+        if let calibration = spatialCalibration,
+           calibration.settings.enabled {
+            guard let candidate = candidates.max(by: {
+                $0.levelDBFS < $1.levelDBFS
+            }),
+                  let survey = calibration.surveys.min(by: {
+                      abs($0.frequencyHz - candidate.frequencyHz)
+                          < abs($1.frequencyHz - candidate.frequencyHz)
+                  }),
+                  abs(survey.frequencyHz - candidate.frequencyHz) <= 2.0,
+                  Date().timeIntervalSince(survey.capturedAt) < 1800,
+                  (try? calibration.validatedSurvey(
+                    for: survey.frequencyHz
+                  )) != nil
+            else {
+                throw ActiveQuietZoneSpatialError.inadequatePhaseReference
+            }
+            selected = [
+                ActiveQuietZoneCandidateTone(
+                    frequencyHz: survey.frequencyHz,
+                    levelDBFS: candidate.levelDBFS,
+                    prominenceDB: candidate.prominenceDB
+                )
+            ]
+        } else {
+            selected = candidates
+        }
         let probePeak = pow(
             10,
             configuration.probePeakDBFS / 20
         )
-        let count = max(candidates.count, 1)
+        let count = max(selected.count, 1)
         let aggregateShare =
             availableInjectionPeak / Double(count) * 0.75
         let amplitude = min(probePeak, aggregateShare)
@@ -850,7 +882,7 @@ final class ActiveQuietZoneController: ObservableObject {
         }
 
         let target = ActiveQuietZoneRuntimeTarget(
-            tones: candidates.map {
+            tones: selected.map {
                 ActiveQuietZoneRuntimeTone(
                     frequencyHz: $0.frequencyHz,
                     leftOutput: ActiveQuietZoneComplex(
