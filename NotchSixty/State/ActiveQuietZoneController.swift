@@ -313,7 +313,7 @@ final class ActiveQuietZoneController: ObservableObject {
         let referenceFrequency = surveyCaptures.isEmpty
             ? measuredFrequency : frequency
         guard abs(measuredFrequency - referenceFrequency)
-                <= spatialCalibration!.settings.maximumFrequencyDriftHz
+                <= calibration.settings.maximumFrequencyDriftHz
         else { throw ActiveQuietZoneSpatialError.inadequatePhaseReference }
         if surveyCaptures.isEmpty {
             surveyToneHz = referenceFrequency
