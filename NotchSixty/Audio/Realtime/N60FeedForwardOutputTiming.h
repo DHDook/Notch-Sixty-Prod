@@ -84,6 +84,20 @@ static inline void N60FeedForwardOutputTimingObserve(
     atomic_store_explicit(&witness->epoch, epoch + 2u, memory_order_release);
 }
 
+/// Control-plane reset only, when output callbacks are stopped.
+/// Prevents reusing timing evidence from a previous output device/route.
+static inline void N60FeedForwardOutputTimingReset(
+    N60FeedForwardOutputTiming * _Nonnull witness
+) {
+    if (witness == NULL) return;
+    atomic_store_explicit(&witness->epoch, 0, memory_order_release);
+    atomic_store_explicit(&witness->firstFrameHostTime, 0, memory_order_relaxed);
+    atomic_store_explicit(&witness->sampleTimeBits, 0, memory_order_relaxed);
+    atomic_store_explicit(&witness->renderedFrames, 0, memory_order_relaxed);
+    atomic_store_explicit(&witness->callbackCount, 0, memory_order_relaxed);
+    atomic_store_explicit(&witness->invalidCount, 0, memory_order_relaxed);
+}
+
 static inline N60FeedForwardOutputTimingSnapshot
 N60FeedForwardOutputTimingRead(
     const N60FeedForwardOutputTiming * _Nonnull witness
