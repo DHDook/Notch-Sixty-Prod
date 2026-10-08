@@ -221,8 +221,8 @@ struct QuietZoneSpatialPlanner: Sendable {
               measuredReductionBySeat.values.allSatisfy({
                   $0 >= -configuration.maximumAllowedRegressionDB
               }),
-              let total = measuredReductionBySeat.values.reduce(0.0, +) as Double?,
-              total / Double(measuredReductionBySeat.count)
+              measuredReductionBySeat.values.reduce(0.0, +)
+                / Double(measuredReductionBySeat.count)
                 >= configuration.minimumProbeImprovementDB
         else { throw QuietZoneSpatialError.verificationRequired }
         var verified = solution
