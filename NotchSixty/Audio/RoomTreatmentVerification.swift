@@ -82,9 +82,12 @@ struct RoomTreatmentVerifier: Sendable {
             Set(namesAfter).count != namesAfter.count {
             problems.append("Include the same uniquely named microphone positions in both captures.")
         }
-        let afterByName = Dictionary(
-            uniqueKeysWithValues: afterPositions.map { (canonicalName($0.name), $0) }
-        )
+        // Avoid Dictionary(uniqueKeysWithValues:) on corrupt/duplicate names:
+        // validation must fail closed, not trap.
+        var afterByName: [String: RoomCorrectionMeasurementPosition] = [:]
+        for position in afterPositions {
+            afterByName[canonicalName(position.name)] = position
+        }
         // Check only matched positions, but reject unequal sets above.
         for position in beforePositions {
             guard let other = afterByName[canonicalName(position.name)] else { continue }
@@ -101,6 +104,14 @@ struct RoomTreatmentVerifier: Sendable {
                     break
                 }
             }
+        }
+        // Quality/identity must pass before potentially expensive decay analysis.
+        if !problems.isEmpty {
+            return RoomTreatmentVerificationReport(
+                baselineProjectName: baseline.name, followUpProjectName: followUp.name,
+                comparable: false, warnings: Array(Set(problems)).sorted(),
+                matchedPositionCount: 0, metrics: []
+            )
         }
         let beforeReport = analyzer.analyze(project: baseline)
         let afterReport = analyzer.analyze(project: followUp)
