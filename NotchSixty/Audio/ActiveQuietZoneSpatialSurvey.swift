@@ -4,6 +4,7 @@ struct ActiveQuietZoneSpatialPhaseCapture: Equatable, Sendable {
     var positionID: UUID
     var epoch: UUID
     var firstSampleIndex: UInt64
+    var frameCount: Int
     var sampleRate: Double
     var frequencyHz: Double
     var detectedFrequencyHz: Double
@@ -118,6 +119,7 @@ struct ActiveQuietZoneSpatialSurveyBuilder: Sendable {
         return ActiveQuietZoneSpatialPhaseCapture(
             positionID: positionID, epoch: epoch,
             firstSampleIndex: firstSampleIndex,
+            frameCount: samples.count,
             sampleRate: sampleRate,
             frequencyHz: frequencyHz,
             detectedFrequencyHz: detectedFrequencyHz,
@@ -171,9 +173,9 @@ struct ActiveQuietZoneSpatialSurveyBuilder: Sendable {
         for (index, id) in required.enumerated() {
             let a = captures[index * 2]
             let b = captures[index * 2 + 1]
-            let minimumWindowAdvance = UInt64(
-                min(8_192, Int(first.sampleRate * 0.15))
-            )
+            // Do not count overlapping windows as independent repeated
+            // evidence. Each observation must begin after its predecessor.
+            let minimumWindowAdvance = UInt64(a.frameCount)
             guard b.firstSampleIndex > a.firstSampleIndex,
                   b.firstSampleIndex - a.firstSampleIndex
                     >= minimumWindowAdvance,
