@@ -32,7 +32,8 @@ for item in ("testSyntheticConcurrentStableTracesAreBenchOnly",
     assert item in capture_tests,item
 engine=(root/"NotchSixty/Audio/AudioIOEngine.swift").read_text()
 transport=(root/"NotchSixty/Audio/CoreAudio/CoreAudioError.swift").read_text()
-for item in ("makeHardwareClockAcquisition(", "hardwareClockAcquisitionRoute()",
+for item in ("makeInstrumentedSourceProbeAcquisition(",
+             "makeHardwareClockAcquisition(", "hardwareClockAcquisitionRoute()",
              "self.transportSession === session", "passiveFeedForwardOutputTimingSnapshot"):
     assert item in engine,item
 for item in ("calibrationTimingRouteLeaseID = UUID().uuidString",

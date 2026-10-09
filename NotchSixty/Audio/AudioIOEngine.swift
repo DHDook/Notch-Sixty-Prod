@@ -1438,6 +1438,45 @@ final class AudioIOEngine: ObservableObject {
         )
     }
 
+    /// Records a controlled EXTERNAL source probe with the live microphone.
+    /// The instrumented source emitter supplies an independent, calibrated
+    /// acoustic-emission timestamp; this entry point NEVER launches playback.
+    func makeInstrumentedSourceProbeAcquisition(
+        microphone: AudioInputDevice,
+        inputChannelIndex: Int,
+        position: QuietZoneFeedForwardPosition,
+        sourceFixtureID: String,
+        synchronizedClockID: String,
+        physicalSourceID: String
+    ) throws -> QuietZoneInstrumentedProbeAcquisition {
+        guard let session = transportSession,
+              let route = hardwareClockAcquisitionRoute()
+        else { throw QuietZoneInstrumentedProbeError.staleRoute }
+        let collector = try QuietZoneInstrumentedProbeCollector(
+            position: position,
+            microphoneID: microphone.uid,
+            microphoneChannel: inputChannelIndex,
+            sourceFixtureID: sourceFixtureID,
+            synchronizedClockID: synchronizedClockID,
+            physicalSourceID: physicalSourceID,
+            routeLeaseID: route.routeID,
+            sampleRate: route.sampleRate
+        )
+        let reference = try FeedForwardReferenceTransport(
+            microphone: microphone, inputChannelIndex: inputChannelIndex
+        )
+        return try QuietZoneInstrumentedProbeAcquisition(
+            reference: reference,
+            collector: collector,
+            currentRoute: { [weak self, weak session] in
+                guard let self, let session,
+                      self.transportSession === session
+                else { return nil }
+                return self.hardwareClockAcquisitionRoute()
+            }
+        )
+    }
+
     /// Creates a microphone-only timing observer bound to the *specific*
     /// active speaker-output session. Changes to the selected device, route,
     /// format or session lifetime invalidate the observer on its next poll.

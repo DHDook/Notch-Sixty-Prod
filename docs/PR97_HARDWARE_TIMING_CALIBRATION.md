@@ -100,3 +100,10 @@ probe waveform/route/clock evidence. Replayed launches and swapped sources
 fail before survey advancement; listener-return drift invalidates launch
 history along with the survey. This is diagnostic evidence only, not a
 cryptographically attested hardware launch source or an ANC arm permit.
+
+The audio engine now exposes an internal
+`makeInstrumentedSourceProbeAcquisition` factory using exactly the active
+stereo output route and weak session-bound provenance, reusing the microphone
+input-only HAL ring. It does not provide an autonomous calibrated source
+actuator or user wizard. The source emission witness must come from separately
+instrumented hardware and remains unverified until real-Mac commissioning.
