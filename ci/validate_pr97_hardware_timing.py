@@ -40,6 +40,22 @@ for item in ("calibrationTimingRouteLeaseID = UUID().uuidString",
              "aggregateDeviceOutputPlan == nil", "isOutputStarted"):
     assert item in transport,item
 assert "testLiveRouteLeaseInvalidatesRestartDeviceAndSampleRate" in capture_tests
+probe=(root/"NotchSixty/Audio/QuietZoneInstrumentedProbeCapture.swift").read_text()
+probe_tests=(root/"NotchSixtyTests/QuietZoneInstrumentedProbeCaptureTests.swift").read_text()
+for token in ("QuietZoneInstrumentedSourceLaunch", "physicalClockCalibrationVerified",
+              "AudioConvertHostTimeToNanos", "QuietZoneInstrumentedProbeAcquisition",
+              "missingPreRoll", "discontinuousInput", "reference.read(maximumFrames:"):
+    assert token in probe,token
+for token in ("testMeasuredSourceCaptureBuildsRealProbePayload",
+              "testRejectsMissingOrUncalibratedSourceWitness",
+              "testNoPreRollOrLateTriggerFailsClosed",
+              "testDroppedSampleAndClippingAreRejected"):
+    assert token in probe_tests,token
+for token in ("QuietZoneInstrumentedProbeCapture.swift in Sources",
+              "QuietZoneInstrumentedProbeCaptureTests.swift in Sources"):
+    assert token in pbx,token
+for unsafe in ("AudioDeviceStart(", "requestArm(", "setEnabled(", "stageRoomTreatment"):
+    assert unsafe not in probe,unsafe
 for item in ("QuietZoneHardwareClockCapture.swift in Sources",
              "QuietZoneHardwareClockCaptureTests.swift in Sources"):
     assert item in pbx,item

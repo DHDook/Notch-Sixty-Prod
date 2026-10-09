@@ -70,3 +70,25 @@ The host application currently exposes this as an internal control-plane
 entry point only. A user-driven measurement wizard, controlled physical
 source trigger, speaker-to-seat impulse timing, physical ADC/DAC deadline
 qualification and instrumented acoustic verification remain outstanding.
+
+## Fourth implementation slice — instrumented external-source probe capture
+
+`QuietZoneInstrumentedProbeCollector` accepts PR96 microphone HAL frame
+records in sample-contiguous order, converts observed Core Audio callback
+host-time ticks into a common timebase and rejects clipping, unbounded
+capture length, skipped frames, timebase errors and missing pre-trigger audio.
+A separate **physically calibrated external source** must supply a witnessed
+acoustic-emission host timestamp, calibrated uncertainty, fixture/clock/route
+identity, independent launch ID and known probe waveform. App button presses,
+queued output writes and unsynchronized phone playback cannot substitute.
+The collector returns a real `QuietZoneFeedForwardProbeCapture`, suitable
+for the existing matched-filter detector and three-position survey.
+
+A microphone-only `QuietZoneInstrumentedProbeAcquisition` adapter starts,
+polls and stops the existing PR96 reference transport with exact route-lease
+checks; it does not itself trigger any loudspeaker. Input waveforms remain
+in temporary memory, not saved alongside the calibration. Synthetic tests
+exercise valid arrivals, broken clocks, missing preroll, timestamp gaps and
+clipped recordings. A hardware source trigger driver and physical timing
+attestation are **not yet implemented**. Do not report a physically verified
+latency or arm ANC based on simulated source-trigger certificates.
