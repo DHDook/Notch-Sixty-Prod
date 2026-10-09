@@ -125,8 +125,8 @@ final class QuietZoneNativeShadowTimingTransportTests: XCTestCase {
         }
         let rows = bridge.readDiagnostics(maximum: 200)
         XCTAssertEqual(rows.count, 200)
-        XCTAssertTrue(zip(rows, rows.dropFirst()).allSatisfy {
-            $0.hypotheticalOutputFrame < $1.hypotheticalOutputFrame
+        XCTAssertTrue(zip(rows, rows.dropFirst()).allSatisfy { pair in
+            pair.0.hypotheticalOutputFrame < pair.1.hypotheticalOutputFrame
         })
         XCTAssertEqual(rows[0].referenceFrame, 2000)
         XCTAssertGreaterThan(rows[0].estimatedProcessingSlackSeconds, 0)
