@@ -78,6 +78,17 @@ struct QuietZoneBenchLoopbackAnalyzer: Sendable {
               abs(first.nominalSampleRate - clock.nominalSampleRate) < 0.5
         else { throw QuietZoneBenchLoopbackError.incompatibleRoute }
 
+        // Require clock observations captured DURING the actual loopback run.
+        // Reusing a healthy trace from a different session cannot qualify it.
+        let windowStart = max(
+            clock.inputObservations[0].hostTimeSeconds,
+            clock.outputObservations[0].hostTimeSeconds
+        )
+        let windowEnd = min(
+            clock.inputObservations[clock.inputObservations.count - 1].hostTimeSeconds,
+            clock.outputObservations[clock.outputObservations.count - 1].hostTimeSeconds
+        )
+        var captureWindows: [(start: Double, end: Double)] = []
         var delays: [Double] = []
         var minSNR = Double.infinity
         var worstClockUncertainty = 0.0
@@ -97,6 +108,22 @@ struct QuietZoneBenchLoopbackAnalyzer: Sendable {
                   capture.firstRecordedFrameHostSeconds > 0 else {
                 throw QuietZoneBenchLoopbackError.untrustedClock
             }
+            // Both the launch and the complete captured frame span must fit
+            // within the simultaneously observed input/output clock window.
+            let capturedEnd = capture.firstRecordedFrameHostSeconds
+                + Double(capture.recorded.count) / capture.nominalSampleRate
+            let captureStart = min(
+                capture.stimulusStartHostSeconds,
+                capture.firstRecordedFrameHostSeconds
+            )
+            guard captureStart >= windowStart,
+                  capturedEnd <= windowEnd else {
+                throw QuietZoneBenchLoopbackError.untrustedClock
+            }
+            captureWindows.append((start: captureStart,
+                                   end: max(capturedEnd,
+                                            capture.stimulusStartHostSeconds)))
+
             guard !capture.captureClipped,
                   (64...Self.maximumProbeFrames)
                     .contains(capture.stimulus.count),
@@ -172,6 +199,15 @@ struct QuietZoneBenchLoopbackAnalyzer: Sendable {
             worstClockUncertainty = max(
                 worstClockUncertainty, capture.clockUncertaintySeconds
             )
+        }
+
+        // At least three distinct trigger-and-capture windows are required;
+        // passing the same recording three times is not repeatability.
+        let orderedWindows = captureWindows.sorted { $0.start < $1.start }
+        for i in 1..<orderedWindows.count {
+            guard orderedWindows[i].start > orderedWindows[i - 1].end else {
+                throw QuietZoneBenchLoopbackError.untrustedClock
+            }
         }
 
         let sorted = delays.sorted()

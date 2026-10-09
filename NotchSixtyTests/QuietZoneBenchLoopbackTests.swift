@@ -27,7 +27,7 @@ final class QuietZoneBenchLoopbackTests: XCTestCase {
 
     private func capture(
         offset: Int = 480, route: String = "wired-loop",
-        clockUncertainty: Double = 0.00001
+        clockUncertainty: Double = 0.00001, startAt: Double = 100.2
     ) -> QuietZoneBenchLoopbackCapture {
         let signal = probe()
         var samples = [Float](repeating: 0.0001, count: 2048)
@@ -38,16 +38,21 @@ final class QuietZoneBenchLoopbackTests: XCTestCase {
             routeFingerprint: route,
             inputDeviceID: "USB-mic", outputDeviceID: "USB-DAC",
             nominalSampleRate: 48_000, stimulus: signal,
-            recorded: samples, stimulusStartHostSeconds: 100,
-            firstRecordedFrameHostSeconds: 100.002,
+            recorded: samples, stimulusStartHostSeconds: startAt,
+            firstRecordedFrameHostSeconds: startAt + 0.002,
             clockUncertaintySeconds: clockUncertainty,
             captureClipped: false
         )
     }
 
+    private func independentCaptures() -> [QuietZoneBenchLoopbackCapture] {
+        [capture(startAt: 100.2), capture(startAt: 101.1),
+         capture(startAt: 102.0)]
+    }
+
     func testMeasuredElectricalRoundTripHasConservativeUpperBound() throws {
         let result = try QuietZoneBenchLoopbackAnalyzer().analyze(
-            [capture(), capture(), capture()], clock: clock()
+            independentCaptures(), clock: clock()
         )
         XCTAssertEqual(result.electricalRoundTripSeconds, 0.012, accuracy: 1.0e-5)
         XCTAssertGreaterThan(result.conservativeUpperBoundSeconds, 0.012)
@@ -59,10 +64,13 @@ final class QuietZoneBenchLoopbackTests: XCTestCase {
 
     func testUnstableRepeatAndDifferentRouteAreRejected() {
         XCTAssertThrowsError(try QuietZoneBenchLoopbackAnalyzer().analyze(
-            [capture(), capture(offset: 570), capture()], clock: clock()
+            [capture(startAt: 100.2), capture(offset: 570, startAt: 101.1),
+             capture(startAt: 102.0)], clock: clock()
         ))
         XCTAssertThrowsError(try QuietZoneBenchLoopbackAnalyzer().analyze(
-            [capture(), capture(route: "different-DAC"), capture()], clock: clock()
+            [capture(startAt: 100.2),
+             capture(route: "different-DAC", startAt: 101.1),
+             capture(startAt: 102.0)], clock: clock()
         ))
     }
 
@@ -71,18 +79,37 @@ final class QuietZoneBenchLoopbackTests: XCTestCase {
             [capture(), capture()], clock: clock()
         ))
         XCTAssertThrowsError(try QuietZoneBenchLoopbackAnalyzer().analyze(
-            [capture(clockUncertainty: 0.01), capture(), capture()],
+            [capture(clockUncertainty: 0.01, startAt: 100.2),
+             capture(startAt: 101.1), capture(startAt: 102.0)],
             clock: clock()
         ))
         var bad = capture()
         bad.recorded[100] = 1
         XCTAssertThrowsError(try QuietZoneBenchLoopbackAnalyzer().analyze(
-            [bad, capture(), capture()], clock: clock()
+            [bad, capture(startAt: 101.1), capture(startAt: 102.0)], clock: clock()
         ))
         var wrongClock = clock()
         wrongClock.inputObservations = []
         XCTAssertThrowsError(try QuietZoneBenchLoopbackAnalyzer().analyze(
-            [capture(), capture(), capture()], clock: wrongClock
+            independentCaptures(), clock: wrongClock
+        ))
+    }
+
+    func testReusedTriggerAndOverlappingCapturesCannotCountAsRepeats() {
+        let reused = capture(startAt: 100.2)
+        XCTAssertThrowsError(try QuietZoneBenchLoopbackAnalyzer().analyze(
+            [reused, reused, reused], clock: clock()
+        ))
+        XCTAssertThrowsError(try QuietZoneBenchLoopbackAnalyzer().analyze(
+            [capture(startAt: 100.2), capture(startAt: 100.21),
+             capture(startAt: 102.0)], clock: clock()
+        ))
+    }
+
+    func testBenchCaptureOutsideConcurrentHALClockObservationIsRejected() {
+        XCTAssertThrowsError(try QuietZoneBenchLoopbackAnalyzer().analyze(
+            [capture(startAt: 100.2), capture(startAt: 101.1),
+             capture(startAt: 104.0)], clock: clock()
         ))
     }
 }

@@ -203,3 +203,17 @@ capture path is still required to obtain them.
 ## Sixth slice — electrical bench loopback diagnostics
 
 `QuietZoneBenchLoopbackAnalyzer` verifies at least three repeatedly triggered, clock-qualified electrical loopback captures using normalized coded-probe correlation. It rejects mismatched routes and devices, clipped recordings, high timing uncertainty, ambiguous arrivals, unqualified clock traces and inconsistent delays. Its reported electrical round-trip delay includes a conservative repetition/clock uncertainty bound. No electrical loopback result qualifies acoustic flight time, actual anti-noise output latency, the virtual listener estimate or live ANC. The capture infrastructure must still supply independently instrumented launch/capture timestamps; the analyzer does not manufacture them.
+
+## PR96 final bench-analysis hardening
+
+Electrical loopback qualification now requires **three independently timed,
+non-overlapping trigger/capture windows**. Reusing the same capture three
+times cannot satisfy repeatability. Every stimulus launch and complete
+microphone capture must also fall within the **concurrently observed** HAL
+input/output timestamp window. An unrelated, older stable clock trace is
+not sufficient bench evidence. Added deterministic rejection tests for
+reused/overlapping runs and measurement timestamps outside the clock survey.
+
+These checks close software-only false-qualification paths, not the physical
+commissioning requirements. The electrical analyzer remains offline and its
+result cannot arm or route feed-forward output to speakers.
