@@ -127,4 +127,27 @@ for token in ("QuietZoneHardwareCommissioning.swift in Sources",
 assert "Hardware commissioning checklist" in ui
 for forbidden in ("AudioDeviceStart(", "requestArm(", "setEnabled(", "stageRoomTreatment"):
     assert forbidden not in commissioning,forbidden
+handoff=(root/"NotchSixty/Audio/QuietZoneEvidenceHandoff.swift").read_text()
+handoff_tests=(root/"NotchSixtyTests/QuietZoneEvidenceHandoffTests.swift").read_text()
+for token in ("Curve25519.Signing.PublicKey", "isValidSignature(",
+              "QuietZoneEvidenceTrustedSigner", "mismatchedSession",
+              "mismatchedRoute", "expiredCalibration", "replayedPackage",
+              "ledger.record(", "physicalHardwareVerified: Bool = false",
+              "liveANCQualified: Bool = false"):
+    assert token in handoff,token
+for token in ("testSignedEnvelopeProducesInspectableDiagnosticOnly",
+              "testAlteredPayloadCannotPassPinnedSignature",
+              "testUnenrolledSignerAndSwappedPhysicalLeaseAreRejected",
+              "testOldSessionAndExpiredCalibrationFailClosed",
+              "testDuplicateSourceAndEndpointIDsRejectedEvenWithValidSignature",
+              "testOversizedAndMalformedEvidenceIsRejected"):
+    assert token in handoff_tests,token
+for token in ("QuietZoneEvidenceHandoff.swift in Sources",
+              "QuietZoneEvidenceHandoffTests.swift in Sources"):
+    assert token in pbx,token
+assert "let evidenceSessionID: UUID" in core
+assert "QuietZoneHardwareCalibrationRig: Codable" in core
+assert "QuietZoneLatencyWitnessMethod: String, Codable" in measurement
+for forbidden in ("AudioDeviceStart(", "requestArm(", "setEnabled(", "stageRoomTreatment"):
+    assert forbidden not in handoff,forbidden
 print("PR97 calibration safety guard passed")

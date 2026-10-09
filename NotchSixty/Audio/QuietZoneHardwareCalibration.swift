@@ -1,7 +1,7 @@
 import Foundation
 
 /// PR97 accepts instrumented evidence; it never starts HAL capture or emits audio.
-struct QuietZoneHardwareCalibrationRig: Equatable, Sendable {
+struct QuietZoneHardwareCalibrationRig: Codable, Equatable, Sendable {
     let projectID: UUID
     let microphoneID: String
     let microphoneChannel: Int
@@ -38,13 +38,19 @@ struct QuietZoneHardwareCalibrationSession: Sendable {
     static let maximumSessionSeconds: TimeInterval = 360
     let rig: QuietZoneHardwareCalibrationRig
     let startedAt: Date
+    /// Ephemeral random session nonce prevents handoff from a previous run.
+    let evidenceSessionID: UUID
     private(set) var clockTrace: QuietZoneHALClockTrace?
     private(set) var loopback: QuietZoneBenchLoopbackResult?
     private var survey: QuietZoneFeedForwardSurveySession
     private var usedPhysicalLaunchIDs: Set<String> = []
     private var physicalSourceID: String?
 
-    init(rig: QuietZoneHardwareCalibrationRig, now: Date = Date()) throws {
+    init(
+        rig: QuietZoneHardwareCalibrationRig,
+        now: Date = Date(),
+        evidenceSessionID: UUID = UUID()
+    ) throws {
         guard !rig.microphoneID.isEmpty, rig.microphoneChannel >= 0,
               !rig.outputDeviceID.isEmpty, !rig.routeID.isEmpty,
               !rig.clockID.isEmpty, !rig.triggerID.isEmpty,
@@ -52,6 +58,7 @@ struct QuietZoneHardwareCalibrationSession: Sendable {
         else { throw QuietZoneHardwareCalibrationError.invalidRig }
         self.rig = rig
         startedAt = now
+        self.evidenceSessionID = evidenceSessionID
         survey = try QuietZoneFeedForwardSurveySession(
             projectID: rig.projectID, microphoneStableID: rig.microphoneID,
             microphoneChannel: rig.microphoneChannel,

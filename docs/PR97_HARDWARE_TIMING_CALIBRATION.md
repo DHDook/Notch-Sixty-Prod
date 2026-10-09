@@ -225,3 +225,41 @@ The independent hardware review and actual measured acoustic
 attenuation/stability gates therefore remain blocked even when all
 synthetic fixtures pass. Runtime authorization, output wiring, persistence,
 and the realtime callback are unchanged.
+
+## Eighth implementation slice — signed offline evidence handoff
+
+An independently built measurement instrument can produce a versioned bounded
+`QuietZoneEvidenceEnvelope` that contains exactly the payload bytes signed
+with Ed25519 (via Apple's CryptoKit `Curve25519.Signing` support), a key ID,
+and the signature. The receiving caller must obtain and enroll the expected
+raw 32-byte public key *separately*; the file never establishes its own trust
+anchor. Signature validation occurs on the original payload bytes, before
+parsing any physical timing records. Payloads have 64 KiB and envelope 128 KiB
+limits, strict v1 schema selection, and no raw microphone audio.
+
+The payload is tied to the random `evidenceSessionID` issued when PR97
+starts a calibration, its starting timestamp, project, mic/channel, DAC UID,
+current exact output session lease, sample rate, clock, instrument ID and
+calibration record. It includes three uniquely named, ordered A/B/A physical
+source-launch witnesses and 12–80 separately timestamped physical endpoint
+observations, which are fed into PR97's strict four-stage measurement-run
+validator. Duplicate IDs, old sessions, route changes, expired calibration,
+bad clock/correction flags and impossible timings fail closed. An in-memory
+ledger prevents repeat imports within the same session. No evidence is
+persisted or used for live activation.
+
+**Security boundary:** A valid signature authenticates the configured signing
+key and detects payload alteration; it does not establish that a physical ADC,
+DAC, microphone, speaker, or acoustic source was actually measured. Neither
+software-controlled boolean fields nor arbitrary signatures count as hardware
+attestation. The verifier's result expressly reports
+`physicalHardwareVerified = false`, `acousticCancellationVerified = false`
+and `liveANCQualified = false`. Physical commissioning with a separately
+trusted instrument, validated sensor channels/firmware, independent review,
+seat cancellation tests and durable replay protection remain outstanding.
+
+The implementation is currently a software ingestion API only, not an enabled
+UI import or external instrument driver. The test suite signs synthetic
+envelopes with an ephemeral key and checks integrity, pinned key mismatch,
+session/route binding, duplicate events, expiry, bounded decoding and
+fail-closed retry. No app-bundled private keys or trust anchors are added.

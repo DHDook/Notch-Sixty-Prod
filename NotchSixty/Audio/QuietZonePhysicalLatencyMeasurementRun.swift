@@ -2,7 +2,7 @@ import Foundation
 
 /// Explicit physical endpoints for each of the four latency segments.
 /// An electrical DAC loopback is NOT an acoustic speaker-to-seat witness.
-enum QuietZoneLatencyWitnessMethod: String, Equatable, Sendable {
+enum QuietZoneLatencyWitnessMethod: String, Codable, Equatable, Sendable {
     case acousticReferenceToADCReady
     case adcReadyToAntiNoiseCommand
     case commandToAnalogDACOutput
