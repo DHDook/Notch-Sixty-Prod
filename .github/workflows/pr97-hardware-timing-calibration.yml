@@ -10,7 +10,8 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: pr97-hardware-timing
+  # Separate branch-push and pull-request refs to prevent cross-cancellation.
+  group: pr97-hardware-timing-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
