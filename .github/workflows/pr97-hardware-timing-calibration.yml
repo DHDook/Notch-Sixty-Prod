@@ -1,0 +1,43 @@
+name: PR97 Hardware Timing Calibration
+
+on:
+  push:
+    branches:
+      - feature/pr97-hardware-timing-calibration
+  pull_request:
+    branches:
+      - feature/pr96-virtual-position-feedforward-anc
+  workflow_dispatch:
+
+concurrency:
+  group: pr97-hardware-timing
+  cancel-in-progress: true
+
+jobs:
+  portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: python3 ci/validate_pr97_hardware_timing.py
+      - run: python3 ci/validate_pr96_feedforward.py
+      - run: python3 ci/validate_pr95_multi_position_quiet_zone.py
+      - run: python3 ci/validate_pr94_treatment_design_verification.py
+      - run: python3 ci/validate_pr93_room_geometry_placement.py
+      - run: python3 ci/validate_pr92_room_treatment_advisor.py
+      - run: python3 ci/validate_pr91_conversation_preservation.py
+      - run: python3 ci/validate_pr90_active_quiet_zone.py
+
+  macos:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - run: python3 ci/validate_pr97_hardware_timing.py
+      - name: Build arm64 macOS app
+        run: |
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES build
+      - name: Targeted hardware calibration and ANC tests
+        run: |
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES -only-testing:NotchSixtyTests/QuietZoneHardwareCalibrationTests -only-testing:NotchSixtyTests/QuietZoneBenchLoopbackTests -only-testing:NotchSixtyTests/QuietZoneFeedForwardSurveyTests -only-testing:NotchSixtyTests/QuietZoneHALClockAnalysisTests test
+      - name: Full XCTest regression
+        run: |
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES test

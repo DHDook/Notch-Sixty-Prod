@@ -18,7 +18,7 @@ struct ProductionFeedForwardReadinessCard: View {
                     .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Text("PR96 · DIAGNOSTICS")
+                Text("PR97 · HARDWARE SETUP")
                     .font(.caption.bold())
                     .tracking(0.5)
                     .foregroundStyle(.secondary)
@@ -80,6 +80,19 @@ struct ProductionFeedForwardReadinessCard: View {
                     "Leave mic upstream only after confidence, causality, model accuracy and hardware verification gates pass."
                 )
             }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Instrumented calibration stages").font(.caption.bold())
+                Text("1. Qualify concurrent input and output HAL clocks")
+                Text("2. Repeat at least three wired electrical loopbacks")
+                Text("3. Capture listener → upstream doorway → listener return")
+                Text("4. Measure physical speaker-to-seat latency before considering ANC")
+                Text("The automated hardware capture driver is not connected; no live anti-noise output is permitted.")
+                    .foregroundStyle(.secondary)
+            }
+            .font(.caption)
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             if let calibration = quietZone.feedForwardCalibration {
                 HStack {
