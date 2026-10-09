@@ -1418,6 +1418,97 @@ final class AudioIOEngine: ObservableObject {
         return outputDevices.first { $0.uid == selectedOutputUID }
     }
 
+    /// PR97 read-only, current-session route binding. This is not a probe
+    /// transmitter, a DAC latency measurement, or an ANC arming interface.
+    func hardwareClockAcquisitionRoute()
+        -> QuietZoneHardwareHALClockAcquisition.Route? {
+        guard let session = transportSession,
+              nChannelTransportSession == nil,
+              binauralHeadphoneTransportSession == nil,
+              let selected = selectedOutputDevice,
+              selected.uid == session.selectedOutput.uid,
+              selected.deviceID == session.selectedOutput.deviceID,
+              abs(selected.nominalSampleRate - session.outputFormat.sampleRate) < 0.5,
+              session.passiveFeedForwardOutputTimingSnapshot() != nil
+        else { return nil }
+        return (
+            outputID: selected.uid,
+            routeID: session.calibrationTimingRouteLeaseID,
+            sampleRate: session.outputFormat.sampleRate
+        )
+    }
+
+    /// Records a controlled EXTERNAL source probe with the live microphone.
+    /// The instrumented source emitter supplies an independent, calibrated
+    /// acoustic-emission timestamp; this entry point NEVER launches playback.
+    func makeInstrumentedSourceProbeAcquisition(
+        microphone: AudioInputDevice,
+        inputChannelIndex: Int,
+        position: QuietZoneFeedForwardPosition,
+        sourceFixtureID: String,
+        synchronizedClockID: String,
+        physicalSourceID: String
+    ) throws -> QuietZoneInstrumentedProbeAcquisition {
+        guard let session = transportSession,
+              let route = hardwareClockAcquisitionRoute()
+        else { throw QuietZoneInstrumentedProbeError.staleRoute }
+        let collector = try QuietZoneInstrumentedProbeCollector(
+            position: position,
+            microphoneID: microphone.uid,
+            microphoneChannel: inputChannelIndex,
+            sourceFixtureID: sourceFixtureID,
+            synchronizedClockID: synchronizedClockID,
+            physicalSourceID: physicalSourceID,
+            routeLeaseID: route.routeID,
+            sampleRate: route.sampleRate
+        )
+        let reference = try FeedForwardReferenceTransport(
+            microphone: microphone, inputChannelIndex: inputChannelIndex
+        )
+        return try QuietZoneInstrumentedProbeAcquisition(
+            reference: reference,
+            collector: collector,
+            currentRoute: { [weak self, weak session] in
+                guard let self, let session,
+                      self.transportSession === session
+                else { return nil }
+                return self.hardwareClockAcquisitionRoute()
+            }
+        )
+    }
+
+    /// Creates a microphone-only timing observer bound to the *specific*
+    /// active speaker-output session. Changes to the selected device, route,
+    /// format or session lifetime invalidate the observer on its next poll.
+    func makeHardwareClockAcquisition(
+        microphone: AudioInputDevice,
+        inputChannelIndex: Int
+    ) throws -> QuietZoneHardwareHALClockAcquisition {
+        guard let session = transportSession,
+              let route = hardwareClockAcquisitionRoute()
+        else { throw QuietZoneHardwareClockCaptureError.incompatibleRoute }
+        let reference = try FeedForwardReferenceTransport(
+            microphone: microphone,
+            inputChannelIndex: inputChannelIndex
+        )
+        return try QuietZoneHardwareHALClockAcquisition(
+            reference: reference,
+            microphoneID: microphone.uid,
+            outputID: route.outputID,
+            routeID: route.routeID,
+            sampleRate: route.sampleRate,
+            currentRoute: { [weak self, weak session] in
+                guard let self, let session,
+                      self.transportSession === session
+                else { return nil }
+                return self.hardwareClockAcquisitionRoute()
+            },
+            outputWitness: { [weak session] in
+                session?.passiveFeedForwardOutputTimingSnapshot()
+            }
+        )
+    }
+
     func audioUnitRackProcessingFormatForNextStart() throws
         -> AudioUnitRackProcessingFormat {
         guard lifecycle.state == .idle else {

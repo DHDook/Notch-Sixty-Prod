@@ -18,7 +18,7 @@ struct ProductionFeedForwardReadinessCard: View {
                     .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Text("PR96 · DIAGNOSTICS")
+                Text("PR97 · HARDWARE SETUP")
                     .font(.caption.bold())
                     .tracking(0.5)
                     .foregroundStyle(.secondary)
@@ -80,6 +80,41 @@ struct ProductionFeedForwardReadinessCard: View {
                     "Leave mic upstream only after confidence, causality, model accuracy and hardware verification gates pass."
                 )
             }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Instrumented calibration stages").font(.caption.bold())
+                Text("1. Qualify concurrent input and output HAL clocks")
+                Text("2. Repeat at least three wired electrical loopbacks")
+                Text("3. Capture listener → upstream doorway → listener return")
+                Text("4. Measure physical speaker-to-seat latency before considering ANC")
+                Text("The automated hardware capture driver is not connected; no live anti-noise output is permitted.")
+                    .foregroundStyle(.secondary)
+            }
+            .font(.caption)
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            let commissioning = QuietZoneHardwareCommissioningEvaluator()
+                .preview(calibration: quietZone.feedForwardCalibration)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Hardware commissioning checklist")
+                    .font(.caption.bold())
+                ForEach(commissioning.items) { item in
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(item.gate.title)
+                        Spacer(minLength: 8)
+                        Text(item.status.caption)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    .font(.caption2)
+                }
+                Text("Saved calibration data cannot certify physical source clocks, independent endpoint instrumentation, or measured attenuation. Live feed-forward ANC is disconnected.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             if let calibration = quietZone.feedForwardCalibration {
                 HStack {
@@ -178,6 +213,44 @@ struct ProductionFeedForwardReadinessCard: View {
                         "Conservative preview minus measured path and jitter."
                     )
                 }
+            }
+
+            if let timing = quietZone.feedForwardCalibration?.timingPath {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Timing path breakdown · diagnostic only")
+                        .font(.caption.bold())
+                    HStack {
+                        Text("Reference ADC / acquisition")
+                        Spacer()
+                        Text(milliseconds(timing.referenceAcquisitionSeconds))
+                            .monospacedDigit()
+                    }
+                    HStack {
+                        Text("Reference processing / scheduling")
+                        Spacer()
+                        Text(milliseconds(timing.referenceProcessingSeconds))
+                            .monospacedDigit()
+                    }
+                    HStack {
+                        Text("DAC + speaker-to-seat (combined)")
+                        Spacer()
+                        Text(milliseconds(timing.commandToSeatSeconds))
+                            .monospacedDigit()
+                    }
+                    HStack {
+                        Text("Worst-case jitter + 3σ clock allowance")
+                        Spacer()
+                        Text(milliseconds(
+                            timing.totalWorstCaseJitterSeconds
+                                + 3 * timing.timingUncertaintySeconds
+                        )).monospacedDigit()
+                    }
+                    Text("Component bounds require separately instrumented hardware evidence. Cable loopback cannot determine acoustic propagation. Positive timing reserve does not establish any frequency-specific attenuation or permit live ANC.")
+                        .foregroundStyle(.secondary)
+                }
+                .font(.caption)
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             Label(
