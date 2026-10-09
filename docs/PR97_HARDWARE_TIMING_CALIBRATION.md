@@ -33,3 +33,22 @@ cases, arm64 macOS build, full XCTest suite, and PR96–PR90 inherited guards.
 
 No callback modifications, external dependencies, automatic playback,
 persistence changes or creation of fake physical measurement evidence.
+
+## Second implementation slice — passive HAL clock acquisition
+
+The new `QuietZoneHardwareHALClockAcquisition` owns the already-existing
+PR96 microphone reference transport while taking read-only output callback
+timestamp snapshots through an injected physical-route-bound witness. It
+converts Core Audio host ticks into common monotonic seconds using
+`AudioConvertHostTimeToNanos`, discards repeated output snapshots, records
+callback-first input samples only, rejects invalid timestamps, ring overflow,
+route/device/rate changes and nonmonotonic clocks, and stops capture on fault.
+
+`QuietZoneHardwareClockAccumulator` bounds memory to 4096 observations
+per clock and invokes PR96's independent clock analyzer. A qualified record
+may be passed to the PR97 calibration session's `qualifyClock` method;
+this is **not** measurement of ADC/DAC round trip or sound arrival. The
+output witness must be supplied by the currently running selected-output
+transport; no new output stream, probe playback, capture polling timer or
+speaker injection is created in this slice. Recorded time series are not
+persisted automatically.

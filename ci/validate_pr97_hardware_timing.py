@@ -19,6 +19,22 @@ for item in ("QuietZoneHardwareCalibration.swift in Sources",
              "QuietZoneHardwareCalibrationTests.swift in Sources"):
     assert item in pbx,item
 assert "PR97 · HARDWARE SETUP" in ui
+capture=(root/"NotchSixty/Audio/QuietZoneHardwareClockCapture.swift").read_text()
+capture_tests=(root/"NotchSixtyTests/QuietZoneHardwareClockCaptureTests.swift").read_text()
+for item in ("QuietZoneHardwareHALClockAcquisition", "AudioConvertHostTimeToNanos",
+             "N60FeedForwardOutputTimingSnapshot", "QuietZoneHALClockAnalyzer",
+             "liveANCQualified: Bool = false", "reference.read(maximumFrames:"):
+    assert item in capture,item
+for item in ("testSyntheticConcurrentStableTracesAreBenchOnly",
+             "testNonOverlappingSnapshotsNeverQualify",
+             "testReplayedTimestampsAndDiscontinuityFailClosed",
+             "testIndependentClockDriftIsRejected"):
+    assert item in capture_tests,item
+for item in ("QuietZoneHardwareClockCapture.swift in Sources",
+             "QuietZoneHardwareClockCaptureTests.swift in Sources"):
+    assert item in pbx,item
+for forbidden in ("requestArm(", "setEnabled(", "stageRoomTreatment"):
+    assert forbidden not in capture,forbidden
 for unsafe in ("AudioDeviceStart(", "requestArm(", "setEnabled(", "stageRoomTreatment"):
     assert unsafe not in core, unsafe
 print("PR97 calibration safety guard passed")
