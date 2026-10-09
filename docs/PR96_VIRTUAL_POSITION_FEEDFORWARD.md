@@ -198,3 +198,8 @@ explicitly false. Live feed-forward ANC remains unarmed.
 The current code does not yet provide a UI button that automatically records
 these input/output traces from an attached hardware bench; an instrumented
 capture path is still required to obtain them.
+
+
+## Sixth slice — electrical bench loopback diagnostics
+
+`QuietZoneBenchLoopbackAnalyzer` verifies at least three repeatedly triggered, clock-qualified electrical loopback captures using normalized coded-probe correlation. It rejects mismatched routes and devices, clipped recordings, high timing uncertainty, ambiguous arrivals, unqualified clock traces and inconsistent delays. Its reported electrical round-trip delay includes a conservative repetition/clock uncertainty bound. No electrical loopback result qualifies acoustic flight time, actual anti-noise output latency, the virtual listener estimate or live ANC. The capture infrastructure must still supply independently instrumented launch/capture timestamps; the analyzer does not manufacture them.
