@@ -123,6 +123,9 @@
 		F97400000000000000000002 /* QuietZoneCommissioningHandoffAdapterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F97400000000000000000012 /* QuietZoneCommissioningHandoffAdapterTests.swift */; };
 		F98000000000000000000001 /* QuietZoneFeedForwardShadowScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = F98000000000000000000011 /* QuietZoneFeedForwardShadowScheduler.swift */; };
 		F98000000000000000000002 /* QuietZoneFeedForwardShadowSchedulerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F98000000000000000000012 /* QuietZoneFeedForwardShadowSchedulerTests.swift */; };
+		F98100000000000000000001 /* N60FeedForwardDeadlineBridge.c in Sources */ = {isa = PBXBuildFile; fileRef = F98100000000000000000011 /* N60FeedForwardDeadlineBridge.c */; };
+		F98100000000000000000002 /* QuietZoneNativeShadowTimingTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F98100000000000000000013 /* QuietZoneNativeShadowTimingTransport.swift */; };
+		F98100000000000000000003 /* QuietZoneNativeShadowTimingTransportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F98100000000000000000014 /* QuietZoneNativeShadowTimingTransportTests.swift */; };
 		F73000000000000000000001 /* MIMORoomTreatmentDesigner.swift in Sources */ = {isa = PBXBuildFile; fileRef = F73000000000000000000011 /* MIMORoomTreatmentDesigner.swift */; };
 		F73000000000000000000002 /* MIMORoomTreatmentDesignerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F73000000000000000000012 /* MIMORoomTreatmentDesignerTests.swift */; };
 		F74000000000000000000001 /* MIMORoomTreatmentFIRCompiler.swift in Sources */ = {isa = PBXBuildFile; fileRef = F74000000000000000000011 /* MIMORoomTreatmentFIRCompiler.swift */; };
@@ -320,6 +323,10 @@
 		F97400000000000000000012 /* QuietZoneCommissioningHandoffAdapterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneCommissioningHandoffAdapterTests.swift; sourceTree = "<group>"; };
 		F98000000000000000000011 /* QuietZoneFeedForwardShadowScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForwardShadowScheduler.swift; sourceTree = "<group>"; };
 		F98000000000000000000012 /* QuietZoneFeedForwardShadowSchedulerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForwardShadowSchedulerTests.swift; sourceTree = "<group>"; };
+		F98100000000000000000011 /* N60FeedForwardDeadlineBridge.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = N60FeedForwardDeadlineBridge.c; sourceTree = "<group>"; };
+		F98100000000000000000012 /* N60FeedForwardDeadlineBridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60FeedForwardDeadlineBridge.h; sourceTree = "<group>"; };
+		F98100000000000000000013 /* QuietZoneNativeShadowTimingTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneNativeShadowTimingTransport.swift; sourceTree = "<group>"; };
+		F98100000000000000000014 /* QuietZoneNativeShadowTimingTransportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneNativeShadowTimingTransportTests.swift; sourceTree = "<group>"; };
 		F73000000000000000000011 /* MIMORoomTreatmentDesigner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMORoomTreatmentDesigner.swift; sourceTree = "<group>"; };
 		F73000000000000000000012 /* MIMORoomTreatmentDesignerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMORoomTreatmentDesignerTests.swift; sourceTree = "<group>"; };
 		F74000000000000000000011 /* MIMORoomTreatmentFIRCompiler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMORoomTreatmentFIRCompiler.swift; sourceTree = "<group>"; };
@@ -451,6 +458,7 @@
 				F97300000000000000000012 /* QuietZoneEvidenceHandoffTests.swift */,
 				F97400000000000000000012 /* QuietZoneCommissioningHandoffAdapterTests.swift */,
 				F98000000000000000000012 /* QuietZoneFeedForwardShadowSchedulerTests.swift */,
+				F98100000000000000000014 /* QuietZoneNativeShadowTimingTransportTests.swift */,
 				F73000000000000000000012 /* MIMORoomTreatmentDesignerTests.swift */,
 				F74000000000000000000012 /* MIMORoomTreatmentFIRCompilerTests.swift */,
 				F75000000000000000000012 /* MIMORoomTreatmentVerificationTests.swift */,
@@ -516,6 +524,7 @@
 				F97300000000000000000011 /* QuietZoneEvidenceHandoff.swift */,
 				F97400000000000000000011 /* QuietZoneCommissioningHandoffAdapter.swift */,
 				F98000000000000000000011 /* QuietZoneFeedForwardShadowScheduler.swift */,
+				F98100000000000000000013 /* QuietZoneNativeShadowTimingTransport.swift */,
 				F95000000000000000000011 /* ActiveQuietZoneSpatial.swift */,
 				F95000000000000000000013 /* ActiveQuietZoneSpatialSurvey.swift */,
 				F73000000000000000000011 /* MIMORoomTreatmentDesigner.swift */,
@@ -570,7 +579,9 @@
 				F96100000000000000000013 /* N60FeedForwardReferenceBridge.c */,
 				F96100000000000000000014 /* N60FeedForwardReferenceBridge.h */,
 				F96200000000000000000013 /* N60FeedForwardPreviewFIR.c */,
+				F98100000000000000000011 /* N60FeedForwardDeadlineBridge.c */,
 				F96200000000000000000014 /* N60FeedForwardPreviewFIR.h */,
+				F98100000000000000000012 /* N60FeedForwardDeadlineBridge.h */,
 				F96400000000000000000011 /* N60FeedForwardOutputTiming.h */,
 				F70000000000000000000011 /* N60AdaptiveSampleRate.c */,
 				F70000000000000000000012 /* N60AdaptiveSampleRate.h */,
@@ -710,6 +721,7 @@
 				F96100000000000000000004 /* FeedForwardReferenceTransport.swift in Sources */,
 				F96200000000000000000001 /* QuietZoneVirtualSeatDesigner.swift in Sources */,
 				F96200000000000000000003 /* N60FeedForwardPreviewFIR.c in Sources */,
+				F98100000000000000000001 /* N60FeedForwardDeadlineBridge.c in Sources */,
 				F96300000000000000000001 /* QuietZoneCausalFIRCompiler.swift in Sources */,
 				F96300000000000000000002 /* QuietZoneFeedForwardRehearsal.swift in Sources */,
 				F96500000000000000000001 /* QuietZoneHALClockAnalysis.swift in Sources */,
@@ -723,6 +735,7 @@
 				F97300000000000000000001 /* QuietZoneEvidenceHandoff.swift in Sources */,
 				F97400000000000000000001 /* QuietZoneCommissioningHandoffAdapter.swift in Sources */,
 				F98000000000000000000001 /* QuietZoneFeedForwardShadowScheduler.swift in Sources */,
+				F98100000000000000000002 /* QuietZoneNativeShadowTimingTransport.swift in Sources */,
 				F73000000000000000000001 /* MIMORoomTreatmentDesigner.swift in Sources */,
 				F74000000000000000000001 /* MIMORoomTreatmentFIRCompiler.swift in Sources */,
 				F75000000000000000000001 /* MIMORoomTreatmentVerification.swift in Sources */,
@@ -798,6 +811,7 @@
 				F97300000000000000000002 /* QuietZoneEvidenceHandoffTests.swift in Sources */,
 				F97400000000000000000002 /* QuietZoneCommissioningHandoffAdapterTests.swift in Sources */,
 				F98000000000000000000002 /* QuietZoneFeedForwardShadowSchedulerTests.swift in Sources */,
+				F98100000000000000000003 /* QuietZoneNativeShadowTimingTransportTests.swift in Sources */,
 				F73000000000000000000002 /* MIMORoomTreatmentDesignerTests.swift in Sources */,
 				F74000000000000000000002 /* MIMORoomTreatmentFIRCompilerTests.swift in Sources */,
 				F75000000000000000000002 /* MIMORoomTreatmentVerificationTests.swift in Sources */,

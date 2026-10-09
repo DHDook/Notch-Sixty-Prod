@@ -202,8 +202,13 @@ final class QuietZoneNativeShadowTimingTransportTests: XCTestCase {
 
     func testMissedDeadlineAndStaleClockFailClosed() throws {
         let late = try transport()
-        var tooLate = input(frame: 0)
-        tooLate.evaluatedAtHostSeconds = 100.04
+        let tooLate = QuietZoneFeedForwardReferenceDeadlineEvent(
+            referenceSampleFrame: 2_000,
+            referenceAcousticHostSeconds: 100,
+            referenceAvailableHostSeconds: 100.001,
+            evaluatedAtHostSeconds: 100.04,
+            microphoneSample: 0.2
+        )
         var out = output(frame: 0)
         out.witnessedAtSeconds = 100.0399
         XCTAssertThrowsError(try late.ingest(

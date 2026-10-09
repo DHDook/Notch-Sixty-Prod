@@ -53,3 +53,42 @@ physical-route mismatches.
 
 Positive causality or signature checks do not prove attenuation. No
 unverified estimate of cancelled frequency range or dB reduction is made.
+
+
+## Second slice: native SPSC shadow deadline bridge (remote)
+
+The native C \`N60FeedForwardDeadlineBridge\` is a preallocated, fixed-capacity
+single-producer/single-consumer FIFO (256–4096 power-of-two records) for
+**hypothetical output frame/time/slack metadata only**. It has no output PCM
+API. Setup allocates the ring and configures the existing bounded native
+PR96 FIR exactly once, off the callback. Per-frame Process and Read use
+bounded loops, acquire/release atomics, no locks, allocation, logging,
+Core Audio calls, Objective-C, Swift callbacks or memory replacement.
+A corrupted reference sample, clock drift or discontinuity, wrong route
+or clock token, stale output witness, missed sample deadline or metadata
+FIFO overflow permanently halts the bridge, resets FIR state and returns
+no further records. Anti-noise L/R samples remain temporary variables and
+are **discarded**, never published.
+
+\`QuietZoneNativeShadowTimingTransport\` is a non-realtime Swift owner
+that checks identity with existing \`N60FeedForwardReferenceFrame\` HAL
+input-ring metadata, accepts externally cross-calibrated acoustic timestamps
+and output witnesses, and forwards the input to the C bridge. It offers
+only read-only deadline diagnostics. The selected route/clock are represented
+by control-plane generated numeric tokens; matching these does not independently
+authenticate hardware and the caller must regenerate them on changes.
+The adapter deliberately does not attach to the playback callback.
+
+Deterministic native FIFO/adversarial XCTest covers ordering, ring
+wraparound, expiry, clock and route changes, missed deadlines, raw HAL
+reference-ID mismatch, exhaustion, invalid FIR and noncausal plans.
+The native bridge rejects overlarge/unbounded FIR coefficients using the
+existing PR96 L1 limiter and always reports playback disconnected.
+
+**Not yet implemented:** A hardware-calibrated mapping from HAL host
+ticks to physical acoustic emission and DAC deadlines; the output scheduler
+is not running inside an IOProc and is not eligible to drive speakers.
+Transport safety tests with synthetic timestamps are not proof of realtime
+OS scheduling or measured cancellation. Any future live topology must
+undergo physical commissioning, echo/feedback stability screening, and
+explicit independent authorization before enablement.
