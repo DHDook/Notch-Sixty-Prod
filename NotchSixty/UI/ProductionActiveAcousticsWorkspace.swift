@@ -1219,6 +1219,7 @@ struct ProductionActiveAcousticsWorkspace: View {
             .glassEffect(.regular, in: .rect(cornerRadius: 18))
 
             spatialQuietZoneCard
+            ProductionFeedForwardReadinessCard(quietZone: quietZone)
 
             LazyVGrid(
                 columns: [

@@ -100,6 +100,16 @@ final class ActiveQuietZoneController: ObservableObject {
     @Published private(set) var spatialSurveyMessage =
         "Speaker-path positions must be prepared before a live noise survey."
     @Published var requestedSpatialSurveyFrequencyHz: Double = 60
+    @Published private(set) var feedForwardCalibration:
+        QuietZoneFeedForwardCalibration?
+    @Published private(set) var feedForwardBudget:
+        QuietZoneFeedForwardBudget = .missing
+    @Published private(set) var feedForwardMessage =
+        "A low-latency feed-forward path must be calibrated and hardware-verified before ANC can operate."
+
+    private var feedForwardStore: QuietZoneFeedForwardStore {
+        QuietZoneFeedForwardStore(roomStore: ambient.projects.store)
+    }
 
     private var spatialStore: ActiveQuietZoneSpatialStore {
         ActiveQuietZoneSpatialStore(
@@ -164,6 +174,7 @@ final class ActiveQuietZoneController: ObservableObject {
         do {
             try synchronizeSelectedPlaybackSystem()
             refreshSpatialCalibration()
+            refreshFeedForwardCalibration()
             if configuration.enabled {
                 try start()
             } else {
@@ -174,6 +185,74 @@ final class ActiveQuietZoneController: ObservableObject {
         } catch {
             fault(error, reason: .ambientEvidenceUnavailable)
         }
+    }
+
+    /// Prepares an Advisor-style diagnostics sidecar. This is NOT a feed-forward
+    /// runtime arm operation, and it deliberately creates no fake probe data.
+    func prepareFeedForwardPlan() throws {
+        guard let project = ambient.projects.project,
+              let position = ambient.selectedModelPosition,
+              project.playbackSystemID == profiles.selectedSystemProfileID,
+              ambient.roomProjectMatchesSelectedMicrophone,
+              let stableID = project.microphone?.stableID,
+              !stableID.isEmpty
+        else { throw QuietZoneFeedForwardError.incompatibleProject }
+        let draft = QuietZoneFeedForwardCalibration(
+            projectID: project.id,
+            playbackSystemID: project.playbackSystemID,
+            listenerPositionID: position.id,
+            upstreamLabel: "Upstream doorway",
+            microphoneStableID: stableID
+        )
+        try feedForwardStore.save(draft, project: project)
+        feedForwardCalibration = draft
+        feedForwardBudget = .missing
+        feedForwardMessage =
+            "Plan saved. Real trigger-synchronized listener → upstream → listener arrivals and a measured ADC/DSP/DAC/seat path are still required."
+    }
+
+    func refreshFeedForwardCalibration() {
+        guard let project = ambient.projects.project,
+              project.playbackSystemID == profiles.selectedSystemProfileID,
+              ambient.roomProjectMatchesSelectedMicrophone else {
+            feedForwardCalibration = nil
+            feedForwardBudget = .missing
+            feedForwardMessage = "Choose a matching Room Correction project and microphone."
+            return
+        }
+        do {
+            feedForwardCalibration = try feedForwardStore.load(for: project)
+            if let calibration = feedForwardCalibration {
+                feedForwardBudget = try QuietZoneFeedForwardBudgetAnalyzer()
+                    .analyze(calibration, project: project)
+                feedForwardMessage = feedForwardBudget.explanation
+            } else {
+                feedForwardBudget = .missing
+                feedForwardMessage = "Create an upstream-reference diagnostic plan to begin."
+            }
+        } catch {
+            feedForwardCalibration = nil
+            feedForwardBudget = .missing
+            feedForwardMessage = error.localizedDescription
+        }
+    }
+
+    /// Keep timing capture ingestion explicit and provenance-gated.
+    /// No ordinary Room Correction sweep can silently create such records.
+    func importMeasuredFeedForwardCalibration(
+        _ calibration: QuietZoneFeedForwardCalibration
+    ) throws {
+        guard let project = ambient.projects.project,
+              project.playbackSystemID == profiles.selectedSystemProfileID,
+              ambient.roomProjectMatchesSelectedMicrophone
+        else { throw QuietZoneFeedForwardError.incompatibleProject }
+        let budget = try QuietZoneFeedForwardBudgetAnalyzer()
+            .analyze(calibration, project: project)
+        try feedForwardStore.save(calibration, project: project)
+        feedForwardCalibration = calibration
+        feedForwardBudget = budget
+        feedForwardMessage = budget.explanation
+        // No runtime target, no arm and no change to the active profile.
     }
 
     /// Saves a draft spatial measurement plan. This does not fabricate the
@@ -1262,6 +1341,9 @@ final class ActiveQuietZoneController: ObservableObject {
         _ = try configuration.validated()
         spatialCalibration = nil
         spatialPredictions = []
+        feedForwardCalibration = nil
+        feedForwardBudget = .missing
+        feedForwardMessage = "Playback System changed; review reference timing before any future use."
         if spatialSurveyActive { cancelSpatialSurvey() }
         activeSystemID = systemID
         if configuration.enabled {

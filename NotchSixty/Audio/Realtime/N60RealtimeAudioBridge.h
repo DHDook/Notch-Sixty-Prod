@@ -8,6 +8,7 @@
 #include "N60AdaptiveSampleRate.h"
 #include "N60AudioUnitLiveRackBridge.h"
 #include "N60RenderKernel.h"
+#include "N60FeedForwardOutputTiming.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -284,6 +285,13 @@ bool N60RealtimeAudioBridgeConfigureHeadphoneDSP(
     N60HeadphoneDSPSnapshot snapshot
 );
 void N60RealtimeAudioBridgeClearHeadphoneDSP(N60RealtimeAudioBridge * _Nonnull bridge);
+/// Passive output callback timing only. It is NOT measured DAC latency or
+/// authorization for anti-noise output.
+N60FeedForwardOutputTimingSnapshot
+N60RealtimeAudioBridgeGetFeedForwardOutputTimingSnapshot(
+    const N60RealtimeAudioBridge * _Nonnull bridge
+);
+
 N60RealtimeAudioBridgeSnapshot N60RealtimeAudioBridgeGetSnapshot(const N60RealtimeAudioBridge * _Nonnull bridge);
 N60RenderKernelDiagnostics N60RealtimeAudioBridgeGetRenderDiagnostics(
     const N60RealtimeAudioBridge * _Nonnull bridge

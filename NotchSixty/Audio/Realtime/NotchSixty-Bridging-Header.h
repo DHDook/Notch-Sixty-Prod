@@ -4,6 +4,8 @@
 #import "N60RealtimeAudioBridge.h"
 #import "N60RoomMeasurementBridge.h"
 #import "N60AmbientMonitorBridge.h"
+#import "N60FeedForwardReferenceBridge.h"
+#import "N60FeedForwardPreviewFIR.h"
 #import "N60TargetedRoomMeasurementBridge.h"
 #import "N60Convolution.h"
 #import "N60LinearPhaseEQ.h"

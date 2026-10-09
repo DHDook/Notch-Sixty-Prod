@@ -84,6 +84,7 @@ struct N60RealtimeAudioBridge {
 
     _Atomic uint64_t captureCallbacks;
     _Atomic uint64_t outputCallbacks;
+    N60FeedForwardOutputTiming feedForwardOutputTiming;
     _Atomic uint64_t capturedFrames;
     _Atomic uint64_t deliveredFrames;
     _Atomic uint64_t underrunFrames;
@@ -576,6 +577,7 @@ void N60RealtimeAudioBridgeReset(N60RealtimeAudioBridge *bridge) {
     atomic_store_explicit(&bridge->readIndex, 0, memory_order_release);
     atomic_store_explicit(&bridge->captureCallbacks, 0, memory_order_relaxed);
     atomic_store_explicit(&bridge->outputCallbacks, 0, memory_order_relaxed);
+    N60FeedForwardOutputTimingReset(&bridge->feedForwardOutputTiming);
     atomic_store_explicit(&bridge->capturedFrames, 0, memory_order_relaxed);
     atomic_store_explicit(&bridge->deliveredFrames, 0, memory_order_relaxed);
     atomic_store_explicit(&bridge->underrunFrames, 0, memory_order_relaxed);
@@ -1231,6 +1233,14 @@ void N60RealtimeAudioBridgeClearHeadphoneDSP(N60RealtimeAudioBridge *bridge) {
     N60RenderKernelClearHeadphoneDSP(bridge->renderKernel);
 }
 
+N60FeedForwardOutputTimingSnapshot
+N60RealtimeAudioBridgeGetFeedForwardOutputTimingSnapshot(
+    const N60RealtimeAudioBridge *bridge
+) {
+    if (bridge == NULL) return (N60FeedForwardOutputTimingSnapshot){0};
+    return N60FeedForwardOutputTimingRead(&bridge->feedForwardOutputTiming);
+}
+
 N60RealtimeAudioBridgeSnapshot N60RealtimeAudioBridgeGetSnapshot(
     const N60RealtimeAudioBridge *bridge
 ) {
@@ -1565,8 +1575,6 @@ OSStatus N60OutputIOProc(
     (void)inNow;
     (void)inInputData;
     (void)inInputTime;
-    (void)inOutputTime;
-
     N60RealtimeAudioBridge *bridge = (N60RealtimeAudioBridge *)inClientData;
     if (bridge == NULL || outOutputData == NULL) return noErr;
     atomic_fetch_add_explicit(&bridge->outputCallbacks, 1, memory_order_relaxed);
@@ -1592,6 +1600,12 @@ OSStatus N60OutputIOProc(
         }
         frameCount = outputView.frameCount;
     }
+
+    // Passive timing witness only: no modification to program audio, DSP,
+    // graph scheduling, anti-noise generation or output routing.
+    N60FeedForwardOutputTimingObserve(
+        &bridge->feedForwardOutputTiming, inOutputTime, frameCount
+    );
 
     bool adaptiveSampleRate = bridge->adaptiveSRC != NULL;
     uint64_t readIndex = atomic_load_explicit(&bridge->readIndex, memory_order_relaxed);

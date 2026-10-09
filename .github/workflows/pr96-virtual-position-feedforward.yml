@@ -1,0 +1,46 @@
+name: PR96 Virtual Position Feed Forward ANC
+
+on:
+  push:
+    branches:
+      - feature/pr96-virtual-position-feedforward-anc
+  pull_request:
+    branches:
+      - feature/pr95-multi-position-quiet-zone
+  workflow_dispatch:
+
+concurrency:
+  group: pr96-feedforward-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: python3 ci/validate_pr96_feedforward.py
+      - run: python3 ci/validate_pr95_multi_position_quiet_zone.py
+      - run: python3 ci/validate_pr94_treatment_design_verification.py
+      - run: python3 ci/validate_pr93_room_geometry_placement.py
+      - run: python3 ci/validate_pr92_room_treatment_advisor.py
+      - run: python3 ci/validate_pr91_conversation_preservation.py
+      - run: python3 ci/validate_pr90_active_quiet_zone.py
+
+  validate-macos-integration:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - run: python3 ci/validate_pr96_feedforward.py
+      - name: Verify passive output timestamp witness
+        run: |
+          xcrun clang -std=c11 -I NotchSixty/Audio/Realtime -framework CoreAudio ci/pr96_output_timing_smoke.c -o /tmp/pr96_output_timing_smoke
+          /tmp/pr96_output_timing_smoke
+      - name: Build macOS arm64 app
+        run: |
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES build
+      - name: Run PR96 and inherited ANC tests
+        run: |
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES -only-testing:NotchSixtyTests/QuietZoneFeedForwardTests -only-testing:NotchSixtyTests/QuietZoneFeedForwardProbeTests -only-testing:NotchSixtyTests/QuietZoneFeedForwardSurveyTests -only-testing:NotchSixtyTests/FeedForwardReferenceBridgeTests -only-testing:NotchSixtyTests/QuietZoneVirtualSeatDesignerTests -only-testing:NotchSixtyTests/FeedForwardPreviewFIRTests -only-testing:NotchSixtyTests/QuietZoneCausalFIRCompilerTests -only-testing:NotchSixtyTests/QuietZoneFeedForwardRehearsalTests -only-testing:NotchSixtyTests/QuietZoneHALClockAnalysisTests -only-testing:NotchSixtyTests/QuietZoneBenchLoopbackTests -only-testing:NotchSixtyTests/ActiveQuietZoneSpatialTests -only-testing:NotchSixtyTests/ActiveQuietZoneTests test
+      - name: Run full XCTest suite
+        run: |
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES test

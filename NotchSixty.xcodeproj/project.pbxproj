@@ -83,6 +83,28 @@
 		F89000000000000000000002 /* AmbientCompensationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F89000000000000000000012 /* AmbientCompensationTests.swift */; };
 		F90000000000000000000001 /* ActiveQuietZone.swift in Sources */ = {isa = PBXBuildFile; fileRef = F90000000000000000000011 /* ActiveQuietZone.swift */; };
 		F90000000000000000000002 /* ActiveQuietZoneTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F90000000000000000000012 /* ActiveQuietZoneTests.swift */; };
+		F96000000000000000000001 /* QuietZoneFeedForward.swift in Sources */ = {isa = PBXBuildFile; fileRef = F96000000000000000000011 /* QuietZoneFeedForward.swift */; };
+		F96000000000000000000002 /* QuietZoneFeedForwardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F96000000000000000000012 /* QuietZoneFeedForwardTests.swift */; };
+		F96000000000000000000003 /* ProductionFeedForwardReadinessCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F96000000000000000000013 /* ProductionFeedForwardReadinessCard.swift */; };
+		F96000000000000000000004 /* QuietZoneFeedForwardProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = F96000000000000000000014 /* QuietZoneFeedForwardProbe.swift */; };
+		F96000000000000000000005 /* QuietZoneFeedForwardProbeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F96000000000000000000015 /* QuietZoneFeedForwardProbeTests.swift */; };
+		F96100000000000000000001 /* QuietZoneFeedForwardSurvey.swift in Sources */ = {isa = PBXBuildFile; fileRef = F96100000000000000000011 /* QuietZoneFeedForwardSurvey.swift */; };
+		F96100000000000000000002 /* QuietZoneFeedForwardSurveyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F96100000000000000000012 /* QuietZoneFeedForwardSurveyTests.swift */; };
+		F96100000000000000000003 /* N60FeedForwardReferenceBridge.c in Sources */ = {isa = PBXBuildFile; fileRef = F96100000000000000000013 /* N60FeedForwardReferenceBridge.c */; };
+		F96100000000000000000004 /* FeedForwardReferenceTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F96100000000000000000015 /* FeedForwardReferenceTransport.swift */; };
+		F96100000000000000000005 /* FeedForwardReferenceBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F96100000000000000000016 /* FeedForwardReferenceBridgeTests.swift */; };
+		F96200000000000000000001 /* QuietZoneVirtualSeatDesigner.swift in Sources */ = {isa = PBXBuildFile; fileRef = F96200000000000000000011 /* QuietZoneVirtualSeatDesigner.swift */; };
+		F96200000000000000000002 /* QuietZoneVirtualSeatDesignerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F96200000000000000000012 /* QuietZoneVirtualSeatDesignerTests.swift */; };
+		F96200000000000000000003 /* N60FeedForwardPreviewFIR.c in Sources */ = {isa = PBXBuildFile; fileRef = F96200000000000000000013 /* N60FeedForwardPreviewFIR.c */; };
+		F96200000000000000000004 /* FeedForwardPreviewFIRTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F96200000000000000000015 /* FeedForwardPreviewFIRTests.swift */; };
+		F96300000000000000000001 /* QuietZoneCausalFIRCompiler.swift in Sources */ = {isa = PBXBuildFile; fileRef = F96300000000000000000011 /* QuietZoneCausalFIRCompiler.swift */; };
+		F96300000000000000000002 /* QuietZoneFeedForwardRehearsal.swift in Sources */ = {isa = PBXBuildFile; fileRef = F96300000000000000000012 /* QuietZoneFeedForwardRehearsal.swift */; };
+		F96300000000000000000003 /* QuietZoneCausalFIRCompilerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F96300000000000000000013 /* QuietZoneCausalFIRCompilerTests.swift */; };
+		F96300000000000000000004 /* QuietZoneFeedForwardRehearsalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F96300000000000000000014 /* QuietZoneFeedForwardRehearsalTests.swift */; };
+		F96500000000000000000001 /* QuietZoneHALClockAnalysis.swift in Sources */ = {isa = PBXBuildFile; fileRef = F96500000000000000000011 /* QuietZoneHALClockAnalysis.swift */; };
+		F96500000000000000000002 /* QuietZoneHALClockAnalysisTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F96500000000000000000012 /* QuietZoneHALClockAnalysisTests.swift */; };
+		F96600000000000000000001 /* QuietZoneBenchLoopback.swift in Sources */ = {isa = PBXBuildFile; fileRef = F96600000000000000000011 /* QuietZoneBenchLoopback.swift */; };
+		F96600000000000000000002 /* QuietZoneBenchLoopbackTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F96600000000000000000012 /* QuietZoneBenchLoopbackTests.swift */; };
 		F73000000000000000000001 /* MIMORoomTreatmentDesigner.swift in Sources */ = {isa = PBXBuildFile; fileRef = F73000000000000000000011 /* MIMORoomTreatmentDesigner.swift */; };
 		F73000000000000000000002 /* MIMORoomTreatmentDesignerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F73000000000000000000012 /* MIMORoomTreatmentDesignerTests.swift */; };
 		F74000000000000000000001 /* MIMORoomTreatmentFIRCompiler.swift in Sources */ = {isa = PBXBuildFile; fileRef = F74000000000000000000011 /* MIMORoomTreatmentFIRCompiler.swift */; };
@@ -237,6 +259,31 @@
 		F89000000000000000000012 /* AmbientCompensationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AmbientCompensationTests.swift; sourceTree = "<group>"; };
 		F90000000000000000000011 /* ActiveQuietZone.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveQuietZone.swift; sourceTree = "<group>"; };
 		F90000000000000000000012 /* ActiveQuietZoneTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveQuietZoneTests.swift; sourceTree = "<group>"; };
+		F96000000000000000000011 /* QuietZoneFeedForward.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForward.swift; sourceTree = "<group>"; };
+		F96000000000000000000012 /* QuietZoneFeedForwardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForwardTests.swift; sourceTree = "<group>"; };
+		F96000000000000000000013 /* ProductionFeedForwardReadinessCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionFeedForwardReadinessCard.swift; sourceTree = "<group>"; };
+		F96000000000000000000014 /* QuietZoneFeedForwardProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForwardProbe.swift; sourceTree = "<group>"; };
+		F96000000000000000000015 /* QuietZoneFeedForwardProbeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForwardProbeTests.swift; sourceTree = "<group>"; };
+		F96100000000000000000011 /* QuietZoneFeedForwardSurvey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForwardSurvey.swift; sourceTree = "<group>"; };
+		F96100000000000000000012 /* QuietZoneFeedForwardSurveyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForwardSurveyTests.swift; sourceTree = "<group>"; };
+		F96100000000000000000013 /* N60FeedForwardReferenceBridge.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = N60FeedForwardReferenceBridge.c; sourceTree = "<group>"; };
+		F96100000000000000000014 /* N60FeedForwardReferenceBridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60FeedForwardReferenceBridge.h; sourceTree = "<group>"; };
+		F96100000000000000000015 /* FeedForwardReferenceTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudio/FeedForwardReferenceTransport.swift; sourceTree = "<group>"; };
+		F96100000000000000000016 /* FeedForwardReferenceBridgeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedForwardReferenceBridgeTests.swift; sourceTree = "<group>"; };
+		F96200000000000000000011 /* QuietZoneVirtualSeatDesigner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneVirtualSeatDesigner.swift; sourceTree = "<group>"; };
+		F96200000000000000000012 /* QuietZoneVirtualSeatDesignerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneVirtualSeatDesignerTests.swift; sourceTree = "<group>"; };
+		F96200000000000000000013 /* N60FeedForwardPreviewFIR.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = N60FeedForwardPreviewFIR.c; sourceTree = "<group>"; };
+		F96200000000000000000014 /* N60FeedForwardPreviewFIR.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60FeedForwardPreviewFIR.h; sourceTree = "<group>"; };
+		F96400000000000000000011 /* N60FeedForwardOutputTiming.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60FeedForwardOutputTiming.h; sourceTree = "<group>"; };
+		F96200000000000000000015 /* FeedForwardPreviewFIRTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedForwardPreviewFIRTests.swift; sourceTree = "<group>"; };
+		F96300000000000000000011 /* QuietZoneCausalFIRCompiler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneCausalFIRCompiler.swift; sourceTree = "<group>"; };
+		F96300000000000000000012 /* QuietZoneFeedForwardRehearsal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForwardRehearsal.swift; sourceTree = "<group>"; };
+		F96300000000000000000013 /* QuietZoneCausalFIRCompilerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneCausalFIRCompilerTests.swift; sourceTree = "<group>"; };
+		F96300000000000000000014 /* QuietZoneFeedForwardRehearsalTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForwardRehearsalTests.swift; sourceTree = "<group>"; };
+		F96500000000000000000011 /* QuietZoneHALClockAnalysis.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneHALClockAnalysis.swift; sourceTree = "<group>"; };
+		F96500000000000000000012 /* QuietZoneHALClockAnalysisTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneHALClockAnalysisTests.swift; sourceTree = "<group>"; };
+		F96600000000000000000011 /* QuietZoneBenchLoopback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneBenchLoopback.swift; sourceTree = "<group>"; };
+		F96600000000000000000012 /* QuietZoneBenchLoopbackTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneBenchLoopbackTests.swift; sourceTree = "<group>"; };
 		F73000000000000000000011 /* MIMORoomTreatmentDesigner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMORoomTreatmentDesigner.swift; sourceTree = "<group>"; };
 		F73000000000000000000012 /* MIMORoomTreatmentDesignerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMORoomTreatmentDesignerTests.swift; sourceTree = "<group>"; };
 		F74000000000000000000011 /* MIMORoomTreatmentFIRCompiler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMORoomTreatmentFIRCompiler.swift; sourceTree = "<group>"; };
@@ -349,6 +396,16 @@
 				F72000000000000000000012 /* AmbientFieldAnalyzerTests.swift */,
 				F89000000000000000000012 /* AmbientCompensationTests.swift */,
 				F90000000000000000000012 /* ActiveQuietZoneTests.swift */,
+				F96000000000000000000012 /* QuietZoneFeedForwardTests.swift */,
+				F96000000000000000000015 /* QuietZoneFeedForwardProbeTests.swift */,
+				F96100000000000000000012 /* QuietZoneFeedForwardSurveyTests.swift */,
+				F96100000000000000000016 /* FeedForwardReferenceBridgeTests.swift */,
+				F96200000000000000000012 /* QuietZoneVirtualSeatDesignerTests.swift */,
+				F96200000000000000000015 /* FeedForwardPreviewFIRTests.swift */,
+				F96300000000000000000013 /* QuietZoneCausalFIRCompilerTests.swift */,
+				F96300000000000000000014 /* QuietZoneFeedForwardRehearsalTests.swift */,
+				F96500000000000000000012 /* QuietZoneHALClockAnalysisTests.swift */,
+				F96600000000000000000012 /* QuietZoneBenchLoopbackTests.swift */,
 				F73000000000000000000012 /* MIMORoomTreatmentDesignerTests.swift */,
 				F74000000000000000000012 /* MIMORoomTreatmentFIRCompilerTests.swift */,
 				F75000000000000000000012 /* MIMORoomTreatmentVerificationTests.swift */,
@@ -386,6 +443,7 @@
 				A30000000000000000000050 /* Realtime */,
 				A20000000000000000000020 /* AudioIOEngine.swift */,
 				F89200000000000000000011 /* AmbientMonitorTransport.swift */,
+				F96100000000000000000015 /* FeedForwardReferenceTransport.swift */,
 				A20000000000000000000027 /* StereoPlaybackControl.swift */,
 				A20000000000000000000029 /* DynamicsConfiguration.swift */,
 				F66000000000000000000011 /* HeadTrackingController.swift */,
@@ -396,6 +454,14 @@
 				F72000000000000000000011 /* AmbientFieldAnalyzer.swift */,
 				F89000000000000000000011 /* AmbientCompensation.swift */,
 				F90000000000000000000011 /* ActiveQuietZone.swift */,
+				F96000000000000000000011 /* QuietZoneFeedForward.swift */,
+				F96000000000000000000014 /* QuietZoneFeedForwardProbe.swift */,
+				F96100000000000000000011 /* QuietZoneFeedForwardSurvey.swift */,
+				F96200000000000000000011 /* QuietZoneVirtualSeatDesigner.swift */,
+				F96300000000000000000011 /* QuietZoneCausalFIRCompiler.swift */,
+				F96300000000000000000012 /* QuietZoneFeedForwardRehearsal.swift */,
+				F96500000000000000000011 /* QuietZoneHALClockAnalysis.swift */,
+				F96600000000000000000011 /* QuietZoneBenchLoopback.swift */,
 				F95000000000000000000011 /* ActiveQuietZoneSpatial.swift */,
 				F95000000000000000000013 /* ActiveQuietZoneSpatialSurvey.swift */,
 				F73000000000000000000011 /* MIMORoomTreatmentDesigner.swift */,
@@ -447,13 +513,18 @@
 				F89100000000000000000012 /* N60AmbientMonitorBridge.h */,
 				F90100000000000000000011 /* N60ActiveQuietZone.c */,
 				F90100000000000000000012 /* N60ActiveQuietZone.h */,
+				F96100000000000000000013 /* N60FeedForwardReferenceBridge.c */,
+				F96100000000000000000014 /* N60FeedForwardReferenceBridge.h */,
+				F96200000000000000000013 /* N60FeedForwardPreviewFIR.c */,
+				F96200000000000000000014 /* N60FeedForwardPreviewFIR.h */,
+				F96400000000000000000011 /* N60FeedForwardOutputTiming.h */,
 				F70000000000000000000011 /* N60AdaptiveSampleRate.c */,
 				F70000000000000000000012 /* N60AdaptiveSampleRate.h */,
 			);
 			path = Realtime;
 			sourceTree = "<group>";
 		};
-		A40000000000000000000050 /* UI */ = {isa = PBXGroup; children = (A40000000000000000000020 /* ProductionRootView.swift */, A40000000000000000000021 /* ProductionEqualizerView.swift */, A40000000000000000000022 /* ProductionDynamicsView.swift */, A40000000000000000000023 /* ProductionDynamicsTelemetryView.swift */, A40000000000000000000024 /* ProductionMetersView.swift */, A40000000000000000000025 /* ProductionAnalysisViews.swift */, A40000000000000000000026 /* ProductionProfileToolbar.swift */, F65000000000000000000015 /* ProductionHeadphoneWorkspace.swift */, F64000000000000000000015 /* ProductionMultichannelCalibrationWorkspace.swift */, A40000000000000000000027 /* ProductionRoomCorrectionWorkspace.swift */, F78000000000000000000011 /* ProductionActiveAcousticsWorkspace.swift */, F92000000000000000000013 /* ProductionRoomTreatmentAdvisorWorkspace.swift */, F93000000000000000000012 /* ProductionRoomGeometrySection.swift */, F94000000000000000000013 /* ProductionRoomTreatmentDesignSection.swift */, F78000000000000000000012 /* ProductionPluginWorkspace.swift */,); path = UI; sourceTree = "<group>"; };
+		A40000000000000000000050 /* UI */ = {isa = PBXGroup; children = (A40000000000000000000020 /* ProductionRootView.swift */, A40000000000000000000021 /* ProductionEqualizerView.swift */, A40000000000000000000022 /* ProductionDynamicsView.swift */, A40000000000000000000023 /* ProductionDynamicsTelemetryView.swift */, A40000000000000000000024 /* ProductionMetersView.swift */, A40000000000000000000025 /* ProductionAnalysisViews.swift */, A40000000000000000000026 /* ProductionProfileToolbar.swift */, F65000000000000000000015 /* ProductionHeadphoneWorkspace.swift */, F64000000000000000000015 /* ProductionMultichannelCalibrationWorkspace.swift */, A40000000000000000000027 /* ProductionRoomCorrectionWorkspace.swift */, F78000000000000000000011 /* ProductionActiveAcousticsWorkspace.swift */, F92000000000000000000013 /* ProductionRoomTreatmentAdvisorWorkspace.swift */, F96000000000000000000013 /* ProductionFeedForwardReadinessCard.swift */, F93000000000000000000012 /* ProductionRoomGeometrySection.swift */, F94000000000000000000013 /* ProductionRoomTreatmentDesignSection.swift */, F78000000000000000000012 /* ProductionPluginWorkspace.swift */,); path = UI; sourceTree = "<group>"; };
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -577,6 +648,18 @@
 				F72000000000000000000001 /* AmbientFieldAnalyzer.swift in Sources */,
 				F89000000000000000000001 /* AmbientCompensation.swift in Sources */,
 				F90000000000000000000001 /* ActiveQuietZone.swift in Sources */,
+				F96000000000000000000003 /* ProductionFeedForwardReadinessCard.swift in Sources */,
+				F96000000000000000000001 /* QuietZoneFeedForward.swift in Sources */,
+				F96000000000000000000004 /* QuietZoneFeedForwardProbe.swift in Sources */,
+				F96100000000000000000001 /* QuietZoneFeedForwardSurvey.swift in Sources */,
+				F96100000000000000000003 /* N60FeedForwardReferenceBridge.c in Sources */,
+				F96100000000000000000004 /* FeedForwardReferenceTransport.swift in Sources */,
+				F96200000000000000000001 /* QuietZoneVirtualSeatDesigner.swift in Sources */,
+				F96200000000000000000003 /* N60FeedForwardPreviewFIR.c in Sources */,
+				F96300000000000000000001 /* QuietZoneCausalFIRCompiler.swift in Sources */,
+				F96300000000000000000002 /* QuietZoneFeedForwardRehearsal.swift in Sources */,
+				F96500000000000000000001 /* QuietZoneHALClockAnalysis.swift in Sources */,
+				F96600000000000000000001 /* QuietZoneBenchLoopback.swift in Sources */,
 				F73000000000000000000001 /* MIMORoomTreatmentDesigner.swift in Sources */,
 				F74000000000000000000001 /* MIMORoomTreatmentFIRCompiler.swift in Sources */,
 				F75000000000000000000001 /* MIMORoomTreatmentVerification.swift in Sources */,
@@ -633,6 +716,16 @@
 				F72000000000000000000002 /* AmbientFieldAnalyzerTests.swift in Sources */,
 				F89000000000000000000002 /* AmbientCompensationTests.swift in Sources */,
 				F90000000000000000000002 /* ActiveQuietZoneTests.swift in Sources */,
+				F96000000000000000000002 /* QuietZoneFeedForwardTests.swift in Sources */,
+				F96000000000000000000005 /* QuietZoneFeedForwardProbeTests.swift in Sources */,
+				F96100000000000000000002 /* QuietZoneFeedForwardSurveyTests.swift in Sources */,
+				F96100000000000000000005 /* FeedForwardReferenceBridgeTests.swift in Sources */,
+				F96200000000000000000002 /* QuietZoneVirtualSeatDesignerTests.swift in Sources */,
+				F96200000000000000000004 /* FeedForwardPreviewFIRTests.swift in Sources */,
+				F96300000000000000000003 /* QuietZoneCausalFIRCompilerTests.swift in Sources */,
+				F96300000000000000000004 /* QuietZoneFeedForwardRehearsalTests.swift in Sources */,
+				F96500000000000000000002 /* QuietZoneHALClockAnalysisTests.swift in Sources */,
+				F96600000000000000000002 /* QuietZoneBenchLoopbackTests.swift in Sources */,
 				F73000000000000000000002 /* MIMORoomTreatmentDesignerTests.swift in Sources */,
 				F74000000000000000000002 /* MIMORoomTreatmentFIRCompilerTests.swift in Sources */,
 				F75000000000000000000002 /* MIMORoomTreatmentVerificationTests.swift in Sources */,
