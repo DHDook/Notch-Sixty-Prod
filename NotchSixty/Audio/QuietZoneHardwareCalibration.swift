@@ -193,6 +193,35 @@ struct QuietZoneHardwareCalibrationSession: Sendable {
         }
     }
 
+    /// Produces a physically decomposed timing-budget receipt only after
+    /// the offline A/B/A survey and electrical bench sequence completed.
+    /// It never turns an electrical round-trip number into an ADC/DAC or
+    /// acoustic secondary-path measurement and never authorizes live ANC.
+    func evaluatePhysicalLatency(
+        plan: QuietZoneFeedForwardCalibration,
+        project: RoomCorrectionProject,
+        stages: [QuietZonePhysicalLatencyEvidence],
+        now: Date = Date()
+    ) throws -> QuietZonePhysicalLatencyReport {
+        try checkAge(now)
+        guard nextStep == .physicalReview,
+              let trace = clockTrace, loopback != nil,
+              plan.projectID == rig.projectID,
+              project.id == rig.projectID else {
+            throw QuietZoneHardwareCalibrationError.incomplete
+        }
+        var draft = plan
+        draft.halClockTrace = trace
+        let (committed, _) = try survey.committed(
+            to: draft, project: project, now: now
+        )
+        return try QuietZonePhysicalLatencyBudgetAnalyzer().analyze(
+            rig: rig, plan: committed, project: project,
+            clock: trace, stages: stages,
+            sessionStartedAt: startedAt, now: now
+        )
+    }
+
     func report(
         plan: QuietZoneFeedForwardCalibration,
         project: RoomCorrectionProject,

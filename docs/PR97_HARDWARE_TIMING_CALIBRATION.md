@@ -107,3 +107,53 @@ stereo output route and weak session-bound provenance, reusing the microphone
 input-only HAL ring. It does not provide an autonomous calibrated source
 actuator or user wizard. The source emission witness must come from separately
 instrumented hardware and remains unverified until real-Mac commissioning.
+
+
+## Fifth implementation slice — decomposed physical latency and causal reserve
+
+The PR97 \`QuietZonePhysicalLatencyBudgetAnalyzer\` requires **four separately
+instrumented** timing stages on the current microphone/DAC clock and route:
+
+1. microphone ADC and reference acquisition
+2. reference processing, buffering and scheduling
+3. command-to-DAC and output latency
+4. speaker electroacoustics and physical travel to listening seat
+
+Each stage requires at least three unique captured hardware events, a nonzero
+median, a measured upper bound, worst-case jitter, measured clock uncertainty,
+and freshness inside the same calibration session. Duplicate/missing stages,
+synthetic/estimated values, stale/replayed captures, mismatched routes or
+sample rates, impossible bounds and invalid clocks are rejected.
+
+The conservative calculation is:
+
+\`\`\`
+noise lead lower bound = measured listener-vs-upstream difference
+                        - 3σ arrival timing uncertainty - listener return drift/2
+
+nominal response path = ADC + processing + DAC/output + speaker-to-seat
+response upper bound = nominal path
+                     + sum(stage upper-bound excesses)
+                     + sum(worst-case jitter)
+                     + 3 × sum(stage timing uncertainty)
+
+causality reserve = noise lead lower bound - response upper bound
+remaining safety reserve = causality reserve - PR96 required 2 ms
+\`\`\`
+
+The final readiness decision is deliberately delegated to the PR96
+\`QuietZoneFeedForwardBudgetAnalyzer\`; no new permissive ANC arm criterion is
+introduced. Electrical cable-loopback delay is **not decomposed** into ADC or
+DAC time and cannot replace acoustic speaker-to-seat measurements.
+\`QuietZoneHardwareCalibrationSession.evaluatePhysicalLatency\` exposes the
+new detailed diagnostic only after the full guided evidence sequence.
+The existing Quiet Zone view shows the known path, uncertainty and jitter
+breakdown, explicitly marking it diagnostic rather than an active control.
+
+A positive timing bound only establishes **causal timing plausibility**.
+Frequency-dependent coherence, secondary-path response, attenuation and
+closed-loop stability are not inferred and remain unverified. CI fixtures
+exercise arithmetic and fail-closed validation; a software-provided
+\`instrumentedHardware\` label is not trusted physical hardware attestation.
+The actual timing-stage acquisition/verification and live control are still
+gated on real equipment and separate PR98/PR99 acceptance.

@@ -38,7 +38,7 @@ jobs:
           xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES build
       - name: Targeted hardware calibration and ANC tests
         run: |
-          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES -only-testing:NotchSixtyTests/QuietZoneInstrumentedProbeCaptureTests -only-testing:NotchSixtyTests/QuietZoneHardwareClockCaptureTests -only-testing:NotchSixtyTests/QuietZoneHardwareCalibrationTests -only-testing:NotchSixtyTests/QuietZoneBenchLoopbackTests -only-testing:NotchSixtyTests/QuietZoneFeedForwardSurveyTests -only-testing:NotchSixtyTests/QuietZoneHALClockAnalysisTests test
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES -only-testing:NotchSixtyTests/QuietZonePhysicalLatencyBudgetTests -only-testing:NotchSixtyTests/QuietZoneInstrumentedProbeCaptureTests -only-testing:NotchSixtyTests/QuietZoneHardwareClockCaptureTests -only-testing:NotchSixtyTests/QuietZoneHardwareCalibrationTests -only-testing:NotchSixtyTests/QuietZoneBenchLoopbackTests -only-testing:NotchSixtyTests/QuietZoneFeedForwardSurveyTests -only-testing:NotchSixtyTests/QuietZoneHALClockAnalysisTests test
       - name: Full XCTest regression
         run: |
           xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES test

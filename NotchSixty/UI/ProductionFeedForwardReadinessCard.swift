@@ -193,6 +193,44 @@ struct ProductionFeedForwardReadinessCard: View {
                 }
             }
 
+            if let timing = quietZone.feedForwardCalibration?.timingPath {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Timing path breakdown · diagnostic only")
+                        .font(.caption.bold())
+                    HStack {
+                        Text("Reference ADC / acquisition")
+                        Spacer()
+                        Text(milliseconds(timing.referenceAcquisitionSeconds))
+                            .monospacedDigit()
+                    }
+                    HStack {
+                        Text("Reference processing / scheduling")
+                        Spacer()
+                        Text(milliseconds(timing.referenceProcessingSeconds))
+                            .monospacedDigit()
+                    }
+                    HStack {
+                        Text("DAC + speaker-to-seat (combined)")
+                        Spacer()
+                        Text(milliseconds(timing.commandToSeatSeconds))
+                            .monospacedDigit()
+                    }
+                    HStack {
+                        Text("Worst-case jitter + 3σ clock allowance")
+                        Spacer()
+                        Text(milliseconds(
+                            timing.totalWorstCaseJitterSeconds
+                                + 3 * timing.timingUncertaintySeconds
+                        )).monospacedDigit()
+                    }
+                    Text("Component bounds require separately instrumented hardware evidence. Cable loopback cannot determine acoustic propagation. Positive timing reserve does not establish any frequency-specific attenuation or permit live ANC.")
+                        .foregroundStyle(.secondary)
+                }
+                .font(.caption)
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
             Label(
                 readinessTitle,
                 systemImage: "waveform.path.ecg.rectangle"

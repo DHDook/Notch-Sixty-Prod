@@ -67,4 +67,25 @@ for forbidden in ("requestArm(", "setEnabled(", "stageRoomTreatment"):
     assert forbidden not in capture,forbidden
 for unsafe in ("AudioDeviceStart(", "requestArm(", "setEnabled(", "stageRoomTreatment"):
     assert unsafe not in core, unsafe
+physical=(root/"NotchSixty/Audio/QuietZonePhysicalLatencyBudget.swift").read_text()
+physical_tests=(root/"NotchSixtyTests/QuietZonePhysicalLatencyBudgetTests.swift").read_text()
+for token in ("QuietZonePhysicalLatencyBudgetAnalyzer", "referenceADC",
+              "referenceProcessing", "outputDAC", "speakerToSeat",
+              "instrumentedHardware", "oneSigmaUncertaintySeconds",
+              "maximumEvidenceAgeSeconds", "liveANCQualified: Bool = false",
+              "QuietZoneFeedForwardBudgetAnalyzer().analyze("):
+    assert token in physical,token
+for token in ("testMeasuredSegmentsProduceConservativeReserveButNeverArm",
+              "testNonCausalPathIsRejectedForANCWithoutThrowingAwayDiagnostics",
+              "testMissingOrDuplicateStageFailsClosed",
+              "testSyntheticAndUnverifiedStageCannotBecomePhysicalEvidence",
+              "testRouteDriftStaleCaptureAndReusedStageEventFailClosed"):
+    assert token in physical_tests,token
+for token in ("QuietZonePhysicalLatencyBudget.swift in Sources",
+              "QuietZonePhysicalLatencyBudgetTests.swift in Sources"):
+    assert token in pbx,token
+assert "evaluatePhysicalLatency(" in core
+assert "Timing path breakdown · diagnostic only" in ui
+for forbidden in ("AudioDeviceStart(", "requestArm(", "setEnabled(", "stageRoomTreatment"):
+    assert forbidden not in physical,forbidden
 print("PR97 calibration safety guard passed")
