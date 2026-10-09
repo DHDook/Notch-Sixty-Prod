@@ -71,3 +71,24 @@ The inspection result is always diagnostic and cannot arm ANC.
 
 No GPL-derived source, privileged component, extra driver, network
 dependency or playback modification is used in this interface.
+
+
+## Read-only selected-file review adapter
+
+A separately enrolled public signing key and an existing PR97 physical
+calibration session must be supplied by the commissioning controller.
+The control-plane \`QuietZoneCommissioningHandoffAdapter\` takes a
+user-selected regular local file and the exact selected output lease.
+It refuses files exceeding the envelope size, verifies the signed package,
+requires exact source-launch IDs accepted by the session's instrumented A/B/A
+survey, and evaluates the original HAL clock + loopback + physical latency
+measurements through the PR97 analyzer. Failed downstream inspections do not
+consume an import nonce. The output is a strictly diagnostic eleven-gate
+commissioning report with timestamps, causes, conservative margins and
+explicit pending physical validation. It does not make an output connection,
+enable cancellation, save sidecars, or modify audio threads.
+
+The actual file picker, physical measurement-driver integration, trusted
+signing-key enrollment, independent attestation and attenuation/stability
+verification are deliberately separate hardware-dependent tasks. Successful
+offline review alone does **not** meet those tasks.

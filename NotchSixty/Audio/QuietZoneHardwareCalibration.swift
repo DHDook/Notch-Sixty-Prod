@@ -44,6 +44,7 @@ struct QuietZoneHardwareCalibrationSession: Sendable {
     private(set) var loopback: QuietZoneBenchLoopbackResult?
     private var survey: QuietZoneFeedForwardSurveySession
     private var usedPhysicalLaunchIDs: Set<String> = []
+    private var acceptedInstrumentedSourceLaunchIDs: [String] = []
     private var physicalSourceID: String?
 
     init(
@@ -79,6 +80,11 @@ struct QuietZoneHardwareCalibrationSession: Sendable {
     }
 
     var arrivals: [QuietZoneFeedForwardArrival] { survey.arrivals }
+    /// Accepted physical launch IDs in exact microphone A/B/A order.
+    /// Required for signed evidence to match the *actual* survey run.
+    var instrumentedSourceLaunchIDs: [String] {
+        acceptedInstrumentedSourceLaunchIDs
+    }
 
     private func checkAge(_ now: Date) throws {
         let age = now.timeIntervalSince(startedAt)
@@ -189,11 +195,13 @@ struct QuietZoneHardwareCalibrationSession: Sendable {
                 capture, projectID: projectID, now: now
             )
             usedPhysicalLaunchIDs.insert(launch.launchID)
+            acceptedInstrumentedSourceLaunchIDs.append(launch.launchID)
             physicalSourceID = launch.physicalSourceID
             return arrival
         } catch {
             if (error as? QuietZoneFeedForwardError) == .sourceDrift {
                 usedPhysicalLaunchIDs.removeAll()
+                acceptedInstrumentedSourceLaunchIDs.removeAll()
                 physicalSourceID = nil
             }
             throw error

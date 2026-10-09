@@ -150,4 +150,27 @@ assert "QuietZoneHardwareCalibrationRig: Codable" in core
 assert "QuietZoneLatencyWitnessMethod: String, Codable" in measurement
 for forbidden in ("AudioDeviceStart(", "requestArm(", "setEnabled(", "stageRoomTreatment"):
     assert forbidden not in handoff,forbidden
+adapter=(root/"NotchSixty/Audio/QuietZoneCommissioningHandoffAdapter.swift").read_text()
+adapter_tests=(root/"NotchSixtyTests/QuietZoneCommissioningHandoffAdapterTests.swift").read_text()
+for token in ("QuietZoneCommissioningHandoffAdapter",
+              "inspectSelectedFile(", "QuietZoneEvidenceHandoffVerifier().inspect(",
+              "var pendingLedger = ledger", "instrumentedSourceLaunchIDs",
+              "sourceLaunchMismatch", "evaluateInstrumentedLatencyRun(",
+              "ledger = pendingLedger", "physicallyCommissioned: Bool = false",
+              "liveANCQualified: Bool = false", "reviewText"):
+    assert token in adapter,token
+for token in ("testEndToEndSignedEvidenceProducesReviewButNeverLiveAuthorization",
+              "testSignedSourceIDsMustMatchAcceptedMicrophoneLaunches",
+              "testMissingSurveyAndUninstrumentedSurveyAreNeverAccepted",
+              "testFailedDownstreamReviewDoesNotConsumeValidSignedPacket",
+              "testNonCausalTimingIsReportedButNeverMisrepresentedAsReady",
+              "testSelectedFileIsBoundedAndReadOnly"):
+    assert token in adapter_tests,token
+for token in ("QuietZoneCommissioningHandoffAdapter.swift in Sources",
+              "QuietZoneCommissioningHandoffAdapterTests.swift in Sources"):
+    assert token in pbx,token
+assert "acceptedInstrumentedSourceLaunchIDs.append(launch.launchID)" in core
+assert "acceptedInstrumentedSourceLaunchIDs.removeAll()" in core
+for forbidden in ("AudioDeviceStart(", "requestArm(", "setEnabled(", "stageRoomTreatment"):
+    assert forbidden not in adapter,forbidden
 print("PR97 calibration safety guard passed")

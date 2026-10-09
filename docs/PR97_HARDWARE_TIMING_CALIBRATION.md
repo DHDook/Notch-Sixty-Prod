@@ -263,3 +263,40 @@ UI import or external instrument driver. The test suite signs synthetic
 envelopes with an ephemeral key and checks integrity, pinned key mismatch,
 session/route binding, duplicate events, expiry, bounded decoding and
 fail-closed retry. No app-bundled private keys or trust anchors are added.
+
+
+## Ninth implementation slice — signed file adapter and final review report
+
+\`QuietZoneCommissioningHandoffAdapter\` provides a bounded read-only
+\`inspectSelectedFile(at:trustedSigner:session:currentOutput:plan:project:ledger:now:)\`
+entry point, intended for a future sandbox user-selected file/import UI.
+It checks the file is a regular local file with bounded size, delegates
+signed payload integrity and session verification to the existing
+\`QuietZoneEvidenceHandoffVerifier\`, and then runs the *actual completed*
+mic A/B/A + loopback + clock + four-stage timing analyzers.
+
+**Closes a provenance gap:** the three signed source-launch IDs must exactly
+match the independent external launches accepted at the listener, doorway,
+and listener return by \`addInstrumentedSourceCapture\`, in that order. A
+generic/non-instrumented A/B/A survey cannot pass even with a correctly
+signed timing payload. Source-drift resets clear previously recorded IDs.
+
+**Atomic review:** the adapter stages the in-memory import/replay ledger and
+publishes it only after downstream project/survey/cause-budget evaluation and
+an 11-gate commissioning checklist succeed. Failed source matching,
+invalid plan or missing hardware phases do not consume a valid signed packet.
+Negative timing is a valid *diagnostic* verdict (\`nonCausal\`), never an ANC
+permission.
+
+The returned \`QuietZoneCommissioningHandoffReport\` includes the signer,
+record ID, stages, conservative budget and margins, an ordered eleven-gate
+review, and a stable plain-text \`reviewText\` suitable for an inspector pane.
+Every report unconditionally identifies **physical hardware UNVERIFIED**,
+**acoustic cancellation UNVERIFIED** and **live ANC DISABLED**.
+
+Added deterministic end-to-end synthetic tests for positive and non-causal
+budgets, source-launch substitution, uninstrumented survey rejection, atomic
+ledger behavior, and bounded local file ingestion. This is the final
+remotely testable control-plane implementation slice; it does not add the
+real external instrument, an unattended speaker stimulus, App Sandbox file
+picker, signer enrollment UI or authorization to enable ANC.
