@@ -193,3 +193,35 @@ prove ADC/DAC or acoustic timing, and a test fixture cannot commission the
 hardware. Until the actual Mac/measurement chain supplies physical witnesses
 and the results pass separate acceptance, no live ANC can arm. There is no
 Core Audio callback modification or autonomous output/playback.
+
+
+## Seventh implementation slice — commissioning preflight and acceptance blockers
+
+The read-only \`QuietZoneHardwareCommissioningEvaluator\` generates eleven
+commissioning gates with statuses: missing, recorded but not independently
+verified, invalid/recapture, or physical verification required. They cover
+the **exact running output lease**, concurrent HAL clocks, independent
+electrical loopbacks, the A/B/A single-microphone source survey, four
+separate timing stages, conservative causality, independent instrumentation
+review, and physical cancellation/stability acceptance.
+
+\`preview(calibration:)\` reads the saved PR96 plan conservatively. A saved
+\`timingPath\` cannot prove ADC, DAC, electrical loopback or physical seat
+propagation. The Quiet Zone UI displays this checklist without a live arm
+control or a claim that its preview represents an active capture session.
+
+\`assess(session:run:currentOutput:plan:project:now:)\` examines the exact
+in-memory route lease, capture age, input/output clock evidence, electrical
+loopback evidence, A/B/A order and repeated physical endpoint events.
+When a complete staged measurement run and actual measurement project exist,
+it delegates to the existing PR97 four-stage physical analyzer and records
+the conservative budget as **diagnostic only**. Old, mismatched or
+invalid evidence becomes invalid rather than silently qualifying.
+
+**Independent hardware attestation remains unimplemented.** A caller-provided
+\`origin = instrumentedHardware\` or \`clockCalibrationVerified = true\` is
+not proof that a calibrated physical source produced the measurement.
+The independent hardware review and actual measured acoustic
+attenuation/stability gates therefore remain blocked even when all
+synthetic fixtures pass. Runtime authorization, output wiring, persistence,
+and the realtime callback are unchanged.

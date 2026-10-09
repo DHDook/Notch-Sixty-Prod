@@ -94,6 +94,28 @@ struct ProductionFeedForwardReadinessCard: View {
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
 
+            let commissioning = QuietZoneHardwareCommissioningEvaluator()
+                .preview(calibration: quietZone.feedForwardCalibration)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Hardware commissioning checklist")
+                    .font(.caption.bold())
+                ForEach(commissioning.items) { item in
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(item.gate.title)
+                        Spacer(minLength: 8)
+                        Text(item.status.caption)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    .font(.caption2)
+                }
+                Text("Saved calibration data cannot certify physical source clocks, independent endpoint instrumentation, or measured attenuation. Live feed-forward ANC is disconnected.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
             if let calibration = quietZone.feedForwardCalibration {
                 HStack {
                     Text("Upstream reference")

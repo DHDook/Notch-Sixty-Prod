@@ -108,4 +108,23 @@ for token in ("QuietZonePhysicalLatencyMeasurementRun.swift in Sources",
 assert "evaluateInstrumentedLatencyRun(" in core
 for forbidden in ("AudioDeviceStart(", "requestArm(", "setEnabled(", "stageRoomTreatment"):
     assert forbidden not in measurement,forbidden
+commissioning=(root/"NotchSixty/Audio/QuietZoneHardwareCommissioning.swift").read_text()
+commissioning_tests=(root/"NotchSixtyTests/QuietZoneHardwareCommissioningTests.swift").read_text()
+for token in ("QuietZoneHardwareCommissioningEvaluator",
+              "selectedOutput", "independentHardwareReview", "acousticAcceptance",
+              "physicalVerificationRequired", "liveANCQualified: Bool = false",
+              "hardwareVerified: Bool = false", "evaluateInstrumentedLatencyRun("):
+    assert token in commissioning,token
+for token in ("testEmptyPreviewRequiresPhysicalAcceptanceEvenWithNoPlan",
+              "testPersistedTimingPathCannotBeTreatedAsFourVerifiedStages",
+              "testExactRunningRouteIsRequiredAndRestartInvalidates",
+              "testStaleClockAndSessionRejectEvidence",
+              "testPartialStageCapturesCannotBeMisrepresentedAsComplete"):
+    assert token in commissioning_tests,token
+for token in ("QuietZoneHardwareCommissioning.swift in Sources",
+              "QuietZoneHardwareCommissioningTests.swift in Sources"):
+    assert token in pbx,token
+assert "Hardware commissioning checklist" in ui
+for forbidden in ("AudioDeviceStart(", "requestArm(", "setEnabled(", "stageRoomTreatment"):
+    assert forbidden not in commissioning,forbidden
 print("PR97 calibration safety guard passed")

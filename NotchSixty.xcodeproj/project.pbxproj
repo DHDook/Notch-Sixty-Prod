@@ -115,6 +115,8 @@
 		F97000000000000000000002 /* QuietZonePhysicalLatencyBudgetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F97000000000000000000012 /* QuietZonePhysicalLatencyBudgetTests.swift */; };
 		F97100000000000000000001 /* QuietZonePhysicalLatencyMeasurementRun.swift in Sources */ = {isa = PBXBuildFile; fileRef = F97100000000000000000011 /* QuietZonePhysicalLatencyMeasurementRun.swift */; };
 		F97100000000000000000002 /* QuietZonePhysicalLatencyMeasurementRunTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F97100000000000000000012 /* QuietZonePhysicalLatencyMeasurementRunTests.swift */; };
+		F97200000000000000000001 /* QuietZoneHardwareCommissioning.swift in Sources */ = {isa = PBXBuildFile; fileRef = F97200000000000000000011 /* QuietZoneHardwareCommissioning.swift */; };
+		F97200000000000000000002 /* QuietZoneHardwareCommissioningTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F97200000000000000000012 /* QuietZoneHardwareCommissioningTests.swift */; };
 		F73000000000000000000001 /* MIMORoomTreatmentDesigner.swift in Sources */ = {isa = PBXBuildFile; fileRef = F73000000000000000000011 /* MIMORoomTreatmentDesigner.swift */; };
 		F73000000000000000000002 /* MIMORoomTreatmentDesignerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F73000000000000000000012 /* MIMORoomTreatmentDesignerTests.swift */; };
 		F74000000000000000000001 /* MIMORoomTreatmentFIRCompiler.swift in Sources */ = {isa = PBXBuildFile; fileRef = F74000000000000000000011 /* MIMORoomTreatmentFIRCompiler.swift */; };
@@ -304,6 +306,8 @@
 		F97000000000000000000012 /* QuietZonePhysicalLatencyBudgetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZonePhysicalLatencyBudgetTests.swift; sourceTree = "<group>"; };
 		F97100000000000000000011 /* QuietZonePhysicalLatencyMeasurementRun.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZonePhysicalLatencyMeasurementRun.swift; sourceTree = "<group>"; };
 		F97100000000000000000012 /* QuietZonePhysicalLatencyMeasurementRunTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZonePhysicalLatencyMeasurementRunTests.swift; sourceTree = "<group>"; };
+		F97200000000000000000011 /* QuietZoneHardwareCommissioning.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneHardwareCommissioning.swift; sourceTree = "<group>"; };
+		F97200000000000000000012 /* QuietZoneHardwareCommissioningTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneHardwareCommissioningTests.swift; sourceTree = "<group>"; };
 		F73000000000000000000011 /* MIMORoomTreatmentDesigner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMORoomTreatmentDesigner.swift; sourceTree = "<group>"; };
 		F73000000000000000000012 /* MIMORoomTreatmentDesignerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMORoomTreatmentDesignerTests.swift; sourceTree = "<group>"; };
 		F74000000000000000000011 /* MIMORoomTreatmentFIRCompiler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMORoomTreatmentFIRCompiler.swift; sourceTree = "<group>"; };
@@ -431,6 +435,7 @@
 				F96900000000000000000012 /* QuietZoneInstrumentedProbeCaptureTests.swift */,
 				F97000000000000000000012 /* QuietZonePhysicalLatencyBudgetTests.swift */,
 				F97100000000000000000012 /* QuietZonePhysicalLatencyMeasurementRunTests.swift */,
+				F97200000000000000000012 /* QuietZoneHardwareCommissioningTests.swift */,
 				F73000000000000000000012 /* MIMORoomTreatmentDesignerTests.swift */,
 				F74000000000000000000012 /* MIMORoomTreatmentFIRCompilerTests.swift */,
 				F75000000000000000000012 /* MIMORoomTreatmentVerificationTests.swift */,
@@ -492,6 +497,7 @@
 				F96900000000000000000011 /* QuietZoneInstrumentedProbeCapture.swift */,
 				F97000000000000000000011 /* QuietZonePhysicalLatencyBudget.swift */,
 				F97100000000000000000011 /* QuietZonePhysicalLatencyMeasurementRun.swift */,
+				F97200000000000000000011 /* QuietZoneHardwareCommissioning.swift */,
 				F95000000000000000000011 /* ActiveQuietZoneSpatial.swift */,
 				F95000000000000000000013 /* ActiveQuietZoneSpatialSurvey.swift */,
 				F73000000000000000000011 /* MIMORoomTreatmentDesigner.swift */,
@@ -695,6 +701,7 @@
 				F96900000000000000000001 /* QuietZoneInstrumentedProbeCapture.swift in Sources */,
 				F97000000000000000000001 /* QuietZonePhysicalLatencyBudget.swift in Sources */,
 				F97100000000000000000001 /* QuietZonePhysicalLatencyMeasurementRun.swift in Sources */,
+				F97200000000000000000001 /* QuietZoneHardwareCommissioning.swift in Sources */,
 				F73000000000000000000001 /* MIMORoomTreatmentDesigner.swift in Sources */,
 				F74000000000000000000001 /* MIMORoomTreatmentFIRCompiler.swift in Sources */,
 				F75000000000000000000001 /* MIMORoomTreatmentVerification.swift in Sources */,
@@ -766,6 +773,7 @@
 				F96900000000000000000002 /* QuietZoneInstrumentedProbeCaptureTests.swift in Sources */,
 				F97000000000000000000002 /* QuietZonePhysicalLatencyBudgetTests.swift in Sources */,
 				F97100000000000000000002 /* QuietZonePhysicalLatencyMeasurementRunTests.swift in Sources */,
+				F97200000000000000000002 /* QuietZoneHardwareCommissioningTests.swift in Sources */,
 				F73000000000000000000002 /* MIMORoomTreatmentDesignerTests.swift in Sources */,
 				F74000000000000000000002 /* MIMORoomTreatmentFIRCompilerTests.swift in Sources */,
 				F75000000000000000000002 /* MIMORoomTreatmentVerificationTests.swift in Sources */,
