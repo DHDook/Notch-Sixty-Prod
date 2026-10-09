@@ -229,29 +229,25 @@ final class QuietZoneInstrumentedProbeAcquisition {
         self.reference = reference
         self.collector = collector
         self.currentRoute = currentRoute
-        self.expectedLease = .init(
-            outputID: "",
-            routeID: collector.routeLeaseID,
-            sampleRate: collector.sampleRate
-        )
-        // outputID is verified separately against the current route captured
-        // at initialization; never inferred from audio samples.
+        // The recorder is pinned to the exact output session lease; a
+        // preexisting device UID alone cannot authorize timing evidence.
         guard let route = currentRoute(), !route.outputID.isEmpty,
               route.routeID == collector.routeLeaseID,
+              route.sampleRate.isFinite,
               abs(route.sampleRate - collector.sampleRate) < 0.5 else {
             throw QuietZoneInstrumentedProbeError.staleRoute
         }
-        self.outputID = route.outputID
+        self.expectedLease = .init(
+            outputID: route.outputID, routeID: route.routeID,
+            sampleRate: route.sampleRate
+        )
     }
 
-    private let outputID: String
-
     private func requireRoute() throws {
-        guard let route = currentRoute(), route.outputID == outputID,
-              route.routeID == expectedLease.routeID,
-              route.sampleRate.isFinite,
-              abs(route.sampleRate - expectedLease.sampleRate) < 0.5
-        else { throw QuietZoneInstrumentedProbeError.staleRoute }
+        guard let route = currentRoute(), expectedLease.permits(
+            outputID: route.outputID, routeID: route.routeID,
+            sampleRate: route.sampleRate
+        ) else { throw QuietZoneInstrumentedProbeError.staleRoute }
     }
 
     func start() throws {

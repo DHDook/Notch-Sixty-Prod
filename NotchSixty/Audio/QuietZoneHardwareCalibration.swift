@@ -41,6 +41,8 @@ struct QuietZoneHardwareCalibrationSession: Sendable {
     private(set) var clockTrace: QuietZoneHALClockTrace?
     private(set) var loopback: QuietZoneBenchLoopbackResult?
     private var survey: QuietZoneFeedForwardSurveySession
+    private var usedPhysicalLaunchIDs: Set<String> = []
+    private var physicalSourceID: String?
 
     init(rig: QuietZoneHardwareCalibrationRig, now: Date = Date()) throws {
         guard !rig.microphoneID.isEmpty, rig.microphoneChannel >= 0,
@@ -141,6 +143,51 @@ struct QuietZoneHardwareCalibrationSession: Sendable {
             // check; preserve that invalidation instead of hiding it.
             if (error as? QuietZoneFeedForwardError) == .sourceDrift {
                 survey = candidate
+            }
+            throw error
+        }
+    }
+
+    /// PR97's instrumented ingestion endpoint. Unlike the lower-level PR96
+    /// survey API, a real three-position run must present three different
+    /// physical launches from the SAME calibrated external source fixture.
+    mutating func addInstrumentedSourceCapture(
+        _ capture: QuietZoneFeedForwardProbeCapture,
+        launch: QuietZoneInstrumentedSourceLaunch,
+        projectID: UUID,
+        now: Date = Date()
+    ) throws -> QuietZoneFeedForwardArrival {
+        guard !launch.launchID.isEmpty,
+              !usedPhysicalLaunchIDs.contains(launch.launchID) else {
+            throw QuietZoneInstrumentedProbeError.replayedLaunch
+        }
+        guard launch.physicalClockCalibrationVerified,
+              launch.oneSigmaTimingUncertaintySeconds.isFinite,
+              (0...0.0005).contains(launch.oneSigmaTimingUncertaintySeconds)
+        else { throw QuietZoneInstrumentedProbeError.uncalibratedTrigger }
+        guard !launch.physicalSourceID.isEmpty,
+              launch.sourceFixtureID == rig.triggerID,
+              launch.synchronizedClockID == rig.clockID,
+              launch.routeLeaseID == rig.routeID,
+              launch.sampleRate.isFinite,
+              abs(launch.sampleRate - rig.sampleRate) < 0.5,
+              capture.sourceTriggerID == launch.sourceFixtureID,
+              capture.synchronizedClockID == launch.synchronizedClockID,
+              capture.routeFingerprint == launch.routeLeaseID,
+              capture.emittedProbe == launch.emittedProbe,
+              physicalSourceID.map({ $0 == launch.physicalSourceID }) ?? true
+        else { throw QuietZoneInstrumentedProbeError.incompatibleSource }
+        do {
+            let arrival = try addAcousticCapture(
+                capture, projectID: projectID, now: now
+            )
+            usedPhysicalLaunchIDs.insert(launch.launchID)
+            physicalSourceID = launch.physicalSourceID
+            return arrival
+        } catch {
+            if (error as? QuietZoneFeedForwardError) == .sourceDrift {
+                usedPhysicalLaunchIDs.removeAll()
+                physicalSourceID = nil
             }
             throw error
         }

@@ -39,6 +39,9 @@ for item in ("calibrationTimingRouteLeaseID = UUID().uuidString",
              "func passiveFeedForwardOutputTimingSnapshot()",
              "aggregateDeviceOutputPlan == nil", "isOutputStarted"):
     assert item in transport,item
+assert "addInstrumentedSourceCapture(" in core
+assert "usedPhysicalLaunchIDs.contains(launch.launchID)" in core
+assert "testInstrumentedCaptureRejectsReplayedLaunchAndSwappedSource" in tests
 assert "testLiveRouteLeaseInvalidatesRestartDeviceAndSampleRate" in capture_tests
 probe=(root/"NotchSixty/Audio/QuietZoneInstrumentedProbeCapture.swift").read_text()
 probe_tests=(root/"NotchSixtyTests/QuietZoneInstrumentedProbeCaptureTests.swift").read_text()

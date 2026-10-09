@@ -92,3 +92,11 @@ exercise valid arrivals, broken clocks, missing preroll, timestamp gaps and
 clipped recordings. A hardware source trigger driver and physical timing
 attestation are **not yet implemented**. Do not report a physically verified
 latency or arm ANC based on simulated source-trigger certificates.
+
+The fourth slice also exposes `addInstrumentedSourceCapture` on the
+calibration session: three accepted positions must have distinct physical
+launch IDs, one physical source identity, one source fixture, and matching
+probe waveform/route/clock evidence. Replayed launches and swapped sources
+fail before survey advancement; listener-return drift invalidates launch
+history along with the survey. This is diagnostic evidence only, not a
+cryptographically attested hardware launch source or an ANC arm permit.

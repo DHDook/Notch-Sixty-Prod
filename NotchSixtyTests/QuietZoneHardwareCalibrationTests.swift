@@ -138,6 +138,55 @@ final class QuietZoneHardwareCalibrationTests: XCTestCase {
         XCTAssertEqual(session.nextStep, .electrical)
     }
 
+    func testInstrumentedCaptureRejectsReplayedLaunchAndSwappedSource() throws {
+        let r = rig()
+        var session = try QuietZoneHardwareCalibrationSession(rig: r, now: start)
+        try session.qualifyClock(clock(), now: start.addingTimeInterval(1))
+        _ = try session.qualifyLoopback(loops(), now: start.addingTimeInterval(2))
+        func launch(_ id: String, source: String = "hallway")
+            -> QuietZoneInstrumentedSourceLaunch {
+            .init(
+                launchID: id, sourceFixtureID: r.triggerID,
+                synchronizedClockID: r.clockID, physicalSourceID: source,
+                routeLeaseID: r.routeID, sampleRate: r.sampleRate,
+                emissionHostSeconds: 100,
+                oneSigmaTimingUncertaintySeconds: 0.00005,
+                physicalClockCalibrationVerified: true,
+                emittedProbe: probe()
+            )
+        }
+        _ = try session.addInstrumentedSourceCapture(
+            acoustic(.listenerFirst, offset: 1200),
+            launch: launch("real-event-1"), projectID: r.projectID,
+            now: start.addingTimeInterval(3)
+        )
+        XCTAssertThrowsError(try session.addInstrumentedSourceCapture(
+            acoustic(.upstream, offset: 700),
+            launch: launch("real-event-1"), projectID: r.projectID,
+            now: start.addingTimeInterval(4)
+        )) {
+            XCTAssertEqual($0 as? QuietZoneInstrumentedProbeError, .replayedLaunch)
+        }
+        XCTAssertThrowsError(try session.addInstrumentedSourceCapture(
+            acoustic(.upstream, offset: 700),
+            launch: launch("real-event-2", source: "different-hallway"),
+            projectID: r.projectID,
+            now: start.addingTimeInterval(4)
+        ))
+        XCTAssertEqual(session.arrivals.count, 1)
+        _ = try session.addInstrumentedSourceCapture(
+            acoustic(.upstream, offset: 700),
+            launch: launch("real-event-2"), projectID: r.projectID,
+            now: start.addingTimeInterval(4)
+        )
+        _ = try session.addInstrumentedSourceCapture(
+            acoustic(.listenerReturn, offset: 1200),
+            launch: launch("real-event-3"), projectID: r.projectID,
+            now: start.addingTimeInterval(5)
+        )
+        XCTAssertEqual(session.nextStep, .physicalReview)
+    }
+
     func testListenerDriftInvalidatesEntireAcousticSurvey() throws {
         let r = rig()
         var session = try QuietZoneHardwareCalibrationSession(
