@@ -2,6 +2,8 @@
 from pathlib import Path
 r=Path(__file__).resolve().parents[1]
 core=(r/"NotchSixty/Audio/QuietZoneFeedForward.swift").read_text()
+bench=(r/"NotchSixty/Audio/QuietZoneBenchLoopback.swift").read_text()
+bench_tests=(r/"NotchSixtyTests/QuietZoneBenchLoopbackTests.swift").read_text()
 clock=(r/"NotchSixty/Audio/QuietZoneHALClockAnalysis.swift").read_text()
 clock_tests=(r/"NotchSixtyTests/QuietZoneHALClockAnalysisTests.swift").read_text()
 feedforward_tests=(r/"NotchSixtyTests/QuietZoneFeedForwardTests.swift").read_text()
@@ -124,6 +126,14 @@ for token in ("testQualifiedClockTraceDoesNotArmFeedForward",
 for token in ("clock.measuredInputRateHz", "clock.relativeDriftPPM",
 "Clock stability is not ADC/DAC latency"):
     assert token in readiness_ui,token
+for token in ("QuietZoneBenchLoopbackAnalyzer", "electricalRoundTripSeconds",
+"conservativeUpperBoundSeconds", "insufficientRepetitions",
+"QuietZoneHALClockAnalyzer", "liveANCQualified: Bool { false }"):
+    assert token in bench,token
+for token in ("testMeasuredElectricalRoundTripHasConservativeUpperBound",
+"testUnstableRepeatAndDifferentRouteAreRejected",
+"testMissingClockQualityAndClippingFailClosed"):
+    assert token in bench_tests,token
 for token in ("prepareFeedForwardPlan()","refreshFeedForwardCalibration()",
 "importMeasuredFeedForwardCalibration","feedForwardBudget"):
     assert token in controller,token
@@ -150,7 +160,9 @@ for token in ("QuietZoneFeedForward.swift in Sources",
 "QuietZoneCausalFIRCompilerTests.swift in Sources",
 "QuietZoneFeedForwardRehearsalTests.swift in Sources",
 "QuietZoneHALClockAnalysis.swift in Sources",
-"QuietZoneHALClockAnalysisTests.swift in Sources"):
+"QuietZoneHALClockAnalysisTests.swift in Sources",
+"QuietZoneBenchLoopback.swift in Sources",
+"QuietZoneBenchLoopbackTests.swift in Sources"):
     assert token in pbx,token
 for forbidden in ("replaceActiveQuietZoneRuntimeTarget","setEnabled(","requestArm","stageRoomTreatment"):
     assert forbidden not in core,"Unsafe runtime path in diagnostics: "+forbidden
