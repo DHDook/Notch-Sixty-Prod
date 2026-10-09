@@ -52,3 +52,21 @@ output witness must be supplied by the currently running selected-output
 transport; no new output stream, probe playback, capture polling timer or
 speaker injection is created in this slice. Recorded time series are not
 persisted automatically.
+
+## Third implementation slice — bind the running stereo output
+
+The application now offers an internal `AudioIOEngine.makeHardwareClockAcquisition`
+factory. It selects PR97's existing microphone HAL reference input while
+holding a weak read-only witness to the **exact** current running stereo
+output session. The output session issues a fresh random route lease on each
+reconstruction; selected device UID, Core Audio device ID, native output rate,
+active stereo transport identity, real output callbacks and the absence of
+aggregate/multi-device routing are independently required. A new session,
+recovery, device change, sample-rate change or loss of output callbacks
+revokes the capture on its next poll. The binding never opens or controls
+a second speaker output and cannot arm anti-noise.
+
+The host application currently exposes this as an internal control-plane
+entry point only. A user-driven measurement wizard, controlled physical
+source trigger, speaker-to-seat impulse timing, physical ADC/DAC deadline
+qualification and instrumented acoustic verification remain outstanding.

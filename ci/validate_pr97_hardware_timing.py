@@ -30,6 +30,16 @@ for item in ("testSyntheticConcurrentStableTracesAreBenchOnly",
              "testReplayedTimestampsAndDiscontinuityFailClosed",
              "testIndependentClockDriftIsRejected"):
     assert item in capture_tests,item
+engine=(root/"NotchSixty/Audio/AudioIOEngine.swift").read_text()
+transport=(root/"NotchSixty/Audio/CoreAudio/CoreAudioError.swift").read_text()
+for item in ("makeHardwareClockAcquisition(", "hardwareClockAcquisitionRoute()",
+             "self.transportSession === session", "passiveFeedForwardOutputTimingSnapshot"):
+    assert item in engine,item
+for item in ("calibrationTimingRouteLeaseID = UUID().uuidString",
+             "func passiveFeedForwardOutputTimingSnapshot()",
+             "aggregateDeviceOutputPlan == nil", "isOutputStarted"):
+    assert item in transport,item
+assert "testLiveRouteLeaseInvalidatesRestartDeviceAndSampleRate" in capture_tests
 for item in ("QuietZoneHardwareClockCapture.swift in Sources",
              "QuietZoneHardwareClockCaptureTests.swift in Sources"):
     assert item in pbx,item

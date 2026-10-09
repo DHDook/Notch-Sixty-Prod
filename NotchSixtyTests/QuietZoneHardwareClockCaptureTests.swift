@@ -71,6 +71,32 @@ final class QuietZoneHardwareClockCaptureTests: XCTestCase {
         XCTAssertThrowsError(try trace.qualify())
     }
 
+    func testLiveRouteLeaseInvalidatesRestartDeviceAndSampleRate() {
+        let lease = QuietZoneHardwareClockRouteLease(
+            outputID: "DAC-A", routeID: "session-A", sampleRate: 48_000
+        )
+        XCTAssertTrue(lease.permits(
+            outputID: "DAC-A", routeID: "session-A", sampleRate: 48_000
+        ))
+        XCTAssertFalse(lease.permits(
+            outputID: "DAC-A", routeID: "session-B", sampleRate: 48_000
+        ))
+        XCTAssertFalse(lease.permits(
+            outputID: "DAC-B", routeID: "session-A", sampleRate: 48_000
+        ))
+        XCTAssertFalse(lease.permits(
+            outputID: "DAC-A", routeID: "session-A", sampleRate: 96_000
+        ))
+        XCTAssertFalse(lease.permits(
+            outputID: "DAC-A", routeID: "session-A", sampleRate: .nan
+        ))
+        XCTAssertFalse(QuietZoneHardwareClockRouteLease(
+            outputID: "DAC-A", routeID: "", sampleRate: 48_000
+        ).permits(
+            outputID: "DAC-A", routeID: "", sampleRate: 48_000
+        ))
+    }
+
     func testIncompleteClockCaptureCannotClaimPhysicalLatency() throws {
         var trace = try collector()
         try trace.addInput(hostSeconds: 100, sampleFrame: 1_000)

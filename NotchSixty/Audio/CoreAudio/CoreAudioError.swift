@@ -416,6 +416,9 @@ final class CoreAudioTransportSession {
     private static let shutdownFadeTimeoutMicroseconds: UInt32 = 100_000
 
     let selectedOutput: AudioOutputDevice
+    /// Random lifecycle token. Evidence from a stopped or reconstructed output
+    /// route is never compatible, even when its device UID is unchanged.
+    let calibrationTimingRouteLeaseID = UUID().uuidString
     let sameDeviceOutputPlan: SameDeviceOutputRoutePlan?
     let aggregateDeviceOutputPlan: AggregateDeviceOutputRoutePlan?
     private(set) var tapFormat = AudioStreamFormatDescription(AudioStreamBasicDescription())
@@ -738,6 +741,21 @@ final class CoreAudioTransportSession {
 
     deinit {
         stop(fadeOut: false)
+    }
+
+    /// Returns a PASSIVE witness only for this exact running physical output.
+    /// An aggregate/multi-device route or stopped session cannot produce
+    /// trusted PR97 clock acquisition evidence through the stereo path.
+    func passiveFeedForwardOutputTimingSnapshot()
+        -> N60FeedForwardOutputTimingSnapshot? {
+        guard !stopped, isOutputStarted,
+              aggregateDeviceOutputPlan == nil,
+              outputDeviceID == selectedOutput.deviceID,
+              let bridge else { return nil }
+        let witness = N60RealtimeAudioBridgeGetFeedForwardOutputTimingSnapshot(bridge)
+        guard witness.valid, witness.callbackCount > 0,
+              witness.invalidCount == 0 else { return nil }
+        return witness
     }
 
     func counters() -> AudioTransportCounters {

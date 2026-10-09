@@ -14,6 +14,21 @@ enum QuietZoneHardwareClockCaptureError: Error, Equatable {
     case alreadyFinished
 }
 
+/// Immutable route identifier for a single running transport. UIDs alone
+/// are insufficient: every transport reinitialization issues a new lease.
+struct QuietZoneHardwareClockRouteLease: Equatable, Sendable {
+    let outputID: String
+    let routeID: String
+    let sampleRate: Double
+
+    func permits(outputID: String, routeID: String, sampleRate: Double) -> Bool {
+        self.outputID == outputID && !self.outputID.isEmpty &&
+        self.routeID == routeID && !self.routeID.isEmpty &&
+        self.sampleRate.isFinite && sampleRate.isFinite &&
+        abs(self.sampleRate - sampleRate) < 0.5
+    }
+}
+
 struct QuietZoneHardwareClockEvidence: Sendable {
     let trace: QuietZoneHALClockTrace
     let health: QuietZoneHALClockHealth
@@ -95,8 +110,7 @@ final class QuietZoneHardwareHALClockAcquisition {
     typealias Route = (outputID: String, routeID: String, sampleRate: Double)
 
     private let reference: FeedForwardReferenceTransport
-    private let expectedOutputID: String
-    private let expectedRouteID: String
+    private let routeLease: QuietZoneHardwareClockRouteLease
     private let currentRoute: () -> Route?
     private let outputWitness: () -> N60FeedForwardOutputTimingSnapshot?
     private var accumulator: QuietZoneHardwareClockAccumulator
@@ -121,8 +135,9 @@ final class QuietZoneHardwareHALClockAcquisition {
             throw QuietZoneHardwareClockCaptureError.incompatibleRoute
         }
         self.reference = reference
-        expectedOutputID = outputID
-        expectedRouteID = routeID
+        routeLease = QuietZoneHardwareClockRouteLease(
+            outputID: outputID, routeID: routeID, sampleRate: sampleRate
+        )
         self.currentRoute = currentRoute
         self.outputWitness = outputWitness
         accumulator = try QuietZoneHardwareClockAccumulator(
@@ -133,10 +148,10 @@ final class QuietZoneHardwareHALClockAcquisition {
 
     private func verifyRoute() throws {
         guard let route = currentRoute(),
-              route.outputID == expectedOutputID,
-              route.routeID == expectedRouteID,
-              route.sampleRate.isFinite,
-              abs(route.sampleRate - accumulator.sampleRate) < 0.5
+              routeLease.permits(
+                outputID: route.outputID, routeID: route.routeID,
+                sampleRate: route.sampleRate
+              )
         else { throw QuietZoneHardwareClockCaptureError.incompatibleRoute }
     }
 
