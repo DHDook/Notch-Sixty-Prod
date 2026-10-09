@@ -157,3 +157,39 @@ exercise arithmetic and fail-closed validation; a software-provided
 \`instrumentedHardware\` label is not trusted physical hardware attestation.
 The actual timing-stage acquisition/verification and live control are still
 gated on real equipment and separate PR98/PR99 acceptance.
+
+
+## Sixth implementation slice — repeated physical timestamp witness workflow
+
+PR97 now has a bounded, in-memory \`QuietZonePhysicalLatencyMeasurementRun\`.
+The separate instrument must supply synchronized start/end host timestamps
+for each stage, corrected for *independently measured* endpoint instrumentation
+latency. Four distinct witness methods are required:
+
+- acoustic reference sound → upstream microphone ADC-ready
+- ADC-ready → real anti-noise DSP command
+- real anti-noise command → analog DAC output
+- analog speaker output → listener-seat microphone arrival (subtracting the
+  listener measurement microphone's separately calibrated ADC delay)
+
+At least three nonoverlapping capture events per method are mandatory.
+Each must share the exact measurement rig, clock identity, DAC session lease,
+valid cross-clock witness, and separately verified endpoint correction.
+Replayed/out-of-order event IDs, overlapping sample timelines, invalid
+uncertainty, negative corrected latency, expired data and estimates fail
+closed. Data collection is capped at 20 repetitions per stage.
+
+For each stage, the collector computes a robust observed median and the
+maximum independently measured corrected latency. It keeps the worst measured
+jitter and the conservative additive uncertainty of start clock, endpoint
+clock and correction, then hands the four typed results to the existing
+physical timing-budget analyzer. The new
+\`QuietZoneHardwareCalibrationSession.evaluateInstrumentedLatencyRun\`
+requires the same session and prior completed clock/loopback/A-B-A sequence.
+
+This is a **control-plane data contract and analysis**, not a live hardware
+instrument: software Boolean claims about a witness cannot independently
+prove ADC/DAC or acoustic timing, and a test fixture cannot commission the
+hardware. Until the actual Mac/measurement chain supplies physical witnesses
+and the results pass separate acceptance, no live ANC can arm. There is no
+Core Audio callback modification or autonomous output/playback.

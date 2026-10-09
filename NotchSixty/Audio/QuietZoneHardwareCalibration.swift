@@ -222,6 +222,23 @@ struct QuietZoneHardwareCalibrationSession: Sendable {
         )
     }
 
+    /// Collect timestamp-differenced physical witnesses using the exact rig
+    /// and refuse to build a causal timing estimate from an incomplete run.
+    func evaluateInstrumentedLatencyRun(
+        _ run: QuietZonePhysicalLatencyMeasurementRun,
+        plan: QuietZoneFeedForwardCalibration,
+        project: RoomCorrectionProject,
+        now: Date = Date()
+    ) throws -> QuietZonePhysicalLatencyReport {
+        guard run.rig == rig, run.startedAt == startedAt else {
+            throw QuietZoneHardwareCalibrationError.wrongDevice
+        }
+        return try evaluatePhysicalLatency(
+            plan: plan, project: project,
+            stages: run.measurements(now: now), now: now
+        )
+    }
+
     func report(
         plan: QuietZoneFeedForwardCalibration,
         project: RoomCorrectionProject,

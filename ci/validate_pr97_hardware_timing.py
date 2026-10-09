@@ -88,4 +88,24 @@ assert "evaluatePhysicalLatency(" in core
 assert "Timing path breakdown · diagnostic only" in ui
 for forbidden in ("AudioDeviceStart(", "requestArm(", "setEnabled(", "stageRoomTreatment"):
     assert forbidden not in physical,forbidden
+measurement=(root/"NotchSixty/Audio/QuietZonePhysicalLatencyMeasurementRun.swift").read_text()
+measurement_tests=(root/"NotchSixtyTests/QuietZonePhysicalLatencyMeasurementRunTests.swift").read_text()
+for token in ("QuietZonePhysicalLatencyMeasurementRun",
+              "QuietZonePhysicalLatencyRepetition",
+              "calibratedEndpointCorrectionSeconds",
+              "outOfOrderCapture", "clockCalibrationVerified",
+              "endpointCorrectionVerified", "liveANCQualified: Bool { false }"):
+    assert token in measurement,token
+for token in ("testAssemblesFourIndependentPhysicalStagesForBudget",
+              "testRejectsSyntheticAndUncalibratedWitness",
+              "testReplayedEventAndRouteChangeFailWithoutCorruptingRun",
+              "testOverlappingFrameWindowsAreRejected",
+              "testPublishingExpiredMeasurementsFailsClosed"):
+    assert token in measurement_tests,token
+for token in ("QuietZonePhysicalLatencyMeasurementRun.swift in Sources",
+              "QuietZonePhysicalLatencyMeasurementRunTests.swift in Sources"):
+    assert token in pbx,token
+assert "evaluateInstrumentedLatencyRun(" in core
+for forbidden in ("AudioDeviceStart(", "requestArm(", "setEnabled(", "stageRoomTreatment"):
+    assert forbidden not in measurement,forbidden
 print("PR97 calibration safety guard passed")
