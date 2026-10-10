@@ -75,4 +75,21 @@ for forbidden in ("AudioDeviceStart(", "N60RenderKernelProcess(",
                   "N60FFDeadlineBridgeProcess(", "requestArm(",
                   "setEnabled(", "N60RealtimeAudioBridgeRender("):
     assert forbidden not in spectral,forbidden
+review=(root/"NotchSixty/Audio/QuietZoneIndependentReviewPacket.swift").read_text()
+for token in ("QuietZoneIndependentReviewPacketAnalyzer", "QuietZoneExternalReviewRole",
+              "maximumReviewAgeSeconds", "duplicateReviewer",
+              "mismatchedEvidence", "rejectEvidence" if False else "rejectedEvidence",
+              "reviewerIdentityCryptographicallyVerified: Bool = false",
+              "instrumentEvidenceIndependentlyAuthenticated: Bool = false",
+              "liveANCQualified: Bool = false", "outputConnected: Bool = false"):
+    assert token in review, token
+for token in ("testTwoDistinctReviewerRolesRemainUnverifiedAndDisconnected",
+              "testReviewRejectsSamePersonAndSameRoleRepeated",
+              "testReviewerDigestMismatchAndRejectionBlockReview",
+              "testReviewerTimeWindowAndEmptyNotesAreRejected"):
+    assert token in tests, token
+assert "QuietZoneIndependentReviewPacket.swift in Sources" in project
+for forbidden in ("AudioDeviceStart(", "N60RenderKernelProcess(",
+                  "N60FFDeadlineBridgeProcess(", "requestArm(", "setEnabled("):
+    assert forbidden not in review, forbidden
 print("PR99 offline physical verification campaign safety guard passed")

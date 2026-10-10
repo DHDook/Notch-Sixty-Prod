@@ -138,6 +138,7 @@
 		F98600000000000000000002 /* QuietZoneHardwareAcceptanceProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F98600000000000000000012 /* QuietZoneHardwareAcceptanceProtocolTests.swift */; };
 		F98700000000000000000001 /* QuietZonePhysicalVerificationCampaign.swift in Sources */ = {isa = PBXBuildFile; fileRef = F98700000000000000000011 /* QuietZonePhysicalVerificationCampaign.swift */; };
 		F98700000000000000000002 /* QuietZonePhysicalVerificationCampaignTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F98700000000000000000012 /* QuietZonePhysicalVerificationCampaignTests.swift */; };
+		F98800000000000000000001 /* QuietZoneIndependentReviewPacket.swift in Sources */ = {isa = PBXBuildFile; fileRef = F98800000000000000000011 /* QuietZoneIndependentReviewPacket.swift */; };
 		F98800000000000000000001 /* QuietZonePhysicalSpectralEvidence.swift in Sources */ = {isa = PBXBuildFile; fileRef = F98800000000000000000011 /* QuietZonePhysicalSpectralEvidence.swift */; };
 		F73000000000000000000001 /* MIMORoomTreatmentDesigner.swift in Sources */ = {isa = PBXBuildFile; fileRef = F73000000000000000000011 /* MIMORoomTreatmentDesigner.swift */; };
 		F73000000000000000000002 /* MIMORoomTreatmentDesignerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F73000000000000000000012 /* MIMORoomTreatmentDesignerTests.swift */; };
@@ -352,6 +353,7 @@
 		F98600000000000000000012 /* QuietZoneHardwareAcceptanceProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneHardwareAcceptanceProtocolTests.swift; sourceTree = "<group>"; };
 		F98700000000000000000011 /* QuietZonePhysicalVerificationCampaign.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZonePhysicalVerificationCampaign.swift; sourceTree = "<group>"; };
 		F98700000000000000000012 /* QuietZonePhysicalVerificationCampaignTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZonePhysicalVerificationCampaignTests.swift; sourceTree = "<group>"; };
+		F98800000000000000000011 /* QuietZoneIndependentReviewPacket.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneIndependentReviewPacket.swift; sourceTree = "<group>"; };
 		F98800000000000000000011 /* QuietZonePhysicalSpectralEvidence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZonePhysicalSpectralEvidence.swift; sourceTree = "<group>"; };
 		F73000000000000000000011 /* MIMORoomTreatmentDesigner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMORoomTreatmentDesigner.swift; sourceTree = "<group>"; };
 		F73000000000000000000012 /* MIMORoomTreatmentDesignerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMORoomTreatmentDesignerTests.swift; sourceTree = "<group>"; };
@@ -563,6 +565,7 @@
 				F98500000000000000000011 /* QuietZoneFeedForwardSafetyAcceptance.swift */,
 				F98600000000000000000011 /* QuietZoneHardwareAcceptanceProtocol.swift */,
 				F98700000000000000000011 /* QuietZonePhysicalVerificationCampaign.swift */,
+				F98800000000000000000011 /* QuietZoneIndependentReviewPacket.swift */,
 				F98800000000000000000011 /* QuietZonePhysicalSpectralEvidence.swift */,
 				F95000000000000000000011 /* ActiveQuietZoneSpatial.swift */,
 				F95000000000000000000013 /* ActiveQuietZoneSpatialSurvey.swift */,
@@ -781,6 +784,7 @@
 				F98500000000000000000001 /* QuietZoneFeedForwardSafetyAcceptance.swift in Sources */,
 				F98600000000000000000001 /* QuietZoneHardwareAcceptanceProtocol.swift in Sources */,
 				F98700000000000000000001 /* QuietZonePhysicalVerificationCampaign.swift in Sources */,
+				F98800000000000000000001 /* QuietZoneIndependentReviewPacket.swift in Sources */,
 				F98800000000000000000001 /* QuietZonePhysicalSpectralEvidence.swift in Sources */,
 				F73000000000000000000001 /* MIMORoomTreatmentDesigner.swift in Sources */,
 				F74000000000000000000001 /* MIMORoomTreatmentFIRCompiler.swift in Sources */,

@@ -447,4 +447,112 @@ final class QuietZonePhysicalVerificationCampaignTests: XCTestCase {
         XCTAssertFalse(later.instrumentEvidenceIndependentlyAuthenticated)
     }
 
+
+    private func reviews(
+        for package: QuietZonePhysicalEvidencePackage
+    ) -> [QuietZoneExternalReviewAcknowledgment] {
+        [
+            .init(role: .acoustics, reviewerID: "acoustic-reviewer-1",
+                  evidenceSHA256Hex: package.sha256Hex,
+                  reviewedAt: now.addingTimeInterval(-60),
+                  decision: .recommendFurtherHardwareReview,
+                  notes: "Numerical spectral evidence examined."),
+            .init(role: .electricalSafety, reviewerID: "safety-reviewer-2",
+                  evidenceSHA256Hex: package.sha256Hex,
+                  reviewedAt: now,
+                  decision: .recommendFurtherHardwareReview,
+                  notes: "Fault witness metadata reviewed; hardware unverified.")
+        ]
+    }
+
+    func testTwoDistinctReviewerRolesRemainUnverifiedAndDisconnected() throws {
+        let r = rig()
+        let p = try spectralPackage(r, campaign(r))
+        let packet = try QuietZoneIndependentReviewPacketAnalyzer().assess(
+            package: p, reviews: reviews(for: p), now: now
+        )
+        XCTAssertTrue(packet.numericalAcceptance)
+        XCTAssertTrue(packet.independentRolesAcknowledged)
+        XCTAssertFalse(packet.reviewerIdentityCryptographicallyVerified)
+        XCTAssertFalse(packet.instrumentEvidenceIndependentlyAuthenticated)
+        XCTAssertFalse(packet.physicalAttenuationVerified)
+        XCTAssertFalse(packet.emergencyMuteHardwareVerified)
+        XCTAssertFalse(packet.liveANCQualified)
+        XCTAssertFalse(packet.outputConnected)
+    }
+
+    func testReviewRejectsSamePersonAndSameRoleRepeated() throws {
+        let r = rig()
+        let p = try spectralPackage(r, campaign(r))
+        let original = reviews(for: p)
+        let samePerson = QuietZoneExternalReviewAcknowledgment(
+            role: .electricalSafety,
+            reviewerID: "ACOUSTIC-REVIEWER-1",
+            evidenceSHA256Hex: p.sha256Hex, reviewedAt: now,
+            decision: .recommendFurtherHardwareReview,
+            notes: "Second claimed review."
+        )
+        XCTAssertThrowsError(try QuietZoneIndependentReviewPacketAnalyzer()
+            .assess(package: p, reviews: [original[0], samePerson], now: now)) {
+            XCTAssertEqual($0 as? QuietZoneExternalReviewFault, .duplicateReviewer)
+        }
+        XCTAssertThrowsError(try QuietZoneIndependentReviewPacketAnalyzer()
+            .assess(package: p, reviews: [original[0], original[0]], now: now)) {
+            XCTAssertEqual($0 as? QuietZoneExternalReviewFault, .incompleteReview)
+        }
+    }
+
+    func testReviewerDigestMismatchAndRejectionBlockReview() throws {
+        let r = rig()
+        let p = try spectralPackage(r, campaign(r))
+        let old = reviews(for: p)
+        let altered = QuietZoneExternalReviewAcknowledgment(
+            role: .electricalSafety, reviewerID: "safety-reviewer-2",
+            evidenceSHA256Hex: String(repeating: "0", count: 64),
+            reviewedAt: now,
+            decision: .recommendFurtherHardwareReview,
+            notes: "Different evidence packet."
+        )
+        XCTAssertThrowsError(try QuietZoneIndependentReviewPacketAnalyzer()
+            .assess(package: p, reviews: [old[0], altered], now: now)) {
+            XCTAssertEqual($0 as? QuietZoneExternalReviewFault, .mismatchedEvidence)
+        }
+        let rejection = QuietZoneExternalReviewAcknowledgment(
+            role: .electricalSafety, reviewerID: "safety-reviewer-2",
+            evidenceSHA256Hex: p.sha256Hex, reviewedAt: now,
+            decision: .rejectEvidence, notes: "Insufficient physical evidence."
+        )
+        XCTAssertThrowsError(try QuietZoneIndependentReviewPacketAnalyzer()
+            .assess(package: p, reviews: [old[0], rejection], now: now)) {
+            XCTAssertEqual($0 as? QuietZoneExternalReviewFault, .rejectedEvidence)
+        }
+    }
+
+    func testReviewerTimeWindowAndEmptyNotesAreRejected() throws {
+        let r = rig()
+        let p = try spectralPackage(r, campaign(r))
+        let old = reviews(for: p)
+        let late = QuietZoneExternalReviewAcknowledgment(
+            role: .electricalSafety, reviewerID: "safety-reviewer-2",
+            evidenceSHA256Hex: p.sha256Hex,
+            reviewedAt: now.addingTimeInterval(-100_000),
+            decision: .recommendFurtherHardwareReview,
+            notes: "This review happened too far from the first."
+        )
+        XCTAssertThrowsError(try QuietZoneIndependentReviewPacketAnalyzer()
+            .assess(package: p, reviews: [old[0], late], now: now)) {
+            XCTAssertEqual($0 as? QuietZoneExternalReviewFault, .expiredReview)
+        }
+        let blank = QuietZoneExternalReviewAcknowledgment(
+            role: .electricalSafety, reviewerID: "safety-reviewer-2",
+            evidenceSHA256Hex: p.sha256Hex, reviewedAt: now,
+            decision: .recommendFurtherHardwareReview,
+            notes: "   "
+        )
+        XCTAssertThrowsError(try QuietZoneIndependentReviewPacketAnalyzer()
+            .assess(package: p, reviews: [old[0], blank], now: now)) {
+            XCTAssertEqual($0 as? QuietZoneExternalReviewFault, .invalidReviewer)
+        }
+    }
+
 }

@@ -102,3 +102,23 @@ masking per-band divergence, tamper detection, JSON-escaped instrument
 names, and raw preflight rejection. This slice remains software-only;
 actual acoustic evidence and independently authenticated instrument
 capture remain future hardware commissioning steps.
+
+
+## Slice 3 — independent offline review acknowledgments
+
+A numerically accepted SHA-256 manifest can be presented to **two different
+reviewer roles**: acoustic evaluation and electrical safety. The read-only
+`QuietZoneIndependentReviewPacketAnalyzer` requires unique reviewer IDs,
+different review roles, matching immutable evidence digest, nonempty bounded
+review notes, affirmative *further hardware review* recommendations, and
+reviews within seven days and at most 24 hours apart. Any rejection,
+reused reviewer, wrong digest, missing role, stale review, or empty notes
+fails. Four focused adversarial XCTest cases guard the workflow.
+
+**Important:** names and acknowledgments are provided by an external caller;
+there is NO reviewer-signature validation, hardware-root trust, enrolled
+calibration equipment, trusted timestamp, independently authenticated
+acoustic attenuation, or real analog mute attestation. Both favorable
+reviewers only recommend *further* physical review. The packet cannot arm
+or connect live ANC and every physical verification/authorization Bool
+remains **false**. Independent signed evidence remains future work.
