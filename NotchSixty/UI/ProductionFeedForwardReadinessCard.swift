@@ -131,6 +131,7 @@ struct ProductionFeedForwardReadinessCard: View {
             }
 
             commissioningSummary
+            oneMicrophoneSetupProgress
 
             VStack(alignment: .leading, spacing: 7) {
                 stage(
@@ -351,6 +352,107 @@ struct ProductionFeedForwardReadinessCard: View {
         .glassEffect(
             .regular,
             in: .rect(cornerRadius: 18)
+        )
+    }
+
+    private var oneMicrophoneSetupProgress: some View {
+        let calibration = quietZone.feedForwardCalibration
+        let rows: [(String, Bool, String)] = [
+            (
+                "Plan",
+                calibration != nil,
+                "Playback system, listener position and upstream reference are identified."
+            ),
+            (
+                "Listener A",
+                calibration?.arrivals.contains {
+                    $0.position == .listenerFirst
+                } ?? false,
+                "First trigger-synchronized listener arrival captured."
+            ),
+            (
+                "Upstream reference",
+                calibration?.arrivals.contains {
+                    $0.position == .upstream
+                } ?? false,
+                "Same microphone moved upstream without changing the timing identity."
+            ),
+            (
+                "Listener A return",
+                calibration?.arrivals.contains {
+                    $0.position == .listenerReturn
+                } ?? false,
+                "Microphone returned to the listener to expose source/timebase drift."
+            ),
+            (
+                "Physical timing path",
+                calibration?.timingPath != nil,
+                "Reference ADC, processing, DAC and speaker-to-seat latency evidence supplied."
+            ),
+            (
+                "HAL clock trace",
+                calibration?.halClockTrace != nil,
+                "Concurrent input/output clock observations supplied for qualification."
+            ),
+        ]
+        let completed = rows.filter { $0.1 }.count
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Guided One-Microphone Setup")
+                        .font(.subheadline.bold())
+                    Text(
+                        "Move the same microphone from the listener to the upstream reference position and back."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("\(completed) / \(rows.count)")
+                    .font(.caption.bold().monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+
+            ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                HStack(alignment: .top, spacing: 10) {
+                    Image(
+                        systemName:
+                            row.1
+                                ? "checkmark.circle.fill"
+                                : "circle"
+                    )
+                    .foregroundStyle(
+                        row.1 ? Color.green : Color.secondary
+                    )
+                    .frame(width: 18)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(index + 1). \(row.0)")
+                            .font(.caption.bold())
+                        Text(row.2)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer()
+                    Text(row.1 ? "RECORDED" : "PENDING")
+                        .font(.caption2.bold())
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Text(
+                "Recorded means only that a software record exists. PR100 does not authenticate the microphone, trigger clock, instrument, geometry, or acoustic result."
+            )
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            .secondary.opacity(0.05),
+            in: RoundedRectangle(cornerRadius: 12)
         )
     }
 
