@@ -260,3 +260,71 @@ sample/timestamp mapping, physical DAC/speaker/seat latency,
 source/microphone acoustic consistency, real SPL/attenuation, echo/feedback
 stability under moving people, and implementation of a speaker-connected
 hardware-verified mute/fade. This PR does not enable or claim acoustic ANC.
+
+
+## Seventh slice — physical-commissioning runbook and acceptance evidence (READ-ONLY)
+
+\`QuietZonePhysicalCommissioningRunbook.make()\` provides a **nine-step,
+ordered, operator-facing rehearsal**. It reuses PR97's existing measurement
+types for selecting and locking the actual DAC route, synchronized running
+input/output HAL clocks, cable loopbacks, A/B/A moveable-mic arrival survey,
+four separately instrumented latency endpoints, signed external evidence
+handoff, and PR98 shadow/echo/leakage preflight. It explicitly forbids using
+a nominal Core Audio buffer size or the electrical loopback total as a
+speaker-to-listener acoustic flight-time witness.
+
+The final two stages describe separately supervised, **externally
+interlocked** listener acoustic acceptance and emergency shutdown exercises.
+The new \`QuietZoneHardwareAcceptanceAnalyzer\` operates ONLY on externally
+supplied typed records. It cannot start a stimulus, open Core Audio, change
+the input/output mixer, accept a file as independent hardware attestation,
+or authorize an ANC output callback.
+
+**Provisional lab numeric criteria (engineering starting points, NOT claims
+of successful physical calibration):**
+
+- Exactly **three independent synchronized source launches** at one fixed
+  listener position, ordered **OFF → TEST → OFF**, on an identical 20–150 Hz
+  frequency grid of 3–32 narrow coherent bands. The controlled source and
+  separate instrument calibration must remain identical; minimum coherence
+  is 0.85. Outside LF and incoherent party speech are NOT included or
+  predicted. These same-source repeated captures cannot prove cancellation
+  of random speech.
+- The two OFF baselines must agree within **1.5 dB in every band**.
+  The baseline is averaged in **linear power**, not by averaging dB.
+  Require at least **1 dB integrated measured improvement** across the
+  supplied bands with **no band worse than 1 dB regression**. This is only
+  a first small, controlled bench eligibility criterion—not a promised
+  noise reduction or evidence of broad-band ANC.
+- During a separately authorized low-level external test, the provided
+  instrument records must show test maximum listener level ≤85 dB SPL,
+  each normalized speaker sample peak ≤0.063095734 (-24 dBFS),
+  combined stereo absolute sample peak ≤0.10, and **no clipping**.
+  All these numbers are conservative configuration defaults; safe real-world
+  instrumentation, transducer protection and calibration are still mandatory.
+- Require **five different external hardware fault interventions**:
+  output route lost; upstream microphone lost; host-clock discontinuity;
+  input reference-ring overflow; and anti-noise output overload. For each
+  independent launched observation the analog output must be independently
+  witnessed at ≤−60 dBFS within **100 ms** after the fault is detected,
+  with no automatic ANC re-arm. Missing, reordered, replayed, stale or
+  duplicate category evidence fails.
+- Every capture/witness must retain the exact calibration session ID,
+  microphone identity/channel, DAC route lease, source fixture ID, measured
+  instrument calibration ID, and monotonic capture sequence.
+
+All numerical acceptance results remain \`provisionalBenchCriteriaMet\`
+and expose **permanently false** \`physicalAcousticEvidenceIndependentlyVerified\`,
+\`emergencyMuteHardwareVerified\`, \`liveSpeakerConnectionAuthorized\`
+and \`liveANCQualified\`. The analysis DOES NOT cryptographically
+verify an external acoustic instrument or prove real output safety.
+Independent hardware review, genuine latency/room/seat tests, actual
+speaker emergency mute/fade implementation and a later separately reviewed
+speaker-connected PR are prerequisites. Live ANC remains disconnected.
+
+Adversarial XCTest cover missing or replayed source launches, wrong or
+moved listening position, clock/source/instrument mismatch, stale sessions,
+low coherence, drifting A/B/A baselines, mismatched spectral counts,
+nonlinear dB-power arithmetic, inadequate reduction, any bad band,
+unsafe output peaks/clipping, five fault types, slow hardware mute,
+insufficient mute, auto-rearm, swapped rig, and the operator runbook.

@@ -202,4 +202,39 @@ for forbidden in ("AudioDeviceStart(", "AudioDeviceCreateIOProcID(",
                   "N60RenderKernelProcess(", "requestArm(", "setEnabled(",
                   "stageRoomTreatment("):
     assert forbidden not in envelope,forbidden
+hardware_protocol=(root/"NotchSixty/Audio/QuietZoneHardwareAcceptanceProtocol.swift").read_text()
+hardware_protocol_tests=(root/"NotchSixtyTests/QuietZoneHardwareAcceptanceProtocolTests.swift").read_text()
+for token in ("QuietZoneHardwareAcceptanceAnalyzer",
+              "QuietZonePhysicalCommissioningRunbook",
+              "QuietZoneSeatAcceptanceCapture",
+              "QuietZoneHardwareFaultShutdownWitness",
+              "maximumMeasuredMuteSeconds = 0.100",
+              "maximumResidualLevelDBFS = -60.0",
+              "maximumBaselineDifferenceDB = 1.5",
+              "maximumStereoSumPeak = 0.10",
+              "minimumIntegratedReductionDB = 1.0",
+              "acousticRegression", "unrepeatableNoise",
+              "liveSpeakerConnectionAuthorized: Bool = false",
+              "emergencyMuteHardwareVerified: Bool = false",
+              "liveANCQualified: Bool = false"):
+    assert token in hardware_protocol,token
+for token in ("testNumericalBenchPassNeverClaimsRealAttenuationOrLiveOutput",
+              "testOffOffPowerBaselineDoesNotAverageDbValues",
+              "testMissingOrDuplicatePhysicalLaunchCannotPass",
+              "testWrongTreatmentOrderOrSeatOrInstrumentFails",
+              "testUnstableNoiseCoherenceOrChronologyFails",
+              "testUnsafeSeatSignalOrJointStereoOutputIsRejected",
+              "testSpectralGridMustMatchAndMissingBinsMustNotCrash",
+              "testNoRealImprovementAndFrequencyRegressionFail",
+              "testSlowMuteLoudResidualAndAutoRearmAllFail",
+              "testReplayedFaultAndChangedHardwareSessionFail",
+              "testRunbookIsOrderedReadOnlyAndExplicitlyHardwareBlocked"):
+    assert token in hardware_protocol_tests,token
+for token in ("QuietZoneHardwareAcceptanceProtocol.swift in Sources",
+              "QuietZoneHardwareAcceptanceProtocolTests.swift in Sources"):
+    assert token in pbx,token
+for forbidden in ("AudioDeviceStart(", "AudioDeviceCreateIOProcID(",
+                  "N60RenderKernelProcess(", "requestArm(", "setEnabled(",
+                  "stageRoomTreatment(", "N60FeedForwardPreviewFIRProcessFrame("):
+    assert forbidden not in hardware_protocol,forbidden
 print("PR98 shadow scheduler safety guards passed")
