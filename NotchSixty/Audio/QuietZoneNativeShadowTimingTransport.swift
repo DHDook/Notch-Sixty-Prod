@@ -130,6 +130,9 @@ final class QuietZoneNativeShadowTimingTransport {
         return N60FFDeadlineBridgeGetSnapshot(bridge)
     }
 
+    /// Clock faults must revoke pending diagnostic records atomically.
+    func stopForClockFault() { invalidate() }
+
     var outputConnected: Bool { false }
     var liveANCQualified: Bool { false }
 }
