@@ -1,5 +1,73 @@
 import SwiftUI
 
+
+enum ActiveAcousticsCommissioningUXState: Equatable {
+    case calibrationRequired
+    case timingUnqualified
+    case timingPlausibleHardwareRequired
+
+    var title: String {
+        switch self {
+        case .calibrationRequired:
+            return "Calibration required"
+        case .timingUnqualified:
+            return "Timing diagnostics incomplete"
+        case .timingPlausibleHardwareRequired:
+            return "Timing plausible · hardware verification required"
+        }
+    }
+}
+
+struct ActiveAcousticsCommissioningUXSnapshot: Equatable {
+    let calibrationPlanned: Bool
+    let timingReadiness: QuietZoneFeedForwardReadiness
+
+    var state: ActiveAcousticsCommissioningUXState {
+        guard calibrationPlanned else {
+            return .calibrationRequired
+        }
+        guard timingReadiness == .physicallyPlausible else {
+            return .timingUnqualified
+        }
+        return .timingPlausibleHardwareRequired
+    }
+
+    var timingCaption: String {
+        switch timingReadiness {
+        case .missingMeasurements:
+            return "MEASUREMENTS REQUIRED"
+        case .invalidTimebase:
+            return "CLOCK UNQUALIFIED"
+        case .unreliableMeasurements:
+            return "MEASUREMENT QUALITY HOLD"
+        case .nonCausal:
+            return "NON-CAUSAL"
+        case .limitedMargin:
+            return "MARGIN TOO SMALL"
+        case .physicallyPlausible:
+            return "DIAGNOSTIC PASS"
+        }
+    }
+
+    // PR100 must never transform remote/synthetic diagnostics into physical
+    // authorization. These remain explicit UX facts until later hardware work.
+    let instrumentEvidenceAuthenticated = false
+    let physicalAttenuationVerified = false
+    let emergencyMuteHardwareVerified = false
+    let liveANCOutputAuthorized = false
+
+    var nextAction: String {
+        switch state {
+        case .calibrationRequired:
+            return "Prepare the one-microphone plan, then capture the listener → upstream → listener timing survey on the physical system."
+        case .timingUnqualified:
+            return "Complete or correct the hardware timing survey until causality and reserve diagnostics are trustworthy."
+        case .timingPlausibleHardwareRequired:
+            return "Run the PR99 A/B/A acoustic campaign, independent instrument review, and real emergency-shutdown verification before any live ANC authorization."
+        }
+    }
+}
+
 /// PR96 uses the familiar Quiet Zone workspace but deliberately does not
 /// expose an Arm switch until the reference-to-speaker path is proven causal.
 struct ProductionFeedForwardReadinessCard: View {
@@ -61,6 +129,9 @@ struct ProductionFeedForwardReadinessCard: View {
                 .font(.caption2.bold())
                 .foregroundStyle(.secondary)
             }
+
+            commissioningSummary
+            oneMicrophoneSetupProgress
 
             VStack(alignment: .leading, spacing: 7) {
                 stage(
@@ -281,6 +352,198 @@ struct ProductionFeedForwardReadinessCard: View {
         .glassEffect(
             .regular,
             in: .rect(cornerRadius: 18)
+        )
+    }
+
+    private var oneMicrophoneSetupProgress: some View {
+        let calibration = quietZone.feedForwardCalibration
+        let rows: [(String, Bool, String)] = [
+            (
+                "Plan",
+                calibration != nil,
+                "Playback system, listener position and upstream reference are identified."
+            ),
+            (
+                "Listener A",
+                calibration?.arrivals.contains {
+                    $0.position == .listenerFirst
+                } ?? false,
+                "First trigger-synchronized listener arrival captured."
+            ),
+            (
+                "Upstream reference",
+                calibration?.arrivals.contains {
+                    $0.position == .upstream
+                } ?? false,
+                "Same microphone moved upstream without changing the timing identity."
+            ),
+            (
+                "Listener A return",
+                calibration?.arrivals.contains {
+                    $0.position == .listenerReturn
+                } ?? false,
+                "Microphone returned to the listener to expose source/timebase drift."
+            ),
+            (
+                "Physical timing path",
+                calibration?.timingPath != nil,
+                "Reference ADC, processing, DAC and speaker-to-seat latency evidence supplied."
+            ),
+            (
+                "HAL clock trace",
+                calibration?.halClockTrace != nil,
+                "Concurrent input/output clock observations supplied for qualification."
+            ),
+        ]
+        let completed = rows.filter { $0.1 }.count
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Guided One-Microphone Setup")
+                        .font(.subheadline.bold())
+                    Text(
+                        "Move the same microphone from the listener to the upstream reference position and back."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("\(completed) / \(rows.count)")
+                    .font(.caption.bold().monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+
+            ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                HStack(alignment: .top, spacing: 10) {
+                    Image(
+                        systemName:
+                            row.1
+                                ? "checkmark.circle.fill"
+                                : "circle"
+                    )
+                    .foregroundStyle(
+                        row.1 ? Color.green : Color.secondary
+                    )
+                    .frame(width: 18)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(index + 1). \(row.0)")
+                            .font(.caption.bold())
+                        Text(row.2)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer()
+                    Text(row.1 ? "RECORDED" : "PENDING")
+                        .font(.caption2.bold())
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Text(
+                "Recorded means only that a software record exists. PR100 does not authenticate the microphone, trigger clock, instrument, geometry, or acoustic result."
+            )
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            .secondary.opacity(0.05),
+            in: RoundedRectangle(cornerRadius: 12)
+        )
+    }
+
+    private var commissioningSummary: some View {
+        let snapshot = ActiveAcousticsCommissioningUXSnapshot(
+            calibrationPlanned: quietZone.feedForwardCalibration != nil,
+            timingReadiness: quietZone.feedForwardBudget.readiness
+        )
+
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Commissioning & Verification")
+                        .font(.subheadline.bold())
+                    Text(snapshot.state.title)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("PR100 · READ ONLY")
+                    .font(.caption2.bold())
+                    .tracking(0.7)
+                    .foregroundStyle(.secondary)
+            }
+
+            LazyVGrid(
+                columns: [
+                    GridItem(.flexible()),
+                    GridItem(.flexible()),
+                ],
+                spacing: 10
+            ) {
+                verificationCell(
+                    "One-mic calibration",
+                    snapshot.calibrationPlanned ? "PLANNED" : "REQUIRED",
+                    snapshot.calibrationPlanned
+                        ? "Listener/upstream geometry exists; physical captures may still be missing."
+                        : "No feed-forward calibration plan is available."
+                )
+                verificationCell(
+                    "Timing & causality",
+                    snapshot.timingCaption,
+                    "Software diagnostics only; never proof of acoustic cancellation."
+                )
+                verificationCell(
+                    "Physical evidence",
+                    "HARDWARE REQUIRED",
+                    "Instrument provenance, A/B/A attenuation and moving-room stability are not yet authenticated."
+                )
+                verificationCell(
+                    "Live ANC output",
+                    "DISCONNECTED",
+                    "No PR98/PR99 result can authorize speaker-connected feed-forward ANC."
+                )
+            }
+
+            Label(snapshot.nextAction, systemImage: "arrow.right.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            .secondary.opacity(0.05),
+            in: RoundedRectangle(cornerRadius: 12)
+        )
+    }
+
+    private func verificationCell(
+        _ title: String,
+        _ value: String,
+        _ detail: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.caption.bold())
+                .tracking(0.4)
+            Text(detail)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            .secondary.opacity(0.04),
+            in: RoundedRectangle(cornerRadius: 9)
         )
     }
 

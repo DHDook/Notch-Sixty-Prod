@@ -1,0 +1,41 @@
+name: PR100 Active Acoustics UX
+
+on:
+  push:
+    branches:
+      - feature/pr100-active-acoustics-ux
+  pull_request:
+    branches:
+      - feature/pr99-physical-anc-verification
+  workflow_dispatch:
+
+concurrency:
+  group: pr100-active-acoustics-ux-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: python3 ci/validate_pr100_active_acoustics_ux.py
+      - run: python3 ci/validate_pr99_physical_verification.py
+      - run: python3 ci/validate_pr98_feedforward_runtime.py
+      - run: python3 ci/audit_pr98_disconnected_boundary.py
+
+  macos:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - run: python3 ci/validate_pr100_active_acoustics_ux.py
+      - run: python3 ci/validate_pr99_physical_verification.py
+      - run: python3 ci/audit_pr98_disconnected_boundary.py
+      - name: Build arm64 macOS app
+        run: |
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES build
+      - name: Targeted Active Acoustics UX and physical-verification tests
+        run: |
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES -only-testing:NotchSixtyTests/ProductionInformationArchitectureTests -only-testing:NotchSixtyTests/QuietZonePhysicalVerificationCampaignTests test
+      - name: Full XCTest regression
+        run: |
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES test
