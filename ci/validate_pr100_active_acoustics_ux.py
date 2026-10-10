@@ -25,6 +25,9 @@ for token in (
     "HARDWARE REQUIRED",
     "DISCONNECTED",
     "PR99 A/B/A",
+    "Guided One-Microphone Setup",
+    "Listener A return",
+    "Recorded means only that a software record exists",
 ):
     require(token in readiness, f"commissioning UX missing {token!r}")
 
