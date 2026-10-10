@@ -71,3 +71,24 @@ The remaining remotely implementable UX work can build on this foundation:
 
 Actual acoustic measurements, real emergency shutdown validation, physical
 stability testing, and speaker-connected feed-forward ANC stay hardware-gated.
+
+
+## Slice 2 — Guided one-microphone setup progress
+
+The feed-forward card now converts the existing calibration record into a
+six-stage read-only progress view:
+
+1. plan prepared;
+2. first listener-A arrival recorded;
+3. upstream-reference arrival recorded;
+4. listener-A return recorded;
+5. physical timing-path record supplied; and
+6. concurrent HAL clock trace supplied.
+
+Each row distinguishes **RECORDED** from **PENDING** and reports total progress.
+The language is deliberately precise: recorded data means only that a software
+record exists. It does not authenticate the microphone, trigger clock,
+instrument, microphone geometry, latency endpoint, or acoustic result.
+
+This makes the single movable-microphone workflow understandable before the
+physical commissioning session while retaining the PR98/PR99 hardware gates.
