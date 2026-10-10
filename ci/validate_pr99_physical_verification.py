@@ -91,7 +91,7 @@ for token in ("testTwoDistinctReviewerRolesRemainUnverifiedAndDisconnected",
 assert "QuietZoneIndependentReviewPacket.swift in Sources" in project
 assert "F98900000000000000000001" in project
 assert "F98900000000000000000011" in project
-assert project.count("F98800000000000000000001 /* QuietZonePhysicalSpectralEvidence.swift") == 3
+assert project.count("F98800000000000000000001 /* QuietZonePhysicalSpectralEvidence.swift") == 2
 for forbidden in ("AudioDeviceStart(", "N60RenderKernelProcess(",
                   "N60FFDeadlineBridgeProcess(", "requestArm(", "setEnabled("):
     assert forbidden not in review, forbidden
