@@ -10,6 +10,8 @@ extern "C" {
 
 #define N60_FF_DEADLINE_MAX_FRAMES 4096u
 #define N60_FF_DEADLINE_MAX_TAPS 64u
+#define N60_FF_SHADOW_MAX_STEREO_SUM 0.10f
+#define N60_FF_SHADOW_FADE_FRAMES 128u
 
 typedef struct N60FeedForwardDeadlineBridge N60FeedForwardDeadlineBridge;
 
@@ -22,7 +24,8 @@ typedef enum {
     N60FFDeadlineFaultStaleWitness = 5,
     N60FFDeadlineFaultMissedDeadline = 6,
     N60FFDeadlineFaultOverflow = 7,
-    N60FFDeadlineFaultStopped = 8
+    N60FFDeadlineFaultStopped = 8,
+    N60FFDeadlineFaultOutputEnvelope = 9
 } N60FFDeadlineFault;
 
 /// Control-plane trusted identity tokens MUST be regenerated when the
@@ -71,6 +74,10 @@ typedef struct {
     uint32_t capacityRecords;
     uint64_t acceptedRecords;
     uint64_t rejectedRecords;
+    uint32_t maximumObservedStereoSumMicro;
+    uint32_t faultFadeFramesRemaining;
+    double simulatedFaultFadeGain;
+    bool simulatedBypassReached;
     N60FFDeadlineFault firstFault;
     bool halted;
     bool outputConnected;
@@ -89,6 +96,14 @@ N60FeedForwardDeadlineBridge *N60FFDeadlineBridgeCreate(
 /// Control plane after producer and consumer have ceased.
 void N60FFDeadlineBridgeDestroy(N60FeedForwardDeadlineBridge *bridge);
 void N60FFDeadlineBridgeStop(N60FeedForwardDeadlineBridge *bridge);
+
+/// Producer/control-thread dry-run ONLY. Advances an imaginary fade to bypass
+/// after a fault. No PCM is produced and no DAC is affected. A real callback
+/// must implement and independently verify its own fault-to-silence action.
+bool N60FFDeadlineBridgeAdvanceFaultFade(
+    N60FeedForwardDeadlineBridge *bridge,
+    uint32_t frames
+);
 
 /// Exactly ONE producer invokes Process. Failures halt permanently, flush the
 /// dry-run FIR and discard all previously queued diagnostic records.

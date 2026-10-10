@@ -17,6 +17,8 @@ struct N60FeedForwardDeadlineBridge {
     _Atomic uint64_t rejected;
     _Atomic int firstFault;
     _Atomic bool halted;
+    _Atomic uint32_t maximumObservedStereoSumMicro;
+    _Atomic uint32_t faultFadeFramesRemaining;
     bool hasPrevious;
     double lastReferenceFrame;
     double lastAcousticSeconds;
@@ -93,6 +95,8 @@ void N60FFDeadlineBridgeDestroy(N60FeedForwardDeadlineBridge *b) {
 static void halt_bridge(N60FeedForwardDeadlineBridge *b, N60FFDeadlineFault why) {
     if (!b || atomic_load_explicit(&b->halted, memory_order_acquire)) return;
     atomic_store_explicit(&b->firstFault, (int)why, memory_order_relaxed);
+    atomic_store_explicit(&b->faultFadeFramesRemaining,
+                          N60_FF_SHADOW_FADE_FRAMES, memory_order_relaxed);
     atomic_fetch_add_explicit(&b->rejected, 1, memory_order_relaxed);
     N60FeedForwardPreviewFIRReset(b->fir);
     // Consumer may race with this halt; it always rechecks halted before
@@ -103,6 +107,19 @@ static void halt_bridge(N60FeedForwardDeadlineBridge *b, N60FFDeadlineFault why)
 void N60FFDeadlineBridgeStop(N60FeedForwardDeadlineBridge *b) {
     // Only call after producer stops; this is a terminal state.
     halt_bridge(b, N60FFDeadlineFaultStopped);
+}
+
+bool N60FFDeadlineBridgeAdvanceFaultFade(
+    N60FeedForwardDeadlineBridge *b, uint32_t frames
+) {
+    if (!b || !frames ||
+        !atomic_load_explicit(&b->halted, memory_order_acquire)) return false;
+    const uint32_t remaining = atomic_load_explicit(
+        &b->faultFadeFramesRemaining, memory_order_relaxed);
+    const uint32_t advanced = frames < remaining ? frames : remaining;
+    atomic_store_explicit(&b->faultFadeFramesRemaining,
+                          remaining - advanced, memory_order_release);
+    return true;
 }
 
 bool N60FFDeadlineBridgeProcess(
@@ -209,9 +226,28 @@ bool N60FFDeadlineBridgeProcess(
     N60FeedForwardPreviewFIRProcessFrame(
         b->fir, r->referenceSample, &discardedLeft, &discardedRight
     );
-    if (!isfinite(discardedLeft) || !isfinite(discardedRight)) {
-        halt_bridge(b, N60FFDeadlineFaultBadReference);
+    // Fail instead of treating native FIR limiting as an acceptable live
+    // output condition. Both speaker channels share the total headroom.
+    const N60FeedForwardPreviewFIRSnapshot firState =
+        N60FeedForwardPreviewFIRGetSnapshot(b->fir);
+    const float sum = fabsf(discardedLeft) + fabsf(discardedRight);
+    if (!isfinite(discardedLeft) || !isfinite(discardedRight) ||
+        !isfinite(sum) ||
+        fabsf(discardedLeft) > N60_FEED_FORWARD_PREVIEW_MAX_OUTPUT_PEAK ||
+        fabsf(discardedRight) > N60_FEED_FORWARD_PREVIEW_MAX_OUTPUT_PEAK ||
+        sum > N60_FF_SHADOW_MAX_STEREO_SUM ||
+        firState.sanitizedInputs != 0 ||
+        firState.limitedOutputFrames != 0) {
+        halt_bridge(b, N60FFDeadlineFaultOutputEnvelope);
         return false;
+    }
+    // Quantized diagnostic peak only. No raw anti-noise PCM escapes.
+    const uint32_t currentPeak = (uint32_t)roundf(sum * 1000000.0f);
+    const uint32_t previousPeak = atomic_load_explicit(
+        &b->maximumObservedStereoSumMicro, memory_order_relaxed);
+    if (currentPeak > previousPeak) {
+        atomic_store_explicit(&b->maximumObservedStereoSumMicro,
+                              currentPeak, memory_order_relaxed);
     }
 
     b->records[(uint32_t)write & b->mask] = (N60FFDeadlineRecord){
@@ -263,6 +299,8 @@ N60FFDeadlineSnapshot N60FFDeadlineBridgeGetSnapshot(
     const uint64_t read = atomic_load_explicit(&b->readIndex, memory_order_acquire);
     const uint64_t write = atomic_load_explicit(&b->writeIndex, memory_order_acquire);
     const bool halted = atomic_load_explicit(&b->halted, memory_order_acquire);
+    const uint32_t remaining = atomic_load_explicit(
+        &b->faultFadeFramesRemaining, memory_order_acquire);
     return (N60FFDeadlineSnapshot){
         .queuedRecords = halted ? 0 :
             (uint32_t)((write - read) < b->capacity ? write - read : b->capacity),
@@ -272,6 +310,12 @@ N60FFDeadlineSnapshot N60FFDeadlineBridgeGetSnapshot(
         .firstFault = (N60FFDeadlineFault)atomic_load_explicit(
             &b->firstFault, memory_order_acquire
         ),
+        .maximumObservedStereoSumMicro = atomic_load_explicit(
+            &b->maximumObservedStereoSumMicro, memory_order_relaxed),
+        .faultFadeFramesRemaining = remaining,
+        .simulatedFaultFadeGain = halted
+            ? (double)remaining / (double)N60_FF_SHADOW_FADE_FRAMES : 1.0,
+        .simulatedBypassReached = halted && remaining == 0,
         .halted = halted,
         .outputConnected = false,
         .liveANCQualified = false,
