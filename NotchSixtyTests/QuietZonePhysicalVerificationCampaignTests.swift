@@ -266,4 +266,170 @@ final class QuietZonePhysicalVerificationCampaignTests: XCTestCase {
                            .staleOrReorderedSessions)
         }
     }
+
+    private func spectralPackage(
+        _ rig: QuietZoneHardwareCalibrationRig,
+        _ visits: [QuietZonePhysicalVerificationVisit]
+    ) throws -> QuietZonePhysicalEvidencePackage {
+        try QuietZonePhysicalSpectralEvidenceAnalyzer().compile(
+            rig: rig, visits: visits, now: now
+        )
+    }
+
+    private func replacingTreatment(
+        visit: QuietZonePhysicalVerificationVisit,
+        levels: [Double]
+    ) -> QuietZonePhysicalVerificationVisit {
+        let old = visit.seatCaptures[1]
+        let revised = QuietZoneSeatAcceptanceCapture(
+            sessionID: old.sessionID, rig: old.rig,
+            phase: old.phase, launchID: old.launchID,
+            independentSourceID: old.independentSourceID,
+            instrumentCalibrationID: old.instrumentCalibrationID,
+            listenerPositionID: old.listenerPositionID,
+            measuredAt: old.measuredAt,
+            measuredCoherence: old.measuredCoherence,
+            bands: zip(old.bands, levels).map {
+                QuietZoneSeatPowerBand(
+                    frequencyHz: $0.0.frequencyHz,
+                    levelDBSPL: $0.1
+                )
+            },
+            maximumSeatLevelDBSPL: old.maximumSeatLevelDBSPL,
+            speakerOutputClipped: old.speakerOutputClipped,
+            maximumLeftSamplePeak: old.maximumLeftSamplePeak,
+            maximumRightSamplePeak: old.maximumRightSamplePeak
+        )
+        return .init(
+            position: visit.position, sessionID: visit.sessionID,
+            rig: visit.rig, sessionStartedAt: visit.sessionStartedAt,
+            seatCaptures: [visit.seatCaptures[0], revised, visit.seatCaptures[2]],
+            faultProbes: visit.faultProbes
+        )
+    }
+
+    func testFrequencyResolvedBandsRetainWeakObserverAndWorstBand() throws {
+        let r = rig()
+        let package = try spectralPackage(r, campaign(r))
+        XCTAssertEqual(package.frequencyResults.count, 3)
+        XCTAssertEqual(package.frequencyResults.map(\.frequencyHz),
+                       [40, 80, 120])
+        XCTAssertEqual(package.frequencyResults[0].primaryFirstReductionDB,
+                       5, accuracy: 0.00001)
+        XCTAssertEqual(package.frequencyResults[1].neighboringSeatReductionDB,
+                       1, accuracy: 0.00001)
+        XCTAssertEqual(package.frequencyResults[1].primaryReturnReductionDB,
+                       3.7, accuracy: 0.00001)
+        XCTAssertEqual(package.worstFrequencyReductionDB,
+                       1, accuracy: 0.00001)
+        XCTAssertEqual(package.maximumPrimaryBandRepeatDifferenceDB,
+                       0.3, accuracy: 0.00001)
+        XCTAssertEqual(package.rawSourceLaunchCount, 9)
+        XCTAssertEqual(package.rawFaultWitnessCount, 15)
+        XCTAssertFalse(package.liveANCQualified)
+        XCTAssertFalse(package.outputConnected)
+        XCTAssertFalse(package.instrumentEvidenceIndependentlyAuthenticated)
+        XCTAssertFalse(package.physicalAcousticReductionVerified)
+        XCTAssertFalse(package.emergencyAnalogMuteVerified)
+    }
+
+    func testEvidenceCanonicalJSONAndDigestAreDeterministic() throws {
+        let r = rig()
+        let v = campaign(r)
+        let first = try spectralPackage(r, v)
+        let second = try spectralPackage(r, v)
+        XCTAssertEqual(first.schemaVersion, 1)
+        XCTAssertEqual(first.canonicalJSON, second.canonicalJSON)
+        XCTAssertEqual(first.sha256Hex, second.sha256Hex)
+        XCTAssertEqual(first.sha256Hex.count, 64)
+        XCTAssertTrue(try QuietZonePhysicalSpectralEvidenceAnalyzer()
+            .verifyDigest(
+                canonicalJSON: first.canonicalJSON,
+                expectedSHA256Hex: first.sha256Hex
+            ))
+        XCTAssertTrue(first.reviewText.contains("PROVISIONAL"))
+    }
+
+    func testEvidenceDigestChangesIfAcousticMeasurementChanges() throws {
+        let r = rig()
+        let original = campaign(r)
+        let a = try spectralPackage(r, original)
+        var modified = original
+        modified[1] = replacingTreatment(
+            visit: original[1], levels: [67.5, 69, 68])
+        let b = try spectralPackage(r, modified)
+        XCTAssertNotEqual(a.sha256Hex, b.sha256Hex)
+        XCTAssertNotEqual(a.canonicalJSON, b.canonicalJSON)
+        XCTAssertEqual(b.frequencyResults[0].neighboringSeatReductionDB,
+                       2.5, accuracy: 0.00001)
+    }
+
+    func testSpectralRepeatGateDetectsHiddenBandVariationInStableAggregate() throws {
+        let r = rig()
+        var visits = campaign(r)
+        visits[2] = replacingTreatment(
+            visit: visits[2], levels: [67, 64, 65])
+        // The original campaign gate checks aggregate improvement; here
+        // opposite single-band excursions largely cancel when summed.
+        let aggregate = try analyze(r, visits: visits)
+        XCTAssertLessThan(
+            aggregate.primaryReductionRepeatDifferenceDB, 1.5)
+        XCTAssertThrowsError(try spectralPackage(r, visits)) {
+            XCTAssertEqual(
+                $0 as? QuietZonePhysicalSpectralFault,
+                .inconsistentFrequencyReduction
+            )
+        }
+    }
+
+    func testTamperedManifestIsRejectedButCannotAuthenticateRealInstrument() throws {
+        let r = rig()
+        let p = try spectralPackage(r, campaign(r))
+        XCTAssertThrowsError(try QuietZonePhysicalSpectralEvidenceAnalyzer()
+            .verifyDigest(
+                canonicalJSON: p.canonicalJSON
+                    .replacingOccurrences(
+                        of: "controlled-repeatable-source",
+                        with: "different-source"
+                    ),
+                expectedSHA256Hex: p.sha256Hex
+            )) {
+            XCTAssertEqual(
+                $0 as? QuietZonePhysicalSpectralFault,
+                .corruptedEvidencePackage
+            )
+        }
+        XCTAssertThrowsError(try QuietZonePhysicalSpectralEvidenceAnalyzer()
+            .verifyDigest(canonicalJSON: "{\"schemaVersion\":1}",
+                          expectedSHA256Hex: p.sha256Hex))
+        XCTAssertThrowsError(try QuietZonePhysicalSpectralEvidenceAnalyzer()
+            .verifyDigest(canonicalJSON: p.canonicalJSON,
+                          expectedSHA256Hex: String(repeating: "0", count: 64)))
+        XCTAssertFalse(p.instrumentEvidenceIndependentlyAuthenticated)
+    }
+
+    func testEvidenceManifestEscapesInstrumentNamesWithoutFieldCollisions() throws {
+        let r = rig()
+        let visits = (0..<3).map {
+            makeVisit(rig: r, index: $0, meter: "meter \"A\"\nline two")
+        }
+        let p = try spectralPackage(r, visits)
+        XCTAssertTrue(p.canonicalJSON.contains("meter"))
+        XCTAssertTrue(try QuietZonePhysicalSpectralEvidenceAnalyzer()
+            .verifyDigest(canonicalJSON: p.canonicalJSON,
+                          expectedSHA256Hex: p.sha256Hex))
+        XCTAssertFalse(p.liveANCQualified)
+    }
+
+    func testSpectralCompilerRefusesEvenOneFailedRawCampaign() throws {
+        let r = rig()
+        var visits = campaign(r)
+        visits[1] = replacingTreatment(
+            visit: visits[1], levels: [70, 70, 70])
+        XCTAssertThrowsError(try spectralPackage(r, visits)) {
+            XCTAssertEqual($0 as? QuietZonePhysicalSpectralFault,
+                           .failedCampaign)
+        }
+    }
+
 }
