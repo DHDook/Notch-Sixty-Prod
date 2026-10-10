@@ -157,4 +157,49 @@ for token in ("AudioDeviceStart(", "AudioDeviceCreateIOProcID(",
               "N60RenderKernelProcess(", "requestArm(", "setEnabled(",
               "stageRoomTreatment(", "N60FeedForwardPreviewFIRProcessFrame("):
     assert token not in echo,token
+envelope=(root/"NotchSixty/Audio/QuietZoneFeedForwardSafetyAcceptance.swift").read_text()
+envelope_tests=(root/"NotchSixtyTests/QuietZoneFeedForwardSafetyAcceptanceTests.swift").read_text()
+deadline_source=(root/"NotchSixty/Audio/Realtime/N60FeedForwardDeadlineBridge.c").read_text()
+deadline_header=(root/"NotchSixty/Audio/Realtime/N60FeedForwardDeadlineBridge.h").read_text()
+for token in ("N60_FF_SHADOW_MAX_STEREO_SUM 0.10f",
+              "N60_FF_SHADOW_FADE_FRAMES 128u",
+              "N60FFDeadlineFaultOutputEnvelope",
+              "N60FFDeadlineBridgeAdvanceFaultFade(",
+              "faultFadeFramesRemaining", "simulatedFaultFadeGain",
+              "simulatedBypassReached"):
+    assert token in deadline_source or token in deadline_header,token
+for token in ("N60FeedForwardPreviewFIRGetSnapshot(b->fir)",
+              "firState.limitedOutputFrames != 0",
+              "sum > N60_FF_SHADOW_MAX_STEREO_SUM",
+              "halt_bridge(b, N60FFDeadlineFaultOutputEnvelope)",
+              "maximumObservedStereoSumMicro"):
+    assert token in deadline_source,token
+for token in ("QuietZoneFeedForwardSafetyAcceptanceEvaluator",
+              "QuietZoneFeedForwardAcceptanceGate",
+              "independentPhysicalReviewRequired",
+              "speakerOutputConnected: Bool = false",
+              "independentlyCommissioned: Bool = false",
+              "liveANCQualified: Bool = false",
+              "maximumCombinedStereoPeak = 0.10"):
+    assert token in envelope,token
+for token in ("testGoodSoftwareEvidenceStillCannotQualifyLiveOutput",
+              "testCombinedStereoCoefficientBudgetRejectsIndividuallyValidFIR",
+              "testFaultedShadowNeverClaimsDeadlineOrPhysicalReadiness",
+              "testMissingEvidenceIsNeverImplicitlyGreen",
+              "testFaultedClockAndExcessiveReportedOutputPeakBlockDiagnostic",
+              "testMismatchedModelAndRigCannotCountAsEchoAcceptance"):
+    assert token in envelope_tests,token
+for token in ("testNativeCombinedStereoPeakTripsEvenIfEachChannelWithinCap",
+              "testSafeStereoHeadroomRecordsOnlyPeakMetadata",
+              "testSimulatedBypassFadeIsMonotoneAndNeverRearmsEngine",
+              "testRouteFaultAlsoStartsSameHypotheticalBypass"):
+    assert token in native_tests,token
+assert "func advanceSimulatedFaultBypass(frames:" in native_adapter
+for token in ("QuietZoneFeedForwardSafetyAcceptance.swift in Sources",
+              "QuietZoneFeedForwardSafetyAcceptanceTests.swift in Sources"):
+    assert token in pbx,token
+for forbidden in ("AudioDeviceStart(", "AudioDeviceCreateIOProcID(",
+                  "N60RenderKernelProcess(", "requestArm(", "setEnabled(",
+                  "stageRoomTreatment("):
+    assert forbidden not in envelope,forbidden
 print("PR98 shadow scheduler safety guards passed")

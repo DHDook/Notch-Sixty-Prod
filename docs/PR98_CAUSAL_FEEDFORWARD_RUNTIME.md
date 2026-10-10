@@ -216,3 +216,47 @@ All outputs are marked \`outputConnected = false\` and
 \`liveANCQualified = false\`. Even a successful held-out simulated probe
 is **not** acoustic feedback stability certification, physical clock
 attestation or authority to energize ANC.
+
+
+## Sixth slice — conservative output envelope and simulated fault-to-bypass
+
+**The native PR98 shadow deadline bridge still discards every computed
+anti-noise PCM sample.** To prevent future assumptions that the existing
+individual FIR limiter would cover stereo summation, it now checks
+**per-speaker instantaneous peak ≤0.063095734 (-24 dBFS)** AND
+**combined instantaneous |left| + |right| ≤0.10 (≈-20 dBFS)**.
+Any FIR sanitization or limiting event is treated as a FAULT, rather than
+silently accepting a clipped anti-noise suggestion. A violation terminally
+halts the scheduler, invalidates its metadata queue and clears FIR history.
+The snapshot exposes only a quantized observed stereo peak, never audio.
+
+All halts now start a **128-frame simulated fault-to-bypass counter**.
+An explicit control-plane \`N60FFDeadlineBridgeAdvanceFaultFade\` step
+reduces a metadata-only hypothetical wet ANC gain from 1.0 to 0.0,
+monotonically. After fault, no reference frame may resume the scheduling
+engine, even when the counter reaches zero; a new independent calibration
+and distinct session will ultimately be needed. A real speaker fade or
+emergency mute MUST be implemented and measured later as part of the live
+output integration. No actual audio can be faded by this code because
+nothing is connected to the DAC.
+
+\`QuietZoneFeedForwardSafetyAcceptanceEvaluator\` aggregates ten explicit
+software and hardware review gates: individual gain, shared stereo headroom,
+HAL clock, deadline diagnostics, leakage bound, offline echo model,
+simulated bypass, external instrument calibration, measured seat ANC benefit
+and stability, and separate output authorization. All apparently passing
+software results remain **diagnostic only**. Independent physical acceptance
+and live authorization are always marked incomplete; the returned
+\`liveANCQualified\`, \`independentlyCommissioned\`, and
+\`speakerOutputConnected\` remain **false** in every case.
+Negative/missing evidence fails the relevant diagnostic gate.
+
+Targeted XCTest adds four native-envelope and fade tests and six
+commissioning-report tests, including software-green-but-hardware-blocked,
+per-channel-valid-but-combined-too-loud, invalid clock, and wrong echo rig.
+
+**Physical hardware outstanding:** Independent calibrated input-to-output
+sample/timestamp mapping, physical DAC/speaker/seat latency,
+source/microphone acoustic consistency, real SPL/attenuation, echo/feedback
+stability under moving people, and implementation of a speaker-connected
+hardware-verified mute/fade. This PR does not enable or claim acoustic ANC.
