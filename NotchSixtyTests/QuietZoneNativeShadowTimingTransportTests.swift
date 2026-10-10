@@ -355,4 +355,71 @@ final class QuietZoneNativeShadowTimingTransportTests: XCTestCase {
         XCTAssertFalse(s.snapshot().liveANCQualified)
     }
 
+
+
+    func testLeakagePreflightGatesClockGuardedShadowSession() throws {
+        let p = plan()
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let data: [QuietZoneReferenceLeakageCapture] =
+            [QuietZoneLeakageSpeaker.left, .right].flatMap { side in
+                (0..<3).map { count in
+                    QuietZoneReferenceLeakageCapture(
+                        rig: p.rig, speaker: side,
+                        sourceFixtureID: p.rig.triggerID,
+                        launchID: "\(side.rawValue)-\(count)",
+                        capturedAt: now.addingTimeInterval(-Double(count)),
+                        measuredCoherence: 0.98,
+                        impulseResponse: [0.05, -0.01],
+                        oneSigmaError: [0.0001, 0.0001]
+                    )
+                }
+            }
+        let trace: QuietZoneHALClockTrace = {
+            let observations: [QuietZoneHALClockObservation] =
+                (0..<12).map { n in
+                    .init(hostTimeSeconds: 100 + Double(n) * 0.25,
+                          sampleFrame: 20_000 + Double(n) * 12_000)
+                }
+            return .init(inputDeviceID: p.rig.microphoneID,
+                         outputDeviceID: p.rig.outputDeviceID,
+                         nominalSampleRate: rate,
+                         inputObservations: observations,
+                         outputObservations: observations)
+        }()
+        func create(_ c: [QuietZoneReferenceLeakageCapture]) throws
+            -> QuietZoneLeakageGuardedShadowSession {
+            try .init(
+                plan: p, candidate: candidate(), captures: c,
+                leakageReviewedAt: now, initialTrace: trace,
+                route: .init(outputID: p.rig.outputDeviceID,
+                             routeID: p.rig.routeID, sampleRate: rate),
+                routeLeaseToken: 9, synchronizedClockToken: 7,
+                clockObservedAtSeconds: 102.8
+            )
+        }
+        let session = try create(data)
+        XCTAssertEqual(session.leakage.uniquePhysicalLaunchCount, 6)
+        XCTAssertFalse(session.echoCancellerEnabled)
+        XCTAssertFalse(session.outputConnected)
+        XCTAssertFalse(session.liveANCQualified)
+        XCTAssertFalse(session.snapshot().outputConnected)
+        session.close()
+
+        let unsafe = data.map { original in
+            QuietZoneReferenceLeakageCapture(
+                rig: original.rig, speaker: original.speaker,
+                sourceFixtureID: original.sourceFixtureID,
+                launchID: original.launchID,
+                capturedAt: original.capturedAt,
+                measuredCoherence: original.measuredCoherence,
+                impulseResponse: [12.0],
+                oneSigmaError: [0.001]
+            )
+        }
+        XCTAssertThrowsError(try create(unsafe)) {
+            XCTAssertEqual($0 as? QuietZoneReferenceLeakageError,
+                           .excessiveFeedbackBound)
+        }
+    }
+
 }

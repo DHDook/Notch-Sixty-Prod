@@ -128,3 +128,49 @@ frame IDs and FIFO revocation. The user-return hardware path still needs
 actual shared-host-clock observation acquisition and physical ADC/DAC/
 speaker acoustic commissioning; no clock converter or live output callback
 is fabricated from model estimates.
+
+
+## Fourth slice — measured reference-leakage stability preflight (offline)
+
+The PR96 per-frequency design and compiler already check individual
+reference-microphone echo magnitudes. The new
+\`QuietZoneReferenceLeakageStabilityAnalyzer\` adds a complementary and
+strictly conservative **time-domain BIBO small-gain criterion**. It accepts
+three separate, repeatable source launches for the LEFT speaker and three
+for the RIGHT speaker, all recorded with the same exact microphone channel,
+DAC route lease, source fixture, sample clock and calibration rig.
+
+Each limited-length speaker-to-reference impulse response includes a
+per-tap uncertainty estimate. An upper L1 bound includes the absolute
+three-repetition mean, maximum inter-repeat deviation at each tap,
+and **three sigma** amplitude uncertainty at each tap. The resulting
+worst-case feedback upper bound is
+
+\`||L_ref||_1 × ||F_left||_1 + ||R_ref||_1 × ||F_right||_1\`,
+
+with a conservative maximum of **0.10**. This is a sufficient stability
+criterion only for a bounded, causal linear time-invariant plant whose
+physical impulse responses lie inside the stated uncertainty envelope;
+it is NOT a proof about nonlinear speakers, changing rooms, microphone
+movement, or real adaptive ANC.
+
+Preflight refuses missing/duplicate launches, wrong left/right count,
+route/clock/fixture mismatch, expired captures, low coherence, changing
+impulse responses, NaNs, invalid uncertainty, FIRs violating the existing
+-24 dBFS L1 cap, and even a nominally safe path whose uncertainty
+makes the whole-loop bound unsafe.
+
+\`QuietZoneLeakageGuardedShadowSession\` offers a dedicated constructor
+that runs this whole six-capture preflight **before** creating the already
+clock-guarded native deadline FIFO. No new callback, output routing,
+speaker connection, echo cancellation or adaptive gain is introduced.
+The report explicitly says \`echoCancellerEnabled = false\`,
+\`acousticFeedbackVerified = false\`, \`outputConnected = false\`, and
+\`liveANCQualified = false\`. All supplied measurements remain model
+data pending independent physical instrument review.
+
+New deterministic XCTest tests cover low/high leakage, uncertainty
+overruns, mismatch/duplication, stale/wrong rig, repeat drift, low
+coherence, invalid values, candidate headroom and diagnostic admission.
+**Actual** speaker-to-microphone impulse capture and physical echo
+suppression remain future hardware-dependent work.

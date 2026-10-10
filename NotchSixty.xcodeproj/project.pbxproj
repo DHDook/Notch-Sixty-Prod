@@ -128,6 +128,8 @@
 		F98100000000000000000003 /* QuietZoneNativeShadowTimingTransportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F98100000000000000000014 /* QuietZoneNativeShadowTimingTransportTests.swift */; };
 		F98200000000000000000001 /* QuietZoneFeedForwardClockMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F98200000000000000000011 /* QuietZoneFeedForwardClockMonitor.swift */; };
 		F98200000000000000000002 /* QuietZoneFeedForwardClockMonitorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F98200000000000000000012 /* QuietZoneFeedForwardClockMonitorTests.swift */; };
+		F98300000000000000000001 /* QuietZoneReferenceLeakageStability.swift in Sources */ = {isa = PBXBuildFile; fileRef = F98300000000000000000011 /* QuietZoneReferenceLeakageStability.swift */; };
+		F98300000000000000000002 /* QuietZoneReferenceLeakageStabilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F98300000000000000000012 /* QuietZoneReferenceLeakageStabilityTests.swift */; };
 		F73000000000000000000001 /* MIMORoomTreatmentDesigner.swift in Sources */ = {isa = PBXBuildFile; fileRef = F73000000000000000000011 /* MIMORoomTreatmentDesigner.swift */; };
 		F73000000000000000000002 /* MIMORoomTreatmentDesignerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F73000000000000000000012 /* MIMORoomTreatmentDesignerTests.swift */; };
 		F74000000000000000000001 /* MIMORoomTreatmentFIRCompiler.swift in Sources */ = {isa = PBXBuildFile; fileRef = F74000000000000000000011 /* MIMORoomTreatmentFIRCompiler.swift */; };
@@ -331,6 +333,8 @@
 		F98100000000000000000014 /* QuietZoneNativeShadowTimingTransportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneNativeShadowTimingTransportTests.swift; sourceTree = "<group>"; };
 		F98200000000000000000011 /* QuietZoneFeedForwardClockMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForwardClockMonitor.swift; sourceTree = "<group>"; };
 		F98200000000000000000012 /* QuietZoneFeedForwardClockMonitorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForwardClockMonitorTests.swift; sourceTree = "<group>"; };
+		F98300000000000000000011 /* QuietZoneReferenceLeakageStability.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneReferenceLeakageStability.swift; sourceTree = "<group>"; };
+		F98300000000000000000012 /* QuietZoneReferenceLeakageStabilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneReferenceLeakageStabilityTests.swift; sourceTree = "<group>"; };
 		F73000000000000000000011 /* MIMORoomTreatmentDesigner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMORoomTreatmentDesigner.swift; sourceTree = "<group>"; };
 		F73000000000000000000012 /* MIMORoomTreatmentDesignerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMORoomTreatmentDesignerTests.swift; sourceTree = "<group>"; };
 		F74000000000000000000011 /* MIMORoomTreatmentFIRCompiler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIMORoomTreatmentFIRCompiler.swift; sourceTree = "<group>"; };
@@ -464,6 +468,7 @@
 				F98000000000000000000012 /* QuietZoneFeedForwardShadowSchedulerTests.swift */,
 				F98100000000000000000014 /* QuietZoneNativeShadowTimingTransportTests.swift */,
 				F98200000000000000000012 /* QuietZoneFeedForwardClockMonitorTests.swift */,
+				F98300000000000000000012 /* QuietZoneReferenceLeakageStabilityTests.swift */,
 				F73000000000000000000012 /* MIMORoomTreatmentDesignerTests.swift */,
 				F74000000000000000000012 /* MIMORoomTreatmentFIRCompilerTests.swift */,
 				F75000000000000000000012 /* MIMORoomTreatmentVerificationTests.swift */,
@@ -531,6 +536,7 @@
 				F98000000000000000000011 /* QuietZoneFeedForwardShadowScheduler.swift */,
 				F98100000000000000000013 /* QuietZoneNativeShadowTimingTransport.swift */,
 				F98200000000000000000011 /* QuietZoneFeedForwardClockMonitor.swift */,
+				F98300000000000000000011 /* QuietZoneReferenceLeakageStability.swift */,
 				F95000000000000000000011 /* ActiveQuietZoneSpatial.swift */,
 				F95000000000000000000013 /* ActiveQuietZoneSpatialSurvey.swift */,
 				F73000000000000000000011 /* MIMORoomTreatmentDesigner.swift */,
@@ -743,6 +749,7 @@
 				F98000000000000000000001 /* QuietZoneFeedForwardShadowScheduler.swift in Sources */,
 				F98100000000000000000002 /* QuietZoneNativeShadowTimingTransport.swift in Sources */,
 				F98200000000000000000001 /* QuietZoneFeedForwardClockMonitor.swift in Sources */,
+				F98300000000000000000001 /* QuietZoneReferenceLeakageStability.swift in Sources */,
 				F73000000000000000000001 /* MIMORoomTreatmentDesigner.swift in Sources */,
 				F74000000000000000000001 /* MIMORoomTreatmentFIRCompiler.swift in Sources */,
 				F75000000000000000000001 /* MIMORoomTreatmentVerification.swift in Sources */,
@@ -820,6 +827,7 @@
 				F98000000000000000000002 /* QuietZoneFeedForwardShadowSchedulerTests.swift in Sources */,
 				F98100000000000000000003 /* QuietZoneNativeShadowTimingTransportTests.swift in Sources */,
 				F98200000000000000000002 /* QuietZoneFeedForwardClockMonitorTests.swift in Sources */,
+				F98300000000000000000002 /* QuietZoneReferenceLeakageStabilityTests.swift in Sources */,
 				F73000000000000000000002 /* MIMORoomTreatmentDesignerTests.swift in Sources */,
 				F74000000000000000000002 /* MIMORoomTreatmentFIRCompilerTests.swift in Sources */,
 				F75000000000000000000002 /* MIMORoomTreatmentVerificationTests.swift in Sources */,

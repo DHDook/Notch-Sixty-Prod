@@ -101,4 +101,32 @@ assert "func stopForClockFault()" in native_adapter
 for forbidden in ("AudioDeviceStart(", "AudioDeviceCreateIOProcID(",
                   "requestArm(", "setEnabled(", "N60RenderKernelProcess("):
     assert forbidden not in clock,forbidden
+leakage=(root/"NotchSixty/Audio/QuietZoneReferenceLeakageStability.swift").read_text()
+leakage_tests=(root/"NotchSixtyTests/QuietZoneReferenceLeakageStabilityTests.swift").read_text()
+for token in ("QuietZoneReferenceLeakageStabilityAnalyzer", "QuietZoneLeakageGuardedShadowSession",
+              "QuietZoneReferenceLeakageCapture", "QuietZoneReferenceLeakageStabilityReport",
+              "maximumConservativeLoopGain = 0.10", "errorSigmaMultiplier = 3.0",
+              "oneSigmaError", "maximumRepeatDeviation",
+              "candidateLeftL1Gain", "conservativeFeedbackLoopL1",
+              "acousticFeedbackVerified: Bool = false",
+              "echoCancellerEnabled: Bool = false",
+              "outputConnected: Bool = false",
+              "liveANCQualified: Bool = false"):
+    assert token in leakage,token
+for token in ("testRepeatedLowLeakageProvidesConservativeDiagnosticOnly",
+              "testStrongSpeakerLeakageIsRejectedEvenIfCandidatePredictedLittleEcho",
+              "testUncertaintyCanExceedFeedbackBoundEvenWithSmallNominalLeakage",
+              "testMissingDuplicateAndWrongSpeakerRepetitionsFailClosed",
+              "testStaleOrMismatchedRigNeverPasses",
+              "testLowCoherenceAndNonfiniteValuesAreRejected",
+              "testRepeatabilityDriftCannotBeHiddenByAveraging",
+              "testFIRFilterHeadroomAndSelfReportedEchoAreNotTrusted"):
+    assert token in leakage_tests,token
+for token in ("QuietZoneReferenceLeakageStability.swift in Sources",
+              "QuietZoneReferenceLeakageStabilityTests.swift in Sources"):
+    assert token in pbx,token
+for forbidden in ("AudioDeviceStart(", "AudioDeviceCreateIOProcID(",
+                  "N60RenderKernelProcess(", "requestArm(", "setEnabled(",
+                  "stageRoomTreatment("):
+    assert forbidden not in leakage,forbidden
 print("PR98 shadow scheduler safety guards passed")
