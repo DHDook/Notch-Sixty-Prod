@@ -49,4 +49,29 @@ for forbidden in (
 ):
     assert forbidden not in source,forbidden
 assert (root/"docs/PR99_PHYSICAL_ANC_VERIFICATION.md").exists()
+spectral=(root/"NotchSixty/Audio/QuietZonePhysicalSpectralEvidence.swift").read_text()
+for token in ("import CryptoKit", "QuietZonePhysicalSpectralEvidenceAnalyzer",
+              "QuietZonePhysicalEvidencePackage", "QuietZonePhysicalFrequencyVerification",
+              "maximumPrimaryBandRepeatDifferenceDB = 1.5",
+              "QuietZonePhysicalVerificationCampaignAnalyzer().analyze(",
+              "String(format: \"%016llx\", value.bitPattern)",
+              "SHA256.hash(data: data)", "verifyDigest(",
+              "instrumentEvidenceIndependentlyAuthenticated: Bool = false",
+              "physicalAcousticReductionVerified: Bool = false",
+              "emergencyAnalogMuteVerified: Bool = false",
+              "outputConnected: Bool = false", "liveANCQualified: Bool = false"):
+    assert token in spectral,token
+for token in ("testFrequencyResolvedBandsRetainWeakObserverAndWorstBand",
+              "testEvidenceCanonicalJSONAndDigestAreDeterministic",
+              "testEvidenceDigestChangesIfAcousticMeasurementChanges",
+              "testSpectralRepeatGateDetectsHiddenBandVariationInStableAggregate",
+              "testTamperedManifestIsRejectedButCannotAuthenticateRealInstrument",
+              "testEvidenceManifestEscapesInstrumentNamesWithoutFieldCollisions",
+              "testSpectralCompilerRefusesEvenOneFailedRawCampaign"):
+    assert token in tests,token
+assert "QuietZonePhysicalSpectralEvidence.swift in Sources" in project
+for forbidden in ("AudioDeviceStart(", "N60RenderKernelProcess(",
+                  "N60FFDeadlineBridgeProcess(", "requestArm(",
+                  "setEnabled(", "N60RealtimeAudioBridgeRender("):
+    assert forbidden not in spectral,forbidden
 print("PR99 offline physical verification campaign safety guard passed")
