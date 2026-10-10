@@ -35,6 +35,8 @@ allowed_references = {
     },
     "QuietZoneHardwareAcceptanceAnalyzer": {
         "Audio/QuietZoneHardwareAcceptanceProtocol.swift",
+        # PR99 is a separately audited, read-only numeric campaign analysis.
+        "Audio/QuietZonePhysicalVerificationCampaign.swift",
     },
 }
 seen = {name: set() for name in allowed_references}
@@ -77,4 +79,13 @@ for relative in (
         "N60RealtimeAudioBridgeRender(", "N60RenderKernelProcess(",
     ):
         assert forbidden not in item, (relative, forbidden)
+pr99 = source_root / "Audio/QuietZonePhysicalVerificationCampaign.swift"
+if pr99.exists():
+    content = pr99.read_text()
+    for forbidden in ("AudioDeviceStart(", "AudioDeviceCreateIOProcID(",
+                      "N60RenderKernelProcess(", "N60RealtimeAudioBridgeRender(",
+                      "requestArm(", "setEnabled("):
+        assert forbidden not in content, ("PR99 read-only campaign", forbidden)
+    assert "liveANCQualified: Bool = false" in content
+    assert "outputConnected: Bool = false" in content
 print("PR98 final disconnected ANC source-boundary audit passed")

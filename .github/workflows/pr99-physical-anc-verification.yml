@@ -1,0 +1,48 @@
+name: PR99 Physical ANC Verification (Offline)
+
+on:
+  push:
+    branches:
+      - feature/pr99-physical-anc-verification
+  pull_request:
+    branches:
+      - feature/pr98-causal-feedforward-runtime
+  workflow_dispatch:
+
+concurrency:
+  group: pr99-physical-verification-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: python3 ci/validate_pr99_physical_verification.py
+      - run: python3 ci/validate_pr98_feedforward_runtime.py
+      - run: python3 ci/audit_pr98_disconnected_boundary.py
+      - run: python3 ci/validate_pr97_hardware_timing.py
+      - run: python3 ci/validate_pr96_feedforward.py
+      - run: python3 ci/validate_pr95_multi_position_quiet_zone.py
+      - run: python3 ci/validate_pr94_treatment_design_verification.py
+      - run: python3 ci/validate_pr93_room_geometry_placement.py
+      - run: python3 ci/validate_pr92_room_treatment_advisor.py
+      - run: python3 ci/validate_pr91_conversation_preservation.py
+      - run: python3 ci/validate_pr90_active_quiet_zone.py
+
+  macos:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - run: python3 ci/validate_pr99_physical_verification.py
+      - run: python3 ci/validate_pr98_feedforward_runtime.py
+      - run: python3 ci/audit_pr98_disconnected_boundary.py
+      - name: Build arm64 macOS app
+        run: |
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES build
+      - name: Targeted multi-position physical acceptance and inherited ANC tests
+        run: |
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES -only-testing:NotchSixtyTests/QuietZonePhysicalVerificationCampaignTests -only-testing:NotchSixtyTests/QuietZoneHardwareAcceptanceProtocolTests -only-testing:NotchSixtyTests/QuietZoneFeedForwardSafetyAcceptanceTests -only-testing:NotchSixtyTests/QuietZoneReferenceEchoSuppressionTests -only-testing:NotchSixtyTests/QuietZoneReferenceLeakageStabilityTests -only-testing:NotchSixtyTests/QuietZoneFeedForwardClockMonitorTests -only-testing:NotchSixtyTests/QuietZoneNativeShadowTimingTransportTests -only-testing:NotchSixtyTests/QuietZoneFeedForwardShadowSchedulerTests -only-testing:NotchSixtyTests/QuietZoneFeedForwardRehearsalTests -only-testing:NotchSixtyTests/FeedForwardPreviewFIRTests -only-testing:NotchSixtyTests/QuietZoneCausalFIRCompilerTests -only-testing:NotchSixtyTests/QuietZoneCommissioningHandoffAdapterTests -only-testing:NotchSixtyTests/QuietZoneEvidenceHandoffTests -only-testing:NotchSixtyTests/QuietZoneHardwareCommissioningTests -only-testing:NotchSixtyTests/QuietZonePhysicalLatencyBudgetTests -only-testing:NotchSixtyTests/QuietZoneFeedForwardSurveyTests test
+      - name: Full XCTest regression
+        run: |
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES test
