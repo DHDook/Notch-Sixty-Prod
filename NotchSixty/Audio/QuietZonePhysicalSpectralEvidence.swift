@@ -169,8 +169,7 @@ struct QuietZonePhysicalSpectralEvidenceAnalyzer: Sendable {
         ]
         var canonical: [[String]] = [
             ["SCHEMA", "PR99_PHYSICAL_EVIDENCE", String(Self.schemaVersion)],
-            rigFields,
-            ["REVIEW_CLOCK", try timestamp(now)]
+            rigFields
         ]
         for visit in visits {
             canonical.append([

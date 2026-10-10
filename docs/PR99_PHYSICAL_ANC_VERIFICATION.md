@@ -84,7 +84,10 @@ with its measured time and analog residual/no-auto-rearm flag. Doubles
 are represented as canonical 16-digit IEEE-754 hex bit patterns to avoid
 locale/precision ambiguity, and JSON encodes strings without delimiter
 collisions. The SHA-256 digest detects accidental alterations and can be
-recomputed from the manifest. Any noncanonical or digest-mismatched
+recomputed from the manifest. The numerical review time is **excluded**
+from the manifest so a later engineer re-reviewing identical source and
+fault records obtains the same fingerprint; record capture timestamps
+and the source rig identity remain included. Any noncanonical or digest-mismatched
 payload fails integrity review.
 
 **A self-contained SHA-256 digest is NOT an instrument signature**, a

@@ -63,6 +63,7 @@ for token in ("import CryptoKit", "QuietZonePhysicalSpectralEvidenceAnalyzer",
     assert token in spectral,token
 for token in ("testFrequencyResolvedBandsRetainWeakObserverAndWorstBand",
               "testEvidenceCanonicalJSONAndDigestAreDeterministic",
+              "testSameRawRecordsHaveSameManifestAcrossLaterReviewTimes",
               "testEvidenceDigestChangesIfAcousticMeasurementChanges",
               "testSpectralRepeatGateDetectsHiddenBandVariationInStableAggregate",
               "testTamperedManifestIsRejectedButCannotAuthenticateRealInstrument",

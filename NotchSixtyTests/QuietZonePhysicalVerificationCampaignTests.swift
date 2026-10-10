@@ -432,4 +432,19 @@ final class QuietZonePhysicalVerificationCampaignTests: XCTestCase {
         }
     }
 
+
+    func testSameRawRecordsHaveSameManifestAcrossLaterReviewTimes() throws {
+        let r = rig()
+        let visits = campaign(r)
+        let a = try QuietZonePhysicalSpectralEvidenceAnalyzer().compile(
+            rig: r, visits: visits, now: now
+        )
+        let later = try QuietZonePhysicalSpectralEvidenceAnalyzer().compile(
+            rig: r, visits: visits, now: now.addingTimeInterval(60)
+        )
+        XCTAssertEqual(a.sha256Hex, later.sha256Hex)
+        XCTAssertEqual(a.canonicalJSON, later.canonicalJSON)
+        XCTAssertFalse(later.instrumentEvidenceIndependentlyAuthenticated)
+    }
+
 }
