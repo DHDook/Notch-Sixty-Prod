@@ -237,4 +237,6 @@ for forbidden in ("AudioDeviceStart(", "AudioDeviceCreateIOProcID(",
                   "N60RenderKernelProcess(", "requestArm(", "setEnabled(",
                   "stageRoomTreatment(", "N60FeedForwardPreviewFIRProcessFrame("):
     assert forbidden not in hardware_protocol,forbidden
+assert (root/"ci/audit_pr98_disconnected_boundary.py").exists()
+assert (root/"docs/PR98_SOFTWARE_CLOSURE.md").exists()
 print("PR98 shadow scheduler safety guards passed")

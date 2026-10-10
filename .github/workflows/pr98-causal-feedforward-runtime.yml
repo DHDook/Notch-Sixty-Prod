@@ -19,6 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: python3 ci/validate_pr98_feedforward_runtime.py
+      - run: python3 ci/audit_pr98_disconnected_boundary.py
       - run: python3 ci/validate_pr97_hardware_timing.py
       - run: python3 ci/validate_pr96_feedforward.py
       - run: python3 ci/validate_pr95_multi_position_quiet_zone.py
@@ -33,6 +34,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: python3 ci/validate_pr98_feedforward_runtime.py
+      - run: python3 ci/audit_pr98_disconnected_boundary.py
       - name: Build arm64 macOS app
         run: |
           xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES build
