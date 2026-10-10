@@ -226,9 +226,9 @@ struct QuietZoneHardwareAcceptanceAnalyzer: Sendable {
                     QuietZoneHardwareAcceptanceCriteria.maximumStereoSumPeak
             else { throw QuietZoneHardwareAcceptanceFault.unsafeSignal }
 
-            guard (3...32).contains(capture.bands.count) else {
-                throw QuietZoneHardwareAcceptanceFault.invalidSpectrum
-            }
+            guard (3...32).contains(capture.bands.count),
+                  index == 0 || capture.bands.count == captures[0].bands.count
+            else { throw QuietZoneHardwareAcceptanceFault.invalidSpectrum }
             for (j, band) in capture.bands.enumerated() {
                 guard band.frequencyHz.isFinite,
                       band.levelDBSPL.isFinite,
@@ -242,9 +242,6 @@ struct QuietZoneHardwareAcceptanceAnalyzer: Sendable {
                         || capture.bands[j].frequencyHz ==
                            captures[0].bands[j].frequencyHz
                 else { throw QuietZoneHardwareAcceptanceFault.invalidSpectrum }
-            }
-            if index > 0 && capture.bands.count != captures[0].bands.count {
-                throw QuietZoneHardwareAcceptanceFault.invalidSpectrum
             }
             highestLevel = max(highestLevel, capture.maximumSeatLevelDBSPL)
         }
@@ -296,7 +293,8 @@ struct QuietZoneHardwareAcceptanceAnalyzer: Sendable {
             else { throw QuietZoneHardwareAcceptanceFault.replayedSource }
             let age = now.timeIntervalSince(probe.measuredAt)
             guard age.isFinite, age >= 0,
-                  probe.measuredAt >= sessionStartedAt,
+                  probe.measuredAt.timeIntervalSince(time) >=
+                    QuietZoneHardwareAcceptanceCriteria.minimumBetweenCapturesSeconds,
                   age <= QuietZoneHardwareAcceptanceCriteria.maximumSessionAgeSeconds
             else { throw QuietZoneHardwareAcceptanceFault.expiredEvidence }
             let delay = probe.physicalMuteReachedAtHostSeconds
@@ -312,6 +310,7 @@ struct QuietZoneHardwareAcceptanceAnalyzer: Sendable {
                   probe.noAutomaticRearmObserved
             else { throw QuietZoneHardwareAcceptanceFault.unverifiedFaultShutdown }
             worstMute = max(worstMute, delay)
+            time = probe.measuredAt
         }
         guard types.count == QuietZoneHardwareFaultProbeType.allCases.count
         else { throw QuietZoneHardwareAcceptanceFault.missingMeasurement }
