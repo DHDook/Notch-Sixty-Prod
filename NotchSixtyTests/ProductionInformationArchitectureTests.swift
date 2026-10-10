@@ -64,4 +64,42 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         )
         XCTAssertEqual(ProductionSection.plugins.title, "Plug-ins")
     }
+
+    func testActiveAcousticsUXRequiresCalibrationBeforeTimingReview() {
+        let snapshot = ActiveAcousticsCommissioningUXSnapshot(
+            calibrationPlanned: false,
+            timingReadiness: .missingMeasurements
+        )
+
+        XCTAssertEqual(snapshot.state, .calibrationRequired)
+        XCTAssertEqual(snapshot.timingCaption, "MEASUREMENTS REQUIRED")
+        XCTAssertFalse(snapshot.instrumentEvidenceAuthenticated)
+        XCTAssertFalse(snapshot.physicalAttenuationVerified)
+        XCTAssertFalse(snapshot.emergencyMuteHardwareVerified)
+        XCTAssertFalse(snapshot.liveANCOutputAuthorized)
+    }
+
+    func testPhysicallyPlausibleTimingStillRequiresHardwareVerification() {
+        let snapshot = ActiveAcousticsCommissioningUXSnapshot(
+            calibrationPlanned: true,
+            timingReadiness: .physicallyPlausible
+        )
+
+        XCTAssertEqual(snapshot.state, .timingPlausibleHardwareRequired)
+        XCTAssertEqual(snapshot.timingCaption, "DIAGNOSTIC PASS")
+        XCTAssertTrue(snapshot.nextAction.contains("PR99 A/B/A"))
+        XCTAssertFalse(snapshot.liveANCOutputAuthorized)
+    }
+
+    func testNonCausalTimingNeverLooksReady() {
+        let snapshot = ActiveAcousticsCommissioningUXSnapshot(
+            calibrationPlanned: true,
+            timingReadiness: .nonCausal
+        )
+
+        XCTAssertEqual(snapshot.state, .timingUnqualified)
+        XCTAssertEqual(snapshot.timingCaption, "NON-CAUSAL")
+        XCTAssertFalse(snapshot.physicalAttenuationVerified)
+    }
+
 }
