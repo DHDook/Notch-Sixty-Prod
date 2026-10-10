@@ -174,3 +174,45 @@ overruns, mismatch/duplication, stale/wrong rig, repeat drift, low
 coherence, invalid values, candidate headroom and diagnostic admission.
 **Actual** speaker-to-microphone impulse capture and physical echo
 suppression remain future hardware-dependent work.
+
+
+## Fifth slice — offline speaker-reference echo suppression and frozen adaptation
+
+\`QuietZoneReferenceEchoModelBuilder\` compiles the six repeated PR98
+left/right speaker-to-reference impulse captures only after the previous
+small-gain, coherence, identity, freshness, repeatability and FIR-headroom
+safety gates pass. It retains per-tap nominal impulse values and independent
+three-sigma uncertainty envelopes, never treating a modeled response as
+independently hardware-attested.
+
+\`QuietZoneReferenceEchoOfflineSimulator\` is a strictly **disconnected,
+offline-only** convolution of *known recorded stereo speaker waveforms*
+through those measured impulse paths, subtracted from the same-timebase
+microphone recording. It publishes a diagnostic pair of predicted speaker
+echo and preview-decontaminated reference, plus mean-square residuals.
+This does not run in a Core Audio callback or feed playback. Its bounded
+4096-frame input blocks require the exact rig, fresh model, finite and
+unclipped inputs and identical contiguous speaker/microphone sample indices.
+One failure permanently halts and erases buffered history without returning
+partial cleaned audio. It never assumes that model subtraction itself
+attenuates noise at the seat.
+
+\`QuietZoneReferenceEchoAdaptationGuard\` offers a distinct, non-mutating
+coefficient **proposal** workflow. It accepts two separate, time-ordered,
+source-silent speaker-only probe captures, disjoint from the six speaker
+impulse capture launch IDs, and proposes small regularized normalized-gradient
+changes. It rejects unbounded steps, coefficient changes outside the
+measured tap uncertainty envelope, total adjustment exceeding 0.002,
+conservative whole-loop gains above 0.10 and proposals that fail to improve
+an independent held-out probe by at least 1% mean-square error. It does
+**not** install proposed coefficients, run continuous live adaptation,
+process unverified speech/background, or issue any output data or command.
+
+Synthetic end-to-end XCTest covers stereo echo/ambient preservation,
+cross-block convolution continuity, frame gap/route/staleness faults,
+nonfinite/clipping failures, uncertain models, probe double-talk,
+independent validation regression and unsafe coefficient updates.
+All outputs are marked \`outputConnected = false\` and
+\`liveANCQualified = false\`. Even a successful held-out simulated probe
+is **not** acoustic feedback stability certification, physical clock
+attestation or authority to energize ANC.

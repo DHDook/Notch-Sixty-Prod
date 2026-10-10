@@ -129,4 +129,32 @@ for forbidden in ("AudioDeviceStart(", "AudioDeviceCreateIOProcID(",
                   "N60RenderKernelProcess(", "requestArm(", "setEnabled(",
                   "stageRoomTreatment("):
     assert forbidden not in leakage,forbidden
+echo=(root/"NotchSixty/Audio/QuietZoneReferenceEchoSuppression.swift").read_text()
+echo_tests=(root/"NotchSixtyTests/QuietZoneReferenceEchoSuppressionTests.swift").read_text()
+for token in ("QuietZoneReferenceEchoModelBuilder", "QuietZoneReferenceEchoOfflineSimulator",
+              "QuietZoneReferenceEchoAdaptationGuard", "QuietZoneReferenceEchoAdaptationProbe",
+              "previewDecontaminatedReference", "predictedSpeakerEcho",
+              "candidate: candidate, rig: rig, captures: captures",
+              "maximumTotalTapAdjustment = 0.002", "minimumValidationImprovement = 0.01",
+              "maximumCaptureAge", "sourceIsSilent", "independentSourceLaunchIDs",
+              "automaticallyApplied: Bool = false",
+              "outputConnected: Bool = false", "liveANCQualified: Bool = false"):
+    assert token in echo,token
+for token in ("testStereoEchoPredictionPreservesIndependentAmbientReference",
+              "testBlockBoundariesPreserveImpulseHistoryAndRejectMissingFrames",
+              "testWrongRouteExpiredModelAndUnalignedSpeakerFramesStop",
+              "testInvalidMeasurementsAndImplausibleSubtractionFailClosed",
+              "testRepeatRigAndInsufficientEchoConfidenceCannotCreateModel",
+              "testHeldOutSpeakerOnlyProbeCanProposeButCannotApplyAdaptation",
+              "testAdaptiveProposalRejectsDoubleTalkAndSameProbe",
+              "testAdaptiveProposalMustImproveIndependentValidation",
+              "testAdaptiveUpdateExceedingMeasuredUncertaintyIsRejected"):
+    assert token in echo_tests,token
+for token in ("QuietZoneReferenceEchoSuppression.swift in Sources",
+              "QuietZoneReferenceEchoSuppressionTests.swift in Sources"):
+    assert token in pbx,token
+for token in ("AudioDeviceStart(", "AudioDeviceCreateIOProcID(",
+              "N60RenderKernelProcess(", "requestArm(", "setEnabled(",
+              "stageRoomTreatment(", "N60FeedForwardPreviewFIRProcessFrame("):
+    assert token not in echo,token
 print("PR98 shadow scheduler safety guards passed")
