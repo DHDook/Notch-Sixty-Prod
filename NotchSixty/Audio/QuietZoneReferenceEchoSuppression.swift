@@ -354,14 +354,14 @@ struct QuietZoneReferenceEchoAdaptationGuard: Sendable {
         guard coupled.isFinite,
               coupled <= QuietZoneReferenceLeakageStabilityAnalyzer
                 .maximumConservativeLoopGain,
-              zip(l, model.leftSpeakerToReference).enumerated().allSatisfy {
+              zip(l, model.leftSpeakerToReference).enumerated().allSatisfy({
                   abs($0.element.0 - $0.element.1)
                     <= model.leftTapDeviationBounds[$0.offset]
-              },
-              zip(r, model.rightSpeakerToReference).enumerated().allSatisfy {
+              }),
+              zip(r, model.rightSpeakerToReference).enumerated().allSatisfy({
                   abs($0.element.0 - $0.element.1)
                     <= model.rightTapDeviationBounds[$0.offset]
-              }
+              })
         else { throw QuietZoneReferenceEchoError.updateExceedsEnvelope }
 
         let before = predicted(
