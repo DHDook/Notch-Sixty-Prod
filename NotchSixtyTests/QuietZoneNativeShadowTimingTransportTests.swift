@@ -261,4 +261,98 @@ final class QuietZoneNativeShadowTimingTransportTests: XCTestCase {
         ))
         XCTAssertThrowsError(try transport(capacity: 257))
     }
+
+    private func clockGuarded() throws -> QuietZoneClockGuardedShadowTransport {
+        let points: [QuietZoneHALClockObservation] = (0..<12).map { i in
+            .init(hostTimeSeconds: 100 + Double(i) * 0.25,
+                  sampleFrame: 20_000 + Double(i) * 12_000)
+        }
+        let t = QuietZoneHALClockTrace(
+            inputDeviceID: "mic", outputDeviceID: "dac",
+            nominalSampleRate: rate,
+            inputObservations: points, outputObservations: points)
+        return try .init(
+            plan: plan(), candidate: candidate(), initialTrace: t,
+            route: .init(outputID: "dac", routeID: "lease",
+                         sampleRate: rate),
+            routeLeaseToken: 9, synchronizedClockToken: 7,
+            now: 102.8)
+    }
+
+    private func guardedSample(_ frame: Double)
+        -> N60FeedForwardReferenceFrame {
+        var r = N60FeedForwardReferenceFrame()
+        r.sample = 0.2
+        r.firstFrameHostTime = 1000
+        r.firstFrameSampleTime = frame
+        r.frameOffset = 0
+        return r
+    }
+
+    private func guardedEvent(_ frame: Double)
+        -> QuietZoneFeedForwardReferenceDeadlineEvent {
+        .init(referenceSampleFrame: frame,
+              referenceAcousticHostSeconds: 102.8,
+              referenceAvailableHostSeconds: 102.801,
+              evaluatedAtHostSeconds: 102.8012,
+              microphoneSample: 0.2)
+    }
+
+    private func guardedOutput() -> N60FFDeadlineOutputWitness {
+        var o = N60FFDeadlineOutputWitness()
+        o.routeLeaseToken = 9
+        o.synchronizedClockToken = 7
+        o.sampleRate = rate
+        o.firstFrame = 152_000
+        o.firstFrameHostSeconds = 102.75
+        o.witnessedAtSeconds = 102.78
+        return o
+    }
+
+    func testClockGuardedNativeTransportOnlyEmitsDiagnostics() throws {
+        let s = try clockGuarded()
+        try s.ingest(
+            referenceFrame: guardedSample(154_400),
+            witnessed: guardedEvent(154_400),
+            output: guardedOutput(),
+            route: .init(outputID: "dac", routeID: "lease",
+                         sampleRate: rate))
+        XCTAssertEqual(s.snapshot().acceptedRecords, 1)
+        XCTAssertEqual(s.readDiagnostics().count, 1)
+        XCTAssertFalse(s.outputConnected)
+        XCTAssertFalse(s.liveANCQualified)
+        s.close()
+    }
+
+    func testUnrelatedReferenceFrameRevokesQueuedNativeMetadata() throws {
+        let s = try clockGuarded()
+        let route = QuietZoneHardwareClockRouteLease(
+            outputID: "dac", routeID: "lease", sampleRate: rate)
+        try s.ingest(
+            referenceFrame: guardedSample(154_400),
+            witnessed: guardedEvent(154_400),
+            output: guardedOutput(), route: route)
+        XCTAssertThrowsError(try s.ingest(
+            referenceFrame: guardedSample(2_000),
+            witnessed: guardedEvent(2_000),
+            output: guardedOutput(), route: route)) {
+            XCTAssertEqual($0 as? QuietZoneFeedForwardClockFault, .clockJump)
+        }
+        XCTAssertTrue(s.snapshot().halted)
+        XCTAssertEqual(s.snapshot().queuedRecords, 0)
+        XCTAssertTrue(s.readDiagnostics().isEmpty)
+    }
+
+    func testClockRouteRestartHaltsNativeBridge() throws {
+        let s = try clockGuarded()
+        let point = QuietZoneHALClockObservation(
+            hostTimeSeconds: 103, sampleFrame: 164_000)
+        XCTAssertThrowsError(try s.observe(
+            input: point, output: point,
+            route: .init(outputID: "dac", routeID: "restarted",
+                         sampleRate: rate), now: 103))
+        XCTAssertTrue(s.snapshot().halted)
+        XCTAssertFalse(s.snapshot().liveANCQualified)
+    }
+
 }
