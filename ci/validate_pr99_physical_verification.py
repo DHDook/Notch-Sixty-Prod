@@ -14,8 +14,7 @@ for token in (
     "QuietZonePhysicalVerificationPosition.allCases",
     "changedNoiseBaseline", "unstableAttenuation",
     "duplicatedEvidence", "mismatchedFrequencyBands",
-    "minimumReturnBaselineDifferenceDB" if False else
-        "maximumReturnBaselineDifferenceDB = 1.5",
+    "maximumReturnBaselineDifferenceDB = 1.5",
     "maximumPrimaryImprovementDifferenceDB = 1.5",
     "instrumentEvidenceIndependentlyAuthenticated: Bool = false",
     "physicalAcousticReductionVerified: Bool = false",

@@ -211,30 +211,33 @@ final class QuietZonePhysicalVerificationCampaignTests: XCTestCase {
     func testObserverPositionWithNoCancellationIsNotSilentlyIgnored() {
         let r = rig()
         var samples = campaign(r)
-        samples[1] = makeVisit(
-            rig: r, index: 1, primaryReturnBaseline: 70,
-            primaryReturnOn: 70)
-        // The observer fixture uses its own treatment values; force a true
-        // failed raw PR98 visit by poisoning a mandatory external fault.
-        let bad = samples[1]
-        let corrupt = bad.faultProbes.enumerated().map { i, p in
-            QuietZoneHardwareFaultShutdownWitness(
-                sessionID: p.sessionID, rig: p.rig, fault: p.fault,
-                launchID: p.launchID,
-                instrumentCalibrationID: p.instrumentCalibrationID,
-                measuredAt: p.measuredAt,
-                detectedAtHostSeconds: p.detectedAtHostSeconds,
-                physicalMuteReachedAtHostSeconds:
-                    i == 0 ? p.detectedAtHostSeconds + 0.2
-                           : p.physicalMuteReachedAtHostSeconds,
-                outputResidualDBFS: p.outputResidualDBFS,
-                noAutomaticRearmObserved: p.noAutomaticRearmObserved
+        let observer = samples[1]
+        let captures = observer.seatCaptures.map { previous in
+            QuietZoneSeatAcceptanceCapture(
+                sessionID: previous.sessionID,
+                rig: previous.rig, phase: previous.phase,
+                launchID: previous.launchID,
+                independentSourceID: previous.independentSourceID,
+                instrumentCalibrationID: previous.instrumentCalibrationID,
+                listenerPositionID: previous.listenerPositionID,
+                measuredAt: previous.measuredAt,
+                measuredCoherence: previous.measuredCoherence,
+                bands: previous.phase == .experimentalTreatment
+                    ? previous.bands.map {
+                        QuietZoneSeatPowerBand(
+                            frequencyHz: $0.frequencyHz, levelDBSPL: 70
+                        )
+                    } : previous.bands,
+                maximumSeatLevelDBSPL: previous.maximumSeatLevelDBSPL,
+                speakerOutputClipped: previous.speakerOutputClipped,
+                maximumLeftSamplePeak: previous.maximumLeftSamplePeak,
+                maximumRightSamplePeak: previous.maximumRightSamplePeak
             )
         }
         samples[1] = .init(
-            position: bad.position, sessionID: bad.sessionID, rig: bad.rig,
-            sessionStartedAt: bad.sessionStartedAt,
-            seatCaptures: bad.seatCaptures, faultProbes: corrupt
+            position: observer.position, sessionID: observer.sessionID,
+            rig: observer.rig, sessionStartedAt: observer.sessionStartedAt,
+            seatCaptures: captures, faultProbes: observer.faultProbes
         )
         XCTAssertThrowsError(try analyze(r, visits: samples)) {
             XCTAssertEqual($0 as? QuietZonePhysicalVerificationFault,
