@@ -233,9 +233,8 @@ struct QuietZoneHardwareAcceptanceAnalyzer: Sendable {
                 guard band.frequencyHz.isFinite,
                       band.levelDBSPL.isFinite,
                       (0...150).contains(band.levelDBSPL),
-                      (QuietZoneHardwareAcceptanceCriteria.minimumBandFrequencyHz
-                       ...QuietZoneHardwareAcceptanceCriteria.maximumBandFrequencyHz)
-                        .contains(band.frequencyHz),
+                      band.frequencyHz >= QuietZoneHardwareAcceptanceCriteria.minimumBandFrequencyHz,
+                      band.frequencyHz <= QuietZoneHardwareAcceptanceCriteria.maximumBandFrequencyHz,
                       j == 0
                         || band.frequencyHz > capture.bands[j - 1].frequencyHz,
                       index == 0
