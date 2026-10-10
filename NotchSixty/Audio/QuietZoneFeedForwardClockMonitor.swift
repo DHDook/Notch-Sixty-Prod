@@ -184,6 +184,33 @@ final class QuietZoneFeedForwardClockMonitor {
         else { throw halt(.staleWitness) }
     }
 
+    /// Bind individual scheduled sample frames to the same qualified
+    /// input and output timebases, not merely to unrelated healthy traces.
+    /// Absolute acoustic/ADC delay still needs external instrument review.
+    func requireFrameMapping(
+        referenceFrame: Double,
+        acousticHostSeconds: Double,
+        outputFrame: Double,
+        outputHostSeconds: Double
+    ) throws {
+        if firstFault != nil { throw QuietZoneFeedForwardClockFault.stopped }
+        guard let a = input.last, let b = output.last,
+              referenceFrame.isFinite, referenceFrame >= 0,
+              outputFrame.isFinite, outputFrame >= 0,
+              acousticHostSeconds.isFinite, acousticHostSeconds >= 0,
+              outputHostSeconds.isFinite, outputHostSeconds >= 0
+        else { throw halt(.invalidTimestamp) }
+        let referenceAt = a.hostTimeSeconds +
+            (referenceFrame - a.sampleFrame) / health.measuredInputRateHz
+        let outputAt = b.hostTimeSeconds +
+            (outputFrame - b.sampleFrame) / health.measuredOutputRateHz
+        guard referenceAt.isFinite, outputAt.isFinite,
+              abs(referenceAt - acousticHostSeconds) <= 0.002,
+              abs(outputAt - outputHostSeconds) <=
+                Self.maximumResidualSeconds
+        else { throw halt(.clockJump) }
+    }
+
     func status() -> QuietZoneFeedForwardClockStatus {
         .init(
             inputRateHz: health.measuredInputRateHz,
@@ -247,6 +274,13 @@ final class QuietZoneClockGuardedShadowTransport {
         do {
             try watchdog.requireFresh(
                 route: route, now: witnessed.evaluatedAtHostSeconds
+            )
+            try watchdog.requireFrameMapping(
+                referenceFrame: referenceFrame.firstFrameSampleTime
+                    + Double(referenceFrame.frameOffset),
+                acousticHostSeconds: witnessed.referenceAcousticHostSeconds,
+                outputFrame: output.firstFrame,
+                outputHostSeconds: output.firstFrameHostSeconds
             )
             _ = try shadow.ingest(
                 referenceFrame: referenceFrame,
