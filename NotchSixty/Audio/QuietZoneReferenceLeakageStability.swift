@@ -255,3 +255,74 @@ struct QuietZoneReferenceLeakageStabilityAnalyzer: Sendable {
         )
     }
 }
+
+
+/// PREVIEW-ONLY admission to the PR98 native shadow session. This interface
+/// requires the full repeated-speaker leakage check *before* allocating the
+/// underlying clock-guarded diagnostic bridge. It has no audio output API.
+final class QuietZoneLeakageGuardedShadowSession {
+    let leakage: QuietZoneReferenceLeakageStabilityReport
+    private let clocked: QuietZoneClockGuardedShadowTransport
+
+    init(
+        plan: QuietZoneFeedForwardSchedulingPlan,
+        candidate: QuietZoneCausalFIRCandidate,
+        captures: [QuietZoneReferenceLeakageCapture],
+        leakageReviewedAt: Date,
+        initialTrace: QuietZoneHALClockTrace,
+        route: QuietZoneHardwareClockRouteLease,
+        routeLeaseToken: UInt64,
+        synchronizedClockToken: UInt64,
+        clockObservedAtSeconds: Double
+    ) throws {
+        // No independent physical attestation is implied: this only checks
+        // typed, caller-provided measured data against conservative limits.
+        leakage = try QuietZoneReferenceLeakageStabilityAnalyzer().assess(
+            candidate: candidate, rig: plan.rig,
+            captures: captures, now: leakageReviewedAt
+        )
+        clocked = try .init(
+            plan: plan, candidate: candidate,
+            initialTrace: initialTrace, route: route,
+            routeLeaseToken: routeLeaseToken,
+            synchronizedClockToken: synchronizedClockToken,
+            now: clockObservedAtSeconds
+        )
+    }
+
+    func observe(
+        input: QuietZoneHALClockObservation,
+        output: QuietZoneHALClockObservation,
+        route: QuietZoneHardwareClockRouteLease,
+        now: Double
+    ) throws -> QuietZoneFeedForwardClockStatus {
+        try clocked.observe(
+            input: input, output: output, route: route, now: now
+        )
+    }
+
+    func ingest(
+        referenceFrame: N60FeedForwardReferenceFrame,
+        witnessed: QuietZoneFeedForwardReferenceDeadlineEvent,
+        output: N60FFDeadlineOutputWitness,
+        route: QuietZoneHardwareClockRouteLease
+    ) throws {
+        try clocked.ingest(
+            referenceFrame: referenceFrame, witnessed: witnessed,
+            output: output, route: route
+        )
+    }
+
+    func readDiagnostics() -> [N60FFDeadlineRecord] {
+        clocked.readDiagnostics()
+    }
+
+    func snapshot() -> N60FFDeadlineSnapshot {
+        clocked.snapshot()
+    }
+
+    func close() { clocked.close() }
+    var echoCancellerEnabled: Bool { false }
+    var outputConnected: Bool { false }
+    var liveANCQualified: Bool { false }
+}
