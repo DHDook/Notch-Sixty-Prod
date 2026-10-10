@@ -130,6 +130,14 @@ final class QuietZoneNativeShadowTimingTransport {
         return N60FFDeadlineBridgeGetSnapshot(bridge)
     }
 
+    /// Control-plane dry-run ONLY. Advances a counter representing how a
+    /// hypothetical wet ANC component would fade to zero after a fault.
+    /// No audio samples or commands exist; this cannot fade real speakers.
+    func advanceSimulatedFaultBypass(frames: UInt32) -> Bool {
+        guard let bridge else { return false }
+        return N60FFDeadlineBridgeAdvanceFaultFade(bridge, frames)
+    }
+
     /// Clock faults must revoke pending diagnostic records atomically.
     func stopForClockFault() { invalidate() }
 

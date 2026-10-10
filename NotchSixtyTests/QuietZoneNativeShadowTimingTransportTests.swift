@@ -422,4 +422,105 @@ final class QuietZoneNativeShadowTimingTransportTests: XCTestCase {
         }
     }
 
+
+    private func safetyCandidate(
+        left: [Float], right: [Float]
+    ) -> QuietZoneCausalFIRCandidate {
+        .init(sampleRate: rate, leftTaps: left, rightTaps: right,
+              worstPredictedReductionDB: 1,
+              maximumRelativeFitError: 0.01,
+              maximumReferenceEchoFraction: 0.01)
+    }
+
+    private func safetyEvent(_ frame: Int)
+        -> QuietZoneFeedForwardReferenceDeadlineEvent {
+        let e = input(frame: frame)
+        return .init(
+            referenceSampleFrame: e.referenceSampleFrame,
+            referenceAcousticHostSeconds: e.referenceAcousticHostSeconds,
+            referenceAvailableHostSeconds: e.referenceAvailableHostSeconds,
+            evaluatedAtHostSeconds: e.evaluatedAtHostSeconds,
+            microphoneSample: 1.0)
+    }
+
+    private func safetyReference(_ frame: Int)
+        -> N60FeedForwardReferenceFrame {
+        var r = raw(frame: frame)
+        r.sample = 1.0
+        return r
+    }
+
+    func testNativeCombinedStereoPeakTripsEvenIfEachChannelWithinCap() throws {
+        let bridge = try QuietZoneNativeShadowTimingTransport(
+            plan: plan(),
+            candidate: safetyCandidate(left: [0.06], right: [0.06]),
+            routeLeaseToken: 9, synchronizedClockToken: 7)
+        XCTAssertThrowsError(try bridge.ingest(
+            referenceFrame: safetyReference(0),
+            witnessed: safetyEvent(0), output: output(frame: 0)))
+        let s = bridge.snapshot()
+        XCTAssertEqual(s.firstFault.rawValue, 9)
+        XCTAssertTrue(s.halted)
+        XCTAssertEqual(s.queuedRecords, 0)
+        XCTAssertEqual(s.faultFadeFramesRemaining, 128)
+        XCTAssertFalse(s.outputConnected)
+        XCTAssertFalse(s.liveANCQualified)
+        XCTAssertTrue(bridge.readDiagnostics().isEmpty)
+    }
+
+    func testSafeStereoHeadroomRecordsOnlyPeakMetadata() throws {
+        let bridge = try QuietZoneNativeShadowTimingTransport(
+            plan: plan(),
+            candidate: safetyCandidate(left: [0.025], right: [0.025]),
+            routeLeaseToken: 9, synchronizedClockToken: 7)
+        try bridge.ingest(
+            referenceFrame: safetyReference(0),
+            witnessed: safetyEvent(0), output: output(frame: 0))
+        let s = bridge.snapshot()
+        XCTAssertFalse(s.halted)
+        XCTAssertEqual(s.maximumObservedStereoSumMicro, 50_000)
+        XCTAssertEqual(bridge.readDiagnostics().count, 1)
+        XCTAssertFalse(s.outputConnected)
+    }
+
+    func testSimulatedBypassFadeIsMonotoneAndNeverRearmsEngine() throws {
+        let bridge = try QuietZoneNativeShadowTimingTransport(
+            plan: plan(),
+            candidate: safetyCandidate(left: [0.06], right: [0.06]),
+            routeLeaseToken: 9, synchronizedClockToken: 7)
+        XCTAssertFalse(bridge.advanceSimulatedFaultBypass(frames: 64))
+        XCTAssertThrowsError(try bridge.ingest(
+            referenceFrame: safetyReference(0),
+            witnessed: safetyEvent(0), output: output(frame: 0)))
+        XCTAssertTrue(bridge.advanceSimulatedFaultBypass(frames: 64))
+        XCTAssertEqual(bridge.snapshot().simulatedFaultFadeGain, 0.5,
+                       accuracy: 0.0001)
+        XCTAssertEqual(bridge.snapshot().faultFadeFramesRemaining, 64)
+        XCTAssertTrue(bridge.advanceSimulatedFaultBypass(frames: 512))
+        XCTAssertEqual(bridge.snapshot().simulatedFaultFadeGain, 0)
+        XCTAssertEqual(bridge.snapshot().faultFadeFramesRemaining, 0)
+        XCTAssertTrue(bridge.snapshot().simulatedBypassReached)
+        XCTAssertTrue(bridge.snapshot().halted)
+        XCTAssertFalse(bridge.snapshot().outputConnected)
+        XCTAssertThrowsError(try bridge.ingest(
+            referenceFrame: safetyReference(1),
+            witnessed: safetyEvent(1), output: output(frame: 1)))
+    }
+
+    func testRouteFaultAlsoStartsSameHypotheticalBypass() throws {
+        let bridge = try transport()
+        try bridge.ingest(
+            referenceFrame: raw(frame: 0),
+            witnessed: input(frame: 0), output: output(frame: 0))
+        XCTAssertThrowsError(try bridge.ingest(
+            referenceFrame: raw(frame: 1),
+            witnessed: input(frame: 1),
+            output: output(frame: 1, route: 999)))
+        XCTAssertEqual(bridge.snapshot().queuedRecords, 0)
+        XCTAssertTrue(bridge.advanceSimulatedFaultBypass(frames: 128))
+        XCTAssertEqual(bridge.snapshot().simulatedFaultFadeGain, 0)
+        XCTAssertTrue(bridge.snapshot().simulatedBypassReached)
+        XCTAssertFalse(bridge.snapshot().liveANCQualified)
+    }
+
 }
