@@ -92,3 +92,39 @@ Transport safety tests with synthetic timestamps are not proof of realtime
 OS scheduling or measured cancellation. Any future live topology must
 undergo physical commissioning, echo/feedback stability screening, and
 explicit independent authorization before enablement.
+
+
+## Third slice — continuously qualified clock alignment watchdog
+
+\`QuietZoneFeedForwardClockMonitor\` loads a two-second **PR97-qualified**
+synchronized HAL input/output trace for an exact physical microphone and
+selected DAC/route lease. Every subsequent control-thread observation
+must be monotonic, consistent with fitted sample rates, from the same
+route/rate/lease, recently witnessed, and inside a bounded overlapping
+window; the original PR97 analyzer is rerun to detect *gradual clock drift*
+even when individual callback increments appear plausible.
+
+It rejects sudden frame-counter jumps, reversed/stalled clocks, device
+restart, sample-rate changes, expired/missing timestamps, and excessive
+relative drift permanently. It also validates that **the individual
+scheduled input and output frame IDs actually map to the monitored host-time
+axes**. Merely supplying an unrelated "healthy" clock trace cannot validate
+another set of frame IDs.
+
+\`QuietZoneClockGuardedShadowTransport\` wraps the native PR98 metadata
+bridge: fresh clock/route and frame-mapping validation are required before
+each hypothetical scheduling operation. Any clock fault calls the native
+transport terminal stop, revokes any queued diagnostics and cannot be
+recovered by repackaging the same frame. Native deadline/FIR output remains
+**physically disconnected**, and all clock reports assert
+\`physicalLatencyVerified = false\` and \`liveANCQualified = false\`.
+An untrusted caller-supplied trace or route token alone cannot qualify real
+hardware or justify enabling ANC.
+
+Five pure clock watchdog tests and three guarded-native integration tests
+cover ordinary fresh clocks, sudden frame jumps, reverse/stalled counts,
+rate drift over repeated observations, route restarts, stale data, unrelated
+frame IDs and FIFO revocation. The user-return hardware path still needs
+actual shared-host-clock observation acquisition and physical ADC/DAC/
+speaker acoustic commissioning; no clock converter or live output callback
+is fabricated from model estimates.

@@ -74,4 +74,31 @@ for forbidden in ("AudioDeviceStart(", "AudioDeviceCreateIOProcID(",
     assert forbidden not in native,forbidden
 for forbidden in ("requestArm(", "setEnabled(", "stageRoomTreatment("):
     assert forbidden not in native_adapter,forbidden
+clock=(root/"NotchSixty/Audio/QuietZoneFeedForwardClockMonitor.swift").read_text()
+clock_tests=(root/"NotchSixtyTests/QuietZoneFeedForwardClockMonitorTests.swift").read_text()
+native_integration=(root/"NotchSixtyTests/QuietZoneNativeShadowTimingTransportTests.swift").read_text()
+for token in ("QuietZoneFeedForwardClockMonitor", "QuietZoneClockGuardedShadowTransport",
+              "QuietZoneHALClockAnalyzer().analyze(", "requireFrameMapping(",
+              "requireFresh(", "shadow.stopForClockFault()",
+              "excessiveDrift", "staleWitness", "clockJump",
+              "physicalLatencyVerified: Bool = false",
+              "liveANCQualified: Bool { false }"):
+    assert token in clock,token
+for token in ("testQualifiedBaselineAndFreshMatchedFramesAreOnlyDiagnostic",
+              "testClockRewindAndCounterJumpPermanentlyStop",
+              "testExpiredClockAndChangedRouteFailClosed",
+              "testGradualClockDriftFailsMovingQualification",
+              "testClockTraceCannotLegitimizeUnrelatedReferenceOrOutputFrames"):
+    assert token in clock_tests,token
+for token in ("testClockGuardedNativeTransportOnlyEmitsDiagnostics",
+              "testUnrelatedReferenceFrameRevokesQueuedNativeMetadata",
+              "testClockRouteRestartHaltsNativeBridge"):
+    assert token in native_integration,token
+for token in ("QuietZoneFeedForwardClockMonitor.swift in Sources",
+              "QuietZoneFeedForwardClockMonitorTests.swift in Sources"):
+    assert token in pbx,token
+assert "func stopForClockFault()" in native_adapter
+for forbidden in ("AudioDeviceStart(", "AudioDeviceCreateIOProcID(",
+                  "requestArm(", "setEnabled(", "N60RenderKernelProcess("):
+    assert forbidden not in clock,forbidden
 print("PR98 shadow scheduler safety guards passed")
