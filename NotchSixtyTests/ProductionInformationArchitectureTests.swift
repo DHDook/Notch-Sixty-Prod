@@ -102,4 +102,61 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         XCTAssertFalse(snapshot.physicalAttenuationVerified)
     }
 
+
+    func testConsolidatedDiagnosticsKeepPhysicalGatesSeparate() {
+        let budget = QuietZoneFeedForwardBudget(
+            readiness: .physicallyPlausible,
+            acousticPreviewSeconds: 0.020,
+            conservativePreviewSeconds: 0.015,
+            antiNoisePathSeconds: 0.010,
+            conservativeReserveSeconds: 0.005,
+            geometryOnly: false,
+            runtimeAvailable: false,
+            explanation: "Synthetic diagnostic fixture"
+        )
+        let snapshot = ActiveAcousticsDiagnosticsUXSnapshot(
+            calibration: nil,
+            budget: budget
+        )
+
+        XCTAssertEqual(
+            snapshot.items.first(where: { $0.id == "causality" })?.disposition,
+            .diagnosticPass
+        )
+        XCTAssertEqual(
+            snapshot.items.first(where: { $0.id == "acoustic" })?.disposition,
+            .hardwareRequired
+        )
+        XCTAssertEqual(
+            snapshot.items.first(where: { $0.id == "mute" })?.disposition,
+            .hardwareRequired
+        )
+        XCTAssertEqual(
+            snapshot.items.first(where: { $0.id == "output" })?.disposition,
+            .disconnected
+        )
+        XCTAssertGreaterThan(snapshot.unresolvedCount, 0)
+    }
+
+    func testConsolidatedDiagnosticsExposeMissingCommissioningRecords() {
+        let snapshot = ActiveAcousticsDiagnosticsUXSnapshot(
+            calibration: nil,
+            budget: .missing
+        )
+
+        XCTAssertEqual(
+            snapshot.items.first(where: { $0.id == "plan" })?.disposition,
+            .blocked
+        )
+        XCTAssertEqual(
+            snapshot.items.first(where: { $0.id == "clock" })?.disposition,
+            .blocked
+        )
+        XCTAssertEqual(
+            snapshot.items.first(where: { $0.id == "path" })?.disposition,
+            .blocked
+        )
+        XCTAssertTrue(snapshot.headline.contains("blockers"))
+    }
+
 }
