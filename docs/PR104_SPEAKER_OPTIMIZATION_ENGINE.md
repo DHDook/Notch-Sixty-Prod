@@ -1,6 +1,6 @@
 # PR104 — Measurement-Driven Speaker Optimization Engine
 
-Status: **SLICE 3 IMPLEMENTED — EXACT-HEAD CI PENDING**
+Status: **SLICE 4 IMPLEMENTED — EXACT-HEAD CI PENDING**
 
 Stack: PR102 remote release handoff → PR103 Speaker Optimizer measurement
 foundation → **PR104 optimization engine** → PR105 guided apply/verification →
@@ -83,3 +83,16 @@ and verification sets. No PR104 prediction may become measured verification.
 - Unlike minimum-phase PEQ, a causal symmetric FIR incurs fixed group delay, which matters for video synchronization; PR105 must explicitly coordinate latency before any application.
 
 Next: measured-source multi-channel/subwoofer feasibility, phase/timing boundaries and candidate ranking. Any actual speaker correction requires explicit later commissioning and new microphone verification.
+
+
+## Slice 4 — Speaker/subwoofer crossover phase and arrival feasibility
+
+- Requires re-qualified PR103 **baseline** evidence and explicit whole-speaker/subwoofer pair. Refuses sub/sub, speaker/speaker, unplanned sources, low-frequency-effects as speaker, unqualified repeats or changed routing/microphone identity.
+- For each stationary microphone position and isolated source, interpolates magnitude and circular phase over the shared usable crossover band (default center 80 Hz and one octave). Interpolation refuses undersampled response grids.
+- The existing room-measurement analyzer explicitly REMOVES bulk arrival from the stored phase. Reconstructs relative complex transfer by adding the separately recorded direct-arrival delay **exactly once**, rather than summing delay-compensated phases or double-counting timing.
+- Compares isolated main and subwoofer complex responses, then explores **hypothetical positive-only** additional delay to either source (default ±8 ms range in 0.25 ms increments) and optional sub polarity inversion. Zero remains the baseline.
+- Rejects hypotheses that decrease any listening-position crossover-band energy beyond tolerance or cause excessive estimated coherent sum relative to the strongest isolated source. Provides explicit per-position and aggregate modeled crossover-region changes.
+- Does **not** change amplifier crossover frequency, driver filters, bass-management configuration, timing, polarity, or limiter routing.
+- **Important measurement-provenance limitation:** PR103 evidence records a common microphone and route but does not separately authenticate cross-source sweep clock origin. Therefore modeled phase-coherent sums, timing and polarity are *conditional feasibility hypotheses*, not certified adjustments. A future provenance and synchronized-capture contract is essential before PR105 could safely apply them.
+- Crossover performance/extra relative energy does not equal absolute digital headroom. Explicit limiter and clipping verification is still required.
+- These models cannot prove real-room improvements; new physical microphone verification remains mandatory.

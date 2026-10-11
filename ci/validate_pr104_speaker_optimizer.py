@@ -118,4 +118,36 @@ for token in (
 ):
     assert project.count(token) >= 2, f"missing FIR Xcode registration {token}"
 assert "Run PR104 FIR candidate tests" in workflow
-print("PR104 offline PEQ/FIR candidate contracts passed")
+crossover_path = ROOT / "NotchSixty/Audio/SpeakerOptimizerCrossoverFeasibility.swift"
+crossover_test_path = ROOT / "NotchSixtyTests/SpeakerOptimizerCrossoverFeasibilityTests.swift"
+assert crossover_path.is_file() and crossover_test_path.is_file()
+crossover = crossover_path.read_text()
+crossover_tests = crossover_test_path.read_text()
+for token in (
+    "struct SpeakerOptimizerCrossoverFeasibilityDesigner",
+    "SpeakerOptimizerMeasurementEvidenceEvaluator().evaluate(baseline)",
+    "case .speaker(let role)",
+    "case .subwoofer = subwoofer",
+    "phaseRadians",
+    "directArrivalSeconds",
+    "previewRelativeDelayMs",
+    "previewInvertSubPolarity",
+    "maximumSeatRegressionDB",
+    "maximumModeledSumAboveStrongestSourceDB",
+    "var canDeploy: Bool { false }",
+    "requiresIndependentHeadroomAndLimiterAudit",
+):
+    assert token in crossover, f"missing crossover safety check: {token}"
+for token in (
+    "testQualifiedMainsSubOffersPreviewOnlyPhaseAndTimingHypothesis",
+    "testRoleRouteAndSourceMustBeQualifiedAndSeparate",
+    "testMissingPhaseOrExcessiveArrivalGapBlocksModel",
+    "testWeightsAndUnsupportedCrossoverBandFailClosed",
+    "testNoBenefitEmitsNoActionableOffset",
+):
+    assert token in crossover_tests, f"missing crossover tests: {token}"
+for token in ("F10400000000000000000007", "F10400000000000000000008",
+              "F10400000000000000000017", "F10400000000000000000018"):
+    assert project.count(token) >= 2, f"missing crossover Xcode registration: {token}"
+assert "Run PR104 crossover feasibility tests" in workflow
+print("PR104 offline PEQ/FIR/crossover feasibility contracts passed")
