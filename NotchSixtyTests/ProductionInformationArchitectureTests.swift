@@ -159,4 +159,16 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         XCTAssertTrue(snapshot.headline.contains("blockers"))
     }
 
+
+    func testPhysicalCampaignPlanPreservesABAAndEvidenceCounts() {
+        let campaign = ActiveAcousticsPhysicalCampaignUXSnapshot()
+
+        XCTAssertEqual(campaign.visits.map(\.positionLabel), ["A", "B", "A"])
+        XCTAssertEqual(campaign.totalSourceCaptures, 9)
+        XCTAssertEqual(campaign.totalFaultWitnesses, 15)
+        XCTAssertFalse(campaign.physicalVerificationComplete)
+        XCTAssertFalse(campaign.instrumentProvenanceAuthenticated)
+        XCTAssertFalse(campaign.liveOutputAuthorized)
+    }
+
 }
