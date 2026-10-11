@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: pr105-speaker-characterization-\${{ github.ref }}
+  group: pr105-speaker-characterization-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -19,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: \${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Validate PR105 characterization boundary
         run: python3 ci/validate_pr105_speaker_characterization.py
       - name: Preserve PR104 optimizer closure
@@ -32,7 +32,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: \${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Validate PR105 characterization boundary
         run: python3 ci/validate_pr105_speaker_characterization.py
       - name: Preserve PR104 optimizer closure
