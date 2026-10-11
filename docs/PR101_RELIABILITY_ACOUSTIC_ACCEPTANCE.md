@@ -260,3 +260,59 @@ eligible for acceptance.
 None of these CI measurements establish real-machine thermal behavior,
 production transport CPU, real sleep/wake or unplug/replug recovery, speaker
 safety, acoustic acceptance, or live feed-forward ANC qualification.
+
+
+## Slice 5 — Same-process realtime resource and dropout soak
+
+Slice 5 upgrades the short-lived Slice 4 resource measurements into a
+same-process reliability campaign around the production realtime bridge.
+
+The macOS harness creates one `N60RealtimeAudioBridge`, publishes a unity
+graph, disables optional meters, and keeps that same bridge alive for the entire
+campaign. It performs **2,048 matched capture/output callbacks as warmup**
+before taking its retained-heap baseline. No process restart is allowed to
+erase leaked state between checkpoints.
+
+The soak then performs **16 blocks × 1,024 normal capture/output callbacks**
+for **16,384 normal callbacks**. Each block additionally injects **32 deliberate
+starvation faults**, for **512 injected faults total**.
+
+For each injected fault the direct SPSC ring is intentionally empty and the
+output callback is invoked without a preceding capture. The required behavior
+is exact fail-closed silence for that 512-frame quantum. The harness then
+re-primes exactly one 512-frame input quantum and requires the immediately
+following output callback to contain finite, nonzero signal.
+
+Acceptance is exact rather than statistical:
+
+- 512 injected starvation faults must produce exactly **262,144 underrun
+  frames**;
+- every injected fault must recover on the next primed callback;
+- no unexpected silent output may occur outside the injected faults;
+- no non-finite sample may escape;
+- overrun frames must remain zero;
+- unsupported buffer-layout events must remain zero;
+- the bridge must end with zero buffered frames; and
+- callback counts must match the exact campaign schedule.
+
+### Same-process retained-memory gate
+
+After warmup the harness primes the macOS allocation and task-info telemetry,
+then records `malloc_zone_statistics(...).size_in_use` as its retained-heap
+baseline. The same process remains alive for every subsequent callback.
+
+At the end of every soak block, retained heap is sampled again. The remote
+resource-stability gate requires **zero positive retained-heap growth at every
+checkpoint** and final retained heap no greater than the post-warmup baseline.
+
+Resident memory from `MACH_TASK_BASIC_INFO` is also recorded at baseline,
+final state, and maximum observed level, but it is observational rather than a
+hard gate: resident-set behavior can include allocator/VM effects that are not
+equivalent to an application leak.
+
+A successful Slice 5 artifact may mark the remote
+`resourceStability` and `dropoutRecoveryStress` campaign evidence as
+accepted at **macOS CI** authority. It still cannot establish prolonged thermal
+behavior on a production Mac, real device unplug/replug, sleep/wake recovery,
+speaker safety, physical acoustic acceptance, or live feed-forward ANC
+authorization. Those hardware-only requirements remain unchanged.
