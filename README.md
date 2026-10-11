@@ -1,53 +1,96 @@
 # Notch Sixty
 
-Private commercial implementation of **Notch Sixty**, a macOS stereo DSP application for loudspeaker + subwoofer playback.
+Private commercial implementation of **Notch Sixty**, a macOS DSP platform for
+speaker, subwoofer, multichannel, headphone/binaural, room-acoustic, plug-in,
+and Active Acoustics workflows.
 
-This repository is a fresh proprietary codebase. It is not a fork of the historical GPL-licensed Notch Sixty / Equaliser repository and must not import that repository's source, history, tests, scripts, project files, assets, or configuration.
+This repository is a fresh proprietary codebase. It is not a fork of the
+historical GPL-licensed Notch Sixty / Equaliser repository and must not import
+that repository's source, history, tests, scripts, project files, assets, or
+configuration.
 
 ## Current status
 
-**v1.0 release-candidate hardening.**
+**PR102 integration and commercial-release preparation.**
 
-The driverless Core Audio transport architecture has already been validated separately in the CoreAudioTapPOC-N60 proof of concept, including native transport through 384 kHz, live sample-rate rebuilding, selected-device persistence, USB reconnect, sleep/wake, permission transitions, failure-safe restoration, and extended high-rate soak testing.
+The clean-room rewrite and cumulative remote/software reliability program are
+complete through PR101. PR102 is reconciling release metadata, sandbox/App
+Store configuration, third-party notices/provenance, packaging, and final
+release gates before the next approved feature track (Speaker Optimizer).
 
-The POC is architectural evidence, not a production dependency. The commercial implementation should be independently structured and production-hardened.
+PR101 established remote/software acceptance across the cumulative runtime, but
+physical hardware/acoustic acceptance and production Apple release credentials
+remain separate gates.
 
-## Product boundaries
+## Current product boundary
 
 - macOS only
 - Apple Silicon
-- two-channel loudspeaker playback
-- subwoofer support through bass management
-- multi-seat room correction is in scope
-- stereo program material only; speaker-integration routing may fan out to 2–8 physical outputs for mains/sub and active bi-/tri-amp systems
-- headphone-only features are out of scope
-- native device sample rates through 384 kHz where the selected hardware exposes them
-- no hidden sample-rate conversion in the transport layer
-- Mac App Store compatibility is a first-class constraint
+- driverless Core Audio process-tap transport using public Apple APIs
+- native device rates through 384 kHz where selected hardware exposes them
+- stereo and approved semantic N-channel program layouts
+- speaker/subwoofer playback, bass management, active-crossover and
+  multichannel calibration paths
+- headphone profiles, binaural/virtual-speaker rendering, SOFA/HRTF import, and
+  head-tracking foundations
+- multi-seat room correction, target/FIR design, speaker calibration, room
+  treatment analysis/design, and ambient compensation
+- Audio Unit hosting with fault-containment boundaries
+- Active Acoustics / Quiet Zone foundations with commissioning, evidence and
+  safety workflows
+- **speaker-connected feed-forward ANC remains hardware-gated and unauthorized
+  until the required physical acceptance campaign passes**
+- App Sandbox and Mac App Store compatibility remain first-class constraints
+- no privileged installer, HAL driver install, root helper, kernel/system
+  extension, or App-Store self-updater requirement
 
-## Architectural direction
+Proprietary object/bitstream decoders such as Dolby Atmos decoding are not
+included without a separate licensing/product decision.
+
+## Architecture
 
 ```text
 System applications
         ↓
 Core Audio device-scoped process tap
         ↓
-AudioIOEngine
+AudioIOEngine / semantic transport
         ↓
 Realtime bridge
         ↓
-RenderKernel
+RenderKernel / DSP graph
         ↓
-DSPGraphSnapshot
-        ↓
-Selected physical output
+Selected physical output(s)
 ```
 
-The realtime path must remain allocation-free, non-blocking, and independent of UI/application state machinery.
+Measurement/calibration transports are deliberately isolated from normal
+program playback where they require controlled excitation or microphone
+capture.
+
+The realtime path must remain allocation-free, non-blocking, and independent
+of UI/application state machinery.
+
+## Release boundary
+
+Remote CI can validate source/configuration correctness, deterministic DSP,
+build/package integrity, resource/dropout behavior, sandbox metadata, and
+fail-closed safety contracts.
+
+It cannot substitute for real hardware evidence such as:
+
+- device unplug/replug;
+- sleep/wake and clock reacquisition;
+- prolonged thermal/endurance playback;
+- speaker/emergency-mute safety;
+- final acoustic acceptance; or
+- physical feed-forward ANC qualification.
+
+Likewise, ad-hoc CI signing is not production App Store or Developer-ID signing.
 
 ## Repository policy
 
-Read `AGENTS.md` before making code changes. It contains mandatory clean-room, realtime, product-scope, and review rules.
+Read `AGENTS.md` before making code changes. It contains mandatory clean-room,
+realtime, product-scope, dependency, and review rules.
 
 Key design documents live in `docs/`:
 
@@ -58,10 +101,12 @@ Key design documents live in `docs/`:
 - `APP_STORE_REQUIREMENTS.md`
 - `TEST_STRATEGY.md`
 - `ROADMAP.md`
-- `XCODE_BOOTSTRAP.md`
+- `PR102_INTEGRATION_COMMERCIAL_RELEASE.md`
 
 ## Licensing
 
 The commercial source in this repository is proprietary. See `LICENSE`.
 
-Third-party components must be approved, provenance-tracked, and listed in `THIRD_PARTY_NOTICES.md` before they are introduced.
+Approved third-party production components must be provenance-tracked and
+listed in `THIRD_PARTY_NOTICES.md`. The shipping application also carries its
+required redistribution notices as bundled product material.
