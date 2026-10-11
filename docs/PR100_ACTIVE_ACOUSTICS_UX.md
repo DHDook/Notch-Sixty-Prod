@@ -92,3 +92,26 @@ instrument, microphone geometry, latency endpoint, or acoustic result.
 
 This makes the single movable-microphone workflow understandable before the
 physical commissioning session while retaining the PR98/PR99 hardware gates.
+
+
+## Slice 3 — Consolidated diagnostics and blockers
+
+The feed-forward commissioning card now presents one ordered **Diagnostics &
+Blockers** view spanning the entire readiness chain. It distinguishes six
+operator-visible dispositions: **RECORDED**, **DIAGNOSTIC PASS**, **ATTENTION**,
+**BLOCKED**, **HARDWARE REQUIRED**, and **DISCONNECTED**.
+
+The summary covers the one-microphone plan, the listener → upstream → listener
+survey, concurrent HAL clock evidence, physical latency-path fields, causality
+reserve, PR99 A/B/A acoustic verification, emergency shutdown verification,
+and the live feed-forward speaker-output boundary.
+
+A positive causality result is deliberately shown only as **DIAGNOSTIC PASS**.
+It cannot collapse or satisfy the later physical gates. PR99 acoustic evidence
+and real shutdown behavior remain **HARDWARE REQUIRED**, while live feed-forward
+speaker output remains **DISCONNECTED**.
+
+The model also reports an unresolved-item count and a state-sensitive headline.
+This makes the next commissioning obstacle visible without introducing an arm
+control, changing Core Audio, or converting caller-supplied records into
+instrument authentication.
