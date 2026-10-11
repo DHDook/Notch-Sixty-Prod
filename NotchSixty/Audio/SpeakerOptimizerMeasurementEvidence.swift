@@ -754,3 +754,328 @@ struct SpeakerOptimizerMeasurementTransportPlanner: Sendable {
         )
     }
 }
+
+
+enum SpeakerOptimizerMeasurementSessionError: Error, Equatable, LocalizedError {
+    case invalidRepeatCount(Int)
+    case noPendingStep
+    case captureDoesNotMatchStep
+    case captureIdentityMismatch
+    case noCaptureToRetry
+    case persistenceInvalid
+    case persistenceIdentityMismatch
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidRepeatCount(let count):
+            return "Speaker Optimizer requires at least \(SpeakerOptimizerMeasurementEvidenceEvaluator.minimumRepeatCount) repeats; requested \(count)."
+        case .noPendingStep:
+            return "The Speaker Optimizer measurement session has no pending sweep."
+        case .captureDoesNotMatchStep:
+            return "The analyzed capture does not match the pending Speaker Optimizer position/source step."
+        case .captureIdentityMismatch:
+            return "The analyzed capture does not match the session playback system, routing, microphone, or sample rate."
+        case .noCaptureToRetry:
+            return "There is no completed capture for this Speaker Optimizer position/source to retry."
+        case .persistenceInvalid:
+            return "The saved Speaker Optimizer measurement set is structurally invalid."
+        case .persistenceIdentityMismatch:
+            return "The saved Speaker Optimizer measurement set does not match the requested measurement-set identity."
+        }
+    }
+}
+
+struct SpeakerOptimizerMeasurementSessionStep: Equatable, Sendable {
+    var position: SpeakerOptimizerMeasurementPosition
+    var source: MultichannelCalibrationSource
+    /// Zero-based repeat ordinal for this exact position/source pair.
+    var repeatIndex: Int
+
+    var displayName: String {
+        "\(position.name) · \(source.displayName) · Repeat \(repeatIndex + 1)"
+    }
+}
+
+struct SpeakerOptimizerMeasurementSessionProgress: Equatable, Sendable {
+    var completedSweepCount: Int
+    var requiredSweepCount: Int
+    var completedPositionSourceGroups: Int
+    var requiredPositionSourceGroups: Int
+    var nextStep: SpeakerOptimizerMeasurementSessionStep?
+
+    var fractionComplete: Double {
+        guard requiredSweepCount > 0 else { return 0 }
+        return min(max(Double(completedSweepCount) / Double(requiredSweepCount), 0), 1)
+    }
+
+    var complete: Bool {
+        requiredSweepCount > 0 && completedSweepCount >= requiredSweepCount
+    }
+}
+
+extension SpeakerOptimizerMeasurementSet {
+    func validatePersistenceStructure() throws {
+        guard schemaVersion == Self.currentSchemaVersion,
+              sampleRate.isFinite,
+              sampleRate > 0,
+              !routingSignature.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              microphone.validate(),
+              !positions.isEmpty,
+              positions.allSatisfy({ $0.validate() }),
+              !plannedSources.isEmpty,
+              Set(positions.map(\.id)).count == positions.count,
+              Set(captures.map(\.id)).count == captures.count,
+              Set(plannedSources).count == plannedSources.count else {
+            throw SpeakerOptimizerMeasurementSessionError.persistenceInvalid
+        }
+
+        for capture in captures {
+            guard capture.playbackSystemID == playbackSystemID,
+                  capture.routingSignature == routingSignature,
+                  capture.microphone == microphone,
+                  abs(capture.sampleRate - sampleRate) < 0.5,
+                  positions.contains(where: { $0.id == capture.positionID }),
+                  plannedSources.contains(capture.source) else {
+                throw SpeakerOptimizerMeasurementSessionError.persistenceInvalid
+            }
+        }
+    }
+}
+
+/// Deterministic, persistence-derived session orchestration.
+///
+/// There is no hidden "current step" stored separately. Progress is derived from
+/// compact analyzed captures, so an interrupted app/session resumes at the first
+/// incomplete position/source repeat after reload.
+struct SpeakerOptimizerMeasurementSessionOrchestrator: Sendable {
+    let repeatsPerPositionSource: Int
+
+    init(
+        repeatsPerPositionSource: Int =
+            SpeakerOptimizerMeasurementEvidenceEvaluator.minimumRepeatCount
+    ) throws {
+        guard repeatsPerPositionSource
+            >= SpeakerOptimizerMeasurementEvidenceEvaluator.minimumRepeatCount else {
+            throw SpeakerOptimizerMeasurementSessionError.invalidRepeatCount(
+                repeatsPerPositionSource
+            )
+        }
+        self.repeatsPerPositionSource = repeatsPerPositionSource
+    }
+
+    func steps(
+        for set: SpeakerOptimizerMeasurementSet
+    ) throws -> [SpeakerOptimizerMeasurementSessionStep] {
+        try set.validatePersistenceStructure()
+        var result: [SpeakerOptimizerMeasurementSessionStep] = []
+        result.reserveCapacity(
+            set.positions.count
+                * set.plannedSources.count
+                * repeatsPerPositionSource
+        )
+
+        // Position-major ordering intentionally minimizes microphone moves.
+        for position in set.positions {
+            for source in set.plannedSources {
+                for repeatIndex in 0..<repeatsPerPositionSource {
+                    result.append(
+                        SpeakerOptimizerMeasurementSessionStep(
+                            position: position,
+                            source: source,
+                            repeatIndex: repeatIndex
+                        )
+                    )
+                }
+            }
+        }
+        return result
+    }
+
+    func progress(
+        for set: SpeakerOptimizerMeasurementSet
+    ) throws -> SpeakerOptimizerMeasurementSessionProgress {
+        let allSteps = try steps(for: set)
+        var completedSweeps = 0
+        var completedGroups = 0
+        var next: SpeakerOptimizerMeasurementSessionStep?
+
+        for position in set.positions {
+            for source in set.plannedSources {
+                let count = set.captures.filter {
+                    $0.positionID == position.id && $0.source == source
+                }.count
+                let bounded = min(count, repeatsPerPositionSource)
+                completedSweeps += bounded
+                if bounded >= repeatsPerPositionSource {
+                    completedGroups += 1
+                } else if next == nil {
+                    next = SpeakerOptimizerMeasurementSessionStep(
+                        position: position,
+                        source: source,
+                        repeatIndex: bounded
+                    )
+                }
+            }
+        }
+
+        return SpeakerOptimizerMeasurementSessionProgress(
+            completedSweepCount: completedSweeps,
+            requiredSweepCount: allSteps.count,
+            completedPositionSourceGroups: completedGroups,
+            requiredPositionSourceGroups:
+                set.positions.count * set.plannedSources.count,
+            nextStep: next
+        )
+    }
+
+    func nextPendingStep(
+        for set: SpeakerOptimizerMeasurementSet
+    ) throws -> SpeakerOptimizerMeasurementSessionStep? {
+        try progress(for: set).nextStep
+    }
+
+    func appending(
+        _ capture: SpeakerOptimizerMeasurementCapture,
+        to set: SpeakerOptimizerMeasurementSet,
+        for step: SpeakerOptimizerMeasurementSessionStep,
+        modifiedAt: Date = Date()
+    ) throws -> SpeakerOptimizerMeasurementSet {
+        try set.validatePersistenceStructure()
+        guard step.position.id == capture.positionID,
+              step.source == capture.source else {
+            throw SpeakerOptimizerMeasurementSessionError.captureDoesNotMatchStep
+        }
+        guard capture.playbackSystemID == set.playbackSystemID,
+              capture.routingSignature == set.routingSignature,
+              capture.microphone == set.microphone,
+              abs(capture.sampleRate - set.sampleRate) < 0.5 else {
+            throw SpeakerOptimizerMeasurementSessionError.captureIdentityMismatch
+        }
+        guard set.positions.contains(where: { $0.id == step.position.id }),
+              set.plannedSources.contains(step.source) else {
+            throw SpeakerOptimizerMeasurementSessionError.captureDoesNotMatchStep
+        }
+
+        let currentCount = set.captures.filter {
+            $0.positionID == step.position.id && $0.source == step.source
+        }.count
+        guard currentCount == step.repeatIndex,
+              currentCount < repeatsPerPositionSource else {
+            throw SpeakerOptimizerMeasurementSessionError.captureDoesNotMatchStep
+        }
+        guard !set.captures.contains(where: { $0.id == capture.id }) else {
+            throw SpeakerOptimizerMeasurementSessionError.captureDoesNotMatchStep
+        }
+
+        var updated = set
+        updated.captures.append(capture)
+        updated.modifiedAt = modifiedAt
+        try updated.validatePersistenceStructure()
+        return updated
+    }
+
+    /// Explicit retry semantics for a completed repeat: remove the most recent
+    /// analyzed capture from one position/source group. The derived next step
+    /// then becomes that repeat again.
+    func retryLatestCapture(
+        in set: SpeakerOptimizerMeasurementSet,
+        positionID: UUID,
+        source: MultichannelCalibrationSource,
+        modifiedAt: Date = Date()
+    ) throws -> SpeakerOptimizerMeasurementSet {
+        try set.validatePersistenceStructure()
+        let candidates = set.captures.enumerated()
+            .filter {
+                $0.element.positionID == positionID
+                    && $0.element.source == source
+            }
+        guard let latest = candidates.max(by: {
+            if $0.element.capturedAt != $1.element.capturedAt {
+                return $0.element.capturedAt < $1.element.capturedAt
+            }
+            return $0.element.id.uuidString < $1.element.id.uuidString
+        }) else {
+            throw SpeakerOptimizerMeasurementSessionError.noCaptureToRetry
+        }
+
+        var updated = set
+        updated.captures.remove(at: latest.offset)
+        updated.modifiedAt = modifiedAt
+        return updated
+    }
+}
+
+struct SpeakerOptimizerMeasurementSetStore: Sendable {
+    let rootDirectory: URL
+
+    init(rootDirectory: URL? = nil) {
+        self.rootDirectory = rootDirectory ?? Self.defaultRootDirectory()
+    }
+
+    func url(for measurementSetID: UUID) -> URL {
+        rootDirectory.appendingPathComponent(
+            "\(measurementSetID.uuidString.lowercased()).json",
+            isDirectory: false
+        )
+    }
+
+    func save(_ set: SpeakerOptimizerMeasurementSet) throws {
+        try set.validatePersistenceStructure()
+        try FileManager.default.createDirectory(
+            at: rootDirectory,
+            withIntermediateDirectories: true
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode(set).write(
+            to: url(for: set.id),
+            options: .atomic
+        )
+    }
+
+    func load(_ measurementSetID: UUID) throws -> SpeakerOptimizerMeasurementSet? {
+        let path = url(for: measurementSetID)
+        guard FileManager.default.fileExists(atPath: path.path) else {
+            return nil
+        }
+        let data = try Data(contentsOf: path)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let set = try decoder.decode(
+            SpeakerOptimizerMeasurementSet.self,
+            from: data
+        )
+        guard set.id == measurementSetID else {
+            throw SpeakerOptimizerMeasurementSessionError
+                .persistenceIdentityMismatch
+        }
+        try set.validatePersistenceStructure()
+        return set
+    }
+
+    func delete(_ measurementSetID: UUID) throws {
+        let path = url(for: measurementSetID)
+        guard FileManager.default.fileExists(atPath: path.path) else {
+            return
+        }
+        try FileManager.default.removeItem(at: path)
+    }
+
+    private static func defaultRootDirectory() -> URL {
+        let root = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first ?? FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(
+                "Library/Application Support",
+                isDirectory: true
+            )
+        return root
+            .appendingPathComponent("Notch Sixty", isDirectory: true)
+            .appendingPathComponent(
+                "Speaker Optimizer Measurements",
+                isDirectory: true
+            )
+    }
+}
