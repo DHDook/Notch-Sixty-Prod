@@ -190,8 +190,12 @@ for token in [
     require(release, token, "manual release-DMG workflow")
 
 # Public product scope/status must not regress to the old bootstrap wording.
-require(readme, "v1.0 release-candidate hardening", "README release status")
-require(readme, "speaker-integration routing may fan out to 2–8 physical outputs", "README speaker-output boundary")
+# Later approved expansion superseded PR45's original stereo-only scope strings,
+# so retain the durable release-hardening constraints without freezing obsolete
+# product-boundary wording.
+require(readme, "commercial-release preparation", "README release status")
+require(readme, "Apple Silicon", "README platform boundary")
+require(readme, "App Sandbox", "README sandbox boundary")
 if "**Commercial bootstrap / architecture foundation.**" in readme:
     fail("README reverted to obsolete bootstrap status")
 
