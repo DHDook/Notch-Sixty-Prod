@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		F10200000000000000000001 /* ThirdPartyNotices.txt in Resources */ = {isa = PBXBuildFile; fileRef = F10200000000000000000011 /* ThirdPartyNotices.txt */; };
 		A10000000000000000000010 /* NotchSixtyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000020 /* NotchSixtyApp.swift */; };
 		A10000000000000000000011 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000021 /* ContentView.swift */; };
 		A10000000000000000000012 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000022 /* Assets.xcassets */; };
@@ -204,6 +205,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		F10200000000000000000011 /* ThirdPartyNotices.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = ThirdPartyNotices.txt; sourceTree = "<group>"; };
 		A10000000000000000000020 /* NotchSixtyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchSixtyApp.swift; sourceTree = "<group>"; };
 		A10000000000000000000021 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A10000000000000000000022 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -433,6 +435,7 @@
 				A10000000000000000000021 /* ContentView.swift */,
 				A10000000000000000000022 /* Assets.xcassets */,
 				A10000000000000000000023 /* NotchSixty.entitlements */,
+				F10200000000000000000011 /* ThirdPartyNotices.txt */,
 				F85000000000000000000011 /* NativeSOFAImporter.swift */,
 				F85000000000000000000012 /* N60SOFABridge.c */,
 				F85000000000000000000013 /* libmysofa reader.c */,
@@ -685,7 +688,7 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		A10000000000000000000044 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000012 /* Assets.xcassets in Resources */,); runOnlyForDeploymentPostprocessing = 0; };
+		A10000000000000000000044 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000012 /* Assets.xcassets in Resources */, F10200000000000000000001 /* ThirdPartyNotices.txt in Resources */,); runOnlyForDeploymentPostprocessing = 0; };
 		A10000000000000000000045 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXResourcesBuildPhase section */
 
