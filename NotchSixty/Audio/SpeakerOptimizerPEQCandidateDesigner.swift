@@ -181,6 +181,7 @@ struct SpeakerOptimizerPEQCandidateDesigner: Sendable {
             var corrections = Array(repeating: 0.0, count: commonCount)
             var bands: [SpeakerOptimizerPEQBand] = []
             var current = before
+            let desired = sourcePreview.correctionDB
             let low = freqs[0]
             let high = freqs[commonCount - 1]
             let maximumCenter = min(high, rate * 0.45)
@@ -191,7 +192,7 @@ struct SpeakerOptimizerPEQCandidateDesigner: Sendable {
 
             for _ in 0..<constraints.maximumBands {
                 var best: (band: SpeakerOptimizerPEQBand, shape: [Double], rmse: Double)?
-                for index in freqs.indices {
+                for index in freqs.indices where index % max(1, freqs.count / 48) == 0 {
                     let center = freqs[index]
                     guard center >= low * 1.15, center <= maximumCenter / 1.15 else { continue }
                     // One dB resolution plus fractional last step, all bounded
@@ -210,7 +211,10 @@ struct SpeakerOptimizerPEQCandidateDesigner: Sendable {
                             }
                             guard shape.allSatisfy(\.isFinite) else { continue }
                             let proposed = zip(corrections, shape).map(+)
-                            guard passesChecks(
+                            guard modeledRMSE(proposed, desired)
+                                    + constraints.minimumModeledImprovementDB
+                                    < modeledRMSE(corrections, desired),
+                                  passesChecks(
                                 bands: bands + [band], frequencies: freqs,
                                 proposed: proposed, positions: positions,
                                 weights: weights, target: target,
@@ -231,6 +235,18 @@ struct SpeakerOptimizerPEQCandidateDesigner: Sendable {
                 current = chosen.rmse
             }
 
+            // A final dense audit is mandatory, because selection uses a
+            // cheaper conservative check for responsive offline fitting.
+            while !bands.isEmpty &&
+                !denseAuditPasses(bands, frequencies: freqs, sampleRate: rate,
+                    constraints: constraints, options: options) {
+                bands.removeLast()
+                warnings.append("PEQ candidate removed after high-resolution headroom/band-edge safety audit.")
+            }
+            corrections = freqs.map { f in
+                bands.reduce(0) { $0 + $1.magnitudeDB(at: f, sampleRate: rate) }
+            }
+            current = weightedRMSE(positions, weights, target, corrections)
             if bands.isEmpty {
                 warnings.append("No safe PEQ candidate clears the modeled improvement and position-guard thresholds; unity preview retained.")
             }
@@ -299,15 +315,22 @@ struct SpeakerOptimizerPEQCandidateDesigner: Sendable {
                 return false
             }
         }
-        let peak = maximumPositiveGain(bands, sampleRate: sampleRate)
-        guard peak.isFinite, peak <= constraints.maximumHeadroomDB + 1e-8 else { return false }
+        // Each peaking filter is individually bounded; their positive
+        // gains add in dB, giving a conservative preamp/headroom bound.
+        let upperBound = bands.reduce(0.0) { $0 + max(0, $1.gainDB) }
+        let reserve = upperBound > 0 ? ceil((upperBound + 0.5) * 2) / 2 : 0
+        guard reserve <= constraints.maximumHeadroomDB + 1e-8 else { return false }
+        guard proposed.allSatisfy({
+            $0.isFinite && $0 >= -options.maximumCutDB - 1e-8
+                && $0 <= options.maximumBoostDB + 1e-8
+        }) else { return false }
         // Inspect frequencies OUTSIDE the allowed band; a bell filter's
         // skirts must not silently alter crossover or unmeasured regions.
         let minF = frequencies[0]
         let maxF = frequencies[frequencies.count - 1]
         let nyquist = sampleRate * 0.5
-        for i in 0...256 {
-            let f = 10 * pow((nyquist * 0.98) / 10, Double(i) / 256)
+        for i in 0...48 {
+            let f = 10 * pow((nyquist * 0.98) / 10, Double(i) / 48)
             if f >= minF && f <= maxF { continue }
             let sum = bands.reduce(0.0) { $0 + $1.magnitudeDB(at: f, sampleRate: sampleRate) }
             if !sum.isFinite || abs(sum) > constraints.maximumOutOfBandDeviationDB + 1e-8 {
@@ -315,6 +338,41 @@ struct SpeakerOptimizerPEQCandidateDesigner: Sendable {
             }
         }
         return true
+    }
+
+    private func modeledRMSE(_ actual: [Double], _ desired: [Double]) -> Double {
+        guard !actual.isEmpty, actual.count == desired.count else { return .infinity }
+        let square = zip(actual, desired).reduce(0.0) { sum, pair in
+            let difference = pair.0 - pair.1
+            return sum + difference * difference
+        }
+        return sqrt(square / Double(actual.count))
+    }
+
+    private func denseAuditPasses(
+        _ bands: [SpeakerOptimizerPEQBand], frequencies: [Double],
+        sampleRate: Double, constraints: SpeakerOptimizerPEQConstraints,
+        options: SpeakerOptimizerDesignOptions
+    ) -> Bool {
+        let nyquist = sampleRate * 0.5
+        let minF = frequencies[0]
+        let maxF = frequencies[frequencies.count - 1]
+        var maximumPositive = 0.0
+        for i in 0...2048 {
+            let f = 10 * pow((nyquist * 0.999) / 10, Double(i) / 2048)
+            let gain = bands.reduce(0.0) { $0 + $1.magnitudeDB(at: f, sampleRate: sampleRate) }
+            guard gain.isFinite,
+                  gain >= -options.maximumCutDB - 1e-6,
+                  gain <= options.maximumBoostDB + 1e-6 else { return false }
+            if (f < minF || f > maxF) &&
+                abs(gain) > constraints.maximumOutOfBandDeviationDB + 1e-6 {
+                return false
+            }
+            maximumPositive = max(maximumPositive, gain)
+        }
+        let requiredReserve = maximumPositive > 1e-6
+            ? ceil((maximumPositive + 0.5) * 2) / 2 : 0
+        return requiredReserve <= constraints.maximumHeadroomDB + 1e-6
     }
 
     private func maximumPositiveGain(_ bands: [SpeakerOptimizerPEQBand], sampleRate: Double) -> Double {
