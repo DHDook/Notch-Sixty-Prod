@@ -33,6 +33,12 @@ for token in (
     "DIAGNOSTIC PASS",
     "HARDWARE REQUIRED",
     "DISCONNECTED",
+    "ActiveAcousticsPhysicalCampaignUXSnapshot",
+    "Physical Verification Campaign",
+    "One microphone · A → B → A",
+    "NOT YET PERFORMED",
+    "9 TOTAL",
+    "15 TOTAL",
 ):
     require(token in readiness, f"commissioning UX missing {token!r}")
 
@@ -67,6 +73,7 @@ for token in (
     "testNonCausalTimingNeverLooksReady",
     "testConsolidatedDiagnosticsKeepPhysicalGatesSeparate",
     "testConsolidatedDiagnosticsExposeMissingCommissioningRecords",
+    "testPhysicalCampaignPlanPreservesABAAndEvidenceCounts",
 ):
     require(token in tests, f"PR100 XCTest missing {token}")
 
@@ -77,6 +84,7 @@ for phrase in (
     "speaker-connected anc remains disconnected",
     "pr99",
     "diagnostics and blockers",
+    "guided pr99 a → b → a physical campaign",
 ):
     require(phrase in doc, f"PR100 document missing {phrase!r}")
 
