@@ -212,7 +212,7 @@ closure_text = CLOSURE.read_text()
 for token in (
     "REMOTE SOFTWARE COMPLETE",
     "PHYSICAL ACCEPTANCE PENDING",
-    "NO authenticated common-clock provenance",
+    "absent authenticated common-clock provenance",
     "PR105",
     "rollback",
     "full application XCTest regression",
