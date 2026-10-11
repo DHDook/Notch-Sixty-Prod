@@ -20,6 +20,8 @@ README = ROOT / "README.md"
 ROADMAP = ROOT / "docs" / "ROADMAP.md"
 HANDOFF = ROOT / "docs" / "PR102_RELEASE_HANDOFF.md"
 SOFTWARE_CLOSURE = ROOT / "docs" / "PR102_SOFTWARE_CLOSURE.md"
+PR102_WORKFLOW = ROOT / ".github" / "workflows" / "pr102-integration-commercial-release.yml"
+MANIFEST_BUILDER = ROOT / "ci" / "build_pr102_release_candidate_manifest.py"
 LICENSE = ROOT / "LICENSE"
 
 
@@ -49,6 +51,8 @@ for path in (
     ROADMAP,
     HANDOFF,
     SOFTWARE_CLOSURE,
+    PR102_WORKFLOW,
+    MANIFEST_BUILDER,
     LICENSE,
 ):
     require(path.is_file(), f"missing required release artifact: {path.relative_to(ROOT)}")
@@ -66,6 +70,8 @@ readme = README.read_text(encoding="utf-8")
 roadmap = ROADMAP.read_text(encoding="utf-8")
 handoff = HANDOFF.read_text(encoding="utf-8")
 software_closure = SOFTWARE_CLOSURE.read_text(encoding="utf-8")
+pr102_workflow = PR102_WORKFLOW.read_text(encoding="utf-8")
+manifest_builder = MANIFEST_BUILDER.read_text(encoding="utf-8")
 license_text = LICENSE.read_text(encoding="utf-8")
 
 with INFO.open("rb") as handle:
@@ -242,6 +248,20 @@ for token in (
     "speakerConnectedFeedForwardOutput = false",
 ):
     require(token in software_closure, f"software closure contract missing {token!r}")
+
+for token in (
+    "ref: ${{ github.event.pull_request.head.sha || github.sha }}",
+    "PR102_EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}",
+):
+    require(token in pr102_workflow, f"PR102 workflow lost exact-source identity contract {token!r}")
+for token in (
+    'source_commit_sha = subprocess.run(',
+    '["git", "rev-parse", "HEAD"]',
+    'source_commit_sha == expected_head_sha',
+    '"githubSHA": source_commit_sha',
+    '"githubWorkflowTriggerSHA": workflow_trigger_sha',
+):
+    require(token in manifest_builder, f"release-candidate manifest lost source identity check {token!r}")
 
 require("proprietary and confidential" in license_text, "root proprietary license contract changed")
 
