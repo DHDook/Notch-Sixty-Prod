@@ -77,7 +77,7 @@ for inherited in (
 ):
     require(inherited.exists(), f"inherited acceptance artifact missing {inherited.name}")
 
-print("PR101 reliability and acoustic acceptance validation passed")
+
 
 
 for token in (
