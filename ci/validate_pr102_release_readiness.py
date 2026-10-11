@@ -238,8 +238,12 @@ for token in (
     require(token in handoff, f"release handoff missing {token!r}")
 
 for token in (
-    "PENDING EXACT-HEAD CI",
+    "REMOTE SOFTWARE COMPLETE",
     "PR102_REMOTE_RELEASE_CANDIDATE",
+    "b15616e98673ece4dd4c1211a9a7df91b6fddd3b",
+    "38161912746",
+    "11710618910",
+    "691 tests, 0 failures",
     "remoteReleasePreparationAccepted = true",
     "physicalAcceptanceComplete = false",
     "releaseCredentialAcceptanceComplete = false",
