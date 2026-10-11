@@ -218,6 +218,165 @@ final class SpeakerOptimizerMeasurementEvidenceTests: XCTestCase {
         )
     }
 
+
+    func testWholeSpeakerCanReuseExistingTargetedCalibrationTransport() throws {
+        let routePlan = makeRoutePlan()
+        let plan = SpeakerOptimizerMeasurementTransportPlanner().plan(
+            target: .acousticSource(.speaker(.frontLeft)),
+            routePlan: routePlan,
+            multiOutputRouting: nil,
+            speakerDriverProcessing: nil
+        )
+
+        XCTAssertTrue(plan.canStartMeasurement)
+        XCTAssertTrue(plan.usesExistingTargetedCalibrationTransport)
+        XCTAssertTrue(plan.preservesMandatoryProtection)
+        XCTAssertEqual(plan.physicalOutputChannelIndex, 0)
+        XCTAssertNil(plan.blockReason)
+    }
+
+    func testSubwooferCanReuseExistingTargetedCalibrationTransport() throws {
+        let routePlan = makeRoutePlan()
+        let plan = SpeakerOptimizerMeasurementTransportPlanner().plan(
+            target: .acousticSource(.subwoofer(0)),
+            routePlan: routePlan,
+            multiOutputRouting: nil,
+            speakerDriverProcessing: nil
+        )
+
+        XCTAssertTrue(plan.canStartMeasurement)
+        XCTAssertEqual(plan.physicalOutputChannelIndex, 2)
+    }
+
+    func testProtectedDriverBusFailsClosedInsteadOfRawPhysicalSweep() throws {
+        let plan = SpeakerOptimizerMeasurementTransportPlanner().plan(
+            target: .protectedDriverBus(.leftLow),
+            routePlan: makeRoutePlan(),
+            multiOutputRouting: nil,
+            speakerDriverProcessing: nil
+        )
+
+        XCTAssertFalse(plan.canStartMeasurement)
+        XCTAssertFalse(plan.usesExistingTargetedCalibrationTransport)
+        XCTAssertFalse(plan.preservesMandatoryProtection)
+        XCTAssertEqual(
+            plan.blockReason,
+            .protectedDriverPathRequired(.leftLow)
+        )
+    }
+
+    func testActiveSplitDriverRoutingBlocksDirectCalibrationReuse() throws {
+        let routing = MultiOutputRoutingConfiguration(
+            enabled: true,
+            routes: [
+                SpeakerOutputRoute(
+                    name: "Left Low",
+                    bus: .leftLow,
+                    destination: PhysicalOutputEndpoint(
+                        deviceUID: "pr103-output",
+                        channelIndex: 0
+                    )
+                ),
+                SpeakerOutputRoute(
+                    name: "Left High",
+                    bus: .leftHigh,
+                    destination: PhysicalOutputEndpoint(
+                        deviceUID: "pr103-output",
+                        channelIndex: 1
+                    )
+                ),
+            ]
+        )
+        let plan = SpeakerOptimizerMeasurementTransportPlanner().plan(
+            target: .acousticSource(.speaker(.frontLeft)),
+            routePlan: makeRoutePlan(),
+            multiOutputRouting: routing,
+            speakerDriverProcessing: nil
+        )
+
+        XCTAssertFalse(plan.canStartMeasurement)
+        XCTAssertEqual(plan.blockReason, .activeCrossoverRoutingPresent)
+    }
+
+    func testConfiguredDriverLimiterBlocksDirectCalibrationReuse() throws {
+        let protection = SpeakerDriverProcessingConfiguration(
+            buses: [
+                SpeakerDriverBusProcessingConfiguration(
+                    bus: .leftFullRange,
+                    limiterEnabled: true,
+                    limiterThresholdDBFS: -6
+                ),
+            ]
+        )
+        let plan = SpeakerOptimizerMeasurementTransportPlanner().plan(
+            target: .acousticSource(.speaker(.frontLeft)),
+            routePlan: makeRoutePlan(),
+            multiOutputRouting: nil,
+            speakerDriverProcessing: protection
+        )
+
+        XCTAssertFalse(plan.canStartMeasurement)
+        XCTAssertEqual(plan.blockReason, .configuredLimiterWouldBeBypassed)
+    }
+
+    func testUnavailablePhysicalRouteFailsClosed() throws {
+        var routePlan = makeRoutePlan()
+        routePlan = LiveNChannelOutputRoutePlan(
+            programLayout: routePlan.programLayout,
+            orderedDeviceUIDs: routePlan.orderedDeviceUIDs,
+            referenceDeviceUID: routePlan.referenceDeviceUID,
+            physicalChannelCount: routePlan.physicalChannelCount,
+            programPhysicalChannels: [UInt32.max, 1] + Array(
+                repeating: UInt32.max,
+                count: routePlan.programPhysicalChannels.count - 2
+            ),
+            subwooferPhysicalChannels: routePlan.subwooferPhysicalChannels,
+            subwooferCount: routePlan.subwooferCount,
+            bassManagementEnabled: routePlan.bassManagementEnabled,
+            speakerCalibrations: routePlan.speakerCalibrations,
+            subwooferCalibrations: routePlan.subwooferCalibrations
+        )
+
+        let plan = SpeakerOptimizerMeasurementTransportPlanner().plan(
+            target: .acousticSource(.speaker(.frontLeft)),
+            routePlan: routePlan,
+            multiOutputRouting: nil,
+            speakerDriverProcessing: nil
+        )
+
+        XCTAssertFalse(plan.canStartMeasurement)
+        XCTAssertNotNil(plan.blockReason)
+    }
+
+    private func makeRoutePlan() -> LiveNChannelOutputRoutePlan {
+        var program = Array(
+            repeating: UInt32.max,
+            count: Int(N60_MAX_PROGRAM_CHANNELS)
+        )
+        program[0] = 0
+        program[1] = 1
+        var subs = Array(
+            repeating: UInt32.max,
+            count: Int(N60_MAX_SUBWOOFER_OUTPUTS)
+        )
+        subs[0] = 2
+        return LiveNChannelOutputRoutePlan(
+            programLayout: .stereo,
+            orderedDeviceUIDs: ["pr103-output"],
+            referenceDeviceUID: "pr103-output",
+            physicalChannelCount: 3,
+            programPhysicalChannels: program,
+            subwooferPhysicalChannels: subs,
+            subwooferCount: 1,
+            bassManagementEnabled: true,
+            speakerCalibrations: [:],
+            subwooferCalibrations: Array(
+                repeating: nil,
+                count: Int(N60_MAX_SUBWOOFER_OUTPUTS)
+            )
+        )
+    }
+
     private func makeSet(
         role: SpeakerOptimizerMeasurementRole = .baseline,
         captures: [SpeakerOptimizerMeasurementCapture]
