@@ -644,3 +644,161 @@ struct FullSystemReliabilityAcceptanceEvaluator: Sendable {
         return FullSystemReliabilityAcceptanceReport(items: items)
     }
 }
+
+
+enum FullSystemLifecycleRecoveryCampaignError: Error, Equatable, Sendable {
+    case invalidIterationCount
+    case unsupportedEvidenceAuthority
+}
+
+struct FullSystemLifecycleRecoveryCampaignResult: Equatable, Sendable {
+    let completedIterations: Int
+    let acceptedTransitionCount: UInt64
+    let injectedFaultCount: UInt64
+    let recoveredFaultCount: UInt64
+    let rejectedInvalidTransitionCount: UInt64
+    let unexpectedAcceptedTransitionCount: UInt64
+    let unrecoveredFaultCount: UInt64
+
+    var passed: Bool {
+        completedIterations > 0
+            && injectedFaultCount == recoveredFaultCount
+            && rejectedInvalidTransitionCount
+                == UInt64(completedIterations)
+            && unexpectedAcceptedTransitionCount == 0
+            && unrecoveredFaultCount == 0
+    }
+
+    func observation(
+        evidence: FullSystemReliabilityEvidenceAuthority
+    ) throws -> FullSystemReliabilityObservation {
+        guard evidence == .deterministicSimulation
+                || evidence == .macOSCI else {
+            throw FullSystemLifecycleRecoveryCampaignError
+                .unsupportedEvidenceAuthority
+        }
+        return FullSystemReliabilityObservation(
+            requirementID: .lifecycleRecoveryModel,
+            evidence: evidence,
+            completedIterations: completedIterations,
+            injectedFaults: injectedFaultCount,
+            unexpectedDropouts: 0,
+            nonFiniteSamples: 0,
+            unrecoveredFaults:
+                unrecoveredFaultCount + unexpectedAcceptedTransitionCount,
+            crashes: 0
+        )
+    }
+}
+
+struct FullSystemLifecycleRecoveryCampaign: Sendable {
+    static let faultInjectionStates: [AudioLifecycleState] = [
+        .requestingPermission,
+        .creatingTap,
+        .creatingAggregate,
+        .openingOutput,
+        .starting,
+        .running,
+        .reconfiguring,
+        .recoveringOutput,
+        .stopping,
+    ]
+
+    func run(
+        iterations: Int
+    ) throws -> FullSystemLifecycleRecoveryCampaignResult {
+        guard iterations > 0 else {
+            throw FullSystemLifecycleRecoveryCampaignError
+                .invalidIterationCount
+        }
+
+        var acceptedTransitions: UInt64 = 0
+        var injectedFaults: UInt64 = 0
+        var recoveredFaults: UInt64 = 0
+        var rejectedInvalidTransitions: UInt64 = 0
+        var unexpectedAcceptedTransitions: UInt64 = 0
+        var unrecoveredFaults: UInt64 = 0
+
+        func transition(
+            _ machine: inout AudioLifecycleStateMachine,
+            _ next: AudioLifecycleState
+        ) -> Bool {
+            do {
+                try machine.transition(to: next)
+                acceptedTransitions += 1
+                return true
+            } catch {
+                unrecoveredFaults += 1
+                return false
+            }
+        }
+
+        for _ in 0..<iterations {
+            var nominal = AudioLifecycleStateMachine()
+            let nominalPath: [AudioLifecycleState] = [
+                .requestingPermission,
+                .creatingTap,
+                .creatingAggregate,
+                .openingOutput,
+                .starting,
+                .running,
+                .reconfiguring,
+                .running,
+                .recoveringOutput,
+                .reconfiguring,
+                .recoveringOutput,
+                .running,
+                .stopping,
+                .idle,
+            ]
+            var nominalHealthy = true
+            for state in nominalPath {
+                if !transition(&nominal, state) {
+                    nominalHealthy = false
+                    break
+                }
+            }
+            if nominalHealthy, nominal.state != .idle {
+                unrecoveredFaults += 1
+            }
+
+            for state in Self.faultInjectionStates {
+                injectedFaults += 1
+                var machine = AudioLifecycleStateMachine(
+                    initialState: state
+                )
+                guard transition(&machine, .failed),
+                      transition(&machine, .stopping),
+                      transition(&machine, .idle),
+                      machine.state == .idle else {
+                    unrecoveredFaults += 1
+                    continue
+                }
+                recoveredFaults += 1
+            }
+
+            var invalid = AudioLifecycleStateMachine()
+            do {
+                try invalid.transition(to: .running)
+                unexpectedAcceptedTransitions += 1
+            } catch {
+                if invalid.state == .idle {
+                    rejectedInvalidTransitions += 1
+                } else {
+                    unrecoveredFaults += 1
+                }
+            }
+        }
+
+        return FullSystemLifecycleRecoveryCampaignResult(
+            completedIterations: iterations,
+            acceptedTransitionCount: acceptedTransitions,
+            injectedFaultCount: injectedFaults,
+            recoveredFaultCount: recoveredFaults,
+            rejectedInvalidTransitionCount: rejectedInvalidTransitions,
+            unexpectedAcceptedTransitionCount:
+                unexpectedAcceptedTransitions,
+            unrecoveredFaultCount: unrecoveredFaults
+        )
+    }
+}
