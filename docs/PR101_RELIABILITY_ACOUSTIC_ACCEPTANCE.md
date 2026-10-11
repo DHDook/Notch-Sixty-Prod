@@ -316,3 +316,67 @@ accepted at **macOS CI** authority. It still cannot establish prolonged thermal
 behavior on a production Mac, real device unplug/replug, sleep/wake recovery,
 speaker safety, physical acoustic acceptance, or live feed-forward ANC
 authorization. Those hardware-only requirements remain unchanged.
+
+
+## Slice 6 — Remote software acceptance closure
+
+The final remote PR101 slice converts the separate campaign outputs into one
+fail-closed acceptance verdict.
+
+The macOS CI job creates success markers only after the following operations
+complete in the same job:
+
+- deterministic full-system reliability campaign;
+- arm64 application build;
+- Release performance build;
+- targeted PR101 lifecycle/runtime tests; and
+- the complete application XCTest regression.
+
+The closure builder also consumes the Slice 4 performance baseline and Slice 5
+same-process resource/dropout soak. Missing files, missing success markers,
+unexpected campaign identities, failed deterministic scenarios, nonzero
+unexpected dropouts, non-finite samples, unrecovered faults, retained-heap
+growth, or an altered physical/release claim abort the closure.
+
+The ten remote requirements are then represented explicitly:
+
+1. stereo transport;
+2. semantic multichannel transport;
+3. headphone/spatial runtime;
+4. Audio Unit fault containment;
+5. Room Treatment fail-closed runtime;
+6. Active Acoustics fail-closed runtime;
+7. lifecycle recovery;
+8. cumulative DSP correctness regression;
+9. resource stability; and
+10. dropout/fault recovery.
+
+The first six remain deterministic scenarios at their source, but the closure
+only promotes them to **macOS CI evidence** because those same scenarios passed
+inside the macOS closure job. Lifecycle acceptance requires the targeted PR101
+test marker. DSP correctness requires the full XCTest marker. Resource and
+dropout acceptance require the same-process soak booleans and zero failure
+signals.
+
+The generated report may set `remoteSoftwareAccepted = true` only when all ten
+remote requirements are present and passed.
+
+The five hardware-only requirements are emitted separately and permanently
+remain `hardwareRequired` in remote CI:
+
+- real device unplug/replug recovery;
+- real sleep/wake recovery;
+- prolonged production-Mac thermal/endurance behavior;
+- speaker protection/emergency hardware mute; and
+- physical acoustic acceptance.
+
+The closure report also hard-codes:
+
+- `physicalAcceptanceComplete = false`;
+- `releaseAcceptanceComplete = false`;
+- `liveFeedForwardANCOutputAuthorized = false`; and
+- `speakerConnectedFeedForwardOutput = false`.
+
+SHA-256 hashes bind the closure to its source JSON evidence, but those hashes
+are integrity evidence only. They do not authenticate physical instruments,
+reviewers, acoustics, or hardware behavior.
