@@ -722,4 +722,290 @@ final class ProductionAnalysisTests: XCTestCase {
         XCTAssertEqual(right, [0, 0, 0, 0])
     }
 
+
+    func testPR101AcceptanceCatalogSeparatesRemoteAndHardwareRequirements() {
+        let all = FullSystemReliabilityRequirementCatalog.standard
+
+        XCTAssertEqual(all.count, FullSystemReliabilityRequirementID.allCases.count)
+        XCTAssertFalse(FullSystemReliabilityRequirementCatalog.remoteRequirementIDs.isEmpty)
+        XCTAssertEqual(
+            FullSystemReliabilityRequirementCatalog.hardwareRequirementIDs,
+            Set([
+                .physicalDeviceRecovery,
+                .sleepWakeRecovery,
+                .prolongedThermalRuntime,
+                .speakerSafety,
+                .acousticAcceptance,
+            ])
+        )
+        XCTAssertTrue(
+            all.filter(\.hardwareOnly).allSatisfy {
+                $0.minimumEvidence == .physicalHardware
+                    || $0.minimumEvidence == .independentPhysicalReview
+            }
+        )
+    }
+
+    func testPR101RemoteSoftwareCanPassWithoutClaimingPhysicalAcceptance() throws {
+        let observations = FullSystemReliabilityRequirementCatalog.standard
+            .filter { !$0.hardwareOnly }
+            .map {
+                FullSystemReliabilityObservation(
+                    requirementID: $0.id,
+                    evidence: $0.minimumEvidence,
+                    completedIterations: 100,
+                    injectedFaults:
+                        $0.id == .dropoutRecoveryStress ? 25 : 0
+                )
+            }
+
+        let report = try FullSystemReliabilityAcceptanceEvaluator()
+            .review(observations: observations)
+
+        XCTAssertTrue(report.remoteSoftwareAccepted)
+        XCTAssertFalse(report.physicalAcceptanceComplete)
+        XCTAssertFalse(report.releaseAcceptanceComplete)
+        XCTAssertEqual(
+            report.hardwarePendingCount,
+            FullSystemReliabilityRequirementCatalog.hardwareRequirementIDs.count
+        )
+        XCTAssertEqual(report.failedCount, 0)
+    }
+
+    func testPR101SyntheticEvidenceCannotSatisfyPhysicalSafetyOrAcoustics() throws {
+        let observations: [FullSystemReliabilityObservation] = [
+            .init(
+                requirementID: .speakerSafety,
+                evidence: .macOSCI,
+                completedIterations: 10_000
+            ),
+            .init(
+                requirementID: .acousticAcceptance,
+                evidence: .deterministicSimulation,
+                completedIterations: 10_000
+            ),
+        ]
+
+        let report = try FullSystemReliabilityAcceptanceEvaluator()
+            .review(observations: observations)
+
+        XCTAssertEqual(
+            report.items.first {
+                $0.requirement.id == .speakerSafety
+            }?.status,
+            .hardwareRequired
+        )
+        XCTAssertEqual(
+            report.items.first {
+                $0.requirement.id == .acousticAcceptance
+            }?.status,
+            .hardwareRequired
+        )
+        XCTAssertFalse(report.physicalAcceptanceComplete)
+        XCTAssertFalse(report.releaseAcceptanceComplete)
+    }
+
+    func testPR101FailureSignalsFailEvenStrongEvidence() throws {
+        let observation = FullSystemReliabilityObservation(
+            requirementID: .audioUnitFaultContainment,
+            evidence: .macOSCI,
+            completedIterations: 500,
+            injectedFaults: 50,
+            unexpectedDropouts: 1
+        )
+
+        let report = try FullSystemReliabilityAcceptanceEvaluator()
+            .review(observations: [observation])
+
+        XCTAssertEqual(
+            report.items.first {
+                $0.requirement.id == .audioUnitFaultContainment
+            }?.status,
+            .failed
+        )
+        XCTAssertEqual(report.failedCount, 1)
+        XCTAssertFalse(report.remoteSoftwareAccepted)
+    }
+
+    func testPR101InjectedFaultsAreAllowedWhenEveryFaultRecovers() throws {
+        let observation = FullSystemReliabilityObservation(
+            requirementID: .dropoutRecoveryStress,
+            evidence: .macOSCI,
+            completedIterations: 1_000,
+            injectedFaults: 250,
+            unexpectedDropouts: 0,
+            nonFiniteSamples: 0,
+            unrecoveredFaults: 0,
+            crashes: 0
+        )
+
+        let report = try FullSystemReliabilityAcceptanceEvaluator()
+            .review(observations: [observation])
+
+        XCTAssertEqual(
+            report.items.first {
+                $0.requirement.id == .dropoutRecoveryStress
+            }?.status,
+            .passed
+        )
+    }
+
+    func testPR101RejectsDuplicateRunIDsAndInvalidResourceTelemetry() throws {
+        let runID = UUID()
+        let first = FullSystemReliabilityObservation(
+            requirementID: .stereoTransport,
+            runID: runID,
+            evidence: .macOSCI,
+            completedIterations: 10
+        )
+        let duplicate = FullSystemReliabilityObservation(
+            requirementID: .semanticMultichannel,
+            runID: runID,
+            evidence: .macOSCI,
+            completedIterations: 10
+        )
+        XCTAssertThrowsError(
+            try FullSystemReliabilityAcceptanceEvaluator()
+                .review(observations: [first, duplicate])
+        ) {
+            XCTAssertEqual(
+                $0 as? FullSystemReliabilityAcceptanceError,
+                .duplicateRunID(runID)
+            )
+        }
+
+        let invalid = FullSystemReliabilityObservation(
+            requirementID: .resourceStability,
+            evidence: .macOSCI,
+            completedIterations: 10,
+            peakProcessCPUPercent: .nan
+        )
+        XCTAssertThrowsError(
+            try FullSystemReliabilityAcceptanceEvaluator()
+                .review(observations: [invalid])
+        ) {
+            XCTAssertEqual(
+                $0 as? FullSystemReliabilityAcceptanceError,
+                .invalidObservation(.resourceStability)
+            )
+        }
+    }
+
+
+    func testPR101LifecycleRecoveryCampaignSurvivesRepeatedFaultInjection()
+        throws {
+        let iterations = 5_000
+        let result = try FullSystemLifecycleRecoveryCampaign()
+            .run(iterations: iterations)
+
+        XCTAssertTrue(result.passed)
+        XCTAssertEqual(result.completedIterations, iterations)
+        XCTAssertEqual(
+            result.injectedFaultCount,
+            UInt64(
+                iterations
+                    * FullSystemLifecycleRecoveryCampaign
+                        .faultInjectionStates.count
+            )
+        )
+        XCTAssertEqual(
+            result.recoveredFaultCount,
+            result.injectedFaultCount
+        )
+        XCTAssertEqual(
+            result.rejectedInvalidTransitionCount,
+            UInt64(iterations)
+        )
+        XCTAssertEqual(result.unexpectedAcceptedTransitionCount, 0)
+        XCTAssertEqual(result.unrecoveredFaultCount, 0)
+
+        let observation = try result.observation(evidence: .macOSCI)
+        let report = try FullSystemReliabilityAcceptanceEvaluator()
+            .review(observations: [observation])
+
+        XCTAssertEqual(
+            report.items.first {
+                $0.requirement.id == .lifecycleRecoveryModel
+            }?.status,
+            .passed
+        )
+        XCTAssertFalse(
+            report.items.first {
+                $0.requirement.id == .physicalDeviceRecovery
+            }?.status == .passed
+        )
+        XCTAssertFalse(report.physicalAcceptanceComplete)
+        XCTAssertFalse(report.releaseAcceptanceComplete)
+    }
+
+    func testPR101LifecycleCampaignCannotSelfPromoteToHardwareEvidence()
+        throws {
+        let result = try FullSystemLifecycleRecoveryCampaign()
+            .run(iterations: 10)
+
+        XCTAssertThrowsError(
+            try result.observation(evidence: .physicalHardware)
+        ) {
+            XCTAssertEqual(
+                $0 as? FullSystemLifecycleRecoveryCampaignError,
+                .unsupportedEvidenceAuthority
+            )
+        }
+        XCTAssertThrowsError(
+            try result.observation(
+                evidence: .independentPhysicalReview
+            )
+        ) {
+            XCTAssertEqual(
+                $0 as? FullSystemLifecycleRecoveryCampaignError,
+                .unsupportedEvidenceAuthority
+            )
+        }
+    }
+
+
+    func testPR101RemoteClosureModelPassesTenRemoteRequirementsOnly()
+        throws {
+        let remoteRequirements = FullSystemReliabilityRequirementCatalog
+            .standard
+            .filter { !$0.hardwareOnly }
+
+        XCTAssertEqual(remoteRequirements.count, 10)
+        XCTAssertEqual(
+            FullSystemReliabilityRequirementCatalog
+                .hardwareRequirementIDs.count,
+            5
+        )
+
+        let observations = remoteRequirements.map {
+            FullSystemReliabilityObservation(
+                requirementID: $0.id,
+                evidence: .macOSCI,
+                completedIterations: 1,
+                injectedFaults:
+                    $0.id == .dropoutRecoveryStress ? 512 : 0
+            )
+        }
+
+        let report = try FullSystemReliabilityAcceptanceEvaluator()
+            .review(observations: observations)
+
+        XCTAssertTrue(report.remoteSoftwareAccepted)
+        XCTAssertFalse(report.physicalAcceptanceComplete)
+        XCTAssertFalse(report.releaseAcceptanceComplete)
+        XCTAssertEqual(report.hardwarePendingCount, 5)
+        XCTAssertEqual(report.failedCount, 0)
+
+        for requirementID
+            in FullSystemReliabilityRequirementCatalog
+                .hardwareRequirementIDs {
+            XCTAssertEqual(
+                report.items.first {
+                    $0.requirement.id == requirementID
+                }?.status,
+                .hardwareRequired
+            )
+        }
+    }
+
 }

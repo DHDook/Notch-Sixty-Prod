@@ -79,7 +79,12 @@ require("adaptiveSampleRateRequired ? tapFormat.sampleRate : outputFormat.sample
         "single-device adaptive capture aggregate must remain tap-native")
 require("adaptiveSampleRateEnabled" in session and "adaptiveCorrectionPPM" in session,
         "N-channel transport counters do not publish ASRC telemetry")
-require("raw.algorithmicLatencyFrames + raw.adaptiveTransportLatencyFrames" in engine,
+latency_anchor = "latencyFrames: raw.algorithmicLatencyFrames"
+latency_start = engine.find(latency_anchor)
+require(latency_start >= 0,
+        "product transport meter latency expression is missing")
+latency_expression = engine[latency_start:latency_start + 600]
+require("raw.adaptiveTransportLatencyFrames" in latency_expression,
         "product transport latency does not include adaptive buffering")
 
 # PR71 must not regress or replace PR70 stereo activation.

@@ -2183,4 +2183,78 @@ extension NotchSixtyTests {
         XCTAssertNil(system.speakerDriverProcessing)
     }
 
+
+    @MainActor
+    func testPR101StableUIDDeviceRecoverySoakRemainsSoftwareEvidence()
+        throws {
+        let stableUID = "pr101-stable-output"
+        let catalog = StubOutputDeviceCatalog(
+            devices: [
+                makeDevice(
+                    deviceID: 20,
+                    uid: stableUID,
+                    name: "PR101 Output"
+                )
+            ]
+        )
+        let engine = AudioIOEngine(deviceCatalog: catalog)
+        try engine.refreshOutputDevices()
+        try engine.selectOutput(uid: stableUID)
+
+        let iterations = 250
+        for iteration in 0..<iterations {
+            catalog.devices = []
+            try engine.refreshOutputDevices()
+            XCTAssertEqual(
+                engine.routeConfiguration.selectedOutputUID,
+                stableUID
+            )
+            XCTAssertNil(engine.selectedOutputDevice)
+            XCTAssertFalse(
+                engine.diagnosticsSnapshot().selectedOutputPresent
+            )
+
+            let replacementID = AudioDeviceID(1_000 + iteration)
+            catalog.devices = [
+                makeDevice(
+                    deviceID: replacementID,
+                    uid: stableUID,
+                    name: "PR101 Output"
+                )
+            ]
+            try engine.refreshOutputDevices()
+            XCTAssertEqual(
+                engine.routeConfiguration.selectedOutputUID,
+                stableUID
+            )
+            XCTAssertEqual(
+                engine.selectedOutputDevice?.deviceID,
+                replacementID
+            )
+        }
+
+        let softwareObservation = FullSystemReliabilityObservation(
+            requirementID: .lifecycleRecoveryModel,
+            evidence: .macOSCI,
+            completedIterations: iterations
+        )
+        let report = try FullSystemReliabilityAcceptanceEvaluator()
+            .review(observations: [softwareObservation])
+
+        XCTAssertEqual(
+            report.items.first {
+                $0.requirement.id == .lifecycleRecoveryModel
+            }?.status,
+            .passed
+        )
+        XCTAssertEqual(
+            report.items.first {
+                $0.requirement.id == .physicalDeviceRecovery
+            }?.status,
+            .hardwareRequired
+        )
+        XCTAssertFalse(report.physicalAcceptanceComplete)
+        XCTAssertFalse(report.releaseAcceptanceComplete)
+    }
+
 }

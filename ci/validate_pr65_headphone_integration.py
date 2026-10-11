@@ -25,7 +25,15 @@ build_stereo_start = engine.index("private func buildStereoTransport")
 build_stereo_end = engine.index("private func tearDownTransport", build_stereo_start)
 build_stereo = engine[build_stereo_start:build_stereo_end]
 
-process_start = render_c.index("void N60RenderKernelProcessStereoFrameInContext")
+# PR65 originally used one monolithic stereo-frame processor. Later stacked
+# work split playback/content processing from system/output processing while
+# retaining the same headphone-before-protection contract. Inspect the system
+# stage when present, otherwise fall back to the original PR65 function.
+system_signature = "void N60RenderKernelProcessStereoSystemFrameInContext"
+if system_signature in render_c:
+    process_start = render_c.index(system_signature)
+else:
+    process_start = render_c.index("void N60RenderKernelProcessStereoFrameInContext")
 process_end = render_c.index("void N60RenderKernelEndRender", process_start)
 process_body = render_c[process_start:process_end]
 
@@ -40,6 +48,10 @@ binaural_render_call = (
     else "N60BinauralRendererProcessFrame"
 )
 
+# PR65 originally established a normalized asset boundary and rejected native
+# SOFA parsing. PR85 later added reviewed native AES69/SOFA import into that
+# same normalized boundary. Validate the cumulative contract rather than the
+# obsolete parser-unavailable sentinel.
 checks = {
     "headphone profile target member": "HeadphoneDeviceProfileConfiguration.swift in Sources" in pbx,
     "binaural asset target member": "BinauralProfileAsset.swift in Sources" in pbx,
@@ -71,10 +83,15 @@ checks = {
     "semantic source layout never guessed": "resolveInputChannelDescriptions" in binaural_session and "programLayoutMismatch" in binaural_session,
     "native-rate only": "sampleRateMismatch(source:" in binaural_session,
     "binaural bridge pipeline order": binaural_output.index(binaural_render_call) < binaural_output.index("N60HeadphoneDSPProcessStereoFrame") < binaural_output.index("N60ProtectionProcessStereoFrame"),
-    "content gain upstream of renderer": binaural_output.index("program.channels[channel] *= bridge->programGainLinear") < binaural_output.index(binaural_render_call),
+    "content gain upstream of renderer": binaural_output.index("bridge->programGainLinear") < binaural_output.index(binaural_render_call),
     "crossfeed bypassed for virtual speakers": "spatialMode == .stereo && crossfeed.preset != .off" in profile,
     "normalized asset boundary": "struct BinauralProfileAsset" in asset and "measurements: [BinauralMeasurement]" in asset,
-    "native sofa not mislabeled": "nativeSOFAParserUnavailable" in asset and 'pathExtension.lowercased() == "sofa"' in asset,
+    "native sofa import boundary": (
+        'pathExtension.lowercased() == "sofa"' in asset
+        and "NativeSOFAImporter()" in asset
+        and "SOFABinauralAssetAdapter()" in asset
+        and "importProvenance: SOFAImportProvenance?" in asset
+    ),
     "crossfeed profile exposed": "HeadphoneCrossfeedConfiguration" in profile,
     "headroom guard exposed": "conservativeRequiredHeadroomDB" in profile and "insufficientHeadroom" in profile,
 }
