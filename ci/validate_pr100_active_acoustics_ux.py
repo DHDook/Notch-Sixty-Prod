@@ -37,8 +37,8 @@ for token in (
     "Physical Verification Campaign",
     "One microphone · A → B → A",
     "NOT YET PERFORMED",
-    "9 TOTAL",
-    "15 TOTAL",
+    "totalSourceCaptures",
+    "totalFaultWitnesses",
 ):
     require(token in readiness, f"commissioning UX missing {token!r}")
 
