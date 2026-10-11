@@ -4,6 +4,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DIAG = ROOT / "NotchSixty/Diagnostics/AudioDiagnosticsSnapshot.swift"
 TESTS = ROOT / "NotchSixtyTests/ProductionAnalysisTests.swift"
+NOTCH_TESTS = ROOT / "NotchSixtyTests/NotchSixtyTests.swift"
 DOC = ROOT / "docs/PR101_RELIABILITY_ACOUSTIC_ACCEPTANCE.md"
 CAMPAIGN = ROOT / "ci/run_pr101_remote_reliability_campaign.py"
 WORKFLOW = ROOT / ".github/workflows/pr101-reliability-acoustic-acceptance.yml"
@@ -16,6 +17,7 @@ def require(condition: bool, message: str) -> None:
 
 diag = DIAG.read_text()
 tests = TESTS.read_text()
+notch_tests = NOTCH_TESTS.read_text()
 doc = DOC.read_text().lower()
 campaign = CAMPAIGN.read_text()
 workflow = WORKFLOW.read_text()
@@ -34,6 +36,9 @@ for token in (
     "speakerSafety",
     "acousticAcceptance",
     "minimumEvidence: .independentPhysicalReview",
+    "FullSystemLifecycleRecoveryCampaign",
+    "unsupportedEvidenceAuthority",
+    "faultInjectionStates",
 ):
     require(token in diag, f"acceptance framework missing {token!r}")
 
@@ -55,8 +60,16 @@ for token in (
     "testPR101FailureSignalsFailEvenStrongEvidence",
     "testPR101InjectedFaultsAreAllowedWhenEveryFaultRecovers",
     "testPR101RejectsDuplicateRunIDsAndInvalidResourceTelemetry",
+    "testPR101LifecycleRecoveryCampaignSurvivesRepeatedFaultInjection",
+    "testPR101LifecycleCampaignCannotSelfPromoteToHardwareEvidence",
 ):
     require(token in tests, f"PR101 XCTest missing {token}")
+
+require(
+    "testPR101StableUIDDeviceRecoverySoakRemainsSoftwareEvidence"
+        in notch_tests,
+    "stable-UID recovery soak test missing",
+)
 
 for phrase in (
     "full-system reliability",
@@ -66,6 +79,8 @@ for phrase in (
     "independent physical review",
     "hardware-only requirements",
     "release acceptance remains false",
+    "lifecycle recovery soak",
+    "stable-uid",
 ):
     require(phrase in doc, f"PR101 documentation missing {phrase!r}")
 
@@ -105,6 +120,7 @@ for token in (
     "LiveMIMORoomTreatmentIntegrationTests",
     "QuietZoneFeedForwardClockMonitorTests",
     "QuietZoneNativeShadowTimingTransportTests",
+    "testPR101StableUIDDeviceRecoverySoakRemainsSoftwareEvidence",
 ):
     require(token in workflow, f"PR101 workflow missing {token!r}")
 
