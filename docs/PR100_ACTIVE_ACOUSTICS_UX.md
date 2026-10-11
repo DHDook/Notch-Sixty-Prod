@@ -201,3 +201,17 @@ or instrument attestation.
 
 No provenance field, digest, or reviewer acknowledgement can authorize live
 ANC output.
+
+
+## Remote software status after Slice 6
+
+The remotely implementable PR100 UX architecture is now substantially complete.
+The operator can see calibration progress, causal-timing blockers, the future
+A → B → A commissioning sequence, digest-valid physical evidence, spectral and
+seat results, and the evidence provenance/review chain without any UI path
+claiming hardware authorization.
+
+What cannot be populated remotely is the genuine physical evidence itself:
+actual instrumented captures, real fault-shutdown measurements, authenticated
+provenance, physical attenuation verification, and any eventual live-output
+authorization. Those remain hardware-gated by PR99 and later acceptance work.
