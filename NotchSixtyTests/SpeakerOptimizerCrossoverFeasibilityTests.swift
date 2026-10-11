@@ -101,6 +101,88 @@ final class SpeakerOptimizerCrossoverFeasibilityTests: XCTestCase {
         XCTAssertFalse(result.canDeploy)
     }
 
+
+    func testClockOffsetUncertaintySensitivityIsPreviewOnlyAndUnauthenticated() throws {
+        let baseline = makeBaseline()
+        var sensitivity = SpeakerOptimizerPhaseReferenceSensitivityOptions()
+        sensitivity.maximumUnknownClockOffsetMs = 0.25
+        let report = try SpeakerOptimizerCrossoverFeasibilityDesigner()
+            .auditUnknownClockOffsetSensitivity(
+                baseline: baseline, speaker: main, subwoofer: sub,
+                sensitivity: sensitivity
+            )
+        XCTAssertEqual(report.measurementSetID, baseline.id)
+        XCTAssertEqual(report.routingSignature, baseline.routingSignature)
+        XCTAssertEqual(report.microphone, baseline.microphone)
+        XCTAssertEqual(report.testedOffsets.count, sensitivity.sampleCount)
+        XCTAssertEqual(report.testedOffsets.first?.assumedSubClockOffsetMs, -0.25)
+        XCTAssertEqual(report.testedOffsets.last?.assumedSubClockOffsetMs, 0.25)
+        XCTAssertTrue(report.previewOnly)
+        XCTAssertFalse(report.canDeploy)
+        XCTAssertFalse(report.crossSourceClockProvenanceAuthenticated)
+        XCTAssertTrue(report.requiresSynchronizedReferenceCapture)
+        XCTAssertFalse(report.isMeasuredVerification)
+        XCTAssertTrue(report.warnings.contains { $0.contains("NOT a measured bound") })
+    }
+
+    func testWideClockUncertaintyCanRejectOtherwiseAttractiveCrossoverHypothesis() throws {
+        let baseline = makeBaseline()
+        var sensitivity = SpeakerOptimizerPhaseReferenceSensitivityOptions()
+        sensitivity.maximumUnknownClockOffsetMs = 8.0
+        let report = try SpeakerOptimizerCrossoverFeasibilityDesigner()
+            .auditUnknownClockOffsetSensitivity(
+                baseline: baseline, speaker: main, subwoofer: sub,
+                sensitivity: sensitivity
+            )
+        XCTAssertFalse(report.survivesAssumedTimingUncertaintyForVisualPreview)
+        XCTAssertFalse(report.blockingReasons.isEmpty)
+        XCTAssertEqual(report.testedOffsets.count, 9)
+        XCTAssertFalse(report.canDeploy)
+    }
+
+    func testClockAuditRejectsUnqualifiedDataOrInvalidUncertainty() throws {
+        var baseline = makeBaseline()
+        baseline.role = .verification
+        XCTAssertThrowsError(
+            try SpeakerOptimizerCrossoverFeasibilityDesigner()
+                .auditUnknownClockOffsetSensitivity(
+                    baseline: baseline, speaker: main, subwoofer: sub
+                )
+        )
+        var limits = SpeakerOptimizerPhaseReferenceSensitivityOptions()
+        limits.maximumUnknownClockOffsetMs = 0
+        XCTAssertThrowsError(
+            try SpeakerOptimizerCrossoverFeasibilityDesigner()
+                .auditUnknownClockOffsetSensitivity(
+                    baseline: makeBaseline(), speaker: main, subwoofer: sub,
+                    sensitivity: limits
+                )
+        ) {
+            XCTAssertEqual($0 as? SpeakerOptimizerCrossoverError, .invalidOptions)
+        }
+        limits.maximumUnknownClockOffsetMs = 2
+        limits.sampleCount = 8
+        XCTAssertThrowsError(
+            try SpeakerOptimizerCrossoverFeasibilityDesigner()
+                .auditUnknownClockOffsetSensitivity(
+                    baseline: makeBaseline(), speaker: main, subwoofer: sub,
+                    sensitivity: limits
+                )
+        )
+    }
+
+    func testClockAuditNeverMutatesBaselineOrAllowsApply() throws {
+        let baseline = makeBaseline()
+        let original = baseline
+        let report = try SpeakerOptimizerCrossoverFeasibilityDesigner()
+            .auditUnknownClockOffsetSensitivity(
+                baseline: baseline, speaker: main, subwoofer: sub
+            )
+        XCTAssertEqual(baseline, original)
+        XCTAssertEqual(report.playbackSystemID, baseline.playbackSystemID)
+        XCTAssertFalse(report.canDeploy)
+    }
+
     private func makeBaseline(subArrival: Double = 0.013) -> SpeakerOptimizerMeasurementSet {
         let system = UUID(uuidString: "E6666666-AAAA-BBBB-CCCC-DDDDDDDDDDDD")!
         let seats = [

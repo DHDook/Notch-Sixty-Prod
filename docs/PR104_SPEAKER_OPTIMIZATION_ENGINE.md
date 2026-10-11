@@ -107,3 +107,13 @@ Next: measured-source multi-channel/subwoofer feasibility, phase/timing boundari
 - Provide side-by-side A/B correction curves, an optional per-frequency difference curve, and separate predicted target errors. **No live-audio switching or coefficient loading.**
 - The existing cross-source speaker/subwoofer analyzer can be invoked as its own isolated baseline-versus-hypothesis diagnostic: comparison does not mix a coherent-sum energy objective with single-source magnitude-RMSE scores.
 - Cross-source phase/sweep reference authentication is absent from the persisted PR103 schema. Diagnostic rankings remain conditional and cannot be applied. Room measurements and user approval remain necessary in PR105.
+
+
+## Slice 6 — Missing common-clock origin sensitivity (software guard)
+
+- PR103 compact schema v1 does **not** store an independently authenticated common source-sweep clock reference. Synchronized microphone, sweep generation, playback latency, and loopback timing cannot be proven from a shared mic UID and route signature.
+- Adds \`auditUnknownClockOffsetSensitivity\` for an already qualified mains/sub hypothesis. It recomputes PR103 readiness, and it evaluates both baseline and candidate using the **same assumed** unknown source-clock offset at each sensitivity sample.
+- Sweep assumes a bounded sub-to-main clock-origin uncertainty (default ±2 ms, configurable 0.125–8 ms, odd sample count); the interval is a **hypothetical stress test** and not an error bar measured from capture evidence.
+- Fail closed for aggregate worst-case loss, any listening-seat loss beyond tolerance, or any modeled relative summed-level violation. A candidate may pass the assumptions only for visual exploration.
+- Never identify the result as "clock authenticated", physically verified, live switchable or deployable: \`crossSourceClockProvenanceAuthenticated == false\`, \`requiresSynchronizedReferenceCapture == true\` and \`canDeploy == false\`.
+- An offset sweep cannot replace true clock-origin provenance. PR105 requires a new capture pipeline with independently validated common hardware reference and real microphone verification before any timing or polarity change.

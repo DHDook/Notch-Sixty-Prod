@@ -75,6 +75,67 @@ struct SpeakerOptimizerCrossoverFeasibility: Equatable, Sendable {
     var requiresIndependentHeadroomAndLimiterAudit: Bool { true }
 }
 
+
+/// PR104 Slice 6: bounded sensitivity test for a missing shared sweep-clock
+/// reference. V1 microphone captures do not record authenticated clock-origin
+/// provenance across separately excited sources. The offset range is an
+/// ASSUMPTION supplied for visual stress-testing, not a confidence interval.
+struct SpeakerOptimizerPhaseReferenceSensitivityOptions: Equatable, Sendable {
+    var maximumUnknownClockOffsetMs = 2.0
+    var sampleCount = 9
+    var minimumWorstCaseImprovementDB = 0.15
+    var maximumWorstSeatRegressionDB = 1.0
+    var maximumSummedAboveStrongestSourceDB = 6.5
+
+    func valid() -> Bool {
+        maximumUnknownClockOffsetMs.isFinite
+            && (0.125...8.0).contains(maximumUnknownClockOffsetMs)
+            && (3...33).contains(sampleCount) && sampleCount % 2 == 1
+            && minimumWorstCaseImprovementDB.isFinite
+            && (0...2).contains(minimumWorstCaseImprovementDB)
+            && maximumWorstSeatRegressionDB.isFinite
+            && (0...2).contains(maximumWorstSeatRegressionDB)
+            && maximumSummedAboveStrongestSourceDB.isFinite
+            && (0...6.5).contains(maximumSummedAboveStrongestSourceDB)
+    }
+}
+
+struct SpeakerOptimizerPhaseReferenceSensitivitySample: Equatable, Sendable {
+    /// Purely hypothetical extra SUB clock-origin shift, not a DSP delay.
+    var assumedSubClockOffsetMs: Double
+    var aggregateModeledImprovementDB: Double
+    var worstSeatRegressionDB: Double
+    var maximumSummedAboveStrongestSourceDB: Double
+}
+
+struct SpeakerOptimizerPhaseReferenceSensitivityReport: Equatable, Sendable {
+    var measurementSetID: UUID
+    var playbackSystemID: UUID
+    var routingSignature: String
+    var microphone: SpeakerOptimizerMicrophoneIdentity
+    var speaker: MultichannelCalibrationSource
+    var subwoofer: MultichannelCalibrationSource
+    var sampleRate: Double
+    var maximumAssumedClockOffsetMs: Double
+    var candidateRelativeDelayMs: Double
+    var candidateInvertSubPolarity: Bool
+    var worstCaseAggregateImprovementDB: Double
+    var worstCaseSeatRegressionDB: Double
+    var worstCaseSummedAboveStrongestDB: Double
+    var testedOffsets: [SpeakerOptimizerPhaseReferenceSensitivitySample]
+    var survivesAssumedTimingUncertaintyForVisualPreview: Bool
+    var blockingReasons: [String]
+    var warnings: [String]
+
+    // No saved PR103 v1 capture authenticates cross-source clock origin.
+    // Surviving an ASSUMED uncertainty range does not verify phase.
+    var crossSourceClockProvenanceAuthenticated: Bool { false }
+    var requiresSynchronizedReferenceCapture: Bool { true }
+    var previewOnly: Bool { true }
+    var canDeploy: Bool { false }
+    var isMeasuredVerification: Bool { false }
+}
+
 /// Reconstructs complex transfer from the analyzer's bulk-delay-removed phase
 /// PLUS that source's direct-arrival metadata. This convention is meaningful
 /// ONLY for captures acquired with the same sweep time reference and route.
@@ -217,6 +278,123 @@ struct SpeakerOptimizerCrossoverFeasibilityDesigner: Sendable {
         )
     }
 
+
+    /// Recompute the existing qualified hypothesis, then rerun its modeled
+    /// coherent sum under a range of UNKNOWN cross-source clock-origin shifts.
+    /// Compare candidate and bypass at the SAME shift at every sample to avoid
+    /// awarding a false gain merely from changing the assumed time origin.
+    /// This deliberately CANNOT establish a trustworthy shared time origin.
+    func auditUnknownClockOffsetSensitivity(
+        baseline: SpeakerOptimizerMeasurementSet,
+        speaker: MultichannelCalibrationSource,
+        subwoofer: MultichannelCalibrationSource,
+        seatWeights: [UUID: Double]? = nil,
+        crossoverOptions: SpeakerOptimizerCrossoverOptions = .init(),
+        sensitivity: SpeakerOptimizerPhaseReferenceSensitivityOptions = .init()
+    ) throws -> SpeakerOptimizerPhaseReferenceSensitivityReport {
+        guard sensitivity.valid() else { throw SpeakerOptimizerCrossoverError.invalidOptions }
+        let hypothesis = try analyze(
+            baseline: baseline, speaker: speaker, subwoofer: subwoofer,
+            seatWeights: seatWeights, options: crossoverOptions
+        )
+        var reasons: [String] = []
+        var samples: [SpeakerOptimizerPhaseReferenceSensitivitySample] = []
+        var worstGain = 0.0
+        var worstSeatLoss = 0.0
+        var worstSumPeak = 0.0
+
+        if hypothesis.acceptedForPreview {
+            let weights = try positionWeights(baseline.positions, supplied: seatWeights)
+            let frequencies = (0..<crossoverOptions.frequencyPointCount).map { i in
+                hypothesis.frequencyLowHz * pow(
+                    hypothesis.frequencyHighHz / hypothesis.frequencyLowHz,
+                    Double(i) / Double(crossoverOptions.frequencyPointCount - 1)
+                )
+            }
+            let pairs = try baseline.positions.map { seat in
+                let main = try response(baseline, at: seat.id, source: speaker,
+                                        frequencies: frequencies)
+                let sub = try response(baseline, at: seat.id, source: subwoofer,
+                                       frequencies: frequencies)
+                return (main: main, sub: sub)
+            }
+            worstGain = .infinity
+            for index in 0..<sensitivity.sampleCount {
+                let clockShiftMs = sensitivity.maximumUnknownClockOffsetMs
+                    * (2 * Double(index) / Double(sensitivity.sampleCount - 1) - 1)
+                let base = pairs.map {
+                    evaluate($0.main, $0.sub, frequencies: frequencies,
+                             sampleRate: baseline.sampleRate, relativeDelayMs: 0,
+                             invertSub: false, unknownSubClockOffsetMs: clockShiftMs)
+                }
+                let test = pairs.map {
+                    evaluate($0.main, $0.sub, frequencies: frequencies,
+                             sampleRate: baseline.sampleRate,
+                             relativeDelayMs: hypothesis.previewRelativeDelayMs,
+                             invertSub: hypothesis.previewInvertSubPolarity,
+                             unknownSubClockOffsetMs: clockShiftMs)
+                }
+                let baseLevels = base.map(\.summedDB)
+                let testLevels = test.map(\.summedDB)
+                let gain = weightedLevel(testLevels, weights)
+                    - weightedLevel(baseLevels, weights)
+                let seatLoss = zip(baseLevels, testLevels).map { pair in
+                    pair.0 - pair.1
+                }.max() ?? .infinity
+                let relativePeak = test.map(\.peakAboveStrongestSourceDB).max() ?? .infinity
+                guard gain.isFinite, seatLoss.isFinite, relativePeak.isFinite else {
+                    throw SpeakerOptimizerCrossoverError.unreliablePhaseOrArrival
+                }
+                worstGain = min(worstGain, gain)
+                worstSeatLoss = max(worstSeatLoss, seatLoss)
+                worstSumPeak = max(worstSumPeak, relativePeak)
+                samples.append(SpeakerOptimizerPhaseReferenceSensitivitySample(
+                    assumedSubClockOffsetMs: clockShiftMs,
+                    aggregateModeledImprovementDB: gain,
+                    worstSeatRegressionDB: seatLoss,
+                    maximumSummedAboveStrongestSourceDB: relativePeak
+                ))
+            }
+            if worstGain < sensitivity.minimumWorstCaseImprovementDB {
+                reasons.append("Timing-reference uncertainty erases the hypothetical modeled improvement.")
+            }
+            if worstSeatLoss > sensitivity.maximumWorstSeatRegressionDB {
+                reasons.append("An assumed clock-origin offset worsens a listening position beyond its limit.")
+            }
+            if worstSumPeak > sensitivity.maximumSummedAboveStrongestSourceDB {
+                reasons.append("An assumed clock-origin offset violates the relative summed-energy guard.")
+            }
+        } else {
+            reasons.append(contentsOf: hypothesis.blockingReasons)
+            reasons.append("No qualifying original crossover hypothesis exists to stress-test.")
+        }
+        return SpeakerOptimizerPhaseReferenceSensitivityReport(
+            measurementSetID: baseline.id,
+            playbackSystemID: baseline.playbackSystemID,
+            routingSignature: baseline.routingSignature,
+            microphone: baseline.microphone,
+            speaker: speaker,
+            subwoofer: subwoofer,
+            sampleRate: baseline.sampleRate,
+            maximumAssumedClockOffsetMs: sensitivity.maximumUnknownClockOffsetMs,
+            candidateRelativeDelayMs: hypothesis.acceptedForPreview
+                ? hypothesis.previewRelativeDelayMs : 0,
+            candidateInvertSubPolarity: hypothesis.acceptedForPreview
+                && hypothesis.previewInvertSubPolarity,
+            worstCaseAggregateImprovementDB: worstGain,
+            worstCaseSeatRegressionDB: worstSeatLoss,
+            worstCaseSummedAboveStrongestDB: worstSumPeak,
+            testedOffsets: samples,
+            survivesAssumedTimingUncertaintyForVisualPreview: reasons.isEmpty,
+            blockingReasons: reasons,
+            warnings: [
+                "PR103 v1 has NO authenticated common capture-clock provenance; a synthetic sensitivity sweep cannot supply it.",
+                "The assumed clock-offset interval is NOT a measured bound or a probability distribution. A larger unknown shift may reverse the result.",
+                "No signal-chain delay, sub polarity, active crossover or driver limiter was changed; PR105 must require synchronized physical captures and independent electrical/driver safeguards."
+            ]
+        )
+    }
+
     private struct ComplexSample {
         var real: Double
         var imaginary: Double
@@ -323,10 +501,11 @@ struct SpeakerOptimizerCrossoverFeasibilityDesigner: Sendable {
     private func evaluate(
         _ main: PositionSourceResponse, _ sub: PositionSourceResponse,
         frequencies: [Double], sampleRate: Double,
-        relativeDelayMs: Double, invertSub: Bool
+        relativeDelayMs: Double, invertSub: Bool,
+        unknownSubClockOffsetMs: Double = 0
     ) -> BandEvaluation {
         let delayMain = max(0, relativeDelayMs) / 1_000
-        let delaySub = max(0, -relativeDelayMs) / 1_000
+        let delaySub = (max(0, -relativeDelayMs) + unknownSubClockOffsetMs) / 1_000
         var summedPower = 0.0
         var maxAbove = 0.0
         for i in frequencies.indices {

@@ -187,4 +187,23 @@ for token in (
 ):
     assert project.count(token) >= 2, f"comparison file not in Xcode {token}"
 assert "Run PR104 candidate comparison tests" in workflow
-print("PR104 offline source alternatives, visual A/B, and crossover boundaries passed")
+for token in (
+    "struct SpeakerOptimizerPhaseReferenceSensitivityOptions",
+    "struct SpeakerOptimizerPhaseReferenceSensitivityReport",
+    "auditUnknownClockOffsetSensitivity(",
+    "unknownSubClockOffsetMs:",
+    "var crossSourceClockProvenanceAuthenticated: Bool { false }",
+    "var requiresSynchronizedReferenceCapture: Bool { true }",
+    "var canDeploy: Bool { false }",
+    "weightedLevel(testLevels, weights)",
+):
+    assert token in crossover, f"missing clock-offset sensitivity boundary {token}"
+for token in (
+    "testClockOffsetUncertaintySensitivityIsPreviewOnlyAndUnauthenticated",
+    "testWideClockUncertaintyCanRejectOtherwiseAttractiveCrossoverHypothesis",
+    "testClockAuditRejectsUnqualifiedDataOrInvalidUncertainty",
+    "testClockAuditNeverMutatesBaselineOrAllowsApply",
+):
+    assert token in crossover_tests, f"missing clock sensitivity test {token}"
+assert "Run PR104 crossover feasibility tests" in workflow
+print("PR104 source alternatives and clock-reference sensitivity safety passed")
