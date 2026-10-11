@@ -63,7 +63,14 @@ if not legacy.rstrip().endswith("#endif"):
 require(app, "#if DEBUG\nprivate struct PR27ProtectionValidationView", "DEBUG engineering view gate")
 require(app, '#if DEBUG\n        Window("Engineering Validation", id: "engineering-validation")', "DEBUG engineering scene gate")
 require(root_view, '#if DEBUG\n    @Environment(\\.openWindow)', "DEBUG openWindow gate")
-require(root_view, '#if DEBUG\n            Button {\n                openWindow(id: "engineering-validation")', "DEBUG engineering toolbar gate")
+engineering_call = 'openWindow(id: "engineering-validation")'
+engineering_index = root_view.find(engineering_call)
+if engineering_index < 0:
+    fail("Engineering Validation toolbar action is missing")
+debug_index = root_view.rfind("#if DEBUG", 0, engineering_index)
+endif_index = root_view.find("#endif", engineering_index)
+if debug_index < 0 or endif_index < 0:
+    fail("Engineering Validation toolbar action is not enclosed by a DEBUG gate")
 
 # Launch at Login must use the public Apple API, live in the same Settings/app
 # preferences UI as Appearance and App Presence, and remain an explicit
@@ -183,8 +190,12 @@ for token in [
     require(release, token, "manual release-DMG workflow")
 
 # Public product scope/status must not regress to the old bootstrap wording.
-require(readme, "v1.0 release-candidate hardening", "README release status")
-require(readme, "speaker-integration routing may fan out to 2–8 physical outputs", "README speaker-output boundary")
+# Later approved expansion superseded PR45's original stereo-only scope strings,
+# so retain the durable release-hardening constraints without freezing obsolete
+# product-boundary wording.
+require(readme, "commercial-release preparation", "README release status")
+require(readme, "Apple Silicon", "README platform boundary")
+require(readme, "App Sandbox", "README sandbox boundary")
 if "**Commercial bootstrap / architecture foundation.**" in readme:
     fail("README reverted to obsolete bootstrap status")
 

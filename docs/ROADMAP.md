@@ -16,6 +16,50 @@ Legacy parity is the minimum capability floor. The commercial rewrite should exc
 
 Future portability must not materially delay the flagship Mac launch.
 
+## Current execution status — PR102
+
+The historical parity/rewrite stages below are retained as project history.
+They are **not** the current execution state.
+
+The cumulative product has progressed through:
+
+- clean-room proprietary rewrite and parity closure;
+- production UI/persistence/interchange;
+- room correction and speaker/multichannel calibration;
+- semantic N-channel transport/DSP;
+- headphone/binaural/SOFA/head-tracking foundations;
+- advanced room treatment and ambient adaptation;
+- Audio Unit hosting;
+- Active Acoustics / Quiet Zone software foundations;
+- hardware-timing/feed-forward runtime scaffolding;
+- Active Acoustics commissioning UX; and
+- PR101 full-system reliability and remote/software acceptance.
+
+### PR102 — Integration & Commercial Release Preparation
+
+Current work:
+
+- reconcile the cumulative product boundary and release-facing documentation;
+- reconcile sandbox/privacy/signing/package configuration;
+- reconcile all production third-party notices and provenance;
+- build an SBOM/dependency manifest;
+- validate Release/archive/package outputs;
+- preserve PR101 fail-closed hardware gates; and
+- create the final hardware/credential acceptance handoff.
+
+PR102 may close remotely while explicitly leaving genuine hardware and Apple
+release-credential gates unresolved.
+
+### Approved post-PR102 feature track
+
+- **PR103 — Speaker Optimizer Measurement Foundation**
+- **PR104 — Measurement-Driven Speaker Optimization Engine**
+- **PR105 — Guided Speaker Optimizer & Acoustic Verification**
+- **PR106 — Advanced Speaker Measurement Lab**
+
+The Speaker Optimizer track is intentionally sequenced after PR102 so release
+integration is not obscured by another feature expansion.
+
 ## Migration rule
 
 For each legacy capability:
@@ -48,7 +92,7 @@ Do not recreate the historical `EqualiserStore`, inherited routing hierarchy, or
 - native-rate linear-phase EQ and live minimum/linear switching
 - independent room-correction convolution stage and control plane
 
-## Current stage — PR #22
+## Historical stage — PR #22
 
 ### Product control/state foundation
 Keep this stage tight and behavior-preserving.
@@ -212,7 +256,7 @@ Also complete the implementation provenance audit and third-party license review
 - normal Quit and force-quit recovery
 - accessibility and keyboard control
 
-### Stage K — commercial launch
+### Historical Stage K — commercial launch
 - Mac App Store signing/entitlements
 - archive/export
 - TestFlight
