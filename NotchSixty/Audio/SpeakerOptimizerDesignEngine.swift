@@ -199,8 +199,9 @@ struct SpeakerOptimizerDesignEngine: Sendable {
 
     private func sameGrid(_ lhs: [Double], _ rhs: [Double]) -> Bool {
         guard lhs.count == rhs.count else { return false }
-        return zip(lhs, rhs).allSatisfy {
-            abs($0 - $1) <= max(1.0e-6, abs($0) * 1.0e-9)
+        return zip(lhs, rhs).allSatisfy { pair in
+            let (left, right) = pair
+            return abs(left - right) <= max(1.0e-6, abs(left) * 1.0e-9)
         }
     }
 
