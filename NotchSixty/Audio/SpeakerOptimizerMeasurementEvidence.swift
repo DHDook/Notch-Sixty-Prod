@@ -1037,7 +1037,7 @@ struct SpeakerOptimizerMeasurementSetStore: Sendable {
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
+        encoder.dateEncodingStrategy = .millisecondsSince1970
         try encoder.encode(set).write(
             to: url(for: set.id),
             options: .atomic
@@ -1051,7 +1051,7 @@ struct SpeakerOptimizerMeasurementSetStore: Sendable {
         }
         let data = try Data(contentsOf: path)
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .millisecondsSince1970
         let set = try decoder.decode(
             SpeakerOptimizerMeasurementSet.self,
             from: data
@@ -1164,7 +1164,7 @@ extension SpeakerOptimizerMeasurementSetStore {
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
+        encoder.dateEncodingStrategy = .millisecondsSince1970
         try encoder.encode(set).write(
             to: currentURL(
                 for: set.playbackSystemID,
@@ -1187,7 +1187,7 @@ extension SpeakerOptimizerMeasurementSetStore {
         }
         let data = try Data(contentsOf: path)
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .millisecondsSince1970
         let set = try decoder.decode(
             SpeakerOptimizerMeasurementSet.self,
             from: data
