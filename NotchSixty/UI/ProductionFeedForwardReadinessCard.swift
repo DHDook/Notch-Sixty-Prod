@@ -379,11 +379,11 @@ struct ActiveAcousticsPhysicalEvidenceUXSnapshot: Equatable {
         returningPrimaryReductionDB =
             package.campaignReview.returningPrimaryReductionDB
         worstFrequencyReductionDB = package.worstFrequencyReductionDB
-        worstSeatReductionDB = min(
+        worstSeatReductionDB = [
             package.campaignReview.firstPrimaryReductionDB,
             package.campaignReview.neighboringSeatReductionDB,
-            package.campaignReview.returningPrimaryReductionDB
-        )
+            package.campaignReview.returningPrimaryReductionDB,
+        ].min()
         primaryRepeatDifferenceDB =
             package.campaignReview.primaryReductionRepeatDifferenceDB
         maximumBandRepeatDifferenceDB =
