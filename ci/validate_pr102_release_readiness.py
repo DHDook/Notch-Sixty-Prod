@@ -16,6 +16,8 @@ VENDOR_README = ROOT / "NotchSixty" / "Audio" / "SOFA" / "Vendor" / "libmysofa" 
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release-dmg.yml"
 APP_STORE = ROOT / "docs" / "APP_STORE_REQUIREMENTS.md"
 PR102_DOC = ROOT / "docs" / "PR102_INTEGRATION_COMMERCIAL_RELEASE.md"
+README = ROOT / "README.md"
+ROADMAP = ROOT / "docs" / "ROADMAP.md"
 LICENSE = ROOT / "LICENSE"
 
 
@@ -41,6 +43,8 @@ for path in (
     RELEASE_WORKFLOW,
     APP_STORE,
     PR102_DOC,
+    README,
+    ROADMAP,
     LICENSE,
 ):
     require(path.is_file(), f"missing required release artifact: {path.relative_to(ROOT)}")
@@ -54,6 +58,8 @@ vendor_readme = VENDOR_README.read_text(encoding="utf-8")
 release_workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
 app_store = APP_STORE.read_text(encoding="utf-8")
 pr102_doc = PR102_DOC.read_text(encoding="utf-8")
+readme = README.read_text(encoding="utf-8")
+roadmap = ROADMAP.read_text(encoding="utf-8")
 license_text = LICENSE.read_text(encoding="utf-8")
 
 with INFO.open("rb") as handle:
@@ -183,6 +189,32 @@ for token in (
     "PR106 — Advanced Speaker Measurement Lab",
 ):
     require(token in pr102_doc, f"PR102 plan missing {token!r}")
+
+for token in (
+    "PR102 integration and commercial-release preparation",
+    "semantic N-channel",
+    "headphone profiles",
+    "Audio Unit hosting",
+    "speaker-connected feed-forward ANC remains hardware-gated",
+    "App Sandbox",
+):
+    require(token in readme, f"README product boundary missing {token!r}")
+for stale in (
+    "two-channel loudspeaker playback",
+    "headphone-only features are out of scope",
+    "stereo program material only",
+):
+    require(stale not in readme, f"README retained stale product-boundary text {stale!r}")
+
+for token in (
+    "Current execution status — PR102",
+    "PR103 — Speaker Optimizer Measurement Foundation",
+    "PR104 — Measurement-Driven Speaker Optimization Engine",
+    "PR105 — Guided Speaker Optimizer & Acoustic Verification",
+    "PR106 — Advanced Speaker Measurement Lab",
+    "Historical stage — PR #22",
+):
+    require(token in roadmap, f"roadmap reconciliation missing {token!r}")
 
 require("proprietary and confidential" in license_text, "root proprietary license contract changed")
 
