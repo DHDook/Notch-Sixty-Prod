@@ -1,0 +1,89 @@
+name: PR102 Integration and Commercial Release
+
+on:
+  push:
+    branches:
+      - feature/pr102-integration-commercial-release
+  pull_request:
+    branches:
+      - feature/pr101-reliability-acoustic-acceptance
+  workflow_dispatch:
+
+concurrency:
+  group: pr102-integration-commercial-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate PR102 release-readiness contract
+        run: python3 ci/validate_pr102_release_readiness.py
+      - name: Re-run PR101 reliability acceptance validator
+        run: python3 ci/validate_pr101_reliability_acceptance.py
+      - name: Re-run v1 release hardening validator
+        run: python3 ci/validate_pr45_release_hardening.py
+      - name: Preserve disconnected feed-forward safety boundary
+        run: python3 ci/audit_pr98_disconnected_boundary.py
+
+  macos:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate PR102 release-readiness contract
+        run: python3 ci/validate_pr102_release_readiness.py
+      - name: Re-run PR101 reliability acceptance validator
+        run: python3 ci/validate_pr101_reliability_acceptance.py
+      - name: Re-run v1 release hardening validator
+        run: python3 ci/validate_pr45_release_hardening.py
+      - name: Preserve disconnected feed-forward safety boundary
+        run: python3 ci/audit_pr98_disconnected_boundary.py
+
+      - name: Build arm64 Debug app
+        run: |
+          xcodebuild             -project NotchSixty.xcodeproj             -scheme NotchSixty             -configuration Debug             -destination 'platform=macOS,arch=arm64'             CODE_SIGNING_ALLOWED=NO             ENABLE_TESTABILITY=YES             build
+
+      - name: Build arm64 Release app
+        run: |
+          xcodebuild             -project NotchSixty.xcodeproj             -scheme NotchSixty             -configuration Release             -destination 'platform=macOS,arch=arm64'             -derivedDataPath "$RUNNER_TEMP/PR102ReleaseDerivedData"             CODE_SIGNING_ALLOWED=NO             GENERATE_INFOPLIST_FILE=NO             INFOPLIST_FILE=NotchSixty/Info.plist             build
+
+      - name: Verify shipped third-party notice and release metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/PR102ReleaseDerivedData/Build/Products/Release/Notch Sixty.app"
+          NOTICE="$APP/Contents/Resources/ThirdPartyNotices.txt"
+          INFO="$APP/Contents/Info.plist"
+          EXECUTABLE="$APP/Contents/MacOS/Notch Sixty"
+
+          test -d "$APP"
+          test -f "$NOTICE"
+          grep -q 'libmysofa v1.3.4' "$NOTICE"
+          grep -q 'BSD 3-Clause' "$NOTICE"
+          grep -q 'Copyright (c) 2016-2017, Symonics GmbH, Christian Hoene' "$NOTICE"
+
+          test -f "$INFO"
+          test -x "$EXECUTABLE"
+          test "$(lipo -archs "$EXECUTABLE")" = "arm64"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$INFO")" = "com.dhdook.NotchSixty"
+          test -n "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$INFO")"
+          test -n "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$INFO")"
+          test -n "$(/usr/libexec/PlistBuddy -c 'Print :NSAudioCaptureUsageDescription' "$INFO")"
+          test -n "$(/usr/libexec/PlistBuddy -c 'Print :NSMicrophoneUsageDescription' "$INFO")"
+
+      - name: Ad-hoc sign and verify sandbox entitlements
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/PR102ReleaseDerivedData/Build/Products/Release/Notch Sixty.app"
+          codesign             --force             --sign -             --timestamp=none             --entitlements NotchSixty/NotchSixty.entitlements             "$APP"
+          codesign --verify --strict --verbose=2 "$APP"
+          ENTITLEMENTS="$(codesign -d --entitlements :- "$APP" 2>&1)"
+          echo "$ENTITLEMENTS" | grep -q 'com.apple.security.app-sandbox'
+          echo "$ENTITLEMENTS" | grep -q 'com.apple.security.device.audio-input'
+          echo "$ENTITLEMENTS" | grep -q 'com.apple.security.files.user-selected.read-write'
+
+      - name: Full XCTest regression
+        run: |
+          xcodebuild             -project NotchSixty.xcodeproj             -scheme NotchSixty             -configuration Debug             -destination 'platform=macOS,arch=arm64'             CODE_SIGNING_ALLOWED=NO             ENABLE_TESTABILITY=YES             test
