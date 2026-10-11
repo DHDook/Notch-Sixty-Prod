@@ -1,0 +1,43 @@
+name: PR101 Reliability and Acoustic Acceptance
+
+on:
+  push:
+    branches:
+      - feature/pr101-reliability-acoustic-acceptance
+  pull_request:
+    branches:
+      - feature/pr100-active-acoustics-ux
+  workflow_dispatch:
+
+concurrency:
+  group: pr101-reliability-acoustic-acceptance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: python3 ci/validate_pr101_reliability_acceptance.py
+      - run: python3 ci/validate_pr100_active_acoustics_ux.py
+      - run: python3 ci/validate_pr99_physical_verification.py
+      - run: python3 ci/validate_pr98_feedforward_runtime.py
+      - run: python3 ci/audit_pr98_disconnected_boundary.py
+
+  macos:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+      - run: python3 ci/validate_pr101_reliability_acceptance.py
+      - run: python3 ci/validate_pr100_active_acoustics_ux.py
+      - run: python3 ci/validate_pr99_physical_verification.py
+      - run: python3 ci/audit_pr98_disconnected_boundary.py
+      - name: Build arm64 macOS app
+        run: |
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES build
+      - name: Targeted PR101 reliability acceptance tests
+        run: |
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES -only-testing:NotchSixtyTests/ProductionAnalysisTests test
+      - name: Full XCTest regression
+        run: |
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES test
