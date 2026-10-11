@@ -68,6 +68,145 @@ struct ActiveAcousticsCommissioningUXSnapshot: Equatable {
     }
 }
 
+
+
+enum ActiveAcousticsDiagnosticDisposition: String, Equatable {
+    case recorded = "RECORDED"
+    case diagnosticPass = "DIAGNOSTIC PASS"
+    case attention = "ATTENTION"
+    case blocked = "BLOCKED"
+    case hardwareRequired = "HARDWARE REQUIRED"
+    case disconnected = "DISCONNECTED"
+}
+
+struct ActiveAcousticsDiagnosticUXItem: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let disposition: ActiveAcousticsDiagnosticDisposition
+    let detail: String
+}
+
+struct ActiveAcousticsDiagnosticsUXSnapshot: Equatable {
+    let items: [ActiveAcousticsDiagnosticUXItem]
+
+    init(
+        calibration: QuietZoneFeedForwardCalibration?,
+        budget: QuietZoneFeedForwardBudget
+    ) {
+        let requiredPositions: [QuietZoneFeedForwardPosition] = [
+            .listenerFirst, .upstream, .listenerReturn
+        ]
+        let positions = calibration?.arrivals.map(\.position) ?? []
+        let surveyComplete = positions == requiredPositions
+        let clockPresent = calibration?.halClockTrace != nil
+        let timingPresent = calibration?.timingPath != nil
+
+        let causalityDisposition: ActiveAcousticsDiagnosticDisposition
+        let causalityDetail: String
+        switch budget.readiness {
+        case .physicallyPlausible:
+            causalityDisposition = .diagnosticPass
+            causalityDetail =
+                "The conservative timing reserve is positive. This is timing plausibility only."
+        case .limitedMargin:
+            causalityDisposition = .attention
+            causalityDetail =
+                "A positive reserve exists but is below the required safety margin."
+        case .nonCausal:
+            causalityDisposition = .blocked
+            causalityDetail =
+                "The anti-noise path cannot reliably beat the disturbance to the listener."
+        case .invalidTimebase:
+            causalityDisposition = .blocked
+            causalityDetail =
+                "The input/output timebase is not trustworthy enough for causal scheduling."
+        case .unreliableMeasurements:
+            causalityDisposition = .blocked
+            causalityDetail =
+                "Measurement quality or repeatability is insufficient."
+        case .missingMeasurements:
+            causalityDisposition = .blocked
+            causalityDetail =
+                "The physical timing survey is incomplete."
+        }
+
+        items = [
+            .init(
+                id: "plan",
+                title: "One-microphone plan",
+                disposition: calibration == nil ? .blocked : .recorded,
+                detail: calibration == nil
+                    ? "Prepare the listener/upstream geometry before commissioning."
+                    : "A software calibration record exists; physical provenance is not authenticated."
+            ),
+            .init(
+                id: "aba",
+                title: "Listener → upstream → listener survey",
+                disposition: surveyComplete ? .recorded : .blocked,
+                detail: surveyComplete
+                    ? "All three timing positions are recorded in the expected order."
+                    : "Three trigger-synchronized position records are required."
+            ),
+            .init(
+                id: "clock",
+                title: "Concurrent HAL clock evidence",
+                disposition: clockPresent ? .recorded : .blocked,
+                detail: clockPresent
+                    ? "A clock trace is present for analysis; presence alone is not instrument attestation."
+                    : "Input/output clock observations are still required."
+            ),
+            .init(
+                id: "path",
+                title: "Physical latency path",
+                disposition: timingPresent ? .recorded : .blocked,
+                detail: timingPresent
+                    ? "ADC, processing and command-to-seat latency fields are present."
+                    : "Independent reference ADC, processing, DAC and speaker-to-seat timing is required."
+            ),
+            .init(
+                id: "causality",
+                title: "Causality reserve",
+                disposition: causalityDisposition,
+                detail: causalityDetail
+            ),
+            .init(
+                id: "acoustic",
+                title: "PR99 A/B/A acoustic verification",
+                disposition: .hardwareRequired,
+                detail: "Requires real calibrated seat measurements, repeatability and independently reviewed evidence."
+            ),
+            .init(
+                id: "mute",
+                title: "Emergency shutdown verification",
+                disposition: .hardwareRequired,
+                detail: "Requires externally measured real output mute/fade behavior for all required fault classes."
+            ),
+            .init(
+                id: "output",
+                title: "Live feed-forward speaker output",
+                disposition: .disconnected,
+                detail: "PR100 exposes no arm, authorization or speaker-output connection."
+            ),
+        ]
+    }
+
+    var unresolvedCount: Int {
+        items.filter {
+            $0.disposition == .blocked
+                || $0.disposition == .attention
+                || $0.disposition == .hardwareRequired
+                || $0.disposition == .disconnected
+        }.count
+    }
+
+    var headline: String {
+        if items.contains(where: { $0.disposition == .blocked }) {
+            return "Commissioning has unresolved software or measurement blockers"
+        }
+        return "Remote diagnostics complete · physical verification still required"
+    }
+}
+
 /// PR96 uses the familiar Quiet Zone workspace but deliberately does not
 /// expose an Arm switch until the reference-to-speaker path is proven causal.
 struct ProductionFeedForwardReadinessCard: View {
@@ -132,6 +271,7 @@ struct ProductionFeedForwardReadinessCard: View {
 
             commissioningSummary
             oneMicrophoneSetupProgress
+            consolidatedDiagnostics
 
             VStack(alignment: .leading, spacing: 7) {
                 stage(
@@ -352,6 +492,67 @@ struct ProductionFeedForwardReadinessCard: View {
         .glassEffect(
             .regular,
             in: .rect(cornerRadius: 18)
+        )
+    }
+
+
+    private var consolidatedDiagnostics: some View {
+        let snapshot = ActiveAcousticsDiagnosticsUXSnapshot(
+            calibration: quietZone.feedForwardCalibration,
+            budget: quietZone.feedForwardBudget
+        )
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Diagnostics & Blockers")
+                        .font(.subheadline.bold())
+                    Text(snapshot.headline)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("\(snapshot.unresolvedCount) OPEN")
+                    .font(.caption2.bold().monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+
+            ForEach(snapshot.items) { item in
+                HStack(alignment: .top, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.title)
+                            .font(.caption.bold())
+                        Text(item.detail)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 12)
+                    Text(item.disposition.rawValue)
+                        .font(.caption2.bold())
+                        .multilineTextAlignment(.trailing)
+                        .foregroundStyle(
+                            item.disposition == .blocked
+                                ? .red
+                                : item.disposition == .diagnosticPass
+                                    ? .green
+                                    : .secondary
+                        )
+                }
+                .padding(.vertical, 3)
+            }
+
+            Text(
+                "A diagnostic pass means only that the corresponding software check succeeded. Physical acoustic benefit, instrument provenance, real emergency shutdown, and live output authorization remain separate hardware gates."
+            )
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            .secondary.opacity(0.05),
+            in: RoundedRectangle(cornerRadius: 12)
         )
     }
 
