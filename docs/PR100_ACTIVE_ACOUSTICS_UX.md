@@ -173,3 +173,31 @@ unauthenticated.
 If the canonical SHA-256 package check fails, PR100 suppresses all acoustic
 metrics and the curve rather than displaying potentially altered evidence.
 Live ANC output remains **DISCONNECTED** in every state.
+
+
+## Slice 6 — Evidence provenance and review trail
+
+The PR99 evidence surface now includes a separate **Evidence Provenance &
+Review** panel. It exposes the identifiers contained in a digest-valid record:
+project ID, microphone and input channel, output device, route lease, nominal
+sample rate, clock ID, controlled-source fixture, campaign-session count,
+source-capture count, fault-witness count, and a short SHA-256 fingerprint.
+
+These fields are shown only after the canonical evidence digest verifies. If
+the record is missing or the digest is invalid, rig and review metadata are
+suppressed.
+
+The review status is hardened as well. PR100 no longer accepts a caller-supplied
+independentRolesAcknowledged Boolean by itself. A reviewed state requires two
+underlying acknowledgements, exactly the acoustics and electrical-safety roles,
+the same evidence digest, and affirmative recommendations for further hardware
+review. Even then, the UI labels reviewer identity and instrument provenance as
+**unverified**.
+
+Reviewer names are deliberately not promoted as trusted identity in the
+operator summary. The panel shows only the acknowledged roles. This preserves
+the distinction between a reproducible review trail and cryptographic identity
+or instrument attestation.
+
+No provenance field, digest, or reviewer acknowledgement can authorize live
+ANC output.
