@@ -152,7 +152,7 @@ for token in (
     require(token in workspace, f"Speaker Calibration optimizer UI missing {token!r}")
 
 for token in (
-    "PENDING EXACT-HEAD CI",
+    "REMOTE SOFTWARE COMPLETE",
     "Protected driver-bus measurement therefore remains unavailable",
     "PR104 may consume only PR103 evidence that reports",
 ):

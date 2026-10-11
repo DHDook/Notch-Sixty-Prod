@@ -1,6 +1,10 @@
 # PR103 — Speaker Optimizer Measurement Foundation Remote Closure
 
-Status: **PENDING EXACT-HEAD CI**
+Status: **REMOTE SOFTWARE COMPLETE — PHYSICAL MEASUREMENT ACCEPTANCE PENDING**
+
+## Exact-head CI record
+
+GitHub Actions run [38165802265](https://github.com/DHDook/Notch-Sixty-Prod/actions/runs/38165802265) passed on 2026-10-11 at commit `155183ca0f712262191cb2486d3d93d2ea414134` (portable and macOS jobs, arm64 Debug build, targeted measurement and calibration tests, full XCTest). This closure-document update makes a subsequent commit; that amended head must also pass the PR103 workflow before it is accepted as the final remote handoff. Physical microphone, protected drivers, room measurements, loudspeaker safety and optimization effectiveness remain explicitly unverified.
 
 PR103 is eligible for remote/software closure only after its exact branch head
 passes the complete PR103 workflow, including the full XCTest regression.
