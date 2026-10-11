@@ -172,3 +172,37 @@ scenarios finish all ten remote PR101 requirements. Lifecycle recovery breadth,
 resource/CPU/memory instrumentation, cumulative long-run dropout stress, and
 machine-level resource budgets remain later PR101 slices. Likewise, none of
 this software evidence satisfies the five hardware-only requirements.
+
+
+## Slice 3 — Lifecycle recovery soak
+
+PR101 now exercises the production lifecycle state machine as a deterministic
+fault/recovery campaign rather than relying only on a few example transitions.
+
+Each campaign iteration runs the complete startup path, repeated
+reconfiguration/output-recovery transitions, orderly shutdown, and an
+intentionally invalid idle → running jump. It then injects a failure at every
+lifecycle state where failure is legal—from permission/startup through running,
+reconfiguration, output recovery, and stopping—and requires every injected
+fault to converge through **failed → stopping → idle**.
+
+The targeted macOS test runs **5,000 complete iterations**, producing tens of
+thousands of legal transitions and **45,000 injected lifecycle faults**. A
+campaign passes only when all injected faults recover, every invalid direct
+jump is rejected without state mutation, and no unrecovered transition remains.
+
+The campaign result can create reliability evidence only at
+`deterministicSimulation` or `macOSCI` authority. It explicitly rejects
+attempts to label the result as `physicalHardware` or
+`independentPhysicalReview`.
+
+PR101 also adds a separate stable-UID route recovery soak. A stub device catalog
+repeatedly removes the selected device and reintroduces the same stable UID with
+a different transient Core Audio device ID. Across 250 cycles, the engine must
+retain the selected UID while absent and reconnect the new transient ID when
+the device reappears.
+
+That test validates the **software recovery model only**. It deliberately leaves
+the distinct `physicalDeviceRecovery` requirement at **HARDWARE REQUIRED**:
+a simulated catalog disappearance is not evidence of a real USB/DAC unplug,
+Core Audio driver teardown, clock reacquisition, or physical reconnect.
