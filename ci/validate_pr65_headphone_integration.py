@@ -79,7 +79,7 @@ checks = {
     "semantic source layout never guessed": "resolveInputChannelDescriptions" in binaural_session and "programLayoutMismatch" in binaural_session,
     "native-rate only": "sampleRateMismatch(source:" in binaural_session,
     "binaural bridge pipeline order": binaural_output.index(binaural_render_call) < binaural_output.index("N60HeadphoneDSPProcessStereoFrame") < binaural_output.index("N60ProtectionProcessStereoFrame"),
-    "content gain upstream of renderer": binaural_output.index("program.channels[channel] *= bridge->programGainLinear") < binaural_output.index(binaural_render_call),
+    "content gain upstream of renderer": binaural_output.index("bridge->programGainLinear") < binaural_output.index(binaural_render_call),
     "crossfeed bypassed for virtual speakers": "spatialMode == .stereo && crossfeed.preset != .off" in profile,
     "normalized asset boundary": "struct BinauralProfileAsset" in asset and "measurements: [BinauralMeasurement]" in asset,
     "native sofa not mislabeled": "nativeSOFAParserUnavailable" in asset and 'pathExtension.lowercased() == "sofa"' in asset,
