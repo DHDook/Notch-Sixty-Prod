@@ -83,4 +83,39 @@ for token in (
 ):
     assert project.count(token) >= 2, f"PEQ not registered in Xcode: {token}"
 assert "Run PR104 PEQ candidate tests" in workflow
-print("PR104 safe offline preview and constrained PEQ candidate contracts passed")
+fir_source = ROOT / "NotchSixty/Audio/SpeakerOptimizerFIRCandidateDesigner.swift"
+fir_tests = ROOT / "NotchSixtyTests/SpeakerOptimizerFIRCandidateTests.swift"
+assert fir_source.is_file() and fir_tests.is_file(), "missing PR104 FIR candidate files"
+firt = fir_source.read_text()
+fitt = fir_tests.read_text()
+for token in (
+    "struct SpeakerOptimizerFIRCandidateDesigner",
+    "SpeakerOptimizerDesignEngine().design(",
+    "tapCount = 2049",
+    "maximumGroupDelayMilliseconds = 30.0",
+    "var canDeploy: Bool { false }",
+    "var isMeasuredVerification: Bool { false }",
+    "taps: accepted ? impulse : []",
+    "groupDelayFrames",
+    "declaredGroupDelayFrames",
+    "SpeakerOptimizerFIRTransform",
+    "vDSP_DFT_Execute(",
+    "minimumModeledImprovementDB",
+    "maximumOutOfBandDeviationDB",
+):
+    assert token in firt, f"missing FIR contract {token}"
+for token in (
+    "testQualifiedEvidenceBuildsLinearPhaseFIRWithDeclaredDelay",
+    "testMissingEvidenceOrVerificationRoleIsRejected",
+    "testTapCountAndDelayFailClosed",
+    "testStrictResponseGuardNeverExposesUnacceptedTaps",
+    "testOneMicTwoPositionsPreserveEvidenceAndRoutingIdentity",
+):
+    assert token in fitt, f"missing FIR test {token}"
+for token in (
+    "F10400000000000000000005", "F10400000000000000000006",
+    "F10400000000000000000015", "F10400000000000000000016"
+):
+    assert project.count(token) >= 2, f"missing FIR Xcode registration {token}"
+assert "Run PR104 FIR candidate tests" in workflow
+print("PR104 offline PEQ/FIR candidate contracts passed")

@@ -1,6 +1,6 @@
 # PR104 — Measurement-Driven Speaker Optimization Engine
 
-Status: **SLICE 2 IMPLEMENTED — EXACT-HEAD CI PENDING**
+Status: **SLICE 3 IMPLEMENTED — EXACT-HEAD CI PENDING**
 
 Stack: PR102 remote release handoff → PR103 Speaker Optimizer measurement
 foundation → **PR104 optimization engine** → PR105 guided apply/verification →
@@ -69,3 +69,17 @@ and verification sets. No PR104 prediction may become measured verification.
 - The resulting candidate contains coefficients, modeled response, and explicit recommended preamp attenuation. This is **preview-only**: nothing loads coefficients into a DSP chain, reconfigures crossovers, or claims measured acoustic verification.
 - Protected active-crossover individual-driver measurements remain unavailable. The data is for whole speakers/subs only.
 - A preview-only PEQ candidate must not be interpreted as a guarantee of speaker safety under live playback; PR105/physical acceptance remain required.
+
+
+## Slice 3 — Offline linear-phase FIR candidates
+
+- Independently regenerate Slice 1 from PR103's requalified baseline rather than accepting an external, stale preview curve.
+- Construct a Hermitian correction magnitude spectrum, take the inverse Accelerate DFT, window/truncate a centered symmetric odd-length impulse into causal Float taps, then run a **separate forward DFT of the actual taps**.
+- Restrict corrections to each source's common usable measurement band, taper at its edges, and audit all Fourier bins (including outside the band).
+- Declare exact constant linear-phase group delay (N-1)/2 frames. Default 2049 taps means 1024 frames (~21.33 ms at 48 kHz); configurations above their declared latency budget fail closed.
+- Predict weighted residual error from the independently measured positions, enforce position degradation limits, and reject candidates without meaningful modeled improvement.
+- Enforce actual synthesized gain/cut bounds, out-of-band leakage, and explicit recommended preamp reserve. Rejected candidates hold **no taps**.
+- No live audio-engine modification, no Apply action, no protected-driver sweep, no promise of real acoustic response. This is an alternative **FIR preview**, not a room correction copy, deployable preset, or measurement-based verification.
+- Unlike minimum-phase PEQ, a causal symmetric FIR incurs fixed group delay, which matters for video synchronization; PR105 must explicitly coordinate latency before any application.
+
+Next: measured-source multi-channel/subwoofer feasibility, phase/timing boundaries and candidate ranking. Any actual speaker correction requires explicit later commissioning and new microphone verification.
