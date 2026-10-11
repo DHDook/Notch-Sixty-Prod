@@ -68,6 +68,7 @@ for token in (
     "testPR101RejectsDuplicateRunIDsAndInvalidResourceTelemetry",
     "testPR101LifecycleRecoveryCampaignSurvivesRepeatedFaultInjection",
     "testPR101LifecycleCampaignCannotSelfPromoteToHardwareEvidence",
+    "testPR101RemoteClosureModelPassesTenRemoteRequirementsOnly",
 ):
     require(token in tests, f"PR101 XCTest missing {token}")
 
@@ -192,9 +193,6 @@ for token in (
 ):
     require(token in workflow, f"realtime soak workflow missing {token!r}")
 
-print("PR101 reliability and acoustic acceptance validation passed")
-
-
 for token in (
     '"PR101_REMOTE_SOFTWARE_ACCEPTANCE_CLOSURE"',
     '"remoteSoftwareAccepted": True',
@@ -236,3 +234,5 @@ for token in (
     "pr101-remote-software-acceptance",
 ):
     require(token in workflow, f"remote closure workflow missing {token!r}")
+
+print("PR101 reliability and acoustic acceptance validation passed")
