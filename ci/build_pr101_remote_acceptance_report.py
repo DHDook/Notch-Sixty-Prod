@@ -95,6 +95,19 @@ def main() -> int:
     scenarios = deterministic.get("scenarios")
     if not isinstance(scenarios, list):
         fail("deterministic scenarios missing")
+    if len(scenarios) != len(DETERMINISTIC_REQUIREMENTS):
+        fail("deterministic scenario count does not match closure contract")
+    scenario_ids = [
+        item.get("requirementID")
+        for item in scenarios
+        if isinstance(item, dict)
+    ]
+    if len(scenario_ids) != len(scenarios):
+        fail("deterministic scenario entry is not an object")
+    if len(set(scenario_ids)) != len(scenario_ids):
+        fail("deterministic campaign contains duplicate requirement IDs")
+    if set(scenario_ids) != set(DETERMINISTIC_REQUIREMENTS):
+        fail("deterministic scenario set does not match closure contract")
 
     scenario_status = {
         item.get("requirementID"): item.get("status")
@@ -213,10 +226,18 @@ def main() -> int:
         },
     }
 
+    github_sha = os.environ.get("GITHUB_SHA")
+    github_run_id = os.environ.get("GITHUB_RUN_ID")
+    if not github_sha or len(github_sha) != 40:
+        fail("closure requires a full GitHub commit SHA")
+    if not github_run_id or not github_run_id.isdigit():
+        fail("closure requires a GitHub Actions run ID")
+
     report: dict[str, Any] = {
         "schemaVersion": 1,
         "campaign": "PR101_REMOTE_SOFTWARE_ACCEPTANCE_CLOSURE",
-        "githubSHA": os.environ.get("GITHUB_SHA"),
+        "githubSHA": github_sha,
+        "githubRunID": github_run_id,
         "evidenceAuthority": "macOSCI",
         "remoteRequirementCount": len(REMOTE_REQUIREMENTS),
         "remotePassedCount": len(evidence),
