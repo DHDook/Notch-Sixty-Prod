@@ -24,6 +24,7 @@ for path in (SOURCE, TESTS, PROJECT, DOC, WORKSPACE):
     require(path.is_file(), f"missing required file {path.relative_to(ROOT)}")
 
 source = SOURCE.read_text(encoding="utf-8")
+require("try! SpeakerOptimizerMeasurementSessionOrchestrator" not in source, "forced orchestrator initialization is forbidden")
 tests = TESTS.read_text(encoding="utf-8")
 project = PROJECT.read_text(encoding="utf-8")
 doc = DOC.read_text(encoding="utf-8")
@@ -56,6 +57,8 @@ for token in (
     "struct SpeakerOptimizerMeasurementSessionStep",
     "struct SpeakerOptimizerMeasurementSessionProgress",
     "struct SpeakerOptimizerMeasurementSessionOrchestrator",
+    "SpeakerOptimizerMeasurementSessionOrchestrator.standard",
+    "private init(validatedRepeatCount: Int)",
     "struct SpeakerOptimizerMeasurementSetStore",
     "validatePersistenceStructure",
     "retryLatestCapture",
