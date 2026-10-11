@@ -348,6 +348,135 @@ final class SpeakerOptimizerMeasurementEvidenceTests: XCTestCase {
         XCTAssertNotNil(plan.blockReason)
     }
 
+
+    func testSessionPlanIsPositionMajorToMinimizeMicrophoneMoves() throws {
+        let secondPosition = SpeakerOptimizerMeasurementPosition(
+            name: "Second Seat"
+        )
+        var set = makeSet(captures: [])
+        set.positions.append(secondPosition)
+        set.plannedSources = [
+            .speaker(.frontLeft),
+            .speaker(.frontRight),
+        ]
+
+        let orchestrator = try SpeakerOptimizerMeasurementSessionOrchestrator()
+        let steps = try orchestrator.steps(for: set)
+
+        XCTAssertEqual(steps.count, 12)
+        XCTAssertTrue(steps[0...5].allSatisfy {
+            $0.position.id == positionID
+        })
+        XCTAssertTrue(steps[6...11].allSatisfy {
+            $0.position.id == secondPosition.id
+        })
+        XCTAssertEqual(
+            Array(steps[0...2].map(\.repeatIndex)),
+            [0, 1, 2]
+        )
+    }
+
+    func testSessionResumesAtFirstIncompleteRepeatAfterReloadStyleState() throws {
+        let orchestrator = try SpeakerOptimizerMeasurementSessionOrchestrator()
+        var set = makeSet(captures: [])
+        let first = try XCTUnwrap(orchestrator.nextPendingStep(for: set))
+        set = try orchestrator.appending(
+            makeCapture(),
+            to: set,
+            for: first
+        )
+        let second = try XCTUnwrap(orchestrator.nextPendingStep(for: set))
+        XCTAssertEqual(second.repeatIndex, 1)
+
+        set = try orchestrator.appending(
+            makeCapture(offsetDB: 0.1),
+            to: set,
+            for: second
+        )
+        let resumed = try XCTUnwrap(orchestrator.nextPendingStep(for: set))
+        XCTAssertEqual(resumed.position.id, positionID)
+        XCTAssertEqual(resumed.source, source)
+        XCTAssertEqual(resumed.repeatIndex, 2)
+    }
+
+    func testSessionRejectsCaptureIdentityDrift() throws {
+        let orchestrator = try SpeakerOptimizerMeasurementSessionOrchestrator()
+        let set = makeSet(captures: [])
+        let step = try XCTUnwrap(orchestrator.nextPendingStep(for: set))
+        var wrong = makeCapture()
+        wrong.routingSignature = "different-route"
+
+        XCTAssertThrowsError(
+            try orchestrator.appending(wrong, to: set, for: step)
+        ) { error in
+            XCTAssertEqual(
+                error as? SpeakerOptimizerMeasurementSessionError,
+                .captureIdentityMismatch
+            )
+        }
+    }
+
+    func testRetryLatestCaptureMakesThatRepeatPendingAgain() throws {
+        let orchestrator = try SpeakerOptimizerMeasurementSessionOrchestrator()
+        var set = makeSet(captures: [])
+        for offset in [0.0, 0.1, -0.1] {
+            let step = try XCTUnwrap(orchestrator.nextPendingStep(for: set))
+            set = try orchestrator.appending(
+                makeCapture(offsetDB: offset),
+                to: set,
+                for: step
+            )
+        }
+        XCTAssertTrue(try orchestrator.progress(for: set).complete)
+
+        set = try orchestrator.retryLatestCapture(
+            in: set,
+            positionID: positionID,
+            source: source
+        )
+        let retry = try XCTUnwrap(orchestrator.nextPendingStep(for: set))
+        XCTAssertEqual(retry.repeatIndex, 2)
+        XCTAssertFalse(try orchestrator.progress(for: set).complete)
+    }
+
+    func testMeasurementSetStoreRoundTripPreservesCompactEvidence() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "PR103-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = SpeakerOptimizerMeasurementSetStore(
+            rootDirectory: root
+        )
+        let original = makeSet(captures: [
+            makeCapture(),
+            makeCapture(offsetDB: 0.1),
+        ])
+        try store.save(original)
+        let loaded = try XCTUnwrap(store.load(original.id))
+
+        XCTAssertEqual(loaded, original)
+        let data = try Data(contentsOf: store.url(for: original.id))
+        let json = try XCTUnwrap(String(data: data, encoding: .utf8))
+        XCTAssertFalse(json.contains("rawCapture"))
+        XCTAssertFalse(json.contains("impulseResponse"))
+    }
+
+    func testPersistenceRejectsCaptureOutsideSessionIdentity() throws {
+        var set = makeSet(captures: [makeCapture()])
+        set.captures[0].playbackSystemID = UUID()
+
+        XCTAssertThrowsError(try set.validatePersistenceStructure()) {
+            error in
+            XCTAssertEqual(
+                error as? SpeakerOptimizerMeasurementSessionError,
+                .persistenceInvalid
+            )
+        }
+    }
+
     private func makeRoutePlan() -> LiveNChannelOutputRoutePlan {
         var program = Array(
             repeating: UInt32.max,
