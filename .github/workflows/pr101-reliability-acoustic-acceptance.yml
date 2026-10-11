@@ -43,6 +43,20 @@ jobs:
       - name: Build arm64 macOS app
         run: |
           xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES build
+      - name: Build Release performance scheme
+        run: |
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty-Performance -configuration Release -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO build
+      - name: Capture repeated PR101 resource baseline
+        run: |
+          python3 ci/run_pr101_resource_baseline.py --repeats 5 --report /tmp/pr101-resource-baseline.json
+          cat /tmp/pr101-resource-baseline.json
+      - name: Upload PR101 resource baseline
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr101-resource-baseline
+          path: /tmp/pr101-resource-baseline.json
+          if-no-files-found: error
+          retention-days: 7
       - name: Targeted PR101 reliability acceptance tests
         run: |
           xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES \
