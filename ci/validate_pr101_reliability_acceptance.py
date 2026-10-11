@@ -5,6 +5,8 @@ ROOT = Path(__file__).resolve().parents[1]
 DIAG = ROOT / "NotchSixty/Diagnostics/AudioDiagnosticsSnapshot.swift"
 TESTS = ROOT / "NotchSixtyTests/ProductionAnalysisTests.swift"
 DOC = ROOT / "docs/PR101_RELIABILITY_ACOUSTIC_ACCEPTANCE.md"
+CAMPAIGN = ROOT / "ci/run_pr101_remote_reliability_campaign.py"
+WORKFLOW = ROOT / ".github/workflows/pr101-reliability-acoustic-acceptance.yml"
 
 
 def require(condition: bool, message: str) -> None:
@@ -15,6 +17,8 @@ def require(condition: bool, message: str) -> None:
 diag = DIAG.read_text()
 tests = TESTS.read_text()
 doc = DOC.read_text().lower()
+campaign = CAMPAIGN.read_text()
+workflow = WORKFLOW.read_text()
 
 for token in (
     "FullSystemReliabilityEvidenceAuthority",
@@ -74,3 +78,32 @@ for inherited in (
     require(inherited.exists(), f"inherited acceptance artifact missing {inherited.name}")
 
 print("PR101 reliability and acoustic acceptance validation passed")
+
+
+for token in (
+    '"stereoTransport"',
+    '"semanticMultichannel"',
+    '"headphoneSpatialRuntime"',
+    '"audioUnitFaultContainment"',
+    '"roomTreatmentFailClosed"',
+    '"activeAcousticsFailClosed"',
+    '"evidenceAuthority": "deterministicSimulation"',
+    '"physicalAcceptanceComplete": False',
+    '"releaseAcceptanceComplete": False',
+    "validate_pr70_stereo_adaptive_src.py",
+    "validate_pr71_nchannel_adaptive_src.py",
+    "validate_pr84a_audio_unit_hardening.py",
+    "validate_pr77_live_room_treatment.py",
+    "audit_pr98_disconnected_boundary.py",
+):
+    require(token in campaign, f"deterministic campaign missing {token!r}")
+
+for token in (
+    "run_pr101_remote_reliability_campaign.py --report",
+    "AudioUnitLiveRackRuntimeTests",
+    "AudioUnitRackMutationTests",
+    "LiveMIMORoomTreatmentIntegrationTests",
+    "QuietZoneFeedForwardClockMonitorTests",
+    "QuietZoneNativeShadowTimingTransportTests",
+):
+    require(token in workflow, f"PR101 workflow missing {token!r}")
