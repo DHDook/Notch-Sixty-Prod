@@ -963,4 +963,49 @@ final class ProductionAnalysisTests: XCTestCase {
         }
     }
 
+
+    func testPR101RemoteClosureModelPassesTenRemoteRequirementsOnly()
+        throws {
+        let remoteRequirements = FullSystemReliabilityRequirementCatalog
+            .standard
+            .filter { !$0.hardwareOnly }
+
+        XCTAssertEqual(remoteRequirements.count, 10)
+        XCTAssertEqual(
+            FullSystemReliabilityRequirementCatalog
+                .hardwareRequirementIDs.count,
+            5
+        )
+
+        let observations = remoteRequirements.map {
+            FullSystemReliabilityObservation(
+                requirementID: $0.id,
+                evidence: .macOSCI,
+                completedIterations: 1,
+                injectedFaults:
+                    $0.id == .dropoutRecoveryStress ? 512 : 0
+            )
+        }
+
+        let report = try FullSystemReliabilityAcceptanceEvaluator()
+            .review(observations: observations)
+
+        XCTAssertTrue(report.remoteSoftwareAccepted)
+        XCTAssertFalse(report.physicalAcceptanceComplete)
+        XCTAssertFalse(report.releaseAcceptanceComplete)
+        XCTAssertEqual(report.hardwarePendingCount, 5)
+        XCTAssertEqual(report.failedCount, 0)
+
+        for requirementID
+            in FullSystemReliabilityRequirementCatalog
+                .hardwareRequirementIDs {
+            XCTAssertEqual(
+                report.items.first {
+                    $0.requirement.id == requirementID
+                }?.status,
+                .hardwareRequired
+            )
+        }
+    }
+
 }
