@@ -297,6 +297,7 @@ struct ActiveAcousticsPhysicalEvidenceUXSnapshot: Equatable {
     let neighboringSeatReductionDB: Double?
     let returningPrimaryReductionDB: Double?
     let worstFrequencyReductionDB: Double?
+    let worstSeatReductionDB: Double?
     let primaryRepeatDifferenceDB: Double?
     let maximumBandRepeatDifferenceDB: Double?
     let largestPrimaryBaselineDifferenceDB: Double?
@@ -320,6 +321,7 @@ struct ActiveAcousticsPhysicalEvidenceUXSnapshot: Equatable {
             neighboringSeatReductionDB = nil
             returningPrimaryReductionDB = nil
             worstFrequencyReductionDB = nil
+            worstSeatReductionDB = nil
             primaryRepeatDifferenceDB = nil
             maximumBandRepeatDifferenceDB = nil
             largestPrimaryBaselineDifferenceDB = nil
@@ -341,6 +343,7 @@ struct ActiveAcousticsPhysicalEvidenceUXSnapshot: Equatable {
             neighboringSeatReductionDB = nil
             returningPrimaryReductionDB = nil
             worstFrequencyReductionDB = nil
+            worstSeatReductionDB = nil
             primaryRepeatDifferenceDB = nil
             maximumBandRepeatDifferenceDB = nil
             largestPrimaryBaselineDifferenceDB = nil
@@ -367,6 +370,11 @@ struct ActiveAcousticsPhysicalEvidenceUXSnapshot: Equatable {
         returningPrimaryReductionDB =
             package.campaignReview.returningPrimaryReductionDB
         worstFrequencyReductionDB = package.worstFrequencyReductionDB
+        worstSeatReductionDB = min(
+            package.campaignReview.firstPrimaryReductionDB,
+            package.campaignReview.neighboringSeatReductionDB,
+            package.campaignReview.returningPrimaryReductionDB
+        )
         primaryRepeatDifferenceDB =
             package.campaignReview.primaryReductionRepeatDifferenceDB
         maximumBandRepeatDifferenceDB =
@@ -879,9 +887,19 @@ struct ProductionFeedForwardReadinessCard: View {
                         "Integrated reduction after moving the microphone away and back."
                     )
                     evidenceMetric(
+                        "Worst seat",
+                        decibels(snapshot.worstSeatReductionDB),
+                        "Weakest integrated reduction across A, B and returned A."
+                    )
+                    evidenceMetric(
                         "Worst frequency",
                         decibels(snapshot.worstFrequencyReductionDB),
                         "Weakest observed 20–150 Hz benefit across all three visits."
+                    )
+                    evidenceMetric(
+                        "Primary baseline span",
+                        absoluteDecibels(snapshot.largestPrimaryBaselineDifferenceDB),
+                        "Largest OFF-baseline variation at the primary position."
                     )
                     evidenceMetric(
                         "A repeat difference",
