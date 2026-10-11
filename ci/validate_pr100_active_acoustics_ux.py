@@ -28,6 +28,11 @@ for token in (
     "Guided One-Microphone Setup",
     "Listener A return",
     "Recorded means only that a software record exists",
+    "ActiveAcousticsDiagnosticsUXSnapshot",
+    "Diagnostics & Blockers",
+    "DIAGNOSTIC PASS",
+    "HARDWARE REQUIRED",
+    "DISCONNECTED",
 ):
     require(token in readiness, f"commissioning UX missing {token!r}")
 
@@ -60,6 +65,8 @@ for token in (
     "testActiveAcousticsUXRequiresCalibrationBeforeTimingReview",
     "testPhysicallyPlausibleTimingStillRequiresHardwareVerification",
     "testNonCausalTimingNeverLooksReady",
+    "testConsolidatedDiagnosticsKeepPhysicalGatesSeparate",
+    "testConsolidatedDiagnosticsExposeMissingCommissioningRecords",
 ):
     require(token in tests, f"PR100 XCTest missing {token}")
 
@@ -69,6 +76,7 @@ for phrase in (
     "hardware-gated",
     "speaker-connected anc remains disconnected",
     "pr99",
+    "diagnostics & blockers",
 ):
     require(phrase in doc, f"PR100 document missing {phrase!r}")
 
