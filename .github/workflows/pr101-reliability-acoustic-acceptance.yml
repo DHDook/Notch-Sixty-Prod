@@ -52,6 +52,7 @@ jobs:
             -only-testing:NotchSixtyTests/LiveMIMORoomTreatmentIntegrationTests \
             -only-testing:NotchSixtyTests/QuietZoneFeedForwardClockMonitorTests \
             -only-testing:NotchSixtyTests/QuietZoneNativeShadowTimingTransportTests \
+            -only-testing:NotchSixtyTests/NotchSixtyTests/testPR101StableUIDDeviceRecoverySoakRemainsSoftwareEvidence \
             test
       - name: Full XCTest regression
         run: |
