@@ -9,6 +9,7 @@ DOC = ROOT / "docs/PR101_RELIABILITY_ACOUSTIC_ACCEPTANCE.md"
 CAMPAIGN = ROOT / "ci/run_pr101_remote_reliability_campaign.py"
 RESOURCE_BASELINE = ROOT / "ci/run_pr101_resource_baseline.py"
 RESOURCE_SOAK = ROOT / "ci/validate_pr101_realtime_resource_soak.c"
+REMOTE_CLOSURE = ROOT / "ci/build_pr101_remote_acceptance_report.py"
 WORKFLOW = ROOT / ".github/workflows/pr101-reliability-acoustic-acceptance.yml"
 
 
@@ -24,6 +25,7 @@ doc = DOC.read_text().lower()
 campaign = CAMPAIGN.read_text()
 resource_baseline = RESOURCE_BASELINE.read_text()
 resource_soak = RESOURCE_SOAK.read_text()
+remote_closure = REMOTE_CLOSURE.read_text()
 workflow = WORKFLOW.read_text()
 
 for token in (
@@ -191,3 +193,46 @@ for token in (
     require(token in workflow, f"realtime soak workflow missing {token!r}")
 
 print("PR101 reliability and acoustic acceptance validation passed")
+
+
+for token in (
+    '"PR101_REMOTE_SOFTWARE_ACCEPTANCE_CLOSURE"',
+    '"remoteSoftwareAccepted": True',
+    '"physicalAcceptanceComplete": False',
+    '"releaseAcceptanceComplete": False',
+    '"liveFeedForwardANCOutputAuthorized": False',
+    '"speakerConnectedFeedForwardOutput": False',
+    '"integrityOnly": True',
+    '"stereoTransport"',
+    '"semanticMultichannel"',
+    '"headphoneSpatialRuntime"',
+    '"audioUnitFaultContainment"',
+    '"roomTreatmentFailClosed"',
+    '"activeAcousticsFailClosed"',
+    '"lifecycleRecoveryModel"',
+    '"dspCorrectnessRegression"',
+    '"resourceStability"',
+    '"dropoutRecoveryStress"',
+    '"physicalDeviceRecovery"',
+    '"sleepWakeRecovery"',
+    '"prolongedThermalRuntime"',
+    '"speakerSafety"',
+    '"acousticAcceptance"',
+    "sha256_file",
+    "hardPerformanceThresholdsApplied",
+    "maximumCheckpointHeapGrowthBytes",
+):
+    require(token in remote_closure, f"remote closure missing {token!r}")
+
+for token in (
+    "touch /tmp/pr101-macos-deterministic-campaign.passed",
+    "touch /tmp/pr101-arm64-build.passed",
+    "touch /tmp/pr101-release-build.passed",
+    "touch /tmp/pr101-targeted-tests.passed",
+    "touch /tmp/pr101-full-xctest.passed",
+    "build_pr101_remote_acceptance_report.py",
+    "--report /tmp/pr101-remote-acceptance.json",
+    "Upload PR101 remote software acceptance closure",
+    "pr101-remote-software-acceptance",
+):
+    require(token in workflow, f"remote closure workflow missing {token!r}")
