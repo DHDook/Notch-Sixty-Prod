@@ -48,6 +48,12 @@ jobs:
           -configuration Debug -destination 'platform=macOS,arch=arm64'
           CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES
           -only-testing:NotchSixtyTests/SpeakerOptimizerDesignEngineTests test
+      - name: Run PR104 PEQ candidate tests
+        run: >-
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
+          -configuration Debug -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES
+          -only-testing:NotchSixtyTests/SpeakerOptimizerPEQCandidateTests test
       - name: Run full XCTest regression
         run: >-
           xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty

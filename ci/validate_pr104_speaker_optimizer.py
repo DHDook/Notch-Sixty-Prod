@@ -47,4 +47,40 @@ for token in (
 for token in ("prediction, not verification", "protected Low/Mid/High", "PR105"):
     assert token in doc, f"missing PR104 design/safety note: {token}"
 assert "full XCTest regression" in workflow
-print("PR104 safe offline preview contracts passed")
+peq_source = ROOT / "NotchSixty/Audio/SpeakerOptimizerPEQCandidateDesigner.swift"
+peq_tests = ROOT / "NotchSixtyTests/SpeakerOptimizerPEQCandidateTests.swift"
+assert peq_source.is_file() and peq_tests.is_file(), "missing Slice 2 PEQ source or tests"
+peq = peq_source.read_text()
+peq_test = peq_tests.read_text()
+for token in (
+    "struct SpeakerOptimizerPEQBand",
+    "struct SpeakerOptimizerPEQCandidateDesigner",
+    "baseline: SpeakerOptimizerMeasurementSet",
+    "SpeakerOptimizerDesignEngine().design(",
+    "maximumBands = 6",
+    "maximumBandGainMagnitudeDB = 6.0",
+    "maximumHeadroomDB = 3.5",
+    "maximumOutOfBandDeviationDB = 1.0",
+    "isMeasuredVerification: Bool { false }",
+    "previewOnly: Bool { true }",
+    "recommendedHeadroomDB",
+    "maximumPositiveGain",
+    "passesChecks(",
+):
+    assert token in peq, f"missing PEQ safety contract: {token}"
+for token in (
+    "testQualifiedMeasurementProducesConstrainedCutOnlyPEQ",
+    "testDigitalPeakingBiquadHasBoundedCorrectCenterGain",
+    "testUnqualifiedDataAndRoleFailClosed",
+    "testInvalidFilterConstraintsFailClosed",
+):
+    assert token in peq_test, f"missing PEQ test {token}"
+for token in (
+    "F10400000000000000000003",
+    "F10400000000000000000004",
+    "F10400000000000000000013",
+    "F10400000000000000000014",
+):
+    assert project.count(token) >= 2, f"PEQ not registered in Xcode: {token}"
+assert "Run PR104 PEQ candidate tests" in workflow
+print("PR104 safe offline preview and constrained PEQ candidate contracts passed")

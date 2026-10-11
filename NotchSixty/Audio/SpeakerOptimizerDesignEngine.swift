@@ -33,6 +33,8 @@ struct SpeakerOptimizerSourcePreview: Equatable, Sendable {
     var source: MultichannelCalibrationSource
     var frequenciesHz: [Double]
     var correctionDB: [Double]
+    /// The reference target used for full-biqaud-model seat regression checks.
+    var targetMagnitudeDB: [Double]
     var weightedRMSEBeforeDB: Double
     /// Model-only: adds the proposed envelope to stored measured magnitudes.
     /// NOT a fresh microphone capture or proof of audible improvement.
@@ -160,6 +162,7 @@ struct SpeakerOptimizerDesignEngine: Sendable {
                 source: source,
                 frequenciesHz: frequencies,
                 correctionDB: correction,
+                targetMagnitudeDB: targets,
                 weightedRMSEBeforeDB: before,
                 predictedWeightedRMSEAfterDB: predicted,
                 warnings: warnings

@@ -1,6 +1,6 @@
 # PR104 — Measurement-Driven Speaker Optimization Engine
 
-Status: **SLICE 1 IMPLEMENTED — EXACT-HEAD CI PENDING**
+Status: **SLICE 2 IMPLEMENTED — EXACT-HEAD CI PENDING**
 
 Stack: PR102 remote release handoff → PR103 Speaker Optimizer measurement
 foundation → **PR104 optimization engine** → PR105 guided apply/verification →
@@ -36,9 +36,13 @@ whole-output bypass of speaker crossovers or per-driver protection.
 
 ## Next slices
 
-2. **Constrained correction parameterization:** Translate preview envelopes
-   into bounded PEQ/FIR candidate parameters, with filter count/Q limits,
-   clipping/headroom accounting and explicit crossover/limiter protections.
+2. **Constrained correction parameterization (PEQ implemented):** Converts freshly
+   evaluated qualified baseline measurement sets into preview-only digital RBJ
+   peaking-EQ biquads. Fits at most six bands per acoustic source with explicit
+   Q and gain limits, full-band peak/headroom audits, out-of-band skirts audit,
+   aggregate and per-position regression rejection, and no deployment path.
+   FIR is deliberately deferred: it requires a separate verified synthesis and
+   latency/deployment safety contract, not relabeling the PEQ result as FIR.
 3. **Multi-source integration:** Optimize sub/mains crossover region, timing,
    polarity and source interaction only where real isolated measurements and
    identity are sufficient; do not assume phase-safe summation.
@@ -57,3 +61,11 @@ dedicated crossover-preserving measured/safety-qualified path exists.
 
 PR105 owns guided approval, application, rollback, and *new measured* candidate
 and verification sets. No PR104 prediction may become measured verification.
+
+## Slice 2 checkpoint
+
+- `SpeakerOptimizerPEQCandidateDesigner` recomputes PR103 readiness and Slice 1 from baseline evidence; it never accepts externally supplied/forged correction envelopes.
+- Greedy digital-biquad fitting tests each RBJ response against all included microphone positions, a maximum band count, Q and gain bounds, positive headroom reserve, and frequency skirts beyond the common measured band.
+- The resulting candidate contains coefficients, modeled response, and explicit recommended preamp attenuation. This is **preview-only**: nothing loads coefficients into a DSP chain, reconfigures crossovers, or claims measured acoustic verification.
+- Protected active-crossover individual-driver measurements remain unavailable. The data is for whole speakers/subs only.
+- A preview-only PEQ candidate must not be interpreted as a guarantee of speaker safety under live playback; PR105/physical acceptance remain required.
