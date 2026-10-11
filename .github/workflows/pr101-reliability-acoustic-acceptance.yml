@@ -23,6 +23,10 @@ jobs:
       - run: python3 ci/validate_pr99_physical_verification.py
       - run: python3 ci/validate_pr98_feedforward_runtime.py
       - run: python3 ci/audit_pr98_disconnected_boundary.py
+      - name: Run deterministic PR101 reliability campaign
+        run: |
+          python3 ci/run_pr101_remote_reliability_campaign.py --report /tmp/pr101-reliability.json
+          cat /tmp/pr101-reliability.json
 
   macos:
     runs-on: xcode-27
@@ -32,12 +36,23 @@ jobs:
       - run: python3 ci/validate_pr100_active_acoustics_ux.py
       - run: python3 ci/validate_pr99_physical_verification.py
       - run: python3 ci/audit_pr98_disconnected_boundary.py
+      - name: Run deterministic PR101 reliability campaign on Apple clang
+        run: |
+          python3 ci/run_pr101_remote_reliability_campaign.py --report /tmp/pr101-reliability.json
+          cat /tmp/pr101-reliability.json
       - name: Build arm64 macOS app
         run: |
           xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES build
       - name: Targeted PR101 reliability acceptance tests
         run: |
-          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES -only-testing:NotchSixtyTests/ProductionAnalysisTests test
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES \
+            -only-testing:NotchSixtyTests/ProductionAnalysisTests \
+            -only-testing:NotchSixtyTests/AudioUnitLiveRackRuntimeTests \
+            -only-testing:NotchSixtyTests/AudioUnitRackMutationTests \
+            -only-testing:NotchSixtyTests/LiveMIMORoomTreatmentIntegrationTests \
+            -only-testing:NotchSixtyTests/QuietZoneFeedForwardClockMonitorTests \
+            -only-testing:NotchSixtyTests/QuietZoneNativeShadowTimingTransportTests \
+            test
       - name: Full XCTest regression
         run: |
           xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty -configuration Debug -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES test
