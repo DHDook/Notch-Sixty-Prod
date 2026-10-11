@@ -18,6 +18,8 @@ APP_STORE = ROOT / "docs" / "APP_STORE_REQUIREMENTS.md"
 PR102_DOC = ROOT / "docs" / "PR102_INTEGRATION_COMMERCIAL_RELEASE.md"
 README = ROOT / "README.md"
 ROADMAP = ROOT / "docs" / "ROADMAP.md"
+HANDOFF = ROOT / "docs" / "PR102_RELEASE_HANDOFF.md"
+SOFTWARE_CLOSURE = ROOT / "docs" / "PR102_SOFTWARE_CLOSURE.md"
 LICENSE = ROOT / "LICENSE"
 
 
@@ -45,6 +47,8 @@ for path in (
     PR102_DOC,
     README,
     ROADMAP,
+    HANDOFF,
+    SOFTWARE_CLOSURE,
     LICENSE,
 ):
     require(path.is_file(), f"missing required release artifact: {path.relative_to(ROOT)}")
@@ -60,6 +64,8 @@ app_store = APP_STORE.read_text(encoding="utf-8")
 pr102_doc = PR102_DOC.read_text(encoding="utf-8")
 readme = README.read_text(encoding="utf-8")
 roadmap = ROADMAP.read_text(encoding="utf-8")
+handoff = HANDOFF.read_text(encoding="utf-8")
+software_closure = SOFTWARE_CLOSURE.read_text(encoding="utf-8")
 license_text = LICENSE.read_text(encoding="utf-8")
 
 with INFO.open("rb") as handle:
@@ -215,6 +221,27 @@ for token in (
     "Historical stage — PR #22",
 ):
     require(token in roadmap, f"roadmap reconciliation missing {token!r}")
+
+for token in (
+    "Physical Mac / audio-hardware acceptance",
+    "Production Apple release credentials",
+    "Legal/IP release review",
+    "Public-release authorization rule",
+    "remoteReleasePreparationAccepted = true",
+):
+    require(token in handoff, f"release handoff missing {token!r}")
+
+for token in (
+    "PENDING EXACT-HEAD CI",
+    "PR102_REMOTE_RELEASE_CANDIDATE",
+    "remoteReleasePreparationAccepted = true",
+    "physicalAcceptanceComplete = false",
+    "releaseCredentialAcceptanceComplete = false",
+    "publicReleaseAuthorized = false",
+    "liveFeedForwardANCOutputAuthorized = false",
+    "speakerConnectedFeedForwardOutput = false",
+):
+    require(token in software_closure, f"software closure contract missing {token!r}")
 
 require("proprietary and confidential" in license_text, "root proprietary license contract changed")
 
