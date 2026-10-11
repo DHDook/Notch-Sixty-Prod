@@ -44,6 +44,13 @@ for token in (
     "init(",
     "compacting measurement: MultichannelCalibrationMeasurement",
     "Capture identity changed across playback routing, microphone, sample rate, position, or source.",
+    "enum SpeakerOptimizerMeasurementExcitationTarget",
+    "case protectedDriverBus(SpeakerOutputBus)",
+    "struct SpeakerOptimizerMeasurementTransportPlan",
+    "struct SpeakerOptimizerMeasurementTransportPlanner",
+    "activeCrossoverRoutingPresent",
+    "configuredLimiterWouldBeBypassed",
+    "preservesMandatoryProtection",
 ):
     require(token in source, f"measurement evidence model missing {token!r}")
 
@@ -72,6 +79,12 @@ for token in (
     "testMissingPlannedSourceCoverageFailsClosed",
     "testCompactionRetainsAnalyzedEvidenceWithoutRawSweepStorage",
     "testBaselineCandidateVerificationRolesRemainDistinct",
+    "testWholeSpeakerCanReuseExistingTargetedCalibrationTransport",
+    "testSubwooferCanReuseExistingTargetedCalibrationTransport",
+    "testProtectedDriverBusFailsClosedInsteadOfRawPhysicalSweep",
+    "testActiveSplitDriverRoutingBlocksDirectCalibrationReuse",
+    "testConfiguredDriverLimiterBlocksDirectCalibrationReuse",
+    "testUnavailablePhysicalRouteFailsClosed",
 ):
     require(token in tests, f"targeted PR103 test missing {token!r}")
 
@@ -93,6 +106,9 @@ for token in (
     "phase/coherence",
     "preserve mandatory crossover/protection filters",
     "Remote CI cannot establish",
+    "Slice 2 implementation checkpoint",
+    "Protected driver measurement remains blocked",
+    "enabled per-driver limiter",
 ):
     require(token in doc, f"PR103 design contract missing {token!r}")
 
