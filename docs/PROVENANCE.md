@@ -62,7 +62,7 @@ Historical GPL Notch Sixty / Equaliser implementation source is **not** a permit
 | PR42 REW interoperability | Original commercial implementation | Public/user-visible REW filter-text format | Parser/exporter authored in commercial repository; REW software not embedded. |
 | PR42 EasyEffects interoperability | Original commercial implementation | Public/user-visible EasyEffects preset JSON format | Import/export authored against proprietary EQ ownership model; EasyEffects not embedded. |
 | PR42 CamillaDSP interoperability | Original commercial implementation | Public CamillaDSP YAML configuration specification | Text exporter only; CamillaDSP is not linked/embedded/redistributed. |
-| Third-party production dependencies | None | `THIRD_PARTY_NOTICES.md` | No approved linked/bundled third-party production source as of PR42. |
+| Third-party production dependencies | Approved BSD dependency | libmysofa v1.3.4 (`hoene/libmysofa`) | Minimal reader/HDF subset vendored for native SOFA decoding; BSD 3-Clause license retained and shipped notice added by PR102. |
 
 ## Detailed historical PR notes retained as provenance facts
 
@@ -110,7 +110,7 @@ As of that review:
 
 - unexplained production source origin: **none identified**;
 - unresolved GPL/AGPL production dependency: **none identified**;
-- linked/bundled third-party production component requiring a notice: **none identified**;
+- linked/bundled third-party production component requiring a notice at the PR42 checkpoint: **none identified**; later PR85+ work added the approved BSD-licensed libmysofa v1.3.4 reader subset, reconciled by PR102;
 - owner-authored reused asset without an ownership basis: **none identified**;
 - substantive PR34–PR42 implementation area without a provenance classification: **none identified**.
 
@@ -119,3 +119,23 @@ As of that review:
 - `NotchSixty/Assets.xcassets/TrayIcon.imageset/notch_sixty_tray_icon_final_tightcrop.svg` is project-owner-controlled artwork carried from the legacy repository by explicit owner request.
 - Only the visual asset is reused. The production `MenuBarExtra`, application preferences, processing controls, preset binding, Settings scene, and Dock/Menu Bar/Both behavior are newly authored against the proprietary production model.
 
+
+
+### PR102 libmysofa reconciliation
+
+Post-PR42 SOFA/AES69 work added a deliberately vendored subset of
+`libmysofa v1.3.4` for native user-selected SOFA/HRTF decoding.
+
+- Upstream: `hoene/libmysofa`, tag `v1.3.4`.
+- License: BSD 3-Clause.
+- Vendored scope: reader/HDF parsing subset only; no upstream SOFA datasets.
+- Production target: the vendored C reader/HDF files are compiled into the app.
+- Realtime boundary: SOFA file parsing remains an import/control-plane
+  operation and is not performed in the realtime render callback.
+- License preservation: the exact upstream `LICENSE` remains in the vendor
+  directory.
+- Binary redistribution notice: `NotchSixty/ThirdPartyNotices.txt` is a
+  production application resource and reproduces the required BSD notice.
+
+This supersedes the older PR42 statement that no bundled third-party
+production component required a redistribution notice.
