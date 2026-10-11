@@ -63,7 +63,14 @@ if not legacy.rstrip().endswith("#endif"):
 require(app, "#if DEBUG\nprivate struct PR27ProtectionValidationView", "DEBUG engineering view gate")
 require(app, '#if DEBUG\n        Window("Engineering Validation", id: "engineering-validation")', "DEBUG engineering scene gate")
 require(root_view, '#if DEBUG\n    @Environment(\\.openWindow)', "DEBUG openWindow gate")
-require(root_view, '#if DEBUG\n            Button {\n                openWindow(id: "engineering-validation")', "DEBUG engineering toolbar gate")
+engineering_call = 'openWindow(id: "engineering-validation")'
+engineering_index = root_view.find(engineering_call)
+if engineering_index < 0:
+    fail("Engineering Validation toolbar action is missing")
+debug_index = root_view.rfind("#if DEBUG", 0, engineering_index)
+endif_index = root_view.find("#endif", engineering_index)
+if debug_index < 0 or endif_index < 0:
+    fail("Engineering Validation toolbar action is not enclosed by a DEBUG gate")
 
 # Launch at Login must use the public Apple API, live in the same Settings/app
 # preferences UI as Appearance and App Presence, and remain an explicit
