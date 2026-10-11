@@ -307,3 +307,12 @@ The final remote-closure machinery is now present:
 
 PR103 remains **PENDING EXACT-HEAD CI** until the current head passes the full
 workflow. Only then may the remote/software status be promoted to complete.
+
+
+### Persistence timestamp precision correction
+
+The first Slice 3 CI pass exposed that Foundation's default ISO-8601 JSON date
+strategy normalizes away subsecond capture timing. Because capture timestamps
+participate in deterministic repeat ordering, PR103 now persists dates as
+milliseconds since the Unix epoch. This retains compact JSON while preserving
+the capture-order precision used by the evidence/session model.
