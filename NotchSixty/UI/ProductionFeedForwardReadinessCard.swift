@@ -335,18 +335,31 @@ struct ActiveAcousticsPhysicalEvidenceUXSnapshot: Equatable {
                 canonicalJSON: package.canonicalJSON,
                 expectedSHA256Hex: package.sha256Hex
             )) == true
+        guard verified else {
+            state = .invalidPackage
+            initialPrimaryReductionDB = nil
+            neighboringSeatReductionDB = nil
+            returningPrimaryReductionDB = nil
+            worstFrequencyReductionDB = nil
+            primaryRepeatDifferenceDB = nil
+            maximumBandRepeatDifferenceDB = nil
+            largestPrimaryBaselineDifferenceDB = nil
+            curvePoints = []
+            digestPrefix = String(package.sha256Hex.prefix(12))
+            digestIntegrityVerified = false
+            independentRolesAcknowledged = false
+            return
+        }
+
         let reviewed =
-            verified
-            && reviewPacket?.evidenceSHA256Hex == package.sha256Hex
+            reviewPacket?.evidenceSHA256Hex == package.sha256Hex
             && reviewPacket?.numericalAcceptance == true
             && reviewPacket?.independentRolesAcknowledged == true
 
         state =
-            !verified
-                ? .invalidPackage
-                : reviewed
-                    ? .roleReviewAcknowledged
-                    : .numericalEvidenceAvailable
+            reviewed
+                ? .roleReviewAcknowledged
+                : .numericalEvidenceAvailable
         initialPrimaryReductionDB =
             package.campaignReview.firstPrimaryReductionDB
         neighboringSeatReductionDB =
