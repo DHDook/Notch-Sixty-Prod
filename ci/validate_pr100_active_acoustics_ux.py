@@ -76,7 +76,7 @@ for phrase in (
     "hardware-gated",
     "speaker-connected anc remains disconnected",
     "pr99",
-    "diagnostics & blockers",
+    "diagnostics and blockers",
 ):
     require(phrase in doc, f"PR100 document missing {phrase!r}")
 
