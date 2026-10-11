@@ -64,6 +64,8 @@ for token in (
     "SpeakerOptimizerMeasurementSessionOrchestrator.standard",
     "private init(validatedRepeatCount: Int)",
     "struct SpeakerOptimizerMeasurementSetStore",
+    "dateEncodingStrategy = .millisecondsSince1970",
+    "dateDecodingStrategy = .millisecondsSince1970",
     "validatePersistenceStructure",
     "retryLatestCapture",
     "Position-major ordering intentionally minimizes microphone moves.",
