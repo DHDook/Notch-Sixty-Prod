@@ -139,3 +139,37 @@ Every row is marked as a future physical commissioning step. The model keeps
 physical verification, instrument provenance authentication, and live-output
 authorization false. The view cannot create captures, fabricate evidence, arm
 ANC, or connect a speaker output.
+
+
+## Slice 5 — Physical evidence visualization
+
+PR100 now has a read-only **Physical Evidence** view capable of rendering a
+real PR99 evidence package when one is explicitly supplied. Until that happens,
+the production UI shows **AWAITING PHYSICAL CAMPAIGN** and does not invent demo,
+predicted, or synthetic acoustic results.
+
+For a digest-valid PR99 package, the view summarizes:
+
+- integrated reduction at the first primary A position;
+- integrated reduction at neighboring position B;
+- integrated reduction after returning to primary A;
+- the weakest integrated seat result;
+- the weakest individual 20–150 Hz frequency result;
+- primary OFF-baseline span;
+- integrated A-return repeat difference; and
+- worst single-band A-return difference.
+
+A frequency-resolved curve plots the three A / B / A-return reduction traces.
+Positive values represent lower coherent-band level during the experimental
+condition. The graph is explicitly numerical evidence, not an instrument
+authentication or a promise of broadband silence.
+
+The provenance panel separately reports canonical-record SHA-256 integrity,
+two-role review acknowledgement, instrument provenance, physical attenuation,
+emergency hardware mute, and live-output state. A matching two-role review is
+shown only as an acknowledgement; reviewer identity and the instrument remain
+unauthenticated.
+
+If the canonical SHA-256 package check fails, PR100 suppresses all acoustic
+metrics and the curve rather than displaying potentially altered evidence.
+Live ANC output remains **DISCONNECTED** in every state.
