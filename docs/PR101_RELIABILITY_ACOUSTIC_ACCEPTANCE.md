@@ -1,0 +1,135 @@
+# PR101 — Full-System Reliability & Acoustic Acceptance
+
+## Purpose
+
+PR101 is the final reliability and acceptance campaign before PR102 integration
+and commercial-release preparation. It does not add another DSP feature family.
+It proves that the cumulative Notch Sixty system behaves predictably under
+stress and makes the remaining physical acceptance work explicit.
+
+The program covers stereo transport, semantic multichannel playback,
+headphone/spatial runtime, Audio Unit hosting, Room Treatment, Active Acoustics,
+lifecycle recovery, DSP regression, resource stability, dropout/fault recovery,
+real-device recovery, sleep/wake, prolonged thermal runtime, speaker safety,
+and final acoustic acceptance.
+
+## Slice 1 — Acceptance framework and evidence authority
+
+Slice 1 introduces one shared acceptance catalog and evaluator so later stress
+campaigns cannot each invent their own meaning of "passed."
+
+Every requirement declares:
+
+- the subsystem or acceptance area being tested;
+- the minimum evidence authority required;
+- whether the requirement is hardware-only; and
+- the reliability behavior that must be demonstrated.
+
+The evidence ladder is deliberately monotonic:
+
+1. **deterministic simulation**;
+2. **macOS CI**;
+3. **physical hardware**; and
+4. **independent physical review**.
+
+A stronger evidence class may satisfy a weaker requirement. A weaker class can
+never satisfy a stronger requirement.
+
+## Remote software requirements
+
+The first ten requirements can ultimately be exercised remotely:
+
+- stereo transport stability;
+- semantic multichannel stability;
+- headphone and spatial runtime stability;
+- Audio Unit fault containment;
+- Room Treatment fail-closed behavior;
+- Active Acoustics fail-closed behavior;
+- lifecycle recovery modeling;
+- cumulative DSP correctness regression;
+- CPU/memory stress instrumentation; and
+- dropout/fault recovery stress.
+
+The evaluator records completed iterations, injected faults, unexpected
+dropouts, non-finite samples, unrecovered faults, crashes, memory change, CPU
+telemetry, and callback-utilization telemetry.
+
+Injected faults are not failures by themselves. They become a failure only when
+they produce an unexpected dropout, non-finite output, an unrecovered fault, or
+a crash.
+
+Resource measurements are recorded in Slice 1 but no arbitrary CPU or memory
+number is promoted to a product acceptance threshold yet. Later PR101 slices
+will establish measured budgets from controlled campaigns instead of encoding
+an unsupported constant.
+
+## Hardware-only requirements
+
+Five requirements are deliberately impossible to satisfy with remote or
+synthetic evidence:
+
+- real input/output device unplug and replug recovery;
+- real macOS sleep/wake recovery and clock reacquisition;
+- prolonged runtime and thermal stability on production-class hardware;
+- speaker protection and actual emergency-mute behavior; and
+- final measured acoustic acceptance.
+
+Real device, sleep/wake, and long-run thermal requirements need physical
+hardware evidence. Speaker safety and final acoustic acceptance require
+independent physical review.
+
+This preserves the PR98–PR100 rule: software evidence must never masquerade as
+physical acoustic or safety verification.
+
+## Acceptance states
+
+The evaluator produces a result for every catalog item:
+
+- **passed**;
+- **failed**;
+- **missing**;
+- **insufficient evidence**; or
+- **hardware required**.
+
+It then exposes three intentionally separate rollups:
+
+- **remoteSoftwareAccepted** — every remotely automatable requirement passed;
+- **physicalAcceptanceComplete** — every hardware-only requirement passed; and
+- **releaseAcceptanceComplete** — both of the above are true.
+
+Therefore CI can eventually produce a clean remote-software acceptance report
+while release acceptance remains false until genuine physical evidence exists.
+
+## Evidence hygiene
+
+Every observation carries a unique run identifier. Duplicate run IDs are
+rejected so one campaign cannot be silently reused as evidence for two
+requirements.
+
+Observations with invalid iteration counts or non-finite/negative CPU or
+callback-utilization telemetry are rejected before the acceptance matrix is
+evaluated.
+
+A high iteration count cannot compensate for insufficient evidence authority.
+
+## Safety boundary
+
+Slice 1 does not:
+
+- connect or authorize feed-forward ANC output;
+- certify a microphone, sound meter, reviewer, speaker, or DAC;
+- simulate physical unplug/replug or sleep/wake and call it hardware evidence;
+- claim acoustic attenuation or listening quality;
+- define unsupported thermal, CPU, or memory limits; or
+- mark a build release-qualified from CI alone.
+
+## Planned follow-on work
+
+Remote PR101 work will build on this contract with deterministic full-stack
+stress campaigns, fault/recovery injection, resource and callback-performance
+instrumentation, memory-growth checks, repeated DSP correctness runs, and
+machine-readable acceptance reporting.
+
+Real unplug/replug, sleep/wake, long-duration thermal behavior, speaker safety,
+listening tests, and measured acoustic performance remain reserved for the
+physical acceptance campaign.
