@@ -8,6 +8,7 @@ NOTCH_TESTS = ROOT / "NotchSixtyTests/NotchSixtyTests.swift"
 DOC = ROOT / "docs/PR101_RELIABILITY_ACOUSTIC_ACCEPTANCE.md"
 CAMPAIGN = ROOT / "ci/run_pr101_remote_reliability_campaign.py"
 RESOURCE_BASELINE = ROOT / "ci/run_pr101_resource_baseline.py"
+RESOURCE_SOAK = ROOT / "ci/validate_pr101_realtime_resource_soak.c"
 WORKFLOW = ROOT / ".github/workflows/pr101-reliability-acoustic-acceptance.yml"
 
 
@@ -22,6 +23,7 @@ notch_tests = NOTCH_TESTS.read_text()
 doc = DOC.read_text().lower()
 campaign = CAMPAIGN.read_text()
 resource_baseline = RESOURCE_BASELINE.read_text()
+resource_soak = RESOURCE_SOAK.read_text()
 workflow = WORKFLOW.read_text()
 
 for token in (
@@ -126,7 +128,7 @@ for token in (
 ):
     require(token in workflow, f"PR101 workflow missing {token!r}")
 
-print("PR101 reliability and acoustic acceptance validation passed")
+
 
 
 for token in (
@@ -151,3 +153,40 @@ for token in (
     "pr101-resource-baseline.json",
 ):
     require(token in workflow, f"resource baseline workflow missing {token!r}")
+
+
+for token in (
+    '"PR101_REALTIME_RESOURCE_DROPOUT_SOAK"',
+    '"evidenceAuthority\\": \\"macOSCI"',
+    "WARMUP_CALLBACKS 2048u",
+    "SOAK_BLOCKS 16u",
+    "NORMAL_CALLBACKS_PER_BLOCK 1024u",
+    "STARVATION_FAULTS_PER_BLOCK 32u",
+    "malloc_zone_statistics",
+    "MACH_TASK_BASIC_INFO",
+    "maximum_heap_growth == 0u",
+    "heap_final <= heap_baseline",
+    "counters.underrunFrames == expected_underrun_frames",
+    "counters.overrunFrames == 0u",
+    "counters.unsupportedBufferLayouts == 0u",
+    "recovered_faults == injected_faults",
+    "output_is_exact_silence",
+    "output_has_signal",
+    '"dropoutRecoveryStressAccepted\\": %s',
+    '"resourceStabilityAccepted\\": %s',
+    '"physicalAcceptanceComplete\\": false',
+    '"releaseAcceptanceComplete\\": false',
+):
+    require(token in resource_soak, f"realtime soak missing {token!r}")
+
+for token in (
+    "Build same-process PR101 realtime resource/dropout soak",
+    "validate_pr101_realtime_resource_soak.c",
+    "Run same-process PR101 realtime resource/dropout soak",
+    "python3 -m json.tool /tmp/pr101-realtime-resource-soak.json",
+    "Upload PR101 realtime resource/dropout soak",
+    "pr101-realtime-resource-dropout-soak",
+):
+    require(token in workflow, f"realtime soak workflow missing {token!r}")
+
+print("PR101 reliability and acoustic acceptance validation passed")
