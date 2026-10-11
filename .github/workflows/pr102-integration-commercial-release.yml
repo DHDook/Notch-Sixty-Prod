@@ -20,6 +20,8 @@ jobs:
       - uses: actions/checkout@v7
       - name: Validate PR102 release-readiness contract
         run: python3 ci/validate_pr102_release_readiness.py
+      - name: Validate PR102 App Store architecture boundary
+        run: python3 ci/validate_pr102_app_store_boundary.py
       - name: Re-run PR101 reliability acceptance validator
         run: python3 ci/validate_pr101_reliability_acceptance.py
       - name: Re-run v1 release hardening validator
