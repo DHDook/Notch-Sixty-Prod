@@ -849,7 +849,16 @@ extension SpeakerOptimizerMeasurementSet {
 /// compact analyzed captures, so an interrupted app/session resumes at the first
 /// incomplete position/source repeat after reload.
 struct SpeakerOptimizerMeasurementSessionOrchestrator: Sendable {
+    static let standard = SpeakerOptimizerMeasurementSessionOrchestrator(
+        validatedRepeatCount:
+            SpeakerOptimizerMeasurementEvidenceEvaluator.minimumRepeatCount
+    )
+
     let repeatsPerPositionSource: Int
+
+    private init(validatedRepeatCount: Int) {
+        repeatsPerPositionSource = validatedRepeatCount
+    }
 
     init(
         repeatsPerPositionSource: Int =
@@ -1248,8 +1257,6 @@ final class SpeakerOptimizerMeasurementController: ObservableObject {
         microphone: RoomCorrectionCalibrationController,
         store: SpeakerOptimizerMeasurementSetStore =
             SpeakerOptimizerMeasurementSetStore(),
-        repeatsPerPositionSource: Int =
-            SpeakerOptimizerMeasurementEvidenceEvaluator.minimumRepeatCount,
         transportFactory: @escaping MultichannelCalibrationTransportFactory = {
             routePlan, outputs, input, inputChannel, program, physicalOutput in
             try MultichannelCalibrationTransport(
@@ -1278,9 +1285,7 @@ final class SpeakerOptimizerMeasurementController: ObservableObject {
         self.store = store
         self.transportFactory = transportFactory
         self.analysisOperation = analysisOperation
-        self.orchestrator = try! SpeakerOptimizerMeasurementSessionOrchestrator(
-            repeatsPerPositionSource: repeatsPerPositionSource
-        )
+        self.orchestrator = SpeakerOptimizerMeasurementSessionOrchestrator.standard
     }
 
     var progress: SpeakerOptimizerMeasurementSessionProgress? {
