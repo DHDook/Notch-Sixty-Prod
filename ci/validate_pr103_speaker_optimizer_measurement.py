@@ -7,6 +7,7 @@ SOURCE = ROOT / "NotchSixty" / "Audio" / "SpeakerOptimizerMeasurementEvidence.sw
 TESTS = ROOT / "NotchSixtyTests" / "SpeakerOptimizerMeasurementEvidenceTests.swift"
 PROJECT = ROOT / "NotchSixty.xcodeproj" / "project.pbxproj"
 DOC = ROOT / "docs" / "PR103_SPEAKER_OPTIMIZER_MEASUREMENT_FOUNDATION.md"
+WORKSPACE = ROOT / "NotchSixty" / "UI" / "ProductionMultichannelCalibrationWorkspace.swift"
 
 
 def fail(message: str) -> None:
@@ -19,13 +20,14 @@ def require(condition: bool, message: str) -> None:
         fail(message)
 
 
-for path in (SOURCE, TESTS, PROJECT, DOC):
+for path in (SOURCE, TESTS, PROJECT, DOC, WORKSPACE):
     require(path.is_file(), f"missing required file {path.relative_to(ROOT)}")
 
 source = SOURCE.read_text(encoding="utf-8")
 tests = TESTS.read_text(encoding="utf-8")
 project = PROJECT.read_text(encoding="utf-8")
 doc = DOC.read_text(encoding="utf-8")
+workspace = WORKSPACE.read_text(encoding="utf-8")
 
 for token in (
     "enum SpeakerOptimizerMeasurementRole",
@@ -128,5 +130,16 @@ for token in (
     "Compact versioned persistence",
 ):
     require(token in doc, f"PR103 design contract missing {token!r}")
+
+for token in (
+    "@StateObject private var optimizer",
+    "SpeakerOptimizerMeasurementController(",
+    'GroupBox("Speaker Optimizer Measurements")',
+    "Start Baseline Session",
+    "Measure Next Repeat",
+    "Optimizer-ready evidence",
+    "Protected Low/Mid/High driver-bus measurements remain fail-closed",
+):
+    require(token in workspace, f"Speaker Calibration optimizer UI missing {token!r}")
 
 print("PR103 Speaker Optimizer measurement foundation validation passed")
