@@ -107,3 +107,5 @@ for token in (
     "QuietZoneNativeShadowTimingTransportTests",
 ):
     require(token in workflow, f"PR101 workflow missing {token!r}")
+
+print("PR101 reliability and acoustic acceptance validation passed")
