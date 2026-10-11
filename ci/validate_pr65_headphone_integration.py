@@ -48,6 +48,10 @@ binaural_render_call = (
     else "N60BinauralRendererProcessFrame"
 )
 
+# PR65 originally established a normalized asset boundary and rejected native
+# SOFA parsing. PR85 later added reviewed native AES69/SOFA import into that
+# same normalized boundary. Validate the cumulative contract rather than the
+# obsolete parser-unavailable sentinel.
 checks = {
     "headphone profile target member": "HeadphoneDeviceProfileConfiguration.swift in Sources" in pbx,
     "binaural asset target member": "BinauralProfileAsset.swift in Sources" in pbx,
@@ -82,7 +86,12 @@ checks = {
     "content gain upstream of renderer": binaural_output.index("bridge->programGainLinear") < binaural_output.index(binaural_render_call),
     "crossfeed bypassed for virtual speakers": "spatialMode == .stereo && crossfeed.preset != .off" in profile,
     "normalized asset boundary": "struct BinauralProfileAsset" in asset and "measurements: [BinauralMeasurement]" in asset,
-    "native sofa not mislabeled": "nativeSOFAParserUnavailable" in asset and 'pathExtension.lowercased() == "sofa"' in asset,
+    "native sofa import boundary": (
+        'pathExtension.lowercased() == "sofa"' in asset
+        and "NativeSOFAImporter()" in asset
+        and "SOFABinauralAssetAdapter()" in asset
+        and "importProvenance: SOFAImportProvenance?" in asset
+    ),
     "crossfeed profile exposed": "HeadphoneCrossfeedConfiguration" in profile,
     "headroom guard exposed": "conservativeRequiredHeadroomDB" in profile and "insufficientHeadroom" in profile,
 }
