@@ -51,6 +51,13 @@ for token in (
     "activeCrossoverRoutingPresent",
     "configuredLimiterWouldBeBypassed",
     "preservesMandatoryProtection",
+    "struct SpeakerOptimizerMeasurementSessionStep",
+    "struct SpeakerOptimizerMeasurementSessionProgress",
+    "struct SpeakerOptimizerMeasurementSessionOrchestrator",
+    "struct SpeakerOptimizerMeasurementSetStore",
+    "validatePersistenceStructure",
+    "retryLatestCapture",
+    "Position-major ordering intentionally minimizes microphone moves.",
 ):
     require(token in source, f"measurement evidence model missing {token!r}")
 
@@ -85,6 +92,12 @@ for token in (
     "testActiveSplitDriverRoutingBlocksDirectCalibrationReuse",
     "testConfiguredDriverLimiterBlocksDirectCalibrationReuse",
     "testUnavailablePhysicalRouteFailsClosed",
+    "testSessionPlanIsPositionMajorToMinimizeMicrophoneMoves",
+    "testSessionResumesAtFirstIncompleteRepeatAfterReloadStyleState",
+    "testSessionRejectsCaptureIdentityDrift",
+    "testRetryLatestCaptureMakesThatRepeatPendingAgain",
+    "testMeasurementSetStoreRoundTripPreservesCompactEvidence",
+    "testPersistenceRejectsCaptureOutsideSessionIdentity",
 ):
     require(token in tests, f"targeted PR103 test missing {token!r}")
 
@@ -109,6 +122,10 @@ for token in (
     "Slice 2 implementation checkpoint",
     "Protected driver measurement remains blocked",
     "enabled per-driver limiter",
+    "Slice 3 implementation checkpoint",
+    "Deterministic one-mic plan",
+    "Interruption and resume",
+    "Compact versioned persistence",
 ):
     require(token in doc, f"PR103 design contract missing {token!r}")
 
