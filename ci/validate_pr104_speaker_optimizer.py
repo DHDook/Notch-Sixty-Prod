@@ -96,7 +96,7 @@ for token in (
     "var canDeploy: Bool { false }",
     "var isMeasuredVerification: Bool { false }",
     "taps: accepted ? impulse : []",
-    "groupDelayFrames",
+    "delayFrames",
     "declaredGroupDelayFrames",
     "SpeakerOptimizerFIRTransform",
     "vDSP_DFT_Execute(",

@@ -107,7 +107,7 @@ struct SpeakerOptimizerFIRCandidateDesigner: Sendable {
                   freqs.count == target.count,
                   freqs.allSatisfy({ $0.isFinite && $0 > 0 && $0 < rate * 0.49 }),
                   desired.allSatisfy(\.isFinite), target.allSatisfy(\.isFinite),
-                  zip(freqs.dropFirst(), freqs).allSatisfy({ $0 > $1 }) else {
+                  zip(freqs.dropFirst(), freqs).allSatisfy({ pair in pair.0 > pair.1 }) else {
                 throw SpeakerOptimizerFIRCandidateError.invalidFrequencyGrid
             }
             let positions = try seatResponses(baseline: baseline, source: sourcePreview.source, frequencies: freqs)
@@ -309,8 +309,8 @@ struct SpeakerOptimizerFIRCandidateDesigner: Sendable {
             var mean = Array(repeating: 0.0, count: frequencies.count)
             for capture in captures {
                 guard capture.response.frequenciesHz.count == reference.count,
-                      zip(capture.response.frequenciesHz, reference).allSatisfy({
-                          abs($0 - $1) <= max(1e-6, $1 * 1e-9)
+                      zip(capture.response.frequenciesHz, reference).allSatisfy({ pair in
+                          abs(pair.0 - pair.1) <= max(1e-6, pair.1 * 1e-9)
                       }) else { throw SpeakerOptimizerFIRCandidateError.invalidFrequencyGrid }
                 for i in mean.indices {
                     mean[i] += capture.response.magnitudeDB[positionsInGrid[i]] / Double(captures.count)
