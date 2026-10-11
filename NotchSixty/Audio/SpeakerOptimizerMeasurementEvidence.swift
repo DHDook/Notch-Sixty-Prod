@@ -603,3 +603,154 @@ struct SpeakerOptimizerMeasurementEvidenceEvaluator: Sendable {
         String(format: "%.2f", value)
     }
 }
+
+
+enum SpeakerOptimizerMeasurementExcitationTarget: Equatable, Sendable {
+    /// Whole acoustic source already supported by the existing targeted
+    /// multichannel calibration transport.
+    case acousticSource(MultichannelCalibrationSource)
+
+    /// Logical active-crossover/driver bus. PR103 deliberately models this
+    /// target but does not send a raw full-band sweep to its physical channel.
+    case protectedDriverBus(SpeakerOutputBus)
+}
+
+enum SpeakerOptimizerMeasurementTransportBlockReason: Equatable, Sendable {
+    case protectedDriverPathRequired(SpeakerOutputBus)
+    case activeCrossoverRoutingPresent
+    case configuredLimiterWouldBeBypassed
+    case physicalRouteUnavailable(String)
+
+    var message: String {
+        switch self {
+        case .protectedDriverPathRequired(let bus):
+            return "\(bus.displayName) requires a crossover-preserving protected driver measurement path."
+        case .activeCrossoverRoutingPresent:
+            return "Existing targeted calibration cannot be reused while active split-driver routing is present because it writes directly to physical output lanes."
+        case .configuredLimiterWouldBeBypassed:
+            return "Existing targeted calibration cannot be reused while per-driver limiter protection is configured because the direct measurement path would bypass it."
+        case .physicalRouteUnavailable(let source):
+            return "No unique targeted physical output is available for \(source)."
+        }
+    }
+}
+
+struct SpeakerOptimizerMeasurementTransportPlan: Equatable, Sendable {
+    var target: SpeakerOptimizerMeasurementExcitationTarget
+    var physicalOutputChannelIndex: UInt32?
+    var usesExistingTargetedCalibrationTransport: Bool
+    var preservesMandatoryProtection: Bool
+    var blockReason: SpeakerOptimizerMeasurementTransportBlockReason?
+
+    var canStartMeasurement: Bool {
+        usesExistingTargetedCalibrationTransport
+            && preservesMandatoryProtection
+            && physicalOutputChannelIndex != nil
+            && blockReason == nil
+    }
+}
+
+/// Fail-closed adapter between Speaker Optimizer measurement intent and the
+/// existing targeted multichannel calibration transport.
+///
+/// Important: MultichannelCalibrationTransport writes its precomputed sweep
+/// directly to one physical output lane. That is safe for an ordinary whole
+/// speaker/sub target only when no active split-driver routing or configured
+/// per-driver limiter would be bypassed. Protected Low/Mid/High driver buses
+/// are explicitly blocked until a later slice provides a crossover-preserving
+/// excitation path.
+struct SpeakerOptimizerMeasurementTransportPlanner: Sendable {
+    func plan(
+        target: SpeakerOptimizerMeasurementExcitationTarget,
+        routePlan: LiveNChannelOutputRoutePlan,
+        multiOutputRouting: MultiOutputRoutingConfiguration?,
+        speakerDriverProcessing: SpeakerDriverProcessingConfiguration?
+    ) -> SpeakerOptimizerMeasurementTransportPlan {
+        switch target {
+        case .protectedDriverBus(let bus):
+            return blocked(
+                target: target,
+                reason: .protectedDriverPathRequired(bus)
+            )
+
+        case .acousticSource(let source):
+            if let routing = multiOutputRouting,
+               routing.enabled,
+               routing.enabledRoutes.contains(where: { !$0.bus.isFullRangeBus }) {
+                return blocked(
+                    target: target,
+                    reason: .activeCrossoverRoutingPresent
+                )
+            }
+
+            if let driverProcessing = speakerDriverProcessing,
+               driverProcessing.buses.contains(where: {
+                   $0.enabled && $0.limiterEnabled
+               }) {
+                return blocked(
+                    target: target,
+                    reason: .configuredLimiterWouldBeBypassed
+                )
+            }
+
+            guard let channel = physicalOutputChannel(
+                for: source,
+                routePlan: routePlan
+            ) else {
+                return blocked(
+                    target: target,
+                    reason: .physicalRouteUnavailable(source.displayName)
+                )
+            }
+
+            return SpeakerOptimizerMeasurementTransportPlan(
+                target: target,
+                physicalOutputChannelIndex: channel,
+                usesExistingTargetedCalibrationTransport: true,
+                preservesMandatoryProtection: true,
+                blockReason: nil
+            )
+        }
+    }
+
+    private func physicalOutputChannel(
+        for source: MultichannelCalibrationSource,
+        routePlan: LiveNChannelOutputRoutePlan
+    ) -> UInt32? {
+        let channel: UInt32
+        switch source {
+        case .speaker(let role):
+            guard role != .lowFrequencyEffects,
+                  let index = routePlan.programLayout.roles.firstIndex(of: role),
+                  index < routePlan.programPhysicalChannels.count else {
+                return nil
+            }
+            channel = routePlan.programPhysicalChannels[index]
+
+        case .subwoofer(let index):
+            guard Int(index) < routePlan.subwooferPhysicalChannels.count else {
+                return nil
+            }
+            channel = routePlan.subwooferPhysicalChannels[Int(index)]
+        }
+
+        guard channel != UInt32.max,
+              channel < routePlan.physicalChannelCount else {
+            return nil
+        }
+        return channel
+    }
+
+    private func blocked(
+        target: SpeakerOptimizerMeasurementExcitationTarget,
+        reason: SpeakerOptimizerMeasurementTransportBlockReason
+    ) -> SpeakerOptimizerMeasurementTransportPlan {
+        SpeakerOptimizerMeasurementTransportPlan(
+            target: target,
+            physicalOutputChannelIndex: nil,
+            usesExistingTargetedCalibrationTransport: false,
+            preservesMandatoryProtection: false,
+            blockReason: reason
+        )
+    }
+}
