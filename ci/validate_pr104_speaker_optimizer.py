@@ -206,4 +206,20 @@ for token in (
 ):
     assert token in crossover_tests, f"missing clock sensitivity test {token}"
 assert "Run PR104 crossover feasibility tests" in workflow
-print("PR104 source alternatives and clock-reference sensitivity safety passed")
+CLOSURE = ROOT / "docs/PR104_SOFTWARE_CLOSURE.md"
+assert CLOSURE.is_file(), "missing PR104 remote closure handoff"
+closure_text = CLOSURE.read_text()
+for token in (
+    "REMOTE SOFTWARE COMPLETE",
+    "PHYSICAL ACCEPTANCE PENDING",
+    "NO authenticated common-clock provenance",
+    "PR105",
+    "rollback",
+    "full application XCTest regression",
+    "protected Low/Mid/High",
+):
+    # Allow capitalisation of the provenance discussion but require meaning.
+    assert token.lower() in closure_text.lower(), f"missing PR104 closure note {token}"
+assert "REMOTE SOFTWARE COMPLETE" in doc
+assert "cross-source clock-origin" in doc
+print("PR104 source alternatives, phase-reference safety and closure contracts passed")

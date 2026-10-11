@@ -1,6 +1,6 @@
 # PR104 — Measurement-Driven Speaker Optimization Engine
 
-Status: **SLICE 4 IMPLEMENTED — EXACT-HEAD CI PENDING**
+Status: **REMOTE SOFTWARE COMPLETE — PHYSICAL ACCEPTANCE PENDING**
 
 Stack: PR102 remote release handoff → PR103 Speaker Optimizer measurement
 foundation → **PR104 optimization engine** → PR105 guided apply/verification →
@@ -112,8 +112,54 @@ Next: measured-source multi-channel/subwoofer feasibility, phase/timing boundari
 ## Slice 6 — Missing common-clock origin sensitivity (software guard)
 
 - PR103 compact schema v1 does **not** store an independently authenticated common source-sweep clock reference. Synchronized microphone, sweep generation, playback latency, and loopback timing cannot be proven from a shared mic UID and route signature.
-- Adds \`auditUnknownClockOffsetSensitivity\` for an already qualified mains/sub hypothesis. It recomputes PR103 readiness, and it evaluates both baseline and candidate using the **same assumed** unknown source-clock offset at each sensitivity sample.
+- Adds `auditUnknownClockOffsetSensitivity` for an already qualified mains/sub hypothesis. It recomputes PR103 readiness, and it evaluates both baseline and candidate using the **same assumed** unknown source-clock offset at each sensitivity sample.
 - Sweep assumes a bounded sub-to-main clock-origin uncertainty (default ±2 ms, configurable 0.125–8 ms, odd sample count); the interval is a **hypothetical stress test** and not an error bar measured from capture evidence.
 - Fail closed for aggregate worst-case loss, any listening-seat loss beyond tolerance, or any modeled relative summed-level violation. A candidate may pass the assumptions only for visual exploration.
-- Never identify the result as "clock authenticated", physically verified, live switchable or deployable: \`crossSourceClockProvenanceAuthenticated == false\`, \`requiresSynchronizedReferenceCapture == true\` and \`canDeploy == false\`.
+- Never identify the result as "clock authenticated", physically verified, live switchable or deployable: `crossSourceClockProvenanceAuthenticated == false`, `requiresSynchronizedReferenceCapture == true` and `canDeploy == false`.
 - An offset sweep cannot replace true clock-origin provenance. PR105 requires a new capture pipeline with independently validated common hardware reference and real microphone verification before any timing or polarity change.
+
+
+## PR104 remote software closure
+
+The staged offline optimization engine is complete through Slice 6, subject to an
+exact-head GitHub Actions run of this closure commit. Its models are:
+baseline-relative magnitude envelopes, bounded digital PEQ, linear-phase FIR
+with disclosed latency, cautious mains/sub phase/timing feasibility, source-wise
+candidate ranking and visual-only A/B, and a cross-source clock-origin
+uncertainty stress test.
+
+All generated outputs remain OFFLINE, MODEL-PREDICTED and NOT DEPLOYABLE.
+PR104 does not expose a live switching, automatic Apply, or device-DSP write
+transport. It must never bypass any split-driver crossover or per-driver
+limiter to acquire a "corrected" measurement.
+
+The status of phase-reference evidence from PR103 compact schema v1 is
+UNAUTHENTICATED across separately excited sources; neither nominal
+phase/arrival consistency nor a passed assumed timing-uncertainty sensitivity
+sweep proves the two sources share an absolute timing origin. Do not promote
+these hypotheses to "approved" polarity or delay settings.
+
+The only safe path to real acceptance requires PR105 to:
+1. Design an independently checkable shared playback/capture sample-clock
+   origin and actual hardware or loopback timing reference. Disallow saved
+   PR103 v1 baselines from certifying coherent cross-source timing without
+   a new qualifying measurement.
+2. Require explicit user confirmation, prevent preset/driver-routing changes
+   during application, and save a reversible snapshot before any authorized
+   candidate installation.
+3. Apply only validated coefficients in the appropriate protected stage,
+   preserve active crossovers/limiters, reserve audited *aggregate* output
+   headroom and coordinate FIR delay across channels and video synchronization.
+4. Measure a new candidate and new post-application verification set on real
+   hardware, verify the same routing/microphone and independent quality gates,
+   and rollback immediately on any clipping, instability or failed protection.
+5. Keep protected Low/Mid/High driver sweeps disabled without a proven
+   crossover-preserving excitation path and physical commissioning.
+
+Remote CI does NOT certify acoustical quality, absolute latency, speaker
+thermal/electrical safety, placement-dependent response, true microphone
+calibration, or usable listening-room noise performance. Those remain physical
+commissioning gates.
+
+PR104 is intentionally draft and stacked atop PR103 while earlier parent
+PRs remain open. This remote closure does NOT mean merged or released.
