@@ -1493,6 +1493,7 @@ OSStatus N60CaptureIOProc(
     (void)inNow;
     (void)inInputTime;
     (void)outOutputData;
+    (void)inOutputTime;
     N60RealtimeAudioBridge *bridge = (N60RealtimeAudioBridge *)inClientData;
     if (bridge == NULL || inInputData == NULL) return noErr;
     atomic_fetch_add_explicit(&bridge->captureCallbacks, 1, memory_order_relaxed);
