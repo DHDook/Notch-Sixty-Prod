@@ -207,6 +207,58 @@ struct ActiveAcousticsDiagnosticsUXSnapshot: Equatable {
     }
 }
 
+
+
+struct ActiveAcousticsPhysicalCampaignUXVisit: Identifiable, Equatable {
+    let id: Int
+    let positionLabel: String
+    let role: String
+    let instruction: String
+    let sourceCaptureCount: Int
+    let faultWitnessCount: Int
+}
+
+struct ActiveAcousticsPhysicalCampaignUXSnapshot: Equatable {
+    let visits: [ActiveAcousticsPhysicalCampaignUXVisit] = [
+        .init(
+            id: 1,
+            positionLabel: "A",
+            role: "Primary listener",
+            instruction: "Run a complete independent OFF → TEST → OFF measurement at the primary listening position.",
+            sourceCaptureCount: 3,
+            faultWitnessCount: 5
+        ),
+        .init(
+            id: 2,
+            positionLabel: "B",
+            role: "Neighbor / observer",
+            instruction: "Move the same microphone to the neighboring position and repeat the complete independent measurement.",
+            sourceCaptureCount: 3,
+            faultWitnessCount: 5
+        ),
+        .init(
+            id: 3,
+            positionLabel: "A",
+            role: "Primary listener return",
+            instruction: "Return the same microphone to the original primary position and repeat to expose geometry or timebase drift.",
+            sourceCaptureCount: 3,
+            faultWitnessCount: 5
+        ),
+    ]
+
+    var totalSourceCaptures: Int {
+        visits.reduce(0) { $0 + $1.sourceCaptureCount }
+    }
+
+    var totalFaultWitnesses: Int {
+        visits.reduce(0) { $0 + $1.faultWitnessCount }
+    }
+
+    let physicalVerificationComplete = false
+    let instrumentProvenanceAuthenticated = false
+    let liveOutputAuthorized = false
+}
+
 /// PR96 uses the familiar Quiet Zone workspace but deliberately does not
 /// expose an Arm switch until the reference-to-speaker path is proven causal.
 struct ProductionFeedForwardReadinessCard: View {
@@ -272,6 +324,7 @@ struct ProductionFeedForwardReadinessCard: View {
             commissioningSummary
             oneMicrophoneSetupProgress
             consolidatedDiagnostics
+            physicalCampaignPlan
 
             VStack(alignment: .leading, spacing: 7) {
                 stage(
@@ -495,6 +548,95 @@ struct ProductionFeedForwardReadinessCard: View {
         )
     }
 
+
+
+    private var physicalCampaignPlan: some View {
+        let campaign = ActiveAcousticsPhysicalCampaignUXSnapshot()
+
+        return VStack(alignment: .leading, spacing: 11) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Physical Verification Campaign")
+                        .font(.subheadline.bold())
+                    Text("One microphone · A → B → A")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("NOT YET PERFORMED")
+                    .font(.caption2.bold())
+                    .foregroundStyle(.secondary)
+            }
+
+            ForEach(campaign.visits) { visit in
+                HStack(alignment: .top, spacing: 10) {
+                    Text(visit.positionLabel)
+                        .font(.caption.bold())
+                        .frame(width: 24, height: 24)
+                        .background(
+                            Color.accentColor.opacity(0.10),
+                            in: Circle()
+                        )
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(visit.id). \(visit.role)")
+                            .font(.caption.bold())
+                        Text(visit.instruction)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 10)
+                    Text(
+                        "\(visit.sourceCaptureCount) captures · \(visit.faultWitnessCount) faults"
+                    )
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                }
+            }
+
+            LazyVGrid(
+                columns: [
+                    GridItem(.flexible()),
+                    GridItem(.flexible()),
+                ],
+                spacing: 8
+            ) {
+                verificationCell(
+                    "Source captures",
+                    "\(campaign.totalSourceCaptures) TOTAL",
+                    "Three independent OFF/TEST/OFF source launches per visit."
+                )
+                verificationCell(
+                    "Fault witnesses",
+                    "\(campaign.totalFaultWitnesses) TOTAL",
+                    "Five externally measured shutdown classes per visit."
+                )
+                verificationCell(
+                    "Acoustic band",
+                    "20–150 Hz",
+                    "Frequency-resolved coherent verification; no broadband silence claim."
+                )
+                verificationCell(
+                    "Primary repeat gate",
+                    "≤ 1.5 dB",
+                    "Return-to-A reduction and OFF baselines must remain repeatable per frequency."
+                )
+            }
+
+            Text(
+                "This is a commissioning guide, not evidence. The captures must come from the real fixed rig with independently calibrated instrumentation; PR100 does not synthesize, sign, or authenticate them."
+            )
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            .secondary.opacity(0.05),
+            in: RoundedRectangle(cornerRadius: 12)
+        )
+    }
 
     private var consolidatedDiagnostics: some View {
         let snapshot = ActiveAcousticsDiagnosticsUXSnapshot(
