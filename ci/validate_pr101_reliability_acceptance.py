@@ -7,6 +7,7 @@ TESTS = ROOT / "NotchSixtyTests/ProductionAnalysisTests.swift"
 NOTCH_TESTS = ROOT / "NotchSixtyTests/NotchSixtyTests.swift"
 DOC = ROOT / "docs/PR101_RELIABILITY_ACOUSTIC_ACCEPTANCE.md"
 CAMPAIGN = ROOT / "ci/run_pr101_remote_reliability_campaign.py"
+RESOURCE_BASELINE = ROOT / "ci/run_pr101_resource_baseline.py"
 WORKFLOW = ROOT / ".github/workflows/pr101-reliability-acoustic-acceptance.yml"
 
 
@@ -20,6 +21,7 @@ tests = TESTS.read_text()
 notch_tests = NOTCH_TESTS.read_text()
 doc = DOC.read_text().lower()
 campaign = CAMPAIGN.read_text()
+resource_baseline = RESOURCE_BASELINE.read_text()
 workflow = WORKFLOW.read_text()
 
 for token in (
@@ -125,3 +127,27 @@ for token in (
     require(token in workflow, f"PR101 workflow missing {token!r}")
 
 print("PR101 reliability and acoustic acceptance validation passed")
+
+
+for token in (
+    '"campaign": "PR101_CI_RESOURCE_BASELINE"',
+    '"evidenceAuthority": "macOSCI"',
+    '"hardPerformanceThresholdsApplied": False',
+    '"resourceStabilityAccepted": False',
+    '"physicalAcceptanceComplete": False',
+    '"releaseAcceptanceComplete": False',
+    "benchmark_pr35_render_kernel.c",
+    "benchmark_pr35_realtime_bridge.c",
+    "statistics.median",
+    "maximum resident set size",
+    "/usr/bin/time",
+):
+    require(token in resource_baseline, f"resource baseline missing {token!r}")
+
+for token in (
+    "Build Release performance scheme",
+    "run_pr101_resource_baseline.py --repeats 5 --report",
+    "Upload PR101 resource baseline",
+    "pr101-resource-baseline.json",
+):
+    require(token in workflow, f"resource baseline workflow missing {token!r}")
