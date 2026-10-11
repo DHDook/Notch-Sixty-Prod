@@ -1,3 +1,5 @@
+import Foundation
+
 struct StereoMeterReading: Equatable, Sendable {
     let peakLeft: Float
     let peakRight: Float
