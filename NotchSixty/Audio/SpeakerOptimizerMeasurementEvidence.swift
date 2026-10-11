@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 enum SpeakerOptimizerMeasurementRole: String, Codable, CaseIterable, Sendable {
@@ -1077,5 +1078,614 @@ struct SpeakerOptimizerMeasurementSetStore: Sendable {
                 "Speaker Optimizer Measurements",
                 isDirectory: true
             )
+    }
+}
+
+
+enum SpeakerOptimizerMeasurementControllerState: String, Equatable, Sendable {
+    case idle
+    case ready
+    case measuring
+    case analyzing
+    case reviewing
+    case blocked
+    case failed
+}
+
+enum SpeakerOptimizerMeasurementControllerError: Error, Equatable, LocalizedError {
+    case playbackSystemRequired
+    case outputDeviceProfileRequired
+    case playbackMustBeIdle(AudioLifecycleState)
+    case microphonePermissionRequired
+    case measurementInputRequired
+    case outputRequired
+    case noIncludedPositions
+    case noPlannedSources
+    case sessionRequired
+    case measurementAlreadyActive
+    case measurementNotActive
+    case transportBlocked(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .playbackSystemRequired:
+            return "Select a Playback System before starting Speaker Optimizer measurement."
+        case .outputDeviceProfileRequired:
+            return "Enable and configure an Output Device Profile before starting Speaker Optimizer measurement."
+        case .playbackMustBeIdle(let state):
+            return "Stop normal DSP playback before Speaker Optimizer measurement. The playback engine is currently \(state.rawValue)."
+        case .microphonePermissionRequired:
+            return "Microphone access is required before Speaker Optimizer measurement."
+        case .measurementInputRequired:
+            return "Select a measurement microphone before Speaker Optimizer measurement."
+        case .outputRequired:
+            return "Select the Playback System output before Speaker Optimizer measurement."
+        case .noIncludedPositions:
+            return "Select at least one listening position for Speaker Optimizer measurement."
+        case .noPlannedSources:
+            return "The selected Playback System has no measurable speaker/subwoofer sources."
+        case .sessionRequired:
+            return "Start or resume a Speaker Optimizer baseline measurement session first."
+        case .measurementAlreadyActive:
+            return "A Speaker Optimizer measurement is already active."
+        case .measurementNotActive:
+            return "No Speaker Optimizer measurement is active."
+        case .transportBlocked(let reason):
+            return "Speaker Optimizer measurement is blocked: \(reason)"
+        }
+    }
+}
+
+extension SpeakerOptimizerMeasurementSetStore {
+    func currentURL(
+        for playbackSystemID: UUID,
+        role: SpeakerOptimizerMeasurementRole
+    ) -> URL {
+        rootDirectory.appendingPathComponent(
+            "\(playbackSystemID.uuidString.lowercased())-\(role.rawValue).json",
+            isDirectory: false
+        )
+    }
+
+    func saveCurrent(_ set: SpeakerOptimizerMeasurementSet) throws {
+        try set.validatePersistenceStructure()
+        try FileManager.default.createDirectory(
+            at: rootDirectory,
+            withIntermediateDirectories: true
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode(set).write(
+            to: currentURL(
+                for: set.playbackSystemID,
+                role: set.role
+            ),
+            options: .atomic
+        )
+    }
+
+    func loadCurrent(
+        playbackSystemID: UUID,
+        role: SpeakerOptimizerMeasurementRole
+    ) throws -> SpeakerOptimizerMeasurementSet? {
+        let path = currentURL(
+            for: playbackSystemID,
+            role: role
+        )
+        guard FileManager.default.fileExists(atPath: path.path) else {
+            return nil
+        }
+        let data = try Data(contentsOf: path)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let set = try decoder.decode(
+            SpeakerOptimizerMeasurementSet.self,
+            from: data
+        )
+        guard set.playbackSystemID == playbackSystemID,
+              set.role == role else {
+            throw SpeakerOptimizerMeasurementSessionError
+                .persistenceIdentityMismatch
+        }
+        try set.validatePersistenceStructure()
+        return set
+    }
+
+    func deleteCurrent(
+        playbackSystemID: UUID,
+        role: SpeakerOptimizerMeasurementRole
+    ) throws {
+        let path = currentURL(
+            for: playbackSystemID,
+            role: role
+        )
+        guard FileManager.default.fileExists(atPath: path.path) else {
+            return
+        }
+        try FileManager.default.removeItem(at: path)
+    }
+}
+
+/// Baseline measurement controller for the PR103 Speaker Optimizer foundation.
+///
+/// It deliberately reuses the existing multichannel calibration transport and
+/// analyzer rather than inventing a second Core Audio stack. The transport
+/// planner remains authoritative: if direct targeted output would bypass an
+/// active crossover or configured limiter, measurement does not start.
+@MainActor
+final class SpeakerOptimizerMeasurementController: ObservableObject {
+    let engine: AudioIOEngine
+    let profiles: ProductProfileController
+    let microphone: RoomCorrectionCalibrationController
+
+    private let store: SpeakerOptimizerMeasurementSetStore
+    private let transportFactory: MultichannelCalibrationTransportFactory
+    private let analysisOperation: MultichannelCalibrationAnalysisOperation
+    private let planner = SpeakerOptimizerMeasurementTransportPlanner()
+    private let evaluator = SpeakerOptimizerMeasurementEvidenceEvaluator()
+    private let sweepGenerator = RoomCorrectionSweepGenerator()
+    private let orchestrator: SpeakerOptimizerMeasurementSessionOrchestrator
+
+    private var activeTransport: (any MultichannelCalibrationTransporting)?
+    private var activeProgram: RoomCorrectionSweepProgram?
+    private var activeStep: SpeakerOptimizerMeasurementSessionStep?
+    private var analysisGeneration: UInt64 = 0
+
+    @Published private(set) var state:
+        SpeakerOptimizerMeasurementControllerState = .idle
+    @Published private(set) var measurementSet:
+        SpeakerOptimizerMeasurementSet?
+    @Published private(set) var evidenceReport:
+        SpeakerOptimizerMeasurementEvidenceReport?
+    @Published private(set) var activeTransportPlan:
+        SpeakerOptimizerMeasurementTransportPlan?
+    @Published private(set) var lastErrorDescription: String?
+
+    init(
+        engine: AudioIOEngine,
+        profiles: ProductProfileController,
+        microphone: RoomCorrectionCalibrationController,
+        store: SpeakerOptimizerMeasurementSetStore =
+            SpeakerOptimizerMeasurementSetStore(),
+        repeatsPerPositionSource: Int =
+            SpeakerOptimizerMeasurementEvidenceEvaluator.minimumRepeatCount,
+        transportFactory: @escaping MultichannelCalibrationTransportFactory = {
+            routePlan, outputs, input, inputChannel, program, physicalOutput in
+            try MultichannelCalibrationTransport(
+                routePlan: routePlan,
+                availableOutputs: outputs,
+                input: input,
+                inputChannelIndex: inputChannel,
+                program: program,
+                physicalOutputChannelIndex: physicalOutput
+            )
+        },
+        analysisOperation: @escaping MultichannelCalibrationAnalysisOperation = {
+            capture, program, microphoneCalibration in
+            try await Task.detached(priority: .userInitiated) {
+                try RoomCorrectionMeasurementAnalyzer().analyzeSingleChannel(
+                    rawCapture: capture.samples,
+                    program: program,
+                    microphoneCalibration: microphoneCalibration
+                )
+            }.value
+        }
+    ) {
+        self.engine = engine
+        self.profiles = profiles
+        self.microphone = microphone
+        self.store = store
+        self.transportFactory = transportFactory
+        self.analysisOperation = analysisOperation
+        self.orchestrator = try! SpeakerOptimizerMeasurementSessionOrchestrator(
+            repeatsPerPositionSource: repeatsPerPositionSource
+        )
+    }
+
+    var progress: SpeakerOptimizerMeasurementSessionProgress? {
+        guard let measurementSet else { return nil }
+        return try? orchestrator.progress(for: measurementSet)
+    }
+
+    var nextStep: SpeakerOptimizerMeasurementSessionStep? {
+        guard let measurementSet else { return nil }
+        return try? orchestrator.nextPendingStep(for: measurementSet)
+    }
+
+    var activeOrNextStep: SpeakerOptimizerMeasurementSessionStep? {
+        activeStep ?? nextStep
+    }
+
+    var activeMeasurementProgress: Double {
+        guard let snapshot = activeTransport?.snapshot(),
+              snapshot.totalFrameCount > 0 else {
+            return 0
+        }
+        return min(
+            max(
+                Double(snapshot.frameCursor)
+                    / Double(snapshot.totalFrameCount),
+                0
+            ),
+            1
+        )
+    }
+
+    var canBeginMeasurement: Bool {
+        guard state == .ready || state == .reviewing,
+              measurementSet != nil,
+              nextStep != nil else {
+            return false
+        }
+        return engine.lifecycleState == .idle
+            && microphone.permissionStatus == .authorized
+            && microphone.selectedInputDevice != nil
+            && engine.selectedOutputDevice != nil
+            && activeTransport == nil
+    }
+
+    func prepareForUse(
+        positions: [MultichannelCalibrationSeat]
+    ) {
+        do {
+            try startOrResumeBaselineSession(positions: positions)
+            lastErrorDescription = nil
+        } catch {
+            recordFailure(error)
+        }
+    }
+
+    func startOrResumeBaselineSession(
+        positions: [MultichannelCalibrationSeat]
+    ) throws {
+        guard activeTransport == nil else {
+            throw SpeakerOptimizerMeasurementControllerError
+                .measurementAlreadyActive
+        }
+        guard let systemID = profiles.selectedSystemProfileID else {
+            throw SpeakerOptimizerMeasurementControllerError
+                .playbackSystemRequired
+        }
+        guard let systemProfile = profiles.selectedSystemProfile,
+              let profile = systemProfile.state.outputDeviceProfile,
+              profile.enabled else {
+            throw SpeakerOptimizerMeasurementControllerError
+                .outputDeviceProfileRequired
+        }
+        guard let output = engine.selectedOutputDevice else {
+            throw SpeakerOptimizerMeasurementControllerError.outputRequired
+        }
+        guard microphone.permissionStatus == .authorized else {
+            throw SpeakerOptimizerMeasurementControllerError
+                .microphonePermissionRequired
+        }
+        guard let input = microphone.selectedInputDevice else {
+            throw SpeakerOptimizerMeasurementControllerError
+                .measurementInputRequired
+        }
+
+        let included = positions.filter {
+            $0.included && $0.weight > 0
+        }
+        guard !included.isEmpty else {
+            throw SpeakerOptimizerMeasurementControllerError
+                .noIncludedPositions
+        }
+
+        let sources = Self.sources(for: profile)
+        guard !sources.isEmpty else {
+            throw SpeakerOptimizerMeasurementControllerError
+                .noPlannedSources
+        }
+
+        let compactPositions = included.map {
+            SpeakerOptimizerMeasurementPosition(
+                id: $0.id,
+                name: $0.name
+            )
+        }
+        let mic = SpeakerOptimizerMicrophoneIdentity(
+            deviceUID: input.uid,
+            inputChannelIndex: microphone.selectedInputChannelIndex,
+            calibrationFingerprint:
+                microphone.microphoneCalibration?.sourceName
+        )
+        let signature = profile.multichannelCalibrationRoutingSignature
+        let sampleRate = output.nominalSampleRate
+
+        if let stored = try store.loadCurrent(
+            playbackSystemID: systemID,
+            role: .baseline
+        ),
+           stored.routingSignature == signature,
+           stored.microphone == mic,
+           abs(stored.sampleRate - sampleRate) < 0.5,
+           stored.positions == compactPositions,
+           stored.plannedSources == sources {
+            measurementSet = stored
+        } else {
+            let fresh = SpeakerOptimizerMeasurementSet(
+                role: .baseline,
+                playbackSystemID: systemID,
+                routingSignature: signature,
+                microphone: mic,
+                sampleRate: sampleRate,
+                positions: compactPositions,
+                plannedSources: sources,
+                captures: [],
+                createdAt: Date(),
+                modifiedAt: Date()
+            )
+            try fresh.validatePersistenceStructure()
+            try store.saveCurrent(fresh)
+            measurementSet = fresh
+        }
+
+        try refreshDerivedState()
+        lastErrorDescription = nil
+    }
+
+    func beginNextMeasurement() throws {
+        guard activeTransport == nil else {
+            throw SpeakerOptimizerMeasurementControllerError
+                .measurementAlreadyActive
+        }
+        guard engine.lifecycleState == .idle else {
+            throw SpeakerOptimizerMeasurementControllerError
+                .playbackMustBeIdle(engine.lifecycleState)
+        }
+        guard microphone.permissionStatus == .authorized else {
+            throw SpeakerOptimizerMeasurementControllerError
+                .microphonePermissionRequired
+        }
+        guard let input = microphone.selectedInputDevice else {
+            throw SpeakerOptimizerMeasurementControllerError
+                .measurementInputRequired
+        }
+        guard let output = engine.selectedOutputDevice,
+              let selectedOutputUID =
+                engine.routeConfiguration.selectedOutputUID else {
+            throw SpeakerOptimizerMeasurementControllerError.outputRequired
+        }
+        guard let systemProfile = profiles.selectedSystemProfile,
+              let profile = systemProfile.state.outputDeviceProfile,
+              profile.enabled else {
+            throw SpeakerOptimizerMeasurementControllerError
+                .outputDeviceProfileRequired
+        }
+        guard let set = measurementSet,
+              let step = try orchestrator.nextPendingStep(for: set) else {
+            throw SpeakerOptimizerMeasurementControllerError.sessionRequired
+        }
+
+        let bassEnabled = systemProfile.state.bassManagement.enabled
+        let routePlan = try profile.makeLivePlan(
+            availableDevices: engine.outputDevices,
+            sampleRate: output.nominalSampleRate,
+            selectedOutputUID: selectedOutputUID,
+            bassManagementEnabled: bassEnabled
+        )
+        let transportPlan = planner.plan(
+            target: .acousticSource(step.source),
+            routePlan: routePlan,
+            multiOutputRouting: systemProfile.state.outputRouting,
+            speakerDriverProcessing:
+                systemProfile.state.speakerDriverProcessing
+        )
+        activeTransportPlan = transportPlan
+        guard transportPlan.canStartMeasurement,
+              let physicalOutput =
+                transportPlan.physicalOutputChannelIndex else {
+            let reason = transportPlan.blockReason?.message
+                ?? "the measurement transport safety contract was not satisfied"
+            state = .blocked
+            let error =
+                SpeakerOptimizerMeasurementControllerError
+                    .transportBlocked(reason)
+            lastErrorDescription = error.localizedDescription
+            throw error
+        }
+
+        let settings = RoomCorrectionSweepSettings(
+            sampleRate: output.nominalSampleRate,
+            startFrequencyHz: microphone.sweepStartFrequencyHz,
+            endFrequencyHz: microphone.sweepEndFrequencyHz,
+            durationSeconds: microphone.sweepDurationSeconds,
+            levelDBFS: microphone.sweepLevelDBFS,
+            leadInSeconds: microphone.sweepLeadInSeconds,
+            tailSeconds: microphone.sweepTailSeconds,
+            fadeSeconds: microphone.sweepFadeSeconds
+        )
+        let program = try sweepGenerator.makeProgram(settings: settings)
+        let transport = try transportFactory(
+            routePlan,
+            engine.outputDevices,
+            input,
+            microphone.selectedInputChannelIndex,
+            program,
+            physicalOutput
+        )
+
+        analysisGeneration &+= 1
+        activeTransport = transport
+        activeProgram = program
+        activeStep = step
+        do {
+            try transport.start()
+            state = .measuring
+            lastErrorDescription = nil
+        } catch {
+            transport.cancel()
+            activeTransport = nil
+            activeProgram = nil
+            activeStep = nil
+            recordFailure(error)
+            throw error
+        }
+    }
+
+    @discardableResult
+    func finishMeasurementIfComplete() async throws -> Bool {
+        guard state == .measuring,
+              let transport = activeTransport else {
+            return false
+        }
+        guard transport.snapshot()?.complete == true else {
+            return false
+        }
+
+        let capture: MultichannelCalibrationCapture
+        do {
+            capture = try transport.finishAndMaterialize()
+        } catch {
+            clearActiveMeasurement()
+            recordFailure(error)
+            throw error
+        }
+        activeTransport = nil
+
+        guard let program = activeProgram,
+              let step = activeStep,
+              var set = measurementSet else {
+            clearActiveMeasurement()
+            let error =
+                SpeakerOptimizerMeasurementControllerError
+                    .measurementNotActive
+            recordFailure(error)
+            throw error
+        }
+        activeProgram = nil
+        state = .analyzing
+        let generation = analysisGeneration
+
+        do {
+            let analyzed = try await analysisOperation(
+                capture,
+                program,
+                microphone.microphoneCalibration
+            )
+            guard generation == analysisGeneration,
+                  state == .analyzing else {
+                return false
+            }
+
+            let measurement = MultichannelCalibrationMeasurement(
+                seatID: step.position.id,
+                source: step.source,
+                sampleRate: program.sampleRate,
+                channel: analyzed
+            )
+            let compact = try SpeakerOptimizerMeasurementCapture(
+                compacting: measurement,
+                playbackSystemID: set.playbackSystemID,
+                routingSignature: set.routingSignature,
+                microphone: set.microphone
+            )
+            set = try orchestrator.appending(
+                compact,
+                to: set,
+                for: step
+            )
+            measurementSet = set
+            try store.saveCurrent(set)
+            activeStep = nil
+            activeTransportPlan = nil
+            try refreshDerivedState()
+            lastErrorDescription = nil
+            return true
+        } catch {
+            activeStep = nil
+            activeTransportPlan = nil
+            recordFailure(error)
+            throw error
+        }
+    }
+
+    func cancelMeasurement() {
+        analysisGeneration &+= 1
+        activeTransport?.cancel()
+        clearActiveMeasurement()
+        do {
+            try refreshDerivedState()
+        } catch {
+            recordFailure(error)
+        }
+    }
+
+    func retryLatestCapture(
+        positionID: UUID,
+        source: MultichannelCalibrationSource
+    ) throws {
+        guard activeTransport == nil,
+              let set = measurementSet else {
+            throw SpeakerOptimizerMeasurementControllerError
+                .sessionRequired
+        }
+        let updated = try orchestrator.retryLatestCapture(
+            in: set,
+            positionID: positionID,
+            source: source
+        )
+        measurementSet = updated
+        try store.saveCurrent(updated)
+        try refreshDerivedState()
+    }
+
+    func resetBaselineSession(
+        positions: [MultichannelCalibrationSeat]
+    ) throws {
+        guard activeTransport == nil else {
+            throw SpeakerOptimizerMeasurementControllerError
+                .measurementAlreadyActive
+        }
+        if let systemID = profiles.selectedSystemProfileID {
+            try store.deleteCurrent(
+                playbackSystemID: systemID,
+                role: .baseline
+            )
+        }
+        measurementSet = nil
+        evidenceReport = nil
+        activeTransportPlan = nil
+        state = .idle
+        try startOrResumeBaselineSession(positions: positions)
+    }
+
+    private func refreshDerivedState() throws {
+        guard let set = measurementSet else {
+            evidenceReport = nil
+            state = .idle
+            return
+        }
+        evidenceReport = try evaluator.evaluate(set)
+        let progress = try orchestrator.progress(for: set)
+        state = progress.complete ? .reviewing : .ready
+    }
+
+    private func clearActiveMeasurement() {
+        activeTransport = nil
+        activeProgram = nil
+        activeStep = nil
+        activeTransportPlan = nil
+    }
+
+    private func recordFailure(_ error: Error) {
+        activeTransport?.cancel()
+        clearActiveMeasurement()
+        state = .failed
+        lastErrorDescription = error.localizedDescription
+    }
+
+    private static func sources(
+        for profile: OutputDeviceProfileConfiguration
+    ) -> [MultichannelCalibrationSource] {
+        let speakers = profile.programLayout.roles
+            .filter { $0 != .lowFrequencyEffects }
+            .map(MultichannelCalibrationSource.speaker)
+        let subs = profile.subwooferAssignments
+            .sorted { $0.index < $1.index }
+            .map { MultichannelCalibrationSource.subwoofer($0.index) }
+        return speakers + subs
     }
 }
