@@ -891,4 +891,76 @@ final class ProductionAnalysisTests: XCTestCase {
         }
     }
 
+
+    func testPR101LifecycleRecoveryCampaignSurvivesRepeatedFaultInjection()
+        throws {
+        let iterations = 5_000
+        let result = try FullSystemLifecycleRecoveryCampaign()
+            .run(iterations: iterations)
+
+        XCTAssertTrue(result.passed)
+        XCTAssertEqual(result.completedIterations, iterations)
+        XCTAssertEqual(
+            result.injectedFaultCount,
+            UInt64(
+                iterations
+                    * FullSystemLifecycleRecoveryCampaign
+                        .faultInjectionStates.count
+            )
+        )
+        XCTAssertEqual(
+            result.recoveredFaultCount,
+            result.injectedFaultCount
+        )
+        XCTAssertEqual(
+            result.rejectedInvalidTransitionCount,
+            UInt64(iterations)
+        )
+        XCTAssertEqual(result.unexpectedAcceptedTransitionCount, 0)
+        XCTAssertEqual(result.unrecoveredFaultCount, 0)
+
+        let observation = try result.observation(evidence: .macOSCI)
+        let report = try FullSystemReliabilityAcceptanceEvaluator()
+            .review(observations: [observation])
+
+        XCTAssertEqual(
+            report.items.first {
+                $0.requirement.id == .lifecycleRecoveryModel
+            }?.status,
+            .passed
+        )
+        XCTAssertFalse(
+            report.items.first {
+                $0.requirement.id == .physicalDeviceRecovery
+            }?.status == .passed
+        )
+        XCTAssertFalse(report.physicalAcceptanceComplete)
+        XCTAssertFalse(report.releaseAcceptanceComplete)
+    }
+
+    func testPR101LifecycleCampaignCannotSelfPromoteToHardwareEvidence()
+        throws {
+        let result = try FullSystemLifecycleRecoveryCampaign()
+            .run(iterations: 10)
+
+        XCTAssertThrowsError(
+            try result.observation(evidence: .physicalHardware)
+        ) {
+            XCTAssertEqual(
+                $0 as? FullSystemLifecycleRecoveryCampaignError,
+                .unsupportedEvidenceAuthority
+            )
+        }
+        XCTAssertThrowsError(
+            try result.observation(
+                evidence: .independentPhysicalReview
+            )
+        ) {
+            XCTAssertEqual(
+                $0 as? FullSystemLifecycleRecoveryCampaignError,
+                .unsupportedEvidenceAuthority
+            )
+        }
+    }
+
 }
