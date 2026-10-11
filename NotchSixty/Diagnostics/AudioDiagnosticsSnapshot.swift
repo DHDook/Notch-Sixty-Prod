@@ -525,10 +525,6 @@ struct FullSystemReliabilityObservation: Equatable, Sendable {
 
     var isStructurallyValid: Bool {
         guard completedIterations > 0 else { return false }
-        if let residentMemoryGrowthBytes,
-           residentMemoryGrowthBytes < Int64.min / 2 {
-            return false
-        }
         if let peakProcessCPUPercent,
            !peakProcessCPUPercent.isFinite || peakProcessCPUPercent < 0 {
             return false
