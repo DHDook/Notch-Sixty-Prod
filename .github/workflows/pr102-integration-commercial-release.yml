@@ -18,6 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Validate PR102 release-readiness contract
         run: python3 ci/validate_pr102_release_readiness.py
       - name: Validate PR102 App Store architecture boundary
@@ -35,6 +37,8 @@ jobs:
     runs-on: xcode-27
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Validate PR102 release-readiness contract
         run: python3 ci/validate_pr102_release_readiness.py
@@ -132,6 +136,8 @@ jobs:
           touch /tmp/pr102-xctest.passed
 
       - name: Build PR102 remote release-candidate manifest
+        env:
+          PR102_EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           python3 ci/build_pr102_release_candidate_manifest.py --release-app "$RUNNER_TEMP/PR102ReleaseDerivedData/Build/Products/Release/Notch Sixty.app" --archive "$RUNNER_TEMP/NotchSixty-PR102.xcarchive" --validators-marker /tmp/pr102-validators.passed --debug-build-marker /tmp/pr102-debug-build.passed --release-build-marker /tmp/pr102-release-build.passed --archive-marker /tmp/pr102-archive.passed --xctest-marker /tmp/pr102-xctest.passed --output /tmp/pr102-release-candidate.json
           python3 -m json.tool /tmp/pr102-release-candidate.json >/dev/null
