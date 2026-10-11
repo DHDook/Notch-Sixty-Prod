@@ -180,6 +180,8 @@
 		F86000000000000000000001 /* CalibrationPredictionVerifierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F86000000000000000000011 /* CalibrationPredictionVerifierTests.swift */; };
 		F10300000000000000000001 /* SpeakerOptimizerMeasurementEvidence.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10300000000000000000011 /* SpeakerOptimizerMeasurementEvidence.swift */; };
 		F10300000000000000000002 /* SpeakerOptimizerMeasurementEvidenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10300000000000000000012 /* SpeakerOptimizerMeasurementEvidenceTests.swift */; };
+		F10400000000000000000001 /* SpeakerOptimizerDesignEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10400000000000000000011 /* SpeakerOptimizerDesignEngine.swift */; };
+		F10400000000000000000002 /* SpeakerOptimizerDesignEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10400000000000000000012 /* SpeakerOptimizerDesignEngineTests.swift */; };
 		F92000000000000000000001 /* RoomTreatmentAdvisor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F92000000000000000000011 /* RoomTreatmentAdvisor.swift */; };
 		F92000000000000000000002 /* RoomTreatmentAdvisorController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F92000000000000000000012 /* RoomTreatmentAdvisorController.swift */; };
 		F92000000000000000000003 /* ProductionRoomTreatmentAdvisorWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = F92000000000000000000013 /* ProductionRoomTreatmentAdvisorWorkspace.swift */; };
@@ -397,6 +399,8 @@
 		F86000000000000000000011 /* CalibrationPredictionVerifierTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalibrationPredictionVerifierTests.swift; sourceTree = "<group>"; };
 		F10300000000000000000011 /* SpeakerOptimizerMeasurementEvidence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerOptimizerMeasurementEvidence.swift; sourceTree = "<group>"; };
 		F10300000000000000000012 /* SpeakerOptimizerMeasurementEvidenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerOptimizerMeasurementEvidenceTests.swift; sourceTree = "<group>"; };
+		F10400000000000000000011 /* SpeakerOptimizerDesignEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerOptimizerDesignEngine.swift; sourceTree = "<group>"; };
+		F10400000000000000000012 /* SpeakerOptimizerDesignEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerOptimizerDesignEngineTests.swift; sourceTree = "<group>"; };
 		F92000000000000000000011 /* RoomTreatmentAdvisor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomTreatmentAdvisor.swift; sourceTree = "<group>"; };
 		F92000000000000000000012 /* RoomTreatmentAdvisorController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomTreatmentAdvisorController.swift; sourceTree = "<group>"; };
 		F92000000000000000000013 /* ProductionRoomTreatmentAdvisorWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionRoomTreatmentAdvisorWorkspace.swift; sourceTree = "<group>"; };
@@ -512,6 +516,7 @@
 				F8500000000000000000001C /* NativeSOFAImporterTests.swift */,
 				F86000000000000000000011 /* CalibrationPredictionVerifierTests.swift */,
 				F10300000000000000000012 /* SpeakerOptimizerMeasurementEvidenceTests.swift */,
+				F10400000000000000000012 /* SpeakerOptimizerDesignEngineTests.swift */,
 				F92000000000000000000014 /* RoomTreatmentAdvisorTests.swift */,
 				F93000000000000000000013 /* RoomGeometryPlacementTests.swift */,
 				F94000000000000000000014 /* RoomTreatmentDesignVerificationTests.swift */,
@@ -544,6 +549,7 @@
 				F66000000000000000000011 /* HeadTrackingController.swift */,
 				F64000000000000000000012 /* MultichannelCalibrationDesigner.swift */,
 				F10300000000000000000011 /* SpeakerOptimizerMeasurementEvidence.swift */,
+				F10400000000000000000011 /* SpeakerOptimizerDesignEngine.swift */,
 				A2000000000000000000002E /* RoomCorrectionMeasurementAnalyzer.swift */,
 				A20000000000000000000030 /* RoomCorrectionTargetDesigner.swift */,
 				E20000000000000000000012 /* RoomCorrectionFIRDesigner.swift */,
@@ -731,6 +737,7 @@
 				F64000000000000000000001 /* OutputDeviceCalibration.swift in Sources */,
 				F64000000000000000000002 /* MultichannelCalibrationDesigner.swift in Sources */,
 				F10300000000000000000001 /* SpeakerOptimizerMeasurementEvidence.swift in Sources */,
+				F10400000000000000000001 /* SpeakerOptimizerDesignEngine.swift in Sources */,
 				F64000000000000000000003 /* MultichannelCalibrationTransport.swift in Sources */,
 				F64000000000000000000004 /* MultichannelCalibrationController.swift in Sources */,
 				F64000000000000000000005 /* ProductionMultichannelCalibrationWorkspace.swift in Sources */,
@@ -890,6 +897,7 @@
 				F8500000000000000000000C /* NativeSOFAImporterTests.swift in Sources */,
 				F86000000000000000000001 /* CalibrationPredictionVerifierTests.swift in Sources */,
 				F10300000000000000000002 /* SpeakerOptimizerMeasurementEvidenceTests.swift in Sources */,
+				F10400000000000000000002 /* SpeakerOptimizerDesignEngineTests.swift in Sources */,
 				F92000000000000000000004 /* RoomTreatmentAdvisorTests.swift in Sources */,
 				F93000000000000000000003 /* RoomGeometryPlacementTests.swift in Sources */,
 				F94000000000000000000004 /* RoomTreatmentDesignVerificationTests.swift in Sources */,

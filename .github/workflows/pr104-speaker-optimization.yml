@@ -1,0 +1,55 @@
+name: PR104 Speaker Optimization Engine
+
+on:
+  push:
+    branches:
+      - feature/pr104-speaker-optimization-engine
+  pull_request:
+    branches:
+      - feature/pr103-speaker-optimizer-measurement-foundation
+  workflow_dispatch:
+
+concurrency:
+  group: pr104-speaker-optimization-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Validate PR104 offline preview boundary
+        run: python3 ci/validate_pr104_speaker_optimizer.py
+      - name: Preserve PR103 measurement foundation
+        run: python3 ci/validate_pr103_speaker_optimizer_measurement.py
+      - name: Preserve disconnected ANC safety
+        run: python3 ci/audit_pr98_disconnected_boundary.py
+
+  macos:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Validate PR104 offline preview boundary
+        run: python3 ci/validate_pr104_speaker_optimizer.py
+      - name: Preserve PR103 measurement foundation
+        run: python3 ci/validate_pr103_speaker_optimizer_measurement.py
+      - name: Build arm64 Debug app
+        run: >-
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
+          -configuration Debug -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES build
+      - name: Run PR104 design engine tests
+        run: >-
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
+          -configuration Debug -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES
+          -only-testing:NotchSixtyTests/SpeakerOptimizerDesignEngineTests test
+      - name: Run full XCTest regression
+        run: >-
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
+          -configuration Debug -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES test
