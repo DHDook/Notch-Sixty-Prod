@@ -25,7 +25,15 @@ build_stereo_start = engine.index("private func buildStereoTransport")
 build_stereo_end = engine.index("private func tearDownTransport", build_stereo_start)
 build_stereo = engine[build_stereo_start:build_stereo_end]
 
-process_start = render_c.index("void N60RenderKernelProcessStereoFrameInContext")
+# PR65 originally used one monolithic stereo-frame processor. Later stacked
+# work split playback/content processing from system/output processing while
+# retaining the same headphone-before-protection contract. Inspect the system
+# stage when present, otherwise fall back to the original PR65 function.
+system_signature = "void N60RenderKernelProcessStereoSystemFrameInContext"
+if system_signature in render_c:
+    process_start = render_c.index(system_signature)
+else:
+    process_start = render_c.index("void N60RenderKernelProcessStereoFrameInContext")
 process_end = render_c.index("void N60RenderKernelEndRender", process_start)
 process_body = render_c[process_start:process_end]
 
