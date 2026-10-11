@@ -259,10 +259,264 @@ struct ActiveAcousticsPhysicalCampaignUXSnapshot: Equatable {
     let liveOutputAuthorized = false
 }
 
+
+
+struct ActiveAcousticsEvidenceCurvePoint: Identifiable, Equatable {
+    let frequencyHz: Double
+    let primaryFirstReductionDB: Double
+    let neighboringSeatReductionDB: Double
+    let primaryReturnReductionDB: Double
+    let worstObservedReductionDB: Double
+
+    var id: Double { frequencyHz }
+}
+
+enum ActiveAcousticsPhysicalEvidenceUXState: Equatable {
+    case awaitingCampaign
+    case invalidPackage
+    case numericalEvidenceAvailable
+    case roleReviewAcknowledged
+
+    var caption: String {
+        switch self {
+        case .awaitingCampaign:
+            return "AWAITING PHYSICAL CAMPAIGN"
+        case .invalidPackage:
+            return "EVIDENCE INTEGRITY FAILED"
+        case .numericalEvidenceAvailable:
+            return "NUMERICAL EVIDENCE · UNAUTHENTICATED"
+        case .roleReviewAcknowledged:
+            return "TWO-ROLE REVIEW · STILL UNAUTHENTICATED"
+        }
+    }
+}
+
+struct ActiveAcousticsPhysicalEvidenceUXSnapshot: Equatable {
+    let state: ActiveAcousticsPhysicalEvidenceUXState
+    let initialPrimaryReductionDB: Double?
+    let neighboringSeatReductionDB: Double?
+    let returningPrimaryReductionDB: Double?
+    let worstFrequencyReductionDB: Double?
+    let primaryRepeatDifferenceDB: Double?
+    let maximumBandRepeatDifferenceDB: Double?
+    let largestPrimaryBaselineDifferenceDB: Double?
+    let curvePoints: [ActiveAcousticsEvidenceCurvePoint]
+    let digestPrefix: String?
+    let digestIntegrityVerified: Bool
+    let independentRolesAcknowledged: Bool
+
+    let instrumentEvidenceAuthenticated = false
+    let physicalAttenuationVerified = false
+    let emergencyMuteHardwareVerified = false
+    let liveOutputAuthorized = false
+
+    init(
+        package: QuietZonePhysicalEvidencePackage?,
+        reviewPacket: QuietZoneExternalReviewPacket?
+    ) {
+        guard let package else {
+            state = .awaitingCampaign
+            initialPrimaryReductionDB = nil
+            neighboringSeatReductionDB = nil
+            returningPrimaryReductionDB = nil
+            worstFrequencyReductionDB = nil
+            primaryRepeatDifferenceDB = nil
+            maximumBandRepeatDifferenceDB = nil
+            largestPrimaryBaselineDifferenceDB = nil
+            curvePoints = []
+            digestPrefix = nil
+            digestIntegrityVerified = false
+            independentRolesAcknowledged = false
+            return
+        }
+
+        let verified =
+            (try? QuietZonePhysicalSpectralEvidenceAnalyzer().verifyDigest(
+                canonicalJSON: package.canonicalJSON,
+                expectedSHA256Hex: package.sha256Hex
+            )) == true
+        let reviewed =
+            verified
+            && reviewPacket?.evidenceSHA256Hex == package.sha256Hex
+            && reviewPacket?.numericalAcceptance == true
+            && reviewPacket?.independentRolesAcknowledged == true
+
+        state =
+            !verified
+                ? .invalidPackage
+                : reviewed
+                    ? .roleReviewAcknowledged
+                    : .numericalEvidenceAvailable
+        initialPrimaryReductionDB =
+            package.campaignReview.firstPrimaryReductionDB
+        neighboringSeatReductionDB =
+            package.campaignReview.neighboringSeatReductionDB
+        returningPrimaryReductionDB =
+            package.campaignReview.returningPrimaryReductionDB
+        worstFrequencyReductionDB = package.worstFrequencyReductionDB
+        primaryRepeatDifferenceDB =
+            package.campaignReview.primaryReductionRepeatDifferenceDB
+        maximumBandRepeatDifferenceDB =
+            package.maximumPrimaryBandRepeatDifferenceDB
+        largestPrimaryBaselineDifferenceDB =
+            package.campaignReview.largestPrimaryBaselineDifferenceDB
+        curvePoints = package.frequencyResults.map {
+            .init(
+                frequencyHz: $0.frequencyHz,
+                primaryFirstReductionDB: $0.primaryFirstReductionDB,
+                neighboringSeatReductionDB: $0.neighboringSeatReductionDB,
+                primaryReturnReductionDB: $0.primaryReturnReductionDB,
+                worstObservedReductionDB: $0.worstObservedReductionDB
+            )
+        }
+        digestPrefix = String(package.sha256Hex.prefix(12))
+        digestIntegrityVerified = verified
+        independentRolesAcknowledged = reviewed
+    }
+}
+
+private struct ActiveAcousticsEvidenceReductionCurveView: View {
+    let points: [ActiveAcousticsEvidenceCurvePoint]
+
+    var body: some View {
+        GeometryReader { _ in
+            Canvas { context, size in
+                guard !points.isEmpty else { return }
+                let plot = CGRect(
+                    x: 42,
+                    y: 10,
+                    width: max(size.width - 52, 1),
+                    height: max(size.height - 30, 1)
+                )
+                let allValues = points.flatMap {
+                    [
+                        $0.primaryFirstReductionDB,
+                        $0.neighboringSeatReductionDB,
+                        $0.primaryReturnReductionDB,
+                    ]
+                }
+                let minimum = min(-1.0, floor((allValues.min() ?? 0) - 0.5))
+                let maximum = max(2.0, ceil((allValues.max() ?? 1) + 0.5))
+                let range = max(maximum - minimum, 0.001)
+
+                func x(_ frequency: Double) -> CGFloat {
+                    let low = log(20.0)
+                    let high = log(150.0)
+                    let clamped = min(max(frequency, 20), 150)
+                    let fraction = (log(clamped) - low) / (high - low)
+                    return plot.minX + plot.width * CGFloat(fraction)
+                }
+
+                func y(_ value: Double) -> CGFloat {
+                    let fraction = (value - minimum) / range
+                    return plot.maxY - plot.height * CGFloat(fraction)
+                }
+
+                for gain in stride(
+                    from: ceil(minimum),
+                    through: floor(maximum),
+                    by: 1.0
+                ) {
+                    var line = Path()
+                    line.move(to: CGPoint(x: plot.minX, y: y(gain)))
+                    line.addLine(to: CGPoint(x: plot.maxX, y: y(gain)))
+                    context.stroke(
+                        line,
+                        with: .color(
+                            Color.secondary.opacity(
+                                abs(gain) < 0.001 ? 0.35 : 0.12
+                            )
+                        ),
+                        lineWidth: abs(gain) < 0.001 ? 1.25 : 1
+                    )
+                }
+
+                for frequency in [20.0, 40, 80, 150] {
+                    let position = x(frequency)
+                    var line = Path()
+                    line.move(to: CGPoint(x: position, y: plot.minY))
+                    line.addLine(to: CGPoint(x: position, y: plot.maxY))
+                    context.stroke(
+                        line,
+                        with: .color(Color.secondary.opacity(0.10)),
+                        lineWidth: 1
+                    )
+                    context.draw(
+                        Text("\(Int(frequency))")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary),
+                        at: CGPoint(x: position, y: plot.maxY + 11),
+                        anchor: .center
+                    )
+                }
+
+                func draw(
+                    _ value: (ActiveAcousticsEvidenceCurvePoint) -> Double,
+                    style: Color,
+                    width: CGFloat
+                ) {
+                    var path = Path()
+                    for (index, point) in points.enumerated() {
+                        let position = CGPoint(
+                            x: x(point.frequencyHz),
+                            y: y(value(point))
+                        )
+                        if index == 0 {
+                            path.move(to: position)
+                        } else {
+                            path.addLine(to: position)
+                        }
+                    }
+                    context.stroke(
+                        path,
+                        with: .color(style),
+                        lineWidth: width
+                    )
+                }
+
+                draw(
+                    { $0.primaryFirstReductionDB },
+                    style: Color.accentColor,
+                    width: 2
+                )
+                draw(
+                    { $0.neighboringSeatReductionDB },
+                    style: Color.secondary,
+                    width: 1.5
+                )
+                draw(
+                    { $0.primaryReturnReductionDB },
+                    style: Color.green,
+                    width: 2
+                )
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Physical verification frequency reduction curve")
+        .accessibilityValue(
+            points.isEmpty
+                ? "No physical evidence available"
+                : "\(points.count) measured frequency bins from 20 to 150 hertz"
+        )
+    }
+}
+
 /// PR96 uses the familiar Quiet Zone workspace but deliberately does not
 /// expose an Arm switch until the reference-to-speaker path is proven causal.
 struct ProductionFeedForwardReadinessCard: View {
     @ObservedObject var quietZone: ActiveQuietZoneController
+    let physicalEvidence: QuietZonePhysicalEvidencePackage?
+    let independentReview: QuietZoneExternalReviewPacket?
+
+    init(
+        quietZone: ActiveQuietZoneController,
+        physicalEvidence: QuietZonePhysicalEvidencePackage? = nil,
+        independentReview: QuietZoneExternalReviewPacket? = nil
+    ) {
+        _quietZone = ObservedObject(wrappedValue: quietZone)
+        self.physicalEvidence = physicalEvidence
+        self.independentReview = independentReview
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -325,6 +579,7 @@ struct ProductionFeedForwardReadinessCard: View {
             oneMicrophoneSetupProgress
             consolidatedDiagnostics
             physicalCampaignPlan
+            physicalEvidenceVisualization
 
             VStack(alignment: .leading, spacing: 7) {
                 stage(
@@ -549,6 +804,204 @@ struct ProductionFeedForwardReadinessCard: View {
     }
 
 
+
+
+    private var physicalEvidenceVisualization: some View {
+        let snapshot = ActiveAcousticsPhysicalEvidenceUXSnapshot(
+            package: physicalEvidence,
+            reviewPacket: independentReview
+        )
+
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Physical Evidence")
+                        .font(.subheadline.bold())
+                    Text(snapshot.state.caption)
+                        .font(.caption)
+                        .foregroundStyle(
+                            snapshot.state == .invalidPackage
+                                ? .red
+                                : .secondary
+                        )
+                }
+                Spacer()
+                if let digest = snapshot.digestPrefix {
+                    Text("SHA-256 " + digest + "…")
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
+
+            if snapshot.curvePoints.isEmpty {
+                Text(
+                    "No PR99 physical evidence package is attached. This view will remain empty until the real A → B → A campaign is captured and compiled."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            } else {
+                LazyVGrid(
+                    columns: [
+                        GridItem(.flexible()),
+                        GridItem(.flexible()),
+                        GridItem(.flexible()),
+                    ],
+                    spacing: 8
+                ) {
+                    evidenceMetric(
+                        "Primary A",
+                        decibels(snapshot.initialPrimaryReductionDB),
+                        "Integrated first primary-seat reduction."
+                    )
+                    evidenceMetric(
+                        "Neighbor B",
+                        decibels(snapshot.neighboringSeatReductionDB),
+                        "Integrated neighboring-seat reduction."
+                    )
+                    evidenceMetric(
+                        "Primary A return",
+                        decibels(snapshot.returningPrimaryReductionDB),
+                        "Integrated reduction after moving the microphone away and back."
+                    )
+                    evidenceMetric(
+                        "Worst frequency",
+                        decibels(snapshot.worstFrequencyReductionDB),
+                        "Weakest observed 20–150 Hz benefit across all three visits."
+                    )
+                    evidenceMetric(
+                        "A repeat difference",
+                        absoluteDecibels(snapshot.primaryRepeatDifferenceDB),
+                        "Integrated initial-A versus returned-A difference."
+                    )
+                    evidenceMetric(
+                        "Worst band repeat",
+                        absoluteDecibels(snapshot.maximumBandRepeatDifferenceDB),
+                        "Largest single-frequency A versus A-return discrepancy."
+                    )
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Frequency-resolved reduction")
+                            .font(.caption.bold())
+                        Spacer()
+                        HStack(spacing: 10) {
+                            legend("A", Color.accentColor)
+                            legend("B", Color.secondary)
+                            legend("A return", Color.green)
+                        }
+                    }
+                    ActiveAcousticsEvidenceReductionCurveView(
+                        points: snapshot.curvePoints
+                    )
+                    .frame(height: 170)
+                    Text(
+                        "Positive values indicate lower measured coherent-band level during the experimental condition. This graph is numerical evidence only; it does not authenticate the measurement instrument."
+                    )
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                }
+            }
+
+            LazyVGrid(
+                columns: [
+                    GridItem(.flexible()),
+                    GridItem(.flexible()),
+                ],
+                spacing: 8
+            ) {
+                verificationCell(
+                    "Record digest",
+                    snapshot.digestIntegrityVerified
+                        ? "INTEGRITY VERIFIED"
+                        : physicalEvidence == nil
+                            ? "NO PACKAGE"
+                            : "FAILED",
+                    "SHA-256 detects package changes; it is not an instrument signature."
+                )
+                verificationCell(
+                    "Independent role review",
+                    snapshot.independentRolesAcknowledged
+                        ? "2 ROLES ACKNOWLEDGED"
+                        : "NOT ESTABLISHED",
+                    "Claimed acoustics and electrical-safety review does not cryptographically identify either reviewer."
+                )
+                verificationCell(
+                    "Instrument provenance",
+                    "UNAUTHENTICATED",
+                    "No enrolled meter, microphone, trusted timestamp or hardware-root signature is verified."
+                )
+                verificationCell(
+                    "Physical attenuation",
+                    "UNVERIFIED",
+                    "Numerical results cannot certify real acoustic benefit without independent physical review."
+                )
+                verificationCell(
+                    "Emergency hardware mute",
+                    "UNVERIFIED",
+                    "Typed fault-witness records are not proof of actual analog shutdown."
+                )
+                verificationCell(
+                    "Live ANC output",
+                    "DISCONNECTED",
+                    "PR100 has no speaker-output authorization or feed-forward arm path."
+                )
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            .secondary.opacity(0.05),
+            in: RoundedRectangle(cornerRadius: 12)
+        )
+    }
+
+    private func evidenceMetric(
+        _ title: String,
+        _ value: String,
+        _ detail: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.headline.monospacedDigit())
+            Text(detail)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            .secondary.opacity(0.04),
+            in: RoundedRectangle(cornerRadius: 9)
+        )
+    }
+
+    private func legend(_ label: String, _ color: Color) -> some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(color)
+                .frame(width: 6, height: 6)
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func decibels(_ value: Double?) -> String {
+        guard let value, value.isFinite else { return "—" }
+        return String(format: "%+.2f dB", value)
+    }
+
+    private func absoluteDecibels(_ value: Double?) -> String {
+        guard let value, value.isFinite else { return "—" }
+        return String(format: "%.2f dB", abs(value))
+    }
 
     private var physicalCampaignPlan: some View {
         let campaign = ActiveAcousticsPhysicalCampaignUXSnapshot()
