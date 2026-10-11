@@ -332,8 +332,8 @@ struct SpeakerOptimizerMeasurementEvidenceEvaluator: Sendable {
 
         let commonLow = captures.compactMap(\.quality.usableLowHz).max()
         let commonHigh = captures.compactMap(\.quality.usableHighHz).min()
-        let usableRangeValid = commonLow.map(\.isFinite) == true
-            && commonHigh.map(\.isFinite) == true
+        let usableRangeValid = commonLow.map { $0.isFinite } == true
+            && commonHigh.map { $0.isFinite } == true
             && (commonLow ?? 0) > 0
             && (commonHigh ?? 0) > (commonLow ?? .infinity)
         if !usableRangeValid {
@@ -565,7 +565,9 @@ struct SpeakerOptimizerMeasurementEvidenceEvaluator: Sendable {
             quality.usableLowHz,
             quality.usableHighHz,
         ]
-        return values.allSatisfy { $0.map(\.isFinite) ?? true }
+        return values.allSatisfy { value in
+            value.map { $0.isFinite } ?? true
+        }
     }
 
     private func scoreSNR(_ snrDB: Double) -> Double {
