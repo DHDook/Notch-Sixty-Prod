@@ -133,3 +133,42 @@ machine-readable acceptance reporting.
 Real unplug/replug, sleep/wake, long-duration thermal behavior, speaker safety,
 listening tests, and measured acoustic performance remain reserved for the
 physical acceptance campaign.
+
+
+## Slice 2 — Deterministic cross-subsystem reliability campaign
+
+PR101 now has one portable deterministic campaign runner instead of relying on
+the historical PR workflows as disconnected evidence islands.
+
+The campaign replays the retained hardening simulations for six remote
+reliability areas:
+
+1. stereo adaptive-clock transport;
+2. semantic N-channel adaptive-clock transport;
+3. headphone, binaural, and head-tracking integration;
+4. Audio Unit rack exchange and stage-fault containment;
+5. Room Treatment transition and physical-output fail-closed simulation; and
+6. Active Acoustics / feed-forward disconnected-output enforcement.
+
+For stereo and multichannel transport it reruns the PR69/70/71 adaptive sample
+rate quality and drift simulations. For Audio Units it reruns the lock-free
+rack-exchange and deterministic stage-fault gate. Room Treatment reruns both
+the transition simulator and physical-output integration simulator. Active
+Acoustics reruns the PR98 runtime validator and disconnected-output audit.
+
+The same runner executes on Linux/clang and Apple clang. It emits a
+machine-readable JSON report naming every requirement, step, exit code, and
+elapsed time. The report explicitly labels itself
+`deterministicSimulation` evidence and hard-codes physical and release
+acceptance to false.
+
+The macOS PR101 job supplements that portable campaign with targeted XCTest for
+the PR101 acceptance model, live Audio Unit runtime/mutation handling, live
+Room Treatment integration, feed-forward clock monitoring, and native shadow
+timing transport, followed by the full application regression suite.
+
+This slice intentionally does **not** claim that the six deterministic
+scenarios finish all ten remote PR101 requirements. Lifecycle recovery breadth,
+resource/CPU/memory instrumentation, cumulative long-run dropout stress, and
+machine-level resource budgets remain later PR101 slices. Likewise, none of
+this software evidence satisfies the five hardware-only requirements.
