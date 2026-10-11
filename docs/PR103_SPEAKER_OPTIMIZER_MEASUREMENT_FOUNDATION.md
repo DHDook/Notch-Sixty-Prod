@@ -211,3 +211,54 @@ The transport plan remains compatible with PR103's one-mic workflow. Position
 identity belongs to the measurement set; the same selected microphone can be
 moved between positions while each capture retains microphone, routing, source,
 sample-rate and position identity.
+
+
+## Slice 3 implementation checkpoint
+
+Session orchestration and compact persistence are implemented.
+
+### Deterministic one-mic plan
+
+`SpeakerOptimizerMeasurementSessionOrchestrator` derives the complete session
+from the measurement set itself:
+
+- positions are visited in stored order;
+- all planned sources/repeats at one position are completed before moving the
+  microphone to the next position;
+- each position/source requires at least the evaluator's three-repeat minimum;
+- the next pending repeat is derived from persisted analyzed captures.
+
+There is no separate hidden "current measurement index" that can become stale.
+
+### Interruption and resume
+
+If measurement is interrupted before a capture is successfully analyzed and
+appended, no evidence is added. Reloading the measurement set therefore resumes
+at that same pending repeat.
+
+If the user explicitly elects to retry a completed repeat, the orchestrator
+removes only the latest analyzed capture for that exact position/source group;
+the derived plan then makes that repeat pending again.
+
+### Identity continuity
+
+Appending a capture fails closed unless it matches the measurement set's:
+
+- playback-system UUID;
+- routing signature;
+- microphone identity/calibration fingerprint;
+- sample rate;
+- position; and
+- source.
+
+Captures cannot be silently transplanted between sessions.
+
+### Compact versioned persistence
+
+`SpeakerOptimizerMeasurementSetStore` persists the existing versioned
+`SpeakerOptimizerMeasurementSet` under Application Support.
+
+Persistence keeps analyzed response/quality evidence only. It does not add raw
+sweep or raw impulse buffers. Structural validation runs on both save and load,
+including schema, duplicate IDs, source/position coverage domain, and capture
+identity continuity.
