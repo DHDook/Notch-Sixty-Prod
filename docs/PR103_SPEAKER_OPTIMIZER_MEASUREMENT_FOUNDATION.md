@@ -262,3 +262,32 @@ Persistence keeps analyzed response/quality evidence only. It does not add raw
 sweep or raw impulse buffers. Structural validation runs on both save and load,
 including schema, duplicate IDs, source/position coverage domain, and capture
 identity continuity.
+
+
+## Slice 4 implementation checkpoint
+
+Speaker Optimizer measurement is now integrated into the existing
+**SYSTEM → Speaker Calibration** workspace.
+
+The UI owns a dedicated `SpeakerOptimizerMeasurementController` that reuses
+the already-selected playback system, measurement microphone, calibration
+transport and analyzer.
+
+The measurement surface provides:
+
+- explicit Start/Resume Baseline session control;
+- position-major one-mic movement guidance;
+- next source/repeat identity;
+- overall repeat and position/source-group progress;
+- current sweep progress;
+- aggregate confidence and optimizer-ready state;
+- per-position/source SNR, magnitude repeatability, arrival spread and phase
+  consistency; and
+- explicit blocking reasons.
+
+PR103 still exposes **no filter generation or Apply action** for Speaker
+Optimizer.
+
+The workspace also states the driver-safety boundary directly: protected
+Low/Mid/High driver-bus measurements remain blocked rather than sending a raw
+full-band sweep around mandatory crossover/protection processing.
