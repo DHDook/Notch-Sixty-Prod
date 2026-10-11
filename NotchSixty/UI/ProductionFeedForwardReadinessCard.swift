@@ -354,10 +354,19 @@ struct ActiveAcousticsPhysicalEvidenceUXSnapshot: Equatable {
             return
         }
 
+        let reviews = reviewPacket?.reviews ?? []
+        let requiredRoles = Set(QuietZoneExternalReviewRole.allCases.map(\.rawValue))
+        let suppliedRoles = Set(reviews.map { $0.role.rawValue })
         let reviewed =
             reviewPacket?.evidenceSHA256Hex == package.sha256Hex
             && reviewPacket?.numericalAcceptance == true
             && reviewPacket?.independentRolesAcknowledged == true
+            && reviews.count == QuietZoneExternalReviewRole.allCases.count
+            && suppliedRoles == requiredRoles
+            && reviews.allSatisfy {
+                $0.evidenceSHA256Hex == package.sha256Hex
+                    && $0.decision == .recommendFurtherHardwareReview
+            }
 
         state =
             reviewed
@@ -393,6 +402,90 @@ struct ActiveAcousticsPhysicalEvidenceUXSnapshot: Equatable {
         digestPrefix = String(package.sha256Hex.prefix(12))
         digestIntegrityVerified = verified
         independentRolesAcknowledged = reviewed
+    }
+}
+
+
+
+struct ActiveAcousticsEvidenceProvenanceUXSnapshot: Equatable {
+    let statusCaption: String
+    let projectID: String?
+    let microphoneID: String?
+    let microphoneChannel: Int?
+    let outputDeviceID: String?
+    let routeID: String?
+    let sampleRate: Double?
+    let clockID: String?
+    let triggerID: String?
+    let sessionCount: Int
+    let sourceCaptureCount: Int
+    let faultWitnessCount: Int
+    let digestPrefix: String?
+    let acknowledgedReviewRoles: [String]
+    let reviewerIdentityCryptographicallyVerified = false
+    let instrumentEvidenceIndependentlyAuthenticated = false
+    let liveOutputAuthorized = false
+
+    init(
+        package: QuietZonePhysicalEvidencePackage?,
+        reviewPacket: QuietZoneExternalReviewPacket?
+    ) {
+        let evidence = ActiveAcousticsPhysicalEvidenceUXSnapshot(
+            package: package,
+            reviewPacket: reviewPacket
+        )
+        guard let package, evidence.digestIntegrityVerified else {
+            statusCaption =
+                package == nil
+                    ? "NO EVIDENCE RECORD"
+                    : "INVALID EVIDENCE RECORD"
+            projectID = nil
+            microphoneID = nil
+            microphoneChannel = nil
+            outputDeviceID = nil
+            routeID = nil
+            sampleRate = nil
+            clockID = nil
+            triggerID = nil
+            sessionCount = 0
+            sourceCaptureCount = 0
+            faultWitnessCount = 0
+            digestPrefix = package.map {
+                String($0.sha256Hex.prefix(12))
+            }
+            acknowledgedReviewRoles = []
+            return
+        }
+
+        let rig = package.campaignReview.rig
+        statusCaption = "RECORD INTEGRITY VERIFIED · PROVENANCE UNAUTHENTICATED"
+        projectID = rig.projectID.uuidString
+        microphoneID = rig.microphoneID
+        microphoneChannel = rig.microphoneChannel
+        outputDeviceID = rig.outputDeviceID
+        routeID = rig.routeID
+        sampleRate = rig.sampleRate
+        clockID = rig.clockID
+        triggerID = rig.triggerID
+        sessionCount = package.campaignReview.sessionIDs.count
+        sourceCaptureCount = package.rawSourceLaunchCount
+        faultWitnessCount = package.rawFaultWitnessCount
+        digestPrefix = String(package.sha256Hex.prefix(12))
+
+        if evidence.independentRolesAcknowledged {
+            acknowledgedReviewRoles = (reviewPacket?.reviews ?? [])
+                .map { item in
+                    switch item.role {
+                    case .acoustics:
+                        return "Acoustics"
+                    case .electricalSafety:
+                        return "Electrical safety"
+                    }
+                }
+                .sorted()
+        } else {
+            acknowledgedReviewRoles = []
+        }
     }
 }
 
@@ -601,6 +694,7 @@ struct ProductionFeedForwardReadinessCard: View {
             consolidatedDiagnostics
             physicalCampaignPlan
             physicalEvidenceVisualization
+            evidenceProvenance
 
             VStack(alignment: .leading, spacing: 7) {
                 stage(
@@ -826,6 +920,128 @@ struct ProductionFeedForwardReadinessCard: View {
 
 
 
+
+
+    private var evidenceProvenance: some View {
+        let provenance = ActiveAcousticsEvidenceProvenanceUXSnapshot(
+            package: physicalEvidence,
+            reviewPacket: independentReview
+        )
+
+        return VStack(alignment: .leading, spacing: 11) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Evidence Provenance & Review")
+                        .font(.subheadline.bold())
+                    Text(provenance.statusCaption)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if let digest = provenance.digestPrefix {
+                    Text(digest + "…")
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
+
+            if provenance.projectID == nil {
+                Text(
+                    "No digest-valid PR99 evidence record is available, so rig identity and review metadata are intentionally not displayed."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            } else {
+                Grid(
+                    alignment: .leading,
+                    horizontalSpacing: 16,
+                    verticalSpacing: 7
+                ) {
+                    provenanceRow("Project", provenance.projectID ?? "—")
+                    provenanceRow("Microphone", provenance.microphoneID ?? "—")
+                    provenanceRow(
+                        "Input channel",
+                        provenance.microphoneChannel.map {
+                            String($0 + 1)
+                        } ?? "—"
+                    )
+                    provenanceRow(
+                        "Output device",
+                        provenance.outputDeviceID ?? "—"
+                    )
+                    provenanceRow("Route lease", provenance.routeID ?? "—")
+                    provenanceRow(
+                        "Sample rate",
+                        provenance.sampleRate.map {
+                            String(format: "%.0f Hz", $0)
+                        } ?? "—"
+                    )
+                    provenanceRow("Clock", provenance.clockID ?? "—")
+                    provenanceRow("Source fixture", provenance.triggerID ?? "—")
+                    provenanceRow(
+                        "Sessions",
+                        String(provenance.sessionCount)
+                    )
+                    provenanceRow(
+                        "Source captures",
+                        String(provenance.sourceCaptureCount)
+                    )
+                    provenanceRow(
+                        "Fault witnesses",
+                        String(provenance.faultWitnessCount)
+                    )
+                }
+                .font(.caption)
+
+                Divider()
+
+                HStack(alignment: .top, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Acknowledged review roles")
+                            .font(.caption.bold())
+                        Text(
+                            provenance.acknowledgedReviewRoles.isEmpty
+                                ? "None established"
+                                : provenance.acknowledgedReviewRoles
+                                    .joined(separator: " · ")
+                        )
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text("IDENTITY UNVERIFIED")
+                        .font(.caption2.bold())
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Text(
+                "The provenance fields above are values contained in the digest-valid record. They do not prove that the named microphone, DAC, clock, source fixture, reviewer, or physical geometry actually produced the measurement."
+            )
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            .secondary.opacity(0.05),
+            in: RoundedRectangle(cornerRadius: 12)
+        )
+    }
+
+    private func provenanceRow(
+        _ title: String,
+        _ value: String
+    ) -> some View {
+        GridRow {
+            Text(title)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .monospaced()
+                .textSelection(.enabled)
+        }
+    }
 
     private var physicalEvidenceVisualization: some View {
         let snapshot = ActiveAcousticsPhysicalEvidenceUXSnapshot(
