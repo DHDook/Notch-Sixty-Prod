@@ -115,3 +115,27 @@ The model also reports an unresolved-item count and a state-sensitive headline.
 This makes the next commissioning obstacle visible without introducing an arm
 control, changing Core Audio, or converting caller-supplied records into
 instrument authentication.
+
+
+## Slice 4 — Guided PR99 A → B → A physical campaign
+
+PR100 now exposes the physical verification sequence that PR99 requires as a
+read-only commissioning guide rather than leaving it only in developer
+documentation.
+
+The card shows the three complete visits with the same movable microphone:
+
+1. **A — primary listener:** independent OFF → TEST → OFF measurement;
+2. **B — neighboring observer:** move the same microphone and repeat; and
+3. **A — primary listener return:** return to the original location and repeat
+   to expose position, source, or timebase drift.
+
+The UX makes the evidence volume explicit: **9 independent source captures**
+and **15 externally witnessed fault-shutdown measurements** across the three
+visits. It also surfaces the coherent **20–150 Hz** verification range and the
+**1.5 dB** primary repeatability ceiling used by the existing PR99 analysis.
+
+Every row is marked as a future physical commissioning step. The model keeps
+physical verification, instrument provenance authentication, and live-output
+authorization false. The view cannot create captures, fabricate evidence, arm
+ANC, or connect a speaker output.
