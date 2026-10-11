@@ -155,3 +155,30 @@ The newly approved Speaker Optimizer roadmap begins after PR102:
 
 This ordering keeps PR102 focused on release integration rather than reopening
 the feature surface while release contracts are being reconciled.
+
+
+## Implementation checkpoint — Slices 1–5
+
+The remote implementation for Slices 1–5 is now present on the PR102 branch:
+
+- release inventory/evidence classification;
+- cumulative product-boundary reconciliation;
+- App Store/sandbox and unsigned archive preflight;
+- libmysofa licensing/provenance reconciliation plus shipped BSD notice;
+- fail-closed machine-readable production dependency manifest; and
+- same-run remote release-candidate manifest tying validation, Debug/Release
+  builds, archive preflight, and full XCTest to the exact commit/run.
+
+The current release-candidate manifest deliberately keeps hardware, Apple
+credential, and public-release authorization gates false/unresolved.
+
+## Slice 6 — Closure and handoff
+
+PR102 now includes:
+- `docs/PR102_RELEASE_HANDOFF.md`, the physical Mac/audio/acoustic and Apple
+  credential checklist; and
+- `docs/PR102_SOFTWARE_CLOSURE.md`, the formal remote closure record.
+
+Slice 6 remains pending until the exact branch head successfully generates the
+formal `PR102_REMOTE_RELEASE_CANDIDATE` artifact. Documentation alone cannot
+self-certify the release candidate.
