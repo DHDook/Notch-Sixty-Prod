@@ -206,3 +206,57 @@ That test validates the **software recovery model only**. It deliberately leaves
 the distinct `physicalDeviceRecovery` requirement at **HARDWARE REQUIRED**:
 a simulated catalog disappearance is not evidence of a real USB/DAC unplug,
 Core Audio driver teardown, clock reacquisition, or physical reconnect.
+
+
+## Slice 4 — Resource and performance baseline
+
+PR101 now reactivates the mature PR35 render-kernel and realtime-bridge
+microbenchmarks against the **current cumulative engine** rather than treating
+their older measurements as permanent truth.
+
+The macOS CI job first builds the dedicated Release performance scheme, then
+compiles the current realtime C sources at `-O3` for Apple Silicon and runs
+five independent benchmark repetitions. The retained workloads cover:
+
+- global DSP bypass;
+- unity/parked DSP;
+- active compressor;
+- full metering;
+- the full capture → DSP → output bridge; and
+- the bridge with output VU metering enabled.
+
+Each repetition reports nanoseconds per rendered frame and the corresponding
+theoretical share of one core at 96 kHz. The wrapper also records process
+wall/user/system time when available and the child process maximum resident set
+size reported by macOS `/usr/bin/time -l`.
+
+The generated JSON artifact contains every raw sample plus minimum, median,
+mean, maximum, and population standard deviation for each benchmark case. It is
+retained as a CI artifact so later PR101 runs can be compared against a known
+exact commit instead of relying on screenshots or manually copied numbers.
+
+### Why this is a baseline, not a hard gate
+
+Hosted CI hardware, virtualization, runner contention, compiler revisions, and
+thermal state can move microbenchmark numbers without a product regression.
+PR101 therefore **does not invent a percentage threshold** and does not fail a
+build merely because one hosted runner is slower than another.
+
+The baseline runner does fail closed on invalid evidence: compilation or
+execution failure, missing expected benchmark cases, non-finite/non-positive
+measurements, or inconsistent bridge callback counts.
+
+The report explicitly records
+`hardPerformanceThresholdsApplied = false` and
+`resourceStabilityAccepted = false`. Slice 4 establishes repeatable
+instrumentation and trend evidence; it does not yet claim the complete
+`resourceStability` acceptance requirement.
+
+Peak RSS from short-lived benchmark processes is likewise **not** proof that
+the shipping app is free of leaks. A later PR101 slice will add a longer
+same-process resource/dropout soak before that remote requirement can become
+eligible for acceptance.
+
+None of these CI measurements establish real-machine thermal behavior,
+production transport CPU, real sleep/wake or unplug/replug recovery, speaker
+safety, acoustic acceptance, or live feed-forward ANC qualification.
