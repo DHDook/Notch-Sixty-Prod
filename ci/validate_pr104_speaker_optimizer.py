@@ -150,4 +150,41 @@ for token in ("F10400000000000000000007", "F10400000000000000000008",
               "F10400000000000000000017", "F10400000000000000000018"):
     assert project.count(token) >= 2, f"missing crossover Xcode registration: {token}"
 assert "Run PR104 crossover feasibility tests" in workflow
-print("PR104 offline PEQ/FIR/crossover feasibility contracts passed")
+compare_source = ROOT / "NotchSixty/Audio/SpeakerOptimizerCandidateComparison.swift"
+compare_tests = ROOT / "NotchSixtyTests/SpeakerOptimizerCandidateComparisonTests.swift"
+assert compare_source.is_file() and compare_tests.is_file(), "missing PR104 ranking files"
+comparator = compare_source.read_text()
+comparison_tests = compare_tests.read_text()
+for token in (
+    "struct SpeakerOptimizerCandidateComparisonDesigner",
+    "SpeakerOptimizerDesignEngine().design(",
+    "SpeakerOptimizerPEQCandidateDesigner().design(",
+    "SpeakerOptimizerFIRCandidateDesigner().design(",
+    "SpeakerOptimizerCrossoverFeasibilityDesigner().analyze(",
+    "case bypass",
+    "case peq",
+    "case fir",
+    "weightedRMSEBeforeDB",
+    "minimumModeledImprovementDB",
+    "maximumRequiredHeadroomDB",
+    "maximumFIRDelayMilliseconds",
+    "var canSwitchLiveAudio: Bool { false }",
+    "var canDeploy: Bool { false }",
+    "func visualAB(",
+    "func crossoverVisualAB(",
+):
+    assert token in comparator, f"missing comparison boundary {token}"
+for token in (
+    "testComparesBypassPEQAndFIRWithSameEvidenceAndNoLiveSwitch",
+    "testVisualABIsMagnitudeOnlyAndRejectsIneligibleCandidate",
+    "testStrictLatencyHeadroomAndBenefitCanRejectAlternatives",
+    "testRejectsIncompleteBaselineAndInvalidTradeoffConstraints",
+):
+    assert token in comparison_tests, f"missing comparison test {token}"
+for token in (
+    "F10400000000000000000009", "F1040000000000000000000A",
+    "F10400000000000000000019", "F1040000000000000000001A",
+):
+    assert project.count(token) >= 2, f"comparison file not in Xcode {token}"
+assert "Run PR104 candidate comparison tests" in workflow
+print("PR104 offline source alternatives, visual A/B, and crossover boundaries passed")

@@ -66,6 +66,12 @@ jobs:
           -configuration Debug -destination 'platform=macOS,arch=arm64'
           CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES
           -only-testing:NotchSixtyTests/SpeakerOptimizerCrossoverFeasibilityTests test
+      - name: Run PR104 candidate comparison tests
+        run: >-
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
+          -configuration Debug -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES
+          -only-testing:NotchSixtyTests/SpeakerOptimizerCandidateComparisonTests test
       - name: Run full XCTest regression
         run: >-
           xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty

@@ -96,3 +96,14 @@ Next: measured-source multi-channel/subwoofer feasibility, phase/timing boundari
 - **Important measurement-provenance limitation:** PR103 evidence records a common microphone and route but does not separately authenticate cross-source sweep clock origin. Therefore modeled phase-coherent sums, timing and polarity are *conditional feasibility hypotheses*, not certified adjustments. A future provenance and synchronized-capture contract is essential before PR105 could safely apply them.
 - Crossover performance/extra relative energy does not equal absolute digital headroom. Explicit limiter and clipping verification is still required.
 - These models cannot prove real-room improvements; new physical microphone verification remains mandatory.
+
+
+## Slice 5 — Offline alternative ranking and visual A/B
+
+- Rebuild **all** correction models from the same requalified PR103 baseline, seat weights, microphone, playback system, sample rate and route; cross-check before-error and frequency-grid agreement before comparing alternatives.
+- Every source has three choices: bypass/unity, bounded digital PEQ, and audited linear-phase FIR. Rejected contenders remain visible with reasons, but their correction curves revert to zero and they cannot be selected for visual A/B.
+- Rank solely **within** one acoustic source, using modeled RMSE improvement minus explicit headroom, filter-complexity, FIR delay and worst-seat-regression penalties. These are UI preference scores, not verified acoustic sound-quality scores.
+- The per-source top choice can remain bypass when correction costs dominate predicted benefit; comparison does not force a filter.
+- Provide side-by-side A/B correction curves, an optional per-frequency difference curve, and separate predicted target errors. **No live-audio switching or coefficient loading.**
+- The existing cross-source speaker/subwoofer analyzer can be invoked as its own isolated baseline-versus-hypothesis diagnostic: comparison does not mix a coherent-sum energy objective with single-source magnitude-RMSE scores.
+- Cross-source phase/sweep reference authentication is absent from the persisted PR103 schema. Diagnostic rankings remain conditional and cannot be applied. Room measurements and user approval remain necessary in PR105.
