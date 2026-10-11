@@ -160,7 +160,9 @@ final class SpeakerOptimizerCharacterizationMeasurementTests: XCTestCase {
                 makeTarget(source: left),
                 makeTarget(source: right)
             ],
-            captures: []
+            captures: [],
+            createdAt: Date(timeIntervalSince1970: 1_703_100_000.123),
+            modifiedAt: Date(timeIntervalSince1970: 1_703_100_000.456)
         )
     }
 
