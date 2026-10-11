@@ -167,3 +167,47 @@ Remote CI cannot establish:
 - PR104 — Measurement-Driven Speaker Optimization Engine
 - PR105 — Guided Speaker Optimizer & Acoustic Verification
 - PR106 — Advanced Speaker Measurement Lab
+
+
+## Slice 2 implementation checkpoint
+
+The first transport-integration layer is implemented as a fail-closed planning
+adapter around the existing `MultichannelCalibrationTransport`.
+
+### Reused safely now
+
+Whole acoustic sources already represented by
+`MultichannelCalibrationSource` (ordinary speaker roles and physical
+subwoofers) may reuse the existing one-source targeted calibration transport
+when:
+
+- the source resolves to one valid physical output lane;
+- no enabled split-driver Low/Mid/High/Sub bus routing is present; and
+- no enabled per-driver limiter would be bypassed by direct targeted output.
+
+The plan records the resolved physical channel explicitly.
+
+### Deliberately blocked now
+
+`SpeakerOptimizerMeasurementExcitationTarget.protectedDriverBus` represents
+the future per-driver measurement use case, but PR103 does **not** translate
+that target into a direct physical sweep.
+
+Protected driver measurement remains blocked because the existing targeted
+calibration transport writes the precomputed sweep directly to a physical
+output lane. Doing that to Low/Mid/High driver outputs could bypass mandatory
+crossover filtering and per-driver protection.
+
+Likewise, reuse of the existing targeted transport fails closed when active
+split-driver routing or an enabled per-driver limiter is detected.
+
+This is intentional scope discipline: PR103 now knows the difference between a
+safe reusable whole-source measurement and a protected driver measurement, but
+it does not manufacture an unsafe bypass merely to claim driver-level coverage.
+
+### One movable microphone
+
+The transport plan remains compatible with PR103's one-mic workflow. Position
+identity belongs to the measurement set; the same selected microphone can be
+moved between positions while each capture retains microphone, routing, source,
+sample-rate and position identity.
