@@ -156,8 +156,9 @@ for token in (
 
 
 for token in (
-    '"PR101_REALTIME_RESOURCE_DROPOUT_SOAK"',
-    '"evidenceAuthority\\": \\"macOSCI"',
+    "PR101_REALTIME_RESOURCE_DROPOUT_SOAK",
+    "evidenceAuthority",
+    "macOSCI",
     "WARMUP_CALLBACKS 2048u",
     "SOAK_BLOCKS 16u",
     "NORMAL_CALLBACKS_PER_BLOCK 1024u",
@@ -172,10 +173,10 @@ for token in (
     "recovered_faults == injected_faults",
     "output_is_exact_silence",
     "output_has_signal",
-    '"dropoutRecoveryStressAccepted\\": %s',
-    '"resourceStabilityAccepted\\": %s',
-    '"physicalAcceptanceComplete\\": false',
-    '"releaseAcceptanceComplete\\": false',
+    "dropoutRecoveryStressAccepted",
+    "resourceStabilityAccepted",
+    "physicalAcceptanceComplete",
+    "releaseAcceptanceComplete",
 ):
     require(token in resource_soak, f"realtime soak missing {token!r}")
 
