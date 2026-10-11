@@ -88,10 +88,23 @@ def main() -> int:
     for label, path in markers.items():
         require(path.is_file(), f"missing same-run success marker: {label} ({path})")
 
-    github_sha = os.environ.get("GITHUB_SHA")
+    workflow_trigger_sha = os.environ.get("GITHUB_SHA")
+    expected_head_sha = os.environ.get("PR102_EXPECTED_HEAD_SHA")
     github_run_id = os.environ.get("GITHUB_RUN_ID")
-    require(github_sha is not None and len(github_sha) == 40, "full GITHUB_SHA is required")
+    require(workflow_trigger_sha is not None and len(workflow_trigger_sha) == 40, "full GITHUB_SHA is required")
+    require(expected_head_sha is not None and len(expected_head_sha) == 40, "full PR102_EXPECTED_HEAD_SHA is required")
     require(github_run_id is not None and github_run_id.isdigit(), "numeric GITHUB_RUN_ID is required")
+
+    source_commit_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+    ).stdout.strip()
+    require(
+        source_commit_sha == expected_head_sha,
+        f"checked-out source commit {source_commit_sha} does not match expected PR/source head {expected_head_sha}",
+    )
 
     app = args.release_app
     require(app.is_dir(), f"Release app missing: {app}")
@@ -181,7 +194,8 @@ def main() -> int:
         "schemaVersion": 1,
         "campaign": "PR102_REMOTE_RELEASE_CANDIDATE",
         "evidenceAuthority": "remoteSoftware",
-        "githubSHA": github_sha,
+        "githubSHA": source_commit_sha,
+        "githubWorkflowTriggerSHA": workflow_trigger_sha,
         "githubRunID": github_run_id,
         "product": {
             "name": "Notch Sixty",
