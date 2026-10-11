@@ -8,6 +8,8 @@ TESTS = ROOT / "NotchSixtyTests" / "SpeakerOptimizerMeasurementEvidenceTests.swi
 PROJECT = ROOT / "NotchSixty.xcodeproj" / "project.pbxproj"
 DOC = ROOT / "docs" / "PR103_SPEAKER_OPTIMIZER_MEASUREMENT_FOUNDATION.md"
 WORKSPACE = ROOT / "NotchSixty" / "UI" / "ProductionMultichannelCalibrationWorkspace.swift"
+CLOSURE = ROOT / "docs" / "PR103_SOFTWARE_CLOSURE.md"
+PHYSICAL_HANDOFF = ROOT / "docs" / "PR103_PHYSICAL_HANDOFF.md"
 
 
 def fail(message: str) -> None:
@@ -20,7 +22,7 @@ def require(condition: bool, message: str) -> None:
         fail(message)
 
 
-for path in (SOURCE, TESTS, PROJECT, DOC, WORKSPACE):
+for path in (SOURCE, TESTS, PROJECT, DOC, WORKSPACE, CLOSURE, PHYSICAL_HANDOFF):
     require(path.is_file(), f"missing required file {path.relative_to(ROOT)}")
 
 source = SOURCE.read_text(encoding="utf-8")
@@ -29,6 +31,8 @@ tests = TESTS.read_text(encoding="utf-8")
 project = PROJECT.read_text(encoding="utf-8")
 doc = DOC.read_text(encoding="utf-8")
 workspace = WORKSPACE.read_text(encoding="utf-8")
+closure = CLOSURE.read_text(encoding="utf-8")
+physical_handoff = PHYSICAL_HANDOFF.read_text(encoding="utf-8")
 
 for token in (
     "enum SpeakerOptimizerMeasurementRole",
@@ -144,5 +148,20 @@ for token in (
     "Protected Low/Mid/High driver-bus measurements remain fail-closed",
 ):
     require(token in workspace, f"Speaker Calibration optimizer UI missing {token!r}")
+
+for token in (
+    "PENDING EXACT-HEAD CI",
+    "Protected driver-bus measurement therefore remains unavailable",
+    "PR104 may consume only PR103 evidence that reports",
+):
+    require(token in closure, f"PR103 closure contract missing {token!r}")
+
+for token in (
+    "Baseline whole-speaker / subwoofer campaign",
+    "Protected active-crossover drivers",
+    "do not manually route a full-band sweep",
+    "Physical PR103 acceptance should record",
+):
+    require(token in physical_handoff, f"PR103 physical handoff missing {token!r}")
 
 print("PR103 Speaker Optimizer measurement foundation validation passed")
