@@ -104,27 +104,36 @@ final class SpeakerOptimizerCandidateComparisonTests: XCTestCase {
         let freqs = (0..<64).map { index in
             20 * pow(1_000.0, Double(index) / 63)
         }
-        let captures = (0..<3).map { repeatIndex in
-            SpeakerOptimizerMeasurementCapture(
-                capturedAt: Date(timeIntervalSince1970: 1_702_000_000 + Double(repeatIndex)),
-                playbackSystemID: system, routingSignature: "comparison-stable-route",
-                microphone: mic, positionID: seat, source: speaker, sampleRate: 48_000,
-                response: RoomCorrectionFrequencyResponse(
-                    frequenciesHz: freqs,
-                    magnitudeDB: freqs.map { f in
-                        6 * exp(-0.5 * pow(log2(f / 250) / 0.65, 2))
-                            + Double(repeatIndex - 1) * 0.08
-                    },
-                    phaseRadians: Array(repeating: 0, count: freqs.count)
-                ),
-                quality: RoomCorrectionMeasurementQuality(
-                    clipped: false, playbackPeakDBFS: -20,
-                    capturePeakDBFS: -12, estimatedNoiseFloorDBFS: -70,
-                    estimatedSNRDB: 55, sweepComplete: true,
-                    directArrivalSeconds: 0.010 + Double(repeatIndex) * 0.00002,
-                    usableLowHz: 20, usableHighHz: 20_000, warnings: []
-                )
+        var captures: [SpeakerOptimizerMeasurementCapture] = []
+        for repeatIndex in 0..<3 {
+            let offsetDB = Double(repeatIndex - 1) * 0.08
+            let values: [Double] = freqs.map { frequency in
+                let octaves = log2(frequency / 250)
+                let scaled = octaves / 0.65
+                return 6 * exp(-0.5 * scaled * scaled) + offsetDB
+            }
+            let response = RoomCorrectionFrequencyResponse(
+                frequenciesHz: freqs,
+                magnitudeDB: values,
+                phaseRadians: Array(repeating: 0, count: freqs.count)
             )
+            let quality = RoomCorrectionMeasurementQuality(
+                clipped: false,
+                playbackPeakDBFS: -20, capturePeakDBFS: -12,
+                estimatedNoiseFloorDBFS: -70, estimatedSNRDB: 55,
+                sweepComplete: true,
+                directArrivalSeconds: 0.010 + Double(repeatIndex) * 0.00002,
+                usableLowHz: 20, usableHighHz: 20_000, warnings: []
+            )
+            let capture = SpeakerOptimizerMeasurementCapture(
+                capturedAt: Date(timeIntervalSince1970:
+                    1_702_000_000 + Double(repeatIndex)),
+                playbackSystemID: system,
+                routingSignature: "comparison-stable-route",
+                microphone: mic, positionID: seat, source: speaker,
+                sampleRate: 48_000, response: response, quality: quality
+            )
+            captures.append(capture)
         }
         return SpeakerOptimizerMeasurementSet(
             role: .baseline, playbackSystemID: system,
