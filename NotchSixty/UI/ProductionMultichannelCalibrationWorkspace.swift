@@ -5,11 +5,31 @@ struct ProductionMultichannelCalibrationWorkspace: View {
     @ObservedObject var calibration: MultichannelCalibrationController
     @ObservedObject var microphone: RoomCorrectionCalibrationController
     @ObservedObject var profiles: ProductProfileController
+    @StateObject private var optimizer: SpeakerOptimizerMeasurementController
 
     @State private var actionError: String?
     @State private var resetConfirmation = false
     @State private var intelligentTargetPreference:
         IntelligentTargetPreference = .neutral
+
+    init(
+        engine: AudioIOEngine,
+        calibration: MultichannelCalibrationController,
+        microphone: RoomCorrectionCalibrationController,
+        profiles: ProductProfileController
+    ) {
+        _engine = ObservedObject(wrappedValue: engine)
+        _calibration = ObservedObject(wrappedValue: calibration)
+        _microphone = ObservedObject(wrappedValue: microphone)
+        _profiles = ObservedObject(wrappedValue: profiles)
+        _optimizer = StateObject(
+            wrappedValue: SpeakerOptimizerMeasurementController(
+                engine: engine,
+                profiles: profiles,
+                microphone: microphone
+            )
+        )
+    }
 
     private var selectedInputBinding: Binding<String?> {
         Binding(
@@ -33,6 +53,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                 microphoneCard
                 seatsCard
                 campaignCard
+                speakerOptimizerCard
                 designCard
 
                 if let error = actionError ?? calibration.lastErrorDescription ?? microphone.lastErrorDescription {
@@ -67,6 +88,19 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                 guard !Task.isCancelled else { break }
                 do {
                     if try await calibration.finishMeasurementIfComplete() { break }
+                } catch {
+                    actionError = error.localizedDescription
+                    break
+                }
+            }
+        }
+        .task(id: optimizer.state) {
+            guard optimizer.state == .measuring else { return }
+            while !Task.isCancelled && optimizer.state == .measuring {
+                try? await Task.sleep(for: .milliseconds(100))
+                guard !Task.isCancelled else { break }
+                do {
+                    if try await optimizer.finishMeasurementIfComplete() { break }
                 } catch {
                     actionError = error.localizedDescription
                     break
@@ -365,6 +399,265 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                         }
                     }
                 }
+            }
+            .padding(6)
+        }
+    }
+
+    private var speakerOptimizerCard: some View {
+        GroupBox("Speaker Optimizer Measurements") {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .top, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Repeated acoustic evidence")
+                            .font(.headline)
+                        Text(
+                            "Build a baseline from repeated isolated speaker/sub sweeps. This stage measures only; it does not generate or deploy optimizer filters."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text(optimizer.state.rawValue.capitalized)
+                        .font(.caption.bold())
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(.quaternary, in: Capsule())
+                }
+
+                HStack(spacing: 10) {
+                    Button(
+                        optimizer.measurementSet == nil
+                            ? "Start Baseline Session"
+                            : "Refresh / Resume Baseline"
+                    ) {
+                        actionError = nil
+                        do {
+                            try optimizer.startOrResumeBaselineSession(
+                                positions: calibration.seats
+                            )
+                        } catch {
+                            actionError = error.localizedDescription
+                        }
+                    }
+                    .buttonStyle(.bordered)
+
+                    if optimizer.measurementSet != nil {
+                        Button("Reset Baseline…", role: .destructive) {
+                            actionError = nil
+                            do {
+                                try optimizer.resetBaselineSession(
+                                    positions: calibration.seats
+                                )
+                            } catch {
+                                actionError = error.localizedDescription
+                            }
+                        }
+                        .disabled(
+                            optimizer.state == .measuring
+                                || optimizer.state == .analyzing
+                        )
+                    }
+                }
+
+                if let set = optimizer.measurementSet,
+                   let progress = optimizer.progress {
+                    Divider()
+
+                    HStack(spacing: 24) {
+                        status("Role", set.role.rawValue.capitalized)
+                        status(
+                            "Repeats",
+                            "\(progress.completedSweepCount) / \(progress.requiredSweepCount)"
+                        )
+                        status(
+                            "Groups",
+                            "\(progress.completedPositionSourceGroups) / \(progress.requiredPositionSourceGroups)"
+                        )
+                        status(
+                            "Confidence",
+                            optimizer.evidenceReport.map {
+                                "\(Int(($0.confidence * 100).rounded()))%"
+                            } ?? "—"
+                        )
+                    }
+
+                    ProgressView(value: progress.fractionComplete)
+
+                    if let step = optimizer.activeOrNextStep {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(
+                                optimizer.state == .measuring
+                                    ? "Measuring \(step.displayName)"
+                                    : "Next: \(step.displayName)"
+                            )
+                            .font(.callout.bold())
+                            Text(
+                                "Move the selected microphone to \(step.position.name) and keep its position fixed for all repeats at that position."
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        }
+                    } else if progress.complete {
+                        Label(
+                            "All planned repeated sweeps are captured.",
+                            systemImage: "checkmark.circle.fill"
+                        )
+                        .foregroundStyle(.green)
+                    }
+
+                    if optimizer.state == .measuring {
+                        ProgressView(
+                            value: optimizer.activeMeasurementProgress
+                        ) {
+                            Text("Current optimizer sweep")
+                        }
+                    }
+
+                    HStack(spacing: 10) {
+                        Button("Measure Next Repeat") {
+                            actionError = nil
+                            do {
+                                try optimizer.beginNextMeasurement()
+                            } catch {
+                                actionError = error.localizedDescription
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!optimizer.canBeginMeasurement)
+
+                        if optimizer.state == .measuring
+                            || optimizer.state == .analyzing {
+                            Button("Cancel") {
+                                optimizer.cancelMeasurement()
+                            }
+                        }
+                    }
+
+                    if let report = optimizer.evidenceReport {
+                        Divider()
+                        HStack(spacing: 10) {
+                            Label(
+                                report.optimizerReady
+                                    ? "Optimizer-ready evidence"
+                                    : "Evidence not optimizer-ready",
+                                systemImage: report.optimizerReady
+                                    ? "checkmark.shield.fill"
+                                    : "exclamationmark.shield.fill"
+                            )
+                            .font(.callout.bold())
+                            .foregroundStyle(
+                                report.optimizerReady ? .green : .secondary
+                            )
+                            Spacer()
+                            Text(
+                                "Confidence \(Int((report.confidence * 100).rounded()))%"
+                            )
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                        }
+
+                        Grid(
+                            alignment: .leading,
+                            horizontalSpacing: 14,
+                            verticalSpacing: 6
+                        ) {
+                            GridRow {
+                                Text("Position").font(.caption.bold())
+                                Text("Source").font(.caption.bold())
+                                Text("Repeats").font(.caption.bold())
+                                Text("SNR").font(.caption.bold())
+                                Text("Repeatability").font(.caption.bold())
+                                Text("Timing").font(.caption.bold())
+                                Text("Phase").font(.caption.bold())
+                                Text("Status").font(.caption.bold())
+                            }
+                            ForEach(
+                                Array(report.groupReports.enumerated()),
+                                id: \.offset
+                            ) { _, group in
+                                GridRow {
+                                    Text(
+                                        set.positions.first(
+                                            where: {
+                                                $0.id == group.positionID
+                                            }
+                                        )?.name ?? "Unknown"
+                                    )
+                                    Text(group.source.displayName)
+                                    Text("\(group.repeatCount)")
+                                    Text(
+                                        group.minimumSNRDB.map {
+                                            String(format: "%.1f dB", $0)
+                                        } ?? "—"
+                                    )
+                                    Text(
+                                        group.magnitudeRepeatabilityRMSDB.map {
+                                            String(format: "%.2f dB", $0)
+                                        } ?? "—"
+                                    )
+                                    Text(
+                                        group.arrivalSpreadMilliseconds.map {
+                                            String(format: "%.2f ms", $0)
+                                        } ?? "—"
+                                    )
+                                    Text(
+                                        group.phaseConsistency.map {
+                                            String(format: "%.0f%%", $0 * 100)
+                                        } ?? "—"
+                                    )
+                                    Text(
+                                        group.optimizerReady
+                                            ? "Ready"
+                                            : "Blocked"
+                                    )
+                                    .foregroundStyle(
+                                        group.optimizerReady
+                                            ? .green
+                                            : .secondary
+                                    )
+                                }
+                                .font(.caption)
+                            }
+                        }
+
+                        if !report.blockingReasons.isEmpty {
+                            VStack(alignment: .leading, spacing: 5) {
+                                ForEach(
+                                    Array(
+                                        report.blockingReasons
+                                            .prefix(8)
+                                            .enumerated()
+                                    ),
+                                    id: \.offset
+                                ) { _, reason in
+                                    Label(
+                                        reason,
+                                        systemImage:
+                                            "exclamationmark.triangle"
+                                    )
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if let blocked = optimizer.activeTransportPlan?.blockReason {
+                    Label(
+                        blocked.message,
+                        systemImage: "lock.shield"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                }
+
+                Text(
+                    "Protected Low/Mid/High driver-bus measurements remain fail-closed in PR103. They will not be excited through a raw physical-output bypass; a crossover-preserving protected measurement path is required first."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
             .padding(6)
         }
