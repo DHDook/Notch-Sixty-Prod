@@ -291,3 +291,19 @@ Optimizer.
 The workspace also states the driver-safety boundary directly: protected
 Low/Mid/High driver-bus measurements remain blocked rather than sending a raw
 full-band sweep around mandatory crossover/protection processing.
+
+
+## Slice 5 closure checkpoint
+
+The final remote-closure machinery is now present:
+
+- full XCTest is part of the PR103 exact-head workflow;
+- `docs/PR103_SOFTWARE_CLOSURE.md` defines the remote acceptance boundary;
+- `docs/PR103_PHYSICAL_HANDOFF.md` defines the genuine microphone/speaker
+  acceptance work that cannot be satisfied by CI;
+- the controller no longer uses a forced initialization path; and
+- the PR103 validator enforces the measurement-only / protected-driver
+  fail-closed contracts.
+
+PR103 remains **PENDING EXACT-HEAD CI** until the current head passes the full
+workflow. Only then may the remote/software status be promoted to complete.
