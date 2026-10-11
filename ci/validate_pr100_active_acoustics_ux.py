@@ -45,6 +45,10 @@ for token in (
     "Frequency-resolved reduction",
     "Instrument provenance",
     "Emergency hardware mute",
+    "ActiveAcousticsEvidenceProvenanceUXSnapshot",
+    "Evidence Provenance & Review",
+    "RECORD INTEGRITY VERIFIED · PROVENANCE UNAUTHENTICATED",
+    "IDENTITY UNVERIFIED",
 ):
     require(token in readiness, f"commissioning UX missing {token!r}")
 
@@ -84,6 +88,8 @@ for token in (
     "testPhysicalEvidenceUXShowsVerifiedNumericalPackageWithoutAuthorizingANC",
     "testPhysicalEvidenceUXSuppressesTamperedPackageMetrics",
     "testTwoRoleReviewStillDoesNotAuthenticatePhysicalEvidence",
+    "testClaimedReviewBoolWithoutRoleRecordsIsNotAccepted",
+    "testEvidenceProvenanceShowsDigestValidRecordButNotAuthentication",
 ):
     require(token in tests, f"PR100 XCTest missing {token}")
 
@@ -96,6 +102,7 @@ for phrase in (
     "diagnostics and blockers",
     "guided pr99 a → b → a physical campaign",
     "physical evidence visualization",
+    "evidence provenance and review trail",
 ):
     require(phrase in doc, f"PR100 document missing {phrase!r}")
 
