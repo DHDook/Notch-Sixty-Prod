@@ -248,6 +248,42 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         )
     }
 
+
+
+    private func makeReviewPacket(
+        for package: QuietZonePhysicalEvidencePackage,
+        includeRecords: Bool = true
+    ) -> QuietZoneExternalReviewPacket {
+        let reviews: [QuietZoneExternalReviewAcknowledgment] =
+            includeRecords
+                ? [
+                    .init(
+                        role: .acoustics,
+                        reviewerID: "acoustics-reviewer",
+                        evidenceSHA256Hex: package.sha256Hex,
+                        reviewedAt: Date(timeIntervalSince1970: 1_000),
+                        decision: .recommendFurtherHardwareReview,
+                        notes: "Numerical acoustic evidence reviewed."
+                    ),
+                    .init(
+                        role: .electricalSafety,
+                        reviewerID: "safety-reviewer",
+                        evidenceSHA256Hex: package.sha256Hex,
+                        reviewedAt: Date(timeIntervalSince1970: 1_030),
+                        decision: .recommendFurtherHardwareReview,
+                        notes: "Fault witness metadata reviewed."
+                    ),
+                ]
+                : []
+
+        return QuietZoneExternalReviewPacket(
+            evidenceSHA256Hex: package.sha256Hex,
+            reviews: reviews,
+            numericalAcceptance: true,
+            independentRolesAcknowledged: true
+        )
+    }
+
     func testPhysicalEvidenceUXWaitsForRealCampaign() {
         let snapshot = ActiveAcousticsPhysicalEvidenceUXSnapshot(
             package: nil,
@@ -303,12 +339,7 @@ final class ProductionInformationArchitectureTests: XCTestCase {
 
     func testTwoRoleReviewStillDoesNotAuthenticatePhysicalEvidence() throws {
         let package = try makePhysicalEvidencePackage()
-        let packet = QuietZoneExternalReviewPacket(
-            evidenceSHA256Hex: package.sha256Hex,
-            reviews: [],
-            numericalAcceptance: true,
-            independentRolesAcknowledged: true
-        )
+        let packet = makeReviewPacket(for: package)
         let snapshot = ActiveAcousticsPhysicalEvidenceUXSnapshot(
             package: package,
             reviewPacket: packet
@@ -320,6 +351,47 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         XCTAssertFalse(snapshot.physicalAttenuationVerified)
         XCTAssertFalse(snapshot.emergencyMuteHardwareVerified)
         XCTAssertFalse(snapshot.liveOutputAuthorized)
+    }
+
+    func testClaimedReviewBoolWithoutRoleRecordsIsNotAccepted() throws {
+        let package = try makePhysicalEvidencePackage()
+        let packet = makeReviewPacket(for: package, includeRecords: false)
+        let snapshot = ActiveAcousticsPhysicalEvidenceUXSnapshot(
+            package: package,
+            reviewPacket: packet
+        )
+
+        XCTAssertEqual(snapshot.state, .numericalEvidenceAvailable)
+        XCTAssertFalse(snapshot.independentRolesAcknowledged)
+        XCTAssertFalse(snapshot.liveOutputAuthorized)
+    }
+
+    func testEvidenceProvenanceShowsDigestValidRecordButNotAuthentication()
+        throws {
+        let package = try makePhysicalEvidencePackage()
+        let packet = makeReviewPacket(for: package)
+        let provenance = ActiveAcousticsEvidenceProvenanceUXSnapshot(
+            package: package,
+            reviewPacket: packet
+        )
+
+        XCTAssertEqual(provenance.microphoneID, "test-mic")
+        XCTAssertEqual(provenance.microphoneChannel, 0)
+        XCTAssertEqual(provenance.outputDeviceID, "test-dac")
+        XCTAssertEqual(provenance.routeID, "route-1")
+        XCTAssertEqual(provenance.sampleRate, 96_000)
+        XCTAssertEqual(provenance.clockID, "clock-1")
+        XCTAssertEqual(provenance.triggerID, "fixture-1")
+        XCTAssertEqual(provenance.sessionCount, 3)
+        XCTAssertEqual(provenance.sourceCaptureCount, 9)
+        XCTAssertEqual(provenance.faultWitnessCount, 15)
+        XCTAssertEqual(
+            Set(provenance.acknowledgedReviewRoles),
+            Set(["Acoustics", "Electrical safety"])
+        )
+        XCTAssertFalse(provenance.reviewerIdentityCryptographicallyVerified)
+        XCTAssertFalse(provenance.instrumentEvidenceIndependentlyAuthenticated)
+        XCTAssertFalse(provenance.liveOutputAuthorized)
     }
 
 }
