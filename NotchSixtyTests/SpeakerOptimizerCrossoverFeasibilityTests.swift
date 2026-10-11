@@ -75,10 +75,17 @@ final class SpeakerOptimizerCrossoverFeasibilityTests: XCTestCase {
         ))
         var options = SpeakerOptimizerCrossoverOptions()
         options.centerHz = 250
+        var limited = baseline
+        for index in limited.captures.indices where limited.captures[index].source == sub {
+            limited.captures[index].quality.usableHighHz = 100
+        }
         XCTAssertThrowsError(try SpeakerOptimizerCrossoverFeasibilityDesigner().analyze(
-            baseline: baseline, speaker: main, subwoofer: sub,
+            baseline: limited, speaker: main, subwoofer: sub,
             options: options
-        ))
+        )) {
+            XCTAssertEqual($0 as? SpeakerOptimizerCrossoverError,
+                           .insufficientCommonBandwidth)
+        }
     }
 
     func testNoBenefitEmitsNoActionableOffset() throws {

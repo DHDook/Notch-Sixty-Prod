@@ -153,7 +153,7 @@ struct SpeakerOptimizerCrossoverFeasibilityDesigner: Sendable {
                 }
                 let candidateLevels = evaluations.map(\.summedDB)
                 let improvement = weightedLevel(candidateLevels, weights) - baselineAggregate
-                let regressions = zip(candidateLevels, baselineLevels).map { $0 - $1 }
+                let regressions = zip(candidateLevels, baselineLevels).map { pair in pair.0 - pair.1 }
                 guard improvement.isFinite,
                       regressions.allSatisfy({ $0 >= -options.maximumSeatRegressionDB }),
                       evaluations.allSatisfy({
