@@ -6,17 +6,23 @@ SOURCE = ROOT / "NotchSixty/Audio/SpeakerMeasurementLabCapability.swift"
 TESTS = ROOT / "NotchSixtyTests/SpeakerMeasurementLabCapabilityTests.swift"
 SESSION_SOURCE = ROOT / "NotchSixty/Audio/SpeakerMeasurementLabSession.swift"
 SESSION_TESTS = ROOT / "NotchSixtyTests/SpeakerMeasurementLabSessionTests.swift"
+DIRECTIVITY_SOURCE = ROOT / "NotchSixty/Audio/SpeakerMeasurementLabDirectivity.swift"
+DIRECTIVITY_TESTS = ROOT / "NotchSixtyTests/SpeakerMeasurementLabDirectivityTests.swift"
+CONTROLLER_SOURCE = ROOT / "NotchSixty/Audio/SpeakerMeasurementLabController.swift"
 PROJECT = ROOT / "NotchSixty.xcodeproj/project.pbxproj"
 DOC = ROOT / "docs/PR106_ADVANCED_SPEAKER_MEASUREMENT_LAB.md"
 WORKFLOW = ROOT / ".github/workflows/pr106-speaker-measurement-lab.yml"
 
-for path in (SOURCE, TESTS, SESSION_SOURCE, SESSION_TESTS, PROJECT, DOC, WORKFLOW):
+for path in (SOURCE, TESTS, SESSION_SOURCE, SESSION_TESTS, DIRECTIVITY_SOURCE, DIRECTIVITY_TESTS, CONTROLLER_SOURCE, PROJECT, DOC, WORKFLOW):
     assert path.is_file(), f"missing PR106 Slice 1 file: {path}"
 
 source = SOURCE.read_text()
 tests = TESTS.read_text()
 session_source = SESSION_SOURCE.read_text()
 session_tests = SESSION_TESTS.read_text()
+directivity_source = DIRECTIVITY_SOURCE.read_text()
+directivity_tests = DIRECTIVITY_TESTS.read_text()
+controller_source = CONTROLLER_SOURCE.read_text()
 project = PROJECT.read_text()
 doc = DOC.read_text()
 workflow = WORKFLOW.read_text()
@@ -75,6 +81,37 @@ for token in (
     assert token in session_tests, f"missing PR106 session test: {token}"
 
 for token in (
+    "final class SpeakerMeasurementLabController",
+    "capabilityPlanner.plan(",
+    "validateCurrentEnvironment",
+    "SpeakerMeasurementLabCaptureBuilder",
+):
+    assert token in controller_source, f"missing PR106 live controller contract: {token}"
+
+for token in (
+    "struct SpeakerMeasurementLabDirectivityOptions",
+    "struct SpeakerMeasurementLabDirectivityTrace",
+    "struct SpeakerMeasurementLabDirectivityReport",
+    "SpeakerOptimizerMeasurementEvidenceEvaluator()",
+    "maximumDistanceMismatchFraction",
+    "relativeMagnitudeDB",
+    "var isAnechoic: Bool { false }",
+    "var canDeploy: Bool { false }",
+):
+    assert token in directivity_source, f"missing PR106 directivity contract: {token}"
+
+for token in (
+    "testQualifiedOnAxisAndOffAxisProduceRelativeDirectivityTrace",
+    "testMultipleAnglesAreSortedByAngularOffset",
+    "testDifferentSpeakerCannotBeComparedAsDirectivity",
+    "testDistanceMismatchFailsClosed",
+    "testInsufficientRepeatsAndLowSNRFailQualification",
+    "testClippedOffAxisRepeatFailsQualification",
+    "testIncompatibleFrequencyGridFailsClosed",
+):
+    assert token in directivity_tests, f"missing PR106 directivity test: {token}"
+
+for token in (
     "F10600000000000000000001",
     "F10600000000000000000002",
     "F10600000000000000000011",
@@ -83,6 +120,10 @@ for token in (
     "F10600000000000000000004",
     "F10600000000000000000013",
     "F10600000000000000000014",
+    "F10600000000000000000005",
+    "F10600000000000000000006",
+    "F10600000000000000000015",
+    "F10600000000000000000016",
 ):
     assert project.count(token) >= 2, f"missing PR106 Xcode registration: {token}"
 
@@ -96,6 +137,9 @@ for token in (
 
 assert "SpeakerMeasurementLabCapabilityTests" in workflow
 assert "SpeakerMeasurementLabSessionTests" in workflow
+assert "SpeakerMeasurementLabDirectivityTests" in workflow
 assert "Run full XCTest regression" in workflow
 assert "Slice 2" in doc
-print("PR106 advanced speaker measurement lab capability + session contracts passed")
+assert "Slice 3" in doc
+assert "Repeat-qualified installed-room directivity comparison" in doc
+print("PR106 lab capability + session + live controller + directivity contracts passed")

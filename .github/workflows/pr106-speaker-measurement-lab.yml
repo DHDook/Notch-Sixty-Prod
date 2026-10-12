@@ -46,7 +46,8 @@ jobs:
           -configuration Debug -destination 'platform=macOS,arch=arm64'
           CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES
           -only-testing:NotchSixtyTests/SpeakerMeasurementLabCapabilityTests
-          -only-testing:NotchSixtyTests/SpeakerMeasurementLabSessionTests test
+          -only-testing:NotchSixtyTests/SpeakerMeasurementLabSessionTests
+          -only-testing:NotchSixtyTests/SpeakerMeasurementLabDirectivityTests test
       - name: Run full XCTest regression
         run: >-
           xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty

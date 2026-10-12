@@ -1,6 +1,6 @@
 # PR106 — Advanced Speaker Measurement Lab
 
-Status: **SLICE 1 SOFTWARE VERIFIED — SLICE 2 IMPLEMENTED — EXACT-HEAD CI PENDING**
+Status: **SLICES 1–3 SOFTWARE VERIFIED — SLICE 4 IMPLEMENTED — EXACT-HEAD CI PENDING**
 
 Base: PR105 Guided Speaker Optimizer & Acoustic Verification.
 
@@ -105,15 +105,49 @@ build, targeted capability tests and full XCTest regression.
 - No live transport controller or UI is introduced yet; this slice establishes
   the durable guided-session/evidence contract.
 
+## Slice 3 — Safe live lab acquisition controller
+
+- Reuses the existing targeted calibration transport and measurement analyzer for
+  the currently safe lab modes.
+- Revalidates Playback System, routing, microphone, sample rate and PR106
+  capability safety immediately before every sweep.
+- A protocol that was safe when persisted cannot bypass a later active
+  crossover or configured driver limiter.
+- Persists analyzed impulse/transfer/quality evidence after each completed
+  repeat and retains protocol-major guided sequencing.
+- Protected-driver and coherent mains/sub modes remain blocked.
+
+Slice 3 exact head `9c60b2200ae409c0175638814e2039dd560b4261`
+passed push run 38212282109 and pull-request run 38211449534, including the
+PR106/PR105 validators, Apple Silicon Debug build and full XCTest regression.
+
+## Slice 4 — Repeat-qualified installed-room directivity comparison
+
+- Requires a qualified whole-speaker on-axis reference and one or more qualified
+  whole-speaker off-axis protocols for the SAME acoustic source.
+- Reuses the PR103/PR105 repeated-sweep evidence evaluator, so clipping,
+  incomplete sweeps, low SNR, unstable magnitude/timing/phase and insufficient
+  common bandwidth fail closed before a trace is produced.
+- Requires on-axis/off-axis protocols to use materially the same microphone
+  radius (default tolerance: max of 2 cm or 3% of reference distance).
+- Requires one shared finite frequency grid and computes the common qualified
+  usable band across all compared captures.
+- Reports off-axis minus on-axis magnitude curves, angular geometry, mean
+  relative level and evidence confidence.
+- Supports multiple off-axis protocols and sorts traces by angular offset for
+  deterministic overlay rendering.
+- Deliberately does NOT claim anechoic/free-field response, spinorama, sound
+  power, beamwidth or polar accuracy. The curves are installed-room relative
+  comparisons using user-entered geometry.
+- Measurement-only: no correction design, deployment authority or DSP mutation.
+
 ## Planned follow-on slices
 
-1. Live lab transport/controller for the currently safe acquisition modes.
-2. Repeat-qualified response overlays and on-axis/off-axis directivity analysis.
-3. Near-field subwoofer/port diagnostics and merge-safe low-frequency analysis.
-4. Quasi-anechoic gated response tools with explicit reflection-window limits.
-5. Distortion/nonlinearity diagnostics from bounded excitation where the current
+1. Near-field subwoofer/port diagnostics and merge-safe low-frequency analysis.
+2. Quasi-anechoic gated response tools with explicit reflection-window limits.
+3. Distortion/nonlinearity diagnostics from bounded excitation where the current
    capture chain can support defensible metrics.
-6. Crossover-preserving protected-driver excitation path.
-7. Authenticated shared-clock reference capture for coherent relative timing and
+4. Crossover-preserving protected-driver excitation path.
+5. Authenticated shared-clock reference capture for coherent relative timing and
    phase diagnostics.
-8. Production Advanced Speaker Measurement Lab UI and export/reporting.
+6. Production Advanced Speaker Measurement Lab UI and export/reporting.
