@@ -78,10 +78,11 @@ struct SpeakerMeasurementLabCompactReport:
     var captureSummaries: [SpeakerMeasurementLabCaptureSummary]
     var analysisSummaries: [SpeakerMeasurementLabAnalysisSummary]
     var warnings: [String]
-
-    var measurementOnly: Bool { true }
-    var canDeploy: Bool { false }
-    var containsRawImpulseData: Bool { false }
+    /// Persisted safety/interpretation flags so exported JSON carries these
+    /// boundaries instead of relying on in-process computed properties.
+    var measurementOnly: Bool = true
+    var canDeploy: Bool = false
+    var containsRawImpulseData: Bool = false
 }
 
 enum SpeakerMeasurementLabReportError:
