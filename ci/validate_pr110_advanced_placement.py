@@ -211,6 +211,79 @@ for token in (
     assert token in test, f"PR110 measurement confidence regression missing {token}"
 assert "AdvancedPlacementDirectivityTests" in workflow
 
+# Slice 4: before/after physical Sub movement is a *measured* multi-seat
+# A/B review. A geometry hypothesis alone has no sub-bass prediction.
+measurement = (ROOT / "NotchSixty/Audio/SpeakerOptimizerMeasurementEvidence.swift").read_text(encoding="utf-8")
+for token in (
+    "struct RoomAdvancedSubPlacementComparisonAnalyzer: Sendable",
+    "RoomAdvancedSubPlacementComparison",
+    "physicalSetupConfirmed: Bool",
+    "case missingPhysicalAttestation",
+    "experiment.move == .subwoofer",
+    "baseline.role == .baseline, candidate.role == .candidate",
+    "baseline.positions.map(\\.id) == candidate.positions.map(\\.id)",
+    "baseline.microphone == candidate.microphone",
+    "baseline.routingSignature == candidate.routingSignature",
+    "baseline.plannedSources == candidate.plannedSources",
+    "SpeakerOptimizerMeasurementEvidenceEvaluator()",
+    "baselineReport.optimizerReady, candidateReport.optimizerReady",
+    "newestBaseline < oldestCandidate",
+    "isDisjoint(with: Set(candidate.captures.map(\\.id)))",
+    "minimumFrequencyHz = 35.0",
+    "maximumFrequencyHz = 160.0",
+    "minimumSeats = 2",
+    "maximumSeats = 8",
+    "selected.count >= Self.minimumFrequencyPoints",
+    "var measurementOnly: Bool { true }",
+    "var canDeploy: Bool { false }",
+    "var requiresRealWorldListeningVerification: Bool { true }",
+):
+    assert token in source, f"PR110 physical Sub A/B guard missing {token}"
+
+assert "func listRecentSets(limit: Int = 32)" in measurement
+assert "try set.validatePersistenceStructure()" in measurement
+for token in (
+    "func refreshPhysicalSubMeasurementSets()",
+    "func comparePhysicalSubPlacement(",
+    "identicalSeatsAndUnchangedSignalChainConfirmed: Bool",
+    "room == savedGeometry",
+    "settings == savedAdvancedPlacement",
+    "trial.move == .subwoofer",
+    "RoomAdvancedSubPlacementComparisonAnalyzer()",
+    "SpeakerOptimizerMeasurementSetStore()",
+    ".listRecentSets(limit: 64)",
+    "func clearPhysicalSubComparison()",
+):
+    assert token in controller, f"PR110 subwoofer A/B controller missing {token}"
+
+for token in (
+    "Multi-Seat Subwoofer A/B",
+    "Find Stored Subwoofer Sweeps",
+    "Compare Measured Sub Positions",
+    "confirmsFixedSubABSeatsAndChain",
+    "advisor.comparePhysicalSubPlacement(",
+    "advisor.physicalSubComparison",
+    "advisor.clearPhysicalSubComparison()",
+    "baselineInterseatSpreadRMSDB",
+    "candidateInterseatSpreadRMSDB",
+):
+    assert token in ui, f"PR110 measured LF UI missing {token}"
+
+for token in (
+    "final class AdvancedSubPlacementABTests",
+    "testMeasuredSubMoveComparesActualThreeSeatLFVariation",
+    "testMovingSubCanWorsenMeasuredSeatConsistency",
+    "testCommonGainShiftDoesNotFabricateSeatImprovement",
+    "testMissingHumanAttestationFailsClosed",
+    "testWrongMicrophoneRouteOrSeatIdentityFailsClosed",
+    "testIncompleteRepeatsAndClippingFailClosed",
+    "testCandidateMustBeCapturedAfterIndependentBaseline",
+    "testUnqualifiedSourceOrNoRealSubMoveRejected",
+    "testResponseGridMismatchOrMissingBassCoverageRejected",
+):
+    assert token in test, f"PR110 Sub physical comparison tests missing {token}"
+assert "AdvancedSubPlacementABTests" in workflow
+
 assert "Read-only hypotheses" in document
 assert "REMOTE SCOPE ONLY" in document
 assert "Current execution status — PR110" in roadmap
