@@ -38,6 +38,49 @@ typedef struct {
     uint64_t runtimeHistoryBytes;
 } N60ProgramFIRProgramInfo;
 
+static inline bool N60ProgramFIRProgramInfoIsValid(
+    N60ProgramFIRProgramInfo info
+) {
+    const uint32_t validMask =
+        N60ProgramFIRValidChannelMask(info.channelCount);
+    if (!info.prepared
+        || validMask == 0u
+        || info.activeChannelMask == 0u
+        || (info.activeChannelMask & ~validMask) != 0u
+        || info.activeChannelCount
+            != N60ProgramFIRPopCount(info.activeChannelMask)
+        || info.activeChannelCount > info.channelCount
+        || info.tapCount == 0u
+        || info.tapCount > N60_CONVOLUTION_MAX_TAPS
+        || info.partitionCount == 0u
+        || info.partitionCount
+            > N60_CONVOLUTION_MAX_PARTITIONS
+        || info.partitionCount
+            != (info.tapCount
+                + N60_CONVOLUTION_PARTITION_FRAMES - 1u)
+                / N60_CONVOLUTION_PARTITION_FRAMES
+        || info.engineLatencyFrames
+            != N60_CONVOLUTION_PARTITION_FRAMES
+        || info.declaredLatencyFrames >= info.tapCount) {
+        return false;
+    }
+    return true;
+}
+
+static inline bool N60ProgramFIRProgramInfoEqual(
+    N60ProgramFIRProgramInfo lhs,
+    N60ProgramFIRProgramInfo rhs
+) {
+    return lhs.prepared == rhs.prepared
+        && lhs.channelCount == rhs.channelCount
+        && lhs.activeChannelMask == rhs.activeChannelMask
+        && lhs.activeChannelCount == rhs.activeChannelCount
+        && lhs.tapCount == rhs.tapCount
+        && lhs.partitionCount == rhs.partitionCount
+        && lhs.engineLatencyFrames == rhs.engineLatencyFrames
+        && lhs.declaredLatencyFrames == rhs.declaredLatencyFrames;
+}
+
 struct N60ProgramFIRProgram {
     uint32_t channelCount;
     uint32_t activeChannelMask;
