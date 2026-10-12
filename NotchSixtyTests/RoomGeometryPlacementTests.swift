@@ -1388,3 +1388,271 @@ final class AdvancedSubPlacementABTests: XCTestCase {
         XCTAssertThrowsError(try measure(prior, after))
     }
 }
+
+
+// PR110 Slice 5: append-only physical placement review, never DSP authority.
+final class AdvancedPlacementReviewHistoryTests: XCTestCase {
+    private func fixture() throws -> (
+        RoomCorrectionProjectStore, RoomCorrectionProject,
+        RoomAdvancedPlacementState, RoomAdvancedPlacementExperiment, URL
+    ) {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("PR110-PlacementHistory-\(UUID())")
+        let store = RoomCorrectionProjectStore(rootDirectory: root)
+        let project = RoomCorrectionProject(
+            id: UUID(), playbackSystemID: UUID(), name: "Review History"
+        )
+        try store.save(project)
+        let room = RoomGeometryModel.template(projectID: project.id)
+        let state = RoomAdvancedPlacementState(
+            room: room,
+            secondarySeats: [
+                RoomGeometryPoint3D(x: 1.5, y: 3.4, z: 1.1)
+            ],
+            subwooferPositions: [
+                RoomGeometryPoint3D(x: 0.5, y: 0.5, z: 0.2)
+            ]
+        )
+        let trial = try XCTUnwrap(
+            RoomAdvancedPlacementExplorer().experiments(for: state)
+                .first { $0.id == "sub-0-right" }
+        )
+        return (store, project, state, trial, root)
+    }
+
+    private func unverified(
+        _ project: RoomCorrectionProject,
+        _ state: RoomAdvancedPlacementState,
+        _ trial: RoomAdvancedPlacementExperiment
+    ) throws -> RoomAdvancedPlacementReviewRecord {
+        try RoomAdvancedPlacementReviewFactory().make(
+            playbackSystemID: project.playbackSystemID,
+            state: state,
+            experiment: trial,
+            comparison: nil
+        )
+    }
+
+    func testReviewHistoryRoundTripsWithoutTouchingOriginalGeometry() throws {
+        let (store, project, state, trial, root) = try fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let geometryStore = RoomGeometryStore(projectStore: store)
+        try geometryStore.save(state.room)
+        let before = try Data(contentsOf:
+            geometryStore.geometryURL(for: project.id))
+        let archive = RoomAdvancedPlacementReviewStore(projectStore: store)
+        let record = try unverified(project, state, trial)
+        XCTAssertEqual(record.outcome, .inconclusive)
+        XCTAssertFalse(record.hardwareAcceptanceComplete)
+        XCTAssertFalse(record.canDeploy)
+        XCTAssertNil(record.measuredSpreadReductionDB)
+        XCTAssertEqual(record.beforeGeometry, state.room)
+        XCTAssertEqual(record.afterGeometry, trial.trial.room)
+        try archive.append(record)
+        XCTAssertEqual(
+            try archive.load(projectID: project.id).records,
+            [record]
+        )
+        XCTAssertEqual(
+            try Data(contentsOf: geometryStore.geometryURL(for: project.id)),
+            before
+        )
+        XCTAssertEqual(try store.load(project.id), project)
+    }
+
+    func testArchiveIsAppendOnlyAndRejectsDuplicateIDs() throws {
+        let (store, project, state, trial, root) = try fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let archive = RoomAdvancedPlacementReviewStore(projectStore: store)
+        let first = try unverified(project, state, trial)
+        try archive.append(first)
+        XCTAssertThrowsError(try archive.append(first)) {
+            XCTAssertEqual(
+                $0 as? RoomAdvancedPlacementReviewError, .duplicateRecord
+            )
+        }
+        let second = try unverified(project, state, trial)
+        try archive.append(second)
+        XCTAssertEqual(
+            try archive.load(projectID: project.id).records.map(\.id),
+            [first.id, second.id]
+        )
+    }
+
+    func testCorruptionFailsClosedWithoutOverwritingHistory() throws {
+        let (store, project, state, trial, root) = try fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let archive = RoomAdvancedPlacementReviewStore(projectStore: store)
+        let path = archive.historyURL(for: project.id)
+        try FileManager.default.createDirectory(
+            at: path.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let broken = Data("{broken".utf8)
+        try broken.write(to: path)
+        XCTAssertThrowsError(try archive.load(projectID: project.id)) {
+            XCTAssertEqual(
+                $0 as? RoomAdvancedPlacementReviewError, .corruptedHistory
+            )
+        }
+        XCTAssertThrowsError(
+            try archive.append(unverified(project, state, trial))
+        )
+        XCTAssertEqual(try Data(contentsOf: path), broken)
+    }
+
+    func testCrossProjectHistoryNeverLeaks() throws {
+        let (store, project, state, trial, root) = try fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let archive = RoomAdvancedPlacementReviewStore(projectStore: store)
+        try archive.append(unverified(project, state, trial))
+        let otherProject = UUID()
+        XCTAssertTrue(
+            try archive.load(projectID: otherProject).records.isEmpty
+        )
+    }
+
+    func testTamperingCannotDeclareHardwareAcceptanceOrForgeGeometry() throws {
+        let (_, project, state, trial, root) = try fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        var record = try unverified(project, state, trial)
+        record.hardwareAcceptanceComplete = true
+        XCTAssertThrowsError(try record.validated(for: project.id))
+        record.hardwareAcceptanceComplete = false
+        record.afterGeometry.rightSpeaker.x += 0.5
+        XCTAssertThrowsError(try record.validated(for: project.id))
+        record = try unverified(project, state, trial)
+        record.outcome = .improved
+        record.measuredSpreadReductionDB = 5
+        XCTAssertThrowsError(try record.validated(for: project.id))
+    }
+
+    func testMeasuredOutcomesConveyRelativeLFSpreadOnly() throws {
+        let (_, project, state, trial, root) = try fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let beforeID = UUID()
+        let afterID = UUID()
+        let comparison = RoomAdvancedSubPlacementComparison(
+            experimentID: trial.id,
+            source: .subwoofer(0),
+            baselineMeasurementSetID: beforeID,
+            candidateMeasurementSetID: afterID,
+            seatCount: 3,
+            commonFrequencyPointCount: 27,
+            commonLowHz: 35,
+            commonHighHz: 160,
+            baselineInterseatSpreadRMSDB: 5,
+            candidateInterseatSpreadRMSDB: 2,
+            reductionInInterseatSpreadDB: 3,
+            evidenceConfidence: 0.9
+        )
+        let factory = RoomAdvancedPlacementReviewFactory()
+        let improved = try factory.make(
+            playbackSystemID: project.playbackSystemID,
+            state: state, experiment: trial, comparison: comparison
+        )
+        XCTAssertEqual(improved.outcome, .improved)
+        XCTAssertEqual(improved.baselineMeasurementSetID, beforeID)
+        XCTAssertEqual(improved.candidateMeasurementSetID, afterID)
+        XCTAssertEqual(improved.measuredSeatCount, 3)
+        XCTAssertFalse(improved.hardwareAcceptanceComplete)
+        var worse = comparison
+        worse.reductionInInterseatSpreadDB = -3
+        worse.baselineInterseatSpreadRMSDB = 2
+        worse.candidateInterseatSpreadRMSDB = 5
+        XCTAssertEqual(
+            try factory.make(
+                playbackSystemID: project.playbackSystemID,
+                state: state, experiment: trial, comparison: worse
+            ).outcome,
+            .regressed
+        )
+        var small = comparison
+        small.reductionInInterseatSpreadDB = 0.1
+        small.candidateInterseatSpreadRMSDB = 4.9
+        let uncertain = try factory.make(
+            playbackSystemID: project.playbackSystemID,
+            state: state, experiment: trial, comparison: small
+        )
+        XCTAssertEqual(uncertain.outcome, .inconclusive)
+        XCTAssertNil(uncertain.measuredSpreadReductionDB)
+    }
+
+    func testInconclusiveReviewPreservesAttemptedCaptureReferences() throws {
+        let (_, project, state, trial, root) = try fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let baseline = UUID()
+        let candidate = UUID()
+        let record = try RoomAdvancedPlacementReviewFactory().make(
+            playbackSystemID: project.playbackSystemID,
+            state: state,
+            experiment: trial,
+            comparison: nil,
+            attemptedBaselineID: baseline,
+            attemptedCandidateID: candidate,
+            inconclusiveReason: "Insufficient repeat-qualified seat captures"
+        )
+        XCTAssertEqual(record.outcome, .inconclusive)
+        XCTAssertEqual(record.baselineMeasurementSetID, baseline)
+        XCTAssertEqual(record.candidateMeasurementSetID, candidate)
+        XCTAssertNil(record.measuredSpreadReductionDB)
+    }
+
+    @MainActor
+    func testControllerRequiresPhysicalConfirmationAndPreservesProjectHistory()
+        throws {
+        let (store, project, state, _, root) = try fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let controller = RoomTreatmentAdvisorController(store: store)
+        controller.prepareForUse()
+        controller.startGeometryTemplate()
+        controller.saveGeometry()
+        controller.addAdvancedSeat()
+        controller.addAdvancedSubwoofer()
+        controller.saveAdvancedPlacement()
+        let trial = try XCTUnwrap(controller.advancedPlacementExperiments
+            .first { $0.id == "sub-0-right" })
+        controller.previewAdvancedExperiment(trial)
+        let before = controller.savedGeometry
+        controller.recordPlacementReview(
+            physicalMoveConfirmed: false,
+            fixedMicrophoneSeatsAndSignalChainConfirmed: false
+        )
+        XCTAssertTrue(controller.placementReviewHistory.isEmpty)
+        controller.recordPlacementReview(
+            physicalMoveConfirmed: true,
+            fixedMicrophoneSeatsAndSignalChainConfirmed: false
+        )
+        XCTAssertEqual(controller.placementReviewHistory.count, 1)
+        XCTAssertEqual(controller.placementReviewHistory[0].outcome,
+                       .inconclusive)
+        XCTAssertEqual(controller.savedGeometry, before)
+        XCTAssertEqual(controller.geometryDraft, before)
+
+        let reloaded = RoomTreatmentAdvisorController(store: store)
+        reloaded.prepareForUse()
+        XCTAssertEqual(reloaded.placementReviewHistory,
+                       controller.placementReviewHistory)
+        XCTAssertEqual(reloaded.selectedProjectID, project.id)
+        XCTAssertEqual(reloaded.savedGeometry, state.room)
+    }
+
+    @MainActor
+    func testUncommittedRoomCannotRecordPlacementReview() throws {
+        let (store, _, _, _, root) = try fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let controller = RoomTreatmentAdvisorController(store: store)
+        controller.prepareForUse()
+        controller.startGeometryTemplate()
+        let trial = try XCTUnwrap(
+            controller.advancedPlacementExperiments.first
+        )
+        controller.previewAdvancedExperiment(trial)
+        controller.recordPlacementReview(
+            physicalMoveConfirmed: true,
+            fixedMicrophoneSeatsAndSignalChainConfirmed: true
+        )
+        XCTAssertTrue(controller.placementReviewHistory.isEmpty)
+        XCTAssertNotNil(controller.placementReviewMessage)
+    }
+}
