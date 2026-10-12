@@ -59,7 +59,7 @@ final class CoherentMultiSubwooferAlignmentCommissioningTests:
         XCTAssertEqual(
             planner.fingerprintEvidenceGroups(groups),
             planner.fingerprintEvidenceGroups(
-                groups.reversed()
+                Array(groups.reversed())
             )
         )
     }
