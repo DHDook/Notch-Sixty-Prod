@@ -11,6 +11,8 @@ AV_SYNC_TESTS = ROOT / "NotchSixtyTests/SpeakerOptimizerFIRAVSyncTests.swift"
 FIR_VERIFY = ROOT / "NotchSixty/Audio/SpeakerOptimizerFIRPostApplyVerification.swift"
 FIR_VERIFY_TESTS = ROOT / "NotchSixtyTests/SpeakerOptimizerFIRPostApplyVerificationTests.swift"
 GUIDED = ROOT / "NotchSixty/Audio/SpeakerOptimizerGuidedWorkflow.swift"
+FIR_VERIFICATION_CONTROLLER = ROOT / "NotchSixty/Audio/SpeakerOptimizerFIRVerificationController.swift"
+GUIDED_FIR_TESTS = ROOT / "NotchSixtyTests/SpeakerOptimizerGuidedFIRWorkflowTests.swift"
 LANE = ROOT / "NotchSixty/Audio/Realtime/N60ProgramLaneEngine.h"
 CONV = ROOT / "NotchSixty/Audio/Realtime/N60Convolution.h"
 COMMISSIONING = ROOT / "NotchSixty/Audio/SpeakerOptimizerCommissioningContract.swift"
@@ -22,7 +24,7 @@ LIVE_RENDER = ROOT / "NotchSixty/Audio/Realtime/N60LiveNChannelRenderCore.h"
 LIVE_RENDER_HARNESS = ROOT / "ci/validate_pr107_live_fir_render.c"
 WORKFLOW = ROOT / ".github/workflows/pr107-speaker-optimizer-fir.yml"
 
-for path in (SOURCE, TESTS, APPLY, APPLY_TESTS, AV_SYNC, AV_SYNC_TESTS, FIR_VERIFY, FIR_VERIFY_TESTS, GUIDED, LANE, CONV, COMMISSIONING, PROJECT, DOC, PROGRAM_FIR, PROGRAM_FIR_HARNESS, LIVE_RENDER, LIVE_RENDER_HARNESS, WORKFLOW):
+for path in (SOURCE, TESTS, APPLY, APPLY_TESTS, AV_SYNC, AV_SYNC_TESTS, FIR_VERIFY, FIR_VERIFY_TESTS, GUIDED, FIR_VERIFICATION_CONTROLLER, GUIDED_FIR_TESTS, LANE, CONV, COMMISSIONING, PROJECT, DOC, PROGRAM_FIR, PROGRAM_FIR_HARNESS, LIVE_RENDER, LIVE_RENDER_HARNESS, WORKFLOW):
     assert path.is_file(), f"missing PR107 Slice 1 file: {path}"
 
 source = SOURCE.read_text()
@@ -34,6 +36,8 @@ av_sync_tests = AV_SYNC_TESTS.read_text()
 fir_verify = FIR_VERIFY.read_text()
 fir_verify_tests = FIR_VERIFY_TESTS.read_text()
 guided = GUIDED.read_text()
+fir_verification_controller = FIR_VERIFICATION_CONTROLLER.read_text()
+guided_fir_tests = GUIDED_FIR_TESTS.read_text()
 lane = LANE.read_text()
 conv = CONV.read_text()
 commissioning = COMMISSIONING.read_text()
@@ -185,6 +189,32 @@ for token in (
 assert "receipt: SpeakerOptimizerFIRApplyReceipt" in guided
 assert "SpeakerOptimizerFIRVerificationRecord" in source
 assert "finalizeVerified" in apply_source
+
+for token in (
+    "SpeakerOptimizerGuidedFIRController",
+    "avSyncDecision",
+    "approveAndApply",
+    "recordVerification",
+    "avSyncApprovalRequired",
+):
+    assert token in guided, f"missing guided FIR workflow contract: {token}"
+
+for token in (
+    "SpeakerOptimizerFIRVerificationController",
+    "SpeakerOptimizerFIRPostApplyVerifier",
+    "speakerOptimizerFIR == receipt.deployment",
+    "makeLivePlan",
+    "finishMeasurementIfComplete",
+):
+    assert token in fir_verification_controller, f"missing FIR verification capture controller contract: {token}"
+
+for token in (
+    "testAudioOnlyReviewDisclosesLatencyHeadroomAndCanApply",
+    "testVideoWithoutCompensationBlocksUntilContextUpdated",
+    "testMeasuredRejectionAutomaticallyRollsBackFIR",
+    "testExplicitUserApprovalRemainsMandatoryForFIR",
+):
+    assert token in guided_fir_tests, f"missing guided FIR workflow test: {token}"
 
 assert "#define N60_CONVOLUTION_PARTITION_FRAMES 256u" in conv
 assert "blockedDedicatedSpeakerOptimizerFIRStageUnavailable" in commissioning
