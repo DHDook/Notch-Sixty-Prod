@@ -10,6 +10,8 @@ import Foundation
 final class RoomTreatmentAdvisorController: ObservableObject {
     let store: RoomCorrectionProjectStore
     let geometryStore: RoomGeometryStore
+    let advancedPlacementStore: RoomAdvancedPlacementStore
+    private let advancedPlacementExplorer = RoomAdvancedPlacementExplorer()
     let treatmentStore: RoomPassiveTreatmentStore
     private let treatmentDesigner = RoomPassiveTreatmentDesigner()
     private let treatmentVerifier = RoomTreatmentVerifier()
@@ -31,6 +33,11 @@ final class RoomTreatmentAdvisorController: ObservableObject {
         RoomGeometryAnalysis?
     @Published private(set) var geometryValidationMessage:
         String?
+    @Published private(set) var advancedPlacementDraft: RoomAdvancedPlacementSettings?
+    @Published private(set) var savedAdvancedPlacement: RoomAdvancedPlacementSettings?
+    @Published private(set) var advancedPlacementExperiments: [RoomAdvancedPlacementExperiment] = []
+    @Published private(set) var selectedAdvancedExperiment: RoomAdvancedPlacementExperiment?
+    @Published private(set) var advancedPlacementMessage: String?
     @Published var treatmentDraft: RoomPassiveTreatmentPlan?
     @Published private(set) var savedTreatmentPlan: RoomPassiveTreatmentPlan?
     @Published private(set) var treatmentAnalysis: RoomPassiveTreatmentDesignSummary?
@@ -43,6 +50,8 @@ final class RoomTreatmentAdvisorController: ObservableObject {
         self.store = store
         self.geometryStore =
             RoomGeometryStore(projectStore: store)
+        self.advancedPlacementStore =
+            RoomAdvancedPlacementStore(projectStore: store)
         self.treatmentStore = RoomPassiveTreatmentStore(projectStore: store)
     }
 
@@ -62,6 +71,10 @@ final class RoomTreatmentAdvisorController: ObservableObject {
 
     var geometryHasUnsavedChanges: Bool {
         geometryDraft != savedGeometry
+    }
+
+    var advancedPlacementHasUnsavedChanges: Bool {
+        advancedPlacementDraft != savedAdvancedPlacement
     }
 
     func prepareForUse() {
@@ -134,6 +147,11 @@ final class RoomTreatmentAdvisorController: ObservableObject {
             savedGeometry = nil
             geometryAnalysis = nil
             geometryValidationMessage = nil
+            advancedPlacementDraft = nil
+            savedAdvancedPlacement = nil
+            advancedPlacementExperiments = []
+            selectedAdvancedExperiment = nil
+            advancedPlacementMessage = nil
             treatmentDraft = nil
             savedTreatmentPlan = nil
             treatmentAnalysis = nil
@@ -145,6 +163,7 @@ final class RoomTreatmentAdvisorController: ObservableObject {
         selectedProject = project
         report = analyzer.analyze(project: project)
         loadGeometry(for: project.id)
+        loadAdvancedPlacement(for: project.id)
         loadTreatment(for: project.id)
         verificationFollowUpID = nil
         verificationReport = nil
@@ -163,6 +182,8 @@ final class RoomTreatmentAdvisorController: ObservableObject {
             )
         geometryDraft = model
         geometryValidationMessage = nil
+        advancedPlacementDraft = RoomAdvancedPlacementSettings(projectID: projectID)
+        savedAdvancedPlacement = nil
         refreshGeometryPreview()
     }
 
@@ -249,6 +270,7 @@ final class RoomTreatmentAdvisorController: ObservableObject {
             return
         }
         do {
+            try advancedPlacementStore.delete(projectID: projectID)
             try geometryStore.delete(
                 projectID: projectID
             )
@@ -256,6 +278,11 @@ final class RoomTreatmentAdvisorController: ObservableObject {
             savedGeometry = nil
             geometryAnalysis = nil
             geometryValidationMessage = nil
+            advancedPlacementDraft = nil
+            savedAdvancedPlacement = nil
+            advancedPlacementExperiments = []
+            selectedAdvancedExperiment = nil
+            advancedPlacementMessage = nil
             treatmentAnalysis = nil
             treatmentMessage = "Geometry was cleared. Save room geometry before editing physical treatment."
         } catch {
@@ -283,6 +310,164 @@ final class RoomTreatmentAdvisorController: ObservableObject {
         }
     }
 
+
+    // MARK: - PR110 project-only advanced placement planning
+
+    private func loadAdvancedPlacement(for projectID: UUID) {
+        advancedPlacementExperiments = []
+        selectedAdvancedExperiment = nil
+        guard let room = geometryDraft else {
+            advancedPlacementDraft = nil
+            savedAdvancedPlacement = nil
+            advancedPlacementMessage = nil
+            return
+        }
+        do {
+            let loaded = try advancedPlacementStore.load(
+                projectID: projectID, room: room
+            )
+            advancedPlacementDraft = loaded ??
+                RoomAdvancedPlacementSettings(projectID: projectID)
+            savedAdvancedPlacement = loaded
+            advancedPlacementMessage = nil
+        } catch {
+            advancedPlacementDraft =
+                RoomAdvancedPlacementSettings(projectID: projectID)
+            savedAdvancedPlacement = nil
+            advancedPlacementMessage = error.localizedDescription
+        }
+        refreshAdvancedPlacementPreview()
+    }
+
+    private func changeAdvancedPlacement(
+        _ changed: RoomAdvancedPlacementSettings
+    ) {
+        guard let room = geometryDraft else { return }
+        do {
+            _ = try changed.state(for: room)
+            advancedPlacementDraft = changed
+            advancedPlacementMessage = nil
+            refreshAdvancedPlacementPreview()
+        } catch {
+            advancedPlacementMessage = error.localizedDescription
+        }
+    }
+
+    func setAdvancedToeIn(
+        _ side: RoomGeometrySpeaker, degrees: Double
+    ) {
+        guard var next = advancedPlacementDraft else { return }
+        if side == .left {
+            next.leftToeInDegrees = degrees
+        } else {
+            next.rightToeInDegrees = degrees
+        }
+        changeAdvancedPlacement(next)
+    }
+
+    func addAdvancedSeat() {
+        guard var next = advancedPlacementDraft,
+              let room = geometryDraft,
+              next.secondarySeats.count < 7 else { return }
+        next.secondarySeats.append(room.listener)
+        changeAdvancedPlacement(next)
+    }
+
+    func addAdvancedSubwoofer() {
+        guard var next = advancedPlacementDraft,
+              let room = geometryDraft,
+              next.subwooferPositions.count < 4 else { return }
+        next.subwooferPositions.append(
+            RoomGeometryPoint3D(
+                x: room.leftSpeaker.x,
+                y: room.leftSpeaker.y,
+                z: 0.2
+            )
+        )
+        changeAdvancedPlacement(next)
+    }
+
+    func removeAdvancedPosition(isSubwoofer: Bool, index: Int) {
+        guard var next = advancedPlacementDraft else { return }
+        if isSubwoofer {
+            guard next.subwooferPositions.indices.contains(index) else { return }
+            next.subwooferPositions.remove(at: index)
+        } else {
+            guard next.secondarySeats.indices.contains(index) else { return }
+            next.secondarySeats.remove(at: index)
+        }
+        changeAdvancedPlacement(next)
+    }
+
+    func setAdvancedPositionCoordinate(
+        isSubwoofer: Bool, index: Int,
+        keyPath: WritableKeyPath<RoomGeometryPoint3D, Double>,
+        value: Double
+    ) {
+        guard var next = advancedPlacementDraft else { return }
+        if isSubwoofer {
+            guard next.subwooferPositions.indices.contains(index) else { return }
+            next.subwooferPositions[index][keyPath: keyPath] = value
+        } else {
+            guard next.secondarySeats.indices.contains(index) else { return }
+            next.secondarySeats[index][keyPath: keyPath] = value
+        }
+        changeAdvancedPlacement(next)
+    }
+
+    func previewAdvancedExperiment(
+        _ proposal: RoomAdvancedPlacementExperiment
+    ) {
+        guard advancedPlacementExperiments.contains(proposal) else {
+            advancedPlacementMessage =
+                "This placement trial is stale. Regenerate from current geometry."
+            return
+        }
+        // Intentionally never mutates saved OR draft geometry, settings, DSP
+        // or calibration. Only displays what the person could physically move.
+        selectedAdvancedExperiment = proposal
+    }
+
+    func saveAdvancedPlacement() {
+        guard let room = geometryDraft,
+              room == savedGeometry,
+              let settings = advancedPlacementDraft,
+              settings.projectID == selectedProjectID else {
+            advancedPlacementMessage =
+                "Save the actual room geometry before saving advanced placement."
+            return
+        }
+        do {
+            try advancedPlacementStore.save(settings, room: room)
+            savedAdvancedPlacement = settings
+            advancedPlacementMessage = nil
+        } catch {
+            advancedPlacementMessage = error.localizedDescription
+        }
+    }
+
+    func revertAdvancedPlacement() {
+        guard let projectID = selectedProjectID else { return }
+        advancedPlacementDraft = savedAdvancedPlacement ??
+            RoomAdvancedPlacementSettings(projectID: projectID)
+        advancedPlacementMessage = nil
+        refreshAdvancedPlacementPreview()
+    }
+
+    private func refreshAdvancedPlacementPreview() {
+        advancedPlacementExperiments = []
+        selectedAdvancedExperiment = nil
+        guard let room = geometryDraft,
+              let settings = advancedPlacementDraft else { return }
+        do {
+            advancedPlacementExperiments = try advancedPlacementExplorer
+                .experiments(for: settings.state(for: room))
+            advancedPlacementMessage = nil
+        } catch {
+            advancedPlacementMessage = error.localizedDescription
+        }
+    }
+
     private func refreshGeometryPreview() {
         guard let model = geometryDraft else {
             geometryAnalysis = nil
@@ -301,6 +486,7 @@ final class RoomTreatmentAdvisorController: ObservableObject {
             geometryValidationMessage =
                 error.localizedDescription
         }
+        refreshAdvancedPlacementPreview()
         refreshTreatmentAnalysis()
     }
 
