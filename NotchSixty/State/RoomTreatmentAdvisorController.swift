@@ -38,6 +38,8 @@ final class RoomTreatmentAdvisorController: ObservableObject {
     @Published private(set) var advancedPlacementExperiments: [RoomAdvancedPlacementExperiment] = []
     @Published private(set) var selectedAdvancedExperiment: RoomAdvancedPlacementExperiment?
     @Published private(set) var advancedPlacementMessage: String?
+    @Published private(set) var toeInMeasurementEvidence: [RoomAdvancedToeInEvidence] = []
+    @Published private(set) var toeInEvidenceMessage: String?
     @Published var treatmentDraft: RoomPassiveTreatmentPlan?
     @Published private(set) var savedTreatmentPlan: RoomPassiveTreatmentPlan?
     @Published private(set) var treatmentAnalysis: RoomPassiveTreatmentDesignSummary?
@@ -152,6 +154,8 @@ final class RoomTreatmentAdvisorController: ObservableObject {
             advancedPlacementExperiments = []
             selectedAdvancedExperiment = nil
             advancedPlacementMessage = nil
+            toeInMeasurementEvidence = []
+            toeInEvidenceMessage = nil
             treatmentDraft = nil
             savedTreatmentPlan = nil
             treatmentAnalysis = nil
@@ -454,7 +458,77 @@ final class RoomTreatmentAdvisorController: ObservableObject {
         refreshAdvancedPlacementPreview()
     }
 
+    /// Explicit read-only lab linkage. A single latest matching Lab session
+    /// must qualify, and the user must confirm geometry/hardware have not
+    /// moved since its measurement. No cross-session inference.
+    func inspectRecentDirectivity(
+        physicalGeometryMatchesCapture: Bool
+    ) {
+        toeInMeasurementEvidence = []
+        guard physicalGeometryMatchesCapture,
+              let project = selectedProject,
+              let room = geometryDraft,
+              room == savedGeometry,
+              let settings = advancedPlacementDraft,
+              settings == savedAdvancedPlacement else {
+            toeInEvidenceMessage =
+                "Save and confirm unchanged physical room/speaker geometry since the Lab capture before comparing toe-in."
+            return
+        }
+        do {
+            let state = try settings.state(for: room)
+            let sessions = try SpeakerMeasurementLabSessionStore()
+                .listRecentSessions(limit: 24)
+                .filter { $0.playbackSystemID == project.playbackSystemID }
+            let analyzer = RoomAdvancedToeInEvidenceAnalyzer()
+            for session in sessions {
+                var matched: [RoomAdvancedToeInEvidence] = []
+                for speaker in RoomGeometrySpeaker.allCases {
+                    let source: MultichannelCalibrationSource = .speaker(
+                        speaker == .left ? .frontLeft : .frontRight
+                    )
+                    for protocolItem in session.protocols where
+                        protocolItem.request.mode == .wholeSpeakerOnAxis
+                        && protocolItem.acousticSource == source {
+                        if let trials = try? analyzer.evaluate(
+                            state: state,
+                            playbackSystemID: project.playbackSystemID,
+                            session: session,
+                            onAxisProtocolID: protocolItem.id,
+                            speaker: speaker
+                        ) {
+                            matched.append(contentsOf: trials)
+                            break
+                        }
+                    }
+                }
+                if !matched.isEmpty {
+                    toeInMeasurementEvidence = matched.sorted {
+                        if $0.status != $1.status {
+                            return $0.status == .measuredComparison
+                        }
+                        if let lhs = $0.indicatedSpectralChangeDB,
+                           let rhs = $1.indicatedSpectralChangeDB,
+                           lhs != rhs { return lhs > rhs }
+                        return $0.experimentID < $1.experimentID
+                    }
+                    toeInEvidenceMessage = matched.contains {
+                        $0.status == .measuredComparison
+                    } ? "Repeat-qualified Lab directivity evidence; ranking concerns on-axis spectral similarity only, NOT verified room response." :
+                        "Lab data found, but neither toe-in trial has angular coverage for a supported comparison."
+                    return
+                }
+            }
+            toeInEvidenceMessage =
+                "No recent whole-speaker on/off-axis Lab session passed source, microphone, radius, routing and repeat-quality gates for this Playback System."
+        } catch {
+            toeInEvidenceMessage = error.localizedDescription
+        }
+    }
+
     private func refreshAdvancedPlacementPreview() {
+        toeInMeasurementEvidence = []
+        toeInEvidenceMessage = nil
         advancedPlacementExperiments = []
         selectedAdvancedExperiment = nil
         guard let room = geometryDraft,
