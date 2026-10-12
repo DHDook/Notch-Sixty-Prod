@@ -32,6 +32,7 @@ final class ProductionInformationArchitectureTests: XCTestCase {
                 .speakers,
                 .headphones,
                 .speakerCalibration,
+                .measurementLab,
                 .roomCorrection,
                 .activeAcoustics,
             ]
@@ -55,6 +56,10 @@ final class ProductionInformationArchitectureTests: XCTestCase {
     func testRenamedAndNewTitlesMatchProductLanguage() {
         XCTAssertEqual(ProductionSection.dashboard.title, "Dashboard")
         XCTAssertEqual(ProductionSection.speakers.title, "Speakers")
+        XCTAssertEqual(
+            ProductionSection.measurementLab.title,
+            "Measurement Lab"
+        )
         XCTAssertEqual(
             ProductionSection.activeAcoustics.title,
             "Active Acoustics"
