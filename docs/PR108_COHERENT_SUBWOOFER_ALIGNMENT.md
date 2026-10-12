@@ -199,10 +199,8 @@ cannot satisfy this gate.
 
 1. Persistent provisional/verified PR108 provenance record and verification
    finalization.
-2. Multi-sub coordination — avoid independent per-Sub choices that conflict
-   with the existing multi-sub relationship.
-3. Guided production workflow/UI — repeat authenticated Main/Sub measurement
-   after Apply and verify summation/timing improvement.
+2. Multi-sub coordination — solve all physical Sub relative delays together
+   without accumulating incompatible common speaker delay.
 3. Guided production workflow/UI — capture, review, Apply, verify, rollback.
 4. Physical commissioning handoff — real DAC/ADC/subwoofer timing, crossover
    summation, restart/rollback and subjective bass integration.
