@@ -1,6 +1,6 @@
 # PR106 — Advanced Speaker Measurement Lab
 
-Status: **SLICES 1–9B SOFTWARE VERIFIED — SLICE 10A CI PENDING**
+Status: **SLICES 1–10A SOFTWARE VERIFIED — SLICE 10B CI PENDING**
 
 Base: PR105 Guided Speaker Optimizer & Acoustic Verification.
 
@@ -419,8 +419,42 @@ Lab tests and full XCTest regression.
   installed-room/quasi-anechoic/near-field/protected-path/coherent-provenance
   interpretation warnings forward into the export.
 
+## Slice 10A exact-head verification
+
+Slice 10A exact head `e2ee6b37f6ab2040c09c6b6949fa8acef61fc1bc` passed
+push run 38230981218, including the PR106/PR105 validators, Apple Silicon Debug
+build, targeted Lab tests and full XCTest regression. The matching PR workflow
+was still completing when Slice 10B development started; the Slice 10B exact
+head supersedes it as the next software gate.
+
+## Slice 10B — Production Advanced Speaker Measurement Lab UI
+
+- Adds a dedicated SYSTEM → Measurement Lab production workspace rather than
+  mixing advanced diagnostics into ordinary Speaker Calibration.
+- Adds a testable protocol-composer model for whole-speaker on-axis/off-axis,
+  subwoofer near-field, protected-driver near-field and linked coherent
+  mains/sub protocols.
+- Geometry, repeat count, source/driver target and explicit excitation are
+  validated by the same PR106 acquisition contracts before a protocol may enter
+  a session.
+- Protected-driver protocols always require a bounded explicit level and remain
+  tied to the crossover/limiter-preserving Slice 8B acquisition path.
+- Coherent Main/Sub composition creates both linked legs together and the UI
+  requires simultaneous shared-time reference configuration before session
+  start.
+- The workspace exposes current Playback System/output/microphone identity,
+  queued protocols, guided next-repeat instructions, progress, cancel/retry and
+  guarded block reasons.
+- Recent persisted Lab sessions may be resumed only through the controller's
+  existing environment-identity validation.
+- Compact directivity, near-field LF, quasi-anechoic, level-dependence and
+  coherent-timing analysis summaries are visible after capture.
+- JSON and CSV export use Slice 10A's compact export contract; raw impulses and
+  full transfer grids remain only in the detailed persisted Lab session.
+- The entire workspace is explicitly measurement-only and exposes no Apply,
+  crossover, limiter, delay, polarity or correction controls.
+
 ## Planned follow-on slices
 
-1. Production Advanced Speaker Measurement Lab UI using the tested report/export
-   contract.
+1. Remote-software closeout and UI regression verification.
 2. Physical Lab commissioning and acceptance on representative hardware.

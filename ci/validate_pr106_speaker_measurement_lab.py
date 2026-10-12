@@ -20,6 +20,10 @@ COHERENT_SOURCE = ROOT / "NotchSixty/Audio/SpeakerMeasurementLabCoherentTiming.s
 COHERENT_TESTS = ROOT / "NotchSixtyTests/SpeakerMeasurementLabCoherentTimingTests.swift"
 REPORT_SOURCE = ROOT / "NotchSixty/Audio/SpeakerMeasurementLabReport.swift"
 REPORT_TESTS = ROOT / "NotchSixtyTests/SpeakerMeasurementLabReportTests.swift"
+UI_MODEL = ROOT / "NotchSixty/Audio/SpeakerMeasurementLabUIModel.swift"
+UI_MODEL_TESTS = ROOT / "NotchSixtyTests/SpeakerMeasurementLabUIModelTests.swift"
+LAB_UI = ROOT / "NotchSixty/UI/ProductionSpeakerMeasurementLabWorkspace.swift"
+ROOT_UI = ROOT / "NotchSixty/UI/ProductionRootView.swift"
 BRIDGE_HEADER = ROOT / "NotchSixty/Audio/Realtime/N60RealtimeAudioBridge.h"
 BRIDGE_SOURCE = ROOT / "NotchSixty/Audio/Realtime/N60RealtimeAudioBridge.c"
 CONTROLLER_SOURCE = ROOT / "NotchSixty/Audio/SpeakerMeasurementLabController.swift"
@@ -48,6 +52,10 @@ coherent_source = COHERENT_SOURCE.read_text()
 coherent_tests = COHERENT_TESTS.read_text()
 report_source = REPORT_SOURCE.read_text()
 report_tests = REPORT_TESTS.read_text()
+ui_model = UI_MODEL.read_text()
+ui_model_tests = UI_MODEL_TESTS.read_text()
+lab_ui = LAB_UI.read_text()
+root_ui = ROOT_UI.read_text()
 bridge_header = BRIDGE_HEADER.read_text()
 bridge_source = BRIDGE_SOURCE.read_text()
 controller_source = CONTROLLER_SOURCE.read_text()
@@ -316,6 +324,42 @@ for token in (
     assert token in report_tests, f"missing PR106 report/export test: {token}"
 
 for token in (
+    "struct SpeakerMeasurementLabProtocolDraft",
+    "func makeProtocols(",
+    "case .protectedDriverNearField",
+    "case .coherentMainsSubTiming",
+    "coherentPairID: pairID",
+    "coherentLeg: .main",
+    "coherentLeg: .subwoofer",
+):
+    assert token in ui_model, f"missing production Lab composer contract: {token}"
+
+for token in (
+    "testOnAxisDraftBuildsValidWholeSpeakerProtocol",
+    "testSubNearFieldDraftCarriesComponentMetadata",
+    "testProtectedDriverDraftAlwaysUsesBoundedExplicitLevel",
+    "testCoherentDraftCreatesLinkedMainAndSubLegs",
+    "testInvalidGeometryAndRepeatCountFailBeforeSessionStart",
+):
+    assert token in ui_model_tests, f"missing production Lab composer test: {token}"
+
+for token in (
+    "struct ProductionSpeakerMeasurementLabWorkspace",
+    "Advanced Speaker Measurement Lab",
+    "MEASUREMENT ONLY",
+    "Start New Lab Session",
+    "Measure Next Repeat",
+    "Export JSON",
+    "Export CSV",
+    "Recent Lab Sessions",
+    "SpeakerMeasurementLabReportBuilder",
+):
+    assert token in lab_ui, f"missing production Lab UI contract: {token}"
+
+assert "case measurementLab" in root_ui
+assert "ProductionSpeakerMeasurementLabWorkspace(" in root_ui
+
+for token in (
     "F10600000000000000000001",
     "F10600000000000000000002",
     "F10600000000000000000011",
@@ -352,6 +396,12 @@ for token in (
     "F10600000000000000000022",
     "F10600000000000000000031",
     "F10600000000000000000032",
+    "F10600000000000000000023",
+    "F10600000000000000000024",
+    "F10600000000000000000025",
+    "F10600000000000000000033",
+    "F10600000000000000000034",
+    "F10600000000000000000035",
 ):
     assert project.count(token) >= 2, f"missing PR106 Xcode registration: {token}"
 
@@ -372,15 +422,17 @@ assert "SpeakerMeasurementLabLevelDependenceTests" in workflow
 assert "SpeakerMeasurementLabProtectedExcitationTests" in workflow
 assert "SpeakerMeasurementLabCoherentTimingTests" in workflow
 assert "SpeakerMeasurementLabReportTests" in workflow
+assert "SpeakerMeasurementLabUIModelTests" in workflow
 assert "Run full XCTest regression" in workflow
 assert "Slice 2" in doc
 assert "Simultaneous shared-time reference capture substrate" in doc
 assert "Reference-aligned coherent mains/sub diagnostics" in doc
 assert "Compact report and export foundation" in doc
+assert "Production Advanced Speaker Measurement Lab UI" in doc
 assert "Slice 3" in doc
 assert "Repeat-qualified installed-room directivity comparison" in doc
 assert "Repeat-qualified near-field LF component diagnostics" in doc
 assert "Explicit reflection-window quasi-anechoic estimate" in doc
 assert "Bounded two-level transfer level-dependence diagnostic" in doc
 assert "Exact protected-driver excitation compiler substrate" in doc
-print("PR106 lab diagnostics + coherent timing + compact report/export contracts passed")
+print("PR106 advanced Lab diagnostics + protected/coherent acquisition + production UI contracts passed")
