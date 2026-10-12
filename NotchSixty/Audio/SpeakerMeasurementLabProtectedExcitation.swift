@@ -561,3 +561,262 @@ extension SpeakerMeasurementLabProtectedDriverCaptureProvenance {
         return true
     }
 }
+
+
+// MARK: - PR111 Slice 1: protected, recommendation-only per-driver PEQ
+
+/// Reviewable frequency-domain hypothesis. It does NOT create an EQBand,
+/// change a Playback System or authorize any crossover/limiter modification.
+/// Negative dB only, at most three isolated, broad protected-passband cuts.
+struct ProtectedDriverPEQCut: Equatable, Sendable {
+    var frequencyHz: Double
+    var gainDB: Double
+    var q: Double
+    var observedBroadPeakDB: Double
+}
+
+/// All provenance remains tied to one exact Lab protocol and one already
+/// configured protected driver. Future guarded Apply must recheck *current*
+/// routing/crossover/limiter state and independently measure the acoustic sum.
+struct ProtectedDriverPEQRecommendation: Equatable, Sendable {
+    var sessionID: UUID
+    var protocolID: UUID
+    var playbackSystemID: UUID
+    var routingSignature: String
+    var targetBus: SpeakerOutputBus
+    var protectedConfiguration: SpeakerDriverBusProcessingConfiguration
+    var bassManagement: BassManagementConfiguration
+    var sampleRate: Double
+    var repeatedCaptureIDs: [UUID]
+    var passbandLowHz: Double
+    var passbandHighHz: Double
+    var cuts: [ProtectedDriverPEQCut]
+    var evidenceSummary: String
+
+    var measurementOnly: Bool { true }
+    var canDeploy: Bool { false }
+    var canChangeDelayOrPolarity: Bool { false }
+    var canAlterCrossoverOrLimiter: Bool { false }
+    var requiresNewMeasuredVerification: Bool { true }
+}
+
+enum ProtectedDriverPEQRecommendationError:
+    Error, Equatable, LocalizedError {
+    case invalidSession
+    case unsupportedDriverBus
+    case protectedPathRequired
+    case inadequateRepeatedEvidence
+    case incompatibleResponseGrid
+    case noUsableCrossoverPassband
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidSession:
+            return "Protected driver measurements must pass session integrity checks."
+        case .unsupportedDriverBus:
+            return "Per-driver optimization requires one exact Low/Mid/High bus."
+        case .protectedPathRequired:
+            return "The selected capture must retain the exact active crossover, limiter and physical bus provenance."
+        case .inadequateRepeatedEvidence:
+            return "At least three repeat-qualified, unclipped protected-driver captures are required."
+        case .incompatibleResponseGrid:
+            return "The protected driver sweeps need an identical, finite frequency-response grid."
+        case .noUsableCrossoverPassband:
+            return "No reliable frequency range remains away from mandatory crossover boundaries."
+        }
+    }
+}
+
+/// Deliberately makes no attempt to flatten overall slope, fill nulls, align
+/// acoustic centers, recommend polarity, change delay or optimize crossover.
+/// A conservative repeat-stable peak *cut* is safer than applying modeled
+/// boosts to an individual exposed driver without hardware verification.
+struct ProtectedDriverPEQRecommendationAnalyzer: Sendable {
+    static let minimumRepeats = 3
+    static let minimumSNRDB = 35.0
+    static let maximumRepeatSpreadDB = 0.85
+    static let minimumPeakDeviationDB = 2.0
+    static let maximumCutDB = 2.5
+    static let maximumSuggestedBands = 3
+    static let maximumBandQ = 1.4
+
+    func recommend(
+        session: SpeakerMeasurementLabSession,
+        protocolID: UUID
+    ) throws -> ProtectedDriverPEQRecommendation {
+        do { try session.validateStructure() }
+        catch { throw ProtectedDriverPEQRecommendationError.invalidSession }
+
+        guard let protocolItem = session.protocols.first(
+            where: { $0.id == protocolID }
+        ),
+        protocolItem.request.mode == .protectedDriverNearField,
+        let bus = protocolItem.protectedDriverBus else {
+            throw ProtectedDriverPEQRecommendationError.unsupportedDriverBus
+        }
+        guard SpeakerMeasurementLabProtectedDriverRoutePlanner
+            .isProtectedSplitBus(bus) else {
+            throw ProtectedDriverPEQRecommendationError.unsupportedDriverBus
+        }
+
+        let captures = session.captures.filter {
+            $0.protocolID == protocolID
+        }.sorted { $0.repeatIndex < $1.repeatIndex }
+        guard captures.count >= Self.minimumRepeats,
+              captures.count == protocolItem.request.repeatCount,
+              captures.map(\.repeatIndex) == Array(0..<captures.count),
+              let provenance = captures.first?.protectedDriverProvenance,
+              provenance.validatesProtectedPath(for: bus),
+              captures.allSatisfy({
+                  $0.protectedDriverProvenance == provenance
+                      && $0.quality.sweepComplete
+                      && !$0.quality.clipped
+                      && $0.quality.estimatedSNRDB.map({
+                          $0.isFinite && $0 >= Self.minimumSNRDB
+                      }) == true
+              }) else {
+            throw ProtectedDriverPEQRecommendationError
+                .inadequateRepeatedEvidence
+        }
+        let reference = captures[0].transferFunction
+        let grid = reference.frequenciesHz
+        guard grid.count >= 48,
+              grid.count == reference.magnitudeDB.count,
+              grid.allSatisfy({ $0.isFinite && $0 > 0 }),
+              zip(grid, grid.dropFirst()).allSatisfy({ $0.0 < $0.1 }),
+              captures.allSatisfy({
+                  $0.transferFunction.frequenciesHz == grid
+                  && $0.transferFunction.magnitudeDB.count == grid.count
+                  && $0.transferFunction.magnitudeDB.allSatisfy(\.isFinite)
+              }) else {
+            throw ProtectedDriverPEQRecommendationError
+                .incompatibleResponseGrid
+        }
+        let bass = provenance.bassManagementConfiguration
+        guard bass.enabled,
+              let physicalMode = bass.physicalOutputMode,
+              (physicalMode == .biAmp || physicalMode == .triAmp),
+              physicalMode.supports(bus: bus) else {
+            throw ProtectedDriverPEQRecommendationError.protectedPathRequired
+        }
+        let fc = bass.frequencyHz
+        let upper = bass.upperFrequencyHz ?? 0
+        let nyquistCeiling = min(16_000.0, session.sampleRate * 0.42)
+        var low = 30.0
+        var high = nyquistCeiling
+        switch bus {
+        case .leftLow, .rightLow:
+            high = min(high, fc / 1.5)
+        case .leftMid, .rightMid:
+            low = max(low, fc * 1.5)
+            high = min(high, upper / 1.5)
+        case .leftHigh, .rightHigh:
+            low = max(low, (physicalMode == .triAmp ? upper : fc) * 1.5)
+        case .leftFullRange, .rightFullRange, .subMono:
+            throw ProtectedDriverPEQRecommendationError.unsupportedDriverBus
+        }
+        let measuredLow = captures.compactMap {
+            $0.quality.usableLowHz
+        }.max() ?? .infinity
+        let measuredHigh = captures.compactMap {
+            $0.quality.usableHighHz
+        }.min() ?? 0
+        low = max(low, measuredLow)
+        high = min(high, measuredHigh)
+        guard fc.isFinite, fc > 0, upper.isFinite,
+              low.isFinite, high.isFinite,
+              high > low * 1.7 else {
+            throw ProtectedDriverPEQRecommendationError
+                .noUsableCrossoverPassband
+        }
+        let indices = grid.indices.filter {
+            grid[$0] >= low && grid[$0] <= high
+        }
+        guard indices.count >= 24 else {
+            throw ProtectedDriverPEQRecommendationError
+                .noUsableCrossoverPassband
+        }
+        let means = grid.indices.map { i in
+            captures.reduce(0.0) {
+                $0 + $1.transferFunction.magnitudeDB[i]
+            } / Double(captures.count)
+        }
+        let stable = indices.filter { i in
+            let readings = captures.map {
+                $0.transferFunction.magnitudeDB[i]
+            }
+            return (readings.max()! - readings.min()!)
+                <= Self.maximumRepeatSpreadDB
+        }
+        guard stable.count >= 24,
+              Double(stable.count) / Double(indices.count) >= 0.90 else {
+            throw ProtectedDriverPEQRecommendationError
+                .inadequateRepeatedEvidence
+        }
+
+        // Only detect local, repeat-stable bumps against surrounding
+        // frequencies; never correct broadband tilt or narrow noise bins.
+        var possible: [(frequency: Double, deviation: Double)] = []
+        for i in stable {
+            let center = grid[i]
+            let neighbors = stable.filter { j in
+                let distance = abs(log2(grid[j] / center))
+                return distance >= 0.22 && distance <= 0.80
+            }
+            guard neighbors.count >= 12,
+                  stable.contains(i - 1), stable.contains(i + 1) else {
+                continue
+            }
+            let surround = neighbors.map { means[$0] }
+                .reduce(0, +) / Double(neighbors.count)
+            let bump = means[i] - surround
+            guard bump >= Self.minimumPeakDeviationDB,
+                  means[i] >= means[i - 1],
+                  means[i] >= means[i + 1] else {
+                continue
+            }
+            possible.append((frequency: center, deviation: bump))
+        }
+        possible.sort {
+            if $0.deviation != $1.deviation {
+                return $0.deviation > $1.deviation
+            }
+            return $0.frequency < $1.frequency
+        }
+        var cuts: [ProtectedDriverPEQCut] = []
+        for candidate in possible {
+            guard cuts.count < Self.maximumSuggestedBands else { break }
+            let separated = cuts.allSatisfy {
+                abs(log2($0.frequencyHz / candidate.frequency)) >= 0.55
+            }
+            guard separated else { continue }
+            cuts.append(
+                ProtectedDriverPEQCut(
+                    frequencyHz: candidate.frequency,
+                    gainDB: -min(Self.maximumCutDB,
+                                 candidate.deviation * 0.55),
+                    q: Self.maximumBandQ,
+                    observedBroadPeakDB: candidate.deviation
+                )
+            )
+        }
+        return ProtectedDriverPEQRecommendation(
+            sessionID: session.id,
+            protocolID: protocolID,
+            playbackSystemID: session.playbackSystemID,
+            routingSignature: session.routingSignature,
+            targetBus: bus,
+            protectedConfiguration: provenance.targetDriverConfiguration,
+            bassManagement: bass,
+            sampleRate: session.sampleRate,
+            repeatedCaptureIDs: captures.map(\.id),
+            passbandLowHz: low,
+            passbandHighHz: high,
+            cuts: cuts,
+            evidenceSummary:
+                "Protected \(bus.displayName) near-field repeated sweeps; " +
+                "0–3 cut-only, bounded peak hypotheses in the guarded passband. " +
+                "No active driver EQ, delay, polarity, limiter or crossover change."
+        )
+    }
+}
