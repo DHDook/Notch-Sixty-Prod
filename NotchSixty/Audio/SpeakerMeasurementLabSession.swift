@@ -122,7 +122,7 @@ struct SpeakerMeasurementLabSession:
                   capture.microphone == microphone,
                   abs(capture.sampleRate - sampleRate) < 0.5,
                   capture.excitationLevelDBFS.map {
-                      $0.isFinite && (-48.0 ... -12.0).contains($0)
+                      $0.isFinite && $0 >= -48.0 && $0 <= -12.0
                   } ?? true,
                   labProtocol.excitationLevelDBFS.map { expected in
                       capture.excitationLevelDBFS.map {
