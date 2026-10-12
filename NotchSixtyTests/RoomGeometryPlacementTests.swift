@@ -1601,7 +1601,7 @@ final class AdvancedPlacementReviewHistoryTests: XCTestCase {
     @MainActor
     func testControllerRequiresPhysicalConfirmationAndPreservesProjectHistory()
         throws {
-        let (store, project, state, _, root) = try fixture()
+        let (store, project, _, _, root) = try fixture()
         defer { try? FileManager.default.removeItem(at: root) }
         let controller = RoomTreatmentAdvisorController(store: store)
         controller.prepareForUse()
@@ -1634,7 +1634,7 @@ final class AdvancedPlacementReviewHistoryTests: XCTestCase {
         XCTAssertEqual(reloaded.placementReviewHistory,
                        controller.placementReviewHistory)
         XCTAssertEqual(reloaded.selectedProjectID, project.id)
-        XCTAssertEqual(reloaded.savedGeometry, state.room)
+        XCTAssertEqual(reloaded.savedGeometry, before)
     }
 
     @MainActor
