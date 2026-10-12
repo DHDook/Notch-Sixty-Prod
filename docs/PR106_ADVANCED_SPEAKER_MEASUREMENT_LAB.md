@@ -1,6 +1,6 @@
 # PR106 — Advanced Speaker Measurement Lab
 
-Status: **SLICES 1–3 SOFTWARE VERIFIED — SLICE 4 IMPLEMENTED — EXACT-HEAD CI PENDING**
+Status: **SLICES 1–4 SOFTWARE VERIFIED — SLICE 5 CI PENDING**
 
 Base: PR105 Guided Speaker Optimizer & Acoustic Verification.
 
@@ -141,13 +141,45 @@ PR106/PR105 validators, Apple Silicon Debug build and full XCTest regression.
   comparisons using user-entered geometry.
 - Measurement-only: no correction design, deployment authority or DSP mutation.
 
+## Slice 4 exact-head verification
+
+Slice 4 exact head `aaca1c0daae3c4057cb174374d36868fe60943a1` passed both
+GitHub Actions paths:
+
+- push run 38215667150;
+- pull-request run 38215670744.
+
+Both paths passed PR106/PR105 validators, Apple Silicon Debug build, targeted
+measurement-lab tests and full XCTest regression.
+
+## Slice 5 — Repeat-qualified near-field LF component diagnostics
+
+- A subwoofer near-field protocol may optionally identify the physical component
+  as radiator, port, passive radiator or other and may retain an explicit
+  effective radiating area for future physically justified splicing.
+- Existing persisted Slice 2 sessions remain valid because component metadata is
+  optional.
+- Every selected near-field protocol must independently pass the inherited
+  repeated-sweep quality gates before LF analysis is produced.
+- Analysis is deliberately bounded to a configurable low-frequency ceiling
+  (500 Hz default) and the common qualified usable band.
+- Reports repeat-averaged local magnitude, circular-mean local phase, dominant
+  local magnitude peak and component-relative magnitude/phase traces.
+- Multiple protocols must measure the same physical subwoofer source.
+- The merge assessment explicitly checks whether area metadata and phase are
+  available, but `canSynthesizeFarFieldComposite == false` in this slice.
+- The lab NEVER sums radiator/port magnitudes in dB. Separate near-field
+  positions do not establish a far-field propagation/phase reference, and a
+  listening/far-field anchor is still required before any component splice can
+  represent system bass response.
+- Near-field LF diagnostics remain measurement-only and cannot design/apply DSP.
+
 ## Planned follow-on slices
 
-1. Near-field subwoofer/port diagnostics and merge-safe low-frequency analysis.
-2. Quasi-anechoic gated response tools with explicit reflection-window limits.
-3. Distortion/nonlinearity diagnostics from bounded excitation where the current
+1. Quasi-anechoic gated response tools with explicit reflection-window limits.
+2. Distortion/nonlinearity diagnostics from bounded excitation where the current
    capture chain can support defensible metrics.
-4. Crossover-preserving protected-driver excitation path.
-5. Authenticated shared-clock reference capture for coherent relative timing and
+3. Crossover-preserving protected-driver excitation path.
+4. Authenticated shared-clock reference capture for coherent relative timing and
    phase diagnostics.
-6. Production Advanced Speaker Measurement Lab UI and export/reporting.
+5. Production Advanced Speaker Measurement Lab UI and export/reporting.

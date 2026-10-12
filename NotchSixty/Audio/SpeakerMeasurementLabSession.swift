@@ -5,6 +5,10 @@ struct SpeakerMeasurementLabProtocol:
     var id: UUID = UUID()
     var name: String
     var request: SpeakerMeasurementLabRequest
+    /// Optional only for subwooferNearField. Older persisted Slice 2 sessions
+    /// decode this as nil, preserving schema compatibility.
+    var nearFieldComponent:
+        SpeakerMeasurementLabNearFieldComponent? = nil
 
     var acousticSource: MultichannelCalibrationSource? {
         guard case .acousticSource(let source) = request.target else {
@@ -21,9 +25,14 @@ struct SpeakerMeasurementLabProtocol:
         }
         switch request.mode {
         case .wholeSpeakerOnAxis,
-             .wholeSpeakerOffAxis,
-             .subwooferNearField:
-            guard acousticSource != nil else {
+             .wholeSpeakerOffAxis:
+            guard acousticSource != nil,
+                  nearFieldComponent == nil else {
+                throw SpeakerMeasurementLabSessionError.invalidProtocol
+            }
+        case .subwooferNearField:
+            guard acousticSource != nil,
+                  nearFieldComponent?.validate() ?? true else {
                 throw SpeakerMeasurementLabSessionError.invalidProtocol
             }
         case .protectedDriverNearField,

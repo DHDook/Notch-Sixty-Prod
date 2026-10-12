@@ -47,7 +47,8 @@ jobs:
           CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES
           -only-testing:NotchSixtyTests/SpeakerMeasurementLabCapabilityTests
           -only-testing:NotchSixtyTests/SpeakerMeasurementLabSessionTests
-          -only-testing:NotchSixtyTests/SpeakerMeasurementLabDirectivityTests test
+          -only-testing:NotchSixtyTests/SpeakerMeasurementLabDirectivityTests
+          -only-testing:NotchSixtyTests/SpeakerMeasurementLabNearFieldLFTests test
       - name: Run full XCTest regression
         run: >-
           xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
