@@ -121,14 +121,14 @@ struct SpeakerMeasurementLabSession:
                   capture.routingSignature == routingSignature,
                   capture.microphone == microphone,
                   abs(capture.sampleRate - sampleRate) < 0.5,
-                  capture.excitationLevelDBFS.map {
+                  (capture.excitationLevelDBFS.map {
                       $0.isFinite && $0 >= -48.0 && $0 <= -12.0
-                  } ?? true,
-                  labProtocol.excitationLevelDBFS.map { expected in
+                  } ?? true),
+                  (labProtocol.excitationLevelDBFS.map { expected in
                       capture.excitationLevelDBFS.map {
                           abs($0 - expected) < 1.0e-6
                       } ?? false
-                  } ?? true,
+                  } ?? true),
                   capture.repeatIndex >= 0,
                   capture.repeatIndex < labProtocol.request.repeatCount,
                   !capture.impulseResponse.isEmpty,
