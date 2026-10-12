@@ -11,6 +11,7 @@ final class RoomTreatmentAdvisorController: ObservableObject {
     let store: RoomCorrectionProjectStore
     let geometryStore: RoomGeometryStore
     let advancedPlacementStore: RoomAdvancedPlacementStore
+    let placementReviewStore: RoomAdvancedPlacementReviewStore
     private let advancedPlacementExplorer = RoomAdvancedPlacementExplorer()
     let treatmentStore: RoomPassiveTreatmentStore
     private let treatmentDesigner = RoomPassiveTreatmentDesigner()
@@ -45,6 +46,8 @@ final class RoomTreatmentAdvisorController: ObservableObject {
     @Published var physicalSubCandidateID: UUID?
     @Published private(set) var physicalSubComparison: RoomAdvancedSubPlacementComparison?
     @Published private(set) var physicalSubComparisonMessage: String?
+    @Published private(set) var placementReviewHistory: [RoomAdvancedPlacementReviewRecord] = []
+    @Published private(set) var placementReviewMessage: String?
     @Published var treatmentDraft: RoomPassiveTreatmentPlan?
     @Published private(set) var savedTreatmentPlan: RoomPassiveTreatmentPlan?
     @Published private(set) var treatmentAnalysis: RoomPassiveTreatmentDesignSummary?
@@ -59,6 +62,8 @@ final class RoomTreatmentAdvisorController: ObservableObject {
             RoomGeometryStore(projectStore: store)
         self.advancedPlacementStore =
             RoomAdvancedPlacementStore(projectStore: store)
+        self.placementReviewStore =
+            RoomAdvancedPlacementReviewStore(projectStore: store)
         self.treatmentStore = RoomPassiveTreatmentStore(projectStore: store)
     }
 
@@ -144,6 +149,8 @@ final class RoomTreatmentAdvisorController: ObservableObject {
 
     func selectProject(_ id: UUID?) {
         selectedProjectID = id
+        placementReviewHistory = []
+        placementReviewMessage = nil
         availablePhysicalSubSets = []
         physicalSubBaselineID = nil
         physicalSubCandidateID = nil
@@ -178,6 +185,7 @@ final class RoomTreatmentAdvisorController: ObservableObject {
         report = analyzer.analyze(project: project)
         loadGeometry(for: project.id)
         loadAdvancedPlacement(for: project.id)
+        loadPlacementReviewHistory(for: project.id)
         loadTreatment(for: project.id)
         verificationFollowUpID = nil
         verificationReport = nil
@@ -603,6 +611,101 @@ final class RoomTreatmentAdvisorController: ObservableObject {
                 "Measured relative bass variation across seats; NOT verified SPL or preference. Real-world verification remains required."
         } catch {
             physicalSubComparisonMessage = error.localizedDescription
+        }
+    }
+
+    /// Historical reviews remain project-scoped and append-only. Failure
+    /// decoding a damaged archive never deletes it or replaces it with empty
+    /// history, and can never mutate the Playback System.
+    private func loadPlacementReviewHistory(for projectID: UUID) {
+        placementReviewHistory = []
+        do {
+            placementReviewHistory = try placementReviewStore
+                .load(projectID: projectID).records
+            placementReviewMessage = nil
+        } catch {
+            placementReviewMessage = error.localizedDescription
+        }
+    }
+
+    /// One explicit review event per physical experiment. Evidence from Sub
+    /// A/B is recomputed from its raw compact measurement sets at recording
+    /// time; any unqualified pair becomes INCONCLUSIVE and cannot be assigned
+    /// an improvement verdict. Non-Sub trials remain INCONCLUSIVE until a
+    /// separate validated capture comparison is implemented.
+    func recordPlacementReview(
+        physicalMoveConfirmed: Bool,
+        fixedMicrophoneSeatsAndSignalChainConfirmed: Bool
+    ) {
+        guard physicalMoveConfirmed else {
+            placementReviewMessage =
+                "Confirm that the physical experiment was actually performed before recording a review."
+            return
+        }
+        guard let project = selectedProject,
+              let room = geometryDraft, room == savedGeometry,
+              let settings = advancedPlacementDraft,
+              settings == savedAdvancedPlacement else {
+            placementReviewMessage =
+                RoomAdvancedPlacementReviewError.unsavedGeometry
+                    .localizedDescription
+            return
+        }
+        guard let experiment = selectedAdvancedExperiment,
+              advancedPlacementExperiments.contains(experiment) else {
+            placementReviewMessage =
+                RoomAdvancedPlacementReviewError.noSelectedExperiment
+                    .localizedDescription
+            return
+        }
+        do {
+            var comparable: RoomAdvancedSubPlacementComparison?
+            var reason: String?
+            var baselineID: UUID?
+            var candidateID: UUID?
+            if experiment.move == .subwoofer {
+                baselineID = physicalSubBaselineID
+                candidateID = physicalSubCandidateID
+                if fixedMicrophoneSeatsAndSignalChainConfirmed,
+                   let beforeID = baselineID,
+                   let afterID = candidateID,
+                   let before = availablePhysicalSubSets.first(
+                       where: { $0.id == beforeID }
+                   ),
+                   let after = availablePhysicalSubSets.first(
+                       where: { $0.id == afterID }
+                   ) {
+                    do {
+                        comparable = try RoomAdvancedSubPlacementComparisonAnalyzer()
+                            .compare(
+                                baseline: before, candidate: after,
+                                state: settings.state(for: room),
+                                experiment: experiment,
+                                playbackSystemID: project.playbackSystemID,
+                                physicalSetupConfirmed: true
+                            )
+                    } catch {
+                        reason = "INCONCLUSIVE: the selected Sub A/B captures did not qualify: \(error.localizedDescription)"
+                    }
+                } else {
+                    reason = "INCONCLUSIVE: select repeat-qualified Sub baseline and candidate sweeps and confirm the same seats and unchanged signal chain."
+                }
+            }
+            let record = try RoomAdvancedPlacementReviewFactory().make(
+                playbackSystemID: project.playbackSystemID,
+                state: settings.state(for: room),
+                experiment: experiment,
+                comparison: comparable,
+                attemptedBaselineID: baselineID,
+                attemptedCandidateID: candidateID,
+                inconclusiveReason: reason
+            )
+            let archive = try placementReviewStore.append(record)
+            placementReviewHistory = archive.records
+            placementReviewMessage =
+                "Saved an immutable project-only placement review. Acoustic hardware acceptance remains pending."
+        } catch {
+            placementReviewMessage = error.localizedDescription
         }
     }
 
