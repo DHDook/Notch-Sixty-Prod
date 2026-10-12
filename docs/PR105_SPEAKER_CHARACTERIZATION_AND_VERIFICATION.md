@@ -109,6 +109,30 @@ reflection timing and acoustic benefit remain unverified.
 - Classification is preview/advisory evidence: `canDeploy == false`. It
   never authorizes PEQ/FIR, timing, polarity, crossover or live DSP mutation.
 
+## Slice 4 — Classification-aware PEQ/FIR correction authority
+
+- PR105's guided path recomputes cross-domain classification from the qualified
+  characterization and listening-position measurement sets. It does not accept
+  an externally supplied correction-authority map.
+- Only `speakerPersistent` points become eligible to drive speaker-correction
+  synthesis.
+- `roomSeatDependent`, `ambiguous`, `noMaterialDeviation`, frequencies below
+  the early-window trust boundary, and missing classification points are
+  protected by default.
+- The desired PEQ/FIR correction is zeroed at protected points BEFORE fitting or
+  FIR synthesis. This prevents a ranking penalty from merely hiding a candidate
+  that still alters a room-specific feature.
+- PEQ band centers must lie on authorized points, and the actual cumulative
+  biquad response may leak no more than 0.5 dB into protected measured points.
+- FIR synthesis receives the same masked desired response. The actual Float-tap
+  forward response is rejected if it exceeds the same protected-region leakage
+  bound.
+- The generic PR104 preview designers retain their original unmasked behavior
+  for regression compatibility; PR105's guided Speaker Optimizer route uses the
+  stricter classification-aware wrapper.
+- Both products remain preview-only and non-deployable. This slice grants
+  correction evidence authority, not permission to mutate live DSP.
+
 ## Planned follow-on slices
 
 1. Correlate speaker-characterization features against multi-seat features to

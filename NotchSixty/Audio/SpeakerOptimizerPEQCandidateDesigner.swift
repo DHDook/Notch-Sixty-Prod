@@ -57,6 +57,7 @@ enum SpeakerOptimizerPEQError: Error, Equatable {
     case invalidSampleRate
     case incompatibleEvidence
     case invalidResponse
+    case invalidEvidenceMask
 }
 
 struct SpeakerOptimizerPEQConstraints: Equatable, Sendable {
@@ -116,12 +117,17 @@ struct SpeakerOptimizerPEQCandidateDesigner: Sendable {
         baseline: SpeakerOptimizerMeasurementSet,
         seatWeights: [UUID: Double]? = nil,
         options: SpeakerOptimizerDesignOptions = .init(),
-        constraints: SpeakerOptimizerPEQConstraints = .init()
+        constraints: SpeakerOptimizerPEQConstraints = .init(),
+        evidenceMask: SpeakerOptimizerCorrectionEvidenceMask? = nil
     ) throws -> SpeakerOptimizerPEQCandidatePlan {
         guard constraints.valid() else { throw SpeakerOptimizerPEQError.invalidConstraints }
         let rate = baseline.sampleRate
         guard rate.isFinite, rate >= 16_000, rate <= 384_000 else {
             throw SpeakerOptimizerPEQError.invalidSampleRate
+        }
+        if let evidenceMask {
+            do { try evidenceMask.validate(for: baseline) }
+            catch { throw SpeakerOptimizerPEQError.invalidEvidenceMask }
         }
         // Re-create the source preview from the baseline and options. We never
         // compile user-supplied, stale or forged preview/evidence objects.
@@ -177,11 +183,22 @@ struct SpeakerOptimizerPEQCandidateDesigner: Sendable {
             }
             let freqs = sourcePreview.frequenciesHz
             let target = sourcePreview.targetMagnitudeDB
+            let authorization: [Bool]
+            do {
+                authorization = try evidenceMask?.authorizationVector(
+                    source: source,
+                    frequenciesHz: freqs
+                ) ?? Array(repeating: true, count: freqs.count)
+            } catch {
+                throw SpeakerOptimizerPEQError.invalidEvidenceMask
+            }
             let before = weightedRMSE(positions, weights, target, Array(repeating: 0, count: commonCount))
             var corrections = Array(repeating: 0.0, count: commonCount)
             var bands: [SpeakerOptimizerPEQBand] = []
             var current = before
-            let desired = sourcePreview.correctionDB
+            let desired = zip(sourcePreview.correctionDB, authorization).map {
+                $0.1 ? $0.0 : 0
+            }
             let low = freqs[0]
             let high = freqs[commonCount - 1]
             let maximumCenter = min(high, rate * 0.45)
@@ -193,6 +210,7 @@ struct SpeakerOptimizerPEQCandidateDesigner: Sendable {
             for _ in 0..<constraints.maximumBands {
                 var best: (band: SpeakerOptimizerPEQBand, shape: [Double], rmse: Double)?
                 for index in freqs.indices where index % max(1, freqs.count / 48) == 0 {
+                    guard authorization[index] else { continue }
                     let center = freqs[index]
                     guard center >= low * 1.15, center <= maximumCenter / 1.15 else { continue }
                     // One dB resolution plus fractional last step, all bounded
@@ -219,8 +237,11 @@ struct SpeakerOptimizerPEQCandidateDesigner: Sendable {
                                 proposed: proposed, positions: positions,
                                 weights: weights, target: target,
                                 constraints: constraints, options: options,
-                                sampleRate: rate
-                            ) else { continue }
+                                sampleRate: rate,
+                                authorization: authorization,
+                                maximumProtectedLeakageDB:
+                                    evidenceMask?.maximumProtectedLeakageDB
+                                                        ) else { continue }
                             let result = weightedRMSE(positions, weights, target, proposed)
                             if result + constraints.minimumModeledImprovementDB < current,
                                result < (best?.rmse ?? .infinity) {
@@ -247,8 +268,11 @@ struct SpeakerOptimizerPEQCandidateDesigner: Sendable {
                 bands.reduce(0) { $0 + $1.magnitudeDB(at: f, sampleRate: rate) }
             }
             current = weightedRMSE(positions, weights, target, corrections)
+            if evidenceMask != nil {
+                warnings.append("PR105 classification mask: only speaker-persistent points may drive PEQ; protected regions are leakage-audited.")
+            }
             if bands.isEmpty {
-                warnings.append("No safe PEQ candidate clears the modeled improvement and position-guard thresholds; unity preview retained.")
+                warnings.append("No safe PEQ candidate clears the modeled improvement, classification, and position-guard thresholds; unity preview retained.")
             }
             if options.maximumBoostDB > 0 {
                 warnings.append("Optional positive PEQ gains require explicit headroom and later independent physical verification.")
@@ -324,6 +348,14 @@ struct SpeakerOptimizerPEQCandidateDesigner: Sendable {
             $0.isFinite && $0 >= -options.maximumCutDB - 1e-8
                 && $0 <= options.maximumBoostDB + 1e-8
         }) else { return false }
+        if let maximumProtectedLeakageDB {
+            guard authorization.count == proposed.count else { return false }
+            for index in proposed.indices where !authorization[index] {
+                if abs(proposed[index]) > maximumProtectedLeakageDB + 1e-8 {
+                    return false
+                }
+            }
+        }
         // Inspect frequencies OUTSIDE the allowed band; a bell filter's
         // skirts must not silently alter crossover or unmeasured regions.
         let minF = frequencies[0]

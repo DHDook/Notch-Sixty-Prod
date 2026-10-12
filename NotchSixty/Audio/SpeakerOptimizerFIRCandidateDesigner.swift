@@ -8,6 +8,7 @@ enum SpeakerOptimizerFIRCandidateError: Error, Equatable {
     case invalidFrequencyGrid
     case transformUnavailable
     case nonFiniteSynthesis
+    case invalidEvidenceMask
 }
 
 /// Explicitly finite linear-phase latency: odd-length symmetric FIRs have
@@ -76,12 +77,17 @@ struct SpeakerOptimizerFIRCandidateDesigner: Sendable {
         baseline: SpeakerOptimizerMeasurementSet,
         seatWeights: [UUID: Double]? = nil,
         options: SpeakerOptimizerDesignOptions = .init(),
-        constraints: SpeakerOptimizerFIRConstraints = .init()
+        constraints: SpeakerOptimizerFIRConstraints = .init(),
+        evidenceMask: SpeakerOptimizerCorrectionEvidenceMask? = nil
     ) throws -> SpeakerOptimizerFIRCandidatePlan {
         guard constraints.valid() else { throw SpeakerOptimizerFIRCandidateError.invalidConstraints }
         let rate = baseline.sampleRate
         guard rate.isFinite, (16_000...384_000).contains(rate) else {
             throw SpeakerOptimizerFIRCandidateError.invalidSampleRate
+        }
+        if let evidenceMask {
+            do { try evidenceMask.validate(for: baseline) }
+            catch { throw SpeakerOptimizerFIRCandidateError.invalidEvidenceMask }
         }
         let delayFrames = (constraints.tapCount - 1) / 2
         let delayMilliseconds = Double(delayFrames) / rate * 1_000
@@ -101,8 +107,19 @@ struct SpeakerOptimizerFIRCandidateDesigner: Sendable {
         var candidates: [SpeakerOptimizerFIRSourceCandidate] = []
         for sourcePreview in preview.sources {
             let freqs = sourcePreview.frequenciesHz
-            let desired = sourcePreview.correctionDB
             let target = sourcePreview.targetMagnitudeDB
+            let authorization: [Bool]
+            do {
+                authorization = try evidenceMask?.authorizationVector(
+                    source: sourcePreview.source,
+                    frequenciesHz: freqs
+                ) ?? Array(repeating: true, count: freqs.count)
+            } catch {
+                throw SpeakerOptimizerFIRCandidateError.invalidEvidenceMask
+            }
+            let desired = zip(sourcePreview.correctionDB, authorization).map {
+                $0.1 ? $0.0 : 0
+            }
             guard freqs.count >= 16, freqs.count == desired.count,
                   freqs.count == target.count,
                   freqs.allSatisfy({ $0.isFinite && $0 > 0 && $0 < rate * 0.49 }),
@@ -113,6 +130,21 @@ struct SpeakerOptimizerFIRCandidateDesigner: Sendable {
             let positions = try seatResponses(baseline: baseline, source: sourcePreview.source, frequencies: freqs)
             let before = weightedRMSE(positions, seatWeights, target,
                                       Array(repeating: 0, count: freqs.count))
+            if evidenceMask != nil && !authorization.contains(true) {
+                candidates.append(SpeakerOptimizerFIRSourceCandidate(
+                    source: sourcePreview.source,
+                    taps: [], frequenciesHz: freqs,
+                    modeledFilterMagnitudeDB: Array(repeating: 0, count: freqs.count),
+                    weightedRMSEBeforeDB: before,
+                    predictedWeightedRMSEAfterDB: before,
+                    worstSeatRegressionDB: 0,
+                    maximumPositiveGainDB: 0,
+                    recommendedHeadroomDB: 0,
+                    acceptedForPreview: false,
+                    blockingReasons: ["No speaker-persistent classified frequency points authorize FIR correction."]
+                ))
+                continue
+            }
             let impulse = try synthesize(
                 correctionDB: desired, frequencies: freqs,
                 sampleRate: rate, tapCount: constraints.tapCount,
@@ -133,6 +165,17 @@ struct SpeakerOptimizerFIRCandidateDesigner: Sendable {
                 options: options, constraints: constraints
             )
             var blockers = audit.blockers
+            if let maximumProtectedLeakageDB = evidenceMask?.maximumProtectedLeakageDB {
+                guard authorization.count == response.count else {
+                    throw SpeakerOptimizerFIRCandidateError.invalidEvidenceMask
+                }
+                if response.indices.contains(where: {
+                    !authorization[$0]
+                        && abs(response[$0]) > maximumProtectedLeakageDB + 1.0e-8
+                }) {
+                    blockers.append("Synthesized FIR leaks material correction into a classification-protected frequency region.")
+                }
+            }
             if !after.isFinite || after > before - constraints.minimumModeledImprovementDB {
                 blockers.append("No meaningful modeled correction improvement from the synthesized taps.")
             }
