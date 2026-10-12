@@ -202,7 +202,8 @@ for token in (
 for token in (
     "SpeakerOptimizerFIRVerificationController",
     "SpeakerOptimizerFIRPostApplyVerifier",
-    "speakerOptimizerFIR == receipt.deployment",
+    "speakerOptimizerFIR",
+    "== receipt.deployment",
     "makeLivePlan",
     "finishMeasurementIfComplete",
 ):
