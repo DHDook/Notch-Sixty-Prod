@@ -2148,3 +2148,289 @@ struct RoomAdvancedSubPlacementComparisonAnalyzer: Sendable {
         )
     }
 }
+
+
+// MARK: - PR110 Slice 5: immutable physical placement review history
+
+/// An observation of a particular captured physical move, never a playback
+/// preset, room-correction deployment or claim of real-world acceptability.
+enum RoomAdvancedPlacementReviewOutcome: String, Codable, Sendable {
+    case improved
+    case regressed
+    case inconclusive
+
+    var displayName: String {
+        switch self {
+        case .improved: "Lower measured inter-seat LF variation"
+        case .regressed: "Higher measured inter-seat LF variation"
+        case .inconclusive: "Inconclusive / unverified"
+        }
+    }
+}
+
+/// The 0.25 dB display deadband avoids treating tiny changes as decisive.
+/// It is an *informational review threshold*, not a statistical confidence
+/// interval, audible difference threshold, or physical acceptance limit.
+struct RoomAdvancedPlacementReviewClassifier: Sendable {
+    static let informationalDeadbandDB = 0.25
+
+    func outcome(
+        for comparison: RoomAdvancedSubPlacementComparison
+    ) -> RoomAdvancedPlacementReviewOutcome {
+        let value = comparison.reductionInInterseatSpreadDB
+        guard value.isFinite,
+              comparison.baselineInterseatSpreadRMSDB.isFinite,
+              comparison.candidateInterseatSpreadRMSDB.isFinite,
+              comparison.evidenceConfidence >=
+                SpeakerOptimizerMeasurementEvidenceEvaluator
+                    .minimumOptimizerConfidence,
+              comparison.seatCount >= 2,
+              comparison.commonFrequencyPointCount >= 12
+        else { return .inconclusive }
+        if value > Self.informationalDeadbandDB { return .improved }
+        if value < -Self.informationalDeadbandDB { return .regressed }
+        return .inconclusive
+    }
+}
+
+struct RoomAdvancedPlacementReviewRecord:
+    Identifiable, Codable, Equatable, Sendable {
+    var id: UUID = UUID()
+    var reviewedAt: Date = Date()
+    var projectID: UUID
+    var playbackSystemID: UUID
+    var experimentID: String
+    var experimentDescription: String
+    var moveKind: String
+    var beforeGeometry: RoomGeometryModel
+    var afterGeometry: RoomGeometryModel
+    var beforeAdvanced: RoomAdvancedPlacementSettings
+    var afterAdvanced: RoomAdvancedPlacementSettings
+    var baselineMeasurementSetID: UUID?
+    var candidateMeasurementSetID: UUID?
+    var outcome: RoomAdvancedPlacementReviewOutcome
+    /// When present, magnitude is measured 35–160 Hz inter-seat RMS spread;
+    /// a positive change means LOWER measured variation, not higher SPL.
+    var measuredSpreadReductionDB: Double?
+    var measuredSeatCount: Int?
+    var measurementConfidence: Double?
+    var evidenceNote: String
+    var hardwareAcceptanceComplete: Bool = false
+    var canDeploy: Bool { false }
+
+    func validated(for projectID: UUID) throws -> Self {
+        guard self.projectID == projectID,
+              beforeGeometry.projectID == projectID,
+              afterGeometry.projectID == projectID,
+              beforeAdvanced.projectID == projectID,
+              afterAdvanced.projectID == projectID,
+              !experimentID.isEmpty, !experimentDescription.isEmpty,
+              !moveKind.isEmpty, !evidenceNote.isEmpty,
+              !hardwareAcceptanceComplete,
+              (try? beforeAdvanced.state(for: beforeGeometry)) != nil,
+              (try? afterAdvanced.state(for: afterGeometry)) != nil else {
+            throw RoomAdvancedPlacementReviewError.invalidRecord
+        }
+        let before = try beforeAdvanced.state(for: beforeGeometry)
+        let candidate = RoomAdvancedPlacementExplorer()
+        let trial = try candidate.experiments(for: before).first {
+            $0.id == experimentID
+        }
+        guard let trial,
+              trial.description == experimentDescription,
+              trial.move.rawValue == moveKind,
+              trial.trial.room == afterGeometry,
+              try RoomAdvancedPlacementSettings.from(trial.trial)
+                == afterAdvanced else {
+            throw RoomAdvancedPlacementReviewError.invalidRecord
+        }
+        if outcome == .inconclusive {
+            guard measuredSpreadReductionDB == nil,
+                  measuredSeatCount == nil,
+                  measurementConfidence == nil else {
+                throw RoomAdvancedPlacementReviewError.invalidRecord
+            }
+        } else {
+            guard moveKind == RoomAdvancedPlacementMove.subwoofer.rawValue,
+                  baselineMeasurementSetID != nil,
+                  candidateMeasurementSetID != nil,
+                  baselineMeasurementSetID != candidateMeasurementSetID,
+                  let reduction = measuredSpreadReductionDB,
+                  reduction.isFinite,
+                  let seats = measuredSeatCount, (2...8).contains(seats),
+                  let confidence = measurementConfidence,
+                  confidence.isFinite,
+                  (0...1).contains(confidence),
+                  confidence >= SpeakerOptimizerMeasurementEvidenceEvaluator
+                    .minimumOptimizerConfidence,
+                  abs(reduction) >
+                    RoomAdvancedPlacementReviewClassifier.informationalDeadbandDB,
+                  (outcome == .improved && reduction > 0)
+                    || (outcome == .regressed && reduction < 0)
+            else { throw RoomAdvancedPlacementReviewError.invalidRecord }
+        }
+        return self
+    }
+}
+
+enum RoomAdvancedPlacementReviewError: Error, Equatable, LocalizedError {
+    case invalidRecord
+    case corruptedHistory
+    case duplicateRecord
+    case noSelectedExperiment
+    case unsavedGeometry
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidRecord:
+            "Placement review provenance or project identity is invalid."
+        case .corruptedHistory:
+            "Saved placement review history is invalid; nothing was overwritten."
+        case .duplicateRecord:
+            "The placement review already exists in the project history."
+        case .noSelectedExperiment:
+            "Inspect a placement experiment before recording the review."
+        case .unsavedGeometry:
+            "Save base and advanced room geometry before recording a review."
+        }
+    }
+}
+
+struct RoomAdvancedPlacementReviewHistory: Codable, Equatable, Sendable {
+    static let currentSchemaVersion = 1
+    var schemaVersion: Int = currentSchemaVersion
+    var projectID: UUID
+    var records: [RoomAdvancedPlacementReviewRecord] = []
+
+    func validated() throws -> Self {
+        guard schemaVersion == Self.currentSchemaVersion,
+              records.count <= 100,
+              Set(records.map(\.id)).count == records.count else {
+            throw RoomAdvancedPlacementReviewError.corruptedHistory
+        }
+        for record in records {
+            guard (try? record.validated(for: projectID)) != nil else {
+                throw RoomAdvancedPlacementReviewError.corruptedHistory
+            }
+        }
+        return self
+    }
+}
+
+/// Persist an append-only immutable snapshot in the current Room Correction
+/// project's advisor directory. No edits, removals or release/merge authority.
+struct RoomAdvancedPlacementReviewStore: Sendable {
+    let projectStore: RoomCorrectionProjectStore
+
+    func historyURL(for projectID: UUID) -> URL {
+        projectStore.projectDirectory(for: projectID)
+            .appendingPathComponent(
+                "advisor-placement-review-history-v1.json",
+                isDirectory: false
+            )
+    }
+
+    func load(projectID: UUID) throws -> RoomAdvancedPlacementReviewHistory {
+        let url = historyURL(for: projectID)
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            return RoomAdvancedPlacementReviewHistory(projectID: projectID)
+        }
+        do {
+            let decoded = try JSONDecoder().decode(
+                RoomAdvancedPlacementReviewHistory.self,
+                from: Data(contentsOf: url)
+            )
+            guard decoded.projectID == projectID else {
+                throw RoomAdvancedPlacementReviewError.corruptedHistory
+            }
+            return try decoded.validated()
+        } catch {
+            throw RoomAdvancedPlacementReviewError.corruptedHistory
+        }
+    }
+
+    @discardableResult
+    func append(
+        _ record: RoomAdvancedPlacementReviewRecord
+    ) throws -> RoomAdvancedPlacementReviewHistory {
+        _ = try record.validated(for: record.projectID)
+        var history = try load(projectID: record.projectID)
+        guard !history.records.contains(where: { $0.id == record.id }) else {
+            throw RoomAdvancedPlacementReviewError.duplicateRecord
+        }
+        guard history.records.count < 100 else {
+            throw RoomAdvancedPlacementReviewError.corruptedHistory
+        }
+        history.records.append(record)
+        _ = try history.validated()
+        let url = historyURL(for: record.projectID)
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .millisecondsSince1970
+        try encoder.encode(history).write(to: url, options: .atomic)
+        return history
+    }
+}
+
+/// Factory used only after the owner explicitly selects and confirms the
+/// physical move. The only automatically scored move today is an actual
+/// repeat-qualified Sub A/B; every other move remains unverified.
+struct RoomAdvancedPlacementReviewFactory: Sendable {
+    func make(
+        playbackSystemID: UUID,
+        state: RoomAdvancedPlacementState,
+        experiment: RoomAdvancedPlacementExperiment,
+        comparison: RoomAdvancedSubPlacementComparison?
+    ) throws -> RoomAdvancedPlacementReviewRecord {
+        let before = try state.validated()
+        let experiments = try RoomAdvancedPlacementExplorer()
+            .experiments(for: before)
+        guard experiments.contains(experiment) else {
+            throw RoomAdvancedPlacementReviewError.invalidRecord
+        }
+        if comparison != nil {
+            guard experiment.move == .subwoofer,
+                  comparison?.experimentID == experiment.id,
+                  comparison?.source != nil else {
+                throw RoomAdvancedPlacementReviewError.invalidRecord
+            }
+        }
+        let verdict = comparison.map {
+            RoomAdvancedPlacementReviewClassifier().outcome(for: $0)
+        } ?? .inconclusive
+        let measured = comparison != nil && verdict != .inconclusive
+        let note: String
+        if comparison == nil {
+            note = "Physical placement hypothesis not independently verified by matched before/after listening-seat captures. No acoustic result asserted."
+        } else if !measured {
+            note = "Measured seat-to-seat LF variation changed within the informational 0.25 dB review deadband; acoustic outcome inconclusive."
+        } else {
+            note = "Separate, repeat-qualified physical Sub captures suggest a \(verdict == .improved ? "reduction" : "increase") in 35–160 Hz seat-to-seat variation; not an SPL, target-response or listening preference claim."
+        }
+        let record = RoomAdvancedPlacementReviewRecord(
+            projectID: before.room.projectID,
+            playbackSystemID: playbackSystemID,
+            experimentID: experiment.id,
+            experimentDescription: experiment.description,
+            moveKind: experiment.move.rawValue,
+            beforeGeometry: before.room,
+            afterGeometry: experiment.trial.room,
+            beforeAdvanced: try .from(before),
+            afterAdvanced: try .from(experiment.trial),
+            baselineMeasurementSetID: comparison?.baselineMeasurementSetID,
+            candidateMeasurementSetID: comparison?.candidateMeasurementSetID,
+            outcome: verdict,
+            measuredSpreadReductionDB: measured
+                ? comparison?.reductionInInterseatSpreadDB : nil,
+            measuredSeatCount: measured ? comparison?.seatCount : nil,
+            measurementConfidence: measured
+                ? comparison?.evidenceConfidence : nil,
+            evidenceNote: note
+        )
+        return try record.validated(for: before.room.projectID)
+    }
+}
