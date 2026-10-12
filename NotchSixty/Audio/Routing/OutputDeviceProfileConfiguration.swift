@@ -422,8 +422,8 @@ struct OutputDeviceProfileConfiguration: Codable, Equatable, Sendable {
         guard coherentSubwooferAlignment?.validate(
             profile: self
         ) ?? true else {
-            throw OutputDeviceCalibrationError
-                .invalidSubwooferCalibration
+            throw CoherentSubwooferAlignmentDeploymentError
+                .invalidRecord
         }
     }
 
