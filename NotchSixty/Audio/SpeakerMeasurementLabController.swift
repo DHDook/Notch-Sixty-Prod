@@ -366,7 +366,7 @@ final class SpeakerMeasurementLabController: ObservableObject {
         let transport: any MultichannelCalibrationTransporting
         let analysisProgram: RoomCorrectionSweepProgram
         var protectedProvenance:
-            SpeakerMeasurementLabProtectedDriverCaptureProvenance?
+            SpeakerMeasurementLabProtectedDriverCaptureProvenance? = nil
 
         if let targetBus = capability.protectedDriverBus {
             guard let routing = systemProfile.state.outputRouting,
