@@ -105,23 +105,21 @@ struct CoherentMultiSubwooferAlignmentPlanner: Sendable {
         let assigned = Set(
             profile.subwooferAssignments.map(\.index)
         )
+        let grouped = Dictionary(
+            grouping: evidenceGroups,
+            by: \.subwooferIndex
+        )
+        if let duplicate = grouped.first(where: {
+            $0.value.count > 1
+        })?.key {
+            throw CoherentMultiSubwooferAlignmentError
+                .duplicateSubwoofer(duplicate)
+        }
         guard evidenceGroups.count == assigned.count,
               Set(evidenceGroups.map(\.subwooferIndex))
                 == assigned else {
             throw CoherentMultiSubwooferAlignmentError
                 .evidenceSetIncomplete
-        }
-        guard Set(evidenceGroups.map(\.subwooferIndex)).count
-                == evidenceGroups.count else {
-            let seen = Dictionary(
-                grouping: evidenceGroups,
-                by: \.subwooferIndex
-            )
-            let duplicate = seen.first {
-                $0.value.count > 1
-            }?.key ?? 0
-            throw CoherentMultiSubwooferAlignmentError
-                .duplicateSubwoofer(duplicate)
         }
 
         var permissiveOptions = options
