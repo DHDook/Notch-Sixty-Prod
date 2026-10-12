@@ -32,6 +32,12 @@ jobs:
       - name: Test fail-closed stack manifest and authorization rules
         run: python3 -m unittest discover -s ci/tests -p test_pr109_integration_stack.py -v
 
+      - name: Verify cross-feature playback ownership and realtime chain
+        run: python3 ci/validate_pr109_cross_feature_contracts.py --report "$RUNNER_TEMP/pr109-cross-feature.json"
+
+      - name: Test negative cross-feature ownership and safety mutations
+        run: python3 -m unittest discover -s ci/tests -p test_pr109_cross_feature_contracts.py -v
+
       - name: Preserve cumulative release, measurement and acoustic safety contracts
         run: |
           set -euo pipefail
@@ -51,7 +57,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: pr109-remote-stack-audit
-          path: ${{ runner.temp }}/pr109-remote-stack.json
+          path: |
+            ${{ runner.temp }}/pr109-remote-stack.json
+            ${{ runner.temp }}/pr109-cross-feature.json
           retention-days: 30
           if-no-files-found: error
 
