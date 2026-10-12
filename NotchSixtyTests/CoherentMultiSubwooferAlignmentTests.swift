@@ -239,9 +239,12 @@ final class CoherentMultiSubwooferAlignmentTests: XCTestCase {
                     crossoverFrequencyHz: 80
                 )
         ) {
-            guard case .delayCapacityExceeded(.speaker) =
-                    $0 as? CoherentMultiSubwooferAlignmentError else {
-                return XCTFail("Expected speaker delay-capacity failure, got \($0)")
+            guard let error =
+                    $0 as? CoherentMultiSubwooferAlignmentError,
+                  case .delayCapacityExceeded(.speaker) = error else {
+                return XCTFail(
+                    "Expected speaker delay-capacity failure, got \($0)"
+                )
             }
         }
     }
