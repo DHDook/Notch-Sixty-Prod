@@ -27,7 +27,9 @@ final class SpeakerOptimizerCharacterizationControllerTests: XCTestCase {
             linkedListeningMeasurementSetID: UUID(),
             targets: [target],
             captures: [],
-            earlyWindowEvidence: []
+            earlyWindowEvidence: [],
+            createdAt: Date(timeIntervalSince1970: 1_703_400_000.125),
+            modifiedAt: Date(timeIntervalSince1970: 1_703_400_000.250)
         )
         let store = SpeakerOptimizerCharacterizationSetStore(
             rootDirectory: root
