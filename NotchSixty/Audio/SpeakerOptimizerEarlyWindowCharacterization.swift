@@ -296,7 +296,7 @@ struct SpeakerOptimizerEarlyWindowAnalyzer: Sendable {
               response.frequenciesHz.allSatisfy({ $0.isFinite && $0 > 0 }),
               response.magnitudeDB.allSatisfy(\.isFinite),
               zip(response.frequenciesHz, response.frequenciesHz.dropFirst())
-                .allSatisfy({ $0 < $1 }) else {
+                .allSatisfy({ pair in pair.0 < pair.1 }) else {
             throw SpeakerOptimizerEarlyWindowError.invalidTransferFunction
         }
     }
