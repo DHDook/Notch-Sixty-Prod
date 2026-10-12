@@ -1,6 +1,6 @@
 # PR105 — Guided Speaker Characterization & Verification
 
-Status: **SLICES 1–10 REMOTE SOFTWARE VERIFIED — SLICE 11 CI PENDING — PHYSICAL ACOUSTIC ACCEPTANCE PENDING**
+Status: **REMOTE SOFTWARE COMPLETE — PHYSICAL ACOUSTIC ACCEPTANCE PENDING**
 
 Base: PR104 measurement-driven Speaker Optimization Engine.
 
@@ -330,3 +330,28 @@ started; Slice 11 exact-head CI supersedes it as the final software gate.
 Physical testing remains required for actual mic-distance guidance, integration
 distance for unusual loudspeakers, reflection-window limits and safe/beneficial
 correction.
+
+
+## PR105 remote-software closeout
+
+All planned remotely implementable PR105 safety and workflow slices are now
+present. Slice 11 code head `ea14277b9d8b840e351fd1529fe8603703a634eb` passed
+pull-request run 38209669007 with:
+
+- PR105/PR104/PR103 portable contract validators;
+- Apple Silicon Debug build;
+- all targeted Speaker Optimizer characterization, classification, commissioning,
+  deployment, transactional Apply, measured-verification and guided-workflow
+  tests;
+- full XCTest regression.
+
+The matching push workflow was still completing when this closeout commit was
+created. This closeout status is valid only when the exact closeout head also
+passes both push and pull-request workflows.
+
+The UI additionally stops offering stale verification-session actions after a
+receipt is resolved as verified, rejected or rolled back.
+
+Remote software completion does NOT certify physical loudspeaker safety,
+microphone geometry, room-reflection assumptions, subjective benefit or
+real-world acoustic acceptance. Those remain hardware commissioning work.

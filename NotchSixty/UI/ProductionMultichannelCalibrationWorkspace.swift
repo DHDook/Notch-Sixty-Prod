@@ -1185,6 +1185,11 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                             }
                         }
                         .buttonStyle(.bordered)
+                        .disabled(
+                            guidedOptimizer.state == .measuredAccepted
+                                || guidedOptimizer.state == .measuredRejected
+                                || guidedOptimizer.state == .rolledBack
+                        )
 
                         Button("Rollback PEQ", role: .destructive) {
                             actionError = nil
@@ -1262,7 +1267,11 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                                 }
                             }
                             .buttonStyle(.borderedProminent)
-                            .disabled(!verification.canBeginMeasurement)
+                            .disabled(
+                                !verification.canBeginMeasurement
+                                    || guidedOptimizer.state
+                                        != .appliedPendingVerification
+                            )
 
                             if verification.state == .measuring
                                 || verification.state == .analyzing {
@@ -1289,6 +1298,8 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                                     verification.state == .measuring
                                         || verification.state
                                             == .analyzing
+                                        || guidedOptimizer.state
+                                            != .appliedPendingVerification
                                 )
                             }
                         }

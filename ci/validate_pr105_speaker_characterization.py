@@ -26,8 +26,9 @@ GUIDED_WORKFLOW_TESTS = ROOT / "NotchSixtyTests/SpeakerOptimizerGuidedWorkflowTe
 PROJECT = ROOT / "NotchSixty.xcodeproj/project.pbxproj"
 DOC = ROOT / "docs/PR105_SPEAKER_CHARACTERIZATION_AND_VERIFICATION.md"
 WORKFLOW = ROOT / ".github/workflows/pr105-speaker-characterization.yml"
+CLOSURE = ROOT / "docs/PR105_SOFTWARE_CLOSURE.md"
 
-for path in (SOURCE, TESTS, EARLY_SOURCE, EARLY_TESTS, CLASSIFIER_SOURCE, CLASSIFIER_TESTS, AWARE_SOURCE, AWARE_TESTS, GUIDED_SOURCE, GUIDED_TESTS, UI_SOURCE, COMMISSION_SOURCE, COMMISSION_TESTS, DEPLOY_SOURCE, DEPLOY_TESTS, APPLY_SOURCE, APPLY_TESTS, VERIFY_SOURCE, VERIFY_TESTS, GUIDED_WORKFLOW_SOURCE, GUIDED_WORKFLOW_TESTS, PROJECT, DOC, WORKFLOW):
+for path in (SOURCE, TESTS, EARLY_SOURCE, EARLY_TESTS, CLASSIFIER_SOURCE, CLASSIFIER_TESTS, AWARE_SOURCE, AWARE_TESTS, GUIDED_SOURCE, GUIDED_TESTS, UI_SOURCE, COMMISSION_SOURCE, COMMISSION_TESTS, DEPLOY_SOURCE, DEPLOY_TESTS, APPLY_SOURCE, APPLY_TESTS, VERIFY_SOURCE, VERIFY_TESTS, GUIDED_WORKFLOW_SOURCE, GUIDED_WORKFLOW_TESTS, PROJECT, DOC, WORKFLOW, CLOSURE):
     assert path.is_file(), f"missing PR105 Slice 1 file: {path}"
 
 source = SOURCE.read_text()
@@ -54,6 +55,7 @@ guided_workflow_tests = GUIDED_WORKFLOW_TESTS.read_text()
 project = PROJECT.read_text()
 doc = DOC.read_text()
 workflow = WORKFLOW.read_text()
+closure = CLOSURE.read_text()
 
 for token in (
     "struct SpeakerOptimizerCharacterizationGeometry",
@@ -370,4 +372,11 @@ assert "Transactional PEQ Apply & rollback" in doc
 assert "Independent measured post-Apply verification" in doc
 assert "Guided provisional Apply & verification workflow" in doc
 assert "Automatic measured resolution & persisted verified status" in doc
-print("PR105 end-to-end guided PEQ Apply + measured verification contracts passed")
+assert "REMOTE SOFTWARE COMPLETE" in doc
+assert "REMOTE SOFTWARE COMPLETE" in closure
+assert "FIR deployment remains blocked" in closure
+assert "shared cross-source playback/capture clock" in closure
+assert "PR #106 remains draft, open and unmerged" in closure
+assert "guidedOptimizer.state == .measuredAccepted" in ui_source
+assert "!= .appliedPendingVerification" in ui_source
+print("PR105 remote software closure contracts passed")
