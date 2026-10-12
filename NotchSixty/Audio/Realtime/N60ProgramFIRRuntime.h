@@ -38,6 +38,46 @@ typedef struct {
     uint64_t runtimeHistoryBytes;
 } N60ProgramFIRProgramInfo;
 
+struct N60ProgramFIRProgram {
+    uint32_t channelCount;
+    uint32_t activeChannelMask;
+    uint32_t activeChannelCount;
+    uint32_t tapCount;
+    uint32_t partitionCount;
+    uint32_t declaredLatencyFrames;
+    uint32_t activeOrdinalForChannel[N60_MAX_PROGRAM_CHANNELS];
+    N60ProgramFIRComplex * _Nullable kernels;
+};
+
+struct N60ProgramFIRRuntime {
+    const N60ProgramFIRProgram * _Nonnull program;
+    uint16_t bitReverse[N60_CONVOLUTION_FFT_SIZE];
+    N60ProgramFIRComplex twiddles[N60_CONVOLUTION_FFT_SIZE / 2u];
+    float inputBlock[N60_MAX_PROGRAM_CHANNELS][N60_CONVOLUTION_PARTITION_FRAMES];
+    float outputBlock[N60_MAX_PROGRAM_CHANNELS][N60_CONVOLUTION_PARTITION_FRAMES];
+    float overlap[N60_MAX_PROGRAM_CHANNELS][N60_CONVOLUTION_PARTITION_FRAMES];
+    uint32_t fill;
+    uint32_t historyWritePartition;
+    N60ProgramFIRComplex * _Nullable history;
+    N60ProgramFIRComplex scratch[N60_CONVOLUTION_FFT_SIZE];
+    N60ProgramFIRComplex accumulator[N60_CONVOLUTION_FFT_SIZE];
+};
+
+static inline uint32_t N60ProgramFIRPopCount(uint32_t value) {
+    uint32_t count = 0u;
+    while (value != 0u) {
+        count += value & 1u;
+        value >>= 1u;
+    }
+    return count;
+}
+
+static inline uint32_t N60ProgramFIRValidChannelMask(uint32_t channelCount) {
+    if (channelCount == 0u || channelCount > N60_MAX_PROGRAM_CHANNELS) return 0u;
+    if (channelCount >= 32u) return UINT32_MAX;
+    return (1u << channelCount) - 1u;
+}
+
 static inline bool N60ProgramFIRProgramInfoIsValid(
     N60ProgramFIRProgramInfo info
 ) {
@@ -81,45 +121,6 @@ static inline bool N60ProgramFIRProgramInfoEqual(
         && lhs.declaredLatencyFrames == rhs.declaredLatencyFrames;
 }
 
-struct N60ProgramFIRProgram {
-    uint32_t channelCount;
-    uint32_t activeChannelMask;
-    uint32_t activeChannelCount;
-    uint32_t tapCount;
-    uint32_t partitionCount;
-    uint32_t declaredLatencyFrames;
-    uint32_t activeOrdinalForChannel[N60_MAX_PROGRAM_CHANNELS];
-    N60ProgramFIRComplex * _Nullable kernels;
-};
-
-struct N60ProgramFIRRuntime {
-    const N60ProgramFIRProgram * _Nonnull program;
-    uint16_t bitReverse[N60_CONVOLUTION_FFT_SIZE];
-    N60ProgramFIRComplex twiddles[N60_CONVOLUTION_FFT_SIZE / 2u];
-    float inputBlock[N60_MAX_PROGRAM_CHANNELS][N60_CONVOLUTION_PARTITION_FRAMES];
-    float outputBlock[N60_MAX_PROGRAM_CHANNELS][N60_CONVOLUTION_PARTITION_FRAMES];
-    float overlap[N60_MAX_PROGRAM_CHANNELS][N60_CONVOLUTION_PARTITION_FRAMES];
-    uint32_t fill;
-    uint32_t historyWritePartition;
-    N60ProgramFIRComplex * _Nullable history;
-    N60ProgramFIRComplex scratch[N60_CONVOLUTION_FFT_SIZE];
-    N60ProgramFIRComplex accumulator[N60_CONVOLUTION_FFT_SIZE];
-};
-
-static inline uint32_t N60ProgramFIRPopCount(uint32_t value) {
-    uint32_t count = 0u;
-    while (value != 0u) {
-        count += value & 1u;
-        value >>= 1u;
-    }
-    return count;
-}
-
-static inline uint32_t N60ProgramFIRValidChannelMask(uint32_t channelCount) {
-    if (channelCount == 0u || channelCount > N60_MAX_PROGRAM_CHANNELS) return 0u;
-    if (channelCount >= 32u) return UINT32_MAX;
-    return (1u << channelCount) - 1u;
-}
 
 static inline N60ProgramFIRComplex N60ProgramFIRComplexMultiply(
     N60ProgramFIRComplex lhs,
