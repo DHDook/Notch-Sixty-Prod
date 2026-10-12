@@ -112,6 +112,28 @@ struct SpeakerMeasurementLabSession:
         }
 
         for capture in captures {
+            let captureLevelValid: Bool
+            if let level = capture.excitationLevelDBFS {
+                captureLevelValid =
+                    level.isFinite && level >= -48.0 && level <= -12.0
+            } else {
+                captureLevelValid = true
+            }
+
+            let captureLevelMatchesProtocol: Bool
+            if let expected = protocols.first(
+                where: { $0.id == capture.protocolID }
+            )?.excitationLevelDBFS {
+                if let actual = capture.excitationLevelDBFS {
+                    captureLevelMatchesProtocol =
+                        abs(actual - expected) < 1.0e-6
+                } else {
+                    captureLevelMatchesProtocol = false
+                }
+            } else {
+                captureLevelMatchesProtocol = true
+            }
+
             guard let labProtocol = protocols.first(
                 where: { $0.id == capture.protocolID }
             ),
@@ -121,14 +143,8 @@ struct SpeakerMeasurementLabSession:
                   capture.routingSignature == routingSignature,
                   capture.microphone == microphone,
                   abs(capture.sampleRate - sampleRate) < 0.5,
-                  (capture.excitationLevelDBFS.map {
-                      $0.isFinite && $0 >= -48.0 && $0 <= -12.0
-                  } ?? true),
-                  (labProtocol.excitationLevelDBFS.map { expected in
-                      capture.excitationLevelDBFS.map {
-                          abs($0 - expected) < 1.0e-6
-                      } ?? false
-                  } ?? true),
+                  captureLevelValid,
+                  captureLevelMatchesProtocol,
                   capture.repeatIndex >= 0,
                   capture.repeatIndex < labProtocol.request.repeatCount,
                   !capture.impulseResponse.isEmpty,
