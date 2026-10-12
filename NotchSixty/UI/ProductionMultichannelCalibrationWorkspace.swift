@@ -6,6 +6,7 @@ struct ProductionMultichannelCalibrationWorkspace: View {
     @ObservedObject var microphone: RoomCorrectionCalibrationController
     @ObservedObject var profiles: ProductProfileController
     @StateObject private var optimizer: SpeakerOptimizerMeasurementController
+    @StateObject private var characterization: SpeakerOptimizerCharacterizationController
 
     @State private var actionError: String?
     @State private var resetConfirmation = false
@@ -24,6 +25,13 @@ struct ProductionMultichannelCalibrationWorkspace: View {
         _profiles = ObservedObject(wrappedValue: profiles)
         _optimizer = StateObject(
             wrappedValue: SpeakerOptimizerMeasurementController(
+                engine: engine,
+                profiles: profiles,
+                microphone: microphone
+            )
+        )
+        _characterization = StateObject(
+            wrappedValue: try! SpeakerOptimizerCharacterizationController(
                 engine: engine,
                 profiles: profiles,
                 microphone: microphone
@@ -54,9 +62,14 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                 seatsCard
                 campaignCard
                 speakerOptimizerCard
+                speakerCharacterizationCard
                 designCard
 
-                if let error = actionError ?? calibration.lastErrorDescription ?? microphone.lastErrorDescription {
+                if let error = actionError
+                    ?? characterization.lastErrorDescription
+                    ?? optimizer.lastErrorDescription
+                    ?? calibration.lastErrorDescription
+                    ?? microphone.lastErrorDescription {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
                         .font(.callout)
                         .foregroundStyle(.red)
@@ -101,6 +114,21 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                 guard !Task.isCancelled else { break }
                 do {
                     if try await optimizer.finishMeasurementIfComplete() { break }
+                } catch {
+                    actionError = error.localizedDescription
+                    break
+                }
+            }
+        }
+        .task(id: characterization.state) {
+            guard characterization.state == .measuring else { return }
+            while !Task.isCancelled && characterization.state == .measuring {
+                try? await Task.sleep(for: .milliseconds(100))
+                guard !Task.isCancelled else { break }
+                do {
+                    if try await characterization.finishMeasurementIfComplete() {
+                        break
+                    }
                 } catch {
                     actionError = error.localizedDescription
                     break
@@ -661,6 +689,275 @@ struct ProductionMultichannelCalibrationWorkspace: View {
             }
             .padding(6)
         }
+    }
+
+
+    private var speakerCharacterizationCard: some View {
+        GroupBox("Speaker Optimizer · Speaker Characterization") {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .top, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Step 2 · Characterize each whole speaker")
+                            .font(.headline)
+                        Text(
+                            "After the listening-position baseline qualifies, move the same microphone to the guided ~1 m position for each whole speaker. Three stationary repeats are taken before moving to the next speaker."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text(characterization.state.rawValue.capitalized)
+                        .font(.caption.bold())
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(.quaternary, in: Capsule())
+                }
+
+                if optimizer.evidenceReport?.optimizerReady != true {
+                    Label(
+                        "Complete an optimizer-ready listening-position baseline above before starting characterization.",
+                        systemImage: "1.circle"
+                    )
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                }
+
+                HStack(spacing: 10) {
+                    Button(
+                        characterization.measurementSet == nil
+                            ? "Start Speaker Characterization"
+                            : "Refresh / Resume Characterization"
+                    ) {
+                        actionError = nil
+                        do {
+                            guard let baseline = optimizer.measurementSet else {
+                                throw SpeakerOptimizerCharacterizationControllerError
+                                    .listeningBaselineRequired
+                            }
+                            try characterization.startOrResumeSession(
+                                listeningBaseline: baseline
+                            )
+                        } catch {
+                            actionError = error.localizedDescription
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(optimizer.evidenceReport?.optimizerReady != true)
+
+                    if characterization.measurementSet != nil,
+                       let baseline = optimizer.measurementSet {
+                        Button("Reset Characterization", role: .destructive) {
+                            actionError = nil
+                            do {
+                                try characterization.resetSession(
+                                    listeningBaseline: baseline
+                                )
+                            } catch {
+                                actionError = error.localizedDescription
+                            }
+                        }
+                        .disabled(
+                            characterization.state == .measuring
+                                || characterization.state == .analyzing
+                        )
+                    }
+                }
+
+                if let set = characterization.measurementSet,
+                   let progress = characterization.progress {
+                    Divider()
+
+                    HStack(spacing: 24) {
+                        status(
+                            "Speakers",
+                            "\(progress.completedTargetCount) / \(progress.requiredTargetCount)"
+                        )
+                        status(
+                            "Repeats",
+                            "\(progress.completedSweepCount) / \(progress.requiredSweepCount)"
+                        )
+                        status(
+                            "Confidence",
+                            characterization.evidenceReport.map {
+                                "\(Int(($0.confidence * 100).rounded()))%"
+                            } ?? "—"
+                        )
+                        status(
+                            "Early Window",
+                            characterization.earlyWindowEvidenceComplete
+                                ? "Complete" : "Pending"
+                        )
+                    }
+
+                    ProgressView(value: progress.fractionComplete)
+
+                    if let step = characterization.activeOrNextStep {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(
+                                characterization.state == .measuring
+                                    ? "Measuring \(step.target.source.displayName)"
+                                    : "Next: \(step.target.source.displayName)"
+                            )
+                            .font(.callout.bold())
+                            Text(step.instruction)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(
+                                "Do not move the loudspeaker. This installed-room measurement is source-weighted evidence, not an anechoic claim."
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        }
+                    } else if progress.complete {
+                        Label(
+                            "All whole-speaker characterization repeats are captured.",
+                            systemImage: "checkmark.circle.fill"
+                        )
+                        .foregroundStyle(.green)
+                    }
+
+                    if characterization.state == .measuring {
+                        ProgressView(
+                            value: characterization.activeMeasurementProgress
+                        ) {
+                            Text("Current characterization sweep")
+                        }
+                    }
+
+                    HStack(spacing: 10) {
+                        Button("Measure Next Characterization Repeat") {
+                            actionError = nil
+                            do {
+                                try characterization.beginNextMeasurement()
+                            } catch {
+                                actionError = error.localizedDescription
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!characterization.canBeginMeasurement)
+
+                        if characterization.state == .measuring
+                            || characterization.state == .analyzing {
+                            Button("Cancel") {
+                                characterization.cancelMeasurement()
+                            }
+                        }
+                    }
+
+                    if let evidence = characterization.evidenceReport {
+                        HStack(spacing: 10) {
+                            Label(
+                                characterization.characterizationReady
+                                    ? "Characterization evidence ready"
+                                    : "Characterization not ready",
+                                systemImage: characterization.characterizationReady
+                                    ? "checkmark.shield.fill"
+                                    : "exclamationmark.shield.fill"
+                            )
+                            .font(.callout.bold())
+                            .foregroundStyle(
+                                characterization.characterizationReady
+                                    ? .green : .secondary
+                            )
+                            Spacer()
+                            Text(
+                                "Confidence \(Int((evidence.confidence * 100).rounded()))%"
+                            )
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    if let report = crossDomainClassificationReport {
+                        Divider()
+                        let summary =
+                            SpeakerOptimizerCrossDomainSummary(report: report)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Step 3 · Compare speaker vs room evidence")
+                                .font(.headline)
+                            HStack(spacing: 22) {
+                                status(
+                                    "Speaker-persistent",
+                                    "\(summary.speakerPersistentPointCount)"
+                                )
+                                status(
+                                    "Room / seat",
+                                    "\(summary.roomSeatDependentPointCount)"
+                                )
+                                status(
+                                    "Ambiguous",
+                                    "\(summary.ambiguousPointCount)"
+                                )
+                                status(
+                                    "No material deviation",
+                                    "\(summary.noMaterialDeviationPointCount)"
+                                )
+                            }
+
+                            Grid(
+                                alignment: .leading,
+                                horizontalSpacing: 16,
+                                verticalSpacing: 6
+                            ) {
+                                GridRow {
+                                    Text("Source").font(.caption.bold())
+                                    Text("Speaker-persistent")
+                                        .font(.caption.bold())
+                                    Text("Room / seat")
+                                        .font(.caption.bold())
+                                    Text("Ambiguous").font(.caption.bold())
+                                }
+                                ForEach(
+                                    Array(report.sources.enumerated()),
+                                    id: \.offset
+                                ) { _, sourceReport in
+                                    GridRow {
+                                        Text(sourceReport.source.displayName)
+                                        Text(
+                                            "\(Int((sourceReport.speakerPersistentFraction * 100).rounded()))%"
+                                        )
+                                        Text(
+                                            "\(Int((sourceReport.roomSeatDependentFraction * 100).rounded()))%"
+                                        )
+                                        Text(
+                                            "\(sourceReport.points.filter { $0.classification == .ambiguous }.count)"
+                                        )
+                                    }
+                                    .font(.caption)
+                                }
+                            }
+
+                            Text(
+                                "Only speaker-persistent regions may drive the guided PEQ/FIR speaker-correction path. Room/seat-dependent, ambiguous, flat, below-window and unclassified regions remain protected."
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                Text(
+                    "Subwoofers remain in the listening-position integration campaign. Protected Low/Mid/High driver buses still require a crossover-preserving measurement path and are not directly swept."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            .padding(6)
+        }
+    }
+
+    private var crossDomainClassificationReport:
+        SpeakerOptimizerCrossDomainReport? {
+        guard characterization.characterizationReady,
+              optimizer.evidenceReport?.optimizerReady == true,
+              let characterizationSet = characterization.measurementSet,
+              let baseline = optimizer.measurementSet else {
+            return nil
+        }
+        return try? SpeakerOptimizerCrossDomainClassifier().classify(
+            characterization: characterizationSet,
+            listeningBaseline: baseline
+        )
     }
 
     private var designCard: some View {

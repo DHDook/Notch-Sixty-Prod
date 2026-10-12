@@ -10,11 +10,14 @@ CLASSIFIER_SOURCE = ROOT / "NotchSixty/Audio/SpeakerOptimizerCrossDomainClassifi
 CLASSIFIER_TESTS = ROOT / "NotchSixtyTests/SpeakerOptimizerCrossDomainClassifierTests.swift"
 AWARE_SOURCE = ROOT / "NotchSixty/Audio/SpeakerOptimizerClassificationAwareCandidates.swift"
 AWARE_TESTS = ROOT / "NotchSixtyTests/SpeakerOptimizerClassificationAwareCandidateTests.swift"
+GUIDED_SOURCE = ROOT / "NotchSixty/State/SpeakerOptimizerCharacterizationController.swift"
+GUIDED_TESTS = ROOT / "NotchSixtyTests/SpeakerOptimizerCharacterizationControllerTests.swift"
+UI_SOURCE = ROOT / "NotchSixty/UI/ProductionMultichannelCalibrationWorkspace.swift"
 PROJECT = ROOT / "NotchSixty.xcodeproj/project.pbxproj"
 DOC = ROOT / "docs/PR105_SPEAKER_CHARACTERIZATION_AND_VERIFICATION.md"
 WORKFLOW = ROOT / ".github/workflows/pr105-speaker-characterization.yml"
 
-for path in (SOURCE, TESTS, EARLY_SOURCE, EARLY_TESTS, CLASSIFIER_SOURCE, CLASSIFIER_TESTS, AWARE_SOURCE, AWARE_TESTS, PROJECT, DOC, WORKFLOW):
+for path in (SOURCE, TESTS, EARLY_SOURCE, EARLY_TESTS, CLASSIFIER_SOURCE, CLASSIFIER_TESTS, AWARE_SOURCE, AWARE_TESTS, GUIDED_SOURCE, GUIDED_TESTS, UI_SOURCE, PROJECT, DOC, WORKFLOW):
     assert path.is_file(), f"missing PR105 Slice 1 file: {path}"
 
 source = SOURCE.read_text()
@@ -25,6 +28,9 @@ classifier_source = CLASSIFIER_SOURCE.read_text()
 classifier_tests = CLASSIFIER_TESTS.read_text()
 aware_source = AWARE_SOURCE.read_text()
 aware_tests = AWARE_TESTS.read_text()
+guided_source = GUIDED_SOURCE.read_text()
+guided_tests = GUIDED_TESTS.read_text()
+ui_source = UI_SOURCE.read_text()
 project = PROJECT.read_text()
 doc = DOC.read_text()
 workflow = WORKFLOW.read_text()
@@ -123,6 +129,31 @@ for token in (
     assert token in aware_tests, f"missing classification-aware candidate test: {token}"
 
 for token in (
+    "final class SpeakerOptimizerCharacterizationController",
+    "startOrResumeSession(",
+    "SpeakerOptimizerCharacterizationCaptureBuilder",
+    "attachingEarlyWindowEvidence",
+    "earlyWindowEvidenceComplete",
+    "characterizationReady",
+    "struct SpeakerOptimizerCrossDomainSummary",
+):
+    assert token in guided_source, f"missing guided characterization controller contract: {token}"
+
+for token in (
+    "testCurrentCharacterizationStoreRoundTripAndDelete",
+    "testCrossDomainSummaryCountsEveryClassificationWithoutGrantingApply",
+):
+    assert token in guided_tests, f"missing guided characterization test: {token}"
+
+for token in (
+    "Speaker Optimizer · Speaker Characterization",
+    "Step 2 · Characterize each whole speaker",
+    "Step 3 · Compare speaker vs room evidence",
+    "Only speaker-persistent regions may drive",
+):
+    assert token in ui_source, f"missing guided Speaker Calibration UI contract: {token}"
+
+for token in (
     "F10500000000000000000001",
     "F10500000000000000000002",
     "F10500000000000000000011",
@@ -139,6 +170,10 @@ for token in (
     "F10500000000000000000008",
     "F10500000000000000000017",
     "F10500000000000000000018",
+    "F10500000000000000000009",
+    "F1050000000000000000000A",
+    "F10500000000000000000019",
+    "F1050000000000000000001A",
 ):
     assert project.count(token) >= 2, f"missing Xcode registration: {token}"
 
@@ -155,7 +190,9 @@ assert "Run PR105 characterization tests" in workflow
 assert "SpeakerOptimizerEarlyWindowCharacterizationTests" in workflow
 assert "SpeakerOptimizerCrossDomainClassifierTests" in workflow
 assert "SpeakerOptimizerClassificationAwareCandidateTests" in workflow
+assert "SpeakerOptimizerCharacterizationControllerTests" in workflow
 assert "Run full XCTest regression" in workflow
 assert "Cross-domain speaker-vs-room classification" in doc
 assert "Classification-aware PEQ/FIR correction authority" in doc
-print("PR105 characterization + early-window + classification-aware optimizer contracts passed")
+assert "Guided Speaker Calibration workflow" in doc
+print("PR105 characterization + classification-aware optimizer + guided UI contracts passed")

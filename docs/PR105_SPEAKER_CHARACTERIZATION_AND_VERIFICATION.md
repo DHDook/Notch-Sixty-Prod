@@ -133,6 +133,29 @@ reflection timing and acoustic benefit remain unverified.
 - Both products remain preview-only and non-deployable. This slice grants
   correction evidence authority, not permission to mutate live DSP.
 
+## Slice 5 — Guided Speaker Calibration workflow
+
+- Adds a dedicated characterization controller under SYSTEM → Speaker
+  Calibration while reusing the existing safe targeted-output transport.
+- The guided order is Listening Baseline → Speaker Characterization → Compare
+  Evidence. Characterization cannot start until the paired listening baseline
+  is optimizer-ready.
+- Whole speakers only are characterized; subwoofers stay in the listening-area
+  integration campaign.
+- The UI presents the ~1 m installed-speaker placement instruction and completes
+  all three stationary repeats before moving to the next speaker.
+- After deconvolution, the controller derives the early-window magnitude from
+  the in-memory impulse before compact persistence drops raw/impulse buffers.
+- Progress, evidence confidence and early-window completeness are visible.
+- Once both campaigns qualify, the UI shows per-source speaker-persistent and
+  room/seat-dependent percentages plus ambiguous counts.
+- The screen explicitly states that only speaker-persistent regions may feed the
+  guided speaker-correction path.
+- Speaker Optimizer controller failures are now included in the shared visible
+  calibration error banner.
+- No Apply control is added in this slice; classification-aware candidates
+  remain preview-only.
+
 ## Planned follow-on slices
 
 1. Correlate speaker-characterization features against multi-seat features to
