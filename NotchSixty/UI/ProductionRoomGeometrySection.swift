@@ -27,6 +27,7 @@ struct ProductionRoomGeometrySection: View {
     @ObservedObject var advisor: RoomTreatmentAdvisorController
     @State private var unit: RoomGeometryDisplayUnit = .meters
     @State private var showsAdvancedPredictions = false
+    @State private var confirmsUnchangedLabGeometry = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -252,6 +253,73 @@ struct ProductionRoomGeometrySection: View {
                             }
                             .buttonStyle(.bordered)
                         }
+                    }
+                }
+
+                Divider()
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("Measurement-Informed Toe-In")
+                        .font(.caption.bold())
+                    Text(
+                        "Review existing repeat-qualified on/off-axis Lab sweeps for this Playback System. Positive signed rotation points toward the right room wall (+X), negative toward the left. In-room benefit is not predicted."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    Toggle(
+                        "I confirm the saved speaker positions and angles match the physical arrangement during these Lab captures",
+                        isOn: $confirmsUnchangedLabGeometry
+                    )
+                    .font(.caption)
+                    Button("Inspect Latest Qualified Lab Directivity") {
+                        advisor.inspectRecentDirectivity(
+                            physicalGeometryMatchesCapture:
+                                confirmsUnchangedLabGeometry
+                        )
+                    }
+                    .disabled(
+                        !confirmsUnchangedLabGeometry
+                        || advisor.geometryHasUnsavedChanges
+                        || advisor.advancedPlacementHasUnsavedChanges
+                        || advisor.savedAdvancedPlacement == nil
+                    )
+                    .buttonStyle(.bordered)
+                    if let message = advisor.toeInEvidenceMessage {
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(
+                        advisor.toeInMeasurementEvidence,
+                        id: \.experimentID
+                    ) { result in
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(result.experimentID)
+                                .font(.caption.bold())
+                            if result.status == .measuredComparison,
+                               let change = result.indicatedSpectralChangeDB {
+                                Text(
+                                    String(
+                                        format:
+                                        "Measured off-axis spectral-similarity change: %.2f dB (positive means closer to on-axis, not an in-room gain)",
+                                        change
+                                    )
+                                )
+                                .font(.caption.monospacedDigit())
+                            } else {
+                                Text("INCONCLUSIVE · insufficient angular or frequency coverage")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Text(result.note)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            .secondary.opacity(0.04),
+                            in: RoundedRectangle(cornerRadius: 8)
+                        )
                     }
                 }
 
