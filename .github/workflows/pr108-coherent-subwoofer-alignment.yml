@@ -47,6 +47,7 @@ jobs:
           CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES
           -only-testing:NotchSixtyTests/CoherentSubwooferAlignmentTests
           -only-testing:NotchSixtyTests/CoherentSubwooferAlignmentCommissioningTests
+          -only-testing:NotchSixtyTests/CoherentSubwooferAlignmentApplyTransactionTests
           test
       - name: Run full XCTest regression
         run: >-
