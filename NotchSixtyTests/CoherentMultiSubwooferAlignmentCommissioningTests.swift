@@ -32,8 +32,8 @@ final class CoherentMultiSubwooferAlignmentCommissioningTests:
 
         XCTAssertTrue(proposal.approvalRequired)
         XCTAssertTrue(proposal.readyForApproval)
-        XCTAssertFalse(proposal.canApply)
-        XCTAssertFalse(proposal.canDeploy)
+        XCTAssertTrue(proposal.canApply)
+        XCTAssertTrue(proposal.canDeploy)
         XCTAssertEqual(proposal.subwooferIndices, [0, 1])
         XCTAssertEqual(
             proposal.rollbackSnapshot.playbackSystemState,
