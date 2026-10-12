@@ -61,9 +61,9 @@ class StackManifestTests(unittest.TestCase):
 
     def test_no_dsp_or_runtime_modification_in_slice_one(self):
         self.assertNotIn("NotchSixty/Audio/Realtime/N60RealtimeAudioBridge.c",
-                         module.ALLOWED_SLICE_ONE_FILES)
+                         module.ALLOWED_REMOTE_INTEGRATION_FILES)
         self.assertNotIn("NotchSixty/Audio/Routing/OutputDeviceProfileConfiguration.swift",
-                         module.ALLOWED_SLICE_ONE_FILES)
+                         module.ALLOWED_REMOTE_INTEGRATION_FILES)
 
 
 if __name__ == "__main__":
