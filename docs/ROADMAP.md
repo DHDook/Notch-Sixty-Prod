@@ -16,6 +16,28 @@ Legacy parity is the minimum capability floor. The commercial rewrite should exc
 
 Future portability must not materially delay the flagship Mac launch.
 
+## Current execution status — PR111
+
+**PR111 — Automatic Per-Driver Speaker Optimization** has begun as a
+remote-only, stacked draft above PR110. Slice 1 adds original, cut-only,
+bounded per-driver PEQ recommendations derived from independently protected
+Low/Mid/High Lab sweeps with mandatory active crossover and limiter.
+No DSP stage, gain, driver phase/polarity, delay, physical routing or
+protection is changed by a recommendation.
+
+PR110's five slices are remotely/software-verified; PR110, PR109 and all
+predecessor PRs remain OPEN/DRAFT/UNMERGED. PR111's source and CI gates do
+not authorize a merge or physical speaker-connected testing.
+
+Next PR111 slices will add richer driver-specific evidence, protected acoustic
+center/phase verification, cross-driver summation, and eventually explicit
+reversible commissioning. PR112 physical hardware acceptance, PR113
+production UX polish and PR114 commercial release preparation remain pending.
+
+See `docs/PR111_PER_DRIVER_SPEAKER_OPTIMIZATION.md`.
+
+---
+
 ## Current execution status — PR110
 
 **PR110 — Advanced Speaker & Subwoofer Placement Optimizer** is now in
