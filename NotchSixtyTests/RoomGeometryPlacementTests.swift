@@ -902,3 +902,252 @@ final class AdvancedPlacementSidecarTests: XCTestCase {
         XCTAssertEqual(try store.load(project.id), project)
     }
 }
+
+
+// PR110 Slice 3: only PR106-qualified directivity may inform physical
+// placement hypotheses. Positive similarity scores are NOT SPL improvements.
+final class AdvancedPlacementDirectivityTests: XCTestCase {
+    private let systemID = UUID(
+        uuidString: "AB110000-0000-0000-0000-000000000001")!
+    private let microphone = SpeakerOptimizerMicrophoneIdentity(
+        deviceUID: "pr110-mic", inputChannelIndex: 0,
+        calibrationFingerprint: "pr110-mic-cal"
+    )
+    private let analyzer = RoomAdvancedToeInEvidenceAnalyzer()
+
+    private func roomState() -> RoomAdvancedPlacementState {
+        var room = RoomGeometryModel.template(
+            projectID: UUID(uuidString:
+                "AB110000-0000-0000-0000-000000000002")!
+        )
+        // Left speaker bearing to center listener is 0° from +Y.
+        room.leftSpeaker.x = room.listener.x - 0.02
+        room.rightSpeaker.x = room.listener.x + 0.3
+        return RoomAdvancedPlacementState(
+            room: room, leftToeInDegrees: 6, rightToeInDegrees: -6
+        )
+    }
+
+    private func protocolItem(
+        _ side: RoomGeometrySpeaker,
+        mode: SpeakerMeasurementLabMode,
+        angle: Double,
+        radius: Double = 1.0
+    ) -> SpeakerMeasurementLabProtocol {
+        SpeakerMeasurementLabProtocol(
+            name: "PR110 \(angle)",
+            request: SpeakerMeasurementLabRequest(
+                mode: mode,
+                target: .acousticSource(
+                    .speaker(side == .left ? .frontLeft : .frontRight)
+                ),
+                geometry: SpeakerMeasurementLabGeometry(
+                    distanceMeters: radius,
+                    horizontalAngleDegrees: angle
+                )
+            )
+        )
+    }
+
+    private func makeSession(
+        speaker: RoomGeometrySpeaker = .left,
+        angles: [Double] = [-15, 15],
+        offAxisLoss: Double = 4,
+        snrDB: Double = 55
+    ) -> (SpeakerMeasurementLabSession, UUID) {
+        let on = protocolItem(speaker, mode: .wholeSpeakerOnAxis, angle: 0)
+        let others = angles.map {
+            protocolItem(speaker, mode: .wholeSpeakerOffAxis, angle: $0)
+        }
+        let frequencyGrid = (0..<64).map { n in
+            100.0 * pow(100.0, Double(n) / 63)
+        }
+        let protocols = [on] + others
+        let source: MultichannelCalibrationSource = .speaker(
+            speaker == .left ? .frontLeft : .frontRight
+        )
+        let captures = protocols.flatMap { item in
+            (0..<3).map { i in
+                SpeakerMeasurementLabCapture(
+                    protocolID: item.id,
+                    repeatIndex: i,
+                    capturedAt: Date(timeIntervalSince1970:
+                        1_704_100_100 + Double(i)),
+                    playbackSystemID: systemID,
+                    routingSignature: "pr110-same-route",
+                    microphone: microphone,
+                    sampleRate: 48_000,
+                    source: source,
+                    impulseResponse: [0, 0.1, 1, 0.2, 0],
+                    transferFunction: RoomCorrectionFrequencyResponse(
+                        frequenciesHz: frequencyGrid,
+                        magnitudeDB: frequencyGrid.map { hz in
+                            2 * exp(-0.5 * pow(log2(hz / 2_000) / 0.8, 2))
+                                - (item.id == on.id ? 0 : offAxisLoss)
+                                + Double(i - 1) * 0.02
+                        },
+                        phaseRadians: frequencyGrid.map { hz in
+                            0.03 * log2(hz / 1_000)
+                                + Double(i - 1) * 0.005
+                        }
+                    ),
+                    quality: RoomCorrectionMeasurementQuality(
+                        clipped: false,
+                        playbackPeakDBFS: -20,
+                        capturePeakDBFS: -12,
+                        estimatedNoiseFloorDBFS: -70,
+                        estimatedSNRDB: snrDB,
+                        sweepComplete: true,
+                        directArrivalSeconds:
+                            0.003 + Double(i) * 0.00002,
+                        usableLowHz: 100,
+                        usableHighHz: 10_000,
+                        warnings: []
+                    )
+                )
+            }
+        }
+        return (
+            SpeakerMeasurementLabSession(
+                playbackSystemID: systemID,
+                routingSignature: "pr110-same-route",
+                microphone: microphone,
+                sampleRate: 48_000,
+                protocols: protocols,
+                captures: captures,
+                createdAt: Date(timeIntervalSince1970: 1_704_100_000),
+                modifiedAt: Date(timeIntervalSince1970: 1_704_100_000)
+            ),
+            on.id
+        )
+    }
+
+    func testQualifiedSignedAnglesProduceExplicitlyNonDeployableComparisons()
+        throws {
+        let state = roomState()
+        let (session, onAxis) = makeSession()
+        let ranked = try analyzer.evaluate(
+            state: state, playbackSystemID: systemID,
+            session: session, onAxisProtocolID: onAxis, speaker: .left
+        )
+        XCTAssertEqual(ranked.count, 2)
+        XCTAssertTrue(ranked.allSatisfy {
+            $0.status == .measuredComparison
+        })
+        XCTAssertTrue(ranked.allSatisfy {
+            $0.sessionID == session.id && $0.sourceProtocolID == onAxis
+        })
+        XCTAssertTrue(ranked.allSatisfy {
+            $0.currentAbsoluteDeviationDB != nil
+                && $0.trialAbsoluteDeviationDB != nil
+                && $0.indicatedSpectralChangeDB?.isFinite == true
+        })
+        XCTAssertFalse(ranked[0].note.contains("SPL"))
+    }
+
+    func testSingleAngleDoesNotExtrapolateMissingNegativeSide() throws {
+        let state = roomState()
+        let (session, onAxis) = makeSession(angles: [15])
+        let ranked = try analyzer.evaluate(
+            state: state, playbackSystemID: systemID,
+            session: session, onAxisProtocolID: onAxis, speaker: .left
+        )
+        XCTAssertEqual(ranked.count, 2)
+        XCTAssertTrue(ranked.contains { $0.status == .inconclusive })
+        XCTAssertTrue(ranked.filter {
+            $0.status == .inconclusive
+        }.allSatisfy { $0.indicatedSpectralChangeDB == nil })
+    }
+
+    func testWideAngleGapDoesNotInventInterpolation() throws {
+        let (session, onAxis) = makeSession(angles: [-35, 35])
+        let ranked = try analyzer.evaluate(
+            state: roomState(), playbackSystemID: systemID,
+            session: session, onAxisProtocolID: onAxis, speaker: .left
+        )
+        XCTAssertTrue(ranked.allSatisfy {
+            $0.status == .inconclusive
+        })
+    }
+
+    func testWrongPlaybackSystemRejectedBeforeLabAnalysis() throws {
+        let (session, onAxis) = makeSession()
+        XCTAssertThrowsError(try analyzer.evaluate(
+            state: roomState(), playbackSystemID: UUID(),
+            session: session, onAxisProtocolID: onAxis, speaker: .left
+        )) {
+            XCTAssertEqual($0 as? RoomAdvancedDirectivityError,
+                           .invalidProjectIdentity)
+        }
+    }
+
+    func testWrongSpeakerRejectedDespiteOtherSideHavingValidData() throws {
+        let (session, onAxis) = makeSession(speaker: .right)
+        XCTAssertThrowsError(try analyzer.evaluate(
+            state: roomState(), playbackSystemID: systemID,
+            session: session, onAxisProtocolID: onAxis, speaker: .left
+        )) {
+            XCTAssertEqual($0 as? RoomAdvancedDirectivityError,
+                           .invalidSource)
+        }
+    }
+
+    func testLowSNRNotConvertedIntoPlacementScore() throws {
+        let (session, onAxis) = makeSession(snrDB: 12)
+        XCTAssertThrowsError(try analyzer.evaluate(
+            state: roomState(), playbackSystemID: systemID,
+            session: session, onAxisProtocolID: onAxis, speaker: .left
+        )) {
+            XCTAssertEqual($0 as? RoomAdvancedDirectivityError,
+                           .unqualifiedLabEvidence)
+        }
+    }
+
+    func testClippedDirectivityCannotInformToeIn() throws {
+        var (session, onAxis) = makeSession()
+        session.captures[4].quality.clipped = true
+        XCTAssertThrowsError(try analyzer.evaluate(
+            state: roomState(), playbackSystemID: systemID,
+            session: session, onAxisProtocolID: onAxis, speaker: .left
+        ))
+    }
+
+    func testUndersampledDirectivityCannotInformToeIn() throws {
+        var (session, onAxis) = makeSession()
+        session.captures.removeAll {
+            $0.protocolID == onAxis && $0.repeatIndex == 2
+        }
+        XCTAssertThrowsError(try analyzer.evaluate(
+            state: roomState(), playbackSystemID: systemID,
+            session: session, onAxisProtocolID: onAxis, speaker: .left
+        ))
+    }
+
+    func testMismatchedMeasurementRadiusCannotInformToeIn() throws {
+        var (session, onAxis) = makeSession()
+        session.protocols[1].request.geometry.distanceMeters = 1.4
+        XCTAssertThrowsError(try analyzer.evaluate(
+            state: roomState(), playbackSystemID: systemID,
+            session: session, onAxisProtocolID: onAxis, speaker: .left
+        ))
+    }
+
+    @MainActor
+    func testControllerRequiresExplicitSavedGeometryConfirmation() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("PR110-Directivity-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = RoomCorrectionProjectStore(rootDirectory: root)
+        let project = RoomCorrectionProject(
+            id: UUID(), playbackSystemID: systemID, name: "PR110 Toe-In"
+        )
+        try store.save(project)
+        let controller = RoomTreatmentAdvisorController(store: store)
+        controller.prepareForUse()
+        controller.startGeometryTemplate()
+        controller.saveGeometry()
+        controller.inspectRecentDirectivity(physicalGeometryMatchesCapture: false)
+        XCTAssertTrue(controller.toeInMeasurementEvidence.isEmpty)
+        XCTAssertNotNil(controller.toeInEvidenceMessage)
+    }
+}
