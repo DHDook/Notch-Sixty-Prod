@@ -56,6 +56,46 @@ final class CoherentSubwooferAlignmentPostApplyVerificationTests:
             source.magnitudeTrackingRMSDB,
             0.05
         )
+
+        let transaction =
+            CoherentSubwooferAlignmentApplyTransaction()
+        let finalized = try transaction.finalizeVerified(
+            report,
+            receipt: fixture.receipt,
+            profileStore: fixture.store,
+            verifiedAt: Date(
+                timeIntervalSince1970: 1_704_900_200
+            )
+        )
+        let verifiedOutput = try XCTUnwrap(
+            fixture.store.profile?.state.outputDeviceProfile
+        )
+        let deployment = try XCTUnwrap(
+            verifiedOutput.coherentSubwooferAlignment
+        )
+        XCTAssertTrue(deployment.verified)
+        XCTAssertFalse(deployment.provisional)
+        XCTAssertEqual(
+            deployment.verification?.applyReceiptID,
+            fixture.receipt.id
+        )
+        XCTAssertEqual(
+            fixture.store.profile?.state,
+            finalized.expectedVerifiedState
+        )
+
+        let rollback = try transaction.rollback(
+            fixture.receipt,
+            profileStore: fixture.store,
+            rolledBackAt: Date(
+                timeIntervalSince1970: 1_704_900_300
+            )
+        )
+        XCTAssertEqual(
+            rollback.restoredState,
+            fixture.receipt.rollbackSnapshot
+                .playbackSystemState
+        )
     }
 
     func testFreshSessionThatDoesNotTrackAppliedDelayIsRejected()
