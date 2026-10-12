@@ -309,6 +309,10 @@ struct OutputDeviceProfileConfiguration: Codable, Equatable, Sendable {
     /// The actual realtime delay/polarity remains in speaker/Sub calibration.
     var coherentSubwooferAlignment:
         CoherentSubwooferAlignmentDeploymentRecord?
+    /// Separate provenance for atomic coordinated alignment of every assigned
+    /// physical Sub. Mutually exclusive with the single-Sub PR108 record.
+    var coherentMultiSubwooferAlignment:
+        CoherentMultiSubwooferAlignmentDeploymentRecord?
 
     init(
         enabled: Bool = false,
@@ -321,7 +325,9 @@ struct OutputDeviceProfileConfiguration: Codable, Equatable, Sendable {
         speakerOptimizerPEQ: SpeakerOptimizerPEQDeploymentConfiguration? = nil,
         speakerOptimizerFIR: SpeakerOptimizerFIRDeploymentConfiguration? = nil,
         coherentSubwooferAlignment:
-            CoherentSubwooferAlignmentDeploymentRecord? = nil
+            CoherentSubwooferAlignmentDeploymentRecord? = nil,
+        coherentMultiSubwooferAlignment:
+            CoherentMultiSubwooferAlignmentDeploymentRecord? = nil
     ) {
         self.enabled = enabled
         self.programLayout = programLayout
@@ -334,6 +340,8 @@ struct OutputDeviceProfileConfiguration: Codable, Equatable, Sendable {
         self.speakerOptimizerFIR = speakerOptimizerFIR
         self.coherentSubwooferAlignment =
             coherentSubwooferAlignment
+        self.coherentMultiSubwooferAlignment =
+            coherentMultiSubwooferAlignment
     }
 
     var requiredDeviceUIDs: Set<String> {
@@ -419,10 +427,21 @@ struct OutputDeviceProfileConfiguration: Codable, Equatable, Sendable {
         try calibrationSummary?.validate()
         try speakerOptimizerPEQ?.validate(profile: self)
         try speakerOptimizerFIR?.validate(profile: self)
+        guard !(coherentSubwooferAlignment != nil
+                    && coherentMultiSubwooferAlignment != nil) else {
+            throw CoherentMultiSubwooferAlignmentDeploymentError
+                .invalidRecord
+        }
         guard coherentSubwooferAlignment?.validate(
             profile: self
         ) ?? true else {
             throw CoherentSubwooferAlignmentDeploymentError
+                .invalidRecord
+        }
+        guard coherentMultiSubwooferAlignment?.validate(
+            profile: self
+        ) ?? true else {
+            throw CoherentMultiSubwooferAlignmentDeploymentError
                 .invalidRecord
         }
     }
