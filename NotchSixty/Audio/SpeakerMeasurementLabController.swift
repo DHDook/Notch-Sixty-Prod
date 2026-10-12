@@ -199,6 +199,8 @@ final class SpeakerMeasurementLabController: ObservableObject {
 
     func startNewSession(
         protocols: [SpeakerMeasurementLabProtocol],
+        sharedClockReferenceConfiguration:
+            SpeakerMeasurementLabSharedClockReferenceConfiguration? = nil,
         createdAt: Date = Date()
     ) throws {
         guard activeTransport == nil else {
@@ -248,6 +250,8 @@ final class SpeakerMeasurementLabController: ObservableObject {
                 profile.multichannelCalibrationRoutingSignature,
             microphone: mic,
             microphoneCalibration: microphone.microphoneCalibration,
+            sharedClockReferenceConfiguration:
+                sharedClockReferenceConfiguration,
             sampleRate: output.nominalSampleRate,
             protocols: protocols,
             captures: [],
@@ -427,14 +431,35 @@ final class SpeakerMeasurementLabController: ObservableObject {
                     )
             }
             analysisProgram = program
-            transport = try transportFactory(
-                routePlan,
-                engine.outputDevices,
-                input,
-                microphone.selectedInputChannelIndex,
-                program,
-                physicalOutput
-            )
+            if let reference =
+                    session.sharedClockReferenceConfiguration {
+                guard reference.inputDeviceUID == input.uid,
+                      reference.outputReferenceDeviceUID
+                        == routePlan.referenceDeviceUID else {
+                    throw SpeakerMeasurementLabControllerError
+                        .sessionEnvironmentChanged
+                }
+                transport = try MultichannelCalibrationTransport(
+                    routePlan: routePlan,
+                    availableOutputs: engine.outputDevices,
+                    input: input,
+                    inputChannelIndex:
+                        microphone.selectedInputChannelIndex,
+                    referenceInputChannelIndex:
+                        reference.inputChannelIndex,
+                    program: program,
+                    physicalOutputChannelIndex: physicalOutput
+                )
+            } else {
+                transport = try transportFactory(
+                    routePlan,
+                    engine.outputDevices,
+                    input,
+                    microphone.selectedInputChannelIndex,
+                    program,
+                    physicalOutput
+                )
+            }
         }
 
         analysisGeneration &+= 1
@@ -498,13 +523,39 @@ final class SpeakerMeasurementLabController: ObservableObject {
                 return false
             }
 
+            var referenceEvidence:
+                SpeakerMeasurementLabSharedClockReferenceEvidence? = nil
+            if let referenceSamples = materialized.referenceSamples,
+               let referenceConfiguration =
+                    session.sharedClockReferenceConfiguration {
+                let referenceAnalyzed =
+                    try RoomCorrectionMeasurementAnalyzer()
+                        .analyzeSingleChannel(
+                            rawCapture: referenceSamples,
+                            program: program,
+                            microphoneCalibration: nil
+                        )
+                referenceEvidence =
+                    try SpeakerMeasurementLabSharedClockReferenceEvaluator()
+                        .build(
+                            analyzed: referenceAnalyzed,
+                            configuration: referenceConfiguration,
+                            microphone: session.microphone,
+                            sampleRate: session.sampleRate
+                        )
+            } else if session.sharedClockReferenceConfiguration != nil {
+                throw SpeakerMeasurementLabSessionError
+                    .sharedClockReferenceUnqualified
+            }
+
             let capture = try captureBuilder.build(
                 analyzed: analyzed,
                 session: session,
                 step: step,
                 excitationLevelDBFS: program.settings.levelDBFS,
                 protectedDriverProvenance:
-                    activeProtectedProvenance
+                    activeProtectedProvenance,
+                sharedClockReference: referenceEvidence
             )
             session = try orchestrator.appending(
                 capture,

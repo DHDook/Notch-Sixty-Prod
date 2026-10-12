@@ -1,6 +1,6 @@
 # PR106 — Advanced Speaker Measurement Lab
 
-Status: **SLICES 1–7 SOFTWARE VERIFIED — SLICE 8A CI PENDING**
+Status: **SLICES 1–8B SOFTWARE VERIFIED — SLICE 9A CI PENDING**
 
 Base: PR105 Guided Speaker Optimizer & Acoustic Verification.
 
@@ -310,6 +310,41 @@ targeted Lab tests and full XCTest regression.
   Lab analysis, while protected provenance retains the exact Low/Mid/High bus.
 - This remains measurement-only: no crossover, limiter, EQ or routing state is
   mutated and `canDeploy == false`.
+
+## Slice 8B exact-head verification
+
+Slice 8B exact head `d1ae00cea4bad862d31edc0336f5047c79a78c00` passed both
+GitHub Actions paths:
+
+- push run 38224937778;
+- pull-request run 38224951546.
+
+Both paths passed the PR106/PR105 validators, Apple Silicon Debug build,
+targeted Lab tests and full XCTest regression.
+
+## Slice 9A — Simultaneous shared-time reference capture substrate
+
+- Extends the targeted measurement bridge with an OPTIONAL second input channel.
+  Ordinary PR103/PR105 and ordinary Lab captures remain single-input and
+  behavior-compatible.
+- Microphone and electrical/reference input are sampled inside the same Core
+  Audio IOProc and therefore share one capture frame timeline.
+- The reference input must be a different channel on the SAME physical input
+  device as the measurement microphone. This prevents two independent ADC
+  clocks from being mislabeled as one reference domain.
+- Lab reference configuration is also bound to the expected reference output
+  device UID and sample rate.
+- The reference channel is deconvolved against the exact same ESS as the
+  microphone, without microphone calibration, and must pass finite arrival,
+  sweep-complete, unclipped and minimum-SNR qualification.
+- Qualified reference evidence persists its input/output identities, direct
+  arrival, transfer function and quality alongside the acoustic Lab capture.
+- This establishes a per-sweep shared sample timeline and reference arrival. It
+  does NOT claim absolute DAC/ADC latency and does NOT yet make independent
+  main/sub source sweeps coherent.
+- `.coherentMainsSubTiming` remains blocked in Slice 9A. Slice 9B must
+  pair two source sweeps against the SAME qualified reference path and audit
+  reference-path stability before publishing relative timing/phase.
 
 ## Planned follow-on slices
 

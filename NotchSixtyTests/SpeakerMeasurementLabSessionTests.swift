@@ -485,4 +485,199 @@ final class SpeakerMeasurementLabSessionTests: XCTestCase {
             )
         )
     }
+
+    func testDualInputTargetedBridgeCapturesMicAndReferenceOnSameTimeline()
+        throws {
+        let sweep: [Float] = [0.1, 0.2, 0.3, 0.4]
+        let bridge = sweep.withUnsafeBufferPointer {
+            N60TargetedRoomMeasurementBridgeCreateDualInput(
+                $0.baseAddress!,
+                UInt32($0.count),
+                2,
+                2,
+                0,
+                1,
+                0
+            )
+        }
+        let bridge = try XCTUnwrap(bridge)
+        defer { N60TargetedRoomMeasurementBridgeDestroy(bridge) }
+
+        let mic: [Float] = [1, 2, 3, 4, 5, 6, 7, 8]
+        let reference: [Float] = [11, 12, 13, 14, 15, 16, 17, 18]
+        var output = [Float](repeating: 0, count: 8)
+        let consumed = mic.withUnsafeBufferPointer { micBuffer in
+            reference.withUnsafeBufferPointer { refBuffer in
+                output.withUnsafeMutableBufferPointer { outBuffer in
+                    N60TargetedRoomMeasurementProcessDualStrided(
+                        bridge,
+                        micBuffer.baseAddress!,
+                        1,
+                        refBuffer.baseAddress!,
+                        1,
+                        outBuffer.baseAddress!,
+                        1,
+                        8
+                    )
+                }
+            }
+        }
+        XCTAssertEqual(consumed, 8)
+        let snapshot =
+            N60TargetedRoomMeasurementBridgeGetSnapshot(bridge)
+        XCTAssertTrue(snapshot.complete)
+        XCTAssertEqual(snapshot.capturedFrames, 8)
+        XCTAssertEqual(snapshot.referenceCapturedFrames, 8)
+        XCTAssertEqual(
+            output,
+            [0, 0, 0.1, 0.2, 0.3, 0.4, 0, 0]
+        )
+
+        var micCopy = [Float](repeating: 0, count: 8)
+        var refCopy = [Float](repeating: 0, count: 8)
+        XCTAssertEqual(
+            micCopy.withUnsafeMutableBufferPointer {
+                N60TargetedRoomMeasurementBridgeCopyCapture(
+                    bridge, $0.baseAddress!, 8
+                )
+            },
+            8
+        )
+        XCTAssertEqual(
+            refCopy.withUnsafeMutableBufferPointer {
+                N60TargetedRoomMeasurementBridgeCopyReferenceCapture(
+                    bridge, $0.baseAddress!, 8
+                )
+            },
+            8
+        )
+        XCTAssertEqual(micCopy, mic)
+        XCTAssertEqual(refCopy, reference)
+    }
+
+    func testSharedClockReferenceConfigurationRequiresSameADCAndDistinctChannel()
+        throws {
+        let good = SpeakerMeasurementLabSharedClockReferenceConfiguration(
+            inputDeviceUID: microphone.deviceUID,
+            inputChannelIndex: 1,
+            outputReferenceDeviceUID: "reference-output",
+            minimumSNRDB: 35
+        )
+        XCTAssertTrue(
+            good.validate(microphone: microphone, sampleRate: 48_000)
+        )
+        var sameChannel = good
+        sameChannel.inputChannelIndex = microphone.inputChannelIndex
+        XCTAssertFalse(
+            sameChannel.validate(
+                microphone: microphone,
+                sampleRate: 48_000
+            )
+        )
+        var otherDevice = good
+        otherDevice.inputDeviceUID = "other-adc"
+        XCTAssertFalse(
+            otherDevice.validate(
+                microphone: microphone,
+                sampleRate: 48_000
+            )
+        )
+    }
+
+    func testQualifiedSharedClockReferencePersistsWithCapture() throws {
+        let labProtocol = makeProtocol(
+            mode: .wholeSpeakerOnAxis,
+            target: .acousticSource(.speaker(.frontLeft)),
+            distance: 1.0
+        )
+        let config =
+            SpeakerMeasurementLabSharedClockReferenceConfiguration(
+                inputDeviceUID: microphone.deviceUID,
+                inputChannelIndex: 1,
+                outputReferenceDeviceUID: "reference-output",
+                minimumSNRDB: 35
+            )
+        var session = makeSession(protocols: [labProtocol])
+        session.sharedClockReferenceConfiguration = config
+        let step = try XCTUnwrap(
+            SpeakerMeasurementLabSessionOrchestrator()
+                .nextPendingStep(for: session)
+        )
+        let referenceChannel = makeChannel()
+        let reference =
+            try SpeakerMeasurementLabSharedClockReferenceEvaluator()
+                .build(
+                    analyzed: referenceChannel,
+                    configuration: config,
+                    microphone: microphone,
+                    sampleRate: 48_000
+                )
+        XCTAssertTrue(reference.sharedTimeOriginQualified)
+
+        let capture = try SpeakerMeasurementLabCaptureBuilder().build(
+            analyzed: makeChannel(),
+            session: session,
+            step: step,
+            sharedClockReference: reference
+        )
+        session = try SpeakerMeasurementLabSessionOrchestrator()
+            .appending(capture, to: session, for: step)
+        XCTAssertEqual(
+            session.captures.first?.sharedClockReference,
+            reference
+        )
+        XCTAssertNoThrow(try session.validateStructure())
+    }
+
+    func testLowSNRReferenceFailsClosedAndCannotAuthenticateTimeOrigin()
+        throws {
+        let config =
+            SpeakerMeasurementLabSharedClockReferenceConfiguration(
+                inputDeviceUID: microphone.deviceUID,
+                inputChannelIndex: 1,
+                outputReferenceDeviceUID: "reference-output",
+                minimumSNRDB: 35
+            )
+        var channel = makeChannel()
+        channel.quality.estimatedSNRDB = 20
+        XCTAssertThrowsError(
+            try SpeakerMeasurementLabSharedClockReferenceEvaluator()
+                .build(
+                    analyzed: channel,
+                    configuration: config,
+                    microphone: microphone,
+                    sampleRate: 48_000
+                )
+        ) {
+            XCTAssertEqual(
+                $0 as? SpeakerMeasurementLabSessionError,
+                .sharedClockReferenceUnqualified
+            )
+        }
+    }
+
+    func testSharedReferenceDoesNotYetUnblockCoherentMainsSubProtocol()
+        throws {
+        let coherent = SpeakerMeasurementLabProtocol(
+            name: "Mains/Sub Coherent Timing",
+            request: SpeakerMeasurementLabRequest(
+                mode: .coherentMainsSubTiming,
+                target: .sourcePair(
+                    main: .speaker(.frontLeft),
+                    subwoofer: .subwoofer(0)
+                ),
+                geometry: SpeakerMeasurementLabGeometry(
+                    distanceMeters: 2.0
+                )
+            )
+        )
+        XCTAssertThrowsError(try coherent.validateForAcquisition()) {
+            guard case .unsupportedAcquisitionMode(
+                .coherentMainsSubTiming
+            ) = $0 as? SpeakerMeasurementLabSessionError else {
+                return XCTFail("Unexpected error: \($0)")
+            }
+        }
+    }
+
 }

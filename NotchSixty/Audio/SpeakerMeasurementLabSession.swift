@@ -88,6 +88,87 @@ struct SpeakerMeasurementLabProtocol:
     }
 }
 
+
+struct SpeakerMeasurementLabSharedClockReferenceConfiguration:
+    Codable, Equatable, Sendable {
+    var inputDeviceUID: String
+    var inputChannelIndex: Int
+    var outputReferenceDeviceUID: String
+    var minimumSNRDB: Double = 35
+
+    func validate(
+        microphone: SpeakerOptimizerMicrophoneIdentity,
+        sampleRate: Double
+    ) -> Bool {
+        !inputDeviceUID.isEmpty
+            && inputDeviceUID == microphone.deviceUID
+            && inputChannelIndex >= 0
+            && inputChannelIndex != microphone.inputChannelIndex
+            && !outputReferenceDeviceUID.isEmpty
+            && minimumSNRDB.isFinite
+            && (20...80).contains(minimumSNRDB)
+            && sampleRate.isFinite && sampleRate > 0
+    }
+}
+
+struct SpeakerMeasurementLabSharedClockReferenceEvidence:
+    Codable, Equatable, Sendable {
+    var inputDeviceUID: String
+    var inputChannelIndex: Int
+    var outputReferenceDeviceUID: String
+    var sampleRate: Double
+    var directArrivalSeconds: Double
+    var transferFunction: RoomCorrectionFrequencyResponse
+    var quality: RoomCorrectionMeasurementQuality
+
+    var sharedTimeOriginQualified: Bool {
+        !quality.clipped
+            && quality.sweepComplete
+            && quality.estimatedSNRDB.map { $0 >= 35 } == true
+            && directArrivalSeconds.isFinite
+            && directArrivalSeconds >= 0
+    }
+}
+
+/// Qualifies an electrical/reference channel captured in the SAME IOProc as
+/// the microphone. This establishes one per-sweep sample timeline and reference
+/// arrival, not absolute DAC/ADC latency and not yet cross-source coherence.
+struct SpeakerMeasurementLabSharedClockReferenceEvaluator: Sendable {
+    func build(
+        analyzed: RoomCorrectionChannelMeasurement,
+        configuration:
+            SpeakerMeasurementLabSharedClockReferenceConfiguration,
+        microphone: SpeakerOptimizerMicrophoneIdentity,
+        sampleRate: Double
+    ) throws -> SpeakerMeasurementLabSharedClockReferenceEvidence {
+        guard configuration.validate(
+                  microphone: microphone,
+                  sampleRate: sampleRate
+              ),
+              let response = analyzed.transferFunction,
+              let arrival = analyzed.quality.directArrivalSeconds,
+              arrival.isFinite, arrival >= 0,
+              !analyzed.quality.clipped,
+              analyzed.quality.sweepComplete,
+              analyzed.quality.estimatedSNRDB.map({
+                  $0 >= configuration.minimumSNRDB
+              }) == true else {
+            throw SpeakerMeasurementLabSessionError
+                .sharedClockReferenceUnqualified
+        }
+        return SpeakerMeasurementLabSharedClockReferenceEvidence(
+            inputDeviceUID: configuration.inputDeviceUID,
+            inputChannelIndex: configuration.inputChannelIndex,
+            outputReferenceDeviceUID:
+                configuration.outputReferenceDeviceUID,
+            sampleRate: sampleRate,
+            directArrivalSeconds: arrival,
+            transferFunction: response,
+            quality: analyzed.quality
+        )
+    }
+}
+
 struct SpeakerMeasurementLabCapture:
     Identifiable, Codable, Equatable, Sendable {
     var id: UUID = UUID()
@@ -107,6 +188,10 @@ struct SpeakerMeasurementLabCapture:
     /// production crossover/limiter state used for this repeat.
     var protectedDriverProvenance:
         SpeakerMeasurementLabProtectedDriverCaptureProvenance? = nil
+    /// Optional simultaneous electrical/shared-time reference evidence.
+    /// Nil preserves existing Lab archives and ordinary single-input captures.
+    var sharedClockReference:
+        SpeakerMeasurementLabSharedClockReferenceEvidence? = nil
     var impulseResponse: [Float]
     var transferFunction: RoomCorrectionFrequencyResponse
     var quality: RoomCorrectionMeasurementQuality
@@ -123,6 +208,11 @@ struct SpeakerMeasurementLabSession:
     var microphone: SpeakerOptimizerMicrophoneIdentity
     /// Optional for backward compatibility with pre-Slice-6 lab archives.
     var microphoneCalibration: RoomCorrectionMicrophoneCalibration? = nil
+    /// Optional simultaneous reference-input configuration. Slice 9A permits
+    /// collecting qualified reference evidence on ordinary Lab protocols; the
+    /// coherent mains/sub protocol remains blocked until paired-source 9B.
+    var sharedClockReferenceConfiguration:
+        SpeakerMeasurementLabSharedClockReferenceConfiguration? = nil
     var sampleRate: Double
     var protocols: [SpeakerMeasurementLabProtocol]
     var captures: [SpeakerMeasurementLabCapture]
@@ -137,6 +227,10 @@ struct SpeakerMeasurementLabSession:
                   in: .whitespacesAndNewlines
               ).isEmpty,
               microphone.validate(),
+              sharedClockReferenceConfiguration?.validate(
+                  microphone: microphone,
+                  sampleRate: sampleRate
+              ) ?? true,
               !protocols.isEmpty,
               Set(protocols.map(\.id)).count == protocols.count,
               Set(captures.map(\.id)).count == captures.count else {
@@ -201,6 +295,29 @@ struct SpeakerMeasurementLabSession:
                 throw SpeakerMeasurementLabSessionError
                     .captureIdentityMismatch
             }
+
+            if let reference = capture.sharedClockReference {
+                guard let configuration =
+                        sharedClockReferenceConfiguration,
+                      reference.inputDeviceUID
+                        == configuration.inputDeviceUID,
+                      reference.inputChannelIndex
+                        == configuration.inputChannelIndex,
+                      reference.outputReferenceDeviceUID
+                        == configuration.outputReferenceDeviceUID,
+                      abs(reference.sampleRate - sampleRate) < 0.5,
+                      reference.quality.estimatedSNRDB.map({
+                          $0 >= configuration.minimumSNRDB
+                      }) == true,
+                      reference.sharedTimeOriginQualified else {
+                    throw SpeakerMeasurementLabSessionError
+                        .captureIdentityMismatch
+                }
+            } else if sharedClockReferenceConfiguration != nil {
+                throw SpeakerMeasurementLabSessionError
+                    .captureIdentityMismatch
+            }
+
         }
 
         for labProtocol in protocols {
@@ -258,6 +375,7 @@ enum SpeakerMeasurementLabSessionError:
     case noCaptureToRetry
     case persistenceIdentityMismatch
     case analyzedResponseUnavailable
+    case sharedClockReferenceUnqualified
 
     var errorDescription: String? {
         switch self {
@@ -279,6 +397,8 @@ enum SpeakerMeasurementLabSessionError:
             return "Stored Advanced Speaker Measurement Lab session identity does not match the requested session."
         case .analyzedResponseUnavailable:
             return "Lab analysis did not produce a usable transfer function or impulse response."
+        case .sharedClockReferenceUnqualified:
+            return "The simultaneous electrical/reference input did not produce a qualified shared-time reference sweep."
         }
     }
 }
@@ -461,7 +581,9 @@ struct SpeakerMeasurementLabCaptureBuilder: Sendable {
         step: SpeakerMeasurementLabSessionStep,
         excitationLevelDBFS: Double? = nil,
         protectedDriverProvenance:
-            SpeakerMeasurementLabProtectedDriverCaptureProvenance? = nil
+            SpeakerMeasurementLabProtectedDriverCaptureProvenance? = nil,
+        sharedClockReference:
+            SpeakerMeasurementLabSharedClockReferenceEvidence? = nil
     ) throws -> SpeakerMeasurementLabCapture {
         guard let source = step.labProtocol.captureSource,
               let response = analyzed.transferFunction,
@@ -483,6 +605,7 @@ struct SpeakerMeasurementLabCaptureBuilder: Sendable {
             source: source,
             protectedDriverProvenance:
                 protectedDriverProvenance,
+            sharedClockReference: sharedClockReference,
             impulseResponse: analyzed.impulseResponse,
             transferFunction: response,
             quality: analyzed.quality

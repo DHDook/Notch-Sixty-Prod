@@ -100,6 +100,11 @@ for token in (
     "testAppendEnforcesRepeatSequenceAndCaptureIdentity",
     "testRetryLatestCaptureReturnsProtocolToThatRepeat",
     "testLabSessionPersistenceRoundTripKeepsGeometryAndCompactAnalysis",
+    "testDualInputTargetedBridgeCapturesMicAndReferenceOnSameTimeline",
+    "testSharedClockReferenceConfigurationRequiresSameADCAndDistinctChannel",
+    "testQualifiedSharedClockReferencePersistsWithCapture",
+    "testLowSNRReferenceFailsClosedAndCannotAuthenticateTimeOrigin",
+    "testSharedReferenceDoesNotYetUnblockCoherentMainsSubProtocol",
 ):
     assert token in session_tests, f"missing PR106 session test: {token}"
 
@@ -158,6 +163,30 @@ for token in (
     "testComponentMetadataMustBePhysicallyFinite",
 ):
     assert token in nearfield_tests, f"missing PR106 near-field LF test: {token}"
+
+for token in (
+    "N60TargetedRoomMeasurementBridgeCreateDualInput",
+    "N60TargetedRoomMeasurementProcessDualStrided",
+    "N60TargetedRoomMeasurementBridgeCopyReferenceCapture",
+):
+    assert token in (ROOT / "NotchSixty/Audio/Realtime/N60TargetedRoomMeasurementBridge.h").read_text(), f"missing dual-input shared-time bridge contract: {token}"
+
+for token in (
+    "SpeakerMeasurementLabSharedClockReferenceConfiguration",
+    "SpeakerMeasurementLabSharedClockReferenceEvidence",
+    "SpeakerMeasurementLabSharedClockReferenceEvaluator",
+    "sharedClockReferenceConfiguration",
+    "sharedClockReference",
+    "sharedClockReferenceUnqualified",
+):
+    assert token in session_source, f"missing shared-time reference session contract: {token}"
+
+for token in (
+    "referenceInputChannelIndex",
+    "referenceSamples",
+    "N60TargetedRoomMeasurementBridgeCreateDualInput",
+):
+    assert token in (ROOT / "NotchSixty/Audio/CoreAudio/MultichannelCalibrationTransport.swift").read_text(), f"missing shared-time reference transport contract: {token}"
 
 for token in (
     "SpeakerMeasurementLabProtectedTransportFactory",
@@ -279,10 +308,11 @@ assert "SpeakerMeasurementLabLevelDependenceTests" in workflow
 assert "SpeakerMeasurementLabProtectedExcitationTests" in workflow
 assert "Run full XCTest regression" in workflow
 assert "Slice 2" in doc
+assert "Simultaneous shared-time reference capture substrate" in doc
 assert "Slice 3" in doc
 assert "Repeat-qualified installed-room directivity comparison" in doc
 assert "Repeat-qualified near-field LF component diagnostics" in doc
 assert "Explicit reflection-window quasi-anechoic estimate" in doc
 assert "Bounded two-level transfer level-dependence diagnostic" in doc
 assert "Exact protected-driver excitation compiler substrate" in doc
-print("PR106 lab capability + advanced diagnostics + protected excitation substrate contracts passed")
+print("PR106 lab diagnostics + protected excitation + shared-time reference substrate contracts passed")
