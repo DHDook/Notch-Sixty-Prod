@@ -1333,13 +1333,7 @@ final class AdvancedSubPlacementABTests: XCTestCase {
     func testIncompleteRepeatsAndClippingFailClosed() throws {
         let before = captures(role: .baseline, spread: 5)
         var after = captures(role: .candidate, spread: 2)
-        let seat = after.positions[0].id
-        after.captures.removeAll {
-            $0.positionID == seat && $0.capturedAt
-                == after.captures.first?.capturedAt
-        }
-        // An intact but clipped set is always rejected.
-        after = captures(role: .candidate, spread: 2)
+        // Clipping or a missing repeated capture is always rejected.
         after.captures[0].quality.clipped = true
         XCTAssertThrowsError(try measure(before, after))
         after = captures(role: .candidate, spread: 2)
