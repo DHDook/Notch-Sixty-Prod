@@ -1,6 +1,6 @@
 # PR107 — Speaker Optimizer FIR Deployment & Latency Coordination
 
-Status: **SOFTWARE PATH IMPLEMENTED — CI + PHYSICAL VALIDATION PENDING**
+Status: **REMOTE SOFTWARE COMPLETE — PHYSICAL ACCEPTANCE PENDING**
 
 Base: PR106 Advanced Speaker Measurement Lab / GitHub PR #107.
 Implementation PR: GitHub #108.
@@ -306,6 +306,10 @@ On real Apple Silicon hardware with the user's actual output chain, verify:
 7. subjective transition/startup behavior before declaring production-ready
    hardware acceptance.
 
-PR107 should remain a draft until its current CI head is green and the roadmap's
-chosen hardware acceptance checkpoint is recorded. PR108 remains responsible
+PR107's exact software head is CI-green. The executable physical commissioning
+checklist is recorded in `docs/PR107_PHYSICAL_FIR_ACCEPTANCE.md`.
+
+PR107 should remain a draft until the roadmap's chosen hardware acceptance
+checkpoint is recorded or the owner explicitly chooses to merge with physical
+acceptance deferred. PR108 remains responsible
 for dedicated physical subwoofer timing/polarity optimization.
