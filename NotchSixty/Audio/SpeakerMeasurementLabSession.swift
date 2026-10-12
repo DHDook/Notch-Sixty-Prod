@@ -507,11 +507,11 @@ struct SpeakerMeasurementLabSessionStep: Equatable, Sendable {
         case .protectedDriverNearField:
             let bus = labProtocol.protectedDriverBus?.displayName
                 ?? "protected driver"
-            return "Place the microphone (format(geometry.distanceMeters)) m from (bus). The sweep is pre-rendered through the active crossover and target limiter; keep geometry fixed for (repeatText)."
+            return "Place the microphone \(format(geometry.distanceMeters)) m from \(bus). The sweep is pre-rendered through the active crossover and target limiter; keep geometry fixed for \(repeatText)."
         case .coherentMainsSubTiming:
             let leg = labProtocol.coherentLeg == .main
                 ? "main speaker" : "subwoofer"
-            return "Keep the microphone fixed at (format(geometry.distanceMeters)) m and measure the linked (leg) with the simultaneous electrical reference active; (repeatText)."
+            return "Keep the microphone fixed at \(format(geometry.distanceMeters)) m and measure the linked \(leg) with the simultaneous electrical reference active; \(repeatText)."
         }
     }
 

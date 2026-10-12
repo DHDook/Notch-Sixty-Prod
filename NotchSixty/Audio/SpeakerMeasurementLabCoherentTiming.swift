@@ -217,10 +217,10 @@ struct SpeakerMeasurementLabCoherentTimingAnalyzer: Sendable {
         }
 
         let referenceMagnitudeRepeatability = rmsDeviationFromMean(
-            allCaptures.map {
-                analysisIndices.map {
-                    $0.sharedClockReference!
-                        .transferFunction.magnitudeDB[$0]
+            allCaptures.map { capture in
+                analysisIndices.map { index in
+                    capture.sharedClockReference!
+                        .transferFunction.magnitudeDB[index]
                 }
             }
         )
