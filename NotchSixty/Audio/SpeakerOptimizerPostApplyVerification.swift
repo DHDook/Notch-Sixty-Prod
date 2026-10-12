@@ -242,7 +242,7 @@ struct SpeakerOptimizerPostApplyVerifier: Sendable {
             )
             let improvement = persistentBefore - persistentAfter
 
-            var worstSeatRegression = -.infinity
+            var worstSeatRegression = -Double.infinity
             for seat in baselineResiduals.indices {
                 let before = indexedRMS(
                     [baselineResiduals[seat]],
