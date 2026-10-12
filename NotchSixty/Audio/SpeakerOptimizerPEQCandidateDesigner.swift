@@ -327,7 +327,9 @@ struct SpeakerOptimizerPEQCandidateDesigner: Sendable {
         bands: [SpeakerOptimizerPEQBand], frequencies: [Double],
         proposed: [Double], positions: [[Double]], weights: [Double],
         target: [Double], constraints: SpeakerOptimizerPEQConstraints,
-        options: SpeakerOptimizerDesignOptions, sampleRate: Double
+        options: SpeakerOptimizerDesignOptions, sampleRate: Double,
+        authorization: [Bool],
+        maximumProtectedLeakageDB: Double?
     ) -> Bool {
         let oldZeros = Array(repeating: 0.0, count: proposed.count)
         let baselineError = weightedRMSE(positions, weights, target, oldZeros)
