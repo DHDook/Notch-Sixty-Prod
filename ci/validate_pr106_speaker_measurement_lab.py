@@ -301,8 +301,9 @@ for token in (
     "struct SpeakerMeasurementLabCompactReport",
     "SpeakerMeasurementLabReportBuilder",
     "SpeakerMeasurementLabReportExporter",
-    "containsRawImpulseData: Bool { false }",
-    "var canDeploy: Bool { false }",
+    "var measurementOnly: Bool = true",
+    "var canDeploy: Bool = false",
+    "var containsRawImpulseData: Bool = false",
     "listRecentSessions",
 ):
     assert token in report_source, f"missing PR106 compact report contract: {token}"
