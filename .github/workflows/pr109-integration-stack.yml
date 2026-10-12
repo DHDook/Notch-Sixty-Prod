@@ -1,0 +1,87 @@
+name: PR109 Remote Stack Integration Audit
+
+on:
+  push:
+    branches:
+      - feature/pr109-integration-stack-consolidation
+  pull_request:
+    branches:
+      - feature/pr108-coherent-subwoofer-alignment
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr109-remote-stack-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portable-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify immutable stacked ancestry and source-only boundary
+        run: python3 ci/validate_pr109_integration_stack.py --report "$${{ runner.temp }}/pr109-remote-stack.json"
+
+      - name: Test fail-closed stack manifest and authorization rules
+        run: python3 -m unittest discover -s ci/tests -p test_pr109_integration_stack.py -v
+
+      - name: Preserve cumulative release, measurement and acoustic safety contracts
+        run: |
+          set -euo pipefail
+          python3 ci/audit_pr98_disconnected_boundary.py
+          python3 ci/validate_pr101_reliability_acceptance.py
+          python3 ci/validate_pr102_release_readiness.py
+          python3 ci/validate_pr102_app_store_boundary.py
+          python3 ci/validate_pr102_dependency_manifest.py
+          python3 ci/validate_pr103_speaker_optimizer_measurement.py
+          python3 ci/validate_pr104_speaker_optimizer.py
+          python3 ci/validate_pr105_speaker_characterization.py
+          python3 ci/validate_pr106_speaker_measurement_lab.py
+          python3 ci/validate_pr107_speaker_optimizer_fir.py
+          python3 ci/validate_pr108_coherent_subwoofer_alignment.py
+
+      - name: Publish remote audit evidence only
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr109-remote-stack-audit
+          path: ${{ runner.temp }}/pr109-remote-stack.json
+          retention-days: 30
+          if-no-files-found: error
+
+  macos-regression:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify PR109 snapshot ancestry and no-audio-change scope
+        run: python3 ci/validate_pr109_integration_stack.py
+
+      - name: Build arm64 Debug app
+        run: >-
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
+          -configuration Debug -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES build
+
+      - name: Build arm64 unsigned Release app
+        run: >-
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
+          -configuration Release -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO GENERATE_INFOPLIST_FILE=NO
+          INFOPLIST_FILE=NotchSixty/Info.plist build
+
+      - name: Run full XCTest regression
+        run: >-
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
+          -configuration Debug -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES test
