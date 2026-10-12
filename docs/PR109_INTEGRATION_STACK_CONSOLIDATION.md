@@ -108,6 +108,19 @@ enforce the cumulative integration contracts:
   lanes → bass management / physical Sub routing; and
 - the PR98 disconnected speaker-connected ANC safety audit is retained.
 
+An additional inherited PR106 validator assumed the entire UI still
+displayed `MEASUREMENT ONLY`. PR108 deliberately replaced that banner with
+`MEASURE → REVIEW → VERIFY` and a separate explicit, provisional coherent
+Sub alignment controller. PR109 preserves the historical PR106 Lab-only check
+OR requires the new controller, non-mutating Lab disclosure and explicit
+fresh-verification wording. The PR108 guarded commissioning validator remains
+mandatory in the cumulative job.
+
+The consolidated real-hardware and eventual sequential-merge planning checklist
+is `docs/PR109_HARDWARE_MERGE_HANDOFF.md`. It records all unperformed physical,
+acoustic, A/V, safe-reference, Apple-signing and release gates without promoting
+them to remotely accepted evidence.
+
 The production README is updated from the historical PR102-in-progress
 description to remote PR108 closure / PR109 integration. The PR102 validator
 still checks its required historical provenance and release metadata tokens.
