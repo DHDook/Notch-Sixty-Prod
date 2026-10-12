@@ -26,8 +26,11 @@ CALIBRATION = ROOT / "NotchSixty/Audio/Routing/OutputDeviceCalibration.swift"
 PROJECT = ROOT / "NotchSixty.xcodeproj/project.pbxproj"
 DOC = ROOT / "docs/PR108_COHERENT_SUBWOOFER_ALIGNMENT.md"
 WORKFLOW = ROOT / ".github/workflows/pr108-coherent-subwoofer-alignment.yml"
+GUIDED = ROOT / "NotchSixty/Audio/CoherentSubwooferAlignmentGuidedWorkflow.swift"
+GUIDED_TESTS = ROOT / "NotchSixtyTests/CoherentSubwooferAlignmentGuidedWorkflowTests.swift"
+LAB_UI = ROOT / "NotchSixty/UI/ProductionSpeakerMeasurementLabWorkspace.swift"
 
-for path in (SOURCE, TESTS, COMMISSIONING, COMMISSIONING_TESTS, APPLY, APPLY_TESTS, VERIFY, VERIFY_TESTS, DEPLOYMENT, MULTI, MULTI_TESTS, MULTI_COMMISSIONING, MULTI_COMMISSIONING_TESTS, MULTI_DEPLOYMENT, MULTI_APPLY, MULTI_APPLY_TESTS, MULTI_VERIFY, MULTI_VERIFY_TESTS, PROFILE, COHERENT, CALIBRATION, PROJECT, DOC, WORKFLOW):
+for path in (SOURCE, TESTS, COMMISSIONING, COMMISSIONING_TESTS, APPLY, APPLY_TESTS, VERIFY, VERIFY_TESTS, DEPLOYMENT, MULTI, MULTI_TESTS, MULTI_COMMISSIONING, MULTI_COMMISSIONING_TESTS, MULTI_DEPLOYMENT, MULTI_APPLY, MULTI_APPLY_TESTS, MULTI_VERIFY, MULTI_VERIFY_TESTS, PROFILE, COHERENT, CALIBRATION, PROJECT, DOC, WORKFLOW, GUIDED, GUIDED_TESTS, LAB_UI):
     assert path.is_file(), f"missing PR108 Slice 1 file: {path}"
 
 source = SOURCE.read_text()
@@ -54,6 +57,9 @@ calibration = CALIBRATION.read_text()
 project = PROJECT.read_text()
 doc = DOC.read_text()
 workflow = WORKFLOW.read_text()
+guided = GUIDED.read_text()
+guided_tests = GUIDED_TESTS.read_text()
+lab_ui = LAB_UI.read_text()
 
 for token in (
     "struct CoherentSubwooferAlignmentPlanner",
@@ -289,6 +295,37 @@ for token in (
 ):
     assert token in multi_verify_tests, f"missing PR108 coordinated fresh verification test: {token}"
 
+
+for token in (
+    "final class CoherentSubwooferAlignmentGuidedController",
+    "func prepareReview(",
+    "func approveAndApply(",
+    "func verify(",
+    "func rollback(",
+    "func resetAfterRollback()",
+    "case singleSubwoofer",
+    "case coordinatedMultiSubwoofer",
+):
+    assert token in guided, f"missing PR108 guided commissioning contract: {token}"
+
+for token in (
+    "testSingleSubGuidedReviewApplyAndRollback",
+    "testMultiSubGuidedReviewUsesAtomicCoordinatedPath",
+    "testAcceptedSingleVerificationFinalizesAndCanRollback",
+    "testRejectedMultiVerificationAutomaticallyRollsBack",
+    "testReviewRequiresExactAssignedSubEvidence",
+):
+    assert token in guided_tests, f"missing PR108 guided commissioning test: {token}"
+
+for token in (
+    "coherentAlignmentCard",
+    "Generate Alignment Proposal",
+    "Approve & Apply Provisionally",
+    "Start Fresh Verification Session",
+    "Verify Current Lab Session",
+):
+    assert token in lab_ui, f"missing PR108 production commissioning UI: {token}"
+
 for token in (
     "wrappedRelativePhaseRadians",
     "relativeArrivalMilliseconds",
@@ -342,6 +379,10 @@ for token in (
     "F10810000000000000000002",
     "F10810000000000000000011",
     "F10810000000000000000012",
+    "F10820000000000000000001",
+    "F10820000000000000000002",
+    "F10820000000000000000011",
+    "F10820000000000000000012",
 ):
     assert project.count(token) >= 2, f"missing PR108 Xcode registration: {token}"
 
@@ -357,6 +398,7 @@ for token in (
     "Slice 8 — Atomic coordinated multi-Sub Apply + provenance",
     "Slice 9 — Coordinated fresh coherent verification",
     "Slice 10 — Verified coordinated provenance + finalization",
+    "Slice 11 — Guided production commissioning workflow/UI",
     "does **not** subtract relativeArrivalMilliseconds again",
     "previewOnly == true",
     "canDeploy == false",
@@ -374,6 +416,7 @@ assert "CoherentMultiSubwooferAlignmentTests" in workflow
 assert "CoherentMultiSubwooferAlignmentCommissioningTests" in workflow
 assert "CoherentMultiSubwooferAlignmentApplyTransactionTests" in workflow
 assert "CoherentMultiSubwooferAlignmentPostApplyVerificationTests" in workflow
+assert "CoherentSubwooferAlignmentGuidedWorkflowTests" in workflow
 assert "Run full XCTest regression" in workflow
 
-print("PR108 Slice 1-10 single-Sub + coordinated multi-Sub verified persistence boundary passed")
+print("PR108 Slice 1-11 backend + guided production commissioning boundary passed")
