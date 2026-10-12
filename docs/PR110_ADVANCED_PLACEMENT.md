@@ -1,6 +1,6 @@
 # PR110 — Advanced Speaker & Subwoofer Placement Optimizer
 
-**State: Slices 1–3 implemented; Slice 3 exact-head CI and all real-room validation pending.**
+**State: Slices 1–4 implemented; Slice 4 exact-head CI and all real-room validation pending.**
 
 **REMOTE SCOPE ONLY:** no acoustic, physical, release or merge acceptance is implied.
 
@@ -136,12 +136,55 @@ angles, insufficient angular resolution, and explicit human confirmation.
 The targeted XCTest group and cumulative macOS regression must pass at the
 same exact PR110 commit before Slice 3 is remotely accepted.
 
-**Slice 4 — Multi-seat and Sub placement.** Incorporate measured PR92 room
-bass variation and qualified PR103/106 individual-sub captures. Explore
-bounded physical Sub positions as a separate problem from PR108's independent
-digital timing/polarity commissioning. Preserve physical-output topology and
-clock constraints. Never confuse independent sub calibration with a line-level
-Sub chained from stereo pre-out.
+**Slice 4 — Multi-seat and physical Sub A/B evidence (implemented,
+CI pending).** Existing PR110 geometry search generates unranked physical Sub
+movement experiments. The new `RoomAdvancedSubPlacementComparisonAnalyzer`
+takes two independently captured PR103 measurement sets, explicitly marked
+baseline and candidate, from the SAME Playback System, physical Sub source,
+route, microphone/calibration, sample rate, and two to eight stable named/ID
+listening seats. Each seat requires at least three stable, qualified sweeps in
+each set. The candidate sweeps must postdate all baseline captures, with no
+shared capture ID, and the user explicitly attests that **only the physical
+Sub position changed**—not DSP, crossover, gain, phase, or mic seats.
+
+Importantly, PR106 Sub *near-field* sweeps cannot stand in for in-room,
+seat-matched bass measurements: near-field data characterize the source,
+not room response at the listener. PR108 electrical-reference-timed digital
+delay and polarity optimization remain separately owned and are never
+reconfigured by PR110.
+
+Only **after both positions have actually been measured** does the offline
+analyzer compute frequency-aligned, per-frequency, across-seat magnitude
+variation (RMS spread in dB) over mutually qualified 35–160 Hz samples,
+requiring >=12 bins. It removes each frequency's common seat-average level,
+so a global volume/gain change cannot masquerade as less inter-seat
+variation. It does not assert target-curve accuracy, acoustic summation,
+absolute SPL, dialogue clarity or listener preference. Positive
+`reductionInInterseatSpreadDB` means only that seat-to-seat variation was
+lower in the *measured A/B evidence*. Negative changes are retained as
+regressions. Unmeasured proposed Sub locations stay unranked.
+
+In Room Advisor the reviewer selects an inspected Sub trial and two local
+Speaker Optimizer measurement archives, then confirms unchanged seats and
+signal chain. Results are labeled **measurement only** and cannot deploy
+anything. Identity, freshness, missing group repeats, clipped/noisy
+captures, incompatible frequency grids, no physical Sub move or unsupported
+hardware routes block a result. The UI resets pose confirmation and stale
+results on switching projects, geometry, trial or capture pair.
+
+The app cannot independently verify physical Sub/microphone pose from old
+capture metadata alone. The explicit human attestation is therefore
+necessary but does NOT confer physical acoustic certification. Later PR112
+hands-on listening and measurement review remains outstanding. The source
+sets' routing signature must not be mistaken for a cryptographically
+verified unchanged DSP graph.
+
+The source/test CI coverage includes A/B gain-shift invariance, measured
+regression, positive comparison, wrong source/project/route/mic/seat,
+clipping/missing repeats, clock/capture order and LF-band comparability.
+This is a **physical-Sub-only** initial measurement bridge; generalized
+multi-seat re-ranking of every *unmeasured* speaker height/placement trial
+is deliberately withheld rather than invented.
 
 **Slice 5 — Measured physical before/after verification.** One actual physical
 move per experiment, same matched microphone positions/settings/routing,
