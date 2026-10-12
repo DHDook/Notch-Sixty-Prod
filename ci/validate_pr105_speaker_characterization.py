@@ -17,11 +17,13 @@ COMMISSION_SOURCE = ROOT / "NotchSixty/Audio/SpeakerOptimizerCommissioningContra
 COMMISSION_TESTS = ROOT / "NotchSixtyTests/SpeakerOptimizerCommissioningContractTests.swift"
 DEPLOY_SOURCE = ROOT / "NotchSixty/Audio/SpeakerOptimizerPEQDeployment.swift"
 DEPLOY_TESTS = ROOT / "NotchSixtyTests/SpeakerOptimizerPEQDeploymentTests.swift"
+APPLY_SOURCE = ROOT / "NotchSixty/Audio/SpeakerOptimizerPEQApplyTransaction.swift"
+APPLY_TESTS = ROOT / "NotchSixtyTests/SpeakerOptimizerPEQApplyTransactionTests.swift"
 PROJECT = ROOT / "NotchSixty.xcodeproj/project.pbxproj"
 DOC = ROOT / "docs/PR105_SPEAKER_CHARACTERIZATION_AND_VERIFICATION.md"
 WORKFLOW = ROOT / ".github/workflows/pr105-speaker-characterization.yml"
 
-for path in (SOURCE, TESTS, EARLY_SOURCE, EARLY_TESTS, CLASSIFIER_SOURCE, CLASSIFIER_TESTS, AWARE_SOURCE, AWARE_TESTS, GUIDED_SOURCE, GUIDED_TESTS, UI_SOURCE, COMMISSION_SOURCE, COMMISSION_TESTS, DEPLOY_SOURCE, DEPLOY_TESTS, PROJECT, DOC, WORKFLOW):
+for path in (SOURCE, TESTS, EARLY_SOURCE, EARLY_TESTS, CLASSIFIER_SOURCE, CLASSIFIER_TESTS, AWARE_SOURCE, AWARE_TESTS, GUIDED_SOURCE, GUIDED_TESTS, UI_SOURCE, COMMISSION_SOURCE, COMMISSION_TESTS, DEPLOY_SOURCE, DEPLOY_TESTS, APPLY_SOURCE, APPLY_TESTS, PROJECT, DOC, WORKFLOW):
     assert path.is_file(), f"missing PR105 Slice 1 file: {path}"
 
 source = SOURCE.read_text()
@@ -39,6 +41,8 @@ commission_source = COMMISSION_SOURCE.read_text()
 commission_tests = COMMISSION_TESTS.read_text()
 deploy_source = DEPLOY_SOURCE.read_text()
 deploy_tests = DEPLOY_TESTS.read_text()
+apply_source = APPLY_SOURCE.read_text()
+apply_tests = APPLY_TESTS.read_text()
 project = PROJECT.read_text()
 doc = DOC.read_text()
 workflow = WORKFLOW.read_text()
@@ -202,6 +206,28 @@ for token in (
     assert token in deploy_tests, f"missing dedicated PEQ deployment test: {token}"
 
 for token in (
+    "protocol SpeakerOptimizerPEQProfileMutating",
+    "struct SpeakerOptimizerPEQApplyReceipt",
+    "requiresMeasuredVerification: Bool { true }",
+    "struct SpeakerOptimizerPEQRollbackReceipt",
+    "struct SpeakerOptimizerPEQApplyTransaction",
+    "current.state == proposal.rollbackSnapshot.playbackSystemState",
+    "current.state == receipt.expectedAppliedState",
+    "speakerOptimizerReplaceOutputDeviceProfile",
+):
+    assert token in apply_source, f"missing transactional Apply contract: {token}"
+
+for token in (
+    "testApplyInstallsOnlyDedicatedOptimizerPEQAndRollbackRestoresExactSnapshot",
+    "testApplyRequiresIdleEngineAndExactCommissioningSnapshot",
+    "testApplyRejectsStaleApprovalBeforeMutation",
+    "testMutationFailureLeavesOriginalSnapshotAndReturnsNoReceipt",
+    "testRollbackRefusesToOverwriteUnrelatedPostApplyEdit",
+    "testRollbackAlsoRequiresIdleEngine",
+):
+    assert token in apply_tests, f"missing transactional Apply test: {token}"
+
+for token in (
     "F10500000000000000000001",
     "F10500000000000000000002",
     "F10500000000000000000011",
@@ -230,6 +256,10 @@ for token in (
     "F1050000000000000000000E",
     "F1050000000000000000001D",
     "F1050000000000000000001E",
+    "F1050000000000000000000F",
+    "F10500000000000000000010",
+    "F1050000000000000000001F",
+    "F10500000000000000000020",
 ):
     assert project.count(token) >= 2, f"missing Xcode registration: {token}"
 
@@ -249,10 +279,12 @@ assert "SpeakerOptimizerClassificationAwareCandidateTests" in workflow
 assert "SpeakerOptimizerCharacterizationControllerTests" in workflow
 assert "SpeakerOptimizerCommissioningContractTests" in workflow
 assert "SpeakerOptimizerPEQDeploymentTests" in workflow
+assert "SpeakerOptimizerPEQApplyTransactionTests" in workflow
 assert "Run full XCTest regression" in workflow
 assert "Cross-domain speaker-vs-room classification" in doc
 assert "Classification-aware PEQ/FIR correction authority" in doc
 assert "Guided Speaker Calibration workflow" in doc
 assert "Commissioning contract, explicit approval & rollback snapshot" in doc
 assert "Separately owned live PEQ deployment substrate" in doc
-print("PR105 guided optimizer + commissioning + dedicated PEQ deployment contracts passed")
+assert "Transactional PEQ Apply & rollback" in doc
+print("PR105 guided optimizer + commissioning + PEQ deploy/apply transaction contracts passed")

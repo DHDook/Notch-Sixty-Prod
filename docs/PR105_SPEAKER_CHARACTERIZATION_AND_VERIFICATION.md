@@ -1,6 +1,6 @@
 # PR105 — Guided Speaker Characterization & Verification
 
-Status: **SLICES 1–2 REMOTE SOFTWARE VERIFIED — PHYSICAL ACOUSTIC ACCEPTANCE PENDING**
+Status: **SLICES 1–7 REMOTE SOFTWARE VERIFIED — SLICE 8 CI PENDING — PHYSICAL ACOUSTIC ACCEPTANCE PENDING**
 
 Base: PR104 measurement-driven Speaker Optimization Engine.
 
@@ -203,14 +203,45 @@ reflection timing and acoustic benefit remain unverified.
   but this slice still does NOT mutate the selected Playback System.
 - FIR remains blocked pending a dedicated per-speaker FIR/latency stage.
 
+## Slice 8 — Transactional PEQ Apply & rollback
+
+- Adds the first live Speaker Optimizer mutation path, restricted to the
+  separately owned cut-only PEQ stage introduced in Slice 7.
+- Apply requires the engine to be idle because Output Device Profile changes
+  require a live N-channel restart boundary.
+- The exact complete Playback System state captured in the commissioning
+  proposal is used as an optimistic-concurrency snapshot. Any state drift after
+  review blocks Apply and requires regeneration/review.
+- Explicit user approval is revalidated against the exact proposal and aggregate
+  candidate fingerprint immediately before mutation.
+- Only `outputDeviceProfile.speakerOptimizerPEQ` is changed. Ordinary Speaker
+  Calibration trim/delay/polarity/EQ ownership is preserved.
+- Production mutation goes through
+  `ProductProfileController.replaceSelectedSystemOutputDeviceProfile`, which
+  atomically coordinates live engine state and persisted Playback System state.
+- The transaction verifies the full expected Playback System state after the
+  write and returns an immutable Apply receipt bound to proposal/baseline/
+  characterization/routing/candidate identities.
+- Every Apply receipt remains `requiresMeasuredVerification == true`; installing
+  coefficients is not acoustic verification.
+- Rollback requires the engine to be idle and the current full Playback System
+  state to exactly match the expected post-Apply state. If any unrelated edit
+  occurred after Apply, rollback fails closed rather than overwriting it.
+- Successful rollback restores the exact pre-Apply Output Device Profile and
+  verifies the full Playback System against the captured commissioning snapshot.
+- FIR Apply remains blocked; Slice 8 does not add a per-speaker FIR stage.
+
 ## Planned follow-on slices
 
-1. Correlate speaker-characterization features against multi-seat features to
-   classify source-persistent vs seat/room-dependent deviations.
-3. Integrate classification into PEQ/FIR ranking so room-specific nulls cannot
-   masquerade as loudspeaker defects.
-4. Add guided UI workflow under SYSTEM → Speaker Calibration.
-5. Continue explicit Apply / rollback / new measured verification.
+1. Add provisional Apply/rollback UI review around the transactional PEQ path.
+2. Capture a new post-Apply verification measurement set with the same
+   routing/microphone/quality identity gates.
+3. Compare verification against the baseline independently and automatically
+   recommend/perform rollback when measured acceptance fails.
+4. Add synchronized reference capture before any crossover timing/polarity
+   deployment; saved PR103 v1 evidence remains insufficient for that action.
+5. Keep FIR deployment blocked until a separately owned per-speaker FIR stage
+   coordinates latency/headroom across channels and video paths.
 
 Physical testing remains required for actual mic-distance guidance, integration
 distance for unusual loudspeakers, reflection-window limits and safe/beneficial
