@@ -672,11 +672,11 @@ final class SpeakerMeasurementLabSessionTests: XCTestCase {
             )
         )
         XCTAssertThrowsError(try coherent.validateForAcquisition()) {
-            guard case .unsupportedAcquisitionMode(
-                .coherentMainsSubTiming
-            ) = $0 as? SpeakerMeasurementLabSessionError else {
-                return XCTFail("Unexpected error: \($0)")
-            }
+            XCTAssertEqual(
+                $0 as? SpeakerMeasurementLabSessionError,
+                .invalidProtocol,
+                "A shared reference alone is insufficient: 9B also requires linked pair ID, coherent leg, and explicit matched sweep level."
+            )
         }
     }
 
