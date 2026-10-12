@@ -16,6 +16,7 @@ ALLOWED_REMOTE_INTEGRATION_FILES = frozenset({
     "ci/validate_pr109_integration_stack.py",
     "ci/tests/test_pr109_integration_stack.py",
     "ci/validate_pr105_speaker_characterization.py",
+    "ci/validate_pr106_speaker_measurement_lab.py",
     "ci/validate_pr109_cross_feature_contracts.py",
     "ci/tests/test_pr109_cross_feature_contracts.py",
     ".github/workflows/pr109-integration-stack.yml",
