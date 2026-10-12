@@ -27,7 +27,7 @@ jobs:
           persist-credentials: false
 
       - name: Verify immutable stacked ancestry and source-only boundary
-        run: python3 ci/validate_pr109_integration_stack.py --report "$${{ runner.temp }}/pr109-remote-stack.json"
+        run: python3 ci/validate_pr109_integration_stack.py --report "$RUNNER_TEMP/pr109-remote-stack.json"
 
       - name: Test fail-closed stack manifest and authorization rules
         run: python3 -m unittest discover -s ci/tests -p test_pr109_integration_stack.py -v
