@@ -334,6 +334,7 @@ struct SpeakerOptimizerFIRDeploymentConfiguration:
               !routingSignature.isEmpty,
               routingSignature
                 == profile.multichannelCalibrationRoutingSignature,
+              profile.speakerOptimizerPEQ == nil,
               !aggregateCandidateFingerprint.isEmpty,
               tapCount >= 257,
               tapCount <= Int(N60_CONVOLUTION_MAX_TAPS),
