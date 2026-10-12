@@ -260,6 +260,21 @@ struct SpeakerOptimizerFIRApplyTransaction {
                 .verificationStateDrift
         }
 
+        let reportRoles = report.sources.compactMap {
+            source -> OutputProgramRole? in
+            guard case .speaker(let role) = source.source else {
+                return nil
+            }
+            return role
+        }
+        guard reportRoles.count == report.sources.count,
+              Set(reportRoles).count == reportRoles.count,
+              Set(reportRoles)
+                == Set(deployment.sources.map(\.role)) else {
+            throw SpeakerOptimizerFIRApplyTransactionError
+                .verificationReceiptMismatch
+        }
+
         let record = SpeakerOptimizerFIRVerificationRecord(
             applyReceiptID: receipt.id,
             verificationMeasurementSetID:
