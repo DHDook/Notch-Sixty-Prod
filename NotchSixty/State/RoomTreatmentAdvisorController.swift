@@ -40,6 +40,11 @@ final class RoomTreatmentAdvisorController: ObservableObject {
     @Published private(set) var advancedPlacementMessage: String?
     @Published private(set) var toeInMeasurementEvidence: [RoomAdvancedToeInEvidence] = []
     @Published private(set) var toeInEvidenceMessage: String?
+    @Published private(set) var availablePhysicalSubSets: [SpeakerOptimizerMeasurementSet] = []
+    @Published var physicalSubBaselineID: UUID?
+    @Published var physicalSubCandidateID: UUID?
+    @Published private(set) var physicalSubComparison: RoomAdvancedSubPlacementComparison?
+    @Published private(set) var physicalSubComparisonMessage: String?
     @Published var treatmentDraft: RoomPassiveTreatmentPlan?
     @Published private(set) var savedTreatmentPlan: RoomPassiveTreatmentPlan?
     @Published private(set) var treatmentAnalysis: RoomPassiveTreatmentDesignSummary?
@@ -139,6 +144,11 @@ final class RoomTreatmentAdvisorController: ObservableObject {
 
     func selectProject(_ id: UUID?) {
         selectedProjectID = id
+        availablePhysicalSubSets = []
+        physicalSubBaselineID = nil
+        physicalSubCandidateID = nil
+        physicalSubComparison = nil
+        physicalSubComparisonMessage = nil
         guard let id,
               let project = availableProjects.first(
                 where: { $0.id == id }
@@ -430,6 +440,8 @@ final class RoomTreatmentAdvisorController: ObservableObject {
         // Intentionally never mutates saved OR draft geometry, settings, DSP
         // or calibration. Only displays what the person could physically move.
         selectedAdvancedExperiment = proposal
+        physicalSubComparison = nil
+        physicalSubComparisonMessage = nil
     }
 
     func saveAdvancedPlacement() {
@@ -526,7 +538,74 @@ final class RoomTreatmentAdvisorController: ObservableObject {
         }
     }
 
+    /// Scan local compact PR103 measurement archives, never initiate a sweep
+    /// or modify correction/physical routing. The user explicitly picks
+    /// BEFORE/AFTER physical Sub capture sets and confirms the matching seats.
+    func refreshPhysicalSubMeasurementSets() {
+        availablePhysicalSubSets = []
+        physicalSubComparison = nil
+        physicalSubComparisonMessage = nil
+        guard let project = selectedProject else { return }
+        do {
+            availablePhysicalSubSets = try SpeakerOptimizerMeasurementSetStore()
+                .listRecentSets(limit: 64).filter {
+                    $0.playbackSystemID == project.playbackSystemID
+                        && $0.plannedSources.count == 1
+                        && {
+                            if case .subwoofer = $0.plannedSources[0] {
+                                return true
+                            }
+                            return false
+                        }()
+                }
+        } catch {
+            physicalSubComparisonMessage = error.localizedDescription
+        }
+    }
+
+    func comparePhysicalSubPlacement(
+        identicalSeatsAndUnchangedSignalChainConfirmed: Bool
+    ) {
+        physicalSubComparison = nil
+        guard let project = selectedProject,
+              let room = geometryDraft, room == savedGeometry,
+              let settings = advancedPlacementDraft,
+              settings == savedAdvancedPlacement,
+              let trial = selectedAdvancedExperiment,
+              trial.move == .subwoofer,
+              let baselineID = physicalSubBaselineID,
+              let candidateID = physicalSubCandidateID,
+              let baseline = availablePhysicalSubSets.first(
+                where: { $0.id == baselineID }
+              ),
+              let candidate = availablePhysicalSubSets.first(
+                where: { $0.id == candidateID }
+              ) else {
+            physicalSubComparisonMessage =
+                "Save actual room geometry, inspect a physical Sub trial, and choose distinct baseline/candidate measurement sets."
+            return
+        }
+        do {
+            physicalSubComparison = try RoomAdvancedSubPlacementComparisonAnalyzer()
+                .compare(
+                    baseline: baseline,
+                    candidate: candidate,
+                    state: settings.state(for: room),
+                    experiment: trial,
+                    playbackSystemID: project.playbackSystemID,
+                    physicalSetupConfirmed:
+                        identicalSeatsAndUnchangedSignalChainConfirmed
+                )
+            physicalSubComparisonMessage =
+                "Measured relative bass variation across seats; NOT verified SPL or preference. Real-world verification remains required."
+        } catch {
+            physicalSubComparisonMessage = error.localizedDescription
+        }
+    }
+
     private func refreshAdvancedPlacementPreview() {
+        physicalSubComparison = nil
+        physicalSubComparisonMessage = nil
         toeInMeasurementEvidence = []
         toeInEvidenceMessage = nil
         advancedPlacementExperiments = []
