@@ -56,6 +56,7 @@ jobs:
           -only-testing:NotchSixtyTests/RoomGeometryPlacementTests
           -only-testing:NotchSixtyTests/AdvancedRoomPlacementExperimentsTests
           -only-testing:NotchSixtyTests/AdvancedPlacementSidecarTests
+          -only-testing:NotchSixtyTests/AdvancedPlacementDirectivityTests
           test
       - name: Run cumulative XCTest regression
         run: >-
