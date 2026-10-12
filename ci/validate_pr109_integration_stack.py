@@ -21,6 +21,7 @@ ALLOWED_REMOTE_INTEGRATION_FILES = frozenset({
     ".github/workflows/pr109-integration-stack.yml",
     "docs/PR109_INTEGRATION_STACK_CONSOLIDATION.md",
     "docs/ROADMAP.md",
+    "README.md",
 })
 SHA = re.compile(r"^[0-9a-f]{40}$")
 
