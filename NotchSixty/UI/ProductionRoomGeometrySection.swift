@@ -334,6 +334,7 @@ struct ProductionRoomGeometrySection: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     Button("Find Stored Subwoofer Sweeps") {
+                        confirmsFixedSubABSeatsAndChain = false
                         advisor.refreshPhysicalSubMeasurementSets()
                     }
                     .buttonStyle(.bordered)
@@ -470,6 +471,14 @@ struct ProductionRoomGeometrySection: View {
         }
         .onChange(of: advisor.selectedAdvancedExperiment?.id) { _, _ in
             confirmsFixedSubABSeatsAndChain = false
+        }
+        .onChange(of: advisor.physicalSubBaselineID) { _, _ in
+            confirmsFixedSubABSeatsAndChain = false
+            advisor.clearPhysicalSubComparison()
+        }
+        .onChange(of: advisor.physicalSubCandidateID) { _, _ in
+            confirmsFixedSubABSeatsAndChain = false
+            advisor.clearPhysicalSubComparison()
         }
     }
 
