@@ -2336,7 +2336,9 @@ struct RoomAdvancedPlacementReviewStore: Sendable {
             return RoomAdvancedPlacementReviewHistory(projectID: projectID)
         }
         do {
-            let decoded = try JSONDecoder().decode(
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .millisecondsSince1970
+            let decoded = try decoder.decode(
                 RoomAdvancedPlacementReviewHistory.self,
                 from: Data(contentsOf: url)
             )
@@ -2384,7 +2386,10 @@ struct RoomAdvancedPlacementReviewFactory: Sendable {
         playbackSystemID: UUID,
         state: RoomAdvancedPlacementState,
         experiment: RoomAdvancedPlacementExperiment,
-        comparison: RoomAdvancedSubPlacementComparison?
+        comparison: RoomAdvancedSubPlacementComparison?,
+        attemptedBaselineID: UUID? = nil,
+        attemptedCandidateID: UUID? = nil,
+        inconclusiveReason: String? = nil
     ) throws -> RoomAdvancedPlacementReviewRecord {
         let before = try state.validated()
         let experiments = try RoomAdvancedPlacementExplorer()
@@ -2405,7 +2410,7 @@ struct RoomAdvancedPlacementReviewFactory: Sendable {
         let measured = comparison != nil && verdict != .inconclusive
         let note: String
         if comparison == nil {
-            note = "Physical placement hypothesis not independently verified by matched before/after listening-seat captures. No acoustic result asserted."
+            note = inconclusiveReason ?? "Physical placement hypothesis not independently verified by matched before/after listening-seat captures. No acoustic result asserted."
         } else if !measured {
             note = "Measured seat-to-seat LF variation changed within the informational 0.25 dB review deadband; acoustic outcome inconclusive."
         } else {
@@ -2421,8 +2426,10 @@ struct RoomAdvancedPlacementReviewFactory: Sendable {
             afterGeometry: experiment.trial.room,
             beforeAdvanced: try .from(before),
             afterAdvanced: try .from(experiment.trial),
-            baselineMeasurementSetID: comparison?.baselineMeasurementSetID,
-            candidateMeasurementSetID: comparison?.candidateMeasurementSetID,
+            baselineMeasurementSetID: comparison?.baselineMeasurementSetID
+                ?? attemptedBaselineID,
+            candidateMeasurementSetID: comparison?.candidateMeasurementSetID
+                ?? attemptedCandidateID,
             outcome: verdict,
             measuredSpreadReductionDB: measured
                 ? comparison?.reductionInInterseatSpreadDB : nil,
