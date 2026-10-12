@@ -11,16 +11,24 @@ configuration.
 
 ## Current status
 
-**PR102 integration and commercial-release preparation.**
+**PR109 — Remote Integration & Stack Consolidation (draft, stacked).**
 
-The clean-room rewrite and cumulative remote/software reliability program are
-complete through PR101. PR102 is reconciling release metadata, sandbox/App
-Store configuration, third-party notices/provenance, packaging, and final
-release gates before the next approved feature track (Speaker Optimizer).
+The clean-room rewrite and cumulative remote/software feature implementations
+are complete through PR108, including Speaker Optimizer PEQ/FIR, advanced
+Measurement Lab, and coherent Main/Sub alignment. PR109 is integrating their
+cross-feature ownership, regression and release contracts. The PR109 branch is
+stacked on PR108; existing feature PRs deliberately remain open, draft and
+unmerged while the owner is away from the Mac.
 
-PR101 established remote/software acceptance across the cumulative runtime, but
-physical hardware/acoustic acceptance and production Apple release credentials
-remain separate gates.
+The earlier **PR102 integration and commercial-release preparation** delivered
+the remote release-candidate foundation. That milestone did **not** satisfy
+physical hardware/acoustic acceptance, production signing, TestFlight/App
+Review or public-release authorization. Those remain later gates, as does
+live speaker-connected feed-forward ANC safety qualification.
+
+Upcoming roadmap milestones: PR110 advanced speaker/subwoofer placement,
+PR111 automatic protected per-driver correction, PR112 physical acceptance,
+PR113 UX polish, PR114 commercial release-candidate preparation.
 
 ## Current product boundary
 
