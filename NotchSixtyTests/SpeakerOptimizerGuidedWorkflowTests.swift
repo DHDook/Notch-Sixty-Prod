@@ -63,11 +63,72 @@ final class SpeakerOptimizerGuidedWorkflowTests: XCTestCase {
         )
         try controller.recordVerification(report)
         XCTAssertEqual(controller.state, .measuredAccepted)
+        XCTAssertNotNil(controller.verificationFinalizationReceipt)
+        XCTAssertEqual(
+            store.profile?.state.outputDeviceProfile?
+                .speakerOptimizerPEQ?.verification?
+                .verificationMeasurementSetID,
+            report.verificationMeasurementSetID
+        )
 
         try controller.rollback(
             rolledBackAt: Date(timeIntervalSince1970: 1_703_900_300)
         )
         XCTAssertEqual(controller.state, .rolledBack)
+        XCTAssertNil(
+            store.profile?.state.outputDeviceProfile?
+                .speakerOptimizerPEQ
+        )
+    }
+
+    func testMeasuredRejectionAutomaticallyRollsBackProvisionalPEQ() throws {
+        let fixture = try makeGuidedFixture()
+        let store = GuidedFakeProfileStore(profile: fixture.profile)
+        let controller = SpeakerOptimizerGuidedPEQController(
+            profileStore: store,
+            designOperation: { _, _ in fixture.plan }
+        )
+        try controller.prepareReview(
+            baseline: fixture.baseline,
+            characterization: fixture.characterization
+        )
+        try controller.approveAndApply(
+            userInitiated: true,
+            approvedAt: Date(timeIntervalSince1970: 1_703_905_100),
+            appliedAt: Date(timeIntervalSince1970: 1_703_905_200)
+        )
+        let receipt = try XCTUnwrap(controller.applyReceipt)
+        let rejected = SpeakerOptimizerPostApplyVerificationReport(
+            applyReceiptID: receipt.id,
+            baselineMeasurementSetID:
+                receipt.baselineMeasurementSetID,
+            verificationMeasurementSetID: UUID(),
+            playbackSystemID: receipt.playbackSystemID,
+            routingSignature: receipt.routingSignature,
+            evidenceConfidence: 0.9,
+            sources: [
+                SpeakerOptimizerPostApplySourceVerification(
+                    source: .speaker(.frontLeft),
+                    persistentPointCount: 8,
+                    protectedPointCount: 8,
+                    filterTrackingRMSDB: 2,
+                    persistentRMSEBeforeDB: 2,
+                    persistentRMSEAfterDB: 2.2,
+                    persistentImprovementDB: -0.2,
+                    worstPersistentSeatRegressionDB: 0.2,
+                    protectedRegressionDB: 0,
+                    accepted: false,
+                    blockingReasons: ["Measured improvement failed."]
+                )
+            ],
+            blockingReasons: ["Front Left: Measured improvement failed."],
+            warnings: []
+        )
+        try controller.recordVerification(rejected)
+
+        XCTAssertEqual(controller.state, .rolledBack)
+        XCTAssertNotNil(controller.rollbackReceipt)
+        XCTAssertNil(controller.verificationFinalizationReceipt)
         XCTAssertNil(
             store.profile?.state.outputDeviceProfile?
                 .speakerOptimizerPEQ

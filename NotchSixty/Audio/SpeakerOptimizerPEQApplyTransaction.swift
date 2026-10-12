@@ -49,6 +49,16 @@ struct SpeakerOptimizerPEQApplyReceipt:
     var isMeasuredVerification: Bool { false }
 }
 
+struct SpeakerOptimizerPEQVerificationFinalizationReceipt:
+    Codable, Equatable, Sendable {
+    var applyReceiptID: UUID
+    var verificationMeasurementSetID: UUID
+    var playbackSystemID: UUID
+    var verifiedAt: Date
+    var verification: SpeakerOptimizerPEQVerificationRecord
+    var expectedVerifiedState: PlaybackSystemState
+}
+
 struct SpeakerOptimizerPEQRollbackReceipt:
     Codable, Equatable, Sendable {
     var applyReceiptID: UUID
@@ -67,6 +77,11 @@ enum SpeakerOptimizerPEQApplyTransactionError:
     case outputDeviceProfileRequired
     case applyMutationFailed
     case postApplyVerificationFailed
+    case verificationReportRejected
+    case verificationReceiptMismatch
+    case verificationStateDrift
+    case verificationMutationFailed
+    case verificationPersistenceFailed
     case rollbackStateDrift
     case rollbackMutationFailed
     case rollbackVerificationFailed
@@ -89,6 +104,16 @@ enum SpeakerOptimizerPEQApplyTransactionError:
             return "Speaker Optimizer PEQ could not be installed atomically; the previous Output Device Profile was restored when possible."
         case .postApplyVerificationFailed:
             return "Speaker Optimizer PEQ was written but the resulting Playback System did not exactly match the expected transactional state."
+        case .verificationReportRejected:
+            return "Speaker Optimizer cannot finalize a deployment whose measured verification failed."
+        case .verificationReceiptMismatch:
+            return "The accepted measured verification does not match this Speaker Optimizer Apply receipt."
+        case .verificationStateDrift:
+            return "The Playback System changed after provisional Apply; verified status will not overwrite unrelated edits."
+        case .verificationMutationFailed:
+            return "Speaker Optimizer could not persist the measured-verification status atomically."
+        case .verificationPersistenceFailed:
+            return "Speaker Optimizer verification metadata was written but the resulting Playback System did not exactly match the verified transactional state."
         case .rollbackStateDrift:
             return "Rollback was blocked because the Playback System changed after Speaker Optimizer Apply; unrelated edits will not be overwritten."
         case .rollbackMutationFailed:
@@ -213,6 +238,117 @@ struct SpeakerOptimizerPEQApplyTransaction {
         )
     }
 
+    func finalizeVerified(
+        _ report: SpeakerOptimizerPostApplyVerificationReport,
+        receipt: SpeakerOptimizerPEQApplyReceipt,
+        profileStore: any SpeakerOptimizerPEQProfileMutating,
+        verifiedAt: Date = Date()
+    ) throws -> SpeakerOptimizerPEQVerificationFinalizationReceipt {
+        try requireIdle(profileStore)
+        guard report.accepted, !report.shouldRollback else {
+            throw SpeakerOptimizerPEQApplyTransactionError
+                .verificationReportRejected
+        }
+        guard report.applyReceiptID == receipt.id,
+              report.baselineMeasurementSetID
+                == receipt.baselineMeasurementSetID,
+              report.playbackSystemID == receipt.playbackSystemID,
+              report.routingSignature == receipt.routingSignature,
+              report.verificationMeasurementSetID
+                != receipt.baselineMeasurementSetID else {
+            throw SpeakerOptimizerPEQApplyTransactionError
+                .verificationReceiptMismatch
+        }
+        guard let current =
+                profileStore.speakerOptimizerSelectedSystemProfile else {
+            throw SpeakerOptimizerPEQApplyTransactionError
+                .selectedProfileRequired
+        }
+        guard current.id == receipt.playbackSystemID else {
+            throw SpeakerOptimizerPEQApplyTransactionError
+                .selectedProfileIdentityMismatch
+        }
+        guard current.state == receipt.expectedAppliedState else {
+            throw SpeakerOptimizerPEQApplyTransactionError
+                .verificationStateDrift
+        }
+        guard var output = current.state.outputDeviceProfile,
+              var deployment = output.speakerOptimizerPEQ,
+              deployment == receipt.deployment else {
+            throw SpeakerOptimizerPEQApplyTransactionError
+                .verificationStateDrift
+        }
+        guard !report.sources.isEmpty else {
+            throw SpeakerOptimizerPEQApplyTransactionError
+                .verificationReportRejected
+        }
+
+        let record = SpeakerOptimizerPEQVerificationRecord(
+            applyReceiptID: receipt.id,
+            verificationMeasurementSetID:
+                report.verificationMeasurementSetID,
+            verifiedAt: verifiedAt,
+            evidenceConfidence: report.evidenceConfidence,
+            sourceCount: report.sources.count,
+            worstFilterTrackingRMSDB:
+                report.sources.map(\.filterTrackingRMSDB).max() ?? .infinity,
+            minimumPersistentImprovementDB:
+                report.sources.map(\.persistentImprovementDB).min()
+                    ?? -.infinity,
+            worstPersistentSeatRegressionDB:
+                report.sources.map(\.worstPersistentSeatRegressionDB)
+                    .max() ?? .infinity,
+            maximumProtectedRegressionDB:
+                report.sources.map(\.protectedRegressionDB).max()
+                    ?? .infinity
+        )
+        guard record.validate(deployment: deployment) else {
+            throw SpeakerOptimizerPEQApplyTransactionError
+                .verificationReportRejected
+        }
+        deployment.verification = record
+        output.speakerOptimizerPEQ = deployment
+        try output.validateStructure(
+            bassManagementEnabled: current.state.bassManagement.enabled
+        )
+        var expectedVerifiedState = current.state
+        expectedVerifiedState.outputDeviceProfile = output
+
+        do {
+            try profileStore.speakerOptimizerReplaceOutputDeviceProfile(
+                output
+            )
+        } catch {
+            try? restoreOutputProfile(
+                receipt.expectedAppliedState.outputDeviceProfile,
+                profileStore: profileStore
+            )
+            throw SpeakerOptimizerPEQApplyTransactionError
+                .verificationMutationFailed
+        }
+
+        guard let verified =
+                profileStore.speakerOptimizerSelectedSystemProfile,
+              verified.id == receipt.playbackSystemID,
+              verified.state == expectedVerifiedState else {
+            try? restoreOutputProfile(
+                receipt.expectedAppliedState.outputDeviceProfile,
+                profileStore: profileStore
+            )
+            throw SpeakerOptimizerPEQApplyTransactionError
+                .verificationPersistenceFailed
+        }
+        return SpeakerOptimizerPEQVerificationFinalizationReceipt(
+            applyReceiptID: receipt.id,
+            verificationMeasurementSetID:
+                report.verificationMeasurementSetID,
+            playbackSystemID: receipt.playbackSystemID,
+            verifiedAt: verifiedAt,
+            verification: record,
+            expectedVerifiedState: expectedVerifiedState
+        )
+    }
+
     func rollback(
         _ receipt: SpeakerOptimizerPEQApplyReceipt,
         profileStore: any SpeakerOptimizerPEQProfileMutating,
@@ -237,7 +373,10 @@ struct SpeakerOptimizerPEQApplyTransaction {
 
         // Never roll back across an unrelated user/system edit. The user can
         // regenerate/review instead of losing work.
-        guard current.state == receipt.expectedAppliedState else {
+        guard rollbackSourceStateMatches(
+            current.state,
+            receipt: receipt
+        ) else {
             throw SpeakerOptimizerPEQApplyTransactionError.rollbackStateDrift
         }
 
@@ -266,6 +405,25 @@ struct SpeakerOptimizerPEQApplyTransaction {
             rolledBackAt: rolledBackAt,
             restoredState: restored.state
         )
+    }
+
+    private func rollbackSourceStateMatches(
+        _ state: PlaybackSystemState,
+        receipt: SpeakerOptimizerPEQApplyReceipt
+    ) -> Bool {
+        if state == receipt.expectedAppliedState {
+            return true
+        }
+        var normalized = state
+        guard var output = normalized.outputDeviceProfile,
+              var deployment = output.speakerOptimizerPEQ,
+              deployment.verification != nil else {
+            return false
+        }
+        deployment.verification = nil
+        output.speakerOptimizerPEQ = deployment
+        normalized.outputDeviceProfile = output
+        return normalized == receipt.expectedAppliedState
     }
 
     private func requireIdle(

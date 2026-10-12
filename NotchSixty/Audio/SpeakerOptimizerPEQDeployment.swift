@@ -27,6 +27,39 @@ struct SpeakerOptimizerPEQSourceDeployment: Codable, Equatable, Sendable {
     var bands: [SpeakerOptimizerDeployedPEQBand]
 }
 
+struct SpeakerOptimizerPEQVerificationRecord:
+    Codable, Equatable, Sendable {
+    static let currentSchemaVersion = 1
+
+    var schemaVersion: Int = currentSchemaVersion
+    var applyReceiptID: UUID
+    var verificationMeasurementSetID: UUID
+    var verifiedAt: Date
+    var evidenceConfidence: Double
+    var sourceCount: Int
+    var worstFilterTrackingRMSDB: Double
+    var minimumPersistentImprovementDB: Double
+    var worstPersistentSeatRegressionDB: Double
+    var maximumProtectedRegressionDB: Double
+
+    func validate(
+        deployment: SpeakerOptimizerPEQDeploymentConfiguration
+    ) -> Bool {
+        schemaVersion == Self.currentSchemaVersion
+            && verificationMeasurementSetID
+                != deployment.baselineMeasurementSetID
+            && evidenceConfidence.isFinite
+            && (0...1).contains(evidenceConfidence)
+            && sourceCount == deployment.sources.count
+            && sourceCount > 0
+            && worstFilterTrackingRMSDB.isFinite
+            && worstFilterTrackingRMSDB >= 0
+            && minimumPersistentImprovementDB.isFinite
+            && worstPersistentSeatRegressionDB.isFinite
+            && maximumProtectedRegressionDB.isFinite
+    }
+}
+
 struct SpeakerOptimizerPEQDeploymentConfiguration: Codable, Equatable, Sendable {
     static let currentSchemaVersion = 1
     static let maximumBandsPerSource = 10
@@ -41,6 +74,9 @@ struct SpeakerOptimizerPEQDeploymentConfiguration: Codable, Equatable, Sendable 
     var aggregateCandidateFingerprint: String
     var approvedAt: Date
     var sources: [SpeakerOptimizerPEQSourceDeployment]
+    /// Optional so pre-PR105 persisted Output Device Profiles decode unchanged.
+    /// Presence means fresh post-Apply microphone verification passed.
+    var verification: SpeakerOptimizerPEQVerificationRecord? = nil
 
     var bandsByRole: [OutputProgramRole: [SpeakerOptimizerDeployedPEQBand]] {
         Dictionary(uniqueKeysWithValues: sources.map { ($0.role, $0.bands) })
@@ -56,6 +92,12 @@ struct SpeakerOptimizerPEQDeploymentConfiguration: Codable, Equatable, Sendable 
               !sources.isEmpty,
               Set(sources.map(\.role)).count == sources.count else {
             throw SpeakerOptimizerPEQDeploymentError.invalidConfiguration
+        }
+
+        if let verification,
+           !verification.validate(deployment: self) {
+            throw SpeakerOptimizerPEQDeploymentError
+                .invalidVerificationRecord
         }
 
         let allowedRoles = Set(
@@ -92,6 +134,7 @@ enum SpeakerOptimizerPEQDeploymentError: Error, Equatable, LocalizedError {
     case invalidConfiguration
     case invalidSource
     case invalidBand
+    case invalidVerificationRecord
     case laneSectionCapacityExceeded(
         role: OutputProgramRole,
         ordinary: Int,
@@ -106,6 +149,8 @@ enum SpeakerOptimizerPEQDeploymentError: Error, Equatable, LocalizedError {
             return "Speaker Optimizer PEQ deployment contains an unsupported or empty whole-speaker source."
         case .invalidBand:
             return "Speaker Optimizer live PEQ currently accepts finite cut-only peaking bands inside the supported sample-rate range."
+        case .invalidVerificationRecord:
+            return "Speaker Optimizer verification metadata is invalid or does not match the deployed PEQ."
         case .laneSectionCapacityExceeded(let role, let ordinary, let optimizer):
             return "\(role.displayName) needs \(ordinary) Speaker Calibration plus \(optimizer) Speaker Optimizer PEQ sections, exceeding the live lane ceiling of \(Int(N60_PROGRAM_LANE_MAX_EQ_SECTIONS))."
         }

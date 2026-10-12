@@ -86,6 +86,46 @@ final class SpeakerOptimizerPEQDeploymentTests: XCTestCase {
         )
     }
 
+    func testVerifiedMetadataIsOptionalPersistedAndExcludedFromRoutingIdentity() throws {
+        var profile = makeProfile(
+            calibrationBandCount: 1,
+            optimizerBands: [
+                .init(frequencyHz: 2_000, gainDB: -2, q: 1)
+            ]
+        )
+        let before = profile.multichannelCalibrationRoutingSignature
+        var optimizer = try XCTUnwrap(profile.speakerOptimizerPEQ)
+        XCTAssertNil(optimizer.verification)
+
+        optimizer.verification = SpeakerOptimizerPEQVerificationRecord(
+            applyReceiptID: UUID(),
+            verificationMeasurementSetID: UUID(),
+            verifiedAt: Date(timeIntervalSince1970: 1_703_950_000),
+            evidenceConfidence: 0.9,
+            sourceCount: optimizer.sources.count,
+            worstFilterTrackingRMSDB: 0.4,
+            minimumPersistentImprovementDB: 0.3,
+            worstPersistentSeatRegressionDB: 0.1,
+            maximumProtectedRegressionDB: 0.1
+        )
+        profile.speakerOptimizerPEQ = optimizer
+        try optimizer.validate(profile: profile)
+        XCTAssertEqual(
+            before,
+            profile.multichannelCalibrationRoutingSignature
+        )
+
+        let data = try JSONEncoder().encode(profile)
+        let decoded = try JSONDecoder().decode(
+            OutputDeviceProfileConfiguration.self,
+            from: data
+        )
+        XCTAssertEqual(
+            decoded.speakerOptimizerPEQ?.verification,
+            optimizer.verification
+        )
+    }
+
     func testOptimizerMetadataDoesNotChangeMeasurementRoutingSignature() throws {
         let without = makeProfile(
             calibrationBandCount: 1,

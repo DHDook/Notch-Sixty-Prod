@@ -1136,14 +1136,19 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                     Divider()
                     Label(
                         guidedOptimizer.state == .measuredAccepted
-                            ? "Measured verification accepted"
-                            : guidedOptimizer.state == .measuredRejected
-                                ? "Measured verification failed — rollback recommended"
-                                : "PEQ applied provisionally — measured verification required",
+                            ? "Measured verification accepted — deployment verified"
+                            : guidedOptimizer.state == .rolledBack
+                                && guidedOptimizer.verificationReport?.accepted == false
+                                ? "Measured verification failed — PEQ rolled back automatically"
+                                : guidedOptimizer.state == .measuredRejected
+                                    ? "Measured verification failed — rollback blocked"
+                                    : "PEQ applied provisionally — measured verification required",
                         systemImage:
                             guidedOptimizer.state == .measuredAccepted
                                 ? "checkmark.shield.fill"
                                 : guidedOptimizer.state == .measuredRejected
+                                    || (guidedOptimizer.state == .rolledBack
+                                        && guidedOptimizer.verificationReport?.accepted == false)
                                     ? "exclamationmark.shield.fill"
                                     : "waveform.badge.magnifyingglass"
                     )
@@ -1152,6 +1157,8 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                         guidedOptimizer.state == .measuredAccepted
                             ? .green
                             : guidedOptimizer.state == .measuredRejected
+                                || (guidedOptimizer.state == .rolledBack
+                                    && guidedOptimizer.verificationReport?.accepted == false)
                                 ? .red
                                 : .orange
                     )
@@ -1305,8 +1312,12 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                             Spacer()
                             Text(
                                 report.shouldRollback
-                                    ? "Rollback recommended"
-                                    : "Eligible to finalize"
+                                    ? (guidedOptimizer.state == .rolledBack
+                                        ? "Rollback completed"
+                                        : "Rollback blocked")
+                                    : (guidedOptimizer.verificationFinalizationReceipt != nil
+                                        ? "Verified & persisted"
+                                        : "Verification finalization pending")
                             )
                             .font(.caption.bold())
                         }

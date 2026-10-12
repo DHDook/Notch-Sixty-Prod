@@ -196,6 +196,10 @@ for token in (
     assert token in commission_tests, f"missing commissioning contract test: {token}"
 
 for token in (
+    "struct SpeakerOptimizerPEQVerificationRecord",
+    "verificationMeasurementSetID",
+    "var verification: SpeakerOptimizerPEQVerificationRecord? = nil",
+    "invalidVerificationRecord",
     "struct SpeakerOptimizerPEQDeploymentConfiguration",
     "SpeakerOptimizerDeployedPEQBand",
     "gainRangeDB = -12.0...0.0",
@@ -210,6 +214,7 @@ for token in (
     "testAggregateLaneCapacityFailsClosedBeforeRuntimeCompilation",
     "testOptimizerDeploymentRejectsBoostAndLFE",
     "testOptimizerMetadataDoesNotChangeMeasurementRoutingSignature",
+    "testVerifiedMetadataIsOptionalPersistedAndExcludedFromRoutingIdentity",
 ):
     assert token in deploy_tests, f"missing dedicated PEQ deployment test: {token}"
 
@@ -222,6 +227,9 @@ for token in (
     "current.state == proposal.rollbackSnapshot.playbackSystemState",
     "current.state == receipt.expectedAppliedState",
     "speakerOptimizerReplaceOutputDeviceProfile",
+    "struct SpeakerOptimizerPEQVerificationFinalizationReceipt",
+    "func finalizeVerified(",
+    "rollbackSourceStateMatches(",
 ):
     assert token in apply_source, f"missing transactional Apply contract: {token}"
 
@@ -361,4 +369,5 @@ assert "Separately owned live PEQ deployment substrate" in doc
 assert "Transactional PEQ Apply & rollback" in doc
 assert "Independent measured post-Apply verification" in doc
 assert "Guided provisional Apply & verification workflow" in doc
+assert "Automatic measured resolution & persisted verified status" in doc
 print("PR105 end-to-end guided PEQ Apply + measured verification contracts passed")

@@ -61,6 +61,8 @@ final class SpeakerOptimizerGuidedPEQController: ObservableObject {
         SpeakerOptimizerPostApplyVerificationReport?
     @Published private(set) var rollbackReceipt:
         SpeakerOptimizerPEQRollbackReceipt?
+    @Published private(set) var verificationFinalizationReceipt:
+        SpeakerOptimizerPEQVerificationFinalizationReceipt?
     @Published private(set) var lastErrorDescription: String?
 
     init(
@@ -126,6 +128,7 @@ final class SpeakerOptimizerGuidedPEQController: ObservableObject {
             applyReceipt = nil
             verificationReport = nil
             rollbackReceipt = nil
+            verificationFinalizationReceipt = nil
             state = .reviewReady
             lastErrorDescription = nil
         } catch {
@@ -160,6 +163,7 @@ final class SpeakerOptimizerGuidedPEQController: ObservableObject {
             applyReceipt = receipt
             verificationReport = nil
             rollbackReceipt = nil
+            verificationFinalizationReceipt = nil
             state = .appliedPendingVerification
             lastErrorDescription = nil
         } catch {
@@ -183,10 +187,38 @@ final class SpeakerOptimizerGuidedPEQController: ObservableObject {
                 .verificationReceiptMismatch
         }
         verificationReport = report
-        state = report.accepted
-            ? .measuredAccepted
-            : .measuredRejected
-        lastErrorDescription = nil
+        if report.accepted {
+            do {
+                let finalized = try transaction.finalizeVerified(
+                    report,
+                    receipt: receipt,
+                    profileStore: profileStore
+                )
+                verificationFinalizationReceipt = finalized
+                rollbackReceipt = nil
+                state = .measuredAccepted
+                lastErrorDescription = nil
+            } catch {
+                state = .failed
+                lastErrorDescription = error.localizedDescription
+                throw error
+            }
+        } else {
+            state = .measuredRejected
+            do {
+                let rolledBack = try transaction.rollback(
+                    receipt,
+                    profileStore: profileStore
+                )
+                rollbackReceipt = rolledBack
+                verificationFinalizationReceipt = nil
+                state = .rolledBack
+                lastErrorDescription = nil
+            } catch {
+                lastErrorDescription = error.localizedDescription
+                throw error
+            }
+        }
     }
 
     func rollback(rolledBackAt: Date = Date()) throws {

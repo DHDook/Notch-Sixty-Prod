@@ -1,6 +1,6 @@
 # PR105 — Guided Speaker Characterization & Verification
 
-Status: **SLICES 1–9 REMOTE SOFTWARE VERIFIED — SLICE 10 CI PENDING — PHYSICAL ACOUSTIC ACCEPTANCE PENDING**
+Status: **SLICES 1–10 REMOTE SOFTWARE VERIFIED — SLICE 11 CI PENDING — PHYSICAL ACOUSTIC ACCEPTANCE PENDING**
 
 Base: PR104 measurement-driven Speaker Optimization Engine.
 
@@ -283,16 +283,49 @@ reflection timing and acoustic benefit remain unverified.
 - Rollback remains an explicit user action in this slice. Automatic rollback on
   measured rejection is intentionally isolated to the next safety slice.
 
+## Slice 10 exact-head verification
+
+Slice 10 exact head `105ef0562fbcbfa245068061a780e1aa178d15eb` passed
+pull-request run 38209277419, including the PR105/PR104/PR103 validators, Apple
+Silicon Debug build, targeted Speaker Optimizer tests and full XCTest
+regression. The matching push run was still completing when Slice 11 work
+started; Slice 11 exact-head CI supersedes it as the final software gate.
+
+## Slice 11 — Automatic measured resolution & persisted verified status
+
+- A successful measured-verification report is finalized transactionally into
+  optional `SpeakerOptimizerPEQVerificationRecord` metadata owned by the
+  dedicated optimizer deployment.
+- The verification record is bound to the Apply receipt and verification
+  measurement-set identity and stores compact audit metrics: confidence, worst
+  filter tracking, minimum persistent improvement, worst seat regression and
+  protected-region regression.
+- The metadata field is optional so Output Device Profiles saved before this
+  slice remain decodable without migration.
+- Persisting verification changes no measurement routing signature and no PEQ
+  coefficient, Speaker Calibration, crossover, limiter or unrelated system
+  setting.
+- Finalization requires engine-idle state and the exact provisional post-Apply
+  Playback System snapshot. Any drift blocks the verification write instead of
+  overwriting unrelated edits.
+- Qualified measured rejection now invokes the existing exact-state rollback
+  immediately from the guided workflow.
+- If rollback is blocked by post-Apply state drift, the workflow remains visibly
+  rejected and reports the failure; it never overwrites unrelated user/system
+  changes.
+- Manual rollback remains available after successful verification. The rollback
+  guard normalizes away ONLY receipt-bound verification metadata before
+  comparing against the immutable provisional Apply state.
+- UI now distinguishes provisional, verified, automatically rolled-back and
+  rollback-blocked outcomes.
+
 ## Planned follow-on slices
 
-1. Automatically invoke guarded rollback when fresh measured acceptance fails,
-   while preserving the existing no-overwrite-on-state-drift rule.
-2. Persist a verified deployment status only after the independent acceptance
-   report passes.
-3. Add synchronized reference capture before any crossover timing/polarity
+1. Add synchronized reference capture before any crossover timing/polarity
    deployment; saved PR103 v1 evidence remains insufficient for that action.
-4. Keep FIR deployment blocked until a separately owned per-speaker FIR stage
+2. Keep FIR deployment blocked until a separately owned per-speaker FIR stage
    coordinates latency/headroom across channels and video paths.
+3. Complete physical mic/room/speaker commissioning and acceptance on hardware.
 
 Physical testing remains required for actual mic-distance guidance, integration
 distance for unusual loudspeakers, reflection-window limits and safe/beneficial
