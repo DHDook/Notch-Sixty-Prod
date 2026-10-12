@@ -71,7 +71,8 @@ for token in (
     "fingerprintReports",
     "fingerprintCandidate",
     "makeExplicitApproval",
-    "var canDeploy: Bool { false }",
+    "var canApply: Bool { readyForApproval }",
+    "var canDeploy: Bool { canApply }",
 ):
     assert token in commissioning, f"missing PR108 commissioning contract: {token}"
 
