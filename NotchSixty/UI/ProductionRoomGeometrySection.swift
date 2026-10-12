@@ -28,6 +28,7 @@ struct ProductionRoomGeometrySection: View {
     @State private var unit: RoomGeometryDisplayUnit = .meters
     @State private var showsAdvancedPredictions = false
     @State private var confirmsUnchangedLabGeometry = false
+    @State private var confirmsFixedSubABSeatsAndChain = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -323,6 +324,100 @@ struct ProductionRoomGeometrySection: View {
                     }
                 }
 
+                Divider()
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Multi-Seat Subwoofer A/B")
+                        .font(.caption.bold())
+                    Text(
+                        "Compare two ACTUAL physical Sub placements at the same microphone seats. The diagnostic is measured 35–160 Hz inter-seat variation, not predicted output level or a subwoofer delay adjustment."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    Button("Find Stored Subwoofer Sweeps") {
+                        advisor.refreshPhysicalSubMeasurementSets()
+                    }
+                    .buttonStyle(.bordered)
+                    if advisor.availablePhysicalSubSets.isEmpty {
+                        Text("No local Sub capture sets selected. Collect three repeated sweeps per seat for both physical positions before comparing.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Picker(
+                            "Before move",
+                            selection: $advisor.physicalSubBaselineID
+                        ) {
+                            Text("Select baseline").tag(nil as UUID?)
+                            ForEach(
+                                advisor.availablePhysicalSubSets.filter {
+                                    $0.role == .baseline
+                                }
+                            ) { item in
+                                Text(
+                                    "Baseline · \(item.modifiedAt.formatted(date: .abbreviated, time: .shortened)) · \(item.id.uuidString.prefix(8))"
+                                )
+                                .tag(Optional(item.id))
+                            }
+                        }
+                        Picker(
+                            "After physical move",
+                            selection: $advisor.physicalSubCandidateID
+                        ) {
+                            Text("Select candidate").tag(nil as UUID?)
+                            ForEach(
+                                advisor.availablePhysicalSubSets.filter {
+                                    $0.role == .candidate
+                                }
+                            ) { item in
+                                Text(
+                                    "Candidate · \(item.modifiedAt.formatted(date: .abbreviated, time: .shortened)) · \(item.id.uuidString.prefix(8))"
+                                )
+                                .tag(Optional(item.id))
+                            }
+                        }
+                    }
+                    Toggle(
+                        "I confirm the physical Sub was moved exactly as inspected; all microphone seats, crossover, gain, phase, routing and DSP settings were unchanged",
+                        isOn: $confirmsFixedSubABSeatsAndChain
+                    )
+                    .font(.caption)
+                    Button("Compare Measured Sub Positions") {
+                        advisor.comparePhysicalSubPlacement(
+                            identicalSeatsAndUnchangedSignalChainConfirmed:
+                                confirmsFixedSubABSeatsAndChain
+                        )
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(
+                        !confirmsFixedSubABSeatsAndChain
+                            || advisor.physicalSubBaselineID == nil
+                            || advisor.physicalSubCandidateID == nil
+                            || advisor.selectedAdvancedExperiment?.move != .subwoofer
+                            || advisor.geometryHasUnsavedChanges
+                            || advisor.advancedPlacementHasUnsavedChanges
+                    )
+                    if let result = advisor.physicalSubComparison {
+                        Text(
+                            String(
+                                format: "Measured inter-seat LF variation: %.2f → %.2f dB RMS (difference %.2f dB; positive means less seat-to-seat variation)",
+                                result.baselineInterseatSpreadRMSDB,
+                                result.candidateInterseatSpreadRMSDB,
+                                result.reductionInInterseatSpreadDB
+                            )
+                        )
+                        .font(.caption.monospacedDigit())
+                        Text(
+                            "\(result.seatCount) seats · \(result.commonFrequencyPointCount) shared frequency samples · \(Int(result.commonLowHz))–\(Int(result.commonHighHz)) Hz · measurement only"
+                        )
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    }
+                    if let message = advisor.physicalSubComparisonMessage {
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 if let proposal = advisor.selectedAdvancedExperiment {
                     VStack(alignment: .leading, spacing: 5) {
                         Text("Hypothetical trial: \(proposal.description)")
@@ -363,12 +458,18 @@ struct ProductionRoomGeometrySection: View {
         )
         .onChange(of: advisor.selectedProjectID) { _, _ in
             confirmsUnchangedLabGeometry = false
+            confirmsFixedSubABSeatsAndChain = false
         }
         .onChange(of: advisor.geometryDraft) { _, _ in
             confirmsUnchangedLabGeometry = false
+            confirmsFixedSubABSeatsAndChain = false
         }
         .onChange(of: advisor.advancedPlacementDraft) { _, _ in
             confirmsUnchangedLabGeometry = false
+            confirmsFixedSubABSeatsAndChain = false
+        }
+        .onChange(of: advisor.selectedAdvancedExperiment?.id) { _, _ in
+            confirmsFixedSubABSeatsAndChain = false
         }
     }
 
