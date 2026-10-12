@@ -142,6 +142,43 @@ final class SpeakerOptimizerFIRPostApplyVerificationTests:
         )
     }
 
+    func testVerificationFinalizationRejectsWrongSpeakerRoleEvenWithMatchingReceiptIDs() throws {
+        let fixture = try makeFixture()
+        var report = try SpeakerOptimizerFIRPostApplyVerifier().verify(
+            baseline: fixture.baseline,
+            verification: fixture.verification,
+            plan: fixture.plan,
+            receipt: fixture.receipt
+        )
+        XCTAssertTrue(report.accepted)
+        report.sources[0].source = .speaker(.frontRight)
+
+        let store = FIRVerificationFakeProfileStore(
+            profile: PlaybackSystemProfile(
+                id: fixture.receipt.playbackSystemID,
+                name: "Wrong Role FIR",
+                state: fixture.receipt.expectedAppliedState
+            )
+        )
+
+        XCTAssertThrowsError(
+            try SpeakerOptimizerFIRApplyTransaction().finalizeVerified(
+                report,
+                receipt: fixture.receipt,
+                profileStore: store
+            )
+        ) {
+            XCTAssertEqual(
+                $0 as? SpeakerOptimizerFIRApplyTransactionError,
+                .verificationReceiptMismatch
+            )
+        }
+        XCTAssertNil(
+            store.profile?.state.outputDeviceProfile?
+                .speakerOptimizerFIR?.verification
+        )
+    }
+
     private func makeFixture(
         applyFilterToVerification: Bool = true,
         verificationGlobalOffsetDB: Double = 0
