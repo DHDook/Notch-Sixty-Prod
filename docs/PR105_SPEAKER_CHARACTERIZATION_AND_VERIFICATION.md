@@ -178,6 +178,31 @@ reflection timing and acoustic benefit remain unverified.
 - No ProductProfileController, AudioIOEngine, crossover, limiter, room
   correction or persisted system state is mutated by this slice.
 
+## Slice 7 — Separately owned live PEQ deployment substrate
+
+- Adds an optional `speakerOptimizerPEQ` object to the Output Device Profile.
+  It is persisted separately from `SemanticSpeakerCalibration`, so optimizer Apply
+  never replaces or silently edits ordinary Speaker Calibration trim, delay,
+  polarity or EQ ownership.
+- Deployment metadata remains bound to the approved proposal, baseline,
+  characterization set, routing signature, sample rate and aggregate candidate
+  fingerprint.
+- The first live optimizer stage is intentionally PEQ-only and cut-only.
+  Whole-speaker roles only are accepted; LFE/subwoofer optimizer deployment is
+  not introduced by this slice.
+- Each semantic realtime lane already owns a bounded 16-section biquad cascade.
+  The compiler installs ordinary Speaker Calibration sections first, then
+  appends separately owned Speaker Optimizer sections.
+- Aggregate Speaker Calibration + Speaker Optimizer section count is validated
+  against the 16-section realtime ceiling before activation.
+- The measurement routing signature deliberately excludes optimizer coefficients,
+  just as it excludes ordinary deployed calibration, so applying a correction
+  does not rewrite the identity of the physical topology that was measured.
+- A qualified cut-only PEQ commissioning proposal can now report its dedicated
+  stage as available. Explicit approval can produce a deployment configuration,
+  but this slice still does NOT mutate the selected Playback System.
+- FIR remains blocked pending a dedicated per-speaker FIR/latency stage.
+
 ## Planned follow-on slices
 
 1. Correlate speaker-characterization features against multi-seat features to

@@ -52,7 +52,8 @@ jobs:
           -only-testing:NotchSixtyTests/SpeakerOptimizerCrossDomainClassifierTests
           -only-testing:NotchSixtyTests/SpeakerOptimizerClassificationAwareCandidateTests
           -only-testing:NotchSixtyTests/SpeakerOptimizerCharacterizationControllerTests
-          -only-testing:NotchSixtyTests/SpeakerOptimizerCommissioningContractTests test
+          -only-testing:NotchSixtyTests/SpeakerOptimizerCommissioningContractTests
+          -only-testing:NotchSixtyTests/SpeakerOptimizerPEQDeploymentTests test
       - name: Run full XCTest regression
         run: >-
           xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty

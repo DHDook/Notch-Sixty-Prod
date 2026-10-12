@@ -6,7 +6,7 @@ final class SpeakerOptimizerCommissioningContractTests: XCTestCase {
     private let baselineID = UUID(uuidString: "C6100000-AAAA-BBBB-CCCC-DDDDDDDDDDDD")!
     private let characterizationID = UUID(uuidString: "C6200000-AAAA-BBBB-CCCC-DDDDDDDDDDDD")!
 
-    func testPEQProposalCapturesRollbackStateAndBlocksExistingCalibrationStageReuse() throws {
+    func testPEQProposalCapturesRollbackStateAndUsesSeparateOptimizerStage() throws {
         let profile = makeProfile()
         let unchanged = profile
         let proposal = try SpeakerOptimizerCommissioningPlanner().proposal(
@@ -19,13 +19,13 @@ final class SpeakerOptimizerCommissioningContractTests: XCTestCase {
         XCTAssertEqual(proposal.rollbackSnapshot.playbackSystemID, profile.id)
         XCTAssertTrue(proposal.approvalRequired)
         XCTAssertTrue(proposal.rollbackRequired)
-        XCTAssertFalse(proposal.canApply)
+        XCTAssertTrue(proposal.canApply)
         XCTAssertFalse(proposal.isMeasuredVerification)
         XCTAssertEqual(
             try XCTUnwrap(proposal.sources.first).stageStatus,
-            .blockedDedicatedSpeakerOptimizerPEQStageUnavailable
+            .availableDedicatedSpeakerOptimizerPEQStage
         )
-        XCTAssertFalse(
+        XCTAssertTrue(
             try XCTUnwrap(proposal.sources.first).stageStatus.canInstall
         )
     }
@@ -42,7 +42,7 @@ final class SpeakerOptimizerCommissioningContractTests: XCTestCase {
         )
     }
 
-    func testExplicitApprovalIsBoundToExactCandidateFingerprintButStillCannotApply() throws {
+    func testExplicitApprovalIsBoundToExactCandidateAndBuildsDedicatedPEQConfiguration() throws {
         let planner = SpeakerOptimizerCommissioningPlanner()
         let proposal = try planner.proposal(
             profile: makeProfile(),
@@ -64,14 +64,31 @@ final class SpeakerOptimizerCommissioningContractTests: XCTestCase {
             approval.aggregateCandidateFingerprint,
             planner.aggregateCandidateFingerprint(proposal)
         )
-        XCTAssertThrowsError(
+        XCTAssertNoThrow(
             try planner.validateApproval(approval, for: proposal)
-        ) {
-            XCTAssertEqual(
-                $0 as? SpeakerOptimizerCommissioningError,
-                .deploymentStageUnavailable
-            )
-        }
+        )
+        let profile = makeProfile()
+        let deployment = try planner.makePEQDeploymentConfiguration(
+            profile: profile,
+            plan: makePEQPlan(),
+            proposal: proposal,
+            approval: approval
+        )
+        XCTAssertEqual(deployment.proposalID, proposal.id)
+        XCTAssertEqual(
+            deployment.aggregateCandidateFingerprint,
+            approval.aggregateCandidateFingerprint
+        )
+        XCTAssertEqual(
+            deployment.sources.first?.bands.first?.gainDB,
+            -3
+        )
+        XCTAssertEqual(
+            profile.state.outputDeviceProfile?
+                .speakerAssignments.first?.calibration?.eqBands.count,
+            1,
+            "Building optimizer deployment must not mutate ordinary Speaker Calibration."
+        )
     }
 
     func testApprovalCannotBeReusedAfterCandidateChanges() throws {

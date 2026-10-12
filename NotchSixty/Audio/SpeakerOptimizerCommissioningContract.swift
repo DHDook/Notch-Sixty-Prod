@@ -6,16 +6,24 @@ enum SpeakerOptimizerCommissioningCandidateKind: String, Codable, Equatable, Sen
 }
 
 enum SpeakerOptimizerDeploymentStageStatus: String, Codable, Equatable, Sendable {
-    /// Existing SemanticSpeakerCalibration.eqBands are owned by ordinary Speaker
-    /// Calibration. PR105 must not silently append/replace those bands.
+    case availableDedicatedSpeakerOptimizerPEQStage
+    case blockedPEQCandidateNotRepresentable
+    /// Retained as a fail-closed legacy checkpoint value; new PEQ proposals use
+    /// the separately owned stage introduced in PR105 Slice 7.
     case blockedDedicatedSpeakerOptimizerPEQStageUnavailable
     /// There is currently no dedicated per-speaker FIR stage in PlaybackSystemState.
     case blockedDedicatedSpeakerOptimizerFIRStageUnavailable
 
-    var canInstall: Bool { false }
+    var canInstall: Bool {
+        self == .availableDedicatedSpeakerOptimizerPEQStage
+    }
 
     var explanation: String {
         switch self {
+        case .availableDedicatedSpeakerOptimizerPEQStage:
+            return "A separately owned cut-only Speaker Optimizer PEQ stage is available and compiles after ordinary Speaker Calibration sections."
+        case .blockedPEQCandidateNotRepresentable:
+            return "The PEQ candidate cannot fit the bounded cut-only optimizer stage without violating band, source, sample-rate, or aggregate lane-section limits."
         case .blockedDedicatedSpeakerOptimizerPEQStageUnavailable:
             return "A separately owned Speaker Optimizer PEQ stage is required; existing Speaker Calibration EQ bands must not be overwritten or double-used."
         case .blockedDedicatedSpeakerOptimizerFIRStageUnavailable:
@@ -127,8 +135,11 @@ struct SpeakerOptimizerCommissioningPlanner: Sendable {
                 source: candidate.source,
                 candidateKind: .peq,
                 candidateFingerprint: fingerprintPEQ(candidate),
-                stageStatus:
-                    .blockedDedicatedSpeakerOptimizerPEQStageUnavailable,
+                stageStatus: peqStageStatus(
+                    candidate,
+                    profile: profile,
+                    sampleRate: plan.candidate.sampleRate
+                ),
                 modeledCorrectionPresent: true
             )
         }
@@ -247,6 +258,116 @@ struct SpeakerOptimizerCommissioningPlanner: Sendable {
         guard proposal.canApply else {
             throw SpeakerOptimizerCommissioningError.deploymentStageUnavailable
         }
+    }
+
+    func makePEQDeploymentConfiguration(
+        profile: PlaybackSystemProfile,
+        plan: SpeakerOptimizerClassificationAwarePEQPlan,
+        proposal: SpeakerOptimizerCommissioningProposal,
+        approval: SpeakerOptimizerApplyApproval
+    ) throws -> SpeakerOptimizerPEQDeploymentConfiguration {
+        try validateApproval(approval, for: proposal)
+        guard proposal.playbackSystemID == profile.id,
+              proposal.baselineMeasurementSetID
+                == plan.candidate.baselineMeasurementSetID,
+              proposal.characterizationMeasurementSetID
+                == plan.classification.characterizationMeasurementSetID,
+              proposal.routingSignature == plan.candidate.routingSignature,
+              abs(proposal.sampleRate - plan.candidate.sampleRate) < 0.5,
+              let outputProfile = profile.state.outputDeviceProfile,
+              outputProfile.enabled else {
+            throw SpeakerOptimizerCommissioningError
+                .candidateIdentityMismatch
+        }
+
+        let proposalBySource = Dictionary(
+            uniqueKeysWithValues: proposal.sources.map {
+                (sourceKey($0.source), $0)
+            }
+        )
+        var deployments: [SpeakerOptimizerPEQSourceDeployment] = []
+        for candidate in plan.candidate.sources where !candidate.bands.isEmpty {
+            guard case .speaker(let role) = candidate.source,
+                  role != .lowFrequencyEffects,
+                  let sourceProposal =
+                    proposalBySource[sourceKey(candidate.source)],
+                  sourceProposal.candidateKind == .peq,
+                  sourceProposal.stageStatus.canInstall,
+                  sourceProposal.candidateFingerprint
+                    == fingerprintPEQ(candidate) else {
+                throw SpeakerOptimizerCommissioningError
+                    .candidateIdentityMismatch
+            }
+            deployments.append(
+                SpeakerOptimizerPEQSourceDeployment(
+                    role: role,
+                    bands: candidate.bands.map {
+                        SpeakerOptimizerDeployedPEQBand(
+                            frequencyHz: $0.centerHz,
+                            gainDB: $0.gainDB,
+                            q: $0.q
+                        )
+                    }
+                )
+            )
+        }
+        guard deployments.count == proposal.sources.count else {
+            throw SpeakerOptimizerCommissioningError
+                .candidateIdentityMismatch
+        }
+
+        let configuration = SpeakerOptimizerPEQDeploymentConfiguration(
+            proposalID: proposal.id,
+            baselineMeasurementSetID:
+                proposal.baselineMeasurementSetID,
+            characterizationMeasurementSetID:
+                proposal.characterizationMeasurementSetID,
+            routingSignature: proposal.routingSignature,
+            sampleRate: proposal.sampleRate,
+            aggregateCandidateFingerprint:
+                approval.aggregateCandidateFingerprint,
+            approvedAt: approval.approvedAt,
+            sources: deployments
+        )
+        try configuration.validate(profile: outputProfile)
+        return configuration
+    }
+
+    private func peqStageStatus(
+        _ candidate: SpeakerOptimizerPEQSourceCandidate,
+        profile: PlaybackSystemProfile,
+        sampleRate: Double
+    ) -> SpeakerOptimizerDeploymentStageStatus {
+        guard case .speaker(let role) = candidate.source,
+              role != .lowFrequencyEffects,
+              let outputProfile = profile.state.outputDeviceProfile,
+              outputProfile.enabled,
+              outputProfile.programLayout.roles.contains(role),
+              !candidate.bands.isEmpty,
+              candidate.bands.count
+                <= SpeakerOptimizerPEQDeploymentConfiguration
+                    .maximumBandsPerSource else {
+            return .blockedPEQCandidateNotRepresentable
+        }
+
+        let ordinaryCount = outputProfile.speakerAssignments
+            .first(where: { $0.role == role })?
+            .calibration?.eqBands.count ?? 0
+        guard ordinaryCount + candidate.bands.count
+                <= Int(N60_PROGRAM_LANE_MAX_EQ_SECTIONS) else {
+            return .blockedPEQCandidateNotRepresentable
+        }
+        for band in candidate.bands {
+            let deployed = SpeakerOptimizerDeployedPEQBand(
+                frequencyHz: band.centerHz,
+                gainDB: band.gainDB,
+                q: band.q
+            )
+            guard (try? deployed.validate(sampleRate: sampleRate)) != nil else {
+                return .blockedPEQCandidateNotRepresentable
+            }
+        }
+        return .availableDedicatedSpeakerOptimizerPEQStage
     }
 
     private func makeProposal(

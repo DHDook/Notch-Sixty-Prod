@@ -299,6 +299,9 @@ struct OutputDeviceProfileConfiguration: Codable, Equatable, Sendable {
     var synchronizationMode: MultiOutputSynchronizationMode
     var referenceDeviceUID: String?
     var calibrationSummary: MultichannelCalibrationDeploymentSummary?
+    /// Separately owned Speaker Optimizer PEQ. Ordinary speakerAssignments.calibration
+    /// remains Speaker Calibration state and is never overwritten by optimizer Apply.
+    var speakerOptimizerPEQ: SpeakerOptimizerPEQDeploymentConfiguration?
 
     init(
         enabled: Bool = false,
@@ -307,7 +310,8 @@ struct OutputDeviceProfileConfiguration: Codable, Equatable, Sendable {
         subwooferAssignments: [PhysicalSubwooferOutputAssignment] = [],
         synchronizationMode: MultiOutputSynchronizationMode = .automatic,
         referenceDeviceUID: String? = nil,
-        calibrationSummary: MultichannelCalibrationDeploymentSummary? = nil
+        calibrationSummary: MultichannelCalibrationDeploymentSummary? = nil,
+        speakerOptimizerPEQ: SpeakerOptimizerPEQDeploymentConfiguration? = nil
     ) {
         self.enabled = enabled
         self.programLayout = programLayout
@@ -316,6 +320,7 @@ struct OutputDeviceProfileConfiguration: Codable, Equatable, Sendable {
         self.synchronizationMode = synchronizationMode
         self.referenceDeviceUID = referenceDeviceUID
         self.calibrationSummary = calibrationSummary
+        self.speakerOptimizerPEQ = speakerOptimizerPEQ
     }
 
     var requiredDeviceUIDs: Set<String> {
@@ -399,6 +404,7 @@ struct OutputDeviceProfileConfiguration: Codable, Equatable, Sendable {
             try sub.calibration?.validate()
         }
         try calibrationSummary?.validate()
+        try speakerOptimizerPEQ?.validate(profile: self)
     }
 
     func makeLivePlan(
@@ -419,6 +425,12 @@ struct OutputDeviceProfileConfiguration: Codable, Equatable, Sendable {
         }
         for assignment in subwooferAssignments {
             try assignment.calibration?.validate(sampleRate: sampleRate)
+        }
+        if let optimizer = speakerOptimizerPEQ {
+            guard abs(optimizer.sampleRate - sampleRate) < 0.5 else {
+                throw SpeakerOptimizerPEQDeploymentError.invalidConfiguration
+            }
+            try optimizer.validate(profile: self)
         }
         if let summary = calibrationSummary {
             try summary.validate()
@@ -539,7 +551,8 @@ struct OutputDeviceProfileConfiguration: Codable, Equatable, Sendable {
             subwooferCount: UInt32(subwooferAssignments.count),
             bassManagementEnabled: bassManagementEnabled,
             speakerCalibrations: speakerCalibrations,
-            subwooferCalibrations: subwooferCalibrations
+            subwooferCalibrations: subwooferCalibrations,
+            speakerOptimizerPEQ: speakerOptimizerPEQ?.bandsByRole ?? [:]
         )
         _ = try plan.makeRealtimeOutputMap()
         return plan
@@ -558,6 +571,38 @@ struct LiveNChannelOutputRoutePlan: Equatable, Sendable {
     let bassManagementEnabled: Bool
     let speakerCalibrations: [OutputProgramRole: SemanticSpeakerCalibration]
     let subwooferCalibrations: [PhysicalSubwooferCalibration?]
+    /// Separate ownership is preserved in the control plane. The realtime
+    /// compiler appends these after ordinary Speaker Calibration sections.
+    let speakerOptimizerPEQ:
+        [OutputProgramRole: [SpeakerOptimizerDeployedPEQBand]]
+
+    init(
+        programLayout: OutputProgramLayout,
+        orderedDeviceUIDs: [String],
+        referenceDeviceUID: String,
+        physicalChannelCount: UInt32,
+        programPhysicalChannels: [UInt32],
+        subwooferPhysicalChannels: [UInt32],
+        subwooferCount: UInt32,
+        bassManagementEnabled: Bool,
+        speakerCalibrations:
+            [OutputProgramRole: SemanticSpeakerCalibration],
+        subwooferCalibrations: [PhysicalSubwooferCalibration?],
+        speakerOptimizerPEQ:
+            [OutputProgramRole: [SpeakerOptimizerDeployedPEQBand]] = [:]
+    ) {
+        self.programLayout = programLayout
+        self.orderedDeviceUIDs = orderedDeviceUIDs
+        self.referenceDeviceUID = referenceDeviceUID
+        self.physicalChannelCount = physicalChannelCount
+        self.programPhysicalChannels = programPhysicalChannels
+        self.subwooferPhysicalChannels = subwooferPhysicalChannels
+        self.subwooferCount = subwooferCount
+        self.bassManagementEnabled = bassManagementEnabled
+        self.speakerCalibrations = speakerCalibrations
+        self.subwooferCalibrations = subwooferCalibrations
+        self.speakerOptimizerPEQ = speakerOptimizerPEQ
+    }
 
     var usesMultiplePhysicalDevices: Bool { orderedDeviceUIDs.count > 1 }
 
