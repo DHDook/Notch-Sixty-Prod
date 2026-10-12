@@ -1063,6 +1063,31 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                         .font(.callout.bold())
                         .foregroundStyle(.secondary)
                     }
+                } else if let persisted = persistedAlignmentStatus {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label(
+                            persisted.verified
+                                ? "Persisted PR108 alignment · VERIFIED"
+                                : "Persisted PR108 alignment · PROVISIONAL",
+                            systemImage: persisted.verified
+                                ? "checkmark.shield.fill"
+                                : "clock.badge.checkmark"
+                        )
+                        .font(.callout.bold())
+                        .foregroundStyle(
+                            persisted.verified ? .green : .orange
+                        )
+
+                        Text(persisted.detail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Text(
+                            "This deployment provenance survived profile reload. A new alignment proposal is blocked while it owns the live timing/polarity calibration. The guided controller does not reconstruct an old Apply receipt after relaunch."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
                 } else {
                     Text(
                         "Complete a coherent Main/Sub Lab session with simultaneous shared-time electrical reference, then generate a proposal here. One Sub uses the single-Sub path; two or more Subs are solved and applied atomically."
@@ -1154,10 +1179,34 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
         }
     }
 
+    private var persistedAlignmentStatus:
+        (verified: Bool, detail: String)? {
+        guard let output = currentProfile else { return nil }
+
+        if let record = output.coherentMultiSubwooferAlignment {
+            return (
+                verified: record.verified,
+                detail:
+                    "Coordinated \(record.subwoofers.count)-Sub provenance · crossover \(String(format: "%.0f Hz", record.crossoverFrequencyHz)) · applied \(record.appliedAt.formatted(date: .abbreviated, time: .shortened))."
+            )
+        }
+
+        if let record = output.coherentSubwooferAlignment {
+            return (
+                verified: record.verified,
+                detail:
+                    "Sub \(record.subwooferIndex + 1) provenance · crossover \(String(format: "%.0f Hz", record.crossoverFrequencyHz)) · applied \(record.appliedAt.formatted(date: .abbreviated, time: .shortened))."
+            )
+        }
+
+        return nil
+    }
+
     private var canGenerateAlignmentProposal: Bool {
         guard lab.progress?.complete == true,
               currentSessionHasCoherentPairs,
-              engine.lifecycleState == .idle else {
+              engine.lifecycleState == .idle,
+              persistedAlignmentStatus == nil else {
             return false
         }
         switch alignment.state {
