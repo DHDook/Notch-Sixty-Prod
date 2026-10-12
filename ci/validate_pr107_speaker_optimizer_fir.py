@@ -18,13 +18,14 @@ CONV = ROOT / "NotchSixty/Audio/Realtime/N60Convolution.h"
 COMMISSIONING = ROOT / "NotchSixty/Audio/SpeakerOptimizerCommissioningContract.swift"
 PROJECT = ROOT / "NotchSixty.xcodeproj/project.pbxproj"
 DOC = ROOT / "docs/PR107_SPEAKER_OPTIMIZER_FIR_DEPLOYMENT.md"
+PHYSICAL_ACCEPTANCE = ROOT / "docs/PR107_PHYSICAL_FIR_ACCEPTANCE.md"
 PROGRAM_FIR = ROOT / "NotchSixty/Audio/Realtime/N60ProgramFIRRuntime.h"
 PROGRAM_FIR_HARNESS = ROOT / "ci/validate_pr107_program_fir_runtime.c"
 LIVE_RENDER = ROOT / "NotchSixty/Audio/Realtime/N60LiveNChannelRenderCore.h"
 LIVE_RENDER_HARNESS = ROOT / "ci/validate_pr107_live_fir_render.c"
 WORKFLOW = ROOT / ".github/workflows/pr107-speaker-optimizer-fir.yml"
 
-for path in (SOURCE, TESTS, APPLY, APPLY_TESTS, AV_SYNC, AV_SYNC_TESTS, FIR_VERIFY, FIR_VERIFY_TESTS, GUIDED, FIR_VERIFICATION_CONTROLLER, GUIDED_FIR_TESTS, LANE, CONV, COMMISSIONING, PROJECT, DOC, PROGRAM_FIR, PROGRAM_FIR_HARNESS, LIVE_RENDER, LIVE_RENDER_HARNESS, WORKFLOW):
+for path in (SOURCE, TESTS, APPLY, APPLY_TESTS, AV_SYNC, AV_SYNC_TESTS, FIR_VERIFY, FIR_VERIFY_TESTS, GUIDED, FIR_VERIFICATION_CONTROLLER, GUIDED_FIR_TESTS, LANE, CONV, COMMISSIONING, PROJECT, DOC, PHYSICAL_ACCEPTANCE, PROGRAM_FIR, PROGRAM_FIR_HARNESS, LIVE_RENDER, LIVE_RENDER_HARNESS, WORKFLOW):
     assert path.is_file(), f"missing PR107 Slice 1 file: {path}"
 
 source = SOURCE.read_text()
@@ -43,6 +44,7 @@ conv = CONV.read_text()
 commissioning = COMMISSIONING.read_text()
 project = PROJECT.read_text()
 doc = DOC.read_text()
+physical_acceptance = PHYSICAL_ACCEPTANCE.read_text()
 program_fir = PROGRAM_FIR.read_text()
 program_fir_harness = PROGRAM_FIR_HARNESS.read_text()
 live_render = LIVE_RENDER.read_text()
@@ -239,6 +241,21 @@ for token in (
     "F10700000000000000000018",
 ):
     assert project.count(token) >= 2, f"missing PR107 Xcode registration: {token}"
+
+for token in (
+    "PR107 — Physical FIR Commissioning & Acceptance",
+    "P2 — Realtime performance / XRun margin",
+    "P3 — Impulse timing and channel coherence",
+    "P4 — Automatic headroom and clipping",
+    "P5 — Fresh post-Apply acoustic verification",
+    "P7 — Synchronized-video / A-V acceptance",
+    "Physical acceptance",
+    "PR107 commit:",
+):
+    assert token in physical_acceptance, f"missing PR107 physical acceptance contract: {token}"
+
+assert "REMOTE SOFTWARE COMPLETE — PHYSICAL ACCEPTANCE PENDING" in doc
+assert "docs/PR107_PHYSICAL_FIR_ACCEPTANCE.md" in doc
 
 for token in (
     "PR107 — Speaker Optimizer FIR Deployment & Latency Coordination",
