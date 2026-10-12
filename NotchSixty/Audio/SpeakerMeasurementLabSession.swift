@@ -52,6 +52,7 @@ struct SpeakerMeasurementLabCapture:
     var playbackSystemID: UUID
     var routingSignature: String
     var microphone: SpeakerOptimizerMicrophoneIdentity
+    var microphoneCalibration: RoomCorrectionMicrophoneCalibration? = nil
     var sampleRate: Double
     var source: MultichannelCalibrationSource
     var impulseResponse: [Float]

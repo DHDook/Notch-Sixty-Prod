@@ -214,6 +214,7 @@ final class SpeakerMeasurementLabController: ObservableObject {
             routingSignature:
                 profile.multichannelCalibrationRoutingSignature,
             microphone: mic,
+            microphoneCalibration: microphone.microphoneCalibration,
             sampleRate: output.nominalSampleRate,
             protocols: protocols,
             captures: [],

@@ -9,13 +9,13 @@ SESSION_TESTS = ROOT / "NotchSixtyTests/SpeakerMeasurementLabSessionTests.swift"
 DIRECTIVITY_SOURCE = ROOT / "NotchSixty/Audio/SpeakerMeasurementLabDirectivity.swift"
 DIRECTIVITY_TESTS = ROOT / "NotchSixtyTests/SpeakerMeasurementLabDirectivityTests.swift"
 NEARFIELD_SOURCE = ROOT / "NotchSixty/Audio/SpeakerMeasurementLabNearFieldLF.swift"
-NEARFIELD_TESTS = ROOT / "NotchSixtyTests/SpeakerMeasurementLabNearFieldLFTests.swift"
+NEARFIELD_TESTS = ROOT / "NotchSixtyTests/SpeakerMeasurementLabNearFieldLFTests.swift"\nGATED_SOURCE = ROOT / "NotchSixty/Audio/SpeakerMeasurementLabQuasiAnechoic.swift"\nGATED_TESTS = ROOT / "NotchSixtyTests/SpeakerMeasurementLabQuasiAnechoicTests.swift"
 CONTROLLER_SOURCE = ROOT / "NotchSixty/Audio/SpeakerMeasurementLabController.swift"
 PROJECT = ROOT / "NotchSixty.xcodeproj/project.pbxproj"
 DOC = ROOT / "docs/PR106_ADVANCED_SPEAKER_MEASUREMENT_LAB.md"
 WORKFLOW = ROOT / ".github/workflows/pr106-speaker-measurement-lab.yml"
 
-for path in (SOURCE, TESTS, SESSION_SOURCE, SESSION_TESTS, DIRECTIVITY_SOURCE, DIRECTIVITY_TESTS, NEARFIELD_SOURCE, NEARFIELD_TESTS, CONTROLLER_SOURCE, PROJECT, DOC, WORKFLOW):
+for path in (SOURCE, TESTS, SESSION_SOURCE, SESSION_TESTS, DIRECTIVITY_SOURCE, DIRECTIVITY_TESTS, NEARFIELD_SOURCE, NEARFIELD_TESTS, GATED_SOURCE, GATED_TESTS, CONTROLLER_SOURCE, PROJECT, DOC, WORKFLOW):
     assert path.is_file(), f"missing PR106 Slice 1 file: {path}"
 
 source = SOURCE.read_text()
@@ -25,7 +25,7 @@ session_tests = SESSION_TESTS.read_text()
 directivity_source = DIRECTIVITY_SOURCE.read_text()
 directivity_tests = DIRECTIVITY_TESTS.read_text()
 nearfield_source = NEARFIELD_SOURCE.read_text()
-nearfield_tests = NEARFIELD_TESTS.read_text()
+nearfield_tests = NEARFIELD_TESTS.read_text()\ngated_source = GATED_SOURCE.read_text()\ngated_tests = GATED_TESTS.read_text()
 controller_source = CONTROLLER_SOURCE.read_text()
 project = PROJECT.read_text()
 doc = DOC.read_text()
@@ -171,10 +171,10 @@ for token in (
 assert "SpeakerMeasurementLabCapabilityTests" in workflow
 assert "SpeakerMeasurementLabSessionTests" in workflow
 assert "SpeakerMeasurementLabDirectivityTests" in workflow
-assert "SpeakerMeasurementLabNearFieldLFTests" in workflow
+assert "SpeakerMeasurementLabNearFieldLFTests" in workflow\nassert "SpeakerMeasurementLabQuasiAnechoicTests" in workflow
 assert "Run full XCTest regression" in workflow
 assert "Slice 2" in doc
 assert "Slice 3" in doc
 assert "Repeat-qualified installed-room directivity comparison" in doc
-assert "Repeat-qualified near-field LF component diagnostics" in doc
-print("PR106 lab capability + directivity + near-field LF contracts passed")
+assert "Repeat-qualified near-field LF component diagnostics" in doc\nassert "Explicit reflection-window quasi-anechoic estimate" in doc
+print("PR106 lab capability + directivity + near-field LF + gated response contracts passed")

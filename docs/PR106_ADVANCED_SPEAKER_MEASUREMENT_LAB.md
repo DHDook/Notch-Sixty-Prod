@@ -1,6 +1,6 @@
 # PR106 — Advanced Speaker Measurement Lab
 
-Status: **SLICES 1–4 SOFTWARE VERIFIED — SLICE 5 CI PENDING**
+Status: **SLICES 1–5 SOFTWARE VERIFIED — SLICE 6 CI PENDING**
 
 Base: PR105 Guided Speaker Optimizer & Acoustic Verification.
 
@@ -174,12 +174,28 @@ measurement-lab tests and full XCTest regression.
   represent system bass response.
 - Near-field LF diagnostics remain measurement-only and cannot design/apply DSP.
 
+## Slice 5 exact-head verification
+
+Slice 5 exact head `6d5723bd58d7dc22ca2c6ea65e91c34c6a810be8` passed push run 38220002851 and pull-request run 38220006969, including PR106/PR105 validators, Apple Silicon Debug build, targeted lab tests and full XCTest regression.
+
+## Slice 6 — Explicit reflection-window quasi-anechoic estimate
+
+- New Lab sessions persist the selected microphone calibration curve so impulse-derived gated magnitude can reproduce calibrated transfer magnitude; legacy sessions remain readable.
+- A calibrated legacy session without the persisted curve fails closed for this analysis.
+- Whole-speaker on-axis/off-axis protocols use already stored deconvolved impulses; no new excitation path is added.
+- The post-arrival reflection-free duration is an explicit assumption. Software does not claim automatic first-reflection detection.
+- The report exposes direct arrival, assumed reflection boundary, window parameters, repeat traces and the gate-derived trust band.
+- Default 6 ms / two-cycle settings imply a ~333 Hz low-frequency boundary before snapping to the measured grid; shorter windows raise it.
+- Late energy outside the selected gate is excluded.
+- Microphone calibration is reapplied to the gated impulse transform.
+- Gated phase is not published; this remains magnitude-only and cannot become crossover/timing evidence.
+- `isQuasiAnechoicEstimate == true`, `isAnechoic == false`, and `canDeploy == false` are explicit.
+
 ## Planned follow-on slices
 
-1. Quasi-anechoic gated response tools with explicit reflection-window limits.
-2. Distortion/nonlinearity diagnostics from bounded excitation where the current
+1. Distortion/nonlinearity diagnostics from bounded excitation where the current
    capture chain can support defensible metrics.
-3. Crossover-preserving protected-driver excitation path.
-4. Authenticated shared-clock reference capture for coherent relative timing and
+2. Crossover-preserving protected-driver excitation path.
+3. Authenticated shared-clock reference capture for coherent relative timing and
    phase diagnostics.
-5. Production Advanced Speaker Measurement Lab UI and export/reporting.
+4. Production Advanced Speaker Measurement Lab UI and export/reporting.
