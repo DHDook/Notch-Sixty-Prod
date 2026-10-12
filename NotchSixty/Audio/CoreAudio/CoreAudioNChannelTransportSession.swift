@@ -17,6 +17,7 @@ enum LiveNChannelTransportError: Error, Equatable, LocalizedError {
     case roomTreatmentPermitMismatch
     case roomTreatmentSourceUnavailable(String)
     case roomTreatmentConfigurationFailed
+    case speakerOptimizerFIRConfigurationFailed
     case configurationChangeRequiresRestart
 
     var errorDescription: String? {
@@ -47,6 +48,8 @@ enum LiveNChannelTransportError: Error, Equatable, LocalizedError {
             return "Room-treatment source \(source) is not mapped to a usable physical output in the active Output Device Profile."
         case .roomTreatmentConfigurationFailed:
             return "The hardware-gated room-treatment runtime could not be prepared."
+        case .speakerOptimizerFIRConfigurationFailed:
+            return "The persisted Speaker Optimizer FIR could not be bound to the live semantic program graph with its required latency/headroom contract."
         case .configurationChangeRequiresRestart:
             return "Stop N-channel processing before changing DSP or Output Device Profile configuration."
         }
@@ -142,9 +145,18 @@ enum LiveNChannelRenderGraphCompiler {
         let layout = routePlan.programLayout.realtimeLayout
         var lanes = N60ProgramLaneGraphSnapshotMakeUnity(sampleRate, layout)
 
+        let optimizerFIRHeadroomDB =
+            routePlan.speakerOptimizerFIR?.requiredHeadroomDB ?? 0
+        guard optimizerFIRHeadroomDB.isFinite,
+              (0...SpeakerOptimizerFIRDeploymentConfiguration
+                    .maximumHeadroomDB)
+                .contains(optimizerFIRHeadroomDB) else {
+            throw LiveNChannelTransportError.renderGraphInvalid
+        }
         let combinedGainDB = gainConfiguration.inputPreampDB
             + gainConfiguration.headroomAttenuationDB
             + gainConfiguration.outputGainDB
+            - optimizerFIRHeadroomDB
         let combinedGain = DSPGainConfiguration.linearGain(forDB: combinedGainDB)
         guard combinedGain.isFinite, combinedGain >= 0, combinedGain <= 16 else {
             throw LiveNChannelTransportError.renderGraphInvalid
@@ -481,6 +493,42 @@ final class CoreAudioNChannelTransportSession {
                 gatePolicy.fadeInFrames
             ) else {
                 throw LiveNChannelTransportError.realtimeBridgeAllocationFailed
+            }
+            if let optimizerFIR = routePlan.speakerOptimizerFIR {
+                do {
+                    try optimizerFIR.validateLiveSampleRate(
+                        outputFormat.sampleRate
+                    )
+                    let preparation =
+                        try optimizerFIR.makeRuntimePreparation(
+                            programLayout: routePlan.programLayout
+                        )
+                    var taps = preparation.flattenedTaps
+                    let configured = taps.withUnsafeBufferPointer {
+                        tapBuffer in
+                        guard let base = tapBuffer.baseAddress else {
+                            return false
+                        }
+                        return N60LiveNChannelBridgeConfigureProgramFIR(
+                            newBridge,
+                            preparation.activeChannelMask,
+                            base,
+                            preparation.tapCount,
+                            preparation.declaredGroupDelayFrames
+                        )
+                    }
+                    guard configured else {
+                        throw LiveNChannelTransportError
+                            .speakerOptimizerFIRConfigurationFailed
+                    }
+                } catch {
+                    N60LiveNChannelBridgeDestroy(newBridge)
+                    if let error = error as? LiveNChannelTransportError {
+                        throw error
+                    }
+                    throw LiveNChannelTransportError
+                        .speakerOptimizerFIRConfigurationFailed
+                }
             }
             if let adaptiveTargetInputFrames {
                 guard N60LiveNChannelBridgeConfigureAdaptiveSampleRate(

@@ -7,7 +7,9 @@ enum SpeakerOptimizerCommissioningCandidateKind: String, Codable, Equatable, Sen
 
 enum SpeakerOptimizerDeploymentStageStatus: String, Codable, Equatable, Sendable {
     case availableDedicatedSpeakerOptimizerPEQStage
+    case availableDedicatedSpeakerOptimizerFIRStage
     case blockedPEQCandidateNotRepresentable
+    case blockedFIRCandidateNotRepresentable
     /// Retained as a fail-closed legacy checkpoint value; new PEQ proposals use
     /// the separately owned stage introduced in PR105 Slice 7.
     case blockedDedicatedSpeakerOptimizerPEQStageUnavailable
@@ -16,14 +18,19 @@ enum SpeakerOptimizerDeploymentStageStatus: String, Codable, Equatable, Sendable
 
     var canInstall: Bool {
         self == .availableDedicatedSpeakerOptimizerPEQStage
+            || self == .availableDedicatedSpeakerOptimizerFIRStage
     }
 
     var explanation: String {
         switch self {
         case .availableDedicatedSpeakerOptimizerPEQStage:
             return "A separately owned cut-only Speaker Optimizer PEQ stage is available and compiles after ordinary Speaker Calibration sections."
+        case .availableDedicatedSpeakerOptimizerFIRStage:
+            return "A separately owned Speaker Optimizer FIR stage is available with explicit per-role taps, automatic headroom reserve, and exact latency/coherence accounting."
         case .blockedPEQCandidateNotRepresentable:
             return "The PEQ candidate cannot fit the bounded cut-only optimizer stage without violating band, source, sample-rate, or aggregate lane-section limits."
+        case .blockedFIRCandidateNotRepresentable:
+            return "The FIR candidate cannot fit the dedicated optimizer stage without violating source, tap, linear-phase, sample-rate, headroom, or latency limits."
         case .blockedDedicatedSpeakerOptimizerPEQStageUnavailable:
             return "A separately owned Speaker Optimizer PEQ stage is required; existing Speaker Calibration EQ bands must not be overwritten or double-used."
         case .blockedDedicatedSpeakerOptimizerFIRStageUnavailable:
@@ -186,8 +193,11 @@ struct SpeakerOptimizerCommissioningPlanner: Sendable {
                 source: candidate.source,
                 candidateKind: .linearPhaseFIR,
                 candidateFingerprint: fingerprintFIR(candidate),
-                stageStatus:
-                    .blockedDedicatedSpeakerOptimizerFIRStageUnavailable,
+                stageStatus: firStageStatus(
+                    candidate,
+                    plan: plan,
+                    profile: profile
+                ),
                 modeledCorrectionPresent: true
             )
         }
@@ -333,6 +343,100 @@ struct SpeakerOptimizerCommissioningPlanner: Sendable {
         return configuration
     }
 
+    func makeFIRDeploymentConfiguration(
+        profile: PlaybackSystemProfile,
+        plan: SpeakerOptimizerClassificationAwareFIRPlan,
+        proposal: SpeakerOptimizerCommissioningProposal,
+        approval: SpeakerOptimizerApplyApproval
+    ) throws -> SpeakerOptimizerFIRDeploymentConfiguration {
+        try validateApproval(approval, for: proposal)
+        guard proposal.playbackSystemID == profile.id,
+              proposal.baselineMeasurementSetID
+                == plan.candidate.baselineMeasurementSetID,
+              proposal.characterizationMeasurementSetID
+                == plan.classification.characterizationMeasurementSetID,
+              proposal.routingSignature == plan.candidate.routingSignature,
+              abs(proposal.sampleRate - plan.candidate.sampleRate) < 0.5,
+              let outputProfile = profile.state.outputDeviceProfile,
+              outputProfile.enabled,
+              outputProfile.speakerOptimizerPEQ == nil,
+              outputProfile.speakerOptimizerFIR == nil else {
+            throw SpeakerOptimizerCommissioningError
+                .candidateIdentityMismatch
+        }
+
+        let proposalBySource = Dictionary(
+            uniqueKeysWithValues: proposal.sources.map {
+                (sourceKey($0.source), $0)
+            }
+        )
+        var deployments: [SpeakerOptimizerFIRSourceDeployment] = []
+        for candidate in plan.candidate.sources
+        where candidate.acceptedForPreview && !candidate.taps.isEmpty {
+            guard case .speaker(let role) = candidate.source,
+                  role != .lowFrequencyEffects,
+                  let sourceProposal =
+                    proposalBySource[sourceKey(candidate.source)],
+                  sourceProposal.candidateKind == .linearPhaseFIR,
+                  sourceProposal.stageStatus
+                    == .availableDedicatedSpeakerOptimizerFIRStage,
+                  sourceProposal.candidateFingerprint
+                    == fingerprintFIR(candidate) else {
+                throw SpeakerOptimizerCommissioningError
+                    .candidateIdentityMismatch
+            }
+            deployments.append(
+                SpeakerOptimizerFIRSourceDeployment(
+                    role: role,
+                    candidateFingerprint:
+                        sourceProposal.candidateFingerprint,
+                    taps: candidate.taps,
+                    maximumPositiveGainDB:
+                        candidate.maximumPositiveGainDB,
+                    recommendedHeadroomDB:
+                        candidate.recommendedHeadroomDB
+                )
+            )
+        }
+        guard deployments.count == proposal.sources.count else {
+            throw SpeakerOptimizerCommissioningError
+                .candidateIdentityMismatch
+        }
+
+        let requiredHeadroom = deployments
+            .map(\.recommendedHeadroomDB).max() ?? 0
+        let configuration =
+            SpeakerOptimizerFIRDeploymentConfiguration(
+                proposalID: proposal.id,
+                baselineMeasurementSetID:
+                    proposal.baselineMeasurementSetID,
+                characterizationMeasurementSetID:
+                    proposal.characterizationMeasurementSetID,
+                routingSignature: proposal.routingSignature,
+                sampleRate: proposal.sampleRate,
+                aggregateCandidateFingerprint:
+                    approval.aggregateCandidateFingerprint,
+                approvedAt: approval.approvedAt,
+                tapCount: plan.candidate.requestedTapCount,
+                declaredGroupDelayFrames:
+                    plan.candidate.declaredGroupDelayFrames,
+                requiredHeadroomDB: requiredHeadroom,
+                sources: deployments
+            )
+        try configuration.validate(profile: outputProfile)
+        _ = try SpeakerOptimizerFIRLatencyPlanner().plan(
+            profile: outputProfile,
+            bassManagementEnabled:
+                profile.state.bassManagement.enabled,
+            sampleRate: configuration.sampleRate,
+            tapCount: configuration.tapCount,
+            declaredGroupDelayFrames:
+                UInt32(configuration.declaredGroupDelayFrames),
+            correctedRoles: configuration.correctedRoles
+        )
+        return configuration
+    }
+
     private func peqStageStatus(
         _ candidate: SpeakerOptimizerPEQSourceCandidate,
         profile: PlaybackSystemProfile,
@@ -342,6 +446,7 @@ struct SpeakerOptimizerCommissioningPlanner: Sendable {
               role != .lowFrequencyEffects,
               let outputProfile = profile.state.outputDeviceProfile,
               outputProfile.enabled,
+              outputProfile.speakerOptimizerFIR == nil,
               outputProfile.programLayout.roles.contains(role),
               !candidate.bands.isEmpty,
               candidate.bands.count
@@ -368,6 +473,78 @@ struct SpeakerOptimizerCommissioningPlanner: Sendable {
             }
         }
         return .availableDedicatedSpeakerOptimizerPEQStage
+    }
+
+    private func firStageStatus(
+        _ candidate: SpeakerOptimizerFIRSourceCandidate,
+        plan: SpeakerOptimizerClassificationAwareFIRPlan,
+        profile: PlaybackSystemProfile
+    ) -> SpeakerOptimizerDeploymentStageStatus {
+        guard case .speaker(let role) = candidate.source,
+              role != .lowFrequencyEffects,
+              candidate.acceptedForPreview,
+              !candidate.taps.isEmpty,
+              let outputProfile = profile.state.outputDeviceProfile,
+              outputProfile.enabled,
+              outputProfile.speakerOptimizerPEQ == nil,
+              outputProfile.speakerOptimizerFIR == nil,
+              outputProfile.programLayout.roles.contains(role),
+              outputProfile.speakerAssignments.contains(where: {
+                  $0.role == role
+              }) else {
+            return .blockedFIRCandidateNotRepresentable
+        }
+
+        let source = SpeakerOptimizerFIRSourceDeployment(
+            role: role,
+            candidateFingerprint: fingerprintFIR(candidate),
+            taps: candidate.taps,
+            maximumPositiveGainDB:
+                candidate.maximumPositiveGainDB,
+            recommendedHeadroomDB:
+                candidate.recommendedHeadroomDB
+        )
+        let candidateConfiguration =
+            SpeakerOptimizerFIRDeploymentConfiguration(
+                proposalID: UUID(),
+                baselineMeasurementSetID:
+                    plan.candidate.baselineMeasurementSetID,
+                characterizationMeasurementSetID:
+                    plan.classification
+                        .characterizationMeasurementSetID,
+                routingSignature:
+                    plan.candidate.routingSignature,
+                sampleRate: plan.candidate.sampleRate,
+                aggregateCandidateFingerprint:
+                    "commissioning-representability-check",
+                approvedAt: Date(timeIntervalSince1970: 0),
+                tapCount: plan.candidate.requestedTapCount,
+                declaredGroupDelayFrames:
+                    plan.candidate.declaredGroupDelayFrames,
+                requiredHeadroomDB:
+                    candidate.recommendedHeadroomDB,
+                sources: [source]
+            )
+        do {
+            try candidateConfiguration.validate(
+                profile: outputProfile
+            )
+            _ = try SpeakerOptimizerFIRLatencyPlanner().plan(
+                profile: outputProfile,
+                bassManagementEnabled:
+                    profile.state.bassManagement.enabled,
+                sampleRate: plan.candidate.sampleRate,
+                tapCount: plan.candidate.requestedTapCount,
+                declaredGroupDelayFrames:
+                    UInt32(
+                        plan.candidate.declaredGroupDelayFrames
+                    ),
+                correctedRoles: [role]
+            )
+        } catch {
+            return .blockedFIRCandidateNotRepresentable
+        }
+        return .availableDedicatedSpeakerOptimizerFIRStage
     }
 
     private func makeProposal(

@@ -302,6 +302,9 @@ struct OutputDeviceProfileConfiguration: Codable, Equatable, Sendable {
     /// Separately owned Speaker Optimizer PEQ. Ordinary speakerAssignments.calibration
     /// remains Speaker Calibration state and is never overwritten by optimizer Apply.
     var speakerOptimizerPEQ: SpeakerOptimizerPEQDeploymentConfiguration?
+    /// Separately owned linear-phase Speaker Optimizer FIR. Optional so legacy
+    /// persisted Output Device Profiles decode with this stage absent.
+    var speakerOptimizerFIR: SpeakerOptimizerFIRDeploymentConfiguration?
 
     init(
         enabled: Bool = false,
@@ -311,7 +314,8 @@ struct OutputDeviceProfileConfiguration: Codable, Equatable, Sendable {
         synchronizationMode: MultiOutputSynchronizationMode = .automatic,
         referenceDeviceUID: String? = nil,
         calibrationSummary: MultichannelCalibrationDeploymentSummary? = nil,
-        speakerOptimizerPEQ: SpeakerOptimizerPEQDeploymentConfiguration? = nil
+        speakerOptimizerPEQ: SpeakerOptimizerPEQDeploymentConfiguration? = nil,
+        speakerOptimizerFIR: SpeakerOptimizerFIRDeploymentConfiguration? = nil
     ) {
         self.enabled = enabled
         self.programLayout = programLayout
@@ -321,6 +325,7 @@ struct OutputDeviceProfileConfiguration: Codable, Equatable, Sendable {
         self.referenceDeviceUID = referenceDeviceUID
         self.calibrationSummary = calibrationSummary
         self.speakerOptimizerPEQ = speakerOptimizerPEQ
+        self.speakerOptimizerFIR = speakerOptimizerFIR
     }
 
     var requiredDeviceUIDs: Set<String> {
@@ -405,6 +410,7 @@ struct OutputDeviceProfileConfiguration: Codable, Equatable, Sendable {
         }
         try calibrationSummary?.validate()
         try speakerOptimizerPEQ?.validate(profile: self)
+        try speakerOptimizerFIR?.validate(profile: self)
     }
 
     func makeLivePlan(
@@ -431,6 +437,19 @@ struct OutputDeviceProfileConfiguration: Codable, Equatable, Sendable {
                 throw SpeakerOptimizerPEQDeploymentError.invalidConfiguration
             }
             try optimizer.validate(profile: self)
+        }
+        if let optimizerFIR = speakerOptimizerFIR {
+            try optimizerFIR.validate(profile: self)
+            try optimizerFIR.validateLiveSampleRate(sampleRate)
+            _ = try SpeakerOptimizerFIRLatencyPlanner().plan(
+                profile: self,
+                bassManagementEnabled: bassManagementEnabled,
+                sampleRate: sampleRate,
+                tapCount: optimizerFIR.tapCount,
+                declaredGroupDelayFrames:
+                    UInt32(optimizerFIR.declaredGroupDelayFrames),
+                correctedRoles: optimizerFIR.correctedRoles
+            )
         }
         if let summary = calibrationSummary {
             try summary.validate()
@@ -552,7 +571,8 @@ struct OutputDeviceProfileConfiguration: Codable, Equatable, Sendable {
             bassManagementEnabled: bassManagementEnabled,
             speakerCalibrations: speakerCalibrations,
             subwooferCalibrations: subwooferCalibrations,
-            speakerOptimizerPEQ: speakerOptimizerPEQ?.bandsByRole ?? [:]
+            speakerOptimizerPEQ: speakerOptimizerPEQ?.bandsByRole ?? [:],
+            speakerOptimizerFIR: speakerOptimizerFIR
         )
         _ = try plan.makeRealtimeOutputMap()
         return plan
@@ -575,6 +595,10 @@ struct LiveNChannelOutputRoutePlan: Equatable, Sendable {
     /// compiler appends these after ordinary Speaker Calibration sections.
     let speakerOptimizerPEQ:
         [OutputProgramRole: [SpeakerOptimizerDeployedPEQBand]]
+    /// Retained as separately owned deployment metadata so the live transport
+    /// cannot silently ignore an enabled persisted FIR.
+    let speakerOptimizerFIR:
+        SpeakerOptimizerFIRDeploymentConfiguration?
 
     init(
         programLayout: OutputProgramLayout,
@@ -589,7 +613,9 @@ struct LiveNChannelOutputRoutePlan: Equatable, Sendable {
             [OutputProgramRole: SemanticSpeakerCalibration],
         subwooferCalibrations: [PhysicalSubwooferCalibration?],
         speakerOptimizerPEQ:
-            [OutputProgramRole: [SpeakerOptimizerDeployedPEQBand]] = [:]
+            [OutputProgramRole: [SpeakerOptimizerDeployedPEQBand]] = [:],
+        speakerOptimizerFIR:
+            SpeakerOptimizerFIRDeploymentConfiguration? = nil
     ) {
         self.programLayout = programLayout
         self.orderedDeviceUIDs = orderedDeviceUIDs
@@ -602,6 +628,7 @@ struct LiveNChannelOutputRoutePlan: Equatable, Sendable {
         self.speakerCalibrations = speakerCalibrations
         self.subwooferCalibrations = subwooferCalibrations
         self.speakerOptimizerPEQ = speakerOptimizerPEQ
+        self.speakerOptimizerFIR = speakerOptimizerFIR
     }
 
     var usesMultiplePhysicalDevices: Bool { orderedDeviceUIDs.count > 1 }

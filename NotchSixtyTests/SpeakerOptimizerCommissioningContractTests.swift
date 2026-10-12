@@ -30,7 +30,7 @@ final class SpeakerOptimizerCommissioningContractTests: XCTestCase {
         )
     }
 
-    func testFIRProposalFailsClosedBecauseNoDedicatedPerSpeakerFIRStageExists() throws {
+    func testFIRProposalFailsClosedWhenCandidateIsNotRepresentable() throws {
         let proposal = try SpeakerOptimizerCommissioningPlanner().proposal(
             profile: makeProfile(),
             plan: makeFIRPlan()
@@ -38,7 +38,46 @@ final class SpeakerOptimizerCommissioningContractTests: XCTestCase {
         XCTAssertFalse(proposal.canApply)
         XCTAssertEqual(
             try XCTUnwrap(proposal.sources.first).stageStatus,
-            .blockedDedicatedSpeakerOptimizerFIRStageUnavailable
+            .blockedFIRCandidateNotRepresentable
+        )
+    }
+
+    func testRepresentableFIRProposalCanApplyAndBuildsDedicatedConfiguration() throws {
+        let planner = SpeakerOptimizerCommissioningPlanner()
+        let profile = makeProfile()
+        let plan = makeFIRPlan(
+            tapCount: 257,
+            maximumPositiveGainDB: 0.5,
+            recommendedHeadroomDB: 1.0
+        )
+        let proposal = try planner.proposal(
+            profile: profile,
+            plan: plan
+        )
+        XCTAssertTrue(proposal.canApply)
+        XCTAssertEqual(
+            try XCTUnwrap(proposal.sources.first).stageStatus,
+            .availableDedicatedSpeakerOptimizerFIRStage
+        )
+        let approval = try planner.makeExplicitApproval(
+            proposal: proposal,
+            userInitiated: true
+        )
+        let deployment = try planner.makeFIRDeploymentConfiguration(
+            profile: profile,
+            plan: plan,
+            proposal: proposal,
+            approval: approval
+        )
+        XCTAssertEqual(deployment.tapCount, 257)
+        XCTAssertEqual(deployment.declaredGroupDelayFrames, 128)
+        XCTAssertEqual(deployment.requiredHeadroomDB, 1.0)
+        XCTAssertEqual(deployment.sources.count, 1)
+        XCTAssertEqual(deployment.sources.first?.role, .frontLeft)
+        XCTAssertEqual(deployment.sources.first?.taps.count, 257)
+        XCTAssertNil(
+            profile.state.outputDeviceProfile?.speakerOptimizerFIR,
+            "Building the deployment must not mutate the Playback System."
         )
     }
 
@@ -139,6 +178,54 @@ final class SpeakerOptimizerCommissioningContractTests: XCTestCase {
         )
     }
 
+    func testExistingOptimizerDeploymentMustBeResolvedBeforeNewCommissioning() throws {
+        let planner = SpeakerOptimizerCommissioningPlanner()
+        let initialProfile = makeProfile()
+        let firPlan = makeFIRPlan(
+            tapCount: 257,
+            maximumPositiveGainDB: 0.5,
+            recommendedHeadroomDB: 1.0
+        )
+        let firstProposal = try planner.proposal(
+            profile: initialProfile,
+            plan: firPlan
+        )
+        let approval = try planner.makeExplicitApproval(
+            proposal: firstProposal,
+            userInitiated: true
+        )
+        let deployment = try planner.makeFIRDeploymentConfiguration(
+            profile: initialProfile,
+            plan: firPlan,
+            proposal: firstProposal,
+            approval: approval
+        )
+
+        var activeProfile = initialProfile
+        activeProfile.state.outputDeviceProfile?
+            .speakerOptimizerFIR = deployment
+
+        let secondFIRProposal = try planner.proposal(
+            profile: activeProfile,
+            plan: firPlan
+        )
+        XCTAssertFalse(secondFIRProposal.canApply)
+        XCTAssertEqual(
+            try XCTUnwrap(secondFIRProposal.sources.first).stageStatus,
+            .blockedFIRCandidateNotRepresentable
+        )
+
+        let peqProposal = try planner.proposal(
+            profile: activeProfile,
+            plan: makePEQPlan()
+        )
+        XCTAssertFalse(peqProposal.canApply)
+        XCTAssertEqual(
+            try XCTUnwrap(peqProposal.sources.first).stageStatus,
+            .blockedPEQCandidateNotRepresentable
+        )
+    }
+
     private func makeProfile() -> PlaybackSystemProfile {
         let outputProfile = OutputDeviceProfileConfiguration(
             enabled: true,
@@ -236,22 +323,31 @@ final class SpeakerOptimizerCommissioningContractTests: XCTestCase {
         )
     }
 
-    private func makeFIRPlan() -> SpeakerOptimizerClassificationAwareFIRPlan {
+    private func makeFIRPlan(
+        tapCount: Int = 3,
+        maximumPositiveGainDB: Double = 0,
+        recommendedHeadroomDB: Double = 0
+    ) -> SpeakerOptimizerClassificationAwareFIRPlan {
         let route = makeProfile().state.outputDeviceProfile!
             .multichannelCalibrationRoutingSignature
+        var taps = [Float](repeating: 0, count: tapCount)
+        if tapCount > 0 {
+            taps[(tapCount - 1) / 2] = 1
+        }
         let source = SpeakerOptimizerFIRSourceCandidate(
             source: .speaker(.frontLeft),
-            taps: [0.25, 0.5, 0.25],
+            taps: taps,
             frequenciesHz: [1_000, 2_000, 4_000],
             modeledFilterMagnitudeDB: [-0.5, -2, -0.5],
             weightedRMSEBeforeDB: 2,
             predictedWeightedRMSEAfterDB: 1,
             worstSeatRegressionDB: 0,
-            maximumPositiveGainDB: 0,
-            recommendedHeadroomDB: 0,
+            maximumPositiveGainDB: maximumPositiveGainDB,
+            recommendedHeadroomDB: recommendedHeadroomDB,
             acceptedForPreview: true,
             blockingReasons: []
         )
+        let delay = max(0, (tapCount - 1) / 2)
         return SpeakerOptimizerClassificationAwareFIRPlan(
             classification: makeClassification(),
             candidate: SpeakerOptimizerFIRCandidatePlan(
@@ -260,9 +356,10 @@ final class SpeakerOptimizerCommissioningContractTests: XCTestCase {
                 routingSignature: route,
                 sampleRate: 48_000,
                 evidenceConfidence: 0.9,
-                requestedTapCount: 3,
-                declaredGroupDelayFrames: 1,
-                declaredGroupDelayMilliseconds: 1.0 / 48,
+                requestedTapCount: tapCount,
+                declaredGroupDelayFrames: delay,
+                declaredGroupDelayMilliseconds:
+                    Double(delay) / 48_000 * 1_000,
                 sources: [source]
             )
         )

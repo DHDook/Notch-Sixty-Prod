@@ -10,6 +10,7 @@
 
 #include "N60MultichannelBassManagement.h"
 #include "N60ProgramLaneEngine.h"
+#include "N60ProgramFIRRuntime.h"
 #include "N60ProgramTransportCore.h"
 
 #ifdef __cplusplus
@@ -34,6 +35,8 @@ typedef struct {
 typedef struct {
     double sampleRate;
     N60ProgramChannelLayout programLayout;
+    bool programFIREnabled;
+    N60ProgramFIRProgramInfo programFIR;
     N60ProgramLaneGraphSnapshot laneGraph;
     bool bassManagementEnabled;
     N60MultichannelBassManagementSnapshot bassManagement;
@@ -46,6 +49,8 @@ typedef struct {
 } N60LiveNChannelPhysicalFrame;
 
 typedef struct N60LiveNChannelRenderRuntime {
+    N60ProgramFIRProgram * _Nullable programFIRProgram;
+    N60ProgramFIRRuntime * _Nullable programFIRRuntime;
     N60ProgramLaneRuntime * _Nullable laneRuntime;
     N60MultichannelBassManagementRuntime * _Nullable bassRuntime;
     N60ProgramChannelLayout preparedLayout;
@@ -153,6 +158,125 @@ static inline bool N60LiveNChannelOutputMapIsValid(
     );
 }
 
+static inline bool N60LiveNChannelProgramFIRGraphStateIsValid(
+    const N60LiveNChannelRenderGraph * _Nullable graph
+) {
+    if (graph == NULL) return false;
+    if (!graph->programFIREnabled) {
+        return !graph->programFIR.prepared
+            && graph->programFIR.activeChannelMask == 0u;
+    }
+
+    const N60ProgramFIRProgramInfo info = graph->programFIR;
+    if (!N60ProgramFIRProgramInfoIsValid(info)
+        || info.channelCount != graph->programLayout.channelCount) {
+        return false;
+    }
+
+    const uint64_t upstream64 =
+        (uint64_t)info.engineLatencyFrames
+        + (uint64_t)info.declaredLatencyFrames;
+    if (upstream64 > N60_PROGRAM_LANE_MAX_DELAY_FRAMES) {
+        return false;
+    }
+    const uint32_t upstream = (uint32_t)upstream64;
+
+    for (uint32_t channel = 0u;
+         channel < graph->programLayout.channelCount;
+         ++channel) {
+        const bool active =
+            (info.activeChannelMask & (1u << channel)) != 0u;
+        if (active
+            && graph->programLayout.channels[channel]
+                == N60ProgramChannelRoleLowFrequencyEffects) {
+            return false;
+        }
+        const uint32_t expected = active ? upstream : 0u;
+        if (graph->laneGraph.lanes[channel]
+                .upstreamProcessingLatencyFrames != expected) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/// Control-plane only. Binds prepared FIR metadata to the render graph and
+/// programs the already-existing lane coherence contract. Taps/runtime state
+/// are configured separately before callbacks start.
+static inline bool N60LiveNChannelRenderGraphSetProgramFIRInfo(
+    N60LiveNChannelRenderGraph * _Nonnull graph,
+    N60ProgramFIRProgramInfo info,
+    bool enabled
+) {
+    if (graph == NULL
+        || !N60ProgramChannelLayoutIsValid(&graph->programLayout)) {
+        return false;
+    }
+
+    N60LiveNChannelRenderGraph candidate = *graph;
+    N60ProgramLaneGraphSnapshot lanes = candidate.laneGraph;
+
+    if (!enabled) {
+        for (uint32_t channel = 0u;
+             channel < candidate.programLayout.channelCount;
+             ++channel) {
+            if (!N60ProgramLaneGraphSetUpstreamProcessingLatency(
+                    &lanes, channel, 0u)) {
+                return false;
+            }
+        }
+        if (!N60ProgramLaneGraphFinalize(&lanes)) return false;
+        candidate.programFIREnabled = false;
+        candidate.programFIR = (N60ProgramFIRProgramInfo){0};
+        candidate.laneGraph = lanes;
+        if (!N60LiveNChannelProgramFIRGraphStateIsValid(&candidate)) {
+            return false;
+        }
+        *graph = candidate;
+        return true;
+    }
+
+    if (!N60ProgramFIRProgramInfoIsValid(info)
+        || info.channelCount != candidate.programLayout.channelCount) {
+        return false;
+    }
+    const uint64_t upstream64 =
+        (uint64_t)info.engineLatencyFrames
+        + (uint64_t)info.declaredLatencyFrames;
+    if (upstream64 > N60_PROGRAM_LANE_MAX_DELAY_FRAMES) {
+        return false;
+    }
+    const uint32_t upstream = (uint32_t)upstream64;
+
+    for (uint32_t channel = 0u;
+         channel < candidate.programLayout.channelCount;
+         ++channel) {
+        const bool active =
+            (info.activeChannelMask & (1u << channel)) != 0u;
+        if (active
+            && candidate.programLayout.channels[channel]
+                == N60ProgramChannelRoleLowFrequencyEffects) {
+            return false;
+        }
+        if (!N60ProgramLaneGraphSetUpstreamProcessingLatency(
+                &lanes,
+                channel,
+                active ? upstream : 0u)) {
+            return false;
+        }
+    }
+    if (!N60ProgramLaneGraphFinalize(&lanes)) return false;
+
+    candidate.programFIREnabled = true;
+    candidate.programFIR = info;
+    candidate.laneGraph = lanes;
+    if (!N60LiveNChannelProgramFIRGraphStateIsValid(&candidate)) {
+        return false;
+    }
+    *graph = candidate;
+    return true;
+}
+
 static inline bool N60LiveNChannelRenderGraphIsValid(
     const N60LiveNChannelRenderGraph * _Nullable graph
 ) {
@@ -161,6 +285,7 @@ static inline bool N60LiveNChannelRenderGraphIsValid(
         || graph->sampleRate <= 0.0
         || !N60ProgramChannelLayoutIsValid(&graph->programLayout)
         || !N60ProgramLaneGraphIsValid(&graph->laneGraph)
+        || !N60LiveNChannelProgramFIRGraphStateIsValid(graph)
         || !N60LiveNChannelOutputMapIsValid(&graph->outputMap)
         || fabs(graph->laneGraph.sampleRate - graph->sampleRate) >= 0.5
         || !N60LiveNChannelLayoutsEqual(&graph->programLayout, &graph->laneGraph.layout)
@@ -189,9 +314,14 @@ static inline uint64_t N60LiveNChannelRenderGraphLatencyFrames(
 
     uint64_t maximumProgramDelay = 0u;
     for (uint32_t channel = 0; channel < graph->programLayout.channelCount; ++channel) {
-        const uint64_t delay = (uint64_t)N60ProgramLaneGraphEffectiveDelayFrames(
-            &graph->laneGraph, channel
-        );
+        const uint64_t upstream =
+            (uint64_t)graph->laneGraph.lanes[channel]
+                .upstreamProcessingLatencyFrames;
+        const uint64_t laneDelay =
+            (uint64_t)N60ProgramLaneGraphEffectiveDelayFrames(
+                &graph->laneGraph, channel
+            );
+        const uint64_t delay = upstream + laneDelay;
         if (delay > maximumProgramDelay) maximumProgramDelay = delay;
     }
 
@@ -247,11 +377,72 @@ static inline void N60LiveNChannelRenderRuntimeDestroy(
     N60LiveNChannelRenderRuntime * _Nullable runtime
 ) {
     if (runtime == NULL) return;
+    N60ProgramFIRRuntimeDestroy(runtime->programFIRRuntime);
+    N60ProgramFIRProgramDestroy(runtime->programFIRProgram);
     N60ProgramLaneRuntimeDestroy(runtime->laneRuntime);
     N60MultichannelBassManagementRuntimeDestroy(runtime->bassRuntime);
+    runtime->programFIRRuntime = NULL;
+    runtime->programFIRProgram = NULL;
     runtime->laneRuntime = NULL;
     runtime->bassRuntime = NULL;
     free(runtime);
+}
+
+/// Control-plane only. Must run while audio callbacks are stopped. Creates a
+/// sparse immutable FIR program/runtime and verifies that the actual prepared
+/// metadata exactly matches the graph's latency/coherence contract.
+static inline bool N60LiveNChannelRenderRuntimeConfigureProgramFIR(
+    N60LiveNChannelRenderRuntime * _Nonnull runtime,
+    const N60LiveNChannelRenderGraph * _Nonnull graph,
+    const float * _Nonnull taps
+) {
+    if (runtime == NULL
+        || graph == NULL
+        || taps == NULL
+        || !graph->programFIREnabled
+        || !N60LiveNChannelProgramFIRGraphStateIsValid(graph)) {
+        return false;
+    }
+
+    N60ProgramFIRProgram *program =
+        N60ProgramFIRProgramCreate(
+            graph->programFIR.channelCount,
+            graph->programFIR.activeChannelMask,
+            taps,
+            graph->programFIR.tapCount,
+            graph->programFIR.declaredLatencyFrames
+        );
+    if (program == NULL) return false;
+    const N60ProgramFIRProgramInfo actual =
+        N60ProgramFIRProgramGetInfo(program);
+    if (!N60ProgramFIRProgramInfoEqual(
+            actual, graph->programFIR)) {
+        N60ProgramFIRProgramDestroy(program);
+        return false;
+    }
+
+    N60ProgramFIRRuntime *programRuntime =
+        N60ProgramFIRRuntimeCreate(program);
+    if (programRuntime == NULL) {
+        N60ProgramFIRProgramDestroy(program);
+        return false;
+    }
+
+    N60ProgramFIRRuntimeDestroy(runtime->programFIRRuntime);
+    N60ProgramFIRProgramDestroy(runtime->programFIRProgram);
+    runtime->programFIRProgram = program;
+    runtime->programFIRRuntime = programRuntime;
+    return true;
+}
+
+static inline void N60LiveNChannelRenderRuntimeClearProgramFIR(
+    N60LiveNChannelRenderRuntime * _Nullable runtime
+) {
+    if (runtime == NULL) return;
+    N60ProgramFIRRuntimeDestroy(runtime->programFIRRuntime);
+    N60ProgramFIRProgramDestroy(runtime->programFIRProgram);
+    runtime->programFIRRuntime = NULL;
+    runtime->programFIRProgram = NULL;
 }
 
 /// Control-plane preparation only. Live graph changes intentionally require the
@@ -266,6 +457,18 @@ static inline bool N60LiveNChannelRenderRuntimePrepare(
         || runtime->laneRuntime == NULL
         || runtime->bassRuntime == NULL
         || !N60LiveNChannelRenderGraphIsValid(graph)
+        || (graph->programFIREnabled
+            && (runtime->programFIRProgram == NULL
+                || runtime->programFIRRuntime == NULL
+                || !N60ProgramFIRProgramInfoEqual(
+                    N60ProgramFIRProgramGetInfo(
+                        runtime->programFIRProgram
+                    ),
+                    graph->programFIR
+                )))
+        || (!graph->programFIREnabled
+            && (runtime->programFIRProgram != NULL
+                || runtime->programFIRRuntime != NULL))
         || !N60ProgramLaneRuntimePrepare(runtime->laneRuntime, &graph->laneGraph)) {
         return false;
     }
@@ -274,6 +477,9 @@ static inline bool N60LiveNChannelRenderRuntimePrepare(
             runtime->bassRuntime,
             &graph->bassManagement)) {
         return false;
+    }
+    if (graph->programFIREnabled) {
+        N60ProgramFIRRuntimeReset(runtime->programFIRRuntime);
     }
     runtime->preparedLayout = graph->programLayout;
     runtime->preparedBassManagement = graph->bassManagementEnabled;
@@ -290,6 +496,17 @@ static inline bool N60LiveNChannelRenderRuntimeIsPrepared(
         && runtime->prepared
         && runtime->preparedBassManagement == graph->bassManagementEnabled
         && N60LiveNChannelLayoutsEqual(&runtime->preparedLayout, &graph->programLayout)
+        && (graph->programFIREnabled
+            ? (runtime->programFIRProgram != NULL
+                && runtime->programFIRRuntime != NULL
+                && N60ProgramFIRProgramInfoEqual(
+                    N60ProgramFIRProgramGetInfo(
+                        runtime->programFIRProgram
+                    ),
+                    graph->programFIR
+                ))
+            : (runtime->programFIRProgram == NULL
+                && runtime->programFIRRuntime == NULL))
         && N60ProgramLaneRuntimeIsPreparedForGraph(runtime->laneRuntime, &graph->laneGraph)
         && (!graph->bassManagementEnabled
             || N60MultichannelBassManagementRuntimeIsPreparedForSnapshot(
@@ -297,8 +514,9 @@ static inline bool N60LiveNChannelRenderRuntimeIsPrepared(
                 &graph->bassManagement));
 }
 
-/// Realtime composite: semantic program frame -> PR54 channel lanes -> optional
-/// PR55 bass management -> explicit physical device frame. Program LFE and Sub N
+/// Realtime composite: semantic program frame -> optional PR107 sparse
+/// Speaker Optimizer FIR -> PR54 channel lanes -> optional PR55 bass management
+/// -> explicit physical device frame. Program LFE and Sub N
 /// remain different domains throughout. No allocation, locking, logging or I/O.
 static inline bool N60LiveNChannelRenderProcessFrame(
     N60LiveNChannelRenderRuntime * _Nonnull runtime,
@@ -315,11 +533,24 @@ static inline bool N60LiveNChannelRenderProcessFrame(
         return false;
     }
 
+    float firOutput[N60_MAX_PROGRAM_CHANNELS] = {0};
+    const float *laneInput = input->channels;
+    if (graph->programFIREnabled) {
+        if (runtime->programFIRRuntime == NULL
+            || !N60ProgramFIRRuntimeProcessFrame(
+                runtime->programFIRRuntime,
+                input->channels,
+                firOutput)) {
+            return false;
+        }
+        laneInput = firOutput;
+    }
+
     float laneOutput[N60_MAX_PROGRAM_CHANNELS] = {0};
     if (!N60ProgramLaneProcessFrame(
             runtime->laneRuntime,
             &graph->laneGraph,
-            input->channels,
+            laneInput,
             laneOutput,
             laneMeter)) {
         return false;

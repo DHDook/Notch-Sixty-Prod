@@ -89,6 +89,7 @@ struct SpeakerOptimizerPEQDeploymentConfiguration: Codable, Equatable, Sendable 
               !routingSignature.isEmpty,
               !aggregateCandidateFingerprint.isEmpty,
               routingSignature == profile.multichannelCalibrationRoutingSignature,
+              profile.speakerOptimizerFIR == nil,
               !sources.isEmpty,
               Set(sources.map(\.role)).count == sources.count else {
             throw SpeakerOptimizerPEQDeploymentError.invalidConfiguration

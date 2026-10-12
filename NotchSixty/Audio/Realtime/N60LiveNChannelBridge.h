@@ -181,6 +181,80 @@ static inline N60LiveNChannelBridge * _Nullable N60LiveNChannelBridgeCreate(
     return bridge;
 }
 
+/// Control-plane only; callbacks must not be running.
+///
+/// Installs one sparse Speaker Optimizer FIR stage into the already-created
+/// semantic bridge, then re-prepares the render runtime against the updated
+/// upstream-latency/coherence graph. Failure restores the prior unity-FIR graph.
+static inline bool N60LiveNChannelBridgeConfigureProgramFIR(
+    N60LiveNChannelBridge * _Nonnull bridge,
+    uint32_t activeChannelMask,
+    const float * _Nonnull taps,
+    uint32_t tapCount,
+    uint32_t declaredLatencyFrames
+) {
+    if (bridge == NULL
+        || bridge->renderRuntime == NULL
+        || taps == NULL
+        || bridge->graph.programFIREnabled
+        || bridge->graph.programLayout.channelCount == 0u) {
+        return false;
+    }
+
+    const uint32_t activeCount =
+        N60ProgramFIRPopCount(activeChannelMask);
+    const uint32_t partitionCount =
+        (tapCount + N60_CONVOLUTION_PARTITION_FRAMES - 1u)
+        / N60_CONVOLUTION_PARTITION_FRAMES;
+    N60ProgramFIRProgramInfo info = {
+        .prepared = true,
+        .channelCount = bridge->graph.programLayout.channelCount,
+        .activeChannelMask = activeChannelMask,
+        .activeChannelCount = activeCount,
+        .tapCount = tapCount,
+        .partitionCount = partitionCount,
+        .engineLatencyFrames = N60_CONVOLUTION_PARTITION_FRAMES,
+        .declaredLatencyFrames = declaredLatencyFrames,
+        .kernelBytes =
+            (uint64_t)activeCount
+            * partitionCount
+            * N60_CONVOLUTION_FFT_SIZE
+            * sizeof(N60ProgramFIRComplex),
+        .runtimeHistoryBytes =
+            (uint64_t)activeCount
+            * partitionCount
+            * N60_CONVOLUTION_FFT_SIZE
+            * sizeof(N60ProgramFIRComplex),
+    };
+    if (!N60ProgramFIRProgramInfoIsValid(info)) return false;
+
+    const N60LiveNChannelRenderGraph previousGraph =
+        bridge->graph;
+    N60LiveNChannelRenderGraph candidateGraph =
+        previousGraph;
+    if (!N60LiveNChannelRenderGraphSetProgramFIRInfo(
+            &candidateGraph, info, true)
+        || !N60LiveNChannelRenderRuntimeConfigureProgramFIR(
+            bridge->renderRuntime,
+            &candidateGraph,
+            taps)
+        || !N60LiveNChannelRenderRuntimePrepare(
+            bridge->renderRuntime,
+            &candidateGraph)) {
+        N60LiveNChannelRenderRuntimeClearProgramFIR(
+            bridge->renderRuntime
+        );
+        (void)N60LiveNChannelRenderRuntimePrepare(
+            bridge->renderRuntime,
+            &previousGraph
+        );
+        return false;
+    }
+
+    bridge->graph = candidateGraph;
+    return true;
+}
+
 static inline void N60LiveNChannelBridgeDestroy(
     N60LiveNChannelBridge * _Nullable bridge
 ) {
