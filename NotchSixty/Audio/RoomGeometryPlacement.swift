@@ -1894,8 +1894,14 @@ struct RoomAdvancedToeInEvidenceAnalyzer: Sendable {
         // On-axis reference is exactly zero dB *relative to itself*.
         // This does not imply the speaker is flat or meets any target.
         if abs(angle) <= 0.0001 { return (0, 1) }
-        let positive = traces.first { $0.horizontalAngleDegrees >= angle }
-        let negative = traces.last { $0.horizontalAngleDegrees <= angle }
+        // A negative-side sample must not be used to extrapolate a positive
+        // orientation (or vice versa); 0° is the explicit reference anchor.
+        let positive = traces.first {
+            $0.horizontalAngleDegrees >= angle && $0.horizontalAngleDegrees > 0
+        }
+        let negative = traces.last {
+            $0.horizontalAngleDegrees <= angle && $0.horizontalAngleDegrees < 0
+        }
         let lower: (Double, [Double], Double)
         let upper: (Double, [Double], Double)
         if angle > 0 {
