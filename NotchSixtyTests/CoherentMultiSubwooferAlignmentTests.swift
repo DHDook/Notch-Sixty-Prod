@@ -209,7 +209,8 @@ final class CoherentMultiSubwooferAlignmentTests: XCTestCase {
         }
     }
 
-    func testCommonSpeakerDelayCapacityFailsClosed() throws {
+    func testCoordinatedSolveRespectsRemainingSpeakerDelayCapacity()
+        throws {
         var profile = makeProfile()
         for index in profile.speakerAssignments.indices {
             profile.speakerAssignments[index].calibration =
@@ -230,7 +231,7 @@ final class CoherentMultiSubwooferAlignmentTests: XCTestCase {
             ),
         ]
 
-        XCTAssertThrowsError(
+        let candidate =
             try CoherentMultiSubwooferAlignmentPlanner()
                 .propose(
                     evidenceGroups: groups,
@@ -238,14 +239,36 @@ final class CoherentMultiSubwooferAlignmentTests: XCTestCase {
                     bassManagementEnabled: true,
                     crossoverFrequencyHz: 80
                 )
-        ) {
-            guard let error =
-                    $0 as? CoherentMultiSubwooferAlignmentError,
-                  case .delayCapacityExceeded(.speaker) = error else {
-                return XCTFail(
-                    "Expected speaker delay-capacity failure, got \($0)"
-                )
-            }
+
+        // Every single-Sub search is already constrained by the current
+        // speaker-delay budget. The coordinated common delay therefore cannot
+        // exceed the smallest remaining speaker headroom.
+        XCTAssertLessThanOrEqual(
+            candidate.speakerCommonDelayAdjustmentMilliseconds,
+            1.0 + 1.0e-9
+        )
+        for assignment in profile.speakerAssignments
+        where assignment.role != .lowFrequencyEffects {
+            let current =
+                assignment.calibration?.delayMilliseconds ?? 0
+            XCTAssertTrue(
+                SemanticSpeakerCalibration.delayRangeMilliseconds
+                    .contains(
+                        current
+                            + candidate
+                                .speakerCommonDelayAdjustmentMilliseconds
+                    )
+            )
+        }
+
+        for sub in candidate.subwoofers {
+            XCTAssertEqual(
+                sub.subwooferDelayAdjustmentMilliseconds
+                    - candidate
+                        .speakerCommonDelayAdjustmentMilliseconds,
+                sub.signedRelativeDelayAdjustmentMilliseconds,
+                accuracy: 0.001
+            )
         }
     }
 
