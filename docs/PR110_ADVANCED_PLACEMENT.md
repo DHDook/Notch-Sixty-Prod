@@ -1,6 +1,6 @@
 # PR110 — Advanced Speaker & Subwoofer Placement Optimizer
 
-**State: Slice 1 implemented; exact-head CI and all real-room validation pending.**
+**State: Slices 1–2 implemented; exact-head CI and all real-room validation pending.**
 
 **REMOTE SCOPE ONLY:** no acoustic, physical, release or merge acceptance is implied.
 
@@ -73,11 +73,27 @@ both the retained and new PR110 XCTest suites.
 
 ## Remaining PR110 slices
 
-**Slice 2 — Project persistence and UI.** Add optional versioned project-sidecar
-state for extra seats, toe-in, physical Sub coordinates, and change provenance.
-Introduce advanced placement controls in the existing
-Tools → Room Advisor → Geometry & Placement, with no mutation of the saved
-room until the user confirms a physically performed change.
+**Slice 2 — Project persistence and UI (implemented, CI pending).**
+The versioned `advisor-advanced-placement-v1.json` sidecar lives in the
+selected Room Correction project directory. Its exact project ID and
+coordinate validity are checked before load/save; missing files are treated
+as optional, while malformed/unsupported files fail closed without touching
+PR93's `advisor-geometry-v1.json`. The legacy room JSON and Playback System
+are not migrated or rewritten.
+
+Room Advisor → Geometry & Placement now exposes toe-in in degrees, up to
+seven extra named-by-order listener seats, and up to four physical Sub
+locations, with m/ft coordinate editing, explicit advanced Save/Revert,
+unsaved warnings, and independent speaker/height/toe-in/Sub proposal cards.
+Every **Inspect** action is display-only: no save, change to actual
+geometry, DSP or output device. Editing a hypothetical pose does not assert
+the hardware has moved. Saving advanced positions requires the actual room
+geometry to be saved and structurally valid.
+
+Controller and persistence XCTest check reload, project isolation,
+corruption, unsupported versions, preview-only behavior, unsaved geometry
+blocking, and clearing sidecar with geometry. The PR110 CI job runs these
+tests and cumulative application regressions before any remote acceptance.
 
 **Slice 3 — Measurement-aware toe-in and per-speaker ranking.**
 Consume source-matched PR106 off-axis/on-axis relative measurements only when
