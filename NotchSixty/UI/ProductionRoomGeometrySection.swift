@@ -361,6 +361,15 @@ struct ProductionRoomGeometrySection: View {
             .secondary.opacity(0.045),
             in: RoundedRectangle(cornerRadius: 13)
         )
+        .onChange(of: advisor.selectedProjectID) { _, _ in
+            confirmsUnchangedLabGeometry = false
+        }
+        .onChange(of: advisor.geometryDraft) { _, _ in
+            confirmsUnchangedLabGeometry = false
+        }
+        .onChange(of: advisor.advancedPlacementDraft) { _, _ in
+            confirmsUnchangedLabGeometry = false
+        }
     }
 
     private func toeInField(
