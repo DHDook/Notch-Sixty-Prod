@@ -284,6 +284,81 @@ for token in (
     assert token in test, f"PR110 Sub physical comparison tests missing {token}"
 assert "AdvancedSubPlacementABTests" in workflow
 
+# Slice 5: project-owned immutable placement review history; measured outcomes
+# are limited to already repeat-qualified physical Sub A/B. Unverified moves
+# cannot be promoted to DSP, hardware or release acceptance.
+for token in (
+    "struct RoomAdvancedPlacementReviewHistory: Codable, Equatable, Sendable",
+    "struct RoomAdvancedPlacementReviewStore: Sendable",
+    "advisor-placement-review-history-v1.json",
+    "struct RoomAdvancedPlacementReviewRecord:",
+    "var hardwareAcceptanceComplete: Bool = false",
+    "var canDeploy: Bool { false }",
+    "enum RoomAdvancedPlacementReviewOutcome: String, Codable, Sendable",
+    "case improved",
+    "case regressed",
+    "case inconclusive",
+    "informationalDeadbandDB = 0.25",
+    "SpeakerOptimizerMeasurementEvidenceEvaluator",
+    "var baselineMeasurementSetID: UUID?",
+    "var candidateMeasurementSetID: UUID?",
+    "var beforeGeometry: RoomGeometryModel",
+    "var afterGeometry: RoomGeometryModel",
+    "var beforeAdvanced: RoomAdvancedPlacementSettings",
+    "var afterAdvanced: RoomAdvancedPlacementSettings",
+    "records.count <= 100",
+    "Set(records.map(\\.id)).count == records.count",
+    "throw RoomAdvancedPlacementReviewError.duplicateRecord",
+    "options: .atomic",
+    "RoomAdvancedPlacementReviewFactory",
+    "comparison?.experimentID == experiment.id",
+):
+    assert token in source, f"PR110 verification history safety contract missing {token}"
+
+for token in (
+    "let placementReviewStore: RoomAdvancedPlacementReviewStore",
+    "placementReviewHistory: [RoomAdvancedPlacementReviewRecord]",
+    "loadPlacementReviewHistory(for: project.id)",
+    "func recordPlacementReview(",
+    "physicalMoveConfirmed: Bool",
+    "fixedMicrophoneSeatsAndSignalChainConfirmed: Bool",
+    "room == savedGeometry",
+    "settings == savedAdvancedPlacement",
+    "advancedPlacementExperiments.contains(experiment)",
+    "RoomAdvancedSubPlacementComparisonAnalyzer()",
+    "RoomAdvancedPlacementReviewFactory().make(",
+    "try placementReviewStore.append(record)",
+):
+    assert token in controller, f"PR110 verification controller missing {token}"
+
+for token in (
+    "Placement Verification & History",
+    "Record Placement Review",
+    "advisor.recordPlacementReview(",
+    "advisor.placementReviewHistory",
+    "record.outcome.displayName",
+    "record.baselineMeasurementSetID",
+    "record.candidateMeasurementSetID",
+    "NOT hardware accepted · NOT deployed",
+    "confirmsActualPlacementMove",
+):
+    assert token in ui, f"PR110 project review UI missing {token}"
+
+for token in (
+    "final class AdvancedPlacementReviewHistoryTests",
+    "testReviewHistoryRoundTripsWithoutTouchingOriginalGeometry",
+    "testArchiveIsAppendOnlyAndRejectsDuplicateIDs",
+    "testCorruptionFailsClosedWithoutOverwritingHistory",
+    "testCrossProjectHistoryNeverLeaks",
+    "testTamperingCannotDeclareHardwareAcceptanceOrForgeGeometry",
+    "testMeasuredOutcomesConveyRelativeLFSpreadOnly",
+    "testInconclusiveReviewPreservesAttemptedCaptureReferences",
+    "testControllerRequiresPhysicalConfirmationAndPreservesProjectHistory",
+    "testUncommittedRoomCannotRecordPlacementReview",
+):
+    assert token in test, f"PR110 review provenance regression missing {token}"
+assert "AdvancedPlacementReviewHistoryTests" in workflow
+
 assert "Read-only hypotheses" in document
 assert "REMOTE SCOPE ONLY" in document
 assert "Current execution status — PR110" in roadmap
