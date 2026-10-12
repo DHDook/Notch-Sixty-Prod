@@ -220,6 +220,8 @@
 		F10800000000000000000004 /* CoherentSubwooferAlignmentCommissioningTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10800000000000000000014 /* CoherentSubwooferAlignmentCommissioningTests.swift */; };
 		F10800000000000000000005 /* CoherentSubwooferAlignmentApplyTransaction.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10800000000000000000015 /* CoherentSubwooferAlignmentApplyTransaction.swift */; };
 		F10800000000000000000006 /* CoherentSubwooferAlignmentApplyTransactionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10800000000000000000016 /* CoherentSubwooferAlignmentApplyTransactionTests.swift */; };
+		F10800000000000000000007 /* CoherentSubwooferAlignmentPostApplyVerification.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10800000000000000000017 /* CoherentSubwooferAlignmentPostApplyVerification.swift */; };
+		F10800000000000000000008 /* CoherentSubwooferAlignmentPostApplyVerificationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10800000000000000000018 /* CoherentSubwooferAlignmentPostApplyVerificationTests.swift */; };
 		F1050000000000000000000F /* SpeakerOptimizerPEQApplyTransaction.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1050000000000000000001F /* SpeakerOptimizerPEQApplyTransaction.swift */; };
 		F10500000000000000000010 /* SpeakerOptimizerPEQApplyTransactionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10500000000000000000020 /* SpeakerOptimizerPEQApplyTransactionTests.swift */; };
 		F10590000000000000000001 /* SpeakerOptimizerPostApplyVerification.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10590000000000000000011 /* SpeakerOptimizerPostApplyVerification.swift */; };
@@ -505,6 +507,8 @@
 		F10800000000000000000014 /* CoherentSubwooferAlignmentCommissioningTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoherentSubwooferAlignmentCommissioningTests.swift; sourceTree = "<group>"; };
 		F10800000000000000000015 /* CoherentSubwooferAlignmentApplyTransaction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoherentSubwooferAlignmentApplyTransaction.swift; sourceTree = "<group>"; };
 		F10800000000000000000016 /* CoherentSubwooferAlignmentApplyTransactionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoherentSubwooferAlignmentApplyTransactionTests.swift; sourceTree = "<group>"; };
+		F10800000000000000000017 /* CoherentSubwooferAlignmentPostApplyVerification.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoherentSubwooferAlignmentPostApplyVerification.swift; sourceTree = "<group>"; };
+		F10800000000000000000018 /* CoherentSubwooferAlignmentPostApplyVerificationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoherentSubwooferAlignmentPostApplyVerificationTests.swift; sourceTree = "<group>"; };
 		F1050000000000000000001F /* SpeakerOptimizerPEQApplyTransaction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerOptimizerPEQApplyTransaction.swift; sourceTree = "<group>"; };
 		F10500000000000000000020 /* SpeakerOptimizerPEQApplyTransactionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerOptimizerPEQApplyTransactionTests.swift; sourceTree = "<group>"; };
 		F10590000000000000000011 /* SpeakerOptimizerPostApplyVerification.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerOptimizerPostApplyVerification.swift; sourceTree = "<group>"; };
@@ -668,6 +672,7 @@
 				F10800000000000000000012 /* CoherentSubwooferAlignmentTests.swift */,
 				F10800000000000000000014 /* CoherentSubwooferAlignmentCommissioningTests.swift */,
 				F10800000000000000000016 /* CoherentSubwooferAlignmentApplyTransactionTests.swift */,
+				F10800000000000000000018 /* CoherentSubwooferAlignmentPostApplyVerificationTests.swift */,
 				F10500000000000000000020 /* SpeakerOptimizerPEQApplyTransactionTests.swift */,
 				F10590000000000000000012 /* SpeakerOptimizerPostApplyVerificationTests.swift */,
 				F105A0000000000000000012 /* SpeakerOptimizerGuidedWorkflowTests.swift */,
@@ -733,6 +738,7 @@
 				F10800000000000000000011 /* CoherentSubwooferAlignment.swift */,
 				F10800000000000000000013 /* CoherentSubwooferAlignmentCommissioning.swift */,
 				F10800000000000000000015 /* CoherentSubwooferAlignmentApplyTransaction.swift */,
+				F10800000000000000000017 /* CoherentSubwooferAlignmentPostApplyVerification.swift */,
 				F1050000000000000000001F /* SpeakerOptimizerPEQApplyTransaction.swift */,
 				F10590000000000000000011 /* SpeakerOptimizerPostApplyVerification.swift */,
 				F105A0000000000000000011 /* SpeakerOptimizerGuidedWorkflow.swift */,
@@ -954,6 +960,7 @@
 				F10800000000000000000001 /* CoherentSubwooferAlignment.swift in Sources */,
 				F10800000000000000000003 /* CoherentSubwooferAlignmentCommissioning.swift in Sources */,
 				F10800000000000000000005 /* CoherentSubwooferAlignmentApplyTransaction.swift in Sources */,
+				F10800000000000000000007 /* CoherentSubwooferAlignmentPostApplyVerification.swift in Sources */,
 				F1050000000000000000000F /* SpeakerOptimizerPEQApplyTransaction.swift in Sources */,
 				F10590000000000000000001 /* SpeakerOptimizerPostApplyVerification.swift in Sources */,
 				F105A0000000000000000001 /* SpeakerOptimizerGuidedWorkflow.swift in Sources */,
@@ -1148,6 +1155,7 @@
 				F10800000000000000000002 /* CoherentSubwooferAlignmentTests.swift in Sources */,
 				F10800000000000000000004 /* CoherentSubwooferAlignmentCommissioningTests.swift in Sources */,
 				F10800000000000000000006 /* CoherentSubwooferAlignmentApplyTransactionTests.swift in Sources */,
+				F10800000000000000000008 /* CoherentSubwooferAlignmentPostApplyVerificationTests.swift in Sources */,
 				F10500000000000000000010 /* SpeakerOptimizerPEQApplyTransactionTests.swift in Sources */,
 				F10590000000000000000002 /* SpeakerOptimizerPostApplyVerificationTests.swift in Sources */,
 				F105A0000000000000000002 /* SpeakerOptimizerGuidedWorkflowTests.swift in Sources */,
