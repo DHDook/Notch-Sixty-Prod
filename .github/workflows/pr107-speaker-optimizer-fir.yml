@@ -1,0 +1,53 @@
+name: PR107 Speaker Optimizer FIR Deployment
+
+on:
+  push:
+    branches:
+      - feature/pr107-speaker-optimizer-fir-deployment-latency
+  pull_request:
+    branches:
+      - feature/pr106-advanced-speaker-measurement-lab
+  workflow_dispatch:
+
+concurrency:
+  group: pr107-speaker-optimizer-fir-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Validate PR107 FIR deployment boundary
+        run: python3 ci/validate_pr107_speaker_optimizer_fir.py
+      - name: Preserve PR106 Advanced Speaker Measurement Lab closure
+        run: python3 ci/validate_pr106_speaker_measurement_lab.py
+
+  macos:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Validate PR107 FIR deployment boundary
+        run: python3 ci/validate_pr107_speaker_optimizer_fir.py
+      - name: Preserve PR106 Advanced Speaker Measurement Lab closure
+        run: python3 ci/validate_pr106_speaker_measurement_lab.py
+      - name: Build arm64 Debug app
+        run: >-
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
+          -configuration Debug -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES build
+      - name: Run PR107 FIR deployment tests
+        run: >-
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
+          -configuration Debug -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES
+          -only-testing:NotchSixtyTests/SpeakerOptimizerFIRDeploymentTests test
+      - name: Run full XCTest regression
+        run: >-
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
+          -configuration Debug -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES test
