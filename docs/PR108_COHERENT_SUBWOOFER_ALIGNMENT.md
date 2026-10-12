@@ -1,6 +1,6 @@
 # PR108 — Coherent Physical Subwoofer Timing & Polarity Optimization
 
-Status: **IN PROGRESS — SLICE 1 PROPOSAL ENGINE**
+Status: **IN PROGRESS — SLICES 1–2 PROPOSAL + COMMISSIONING IDENTITY**
 
 Base: PR107 Speaker Optimizer FIR Deployment & Latency Coordination.
 
@@ -97,18 +97,40 @@ against only one channel and accidentally degrading another.
 - no Speaker Optimizer/Room Correction mutation; and
 - no claim of measured post-Apply improvement.
 
+## Slice 2 — Commissioning identity and explicit approval
+
+Implemented in CoherentSubwooferAlignmentCommissioning.swift.
+
+Commissioning does not trust a caller-provided candidate. It re-runs Slice 1
+from the supplied coherent reports and the current Playback System, then
+requires exact candidate equality.
+
+The proposal binds:
+
+- Playback System ID and complete PlaybackSystemState rollback snapshot;
+- Output Device Profile routing identity;
+- active bass-management crossover;
+- sample rate and physical Sub index;
+- a stable fingerprint of every coherent report, including measured magnitude,
+  phase and relative arrival evidence; and
+- a stable fingerprint of the derived alignment candidate.
+
+Any crossover change, Playback System mismatch, output-profile removal,
+measurement mutation or hand-edited candidate invalidates commissioning.
+
+Explicit approval is separately fingerprint-bound and requires a user-initiated
+action. Slice 2 still has no mutation path: proposal canDeploy remains false.
+
 ## Planned follow-on slices
 
-1. Commissioning identity + proposal fingerprint — bind the candidate to exact
-   coherent evidence, profile snapshot, crossover and current calibration.
-2. Transactional Apply / rollback — engine-idle mutation of only the required
+1. Transactional Apply / rollback — engine-idle mutation of only the required
    speaker-common delay and physical Sub delay/polarity.
-3. Multi-sub coordination — avoid independent per-Sub choices that conflict
+2. Multi-sub coordination — avoid independent per-Sub choices that conflict
    with the existing multi-sub relationship.
-4. Fresh coherent verification — repeat authenticated Main/Sub measurement
+3. Fresh coherent verification — repeat authenticated Main/Sub measurement
    after Apply and verify summation/timing improvement.
-5. Guided production workflow/UI — capture, review, Apply, verify, rollback.
-6. Physical commissioning handoff — real DAC/ADC/subwoofer timing, crossover
+4. Guided production workflow/UI — capture, review, Apply, verify, rollback.
+5. Physical commissioning handoff — real DAC/ADC/subwoofer timing, crossover
    summation, restart/rollback and subjective bass integration.
 
 ## Slice 1 validation
@@ -119,3 +141,10 @@ already-coherent no-op blocking, and stale identity/bass-management failures.
 
 PR108 CI also preserves the complete PR107 software contract and full retained
 XCTest suite.
+
+
+## Slice 2 validation
+
+CoherentSubwooferAlignmentCommissioningTests verifies exact Playback System
+snapshot binding, deterministic evidence/candidate fingerprints, candidate
+regeneration, crossover-drift rejection, and mandatory explicit approval.
