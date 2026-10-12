@@ -78,6 +78,7 @@ jobs:
           -only-testing:NotchSixtyTests/SpeakerOptimizerCommissioningContractTests
           -only-testing:NotchSixtyTests/SpeakerOptimizerFIRAVSyncTests
           -only-testing:NotchSixtyTests/SpeakerOptimizerFIRPostApplyVerificationTests
+          -only-testing:NotchSixtyTests/SpeakerOptimizerGuidedFIRWorkflowTests
           test
       - name: Run full XCTest regression
         run: >-
