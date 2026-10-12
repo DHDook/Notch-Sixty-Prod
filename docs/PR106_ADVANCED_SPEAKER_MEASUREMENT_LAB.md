@@ -271,10 +271,48 @@ targeted measurement-lab tests and full XCTest regression.
   revalidates the crossover/driver state immediately before playback.
 - Measurement-only; no DSP mutation and `canDeploy == false`.
 
+## Slice 8A exact-head verification
+
+Slice 8A exact head `7ebf3f3dff74f757652e154457fae8a699992c4e` passed both
+GitHub Actions paths:
+
+- push run 38223410879;
+- pull-request run 38223416865.
+
+Both paths passed the PR106/PR105 validators, Apple Silicon Debug build,
+targeted Lab tests and full XCTest regression.
+
+## Slice 8B — Live crossover/limiter-preserving protected-driver acquisition
+
+- The dedicated protected path never changes PR103's legacy raw-output planner;
+  protected Low/Mid/High requests use a separate PR106 route binding.
+- Live availability requires exactly one enabled physical route for the target
+  Low/Mid/High bus, an active Bi-Amp/Tri-Amp crossover that produces that bus,
+  and an enabled limiter on that exact driver-processing path.
+- Direct-driver protocols require an explicit bounded excitation level no hotter
+  than -24 dBFS. They cannot inherit a potentially hotter general Lab default.
+- The exact upstream ESS is rendered offline through the production crossover
+  and production driver EQ/trim/polarity/delay/limiter chain from Slice 8A.
+- The existing bounded Core Audio measurement bridge plays only that
+  pre-rendered protected waveform to one exact physical route while zeroing all
+  other output lanes.
+- The analyzer still deconvolves against the ORIGINAL upstream ESS. The
+  crossover/driver protection transfer therefore remains part of the measured
+  response rather than being divided away.
+- The rendered flush extension becomes additional capture tail, preserving
+  driver delay and IIR ring-out without changing the deconvolution reference.
+- Immediately before hardware start, the controller re-reads and exactly checks
+  Playback System identity, physical routing, crossover configuration, complete
+  driver-processing configuration and selected reference output.
+- Every protected capture persists exact bus/physical-route/crossover/limiter
+  provenance. Repeats for one protocol must share the same provenance.
+- The persisted acoustic source remains the parent Left/Right speaker for common
+  Lab analysis, while protected provenance retains the exact Low/Mid/High bus.
+- This remains measurement-only: no crossover, limiter, EQ or routing state is
+  mutated and `canDeploy == false`.
+
 ## Planned follow-on slices
 
-1. Slice 8B: bind the verified protected excitation to one exact physical
-   driver route with immediate pre-playback state revalidation.
-2. Authenticated shared-clock reference capture for coherent relative timing and
+1. Authenticated shared-clock reference capture for coherent relative timing and
    phase diagnostics.
-3. Production Advanced Speaker Measurement Lab UI and export/reporting.
+2. Production Advanced Speaker Measurement Lab UI and export/reporting.

@@ -68,6 +68,7 @@ for token in (
     "testOffAxisRequiresActualAngularOffset",
     "testSubwooferNearFieldRequiresSubwooferAndNearFieldDistance",
     "testProtectedDriverNearFieldCannotFallThroughToRawOutput",
+    "testProtectedDriverNearFieldUnlocksOnlyDedicatedProtectedPath",
     "testCoherentTimingRequiresAuthenticatedSharedClock",
     "testActiveSplitDriverRoutingStillBlocksWholeSpeakerRawTarget",
     "testConfiguredDriverLimiterStillBlocksWholeSpeakerRawTarget",
@@ -92,6 +93,8 @@ for token in (
 
 for token in (
     "testSessionSupportsOnlyCurrentlySafeAcquisitionModes",
+    "testProtectedDriverProtocolRequiresExplicitConservativeLevel",
+    "testProtectedDriverCapturePersistsExactProtectionProvenance",
     "testGuidedStepsFinishAllStationaryRepeatsBeforeNextProtocol",
     "testAnalyzedCaptureBuilderKeepsImpulseButNotRawSweepModel",
     "testAppendEnforcesRepeatSequenceAndCaptureIdentity",
@@ -155,6 +158,17 @@ for token in (
     "testComponentMetadataMustBePhysicallyFinite",
 ):
     assert token in nearfield_tests, f"missing PR106 near-field LF test: {token}"
+
+for token in (
+    "SpeakerMeasurementLabProtectedTransportFactory",
+    "protectedTransportFactory",
+    "protectedExcitationCompiler.compile(",
+    "protectedRoutePlanner.plan(",
+    "makeAnalysisProgram(",
+    "validateProtectedStateImmediatelyBeforeStart",
+    "protectedDriverProvenance",
+):
+    assert token in controller_source or token in session_source, f"missing PR106 protected live path contract: {token}"
 
 for token in (
     "struct SpeakerMeasurementLabLevelDependenceOptions",

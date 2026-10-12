@@ -103,8 +103,14 @@ struct SpeakerMeasurementLabRequest: Codable, Equatable, Sendable {
             }
         case (.subwooferNearField, .acousticSource(.subwoofer)):
             break
-        case (.protectedDriverNearField, .protectedDriverBus):
-            break
+        case (
+            .protectedDriverNearField,
+            .protectedDriverBus(let bus)
+        ):
+            guard SpeakerMeasurementLabProtectedDriverRoutePlanner
+                    .isProtectedSplitBus(bus) else {
+                throw SpeakerMeasurementLabError.invalidTarget
+            }
         case (
             .coherentMainsSubTiming,
             .sourcePair(
@@ -162,10 +168,16 @@ struct SpeakerMeasurementLabPlan: Equatable, Sendable {
     var blockReasons: [SpeakerMeasurementLabBlockReason]
     var warnings: [String]
     var phaseReferenceAuthenticated: Bool
+    /// Non-nil only for PR106's dedicated crossover/limiter-preserving path.
+    /// It never falls through to the legacy raw physical-lane planner.
+    var protectedDriverBus: SpeakerOutputBus? = nil
 
     var canStartMeasurement: Bool {
-        blockReasons.isEmpty
-            && delegatedTransportPlans.count == 1
+        guard blockReasons.isEmpty else { return false }
+        if protectedDriverBus != nil {
+            return delegatedTransportPlans.isEmpty
+        }
+        return delegatedTransportPlans.count == 1
             && delegatedTransportPlans.allSatisfy(\.canStartMeasurement)
     }
 
@@ -182,7 +194,8 @@ struct SpeakerMeasurementLabCapabilityPlanner: Sendable {
         _ request: SpeakerMeasurementLabRequest,
         routePlan: LiveNChannelOutputRoutePlan,
         multiOutputRouting: MultiOutputRoutingConfiguration?,
-        speakerDriverProcessing: SpeakerDriverProcessingConfiguration?
+        speakerDriverProcessing: SpeakerDriverProcessingConfiguration?,
+        bassManagementConfiguration: BassManagementConfiguration? = nil
     ) throws -> SpeakerMeasurementLabPlan {
         try request.validate()
 
@@ -252,23 +265,49 @@ struct SpeakerMeasurementLabCapabilityPlanner: Sendable {
             .protectedDriverNearField,
             .protectedDriverBus(let bus)
         ):
-            let delegated = transportPlanner.plan(
-                target: .protectedDriverBus(bus),
-                routePlan: routePlan,
-                multiOutputRouting: multiOutputRouting,
-                speakerDriverProcessing: speakerDriverProcessing
-            )
+            let routeReady =
+                multiOutputRouting?.enabled == true
+                && multiOutputRouting?.enabledRoutes.filter {
+                    $0.bus == bus
+                }.count == 1
+            let crossoverReady: Bool
+            if let bass = bassManagementConfiguration,
+               bass.enabled,
+               let mode = bass.physicalOutputMode,
+               (mode == .biAmp || mode == .triAmp) {
+                crossoverReady = mode.supports(bus: bus)
+            } else {
+                crossoverReady = false
+            }
+            let protectionReady: Bool
+            if let speakerDriverProcessing {
+                let target = speakerDriverProcessing.configuration(
+                    for: bus
+                )
+                protectionReady =
+                    target.enabled && target.limiterEnabled
+            } else {
+                protectionReady = false
+            }
+            let blockers: [SpeakerMeasurementLabBlockReason] =
+                routeReady && crossoverReady && protectionReady
+                ? []
+                : [.protectedDriverTransportRequired(bus)]
             return SpeakerMeasurementLabPlan(
                 request: request,
-                delegatedTransportPlans: [delegated],
-                analysisProducts: [],
-                blockReasons: [
-                    .protectedDriverTransportRequired(bus)
+                delegatedTransportPlans: [],
+                analysisProducts: [
+                    .magnitudeResponse,
+                    .phaseResponse,
+                    .directArrival,
                 ],
+                blockReasons: blockers,
                 warnings: [
-                    "Direct Low/Mid/High measurement remains blocked until excitation is guaranteed to preserve crossover and limiter protection."
+                    "Protected-driver response includes the active production crossover plus configured driver EQ/trim/polarity/delay/limiter path; it is not a bare-driver specification.",
+                    "Live acquisition still revalidates the exact physical route, crossover and target limiter immediately before playback."
                 ],
-                phaseReferenceAuthenticated: false
+                phaseReferenceAuthenticated: false,
+                protectedDriverBus: blockers.isEmpty ? bus : nil
             )
         case (.coherentMainsSubTiming, .sourcePair):
             return SpeakerMeasurementLabPlan(

@@ -93,16 +93,59 @@ final class SpeakerMeasurementLabCapabilityTests: XCTestCase {
             request,
             routePlan: makeRoutePlan(),
             multiOutputRouting: nil,
-            speakerDriverProcessing: nil
+            speakerDriverProcessing: nil,
+            bassManagementConfiguration: nil
         )
         XCTAssertFalse(plan.canStartMeasurement)
-        XCTAssertFalse(
-            plan.delegatedTransportPlans.first?.canStartMeasurement ?? true
-        )
+        XCTAssertTrue(plan.delegatedTransportPlans.isEmpty)
+        XCTAssertNil(plan.protectedDriverBus)
         XCTAssertEqual(
             plan.blockReasons,
             [.protectedDriverTransportRequired(.leftLow)]
         )
+    }
+
+    func testProtectedDriverNearFieldUnlocksOnlyDedicatedProtectedPath()
+        throws {
+        let request = SpeakerMeasurementLabRequest(
+            mode: .protectedDriverNearField,
+            target: .protectedDriverBus(.leftHigh),
+            geometry: .init(distanceMeters: 0.05)
+        )
+        let plan = try SpeakerMeasurementLabCapabilityPlanner().plan(
+            request,
+            routePlan: makeRoutePlan(),
+            multiOutputRouting: makeProtectedRouting(),
+            speakerDriverProcessing:
+                makeProtectedDriver(bus: .leftHigh),
+            bassManagementConfiguration: makeBiAmpBass()
+        )
+        XCTAssertTrue(plan.canStartMeasurement)
+        XCTAssertTrue(plan.delegatedTransportPlans.isEmpty)
+        XCTAssertEqual(plan.protectedDriverBus, .leftHigh)
+        XCTAssertTrue(
+            plan.analysisProducts.contains(.magnitudeResponse)
+        )
+        XCTAssertFalse(plan.canDeploy)
+        XCTAssertFalse(plan.canMutateDSP)
+
+        var noLimiter = SpeakerDriverProcessingConfiguration()
+        noLimiter.replace(
+            SpeakerDriverBusProcessingConfiguration(
+                bus: .leftHigh,
+                limiterEnabled: false
+            )
+        )
+        let blocked = try SpeakerMeasurementLabCapabilityPlanner()
+            .plan(
+                request,
+                routePlan: makeRoutePlan(),
+                multiOutputRouting: makeProtectedRouting(),
+                speakerDriverProcessing: noLimiter,
+                bassManagementConfiguration: makeBiAmpBass()
+            )
+        XCTAssertFalse(blocked.canStartMeasurement)
+        XCTAssertNil(blocked.protectedDriverBus)
     }
 
     func testCoherentTimingRequiresAuthenticatedSharedClock() throws {
@@ -214,6 +257,54 @@ final class SpeakerMeasurementLabCapabilityTests: XCTestCase {
         }
         request.repeatCount = 3
         XCTAssertNoThrow(try request.validate())
+    }
+
+    private func makeProtectedRouting()
+        -> MultiOutputRoutingConfiguration {
+        MultiOutputRoutingConfiguration(
+            enabled: true,
+            routes: [
+                SpeakerOutputRoute(
+                    name: "Left Low",
+                    bus: .leftLow,
+                    destination: PhysicalOutputEndpoint(
+                        deviceUID: "pr106-output",
+                        channelIndex: 0
+                    )
+                ),
+                SpeakerOutputRoute(
+                    name: "Left High",
+                    bus: .leftHigh,
+                    destination: PhysicalOutputEndpoint(
+                        deviceUID: "pr106-output",
+                        channelIndex: 1
+                    )
+                ),
+            ],
+            referenceDeviceUID: "pr106-output"
+        )
+    }
+
+    private func makeBiAmpBass() -> BassManagementConfiguration {
+        var result = BassManagementConfiguration()
+        result.enabled = true
+        result.frequencyHz = 1_000
+        result.physicalOutputMode = .biAmp
+        return result
+    }
+
+    private func makeProtectedDriver(
+        bus: SpeakerOutputBus
+    ) -> SpeakerDriverProcessingConfiguration {
+        var result = SpeakerDriverProcessingConfiguration()
+        result.replace(
+            SpeakerDriverBusProcessingConfiguration(
+                bus: bus,
+                limiterEnabled: true,
+                limiterThresholdDBFS: -30
+            )
+        )
+        return result
     }
 
     private func makeRoutePlan() -> LiveNChannelOutputRoutePlan {

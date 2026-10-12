@@ -528,3 +528,36 @@ extension SpeakerMeasurementLabProtectedExcitation {
         return result
     }
 }
+
+
+extension SpeakerMeasurementLabProtectedDriverCaptureProvenance {
+    func validatesProtectedPath(
+        for targetBus: SpeakerOutputBus
+    ) -> Bool {
+        guard self.targetBus == targetBus,
+              SpeakerMeasurementLabProtectedDriverRoutePlanner
+                .isProtectedSplitBus(targetBus),
+              routingConfiguration.enabled,
+              routingConfiguration.enabledRoutes.filter({
+                  $0.bus == targetBus
+                    && $0.destination == physicalDestination
+              }).count == 1,
+              bassManagementConfiguration.enabled,
+              let mode =
+                bassManagementConfiguration.physicalOutputMode,
+              (mode == .biAmp || mode == .triAmp),
+              mode.supports(bus: targetBus),
+              targetDriverConfiguration.bus == targetBus,
+              targetDriverConfiguration.enabled,
+              targetDriverConfiguration.limiterEnabled,
+              inputPeakDBFS.isFinite,
+              inputPeakDBFS <= -24.0 + 1.0e-6,
+              renderedPeakDBFS.isFinite,
+              renderedPeakDBFS <= 0,
+              sourceFrameCount > 0,
+              renderedFrameCount >= sourceFrameCount else {
+            return false
+        }
+        return true
+    }
+}

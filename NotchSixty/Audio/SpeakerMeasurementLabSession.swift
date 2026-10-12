@@ -21,6 +21,29 @@ struct SpeakerMeasurementLabProtocol:
         return source
     }
 
+    var protectedDriverBus: SpeakerOutputBus? {
+        guard case .protectedDriverBus(let bus) = request.target else {
+            return nil
+        }
+        return bus
+    }
+
+    /// Protected split-driver captures retain the parent L/R speaker identity
+    /// for common acoustic analysis while separate provenance keeps the exact
+    /// Low/Mid/High bus identity.
+    var captureSource: MultichannelCalibrationSource? {
+        if let acousticSource { return acousticSource }
+        guard let bus = protectedDriverBus else { return nil }
+        switch bus {
+        case .leftLow, .leftMid, .leftHigh:
+            return .speaker(.frontLeft)
+        case .rightLow, .rightMid, .rightHigh:
+            return .speaker(.frontRight)
+        case .leftFullRange, .rightFullRange, .subMono:
+            return nil
+        }
+    }
+
     func resolvedExcitationLevelDBFS(default defaultLevel: Double) -> Double {
         excitationLevelDBFS ?? defaultLevel
     }
@@ -49,8 +72,16 @@ struct SpeakerMeasurementLabProtocol:
                   nearFieldComponent?.validate() ?? true else {
                 throw SpeakerMeasurementLabSessionError.invalidProtocol
             }
-        case .protectedDriverNearField,
-             .coherentMainsSubTiming:
+        case .protectedDriverNearField:
+            guard protectedDriverBus != nil,
+                  captureSource != nil,
+                  nearFieldComponent == nil,
+                  let excitationLevelDBFS,
+                  excitationLevelDBFS >= -48.0,
+                  excitationLevelDBFS <= -24.0 else {
+                throw SpeakerMeasurementLabSessionError.invalidProtocol
+            }
+        case .coherentMainsSubTiming:
             throw SpeakerMeasurementLabSessionError
                 .unsupportedAcquisitionMode(request.mode)
         }
@@ -71,6 +102,11 @@ struct SpeakerMeasurementLabCapture:
     var excitationLevelDBFS: Double? = nil
     var sampleRate: Double
     var source: MultichannelCalibrationSource
+    /// Nil for ordinary whole-speaker/sub captures. Protected Low/Mid/High
+    /// captures require receipt-like provenance binding the exact route and
+    /// production crossover/limiter state used for this repeat.
+    var protectedDriverProvenance:
+        SpeakerMeasurementLabProtectedDriverCaptureProvenance? = nil
     var impulseResponse: [Float]
     var transferFunction: RoomCorrectionFrequencyResponse
     var quality: RoomCorrectionMeasurementQuality
@@ -137,7 +173,7 @@ struct SpeakerMeasurementLabSession:
             guard let labProtocol = protocols.first(
                 where: { $0.id == capture.protocolID }
             ),
-                  let source = labProtocol.acousticSource,
+                  let source = labProtocol.captureSource,
                   capture.source == source,
                   capture.playbackSystemID == playbackSystemID,
                   capture.routingSignature == routingSignature,
@@ -153,6 +189,18 @@ struct SpeakerMeasurementLabSession:
                 throw SpeakerMeasurementLabSessionError
                     .captureIdentityMismatch
             }
+
+            if let bus = labProtocol.protectedDriverBus {
+                guard let provenance =
+                        capture.protectedDriverProvenance,
+                      provenance.validatesProtectedPath(for: bus) else {
+                    throw SpeakerMeasurementLabSessionError
+                        .captureIdentityMismatch
+                }
+            } else if capture.protectedDriverProvenance != nil {
+                throw SpeakerMeasurementLabSessionError
+                    .captureIdentityMismatch
+            }
         }
 
         for labProtocol in protocols {
@@ -163,6 +211,15 @@ struct SpeakerMeasurementLabSession:
                   group.map(\.repeatIndex) == Array(0..<group.count) else {
                 throw SpeakerMeasurementLabSessionError
                     .captureSequenceInvalid
+            }
+            if labProtocol.protectedDriverBus != nil,
+               let first = group.first?.protectedDriverProvenance {
+                guard group.allSatisfy({
+                    $0.protectedDriverProvenance == first
+                }) else {
+                    throw SpeakerMeasurementLabSessionError
+                        .captureSequenceInvalid
+                }
             }
         }
     }
@@ -241,9 +298,12 @@ struct SpeakerMeasurementLabSessionStep: Equatable, Sendable {
             return "Place the microphone \(format(geometry.distanceMeters)) m from \(labProtocol.name) at H \(format(geometry.horizontalAngleDegrees))° / V \(format(geometry.verticalAngleDegrees))°; keep geometry fixed for \(repeatText)."
         case .subwooferNearField:
             return "Place the microphone \(format(geometry.distanceMeters)) m from \(labProtocol.name) in the selected near-field location; keep geometry fixed for \(repeatText)."
-        case .protectedDriverNearField,
-             .coherentMainsSubTiming:
-            return "This protocol is blocked by the current measurement safety contract."
+        case .protectedDriverNearField:
+            let bus = labProtocol.protectedDriverBus?.displayName
+                ?? "protected driver"
+            return "Place the microphone (format(geometry.distanceMeters)) m from (bus). The sweep is pre-rendered through the active crossover and target limiter; keep geometry fixed for (repeatText)."
+        case .coherentMainsSubTiming:
+            return "This protocol is blocked until authenticated shared-clock measurement is available."
         }
     }
 
@@ -343,7 +403,7 @@ struct SpeakerMeasurementLabSessionOrchestrator: Sendable {
         try session.validateStructure()
         guard step.labProtocol.id == capture.protocolID,
               step.repeatIndex == capture.repeatIndex,
-              step.labProtocol.acousticSource == capture.source,
+              step.labProtocol.captureSource == capture.source,
               session.protocols.contains(
                   where: { $0.id == step.labProtocol.id }
               ) else {
@@ -399,9 +459,11 @@ struct SpeakerMeasurementLabCaptureBuilder: Sendable {
         analyzed: RoomCorrectionChannelMeasurement,
         session: SpeakerMeasurementLabSession,
         step: SpeakerMeasurementLabSessionStep,
-        excitationLevelDBFS: Double? = nil
+        excitationLevelDBFS: Double? = nil,
+        protectedDriverProvenance:
+            SpeakerMeasurementLabProtectedDriverCaptureProvenance? = nil
     ) throws -> SpeakerMeasurementLabCapture {
-        guard let source = step.labProtocol.acousticSource,
+        guard let source = step.labProtocol.captureSource,
               let response = analyzed.transferFunction,
               !analyzed.impulseResponse.isEmpty,
               analyzed.impulseResponse.allSatisfy(\.isFinite) else {
@@ -419,6 +481,8 @@ struct SpeakerMeasurementLabCaptureBuilder: Sendable {
             excitationLevelDBFS: excitationLevelDBFS,
             sampleRate: session.sampleRate,
             source: source,
+            protectedDriverProvenance:
+                protectedDriverProvenance,
             impulseResponse: analyzed.impulseResponse,
             transferFunction: response,
             quality: analyzed.quality

@@ -1,6 +1,16 @@
 import Combine
 import Foundation
 
+typealias SpeakerMeasurementLabProtectedTransportFactory = (
+    LiveNChannelOutputRoutePlan,
+    [AudioOutputDevice],
+    AudioInputDevice,
+    Int,
+    RoomCorrectionSweepProgram,
+    UInt32,
+    [Float]
+) throws -> any MultichannelCalibrationTransporting
+
 enum SpeakerMeasurementLabControllerError:
     Error, Equatable, LocalizedError {
     case playbackSystemRequired
@@ -61,17 +71,25 @@ final class SpeakerMeasurementLabController: ObservableObject {
 
     private let store: SpeakerMeasurementLabSessionStore
     private let transportFactory: MultichannelCalibrationTransportFactory
+    private let protectedTransportFactory:
+        SpeakerMeasurementLabProtectedTransportFactory
     private let analysisOperation: MultichannelCalibrationAnalysisOperation
     private let capabilityPlanner =
         SpeakerMeasurementLabCapabilityPlanner()
     private let captureBuilder = SpeakerMeasurementLabCaptureBuilder()
     private let orchestrator = SpeakerMeasurementLabSessionOrchestrator()
     private let sweepGenerator = RoomCorrectionSweepGenerator()
+    private let protectedExcitationCompiler =
+        SpeakerMeasurementLabProtectedExcitationCompiler()
+    private let protectedRoutePlanner =
+        SpeakerMeasurementLabProtectedDriverRoutePlanner()
 
     private var activeTransport:
         (any MultichannelCalibrationTransporting)?
     private var activeProgram: RoomCorrectionSweepProgram?
     private var activeStep: SpeakerMeasurementLabSessionStep?
+    private var activeProtectedProvenance:
+        SpeakerMeasurementLabProtectedDriverCaptureProvenance?
     private var analysisGeneration: UInt64 = 0
 
     @Published private(set) var state:
@@ -100,6 +118,20 @@ final class SpeakerMeasurementLabController: ObservableObject {
                     physicalOutputChannelIndex: physicalOutput
                 )
             },
+        protectedTransportFactory:
+            @escaping SpeakerMeasurementLabProtectedTransportFactory = {
+                routePlan, outputs, input, inputChannel,
+                program, physicalOutput, outputSamples in
+                try MultichannelCalibrationTransport(
+                    routePlan: routePlan,
+                    availableOutputs: outputs,
+                    input: input,
+                    inputChannelIndex: inputChannel,
+                    program: program,
+                    physicalOutputChannelIndex: physicalOutput,
+                    outputSweepSamples: outputSamples
+                )
+            },
         analysisOperation:
             @escaping MultichannelCalibrationAnalysisOperation = {
                 capture, program, microphoneCalibration in
@@ -119,6 +151,7 @@ final class SpeakerMeasurementLabController: ObservableObject {
         self.microphone = microphone
         self.store = store
         self.transportFactory = transportFactory
+        self.protectedTransportFactory = protectedTransportFactory
         self.analysisOperation = analysisOperation
     }
 
@@ -294,14 +327,12 @@ final class SpeakerMeasurementLabController: ObservableObject {
             routePlan: routePlan,
             multiOutputRouting: systemProfile.state.outputRouting,
             speakerDriverProcessing:
-                systemProfile.state.speakerDriverProcessing
+                systemProfile.state.speakerDriverProcessing,
+            bassManagementConfiguration:
+                systemProfile.state.bassManagement
         )
         activeCapabilityPlan = capability
-        guard capability.canStartMeasurement,
-              capability.delegatedTransportPlans.count == 1,
-              let physicalOutput =
-                capability.delegatedTransportPlans[0]
-                    .physicalOutputChannelIndex else {
+        guard capability.canStartMeasurement else {
             state = .blocked
             let reason = capability.blockReasons
                 .map(\.message)
@@ -331,18 +362,85 @@ final class SpeakerMeasurementLabController: ObservableObject {
         let program = try sweepGenerator.makeProgram(
             settings: settings
         )
-        let transport = try transportFactory(
-            routePlan,
-            engine.outputDevices,
-            input,
-            microphone.selectedInputChannelIndex,
-            program,
-            physicalOutput
-        )
+
+        let transport: any MultichannelCalibrationTransporting
+        let analysisProgram: RoomCorrectionSweepProgram
+        var protectedProvenance:
+            SpeakerMeasurementLabProtectedDriverCaptureProvenance?
+
+        if let targetBus = capability.protectedDriverBus {
+            guard let routing = systemProfile.state.outputRouting,
+                  let driverProcessing =
+                    systemProfile.state.speakerDriverProcessing else {
+                throw SpeakerMeasurementLabControllerError
+                    .transportBlocked(
+                        "Protected-driver crossover routing and limiter processing are required."
+                    )
+            }
+            let excitation = try protectedExcitationCompiler.compile(
+                monoSamples: program.sweepSamples,
+                sampleRate: program.sampleRate,
+                targetBus: targetBus,
+                bassManagement: systemProfile.state.bassManagement,
+                driverProcessing: driverProcessing
+            )
+            let binding = try protectedRoutePlanner.plan(
+                targetBus: targetBus,
+                routing: routing,
+                bassManagement: systemProfile.state.bassManagement,
+                driverProcessing: driverProcessing,
+                availableOutputs: engine.outputDevices,
+                sampleRate: output.nominalSampleRate,
+                selectedOutputUID: selectedOutputUID
+            )
+            protectedProvenance = try excitation
+                .makeCaptureProvenance(binding: binding)
+            analysisProgram = try excitation.makeAnalysisProgram(
+                from: program
+            )
+            transport = try protectedTransportFactory(
+                binding.carrierRoutePlan,
+                engine.outputDevices,
+                input,
+                microphone.selectedInputChannelIndex,
+                program,
+                binding.physicalOutputChannelIndex,
+                excitation.renderedSamples
+            )
+
+            // Re-read the selected Playback System immediately before hardware
+            // start. A route/crossover/limiter change after compilation must
+            // cancel rather than play a stale protected waveform.
+            try validateProtectedStateImmediatelyBeforeStart(
+                session: session,
+                binding: binding,
+                excitation: excitation
+            )
+        } else {
+            guard capability.delegatedTransportPlans.count == 1,
+                  let physicalOutput =
+                    capability.delegatedTransportPlans[0]
+                        .physicalOutputChannelIndex else {
+                throw SpeakerMeasurementLabControllerError
+                    .transportBlocked(
+                        "Ordinary Lab acquisition did not resolve one safe physical output."
+                    )
+            }
+            analysisProgram = program
+            transport = try transportFactory(
+                routePlan,
+                engine.outputDevices,
+                input,
+                microphone.selectedInputChannelIndex,
+                program,
+                physicalOutput
+            )
+        }
 
         analysisGeneration &+= 1
         activeTransport = transport
-        activeProgram = program
+        activeProgram = analysisProgram
+        activeProtectedProvenance = protectedProvenance
         activeStep = step
         do {
             try transport.start()
@@ -404,7 +502,9 @@ final class SpeakerMeasurementLabController: ObservableObject {
                 analyzed: analyzed,
                 session: session,
                 step: step,
-                excitationLevelDBFS: program.settings.levelDBFS
+                excitationLevelDBFS: program.settings.levelDBFS,
+                protectedDriverProvenance:
+                    activeProtectedProvenance
             )
             session = try orchestrator.appending(
                 capture,
@@ -415,6 +515,7 @@ final class SpeakerMeasurementLabController: ObservableObject {
             try store.save(session)
             activeStep = nil
             activeCapabilityPlan = nil
+            activeProtectedProvenance = nil
             state = try orchestrator.progress(for: session).complete
                 ? .reviewing : .ready
             lastErrorDescription = nil
@@ -486,11 +587,39 @@ final class SpeakerMeasurementLabController: ObservableObject {
         }
     }
 
+    private func validateProtectedStateImmediatelyBeforeStart(
+        session: SpeakerMeasurementLabSession,
+        binding: SpeakerMeasurementLabProtectedDriverRouteBinding,
+        excitation: SpeakerMeasurementLabProtectedExcitation
+    ) throws {
+        guard profiles.selectedSystemProfileID
+                == session.playbackSystemID,
+              let current = profiles.selectedSystemProfile,
+              current.state.outputRouting
+                == binding.routingConfiguration,
+              current.state.bassManagement
+                == excitation.bassManagementConfiguration,
+              current.state.speakerDriverProcessing
+                == excitation.driverProcessingConfiguration,
+              engine.routeConfiguration.selectedOutputUID
+                == binding.carrierRoutePlan.referenceDeviceUID,
+              binding.matchesCurrentState(
+                  routing: current.state.outputRouting,
+                  bassManagement: current.state.bassManagement,
+                  driverProcessing:
+                      current.state.speakerDriverProcessing
+              ) else {
+            throw SpeakerMeasurementLabControllerError
+                .sessionEnvironmentChanged
+        }
+    }
+
     private func clearActiveMeasurement() {
         activeTransport = nil
         activeProgram = nil
         activeStep = nil
         activeCapabilityPlan = nil
+        activeProtectedProvenance = nil
     }
 
     private func recordFailure(_ error: Error) {
