@@ -323,6 +323,10 @@ for token in (
     "Approve & Apply Provisionally",
     "Start Fresh Verification Session",
     "Verify Current Lab Session",
+    "persistedAlignmentStatus",
+    "Persisted PR108 alignment · VERIFIED",
+    "coherentMultiSubwooferAlignment",
+    "coherentSubwooferAlignment",
 ):
     assert token in lab_ui, f"missing PR108 production commissioning UI: {token}"
 
