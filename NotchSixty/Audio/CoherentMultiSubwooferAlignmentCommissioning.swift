@@ -25,10 +25,10 @@ struct CoherentMultiSubwooferAlignmentCommissioningProposal:
             && !candidate.canDeploy
             && subwooferIndices.count >= 2
     }
-    /// Slice 7 is commissioning-only. A dedicated coordinated transaction must
-    /// exist before a multi-Sub proposal can become Apply-capable.
-    var canApply: Bool { false }
-    var canDeploy: Bool { false }
+    /// The raw coordinated candidate remains preview-only. Only this complete,
+    /// fingerprint-bound proposal can enter the atomic multi-Sub transaction.
+    var canApply: Bool { readyForApproval }
+    var canDeploy: Bool { canApply }
 }
 
 struct CoherentMultiSubwooferAlignmentApproval:
@@ -46,7 +46,7 @@ enum CoherentMultiSubwooferAlignmentCommissioningError:
     case playbackSystemIdentityMismatch
     case outputDeviceProfileRequired
     case bassManagementMismatch
-    case conflictingSingleSubProvenance
+    case conflictingAlignmentProvenance
     case evidenceOrCandidateDrift
     case invalidApproval
 
@@ -60,8 +60,8 @@ enum CoherentMultiSubwooferAlignmentCommissioningError:
             return "The selected Playback System needs an enabled Output Device Profile for coordinated multi-Sub alignment."
         case .bassManagementMismatch:
             return "Bass-management state or crossover frequency changed after the coordinated candidate was designed."
-        case .conflictingSingleSubProvenance:
-            return "Clear or rollback existing single-Sub coherent-alignment provenance before coordinated multi-Sub commissioning."
+        case .conflictingAlignmentProvenance:
+            return "Clear or rollback existing coherent-alignment provenance before coordinated multi-Sub commissioning."
         case .evidenceOrCandidateDrift:
             return "Coherent multi-Sub evidence or the derived coordinated candidate changed after review; regenerate the proposal."
         case .invalidApproval:
@@ -101,9 +101,10 @@ struct CoherentMultiSubwooferAlignmentCommissioningPlanner:
             throw CoherentMultiSubwooferAlignmentCommissioningError
                 .outputDeviceProfileRequired
         }
-        guard output.coherentSubwooferAlignment == nil else {
+        guard output.coherentSubwooferAlignment == nil,
+              output.coherentMultiSubwooferAlignment == nil else {
             throw CoherentMultiSubwooferAlignmentCommissioningError
-                .conflictingSingleSubProvenance
+                .conflictingAlignmentProvenance
         }
         let bass = profile.state.bassManagement
         guard bass.enabled,
