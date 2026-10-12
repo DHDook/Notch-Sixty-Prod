@@ -18,6 +18,8 @@ MULTI_COMMISSIONING_TESTS = ROOT / "NotchSixtyTests/CoherentMultiSubwooferAlignm
 MULTI_DEPLOYMENT = ROOT / "NotchSixty/Audio/CoherentMultiSubwooferAlignmentDeployment.swift"
 MULTI_APPLY = ROOT / "NotchSixty/Audio/CoherentMultiSubwooferAlignmentApplyTransaction.swift"
 MULTI_APPLY_TESTS = ROOT / "NotchSixtyTests/CoherentMultiSubwooferAlignmentApplyTransactionTests.swift"
+MULTI_VERIFY = ROOT / "NotchSixty/Audio/CoherentMultiSubwooferAlignmentPostApplyVerification.swift"
+MULTI_VERIFY_TESTS = ROOT / "NotchSixtyTests/CoherentMultiSubwooferAlignmentPostApplyVerificationTests.swift"
 PROFILE = ROOT / "NotchSixty/Audio/Routing/OutputDeviceProfileConfiguration.swift"
 COHERENT = ROOT / "NotchSixty/Audio/SpeakerMeasurementLabCoherentTiming.swift"
 CALIBRATION = ROOT / "NotchSixty/Audio/Routing/OutputDeviceCalibration.swift"
@@ -25,7 +27,7 @@ PROJECT = ROOT / "NotchSixty.xcodeproj/project.pbxproj"
 DOC = ROOT / "docs/PR108_COHERENT_SUBWOOFER_ALIGNMENT.md"
 WORKFLOW = ROOT / ".github/workflows/pr108-coherent-subwoofer-alignment.yml"
 
-for path in (SOURCE, TESTS, COMMISSIONING, COMMISSIONING_TESTS, APPLY, APPLY_TESTS, VERIFY, VERIFY_TESTS, DEPLOYMENT, MULTI, MULTI_TESTS, MULTI_COMMISSIONING, MULTI_COMMISSIONING_TESTS, MULTI_DEPLOYMENT, MULTI_APPLY, MULTI_APPLY_TESTS, PROFILE, COHERENT, CALIBRATION, PROJECT, DOC, WORKFLOW):
+for path in (SOURCE, TESTS, COMMISSIONING, COMMISSIONING_TESTS, APPLY, APPLY_TESTS, VERIFY, VERIFY_TESTS, DEPLOYMENT, MULTI, MULTI_TESTS, MULTI_COMMISSIONING, MULTI_COMMISSIONING_TESTS, MULTI_DEPLOYMENT, MULTI_APPLY, MULTI_APPLY_TESTS, MULTI_VERIFY, MULTI_VERIFY_TESTS, PROFILE, COHERENT, CALIBRATION, PROJECT, DOC, WORKFLOW):
     assert path.is_file(), f"missing PR108 Slice 1 file: {path}"
 
 source = SOURCE.read_text()
@@ -44,6 +46,8 @@ multi_commissioning_tests = MULTI_COMMISSIONING_TESTS.read_text()
 multi_deployment = MULTI_DEPLOYMENT.read_text()
 multi_apply = MULTI_APPLY.read_text()
 multi_apply_tests = MULTI_APPLY_TESTS.read_text()
+multi_verify = MULTI_VERIFY.read_text()
+multi_verify_tests = MULTI_VERIFY_TESTS.read_text()
 profile_source = PROFILE.read_text()
 coherent = COHERENT.read_text()
 calibration = CALIBRATION.read_text()
@@ -256,6 +260,27 @@ assert "coherentMultiSubwooferAlignment" in profile_source
 assert "coherentSubwooferAlignment != nil" in profile_source
 assert "coherentMultiSubwooferAlignment != nil" in profile_source
 
+
+for token in (
+    "struct CoherentMultiSubwooferAlignmentPostApplyVerifier",
+    "struct CoherentMultiSubwooferAlignmentVerificationReport",
+    "verificationPairIDsBySubwoofer",
+    "capturedAt > receipt.appliedAt",
+    "maximumPhaseTrackingRMSRadians",
+    "maximumMagnitudeTrackingRMSDB",
+    "minimumMeasuredImprovementDB",
+    "shouldRollback",
+):
+    assert token in multi_verify, f"missing PR108 coordinated fresh verification contract: {token}"
+
+for token in (
+    "testFreshCoordinatedSessionAcceptsEveryAppliedSubSignature",
+    "testOneUncorrectedSubRejectsWholeCoordinatedVerification",
+    "testPairSetAndFreshnessMustCoverEverySub",
+    "testBaselineAndCurrentStateDriftFailClosed",
+):
+    assert token in multi_verify_tests, f"missing PR108 coordinated fresh verification test: {token}"
+
 for token in (
     "wrappedRelativePhaseRadians",
     "relativeArrivalMilliseconds",
@@ -305,6 +330,10 @@ for token in (
     "F1080000000000000000001E",
     "F1080000000000000000001F",
     "F10800000000000000000020",
+    "F10810000000000000000001",
+    "F10810000000000000000002",
+    "F10810000000000000000011",
+    "F10810000000000000000012",
 ):
     assert project.count(token) >= 2, f"missing PR108 Xcode registration: {token}"
 
@@ -318,6 +347,7 @@ for token in (
     "Slice 6 — Coordinated multi-Sub proposal",
     "Slice 7 — Coordinated multi-Sub commissioning identity",
     "Slice 8 — Atomic coordinated multi-Sub Apply + provenance",
+    "Slice 9 — Coordinated fresh coherent verification",
     "does **not** subtract relativeArrivalMilliseconds again",
     "previewOnly == true",
     "canDeploy == false",
@@ -334,6 +364,7 @@ assert "CoherentSubwooferAlignmentPostApplyVerificationTests" in workflow
 assert "CoherentMultiSubwooferAlignmentTests" in workflow
 assert "CoherentMultiSubwooferAlignmentCommissioningTests" in workflow
 assert "CoherentMultiSubwooferAlignmentApplyTransactionTests" in workflow
+assert "CoherentMultiSubwooferAlignmentPostApplyVerificationTests" in workflow
 assert "Run full XCTest regression" in workflow
 
-print("PR108 Slice 1-8 single-Sub verified path + coordinated multi-Sub atomic Apply boundary passed")
+print("PR108 Slice 1-9 single-Sub verified path + coordinated multi-Sub measured verification boundary passed")
