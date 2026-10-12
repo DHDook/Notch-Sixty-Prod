@@ -2336,9 +2336,7 @@ struct RoomAdvancedPlacementReviewStore: Sendable {
             return RoomAdvancedPlacementReviewHistory(projectID: projectID)
         }
         do {
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .millisecondsSince1970
-            let decoded = try decoder.decode(
+            let decoded = try JSONDecoder().decode(
                 RoomAdvancedPlacementReviewHistory.self,
                 from: Data(contentsOf: url)
             )
@@ -2372,7 +2370,6 @@ struct RoomAdvancedPlacementReviewStore: Sendable {
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .millisecondsSince1970
         try encoder.encode(history).write(to: url, options: .atomic)
         return history
     }
