@@ -1,6 +1,6 @@
 # PR105 — Guided Speaker Characterization & Verification
 
-Status: **SLICES 1–7 REMOTE SOFTWARE VERIFIED — SLICE 8 CI PENDING — PHYSICAL ACOUSTIC ACCEPTANCE PENDING**
+Status: **SLICES 1–8 REMOTE SOFTWARE VERIFIED — SLICE 9 CI PENDING — PHYSICAL ACOUSTIC ACCEPTANCE PENDING**
 
 Base: PR104 measurement-driven Speaker Optimization Engine.
 
@@ -231,13 +231,42 @@ reflection timing and acoustic benefit remain unverified.
   verifies the full Playback System against the captured commissioning snapshot.
 - FIR Apply remains blocked; Slice 8 does not add a per-speaker FIR stage.
 
+## Slice 9 — Independent measured post-Apply verification
+
+- Requires a new `.verification` measurement set captured after the Apply
+  receipt. Baseline captures cannot be reused as verification.
+- Baseline and verification must have identical Playback System, routing,
+  calibrated microphone identity, sample rate, listening positions and planned
+  acoustic sources.
+- Both campaigns independently re-run the PR103 repeated-sweep SNR, clipping,
+  magnitude-repeatability, timing and phase-consistency gates.
+- The Apply receipt is revalidated against the exact deployed PEQ metadata and
+  classification-aware candidate identity before acoustic scoring.
+- For each deployed whole speaker, the verifier reconstructs the actual digital
+  PEQ response and compares it with the measured verification-minus-baseline
+  acoustic delta.
+- A single constant dB level offset may be fitted out of that DELTA so minor
+  measurement-level drift cannot create a false failure. Spectral shape is not
+  normalized away.
+- Speaker-persistent regions must show measured local spectral-error
+  improvement, with a per-seat regression guard.
+- Room/seat-dependent, ambiguous and otherwise protected regions have a
+  separate regression guard.
+- A deployment is accepted only if every deployed source clears filter tracking,
+  persistent improvement, seat regression and protected-region checks.
+- Failed measured acceptance sets `shouldRollback == true`; modeled
+  improvement alone can never finalize the deployment.
+- This slice produces the independent acceptance report. Automatic rollback/UI
+  orchestration comes next.
+
 ## Planned follow-on slices
 
-1. Add provisional Apply/rollback UI review around the transactional PEQ path.
-2. Capture a new post-Apply verification measurement set with the same
-   routing/microphone/quality identity gates.
-3. Compare verification against the baseline independently and automatically
-   recommend/perform rollback when measured acceptance fails.
+1. Add provisional Apply/rollback UI review plus a guided post-Apply
+   verification capture controller.
+2. Automatically invoke guarded rollback when fresh measured acceptance fails,
+   while preserving the existing no-overwrite-on-state-drift rule.
+3. Persist a verified deployment status only after the independent acceptance
+   report passes.
 4. Add synchronized reference capture before any crossover timing/polarity
    deployment; saved PR103 v1 evidence remains insufficient for that action.
 5. Keep FIR deployment blocked until a separately owned per-speaker FIR stage

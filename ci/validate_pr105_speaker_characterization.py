@@ -19,11 +19,13 @@ DEPLOY_SOURCE = ROOT / "NotchSixty/Audio/SpeakerOptimizerPEQDeployment.swift"
 DEPLOY_TESTS = ROOT / "NotchSixtyTests/SpeakerOptimizerPEQDeploymentTests.swift"
 APPLY_SOURCE = ROOT / "NotchSixty/Audio/SpeakerOptimizerPEQApplyTransaction.swift"
 APPLY_TESTS = ROOT / "NotchSixtyTests/SpeakerOptimizerPEQApplyTransactionTests.swift"
+VERIFY_SOURCE = ROOT / "NotchSixty/Audio/SpeakerOptimizerPostApplyVerification.swift"
+VERIFY_TESTS = ROOT / "NotchSixtyTests/SpeakerOptimizerPostApplyVerificationTests.swift"
 PROJECT = ROOT / "NotchSixty.xcodeproj/project.pbxproj"
 DOC = ROOT / "docs/PR105_SPEAKER_CHARACTERIZATION_AND_VERIFICATION.md"
 WORKFLOW = ROOT / ".github/workflows/pr105-speaker-characterization.yml"
 
-for path in (SOURCE, TESTS, EARLY_SOURCE, EARLY_TESTS, CLASSIFIER_SOURCE, CLASSIFIER_TESTS, AWARE_SOURCE, AWARE_TESTS, GUIDED_SOURCE, GUIDED_TESTS, UI_SOURCE, COMMISSION_SOURCE, COMMISSION_TESTS, DEPLOY_SOURCE, DEPLOY_TESTS, APPLY_SOURCE, APPLY_TESTS, PROJECT, DOC, WORKFLOW):
+for path in (SOURCE, TESTS, EARLY_SOURCE, EARLY_TESTS, CLASSIFIER_SOURCE, CLASSIFIER_TESTS, AWARE_SOURCE, AWARE_TESTS, GUIDED_SOURCE, GUIDED_TESTS, UI_SOURCE, COMMISSION_SOURCE, COMMISSION_TESTS, DEPLOY_SOURCE, DEPLOY_TESTS, APPLY_SOURCE, APPLY_TESTS, VERIFY_SOURCE, VERIFY_TESTS, PROJECT, DOC, WORKFLOW):
     assert path.is_file(), f"missing PR105 Slice 1 file: {path}"
 
 source = SOURCE.read_text()
@@ -43,6 +45,8 @@ deploy_source = DEPLOY_SOURCE.read_text()
 deploy_tests = DEPLOY_TESTS.read_text()
 apply_source = APPLY_SOURCE.read_text()
 apply_tests = APPLY_TESTS.read_text()
+verify_source = VERIFY_SOURCE.read_text()
+verify_tests = VERIFY_TESTS.read_text()
 project = PROJECT.read_text()
 doc = DOC.read_text()
 workflow = WORKFLOW.read_text()
@@ -228,6 +232,29 @@ for token in (
     assert token in apply_tests, f"missing transactional Apply test: {token}"
 
 for token in (
+    "struct SpeakerOptimizerPostApplyVerificationOptions",
+    "struct SpeakerOptimizerPostApplyVerificationReport",
+    "var shouldRollback: Bool { !accepted }",
+    "var isMeasuredVerification: Bool { true }",
+    "verification.role == .verification",
+    "capturedAt > receipt.appliedAt",
+    "maximumFilterTrackingRMSDB",
+    "minimumPersistentImprovementDB",
+    "maximumProtectedRegressionDB",
+):
+    assert token in verify_source, f"missing post-Apply verification contract: {token}"
+
+for token in (
+    "testFreshQualifiedVerificationAcceptsTrackedBeneficialPEQ",
+    "testGlobalMeasurementLevelOffsetDoesNotCreateFalseFailure",
+    "testNoAcousticChangeAfterApplyRecommendsRollback",
+    "testProtectedRegionRegressionRecommendsRollback",
+    "testVerificationMustBeNewPostApplyEvidence",
+    "testVerificationIdentityAndQualityDriftFailClosed",
+):
+    assert token in verify_tests, f"missing post-Apply verification test: {token}"
+
+for token in (
     "F10500000000000000000001",
     "F10500000000000000000002",
     "F10500000000000000000011",
@@ -260,6 +287,10 @@ for token in (
     "F10500000000000000000010",
     "F1050000000000000000001F",
     "F10500000000000000000020",
+    "F10590000000000000000001",
+    "F10590000000000000000002",
+    "F10590000000000000000011",
+    "F10590000000000000000012",
 ):
     assert project.count(token) >= 2, f"missing Xcode registration: {token}"
 
@@ -280,6 +311,7 @@ assert "SpeakerOptimizerCharacterizationControllerTests" in workflow
 assert "SpeakerOptimizerCommissioningContractTests" in workflow
 assert "SpeakerOptimizerPEQDeploymentTests" in workflow
 assert "SpeakerOptimizerPEQApplyTransactionTests" in workflow
+assert "SpeakerOptimizerPostApplyVerificationTests" in workflow
 assert "Run full XCTest regression" in workflow
 assert "Cross-domain speaker-vs-room classification" in doc
 assert "Classification-aware PEQ/FIR correction authority" in doc
@@ -287,4 +319,5 @@ assert "Guided Speaker Calibration workflow" in doc
 assert "Commissioning contract, explicit approval & rollback snapshot" in doc
 assert "Separately owned live PEQ deployment substrate" in doc
 assert "Transactional PEQ Apply & rollback" in doc
-print("PR105 guided optimizer + commissioning + PEQ deploy/apply transaction contracts passed")
+assert "Independent measured post-Apply verification" in doc
+print("PR105 guided optimizer + transactional Apply + measured verification contracts passed")
