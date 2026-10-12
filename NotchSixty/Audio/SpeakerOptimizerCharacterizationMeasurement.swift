@@ -68,6 +68,9 @@ struct SpeakerOptimizerCharacterizationMeasurementSet: Identifiable, Codable, Eq
     /// Reuses compact PR103 capture evidence. positionID is deliberately the
     /// characterization target ID, preventing seat/near-speaker mixing.
     var captures: [SpeakerOptimizerMeasurementCapture]
+    /// Optional compact magnitude-only response derived from the in-memory
+    /// impulse before raw/impulse buffers are discarded. One entry per capture.
+    var earlyWindowEvidence: [SpeakerOptimizerEarlyWindowEvidence]? = nil
     var createdAt: Date = Date()
     var modifiedAt: Date = Date()
 }
@@ -127,6 +130,45 @@ extension SpeakerOptimizerCharacterizationMeasurementSet {
                 throw SpeakerOptimizerCharacterizationError.captureIdentityMismatch
             }
         }
+        let early = earlyWindowEvidence ?? []
+        guard Set(early.map(\.captureID)).count == early.count else {
+            throw SpeakerOptimizerCharacterizationError.invalidSet
+        }
+        for item in early {
+            guard item.validate(),
+                  let capture = captures.first(where: { $0.id == item.captureID }),
+                  capture.positionID == item.targetID,
+                  capture.source == item.source,
+                  abs(item.sampleRate - sampleRate) < 0.5,
+                  item.microphoneCalibrationFingerprint
+                    == microphone.calibrationFingerprint else {
+                throw SpeakerOptimizerCharacterizationError.captureIdentityMismatch
+            }
+        }
+    }
+
+    func attachingEarlyWindowEvidence(
+        _ evidence: SpeakerOptimizerEarlyWindowEvidence,
+        modifiedAt: Date = Date()
+    ) throws -> SpeakerOptimizerCharacterizationMeasurementSet {
+        try validateStructure()
+        guard evidence.validate(),
+              let capture = captures.first(where: { $0.id == evidence.captureID }),
+              capture.positionID == evidence.targetID,
+              capture.source == evidence.source,
+              abs(evidence.sampleRate - sampleRate) < 0.5,
+              evidence.microphoneCalibrationFingerprint
+                == microphone.calibrationFingerprint else {
+            throw SpeakerOptimizerCharacterizationError.captureIdentityMismatch
+        }
+        var updated = self
+        var items = updated.earlyWindowEvidence ?? []
+        items.removeAll { $0.captureID == evidence.captureID }
+        items.append(evidence)
+        updated.earlyWindowEvidence = items
+        updated.modifiedAt = modifiedAt
+        try updated.validateStructure()
+        return updated
     }
 
     func validateCompatibility(
@@ -364,7 +406,13 @@ struct SpeakerOptimizerCharacterizationSessionOrchestrator: Sendable {
             throw SpeakerOptimizerCharacterizationError.noCaptureToRetry
         }
         var updated = set
+        let removedCaptureID = updated.captures[latest.offset].id
         updated.captures.remove(at: latest.offset)
+        if let evidence = updated.earlyWindowEvidence {
+            updated.earlyWindowEvidence = evidence.filter {
+                $0.captureID != removedCaptureID
+            }
+        }
         updated.modifiedAt = modifiedAt
         return updated
     }

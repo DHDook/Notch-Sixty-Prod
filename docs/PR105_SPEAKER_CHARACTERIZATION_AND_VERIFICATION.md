@@ -1,6 +1,6 @@
 # PR105 — Guided Speaker Characterization & Verification
 
-Status: **SLICE 1 IMPLEMENTED — EXACT-HEAD CI PENDING**
+Status: **SLICE 1 VERIFIED; SLICE 2 IMPLEMENTED — EXACT-HEAD CI PENDING**
 
 Base: PR104 measurement-driven Speaker Optimization Engine.
 
@@ -48,11 +48,31 @@ crossover, polarity, delay or limiter is modified.
 Protected Low/Mid/High driver buses remain blocked. We characterize the whole
 speaker only through an already safe acoustic-source route.
 
+## Slice 2 — Bounded early-window characterization
+
+- Derives an additional response from the in-memory deconvolved impulse before
+  compact persistence discards raw capture and impulse buffers.
+- Default gate keeps 0.75 ms before the direct-arrival peak and 6.0 ms after it,
+  with a 1.5 ms raised-cosine tail.
+- The gate is an explicit analysis assumption; PR105 does not claim to detect
+  the first room reflection or produce a true anechoic/free-field response.
+- The trusted low-frequency boundary is derived from gate duration. The default
+  requires two complete periods inside the 6 ms post-arrival window (~333 Hz)
+  and then snaps to the actual analyzed frequency grid.
+- The result is magnitude-only. Windowed phase is discarded so it cannot enter
+  crossover, polarity or synchronized timing decisions.
+- The same microphone calibration curve is explicitly reapplied to the gated
+  impulse-derived magnitude, and the characterization microphone calibration
+  identity is retained in the compact evidence.
+- A late reflection outside the gate is rejected from the derived magnitude in
+  deterministic tests; frequencies below the gate-derived boundary continue to
+  rely on the ordinary listening-position campaign.
+- Compact characterization persistence stores only the derived frequency
+  response and audit metadata, never the raw sweep or impulse response.
+
 ## Planned follow-on slices
 
-1. Add an explicitly bounded early-window characterization response derived
-   before compact persistence, with microphone calibration retained.
-2. Correlate speaker-characterization features against multi-seat features to
+1. Correlate speaker-characterization features against multi-seat features to
    classify source-persistent vs seat/room-dependent deviations.
 3. Integrate classification into PEQ/FIR ranking so room-specific nulls cannot
    masquerade as loudspeaker defects.
