@@ -563,6 +563,11 @@ final class RoomTreatmentAdvisorController: ObservableObject {
         }
     }
 
+    func clearPhysicalSubComparison() {
+        physicalSubComparison = nil
+        physicalSubComparisonMessage = nil
+    }
+
     func comparePhysicalSubPlacement(
         identicalSeatsAndUnchangedSignalChainConfirmed: Bool
     ) {
