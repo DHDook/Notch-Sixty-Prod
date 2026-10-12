@@ -712,3 +712,193 @@ final class AdvancedRoomPlacementExperimentsTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(primaryOnly, 0)
     }
 }
+
+
+// PR110 Slice 2 — separate project-sidecar persistence and UI controller.
+final class AdvancedPlacementSidecarTests: XCTestCase {
+    private func makeFixture() throws -> (
+        RoomCorrectionProjectStore, RoomCorrectionProject, URL
+    ) {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "PR110-Advanced-\(UUID().uuidString)", isDirectory: true
+            )
+        let store = RoomCorrectionProjectStore(rootDirectory: root)
+        let project = RoomCorrectionProject(
+            id: UUID(), playbackSystemID: UUID(),
+            name: "Advanced Placement"
+        )
+        try store.save(project)
+        return (store, project, root)
+    }
+
+    func testProjectSidecarRoundTripDoesNotChangeLegacyGeometryOrProject() throws {
+        let (store, project, root) = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let geometryStore = RoomGeometryStore(projectStore: store)
+        let advancedStore = RoomAdvancedPlacementStore(projectStore: store)
+        let original = RoomGeometryModel.template(projectID: project.id)
+        try geometryStore.save(original)
+        let legacyJSON = try Data(contentsOf:
+            geometryStore.geometryURL(for: project.id))
+        var settings = RoomAdvancedPlacementSettings(projectID: project.id)
+        settings.leftToeInDegrees = 14
+        settings.rightToeInDegrees = -12
+        settings.secondarySeats = [
+            RoomGeometryPoint3D(x: 1.5, y: 3.4, z: 1.1)
+        ]
+        settings.subwooferPositions = [
+            RoomGeometryPoint3D(x: 0.35, y: 0.55, z: 0.2)
+        ]
+        let advancedURL = try advancedStore.save(settings, room: original)
+        XCTAssertTrue(advancedURL.lastPathComponent.contains("advanced-placement"))
+        XCTAssertEqual(
+            try advancedStore.load(projectID: project.id, room: original),
+            settings
+        )
+        XCTAssertEqual(
+            try Data(contentsOf: geometryStore.geometryURL(for: project.id)),
+            legacyJSON
+        )
+        XCTAssertEqual(try store.load(project.id), project)
+        XCTAssertEqual(
+            try geometryStore.load(projectID: project.id), original
+        )
+    }
+
+    func testMissingSidecarLeavesExistingRoomUntouched() throws {
+        let (store, project, root) = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let geometry = RoomGeometryModel.template(projectID: project.id)
+        let advancedStore = RoomAdvancedPlacementStore(projectStore: store)
+        XCTAssertNil(
+            try advancedStore.load(projectID: project.id, room: geometry)
+        )
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath:
+                advancedStore.settingsURL(for: project.id).path)
+        )
+    }
+
+    func testCorruptedSidecarCannotSilentlyResetOrDamageLegacyRoom() throws {
+        let (store, project, root) = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let geometryStore = RoomGeometryStore(projectStore: store)
+        let advancedStore = RoomAdvancedPlacementStore(projectStore: store)
+        let geometry = RoomGeometryModel.template(projectID: project.id)
+        try geometryStore.save(geometry)
+        try Data("{bad-json".utf8).write(
+            to: advancedStore.settingsURL(for: project.id)
+        )
+        XCTAssertThrowsError(try advancedStore.load(
+            projectID: project.id, room: geometry
+        )) { error in
+            XCTAssertEqual(
+                error as? RoomAdvancedPlacementError, .corruptSettings
+            )
+        }
+        XCTAssertEqual(
+            try geometryStore.load(projectID: project.id), geometry
+        )
+    }
+
+    func testCrossProjectAndUnsupportedVersionSettingsRejected() throws {
+        let (store, project, root) = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let geometry = RoomGeometryModel.template(projectID: project.id)
+        let advancedStore = RoomAdvancedPlacementStore(projectStore: store)
+        var wrong = RoomAdvancedPlacementSettings(projectID: UUID())
+        XCTAssertThrowsError(try advancedStore.save(wrong, room: geometry))
+        wrong.projectID = project.id
+        wrong.schemaVersion = 5
+        XCTAssertThrowsError(try advancedStore.save(wrong, room: geometry))
+        XCTAssertThrowsError(try advancedStore.load(
+            projectID: UUID(), room: geometry
+        ))
+    }
+
+    @MainActor
+    func testControllerDraftSaveReloadAndPureProposalPreview() throws {
+        let (store, project, root) = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let first = RoomTreatmentAdvisorController(store: store)
+        first.prepareForUse()
+        first.startGeometryTemplate()
+        first.saveGeometry()
+        let baseline = try XCTUnwrap(first.savedGeometry)
+        first.setAdvancedToeIn(.left, degrees: 16)
+        first.addAdvancedSeat()
+        first.addAdvancedSubwoofer()
+        XCTAssertTrue(first.advancedPlacementHasUnsavedChanges)
+        first.saveAdvancedPlacement()
+        XCTAssertFalse(first.advancedPlacementHasUnsavedChanges)
+        XCTAssertEqual(first.savedGeometry, baseline)
+
+        let second = RoomTreatmentAdvisorController(store: store)
+        second.prepareForUse()
+        XCTAssertEqual(second.savedGeometry, baseline)
+        XCTAssertEqual(second.advancedPlacementDraft?.leftToeInDegrees, 16)
+        XCTAssertEqual(second.advancedPlacementDraft?.secondarySeats.count, 1)
+        XCTAssertEqual(second.advancedPlacementDraft?.subwooferPositions.count, 1)
+        let trial = try XCTUnwrap(second.advancedPlacementExperiments.first)
+        second.previewAdvancedExperiment(trial)
+        XCTAssertEqual(second.selectedAdvancedExperiment, trial)
+        XCTAssertEqual(second.savedGeometry, baseline)
+        XCTAssertEqual(second.geometryDraft, baseline)
+        XCTAssertEqual(second.advancedPlacementDraft, second.savedAdvancedPlacement)
+    }
+
+    @MainActor
+    func testAdvancedSaveBlockedWhileBaseGeometryIsUnsaved() throws {
+        let (store, _, root) = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let controller = RoomTreatmentAdvisorController(store: store)
+        controller.prepareForUse()
+        controller.startGeometryTemplate()
+        controller.setAdvancedToeIn(.right, degrees: 20)
+        controller.saveAdvancedPlacement()
+        XCTAssertNil(controller.savedAdvancedPlacement)
+        XCTAssertNotNil(controller.advancedPlacementMessage)
+        controller.saveGeometry()
+        controller.saveAdvancedPlacement()
+        XCTAssertEqual(controller.savedAdvancedPlacement?.rightToeInDegrees, 20)
+    }
+
+    @MainActor
+    func testAdvancedDraftRevertDoesNotTouchSavedGeometry() throws {
+        let (store, _, root) = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let controller = RoomTreatmentAdvisorController(store: store)
+        controller.prepareForUse()
+        controller.startGeometryTemplate()
+        controller.saveGeometry()
+        controller.setAdvancedToeIn(.left, degrees: 15)
+        controller.saveAdvancedPlacement()
+        let baseline = try XCTUnwrap(controller.savedGeometry)
+        controller.setAdvancedToeIn(.left, degrees: 23)
+        controller.addAdvancedSeat()
+        controller.revertAdvancedPlacement()
+        XCTAssertEqual(controller.advancedPlacementDraft?.leftToeInDegrees, 15)
+        XCTAssertEqual(controller.advancedPlacementDraft?.secondarySeats.count, 0)
+        XCTAssertEqual(controller.geometryDraft, baseline)
+    }
+
+    @MainActor
+    func testClearingGeometryRemovesOnlyCorrespondingAdvancedSidecar() throws {
+        let (store, project, root) = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let controller = RoomTreatmentAdvisorController(store: store)
+        controller.prepareForUse()
+        controller.startGeometryTemplate()
+        controller.saveGeometry()
+        controller.saveAdvancedPlacement()
+        let url = RoomAdvancedPlacementStore(projectStore: store)
+            .settingsURL(for: project.id)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+        controller.clearGeometry()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+        XCTAssertNil(controller.savedGeometry)
+        XCTAssertNil(controller.advancedPlacementDraft)
+        XCTAssertEqual(try store.load(project.id), project)
+    }
+}
