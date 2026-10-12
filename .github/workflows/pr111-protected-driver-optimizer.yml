@@ -1,0 +1,71 @@
+name: PR111 Protected Per-Driver Optimization
+
+on:
+  push:
+    branches:
+      - feature/pr111-protected-per-driver-optimizer
+  pull_request:
+    branches:
+      - feature/pr110-advanced-speaker-sub-placement
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr111-protected-driver-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Verify PR111 protected driver cut-only recommendation boundary
+        run: python3 ci/validate_pr111_protected_driver_optimizer.py
+      - name: Preserve PR106 driver protection and PR109 integration safety
+        run: |
+          python3 ci/validate_pr106_speaker_measurement_lab.py
+          python3 ci/validate_pr109_cross_feature_contracts.py
+          python3 ci/validate_pr110_advanced_placement.py
+
+  macos:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Verify protected-driver recommendation and inherited contracts
+        run: |
+          python3 ci/validate_pr111_protected_driver_optimizer.py
+          python3 ci/validate_pr106_speaker_measurement_lab.py
+          python3 ci/validate_pr109_cross_feature_contracts.py
+          python3 ci/validate_pr110_advanced_placement.py
+      - name: Build unsigned arm64 Debug app
+        run: >-
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
+          -configuration Debug -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES build
+      - name: Run protected Lab and new per-driver recommendation tests
+        run: >-
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
+          -configuration Debug -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES
+          -only-testing:NotchSixtyTests/SpeakerMeasurementLabProtectedExcitationTests
+          -only-testing:NotchSixtyTests/ProtectedDriverPEQRecommendationTests
+          test
+      - name: Build unsigned arm64 Release app
+        run: >-
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
+          -configuration Release -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO GENERATE_INFOPLIST_FILE=NO
+          INFOPLIST_FILE=NotchSixty/Info.plist build
+      - name: Run cumulative XCTest regression
+        run: >-
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
+          -configuration Debug -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES test
