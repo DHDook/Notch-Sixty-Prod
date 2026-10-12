@@ -52,7 +52,6 @@ struct SpeakerMeasurementLabCapture:
     var playbackSystemID: UUID
     var routingSignature: String
     var microphone: SpeakerOptimizerMicrophoneIdentity
-    var microphoneCalibration: RoomCorrectionMicrophoneCalibration? = nil
     var sampleRate: Double
     var source: MultichannelCalibrationSource
     var impulseResponse: [Float]
@@ -69,6 +68,8 @@ struct SpeakerMeasurementLabSession:
     var playbackSystemID: UUID
     var routingSignature: String
     var microphone: SpeakerOptimizerMicrophoneIdentity
+    /// Optional for backward compatibility with pre-Slice-6 lab archives.
+    var microphoneCalibration: RoomCorrectionMicrophoneCalibration? = nil
     var sampleRate: Double
     var protocols: [SpeakerMeasurementLabProtocol]
     var captures: [SpeakerMeasurementLabCapture]
