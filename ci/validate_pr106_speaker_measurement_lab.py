@@ -348,7 +348,6 @@ for token in (
 for token in (
     "struct ProductionSpeakerMeasurementLabWorkspace",
     "Advanced Speaker Measurement Lab",
-    "MEASUREMENT ONLY",
     "Start New Lab Session",
     "Measure Next Repeat",
     "Export JSON",
@@ -357,6 +356,23 @@ for token in (
     "SpeakerMeasurementLabReportBuilder",
 ):
     assert token in lab_ui, f"missing production Lab UI contract: {token}"
+
+# PR106 originally owned a diagnostic-only UI. PR108 subsequently added
+# *separate* explicit, provisional, measured-verified coherent-Sub
+# commissioning to the same workspace. Reject an unguarded Apply UI while
+# preserving the historical PR106 proof for the original Lab branch.
+historical_lab_only = "MEASUREMENT ONLY" in lab_ui
+pr108_explicit_commissioning = all(token in lab_ui for token in (
+    "MEASURE → REVIEW → VERIFY",
+    "Lab analyses never mutate DSP on their own.",
+    "CoherentSubwooferAlignmentGuidedController",
+    "coherentAlignmentCard",
+    "Apply is explicit, provisional, and accepted only after a new measured session passes.",
+))
+assert historical_lab_only or pr108_explicit_commissioning, (
+    "Lab diagnostics must remain measurement-only unless separately guarded "
+    "PR108 commissioning and fresh verification are present"
+)
 
 assert "case measurementLab" in root_ui
 assert "ProductionSpeakerMeasurementLabWorkspace(" in root_ui
