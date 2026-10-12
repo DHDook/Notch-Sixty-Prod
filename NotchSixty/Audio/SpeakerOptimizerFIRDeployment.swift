@@ -248,3 +248,216 @@ struct SpeakerOptimizerFIRLatencyPlanner: Sendable {
         return UInt32(frames.rounded())
     }
 }
+
+
+struct SpeakerOptimizerFIRSourceDeployment:
+    Codable, Equatable, Sendable {
+    var role: OutputProgramRole
+    var candidateFingerprint: String
+    var taps: [Float]
+    var maximumPositiveGainDB: Double
+    var recommendedHeadroomDB: Double
+}
+
+struct SpeakerOptimizerFIRRuntimePreparation:
+    Equatable, Sendable {
+    var activeChannelMask: UInt32
+    /// Flattened [active semantic channel in ascending layout order][tap].
+    var flattenedTaps: [Float]
+    var tapCount: UInt32
+    var declaredGroupDelayFrames: UInt32
+    var requiredHeadroomDB: Double
+}
+
+enum SpeakerOptimizerFIRDeploymentError:
+    Error, Equatable, LocalizedError {
+    case invalidConfiguration
+    case invalidSource(OutputProgramRole)
+    case invalidTaps(OutputProgramRole)
+    case sampleRateMismatch(expected: Double, actual: Double)
+    case runtimePreparationFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidConfiguration:
+            return "Speaker Optimizer FIR deployment metadata is invalid or stale."
+        case .invalidSource(let role):
+            return "Speaker Optimizer FIR deployment contains an unsupported or duplicate source: \(role.displayName)."
+        case .invalidTaps(let role):
+            return "Speaker Optimizer FIR taps for \(role.displayName) are invalid, non-finite, empty, or not symmetric linear-phase taps."
+        case .sampleRateMismatch(let expected, let actual):
+            return "Speaker Optimizer FIR was commissioned at \(expected) Hz but the live Playback System is running at \(actual) Hz."
+        case .runtimePreparationFailed:
+            return "Speaker Optimizer FIR could not be mapped onto the active semantic program layout."
+        }
+    }
+}
+
+/// Separately owned, versioned Playback-System state for a deployed
+/// Speaker Optimizer linear-phase FIR.
+///
+/// This is intentionally distinct from Room Correction, Speaker IR and ordinary
+/// Speaker Calibration. The required headroom reserve is part of the deployment
+/// contract so a persisted FIR cannot depend on a Content Preset happening to
+/// provide enough attenuation.
+struct SpeakerOptimizerFIRDeploymentConfiguration:
+    Codable, Equatable, Sendable {
+    static let currentSchemaVersion = 1
+    static let maximumHeadroomDB = 6.0
+
+    var schemaVersion: Int = currentSchemaVersion
+    var enabled: Bool = true
+    var proposalID: UUID
+    var baselineMeasurementSetID: UUID
+    var characterizationMeasurementSetID: UUID
+    var routingSignature: String
+    var sampleRate: Double
+    var aggregateCandidateFingerprint: String
+    var approvedAt: Date
+    var tapCount: Int
+    var declaredGroupDelayFrames: Int
+    /// Automatic whole-program reserve applied by the N-channel graph compiler.
+    /// Positive dB here means that amount is subtracted from live program gain.
+    var requiredHeadroomDB: Double
+    var sources: [SpeakerOptimizerFIRSourceDeployment]
+
+    var correctedRoles: [OutputProgramRole] {
+        sources.map(\.role)
+    }
+
+    func validate(
+        profile: OutputDeviceProfileConfiguration
+    ) throws {
+        guard schemaVersion == Self.currentSchemaVersion,
+              enabled,
+              sampleRate.isFinite, sampleRate > 0,
+              !routingSignature.isEmpty,
+              routingSignature
+                == profile.multichannelCalibrationRoutingSignature,
+              !aggregateCandidateFingerprint.isEmpty,
+              tapCount >= 257,
+              tapCount <= Int(N60_CONVOLUTION_MAX_TAPS),
+              tapCount % 2 == 1,
+              declaredGroupDelayFrames == (tapCount - 1) / 2,
+              requiredHeadroomDB.isFinite,
+              (0...Self.maximumHeadroomDB)
+                .contains(requiredHeadroomDB),
+              !sources.isEmpty,
+              Set(sources.map(\.role)).count == sources.count else {
+            throw SpeakerOptimizerFIRDeploymentError
+                .invalidConfiguration
+        }
+
+        let allowed = Set(
+            profile.programLayout.roles.filter {
+                $0 != .lowFrequencyEffects
+            }
+        )
+        var maximumSourceReserve = 0.0
+        for source in sources {
+            guard allowed.contains(source.role),
+                  profile.speakerAssignments.contains(where: {
+                      $0.role == source.role
+                  }),
+                  !source.candidateFingerprint.isEmpty,
+                  source.maximumPositiveGainDB.isFinite,
+                  source.maximumPositiveGainDB >= 0,
+                  source.maximumPositiveGainDB
+                    <= Self.maximumHeadroomDB,
+                  source.recommendedHeadroomDB.isFinite,
+                  (0...Self.maximumHeadroomDB)
+                    .contains(source.recommendedHeadroomDB),
+                  source.recommendedHeadroomDB + 1.0e-8
+                    >= source.maximumPositiveGainDB else {
+                throw SpeakerOptimizerFIRDeploymentError
+                    .invalidSource(source.role)
+            }
+            guard source.taps.count == tapCount,
+                  source.taps.allSatisfy(\.isFinite),
+                  source.taps.contains(where: {
+                      abs($0) > 1.0e-12
+                  }),
+                  Self.isSymmetricLinearPhase(source.taps) else {
+                throw SpeakerOptimizerFIRDeploymentError
+                    .invalidTaps(source.role)
+            }
+            maximumSourceReserve = max(
+                maximumSourceReserve,
+                source.recommendedHeadroomDB
+            )
+        }
+        guard abs(maximumSourceReserve - requiredHeadroomDB)
+                <= 1.0e-8 else {
+            throw SpeakerOptimizerFIRDeploymentError
+                .invalidConfiguration
+        }
+    }
+
+    func validateLiveSampleRate(_ actual: Double) throws {
+        guard actual.isFinite, actual > 0,
+              abs(actual - sampleRate) < 0.5 else {
+            throw SpeakerOptimizerFIRDeploymentError
+                .sampleRateMismatch(
+                    expected: sampleRate,
+                    actual: actual
+                )
+        }
+    }
+
+    func makeRuntimePreparation(
+        programLayout: OutputProgramLayout
+    ) throws -> SpeakerOptimizerFIRRuntimePreparation {
+        let roles = programLayout.roles
+        let byRole = Dictionary(
+            uniqueKeysWithValues: sources.map { ($0.role, $0) }
+        )
+        var activeMask: UInt32 = 0
+        var flattened: [Float] = []
+        flattened.reserveCapacity(sources.count * tapCount)
+
+        for (index, role) in roles.enumerated() {
+            guard index < Int(N60_MAX_PROGRAM_CHANNELS) else {
+                throw SpeakerOptimizerFIRDeploymentError
+                    .runtimePreparationFailed
+            }
+            guard let source = byRole[role] else { continue }
+            guard role != .lowFrequencyEffects else {
+                throw SpeakerOptimizerFIRDeploymentError
+                    .runtimePreparationFailed
+            }
+            activeMask |= UInt32(1) << UInt32(index)
+            flattened.append(contentsOf: source.taps)
+        }
+        guard activeMask != 0,
+              flattened.count == sources.count * tapCount else {
+            throw SpeakerOptimizerFIRDeploymentError
+                .runtimePreparationFailed
+        }
+
+        return SpeakerOptimizerFIRRuntimePreparation(
+            activeChannelMask: activeMask,
+            flattenedTaps: flattened,
+            tapCount: UInt32(tapCount),
+            declaredGroupDelayFrames:
+                UInt32(declaredGroupDelayFrames),
+            requiredHeadroomDB: requiredHeadroomDB
+        )
+    }
+
+    private static func isSymmetricLinearPhase(
+        _ taps: [Float]
+    ) -> Bool {
+        guard !taps.isEmpty else { return false }
+        let peak = taps.reduce(Float.zero) {
+            max($0, abs($1))
+        }
+        let tolerance = max(1.0e-6, peak * 2.0e-5)
+        for index in 0..<(taps.count / 2) {
+            if abs(taps[index] - taps[taps.count - 1 - index])
+                > tolerance {
+                return false
+            }
+        }
+        return true
+    }
+}
