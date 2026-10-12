@@ -105,10 +105,13 @@ struct CoherentSubwooferAlignmentCandidate:
 /// that measurement-only evidence into a bounded candidate without mutating
 /// speaker/subwoofer calibration.
 ///
-/// The search models the full relative phase as:
+/// PR106's coherent report already carries the measured Main/Sub timing inside
+/// `wrappedRelativePhaseRadians` (its tests prove a +3 ms Sub arrival as
+/// -2*pi*f*3 ms). The search therefore applies ONLY the proposed incremental
+/// relative delay:
 ///
-/// residual reference-aligned phase
-///   - 2*pi*f*(measured sub-minus-main arrival + signed adjustment)
+/// measured reference-aligned relative phase
+///   - 2*pi*f*signed adjustment
 ///   + optional pi polarity toggle
 ///
 /// A positive signed adjustment delays Sub. A negative result is never
@@ -218,7 +221,8 @@ struct CoherentSubwooferAlignmentPlanner: Sendable {
             indices: indices,
             crossoverFrequencyHz: crossoverFrequencyHz,
             signedAdjustmentMilliseconds: 0,
-            togglePolarity: false
+            togglePolarity: false,
+            halfBandOctaves: halfOctaves
         )
 
         let maxAdjustment =
@@ -246,7 +250,8 @@ struct CoherentSubwooferAlignmentPlanner: Sendable {
                     indices: indices,
                     crossoverFrequencyHz: crossoverFrequencyHz,
                     signedAdjustmentMilliseconds: adjustment,
-                    togglePolarity: toggle
+                    togglePolarity: toggle,
+                    halfBandOctaves: halfOctaves
                 )
                 if better(
                     score: score,
@@ -318,7 +323,8 @@ struct CoherentSubwooferAlignmentPlanner: Sendable {
         indices: [Int],
         crossoverFrequencyHz: Double,
         signedAdjustmentMilliseconds: Double,
-        togglePolarity: Bool
+        togglePolarity: Bool,
+        halfBandOctaves: Double
     ) -> Double {
         var weightedEnergy = 0.0
         var totalWeight = 0.0
@@ -326,8 +332,6 @@ struct CoherentSubwooferAlignmentPlanner: Sendable {
             signedAdjustmentMilliseconds / 1_000
 
         for report in reports {
-            let arrivalSeconds =
-                report.relativeArrivalMilliseconds / 1_000
             for index in indices {
                 let frequency = report.frequenciesHz[index]
                 let magnitudeRatio = pow(
@@ -336,8 +340,7 @@ struct CoherentSubwooferAlignmentPlanner: Sendable {
                 )
                 let phase =
                     report.wrappedRelativePhaseRadians[index]
-                    - 2 * Double.pi * frequency
-                        * (arrivalSeconds + delaySeconds)
+                    - 2 * Double.pi * frequency * delaySeconds
                     + (togglePolarity ? Double.pi : 0)
                 let combinedPower =
                     1 + magnitudeRatio * magnitudeRatio
@@ -352,10 +355,9 @@ struct CoherentSubwooferAlignmentPlanner: Sendable {
                 let octaveDistance = abs(
                     log2(frequency / crossoverFrequencyHz)
                 )
-                let halfSpan = max(0.125, 0.5)
                 let weight = max(
                     0.05,
-                    1 - octaveDistance / halfSpan
+                    1 - octaveDistance / max(0.125, halfBandOctaves)
                 )
                 weightedEnergy += weight * normalized
                 totalWeight += weight
