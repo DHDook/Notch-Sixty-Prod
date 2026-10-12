@@ -1,6 +1,6 @@
 # PR106 — Advanced Speaker Measurement Lab
 
-Status: **SLICES 1–5 SOFTWARE VERIFIED — SLICE 6 CI PENDING**
+Status: **SLICES 1–6 SOFTWARE VERIFIED — SLICE 7 CI PENDING**
 
 Base: PR105 Guided Speaker Optimizer & Acoustic Verification.
 
@@ -191,11 +191,51 @@ Slice 5 exact head `6d5723bd58d7dc22ca2c6ea65e91c34c6a810be8` passed push run 38
 - Gated phase is not published; this remains magnitude-only and cannot become crossover/timing evidence.
 - `isQuasiAnechoicEstimate == true`, `isAnechoic == false`, and `canDeploy == false` are explicit.
 
+## Slice 6 exact-head verification
+
+Slice 6 exact head `9c8e726a5d6ee5eadb289aea5917f2072341cefa` passed both
+GitHub Actions paths:
+
+- push run 38221077102;
+- pull-request run 38221082494.
+
+Both paths passed the PR106/PR105 validators, Apple Silicon Debug build,
+targeted measurement-lab tests and full XCTest regression.
+
+## Slice 7 — Bounded two-level transfer level-dependence diagnostic
+
+- Lab protocols may optionally persist an explicit sweep excitation level.
+  Explicit lab levels are bounded to -48...-12 dBFS; legacy protocols with no
+  explicit level continue using the ordinary measurement-controller setting.
+- Each capture persists the actual sweep-program level when known, and an
+  explicit-level protocol rejects captures whose level provenance does not
+  match.
+- The live Lab controller uses the protocol's explicit level for acquisition
+  and records the exact program level on the resulting capture.
+- Level-dependence analysis currently requires two whole-speaker on-axis
+  protocols for the same acoustic source and essentially the same geometry.
+- Both protocols independently pass the inherited repeated-sweep SNR, clipping,
+  repeatability, timing, phase and usable-band gates.
+- The excitation step must be bounded (6–18 dB by default).
+- Because each transfer function is deconvolved by its own exact excitation, a
+  linear chain should produce the same normalized transfer at both levels.
+  The report exposes high-minus-low normalized transfer, broadband transfer
+  shift, shape-only level dependence, RMS shape change, localized compression
+  and expansion diagnostics.
+- Broadband shift is deliberately NOT certified as intrinsic loudspeaker
+  compression because untracked playback-gain drift between protocol groups can
+  produce the same symptom.
+- The current capture model does not retain nonlinear harmonic slices needed
+  for defensible harmonic/intermodulation distortion estimates. The report
+  explicitly declares `isTHDMeasurement == false` and
+  `isIMDMeasurement == false`.
+- Excitation is digital dBFS, not calibrated acoustic SPL. No compression SPL
+  threshold or loudspeaker defect certification is claimed.
+- Measurement-only: `canDeploy == false`.
+
 ## Planned follow-on slices
 
-1. Distortion/nonlinearity diagnostics from bounded excitation where the current
-   capture chain can support defensible metrics.
-2. Crossover-preserving protected-driver excitation path.
-3. Authenticated shared-clock reference capture for coherent relative timing and
+1. Crossover-preserving protected-driver excitation path.
+2. Authenticated shared-clock reference capture for coherent relative timing and
    phase diagnostics.
-4. Production Advanced Speaker Measurement Lab UI and export/reporting.
+3. Production Advanced Speaker Measurement Lab UI and export/reporting.

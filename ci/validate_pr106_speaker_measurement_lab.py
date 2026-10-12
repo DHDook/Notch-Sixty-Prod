@@ -12,12 +12,14 @@ NEARFIELD_SOURCE = ROOT / "NotchSixty/Audio/SpeakerMeasurementLabNearFieldLF.swi
 NEARFIELD_TESTS = ROOT / "NotchSixtyTests/SpeakerMeasurementLabNearFieldLFTests.swift"
 GATED_SOURCE = ROOT / "NotchSixty/Audio/SpeakerMeasurementLabQuasiAnechoic.swift"
 GATED_TESTS = ROOT / "NotchSixtyTests/SpeakerMeasurementLabQuasiAnechoicTests.swift"
+LEVEL_SOURCE = ROOT / "NotchSixty/Audio/SpeakerMeasurementLabLevelDependence.swift"
+LEVEL_TESTS = ROOT / "NotchSixtyTests/SpeakerMeasurementLabLevelDependenceTests.swift"
 CONTROLLER_SOURCE = ROOT / "NotchSixty/Audio/SpeakerMeasurementLabController.swift"
 PROJECT = ROOT / "NotchSixty.xcodeproj/project.pbxproj"
 DOC = ROOT / "docs/PR106_ADVANCED_SPEAKER_MEASUREMENT_LAB.md"
 WORKFLOW = ROOT / ".github/workflows/pr106-speaker-measurement-lab.yml"
 
-for path in (SOURCE, TESTS, SESSION_SOURCE, SESSION_TESTS, DIRECTIVITY_SOURCE, DIRECTIVITY_TESTS, NEARFIELD_SOURCE, NEARFIELD_TESTS, GATED_SOURCE, GATED_TESTS, CONTROLLER_SOURCE, PROJECT, DOC, WORKFLOW):
+for path in (SOURCE, TESTS, SESSION_SOURCE, SESSION_TESTS, DIRECTIVITY_SOURCE, DIRECTIVITY_TESTS, NEARFIELD_SOURCE, NEARFIELD_TESTS, GATED_SOURCE, GATED_TESTS, LEVEL_SOURCE, LEVEL_TESTS, CONTROLLER_SOURCE, PROJECT, DOC, WORKFLOW):
     assert path.is_file(), f"missing PR106 Slice 1 file: {path}"
 
 source = SOURCE.read_text()
@@ -30,6 +32,8 @@ nearfield_source = NEARFIELD_SOURCE.read_text()
 nearfield_tests = NEARFIELD_TESTS.read_text()
 gated_source = GATED_SOURCE.read_text()
 gated_tests = GATED_TESTS.read_text()
+level_source = LEVEL_SOURCE.read_text()
+level_tests = LEVEL_TESTS.read_text()
 controller_source = CONTROLLER_SOURCE.read_text()
 project = PROJECT.read_text()
 doc = DOC.read_text()
@@ -145,6 +149,39 @@ for token in (
     assert token in nearfield_tests, f"missing PR106 near-field LF test: {token}"
 
 for token in (
+    "struct SpeakerMeasurementLabLevelDependenceOptions",
+    "struct SpeakerMeasurementLabLevelDependenceReport",
+    "SpeakerMeasurementLabLevelDependenceAnalyzer",
+    "minimumExcitationStepDB: Double = 6.0",
+    "maximumExcitationStepDB: Double = 18.0",
+    "normalizedTransferDeltaDB",
+    "shapeOnlyDeltaDB",
+    "isTHDMeasurement: Bool { false }",
+    "isIMDMeasurement: Bool { false }",
+    "var canDeploy: Bool { false }",
+):
+    assert token in level_source, f"missing PR106 level-dependence contract: {token}"
+
+for token in (
+    "testBoundedTwoLevelTransferDetectsLocalizedCompression",
+    "testIdenticalNormalizedTransferIsNearLinearAcrossLevels",
+    "testExplicitLevelsAndBoundedStepAreRequired",
+    "testGeometryAndSourceMustMatch",
+    "testLowSNRClippingAndCaptureLevelMismatchFailClosed",
+    "testProtocolLevelIsPersistedAndResolvedForAcquisition",
+):
+    assert token in level_tests, f"missing PR106 level-dependence test: {token}"
+
+for token in (
+    "excitationLevelDBFS: Double? = nil",
+    "resolvedExcitationLevelDBFS",
+):
+    assert token in session_source, f"missing protocol excitation provenance: {token}"
+
+assert "step.labProtocol.resolvedExcitationLevelDBFS" in controller_source
+assert "excitationLevelDBFS: program.settings.levelDBFS" in controller_source
+
+for token in (
     "F10600000000000000000001",
     "F10600000000000000000002",
     "F10600000000000000000011",
@@ -161,6 +198,14 @@ for token in (
     "F10600000000000000000008",
     "F10600000000000000000017",
     "F10600000000000000000018",
+    "F10600000000000000000009",
+    "F1060000000000000000000A",
+    "F10600000000000000000019",
+    "F1060000000000000000001A",
+    "F1060000000000000000000B",
+    "F1060000000000000000000C",
+    "F1060000000000000000001B",
+    "F1060000000000000000001C",
 ):
     assert project.count(token) >= 2, f"missing PR106 Xcode registration: {token}"
 
@@ -177,10 +222,12 @@ assert "SpeakerMeasurementLabSessionTests" in workflow
 assert "SpeakerMeasurementLabDirectivityTests" in workflow
 assert "SpeakerMeasurementLabNearFieldLFTests" in workflow
 assert "SpeakerMeasurementLabQuasiAnechoicTests" in workflow
+assert "SpeakerMeasurementLabLevelDependenceTests" in workflow
 assert "Run full XCTest regression" in workflow
 assert "Slice 2" in doc
 assert "Slice 3" in doc
 assert "Repeat-qualified installed-room directivity comparison" in doc
 assert "Repeat-qualified near-field LF component diagnostics" in doc
 assert "Explicit reflection-window quasi-anechoic estimate" in doc
-print("PR106 lab capability + directivity + near-field LF + gated response contracts passed")
+assert "Bounded two-level transfer level-dependence diagnostic" in doc
+print("PR106 lab capability + directivity + LF + gated + level-dependence contracts passed")

@@ -220,6 +220,8 @@
 		F10600000000000000000008 /* SpeakerMeasurementLabNearFieldLFTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10600000000000000000018 /* SpeakerMeasurementLabNearFieldLFTests.swift */; };
 		F10600000000000000000009 /* SpeakerMeasurementLabQuasiAnechoic.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10600000000000000000019 /* SpeakerMeasurementLabQuasiAnechoic.swift */; };
 		F1060000000000000000000A /* SpeakerMeasurementLabQuasiAnechoicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1060000000000000000001A /* SpeakerMeasurementLabQuasiAnechoicTests.swift */; };
+		F1060000000000000000000B /* SpeakerMeasurementLabLevelDependence.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1060000000000000000001B /* SpeakerMeasurementLabLevelDependence.swift */; };
+		F1060000000000000000000C /* SpeakerMeasurementLabLevelDependenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1060000000000000000001C /* SpeakerMeasurementLabLevelDependenceTests.swift */; };
 		F92000000000000000000001 /* RoomTreatmentAdvisor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F92000000000000000000011 /* RoomTreatmentAdvisor.swift */; };
 		F92000000000000000000002 /* RoomTreatmentAdvisorController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F92000000000000000000012 /* RoomTreatmentAdvisorController.swift */; };
 		F92000000000000000000003 /* ProductionRoomTreatmentAdvisorWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = F92000000000000000000013 /* ProductionRoomTreatmentAdvisorWorkspace.swift */; };
@@ -477,6 +479,8 @@
 		F10600000000000000000018 /* SpeakerMeasurementLabNearFieldLFTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerMeasurementLabNearFieldLFTests.swift; sourceTree = "<group>"; };
 		F10600000000000000000019 /* SpeakerMeasurementLabQuasiAnechoic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerMeasurementLabQuasiAnechoic.swift; sourceTree = "<group>"; };
 		F1060000000000000000001A /* SpeakerMeasurementLabQuasiAnechoicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerMeasurementLabQuasiAnechoicTests.swift; sourceTree = "<group>"; };
+		F1060000000000000000001B /* SpeakerMeasurementLabLevelDependence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerMeasurementLabLevelDependence.swift; sourceTree = "<group>"; };
+		F1060000000000000000001C /* SpeakerMeasurementLabLevelDependenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerMeasurementLabLevelDependenceTests.swift; sourceTree = "<group>"; };
 		F92000000000000000000011 /* RoomTreatmentAdvisor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomTreatmentAdvisor.swift; sourceTree = "<group>"; };
 		F92000000000000000000012 /* RoomTreatmentAdvisorController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomTreatmentAdvisorController.swift; sourceTree = "<group>"; };
 		F92000000000000000000013 /* ProductionRoomTreatmentAdvisorWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionRoomTreatmentAdvisorWorkspace.swift; sourceTree = "<group>"; };
@@ -612,6 +616,7 @@
 				F10600000000000000000016 /* SpeakerMeasurementLabDirectivityTests.swift */,
 				F10600000000000000000018 /* SpeakerMeasurementLabNearFieldLFTests.swift */,
 				F1060000000000000000001A /* SpeakerMeasurementLabQuasiAnechoicTests.swift */,
+				F1060000000000000000001C /* SpeakerMeasurementLabLevelDependenceTests.swift */,
 				F92000000000000000000014 /* RoomTreatmentAdvisorTests.swift */,
 				F93000000000000000000013 /* RoomGeometryPlacementTests.swift */,
 				F94000000000000000000014 /* RoomTreatmentDesignVerificationTests.swift */,
@@ -664,6 +669,7 @@
 				F10600000000000000000015 /* SpeakerMeasurementLabDirectivity.swift */,
 				F10600000000000000000017 /* SpeakerMeasurementLabNearFieldLF.swift */,
 				F10600000000000000000019 /* SpeakerMeasurementLabQuasiAnechoic.swift */,
+				F1060000000000000000001B /* SpeakerMeasurementLabLevelDependence.swift */,
 				A2000000000000000000002E /* RoomCorrectionMeasurementAnalyzer.swift */,
 				A20000000000000000000030 /* RoomCorrectionTargetDesigner.swift */,
 				E20000000000000000000012 /* RoomCorrectionFIRDesigner.swift */,
@@ -871,6 +877,7 @@
 				F10600000000000000000005 /* SpeakerMeasurementLabDirectivity.swift in Sources */,
 				F10600000000000000000007 /* SpeakerMeasurementLabNearFieldLF.swift in Sources */,
 				F10600000000000000000009 /* SpeakerMeasurementLabQuasiAnechoic.swift in Sources */,
+				F1060000000000000000000B /* SpeakerMeasurementLabLevelDependence.swift in Sources */,
 				F64000000000000000000003 /* MultichannelCalibrationTransport.swift in Sources */,
 				F64000000000000000000004 /* MultichannelCalibrationController.swift in Sources */,
 				F64000000000000000000005 /* ProductionMultichannelCalibrationWorkspace.swift in Sources */,
@@ -1050,6 +1057,7 @@
 				F10600000000000000000006 /* SpeakerMeasurementLabDirectivityTests.swift in Sources */,
 				F10600000000000000000008 /* SpeakerMeasurementLabNearFieldLFTests.swift in Sources */,
 				F1060000000000000000000A /* SpeakerMeasurementLabQuasiAnechoicTests.swift in Sources */,
+				F1060000000000000000000C /* SpeakerMeasurementLabLevelDependenceTests.swift in Sources */,
 				F92000000000000000000004 /* RoomTreatmentAdvisorTests.swift in Sources */,
 				F93000000000000000000003 /* RoomGeometryPlacementTests.swift in Sources */,
 				F94000000000000000000004 /* RoomTreatmentDesignVerificationTests.swift in Sources */,

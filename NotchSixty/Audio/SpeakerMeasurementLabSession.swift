@@ -5,6 +5,10 @@ struct SpeakerMeasurementLabProtocol:
     var id: UUID = UUID()
     var name: String
     var request: SpeakerMeasurementLabRequest
+    /// Optional explicit sweep level for bounded multi-level diagnostics.
+    /// Nil preserves legacy behavior using the current measurement-controller
+    /// sweep level. New level-dependence analysis requires explicit values.
+    var excitationLevelDBFS: Double? = nil
     /// Optional only for subwooferNearField. Older persisted Slice 2 sessions
     /// decode this as nil, preserving schema compatibility.
     var nearFieldComponent:
@@ -17,11 +21,21 @@ struct SpeakerMeasurementLabProtocol:
         return source
     }
 
+    func resolvedExcitationLevelDBFS(default defaultLevel: Double) -> Double {
+        excitationLevelDBFS ?? defaultLevel
+    }
+
     func validateForAcquisition() throws {
         try request.validate()
         guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else {
             throw SpeakerMeasurementLabSessionError.invalidProtocol
+        }
+        if let excitationLevelDBFS {
+            guard excitationLevelDBFS.isFinite,
+                  (-48.0 ... -12.0).contains(excitationLevelDBFS) else {
+                throw SpeakerMeasurementLabSessionError.invalidProtocol
+            }
         }
         switch request.mode {
         case .wholeSpeakerOnAxis,
@@ -70,6 +84,9 @@ struct SpeakerMeasurementLabSession:
     var microphone: SpeakerOptimizerMicrophoneIdentity
     /// Optional for backward compatibility with pre-Slice-6 lab archives.
     var microphoneCalibration: RoomCorrectionMicrophoneCalibration? = nil
+    /// Actual sweep-program level used for this capture when known.
+    /// Optional keeps older persisted lab sessions decodable.
+    var excitationLevelDBFS: Double? = nil
     var sampleRate: Double
     var protocols: [SpeakerMeasurementLabProtocol]
     var captures: [SpeakerMeasurementLabCapture]
@@ -104,6 +121,14 @@ struct SpeakerMeasurementLabSession:
                   capture.routingSignature == routingSignature,
                   capture.microphone == microphone,
                   abs(capture.sampleRate - sampleRate) < 0.5,
+                  capture.excitationLevelDBFS.map {
+                      $0.isFinite && (-48.0 ... -12.0).contains($0)
+                  } ?? true,
+                  labProtocol.excitationLevelDBFS.map { expected in
+                      capture.excitationLevelDBFS.map {
+                          abs($0 - expected) < 1.0e-6
+                      } ?? false
+                  } ?? true,
                   capture.repeatIndex >= 0,
                   capture.repeatIndex < labProtocol.request.repeatCount,
                   !capture.impulseResponse.isEmpty,
@@ -357,7 +382,8 @@ struct SpeakerMeasurementLabCaptureBuilder: Sendable {
     func build(
         analyzed: RoomCorrectionChannelMeasurement,
         session: SpeakerMeasurementLabSession,
-        step: SpeakerMeasurementLabSessionStep
+        step: SpeakerMeasurementLabSessionStep,
+        excitationLevelDBFS: Double? = nil
     ) throws -> SpeakerMeasurementLabCapture {
         guard let source = step.labProtocol.acousticSource,
               let response = analyzed.transferFunction,
@@ -374,6 +400,7 @@ struct SpeakerMeasurementLabCaptureBuilder: Sendable {
             playbackSystemID: session.playbackSystemID,
             routingSignature: session.routingSignature,
             microphone: session.microphone,
+            excitationLevelDBFS: excitationLevelDBFS,
             sampleRate: session.sampleRate,
             source: source,
             impulseResponse: analyzed.impulseResponse,

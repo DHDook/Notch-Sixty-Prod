@@ -321,7 +321,9 @@ final class SpeakerMeasurementLabController: ObservableObject {
             startFrequencyHz: microphone.sweepStartFrequencyHz,
             endFrequencyHz: microphone.sweepEndFrequencyHz,
             durationSeconds: microphone.sweepDurationSeconds,
-            levelDBFS: microphone.sweepLevelDBFS,
+            levelDBFS: step.labProtocol.resolvedExcitationLevelDBFS(
+                default: microphone.sweepLevelDBFS
+            ),
             leadInSeconds: microphone.sweepLeadInSeconds,
             tailSeconds: microphone.sweepTailSeconds,
             fadeSeconds: microphone.sweepFadeSeconds
@@ -401,7 +403,8 @@ final class SpeakerMeasurementLabController: ObservableObject {
             let capture = try captureBuilder.build(
                 analyzed: analyzed,
                 session: session,
-                step: step
+                step: step,
+                excitationLevelDBFS: program.settings.levelDBFS
             )
             session = try orchestrator.appending(
                 capture,
