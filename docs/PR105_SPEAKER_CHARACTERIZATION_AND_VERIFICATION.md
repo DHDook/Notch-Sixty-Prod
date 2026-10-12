@@ -87,6 +87,28 @@ handoff.
 Physical microphone distance, loudspeaker integration distance, actual room
 reflection timing and acoustic benefit remain unverified.
 
+## Slice 3 — Cross-domain speaker-vs-room classification
+
+- Requires BOTH the ordinary listening-position baseline and the separately
+  qualified characterization campaign to pass their existing evidence gates.
+- Compares local response SHAPE rather than absolute dB. A ~1 m capture and a
+  listening-seat capture have different propagation gain, so direct absolute
+  level subtraction would be invalid.
+- Each domain is reduced to residual response around a 1/3-octave
+  log-frequency-smoothed local trend.
+- A feature is `speakerPersistent` only when a significant near-speaker
+  deviation appears in the same direction and magnitude at the listening
+  positions with low seat-to-seat spread.
+- A feature is `roomSeatDependent` when characterization is locally
+  flat but the listening area has a strong deviation or strong seat variation.
+- Disagreement or insufficiently decisive evidence remains `ambiguous`.
+- Flat regions are explicitly `noMaterialDeviation`; the classifier does
+  not manufacture a speaker defect merely because two data sets exist.
+- Classification is constrained to the early-window reliable frequency band.
+  Frequencies below that boundary remain listening-position evidence only.
+- Classification is preview/advisory evidence: `canDeploy == false`. It
+  never authorizes PEQ/FIR, timing, polarity, crossover or live DSP mutation.
+
 ## Planned follow-on slices
 
 1. Correlate speaker-characterization features against multi-seat features to

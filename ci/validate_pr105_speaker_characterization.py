@@ -6,17 +6,21 @@ SOURCE = ROOT / "NotchSixty/Audio/SpeakerOptimizerCharacterizationMeasurement.sw
 TESTS = ROOT / "NotchSixtyTests/SpeakerOptimizerCharacterizationMeasurementTests.swift"
 EARLY_SOURCE = ROOT / "NotchSixty/Audio/SpeakerOptimizerEarlyWindowCharacterization.swift"
 EARLY_TESTS = ROOT / "NotchSixtyTests/SpeakerOptimizerEarlyWindowCharacterizationTests.swift"
+CLASSIFIER_SOURCE = ROOT / "NotchSixty/Audio/SpeakerOptimizerCrossDomainClassifier.swift"
+CLASSIFIER_TESTS = ROOT / "NotchSixtyTests/SpeakerOptimizerCrossDomainClassifierTests.swift"
 PROJECT = ROOT / "NotchSixty.xcodeproj/project.pbxproj"
 DOC = ROOT / "docs/PR105_SPEAKER_CHARACTERIZATION_AND_VERIFICATION.md"
 WORKFLOW = ROOT / ".github/workflows/pr105-speaker-characterization.yml"
 
-for path in (SOURCE, TESTS, EARLY_SOURCE, EARLY_TESTS, PROJECT, DOC, WORKFLOW):
+for path in (SOURCE, TESTS, EARLY_SOURCE, EARLY_TESTS, CLASSIFIER_SOURCE, CLASSIFIER_TESTS, PROJECT, DOC, WORKFLOW):
     assert path.is_file(), f"missing PR105 Slice 1 file: {path}"
 
 source = SOURCE.read_text()
 tests = TESTS.read_text()
 early_source = EARLY_SOURCE.read_text()
 early_tests = EARLY_TESTS.read_text()
+classifier_source = CLASSIFIER_SOURCE.read_text()
+classifier_tests = CLASSIFIER_TESTS.read_text()
 project = PROJECT.read_text()
 doc = DOC.read_text()
 workflow = WORKFLOW.read_text()
@@ -73,6 +77,28 @@ for token in (
     assert token in early_tests, f"missing early-window test: {token}"
 
 for token in (
+    "enum SpeakerOptimizerDeviationClassification",
+    "case speakerPersistent",
+    "case roomSeatDependent",
+    "case ambiguous",
+    "case noMaterialDeviation",
+    "supportsSpeakerCorrection",
+    "var canDeploy: Bool { false }",
+    "localResidual(",
+):
+    assert token in classifier_source, f"missing cross-domain classifier contract: {token}"
+
+for token in (
+    "testMatchingSpeakerAndSeatFeatureClassifiesSpeakerPersistent",
+    "testSeatSpecificNullWithFlatCharacterizationClassifiesRoomDependent",
+    "testDomainDisagreementRemainsAmbiguous",
+    "testFlatDomainsDoNotManufactureSpeakerDefect",
+    "testAbsoluteMeasurementLevelDifferenceDoesNotDriveClassification",
+    "testMissingEarlyWindowRepeatsFailClosed",
+):
+    assert token in classifier_tests, f"missing cross-domain classifier test: {token}"
+
+for token in (
     "F10500000000000000000001",
     "F10500000000000000000002",
     "F10500000000000000000011",
@@ -81,6 +107,10 @@ for token in (
     "F10500000000000000000004",
     "F10500000000000000000013",
     "F10500000000000000000014",
+    "F10500000000000000000005",
+    "F10500000000000000000006",
+    "F10500000000000000000015",
+    "F10500000000000000000016",
 ):
     assert project.count(token) >= 2, f"missing Xcode registration: {token}"
 
@@ -95,5 +125,7 @@ for token in (
 
 assert "Run PR105 characterization tests" in workflow
 assert "SpeakerOptimizerEarlyWindowCharacterizationTests" in workflow
+assert "SpeakerOptimizerCrossDomainClassifierTests" in workflow
 assert "Run full XCTest regression" in workflow
-print("PR105 speaker characterization + bounded early-window contracts passed")
+assert "Cross-domain speaker-vs-room classification" in doc
+print("PR105 speaker characterization + early-window + cross-domain classification contracts passed")
