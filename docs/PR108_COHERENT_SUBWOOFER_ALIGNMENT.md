@@ -1,6 +1,6 @@
 # PR108 — Coherent Physical Subwoofer Timing & Polarity Optimization
 
-Status: **IN PROGRESS — SLICES 1–3 PROPOSAL + COMMISSIONING + TRANSACTIONAL APPLY**
+Status: **IN PROGRESS — SLICES 1–4 THROUGH FRESH COHERENT VERIFICATION**
 
 Base: PR107 Speaker Optimizer FIR Deployment & Latency Coordination.
 
@@ -155,11 +155,45 @@ post-Apply edits.
 
 Apply receipts remain provisional and require fresh measured verification.
 
+## Slice 4 — Fresh coherent post-Apply verification
+
+Implemented in CoherentSubwooferAlignmentPostApplyVerification.swift.
+
+Verification consumes the actual post-Apply Advanced Speaker Measurement Lab
+session plus linked coherent pair IDs. It does not trust caller-supplied
+post-Apply reports.
+
+The verifier requires:
+
+- the current Playback System still exactly equals the provisional Apply state;
+- baseline coherent reports still match the receipt's approved evidence
+  fingerprint;
+- the verification session uses the same Playback System, physical route,
+  calibrated microphone and sample rate;
+- new session/pair identities rather than the baseline session;
+- every selected capture timestamp is later than Apply; and
+- exactly one fresh coherent pair for every commissioned Main role.
+
+It re-runs the PR106 coherent analyzer and checks two independent outcomes:
+
+1. **Applied-filter tracking.** Since PR108 changes only timing/polarity, measured
+   relative phase must track
+   `-2πf·signedDelay + π when polarity toggles` within the configured RMS
+   tolerance. Relative crossover magnitude is expected to remain stable.
+2. **Acoustic benefit.** Normalized coherent Main+Sub summation around crossover
+   must improve by the required amount, no included Main pair may materially
+   regress, and final coherence must clear the acceptance floor.
+
+Rejected verification sets `shouldRollback == true`. Modeled proposal quality
+cannot satisfy this gate.
+
 ## Planned follow-on slices
 
-1. Multi-sub coordination — avoid independent per-Sub choices that conflict
+1. Persistent provisional/verified PR108 provenance record and verification
+   finalization.
+2. Multi-sub coordination — avoid independent per-Sub choices that conflict
    with the existing multi-sub relationship.
-2. Fresh coherent verification — repeat authenticated Main/Sub measurement
+3. Guided production workflow/UI — repeat authenticated Main/Sub measurement
    after Apply and verify summation/timing improvement.
 3. Guided production workflow/UI — capture, review, Apply, verify, rollback.
 4. Physical commissioning handoff — real DAC/ADC/subwoofer timing, crossover
@@ -188,3 +222,11 @@ CoherentSubwooferAlignmentApplyTransactionTests verifies late-Sub common speaker
 delay, early-Sub physical delay, isolated polarity mutation, engine-idle/exact
 snapshot gates, stale-approval rejection, exact rollback and rollback state-drift
 protection.
+
+
+## Slice 4 validation
+
+CoherentSubwooferAlignmentPostApplyVerificationTests uses complete synthetic
+PR106 Measurement Lab sessions to verify accepted measured timing correction,
+rejection when the acoustic phase does not follow Apply, mandatory post-Apply
+capture timestamps, baseline-evidence binding and current-state drift rejection.
