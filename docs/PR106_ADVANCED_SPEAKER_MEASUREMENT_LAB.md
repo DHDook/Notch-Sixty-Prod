@@ -1,6 +1,6 @@
 # PR106 — Advanced Speaker Measurement Lab
 
-Status: **SLICE 1 IMPLEMENTED — EXACT-HEAD CI PENDING**
+Status: **SLICE 1 SOFTWARE VERIFIED — SLICE 2 IMPLEMENTED — EXACT-HEAD CI PENDING**
 
 Base: PR105 Guided Speaker Optimizer & Acoustic Verification.
 
@@ -74,9 +74,40 @@ Every Slice 1 plan is measurement-only:
   not replace listening-position bass integration evidence.
 - Physical distance/angle accuracy remains a hardware/user setup gate.
 
+## Slice 1 exact-head verification
+
+Slice 1 exact head `9718cd23e670afd16d903f3c2864e56d073fd19a` passed the
+full push workflow, including the PR106/PR105 validators, Apple Silicon Debug
+build, targeted capability tests and full XCTest regression.
+
+## Slice 2 — Persistent guided lab sessions
+
+- Adds a separate versioned Advanced Speaker Measurement Lab session model;
+  listening-seat identities are not overloaded as fake lab positions.
+- Each lab protocol retains its exact measurement mode, acoustic target,
+  distance, horizontal/vertical angle and required repeat count.
+- Only the currently safe acoustic-source modes may enter live-acquisition
+  sessions: whole-speaker on-axis, whole-speaker off-axis and subwoofer
+  near-field.
+- Protected-driver and coherent mains/sub protocols remain representable by the
+  capability layer but are rejected by the Slice 2 acquisition/session model.
+- Protocol-major sequencing completes all stationary repeats before the user
+  moves to the next geometry.
+- Captures are bound to playback-system, routing, microphone, sample-rate,
+  protocol, source and repeat identity.
+- The persisted analysis keeps the deconvolved impulse response, transfer
+  function and quality metadata needed for later lab analysis, but deliberately
+  does not persist the raw sweep capture.
+- Retry removes only the latest repeat from the selected protocol and makes that
+  repeat pending again.
+- Session persistence is separate from Speaker Optimizer baseline,
+  characterization and verification stores.
+- No live transport controller or UI is introduced yet; this slice establishes
+  the durable guided-session/evidence contract.
+
 ## Planned follow-on slices
 
-1. Lab session/capture persistence and guided acquisition for the safe modes.
+1. Live lab transport/controller for the currently safe acquisition modes.
 2. Repeat-qualified response overlays and on-axis/off-axis directivity analysis.
 3. Near-field subwoofer/port diagnostics and merge-safe low-frequency analysis.
 4. Quasi-anechoic gated response tools with explicit reflection-window limits.
