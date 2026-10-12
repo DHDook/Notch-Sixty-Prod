@@ -23,7 +23,7 @@ final class SpeakerOptimizerFIRDeploymentTests: XCTestCase {
             accuracy: 1.0e-7
         )
         XCTAssertTrue(plan.requiresAVSyncCoordination)
-        XCTAssertFalse(plan.canInstallLiveFIR)
+        XCTAssertTrue(plan.canInstallLiveFIR)
 
         let left = try XCTUnwrap(
             plan.rolePlans.first(where: { $0.role == .frontLeft })
