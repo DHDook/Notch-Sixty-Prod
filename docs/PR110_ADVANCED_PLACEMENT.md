@@ -1,6 +1,6 @@
 # PR110 — Advanced Speaker & Subwoofer Placement Optimizer
 
-**State: Slices 1–4 implemented; Slice 4 exact-head CI and all real-room validation pending.**
+**State: Slices 1–5 implemented; Slice 5 exact-head CI and all real-room validation pending.**
 
 **REMOTE SCOPE ONLY:** no acoustic, physical, release or merge acceptance is implied.
 
@@ -186,12 +186,56 @@ This is a **physical-Sub-only** initial measurement bridge; generalized
 multi-seat re-ranking of every *unmeasured* speaker height/placement trial
 is deliberately withheld rather than invented.
 
-**Slice 5 — Measured physical before/after verification.** One actual physical
-move per experiment, same matched microphone positions/settings/routing,
-fresh captures, quality and identity gating, measured
-improvement/regression/inconclusive outcome. Failed experiments can be
-rejected without modifying the Playback System. Only measurements on real
-hardware may confer physical acoustic acceptance.
+**Slice 5 — Placement verification and review history (implemented;
+exact-head CI pending).**
+
+The Room Advisor now maintains an independent append-only project-sidecar
+`advisor-placement-review-history-v1.json`, limited to 100 review records.
+Every review captures a stable experiment ID, the actual baseline geometry,
+the hypothetical target geometry, both advanced-placement snapshots, the
+Playback System identity, a timestamp, measurement capture-set IDs (when
+available), the precise evidence status, and an explanatory note. It does
+not overwrite the geometry, treatment plan, Playback System, Content Preset
+or any DSP stage. Records remain in the selected project even if the current
+draft geometry changes. On corruption or unsupported schema, the archive
+fails closed and refuses to overwrite damaged content.
+
+**Before recording:** select a concrete physical placement experiment,
+save unchanged reference room/advanced geometry, and explicitly attest the
+physical move was performed. On a physical Sub trial, the optional separate
+`fixedMicrophoneSeatsAndSignalChainConfirmed` attestation allows the
+existing PR110 Slice 4 evaluator to recompute A/B evidence from independently
+qualified PR103 capture sets at review time. The source, routing, microphone,
+capture IDs, freshness, compatible LF bins and seat identities must pass.
+The reviewer cannot manufacture a score from an unmeasured trial or trust an
+old UI scalar. If the selected captures fail, the resulting review is
+**INCONCLUSIVE** and its attempted capture IDs and blocker are retained.
+
+Review status is deliberately narrow: positive qualified reduction in
+**measured inter-seat 35–160 Hz magnitude variation** is displayed as
+`Lower measured inter-seat LF variation` (improved on that diagnostic);
+negative qualified reduction means `Higher measured inter-seat LF
+variation` (regressed). A change within ±0.25 dB (an informational display
+deadband, **not** a perceptual or statistical significance threshold), or
+missing/unqualified evidence, is **INCONCLUSIVE**. Other speaker height,
+position, and toe-in changes have no new verified before/after listening-seat
+comparator in PR110 and are always recorded as inconclusive. This does not
+claim absolute SPL, phase integration, target-curve compliance, listening
+preference or an acoustically superior move.
+
+The review card displays the record status, before/after IDs, observed
+diagnostic, recorded date and explicit warning that neither hardware
+acceptance nor DSP deployment occurred. The records are append-only:
+historical entries have no edit/delete or apply action, and damaged histories
+cannot be silently reset. Exact-head Apple Silicon CI must pass the new
+history/persistence/controller regression plus all inherited suites.
+Physical acceptance will remain separate at PR112.
+
+**Explicit limitation:** app-side historical capture metadata cannot prove
+that a person physically moved a Sub or kept a microphone at precisely the
+same coordinates. The attestations and offline evaluator establish a
+traceable **software review**, not authenticated physical acoustic proof.
+
 
 ## Remote vs physical acceptance
 
