@@ -569,3 +569,146 @@ final class RoomGeometryPlacementTests: XCTestCase {
         )
     }
 }
+
+
+// PR110 Slice 1: offline-only advanced placement candidate safety.
+final class AdvancedRoomPlacementExperimentsTests: XCTestCase {
+    private let explorer = RoomAdvancedPlacementExplorer()
+
+    private func sample() -> RoomAdvancedPlacementState {
+        let room = RoomGeometryModel.template(
+            projectID: UUID(uuidString:
+                "11000000-0000-0000-0000-000000000001")!
+        )
+        return RoomAdvancedPlacementState(
+            room: room,
+            secondarySeats: [
+                RoomGeometryPoint3D(x: 1.4, y: 3.5, z: 1.1),
+                RoomGeometryPoint3D(x: 2.6, y: 3.5, z: 1.1),
+            ],
+            leftToeInDegrees: 12,
+            rightToeInDegrees: -12,
+            subwooferPositions: [
+                RoomGeometryPoint3D(x: 0.5, y: 0.5, z: 0.2),
+            ]
+        )
+    }
+
+    func testIndependentLeftMoveDoesNotChangeRightOrSub() throws {
+        let before = sample()
+        let candidates = try explorer.experiments(for: before)
+        let moved = try XCTUnwrap(
+            candidates.first { $0.id == "left-left" }
+        )
+        XCTAssertEqual(moved.move, .leftSpeaker)
+        XCTAssertEqual(moved.trial.room.rightSpeaker, before.room.rightSpeaker)
+        XCTAssertEqual(moved.trial.subwooferPositions, before.subwooferPositions)
+        XCTAssertEqual(moved.trial.room.leftSpeaker.x,
+                       before.room.leftSpeaker.x - 0.15, accuracy: 0.000001)
+        XCTAssertEqual(moved.trial.room.projectID, before.room.projectID)
+        XCTAssertTrue(moved.requiresMeasuredVerification)
+        XCTAssertEqual(moved.evidenceLabel,
+                       "Geometry hypothesis — measurement required")
+    }
+
+    func testSubMoveOnlyChangesSelectedSubPosition() throws {
+        let before = sample()
+        let trial = try XCTUnwrap(
+            explorer.experiments(for: before).first {
+                $0.id == "sub-0-right"
+            }
+        )
+        XCTAssertEqual(trial.move, .subwoofer)
+        XCTAssertEqual(trial.trial.room, before.room)
+        XCTAssertEqual(trial.trial.subwooferPositions[0].x,
+                       before.subwooferPositions[0].x + 0.30,
+                       accuracy: 0.000001)
+    }
+
+    func testToeInChangesOrientationWithoutMovingSpeakers() throws {
+        let before = sample()
+        let trial = try XCTUnwrap(
+            explorer.experiments(for: before).first {
+                $0.id == "right-toe-clockwise"
+            }
+        )
+        XCTAssertEqual(trial.trial.room, before.room)
+        XCTAssertEqual(trial.trial.leftToeInDegrees, before.leftToeInDegrees)
+        XCTAssertEqual(trial.trial.rightToeInDegrees,
+                       before.rightToeInDegrees - 5, accuracy: 0.000001)
+    }
+
+    func testHeightChangesOnlySelectedSpeaker() throws {
+        let before = sample()
+        let trial = try XCTUnwrap(
+            explorer.experiments(for: before).first {
+                $0.id == "left-height-higher"
+            }
+        )
+        XCTAssertEqual(trial.move, .leftHeight)
+        XCTAssertEqual(trial.trial.room.leftSpeaker.z,
+                       before.room.leftSpeaker.z + 0.1, accuracy: 0.000001)
+        XCTAssertEqual(trial.trial.room.rightSpeaker, before.room.rightSpeaker)
+    }
+
+    func testInvalidOutOfRoomTrialsAreOmitted() throws {
+        var nearWall = sample()
+        nearWall.room.leftSpeaker.x = 0.05
+        let trials = try explorer.experiments(for: nearWall)
+        XCTAssertFalse(trials.contains { $0.id == "left-left" })
+        XCTAssertTrue(trials.contains { $0.id == "left-right" })
+        XCTAssertEqual(trials.count, Set(trials.map(\.id)).count)
+        XCTAssertTrue(trials.allSatisfy {
+            (try? $0.trial.validated()) != nil
+        })
+    }
+
+    func testNoSubProducesNoInventedSubwooferTrials() throws {
+        var state = sample()
+        state.subwooferPositions = []
+        XCTAssertFalse(
+            try explorer.experiments(for: state).contains {
+                $0.move == .subwoofer
+            }
+        )
+    }
+
+    func testInvalidGeometryAndAnglesFailClosed() throws {
+        var state = sample()
+        state.leftToeInDegrees = .infinity
+        XCTAssertThrowsError(try explorer.experiments(for: state))
+        state = sample()
+        state.secondarySeats[0].x = -1
+        XCTAssertThrowsError(try explorer.experiments(for: state))
+        state = sample()
+        state.subwooferPositions = Array(
+            repeating: RoomGeometryPoint3D(x: 1, y: 1, z: 0.2),
+            count: 5
+        )
+        XCTAssertThrowsError(try explorer.experiments(for: state))
+    }
+
+    func testCandidateEnumerationIsDeterministicAndDoesNotMutateState() throws {
+        let before = sample()
+        let unchanged = before
+        let first = try explorer.experiments(for: before)
+        let second = try explorer.experiments(for: before)
+        XCTAssertEqual(first, second)
+        XCTAssertEqual(before, unchanged)
+        XCTAssertFalse(first.isEmpty)
+        XCTAssertLessThanOrEqual(first.count, 32)
+        XCTAssertTrue(first.allSatisfy {
+            $0.maximumSeatPathImbalanceMeters.isFinite
+                && $0.maximumSeatPathImbalanceMeters >= 0
+        })
+    }
+
+    func testMultiSeatPathMetricIsGeometryOnlyAndNonNegative() {
+        var state = sample()
+        let original = explorer.maximumSeatPathImbalance(state)
+        state.secondarySeats = []
+        let primaryOnly = explorer.maximumSeatPathImbalance(state)
+        XCTAssertGreaterThanOrEqual(original, primaryOnly)
+        XCTAssertGreaterThanOrEqual(primaryOnly, 0)
+    }
+}
