@@ -1,0 +1,53 @@
+name: PR106 Advanced Speaker Measurement Lab
+
+on:
+  push:
+    branches:
+      - feature/pr106-advanced-speaker-measurement-lab
+  pull_request:
+    branches:
+      - feature/pr105-guided-speaker-characterization-verification
+  workflow_dispatch:
+
+concurrency:
+  group: pr106-speaker-measurement-lab-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Validate PR106 measurement lab boundary
+        run: python3 ci/validate_pr106_speaker_measurement_lab.py
+      - name: Preserve PR105 guided optimizer closure
+        run: python3 ci/validate_pr105_speaker_characterization.py
+
+  macos:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Validate PR106 measurement lab boundary
+        run: python3 ci/validate_pr106_speaker_measurement_lab.py
+      - name: Preserve PR105 guided optimizer closure
+        run: python3 ci/validate_pr105_speaker_characterization.py
+      - name: Build arm64 Debug app
+        run: >-
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
+          -configuration Debug -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES build
+      - name: Run PR106 measurement lab tests
+        run: >-
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
+          -configuration Debug -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES
+          -only-testing:NotchSixtyTests/SpeakerMeasurementLabCapabilityTests test
+      - name: Run full XCTest regression
+        run: >-
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
+          -configuration Debug -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES test
