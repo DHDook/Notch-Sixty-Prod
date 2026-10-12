@@ -64,6 +64,7 @@ for token in (
     "testTwoMainsProduceOneRobustCompromiseForSamePhysicalSub",
     "testAlreadyCoherentPairReturnsReviewBlockedNoOp",
     "testEvidenceIdentityAndBassManagementFailClosed",
+    "testSingleSubPlannerBlocksMultiSubProfileUntilCoordinated",
 ):
     assert token in tests, f"missing PR108 proposal test: {token}"
 
@@ -177,6 +178,7 @@ for token in (
     "does **not** subtract relativeArrivalMilliseconds again",
     "previewOnly == true",
     "canDeploy == false",
+    "multiSubCoordinationRequired",
     "Transactional Apply / rollback",
     "Fresh coherent verification",
 ):
