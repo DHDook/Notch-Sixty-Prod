@@ -1,5 +1,11 @@
 import Foundation
 
+enum SpeakerMeasurementLabCoherentLeg:
+    String, Codable, CaseIterable, Equatable, Sendable {
+    case main
+    case subwoofer
+}
+
 struct SpeakerMeasurementLabProtocol:
     Identifiable, Codable, Equatable, Sendable {
     var id: UUID = UUID()
@@ -13,6 +19,10 @@ struct SpeakerMeasurementLabProtocol:
     /// decode this as nil, preserving schema compatibility.
     var nearFieldComponent:
         SpeakerMeasurementLabNearFieldComponent? = nil
+    /// Slice 9B: a coherent pair is represented by two protocols sharing this
+    /// ID, one Main leg and one Sub leg. Optional preserves older archives.
+    var coherentPairID: UUID? = nil
+    var coherentLeg: SpeakerMeasurementLabCoherentLeg? = nil
 
     var acousticSource: MultichannelCalibrationSource? {
         guard case .acousticSource(let source) = request.target else {
@@ -33,6 +43,14 @@ struct SpeakerMeasurementLabProtocol:
     /// Low/Mid/High bus identity.
     var captureSource: MultichannelCalibrationSource? {
         if let acousticSource { return acousticSource }
+        if request.mode == .coherentMainsSubTiming,
+           case .sourcePair(let main, let subwoofer) = request.target,
+           let coherentLeg {
+            switch coherentLeg {
+            case .main: return main
+            case .subwoofer: return subwoofer
+            }
+        }
         guard let bus = protectedDriverBus else { return nil }
         switch bus {
         case .leftLow, .leftMid, .leftHigh:
@@ -64,12 +82,16 @@ struct SpeakerMeasurementLabProtocol:
         case .wholeSpeakerOnAxis,
              .wholeSpeakerOffAxis:
             guard acousticSource != nil,
-                  nearFieldComponent == nil else {
+                  nearFieldComponent == nil,
+                  coherentPairID == nil,
+                  coherentLeg == nil else {
                 throw SpeakerMeasurementLabSessionError.invalidProtocol
             }
         case .subwooferNearField:
             guard acousticSource != nil,
-                  nearFieldComponent?.validate() ?? true else {
+                  nearFieldComponent?.validate() ?? true,
+                  coherentPairID == nil,
+                  coherentLeg == nil else {
                 throw SpeakerMeasurementLabSessionError.invalidProtocol
             }
         case .protectedDriverNearField:
@@ -78,12 +100,21 @@ struct SpeakerMeasurementLabProtocol:
                   nearFieldComponent == nil,
                   let excitationLevelDBFS,
                   excitationLevelDBFS >= -48.0,
-                  excitationLevelDBFS <= -24.0 else {
+                  excitationLevelDBFS <= -24.0,
+                  coherentPairID == nil,
+                  coherentLeg == nil else {
                 throw SpeakerMeasurementLabSessionError.invalidProtocol
             }
         case .coherentMainsSubTiming:
-            throw SpeakerMeasurementLabSessionError
-                .unsupportedAcquisitionMode(request.mode)
+            guard coherentPairID != nil,
+                  coherentLeg != nil,
+                  captureSource != nil,
+                  nearFieldComponent == nil,
+                  let excitationLevelDBFS,
+                  excitationLevelDBFS.isFinite,
+                  (-48.0 ... -12.0).contains(excitationLevelDBFS) else {
+                throw SpeakerMeasurementLabSessionError.invalidProtocol
+            }
         }
     }
 }
@@ -241,6 +272,33 @@ struct SpeakerMeasurementLabSession:
             try labProtocol.validateForAcquisition()
         }
 
+        let coherentProtocols = protocols.filter {
+            $0.request.mode == .coherentMainsSubTiming
+        }
+        if !coherentProtocols.isEmpty {
+            guard sharedClockReferenceConfiguration != nil else {
+                throw SpeakerMeasurementLabSessionError
+                    .coherentPairInvalid
+            }
+            let grouped = Dictionary(grouping: coherentProtocols) {
+                $0.coherentPairID!
+            }
+            for (_, pair) in grouped {
+                guard pair.count == 2,
+                      Set(pair.compactMap(\.coherentLeg))
+                        == Set(SpeakerMeasurementLabCoherentLeg.allCases),
+                      pair[0].request.target == pair[1].request.target,
+                      pair[0].request.geometry == pair[1].request.geometry,
+                      pair[0].request.repeatCount
+                        == pair[1].request.repeatCount,
+                      pair[0].excitationLevelDBFS
+                        == pair[1].excitationLevelDBFS else {
+                    throw SpeakerMeasurementLabSessionError
+                        .coherentPairInvalid
+                }
+            }
+        }
+
         for capture in captures {
             let captureLevelValid: Bool
             if let level = capture.excitationLevelDBFS {
@@ -339,6 +397,31 @@ struct SpeakerMeasurementLabSession:
                 }
             }
         }
+
+        for pairID in Set(
+            protocols.compactMap {
+                $0.request.mode == .coherentMainsSubTiming
+                    ? $0.coherentPairID : nil
+            }
+        ) {
+            let pairProtocols = protocols.filter {
+                $0.coherentPairID == pairID
+                    && $0.request.mode == .coherentMainsSubTiming
+            }
+            let pairCaptures = captures.filter { capture in
+                pairProtocols.contains {
+                    $0.id == capture.protocolID
+                }
+            }
+            if !pairCaptures.isEmpty {
+                guard pairCaptures.allSatisfy({
+                    $0.sharedClockReference != nil
+                }) else {
+                    throw SpeakerMeasurementLabSessionError
+                        .captureIdentityMismatch
+                }
+            }
+        }
     }
 
     private func valid(
@@ -376,6 +459,7 @@ enum SpeakerMeasurementLabSessionError:
     case persistenceIdentityMismatch
     case analyzedResponseUnavailable
     case sharedClockReferenceUnqualified
+    case coherentPairInvalid
 
     var errorDescription: String? {
         switch self {
@@ -399,6 +483,8 @@ enum SpeakerMeasurementLabSessionError:
             return "Lab analysis did not produce a usable transfer function or impulse response."
         case .sharedClockReferenceUnqualified:
             return "The simultaneous electrical/reference input did not produce a qualified shared-time reference sweep."
+        case .coherentPairInvalid:
+            return "Coherent mains/sub acquisition requires exactly one linked Main/Sub protocol pair with identical geometry, repeat count, explicit sweep level, and a configured shared-time reference."
         }
     }
 }
@@ -423,7 +509,9 @@ struct SpeakerMeasurementLabSessionStep: Equatable, Sendable {
                 ?? "protected driver"
             return "Place the microphone (format(geometry.distanceMeters)) m from (bus). The sweep is pre-rendered through the active crossover and target limiter; keep geometry fixed for (repeatText)."
         case .coherentMainsSubTiming:
-            return "This protocol is blocked until authenticated shared-clock measurement is available."
+            let leg = labProtocol.coherentLeg == .main
+                ? "main speaker" : "subwoofer"
+            return "Keep the microphone fixed at (format(geometry.distanceMeters)) m and measure the linked (leg) with the simultaneous electrical reference active; (repeatText)."
         }
     }
 

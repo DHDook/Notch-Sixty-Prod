@@ -195,7 +195,9 @@ struct SpeakerMeasurementLabCapabilityPlanner: Sendable {
         routePlan: LiveNChannelOutputRoutePlan,
         multiOutputRouting: MultiOutputRoutingConfiguration?,
         speakerDriverProcessing: SpeakerDriverProcessingConfiguration?,
-        bassManagementConfiguration: BassManagementConfiguration? = nil
+        bassManagementConfiguration: BassManagementConfiguration? = nil,
+        coherentLeg: SpeakerMeasurementLabCoherentLeg? = nil,
+        sharedClockReferenceAvailable: Bool = false
     ) throws -> SpeakerMeasurementLabPlan {
         try request.validate()
 
@@ -309,16 +311,41 @@ struct SpeakerMeasurementLabCapabilityPlanner: Sendable {
                 phaseReferenceAuthenticated: false,
                 protectedDriverBus: blockers.isEmpty ? bus : nil
             )
-        case (.coherentMainsSubTiming, .sourcePair):
-            return SpeakerMeasurementLabPlan(
+        case (
+            .coherentMainsSubTiming,
+            .sourcePair(let main, let subwoofer)
+        ):
+            guard sharedClockReferenceAvailable,
+                  let coherentLeg else {
+                return SpeakerMeasurementLabPlan(
+                    request: request,
+                    delegatedTransportPlans: [],
+                    analysisProducts: [.relativeArrival, .relativePhase],
+                    blockReasons: [.authenticatedSharedClockRequired],
+                    warnings: [
+                        "A linked Main/Sub Lab pair must capture a simultaneous electrical reference on every sweep before coherent diagnostics can run."
+                    ],
+                    phaseReferenceAuthenticated: false
+                )
+            }
+            let source = coherentLeg == .main ? main : subwoofer
+            return acousticPlan(
                 request: request,
-                delegatedTransportPlans: [],
-                analysisProducts: [.relativeArrival, .relativePhase],
-                blockReasons: [.authenticatedSharedClockRequired],
-                warnings: [
-                    "PR103/PR104 saved source-isolated measurements do not independently authenticate a common source-to-source clock origin."
+                source: source,
+                products: [
+                    .magnitudeResponse,
+                    .phaseResponse,
+                    .directArrival,
+                    .relativeArrival,
+                    .relativePhase,
                 ],
-                phaseReferenceAuthenticated: false
+                warnings: [
+                    "Live acquisition is only one leg of a linked coherent pair. Cross-source clock provenance is authenticated later from BOTH qualified reference-captured groups.",
+                    "No delay, polarity or crossover state is mutated by the Lab."
+                ],
+                routePlan: routePlan,
+                multiOutputRouting: multiOutputRouting,
+                speakerDriverProcessing: speakerDriverProcessing
             )
         default:
             throw SpeakerMeasurementLabError.invalidTarget

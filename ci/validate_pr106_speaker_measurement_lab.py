@@ -16,6 +16,8 @@ LEVEL_SOURCE = ROOT / "NotchSixty/Audio/SpeakerMeasurementLabLevelDependence.swi
 LEVEL_TESTS = ROOT / "NotchSixtyTests/SpeakerMeasurementLabLevelDependenceTests.swift"
 PROTECTED_SOURCE = ROOT / "NotchSixty/Audio/SpeakerMeasurementLabProtectedExcitation.swift"
 PROTECTED_TESTS = ROOT / "NotchSixtyTests/SpeakerMeasurementLabProtectedExcitationTests.swift"
+COHERENT_SOURCE = ROOT / "NotchSixty/Audio/SpeakerMeasurementLabCoherentTiming.swift"
+COHERENT_TESTS = ROOT / "NotchSixtyTests/SpeakerMeasurementLabCoherentTimingTests.swift"
 BRIDGE_HEADER = ROOT / "NotchSixty/Audio/Realtime/N60RealtimeAudioBridge.h"
 BRIDGE_SOURCE = ROOT / "NotchSixty/Audio/Realtime/N60RealtimeAudioBridge.c"
 CONTROLLER_SOURCE = ROOT / "NotchSixty/Audio/SpeakerMeasurementLabController.swift"
@@ -23,7 +25,7 @@ PROJECT = ROOT / "NotchSixty.xcodeproj/project.pbxproj"
 DOC = ROOT / "docs/PR106_ADVANCED_SPEAKER_MEASUREMENT_LAB.md"
 WORKFLOW = ROOT / ".github/workflows/pr106-speaker-measurement-lab.yml"
 
-for path in (SOURCE, TESTS, SESSION_SOURCE, SESSION_TESTS, DIRECTIVITY_SOURCE, DIRECTIVITY_TESTS, NEARFIELD_SOURCE, NEARFIELD_TESTS, GATED_SOURCE, GATED_TESTS, LEVEL_SOURCE, LEVEL_TESTS, PROTECTED_SOURCE, PROTECTED_TESTS, BRIDGE_HEADER, BRIDGE_SOURCE, CONTROLLER_SOURCE, PROJECT, DOC, WORKFLOW):
+for path in (SOURCE, TESTS, SESSION_SOURCE, SESSION_TESTS, DIRECTIVITY_SOURCE, DIRECTIVITY_TESTS, NEARFIELD_SOURCE, NEARFIELD_TESTS, GATED_SOURCE, GATED_TESTS, LEVEL_SOURCE, LEVEL_TESTS, PROTECTED_SOURCE, PROTECTED_TESTS, COHERENT_SOURCE, COHERENT_TESTS, BRIDGE_HEADER, BRIDGE_SOURCE, CONTROLLER_SOURCE, PROJECT, DOC, WORKFLOW):
     assert path.is_file(), f"missing PR106 Slice 1 file: {path}"
 
 source = SOURCE.read_text()
@@ -40,6 +42,8 @@ level_source = LEVEL_SOURCE.read_text()
 level_tests = LEVEL_TESTS.read_text()
 protected_source = PROTECTED_SOURCE.read_text()
 protected_tests = PROTECTED_TESTS.read_text()
+coherent_source = COHERENT_SOURCE.read_text()
+coherent_tests = COHERENT_TESTS.read_text()
 bridge_header = BRIDGE_HEADER.read_text()
 bridge_source = BRIDGE_SOURCE.read_text()
 controller_source = CONTROLLER_SOURCE.read_text()
@@ -260,6 +264,36 @@ assert "N60SpeakerDriverProcessingRuntimeProcessValues(" in bridge_source
 assert "targetDriver->limiterEnabled" in bridge_source
 
 for token in (
+    "struct SpeakerMeasurementLabCoherentTimingOptions",
+    "struct SpeakerMeasurementLabCoherentTimingReport",
+    "SpeakerMeasurementLabCoherentTimingAnalyzer",
+    "crossSourceClockProvenanceAuthenticated: Bool { true }",
+    "maximumReferenceArrivalSpreadMilliseconds",
+    "maximumReferenceMagnitudeRepeatabilityRMSDB",
+    "minimumReferencePhaseConsistency",
+    "canDeploy: Bool { false }",
+    "canMutateDSP: Bool { false }",
+):
+    assert token in coherent_source, f"missing coherent timing contract: {token}"
+
+for token in (
+    "testLinkedMainSubPairWithStableReferenceAuthenticatesTiming",
+    "testReferenceArrivalDriftFailsClosed",
+    "testReferenceMagnitudeOrPhaseInstabilityFailsClosed",
+    "testCoherentSessionRequiresReferenceAndMatchedPairGeometryLevel",
+    "testCapabilityStillBlocksCoherentRequestWithoutLinkedReferenceLeg",
+):
+    assert token in coherent_tests, f"missing coherent timing test: {token}"
+
+for token in (
+    "enum SpeakerMeasurementLabCoherentLeg",
+    "coherentPairID",
+    "coherentLeg",
+    "coherentPairInvalid",
+):
+    assert token in session_source, f"missing coherent pair session contract: {token}"
+
+for token in (
     "F10600000000000000000001",
     "F10600000000000000000002",
     "F10600000000000000000011",
@@ -288,6 +322,10 @@ for token in (
     "F1060000000000000000000E",
     "F1060000000000000000001D",
     "F1060000000000000000001E",
+    "F1060000000000000000000F",
+    "F10600000000000000000010",
+    "F1060000000000000000001F",
+    "F10600000000000000000020",
 ):
     assert project.count(token) >= 2, f"missing PR106 Xcode registration: {token}"
 
@@ -306,13 +344,15 @@ assert "SpeakerMeasurementLabNearFieldLFTests" in workflow
 assert "SpeakerMeasurementLabQuasiAnechoicTests" in workflow
 assert "SpeakerMeasurementLabLevelDependenceTests" in workflow
 assert "SpeakerMeasurementLabProtectedExcitationTests" in workflow
+assert "SpeakerMeasurementLabCoherentTimingTests" in workflow
 assert "Run full XCTest regression" in workflow
 assert "Slice 2" in doc
 assert "Simultaneous shared-time reference capture substrate" in doc
+assert "Reference-aligned coherent mains/sub diagnostics" in doc
 assert "Slice 3" in doc
 assert "Repeat-qualified installed-room directivity comparison" in doc
 assert "Repeat-qualified near-field LF component diagnostics" in doc
 assert "Explicit reflection-window quasi-anechoic estimate" in doc
 assert "Bounded two-level transfer level-dependence diagnostic" in doc
 assert "Exact protected-driver excitation compiler substrate" in doc
-print("PR106 lab diagnostics + protected excitation + shared-time reference substrate contracts passed")
+print("PR106 lab diagnostics + protected excitation + authenticated coherent timing contracts passed")

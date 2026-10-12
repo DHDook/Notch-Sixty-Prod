@@ -333,9 +333,33 @@ final class SpeakerMeasurementLabController: ObservableObject {
             speakerDriverProcessing:
                 systemProfile.state.speakerDriverProcessing,
             bassManagementConfiguration:
-                systemProfile.state.bassManagement
+                systemProfile.state.bassManagement,
+            coherentLeg: step.labProtocol.coherentLeg,
+            sharedClockReferenceAvailable:
+                session.sharedClockReferenceConfiguration != nil
         )
         activeCapabilityPlan = capability
+
+        if step.labProtocol.request.mode == .coherentMainsSubTiming {
+            guard let reference =
+                    session.sharedClockReferenceConfiguration,
+                  let source = step.labProtocol.captureSource,
+                  coherentEndpointDeviceUID(
+                      for: source,
+                      profile: profile
+                  ) == reference.outputReferenceDeviceUID,
+                  reference.outputReferenceDeviceUID
+                    == routePlan.referenceDeviceUID else {
+                state = .blocked
+                let error = SpeakerMeasurementLabControllerError
+                    .transportBlocked(
+                        "Coherent mains/sub acquisition currently requires both source endpoints and the simultaneous reference path to use the same reference output device."
+                    )
+                lastErrorDescription = error.localizedDescription
+                throw error
+            }
+        }
+
         guard capability.canStartMeasurement else {
             state = .blocked
             let reason = capability.blockReasons
@@ -662,6 +686,22 @@ final class SpeakerMeasurementLabController: ObservableObject {
               ) else {
             throw SpeakerMeasurementLabControllerError
                 .sessionEnvironmentChanged
+        }
+    }
+
+    private func coherentEndpointDeviceUID(
+        for source: MultichannelCalibrationSource,
+        profile: OutputDeviceProfileConfiguration
+    ) -> String? {
+        switch source {
+        case .speaker(let role):
+            return profile.speakerAssignments.first {
+                $0.role == role
+            }?.destination.deviceUID
+        case .subwoofer(let index):
+            return profile.subwooferAssignments.first {
+                $0.index == index
+            }?.destination.deviceUID
         }
     }
 

@@ -1,6 +1,6 @@
 # PR106 — Advanced Speaker Measurement Lab
 
-Status: **SLICES 1–8B SOFTWARE VERIFIED — SLICE 9A CI PENDING**
+Status: **SLICES 1–9A SOFTWARE VERIFIED — SLICE 9B CI PENDING**
 
 Base: PR105 Guided Speaker Optimizer & Acoustic Verification.
 
@@ -345,6 +345,45 @@ targeted Lab tests and full XCTest regression.
 - `.coherentMainsSubTiming` remains blocked in Slice 9A. Slice 9B must
   pair two source sweeps against the SAME qualified reference path and audit
   reference-path stability before publishing relative timing/phase.
+
+## Slice 9A exact-head verification
+
+Slice 9A exact head `180fd38fadd9e51df6d98108aaa2ca707eb6105d` passed both
+GitHub Actions paths:
+
+- push run 38227227332;
+- pull-request run 38227245281.
+
+Both paths passed the PR106/PR105 validators, Apple Silicon Debug build,
+targeted Lab tests and full XCTest regression.
+
+## Slice 9B — Reference-aligned coherent mains/sub diagnostics
+
+- A coherent source pair is represented by exactly two linked Lab protocols
+  sharing one pair ID: one Main leg and one Sub leg.
+- Both legs must use identical microphone geometry, repeat count and an explicit
+  identical bounded sweep level.
+- Live acquisition is available only when a simultaneous shared-time reference
+  is configured. Legacy/source-isolated captures cannot enter this path.
+- The first coherent implementation also requires both target source endpoints
+  and the electrical reference clock domain to use the same reference output
+  device. Multi-device cross-source phase remains blocked.
+- Every sweep captures microphone plus reference input in the same IOProc using
+  Slice 9A's dual-input bridge.
+- Main and Sub acoustic groups independently pass the inherited repeated-sweep
+  SNR, clipping, magnitude, arrival and phase qualification.
+- The reference path is independently audited across BOTH groups for arrival
+  spread, magnitude repeatability and circular phase consistency.
+- Each acoustic transfer is divided by its own simultaneous reference in the
+  complex domain after restoring each analyzer-reported direct arrival exactly
+  once.
+- Only after those guards pass does the report publish authenticated cross-source
+  relative arrival and wrapped relative phase.
+- `crossSourceClockProvenanceAuthenticated == true` means this exact linked
+  pair/session/reference path passed the measurement guards. It is not a global
+  hardware-clock certification.
+- Measurement-only: no delay, polarity, crossover, gain or limiter state changes;
+  `canDeploy == false` and `canMutateDSP == false`.
 
 ## Planned follow-on slices
 

@@ -51,7 +51,8 @@ jobs:
           -only-testing:NotchSixtyTests/SpeakerMeasurementLabNearFieldLFTests
           -only-testing:NotchSixtyTests/SpeakerMeasurementLabQuasiAnechoicTests
           -only-testing:NotchSixtyTests/SpeakerMeasurementLabLevelDependenceTests
-          -only-testing:NotchSixtyTests/SpeakerMeasurementLabProtectedExcitationTests test
+          -only-testing:NotchSixtyTests/SpeakerMeasurementLabProtectedExcitationTests
+          -only-testing:NotchSixtyTests/SpeakerMeasurementLabCoherentTimingTests test
       - name: Run full XCTest regression
         run: >-
           xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
