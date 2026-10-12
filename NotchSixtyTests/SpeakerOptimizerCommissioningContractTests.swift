@@ -178,6 +178,54 @@ final class SpeakerOptimizerCommissioningContractTests: XCTestCase {
         )
     }
 
+    func testExistingOptimizerDeploymentMustBeResolvedBeforeNewCommissioning() throws {
+        let planner = SpeakerOptimizerCommissioningPlanner()
+        let initialProfile = makeProfile()
+        let firPlan = makeFIRPlan(
+            tapCount: 257,
+            maximumPositiveGainDB: 0.5,
+            recommendedHeadroomDB: 1.0
+        )
+        let firstProposal = try planner.proposal(
+            profile: initialProfile,
+            plan: firPlan
+        )
+        let approval = try planner.makeExplicitApproval(
+            proposal: firstProposal,
+            userInitiated: true
+        )
+        let deployment = try planner.makeFIRDeploymentConfiguration(
+            profile: initialProfile,
+            plan: firPlan,
+            proposal: firstProposal,
+            approval: approval
+        )
+
+        var activeProfile = initialProfile
+        activeProfile.state.outputDeviceProfile?
+            .speakerOptimizerFIR = deployment
+
+        let secondFIRProposal = try planner.proposal(
+            profile: activeProfile,
+            plan: firPlan
+        )
+        XCTAssertFalse(secondFIRProposal.canApply)
+        XCTAssertEqual(
+            try XCTUnwrap(secondFIRProposal.sources.first).stageStatus,
+            .blockedFIRCandidateNotRepresentable
+        )
+
+        let peqProposal = try planner.proposal(
+            profile: activeProfile,
+            plan: makePEQPlan()
+        )
+        XCTAssertFalse(peqProposal.canApply)
+        XCTAssertEqual(
+            try XCTUnwrap(peqProposal.sources.first).stageStatus,
+            .blockedPEQCandidateNotRepresentable
+        )
+    }
+
     private func makeProfile() -> PlaybackSystemProfile {
         let outputProfile = OutputDeviceProfileConfiguration(
             enabled: true,
