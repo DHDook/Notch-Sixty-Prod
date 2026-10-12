@@ -305,6 +305,10 @@ struct OutputDeviceProfileConfiguration: Codable, Equatable, Sendable {
     /// Separately owned linear-phase Speaker Optimizer FIR. Optional so legacy
     /// persisted Output Device Profiles decode with this stage absent.
     var speakerOptimizerFIR: SpeakerOptimizerFIRDeploymentConfiguration?
+    /// PR108 provenance for coherent physical Sub timing/polarity alignment.
+    /// The actual realtime delay/polarity remains in speaker/Sub calibration.
+    var coherentSubwooferAlignment:
+        CoherentSubwooferAlignmentDeploymentRecord?
 
     init(
         enabled: Bool = false,
@@ -315,7 +319,9 @@ struct OutputDeviceProfileConfiguration: Codable, Equatable, Sendable {
         referenceDeviceUID: String? = nil,
         calibrationSummary: MultichannelCalibrationDeploymentSummary? = nil,
         speakerOptimizerPEQ: SpeakerOptimizerPEQDeploymentConfiguration? = nil,
-        speakerOptimizerFIR: SpeakerOptimizerFIRDeploymentConfiguration? = nil
+        speakerOptimizerFIR: SpeakerOptimizerFIRDeploymentConfiguration? = nil,
+        coherentSubwooferAlignment:
+            CoherentSubwooferAlignmentDeploymentRecord? = nil
     ) {
         self.enabled = enabled
         self.programLayout = programLayout
@@ -326,6 +332,8 @@ struct OutputDeviceProfileConfiguration: Codable, Equatable, Sendable {
         self.calibrationSummary = calibrationSummary
         self.speakerOptimizerPEQ = speakerOptimizerPEQ
         self.speakerOptimizerFIR = speakerOptimizerFIR
+        self.coherentSubwooferAlignment =
+            coherentSubwooferAlignment
     }
 
     var requiredDeviceUIDs: Set<String> {
@@ -411,6 +419,12 @@ struct OutputDeviceProfileConfiguration: Codable, Equatable, Sendable {
         try calibrationSummary?.validate()
         try speakerOptimizerPEQ?.validate(profile: self)
         try speakerOptimizerFIR?.validate(profile: self)
+        guard coherentSubwooferAlignment?.validate(
+            profile: self
+        ) ?? true else {
+            throw OutputDeviceCalibrationError
+                .invalidSubwooferCalibration
+        }
     }
 
     func makeLivePlan(
