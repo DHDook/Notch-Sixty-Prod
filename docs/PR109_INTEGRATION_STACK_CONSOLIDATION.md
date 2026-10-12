@@ -1,6 +1,6 @@
 # PR109 — Remote Integration & Stack Consolidation
 
-Status: **SLICE 1 IMPLEMENTED — EXACT-HEAD CI PENDING; HARDWARE ACCEPTANCE DEFERRED**
+Status: **SLICES 1–2 IMPLEMENTED — EXACT-HEAD CI PENDING; HARDWARE ACCEPTANCE DEFERRED**
 
 GitHub PR numbering is one ahead of the roadmap from PR99 onward: roadmap PR108
 is GitHub #109; roadmap PR109 will be GitHub #110. PR109 is stacked directly
@@ -64,9 +64,8 @@ The manifest deliberately hard-codes:
 - `mayMergeIntoMain: false`
 - `liveFeedForwardANCAuthorized: false`
 
-Those values are hard-gated, not derived from successful CI. All application,
-DSP, audio transport, calibration state, and existing PR branch heads remain
-untouched by PR109 Slice 1. A valid read-only report carries only Git ancestry
+Those values are hard-gated, not derived from successful CI. All application, DSP, audio transport and calibration state, and all prior
+PR branch heads remain untouched by PR109 Slices 1–2. A valid read-only report carries only Git ancestry
 and source/test evidence, never hardware authority.
 
 ### Acceptance
@@ -76,6 +75,47 @@ the manifest and negative tests, all applicable inherited guard scripts,
 arm64 Debug/Release builds, and full XCTest must pass. Record exact commit,
 runs, failing/passing jobs, and any required fixes in this document.
 Do not call the PR remotely complete based on source changes alone.
+
+## Slice 2 — Cross-feature ownership and cumulative guard reconciliation
+
+Implemented on PR109 with no DSP or realtime code mutation.
+
+The first true cumulative portable CI run passed the Git ancestry audit,
+eight negative stack-manifest tests, and PR98, PR101, PR102, PR103 and PR104
+legacy guards, but exposed one **obsolete historical assertion**:
+PR105's old validator still demanded
+`testFIRProposalFailsClosedBecauseNoDedicatedPerSpeakerFIRStageExists`.
+That test was intentionally superseded by PR107's dedicated FIR stage. PR109
+updates the PR105 validator to accept either the old fail-closed implementation
+(in original historical branches) or BOTH current PR107 tests:
+`testFIRProposalFailsClosedWhenCandidateIsNotRepresentable` and
+`testRepresentableFIRProposalCanApplyAndBuildsDedicatedConfiguration`,
+alongside the new status enum values. PR107's own validator is still rerun,
+so the new stage is not exempt from independent safety scrutiny.
+
+The new `ci/validate_pr109_cross_feature_contracts.py` and negative tests
+enforce the cumulative integration contracts:
+
+- persistent whole-speaker PEQ and FIR stay separately owned and mutually
+  exclusive, preserving ordinary Speaker Calibration;
+- single physical Sub and coordinated multi-Sub provenance cannot both own
+  one output profile;
+- provisional Apply still requires independent measured verification and
+  state-drift-guarded rollback;
+- protected Low/Mid/High Lab acquisition retains mandatory crossover,
+  limiter and maximum bounded excitation;
+- the live render order remains Speaker Optimizer FIR → semantic speaker
+  lanes → bass management / physical Sub routing; and
+- the PR98 disconnected speaker-connected ANC safety audit is retained.
+
+The production README is updated from the historical PR102-in-progress
+description to remote PR108 closure / PR109 integration. The PR102 validator
+still checks its required historical provenance and release metadata tokens.
+
+The PR109 GitHub Actions job now retains separate JSON audit evidence for
+stack ancestry and cross-feature contracts. These are **static/software**
+evidence only. Exact-head cumulative CI and physical acceptance remain
+separate gates.
 
 ## Follow-on PR109 work — still remote/software-only
 
