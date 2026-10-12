@@ -358,6 +358,8 @@ for token in (
 
 assert "case measurementLab" in root_ui
 assert "ProductionSpeakerMeasurementLabWorkspace(" in root_ui
+assert "F10600000000000000000026" in project
+assert "F10600000000000000000036" in project
 
 for token in (
     "F10600000000000000000001",
@@ -402,6 +404,8 @@ for token in (
     "F10600000000000000000033",
     "F10600000000000000000034",
     "F10600000000000000000035",
+    "F10600000000000000000026",
+    "F10600000000000000000036",
 ):
     assert project.count(token) >= 2, f"missing PR106 Xcode registration: {token}"
 

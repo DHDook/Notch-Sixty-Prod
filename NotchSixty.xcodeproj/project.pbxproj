@@ -231,6 +231,7 @@
 		F10600000000000000000023 /* SpeakerMeasurementLabUIModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10600000000000000000033 /* SpeakerMeasurementLabUIModel.swift */; };
 		F10600000000000000000024 /* SpeakerMeasurementLabUIModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10600000000000000000034 /* SpeakerMeasurementLabUIModelTests.swift */; };
 		F10600000000000000000025 /* ProductionSpeakerMeasurementLabWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10600000000000000000035 /* ProductionSpeakerMeasurementLabWorkspace.swift */; };
+		F10600000000000000000026 /* SpeakerMeasurementLabController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10600000000000000000036 /* SpeakerMeasurementLabController.swift */; };
 		F92000000000000000000001 /* RoomTreatmentAdvisor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F92000000000000000000011 /* RoomTreatmentAdvisor.swift */; };
 		F92000000000000000000002 /* RoomTreatmentAdvisorController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F92000000000000000000012 /* RoomTreatmentAdvisorController.swift */; };
 		F92000000000000000000003 /* ProductionRoomTreatmentAdvisorWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = F92000000000000000000013 /* ProductionRoomTreatmentAdvisorWorkspace.swift */; };
@@ -499,6 +500,7 @@
 		F10600000000000000000033 /* SpeakerMeasurementLabUIModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerMeasurementLabUIModel.swift; sourceTree = "<group>"; };
 		F10600000000000000000034 /* SpeakerMeasurementLabUIModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerMeasurementLabUIModelTests.swift; sourceTree = "<group>"; };
 		F10600000000000000000035 /* ProductionSpeakerMeasurementLabWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionSpeakerMeasurementLabWorkspace.swift; sourceTree = "<group>"; };
+		F10600000000000000000036 /* SpeakerMeasurementLabController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerMeasurementLabController.swift; sourceTree = "<group>"; };
 		F92000000000000000000011 /* RoomTreatmentAdvisor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomTreatmentAdvisor.swift; sourceTree = "<group>"; };
 		F92000000000000000000012 /* RoomTreatmentAdvisorController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomTreatmentAdvisorController.swift; sourceTree = "<group>"; };
 		F92000000000000000000013 /* ProductionRoomTreatmentAdvisorWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionRoomTreatmentAdvisorWorkspace.swift; sourceTree = "<group>"; };
@@ -696,6 +698,7 @@
 				F1060000000000000000001F /* SpeakerMeasurementLabCoherentTiming.swift */,
 				F10600000000000000000031 /* SpeakerMeasurementLabReport.swift */,
 				F10600000000000000000033 /* SpeakerMeasurementLabUIModel.swift */,
+				F10600000000000000000036 /* SpeakerMeasurementLabController.swift */,
 				A2000000000000000000002E /* RoomCorrectionMeasurementAnalyzer.swift */,
 				A20000000000000000000030 /* RoomCorrectionTargetDesigner.swift */,
 				E20000000000000000000012 /* RoomCorrectionFIRDesigner.swift */,
@@ -909,6 +912,7 @@
 				F10600000000000000000021 /* SpeakerMeasurementLabReport.swift in Sources */,
 				F10600000000000000000023 /* SpeakerMeasurementLabUIModel.swift in Sources */,
 				F10600000000000000000025 /* ProductionSpeakerMeasurementLabWorkspace.swift in Sources */,
+				F10600000000000000000026 /* SpeakerMeasurementLabController.swift in Sources */,
 				F64000000000000000000003 /* MultichannelCalibrationTransport.swift in Sources */,
 				F64000000000000000000004 /* MultichannelCalibrationController.swift in Sources */,
 				F64000000000000000000005 /* ProductionMultichannelCalibrationWorkspace.swift in Sources */,
