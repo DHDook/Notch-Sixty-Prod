@@ -118,7 +118,7 @@ for token in (
     "1280 frames / 26.67 ms",
     "canInstallLiveFIR == false",
     "A/V latency policy",
-    "Per-program-role FIR realtime substrate",
+    "Sparse per-program-channel FIR realtime substrate",
 ):
     assert token in doc, f"missing PR107 Slice 1 documentation: {token}"
 
