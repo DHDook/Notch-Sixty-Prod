@@ -27,7 +27,8 @@ final class SpeakerOptimizerPEQDeploymentTests: XCTestCase {
             bassManagementConfiguration:
                 BassManagementConfiguration(enabled: false)
         )
-        XCTAssertTrue(N60LiveNChannelRenderGraphIsValid(&unsafeMutable(graph)))
+        var validatedGraph = graph
+        XCTAssertTrue(N60LiveNChannelRenderGraphIsValid(&validatedGraph))
         XCTAssertEqual(
             laneEQCount(graph: graph, channel: 0),
             2,
@@ -203,7 +204,4 @@ final class SpeakerOptimizerPEQDeploymentTests: XCTestCase {
         }
     }
 
-    private func unsafeMutable<T>(_ value: T) -> T {
-        value
-    }
 }

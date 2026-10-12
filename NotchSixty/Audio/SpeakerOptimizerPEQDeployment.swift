@@ -63,12 +63,6 @@ struct SpeakerOptimizerPEQDeploymentConfiguration: Codable, Equatable, Sendable 
                 $0 != .lowFrequencyEffects
             }
         )
-        let calibrationByRole = Dictionary(
-            uniqueKeysWithValues: profile.speakerAssignments.map {
-                ($0.role, $0.calibration)
-            }
-        )
-
         for source in sources {
             guard allowedRoles.contains(source.role),
                   !source.bands.isEmpty,
@@ -78,8 +72,9 @@ struct SpeakerOptimizerPEQDeploymentConfiguration: Codable, Equatable, Sendable 
             for band in source.bands {
                 try band.validate(sampleRate: sampleRate)
             }
-            let ordinaryCount =
-                calibrationByRole[source.role]??.eqBands.count ?? 0
+            let ordinaryCount = profile.speakerAssignments
+                .first(where: { $0.role == source.role })?
+                .calibration?.eqBands.count ?? 0
             guard ordinaryCount + source.bands.count
                     <= Int(N60_PROGRAM_LANE_MAX_EQ_SECTIONS) else {
                 throw SpeakerOptimizerPEQDeploymentError
