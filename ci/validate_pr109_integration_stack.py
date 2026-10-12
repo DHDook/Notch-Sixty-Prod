@@ -11,10 +11,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "ci/pr109_stack_manifest.json"
-ALLOWED_SLICE_ONE_FILES = frozenset({
+ALLOWED_REMOTE_INTEGRATION_FILES = frozenset({
     "ci/pr109_stack_manifest.json",
     "ci/validate_pr109_integration_stack.py",
     "ci/tests/test_pr109_integration_stack.py",
+    "ci/validate_pr105_speaker_characterization.py",
+    "ci/validate_pr109_cross_feature_contracts.py",
+    "ci/tests/test_pr109_cross_feature_contracts.py",
     ".github/workflows/pr109-integration-stack.yml",
     "docs/PR109_INTEGRATION_STACK_CONSOLIDATION.md",
     "docs/ROADMAP.md",
@@ -91,9 +94,9 @@ def audit_checkout(data: dict) -> dict:
         require(older != newer, f"identical {older_label}/{newer_label} checkpoints")
     source = milestones[-1]["headCommit"]
     changed = set(git("diff", "--name-only", source, "HEAD").splitlines())
-    unexpected = changed - ALLOWED_SLICE_ONE_FILES
+    unexpected = changed - ALLOWED_REMOTE_INTEGRATION_FILES
     require(not unexpected,
-            "PR109 Slice 1 must not change app/DSP/runtime/safety code: "
+            "PR109 remote integration audit must not change app/DSP/runtime/safety code: "
             + ", ".join(sorted(unexpected)))
     require("ci/validate_pr109_integration_stack.py" in changed,
             "PR109 validator must be committed on PR109")
