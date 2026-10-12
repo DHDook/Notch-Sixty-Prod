@@ -1,6 +1,6 @@
 # PR108 — Coherent Physical Subwoofer Timing & Polarity Optimization
 
-Status: **IN PROGRESS — SLICES 1–4 THROUGH FRESH COHERENT VERIFICATION**
+Status: **IN PROGRESS — SLICES 1–5 THROUGH VERIFIED PERSISTENT PROVENANCE**
 
 Base: PR107 Speaker Optimizer FIR Deployment & Latency Coordination.
 
@@ -195,14 +195,47 @@ It re-runs the PR106 coherent analyzer and checks two independent outcomes:
 Rejected verification sets `shouldRollback == true`. Modeled proposal quality
 cannot satisfy this gate.
 
+## Slice 5 — Persistent provisional/verified provenance + finalization
+
+Implemented in CoherentSubwooferAlignmentDeployment.swift and the existing Apply
+transaction.
+
+PR108 now persists its own optional Output Device Profile provenance record
+rather than overwriting the ordinary MultichannelCalibrationDeploymentSummary.
+
+At provisional Apply the record stores:
+
+- Apply/proposal/Playback System identities;
+- route, sample rate, crossover and physical Sub identity;
+- evidence and candidate fingerprints;
+- the signed relative adjustment and its physical materialization;
+- exact post-Apply delay for every non-LFE speaker;
+- exact target Sub delay and polarity; and
+- no verification marker yet.
+
+Output Device Profile validation proves the provenance still matches the actual
+speaker/Sub calibration. If those live delay/polarity values are edited later,
+the stale PR108 record becomes invalid rather than silently claiming ownership
+of different settings.
+
+Accepted Slice 4 evidence can then be finalized into a verification record with
+the fresh Lab session ID, evidence confidence, worst phase/magnitude tracking,
+and measured before/after coherence. The verified write is engine-idle,
+state-drift guarded, and exact-state checked.
+
+Rollback remains possible from either provisional or verified state: the
+rollback checker normalizes away only the verification marker before proving the
+state is otherwise the exact Apply state.
+
+The persisted field is optional, so older Output Device Profiles with no PR108
+key continue to decode with no alignment provenance.
+
 ## Planned follow-on slices
 
-1. Persistent provisional/verified PR108 provenance record and verification
-   finalization.
-2. Multi-sub coordination — solve all physical Sub relative delays together
+1. Multi-sub coordination — solve all physical Sub relative delays together
    without accumulating incompatible common speaker delay.
-3. Guided production workflow/UI — capture, review, Apply, verify, rollback.
-4. Physical commissioning handoff — real DAC/ADC/subwoofer timing, crossover
+2. Guided production workflow/UI — capture, review, Apply, verify, rollback.
+3. Physical commissioning handoff — real DAC/ADC/subwoofer timing, crossover
    summation, restart/rollback and subjective bass integration.
 
 ## Slice 1 validation
@@ -236,3 +269,11 @@ CoherentSubwooferAlignmentPostApplyVerificationTests uses complete synthetic
 PR106 Measurement Lab sessions to verify accepted measured timing correction,
 rejection when the acoustic phase does not follow Apply, mandatory post-Apply
 capture timestamps, baseline-evidence binding and current-state drift rejection.
+
+
+## Slice 5 validation
+
+The retained Apply/verification tests now also cover provisional record identity,
+verified finalization, rollback from verified state, stale-provenance rejection
+after manual calibration drift, and backward-compatible decoding of profiles
+that predate the optional PR108 field.
