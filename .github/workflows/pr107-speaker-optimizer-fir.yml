@@ -31,6 +31,13 @@ jobs:
             ci/validate_pr107_program_fir_runtime.c \
             -lm -o /tmp/pr107-program-fir
           /tmp/pr107-program-fir
+      - name: Run PR107 live FIR render integration
+        run: |
+          clang -std=c11 -O2 -Wall -Wextra -Werror \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr107_live_fir_render.c \
+            -lm -o /tmp/pr107-live-fir-render
+          /tmp/pr107-live-fir-render
 
   macos:
     runs-on: xcode-27
@@ -49,6 +56,13 @@ jobs:
             ci/validate_pr107_program_fir_runtime.c \
             -lm -o /tmp/pr107-program-fir
           /tmp/pr107-program-fir
+      - name: Run PR107 live FIR render integration on Apple clang
+        run: |
+          clang -std=c11 -O2 -Wall -Wextra -Werror \
+            -INotchSixty/Audio/Realtime \
+            ci/validate_pr107_live_fir_render.c \
+            -lm -o /tmp/pr107-live-fir-render
+          /tmp/pr107-live-fir-render
       - name: Build arm64 Debug app
         run: >-
           xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
