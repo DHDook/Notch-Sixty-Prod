@@ -9,6 +9,51 @@ enum CoherentMultiSubwooferAlignmentDeploymentError:
     }
 }
 
+struct CoherentMultiSubwooferAlignmentVerificationRecord:
+    Codable, Equatable, Sendable {
+    static let currentSchemaVersion = 1
+
+    var schemaVersion: Int = currentSchemaVersion
+    var applyReceiptID: UUID
+    var verificationSessionID: UUID
+    var verifiedAt: Date
+    var evidenceConfidence: Double
+    var sourceCount: Int
+    var worstPhaseTrackingRMSRadians: Double
+    var worstMagnitudeTrackingRMSDB: Double
+    var coherenceBeforeDB: Double
+    var coherenceAfterDB: Double
+    var measuredImprovementDB: Double
+
+    func validate(
+        deployment:
+            CoherentMultiSubwooferAlignmentDeploymentRecord
+    ) -> Bool {
+        schemaVersion == Self.currentSchemaVersion
+            && applyReceiptID == deployment.applyReceiptID
+            && verifiedAt >= deployment.appliedAt
+            && evidenceConfidence.isFinite
+            && (0...1).contains(evidenceConfidence)
+            && sourceCount
+                == deployment.mainRoles.count
+                    * deployment.subwoofers.count
+            && sourceCount >= 2
+            && worstPhaseTrackingRMSRadians.isFinite
+            && worstPhaseTrackingRMSRadians >= 0
+            && worstMagnitudeTrackingRMSDB.isFinite
+            && worstMagnitudeTrackingRMSDB >= 0
+            && coherenceBeforeDB.isFinite
+            && coherenceAfterDB.isFinite
+            && coherenceAfterDB <= 1.0e-6
+            && measuredImprovementDB.isFinite
+            && measuredImprovementDB >= 0
+            && abs(
+                (coherenceAfterDB - coherenceBeforeDB)
+                    - measuredImprovementDB
+            ) <= 1.0e-6
+    }
+}
+
 struct CoherentMultiSubwooferAlignmentSubDeploymentRecord:
     Codable, Equatable, Sendable {
     var subwooferIndex: UInt32
@@ -44,9 +89,11 @@ struct CoherentMultiSubwooferAlignmentDeploymentRecord:
         [CoherentSubwooferAlignmentSpeakerDelayRecord]
     var subwoofers:
         [CoherentMultiSubwooferAlignmentSubDeploymentRecord]
+    var verification:
+        CoherentMultiSubwooferAlignmentVerificationRecord? = nil
 
-    var provisional: Bool { true }
-    var verified: Bool { false }
+    var provisional: Bool { verification == nil }
+    var verified: Bool { verification != nil }
 
     func validate(
         profile: OutputDeviceProfileConfiguration
@@ -162,6 +209,9 @@ struct CoherentMultiSubwooferAlignmentDeploymentRecord:
                         .expectedSubwooferPolarityInverted else {
                 return false
             }
+        }
+        if let verification {
+            return verification.validate(deployment: self)
         }
         return true
     }
