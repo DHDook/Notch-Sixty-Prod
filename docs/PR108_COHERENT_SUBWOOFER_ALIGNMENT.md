@@ -1,6 +1,6 @@
 # PR108 — Coherent Physical Subwoofer Timing & Polarity Optimization
 
-Status: **IN PROGRESS — SLICES 1–7 THROUGH COORDINATED MULTI-SUB COMMISSIONING**
+Status: **IN PROGRESS — SLICES 1–8 THROUGH ATOMIC COORDINATED MULTI-SUB APPLY**
 
 Base: PR107 Speaker Optimizer FIR Deployment & Latency Coordination.
 
@@ -293,16 +293,41 @@ Evidence-group order does not change the fingerprint, but changing any measured
 phase/magnitude/arrival data does. Existing single-Sub PR108 provenance blocks
 multi-Sub commissioning so ownership cannot overlap silently.
 
-Approval is explicit and fingerprint-bound. Slice 7 remains commissioning-only:
-canApply and canDeploy are false until the dedicated coordinated transaction
-exists.
+Approval is explicit and fingerprint-bound. With Slice 8 present, the raw
+multi-Sub candidate remains preview-only while the exact commissioned proposal
+is Apply-capable.
+
+## Slice 8 — Atomic coordinated multi-Sub Apply + provenance
+
+Implemented in CoherentMultiSubwooferAlignmentApplyTransaction.swift and
+CoherentMultiSubwooferAlignmentDeployment.swift.
+
+The transaction requires DSP idle, exact Playback System snapshot equality,
+unchanged bass-management crossover, explicit fingerprint-bound approval, and
+no existing single- or multi-Sub PR108 provenance.
+
+Apply materializes the coordinated solution in one Output Device Profile write:
+
+- the shared non-LFE speaker delay is added exactly once;
+- every physical Sub receives its own nonnegative delay addition;
+- each Sub receives its own resulting polarity; and
+- speaker trim/EQ/polarity, Sub gain/EQ, crossover, Room Correction, Speaker
+  Optimizer, and unrelated Playback System state remain unchanged.
+
+A separate optional coherentMultiSubwooferAlignment provenance record persists
+the exact common speaker delay, each Sub's signed optimum/materialized delay,
+expected final speaker delays, and every expected final Sub delay/polarity.
+It is mutually exclusive with the single-Sub coherentSubwooferAlignment record.
+
+The write is exact-state checked. Rollback restores the immutable commissioning
+snapshot and refuses to overwrite unrelated post-Apply edits. The Apply receipt
+remains provisional and requires fresh measured coordinated verification.
 
 ## Planned follow-on slices
 
-1. Coordinated multi-Sub transactional Apply/rollback + persistent provenance.
-2. Coordinated fresh coherent verification/finalization.
-3. Guided production workflow/UI — capture, review, Apply, verify, rollback.
-4. Physical commissioning handoff — real DAC/ADC/subwoofer timing, crossover
+1. Coordinated fresh coherent verification + persistent verified finalization.
+2. Guided production workflow/UI — capture, review, Apply, verify, rollback.
+3. Physical commissioning handoff — real DAC/ADC/subwoofer timing, crossover
    summation, restart/rollback and subjective bass integration.
 
 ## Slice 1 validation
@@ -359,3 +384,12 @@ CoherentMultiSubwooferAlignmentCommissioningTests verifies atomic Playback Syste
 snapshot binding, evidence-set order independence, candidate regeneration,
 measurement-drift fingerprinting, and mandatory explicit fingerprint-bound
 approval.
+
+
+## Slice 8 validation
+
+CoherentMultiSubwooferAlignmentApplyTransactionTests verifies one-time shared
+speaker-delay materialization, simultaneous per-Sub delay/polarity application,
+preservation of existing gain/EQ, provisional provenance identity, exact
+rollback, engine-idle/current-snapshot gates, stale approval rejection, and
+rollback state-drift protection.
