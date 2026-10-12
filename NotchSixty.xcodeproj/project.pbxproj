@@ -212,6 +212,7 @@
 		F10700000000000000000006 /* SpeakerOptimizerFIRAVSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10700000000000000000016 /* SpeakerOptimizerFIRAVSyncTests.swift */; };
 		F10700000000000000000007 /* SpeakerOptimizerFIRPostApplyVerification.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10700000000000000000017 /* SpeakerOptimizerFIRPostApplyVerification.swift */; };
 		F10700000000000000000008 /* SpeakerOptimizerFIRPostApplyVerificationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10700000000000000000018 /* SpeakerOptimizerFIRPostApplyVerificationTests.swift */; };
+		F10700000000000000000009 /* SpeakerOptimizerGuidedFIRWorkflowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10700000000000000000019 /* SpeakerOptimizerGuidedFIRWorkflowTests.swift */; };
 		F1050000000000000000000F /* SpeakerOptimizerPEQApplyTransaction.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1050000000000000000001F /* SpeakerOptimizerPEQApplyTransaction.swift */; };
 		F10500000000000000000010 /* SpeakerOptimizerPEQApplyTransactionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10500000000000000000020 /* SpeakerOptimizerPEQApplyTransactionTests.swift */; };
 		F10590000000000000000001 /* SpeakerOptimizerPostApplyVerification.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10590000000000000000011 /* SpeakerOptimizerPostApplyVerification.swift */; };
@@ -489,6 +490,7 @@
 		F10700000000000000000016 /* SpeakerOptimizerFIRAVSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerOptimizerFIRAVSyncTests.swift; sourceTree = "<group>"; };
 		F10700000000000000000017 /* SpeakerOptimizerFIRPostApplyVerification.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerOptimizerFIRPostApplyVerification.swift; sourceTree = "<group>"; };
 		F10700000000000000000018 /* SpeakerOptimizerFIRPostApplyVerificationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerOptimizerFIRPostApplyVerificationTests.swift; sourceTree = "<group>"; };
+		F10700000000000000000019 /* SpeakerOptimizerGuidedFIRWorkflowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerOptimizerGuidedFIRWorkflowTests.swift; sourceTree = "<group>"; };
 		F1050000000000000000001F /* SpeakerOptimizerPEQApplyTransaction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerOptimizerPEQApplyTransaction.swift; sourceTree = "<group>"; };
 		F10500000000000000000020 /* SpeakerOptimizerPEQApplyTransactionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerOptimizerPEQApplyTransactionTests.swift; sourceTree = "<group>"; };
 		F10590000000000000000011 /* SpeakerOptimizerPostApplyVerification.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerOptimizerPostApplyVerification.swift; sourceTree = "<group>"; };
@@ -648,6 +650,7 @@
 				F10700000000000000000014 /* SpeakerOptimizerFIRApplyTransactionTests.swift */,
 				F10700000000000000000016 /* SpeakerOptimizerFIRAVSyncTests.swift */,
 				F10700000000000000000018 /* SpeakerOptimizerFIRPostApplyVerificationTests.swift */,
+				F10700000000000000000019 /* SpeakerOptimizerGuidedFIRWorkflowTests.swift */,
 				F10500000000000000000020 /* SpeakerOptimizerPEQApplyTransactionTests.swift */,
 				F10590000000000000000012 /* SpeakerOptimizerPostApplyVerificationTests.swift */,
 				F105A0000000000000000012 /* SpeakerOptimizerGuidedWorkflowTests.swift */,
@@ -1116,6 +1119,7 @@
 				F10700000000000000000004 /* SpeakerOptimizerFIRApplyTransactionTests.swift in Sources */,
 				F10700000000000000000006 /* SpeakerOptimizerFIRAVSyncTests.swift in Sources */,
 				F10700000000000000000008 /* SpeakerOptimizerFIRPostApplyVerificationTests.swift in Sources */,
+				F10700000000000000000009 /* SpeakerOptimizerGuidedFIRWorkflowTests.swift in Sources */,
 				F10500000000000000000010 /* SpeakerOptimizerPEQApplyTransactionTests.swift in Sources */,
 				F10590000000000000000002 /* SpeakerOptimizerPostApplyVerificationTests.swift in Sources */,
 				F105A0000000000000000002 /* SpeakerOptimizerGuidedWorkflowTests.swift in Sources */,
