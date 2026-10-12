@@ -189,6 +189,67 @@ final class CoherentSubwooferAlignmentApplyTransactionTests:
         XCTAssertEqual(store.replaceCount, 0)
     }
 
+    func testProvenanceInvalidatesIfLiveCalibrationDrifts()
+        throws {
+        let fixture = try makeFixture(arrivalMilliseconds: 3)
+        let store = PR108FakeProfileStore(profile: fixture.profile)
+        let receipt =
+            try CoherentSubwooferAlignmentApplyTransaction()
+                .apply(
+                    profileStore: store,
+                    proposal: fixture.proposal,
+                    approval: fixture.approval
+                )
+
+        var output = try XCTUnwrap(
+            receipt.expectedAppliedState.outputDeviceProfile
+        )
+        var sub = try XCTUnwrap(
+            output.subwooferAssignments[0].calibration
+        )
+        sub.delayMilliseconds += 1
+        output.subwooferAssignments[0].calibration = sub
+
+        XCTAssertThrowsError(
+            try output.validateStructure(
+                bassManagementEnabled: true
+            )
+        ) {
+            XCTAssertEqual(
+                $0 as?
+                    CoherentSubwooferAlignmentDeploymentError,
+                .invalidRecord
+            )
+        }
+    }
+
+    func testLegacyOutputProfileWithoutPR108ProvenanceDecodes()
+        throws {
+        let output = try XCTUnwrap(
+            makeProfile().state.outputDeviceProfile
+        )
+        let encoded = try JSONEncoder().encode(output)
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded)
+                as? [String: Any]
+        )
+        object.removeValue(
+            forKey: "coherentSubwooferAlignment"
+        )
+        let legacy = try JSONSerialization.data(
+            withJSONObject: object
+        )
+        let decoded = try JSONDecoder().decode(
+            OutputDeviceProfileConfiguration.self,
+            from: legacy
+        )
+        XCTAssertNil(decoded.coherentSubwooferAlignment)
+        XCTAssertEqual(
+            decoded.multichannelCalibrationRoutingSignature,
+            output.multichannelCalibrationRoutingSignature
+        )
+    }
+
     func testStaleApprovalAndPostApplyStateDriftFailClosed()
         throws {
         let fixture = try makeFixture(arrivalMilliseconds: 3)
