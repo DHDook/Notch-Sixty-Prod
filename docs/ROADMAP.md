@@ -16,6 +16,38 @@ Legacy parity is the minimum capability floor. The commercial rewrite should exc
 
 Future portability must not materially delay the flagship Mac launch.
 
+## Current execution status — PR109
+
+**Roadmap PR109 — Integration & Stack Consolidation** has begun on a draft,
+stacked feature branch above remote-software-complete PR108. The first PR109
+slice records pinned PR99–108 milestone ancestry and runs read-only cumulative
+source/CI verification. It does **not** merge or close any existing PR or modify
+`main`, audio processing or physical hardware.
+
+The owner is away from the Mac. All PR101–108 physical/acoustic acceptance,
+real-device safety, production Apple signing, TestFlight/App Review, and public
+release authorization remain pending. Remote CI must not elevate simulated
+acceptance to hardware or release acceptance. The stack stays open and draft
+until the owner elects to review/merge it after the appropriate physical tests.
+
+Next provisional feature/release milestones agreed after PR108:
+
+- **PR109 — Integration & Stack Consolidation** (now in progress remotely);
+- **PR110 — Advanced Speaker & Subwoofer Placement Optimizer** (planned);
+- **PR111 — Automatic Per-Driver Speaker Optimization** (planned);
+- **PR112 — Physical Hardware & Acoustic Acceptance** (requires the Mac);
+- **PR113 — Production UX & Workflow Polish** (planned);
+- **PR114 — Commercial Release Candidate** (requires release credentials).
+
+The latest implementation and exact acceptance scope are in
+`docs/PR109_INTEGRATION_STACK_CONSOLIDATION.md`.
+Historical milestone status sections below are preserved as immutable audit
+context, not a statement that PR108 is still current. The historical PR102
+checkpoint label was `Current execution status — PR102`; PR102 was remotely
+completed, not hardware- or release-approved.
+
+---
+
 ## Current execution status — PR108
 
 The historical parity/rewrite stages below are retained as project history.

@@ -190,12 +190,31 @@ for token in (
 
 for token in (
     "testPEQProposalCapturesRollbackStateAndUsesSeparateOptimizerStage",
-    "testFIRProposalFailsClosedBecauseNoDedicatedPerSpeakerFIRStageExists",
     "testExplicitApprovalIsBoundToExactCandidateAndBuildsDedicatedPEQConfiguration",
     "testApprovalCannotBeReusedAfterCandidateChanges",
     "testProfileOrClassificationIdentityDriftFailsClosed",
 ):
     assert token in commission_tests, f"missing commissioning contract test: {token}"
+
+# PR107 intentionally introduced the dedicated speaker FIR stage after PR105.
+# Preserve the original PR105 fail-closed claim for unsuitable candidates,
+# while also requiring the new positive authorization test. Historical PR105
+# commits can still validate their original blocked-stage contract.
+legacy_fir_blocked = (
+    "testFIRProposalFailsClosedBecauseNoDedicatedPerSpeakerFIRStageExists"
+    in commission_tests
+)
+dedicated_fir_integrated = (
+    "testFIRProposalFailsClosedWhenCandidateIsNotRepresentable"
+    in commission_tests
+    and "testRepresentableFIRProposalCanApplyAndBuildsDedicatedConfiguration"
+    in commission_tests
+    and "availableDedicatedSpeakerOptimizerFIRStage" in commission_source
+    and "blockedFIRCandidateNotRepresentable" in commission_source
+)
+assert legacy_fir_blocked or dedicated_fir_integrated, (
+    "missing original PR105 FIR blocking or PR107 bounded FIR replacement contract"
+)
 
 for token in (
     "struct SpeakerOptimizerPEQVerificationRecord",
