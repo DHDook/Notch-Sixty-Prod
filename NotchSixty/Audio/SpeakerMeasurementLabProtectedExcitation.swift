@@ -228,3 +228,303 @@ struct SpeakerMeasurementLabProtectedExcitationCompiler: Sendable {
         }
     }
 }
+
+
+// MARK: - Slice 8B protected physical-route binding
+
+struct SpeakerMeasurementLabProtectedDriverRouteBinding:
+    Equatable, Sendable {
+    var targetBus: SpeakerOutputBus
+    var physicalDestination: PhysicalOutputEndpoint
+    var physicalOutputChannelIndex: UInt32
+    /// Carrier used only to let the existing targeted Core Audio transport
+    /// recreate the exact device/aggregate topology. It does NOT determine
+    /// excitation filtering; the pre-rendered protected waveform does.
+    var carrierRoutePlan: LiveNChannelOutputRoutePlan
+    var routingConfiguration: MultiOutputRoutingConfiguration
+    var bassManagementConfiguration: BassManagementConfiguration
+    var targetDriverConfiguration:
+        SpeakerDriverBusProcessingConfiguration
+
+    func matchesCurrentState(
+        routing: MultiOutputRoutingConfiguration?,
+        bassManagement: BassManagementConfiguration,
+        driverProcessing: SpeakerDriverProcessingConfiguration?
+    ) -> Bool {
+        guard routing == routingConfiguration,
+              bassManagement == bassManagementConfiguration,
+              let driverProcessing else {
+            return false
+        }
+        return driverProcessing.configuration(for: targetBus)
+            == targetDriverConfiguration
+    }
+}
+
+struct SpeakerMeasurementLabProtectedDriverCaptureProvenance:
+    Codable, Equatable, Sendable {
+    var targetBus: SpeakerOutputBus
+    var physicalDestination: PhysicalOutputEndpoint
+    var routingConfiguration: MultiOutputRoutingConfiguration
+    var bassManagementConfiguration: BassManagementConfiguration
+    var targetDriverConfiguration:
+        SpeakerDriverBusProcessingConfiguration
+    var inputPeakDBFS: Double
+    var renderedPeakDBFS: Double
+    var sourceFrameCount: Int
+    var renderedFrameCount: Int
+
+    var crossoverPreserved: Bool { true }
+    var limiterPreserved: Bool {
+        targetDriverConfiguration.enabled
+            && targetDriverConfiguration.limiterEnabled
+    }
+}
+
+enum SpeakerMeasurementLabProtectedDriverRouteError:
+    Error, Equatable, LocalizedError {
+    case invalidTargetBus
+    case routingRequired
+    case targetRouteMissing
+    case targetRouteAmbiguous
+    case physicalCrossoverRequired
+    case targetUnsupportedByCrossover
+    case targetLimiterRequired
+    case invalidPhysicalRoute
+    case insufficientCarrierRoutes
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidTargetBus:
+            return "Protected measurement supports only split Low/Mid/High driver buses."
+        case .routingRequired:
+            return "Protected-driver measurement requires enabled physical multi-output routing."
+        case .targetRouteMissing:
+            return "The protected driver bus does not have an enabled physical output route."
+        case .targetRouteAmbiguous:
+            return "The protected driver bus is routed more than once; measurement requires one exact physical destination."
+        case .physicalCrossoverRequired:
+            return "Protected-driver measurement requires an enabled Bi-Amp or Tri-Amp physical crossover."
+        case .targetUnsupportedByCrossover:
+            return "The active physical crossover does not produce the requested protected driver bus."
+        case .targetLimiterRequired:
+            return "The requested driver path must be enabled and limiter-protected immediately before measurement."
+        case .invalidPhysicalRoute:
+            return "The current physical output routing cannot be compiled safely for protected measurement."
+        case .insufficientCarrierRoutes:
+            return "Protected measurement requires at least two valid routed physical channels to construct the measurement carrier topology."
+        }
+    }
+}
+
+struct SpeakerMeasurementLabProtectedDriverRoutePlanner: Sendable {
+    func plan(
+        targetBus: SpeakerOutputBus,
+        routing: MultiOutputRoutingConfiguration?,
+        bassManagement: BassManagementConfiguration,
+        driverProcessing: SpeakerDriverProcessingConfiguration?,
+        availableOutputs: [AudioOutputDevice],
+        sampleRate: Double,
+        selectedOutputUID: String
+    ) throws -> SpeakerMeasurementLabProtectedDriverRouteBinding {
+        guard Self.isProtectedSplitBus(targetBus) else {
+            throw SpeakerMeasurementLabProtectedDriverRouteError
+                .invalidTargetBus
+        }
+        guard let routing, routing.enabled else {
+            throw SpeakerMeasurementLabProtectedDriverRouteError
+                .routingRequired
+        }
+        let matching = routing.enabledRoutes.filter {
+            $0.bus == targetBus
+        }
+        guard !matching.isEmpty else {
+            throw SpeakerMeasurementLabProtectedDriverRouteError
+                .targetRouteMissing
+        }
+        guard matching.count == 1, let targetRoute = matching.first else {
+            throw SpeakerMeasurementLabProtectedDriverRouteError
+                .targetRouteAmbiguous
+        }
+        guard bassManagement.enabled,
+              let crossoverMode = bassManagement.physicalOutputMode,
+              crossoverMode == .biAmp || crossoverMode == .triAmp else {
+            throw SpeakerMeasurementLabProtectedDriverRouteError
+                .physicalCrossoverRequired
+        }
+        guard crossoverMode.supports(bus: targetBus) else {
+            throw SpeakerMeasurementLabProtectedDriverRouteError
+                .targetUnsupportedByCrossover
+        }
+        guard let driverProcessing else {
+            throw SpeakerMeasurementLabProtectedDriverRouteError
+                .targetLimiterRequired
+        }
+        let targetDriver = driverProcessing.configuration(for: targetBus)
+        guard targetDriver.enabled, targetDriver.limiterEnabled else {
+            throw SpeakerMeasurementLabProtectedDriverRouteError
+                .targetLimiterRequired
+        }
+
+        do {
+            try routing.validate(
+                availableDevices: availableOutputs,
+                sampleRate: sampleRate
+            )
+
+            let orderedUIDs: [String]
+            let referenceUID: String
+            let physicalChannelCount: UInt32
+            let routeChannels: [UInt32]
+            let targetPhysical: UInt32
+
+            if routing.usesMultiplePhysicalDevices {
+                let aggregate = try routing.makeAggregateDevicePlan(
+                    availableDevices: availableOutputs,
+                    sampleRate: sampleRate
+                )
+                try aggregate.validateForC4LiveTransport(
+                    selectedOutputUID: selectedOutputUID,
+                    crossoverMode: crossoverMode
+                )
+                orderedUIDs = aggregate.orderedDeviceUIDs
+                referenceUID = aggregate.referenceDeviceUID
+                physicalChannelCount = aggregate.physicalChannelCount
+                routeChannels = aggregate.mappedRoutes.map(
+                    \.aggregateChannelIndex
+                )
+                guard let mapped = aggregate.mappedRoutes.first(
+                    where: { $0.route.id == targetRoute.id }
+                ) else {
+                    throw SpeakerMeasurementLabProtectedDriverRouteError
+                        .invalidPhysicalRoute
+                }
+                targetPhysical = mapped.aggregateChannelIndex
+            } else {
+                let same = try routing.makeSameDevicePlan(
+                    availableDevices: availableOutputs,
+                    sampleRate: sampleRate
+                )
+                try same.validateForC4LiveTransport(
+                    selectedOutputUID: selectedOutputUID,
+                    crossoverMode: crossoverMode
+                )
+                orderedUIDs = [same.deviceUID]
+                referenceUID = same.deviceUID
+                physicalChannelCount = same.physicalChannelCount
+                routeChannels = same.routes.map(
+                    \.destination.channelIndex
+                )
+                targetPhysical = targetRoute.destination.channelIndex
+            }
+
+            let uniqueCarrierChannels = routeChannels.reduce(
+                into: [UInt32]()
+            ) { result, channel in
+                if !result.contains(channel) {
+                    result.append(channel)
+                }
+            }
+            guard uniqueCarrierChannels.count >= 2 else {
+                throw SpeakerMeasurementLabProtectedDriverRouteError
+                    .insufficientCarrierRoutes
+            }
+
+            let carrier = LiveNChannelOutputRoutePlan(
+                programLayout: .stereo,
+                orderedDeviceUIDs: orderedUIDs,
+                referenceDeviceUID: referenceUID,
+                physicalChannelCount: physicalChannelCount,
+                programPhysicalChannels:
+                    Array(uniqueCarrierChannels.prefix(2)),
+                subwooferPhysicalChannels: [],
+                subwooferCount: 0,
+                bassManagementEnabled: false,
+                speakerCalibrations: [:],
+                subwooferCalibrations: [],
+                speakerOptimizerPEQ: [:]
+            )
+            _ = try carrier.makeRealtimeOutputMap()
+            guard targetPhysical < physicalChannelCount else {
+                throw SpeakerMeasurementLabProtectedDriverRouteError
+                    .invalidPhysicalRoute
+            }
+
+            return SpeakerMeasurementLabProtectedDriverRouteBinding(
+                targetBus: targetBus,
+                physicalDestination: targetRoute.destination,
+                physicalOutputChannelIndex: targetPhysical,
+                carrierRoutePlan: carrier,
+                routingConfiguration: routing,
+                bassManagementConfiguration: bassManagement,
+                targetDriverConfiguration: targetDriver
+            )
+        } catch let error as SpeakerMeasurementLabProtectedDriverRouteError {
+            throw error
+        } catch {
+            throw SpeakerMeasurementLabProtectedDriverRouteError
+                .invalidPhysicalRoute
+        }
+    }
+
+    static func isProtectedSplitBus(
+        _ bus: SpeakerOutputBus
+    ) -> Bool {
+        switch bus {
+        case .leftLow, .rightLow,
+             .leftMid, .rightMid,
+             .leftHigh, .rightHigh:
+            return true
+        case .leftFullRange, .rightFullRange, .subMono:
+            return false
+        }
+    }
+}
+
+extension SpeakerMeasurementLabProtectedExcitation {
+    func makeCaptureProvenance(
+        binding: SpeakerMeasurementLabProtectedDriverRouteBinding
+    ) throws -> SpeakerMeasurementLabProtectedDriverCaptureProvenance {
+        guard binding.targetBus == targetBus,
+              binding.bassManagementConfiguration
+                == bassManagementConfiguration,
+              binding.targetDriverConfiguration
+                == targetDriverConfiguration else {
+            throw SpeakerMeasurementLabProtectedDriverRouteError
+                .invalidPhysicalRoute
+        }
+        return SpeakerMeasurementLabProtectedDriverCaptureProvenance(
+            targetBus: targetBus,
+            physicalDestination: binding.physicalDestination,
+            routingConfiguration: binding.routingConfiguration,
+            bassManagementConfiguration: bassManagementConfiguration,
+            targetDriverConfiguration: targetDriverConfiguration,
+            inputPeakDBFS: inputPeakDBFS,
+            renderedPeakDBFS: renderedPeakDBFS,
+            sourceFrameCount: sourceFrameCount,
+            renderedFrameCount: renderedSamples.count
+        )
+    }
+
+    /// Keep the ORIGINAL upstream ESS as the deconvolution reference but extend
+    /// its capture tail by exactly the protected renderer's flush frames.
+    /// Therefore the measured transfer includes crossover + driver protection
+    /// rather than mathematically dividing those stages away.
+    func makeAnalysisProgram(
+        from sourceProgram: RoomCorrectionSweepProgram
+    ) throws -> RoomCorrectionSweepProgram {
+        guard sourceProgram.sweepSamples.count == sourceFrameCount,
+              abs(sourceProgram.sampleRate - sampleRate) < 0.5,
+              renderedSamples.count >= sourceFrameCount else {
+            throw SpeakerMeasurementLabProtectedExcitationError
+                .invalidExcitation
+        }
+        let extraFrames = renderedSamples.count - sourceFrameCount
+        guard sourceProgram.tailFrames <= Int.max - extraFrames else {
+            throw RoomCorrectionSweepGenerationError.frameCountOverflow
+        }
+        var result = sourceProgram
+        result.tailFrames += extraFrames
+        return result
+    }
+}

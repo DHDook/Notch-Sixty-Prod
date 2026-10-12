@@ -252,6 +252,223 @@ final class SpeakerMeasurementLabProtectedExcitationTests:
         )
     }
 
+
+    func testProtectedRouteBindingRequiresExactBusCrossoverAndLimiter()
+        throws {
+        let routing = sameDeviceRouting()
+        let outputs = [
+            AudioOutputDevice(
+                deviceID: 1,
+                uid: "protected-device",
+                name: "Protected Device",
+                nominalSampleRate: sampleRate,
+                availableSampleRateRanges: [
+                    AudioSampleRateRange(
+                        minimum: sampleRate,
+                        maximum: sampleRate
+                    )
+                ],
+                outputChannelCount: 2
+            )
+        ]
+        let binding = try
+            SpeakerMeasurementLabProtectedDriverRoutePlanner()
+                .plan(
+                    targetBus: .leftHigh,
+                    routing: routing,
+                    bassManagement: biAmpCrossover(),
+                    driverProcessing:
+                        protectedDriver(bus: .leftHigh),
+                    availableOutputs: outputs,
+                    sampleRate: sampleRate,
+                    selectedOutputUID: "protected-device"
+                )
+        XCTAssertEqual(binding.physicalOutputChannelIndex, 1)
+        XCTAssertEqual(
+            binding.physicalDestination,
+            PhysicalOutputEndpoint(
+                deviceUID: "protected-device",
+                channelIndex: 1
+            )
+        )
+        XCTAssertTrue(
+            binding.matchesCurrentState(
+                routing: routing,
+                bassManagement: biAmpCrossover(),
+                driverProcessing:
+                    protectedDriver(bus: .leftHigh)
+            )
+        )
+
+        var unprotected = SpeakerDriverProcessingConfiguration()
+        unprotected.replace(
+            SpeakerDriverBusProcessingConfiguration(
+                bus: .leftHigh,
+                limiterEnabled: false
+            )
+        )
+        XCTAssertThrowsError(
+            try SpeakerMeasurementLabProtectedDriverRoutePlanner()
+                .plan(
+                    targetBus: .leftHigh,
+                    routing: routing,
+                    bassManagement: biAmpCrossover(),
+                    driverProcessing: unprotected,
+                    availableOutputs: outputs,
+                    sampleRate: sampleRate,
+                    selectedOutputUID: "protected-device"
+                )
+        ) {
+            XCTAssertEqual(
+                $0 as?
+                    SpeakerMeasurementLabProtectedDriverRouteError,
+                .targetLimiterRequired
+            )
+        }
+    }
+
+    func testProtectedRouteBindingRejectsMissingOrAmbiguousTargetRoute()
+        throws {
+        let outputs = [
+            AudioOutputDevice(
+                deviceID: 1,
+                uid: "protected-device",
+                name: "Protected Device",
+                nominalSampleRate: sampleRate,
+                availableSampleRateRanges: [
+                    AudioSampleRateRange(
+                        minimum: sampleRate,
+                        maximum: sampleRate
+                    )
+                ],
+                outputChannelCount: 4
+            )
+        ]
+        var missing = sameDeviceRouting()
+        missing.routes[1].bus = .rightHigh
+        XCTAssertThrowsError(
+            try SpeakerMeasurementLabProtectedDriverRoutePlanner()
+                .plan(
+                    targetBus: .leftHigh,
+                    routing: missing,
+                    bassManagement: biAmpCrossover(),
+                    driverProcessing:
+                        protectedDriver(bus: .leftHigh),
+                    availableOutputs: outputs,
+                    sampleRate: sampleRate,
+                    selectedOutputUID: "protected-device"
+                )
+        )
+
+        var ambiguous = sameDeviceRouting()
+        ambiguous.routes.append(
+            SpeakerOutputRoute(
+                name: "Duplicate Left High",
+                bus: .leftHigh,
+                destination: PhysicalOutputEndpoint(
+                    deviceUID: "protected-device",
+                    channelIndex: 2
+                )
+            )
+        )
+        XCTAssertThrowsError(
+            try SpeakerMeasurementLabProtectedDriverRoutePlanner()
+                .plan(
+                    targetBus: .leftHigh,
+                    routing: ambiguous,
+                    bassManagement: biAmpCrossover(),
+                    driverProcessing:
+                        protectedDriver(bus: .leftHigh),
+                    availableOutputs: outputs,
+                    sampleRate: sampleRate,
+                    selectedOutputUID: "protected-device"
+                )
+        ) {
+            XCTAssertEqual(
+                $0 as?
+                    SpeakerMeasurementLabProtectedDriverRouteError,
+                .targetRouteAmbiguous
+            )
+        }
+    }
+
+    func testProtectedAnalysisProgramKeepsOriginalESSAndExtendsOnlyTail()
+        throws {
+        let settings = RoomCorrectionSweepSettings(
+            sampleRate: sampleRate,
+            startFrequencyHz: 100,
+            endFrequencyHz: 10_000,
+            durationSeconds: 0.20,
+            levelDBFS: -30,
+            leadInSeconds: 0.05,
+            tailSeconds: 0.10,
+            fadeSeconds: 0.01
+        )
+        let sourceProgram = try RoomCorrectionSweepGenerator()
+            .makeProgram(settings: settings)
+        let excitation = try
+            SpeakerMeasurementLabProtectedExcitationCompiler()
+                .compile(
+                    monoSamples: sourceProgram.sweepSamples,
+                    sampleRate: sampleRate,
+                    targetBus: .leftHigh,
+                    bassManagement: biAmpCrossover(),
+                    driverProcessing:
+                        protectedDriver(bus: .leftHigh)
+                )
+        let analysis = try excitation.makeAnalysisProgram(
+            from: sourceProgram
+        )
+
+        XCTAssertEqual(
+            analysis.sweepSamples,
+            sourceProgram.sweepSamples
+        )
+        XCTAssertEqual(
+            analysis.inverseFilter,
+            sourceProgram.inverseFilter
+        )
+        XCTAssertEqual(
+            analysis.tailFrames,
+            sourceProgram.tailFrames
+                + excitation.renderedSamples.count
+                - sourceProgram.sweepSamples.count
+        )
+        XCTAssertEqual(
+            analysis.captureFrameCount,
+            sourceProgram.leadInFrames
+                + excitation.renderedSamples.count
+                + sourceProgram.tailFrames
+        )
+    }
+
+    private func sameDeviceRouting()
+        -> MultiOutputRoutingConfiguration {
+        MultiOutputRoutingConfiguration(
+            enabled: true,
+            routes: [
+                SpeakerOutputRoute(
+                    name: "Left Low",
+                    bus: .leftLow,
+                    destination: PhysicalOutputEndpoint(
+                        deviceUID: "protected-device",
+                        channelIndex: 0
+                    )
+                ),
+                SpeakerOutputRoute(
+                    name: "Left High",
+                    bus: .leftHigh,
+                    destination: PhysicalOutputEndpoint(
+                        deviceUID: "protected-device",
+                        channelIndex: 1
+                    )
+                ),
+            ],
+            synchronizationMode: .automatic,
+            referenceDeviceUID: "protected-device"
+        )
+    }
+
     private func biAmpCrossover() -> BassManagementConfiguration {
         var configuration = BassManagementConfiguration()
         configuration.enabled = true

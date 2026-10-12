@@ -12,6 +12,7 @@ enum MultichannelCalibrationTransportError: Error, Equatable, LocalizedError {
     case sampleRateMismatch(role: String, expected: Double, actual: Double)
     case unsupportedPCMFormat(role: String, format: AudioStreamFormatDescription)
     case frameCountOverflow
+    case invalidOutputProgram
     case bridgeAllocationFailed
     case ioProcUnavailable
     case closed
@@ -33,6 +34,8 @@ enum MultichannelCalibrationTransportError: Error, Equatable, LocalizedError {
             return "Multichannel calibration requires native 32-bit floating-point PCM for \(role); received \(format.sampleRate) Hz, \(format.channelCount) channel(s), \(format.bitsPerChannel)-bit."
         case .frameCountOverflow:
             return "The calibration sweep exceeds the bounded targeted measurement transport."
+        case .invalidOutputProgram:
+            return "The targeted measurement output program is empty, non-finite, or otherwise invalid."
         case .bridgeAllocationFailed:
             return "Unable to allocate the precomputed targeted measurement bridge."
         case .ioProcUnavailable:
@@ -61,6 +64,11 @@ final class MultichannelCalibrationTransport {
     let program: RoomCorrectionSweepProgram
     let physicalOutputChannelIndex: UInt32
 
+    /// Optional control-plane pre-rendered output. Ordinary calibration uses
+    /// program.sweepSamples unchanged; protected-driver Lab acquisition may
+    /// supply a longer crossover/limiter-rendered waveform while analysis
+    /// still deconvolves against the original upstream sweep.
+    private let outputSweepSamples: [Float]
     private let orderedOutputs: [AudioOutputDevice]
     private var bridge: UnsafeMutablePointer<N60TargetedRoomMeasurementBridge>?
     private var ioProcID: AudioDeviceIOProcID?
@@ -76,13 +84,19 @@ final class MultichannelCalibrationTransport {
         input: AudioInputDevice,
         inputChannelIndex: Int,
         program: RoomCorrectionSweepProgram,
-        physicalOutputChannelIndex: UInt32
+        physicalOutputChannelIndex: UInt32,
+        outputSweepSamples: [Float]? = nil
     ) throws {
         self.routePlan = routePlan
         self.input = input
         self.selectedInputChannelIndex = inputChannelIndex
         self.program = program
         self.physicalOutputChannelIndex = physicalOutputChannelIndex
+        self.outputSweepSamples = outputSweepSamples ?? program.sweepSamples
+        guard !self.outputSweepSamples.isEmpty,
+              self.outputSweepSamples.allSatisfy(\.isFinite) else {
+            throw MultichannelCalibrationTransportError.invalidOutputProgram
+        }
 
         var ordered: [AudioOutputDevice] = []
         ordered.reserveCapacity(routePlan.orderedDeviceUIDs.count)
@@ -146,7 +160,11 @@ final class MultichannelCalibrationTransport {
             throw MultichannelCalibrationTransportError.incompleteCapture
         }
 
-        let frameCount = program.captureFrameCount
+        let frameCount = Int(snapshot.totalFrameCount)
+        guard frameCount > 0 else {
+            close()
+            throw MultichannelCalibrationTransportError.incompleteCapture
+        }
         var samples = [Float](repeating: 0, count: frameCount)
         let copied = samples.withUnsafeMutableBufferPointer { buffer in
             N60TargetedRoomMeasurementBridgeCopyCapture(
@@ -278,11 +296,11 @@ final class MultichannelCalibrationTransport {
         try Self.validateSampleRate(inputFormat, expected: sampleRate, role: "measurement input")
         try Self.validateSampleRate(outputFormat, expected: sampleRate, role: "measurement output")
 
-        let sweepFrames = try Self.checkedUInt32(program.sweepSamples.count)
+        let sweepFrames = try Self.checkedUInt32(outputSweepSamples.count)
         let leadInFrames = try Self.checkedUInt32(program.leadInFrames)
         let tailFrames = try Self.checkedUInt32(program.tailFrames)
         let inputChannel = try Self.checkedUInt32(aggregateInputChannel)
-        bridge = program.sweepSamples.withUnsafeBufferPointer { buffer in
+        bridge = outputSweepSamples.withUnsafeBufferPointer { buffer in
             N60TargetedRoomMeasurementBridgeCreate(
                 buffer.baseAddress!,
                 sweepFrames,
@@ -295,8 +313,13 @@ final class MultichannelCalibrationTransport {
         guard let bridge else {
             throw MultichannelCalibrationTransportError.bridgeAllocationFailed
         }
-        guard N60TargetedRoomMeasurementBridgeGetSnapshot(bridge).totalFrameCount
-            == UInt32(program.captureFrameCount) else {
+        let expectedCaptureFrames = program.leadInFrames
+            + outputSweepSamples.count
+            + program.tailFrames
+        guard expectedCaptureFrames > 0,
+              expectedCaptureFrames <= Int(UInt32.max),
+              N60TargetedRoomMeasurementBridgeGetSnapshot(bridge).totalFrameCount
+                == UInt32(expectedCaptureFrames) else {
             throw MultichannelCalibrationTransportError.frameCountOverflow
         }
 
