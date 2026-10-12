@@ -1,6 +1,6 @@
 # PR108 — Coherent Physical Subwoofer Timing & Polarity Optimization
 
-Status: **IN PROGRESS — SLICES 1–10 THROUGH VERIFIED COORDINATED MULTI-SUB PROVENANCE**
+Status: **IN PROGRESS — SLICES 1–11 THROUGH GUIDED PRODUCTION COMMISSIONING UI**
 
 Base: PR107 Speaker Optimizer FIR Deployment & Latency Coordination.
 
@@ -368,10 +368,41 @@ The verified write is exact-state checked. Rollback accepts either the exact
 provisional state or a state that differs only by this verified marker; unrelated
 post-Apply edits still block rollback.
 
+## Slice 11 — Guided production commissioning workflow/UI
+
+Implemented in CoherentSubwooferAlignmentGuidedWorkflow.swift and integrated
+into ProductionSpeakerMeasurementLabWorkspace.swift.
+
+The guided controller reuses the existing PR106 Measurement Lab session as the
+only acquisition source. It creates no parallel measurement store and performs
+no raw output mutation.
+
+The production sequence is:
+
+1. complete reference-authenticated coherent Main/Sub Lab evidence;
+2. generate and review the bounded PR108 proposal;
+3. explicitly approve and Apply provisionally while DSP is idle;
+4. create a fresh verification Lab session with new session/pair identities;
+5. remeasure the same approved coherent geometry/reference configuration;
+6. verify the fresh session; and
+7. finalize VERIFIED provenance on acceptance or automatically roll back on
+   rejection.
+
+The controller automatically selects the safe ownership path:
+
+- one assigned physical Sub → single-Sub PR108 transaction;
+- multiple assigned physical Subs → atomic coordinated multi-Sub transaction.
+
+The Measurement Lab card exposes mode, physical Sub count, predicted crossover
+coherence improvement, common speaker delay, provisional Apply, fresh
+verification, measured result, and guarded rollback.
+
+The UI never treats the proposal as measured proof. Fresh verification is
+mandatory before the deployment becomes VERIFIED.
+
 ## Planned follow-on slices
 
-1. Guided production workflow/UI — capture, review, Apply, verify, rollback.
-2. Physical commissioning handoff — real DAC/ADC/subwoofer timing, crossover
+1. Physical commissioning handoff — real DAC/ADC/subwoofer timing, crossover
    summation, restart/rollback and subjective bass integration.
 
 ## Slice 1 validation
@@ -451,3 +482,14 @@ baseline evidence fingerprint binding, and current-state drift rejection.
 
 The coordinated fresh-verification acceptance test now also finalizes the
 persistent verified record and proves exact rollback from verified state.
+
+
+## Slice 11 validation
+
+CoherentSubwooferAlignmentGuidedWorkflowTests verifies single-Sub review/Apply/
+rollback, coordinated multi-Sub path selection, accepted single-Sub
+verification/finalization with rollback, rejected coordinated verification with
+automatic rollback, and exact assigned-Sub evidence coverage.
+
+PR108 CI also validates the production Measurement Lab commissioning card and
+runs the guided workflow test class in the targeted PR108 XCTest job.
