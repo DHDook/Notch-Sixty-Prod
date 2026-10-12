@@ -457,7 +457,7 @@ that predate the optional PR108 field.
 
 CoherentMultiSubwooferAlignmentTests verifies the minimum-latency shared-delay
 solution, independent per-Sub polarity, duplicate/incomplete evidence rejection,
-Main-role-set identity, and realtime delay-capacity failure.
+Main-role-set identity, and bounded coordination within remaining realtime delay capacity.
 
 
 ## Slice 7 validation
