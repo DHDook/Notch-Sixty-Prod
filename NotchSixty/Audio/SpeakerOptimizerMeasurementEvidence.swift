@@ -1694,3 +1694,33 @@ final class SpeakerOptimizerMeasurementController: ObservableObject {
         return speakers + subs
     }
 }
+
+
+// PR110 Slice 4: read-only browse of existing analyzed Speaker Optimizer
+// measurement archives for the user-approved physical placement comparison.
+// Unreadable or invalid sets never become evidence.
+extension SpeakerOptimizerMeasurementSetStore {
+    func listRecentSets(limit: Int = 32)
+        throws -> [SpeakerOptimizerMeasurementSet] {
+        guard (1...128).contains(limit),
+              FileManager.default.fileExists(atPath: rootDirectory.path)
+        else { return [] }
+        let urls = try FileManager.default.contentsOfDirectory(
+            at: rootDirectory, includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ).filter { $0.pathExtension.lowercased() == "json" }
+        var sets: [SpeakerOptimizerMeasurementSet] = []
+        for file in urls {
+            guard let id = UUID(uuidString:
+                file.deletingPathExtension().lastPathComponent),
+                  let loaded = try? load(id) else { continue }
+            sets.append(loaded)
+        }
+        return Array(sets.sorted {
+            if $0.modifiedAt != $1.modifiedAt {
+                return $0.modifiedAt > $1.modifiedAt
+            }
+            return $0.id.uuidString < $1.id.uuidString
+        }.prefix(limit))
+    }
+}
