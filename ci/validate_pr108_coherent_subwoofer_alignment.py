@@ -29,8 +29,11 @@ WORKFLOW = ROOT / ".github/workflows/pr108-coherent-subwoofer-alignment.yml"
 GUIDED = ROOT / "NotchSixty/Audio/CoherentSubwooferAlignmentGuidedWorkflow.swift"
 GUIDED_TESTS = ROOT / "NotchSixtyTests/CoherentSubwooferAlignmentGuidedWorkflowTests.swift"
 LAB_UI = ROOT / "NotchSixty/UI/ProductionSpeakerMeasurementLabWorkspace.swift"
+CLOSURE = ROOT / "docs/PR108_SOFTWARE_CLOSURE.md"
+PHYSICAL = ROOT / "docs/PR108_PHYSICAL_ACCEPTANCE.md"
+ROADMAP = ROOT / "docs/ROADMAP.md"
 
-for path in (SOURCE, TESTS, COMMISSIONING, COMMISSIONING_TESTS, APPLY, APPLY_TESTS, VERIFY, VERIFY_TESTS, DEPLOYMENT, MULTI, MULTI_TESTS, MULTI_COMMISSIONING, MULTI_COMMISSIONING_TESTS, MULTI_DEPLOYMENT, MULTI_APPLY, MULTI_APPLY_TESTS, MULTI_VERIFY, MULTI_VERIFY_TESTS, PROFILE, COHERENT, CALIBRATION, PROJECT, DOC, WORKFLOW, GUIDED, GUIDED_TESTS, LAB_UI):
+for path in (SOURCE, TESTS, COMMISSIONING, COMMISSIONING_TESTS, APPLY, APPLY_TESTS, VERIFY, VERIFY_TESTS, DEPLOYMENT, MULTI, MULTI_TESTS, MULTI_COMMISSIONING, MULTI_COMMISSIONING_TESTS, MULTI_DEPLOYMENT, MULTI_APPLY, MULTI_APPLY_TESTS, MULTI_VERIFY, MULTI_VERIFY_TESTS, PROFILE, COHERENT, CALIBRATION, PROJECT, DOC, WORKFLOW, GUIDED, GUIDED_TESTS, LAB_UI, CLOSURE, PHYSICAL, ROADMAP):
     assert path.is_file(), f"missing PR108 Slice 1 file: {path}"
 
 source = SOURCE.read_text()
@@ -60,6 +63,9 @@ workflow = WORKFLOW.read_text()
 guided = GUIDED.read_text()
 guided_tests = GUIDED_TESTS.read_text()
 lab_ui = LAB_UI.read_text()
+closure = CLOSURE.read_text()
+physical = PHYSICAL.read_text()
+roadmap = ROADMAP.read_text()
 
 for token in (
     "struct CoherentSubwooferAlignmentPlanner",
@@ -411,6 +417,36 @@ for token in (
 ):
     assert token in doc, f"missing PR108 Slice 1 documentation: {token}"
 
+
+for token in (
+    "REMOTE SOFTWARE COMPLETE — PHYSICAL COHERENT ALIGNMENT ACCEPTANCE PENDING",
+    "7d93e453c2a54a1651e7678bad42d64f66ac8f15",
+    "38263562739",
+    "38263566501",
+    "46 tests, 0 failures",
+    "PR108_PHYSICAL_ACCEPTANCE.md",
+):
+    assert token in closure, f"missing PR108 software closure evidence: {token}"
+
+for token in (
+    "no physical acceptance is claimed",
+    "same physical ADC",
+    "Never connect amplifier speaker terminals",
+    "A0",
+    "A9",
+    "D_i - C = s_i",
+):
+    assert token in physical, f"missing PR108 physical handoff contract: {token}"
+
+for token in (
+    "Current execution status — PR108",
+    "PR107 — Speaker Optimizer FIR Deployment & Latency Coordination",
+    "PR108 — Coherent Physical Subwoofer Timing & Polarity Optimization",
+):
+    assert token in roadmap, f"missing PR108 roadmap closure state: {token}"
+
+assert "REMOTE SOFTWARE COMPLETE — PHYSICAL COHERENT ALIGNMENT ACCEPTANCE PENDING" in doc
+
 assert "validate_pr107_speaker_optimizer_fir.py" in workflow
 assert "CoherentSubwooferAlignmentTests" in workflow
 assert "CoherentSubwooferAlignmentCommissioningTests" in workflow
@@ -423,4 +459,4 @@ assert "CoherentMultiSubwooferAlignmentPostApplyVerificationTests" in workflow
 assert "CoherentSubwooferAlignmentGuidedWorkflowTests" in workflow
 assert "Run full XCTest regression" in workflow
 
-print("PR108 Slice 1-11 backend + guided production commissioning boundary passed")
+print("PR108 remote software closure + physical handoff boundary passed")
