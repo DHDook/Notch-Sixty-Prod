@@ -1368,3 +1368,209 @@ struct RoomGeometryStore: Sendable {
         try FileManager.default.removeItem(at: url)
     }
 }
+
+
+// MARK: - PR110: read-only advanced placement experiments
+
+/// Optional, project-scoped experiment geometry. No DSP/profile ownership.
+/// Secondary seats and physical Sub positions supplement the PR93 room model
+/// without changing its versioned JSON schema or saved state.
+struct RoomAdvancedPlacementState: Equatable, Sendable {
+    var room: RoomGeometryModel
+    var secondarySeats: [RoomGeometryPoint3D] = []
+    var leftToeInDegrees: Double = 0
+    var rightToeInDegrees: Double = 0
+    var subwooferPositions: [RoomGeometryPoint3D] = []
+
+    func validated() throws -> Self {
+        _ = try room.validated()
+        guard secondarySeats.count <= 7,
+              subwooferPositions.count <= 4,
+              leftToeInDegrees.isFinite,
+              rightToeInDegrees.isFinite,
+              abs(leftToeInDegrees) <= 80,
+              abs(rightToeInDegrees) <= 80 else {
+            throw RoomAdvancedPlacementError.invalidConfiguration
+        }
+        for point in secondarySeats + subwooferPositions {
+            guard point.x.isFinite, point.y.isFinite, point.z.isFinite,
+                  point.x >= 0, point.x <= room.dimensions.width,
+                  point.y >= 0, point.y <= room.dimensions.length,
+                  point.z >= 0, point.z <= room.dimensions.height else {
+                throw RoomAdvancedPlacementError.invalidConfiguration
+            }
+        }
+        return self
+    }
+}
+
+enum RoomAdvancedPlacementError: Error, Equatable, Sendable {
+    case invalidConfiguration
+}
+
+enum RoomAdvancedPlacementMove: String, Equatable, Sendable {
+    case leftSpeaker
+    case rightSpeaker
+    case leftToeIn
+    case rightToeIn
+    case leftHeight
+    case rightHeight
+    case subwoofer
+}
+
+/// This is a *physical experiment*, not a correction plan or an acoustic
+/// prediction. No source here owns a profile mutation, DSP graph or Apply API.
+struct RoomAdvancedPlacementExperiment: Identifiable, Equatable, Sendable {
+    var id: String
+    var move: RoomAdvancedPlacementMove
+    var description: String
+    var trial: RoomAdvancedPlacementState
+    var movementMeters: Double
+    /// Pure path-length diagnostic, NOT a frequency response or SPL estimate.
+    var maximumSeatPathImbalanceMeters: Double
+    var evidenceLabel: String { "Geometry hypothesis — measurement required" }
+    var requiresMeasuredVerification: Bool { true }
+}
+
+/// Reuses PR93's validated coordinates. Search is intentionally small:
+/// independently move L/R by 15 cm, try 10 cm height changes, ±5° toe-in,
+/// and move each modeled physical Sub 30 cm in x/y. These are bounded,
+/// unranked *experiments*; room geometry alone does not authorize claiming
+/// any before/after dB, phase, SPL, decay or perceived-image improvement.
+///
+/// Later PR110 slices will add source-specific microphone evidence, toe-in
+/// directivity matching, multi-seat scoring and measured before/after checks.
+struct RoomAdvancedPlacementExplorer: Sendable {
+    func experiments(
+        for original: RoomAdvancedPlacementState
+    ) throws -> [RoomAdvancedPlacementExperiment] {
+        let state = try original.validated()
+        var results: [RoomAdvancedPlacementExperiment] = []
+
+        func include(
+            _ id: String,
+            move: RoomAdvancedPlacementMove,
+            description: String,
+            trial: RoomAdvancedPlacementState,
+            movement: Double
+        ) {
+            guard (try? trial.validated()) != nil,
+                  trial != state else { return }
+            results.append(
+                RoomAdvancedPlacementExperiment(
+                    id: id,
+                    move: move,
+                    description: description,
+                    trial: trial,
+                    movementMeters: movement,
+                    maximumSeatPathImbalanceMeters:
+                        maximumSeatPathImbalance(trial)
+                )
+            )
+        }
+
+        for (side, kind) in [
+            (RoomGeometrySpeaker.left, RoomAdvancedPlacementMove.leftSpeaker),
+            (.right, .rightSpeaker),
+        ] {
+            for (axis, shift) in [
+                ("left", -0.15), ("right", 0.15),
+                ("forward", -0.15), ("back", 0.15),
+            ] {
+                var trial = state
+                var point = side == .left
+                    ? trial.room.leftSpeaker : trial.room.rightSpeaker
+                if axis == "left" || axis == "right" {
+                    point.x += shift
+                } else {
+                    point.y += shift
+                }
+                if side == .left {
+                    trial.room.leftSpeaker = point
+                } else {
+                    trial.room.rightSpeaker = point
+                }
+                include(
+                    "\(side.rawValue)-\(axis)",
+                    move: kind,
+                    description: "Move \(side.displayName) \(axis) by 15 cm",
+                    trial: trial,
+                    movement: 0.15
+                )
+            }
+            for (direction, adjustment) in [
+                ("lower", -0.10), ("higher", 0.10),
+            ] {
+                var trial = state
+                if side == .left {
+                    trial.room.leftSpeaker.z += adjustment
+                } else {
+                    trial.room.rightSpeaker.z += adjustment
+                }
+                include(
+                    "\(side.rawValue)-height-\(direction)",
+                    move: side == .left ? .leftHeight : .rightHeight,
+                    description:
+                        "Move \(side.displayName) \(direction) by 10 cm",
+                    trial: trial,
+                    movement: 0.10
+                )
+            }
+            for (direction, adjustment) in [
+                ("clockwise", -5.0), ("counterclockwise", 5.0),
+            ] {
+                var trial = state
+                if side == .left {
+                    trial.leftToeInDegrees += adjustment
+                } else {
+                    trial.rightToeInDegrees += adjustment
+                }
+                include(
+                    "\(side.rawValue)-toe-\(direction)",
+                    move: side == .left ? .leftToeIn : .rightToeIn,
+                    description:
+                        "Rotate \(side.displayName) \(direction) by 5°",
+                    trial: trial,
+                    movement: 0
+                )
+            }
+        }
+
+        for subIndex in state.subwooferPositions.indices {
+            for (direction, dx, dy) in [
+                ("left", -0.30, 0.0),
+                ("right", 0.30, 0.0),
+                ("forward", 0.0, -0.30),
+                ("back", 0.0, 0.30),
+            ] {
+                var trial = state
+                trial.subwooferPositions[subIndex].x += dx
+                trial.subwooferPositions[subIndex].y += dy
+                include(
+                    "sub-\(subIndex)-\(direction)",
+                    move: .subwoofer,
+                    description:
+                        "Move Sub \(subIndex + 1) \(direction) by 30 cm",
+                    trial: trial,
+                    movement: 0.30
+                )
+            }
+        }
+        return results
+    }
+
+    /// Tracks L/R direct-path symmetry across every specified seat.
+    /// This is useful diagnostic context, never a scalar acoustic quality
+    /// score and never a license to apply EQ or physical sub alignment.
+    func maximumSeatPathImbalance(
+        _ state: RoomAdvancedPlacementState
+    ) -> Double {
+        let seats = [state.room.listener] + state.secondarySeats
+        return seats.map { seat in
+            abs(
+                state.room.leftSpeaker.distance(to: seat)
+                - state.room.rightSpeaker.distance(to: seat)
+            )
+        }.max() ?? 0
+    }
+}
