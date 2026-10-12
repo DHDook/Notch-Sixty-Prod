@@ -20,6 +20,14 @@ struct CoherentMultiSubwooferAlignmentApplyReceipt:
     var isMeasuredVerification: Bool { false }
 }
 
+struct CoherentMultiSubwooferAlignmentVerificationFinalizationReceipt:
+    Codable, Equatable, Sendable {
+    var applyReceiptID: UUID
+    var playbackSystemID: UUID
+    var verifiedAt: Date
+    var expectedVerifiedState: PlaybackSystemState
+}
+
 struct CoherentMultiSubwooferAlignmentRollbackReceipt:
     Codable, Equatable, Sendable {
     var applyReceiptID: UUID
@@ -40,6 +48,11 @@ enum CoherentMultiSubwooferAlignmentApplyError:
     case calibrationMutationInvalid
     case applyMutationFailed
     case postApplyVerificationFailed
+    case verificationReportRejected
+    case verificationReceiptMismatch
+    case verificationStateDrift
+    case verificationMutationFailed
+    case verificationWriteFailed
     case rollbackStateDrift
     case rollbackMutationFailed
     case rollbackVerificationFailed
@@ -66,6 +79,16 @@ enum CoherentMultiSubwooferAlignmentApplyError:
             return "Coordinated multi-Sub alignment could not be installed atomically; the prior Output Device Profile was restored when possible."
         case .postApplyVerificationFailed:
             return "Coordinated multi-Sub alignment was written but the resulting Playback System did not exactly match the expected transaction state."
+        case .verificationReportRejected:
+            return "Only an accepted fresh coordinated verification report can finalize multi-Sub alignment."
+        case .verificationReceiptMismatch:
+            return "The coordinated verification report does not belong to this Apply receipt."
+        case .verificationStateDrift:
+            return "The Playback System changed after provisional coordinated Apply; verification finalization is blocked."
+        case .verificationMutationFailed:
+            return "The verified coordinated provenance record could not be persisted."
+        case .verificationWriteFailed:
+            return "Verified coordinated provenance was written but the Playback System did not match the expected verified state."
         case .rollbackStateDrift:
             return "Rollback was blocked because the Playback System changed after coordinated multi-Sub Apply."
         case .rollbackMutationFailed:
@@ -203,6 +226,143 @@ struct CoherentMultiSubwooferAlignmentApplyTransaction {
         )
     }
 
+    func finalizeVerified(
+        _ report:
+            CoherentMultiSubwooferAlignmentVerificationReport,
+        receipt: CoherentMultiSubwooferAlignmentApplyReceipt,
+        profileStore:
+            any CoherentSubwooferAlignmentProfileMutating,
+        verifiedAt: Date = Date()
+    ) throws
+        -> CoherentMultiSubwooferAlignmentVerificationFinalizationReceipt {
+        try requireIdle(profileStore)
+        guard report.accepted,
+              !report.shouldRollback,
+              !report.sources.isEmpty else {
+            throw CoherentMultiSubwooferAlignmentApplyError
+                .verificationReportRejected
+        }
+        guard report.applyReceiptID == receipt.id,
+              report.playbackSystemID
+                == receipt.playbackSystemID,
+              report.routingSignature
+                == receipt.candidate.routingSignature,
+              report.subwooferIndices
+                == receipt.candidate.subwoofers
+                    .map(\.subwooferIndex)
+                    .sorted(),
+              abs(
+                report.sampleRate
+                    - receipt.candidate.sampleRate
+              ) < 0.5 else {
+            throw CoherentMultiSubwooferAlignmentApplyError
+                .verificationReceiptMismatch
+        }
+
+        guard let current =
+                profileStore.coherentAlignmentSelectedSystemProfile else {
+            throw CoherentMultiSubwooferAlignmentApplyError
+                .selectedProfileRequired
+        }
+        guard current.id == receipt.playbackSystemID else {
+            throw CoherentMultiSubwooferAlignmentApplyError
+                .selectedProfileIdentityMismatch
+        }
+        guard current.state == receipt.expectedAppliedState else {
+            throw CoherentMultiSubwooferAlignmentApplyError
+                .verificationStateDrift
+        }
+        guard var output = current.state.outputDeviceProfile,
+              var deployment =
+                output.coherentMultiSubwooferAlignment,
+              deployment.applyReceiptID == receipt.id,
+              deployment.proposalID == receipt.proposalID,
+              deployment.evidenceFingerprint
+                == receipt.evidenceFingerprint,
+              deployment.candidateFingerprint
+                == receipt.candidateFingerprint,
+              deployment.verification == nil else {
+            throw CoherentMultiSubwooferAlignmentApplyError
+                .verificationStateDrift
+        }
+
+        let record =
+            CoherentMultiSubwooferAlignmentVerificationRecord(
+                applyReceiptID: receipt.id,
+                verificationSessionID:
+                    report.verificationSessionID,
+                verifiedAt: verifiedAt,
+                evidenceConfidence:
+                    report.evidenceConfidence,
+                sourceCount: report.sources.count,
+                worstPhaseTrackingRMSRadians:
+                    report.sources
+                        .map(\.phaseTrackingRMSRadians)
+                        .max() ?? .infinity,
+                worstMagnitudeTrackingRMSDB:
+                    report.sources
+                        .map(\.magnitudeTrackingRMSDB)
+                        .max() ?? .infinity,
+                coherenceBeforeDB:
+                    report.coherenceBeforeDB,
+                coherenceAfterDB:
+                    report.coherenceAfterDB,
+                measuredImprovementDB:
+                    report.measuredImprovementDB
+            )
+        guard record.validate(deployment: deployment) else {
+            throw CoherentMultiSubwooferAlignmentApplyError
+                .verificationReportRejected
+        }
+
+        deployment.verification = record
+        output.coherentMultiSubwooferAlignment = deployment
+        do {
+            try output.validateStructure(
+                bassManagementEnabled:
+                    current.state.bassManagement.enabled
+            )
+        } catch {
+            throw CoherentMultiSubwooferAlignmentApplyError
+                .verificationReportRejected
+        }
+
+        var expectedVerified = current.state
+        expectedVerified.outputDeviceProfile = output
+        do {
+            try profileStore
+                .coherentAlignmentReplaceOutputDeviceProfile(
+                    output
+                )
+        } catch {
+            try? restore(
+                receipt.expectedAppliedState.outputDeviceProfile,
+                profileStore: profileStore
+            )
+            throw CoherentMultiSubwooferAlignmentApplyError
+                .verificationMutationFailed
+        }
+
+        guard let verified =
+                profileStore.coherentAlignmentSelectedSystemProfile,
+              verified.id == current.id,
+              verified.state == expectedVerified else {
+            try? restore(
+                receipt.expectedAppliedState.outputDeviceProfile,
+                profileStore: profileStore
+            )
+            throw CoherentMultiSubwooferAlignmentApplyError
+                .verificationWriteFailed
+        }
+
+        return CoherentMultiSubwooferAlignmentVerificationFinalizationReceipt(
+            applyReceiptID: receipt.id,
+            playbackSystemID: current.id,
+            verifiedAt: verifiedAt,
+            expectedVerifiedState: expectedVerified
+        )
+    }
+
     func rollback(
         _ receipt: CoherentMultiSubwooferAlignmentApplyReceipt,
         profileStore:
@@ -221,7 +381,10 @@ struct CoherentMultiSubwooferAlignmentApplyTransaction {
             throw CoherentMultiSubwooferAlignmentApplyError
                 .selectedProfileIdentityMismatch
         }
-        guard current.state == receipt.expectedAppliedState else {
+        guard rollbackSourceStateMatches(
+            current.state,
+            receipt: receipt
+        ) else {
             throw CoherentMultiSubwooferAlignmentApplyError
                 .rollbackStateDrift
         }
@@ -252,6 +415,27 @@ struct CoherentMultiSubwooferAlignmentApplyTransaction {
             rolledBackAt: rolledBackAt,
             restoredState: restored.state
         )
+    }
+
+    private func rollbackSourceStateMatches(
+        _ state: PlaybackSystemState,
+        receipt: CoherentMultiSubwooferAlignmentApplyReceipt
+    ) -> Bool {
+        if state == receipt.expectedAppliedState {
+            return true
+        }
+        var normalized = state
+        guard var output = normalized.outputDeviceProfile,
+              var deployment =
+                output.coherentMultiSubwooferAlignment,
+              deployment.applyReceiptID == receipt.id,
+              deployment.verification != nil else {
+            return false
+        }
+        deployment.verification = nil
+        output.coherentMultiSubwooferAlignment = deployment
+        normalized.outputDeviceProfile = output
+        return normalized == receipt.expectedAppliedState
     }
 
     private func materialize(
