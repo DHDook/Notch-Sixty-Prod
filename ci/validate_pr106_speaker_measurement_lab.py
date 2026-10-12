@@ -9,7 +9,9 @@ SESSION_TESTS = ROOT / "NotchSixtyTests/SpeakerMeasurementLabSessionTests.swift"
 DIRECTIVITY_SOURCE = ROOT / "NotchSixty/Audio/SpeakerMeasurementLabDirectivity.swift"
 DIRECTIVITY_TESTS = ROOT / "NotchSixtyTests/SpeakerMeasurementLabDirectivityTests.swift"
 NEARFIELD_SOURCE = ROOT / "NotchSixty/Audio/SpeakerMeasurementLabNearFieldLF.swift"
-NEARFIELD_TESTS = ROOT / "NotchSixtyTests/SpeakerMeasurementLabNearFieldLFTests.swift"\nGATED_SOURCE = ROOT / "NotchSixty/Audio/SpeakerMeasurementLabQuasiAnechoic.swift"\nGATED_TESTS = ROOT / "NotchSixtyTests/SpeakerMeasurementLabQuasiAnechoicTests.swift"
+NEARFIELD_TESTS = ROOT / "NotchSixtyTests/SpeakerMeasurementLabNearFieldLFTests.swift"
+GATED_SOURCE = ROOT / "NotchSixty/Audio/SpeakerMeasurementLabQuasiAnechoic.swift"
+GATED_TESTS = ROOT / "NotchSixtyTests/SpeakerMeasurementLabQuasiAnechoicTests.swift"
 CONTROLLER_SOURCE = ROOT / "NotchSixty/Audio/SpeakerMeasurementLabController.swift"
 PROJECT = ROOT / "NotchSixty.xcodeproj/project.pbxproj"
 DOC = ROOT / "docs/PR106_ADVANCED_SPEAKER_MEASUREMENT_LAB.md"
@@ -25,7 +27,9 @@ session_tests = SESSION_TESTS.read_text()
 directivity_source = DIRECTIVITY_SOURCE.read_text()
 directivity_tests = DIRECTIVITY_TESTS.read_text()
 nearfield_source = NEARFIELD_SOURCE.read_text()
-nearfield_tests = NEARFIELD_TESTS.read_text()\ngated_source = GATED_SOURCE.read_text()\ngated_tests = GATED_TESTS.read_text()
+nearfield_tests = NEARFIELD_TESTS.read_text()
+gated_source = GATED_SOURCE.read_text()
+gated_tests = GATED_TESTS.read_text()
 controller_source = CONTROLLER_SOURCE.read_text()
 project = PROJECT.read_text()
 doc = DOC.read_text()
@@ -171,10 +175,12 @@ for token in (
 assert "SpeakerMeasurementLabCapabilityTests" in workflow
 assert "SpeakerMeasurementLabSessionTests" in workflow
 assert "SpeakerMeasurementLabDirectivityTests" in workflow
-assert "SpeakerMeasurementLabNearFieldLFTests" in workflow\nassert "SpeakerMeasurementLabQuasiAnechoicTests" in workflow
+assert "SpeakerMeasurementLabNearFieldLFTests" in workflow
+assert "SpeakerMeasurementLabQuasiAnechoicTests" in workflow
 assert "Run full XCTest regression" in workflow
 assert "Slice 2" in doc
 assert "Slice 3" in doc
 assert "Repeat-qualified installed-room directivity comparison" in doc
-assert "Repeat-qualified near-field LF component diagnostics" in doc\nassert "Explicit reflection-window quasi-anechoic estimate" in doc
+assert "Repeat-qualified near-field LF component diagnostics" in doc
+assert "Explicit reflection-window quasi-anechoic estimate" in doc
 print("PR106 lab capability + directivity + near-field LF + gated response contracts passed")
