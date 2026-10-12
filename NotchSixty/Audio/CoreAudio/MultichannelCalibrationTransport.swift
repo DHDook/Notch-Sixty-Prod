@@ -3,6 +3,9 @@ import Foundation
 
 struct MultichannelCalibrationCapture: Equatable, Sendable {
     var samples: [Float]
+    /// Optional simultaneous second input captured on the exact same IOProc
+    /// timeline. PR106 uses this for an electrical/shared-time reference.
+    var referenceSamples: [Float]? = nil
 }
 
 enum MultichannelCalibrationTransportError: Error, Equatable, LocalizedError {
@@ -12,6 +15,7 @@ enum MultichannelCalibrationTransportError: Error, Equatable, LocalizedError {
     case sampleRateMismatch(role: String, expected: Double, actual: Double)
     case unsupportedPCMFormat(role: String, format: AudioStreamFormatDescription)
     case frameCountOverflow
+    case invalidOutputProgram
     case bridgeAllocationFailed
     case ioProcUnavailable
     case closed
@@ -33,6 +37,8 @@ enum MultichannelCalibrationTransportError: Error, Equatable, LocalizedError {
             return "Multichannel calibration requires native 32-bit floating-point PCM for \(role); received \(format.sampleRate) Hz, \(format.channelCount) channel(s), \(format.bitsPerChannel)-bit."
         case .frameCountOverflow:
             return "The calibration sweep exceeds the bounded targeted measurement transport."
+        case .invalidOutputProgram:
+            return "The targeted measurement output program is empty, non-finite, or otherwise invalid."
         case .bridgeAllocationFailed:
             return "Unable to allocate the precomputed targeted measurement bridge."
         case .ioProcUnavailable:
@@ -58,9 +64,15 @@ final class MultichannelCalibrationTransport {
     let routePlan: LiveNChannelOutputRoutePlan
     let input: AudioInputDevice
     let selectedInputChannelIndex: Int
+    let referenceInputChannelIndex: Int?
     let program: RoomCorrectionSweepProgram
     let physicalOutputChannelIndex: UInt32
 
+    /// Optional control-plane pre-rendered output. Ordinary calibration uses
+    /// program.sweepSamples unchanged; protected-driver Lab acquisition may
+    /// supply a longer crossover/limiter-rendered waveform while analysis
+    /// still deconvolves against the original upstream sweep.
+    private let outputSweepSamples: [Float]
     private let orderedOutputs: [AudioOutputDevice]
     private var bridge: UnsafeMutablePointer<N60TargetedRoomMeasurementBridge>?
     private var ioProcID: AudioDeviceIOProcID?
@@ -75,14 +87,22 @@ final class MultichannelCalibrationTransport {
         availableOutputs: [AudioOutputDevice],
         input: AudioInputDevice,
         inputChannelIndex: Int,
+        referenceInputChannelIndex: Int? = nil,
         program: RoomCorrectionSweepProgram,
-        physicalOutputChannelIndex: UInt32
+        physicalOutputChannelIndex: UInt32,
+        outputSweepSamples: [Float]? = nil
     ) throws {
         self.routePlan = routePlan
         self.input = input
         self.selectedInputChannelIndex = inputChannelIndex
+        self.referenceInputChannelIndex = referenceInputChannelIndex
         self.program = program
         self.physicalOutputChannelIndex = physicalOutputChannelIndex
+        self.outputSweepSamples = outputSweepSamples ?? program.sweepSamples
+        guard !self.outputSweepSamples.isEmpty,
+              self.outputSweepSamples.allSatisfy(\.isFinite) else {
+            throw MultichannelCalibrationTransportError.invalidOutputProgram
+        }
 
         var ordered: [AudioOutputDevice] = []
         ordered.reserveCapacity(routePlan.orderedDeviceUIDs.count)
@@ -146,7 +166,11 @@ final class MultichannelCalibrationTransport {
             throw MultichannelCalibrationTransportError.incompleteCapture
         }
 
-        let frameCount = program.captureFrameCount
+        let frameCount = Int(snapshot.totalFrameCount)
+        guard frameCount > 0 else {
+            close()
+            throw MultichannelCalibrationTransportError.incompleteCapture
+        }
         var samples = [Float](repeating: 0, count: frameCount)
         let copied = samples.withUnsafeMutableBufferPointer { buffer in
             N60TargetedRoomMeasurementBridgeCopyCapture(
@@ -159,8 +183,28 @@ final class MultichannelCalibrationTransport {
             close()
             throw MultichannelCalibrationTransportError.incompleteCapture
         }
+        var referenceSamples: [Float]?
+        if referenceInputChannelIndex != nil {
+            var reference = [Float](repeating: 0, count: frameCount)
+            let referenceCopied =
+                reference.withUnsafeMutableBufferPointer { buffer in
+                    N60TargetedRoomMeasurementBridgeCopyReferenceCapture(
+                        bridge,
+                        buffer.baseAddress!,
+                        UInt32(buffer.count)
+                    )
+                }
+            guard referenceCopied == UInt32(frameCount) else {
+                close()
+                throw MultichannelCalibrationTransportError.incompleteCapture
+            }
+            referenceSamples = reference
+        }
         close()
-        return MultichannelCalibrationCapture(samples: samples)
+        return MultichannelCalibrationCapture(
+            samples: samples,
+            referenceSamples: referenceSamples
+        )
     }
 
     func cancel() { close() }
@@ -191,6 +235,16 @@ final class MultichannelCalibrationTransport {
                 index: selectedInputChannelIndex,
                 availableChannels: physicalInputChannelCount
             )
+        }
+        if let referenceInputChannelIndex {
+            guard referenceInputChannelIndex >= 0,
+                  referenceInputChannelIndex < physicalInputChannelCount,
+                  referenceInputChannelIndex != selectedInputChannelIndex else {
+                throw MultichannelCalibrationTransportError.invalidInputChannel(
+                    index: referenceInputChannelIndex,
+                    availableChannels: physicalInputChannelCount
+                )
+            }
         }
         guard let referenceOutput = orderedOutputs.first(where: { $0.uid == routePlan.referenceDeviceUID }) else {
             throw MultichannelCalibrationTransportError.outputDeviceUnavailable(routePlan.referenceDeviceUID)
@@ -226,14 +280,20 @@ final class MultichannelCalibrationTransport {
 
         let useDirectDevice = orderedOutputs.count == 1 && input.deviceID == orderedOutputs[0].deviceID
         let aggregateInputChannel: Int
+        let aggregateReferenceInputChannel: Int?
         if useDirectDevice {
             calibrationDeviceID = orderedOutputs[0].deviceID
             aggregateInputChannel = selectedInputChannelIndex
+            aggregateReferenceInputChannel = referenceInputChannelIndex
         } else {
-            let aggregate = try makePrivateAggregate(referenceOutput: referenceOutput, sampleRate: sampleRate)
+            let aggregate = try makePrivateAggregate(
+                referenceOutput: referenceOutput,
+                sampleRate: sampleRate
+            )
             aggregateDeviceID = aggregate.deviceID
             calibrationDeviceID = aggregate.deviceID
             aggregateInputChannel = aggregate.inputChannelIndex
+            aggregateReferenceInputChannel = aggregate.referenceInputChannelIndex
         }
 
         let inputChannelCount = try Self.readChannelCount(
@@ -246,6 +306,16 @@ final class MultichannelCalibrationTransport {
                 index: aggregateInputChannel,
                 availableChannels: inputChannelCount
             )
+        }
+        if let aggregateReferenceInputChannel {
+            guard aggregateReferenceInputChannel >= 0,
+                  aggregateReferenceInputChannel < inputChannelCount,
+                  aggregateReferenceInputChannel != aggregateInputChannel else {
+                throw MultichannelCalibrationTransportError.invalidInputChannel(
+                    index: aggregateReferenceInputChannel,
+                    availableChannels: inputChannelCount
+                )
+            }
         }
         let outputChannelCount = try Self.readChannelCount(
             deviceID: calibrationDeviceID,
@@ -278,12 +348,26 @@ final class MultichannelCalibrationTransport {
         try Self.validateSampleRate(inputFormat, expected: sampleRate, role: "measurement input")
         try Self.validateSampleRate(outputFormat, expected: sampleRate, role: "measurement output")
 
-        let sweepFrames = try Self.checkedUInt32(program.sweepSamples.count)
+        let sweepFrames = try Self.checkedUInt32(outputSweepSamples.count)
         let leadInFrames = try Self.checkedUInt32(program.leadInFrames)
         let tailFrames = try Self.checkedUInt32(program.tailFrames)
         let inputChannel = try Self.checkedUInt32(aggregateInputChannel)
-        bridge = program.sweepSamples.withUnsafeBufferPointer { buffer in
-            N60TargetedRoomMeasurementBridgeCreate(
+        bridge = outputSweepSamples.withUnsafeBufferPointer { buffer in
+            if let aggregateReferenceInputChannel,
+               let referenceChannel = try? Self.checkedUInt32(
+                   aggregateReferenceInputChannel
+               ) {
+                return N60TargetedRoomMeasurementBridgeCreateDualInput(
+                    buffer.baseAddress!,
+                    sweepFrames,
+                    leadInFrames,
+                    tailFrames,
+                    inputChannel,
+                    referenceChannel,
+                    physicalOutputChannelIndex
+                )
+            }
+            return N60TargetedRoomMeasurementBridgeCreate(
                 buffer.baseAddress!,
                 sweepFrames,
                 leadInFrames,
@@ -295,8 +379,13 @@ final class MultichannelCalibrationTransport {
         guard let bridge else {
             throw MultichannelCalibrationTransportError.bridgeAllocationFailed
         }
-        guard N60TargetedRoomMeasurementBridgeGetSnapshot(bridge).totalFrameCount
-            == UInt32(program.captureFrameCount) else {
+        let expectedCaptureFrames = program.leadInFrames
+            + outputSweepSamples.count
+            + program.tailFrames
+        guard expectedCaptureFrames > 0,
+              expectedCaptureFrames <= Int(UInt32.max),
+              N60TargetedRoomMeasurementBridgeGetSnapshot(bridge).totalFrameCount
+                == UInt32(expectedCaptureFrames) else {
             throw MultichannelCalibrationTransportError.frameCountOverflow
         }
 
@@ -340,14 +429,24 @@ final class MultichannelCalibrationTransport {
     private func makePrivateAggregate(
         referenceOutput: AudioOutputDevice,
         sampleRate: Double
-    ) throws -> (deviceID: AudioDeviceID, inputChannelIndex: Int) {
+    ) throws -> (
+        deviceID: AudioDeviceID,
+        inputChannelIndex: Int,
+        referenceInputChannelIndex: Int?
+    ) {
         var subdevices: [[String: Any]] = []
         var aggregateInputOffset = 0
         var resolvedInputChannel: Int?
+        var resolvedReferenceInputChannel: Int?
 
         for output in orderedOutputs {
             if output.deviceID == input.deviceID {
-                resolvedInputChannel = aggregateInputOffset + selectedInputChannelIndex
+                resolvedInputChannel =
+                    aggregateInputOffset + selectedInputChannelIndex
+                if let referenceInputChannelIndex {
+                    resolvedReferenceInputChannel =
+                        aggregateInputOffset + referenceInputChannelIndex
+                }
             }
             let inputChannels = (try? Self.readChannelCount(
                 deviceID: output.deviceID,
@@ -362,7 +461,12 @@ final class MultichannelCalibrationTransport {
         }
 
         if !orderedOutputs.contains(where: { $0.deviceID == input.deviceID }) {
-            resolvedInputChannel = aggregateInputOffset + selectedInputChannelIndex
+            resolvedInputChannel =
+                aggregateInputOffset + selectedInputChannelIndex
+            if let referenceInputChannelIndex {
+                resolvedReferenceInputChannel =
+                    aggregateInputOffset + referenceInputChannelIndex
+            }
             subdevices.append([
                 kAudioSubDeviceUIDKey: input.uid,
                 kAudioSubDeviceDriftCompensationKey: true,
@@ -415,7 +519,11 @@ final class MultichannelCalibrationTransport {
             value: bufferFrames,
             operation: "set calibration aggregate buffer size"
         )
-        return (deviceID, resolvedInputChannel)
+        return (
+            deviceID,
+            resolvedInputChannel,
+            resolvedReferenceInputChannel
+        )
     }
 
     private func close() {

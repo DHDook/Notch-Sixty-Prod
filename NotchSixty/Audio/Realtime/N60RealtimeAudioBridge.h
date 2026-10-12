@@ -328,6 +328,22 @@ bool N60RealtimeAudioBridgeConfigureSpeakerDriverProcessing(
     N60SpeakerDriverProcessingSnapshot snapshot
 );
 
+/// Control-plane/offline protected-driver excitation renderer.
+///
+/// This deliberately reuses the production speaker bus splitter followed by
+/// the production per-driver processor. It accepts ONLY split Low/Mid/High
+/// buses whose configured driver path is enabled and limiter-protected.
+/// It does not route audio to hardware and must not be called from a realtime
+/// callback.
+bool N60ProtectedSpeakerBusRenderProgram(
+    const float * _Nonnull monoInput,
+    uint32_t frameCount,
+    N60SpeakerOutputBus targetBus,
+    N60SpeakerBusSplitterSnapshot splitterSnapshot,
+    N60SpeakerDriverProcessingSnapshot driverSnapshot,
+    float * _Nonnull output
+);
+
 bool N60SameDeviceOutputMapValueForChannel(
     const N60SameDeviceOutputMap * _Nonnull map,
     const N60SpeakerBusFrame * _Nonnull frame,

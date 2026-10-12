@@ -26,6 +26,7 @@ enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
     case speakers
     case headphones
     case speakerCalibration
+    case measurementLab
     case roomCorrection
     case activeAcoustics
     case roomAdvisor
@@ -41,6 +42,7 @@ enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
         .speakers,
         .headphones,
         .speakerCalibration,
+        .measurementLab,
         .roomCorrection,
         .activeAcoustics,
     ]
@@ -64,6 +66,7 @@ enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
         case .speakers: return "Speakers"
         case .headphones: return "Headphones"
         case .speakerCalibration: return "Speaker Calibration"
+        case .measurementLab: return "Measurement Lab"
         case .roomCorrection: return "Room Correction"
         case .activeAcoustics: return "Active Acoustics"
         case .roomAdvisor: return "Room Advisor"
@@ -80,6 +83,7 @@ enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
         case .speakers: return "hifispeaker.2.fill"
         case .headphones: return "headphones"
         case .speakerCalibration: return "speaker.wave.3.fill"
+        case .measurementLab: return "waveform.badge.magnifyingglass"
         case .roomCorrection: return "waveform.badge.magnifyingglass"
         case .activeAcoustics: return "waveform.and.mic"
         case .roomAdvisor: return "wand.and.stars.inverse"
@@ -262,6 +266,12 @@ struct ProductionRootView: View {
             ProductionMultichannelCalibrationWorkspace(
                 engine: engine,
                 calibration: product.multichannelCalibration,
+                microphone: product.calibration,
+                profiles: product.profiles
+            )
+        case .measurementLab:
+            ProductionSpeakerMeasurementLabWorkspace(
+                engine: engine,
                 microphone: product.calibration,
                 profiles: product.profiles
             )
