@@ -695,10 +695,11 @@ struct SpeakerMeasurementLabReportExporter: Sendable {
     }
 
     private func csv(_ value: String) -> String {
-        "\"\(value.replacingOccurrences(
+        let escaped = value.replacingOccurrences(
             of: "\"",
             with: "\"\""
-        ))\""
+        )
+        return "\"\(escaped)\""
     }
 }
 
