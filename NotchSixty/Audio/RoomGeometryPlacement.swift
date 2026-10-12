@@ -1896,30 +1896,41 @@ struct RoomAdvancedToeInEvidenceAnalyzer: Sendable {
         if abs(angle) <= 0.0001 { return (0, 1) }
         // A negative-side sample must not be used to extrapolate a positive
         // orientation (or vice versa); 0° is the explicit reference anchor.
-        let positive = traces.first {
-            $0.horizontalAngleDegrees >= angle && $0.horizontalAngleDegrees > 0
-        }
-        let negative = traces.last {
-            $0.horizontalAngleDegrees <= angle && $0.horizontalAngleDegrees < 0
-        }
         let lower: (Double, [Double], Double)
         let upper: (Double, [Double], Double)
+        let onAxis = Array(repeating: 0.0, count: exemplar.frequenciesHz.count)
         if angle > 0 {
-            lower = (negative?.horizontalAngleDegrees ?? 0,
-                     negative?.relativeMagnitudeDB ??
-                         Array(repeating: 0, count: exemplar.frequenciesHz.count),
-                     negative?.evidenceConfidence ?? 1)
-            guard let positive else { return nil }
-            upper = (positive.horizontalAngleDegrees,
-                     positive.relativeMagnitudeDB, positive.evidenceConfidence)
+            let sameSideLower = traces.last {
+                $0.horizontalAngleDegrees > 0
+                    && $0.horizontalAngleDegrees <= angle
+            }
+            let sameSideUpper = traces.first {
+                $0.horizontalAngleDegrees > 0
+                    && $0.horizontalAngleDegrees >= angle
+            }
+            guard let sameSideUpper else { return nil }
+            lower = (sameSideLower?.horizontalAngleDegrees ?? 0,
+                     sameSideLower?.relativeMagnitudeDB ?? onAxis,
+                     sameSideLower?.evidenceConfidence ?? 1)
+            upper = (sameSideUpper.horizontalAngleDegrees,
+                     sameSideUpper.relativeMagnitudeDB,
+                     sameSideUpper.evidenceConfidence)
         } else {
-            upper = (positive?.horizontalAngleDegrees ?? 0,
-                     positive?.relativeMagnitudeDB ??
-                         Array(repeating: 0, count: exemplar.frequenciesHz.count),
-                     positive?.evidenceConfidence ?? 1)
-            guard let negative else { return nil }
-            lower = (negative.horizontalAngleDegrees,
-                     negative.relativeMagnitudeDB, negative.evidenceConfidence)
+            let sameSideLower = traces.last {
+                $0.horizontalAngleDegrees < 0
+                    && $0.horizontalAngleDegrees <= angle
+            }
+            let sameSideUpper = traces.first {
+                $0.horizontalAngleDegrees < 0
+                    && $0.horizontalAngleDegrees >= angle
+            }
+            guard let sameSideLower else { return nil }
+            upper = (sameSideUpper?.horizontalAngleDegrees ?? 0,
+                     sameSideUpper?.relativeMagnitudeDB ?? onAxis,
+                     sameSideUpper?.evidenceConfidence ?? 1)
+            lower = (sameSideLower.horizontalAngleDegrees,
+                     sameSideLower.relativeMagnitudeDB,
+                     sameSideLower.evidenceConfidence)
         }
         let gap = upper.0 - lower.0
         guard lower.0 <= angle, angle <= upper.0,
