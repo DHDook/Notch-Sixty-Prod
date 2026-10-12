@@ -213,7 +213,7 @@ for token in (
     "previewOnly == true",
     "canDeploy == false",
     "multiSubCoordinationRequired",
-    "Persistent provisional/verified PR108 provenance record",
+    "Slice 5 — Persistent provisional/verified provenance + finalization",
     "Fresh coherent post-Apply verification",
 ):
     assert token in doc, f"missing PR108 Slice 1 documentation: {token}"
