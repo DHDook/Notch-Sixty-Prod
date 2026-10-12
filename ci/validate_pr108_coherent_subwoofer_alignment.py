@@ -208,7 +208,7 @@ for token in (
     "testCoordinatedSolveCarriesIndependentPolarityPerSub",
     "testDuplicateAndIncompleteEvidenceFailClosed",
     "testEverySubMustUseSameMainRoleSet",
-    "testCommonSpeakerDelayCapacityFailsClosed",
+    "testCoordinatedSolveRespectsRemainingSpeakerDelayCapacity",
 ):
     assert token in multi_tests, f"missing PR108 coordinated multi-Sub test: {token}"
 
