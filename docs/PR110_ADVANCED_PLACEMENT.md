@@ -1,6 +1,6 @@
 # PR110 — Advanced Speaker & Subwoofer Placement Optimizer
 
-**State: Slices 1–2 implemented; exact-head CI and all real-room validation pending.**
+**State: Slices 1–3 implemented; Slice 3 exact-head CI and all real-room validation pending.**
 
 **REMOTE SCOPE ONLY:** no acoustic, physical, release or merge acceptance is implied.
 
@@ -95,12 +95,46 @@ corruption, unsupported versions, preview-only behavior, unsaved geometry
 blocking, and clearing sidecar with geometry. The PR110 CI job runs these
 tests and cumulative application regressions before any remote acceptance.
 
-**Slice 3 — Measurement-aware toe-in and per-speaker ranking.**
-Consume source-matched PR106 off-axis/on-axis relative measurements only when
-angle, measurement radius, mic, routing and repeat/SNR evidence qualify.
-Treat missing off-axis measurements as inconclusive, never as a flat directivity
-response. Rank practical placement *experiments* with transparent tradeoffs and
-uncertainties, not guaranteed numerical acoustic improvements.
+**Slice 3 — Measurement-aware toe-in (implemented; CI pending).**
+Adds `RoomAdvancedToeInEvidenceAnalyzer` using the existing PR106
+`SpeakerMeasurementLabDirectivityAnalyzer`, which requalifies every Lab
+session's on-axis/off-axis captures (same source, route, microphone, radius,
+sample rate, common grid, repeat count, SNR, clipping and arrival/phase gates).
+A derived report from an arbitrary external caller is **not** accepted as
+qualified by the production entry point.
+
+The Room Advisor action **Inspect Latest Qualified Lab Directivity** looks
+through recent Measurement Lab sessions matching the selected project's
+Playback System and processes only whole-speaker `frontLeft/frontRight`
+protocols with qualifying on-axis and off-axis groups. Before inspection the
+user must explicitly confirm the speakers and angles physically match the
+recorded setup; the project geometry and advanced settings must both be
+saved and unchanged. This is an essential human attestation because the
+PR106 Lab capture does not cryptographically bind physical pose to PR93
+geometry. No unqualified source is used; no Lab session modifies DSP.
+
+For only **±5° toe-in trial comparisons**, the analyzer computes signed
+speaker-to-center-seat azimuth from room geometry, subtracts the stated
+signed physical toe-in, and uses *only* qualified on-axis reference plus
+same-side horizontal off-axis traces. It requires adequate 1–8 kHz
+bandwidth, matched frequency grids, confidence, and no interpolation over
+more than 20° of measured angular separation; no angular extrapolation or
+cross-sign guesswork. An eligible result compares mean absolute spectral
+deviation *from the measured on-axis reference*, with a transparent
+directional indicator. It **does not predict SPL, perceived imaging,
+listening-position EQ, acoustic improvement or a correction to apply**.
+Missing signs, sparse angular evidence or mismatched identity produce
+`inconclusive`, with a visible reason and no numeric ranking.
+
+Moving either speaker in x/y, changing height, changing subwoofer position,
+and multi-seat score remain purely unranked geometric experiments in Slice 3.
+Physical listener-position verification remains a later required gate.
+
+New negative tests exercise cross-project / cross-speaker evidence rejection,
+clipping, low SNR, missing repeats, mismatched radius, unmeasured signed
+angles, insufficient angular resolution, and explicit human confirmation.
+The targeted XCTest group and cumulative macOS regression must pass at the
+same exact PR110 commit before Slice 3 is remotely accepted.
 
 **Slice 4 — Multi-seat and Sub placement.** Incorporate measured PR92 room
 bass variation and qualified PR103/106 individual-sub captures. Explore
