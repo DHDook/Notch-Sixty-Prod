@@ -30,8 +30,11 @@ struct CoherentSubwooferAlignmentCommissioningProposal:
             && candidate.previewOnly
             && !candidate.canDeploy
     }
-    /// Slice 2 still owns no mutation path.
-    var canDeploy: Bool { false }
+    /// The raw Slice 1 candidate remains preview-only. Once the dedicated
+    /// transactional stage exists, this fingerprint-bound proposal is eligible
+    /// for explicit Apply.
+    var canApply: Bool { readyForApproval }
+    var canDeploy: Bool { canApply }
 }
 
 struct CoherentSubwooferAlignmentApproval:
