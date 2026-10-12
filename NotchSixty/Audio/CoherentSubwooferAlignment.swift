@@ -5,6 +5,7 @@ enum CoherentSubwooferAlignmentError:
     case invalidOptions
     case profileInvalid
     case bassManagementRequired
+    case multiSubCoordinationRequired
     case evidenceRequired
     case evidenceIdentityMismatch
     case unsupportedSource
@@ -20,6 +21,8 @@ enum CoherentSubwooferAlignmentError:
             return "Coherent subwoofer alignment requires a valid enabled Output Device Profile."
         case .bassManagementRequired:
             return "Physical subwoofer alignment requires bass management and an assigned physical subwoofer."
+        case .multiSubCoordinationRequired:
+            return "Single-Sub coherent alignment is blocked when more than one physical subwoofer is assigned; use the coordinated multi-Sub PR108 path."
         case .evidenceRequired:
             return "At least one authenticated coherent Main/Sub timing report is required."
         case .evidenceIdentityMismatch:
@@ -143,6 +146,10 @@ struct CoherentSubwooferAlignmentPlanner: Sendable {
         guard bassManagementEnabled,
               !profile.subwooferAssignments.isEmpty else {
             throw CoherentSubwooferAlignmentError.bassManagementRequired
+        }
+        guard profile.subwooferAssignments.count == 1 else {
+            throw CoherentSubwooferAlignmentError
+                .multiSubCoordinationRequired
         }
         guard let first = reports.first else {
             throw CoherentSubwooferAlignmentError.evidenceRequired
