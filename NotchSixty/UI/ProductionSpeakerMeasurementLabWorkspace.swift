@@ -28,6 +28,8 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
     @ObservedObject var microphone: RoomCorrectionCalibrationController
     @ObservedObject var profiles: ProductProfileController
     @StateObject private var lab: SpeakerMeasurementLabController
+    @StateObject private var alignment:
+        CoherentSubwooferAlignmentGuidedController
 
     private let store = SpeakerMeasurementLabSessionStore()
     private let reportBuilder = SpeakerMeasurementLabReportBuilder()
@@ -60,6 +62,12 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                 microphone: microphone
             )
         )
+        _alignment = StateObject(
+            wrappedValue:
+                CoherentSubwooferAlignmentGuidedController(
+                    profileStore: profiles
+                )
+        )
     }
 
     var body: some View {
@@ -70,9 +78,11 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                 protocolComposerCard
                 sessionCard
                 reportCard
+                coherentAlignmentCard
                 historyCard
 
                 if let error = actionError
+                    ?? alignment.lastErrorDescription
                     ?? lab.lastErrorDescription
                     ?? microphone.lastErrorDescription {
                     Label(
@@ -140,7 +150,10 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                     .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Label("MEASUREMENT ONLY", systemImage: "lock.shield")
+                Label(
+                    "MEASURE → REVIEW → VERIFY",
+                    systemImage: "checkmark.shield"
+                )
                     .font(.caption.bold())
                     .tracking(1.0)
                     .foregroundStyle(.secondary)
@@ -150,7 +163,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
             }
 
             Text(
-                "Lab results never deploy DSP. Installed-room, near-field, quasi-anechoic and coherent-reference interpretations remain explicitly separated."
+                "Lab analyses never mutate DSP on their own. Coherent Sub Alignment below can turn authenticated Main/Sub timing evidence into an explicit reviewed transaction, followed by mandatory fresh measured verification."
             )
             .font(.caption)
             .foregroundStyle(.secondary)
