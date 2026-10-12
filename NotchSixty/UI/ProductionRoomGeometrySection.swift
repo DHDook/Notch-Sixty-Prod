@@ -27,6 +27,9 @@ struct ProductionRoomGeometrySection: View {
     @ObservedObject var advisor: RoomTreatmentAdvisorController
     @State private var unit: RoomGeometryDisplayUnit = .meters
     @State private var showsAdvancedPredictions = false
+    @State private var confirmsUnchangedLabGeometry = false
+    @State private var confirmsFixedSubABSeatsAndChain = false
+    @State private var confirmsActualPlacementMove = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -56,6 +59,7 @@ struct ProductionRoomGeometrySection: View {
                 emptyGeometryState
             } else {
                 geometryEditor
+                advancedPlacementSection
 
                 if let message =
                     advisor.geometryValidationMessage {
@@ -133,6 +137,543 @@ struct ProductionRoomGeometrySection: View {
         .background(
             .secondary.opacity(0.05),
             in: RoundedRectangle(cornerRadius: 13)
+        )
+    }
+
+
+    // PR110: optional project-only experiment settings. Nothing in this card
+    // moves real speakers, changes the Playback System, or applies DSP.
+    private var advancedPlacementSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Advanced Speaker & Subwoofer Placement")
+                .font(.subheadline.bold())
+            Text(
+                "Read-only physical experiments. A proposed toe-in, height, speaker or Sub move needs real microphone verification before treating it as an improvement."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+            if let settings = advisor.advancedPlacementDraft {
+                HStack(spacing: 12) {
+                    toeInField("Left toe-in (°)", side: .left,
+                               value: settings.leftToeInDegrees)
+                    toeInField("Right toe-in (°)", side: .right,
+                               value: settings.rightToeInDegrees)
+                }
+
+                HStack {
+                    Text("Additional listening seats")
+                        .font(.caption.bold())
+                    Spacer()
+                    Button("Add Seat") {
+                        advisor.addAdvancedSeat()
+                    }
+                    .disabled(settings.secondarySeats.count >= 7)
+                }
+                ForEach(settings.secondarySeats.indices, id: \.self) {
+                    index in
+                    advancedPositionRow(
+                        "Seat \(index + 2)",
+                        point: settings.secondarySeats[index],
+                        isSubwoofer: false,
+                        index: index
+                    )
+                }
+
+                HStack {
+                    Text("Modeled physical Sub positions")
+                        .font(.caption.bold())
+                    Spacer()
+                    Button("Add Sub") {
+                        advisor.addAdvancedSubwoofer()
+                    }
+                    .disabled(settings.subwooferPositions.count >= 4)
+                }
+                ForEach(settings.subwooferPositions.indices, id: \.self) {
+                    index in
+                    advancedPositionRow(
+                        "Sub \(index + 1)",
+                        point: settings.subwooferPositions[index],
+                        isSubwoofer: true,
+                        index: index
+                    )
+                }
+
+                HStack(spacing: 10) {
+                    Button("Save Advanced Placement") {
+                        advisor.saveAdvancedPlacement()
+                    }
+                    .disabled(
+                        advisor.geometryHasUnsavedChanges
+                        || advisor.savedGeometry == nil
+                        || !advisor.advancedPlacementHasUnsavedChanges
+                    )
+                    Button("Revert Advanced") {
+                        advisor.revertAdvancedPlacement()
+                    }
+                    .disabled(!advisor.advancedPlacementHasUnsavedChanges)
+                    Spacer()
+                    Text(
+                        advisor.advancedPlacementHasUnsavedChanges
+                        ? "UNSAVED DRAFT" : "SAVED"
+                    )
+                    .font(.caption2.bold())
+                    .foregroundStyle(.secondary)
+                }
+                if advisor.geometryHasUnsavedChanges {
+                    Text("Save your actual room geometry before saving advanced coordinates.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if let message = advisor.advancedPlacementMessage {
+                    Label(message, systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+
+                if !advisor.advancedPlacementExperiments.isEmpty {
+                    Divider()
+                    Text("Physical experiments to consider")
+                        .font(.caption.bold())
+                    Text(
+                        "Each experiment changes one variable. Preview does not change either draft or saved geometry."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    ForEach(advisor.advancedPlacementExperiments) { proposal in
+                        HStack(spacing: 8) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(proposal.description)
+                                    .font(.caption)
+                                Text(proposal.evidenceLabel)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button("Inspect") {
+                                advisor.previewAdvancedExperiment(proposal)
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
+                }
+
+                Divider()
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("Measurement-Informed Toe-In")
+                        .font(.caption.bold())
+                    Text(
+                        "Review existing repeat-qualified on/off-axis Lab sweeps for this Playback System. Positive signed rotation points toward the right room wall (+X), negative toward the left. In-room benefit is not predicted."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    Toggle(
+                        "I confirm the saved speaker positions and angles match the physical arrangement during these Lab captures",
+                        isOn: $confirmsUnchangedLabGeometry
+                    )
+                    .font(.caption)
+                    Button("Inspect Latest Qualified Lab Directivity") {
+                        advisor.inspectRecentDirectivity(
+                            physicalGeometryMatchesCapture:
+                                confirmsUnchangedLabGeometry
+                        )
+                    }
+                    .disabled(
+                        !confirmsUnchangedLabGeometry
+                        || advisor.geometryHasUnsavedChanges
+                        || advisor.advancedPlacementHasUnsavedChanges
+                        || advisor.savedAdvancedPlacement == nil
+                    )
+                    .buttonStyle(.bordered)
+                    if let message = advisor.toeInEvidenceMessage {
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(
+                        advisor.toeInMeasurementEvidence,
+                        id: \.experimentID
+                    ) { result in
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(result.experimentID)
+                                .font(.caption.bold())
+                            if result.status == .measuredComparison,
+                               let change = result.indicatedSpectralChangeDB {
+                                Text(
+                                    String(
+                                        format:
+                                        "Measured off-axis spectral-similarity change: %.2f dB (positive means closer to on-axis, not an in-room gain)",
+                                        change
+                                    )
+                                )
+                                .font(.caption.monospacedDigit())
+                            } else {
+                                Text("INCONCLUSIVE · insufficient angular or frequency coverage")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Text(result.note)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            .secondary.opacity(0.04),
+                            in: RoundedRectangle(cornerRadius: 8)
+                        )
+                    }
+                }
+
+                Divider()
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Multi-Seat Subwoofer A/B")
+                        .font(.caption.bold())
+                    Text(
+                        "Compare two ACTUAL physical Sub placements at the same microphone seats. The diagnostic is measured 35–160 Hz inter-seat variation, not predicted output level or a subwoofer delay adjustment."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    Button("Find Stored Subwoofer Sweeps") {
+                        confirmsFixedSubABSeatsAndChain = false
+                        advisor.refreshPhysicalSubMeasurementSets()
+                    }
+                    .buttonStyle(.bordered)
+                    if advisor.availablePhysicalSubSets.isEmpty {
+                        Text("No local Sub capture sets selected. Collect three repeated sweeps per seat for both physical positions before comparing.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Picker(
+                            "Before move",
+                            selection: $advisor.physicalSubBaselineID
+                        ) {
+                            Text("Select baseline").tag(nil as UUID?)
+                            ForEach(
+                                advisor.availablePhysicalSubSets.filter {
+                                    $0.role == .baseline
+                                }
+                            ) { item in
+                                Text(
+                                    "Baseline · \(item.modifiedAt.formatted(date: .abbreviated, time: .shortened)) · \(item.id.uuidString.prefix(8))"
+                                )
+                                .tag(Optional(item.id))
+                            }
+                        }
+                        Picker(
+                            "After physical move",
+                            selection: $advisor.physicalSubCandidateID
+                        ) {
+                            Text("Select candidate").tag(nil as UUID?)
+                            ForEach(
+                                advisor.availablePhysicalSubSets.filter {
+                                    $0.role == .candidate
+                                }
+                            ) { item in
+                                Text(
+                                    "Candidate · \(item.modifiedAt.formatted(date: .abbreviated, time: .shortened)) · \(item.id.uuidString.prefix(8))"
+                                )
+                                .tag(Optional(item.id))
+                            }
+                        }
+                    }
+                    Toggle(
+                        "I confirm the physical Sub was moved exactly as inspected; all microphone seats, crossover, gain, phase, routing and DSP settings were unchanged",
+                        isOn: $confirmsFixedSubABSeatsAndChain
+                    )
+                    .font(.caption)
+                    Button("Compare Measured Sub Positions") {
+                        advisor.comparePhysicalSubPlacement(
+                            identicalSeatsAndUnchangedSignalChainConfirmed:
+                                confirmsFixedSubABSeatsAndChain
+                        )
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(
+                        !confirmsFixedSubABSeatsAndChain
+                            || advisor.physicalSubBaselineID == nil
+                            || advisor.physicalSubCandidateID == nil
+                            || advisor.selectedAdvancedExperiment?.move != .subwoofer
+                            || advisor.geometryHasUnsavedChanges
+                            || advisor.advancedPlacementHasUnsavedChanges
+                    )
+                    if let result = advisor.physicalSubComparison {
+                        Text(
+                            String(
+                                format: "Measured inter-seat LF variation: %.2f → %.2f dB RMS (difference %.2f dB; positive means less seat-to-seat variation)",
+                                result.baselineInterseatSpreadRMSDB,
+                                result.candidateInterseatSpreadRMSDB,
+                                result.reductionInInterseatSpreadDB
+                            )
+                        )
+                        .font(.caption.monospacedDigit())
+                        Text(
+                            "\(result.seatCount) seats · \(result.commonFrequencyPointCount) shared frequency samples · \(Int(result.commonLowHz))–\(Int(result.commonHighHz)) Hz · measurement only"
+                        )
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    }
+                    if let message = advisor.physicalSubComparisonMessage {
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Divider()
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Placement Verification & History")
+                        .font(.caption.bold())
+                    Text(
+                        "Record one physically performed experiment. Only repeat-qualified, matching before/after Sub sweeps can receive a measured lower/higher LF-variation outcome. Every other move remains inconclusive."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    Toggle(
+                        "I physically performed the inspected move and verified its position",
+                        isOn: $confirmsActualPlacementMove
+                    )
+                    .font(.caption)
+                    Button("Record Placement Review") {
+                        advisor.recordPlacementReview(
+                            physicalMoveConfirmed: confirmsActualPlacementMove,
+                            fixedMicrophoneSeatsAndSignalChainConfirmed:
+                                confirmsFixedSubABSeatsAndChain
+                        )
+                        confirmsActualPlacementMove = false
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(
+                        !confirmsActualPlacementMove
+                        || advisor.selectedAdvancedExperiment == nil
+                        || advisor.geometryHasUnsavedChanges
+                        || advisor.advancedPlacementHasUnsavedChanges
+                        || advisor.savedAdvancedPlacement == nil
+                    )
+                    Text(
+                        "Reviews are immutable evidence snapshots. Recording does not accept, save or apply a new speaker/sub position."
+                    )
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    if let message = advisor.placementReviewMessage {
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if !advisor.placementReviewHistory.isEmpty {
+                        Text(
+                            "Saved project reviews (\(advisor.placementReviewHistory.count))"
+                        )
+                        .font(.caption.bold())
+                        ForEach(Array(advisor.placementReviewHistory.suffix(20).reversed())) { record in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(record.outcome.displayName)
+                                    .font(.caption.bold())
+                                Text(record.experimentDescription)
+                                    .font(.caption)
+                                Text(
+                                    record.reviewedAt.formatted(date: .abbreviated, time: .shortened)
+                                )
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                if let delta = record.measuredSpreadReductionDB {
+                                    Text(
+                                        String(
+                                            format: "Measured change in inter-seat LF variation: %+.2f dB · %d seats",
+                                            delta,
+                                            record.measuredSeatCount ?? 0
+                                        )
+                                    )
+                                    .font(.caption.monospacedDigit())
+                                }
+                                if let before = record.baselineMeasurementSetID {
+                                    Text("Baseline capture: \(before.uuidString)")
+                                        .font(.caption2.monospaced())
+                                }
+                                if let after = record.candidateMeasurementSetID {
+                                    Text("Candidate capture: \(after.uuidString)")
+                                        .font(.caption2.monospaced())
+                                }
+                                Text(record.evidenceNote)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                Text("NOT hardware accepted · NOT deployed")
+                                    .font(.caption2.bold())
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(9)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(
+                                .secondary.opacity(0.04),
+                                in: RoundedRectangle(cornerRadius: 8)
+                            )
+                        }
+                    }
+                }
+
+                if let proposal = advisor.selectedAdvancedExperiment {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("Hypothetical trial: \(proposal.description)")
+                            .font(.caption.bold())
+                        Text(
+                            "This is not a measurement or an accepted placement. Physically test one change, then repeat matched sweeps before recording the actual location."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        Text("Left: \(formatAdvancedPoint(proposal.trial.room.leftSpeaker))")
+                            .font(.caption.monospacedDigit())
+                        Text("Right: \(formatAdvancedPoint(proposal.trial.room.rightSpeaker))")
+                            .font(.caption.monospacedDigit())
+                        Text(
+                            "Toe-in: L \(proposal.trial.leftToeInDegrees.formatted())°, R \(proposal.trial.rightToeInDegrees.formatted())°"
+                        )
+                        .font(.caption.monospacedDigit())
+                        ForEach(proposal.trial.subwooferPositions.indices, id: \.self) {
+                            index in
+                            Text(
+                                "Sub \(index + 1): \(formatAdvancedPoint(proposal.trial.subwooferPositions[index]))"
+                            )
+                            .font(.caption.monospacedDigit())
+                        }
+                    }
+                    .padding(10)
+                    .background(
+                        .secondary.opacity(0.06),
+                        in: RoundedRectangle(cornerRadius: 9)
+                    )
+                }
+            }
+        }
+        .padding(14)
+        .background(
+            .secondary.opacity(0.045),
+            in: RoundedRectangle(cornerRadius: 13)
+        )
+        .onChange(of: advisor.selectedProjectID) { _, _ in
+            confirmsUnchangedLabGeometry = false
+            confirmsFixedSubABSeatsAndChain = false
+            confirmsActualPlacementMove = false
+        }
+        .onChange(of: advisor.geometryDraft) { _, _ in
+            confirmsUnchangedLabGeometry = false
+            confirmsFixedSubABSeatsAndChain = false
+            confirmsActualPlacementMove = false
+        }
+        .onChange(of: advisor.advancedPlacementDraft) { _, _ in
+            confirmsUnchangedLabGeometry = false
+            confirmsFixedSubABSeatsAndChain = false
+            confirmsActualPlacementMove = false
+        }
+        .onChange(of: advisor.selectedAdvancedExperiment?.id) { _, _ in
+            confirmsFixedSubABSeatsAndChain = false
+            confirmsActualPlacementMove = false
+        }
+        .onChange(of: advisor.physicalSubBaselineID) { _, _ in
+            confirmsFixedSubABSeatsAndChain = false
+            advisor.clearPhysicalSubComparison()
+        }
+        .onChange(of: advisor.physicalSubCandidateID) { _, _ in
+            confirmsFixedSubABSeatsAndChain = false
+            advisor.clearPhysicalSubComparison()
+        }
+    }
+
+    private func toeInField(
+        _ title: String,
+        side: RoomGeometrySpeaker,
+        value: Double
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption)
+            TextField(
+                title,
+                value: Binding(
+                    get: {
+                        guard let state = advisor.advancedPlacementDraft else {
+                            return 0.0
+                        }
+                        return side == .left
+                            ? state.leftToeInDegrees : state.rightToeInDegrees
+                    },
+                    set: { advisor.setAdvancedToeIn(side, degrees: $0) }
+                ),
+                format: .number.precision(.fractionLength(1))
+            )
+            .textFieldStyle(.roundedBorder)
+            .frame(width: 108)
+        }
+    }
+
+    private func advancedPositionRow(
+        _ label: String,
+        point: RoomGeometryPoint3D,
+        isSubwoofer: Bool,
+        index: Int
+    ) -> some View {
+        HStack(spacing: 8) {
+            Text(label)
+                .font(.caption)
+                .frame(width: 56, alignment: .leading)
+            coordinateEditor("X", \.x, isSubwoofer: isSubwoofer, index: index)
+            coordinateEditor("Y", \.y, isSubwoofer: isSubwoofer, index: index)
+            coordinateEditor("Z", \.z, isSubwoofer: isSubwoofer, index: index)
+            Button {
+                advisor.removeAdvancedPosition(
+                    isSubwoofer: isSubwoofer, index: index
+                )
+            } label: {
+                Image(systemName: "minus.circle")
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("Remove \(label)")
+        }
+    }
+
+    private func coordinateEditor(
+        _ axis: String,
+        _ keyPath: WritableKeyPath<RoomGeometryPoint3D, Double>,
+        isSubwoofer: Bool,
+        index: Int
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(axis)
+                .font(.caption2)
+            TextField(
+                axis,
+                value: Binding(
+                    get: {
+                        guard let settings = advisor.advancedPlacementDraft
+                        else { return 0.0 }
+                        let points = isSubwoofer
+                            ? settings.subwooferPositions
+                            : settings.secondarySeats
+                        guard points.indices.contains(index) else { return 0.0 }
+                        return points[index][keyPath: keyPath] * unit.fromMeters
+                    },
+                    set: {
+                        advisor.setAdvancedPositionCoordinate(
+                            isSubwoofer: isSubwoofer,
+                            index: index,
+                            keyPath: keyPath,
+                            value: $0 / unit.fromMeters
+                        )
+                    }
+                ),
+                format: .number.precision(.fractionLength(2))
+            )
+            .textFieldStyle(.roundedBorder)
+            .frame(maxWidth: 92)
+        }
+    }
+
+    private func formatAdvancedPoint(_ point: RoomGeometryPoint3D) -> String {
+        String(
+            format: "(%.2f, %.2f, %.2f) %@",
+            point.x * unit.fromMeters,
+            point.y * unit.fromMeters,
+            point.z * unit.fromMeters,
+            unit.title
         )
     }
 

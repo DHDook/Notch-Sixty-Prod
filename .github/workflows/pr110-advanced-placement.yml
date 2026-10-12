@@ -1,0 +1,67 @@
+name: PR110 Advanced Placement
+
+on:
+  push:
+    branches:
+      - feature/pr110-advanced-speaker-sub-placement
+  pull_request:
+    branches:
+      - feature/pr109-integration-stack-consolidation
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr110-advanced-placement-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Validate bounded read-only placement design
+        run: python3 ci/validate_pr110_advanced_placement.py
+      - name: Preserve PR109 cross-feature playback protection
+        run: python3 ci/validate_pr109_cross_feature_contracts.py
+      - name: Preserve PR93 geometry placement contracts
+        run: python3 ci/validate_pr93_room_geometry_placement.py
+
+  macos:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Validate PR110 read-only source and PR109 playback protection
+        run: |
+          python3 ci/validate_pr110_advanced_placement.py
+          python3 ci/validate_pr109_cross_feature_contracts.py
+          python3 ci/validate_pr93_room_geometry_placement.py
+      - name: Build Apple Silicon Debug
+        run: >-
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
+          -configuration Debug -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES build
+      - name: Run PR110 placement and inherited PR93 tests
+        run: >-
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
+          -configuration Debug -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES
+          -only-testing:NotchSixtyTests/RoomGeometryPlacementTests
+          -only-testing:NotchSixtyTests/AdvancedRoomPlacementExperimentsTests
+          -only-testing:NotchSixtyTests/AdvancedPlacementSidecarTests
+          -only-testing:NotchSixtyTests/AdvancedPlacementDirectivityTests
+          -only-testing:NotchSixtyTests/AdvancedSubPlacementABTests
+          -only-testing:NotchSixtyTests/AdvancedPlacementReviewHistoryTests
+          test
+      - name: Run cumulative XCTest regression
+        run: >-
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
+          -configuration Debug -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES test

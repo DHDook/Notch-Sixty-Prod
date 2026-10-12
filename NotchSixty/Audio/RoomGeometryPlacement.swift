@@ -1368,3 +1368,1073 @@ struct RoomGeometryStore: Sendable {
         try FileManager.default.removeItem(at: url)
     }
 }
+
+
+// MARK: - PR110: read-only advanced placement experiments
+
+/// Optional, project-scoped experiment geometry. No DSP/profile ownership.
+/// Secondary seats and physical Sub positions supplement the PR93 room model
+/// without changing its versioned JSON schema or saved state.
+struct RoomAdvancedPlacementState: Equatable, Sendable {
+    var room: RoomGeometryModel
+    var secondarySeats: [RoomGeometryPoint3D] = []
+    var leftToeInDegrees: Double = 0
+    var rightToeInDegrees: Double = 0
+    var subwooferPositions: [RoomGeometryPoint3D] = []
+
+    func validated() throws -> Self {
+        _ = try room.validated()
+        guard secondarySeats.count <= 7,
+              subwooferPositions.count <= 4,
+              leftToeInDegrees.isFinite,
+              rightToeInDegrees.isFinite,
+              abs(leftToeInDegrees) <= 80,
+              abs(rightToeInDegrees) <= 80 else {
+            throw RoomAdvancedPlacementError.invalidConfiguration
+        }
+        for point in secondarySeats + subwooferPositions {
+            guard point.x.isFinite, point.y.isFinite, point.z.isFinite,
+                  point.x >= 0, point.x <= room.dimensions.width,
+                  point.y >= 0, point.y <= room.dimensions.length,
+                  point.z >= 0, point.z <= room.dimensions.height else {
+                throw RoomAdvancedPlacementError.invalidConfiguration
+            }
+        }
+        return self
+    }
+}
+
+enum RoomAdvancedPlacementError: Error, LocalizedError, Equatable, Sendable {
+    case invalidConfiguration
+    case corruptSettings
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidConfiguration:
+            return "Advanced placement must match this project and stay inside the room limits."
+        case .corruptSettings:
+            return "Saved advanced placement settings could not be read; the original room geometry was preserved."
+        }
+    }
+}
+
+enum RoomAdvancedPlacementMove: String, Equatable, Sendable {
+    case leftSpeaker
+    case rightSpeaker
+    case leftToeIn
+    case rightToeIn
+    case leftHeight
+    case rightHeight
+    case subwoofer
+}
+
+/// This is a *physical experiment*, not a correction plan or an acoustic
+/// prediction. No source here owns a profile mutation, DSP graph or Apply API.
+struct RoomAdvancedPlacementExperiment: Identifiable, Equatable, Sendable {
+    var id: String
+    var move: RoomAdvancedPlacementMove
+    var description: String
+    var trial: RoomAdvancedPlacementState
+    var movementMeters: Double
+    /// Pure path-length diagnostic, NOT a frequency response or SPL estimate.
+    var maximumSeatPathImbalanceMeters: Double
+    var evidenceLabel: String { "Geometry hypothesis — measurement required" }
+    var requiresMeasuredVerification: Bool { true }
+}
+
+/// Reuses PR93's validated coordinates. Search is intentionally small:
+/// independently move L/R by 15 cm, try 10 cm height changes, ±5° toe-in,
+/// and move each modeled physical Sub 30 cm in x/y. These are bounded,
+/// unranked *experiments*; room geometry alone does not authorize claiming
+/// any before/after dB, phase, SPL, decay or perceived-image improvement.
+///
+/// Later PR110 slices will add source-specific microphone evidence, toe-in
+/// directivity matching, multi-seat scoring and measured before/after checks.
+struct RoomAdvancedPlacementExplorer: Sendable {
+    func experiments(
+        for original: RoomAdvancedPlacementState
+    ) throws -> [RoomAdvancedPlacementExperiment] {
+        let state = try original.validated()
+        var results: [RoomAdvancedPlacementExperiment] = []
+
+        func include(
+            _ id: String,
+            move: RoomAdvancedPlacementMove,
+            description: String,
+            trial: RoomAdvancedPlacementState,
+            movement: Double
+        ) {
+            guard (try? trial.validated()) != nil,
+                  trial != state else { return }
+            results.append(
+                RoomAdvancedPlacementExperiment(
+                    id: id,
+                    move: move,
+                    description: description,
+                    trial: trial,
+                    movementMeters: movement,
+                    maximumSeatPathImbalanceMeters:
+                        maximumSeatPathImbalance(trial)
+                )
+            )
+        }
+
+        for (side, kind) in [
+            (RoomGeometrySpeaker.left, RoomAdvancedPlacementMove.leftSpeaker),
+            (.right, .rightSpeaker),
+        ] {
+            for (axis, shift) in [
+                ("left", -0.15), ("right", 0.15),
+                ("forward", -0.15), ("back", 0.15),
+            ] {
+                var trial = state
+                var point = side == .left
+                    ? trial.room.leftSpeaker : trial.room.rightSpeaker
+                if axis == "left" || axis == "right" {
+                    point.x += shift
+                } else {
+                    point.y += shift
+                }
+                if side == .left {
+                    trial.room.leftSpeaker = point
+                } else {
+                    trial.room.rightSpeaker = point
+                }
+                include(
+                    "\(side.rawValue)-\(axis)",
+                    move: kind,
+                    description: "Move \(side.displayName) \(axis) by 15 cm",
+                    trial: trial,
+                    movement: 0.15
+                )
+            }
+            for (direction, adjustment) in [
+                ("lower", -0.10), ("higher", 0.10),
+            ] {
+                var trial = state
+                if side == .left {
+                    trial.room.leftSpeaker.z += adjustment
+                } else {
+                    trial.room.rightSpeaker.z += adjustment
+                }
+                include(
+                    "\(side.rawValue)-height-\(direction)",
+                    move: side == .left ? .leftHeight : .rightHeight,
+                    description:
+                        "Move \(side.displayName) \(direction) by 10 cm",
+                    trial: trial,
+                    movement: 0.10
+                )
+            }
+            for (direction, adjustment) in [
+                ("clockwise", -5.0), ("counterclockwise", 5.0),
+            ] {
+                var trial = state
+                if side == .left {
+                    trial.leftToeInDegrees += adjustment
+                } else {
+                    trial.rightToeInDegrees += adjustment
+                }
+                include(
+                    "\(side.rawValue)-toe-\(direction)",
+                    move: side == .left ? .leftToeIn : .rightToeIn,
+                    description:
+                        "Rotate \(side.displayName) \(direction) by 5°",
+                    trial: trial,
+                    movement: 0
+                )
+            }
+        }
+
+        for subIndex in state.subwooferPositions.indices {
+            for (direction, dx, dy) in [
+                ("left", -0.30, 0.0),
+                ("right", 0.30, 0.0),
+                ("forward", 0.0, -0.30),
+                ("back", 0.0, 0.30),
+            ] {
+                var trial = state
+                trial.subwooferPositions[subIndex].x += dx
+                trial.subwooferPositions[subIndex].y += dy
+                include(
+                    "sub-\(subIndex)-\(direction)",
+                    move: .subwoofer,
+                    description:
+                        "Move Sub \(subIndex + 1) \(direction) by 30 cm",
+                    trial: trial,
+                    movement: 0.30
+                )
+            }
+        }
+        return results
+    }
+
+    /// Tracks L/R direct-path symmetry across every specified seat.
+    /// This is useful diagnostic context, never a scalar acoustic quality
+    /// score and never a license to apply EQ or physical sub alignment.
+    func maximumSeatPathImbalance(
+        _ state: RoomAdvancedPlacementState
+    ) -> Double {
+        let seats = [state.room.listener] + state.secondarySeats
+        return seats.map { seat in
+            abs(
+                state.room.leftSpeaker.distance(to: seat)
+                - state.room.rightSpeaker.distance(to: seat)
+            )
+        }.max() ?? 0
+    }
+}
+
+
+// MARK: - PR110 Slice 2: project-only advanced placement sidecar
+
+/// Versioned sidecar deliberately independent of the existing PR93 geometry
+/// JSON and of the persisted Playback System / Content Preset.
+struct RoomAdvancedPlacementSettings: Codable, Equatable, Sendable {
+    static let currentSchemaVersion = 1
+
+    var schemaVersion: Int = currentSchemaVersion
+    var projectID: UUID
+    var secondarySeats: [RoomGeometryPoint3D] = []
+    var leftToeInDegrees: Double = 0
+    var rightToeInDegrees: Double = 0
+    var subwooferPositions: [RoomGeometryPoint3D] = []
+
+    func state(for room: RoomGeometryModel) throws -> RoomAdvancedPlacementState {
+        guard schemaVersion == Self.currentSchemaVersion,
+              projectID == room.projectID else {
+            throw RoomAdvancedPlacementError.invalidConfiguration
+        }
+        return try RoomAdvancedPlacementState(
+            room: room,
+            secondarySeats: secondarySeats,
+            leftToeInDegrees: leftToeInDegrees,
+            rightToeInDegrees: rightToeInDegrees,
+            subwooferPositions: subwooferPositions
+        ).validated()
+    }
+
+    static func from(
+        _ state: RoomAdvancedPlacementState
+    ) throws -> Self {
+        let checked = try state.validated()
+        return Self(
+            projectID: checked.room.projectID,
+            secondarySeats: checked.secondarySeats,
+            leftToeInDegrees: checked.leftToeInDegrees,
+            rightToeInDegrees: checked.rightToeInDegrees,
+            subwooferPositions: checked.subwooferPositions
+        )
+    }
+}
+
+/// No automatic migration of PR93; unsupported/corrupted new sidecars fail
+/// closed without deleting the existing base room geometry.
+struct RoomAdvancedPlacementStore: Sendable {
+    let projectStore: RoomCorrectionProjectStore
+
+    func settingsURL(for projectID: UUID) -> URL {
+        projectStore.projectDirectory(for: projectID)
+            .appendingPathComponent(
+                "advisor-advanced-placement-v1.json", isDirectory: false
+            )
+    }
+
+    func load(
+        projectID: UUID,
+        room: RoomGeometryModel
+    ) throws -> RoomAdvancedPlacementSettings? {
+        guard projectID == room.projectID else {
+            throw RoomAdvancedPlacementError.invalidConfiguration
+        }
+        let url = settingsURL(for: projectID)
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            return nil
+        }
+        let decoded: RoomAdvancedPlacementSettings
+        do {
+            decoded = try JSONDecoder().decode(
+                RoomAdvancedPlacementSettings.self,
+                from: Data(contentsOf: url)
+            )
+        } catch {
+            throw RoomAdvancedPlacementError.corruptSettings
+        }
+        _ = try decoded.state(for: room)
+        return decoded
+    }
+
+    @discardableResult
+    func save(
+        _ settings: RoomAdvancedPlacementSettings,
+        room: RoomGeometryModel
+    ) throws -> URL {
+        _ = try settings.state(for: room)
+        let directory = projectStore.projectDirectory(
+            for: settings.projectID
+        )
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let destination = settingsURL(for: settings.projectID)
+        try encoder.encode(settings).write(
+            to: destination, options: .atomic
+        )
+        return destination
+    }
+
+    func delete(projectID: UUID) throws {
+        let destination = settingsURL(for: projectID)
+        guard FileManager.default.fileExists(atPath: destination.path) else {
+            return
+        }
+        try FileManager.default.removeItem(at: destination)
+    }
+}
+
+
+// MARK: - PR110 Slice 3: qualified, measurement-informed toe-in advice
+
+/// A scored *spectral orientation experiment*, never proof of in-room
+/// improvement. Angles in this model are signed clockwise from the room's
+/// forward (+Y) axis: positive toe-in rotates toward +X.
+enum RoomAdvancedDirectivityStatus: String, Equatable, Sendable {
+    case measuredComparison
+    case inconclusive
+}
+
+struct RoomAdvancedToeInEvidence: Equatable, Sendable {
+    var experimentID: String
+    var speaker: RoomGeometrySpeaker
+    var status: RoomAdvancedDirectivityStatus
+    var sessionID: UUID?
+    var sourceProtocolID: UUID?
+    var currentAxisOffsetDegrees: Double
+    var trialAxisOffsetDegrees: Double
+    /// Mean |off-axis minus on-axis magnitude| over an actually supported
+    /// 1–8 kHz grid. Diagnostic preference for on-axis spectral similarity;
+    /// NOT a predicted in-room improvement or acoustic score.
+    var currentAbsoluteDeviationDB: Double?
+    var trialAbsoluteDeviationDB: Double?
+    var confidence: Double?
+    var note: String
+
+    var indicatedSpectralChangeDB: Double? {
+        guard let baseline = currentAbsoluteDeviationDB,
+              let trial = trialAbsoluteDeviationDB else { return nil }
+        return baseline - trial
+    }
+}
+
+enum RoomAdvancedDirectivityError: Error, LocalizedError, Equatable {
+    case invalidProjectIdentity
+    case invalidSource
+    case unqualifiedLabEvidence
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidProjectIdentity:
+            return "Directivity evidence belongs to a different Playback System."
+        case .invalidSource:
+            return "Use on-axis whole-speaker evidence for the requested left/right speaker."
+        case .unqualifiedLabEvidence:
+            return "Measurement Lab evidence did not pass the repeated-capture directivity quality gates."
+        }
+    }
+}
+
+struct RoomAdvancedToeInEvidenceAnalyzer: Sendable {
+    static let minimumQualifiedConfidence =
+        SpeakerOptimizerMeasurementEvidenceEvaluator.minimumOptimizerConfidence
+    static let minimumFrequencyHz = 1_000.0
+    static let maximumFrequencyHz = 8_000.0
+    static let maximumMeasuredAngularGapDegrees = 20.0
+
+    /// Never accept a caller-supplied directivity report as verified evidence:
+    /// derive it by re-running PR106's repeat-qualified analyzer on the actual
+    /// session, including source/radius/SNR/clipping/mic/routing quality gates.
+    func evaluate(
+        state: RoomAdvancedPlacementState,
+        playbackSystemID: UUID,
+        session: SpeakerMeasurementLabSession,
+        onAxisProtocolID: UUID,
+        speaker: RoomGeometrySpeaker
+    ) throws -> [RoomAdvancedToeInEvidence] {
+        let valid = try state.validated()
+        guard session.playbackSystemID == playbackSystemID else {
+            throw RoomAdvancedDirectivityError.invalidProjectIdentity
+        }
+        let report: SpeakerMeasurementLabDirectivityReport
+        do {
+            report = try SpeakerMeasurementLabDirectivityAnalyzer()
+                .analyze(
+                    session: session,
+                    onAxisProtocolID: onAxisProtocolID
+                )
+        } catch {
+            throw RoomAdvancedDirectivityError.unqualifiedLabEvidence
+        }
+        let requiredSource: MultichannelCalibrationSource =
+            .speaker(speaker == .left ? .frontLeft : .frontRight)
+        guard report.source == requiredSource,
+              report.sessionID == session.id,
+              report.playbackSystemID == playbackSystemID else {
+            throw RoomAdvancedDirectivityError.invalidSource
+        }
+        return evaluateQualifiedReport(
+            report: report,
+            state: valid,
+            speaker: speaker
+        )
+    }
+
+    /// Internal pure scoring seam. The production boundary above MUST
+    /// authenticate the report through the Lab analyzer before calling it.
+    func evaluateQualifiedReport(
+        report: SpeakerMeasurementLabDirectivityReport,
+        state: RoomAdvancedPlacementState,
+        speaker: RoomGeometrySpeaker
+    ) -> [RoomAdvancedToeInEvidence] {
+        let experiments = (try? RoomAdvancedPlacementExplorer()
+            .experiments(for: state)) ?? []
+        let origin = speaker == .left
+            ? state.room.leftSpeaker : state.room.rightSpeaker
+        let toe = speaker == .left
+            ? state.leftToeInDegrees : state.rightToeInDegrees
+        let current = offset(
+            from: origin, to: state.room.listener, toeIn: toe
+        )
+        let expectedMove: RoomAdvancedPlacementMove =
+            speaker == .left ? .leftToeIn : .rightToeIn
+
+        let results: [RoomAdvancedToeInEvidence] = experiments
+            .filter { $0.move == expectedMove }
+            .map { trial in
+                let changedToe = speaker == .left
+                    ? trial.trial.leftToeInDegrees
+                    : trial.trial.rightToeInDegrees
+                let target = offset(
+                    from: origin,
+                    to: state.room.listener,
+                    toeIn: changedToe
+                )
+                let before = spectralDeviation(report, angle: current)
+                let after = spectralDeviation(report, angle: target)
+                let qualified = before != nil && after != nil
+                return RoomAdvancedToeInEvidence(
+                    experimentID: trial.id,
+                    speaker: speaker,
+                    status: qualified ? .measuredComparison : .inconclusive,
+                    sessionID: report.sessionID,
+                    sourceProtocolID: report.onAxisProtocolID,
+                    currentAxisOffsetDegrees: current,
+                    trialAxisOffsetDegrees: target,
+                    currentAbsoluteDeviationDB: before?.value,
+                    trialAbsoluteDeviationDB: after?.value,
+                    confidence: qualified
+                        ? min(before!.confidence, after!.confidence) : nil,
+                    note: qualified
+                        ? "Qualified installed-room on/off-axis spectrum suggests a change in similarity to the on-axis reference; perform fresh listening-position measurement before assessing benefit."
+                        : "No repeat-qualified, signed off-axis evidence brackets both angles at usable 1–8 kHz frequencies; do not rank."
+                )
+            }
+        // Unsupported trials retain their identity and explanatory blocker,
+        // and cannot rise to the top on a guessed numerical score.
+        return results.sorted {
+            if $0.status != $1.status {
+                return $0.status == .measuredComparison
+            }
+            if let lhs = $0.indicatedSpectralChangeDB,
+               let rhs = $1.indicatedSpectralChangeDB,
+               lhs != rhs {
+                return lhs > rhs
+            }
+            return $0.experimentID < $1.experimentID
+        }
+    }
+
+    private func offset(
+        from speaker: RoomGeometryPoint3D,
+        to listener: RoomGeometryPoint3D,
+        toeIn: Double
+    ) -> Double {
+        atan2(listener.x - speaker.x, listener.y - speaker.y)
+            * 180 / .pi - toeIn
+    }
+
+    private func spectralDeviation(
+        _ report: SpeakerMeasurementLabDirectivityReport,
+        angle: Double
+    ) -> (value: Double, confidence: Double)? {
+        guard angle.isFinite,
+              report.commonUsableLowHz <= Self.minimumFrequencyHz,
+              report.commonUsableHighHz >= Self.maximumFrequencyHz else {
+            return nil
+        }
+        let traces = report.traces.filter {
+            abs($0.verticalAngleDegrees) < 0.5
+                && $0.evidenceConfidence >= Self.minimumQualifiedConfidence
+                && $0.frequenciesHz.count == $0.relativeMagnitudeDB.count
+                && $0.frequenciesHz.count >= 12
+                && $0.relativeMagnitudeDB.allSatisfy(\.isFinite)
+        }.sorted { $0.horizontalAngleDegrees < $1.horizontalAngleDegrees }
+        guard let exemplar = traces.first else { return nil }
+        let indices = exemplar.frequenciesHz.indices.filter {
+            (Self.minimumFrequencyHz...Self.maximumFrequencyHz)
+                .contains(exemplar.frequenciesHz[$0])
+        }
+        guard indices.count >= 8,
+              traces.allSatisfy({ $0.frequenciesHz == exemplar.frequenciesHz }),
+              exemplar.frequenciesHz.allSatisfy(\.isFinite) else {
+            return nil
+        }
+        // On-axis reference is exactly zero dB *relative to itself*.
+        // This does not imply the speaker is flat or meets any target.
+        if abs(angle) <= 0.0001 { return (0, 1) }
+        // A negative-side sample must not be used to extrapolate a positive
+        // orientation (or vice versa); 0° is the explicit reference anchor.
+        let lower: (Double, [Double], Double)
+        let upper: (Double, [Double], Double)
+        let onAxis = Array(repeating: 0.0, count: exemplar.frequenciesHz.count)
+        if angle > 0 {
+            let sameSideLower = traces.last {
+                $0.horizontalAngleDegrees > 0
+                    && $0.horizontalAngleDegrees <= angle
+            }
+            let sameSideUpper = traces.first {
+                $0.horizontalAngleDegrees > 0
+                    && $0.horizontalAngleDegrees >= angle
+            }
+            guard let sameSideUpper else { return nil }
+            lower = (sameSideLower?.horizontalAngleDegrees ?? 0,
+                     sameSideLower?.relativeMagnitudeDB ?? onAxis,
+                     sameSideLower?.evidenceConfidence ?? 1)
+            upper = (sameSideUpper.horizontalAngleDegrees,
+                     sameSideUpper.relativeMagnitudeDB,
+                     sameSideUpper.evidenceConfidence)
+        } else {
+            let sameSideLower = traces.last {
+                $0.horizontalAngleDegrees < 0
+                    && $0.horizontalAngleDegrees <= angle
+            }
+            let sameSideUpper = traces.first {
+                $0.horizontalAngleDegrees < 0
+                    && $0.horizontalAngleDegrees >= angle
+            }
+            guard let sameSideLower else { return nil }
+            upper = (sameSideUpper?.horizontalAngleDegrees ?? 0,
+                     sameSideUpper?.relativeMagnitudeDB ?? onAxis,
+                     sameSideUpper?.evidenceConfidence ?? 1)
+            lower = (sameSideLower.horizontalAngleDegrees,
+                     sameSideLower.relativeMagnitudeDB,
+                     sameSideLower.evidenceConfidence)
+        }
+        let gap = upper.0 - lower.0
+        guard lower.0 <= angle, angle <= upper.0,
+              gap >= 0, gap <= Self.maximumMeasuredAngularGapDegrees else {
+            return nil
+        }
+        let ratio = gap > 0 ? (angle - lower.0) / gap : 0
+        let meanAbs = indices.reduce(0.0) { sum, i in
+            let value = lower.1[i] + ratio * (upper.1[i] - lower.1[i])
+            return sum + abs(value)
+        } / Double(indices.count)
+        return meanAbs.isFinite
+            ? (meanAbs, min(lower.2, upper.2)) : nil
+    }
+}
+
+
+// MARK: - PR110 Slice 4: measured physical Sub A/B at multiple seats
+
+/// Separate physical position trials from PR108 coherent *digital* Sub
+/// timing/phase commissioning. No room model may synthesize new LF evidence.
+/// This is an offline, signed human-setup attestation plus two independently
+/// repeat-qualified PR103 capture sets. It never alters DSP or output routing.
+struct RoomAdvancedSubPlacementComparison: Equatable, Sendable {
+    var experimentID: String
+    var source: MultichannelCalibrationSource
+    var baselineMeasurementSetID: UUID
+    var candidateMeasurementSetID: UUID
+    var seatCount: Int
+    var commonFrequencyPointCount: Int
+    var commonLowHz: Double
+    var commonHighHz: Double
+    var baselineInterseatSpreadRMSDB: Double
+    var candidateInterseatSpreadRMSDB: Double
+    /// Positive means *lower* inter-seat variation in measured relative LF
+    /// magnitude. Not a sound-pressure or target-response improvement.
+    var reductionInInterseatSpreadDB: Double
+    var evidenceConfidence: Double
+    var measurementOnly: Bool { true }
+    var canDeploy: Bool { false }
+    var requiresRealWorldListeningVerification: Bool { true }
+}
+
+enum RoomAdvancedSubPlacementComparisonError:
+    Error, Equatable, LocalizedError {
+    case missingPhysicalAttestation
+    case invalidExperiment
+    case mismatchedIdentity
+    case inadequateEvidence
+    case incompatibleFrequencyResponse
+
+    var errorDescription: String? {
+        switch self {
+        case .missingPhysicalAttestation:
+            return "Confirm identical microphone seats and an unchanged DSP/crossover/gain/phase chain across both physical placement captures."
+        case .invalidExperiment:
+            return "The proposed physical Sub move must exactly match the saved placement experiment."
+        case .mismatchedIdentity:
+            return "The baseline and candidate need the same Playback System, source, microphone, route, sample rate, and seat IDs."
+        case .inadequateEvidence:
+            return "Both positions need separate, fresh, repeat-qualified sweeps at every seat."
+        case .incompatibleFrequencyResponse:
+            return "Multi-seat LF comparisons need identical qualified response grids across both positions."
+        }
+    }
+}
+
+struct RoomAdvancedSubPlacementComparisonAnalyzer: Sendable {
+    static let minimumFrequencyHz = 35.0
+    static let maximumFrequencyHz = 160.0
+    static let minimumFrequencyPoints = 12
+    static let minimumSeats = 2
+    static let maximumSeats = 8
+
+    func compare(
+        baseline: SpeakerOptimizerMeasurementSet,
+        candidate: SpeakerOptimizerMeasurementSet,
+        state: RoomAdvancedPlacementState,
+        experiment: RoomAdvancedPlacementExperiment,
+        playbackSystemID: UUID,
+        physicalSetupConfirmed: Bool
+    ) throws -> RoomAdvancedSubPlacementComparison {
+        guard physicalSetupConfirmed else {
+            throw RoomAdvancedSubPlacementComparisonError
+                .missingPhysicalAttestation
+        }
+        let checked = try? state.validated()
+        let genuine = try? RoomAdvancedPlacementExplorer()
+            .experiments(for: state)
+            .first { $0.id == experiment.id }
+        guard let checked, let genuine,
+              experiment == genuine,
+              experiment.move == .subwoofer,
+              checked.subwooferPositions != experiment.trial.subwooferPositions
+        else {
+            throw RoomAdvancedSubPlacementComparisonError.invalidExperiment
+        }
+
+        let seats = [checked.room.listener] + checked.secondarySeats
+        guard (Self.minimumSeats...Self.maximumSeats).contains(seats.count),
+              baseline.positions.count == seats.count,
+              candidate.positions.count == seats.count,
+              baseline.positions.map(\.id) == candidate.positions.map(\.id),
+              baseline.positions.map(\.name) == candidate.positions.map(\.name),
+              baseline.id != candidate.id,
+              baseline.role == .baseline, candidate.role == .candidate,
+              baseline.playbackSystemID == playbackSystemID,
+              candidate.playbackSystemID == playbackSystemID,
+              baseline.routingSignature == candidate.routingSignature,
+              baseline.microphone == candidate.microphone,
+              baseline.sampleRate == candidate.sampleRate,
+              baseline.plannedSources == candidate.plannedSources,
+              baseline.plannedSources.count == 1,
+              baseline.captures.allSatisfy({ $0.source == baseline.plannedSources[0] }),
+              candidate.captures.allSatisfy({ $0.source == candidate.plannedSources[0] })
+        else {
+            throw RoomAdvancedSubPlacementComparisonError.mismatchedIdentity
+        }
+        let source = baseline.plannedSources[0]
+        guard case .subwoofer(let physicalIndex) = source,
+              Int(physicalIndex) < checked.subwooferPositions.count,
+              experiment.id.hasPrefix("sub-\(physicalIndex)-") else {
+            throw RoomAdvancedSubPlacementComparisonError.invalidExperiment
+        }
+
+        let validator = SpeakerOptimizerMeasurementEvidenceEvaluator()
+        guard let baselineReport = try? validator.evaluate(baseline),
+              let candidateReport = try? validator.evaluate(candidate),
+              baselineReport.optimizerReady, candidateReport.optimizerReady,
+              baselineReport.groupReports.count == seats.count,
+              candidateReport.groupReports.count == seats.count,
+              baselineReport.groupReports.allSatisfy(\.optimizerReady),
+              candidateReport.groupReports.allSatisfy(\.optimizerReady),
+              let newestBaseline = baseline.captures.map(\.capturedAt).max(),
+              let oldestCandidate = candidate.captures.map(\.capturedAt).min(),
+              newestBaseline < oldestCandidate,
+              Set(baseline.captures.map(\.id))
+                .isDisjoint(with: Set(candidate.captures.map(\.id)))
+        else {
+            throw RoomAdvancedSubPlacementComparisonError.inadequateEvidence
+        }
+
+        let allGroups = baselineReport.groupReports
+            + candidateReport.groupReports
+        let low = max(Self.minimumFrequencyHz,
+                      allGroups.compactMap(\.commonUsableLowHz).max() ?? .infinity)
+        let high = min(Self.maximumFrequencyHz,
+                       allGroups.compactMap(\.commonUsableHighHz).min() ?? 0)
+        guard low <= high, low.isFinite, high.isFinite else {
+            throw RoomAdvancedSubPlacementComparisonError
+                .incompatibleFrequencyResponse
+        }
+
+        let allCaptures = baseline.captures + candidate.captures
+        guard let grid = allCaptures.first?.response.frequenciesHz,
+              !grid.isEmpty,
+              zip(grid, grid.dropFirst()).allSatisfy({ $0.0 < $0.1 }),
+              grid.allSatisfy({ $0.isFinite && $0 > 0 }),
+              allCaptures.allSatisfy({
+                  $0.response.frequenciesHz == grid
+                    && $0.response.magnitudeDB.count == grid.count
+                    && $0.response.magnitudeDB.allSatisfy(\.isFinite)
+              }) else {
+            throw RoomAdvancedSubPlacementComparisonError
+                .incompatibleFrequencyResponse
+        }
+        let selected = grid.indices.filter {
+            grid[$0] >= low && grid[$0] <= high
+        }
+        guard selected.count >= Self.minimumFrequencyPoints else {
+            throw RoomAdvancedSubPlacementComparisonError
+                .incompatibleFrequencyResponse
+        }
+
+        func interseatRMS(_ set: SpeakerOptimizerMeasurementSet) -> Double? {
+            let ordered = set.positions.map { position in
+                set.captures.filter { $0.positionID == position.id }
+            }
+            guard ordered.allSatisfy({ !$0.isEmpty }) else { return nil }
+            // Per-frequency variance across seats; cancels common gain
+            // shifts, so it never pretends to measure absolute LF level.
+            let spreads: [Double] = selected.map { frequencyIndex in
+                let seatMeans = ordered.map { captures in
+                    captures.map { $0.response.magnitudeDB[frequencyIndex] }
+                        .reduce(0, +) / Double(captures.count)
+                }
+                let center = seatMeans.reduce(0, +) / Double(seatMeans.count)
+                return seatMeans.reduce(0.0) {
+                    $0 + pow($1 - center, 2)
+                } / Double(seatMeans.count)
+            }
+            let value = sqrt(spreads.reduce(0, +) / Double(spreads.count))
+            return value.isFinite ? value : nil
+        }
+        guard let prior = interseatRMS(baseline),
+              let after = interseatRMS(candidate) else {
+            throw RoomAdvancedSubPlacementComparisonError
+                .incompatibleFrequencyResponse
+        }
+        return RoomAdvancedSubPlacementComparison(
+            experimentID: experiment.id,
+            source: source,
+            baselineMeasurementSetID: baseline.id,
+            candidateMeasurementSetID: candidate.id,
+            seatCount: seats.count,
+            commonFrequencyPointCount: selected.count,
+            commonLowHz: low,
+            commonHighHz: high,
+            baselineInterseatSpreadRMSDB: prior,
+            candidateInterseatSpreadRMSDB: after,
+            reductionInInterseatSpreadDB: prior - after,
+            evidenceConfidence: min(
+                baselineReport.confidence, candidateReport.confidence
+            )
+        )
+    }
+}
+
+
+// MARK: - PR110 Slice 5: immutable physical placement review history
+
+/// An observation of a particular captured physical move, never a playback
+/// preset, room-correction deployment or claim of real-world acceptability.
+enum RoomAdvancedPlacementReviewOutcome: String, Codable, Sendable {
+    case improved
+    case regressed
+    case inconclusive
+
+    var displayName: String {
+        switch self {
+        case .improved: "Lower measured inter-seat LF variation"
+        case .regressed: "Higher measured inter-seat LF variation"
+        case .inconclusive: "Inconclusive / unverified"
+        }
+    }
+}
+
+/// The 0.25 dB display deadband avoids treating tiny changes as decisive.
+/// It is an *informational review threshold*, not a statistical confidence
+/// interval, audible difference threshold, or physical acceptance limit.
+struct RoomAdvancedPlacementReviewClassifier: Sendable {
+    static let informationalDeadbandDB = 0.25
+
+    func outcome(
+        for comparison: RoomAdvancedSubPlacementComparison
+    ) -> RoomAdvancedPlacementReviewOutcome {
+        let value = comparison.reductionInInterseatSpreadDB
+        guard value.isFinite,
+              comparison.baselineInterseatSpreadRMSDB.isFinite,
+              comparison.candidateInterseatSpreadRMSDB.isFinite,
+              comparison.evidenceConfidence >=
+                SpeakerOptimizerMeasurementEvidenceEvaluator
+                    .minimumOptimizerConfidence,
+              comparison.seatCount >= 2,
+              comparison.commonFrequencyPointCount >= 12
+        else { return .inconclusive }
+        if value > Self.informationalDeadbandDB { return .improved }
+        if value < -Self.informationalDeadbandDB { return .regressed }
+        return .inconclusive
+    }
+}
+
+struct RoomAdvancedPlacementReviewRecord:
+    Identifiable, Codable, Equatable, Sendable {
+    var id: UUID = UUID()
+    var reviewedAt: Date = Date()
+    var projectID: UUID
+    var playbackSystemID: UUID
+    var experimentID: String
+    var experimentDescription: String
+    var moveKind: String
+    var beforeGeometry: RoomGeometryModel
+    var afterGeometry: RoomGeometryModel
+    var beforeAdvanced: RoomAdvancedPlacementSettings
+    var afterAdvanced: RoomAdvancedPlacementSettings
+    var baselineMeasurementSetID: UUID?
+    var candidateMeasurementSetID: UUID?
+    var outcome: RoomAdvancedPlacementReviewOutcome
+    /// When present, magnitude is measured 35–160 Hz inter-seat RMS spread;
+    /// a positive change means LOWER measured variation, not higher SPL.
+    var measuredSpreadReductionDB: Double?
+    var measuredSeatCount: Int?
+    var measurementConfidence: Double?
+    var evidenceNote: String
+    var hardwareAcceptanceComplete: Bool = false
+    var canDeploy: Bool { false }
+
+    func validated(for projectID: UUID) throws -> Self {
+        guard self.projectID == projectID,
+              beforeGeometry.projectID == projectID,
+              afterGeometry.projectID == projectID,
+              beforeAdvanced.projectID == projectID,
+              afterAdvanced.projectID == projectID,
+              !experimentID.isEmpty, !experimentDescription.isEmpty,
+              !moveKind.isEmpty, !evidenceNote.isEmpty,
+              !hardwareAcceptanceComplete,
+              (try? beforeAdvanced.state(for: beforeGeometry)) != nil,
+              (try? afterAdvanced.state(for: afterGeometry)) != nil else {
+            throw RoomAdvancedPlacementReviewError.invalidRecord
+        }
+        let before = try beforeAdvanced.state(for: beforeGeometry)
+        let candidate = RoomAdvancedPlacementExplorer()
+        let trial = try candidate.experiments(for: before).first {
+            $0.id == experimentID
+        }
+        guard let trial,
+              trial.description == experimentDescription,
+              trial.move.rawValue == moveKind,
+              trial.trial.room == afterGeometry,
+              try RoomAdvancedPlacementSettings.from(trial.trial)
+                == afterAdvanced else {
+            throw RoomAdvancedPlacementReviewError.invalidRecord
+        }
+        if outcome == .inconclusive {
+            guard measuredSpreadReductionDB == nil,
+                  measuredSeatCount == nil,
+                  measurementConfidence == nil else {
+                throw RoomAdvancedPlacementReviewError.invalidRecord
+            }
+        } else {
+            guard moveKind == RoomAdvancedPlacementMove.subwoofer.rawValue,
+                  baselineMeasurementSetID != nil,
+                  candidateMeasurementSetID != nil,
+                  baselineMeasurementSetID != candidateMeasurementSetID,
+                  let reduction = measuredSpreadReductionDB,
+                  reduction.isFinite,
+                  let seats = measuredSeatCount, (2...8).contains(seats),
+                  let confidence = measurementConfidence,
+                  confidence.isFinite,
+                  (0...1).contains(confidence),
+                  confidence >= SpeakerOptimizerMeasurementEvidenceEvaluator
+                    .minimumOptimizerConfidence,
+                  abs(reduction) >
+                    RoomAdvancedPlacementReviewClassifier.informationalDeadbandDB,
+                  (outcome == .improved && reduction > 0)
+                    || (outcome == .regressed && reduction < 0)
+            else { throw RoomAdvancedPlacementReviewError.invalidRecord }
+        }
+        return self
+    }
+}
+
+enum RoomAdvancedPlacementReviewError: Error, Equatable, LocalizedError {
+    case invalidRecord
+    case corruptedHistory
+    case duplicateRecord
+    case noSelectedExperiment
+    case unsavedGeometry
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidRecord:
+            "Placement review provenance or project identity is invalid."
+        case .corruptedHistory:
+            "Saved placement review history is invalid; nothing was overwritten."
+        case .duplicateRecord:
+            "The placement review already exists in the project history."
+        case .noSelectedExperiment:
+            "Inspect a placement experiment before recording the review."
+        case .unsavedGeometry:
+            "Save base and advanced room geometry before recording a review."
+        }
+    }
+}
+
+struct RoomAdvancedPlacementReviewHistory: Codable, Equatable, Sendable {
+    static let currentSchemaVersion = 1
+    var schemaVersion: Int = currentSchemaVersion
+    var projectID: UUID
+    var records: [RoomAdvancedPlacementReviewRecord] = []
+
+    func validated() throws -> Self {
+        guard schemaVersion == Self.currentSchemaVersion,
+              records.count <= 100,
+              Set(records.map(\.id)).count == records.count else {
+            throw RoomAdvancedPlacementReviewError.corruptedHistory
+        }
+        for record in records {
+            guard (try? record.validated(for: projectID)) != nil else {
+                throw RoomAdvancedPlacementReviewError.corruptedHistory
+            }
+        }
+        return self
+    }
+}
+
+/// Persist an append-only immutable snapshot in the current Room Correction
+/// project's advisor directory. No edits, removals or release/merge authority.
+struct RoomAdvancedPlacementReviewStore: Sendable {
+    let projectStore: RoomCorrectionProjectStore
+
+    func historyURL(for projectID: UUID) -> URL {
+        projectStore.projectDirectory(for: projectID)
+            .appendingPathComponent(
+                "advisor-placement-review-history-v1.json",
+                isDirectory: false
+            )
+    }
+
+    func load(projectID: UUID) throws -> RoomAdvancedPlacementReviewHistory {
+        let url = historyURL(for: projectID)
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            return RoomAdvancedPlacementReviewHistory(projectID: projectID)
+        }
+        do {
+            let decoded = try JSONDecoder().decode(
+                RoomAdvancedPlacementReviewHistory.self,
+                from: Data(contentsOf: url)
+            )
+            guard decoded.projectID == projectID else {
+                throw RoomAdvancedPlacementReviewError.corruptedHistory
+            }
+            return try decoded.validated()
+        } catch {
+            throw RoomAdvancedPlacementReviewError.corruptedHistory
+        }
+    }
+
+    @discardableResult
+    func append(
+        _ record: RoomAdvancedPlacementReviewRecord
+    ) throws -> RoomAdvancedPlacementReviewHistory {
+        _ = try record.validated(for: record.projectID)
+        var history = try load(projectID: record.projectID)
+        guard !history.records.contains(where: { $0.id == record.id }) else {
+            throw RoomAdvancedPlacementReviewError.duplicateRecord
+        }
+        guard history.records.count < 100 else {
+            throw RoomAdvancedPlacementReviewError.corruptedHistory
+        }
+        history.records.append(record)
+        _ = try history.validated()
+        let url = historyURL(for: record.projectID)
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(history).write(to: url, options: .atomic)
+        return history
+    }
+}
+
+/// Factory used only after the owner explicitly selects and confirms the
+/// physical move. The only automatically scored move today is an actual
+/// repeat-qualified Sub A/B; every other move remains unverified.
+struct RoomAdvancedPlacementReviewFactory: Sendable {
+    func make(
+        playbackSystemID: UUID,
+        state: RoomAdvancedPlacementState,
+        experiment: RoomAdvancedPlacementExperiment,
+        comparison: RoomAdvancedSubPlacementComparison?,
+        attemptedBaselineID: UUID? = nil,
+        attemptedCandidateID: UUID? = nil,
+        inconclusiveReason: String? = nil
+    ) throws -> RoomAdvancedPlacementReviewRecord {
+        let before = try state.validated()
+        let experiments = try RoomAdvancedPlacementExplorer()
+            .experiments(for: before)
+        guard experiments.contains(experiment) else {
+            throw RoomAdvancedPlacementReviewError.invalidRecord
+        }
+        if comparison != nil {
+            guard experiment.move == .subwoofer,
+                  comparison?.experimentID == experiment.id,
+                  comparison?.source != nil else {
+                throw RoomAdvancedPlacementReviewError.invalidRecord
+            }
+        }
+        let verdict = comparison.map {
+            RoomAdvancedPlacementReviewClassifier().outcome(for: $0)
+        } ?? .inconclusive
+        let measured = comparison != nil && verdict != .inconclusive
+        let note: String
+        if comparison == nil {
+            note = inconclusiveReason ?? "Physical placement hypothesis not independently verified by matched before/after listening-seat captures. No acoustic result asserted."
+        } else if !measured {
+            note = "Measured seat-to-seat LF variation changed within the informational 0.25 dB review deadband; acoustic outcome inconclusive."
+        } else {
+            note = "Separate, repeat-qualified physical Sub captures suggest a \(verdict == .improved ? "reduction" : "increase") in 35–160 Hz seat-to-seat variation; not an SPL, target-response or listening preference claim."
+        }
+        let record = RoomAdvancedPlacementReviewRecord(
+            projectID: before.room.projectID,
+            playbackSystemID: playbackSystemID,
+            experimentID: experiment.id,
+            experimentDescription: experiment.description,
+            moveKind: experiment.move.rawValue,
+            beforeGeometry: before.room,
+            afterGeometry: experiment.trial.room,
+            beforeAdvanced: try .from(before),
+            afterAdvanced: try .from(experiment.trial),
+            baselineMeasurementSetID: comparison?.baselineMeasurementSetID
+                ?? attemptedBaselineID,
+            candidateMeasurementSetID: comparison?.candidateMeasurementSetID
+                ?? attemptedCandidateID,
+            outcome: verdict,
+            measuredSpreadReductionDB: measured
+                ? comparison?.reductionInInterseatSpreadDB : nil,
+            measuredSeatCount: measured ? comparison?.seatCount : nil,
+            measurementConfidence: measured
+                ? comparison?.evidenceConfidence : nil,
+            evidenceNote: note
+        )
+        return try record.validated(for: before.room.projectID)
+    }
+}

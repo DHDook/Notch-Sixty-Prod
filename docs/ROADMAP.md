@@ -16,6 +16,27 @@ Legacy parity is the minimum capability floor. The commercial rewrite should exc
 
 Future portability must not materially delay the flagship Mac launch.
 
+## Current execution status — PR110
+
+**PR110 — Advanced Speaker & Subwoofer Placement Optimizer** is now in
+remote implementation, stacked on draft PR109. Its first software slice
+generates read-only, bounded experiments for independently positioned
+left/right speakers, toe-in, height, and modeled physical Sub positions,
+including up to eight listener seats. These are *geometry hypotheses*,
+never quantified acoustic improvements or DSP deployments.
+
+Subsequent slices add project-scoped advanced geometry persistence,
+PR106 source-specific measurement corroboration, multi-seat/Sub ranking,
+and measured physical before/after acceptance. This work does not merge,
+close or promote any PR; it does not satisfy PR109's independent
+exact-head macOS regression, physical acceptance or release credentials.
+
+See \`docs/PR110_ADVANCED_PLACEMENT.md\`. PR111 per-driver optimization
+remains planned; PR112 physical hardware acceptance, PR113 final UX and
+PR114 commercial release candidate remain later milestones.
+
+---
+
 ## Current execution status — PR109
 
 **Roadmap PR109 — Integration & Stack Consolidation** has begun on a draft,
