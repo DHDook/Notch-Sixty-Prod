@@ -13,11 +13,13 @@ AWARE_TESTS = ROOT / "NotchSixtyTests/SpeakerOptimizerClassificationAwareCandida
 GUIDED_SOURCE = ROOT / "NotchSixty/Audio/SpeakerOptimizerCharacterizationController.swift"
 GUIDED_TESTS = ROOT / "NotchSixtyTests/SpeakerOptimizerCharacterizationControllerTests.swift"
 UI_SOURCE = ROOT / "NotchSixty/UI/ProductionMultichannelCalibrationWorkspace.swift"
+COMMISSION_SOURCE = ROOT / "NotchSixty/Audio/SpeakerOptimizerCommissioningContract.swift"
+COMMISSION_TESTS = ROOT / "NotchSixtyTests/SpeakerOptimizerCommissioningContractTests.swift"
 PROJECT = ROOT / "NotchSixty.xcodeproj/project.pbxproj"
 DOC = ROOT / "docs/PR105_SPEAKER_CHARACTERIZATION_AND_VERIFICATION.md"
 WORKFLOW = ROOT / ".github/workflows/pr105-speaker-characterization.yml"
 
-for path in (SOURCE, TESTS, EARLY_SOURCE, EARLY_TESTS, CLASSIFIER_SOURCE, CLASSIFIER_TESTS, AWARE_SOURCE, AWARE_TESTS, GUIDED_SOURCE, GUIDED_TESTS, UI_SOURCE, PROJECT, DOC, WORKFLOW):
+for path in (SOURCE, TESTS, EARLY_SOURCE, EARLY_TESTS, CLASSIFIER_SOURCE, CLASSIFIER_TESTS, AWARE_SOURCE, AWARE_TESTS, GUIDED_SOURCE, GUIDED_TESTS, UI_SOURCE, COMMISSION_SOURCE, COMMISSION_TESTS, PROJECT, DOC, WORKFLOW):
     assert path.is_file(), f"missing PR105 Slice 1 file: {path}"
 
 source = SOURCE.read_text()
@@ -31,6 +33,8 @@ aware_tests = AWARE_TESTS.read_text()
 guided_source = GUIDED_SOURCE.read_text()
 guided_tests = GUIDED_TESTS.read_text()
 ui_source = UI_SOURCE.read_text()
+commission_source = COMMISSION_SOURCE.read_text()
+commission_tests = COMMISSION_TESTS.read_text()
 project = PROJECT.read_text()
 doc = DOC.read_text()
 workflow = WORKFLOW.read_text()
@@ -154,6 +158,28 @@ for token in (
     assert token in ui_source, f"missing guided Speaker Calibration UI contract: {token}"
 
 for token in (
+    "struct SpeakerOptimizerCommissioningProposal",
+    "struct SpeakerOptimizerRollbackSnapshot",
+    "struct SpeakerOptimizerApplyApproval",
+    "userInitiated: Bool",
+    "blockedDedicatedSpeakerOptimizerPEQStageUnavailable",
+    "blockedDedicatedSpeakerOptimizerFIRStageUnavailable",
+    "var canApply: Bool",
+    "aggregateCandidateFingerprint",
+    "deploymentStageUnavailable",
+):
+    assert token in commission_source, f"missing commissioning safety contract: {token}"
+
+for token in (
+    "testPEQProposalCapturesRollbackStateAndBlocksExistingCalibrationStageReuse",
+    "testFIRProposalFailsClosedBecauseNoDedicatedPerSpeakerFIRStageExists",
+    "testExplicitApprovalIsBoundToExactCandidateFingerprintButStillCannotApply",
+    "testApprovalCannotBeReusedAfterCandidateChanges",
+    "testProfileOrClassificationIdentityDriftFailsClosed",
+):
+    assert token in commission_tests, f"missing commissioning contract test: {token}"
+
+for token in (
     "F10500000000000000000001",
     "F10500000000000000000002",
     "F10500000000000000000011",
@@ -174,6 +200,10 @@ for token in (
     "F1050000000000000000000A",
     "F10500000000000000000019",
     "F1050000000000000000001A",
+    "F1050000000000000000000B",
+    "F1050000000000000000000C",
+    "F1050000000000000000001B",
+    "F1050000000000000000001C",
 ):
     assert project.count(token) >= 2, f"missing Xcode registration: {token}"
 
@@ -191,8 +221,10 @@ assert "SpeakerOptimizerEarlyWindowCharacterizationTests" in workflow
 assert "SpeakerOptimizerCrossDomainClassifierTests" in workflow
 assert "SpeakerOptimizerClassificationAwareCandidateTests" in workflow
 assert "SpeakerOptimizerCharacterizationControllerTests" in workflow
+assert "SpeakerOptimizerCommissioningContractTests" in workflow
 assert "Run full XCTest regression" in workflow
 assert "Cross-domain speaker-vs-room classification" in doc
 assert "Classification-aware PEQ/FIR correction authority" in doc
 assert "Guided Speaker Calibration workflow" in doc
-print("PR105 characterization + classification-aware optimizer + guided UI contracts passed")
+assert "Commissioning contract, explicit approval & rollback snapshot" in doc
+print("PR105 characterization + guided optimizer + fail-closed commissioning contracts passed")

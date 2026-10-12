@@ -1,0 +1,371 @@
+import Foundation
+
+enum SpeakerOptimizerCommissioningCandidateKind: String, Codable, Equatable, Sendable {
+    case peq
+    case linearPhaseFIR
+}
+
+enum SpeakerOptimizerDeploymentStageStatus: String, Codable, Equatable, Sendable {
+    /// Existing SemanticSpeakerCalibration.eqBands are owned by ordinary Speaker
+    /// Calibration. PR105 must not silently append/replace those bands.
+    case blockedDedicatedSpeakerOptimizerPEQStageUnavailable
+    /// There is currently no dedicated per-speaker FIR stage in PlaybackSystemState.
+    case blockedDedicatedSpeakerOptimizerFIRStageUnavailable
+
+    var canInstall: Bool { false }
+
+    var explanation: String {
+        switch self {
+        case .blockedDedicatedSpeakerOptimizerPEQStageUnavailable:
+            return "A separately owned Speaker Optimizer PEQ stage is required; existing Speaker Calibration EQ bands must not be overwritten or double-used."
+        case .blockedDedicatedSpeakerOptimizerFIRStageUnavailable:
+            return "A dedicated per-speaker FIR stage with declared latency/headroom ownership is required before optimizer FIR taps can be installed."
+        }
+    }
+}
+
+struct SpeakerOptimizerCommissioningSource: Codable, Equatable, Sendable {
+    var source: MultichannelCalibrationSource
+    var candidateKind: SpeakerOptimizerCommissioningCandidateKind
+    var candidateFingerprint: String
+    var stageStatus: SpeakerOptimizerDeploymentStageStatus
+    var modeledCorrectionPresent: Bool
+}
+
+struct SpeakerOptimizerRollbackSnapshot: Codable, Equatable, Sendable {
+    var playbackSystemID: UUID
+    var routingSignature: String
+    var playbackSystemState: PlaybackSystemState
+}
+
+struct SpeakerOptimizerCommissioningProposal: Identifiable, Codable, Equatable, Sendable {
+    static let currentSchemaVersion = 1
+
+    var schemaVersion: Int = currentSchemaVersion
+    var id: UUID = UUID()
+    var createdAt: Date = Date()
+    var playbackSystemID: UUID
+    var baselineMeasurementSetID: UUID
+    var characterizationMeasurementSetID: UUID
+    var routingSignature: String
+    var sampleRate: Double
+    var sources: [SpeakerOptimizerCommissioningSource]
+    var rollbackSnapshot: SpeakerOptimizerRollbackSnapshot
+
+    var approvalRequired: Bool { true }
+    var rollbackRequired: Bool { true }
+    var isMeasuredVerification: Bool { false }
+    var canApply: Bool {
+        !sources.isEmpty
+            && sources.allSatisfy {
+                $0.modeledCorrectionPresent && $0.stageStatus.canInstall
+            }
+    }
+}
+
+struct SpeakerOptimizerApplyApproval: Codable, Equatable, Sendable {
+    var proposalID: UUID
+    var aggregateCandidateFingerprint: String
+    var approvedAt: Date
+    /// Approval objects may only be minted from an explicit UI/user action.
+    /// This field is intentionally required rather than defaulted.
+    var userInitiated: Bool
+}
+
+enum SpeakerOptimizerCommissioningError: Error, Equatable, LocalizedError {
+    case profileIdentityMismatch
+    case candidateIdentityMismatch
+    case candidateNotPreviewOnly
+    case candidateHasNoModeledCorrection
+    case invalidApproval
+    case deploymentStageUnavailable
+
+    var errorDescription: String? {
+        switch self {
+        case .profileIdentityMismatch:
+            return "Speaker Optimizer commissioning snapshot does not match the selected Playback System or routing."
+        case .candidateIdentityMismatch:
+            return "Speaker Optimizer candidate identity does not match its measured classification evidence."
+        case .candidateNotPreviewOnly:
+            return "Only a preview-only, non-deployed Speaker Optimizer candidate can enter commissioning review."
+        case .candidateHasNoModeledCorrection:
+            return "Speaker Optimizer commissioning requires at least one modeled correction candidate."
+        case .invalidApproval:
+            return "Speaker Optimizer Apply approval is missing, stale, or not explicitly user-initiated."
+        case .deploymentStageUnavailable:
+            return "Speaker Optimizer Apply remains blocked until a separately owned deployment stage exists for every selected candidate."
+        }
+    }
+}
+
+/// Creates immutable review/rollback metadata. This type DOES NOT mutate
+/// ProductProfileController, AudioIOEngine, routing, calibration or DSP.
+struct SpeakerOptimizerCommissioningPlanner: Sendable {
+    func proposal(
+        profile: PlaybackSystemProfile,
+        plan: SpeakerOptimizerClassificationAwarePEQPlan,
+        createdAt: Date = Date()
+    ) throws -> SpeakerOptimizerCommissioningProposal {
+        guard plan.previewOnly, !plan.canDeploy,
+              plan.candidate.previewOnly,
+              !plan.candidate.isMeasuredVerification else {
+            throw SpeakerOptimizerCommissioningError.candidateNotPreviewOnly
+        }
+        try validateIdentity(
+            profile: profile,
+            classification: plan.classification,
+            baselineID: plan.candidate.baselineMeasurementSetID,
+            playbackSystemID: plan.candidate.playbackSystemID,
+            routingSignature: plan.candidate.routingSignature,
+            sampleRate: plan.candidate.sampleRate
+        )
+
+        let sources = plan.candidate.sources.compactMap { candidate
+            -> SpeakerOptimizerCommissioningSource? in
+            guard !candidate.bands.isEmpty else { return nil }
+            return SpeakerOptimizerCommissioningSource(
+                source: candidate.source,
+                candidateKind: .peq,
+                candidateFingerprint: fingerprintPEQ(candidate),
+                stageStatus:
+                    .blockedDedicatedSpeakerOptimizerPEQStageUnavailable,
+                modeledCorrectionPresent: true
+            )
+        }
+        guard !sources.isEmpty else {
+            throw SpeakerOptimizerCommissioningError
+                .candidateHasNoModeledCorrection
+        }
+        return makeProposal(
+            profile: profile,
+            classification: plan.classification,
+            baselineID: plan.candidate.baselineMeasurementSetID,
+            routingSignature: plan.candidate.routingSignature,
+            sampleRate: plan.candidate.sampleRate,
+            sources: sources,
+            createdAt: createdAt
+        )
+    }
+
+    func proposal(
+        profile: PlaybackSystemProfile,
+        plan: SpeakerOptimizerClassificationAwareFIRPlan,
+        createdAt: Date = Date()
+    ) throws -> SpeakerOptimizerCommissioningProposal {
+        guard plan.previewOnly, !plan.canDeploy,
+              plan.candidate.previewOnly, !plan.candidate.canDeploy,
+              !plan.candidate.isMeasuredVerification else {
+            throw SpeakerOptimizerCommissioningError.candidateNotPreviewOnly
+        }
+        try validateIdentity(
+            profile: profile,
+            classification: plan.classification,
+            baselineID: plan.candidate.baselineMeasurementSetID,
+            playbackSystemID: plan.candidate.playbackSystemID,
+            routingSignature: plan.candidate.routingSignature,
+            sampleRate: plan.candidate.sampleRate
+        )
+
+        let sources = plan.candidate.sources.compactMap { candidate
+            -> SpeakerOptimizerCommissioningSource? in
+            guard candidate.acceptedForPreview, !candidate.taps.isEmpty else {
+                return nil
+            }
+            return SpeakerOptimizerCommissioningSource(
+                source: candidate.source,
+                candidateKind: .linearPhaseFIR,
+                candidateFingerprint: fingerprintFIR(candidate),
+                stageStatus:
+                    .blockedDedicatedSpeakerOptimizerFIRStageUnavailable,
+                modeledCorrectionPresent: true
+            )
+        }
+        guard !sources.isEmpty else {
+            throw SpeakerOptimizerCommissioningError
+                .candidateHasNoModeledCorrection
+        }
+        return makeProposal(
+            profile: profile,
+            classification: plan.classification,
+            baselineID: plan.candidate.baselineMeasurementSetID,
+            routingSignature: plan.candidate.routingSignature,
+            sampleRate: plan.candidate.sampleRate,
+            sources: sources,
+            createdAt: createdAt
+        )
+    }
+
+    func aggregateCandidateFingerprint(
+        _ proposal: SpeakerOptimizerCommissioningProposal
+    ) -> String {
+        var digest = StableDigest64()
+        digest.add("proposal-candidates-v1")
+        digest.add(proposal.playbackSystemID.uuidString)
+        digest.add(proposal.baselineMeasurementSetID.uuidString)
+        digest.add(proposal.characterizationMeasurementSetID.uuidString)
+        digest.add(proposal.routingSignature)
+        for source in proposal.sources.sorted(by: {
+            sourceKey($0.source) < sourceKey($1.source)
+        }) {
+            digest.add(sourceKey(source.source))
+            digest.add(source.candidateKind.rawValue)
+            digest.add(source.candidateFingerprint)
+        }
+        return digest.hex
+    }
+
+    func makeExplicitApproval(
+        proposal: SpeakerOptimizerCommissioningProposal,
+        approvedAt: Date = Date(),
+        userInitiated: Bool
+    ) throws -> SpeakerOptimizerApplyApproval {
+        guard userInitiated else {
+            throw SpeakerOptimizerCommissioningError.invalidApproval
+        }
+        return SpeakerOptimizerApplyApproval(
+            proposalID: proposal.id,
+            aggregateCandidateFingerprint:
+                aggregateCandidateFingerprint(proposal),
+            approvedAt: approvedAt,
+            userInitiated: true
+        )
+    }
+
+    /// Approval is necessary but deliberately not sufficient in this slice.
+    /// A later live deployment adapter must also prove stage availability,
+    /// snapshot identity, headroom/latency and post-apply measurement gates.
+    func validateApproval(
+        _ approval: SpeakerOptimizerApplyApproval,
+        for proposal: SpeakerOptimizerCommissioningProposal
+    ) throws {
+        guard approval.userInitiated,
+              approval.proposalID == proposal.id,
+              approval.aggregateCandidateFingerprint
+                == aggregateCandidateFingerprint(proposal) else {
+            throw SpeakerOptimizerCommissioningError.invalidApproval
+        }
+        guard proposal.canApply else {
+            throw SpeakerOptimizerCommissioningError.deploymentStageUnavailable
+        }
+    }
+
+    private func makeProposal(
+        profile: PlaybackSystemProfile,
+        classification: SpeakerOptimizerCrossDomainReport,
+        baselineID: UUID,
+        routingSignature: String,
+        sampleRate: Double,
+        sources: [SpeakerOptimizerCommissioningSource],
+        createdAt: Date
+    ) -> SpeakerOptimizerCommissioningProposal {
+        SpeakerOptimizerCommissioningProposal(
+            createdAt: createdAt,
+            playbackSystemID: profile.id,
+            baselineMeasurementSetID: baselineID,
+            characterizationMeasurementSetID:
+                classification.characterizationMeasurementSetID,
+            routingSignature: routingSignature,
+            sampleRate: sampleRate,
+            sources: sources,
+            rollbackSnapshot: SpeakerOptimizerRollbackSnapshot(
+                playbackSystemID: profile.id,
+                routingSignature: routingSignature,
+                playbackSystemState: profile.state
+            )
+        )
+    }
+
+    private func validateIdentity(
+        profile: PlaybackSystemProfile,
+        classification: SpeakerOptimizerCrossDomainReport,
+        baselineID: UUID,
+        playbackSystemID: UUID,
+        routingSignature: String,
+        sampleRate: Double
+    ) throws {
+        guard profile.id == playbackSystemID,
+              classification.listeningMeasurementSetID == baselineID,
+              classification.playbackSystemID == playbackSystemID,
+              classification.routingSignature == routingSignature else {
+            throw SpeakerOptimizerCommissioningError
+                .candidateIdentityMismatch
+        }
+        guard let outputProfile = profile.state.outputDeviceProfile,
+              outputProfile.enabled,
+              outputProfile.multichannelCalibrationRoutingSignature
+                == routingSignature,
+              sampleRate.isFinite, sampleRate > 0 else {
+            throw SpeakerOptimizerCommissioningError.profileIdentityMismatch
+        }
+    }
+
+    private func fingerprintPEQ(
+        _ candidate: SpeakerOptimizerPEQSourceCandidate
+    ) -> String {
+        var digest = StableDigest64()
+        digest.add("peq-v1")
+        digest.add(sourceKey(candidate.source))
+        for band in candidate.bands {
+            digest.add(band.centerHz.bitPattern)
+            digest.add(band.q.bitPattern)
+            digest.add(band.gainDB.bitPattern)
+            digest.add(band.b0.bitPattern)
+            digest.add(band.b1.bitPattern)
+            digest.add(band.b2.bitPattern)
+            digest.add(band.a1.bitPattern)
+            digest.add(band.a2.bitPattern)
+        }
+        return digest.hex
+    }
+
+    private func fingerprintFIR(
+        _ candidate: SpeakerOptimizerFIRSourceCandidate
+    ) -> String {
+        var digest = StableDigest64()
+        digest.add("linear-fir-v1")
+        digest.add(sourceKey(candidate.source))
+        digest.add(UInt64(candidate.taps.count))
+        for tap in candidate.taps {
+            digest.add(UInt64(tap.bitPattern))
+        }
+        return digest.hex
+    }
+
+    private func sourceKey(
+        _ source: MultichannelCalibrationSource
+    ) -> String {
+        switch source {
+        case .speaker(let role):
+            return "speaker:\(role.rawValue)"
+        case .subwoofer(let index):
+            return "subwoofer:\(index)"
+        }
+    }
+}
+
+private struct StableDigest64 {
+    private var value: UInt64 = 14_695_981_039_346_656_037
+    private let prime: UInt64 = 1_099_511_628_211
+
+    mutating func add(_ text: String) {
+        for byte in text.utf8 {
+            value ^= UInt64(byte)
+            value = value &* prime
+        }
+        add(UInt64(0xff))
+    }
+
+    mutating func add(_ number: UInt64) {
+        var little = number.littleEndian
+        withUnsafeBytes(of: &little) { bytes in
+            for byte in bytes {
+                value ^= UInt64(byte)
+                value = value &* prime
+            }
+        }
+    }
+
+    var hex: String {
+        String(format: "%016llx", value)
+    }
+}

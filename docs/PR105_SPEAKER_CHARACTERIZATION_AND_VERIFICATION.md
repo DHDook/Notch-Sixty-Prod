@@ -156,6 +156,28 @@ reflection timing and acoustic benefit remain unverified.
 - No Apply control is added in this slice; classification-aware candidates
   remain preview-only.
 
+## Slice 6 — Commissioning contract, explicit approval & rollback snapshot
+
+- Converts a classification-aware PEQ or FIR preview into an immutable
+  commissioning proposal bound to the exact baseline, characterization,
+  Playback System, routing signature and sample rate.
+- Captures the complete `PlaybackSystemState` as the rollback snapshot before any
+  future live mutation.
+- Creates deterministic stale-candidate fingerprints for selected PEQ
+  coefficients or accepted FIR taps.
+- Explicit approval is a separate, user-initiated object bound to the proposal
+  ID and exact aggregate candidate fingerprint. Approval cannot be silently
+  minted or reused after candidate changes.
+- Approval is necessary but NOT sufficient to Apply.
+- Existing `SemanticSpeakerCalibration.eqBands` remain owned by ordinary Speaker
+  Calibration; PR105 refuses to append/replace them as an optimizer shortcut.
+- The current Playback System model also has no dedicated per-speaker optimizer
+  FIR stage. FIR deployment therefore remains blocked.
+- Both deployment-stage states are represented explicitly and `canApply` remains
+  false until a separately owned optimizer stage is implemented and audited.
+- No ProductProfileController, AudioIOEngine, crossover, limiter, room
+  correction or persisted system state is mutated by this slice.
+
 ## Planned follow-on slices
 
 1. Correlate speaker-characterization features against multi-seat features to
