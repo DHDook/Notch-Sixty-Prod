@@ -1,6 +1,6 @@
 # PR106 — Advanced Speaker Measurement Lab
 
-Status: **SLICES 1–10A SOFTWARE VERIFIED — SLICE 10B CI PENDING**
+Status: **REMOTE SOFTWARE COMPLETE — PHYSICAL LAB ACCEPTANCE PENDING**
 
 Base: PR105 Guided Speaker Optimizer & Acoustic Verification.
 
@@ -454,7 +454,50 @@ head supersedes it as the next software gate.
 - The entire workspace is explicitly measurement-only and exposes no Apply,
   crossover, limiter, delay, polarity or correction controls.
 
-## Planned follow-on slices
+## Slice 10B exact-head verification
 
-1. Remote-software closeout and UI regression verification.
-2. Physical Lab commissioning and acceptance on representative hardware.
+Slice 10B exact head `7111ad1edcf88eb8bd8428b2a709c3c8494575ba` passed both
+GitHub Actions paths:
+
+- push run 38232865632;
+- pull-request run 38232870524.
+
+Both paths passed the PR106/PR105 contract validators, Apple Silicon Debug build,
+the full targeted Advanced Speaker Measurement Lab suite, production UI
+integration checks, and full XCTest regression.
+
+## Remote software closure
+
+PR106 is **REMOTE SOFTWARE COMPLETE — PHYSICAL LAB ACCEPTANCE PENDING**.
+
+The remote implementation now covers:
+
+- durable guided Lab sessions with exact source/geometry/repeat identity;
+- whole-speaker on-axis/off-axis acquisition and installed-room directivity;
+- near-field subwoofer component diagnostics without false far-field synthesis;
+- explicit-window quasi-anechoic magnitude estimation;
+- bounded two-level transfer level-dependence diagnostics without false THD/IMD
+  claims;
+- crossover/limiter-preserving Low/Mid/High protected-driver acquisition;
+- simultaneous shared-time electrical-reference capture;
+- reference-aligned coherent Main/Sub relative timing and phase diagnostics;
+- compact report/history/export tooling; and
+- dedicated production SYSTEM → Measurement Lab UI.
+
+The following remain intentionally outside remote certification:
+
+- physical microphone placement accuracy;
+- actual loudspeaker/driver/subwoofer behavior;
+- acoustic benefit or subjective interpretation;
+- real-world reflection-window suitability in a specific room;
+- thermal/electrical driver safety beyond the configured production protection
+  path;
+- multi-device coherent phase/timing across independent output clocks;
+- automatic correction/deployment from Lab diagnostics; and
+- physical commissioning on representative hardware.
+
+All PR106 Lab analysis remains measurement-only. No report or diagnostic grants
+DSP deployment authority. PR remains draft/open/unmerged pending physical
+acceptance or an explicit merge decision.
+
+See `docs/PR106_SOFTWARE_CLOSURE.md` for the final closeout checklist.

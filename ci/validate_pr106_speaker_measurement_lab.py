@@ -30,8 +30,9 @@ CONTROLLER_SOURCE = ROOT / "NotchSixty/Audio/SpeakerMeasurementLabController.swi
 PROJECT = ROOT / "NotchSixty.xcodeproj/project.pbxproj"
 DOC = ROOT / "docs/PR106_ADVANCED_SPEAKER_MEASUREMENT_LAB.md"
 WORKFLOW = ROOT / ".github/workflows/pr106-speaker-measurement-lab.yml"
+CLOSURE = ROOT / "docs/PR106_SOFTWARE_CLOSURE.md"
 
-for path in (SOURCE, TESTS, SESSION_SOURCE, SESSION_TESTS, DIRECTIVITY_SOURCE, DIRECTIVITY_TESTS, NEARFIELD_SOURCE, NEARFIELD_TESTS, GATED_SOURCE, GATED_TESTS, LEVEL_SOURCE, LEVEL_TESTS, PROTECTED_SOURCE, PROTECTED_TESTS, COHERENT_SOURCE, COHERENT_TESTS, REPORT_SOURCE, REPORT_TESTS, BRIDGE_HEADER, BRIDGE_SOURCE, CONTROLLER_SOURCE, PROJECT, DOC, WORKFLOW):
+for path in (SOURCE, TESTS, SESSION_SOURCE, SESSION_TESTS, DIRECTIVITY_SOURCE, DIRECTIVITY_TESTS, NEARFIELD_SOURCE, NEARFIELD_TESTS, GATED_SOURCE, GATED_TESTS, LEVEL_SOURCE, LEVEL_TESTS, PROTECTED_SOURCE, PROTECTED_TESTS, COHERENT_SOURCE, COHERENT_TESTS, REPORT_SOURCE, REPORT_TESTS, BRIDGE_HEADER, BRIDGE_SOURCE, CONTROLLER_SOURCE, PROJECT, DOC, WORKFLOW, CLOSURE):
     assert path.is_file(), f"missing PR106 Slice 1 file: {path}"
 
 source = SOURCE.read_text()
@@ -62,6 +63,7 @@ controller_source = CONTROLLER_SOURCE.read_text()
 project = PROJECT.read_text()
 doc = DOC.read_text()
 workflow = WORKFLOW.read_text()
+closure = CLOSURE.read_text()
 
 for token in (
     "enum SpeakerMeasurementLabMode",
@@ -439,4 +441,16 @@ assert "Repeat-qualified near-field LF component diagnostics" in doc
 assert "Explicit reflection-window quasi-anechoic estimate" in doc
 assert "Bounded two-level transfer level-dependence diagnostic" in doc
 assert "Exact protected-driver excitation compiler substrate" in doc
-print("PR106 advanced Lab diagnostics + protected/coherent acquisition + production UI contracts passed")
+for token in (
+    "REMOTE SOFTWARE COMPLETE — PHYSICAL LAB ACCEPTANCE PENDING",
+    "PR103 raw physical-lane behavior is unchanged",
+    "measurement-only",
+    "multi-device cross-clock phase is not certified",
+    "PR106 remains draft, open and unmerged",
+):
+    assert token in closure, f"missing PR106 closure contract: {token}"
+
+assert "REMOTE SOFTWARE COMPLETE — PHYSICAL LAB ACCEPTANCE PENDING" in doc
+assert "Slice 10B exact-head verification" in doc
+assert "PR106_SOFTWARE_CLOSURE.md" in doc
+print("PR106 advanced Lab diagnostics + production UI + remote software closure contracts passed")
