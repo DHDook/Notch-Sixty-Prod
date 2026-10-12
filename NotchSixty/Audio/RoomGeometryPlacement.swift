@@ -1694,3 +1694,238 @@ struct RoomAdvancedPlacementStore: Sendable {
         try FileManager.default.removeItem(at: destination)
     }
 }
+
+
+// MARK: - PR110 Slice 3: qualified, measurement-informed toe-in advice
+
+/// A scored *spectral orientation experiment*, never proof of in-room
+/// improvement. Angles in this model are signed clockwise from the room's
+/// forward (+Y) axis: positive toe-in rotates toward +X.
+enum RoomAdvancedDirectivityStatus: String, Equatable, Sendable {
+    case measuredComparison
+    case inconclusive
+}
+
+struct RoomAdvancedToeInEvidence: Equatable, Sendable {
+    var experimentID: String
+    var speaker: RoomGeometrySpeaker
+    var status: RoomAdvancedDirectivityStatus
+    var sessionID: UUID?
+    var sourceProtocolID: UUID?
+    var currentAxisOffsetDegrees: Double
+    var trialAxisOffsetDegrees: Double
+    /// Mean |off-axis minus on-axis magnitude| over an actually supported
+    /// 1–8 kHz grid. Diagnostic preference for on-axis spectral similarity;
+    /// NOT a predicted in-room improvement or acoustic score.
+    var currentAbsoluteDeviationDB: Double?
+    var trialAbsoluteDeviationDB: Double?
+    var confidence: Double?
+    var note: String
+
+    var indicatedSpectralChangeDB: Double? {
+        guard let baseline = currentAbsoluteDeviationDB,
+              let trial = trialAbsoluteDeviationDB else { return nil }
+        return baseline - trial
+    }
+}
+
+enum RoomAdvancedDirectivityError: Error, LocalizedError, Equatable {
+    case invalidProjectIdentity
+    case invalidSource
+    case unqualifiedLabEvidence
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidProjectIdentity:
+            return "Directivity evidence belongs to a different Playback System."
+        case .invalidSource:
+            return "Use on-axis whole-speaker evidence for the requested left/right speaker."
+        case .unqualifiedLabEvidence:
+            return "Measurement Lab evidence did not pass the repeated-capture directivity quality gates."
+        }
+    }
+}
+
+struct RoomAdvancedToeInEvidenceAnalyzer: Sendable {
+    static let minimumQualifiedConfidence =
+        SpeakerOptimizerMeasurementEvidenceEvaluator.minimumOptimizerConfidence
+    static let minimumFrequencyHz = 1_000.0
+    static let maximumFrequencyHz = 8_000.0
+    static let maximumMeasuredAngularGapDegrees = 20.0
+
+    /// Never accept a caller-supplied directivity report as verified evidence:
+    /// derive it by re-running PR106's repeat-qualified analyzer on the actual
+    /// session, including source/radius/SNR/clipping/mic/routing quality gates.
+    func evaluate(
+        state: RoomAdvancedPlacementState,
+        playbackSystemID: UUID,
+        session: SpeakerMeasurementLabSession,
+        onAxisProtocolID: UUID,
+        speaker: RoomGeometrySpeaker
+    ) throws -> [RoomAdvancedToeInEvidence] {
+        let valid = try state.validated()
+        guard session.playbackSystemID == playbackSystemID else {
+            throw RoomAdvancedDirectivityError.invalidProjectIdentity
+        }
+        let report: SpeakerMeasurementLabDirectivityReport
+        do {
+            report = try SpeakerMeasurementLabDirectivityAnalyzer()
+                .analyze(
+                    session: session,
+                    onAxisProtocolID: onAxisProtocolID
+                )
+        } catch {
+            throw RoomAdvancedDirectivityError.unqualifiedLabEvidence
+        }
+        let requiredSource: MultichannelCalibrationSource =
+            .speaker(speaker == .left ? .frontLeft : .frontRight)
+        guard report.source == requiredSource,
+              report.sessionID == session.id,
+              report.playbackSystemID == playbackSystemID else {
+            throw RoomAdvancedDirectivityError.invalidSource
+        }
+        return evaluateQualifiedReport(
+            report: report,
+            state: valid,
+            speaker: speaker
+        )
+    }
+
+    /// Internal pure scoring seam. The production boundary above MUST
+    /// authenticate the report through the Lab analyzer before calling it.
+    func evaluateQualifiedReport(
+        report: SpeakerMeasurementLabDirectivityReport,
+        state: RoomAdvancedPlacementState,
+        speaker: RoomGeometrySpeaker
+    ) -> [RoomAdvancedToeInEvidence] {
+        let experiments = (try? RoomAdvancedPlacementExplorer()
+            .experiments(for: state)) ?? []
+        let origin = speaker == .left
+            ? state.room.leftSpeaker : state.room.rightSpeaker
+        let toe = speaker == .left
+            ? state.leftToeInDegrees : state.rightToeInDegrees
+        let current = offset(
+            from: origin, to: state.room.listener, toeIn: toe
+        )
+        let expectedMove: RoomAdvancedPlacementMove =
+            speaker == .left ? .leftToeIn : .rightToeIn
+
+        let results: [RoomAdvancedToeInEvidence] = experiments
+            .filter { $0.move == expectedMove }
+            .map { trial in
+                let changedToe = speaker == .left
+                    ? trial.trial.leftToeInDegrees
+                    : trial.trial.rightToeInDegrees
+                let target = offset(
+                    from: origin,
+                    to: state.room.listener,
+                    toeIn: changedToe
+                )
+                let before = spectralDeviation(report, angle: current)
+                let after = spectralDeviation(report, angle: target)
+                let qualified = before != nil && after != nil
+                return RoomAdvancedToeInEvidence(
+                    experimentID: trial.id,
+                    speaker: speaker,
+                    status: qualified ? .measuredComparison : .inconclusive,
+                    sessionID: report.sessionID,
+                    sourceProtocolID: report.onAxisProtocolID,
+                    currentAxisOffsetDegrees: current,
+                    trialAxisOffsetDegrees: target,
+                    currentAbsoluteDeviationDB: before?.value,
+                    trialAbsoluteDeviationDB: after?.value,
+                    confidence: qualified
+                        ? min(before!.confidence, after!.confidence) : nil,
+                    note: qualified
+                        ? "Qualified installed-room on/off-axis spectrum suggests a change in similarity to the on-axis reference; perform fresh listening-position measurement before assessing benefit."
+                        : "No repeat-qualified, signed off-axis evidence brackets both angles at usable 1–8 kHz frequencies; do not rank."
+                )
+            }
+        // Unsupported trials retain their identity and explanatory blocker,
+        // and cannot rise to the top on a guessed numerical score.
+        return results.sorted {
+            if $0.status != $1.status {
+                return $0.status == .measuredComparison
+            }
+            if let lhs = $0.indicatedSpectralChangeDB,
+               let rhs = $1.indicatedSpectralChangeDB,
+               lhs != rhs {
+                return lhs > rhs
+            }
+            return $0.experimentID < $1.experimentID
+        }
+    }
+
+    private func offset(
+        from speaker: RoomGeometryPoint3D,
+        to listener: RoomGeometryPoint3D,
+        toeIn: Double
+    ) -> Double {
+        atan2(listener.x - speaker.x, listener.y - speaker.y)
+            * 180 / .pi - toeIn
+    }
+
+    private func spectralDeviation(
+        _ report: SpeakerMeasurementLabDirectivityReport,
+        angle: Double
+    ) -> (value: Double, confidence: Double)? {
+        guard angle.isFinite,
+              report.commonUsableLowHz <= Self.minimumFrequencyHz,
+              report.commonUsableHighHz >= Self.maximumFrequencyHz else {
+            return nil
+        }
+        let traces = report.traces.filter {
+            abs($0.verticalAngleDegrees) < 0.5
+                && $0.evidenceConfidence >= Self.minimumQualifiedConfidence
+                && $0.frequenciesHz.count == $0.relativeMagnitudeDB.count
+                && $0.frequenciesHz.count >= 12
+                && $0.relativeMagnitudeDB.allSatisfy(\.isFinite)
+        }.sorted { $0.horizontalAngleDegrees < $1.horizontalAngleDegrees }
+        guard let exemplar = traces.first else { return nil }
+        let indices = exemplar.frequenciesHz.indices.filter {
+            (Self.minimumFrequencyHz...Self.maximumFrequencyHz)
+                .contains(exemplar.frequenciesHz[$0])
+        }
+        guard indices.count >= 8,
+              traces.allSatisfy({ $0.frequenciesHz == exemplar.frequenciesHz }),
+              exemplar.frequenciesHz.allSatisfy(\.isFinite) else {
+            return nil
+        }
+        // On-axis reference is exactly zero dB *relative to itself*.
+        // This does not imply the speaker is flat or meets any target.
+        if abs(angle) <= 0.0001 { return (0, 1) }
+        let positive = traces.first { $0.horizontalAngleDegrees >= angle }
+        let negative = traces.last { $0.horizontalAngleDegrees <= angle }
+        let lower: (Double, [Double], Double)
+        let upper: (Double, [Double], Double)
+        if angle > 0 {
+            lower = (negative?.horizontalAngleDegrees ?? 0,
+                     negative?.relativeMagnitudeDB ??
+                         Array(repeating: 0, count: exemplar.frequenciesHz.count),
+                     negative?.evidenceConfidence ?? 1)
+            guard let positive else { return nil }
+            upper = (positive.horizontalAngleDegrees,
+                     positive.relativeMagnitudeDB, positive.evidenceConfidence)
+        } else {
+            upper = (positive?.horizontalAngleDegrees ?? 0,
+                     positive?.relativeMagnitudeDB ??
+                         Array(repeating: 0, count: exemplar.frequenciesHz.count),
+                     positive?.evidenceConfidence ?? 1)
+            guard let negative else { return nil }
+            lower = (negative.horizontalAngleDegrees,
+                     negative.relativeMagnitudeDB, negative.evidenceConfidence)
+        }
+        let gap = upper.0 - lower.0
+        guard lower.0 <= angle, angle <= upper.0,
+              gap >= 0, gap <= Self.maximumMeasuredAngularGapDegrees else {
+            return nil
+        }
+        let ratio = gap > 0 ? (angle - lower.0) / gap : 0
+        let meanAbs = indices.reduce(0.0) { sum, i in
+            let value = lower.1[i] + ratio * (upper.1[i] - lower.1[i])
+            return sum + abs(value)
+        } / Double(indices.count)
+        return meanAbs.isFinite
+            ? (meanAbs, min(lower.2, upper.2)) : nil
+    }
+}
