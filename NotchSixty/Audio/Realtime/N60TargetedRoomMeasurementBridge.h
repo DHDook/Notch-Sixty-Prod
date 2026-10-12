@@ -47,6 +47,10 @@ typedef struct N60TargetedRoomMeasurementBridge {
     _Atomic bool complete;
 } N60TargetedRoomMeasurementBridge;
 
+static inline void N60TargetedRoomMeasurementBridgeDestroy(
+    N60TargetedRoomMeasurementBridge * _Nullable bridge
+);
+
 static inline void N60TargetedRoomMeasurementBridgeReset(
     N60TargetedRoomMeasurementBridge * _Nullable bridge
 ) {
