@@ -21,6 +21,7 @@ ALLOWED_REMOTE_INTEGRATION_FILES = frozenset({
     "ci/tests/test_pr109_cross_feature_contracts.py",
     ".github/workflows/pr109-integration-stack.yml",
     "docs/PR109_INTEGRATION_STACK_CONSOLIDATION.md",
+    "docs/PR109_HARDWARE_MERGE_HANDOFF.md",
     "docs/ROADMAP.md",
     "README.md",
 })
