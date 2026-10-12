@@ -226,6 +226,8 @@
 		F1060000000000000000000E /* SpeakerMeasurementLabProtectedExcitationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1060000000000000000001E /* SpeakerMeasurementLabProtectedExcitationTests.swift */; };
 		F1060000000000000000000F /* SpeakerMeasurementLabCoherentTiming.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1060000000000000000001F /* SpeakerMeasurementLabCoherentTiming.swift */; };
 		F10600000000000000000010 /* SpeakerMeasurementLabCoherentTimingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10600000000000000000020 /* SpeakerMeasurementLabCoherentTimingTests.swift */; };
+		F10600000000000000000021 /* SpeakerMeasurementLabReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10600000000000000000031 /* SpeakerMeasurementLabReport.swift */; };
+		F10600000000000000000022 /* SpeakerMeasurementLabReportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10600000000000000000032 /* SpeakerMeasurementLabReportTests.swift */; };
 		F92000000000000000000001 /* RoomTreatmentAdvisor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F92000000000000000000011 /* RoomTreatmentAdvisor.swift */; };
 		F92000000000000000000002 /* RoomTreatmentAdvisorController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F92000000000000000000012 /* RoomTreatmentAdvisorController.swift */; };
 		F92000000000000000000003 /* ProductionRoomTreatmentAdvisorWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = F92000000000000000000013 /* ProductionRoomTreatmentAdvisorWorkspace.swift */; };
@@ -489,6 +491,8 @@
 		F1060000000000000000001E /* SpeakerMeasurementLabProtectedExcitationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerMeasurementLabProtectedExcitationTests.swift; sourceTree = "<group>"; };
 		F1060000000000000000001F /* SpeakerMeasurementLabCoherentTiming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerMeasurementLabCoherentTiming.swift; sourceTree = "<group>"; };
 		F10600000000000000000020 /* SpeakerMeasurementLabCoherentTimingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerMeasurementLabCoherentTimingTests.swift; sourceTree = "<group>"; };
+		F10600000000000000000031 /* SpeakerMeasurementLabReport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerMeasurementLabReport.swift; sourceTree = "<group>"; };
+		F10600000000000000000032 /* SpeakerMeasurementLabReportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerMeasurementLabReportTests.swift; sourceTree = "<group>"; };
 		F92000000000000000000011 /* RoomTreatmentAdvisor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomTreatmentAdvisor.swift; sourceTree = "<group>"; };
 		F92000000000000000000012 /* RoomTreatmentAdvisorController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomTreatmentAdvisorController.swift; sourceTree = "<group>"; };
 		F92000000000000000000013 /* ProductionRoomTreatmentAdvisorWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionRoomTreatmentAdvisorWorkspace.swift; sourceTree = "<group>"; };
@@ -627,6 +631,7 @@
 				F1060000000000000000001C /* SpeakerMeasurementLabLevelDependenceTests.swift */,
 				F1060000000000000000001E /* SpeakerMeasurementLabProtectedExcitationTests.swift */,
 				F10600000000000000000020 /* SpeakerMeasurementLabCoherentTimingTests.swift */,
+				F10600000000000000000032 /* SpeakerMeasurementLabReportTests.swift */,
 				F92000000000000000000014 /* RoomTreatmentAdvisorTests.swift */,
 				F93000000000000000000013 /* RoomGeometryPlacementTests.swift */,
 				F94000000000000000000014 /* RoomTreatmentDesignVerificationTests.swift */,
@@ -682,6 +687,7 @@
 				F1060000000000000000001B /* SpeakerMeasurementLabLevelDependence.swift */,
 				F1060000000000000000001D /* SpeakerMeasurementLabProtectedExcitation.swift */,
 				F1060000000000000000001F /* SpeakerMeasurementLabCoherentTiming.swift */,
+				F10600000000000000000031 /* SpeakerMeasurementLabReport.swift */,
 				A2000000000000000000002E /* RoomCorrectionMeasurementAnalyzer.swift */,
 				A20000000000000000000030 /* RoomCorrectionTargetDesigner.swift */,
 				E20000000000000000000012 /* RoomCorrectionFIRDesigner.swift */,
@@ -892,6 +898,7 @@
 				F1060000000000000000000B /* SpeakerMeasurementLabLevelDependence.swift in Sources */,
 				F1060000000000000000000D /* SpeakerMeasurementLabProtectedExcitation.swift in Sources */,
 				F1060000000000000000000F /* SpeakerMeasurementLabCoherentTiming.swift in Sources */,
+				F10600000000000000000021 /* SpeakerMeasurementLabReport.swift in Sources */,
 				F64000000000000000000003 /* MultichannelCalibrationTransport.swift in Sources */,
 				F64000000000000000000004 /* MultichannelCalibrationController.swift in Sources */,
 				F64000000000000000000005 /* ProductionMultichannelCalibrationWorkspace.swift in Sources */,
@@ -1074,6 +1081,7 @@
 				F1060000000000000000000C /* SpeakerMeasurementLabLevelDependenceTests.swift in Sources */,
 				F1060000000000000000000E /* SpeakerMeasurementLabProtectedExcitationTests.swift in Sources */,
 				F10600000000000000000010 /* SpeakerMeasurementLabCoherentTimingTests.swift in Sources */,
+				F10600000000000000000022 /* SpeakerMeasurementLabReportTests.swift in Sources */,
 				F92000000000000000000004 /* RoomTreatmentAdvisorTests.swift in Sources */,
 				F93000000000000000000003 /* RoomGeometryPlacementTests.swift in Sources */,
 				F94000000000000000000004 /* RoomTreatmentDesignVerificationTests.swift in Sources */,

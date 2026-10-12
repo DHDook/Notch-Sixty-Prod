@@ -1,6 +1,6 @@
 # PR106 — Advanced Speaker Measurement Lab
 
-Status: **SLICES 1–9A SOFTWARE VERIFIED — SLICE 9B CI PENDING**
+Status: **SLICES 1–9B SOFTWARE VERIFIED — SLICE 10A CI PENDING**
 
 Base: PR105 Guided Speaker Optimizer & Acoustic Verification.
 
@@ -385,8 +385,42 @@ targeted Lab tests and full XCTest regression.
 - Measurement-only: no delay, polarity, crossover, gain or limiter state changes;
   `canDeploy == false` and `canMutateDSP == false`.
 
+## Slice 9B exact-head verification
+
+Slice 9B exact head `274d27df29aa06627172034ff5df6b1092fb7a54` passed both
+GitHub Actions paths:
+
+- push run 38229295410;
+- pull-request run 38229299995.
+
+Both paths passed PR106/PR105 validators, Apple Silicon Debug build, targeted
+Lab tests and full XCTest regression.
+
+## Slice 10A — Compact report and export foundation
+
+- Adds a compact, versioned Lab report that records session/playback/routing/
+  microphone identity, protocol geometry/progress, capture-quality provenance
+  and available diagnostic summaries.
+- Report exports intentionally exclude raw impulse arrays and full transfer
+  grids; the persistent Lab session remains the detailed analysis archive.
+- Specialized directivity, near-field LF, quasi-anechoic, two-level
+  level-dependence and coherent-timing analyzers are invoked only for complete
+  relevant protocol groups.
+- An analysis whose physical/evidence prerequisites are not satisfied remains
+  visible as unavailable with its blocking reason instead of silently
+  disappearing.
+- JSON export uses stable pretty/sorted encoding with ISO-8601 dates.
+- CSV export provides compact protocol and analysis sections for external
+  review.
+- Session-store listing exposes recent valid Lab sessions in modified-time order
+  and ignores corrupt/unrelated JSON files rather than making the whole Lab
+  history unusable.
+- Every report remains measurement-only with `canDeploy == false` and carries the
+  installed-room/quasi-anechoic/near-field/protected-path/coherent-provenance
+  interpretation warnings forward into the export.
+
 ## Planned follow-on slices
 
-1. Authenticated shared-clock reference capture for coherent relative timing and
-   phase diagnostics.
-2. Production Advanced Speaker Measurement Lab UI and export/reporting.
+1. Production Advanced Speaker Measurement Lab UI using the tested report/export
+   contract.
+2. Physical Lab commissioning and acceptance on representative hardware.
