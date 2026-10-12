@@ -55,6 +55,7 @@ jobs:
           CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES
           -only-testing:NotchSixtyTests/RoomGeometryPlacementTests
           -only-testing:NotchSixtyTests/AdvancedRoomPlacementExperimentsTests
+          -only-testing:NotchSixtyTests/AdvancedPlacementSidecarTests
           test
       - name: Run cumulative XCTest regression
         run: >-
