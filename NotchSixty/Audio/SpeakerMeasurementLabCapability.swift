@@ -1,6 +1,6 @@
 import Foundation
 
-enum SpeakerMeasurementLabMode: String, CaseIterable, Sendable {
+enum SpeakerMeasurementLabMode: String, CaseIterable, Codable, Sendable {
     case wholeSpeakerOnAxis
     case wholeSpeakerOffAxis
     case subwooferNearField
@@ -8,7 +8,7 @@ enum SpeakerMeasurementLabMode: String, CaseIterable, Sendable {
     case coherentMainsSubTiming
 }
 
-struct SpeakerMeasurementLabGeometry: Equatable, Sendable {
+struct SpeakerMeasurementLabGeometry: Codable, Equatable, Sendable {
     var distanceMeters: Double
     var horizontalAngleDegrees: Double
     var verticalAngleDegrees: Double
@@ -57,7 +57,7 @@ struct SpeakerMeasurementLabGeometry: Equatable, Sendable {
     }
 }
 
-enum SpeakerMeasurementLabTarget: Equatable, Sendable {
+enum SpeakerMeasurementLabTarget: Codable, Equatable, Sendable {
     case acousticSource(MultichannelCalibrationSource)
     case protectedDriverBus(SpeakerOutputBus)
     case sourcePair(
@@ -67,7 +67,7 @@ enum SpeakerMeasurementLabTarget: Equatable, Sendable {
 }
 
 enum SpeakerMeasurementLabAnalysisProduct:
-    String, CaseIterable, Equatable, Sendable {
+    String, CaseIterable, Codable, Equatable, Sendable {
     case magnitudeResponse
     case phaseResponse
     case directArrival
@@ -78,7 +78,7 @@ enum SpeakerMeasurementLabAnalysisProduct:
     case relativePhase
 }
 
-struct SpeakerMeasurementLabRequest: Equatable, Sendable {
+struct SpeakerMeasurementLabRequest: Codable, Equatable, Sendable {
     static let minimumRepeatCount =
         SpeakerOptimizerMeasurementEvidenceEvaluator.minimumRepeatCount
 
