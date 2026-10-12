@@ -520,3 +520,237 @@ final class SpeakerMeasurementLabProtectedExcitationTests:
         )
     }
 }
+
+
+// PR111 Slice 1: original, measurement-only, cut-only driver optimizer.
+final class ProtectedDriverPEQRecommendationTests: XCTestCase {
+    private let systemID = UUID(uuidString:
+        "11100000-0000-0000-0000-000000000001")!
+    private let mic = SpeakerOptimizerMicrophoneIdentity(
+        deviceUID: "pr111-calibrated-mic",
+        inputChannelIndex: 0,
+        calibrationFingerprint: "pr111-mic-cal"
+    )
+    private let analyzer = ProtectedDriverPEQRecommendationAnalyzer()
+
+    private func provenance(
+        bus: SpeakerOutputBus = .leftHigh,
+        limiter: Bool = true,
+        activeCrossover: Bool = true
+    ) -> SpeakerMeasurementLabProtectedDriverCaptureProvenance {
+        var bass = BassManagementConfiguration()
+        bass.enabled = activeCrossover
+        bass.frequencyHz = 1_000
+        bass.physicalOutputMode = .biAmp
+        let route = MultiOutputRoutingConfiguration(
+            enabled: true,
+            routes: [
+                SpeakerOutputRoute(
+                    name: "Left Low", bus: .leftLow,
+                    destination: PhysicalOutputEndpoint(
+                        deviceUID: "PR111 Device", channelIndex: 0
+                    )
+                ),
+                SpeakerOutputRoute(
+                    name: "Left High", bus: .leftHigh,
+                    destination: PhysicalOutputEndpoint(
+                        deviceUID: "PR111 Device", channelIndex: 1
+                    )
+                )
+            ],
+            referenceDeviceUID: "PR111 Device"
+        )
+        return SpeakerMeasurementLabProtectedDriverCaptureProvenance(
+            targetBus: bus,
+            physicalDestination: PhysicalOutputEndpoint(
+                deviceUID: "PR111 Device", channelIndex: 1
+            ),
+            routingConfiguration: route,
+            bassManagementConfiguration: bass,
+            targetDriverConfiguration:
+                SpeakerDriverBusProcessingConfiguration(
+                    bus: bus, limiterEnabled: limiter,
+                    limiterThresholdDBFS: -30
+                ),
+            inputPeakDBFS: -30,
+            renderedPeakDBFS: -32,
+            sourceFrameCount: 4_800,
+            renderedFrameCount: 16_800
+        )
+    }
+
+    private func fixture(
+        peakDB: Double = 5,
+        snrDB: Double = 55,
+        repeats: Int = 3,
+        limiter: Bool = true,
+        crossover: Bool = true,
+        protectedBus: SpeakerOutputBus = .leftHigh
+    ) -> (SpeakerMeasurementLabSession, UUID) {
+        let labProtocol = SpeakerMeasurementLabProtocol(
+            name: "PR111 Protected High",
+            request: SpeakerMeasurementLabRequest(
+                mode: .protectedDriverNearField,
+                target: .protectedDriverBus(protectedBus),
+                geometry: SpeakerMeasurementLabGeometry(
+                    distanceMeters: 0.05
+                )
+            ),
+            excitationLevelDBFS: -30
+        )
+        let grid = (0..<100).map { i in
+            400.0 * pow(35, Double(i) / 99)
+        }
+        let receipt = provenance(
+            bus: protectedBus,
+            limiter: limiter,
+            activeCrossover: crossover
+        )
+        var captures: [SpeakerMeasurementLabCapture] = []
+        for repeatIndex in 0..<repeats {
+            let magnitudes = grid.map { hz in
+                let broadPeak = peakDB * exp(
+                    -0.5 * pow(log2(hz / 4_000) / 0.23, 2)
+                )
+                return 0.1 * log2(hz / 2_000)
+                    + broadPeak
+                    + Double(repeatIndex - 1) * 0.03
+            }
+            let response = RoomCorrectionFrequencyResponse(
+                frequenciesHz: grid,
+                magnitudeDB: magnitudes,
+                phaseRadians: grid.map { 0.02 * log2($0 / 1_000) }
+            )
+            let quality = RoomCorrectionMeasurementQuality(
+                clipped: false,
+                playbackPeakDBFS: -30,
+                capturePeakDBFS: -20,
+                estimatedNoiseFloorDBFS: -85,
+                estimatedSNRDB: snrDB,
+                sweepComplete: true,
+                directArrivalSeconds: 0.003,
+                usableLowHz: 400,
+                usableHighHz: 14_000,
+                warnings: []
+            )
+            captures.append(
+                SpeakerMeasurementLabCapture(
+                    protocolID: labProtocol.id,
+                    repeatIndex: repeatIndex,
+                    capturedAt: Date(
+                        timeIntervalSince1970:
+                            1_700_000_000 + Double(repeatIndex)
+                    ),
+                    playbackSystemID: systemID,
+                    routingSignature: "pr111-active-route",
+                    microphone: mic,
+                    excitationLevelDBFS: -30,
+                    sampleRate: 48_000,
+                    source: .speaker(.frontLeft),
+                    protectedDriverProvenance: receipt,
+                    impulseResponse: [0.0, 0.3, 1.0, 0.2],
+                    transferFunction: response,
+                    quality: quality
+                )
+            )
+        }
+        return (
+            SpeakerMeasurementLabSession(
+                playbackSystemID: systemID,
+                routingSignature: "pr111-active-route",
+                microphone: mic,
+                sampleRate: 48_000,
+                protocols: [labProtocol],
+                captures: captures
+            ),
+            labProtocol.id
+        )
+    }
+
+    func testBroadRepeatStablePeakProducesBoundedCutOnlyReview() throws {
+        let (session, protocolID) = fixture()
+        let advice = try analyzer.recommend(
+            session: session, protocolID: protocolID
+        )
+        XCTAssertEqual(advice.targetBus, .leftHigh)
+        XCTAssertEqual(advice.repeatedCaptureIDs.count, 3)
+        XCTAssertFalse(advice.cuts.isEmpty)
+        XCTAssertLessThanOrEqual(advice.cuts.count, 3)
+        XCTAssertTrue(advice.cuts.allSatisfy {
+            $0.frequencyHz > 1_500 && $0.frequencyHz < 14_000
+                && $0.gainDB < 0 && $0.gainDB >= -2.5
+                && $0.q > 0 && $0.q <= 1.4
+        })
+        XCTAssertFalse(advice.canDeploy)
+        XCTAssertFalse(advice.canChangeDelayOrPolarity)
+        XCTAssertFalse(advice.canAlterCrossoverOrLimiter)
+        XCTAssertTrue(advice.requiresNewMeasuredVerification)
+    }
+
+    func testSmoothResponseDoesNotInventPEQ() throws {
+        let (session, protocolID) = fixture(peakDB: 0)
+        XCTAssertTrue(
+            try analyzer.recommend(
+                session: session, protocolID: protocolID
+            ).cuts.isEmpty
+        )
+    }
+
+    func testClippedLowSNRMissingRepeatsAndBadGridReject() throws {
+        var (session, protocolID) = fixture()
+        session.captures[0].quality.clipped = true
+        XCTAssertThrowsError(try analyzer.recommend(
+            session: session, protocolID: protocolID
+        ))
+        (session, protocolID) = fixture(snrDB: 14)
+        XCTAssertThrowsError(try analyzer.recommend(
+            session: session, protocolID: protocolID
+        ))
+        (session, protocolID) = fixture(repeats: 2)
+        XCTAssertThrowsError(try analyzer.recommend(
+            session: session, protocolID: protocolID
+        ))
+        (session, protocolID) = fixture()
+        session.captures[1].transferFunction.frequenciesHz[13] *= 1.001
+        XCTAssertThrowsError(try analyzer.recommend(
+            session: session, protocolID: protocolID
+        ))
+    }
+
+    func testMandatoryCrossoverAndLimiterAreNeverBypassed() throws {
+        var (session, protocolID) = fixture(limiter: false)
+        XCTAssertThrowsError(try analyzer.recommend(
+            session: session, protocolID: protocolID
+        ))
+        (session, protocolID) = fixture(crossover: false)
+        XCTAssertThrowsError(try analyzer.recommend(
+            session: session, protocolID: protocolID
+        ))
+        (session, protocolID) = fixture(protectedBus: .leftFullRange)
+        XCTAssertThrowsError(try analyzer.recommend(
+            session: session, protocolID: protocolID
+        ))
+    }
+
+    func testWrongProtocolOrAlteredRouteCannotBecomeRecommendation() throws {
+        var (session, protocolID) = fixture()
+        XCTAssertThrowsError(try analyzer.recommend(
+            session: session, protocolID: UUID()
+        ))
+        session.captures[0].routingSignature = "other-route"
+        XCTAssertThrowsError(try analyzer.recommend(
+            session: session, protocolID: protocolID
+        ))
+    }
+
+    func testUnstableRepeatsDoNotAuthorizeCuts() throws {
+        var (session, protocolID) = fixture()
+        session.captures[1].transferFunction.magnitudeDB =
+            session.captures[1].transferFunction.magnitudeDB.map {
+                $0 + 2.5
+            }
+        XCTAssertThrowsError(try analyzer.recommend(
+            session: session, protocolID: protocolID
+        ))
+    }
+}
