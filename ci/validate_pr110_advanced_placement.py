@@ -177,7 +177,7 @@ for token in (
     "room == savedGeometry",
     "settings == savedAdvancedPlacement",
     ".listRecentSessions(limit: 24)",
-    "session.playbackSystemID == project.playbackSystemID",
+    "$0.playbackSystemID == project.playbackSystemID",
     "RoomAdvancedToeInEvidenceAnalyzer()",
     "toeInMeasurementEvidence = []",
     "status == .measuredComparison",
