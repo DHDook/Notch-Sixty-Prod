@@ -1404,8 +1404,18 @@ struct RoomAdvancedPlacementState: Equatable, Sendable {
     }
 }
 
-enum RoomAdvancedPlacementError: Error, Equatable, Sendable {
+enum RoomAdvancedPlacementError: Error, LocalizedError, Equatable, Sendable {
     case invalidConfiguration
+    case corruptSettings
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidConfiguration:
+            return "Advanced placement must match this project and stay inside the room limits."
+        case .corruptSettings:
+            return "Saved advanced placement settings could not be read; the original room geometry was preserved."
+        }
+    }
 }
 
 enum RoomAdvancedPlacementMove: String, Equatable, Sendable {
@@ -1572,5 +1582,115 @@ struct RoomAdvancedPlacementExplorer: Sendable {
                 - state.room.rightSpeaker.distance(to: seat)
             )
         }.max() ?? 0
+    }
+}
+
+
+// MARK: - PR110 Slice 2: project-only advanced placement sidecar
+
+/// Versioned sidecar deliberately independent of the existing PR93 geometry
+/// JSON and of the persisted Playback System / Content Preset.
+struct RoomAdvancedPlacementSettings: Codable, Equatable, Sendable {
+    static let currentSchemaVersion = 1
+
+    var schemaVersion: Int = currentSchemaVersion
+    var projectID: UUID
+    var secondarySeats: [RoomGeometryPoint3D] = []
+    var leftToeInDegrees: Double = 0
+    var rightToeInDegrees: Double = 0
+    var subwooferPositions: [RoomGeometryPoint3D] = []
+
+    func state(for room: RoomGeometryModel) throws -> RoomAdvancedPlacementState {
+        guard schemaVersion == Self.currentSchemaVersion,
+              projectID == room.projectID else {
+            throw RoomAdvancedPlacementError.invalidConfiguration
+        }
+        return try RoomAdvancedPlacementState(
+            room: room,
+            secondarySeats: secondarySeats,
+            leftToeInDegrees: leftToeInDegrees,
+            rightToeInDegrees: rightToeInDegrees,
+            subwooferPositions: subwooferPositions
+        ).validated()
+    }
+
+    static func from(
+        _ state: RoomAdvancedPlacementState
+    ) throws -> Self {
+        let checked = try state.validated()
+        return Self(
+            projectID: checked.room.projectID,
+            secondarySeats: checked.secondarySeats,
+            leftToeInDegrees: checked.leftToeInDegrees,
+            rightToeInDegrees: checked.rightToeInDegrees,
+            subwooferPositions: checked.subwooferPositions
+        )
+    }
+}
+
+/// No automatic migration of PR93; unsupported/corrupted new sidecars fail
+/// closed without deleting the existing base room geometry.
+struct RoomAdvancedPlacementStore: Sendable {
+    let projectStore: RoomCorrectionProjectStore
+
+    func settingsURL(for projectID: UUID) -> URL {
+        projectStore.projectDirectory(for: projectID)
+            .appendingPathComponent(
+                "advisor-advanced-placement-v1.json", isDirectory: false
+            )
+    }
+
+    func load(
+        projectID: UUID,
+        room: RoomGeometryModel
+    ) throws -> RoomAdvancedPlacementSettings? {
+        guard projectID == room.projectID else {
+            throw RoomAdvancedPlacementError.invalidConfiguration
+        }
+        let url = settingsURL(for: projectID)
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            return nil
+        }
+        let decoded: RoomAdvancedPlacementSettings
+        do {
+            decoded = try JSONDecoder().decode(
+                RoomAdvancedPlacementSettings.self,
+                from: Data(contentsOf: url)
+            )
+        } catch {
+            throw RoomAdvancedPlacementError.corruptSettings
+        }
+        _ = try decoded.state(for: room)
+        return decoded
+    }
+
+    @discardableResult
+    func save(
+        _ settings: RoomAdvancedPlacementSettings,
+        room: RoomGeometryModel
+    ) throws -> URL {
+        _ = try settings.state(for: room)
+        let directory = projectStore.projectDirectory(
+            for: settings.projectID
+        )
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let destination = settingsURL(for: settings.projectID)
+        try encoder.encode(settings).write(
+            to: destination, options: .atomic
+        )
+        return destination
+    }
+
+    func delete(projectID: UUID) throws {
+        let destination = settingsURL(for: projectID)
+        guard FileManager.default.fileExists(atPath: destination.path) else {
+            return
+        }
+        try FileManager.default.removeItem(at: destination)
     }
 }
