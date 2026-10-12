@@ -2,6 +2,8 @@
 
 **State: Slice 1 implemented; exact-head CI and all real-room validation pending.**
 
+**REMOTE SCOPE ONLY:** no acoustic, physical, release or merge acceptance is implied.
+
 ## Purpose
 
 Extend the existing PR93 Room Advisor geometry model and PR103–106 Speaker
