@@ -21,30 +21,31 @@ final class CoherentSubwooferAlignmentApplyTransactionTests:
         let output = try XCTUnwrap(
             store.profile?.state.outputDeviceProfile
         )
+        let leftCalibration = try XCTUnwrap(
+            output.speakerAssignments[0].calibration
+        )
+        let rightCalibration = try XCTUnwrap(
+            output.speakerAssignments[1].calibration
+        )
+        let subCalibration = try XCTUnwrap(
+            output.subwooferAssignments[0].calibration
+        )
         XCTAssertEqual(
-            output.speakerAssignments[0]
-                .calibration?.delayMilliseconds,
+            leftCalibration.delayMilliseconds,
             3.5,
             accuracy: 0.05
         )
         XCTAssertEqual(
-            output.speakerAssignments[1]
-                .calibration?.delayMilliseconds,
+            rightCalibration.delayMilliseconds,
             4.0,
             accuracy: 0.05
         )
         XCTAssertEqual(
-            output.subwooferAssignments[0]
-                .calibration?.delayMilliseconds,
+            subCalibration.delayMilliseconds,
             0.75,
             accuracy: 0.001
         )
-        XCTAssertFalse(
-            try XCTUnwrap(
-                output.subwooferAssignments[0]
-                    .calibration?.polarityInverted
-            )
-        )
+        XCTAssertFalse(subCalibration.polarityInverted)
         XCTAssertEqual(
             store.profile?.state,
             receipt.expectedAppliedState
@@ -78,21 +79,27 @@ final class CoherentSubwooferAlignmentApplyTransactionTests:
         let output = try XCTUnwrap(
             store.profile?.state.outputDeviceProfile
         )
+        let leftCalibration = try XCTUnwrap(
+            output.speakerAssignments[0].calibration
+        )
+        let rightCalibration = try XCTUnwrap(
+            output.speakerAssignments[1].calibration
+        )
+        let subCalibration = try XCTUnwrap(
+            output.subwooferAssignments[0].calibration
+        )
         XCTAssertEqual(
-            output.speakerAssignments[0]
-                .calibration?.delayMilliseconds,
+            leftCalibration.delayMilliseconds,
             0.5,
             accuracy: 0.001
         )
         XCTAssertEqual(
-            output.speakerAssignments[1]
-                .calibration?.delayMilliseconds,
+            rightCalibration.delayMilliseconds,
             1.0,
             accuracy: 0.001
         )
         XCTAssertEqual(
-            output.subwooferAssignments[0]
-                .calibration?.delayMilliseconds,
+            subCalibration.delayMilliseconds,
             2.75,
             accuracy: 0.05
         )
