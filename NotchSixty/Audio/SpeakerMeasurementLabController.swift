@@ -1,0 +1,498 @@
+import Combine
+import Foundation
+
+enum SpeakerMeasurementLabControllerError:
+    Error, Equatable, LocalizedError {
+    case playbackSystemRequired
+    case outputDeviceProfileRequired
+    case playbackMustBeIdle(AudioLifecycleState)
+    case microphonePermissionRequired
+    case measurementInputRequired
+    case outputRequired
+    case protocolsRequired
+    case sessionRequired
+    case sessionEnvironmentChanged
+    case measurementAlreadyActive
+    case measurementNotActive
+    case transportBlocked(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .playbackSystemRequired:
+            return "Select a Playback System before starting the Advanced Speaker Measurement Lab."
+        case .outputDeviceProfileRequired:
+            return "Enable and configure an Output Device Profile before starting the Advanced Speaker Measurement Lab."
+        case .playbackMustBeIdle(let state):
+            return "Stop normal DSP playback before a lab sweep. The playback engine is currently \(state.rawValue)."
+        case .microphonePermissionRequired:
+            return "Microphone access is required before an Advanced Speaker Measurement Lab sweep."
+        case .measurementInputRequired:
+            return "Select a measurement microphone before starting the lab."
+        case .outputRequired:
+            return "Select the commissioned Playback System output before starting the lab."
+        case .protocolsRequired:
+            return "Add at least one supported lab measurement protocol."
+        case .sessionRequired:
+            return "Start or resume an Advanced Speaker Measurement Lab session first."
+        case .sessionEnvironmentChanged:
+            return "Playback System, physical routing, microphone identity, or sample rate changed after this lab session was created."
+        case .measurementAlreadyActive:
+            return "An Advanced Speaker Measurement Lab sweep is already active."
+        case .measurementNotActive:
+            return "No Advanced Speaker Measurement Lab sweep is active."
+        case .transportBlocked(let reason):
+            return "Advanced Speaker Measurement Lab sweep is blocked: \(reason)"
+        }
+    }
+}
+
+/// Live acquisition bridge for PR106 safe lab modes.
+///
+/// This controller deliberately reuses MultichannelCalibrationTransport and
+/// RoomCorrectionMeasurementAnalyzer. Before EVERY sweep it re-runs the PR106
+/// capability planner against the current Playback System state. A protocol
+/// that was safe when persisted therefore cannot bypass a later active
+/// crossover or limiter configuration.
+@MainActor
+final class SpeakerMeasurementLabController: ObservableObject {
+    let engine: AudioIOEngine
+    let profiles: ProductProfileController
+    let microphone: RoomCorrectionCalibrationController
+
+    private let store: SpeakerMeasurementLabSessionStore
+    private let transportFactory: MultichannelCalibrationTransportFactory
+    private let analysisOperation: MultichannelCalibrationAnalysisOperation
+    private let capabilityPlanner =
+        SpeakerMeasurementLabCapabilityPlanner()
+    private let captureBuilder = SpeakerMeasurementLabCaptureBuilder()
+    private let orchestrator = SpeakerMeasurementLabSessionOrchestrator()
+    private let sweepGenerator = RoomCorrectionSweepGenerator()
+
+    private var activeTransport:
+        (any MultichannelCalibrationTransporting)?
+    private var activeProgram: RoomCorrectionSweepProgram?
+    private var activeStep: SpeakerMeasurementLabSessionStep?
+    private var analysisGeneration: UInt64 = 0
+
+    @Published private(set) var state:
+        SpeakerOptimizerMeasurementControllerState = .idle
+    @Published private(set) var session: SpeakerMeasurementLabSession?
+    @Published private(set) var activeCapabilityPlan:
+        SpeakerMeasurementLabPlan?
+    @Published private(set) var lastErrorDescription: String?
+
+    init(
+        engine: AudioIOEngine,
+        profiles: ProductProfileController,
+        microphone: RoomCorrectionCalibrationController,
+        store: SpeakerMeasurementLabSessionStore =
+            SpeakerMeasurementLabSessionStore(),
+        transportFactory:
+            @escaping MultichannelCalibrationTransportFactory = {
+                routePlan, outputs, input, inputChannel,
+                program, physicalOutput in
+                try MultichannelCalibrationTransport(
+                    routePlan: routePlan,
+                    availableOutputs: outputs,
+                    input: input,
+                    inputChannelIndex: inputChannel,
+                    program: program,
+                    physicalOutputChannelIndex: physicalOutput
+                )
+            },
+        analysisOperation:
+            @escaping MultichannelCalibrationAnalysisOperation = {
+                capture, program, microphoneCalibration in
+                try await Task.detached(priority: .userInitiated) {
+                    try RoomCorrectionMeasurementAnalyzer()
+                        .analyzeSingleChannel(
+                            rawCapture: capture.samples,
+                            program: program,
+                            microphoneCalibration:
+                                microphoneCalibration
+                        )
+                }.value
+            }
+    ) {
+        self.engine = engine
+        self.profiles = profiles
+        self.microphone = microphone
+        self.store = store
+        self.transportFactory = transportFactory
+        self.analysisOperation = analysisOperation
+    }
+
+    var progress: SpeakerMeasurementLabSessionProgress? {
+        guard let session else { return nil }
+        return try? orchestrator.progress(for: session)
+    }
+
+    var nextStep: SpeakerMeasurementLabSessionStep? {
+        guard let session else { return nil }
+        return try? orchestrator.nextPendingStep(for: session)
+    }
+
+    var activeOrNextStep: SpeakerMeasurementLabSessionStep? {
+        activeStep ?? nextStep
+    }
+
+    var activeMeasurementProgress: Double {
+        guard let snapshot = activeTransport?.snapshot(),
+              snapshot.totalFrameCount > 0 else {
+            return 0
+        }
+        return min(
+            max(
+                Double(snapshot.frameCursor)
+                    / Double(snapshot.totalFrameCount),
+                0
+            ),
+            1
+        )
+    }
+
+    var canBeginMeasurement: Bool {
+        guard state == .ready || state == .reviewing,
+              session != nil,
+              nextStep != nil else {
+            return false
+        }
+        return engine.lifecycleState == .idle
+            && microphone.permissionStatus == .authorized
+            && microphone.selectedInputDevice != nil
+            && engine.selectedOutputDevice != nil
+            && activeTransport == nil
+    }
+
+    func startNewSession(
+        protocols: [SpeakerMeasurementLabProtocol],
+        createdAt: Date = Date()
+    ) throws {
+        guard activeTransport == nil else {
+            throw SpeakerMeasurementLabControllerError
+                .measurementAlreadyActive
+        }
+        guard !protocols.isEmpty else {
+            throw SpeakerMeasurementLabControllerError.protocolsRequired
+        }
+        for labProtocol in protocols {
+            try labProtocol.validateForAcquisition()
+        }
+
+        guard let systemID = profiles.selectedSystemProfileID else {
+            throw SpeakerMeasurementLabControllerError
+                .playbackSystemRequired
+        }
+        guard let systemProfile = profiles.selectedSystemProfile,
+              let profile =
+                systemProfile.state.outputDeviceProfile,
+              profile.enabled else {
+            throw SpeakerMeasurementLabControllerError
+                .outputDeviceProfileRequired
+        }
+        guard let output = engine.selectedOutputDevice else {
+            throw SpeakerMeasurementLabControllerError.outputRequired
+        }
+        guard microphone.permissionStatus == .authorized else {
+            throw SpeakerMeasurementLabControllerError
+                .microphonePermissionRequired
+        }
+        guard let input = microphone.selectedInputDevice else {
+            throw SpeakerMeasurementLabControllerError
+                .measurementInputRequired
+        }
+
+        let mic = SpeakerOptimizerMicrophoneIdentity(
+            deviceUID: input.uid,
+            inputChannelIndex:
+                microphone.selectedInputChannelIndex,
+            calibrationFingerprint:
+                microphone.microphoneCalibration?.sourceName
+        )
+        let fresh = SpeakerMeasurementLabSession(
+            playbackSystemID: systemID,
+            routingSignature:
+                profile.multichannelCalibrationRoutingSignature,
+            microphone: mic,
+            sampleRate: output.nominalSampleRate,
+            protocols: protocols,
+            captures: [],
+            createdAt: createdAt,
+            modifiedAt: createdAt
+        )
+        try fresh.validateStructure()
+        try store.save(fresh)
+        session = fresh
+        activeCapabilityPlan = nil
+        state = .ready
+        lastErrorDescription = nil
+    }
+
+    func resumeSession(_ sessionID: UUID) throws {
+        guard activeTransport == nil else {
+            throw SpeakerMeasurementLabControllerError
+                .measurementAlreadyActive
+        }
+        guard let stored = try store.load(sessionID) else {
+            throw SpeakerMeasurementLabControllerError.sessionRequired
+        }
+        try validateCurrentEnvironment(for: stored)
+        session = stored
+        activeCapabilityPlan = nil
+        state = try orchestrator.progress(for: stored).complete
+            ? .reviewing : .ready
+        lastErrorDescription = nil
+    }
+
+    func beginNextMeasurement() throws {
+        guard activeTransport == nil else {
+            throw SpeakerMeasurementLabControllerError
+                .measurementAlreadyActive
+        }
+        guard engine.lifecycleState == .idle else {
+            throw SpeakerMeasurementLabControllerError
+                .playbackMustBeIdle(engine.lifecycleState)
+        }
+        guard microphone.permissionStatus == .authorized else {
+            throw SpeakerMeasurementLabControllerError
+                .microphonePermissionRequired
+        }
+        guard let input = microphone.selectedInputDevice else {
+            throw SpeakerMeasurementLabControllerError
+                .measurementInputRequired
+        }
+        guard let output = engine.selectedOutputDevice,
+              let selectedOutputUID =
+                engine.routeConfiguration.selectedOutputUID else {
+            throw SpeakerMeasurementLabControllerError.outputRequired
+        }
+        guard let systemProfile = profiles.selectedSystemProfile,
+              let profile =
+                systemProfile.state.outputDeviceProfile,
+              profile.enabled else {
+            throw SpeakerMeasurementLabControllerError
+                .outputDeviceProfileRequired
+        }
+        guard let session,
+              let step = try orchestrator.nextPendingStep(
+                  for: session
+              ) else {
+            throw SpeakerMeasurementLabControllerError.sessionRequired
+        }
+        try validateCurrentEnvironment(for: session)
+
+        let routePlan = try profile.makeLivePlan(
+            availableDevices: engine.outputDevices,
+            sampleRate: output.nominalSampleRate,
+            selectedOutputUID: selectedOutputUID,
+            bassManagementEnabled:
+                systemProfile.state.bassManagement.enabled
+        )
+        let capability = try capabilityPlanner.plan(
+            step.labProtocol.request,
+            routePlan: routePlan,
+            multiOutputRouting: systemProfile.state.outputRouting,
+            speakerDriverProcessing:
+                systemProfile.state.speakerDriverProcessing
+        )
+        activeCapabilityPlan = capability
+        guard capability.canStartMeasurement,
+              capability.delegatedTransportPlans.count == 1,
+              let physicalOutput =
+                capability.delegatedTransportPlans[0]
+                    .physicalOutputChannelIndex else {
+            state = .blocked
+            let reason = capability.blockReasons
+                .map(\.message)
+                .joined(separator: " ")
+            let error = SpeakerMeasurementLabControllerError
+                .transportBlocked(
+                    reason.isEmpty
+                        ? "the measurement safety contract was not satisfied"
+                        : reason
+                )
+            lastErrorDescription = error.localizedDescription
+            throw error
+        }
+
+        let settings = RoomCorrectionSweepSettings(
+            sampleRate: output.nominalSampleRate,
+            startFrequencyHz: microphone.sweepStartFrequencyHz,
+            endFrequencyHz: microphone.sweepEndFrequencyHz,
+            durationSeconds: microphone.sweepDurationSeconds,
+            levelDBFS: microphone.sweepLevelDBFS,
+            leadInSeconds: microphone.sweepLeadInSeconds,
+            tailSeconds: microphone.sweepTailSeconds,
+            fadeSeconds: microphone.sweepFadeSeconds
+        )
+        let program = try sweepGenerator.makeProgram(
+            settings: settings
+        )
+        let transport = try transportFactory(
+            routePlan,
+            engine.outputDevices,
+            input,
+            microphone.selectedInputChannelIndex,
+            program,
+            physicalOutput
+        )
+
+        analysisGeneration &+= 1
+        activeTransport = transport
+        activeProgram = program
+        activeStep = step
+        do {
+            try transport.start()
+            state = .measuring
+            lastErrorDescription = nil
+        } catch {
+            transport.cancel()
+            clearActiveMeasurement()
+            recordFailure(error)
+            throw error
+        }
+    }
+
+    @discardableResult
+    func finishMeasurementIfComplete() async throws -> Bool {
+        guard state == .measuring,
+              let transport = activeTransport else {
+            return false
+        }
+        guard transport.snapshot()?.complete == true else {
+            return false
+        }
+
+        let materialized: MultichannelCalibrationCapture
+        do {
+            materialized = try transport.finishAndMaterialize()
+        } catch {
+            clearActiveMeasurement()
+            recordFailure(error)
+            throw error
+        }
+        activeTransport = nil
+
+        guard let program = activeProgram,
+              let step = activeStep,
+              var session else {
+            clearActiveMeasurement()
+            let error = SpeakerMeasurementLabControllerError
+                .measurementNotActive
+            recordFailure(error)
+            throw error
+        }
+        activeProgram = nil
+        state = .analyzing
+        let generation = analysisGeneration
+
+        do {
+            let analyzed = try await analysisOperation(
+                materialized,
+                program,
+                microphone.microphoneCalibration
+            )
+            guard generation == analysisGeneration,
+                  state == .analyzing else {
+                return false
+            }
+
+            let capture = try captureBuilder.build(
+                analyzed: analyzed,
+                session: session,
+                step: step
+            )
+            session = try orchestrator.appending(
+                capture,
+                to: session,
+                for: step
+            )
+            self.session = session
+            try store.save(session)
+            activeStep = nil
+            activeCapabilityPlan = nil
+            state = try orchestrator.progress(for: session).complete
+                ? .reviewing : .ready
+            lastErrorDescription = nil
+            return true
+        } catch {
+            activeStep = nil
+            activeCapabilityPlan = nil
+            recordFailure(error)
+            throw error
+        }
+    }
+
+    func cancelMeasurement() {
+        analysisGeneration &+= 1
+        activeTransport?.cancel()
+        clearActiveMeasurement()
+        if let session {
+            state = (try? orchestrator.progress(for: session).complete)
+                == true ? .reviewing : .ready
+        } else {
+            state = .idle
+        }
+    }
+
+    func retryLatestCapture(protocolID: UUID) throws {
+        guard activeTransport == nil,
+              let session else {
+            throw SpeakerMeasurementLabControllerError.sessionRequired
+        }
+        let updated = try orchestrator.retryLatestCapture(
+            in: session,
+            protocolID: protocolID
+        )
+        self.session = updated
+        try store.save(updated)
+        state = .ready
+        lastErrorDescription = nil
+    }
+
+    private func validateCurrentEnvironment(
+        for session: SpeakerMeasurementLabSession
+    ) throws {
+        guard profiles.selectedSystemProfileID
+                == session.playbackSystemID,
+              let systemProfile = profiles.selectedSystemProfile,
+              let profile =
+                systemProfile.state.outputDeviceProfile,
+              profile.enabled,
+              profile.multichannelCalibrationRoutingSignature
+                == session.routingSignature,
+              let output = engine.selectedOutputDevice,
+              abs(output.nominalSampleRate - session.sampleRate)
+                < 0.5,
+              let input = microphone.selectedInputDevice else {
+            throw SpeakerMeasurementLabControllerError
+                .sessionEnvironmentChanged
+        }
+
+        let mic = SpeakerOptimizerMicrophoneIdentity(
+            deviceUID: input.uid,
+            inputChannelIndex:
+                microphone.selectedInputChannelIndex,
+            calibrationFingerprint:
+                microphone.microphoneCalibration?.sourceName
+        )
+        guard mic == session.microphone else {
+            throw SpeakerMeasurementLabControllerError
+                .sessionEnvironmentChanged
+        }
+    }
+
+    private func clearActiveMeasurement() {
+        activeTransport = nil
+        activeProgram = nil
+        activeStep = nil
+        activeCapabilityPlan = nil
+    }
+
+    private func recordFailure(_ error: Error) {
+        activeTransport?.cancel()
+        clearActiveMeasurement()
+        state = .failed
+        lastErrorDescription = error.localizedDescription
+    }
+}
