@@ -2087,7 +2087,7 @@ struct RoomAdvancedSubPlacementComparisonAnalyzer: Sendable {
         let allCaptures = baseline.captures + candidate.captures
         guard let grid = allCaptures.first?.response.frequenciesHz,
               !grid.isEmpty,
-              zip(grid, grid.dropFirst()).allSatisfy({ $0 < $1 }),
+              zip(grid, grid.dropFirst()).allSatisfy({ $0.0 < $0.1 }),
               grid.allSatisfy({ $0.isFinite && $0 > 0 }),
               allCaptures.allSatisfy({
                   $0.response.frequenciesHz == grid
