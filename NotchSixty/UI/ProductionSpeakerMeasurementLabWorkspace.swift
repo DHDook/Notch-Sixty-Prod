@@ -612,234 +612,238 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
 
     private var sessionCard: some View {
         GroupBox("Lab Session") {
-            VStack(alignment: .leading, spacing: 12) {
-                guard let session = lab.session else {
-                    Text(
-                        "No active Lab session. Compose one above or resume a recent session."
-                    )
-                    .foregroundStyle(.secondary)
-                    .padding(6)
-                    return
-                }
+            if let session = lab.session {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 22) {
+                        status(
+                            "Session",
+                            String(session.id.uuidString.prefix(8))
+                        )
+                        if let progress = lab.progress {
+                            status(
+                                "Captures",
+                                "\(progress.completedCaptureCount) / \(progress.requiredCaptureCount)"
+                            )
+                            status(
+                                "Protocols",
+                                "\(progress.completedProtocolCount) / \(progress.requiredProtocolCount)"
+                            )
+                        }
+                        status(
+                            "Reference",
+                            session.sharedClockReferenceConfiguration == nil
+                                ? "Off" : "Configured"
+                        )
+                        status("State", lab.state.rawValue.capitalized)
+                    }
 
-                HStack(spacing: 22) {
-                    status(
-                        "Session",
-                        String(session.id.uuidString.prefix(8))
-                    )
                     if let progress = lab.progress {
-                        status(
-                            "Captures",
-                            "\(progress.completedCaptureCount) / \(progress.requiredCaptureCount)"
-                        )
-                        status(
-                            "Protocols",
-                            "\(progress.completedProtocolCount) / \(progress.requiredProtocolCount)"
-                        )
+                        ProgressView(value: progress.fractionComplete)
                     }
-                    status(
-                        "Reference",
-                        session.sharedClockReferenceConfiguration == nil
-                            ? "Off" : "Configured"
-                    )
-                    status("State", lab.state.rawValue.capitalized)
-                }
 
-                if let progress = lab.progress {
-                    ProgressView(value: progress.fractionComplete)
-                }
-
-                if let step = lab.activeOrNextStep {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(
-                            lab.state == .measuring
-                                ? "Measuring \(step.labProtocol.name)"
-                                : "Next: \(step.labProtocol.name)"
-                        )
-                        .font(.callout.bold())
-                        Text(step.instruction)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                } else if lab.progress?.complete == true {
-                    Label(
-                        "All queued Lab protocols are complete.",
-                        systemImage: "checkmark.circle.fill"
-                    )
-                    .foregroundStyle(.green)
-                }
-
-                if lab.state == .measuring {
-                    ProgressView(value: lab.activeMeasurementProgress) {
-                        Text("Current Lab sweep")
-                    }
-                }
-
-                HStack(spacing: 10) {
-                    Button("Measure Next Repeat") {
-                        actionError = nil
-                        do {
-                            try lab.beginNextMeasurement()
-                        } catch {
-                            actionError = error.localizedDescription
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!lab.canBeginMeasurement)
-
-                    if lab.state == .measuring
-                        || lab.state == .analyzing {
-                        Button("Cancel") {
-                            lab.cancelMeasurement()
-                        }
-                    }
-                }
-
-                Divider()
-
-                ForEach(session.protocols) { item in
-                    let captured = session.captures.filter {
-                        $0.protocolID == item.id
-                    }.count
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(item.name)
-                                .font(.callout.bold())
-                            Text(protocolSummary(item))
+                    if let step = lab.activeOrNextStep {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(
+                                lab.state == .measuring
+                                    ? "Measuring \(step.labProtocol.name)"
+                                    : "Next: \(step.labProtocol.name)"
+                            )
+                            .font(.callout.bold())
+                            Text(step.instruction)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
-                        Spacer()
-                        Text(
-                            "\(captured) / \(item.request.repeatCount)"
+                    } else if lab.progress?.complete == true {
+                        Label(
+                            "All queued Lab protocols are complete.",
+                            systemImage: "checkmark.circle.fill"
                         )
-                        .font(.caption.monospacedDigit())
-                        if captured > 0
-                            && lab.state != .measuring
-                            && lab.state != .analyzing {
-                            Button("Retry Latest") {
-                                actionError = nil
-                                do {
-                                    try lab.retryLatestCapture(
-                                        protocolID: item.id
-                                    )
-                                } catch {
-                                    actionError =
-                                        error.localizedDescription
-                                }
-                            }
-                            .font(.caption)
+                        .foregroundStyle(.green)
+                    }
+
+                    if lab.state == .measuring {
+                        ProgressView(value: lab.activeMeasurementProgress) {
+                            Text("Current Lab sweep")
                         }
                     }
-                    .padding(.vertical, 2)
-                }
 
-                if let blocked = lab.activeCapabilityPlan?.blockReasons.first {
-                    Label(
-                        blocked.message,
-                        systemImage: "lock.shield"
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.orange)
+                    HStack(spacing: 10) {
+                        Button("Measure Next Repeat") {
+                            actionError = nil
+                            do {
+                                try lab.beginNextMeasurement()
+                            } catch {
+                                actionError = error.localizedDescription
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!lab.canBeginMeasurement)
+
+                        if lab.state == .measuring
+                            || lab.state == .analyzing {
+                            Button("Cancel") {
+                                lab.cancelMeasurement()
+                            }
+                        }
+                    }
+
+                    Divider()
+
+                    ForEach(session.protocols) { item in
+                        let captured = session.captures.filter {
+                            $0.protocolID == item.id
+                        }.count
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(item.name)
+                                    .font(.callout.bold())
+                                Text(protocolSummary(item))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text(
+                                "\(captured) / \(item.request.repeatCount)"
+                            )
+                            .font(.caption.monospacedDigit())
+                            if captured > 0
+                                && lab.state != .measuring
+                                && lab.state != .analyzing {
+                                Button("Retry Latest") {
+                                    actionError = nil
+                                    do {
+                                        try lab.retryLatestCapture(
+                                            protocolID: item.id
+                                        )
+                                    } catch {
+                                        actionError =
+                                            error.localizedDescription
+                                    }
+                                }
+                                .font(.caption)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+
+                    if let blocked =
+                            lab.activeCapabilityPlan?.blockReasons.first {
+                        Label(
+                            blocked.message,
+                            systemImage: "lock.shield"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                    }
                 }
+                .padding(6)
+            } else {
+                Text(
+                    "No active Lab session. Compose one above or resume a recent session."
+                )
+                .foregroundStyle(.secondary)
+                .padding(6)
             }
-            .padding(6)
         }
     }
 
     private var reportCard: some View {
         GroupBox("Analysis & Export") {
-            VStack(alignment: .leading, spacing: 12) {
-                guard let report = currentReport else {
-                    Text(
-                        "Analysis summaries appear after a valid Lab session exists."
-                    )
-                    .foregroundStyle(.secondary)
-                    .padding(6)
-                    return
-                }
+            if let report = currentReport {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 22) {
+                        status(
+                            "Protocols",
+                            "\(report.protocolSummaries.count)"
+                        )
+                        status(
+                            "Captures",
+                            "\(report.captureSummaries.count)"
+                        )
+                        status(
+                            "Analyses",
+                            "\(report.analysisSummaries.filter(\.available).count) / \(report.analysisSummaries.count)"
+                        )
+                        status(
+                            "Deploy",
+                            report.canDeploy ? "Allowed" : "Never"
+                        )
+                    }
 
-                HStack(spacing: 22) {
-                    status(
-                        "Protocols",
-                        "\(report.protocolSummaries.count)"
-                    )
-                    status(
-                        "Captures",
-                        "\(report.captureSummaries.count)"
-                    )
-                    status(
-                        "Analyses",
-                        "\(report.analysisSummaries.filter(\.available).count) / \(report.analysisSummaries.count)"
-                    )
-                    status("Deploy", report.canDeploy ? "Allowed" : "Never")
-                }
-
-                ForEach(
-                    Array(report.analysisSummaries.enumerated()),
-                    id: \.offset
-                ) { _, analysis in
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Label(
-                                analysis.title,
-                                systemImage: analysis.available
-                                    ? "checkmark.circle.fill"
-                                    : "exclamationmark.circle"
-                            )
-                            .font(.callout.bold())
-                            .foregroundStyle(
-                                analysis.available ? .green : .secondary
-                            )
-                            Spacer()
-                            Text(
-                                analysis.available
-                                    ? "AVAILABLE" : "UNAVAILABLE"
-                            )
-                            .font(.caption.bold())
-                            .foregroundStyle(.secondary)
-                        }
-                        if !analysis.metrics.isEmpty {
-                            HStack(spacing: 18) {
-                                ForEach(
-                                    Array(
-                                        analysis.metrics.enumerated()
-                                    ),
-                                    id: \.offset
-                                ) { _, metric in
-                                    status(metric.name, metric.value)
+                    ForEach(
+                        Array(report.analysisSummaries.enumerated()),
+                        id: \.offset
+                    ) { _, analysis in
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Label(
+                                    analysis.title,
+                                    systemImage: analysis.available
+                                        ? "checkmark.circle.fill"
+                                        : "exclamationmark.circle"
+                                )
+                                .font(.callout.bold())
+                                .foregroundStyle(
+                                    analysis.available
+                                        ? .green : .secondary
+                                )
+                                Spacer()
+                                Text(
+                                    analysis.available
+                                        ? "AVAILABLE" : "UNAVAILABLE"
+                                )
+                                .font(.caption.bold())
+                                .foregroundStyle(.secondary)
+                            }
+                            if !analysis.metrics.isEmpty {
+                                HStack(spacing: 18) {
+                                    ForEach(
+                                        Array(
+                                            analysis.metrics.enumerated()
+                                        ),
+                                        id: \.offset
+                                    ) { _, metric in
+                                        status(metric.name, metric.value)
+                                    }
                                 }
                             }
+                            if let warning =
+                                    analysis.warnings.first {
+                                Text(warning)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
-                        if let warning = analysis.warnings.first {
-                            Text(warning)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                        .padding(10)
+                        .background(
+                            .quaternary.opacity(0.45),
+                            in: RoundedRectangle(cornerRadius: 10)
+                        )
+                    }
+
+                    HStack(spacing: 10) {
+                        Button("Export JSON") {
+                            prepareExport(json: true)
+                        }
+                        Button("Export CSV") {
+                            prepareExport(json: false)
                         }
                     }
-                    .padding(10)
-                    .background(
-                        .quaternary.opacity(0.45),
-                        in: RoundedRectangle(cornerRadius: 10)
+
+                    Text(
+                        "Compact exports intentionally exclude raw impulse arrays and full transfer grids. The persisted Lab session remains the detailed analysis archive."
                     )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
-
-                HStack(spacing: 10) {
-                    Button("Export JSON") {
-                        prepareExport(json: true)
-                    }
-                    Button("Export CSV") {
-                        prepareExport(json: false)
-                    }
-                }
-
+                .padding(6)
+            } else {
                 Text(
-                    "Compact exports intentionally exclude raw impulse arrays and full transfer grids. The persisted Lab session remains the detailed analysis archive."
+                    "Analysis summaries appear after a valid Lab session exists."
                 )
-                .font(.caption)
                 .foregroundStyle(.secondary)
+                .padding(6)
             }
-            .padding(6)
         }
     }
 
