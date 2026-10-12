@@ -122,9 +122,6 @@ for token in (
     "currentStateDrift",
     "rollbackStateDrift",
     "requiresMeasuredVerification",
-    "finalizeVerified",
-    "CoherentMultiSubwooferAlignmentVerificationFinalizationReceipt",
-    "rollbackSourceStateMatches",
 ):
     assert token in apply_source, f"missing PR108 Apply transaction contract: {token}"
 
@@ -251,6 +248,9 @@ for token in (
     "currentStateDrift",
     "rollbackStateDrift",
     "requiresMeasuredVerification",
+    "finalizeVerified",
+    "CoherentMultiSubwooferAlignmentVerificationFinalizationReceipt",
+    "rollbackSourceStateMatches",
 ):
     assert token in multi_apply, f"missing PR108 coordinated multi-Sub Apply contract: {token}"
 
