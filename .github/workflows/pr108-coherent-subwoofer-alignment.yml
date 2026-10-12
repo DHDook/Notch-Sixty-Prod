@@ -53,6 +53,7 @@ jobs:
           -only-testing:NotchSixtyTests/CoherentMultiSubwooferAlignmentCommissioningTests
           -only-testing:NotchSixtyTests/CoherentMultiSubwooferAlignmentApplyTransactionTests
           -only-testing:NotchSixtyTests/CoherentMultiSubwooferAlignmentPostApplyVerificationTests
+          -only-testing:NotchSixtyTests/CoherentSubwooferAlignmentGuidedWorkflowTests
           test
       - name: Run full XCTest regression
         run: >-
