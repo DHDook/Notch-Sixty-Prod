@@ -29,6 +29,7 @@ struct ProductionRoomGeometrySection: View {
     @State private var showsAdvancedPredictions = false
     @State private var confirmsUnchangedLabGeometry = false
     @State private var confirmsFixedSubABSeatsAndChain = false
+    @State private var confirmsActualPlacementMove = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -419,6 +420,97 @@ struct ProductionRoomGeometrySection: View {
                     }
                 }
 
+                Divider()
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Placement Verification & History")
+                        .font(.caption.bold())
+                    Text(
+                        "Record one physically performed experiment. Only repeat-qualified, matching before/after Sub sweeps can receive a measured lower/higher LF-variation outcome. Every other move remains inconclusive."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    Toggle(
+                        "I physically performed the inspected move and verified its position",
+                        isOn: $confirmsActualPlacementMove
+                    )
+                    .font(.caption)
+                    Button("Record Placement Review") {
+                        advisor.recordPlacementReview(
+                            physicalMoveConfirmed: confirmsActualPlacementMove,
+                            fixedMicrophoneSeatsAndSignalChainConfirmed:
+                                confirmsFixedSubABSeatsAndChain
+                        )
+                        confirmsActualPlacementMove = false
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(
+                        !confirmsActualPlacementMove
+                        || advisor.selectedAdvancedExperiment == nil
+                        || advisor.geometryHasUnsavedChanges
+                        || advisor.advancedPlacementHasUnsavedChanges
+                        || advisor.savedAdvancedPlacement == nil
+                    )
+                    Text(
+                        "Reviews are immutable evidence snapshots. Recording does not accept, save or apply a new speaker/sub position."
+                    )
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    if let message = advisor.placementReviewMessage {
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if !advisor.placementReviewHistory.isEmpty {
+                        Text(
+                            "Saved project reviews (\(advisor.placementReviewHistory.count))"
+                        )
+                        .font(.caption.bold())
+                        ForEach(Array(advisor.placementReviewHistory.suffix(20).reversed())) { record in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(record.outcome.displayName)
+                                    .font(.caption.bold())
+                                Text(record.experimentDescription)
+                                    .font(.caption)
+                                Text(
+                                    record.reviewedAt.formatted(date: .abbreviated, time: .shortened)
+                                )
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                if let delta = record.measuredSpreadReductionDB {
+                                    Text(
+                                        String(
+                                            format: "Measured change in inter-seat LF variation: %+.2f dB · %d seats",
+                                            delta,
+                                            record.measuredSeatCount ?? 0
+                                        )
+                                    )
+                                    .font(.caption.monospacedDigit())
+                                }
+                                if let before = record.baselineMeasurementSetID {
+                                    Text("Baseline capture: \(before.uuidString)")
+                                        .font(.caption2.monospaced())
+                                }
+                                if let after = record.candidateMeasurementSetID {
+                                    Text("Candidate capture: \(after.uuidString)")
+                                        .font(.caption2.monospaced())
+                                }
+                                Text(record.evidenceNote)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                Text("NOT hardware accepted · NOT deployed")
+                                    .font(.caption2.bold())
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(9)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(
+                                .secondary.opacity(0.04),
+                                in: RoundedRectangle(cornerRadius: 8)
+                            )
+                        }
+                    }
+                }
+
                 if let proposal = advisor.selectedAdvancedExperiment {
                     VStack(alignment: .leading, spacing: 5) {
                         Text("Hypothetical trial: \(proposal.description)")
@@ -460,17 +552,21 @@ struct ProductionRoomGeometrySection: View {
         .onChange(of: advisor.selectedProjectID) { _, _ in
             confirmsUnchangedLabGeometry = false
             confirmsFixedSubABSeatsAndChain = false
+            confirmsActualPlacementMove = false
         }
         .onChange(of: advisor.geometryDraft) { _, _ in
             confirmsUnchangedLabGeometry = false
             confirmsFixedSubABSeatsAndChain = false
+            confirmsActualPlacementMove = false
         }
         .onChange(of: advisor.advancedPlacementDraft) { _, _ in
             confirmsUnchangedLabGeometry = false
             confirmsFixedSubABSeatsAndChain = false
+            confirmsActualPlacementMove = false
         }
         .onChange(of: advisor.selectedAdvancedExperiment?.id) { _, _ in
             confirmsFixedSubABSeatsAndChain = false
+            confirmsActualPlacementMove = false
         }
         .onChange(of: advisor.physicalSubBaselineID) { _, _ in
             confirmsFixedSubABSeatsAndChain = false
