@@ -283,6 +283,53 @@ final class SpeakerOptimizerFIRDeploymentTests: XCTestCase {
         XCTAssertEqual(decoded, profile)
     }
 
+    func testLiveGraphAutomaticallyReservesPersistedFIRHeadroom() throws {
+        let profile = makeStereoProfile()
+        let deployment = makeDeployment(
+            profile: profile,
+            sources: [
+                makeSource(
+                    role: .frontLeft,
+                    centerTap: 1.0
+                )
+            ],
+            requiredHeadroomDB: 1.0
+        )
+        let routePlan = LiveNChannelOutputRoutePlan(
+            programLayout: .stereo,
+            orderedDeviceUIDs: ["fir-output"],
+            referenceDeviceUID: "fir-output",
+            physicalChannelCount: 2,
+            programPhysicalChannels: [0, 1],
+            subwooferPhysicalChannels: [],
+            subwooferCount: 0,
+            bassManagementEnabled: false,
+            speakerCalibrations: [:],
+            subwooferCalibrations: [],
+            speakerOptimizerFIR: deployment
+        )
+        let graph = try LiveNChannelRenderGraphCompiler.makeGraph(
+            routePlan: routePlan,
+            sampleRate: 48_000,
+            gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration:
+                BassManagementConfiguration(enabled: false)
+        )
+        let expected = DSPGainConfiguration.linearGain(
+            forDB: -1.0
+        )
+        XCTAssertEqual(
+            graph.laneGraph.lanes.0.gainLinear,
+            expected,
+            accuracy: 1.0e-6
+        )
+        XCTAssertEqual(
+            graph.laneGraph.lanes.1.gainLinear,
+            expected,
+            accuracy: 1.0e-6
+        )
+    }
+
     private func makeSource(
         role: OutputProgramRole,
         centerTap: Float
