@@ -301,6 +301,39 @@ enum SpeakerOptimizerFIRDeploymentError:
 /// Speaker Calibration. The required headroom reserve is part of the deployment
 /// contract so a persisted FIR cannot depend on a Content Preset happening to
 /// provide enough attenuation.
+struct SpeakerOptimizerFIRVerificationRecord:
+    Codable, Equatable, Sendable {
+    static let currentSchemaVersion = 1
+
+    var schemaVersion: Int = currentSchemaVersion
+    var applyReceiptID: UUID
+    var verificationMeasurementSetID: UUID
+    var verifiedAt: Date
+    var evidenceConfidence: Double
+    var sourceCount: Int
+    var worstFilterTrackingRMSDB: Double
+    var minimumPersistentImprovementDB: Double
+    var worstPersistentSeatRegressionDB: Double
+    var maximumProtectedRegressionDB: Double
+
+    func validate(
+        deployment: SpeakerOptimizerFIRDeploymentConfiguration
+    ) -> Bool {
+        schemaVersion == Self.currentSchemaVersion
+            && verificationMeasurementSetID
+                != deployment.baselineMeasurementSetID
+            && evidenceConfidence.isFinite
+            && (0...1).contains(evidenceConfidence)
+            && sourceCount == deployment.sources.count
+            && sourceCount > 0
+            && worstFilterTrackingRMSDB.isFinite
+            && worstFilterTrackingRMSDB >= 0
+            && minimumPersistentImprovementDB.isFinite
+            && worstPersistentSeatRegressionDB.isFinite
+            && maximumProtectedRegressionDB.isFinite
+    }
+}
+
 struct SpeakerOptimizerFIRDeploymentConfiguration:
     Codable, Equatable, Sendable {
     static let currentSchemaVersion = 1
@@ -321,6 +354,9 @@ struct SpeakerOptimizerFIRDeploymentConfiguration:
     /// Positive dB here means that amount is subtracted from live program gain.
     var requiredHeadroomDB: Double
     var sources: [SpeakerOptimizerFIRSourceDeployment]
+    /// Presence means a fresh post-Apply microphone verification campaign
+    /// accepted this exact deployed FIR.
+    var verification: SpeakerOptimizerFIRVerificationRecord? = nil
 
     var correctedRoles: [OutputProgramRole] {
         sources.map(\.role)
@@ -346,6 +382,12 @@ struct SpeakerOptimizerFIRDeploymentConfiguration:
                 .contains(requiredHeadroomDB),
               !sources.isEmpty,
               Set(sources.map(\.role)).count == sources.count else {
+            throw SpeakerOptimizerFIRDeploymentError
+                .invalidConfiguration
+        }
+
+        if let verification,
+           !verification.validate(deployment: self) {
             throw SpeakerOptimizerFIRDeploymentError
                 .invalidConfiguration
         }
