@@ -276,7 +276,7 @@ struct CoherentSubwooferAlignmentCommissioningPlanner:
     }
 }
 
-private struct PR108StableDigest64 {
+struct PR108StableDigest64 {
     private var value: UInt64 =
         14_695_981_039_346_656_037
     private let prime: UInt64 = 1_099_511_628_211
