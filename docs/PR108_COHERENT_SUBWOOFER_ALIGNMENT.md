@@ -1,6 +1,6 @@
 # PR108 — Coherent Physical Subwoofer Timing & Polarity Optimization
 
-Status: **IN PROGRESS — SLICES 1–9 THROUGH COORDINATED FRESH VERIFICATION**
+Status: **IN PROGRESS — SLICES 1–10 THROUGH VERIFIED COORDINATED MULTI-SUB PROVENANCE**
 
 Base: PR107 Speaker Optimizer FIR Deployment & Latency Coordination.
 
@@ -347,12 +347,31 @@ Acceptance is atomic: one rejected Sub/Main pair rejects the full coordinated
 deployment and sets shouldRollback true. Modeled Slice 6 prediction cannot
 satisfy this measured gate.
 
+## Slice 10 — Verified coordinated provenance + finalization
+
+CoherentMultiSubwooferAlignmentDeploymentRecord now carries an optional
+verification record. Provisional/verified state therefore survives persistence
+and relaunch without creating another DSP stage.
+
+Accepted Slice 9 evidence can be finalized only when:
+
+- the engine is idle;
+- the report belongs to the exact coordinated Apply receipt;
+- the current Playback System is still the exact provisional Apply state; and
+- the persisted multi-Sub provenance still matches the receipt fingerprints.
+
+The verification record persists the fresh Lab session ID, evidence confidence,
+source count, worst phase/magnitude tracking, and measured before/after aggregate
+coherence.
+
+The verified write is exact-state checked. Rollback accepts either the exact
+provisional state or a state that differs only by this verified marker; unrelated
+post-Apply edits still block rollback.
+
 ## Planned follow-on slices
 
-1. Persist the accepted coordinated verification record and support verified
-   rollback/finalization across relaunch.
-2. Guided production workflow/UI — capture, review, Apply, verify, rollback.
-3. Physical commissioning handoff — real DAC/ADC/subwoofer timing, crossover
+1. Guided production workflow/UI — capture, review, Apply, verify, rollback.
+2. Physical commissioning handoff — real DAC/ADC/subwoofer timing, crossover
    summation, restart/rollback and subjective bass integration.
 
 ## Slice 1 validation
@@ -426,3 +445,9 @@ CoherentMultiSubwooferAlignmentPostApplyVerificationTests verifies fresh
 all-Sub acceptance, whole-system rejection when one Sub fails to follow its
 applied phase signature, complete pair-set requirements, post-Apply timestamps,
 baseline evidence fingerprint binding, and current-state drift rejection.
+
+
+## Slice 10 validation
+
+The coordinated fresh-verification acceptance test now also finalizes the
+persistent verified record and proves exact rollback from verified state.
