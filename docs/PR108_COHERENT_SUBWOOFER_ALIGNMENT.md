@@ -1,6 +1,6 @@
 # PR108 — Coherent Physical Subwoofer Timing & Polarity Optimization
 
-Status: **IN PROGRESS — SLICES 1–5 THROUGH VERIFIED PERSISTENT PROVENANCE**
+Status: **IN PROGRESS — SLICES 1–6 THROUGH COORDINATED MULTI-SUB PROPOSAL**
 
 Base: PR107 Speaker Optimizer FIR Deployment & Latency Coordination.
 
@@ -87,11 +87,14 @@ against only one channel and accidentally degrading another.
 
 ### Multi-Sub boundary
 
-Slices 1–4 are deliberately single-Sub. If more than one physical Sub is
-assigned, the single-Sub planner fails closed with multiSubCoordinationRequired.
-Independent sequential application could otherwise accumulate the shared
-speaker-delay compensation and disturb an already aligned Sub. A dedicated
-coordinated multi-Sub slice must solve all Sub relative delays together.
+The single-Sub planner remains deliberately fail-closed whenever more than one
+physical Sub is assigned. Independent sequential application could otherwise
+accumulate common speaker delay and disturb an already aligned Sub.
+
+Slice 6 adds a separate coordinated multi-Sub **proposal** path. It does not
+relax the single-Sub commissioning/Apply/verification path, so multi-Sub
+deployment remains unavailable until its own coordinated transaction and fresh
+verification slices are complete.
 
 ## Slice 1 safety state
 
@@ -230,10 +233,49 @@ state is otherwise the exact Apply state.
 The persisted field is optional, so older Output Device Profiles with no PR108
 key continue to decode with no alignment provenance.
 
+## Slice 6 — Coordinated multi-Sub proposal
+
+Implemented in CoherentMultiSubwooferAlignment.swift.
+
+The planner requires one coherent evidence group for every assigned physical
+Sub, and every group must share the same Playback System, physical route,
+calibrated microphone, sample rate, crossover, and Main-role set.
+
+Each Sub first receives its own bounded coherent optimum s_i from the guarded
+single-Sub search, where positive means "delay this Sub" and negative means
+"this Sub would need advancing."
+
+Rather than independently adding speaker delay once per Sub, the coordinated
+planner solves all Subs together:
+
+```
+D_i - C = s_i
+C   = max(0, -min(s_i))
+D_i = C + s_i
+```
+
+C is one shared nonnegative delay added to every non-LFE speaker lane. D_i is
+the nonnegative added delay for physical Sub i. This is the minimum-latency
+materialization that preserves every independently measured relative optimum.
+
+The planner also:
+
+- keeps polarity decisions per physical Sub;
+- validates the shared speaker-delay and every per-Sub delay against current
+  calibration and realtime frame limits;
+- requires exactly one evidence group per assigned Sub;
+- rejects duplicate Sub evidence deterministically;
+- requires the same Main-role set for every Sub; and
+- evaluates aggregate predicted crossover coherence across the coordinated set.
+
+Slice 6 remains proposal-only: previewOnly is true and canDeploy is false.
+The existing single-Sub commissioning/Apply/fresh-verification types do not
+accept this multi-Sub candidate.
+
 ## Planned follow-on slices
 
-1. Multi-sub coordination — solve all physical Sub relative delays together
-   without accumulating incompatible common speaker delay.
+1. Coordinated multi-Sub commissioning, transactional Apply/rollback, persistent
+   provenance, and fresh coherent verification.
 2. Guided production workflow/UI — capture, review, Apply, verify, rollback.
 3. Physical commissioning handoff — real DAC/ADC/subwoofer timing, crossover
    summation, restart/rollback and subjective bass integration.
@@ -277,3 +319,10 @@ The retained Apply/verification tests now also cover provisional record identity
 verified finalization, rollback from verified state, stale-provenance rejection
 after manual calibration drift, and backward-compatible decoding of profiles
 that predate the optional PR108 field.
+
+
+## Slice 6 validation
+
+CoherentMultiSubwooferAlignmentTests verifies the minimum-latency shared-delay
+solution, independent per-Sub polarity, duplicate/incomplete evidence rejection,
+Main-role-set identity, and realtime delay-capacity failure.
