@@ -1043,6 +1043,9 @@ final class AdvancedPlacementDirectivityTests: XCTestCase {
                 && $0.indicatedSpectralChangeDB?.isFinite == true
         })
         XCTAssertFalse(ranked[0].note.contains("SPL"))
+        XCTAssertEqual(ranked.first?.experimentID, "left-toe-clockwise")
+        XCTAssertGreaterThan(ranked[0].indicatedSpectralChangeDB ?? -1, 0)
+        XCTAssertLessThan(ranked[1].indicatedSpectralChangeDB ?? 1, 0)
     }
 
     func testSingleAngleDoesNotExtrapolateMissingNegativeSide() throws {
