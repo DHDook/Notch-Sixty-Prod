@@ -122,6 +122,9 @@ for token in (
     "currentStateDrift",
     "rollbackStateDrift",
     "requiresMeasuredVerification",
+    "finalizeVerified",
+    "CoherentMultiSubwooferAlignmentVerificationFinalizationReceipt",
+    "rollbackSourceStateMatches",
 ):
     assert token in apply_source, f"missing PR108 Apply transaction contract: {token}"
 
@@ -235,6 +238,9 @@ for token in (
     "expectedSpeakerDelays",
     "expectedSubwooferDelayMilliseconds",
     "provisional",
+    "CoherentMultiSubwooferAlignmentVerificationRecord",
+    "verification",
+    "verified",
 ):
     assert token in multi_deployment, f"missing PR108 coordinated multi-Sub provenance contract: {token}"
 
@@ -278,6 +284,8 @@ for token in (
     "testOneUncorrectedSubRejectsWholeCoordinatedVerification",
     "testPairSetAndFreshnessMustCoverEverySub",
     "testBaselineAndCurrentStateDriftFailClosed",
+    "finalizeVerified",
+    "deployment.verified",
 ):
     assert token in multi_verify_tests, f"missing PR108 coordinated fresh verification test: {token}"
 
@@ -348,6 +356,7 @@ for token in (
     "Slice 7 — Coordinated multi-Sub commissioning identity",
     "Slice 8 — Atomic coordinated multi-Sub Apply + provenance",
     "Slice 9 — Coordinated fresh coherent verification",
+    "Slice 10 — Verified coordinated provenance + finalization",
     "does **not** subtract relativeArrivalMilliseconds again",
     "previewOnly == true",
     "canDeploy == false",
@@ -367,4 +376,4 @@ assert "CoherentMultiSubwooferAlignmentApplyTransactionTests" in workflow
 assert "CoherentMultiSubwooferAlignmentPostApplyVerificationTests" in workflow
 assert "Run full XCTest regression" in workflow
 
-print("PR108 Slice 1-9 single-Sub verified path + coordinated multi-Sub measured verification boundary passed")
+print("PR108 Slice 1-10 single-Sub + coordinated multi-Sub verified persistence boundary passed")
