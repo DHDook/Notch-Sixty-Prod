@@ -241,6 +241,342 @@ final class SpeakerOptimizerGuidedPEQController: ObservableObject {
     }
 }
 
+enum SpeakerOptimizerGuidedFIRState:
+    String, Equatable, Sendable {
+    case idle
+    case reviewReady
+    case appliedPendingVerification
+    case measuredAccepted
+    case measuredRejected
+    case rolledBack
+    case failed
+}
+
+enum SpeakerOptimizerGuidedFIRError:
+    Error, Equatable, LocalizedError {
+    case reviewRequired
+    case applyRequired
+    case activeDeploymentRequiresResolution
+    case verificationReceiptMismatch
+    case avSyncApprovalRequired
+
+    var errorDescription: String? {
+        switch self {
+        case .reviewRequired:
+            return "Generate and review a Speaker Optimizer FIR proposal first."
+        case .applyRequired:
+            return "Apply the reviewed Speaker Optimizer FIR before starting measured verification."
+        case .activeDeploymentRequiresResolution:
+            return "The current Speaker Optimizer FIR deployment must be verified or rolled back before generating another proposal."
+        case .verificationReceiptMismatch:
+            return "The measured verification report does not belong to the current Speaker Optimizer FIR Apply receipt."
+        case .avSyncApprovalRequired:
+            return "Choose an A/V synchronization context that can support the reported FIR audio-path latency before Apply."
+        }
+    }
+}
+
+typealias SpeakerOptimizerGuidedFIRDesignOperation = (
+    SpeakerOptimizerCharacterizationMeasurementSet,
+    SpeakerOptimizerMeasurementSet
+) throws -> SpeakerOptimizerClassificationAwareFIRPlan
+
+/// UI-facing PR107 FIR commissioning state machine.
+///
+/// Review always carries exact headroom/latency disclosure. Synchronized-video
+/// Apply is blocked unless the caller declares an external video-delay path with
+/// enough capacity; Notch Sixty itself does not claim to delay system video.
+@MainActor
+final class SpeakerOptimizerGuidedFIRController: ObservableObject {
+    private let profileStore: any SpeakerOptimizerFIRProfileMutating
+    private let designOperation: SpeakerOptimizerGuidedFIRDesignOperation
+    private let planner = SpeakerOptimizerCommissioningPlanner()
+    private let transaction = SpeakerOptimizerFIRApplyTransaction()
+    private let latencyPlanner = SpeakerOptimizerFIRLatencyPlanner()
+    private let avPolicy = SpeakerOptimizerFIRAVSyncPolicy()
+
+    @Published private(set) var state:
+        SpeakerOptimizerGuidedFIRState = .idle
+    @Published private(set) var plan:
+        SpeakerOptimizerClassificationAwareFIRPlan?
+    @Published private(set) var proposal:
+        SpeakerOptimizerCommissioningProposal?
+    @Published private(set) var approval:
+        SpeakerOptimizerApplyApproval?
+    @Published private(set) var applyReceipt:
+        SpeakerOptimizerFIRApplyReceipt?
+    @Published private(set) var verificationReport:
+        SpeakerOptimizerPostApplyVerificationReport?
+    @Published private(set) var rollbackReceipt:
+        SpeakerOptimizerFIRRollbackReceipt?
+    @Published private(set) var verificationFinalizationReceipt:
+        SpeakerOptimizerFIRVerificationFinalizationReceipt?
+    @Published private(set) var latencyPlan:
+        SpeakerOptimizerFIRLatencyPlan?
+    @Published private(set) var avSyncDecision:
+        SpeakerOptimizerFIRAVSyncDecision?
+    @Published private(set) var lastErrorDescription: String?
+
+    init(
+        profileStore: any SpeakerOptimizerFIRProfileMutating,
+        designOperation:
+            @escaping SpeakerOptimizerGuidedFIRDesignOperation = {
+                characterization, baseline in
+                try SpeakerOptimizerClassificationAwareCandidateDesigner()
+                    .designFIR(
+                        characterization: characterization,
+                        listeningBaseline: baseline
+                    )
+            }
+    ) {
+        self.profileStore = profileStore
+        self.designOperation = designOperation
+    }
+
+    var candidateTapCount: Int {
+        plan?.candidate.requestedTapCount ?? 0
+    }
+
+    var requiredHeadroomDB: Double {
+        plan?.candidate.sources
+            .filter { $0.acceptedForPreview }
+            .map(\.recommendedHeadroomDB)
+            .max() ?? 0
+    }
+
+    var addedFIRLatencyMilliseconds: Double {
+        avSyncDecision?.incrementalFIRLatencyMilliseconds ?? 0
+    }
+
+    var programPathLatencyMilliseconds: Double {
+        avSyncDecision?.requiredVideoDelayMilliseconds ?? 0
+    }
+
+    var canApproveAndApply: Bool {
+        state == .reviewReady
+            && proposal?.canApply == true
+            && avSyncDecision?.canUseFIRForContext == true
+            && profileStore.speakerOptimizerLifecycleState == .idle
+    }
+
+    var canRollback: Bool {
+        applyReceipt != nil
+            && state != .rolledBack
+            && profileStore.speakerOptimizerLifecycleState == .idle
+    }
+
+    func prepareReview(
+        baseline: SpeakerOptimizerMeasurementSet,
+        characterization:
+            SpeakerOptimizerCharacterizationMeasurementSet,
+        avSyncContext: SpeakerOptimizerFIRAVSyncContext
+    ) throws {
+        guard applyReceipt == nil || state == .rolledBack else {
+            throw SpeakerOptimizerGuidedFIRError
+                .activeDeploymentRequiresResolution
+        }
+        guard let profile =
+                profileStore.speakerOptimizerSelectedSystemProfile else {
+            throw SpeakerOptimizerFIRApplyTransactionError
+                .selectedProfileRequired
+        }
+
+        do {
+            let freshPlan = try designOperation(
+                characterization,
+                baseline
+            )
+            let freshProposal = try planner.proposal(
+                profile: profile,
+                plan: freshPlan
+            )
+            let latency: SpeakerOptimizerFIRLatencyPlan?
+            let av: SpeakerOptimizerFIRAVSyncDecision?
+            if freshProposal.canApply,
+               let output =
+                    profile.state.outputDeviceProfile {
+                let roles = freshPlan.candidate.sources.compactMap {
+                    candidate -> OutputProgramRole? in
+                    guard candidate.acceptedForPreview,
+                          !candidate.taps.isEmpty,
+                          case .speaker(let role) =
+                            candidate.source else {
+                        return nil
+                    }
+                    return role
+                }
+                let planned = try latencyPlanner.plan(
+                    profile: output,
+                    bassManagementEnabled:
+                        profile.state.bassManagement.enabled,
+                    sampleRate:
+                        freshPlan.candidate.sampleRate,
+                    tapCount:
+                        freshPlan.candidate.requestedTapCount,
+                    declaredGroupDelayFrames:
+                        UInt32(
+                            freshPlan.candidate
+                                .declaredGroupDelayFrames
+                        ),
+                    correctedRoles: roles
+                )
+                latency = planned
+                av = try avPolicy.assess(
+                    plan: planned,
+                    context: avSyncContext
+                )
+            } else {
+                latency = nil
+                av = nil
+            }
+
+            plan = freshPlan
+            proposal = freshProposal
+            approval = nil
+            applyReceipt = nil
+            verificationReport = nil
+            rollbackReceipt = nil
+            verificationFinalizationReceipt = nil
+            latencyPlan = latency
+            avSyncDecision = av
+            state = .reviewReady
+            lastErrorDescription = nil
+        } catch {
+            state = .failed
+            lastErrorDescription = error.localizedDescription
+            throw error
+        }
+    }
+
+    func updateAVSyncContext(
+        _ context: SpeakerOptimizerFIRAVSyncContext
+    ) throws {
+        guard let latencyPlan else {
+            throw SpeakerOptimizerGuidedFIRError.reviewRequired
+        }
+        do {
+            avSyncDecision = try avPolicy.assess(
+                plan: latencyPlan,
+                context: context
+            )
+            lastErrorDescription = nil
+        } catch {
+            lastErrorDescription = error.localizedDescription
+            throw error
+        }
+    }
+
+    func approveAndApply(
+        userInitiated: Bool,
+        approvedAt: Date = Date(),
+        appliedAt: Date = Date()
+    ) throws {
+        guard let plan, let proposal else {
+            throw SpeakerOptimizerGuidedFIRError.reviewRequired
+        }
+        guard avSyncDecision?.canUseFIRForContext == true else {
+            throw SpeakerOptimizerGuidedFIRError
+                .avSyncApprovalRequired
+        }
+        do {
+            let freshApproval = try planner.makeExplicitApproval(
+                proposal: proposal,
+                approvedAt: approvedAt,
+                userInitiated: userInitiated
+            )
+            let receipt = try transaction.apply(
+                profileStore: profileStore,
+                plan: plan,
+                proposal: proposal,
+                approval: freshApproval,
+                appliedAt: appliedAt
+            )
+            approval = freshApproval
+            applyReceipt = receipt
+            verificationReport = nil
+            rollbackReceipt = nil
+            verificationFinalizationReceipt = nil
+            state = .appliedPendingVerification
+            lastErrorDescription = nil
+        } catch {
+            lastErrorDescription = error.localizedDescription
+            throw error
+        }
+    }
+
+    func recordVerification(
+        _ report: SpeakerOptimizerPostApplyVerificationReport
+    ) throws {
+        guard let receipt = applyReceipt else {
+            throw SpeakerOptimizerGuidedFIRError.applyRequired
+        }
+        guard report.applyReceiptID == receipt.id,
+              report.baselineMeasurementSetID
+                == receipt.baselineMeasurementSetID,
+              report.playbackSystemID
+                == receipt.playbackSystemID,
+              report.routingSignature
+                == receipt.routingSignature else {
+            throw SpeakerOptimizerGuidedFIRError
+                .verificationReceiptMismatch
+        }
+        verificationReport = report
+        if report.accepted {
+            do {
+                let finalized = try transaction.finalizeVerified(
+                    report,
+                    receipt: receipt,
+                    profileStore: profileStore
+                )
+                verificationFinalizationReceipt = finalized
+                rollbackReceipt = nil
+                state = .measuredAccepted
+                lastErrorDescription = nil
+            } catch {
+                state = .failed
+                lastErrorDescription = error.localizedDescription
+                throw error
+            }
+        } else {
+            state = .measuredRejected
+            do {
+                let rolledBack = try transaction.rollback(
+                    receipt,
+                    profileStore: profileStore
+                )
+                rollbackReceipt = rolledBack
+                verificationFinalizationReceipt = nil
+                state = .rolledBack
+                lastErrorDescription = nil
+            } catch {
+                lastErrorDescription = error.localizedDescription
+                throw error
+            }
+        }
+    }
+
+    func rollback(
+        rolledBackAt: Date = Date()
+    ) throws {
+        guard let receipt = applyReceipt else {
+            throw SpeakerOptimizerGuidedFIRError.applyRequired
+        }
+        do {
+            let result = try transaction.rollback(
+                receipt,
+                profileStore: profileStore,
+                rolledBackAt: rolledBackAt
+            )
+            rollbackReceipt = result
+            state = .rolledBack
+            lastErrorDescription = nil
+        } catch {
+            lastErrorDescription = error.localizedDescription
+            throw error
+        }
+    }
+}
+
 struct SpeakerOptimizerVerificationCampaignArchive:
     Codable, Equatable, Sendable {
     static let currentSchemaVersion = 1
