@@ -1,6 +1,6 @@
 # PR107 — Speaker Optimizer FIR Deployment & Latency Coordination
 
-Status: **IN PROGRESS — SLICE 1 LATENCY CONTRACT**
+Status: **IN PROGRESS — SLICES 1–2 LATENCY + REALTIME SUBSTRATE**
 
 Base: PR106 Advanced Speaker Measurement Lab / GitHub PR #107.
 
@@ -92,25 +92,69 @@ claim is allowed.
 - no Speaker Calibration, Room Correction or Speaker IR state is reused; and
 - PR105's existing FIR commissioning block remains in force.
 
+## Slice 2 — Sparse per-program-channel FIR realtime substrate
+
+Implemented in `N60ProgramFIRRuntime.h`.
+
+Speaker Optimizer FIR is a diagonal correction problem: each selected semantic
+speaker receives its own FIR, and no corrected speaker should receive filtered
+content from a different program channel. Reusing the PR74 MIMO runtime would
+therefore introduce unnecessary cross-coupling machinery and retain a four-
+channel ceiling that does not match the N-channel Playback System.
+
+Slice 2 introduces a dedicated sparse diagonal runtime:
+
+- supports the full existing `N60_MAX_PROGRAM_CHANNELS` semantic layout;
+- accepts an explicit active-channel bit mask;
+- stores taps in ascending active-channel order;
+- allocates transformed kernels and history only for active corrected channels;
+- shares one FFT/twiddle table and one scratch/accumulator across channels;
+- uses the same 256-frame partition size and 32768-tap ceiling as the production
+  partitioned-convolution foundation;
+- reports exact engine and declared latency separately;
+- passes inactive program channels through unchanged in the standalone stage;
+- sanitizes non-finite input to zero; and
+- processes realtime frames without allocation/free, locks, logging,
+  trigonometry, file/network I/O or filter construction.
+
+Inactive channels are intentionally *not* delayed inside the FIR runtime.
+Slice 3 will place this runtime immediately upstream of
+`N60ProgramLaneEngine`, set `upstreamProcessingLatencyFrames` on FIR-active
+lanes, and let the existing lane finalizer insert exact coherence compensation
+on faster inactive lanes. This keeps latency ownership in one place and avoids
+double delay.
+
+The standalone C harness verifies sparse routing, independent kernels, exact
+256-frame engine latency, inactive passthrough, reset behavior, non-finite
+sanitization, invalid-program rejection, and that a 32-channel layout with one
+corrected speaker consumes kernel/history proportional to **one** active
+channel rather than 32.
+
+### Slice 2 safety state
+
+- no FIR stage is yet attached to `N60LiveNChannelRenderCore`;
+- no bridge/session creates or owns a live optimizer FIR program;
+- no Output Device Profile persists active optimizer FIR taps;
+- PR105 commissioning still reports the dedicated FIR stage unavailable; and
+- `canInstallLiveFIR == false` remains unchanged.
+
 ## Planned follow-on slices
 
-1. **Per-program-role FIR realtime substrate** — immutable prepared convolution
-   programs and allocation-free render path before the lane stage.
-2. **Live graph compiler integration** — bind role-specific prepared programs to
+1. **Live graph compiler integration** — bind role-specific prepared programs to
    the N-channel render graph and feed exact upstream latency into the existing
    lane-coherence finalizer.
-3. **Persistent Speaker Optimizer FIR ownership** — versioned Output Device
+2. **Persistent Speaker Optimizer FIR ownership** — versioned Output Device
    Profile configuration that cannot be silently ignored by live compilation.
-4. **Headroom + transactional Apply/rollback** — validate candidate identity,
+3. **Headroom + transactional Apply/rollback** — validate candidate identity,
    reserve required digital headroom, mutate only while engine-idle, and verify
    exact post-write state.
-5. **A/V latency policy** — expose total latency and fail closed for modes whose
+4. **A/V latency policy** — expose total latency and fail closed for modes whose
    synchronization policy cannot tolerate/compensate it.
-6. **Fresh measured FIR verification** — receipt-bound microphone campaign,
+5. **Fresh measured FIR verification** — receipt-bound microphone campaign,
    acoustic filter tracking, speaker-persistent improvement and guarded rollback.
-7. **Guided production UI** — FIR proposal review, latency/headroom disclosure,
+6. **Guided production UI** — FIR proposal review, latency/headroom disclosure,
    explicit approval, provisional state, verification and rollback.
-8. **Remote software closure + physical handoff**.
+7. **Remote software closure + physical handoff**.
 
 ## Slice 1 tests
 
@@ -126,3 +170,11 @@ claim is allowed.
 
 Physical A/V sync, real convolution CPU cost, subjective benefit and acoustic
 verification remain outside Slice 1.
+
+
+## Slice 2 portable validation
+
+`ci/validate_pr107_program_fir_runtime.c` is compiled and executed on both
+Ubuntu clang and Apple clang. The PR107 workflow continues to preserve the
+entire PR106 contract, build the Apple Silicon app, run targeted Swift tests and
+run the complete retained XCTest regression.
