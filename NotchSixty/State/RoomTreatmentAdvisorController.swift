@@ -462,7 +462,6 @@ final class RoomTreatmentAdvisorController: ObservableObject {
         do {
             advancedPlacementExperiments = try advancedPlacementExplorer
                 .experiments(for: settings.state(for: room))
-            advancedPlacementMessage = nil
         } catch {
             advancedPlacementMessage = error.localizedDescription
         }
