@@ -11,9 +11,11 @@ PROJECT = ROOT / "NotchSixty.xcodeproj/project.pbxproj"
 DOC = ROOT / "docs/PR107_SPEAKER_OPTIMIZER_FIR_DEPLOYMENT.md"
 PROGRAM_FIR = ROOT / "NotchSixty/Audio/Realtime/N60ProgramFIRRuntime.h"
 PROGRAM_FIR_HARNESS = ROOT / "ci/validate_pr107_program_fir_runtime.c"
+LIVE_RENDER = ROOT / "NotchSixty/Audio/Realtime/N60LiveNChannelRenderCore.h"
+LIVE_RENDER_HARNESS = ROOT / "ci/validate_pr107_live_fir_render.c"
 WORKFLOW = ROOT / ".github/workflows/pr107-speaker-optimizer-fir.yml"
 
-for path in (SOURCE, TESTS, LANE, CONV, COMMISSIONING, PROJECT, DOC, PROGRAM_FIR, PROGRAM_FIR_HARNESS, WORKFLOW):
+for path in (SOURCE, TESTS, LANE, CONV, COMMISSIONING, PROJECT, DOC, PROGRAM_FIR, PROGRAM_FIR_HARNESS, LIVE_RENDER, LIVE_RENDER_HARNESS, WORKFLOW):
     assert path.is_file(), f"missing PR107 Slice 1 file: {path}"
 
 source = SOURCE.read_text()
@@ -25,6 +27,8 @@ project = PROJECT.read_text()
 doc = DOC.read_text()
 program_fir = PROGRAM_FIR.read_text()
 program_fir_harness = PROGRAM_FIR_HARNESS.read_text()
+live_render = LIVE_RENDER.read_text()
+live_render_harness = LIVE_RENDER_HARNESS.read_text()
 workflow = WORKFLOW.read_text()
 
 for token in (
@@ -81,6 +85,23 @@ for token in (
 ):
     assert token in program_fir_harness, f"missing PR107 sparse FIR runtime test: {token}"
 
+for token in (
+    "programFIREnabled",
+    "N60LiveNChannelRenderGraphSetProgramFIRInfo",
+    "N60LiveNChannelRenderRuntimeConfigureProgramFIR",
+    "N60ProgramFIRRuntimeProcessFrame",
+    "upstreamProcessingLatencyFrames",
+):
+    assert token in live_render, f"missing PR107 live FIR render contract: {token}"
+
+for token in (
+    "test_graph_latency_counts_upstream_fir_when_all_lanes_active",
+    "test_sparse_fir_and_lane_compensation_realign_outputs",
+    "test_graph_rejects_fir_on_semantic_lfe",
+    "test_runtime_requires_exact_graph_program_identity",
+):
+    assert token in live_render_harness, f"missing PR107 live FIR render test: {token}"
+
 assert "#define N60_CONVOLUTION_PARTITION_FRAMES 256u" in conv
 assert "blockedDedicatedSpeakerOptimizerFIRStageUnavailable" in commissioning
 
@@ -103,7 +124,8 @@ for token in (
 
 assert "SpeakerOptimizerFIRDeploymentTests" in workflow
 assert "validate_pr107_program_fir_runtime.c" in workflow
+assert "validate_pr107_live_fir_render.c" in workflow
 assert "validate_pr106_speaker_measurement_lab.py" in workflow
 assert "Run full XCTest regression" in workflow
 
-print("PR107 Slice 1-2 FIR latency + sparse runtime boundary passed")
+print("PR107 Slice 1-3 FIR latency + runtime + render integration boundary passed")
