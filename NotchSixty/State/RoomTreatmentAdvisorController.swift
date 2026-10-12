@@ -548,15 +548,13 @@ final class RoomTreatmentAdvisorController: ObservableObject {
         guard let project = selectedProject else { return }
         do {
             availablePhysicalSubSets = try SpeakerOptimizerMeasurementSetStore()
-                .listRecentSets(limit: 64).filter {
-                    $0.playbackSystemID == project.playbackSystemID
-                        && $0.plannedSources.count == 1
-                        && {
-                            if case .subwoofer = $0.plannedSources[0] {
-                                return true
-                            }
-                            return false
-                        }()
+                .listRecentSets(limit: 64).filter { set in
+                    guard set.playbackSystemID == project.playbackSystemID,
+                          set.plannedSources.count == 1 else { return false }
+                    if case .subwoofer = set.plannedSources[0] {
+                        return true
+                    }
+                    return false
                 }
         } catch {
             physicalSubComparisonMessage = error.localizedDescription
