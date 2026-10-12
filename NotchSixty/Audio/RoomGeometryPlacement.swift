@@ -1946,3 +1946,205 @@ struct RoomAdvancedToeInEvidenceAnalyzer: Sendable {
             ? (meanAbs, min(lower.2, upper.2)) : nil
     }
 }
+
+
+// MARK: - PR110 Slice 4: measured physical Sub A/B at multiple seats
+
+/// Separate physical position trials from PR108 coherent *digital* Sub
+/// timing/phase commissioning. No room model may synthesize new LF evidence.
+/// This is an offline, signed human-setup attestation plus two independently
+/// repeat-qualified PR103 capture sets. It never alters DSP or output routing.
+struct RoomAdvancedSubPlacementComparison: Equatable, Sendable {
+    var experimentID: String
+    var source: MultichannelCalibrationSource
+    var baselineMeasurementSetID: UUID
+    var candidateMeasurementSetID: UUID
+    var seatCount: Int
+    var commonFrequencyPointCount: Int
+    var commonLowHz: Double
+    var commonHighHz: Double
+    var baselineInterseatSpreadRMSDB: Double
+    var candidateInterseatSpreadRMSDB: Double
+    /// Positive means *lower* inter-seat variation in measured relative LF
+    /// magnitude. Not a sound-pressure or target-response improvement.
+    var reductionInInterseatSpreadDB: Double
+    var evidenceConfidence: Double
+    var measurementOnly: Bool { true }
+    var canDeploy: Bool { false }
+    var requiresRealWorldListeningVerification: Bool { true }
+}
+
+enum RoomAdvancedSubPlacementComparisonError:
+    Error, Equatable, LocalizedError {
+    case missingPhysicalAttestation
+    case invalidExperiment
+    case mismatchedIdentity
+    case inadequateEvidence
+    case incompatibleFrequencyResponse
+
+    var errorDescription: String? {
+        switch self {
+        case .missingPhysicalAttestation:
+            return "Confirm identical microphone seats and an unchanged DSP/crossover/gain/phase chain across both physical placement captures."
+        case .invalidExperiment:
+            return "The proposed physical Sub move must exactly match the saved placement experiment."
+        case .mismatchedIdentity:
+            return "The baseline and candidate need the same Playback System, source, microphone, route, sample rate, and seat IDs."
+        case .inadequateEvidence:
+            return "Both positions need separate, fresh, repeat-qualified sweeps at every seat."
+        case .incompatibleFrequencyResponse:
+            return "Multi-seat LF comparisons need identical qualified response grids across both positions."
+        }
+    }
+}
+
+struct RoomAdvancedSubPlacementComparisonAnalyzer: Sendable {
+    static let minimumFrequencyHz = 35.0
+    static let maximumFrequencyHz = 160.0
+    static let minimumFrequencyPoints = 12
+    static let minimumSeats = 2
+    static let maximumSeats = 8
+
+    func compare(
+        baseline: SpeakerOptimizerMeasurementSet,
+        candidate: SpeakerOptimizerMeasurementSet,
+        state: RoomAdvancedPlacementState,
+        experiment: RoomAdvancedPlacementExperiment,
+        playbackSystemID: UUID,
+        physicalSetupConfirmed: Bool
+    ) throws -> RoomAdvancedSubPlacementComparison {
+        guard physicalSetupConfirmed else {
+            throw RoomAdvancedSubPlacementComparisonError
+                .missingPhysicalAttestation
+        }
+        let checked = try? state.validated()
+        let genuine = try? RoomAdvancedPlacementExplorer()
+            .experiments(for: state)
+            .first { $0.id == experiment.id }
+        guard let checked, let genuine,
+              experiment == genuine,
+              experiment.move == .subwoofer,
+              checked.subwooferPositions != experiment.trial.subwooferPositions
+        else {
+            throw RoomAdvancedSubPlacementComparisonError.invalidExperiment
+        }
+
+        let seats = [checked.room.listener] + checked.secondarySeats
+        guard (Self.minimumSeats...Self.maximumSeats).contains(seats.count),
+              baseline.positions.count == seats.count,
+              candidate.positions.count == seats.count,
+              baseline.positions.map(\.id) == candidate.positions.map(\.id),
+              baseline.positions.map(\.name) == candidate.positions.map(\.name),
+              baseline.id != candidate.id,
+              baseline.role == .baseline, candidate.role == .candidate,
+              baseline.playbackSystemID == playbackSystemID,
+              candidate.playbackSystemID == playbackSystemID,
+              baseline.routingSignature == candidate.routingSignature,
+              baseline.microphone == candidate.microphone,
+              baseline.sampleRate == candidate.sampleRate,
+              baseline.plannedSources == candidate.plannedSources,
+              baseline.plannedSources.count == 1,
+              baseline.captures.allSatisfy({ $0.source == baseline.plannedSources[0] }),
+              candidate.captures.allSatisfy({ $0.source == candidate.plannedSources[0] })
+        else {
+            throw RoomAdvancedSubPlacementComparisonError.mismatchedIdentity
+        }
+        let source = baseline.plannedSources[0]
+        guard case .subwoofer(let physicalIndex) = source,
+              Int(physicalIndex) < checked.subwooferPositions.count,
+              experiment.id.hasPrefix("sub-\(physicalIndex)-") else {
+            throw RoomAdvancedSubPlacementComparisonError.invalidExperiment
+        }
+
+        let validator = SpeakerOptimizerMeasurementEvidenceEvaluator()
+        guard let baselineReport = try? validator.evaluate(baseline),
+              let candidateReport = try? validator.evaluate(candidate),
+              baselineReport.optimizerReady, candidateReport.optimizerReady,
+              baselineReport.groupReports.count == seats.count,
+              candidateReport.groupReports.count == seats.count,
+              baselineReport.groupReports.allSatisfy(\.optimizerReady),
+              candidateReport.groupReports.allSatisfy(\.optimizerReady),
+              let newestBaseline = baseline.captures.map(\.capturedAt).max(),
+              let oldestCandidate = candidate.captures.map(\.capturedAt).min(),
+              newestBaseline < oldestCandidate,
+              Set(baseline.captures.map(\.id))
+                .isDisjoint(with: Set(candidate.captures.map(\.id)))
+        else {
+            throw RoomAdvancedSubPlacementComparisonError.inadequateEvidence
+        }
+
+        let allGroups = baselineReport.groupReports
+            + candidateReport.groupReports
+        let low = max(Self.minimumFrequencyHz,
+                      allGroups.compactMap(\.commonUsableLowHz).max() ?? .infinity)
+        let high = min(Self.maximumFrequencyHz,
+                       allGroups.compactMap(\.commonUsableHighHz).min() ?? 0)
+        guard low <= high, low.isFinite, high.isFinite else {
+            throw RoomAdvancedSubPlacementComparisonError
+                .incompatibleFrequencyResponse
+        }
+
+        let allCaptures = baseline.captures + candidate.captures
+        guard let grid = allCaptures.first?.response.frequenciesHz,
+              !grid.isEmpty,
+              zip(grid, grid.dropFirst()).allSatisfy({ $0 < $1 }),
+              grid.allSatisfy({ $0.isFinite && $0 > 0 }),
+              allCaptures.allSatisfy({
+                  $0.response.frequenciesHz == grid
+                    && $0.response.magnitudeDB.count == grid.count
+                    && $0.response.magnitudeDB.allSatisfy(\.isFinite)
+              }) else {
+            throw RoomAdvancedSubPlacementComparisonError
+                .incompatibleFrequencyResponse
+        }
+        let selected = grid.indices.filter {
+            grid[$0] >= low && grid[$0] <= high
+        }
+        guard selected.count >= Self.minimumFrequencyPoints else {
+            throw RoomAdvancedSubPlacementComparisonError
+                .incompatibleFrequencyResponse
+        }
+
+        func interseatRMS(_ set: SpeakerOptimizerMeasurementSet) -> Double? {
+            let ordered = set.positions.map { position in
+                set.captures.filter { $0.positionID == position.id }
+            }
+            guard ordered.allSatisfy({ !$0.isEmpty }) else { return nil }
+            // Per-frequency variance across seats; cancels common gain
+            // shifts, so it never pretends to measure absolute LF level.
+            let spreads: [Double] = selected.map { frequencyIndex in
+                let seatMeans = ordered.map { captures in
+                    captures.map { $0.response.magnitudeDB[frequencyIndex] }
+                        .reduce(0, +) / Double(captures.count)
+                }
+                let center = seatMeans.reduce(0, +) / Double(seatMeans.count)
+                return seatMeans.reduce(0.0) {
+                    $0 + pow($1 - center, 2)
+                } / Double(seatMeans.count)
+            }
+            let value = sqrt(spreads.reduce(0, +) / Double(spreads.count))
+            return value.isFinite ? value : nil
+        }
+        guard let prior = interseatRMS(baseline),
+              let after = interseatRMS(candidate) else {
+            throw RoomAdvancedSubPlacementComparisonError
+                .incompatibleFrequencyResponse
+        }
+        return RoomAdvancedSubPlacementComparison(
+            experimentID: experiment.id,
+            source: source,
+            baselineMeasurementSetID: baseline.id,
+            candidateMeasurementSetID: candidate.id,
+            seatCount: seats.count,
+            commonFrequencyPointCount: selected.count,
+            commonLowHz: low,
+            commonHighHz: high,
+            baselineInterseatSpreadRMSDB: prior,
+            candidateInterseatSpreadRMSDB: after,
+            reductionInInterseatSpreadDB: prior - after,
+            evidenceConfidence: min(
+                baselineReport.confidence, candidateReport.confidence
+            )
+        )
+    }
+}
