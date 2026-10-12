@@ -9,9 +9,11 @@ CONV = ROOT / "NotchSixty/Audio/Realtime/N60Convolution.h"
 COMMISSIONING = ROOT / "NotchSixty/Audio/SpeakerOptimizerCommissioningContract.swift"
 PROJECT = ROOT / "NotchSixty.xcodeproj/project.pbxproj"
 DOC = ROOT / "docs/PR107_SPEAKER_OPTIMIZER_FIR_DEPLOYMENT.md"
+PROGRAM_FIR = ROOT / "NotchSixty/Audio/Realtime/N60ProgramFIRRuntime.h"
+PROGRAM_FIR_HARNESS = ROOT / "ci/validate_pr107_program_fir_runtime.c"
 WORKFLOW = ROOT / ".github/workflows/pr107-speaker-optimizer-fir.yml"
 
-for path in (SOURCE, TESTS, LANE, CONV, COMMISSIONING, PROJECT, DOC, WORKFLOW):
+for path in (SOURCE, TESTS, LANE, CONV, COMMISSIONING, PROJECT, DOC, PROGRAM_FIR, PROGRAM_FIR_HARNESS, WORKFLOW):
     assert path.is_file(), f"missing PR107 Slice 1 file: {path}"
 
 source = SOURCE.read_text()
@@ -21,6 +23,8 @@ conv = CONV.read_text()
 commissioning = COMMISSIONING.read_text()
 project = PROJECT.read_text()
 doc = DOC.read_text()
+program_fir = PROGRAM_FIR.read_text()
+program_fir_harness = PROGRAM_FIR_HARNESS.read_text()
 workflow = WORKFLOW.read_text()
 
 for token in (
@@ -55,6 +59,28 @@ for token in (
 ):
     assert token in lane, f"missing inherited program-lane latency hook: {token}"
 
+
+for token in (
+    "N60ProgramFIRProgramCreate",
+    "N60ProgramFIRRuntimeCreate",
+    "N60ProgramFIRRuntimeProcessFrame",
+    "activeChannelMask",
+    "activeOrdinalForChannel",
+    "N60_CONVOLUTION_PARTITION_FRAMES",
+    "N60_PROGRAM_FIR_INACTIVE_ORDINAL",
+):
+    assert token in program_fir, f"missing PR107 sparse FIR runtime contract: {token}"
+
+for token in (
+    "test_sparse_single_channel_impulse_and_passthrough",
+    "test_multiple_sparse_channels_use_independent_kernels",
+    "test_reset_clears_active_history",
+    "test_nonfinite_input_is_sanitized",
+    "test_invalid_programs_fail_closed",
+    "test_memory_scales_with_active_channels_not_layout_width",
+):
+    assert token in program_fir_harness, f"missing PR107 sparse FIR runtime test: {token}"
+
 assert "#define N60_CONVOLUTION_PARTITION_FRAMES 256u" in conv
 assert "blockedDedicatedSpeakerOptimizerFIRStageUnavailable" in commissioning
 
@@ -76,7 +102,8 @@ for token in (
     assert token in doc, f"missing PR107 Slice 1 documentation: {token}"
 
 assert "SpeakerOptimizerFIRDeploymentTests" in workflow
+assert "validate_pr107_program_fir_runtime.c" in workflow
 assert "validate_pr106_speaker_measurement_lab.py" in workflow
 assert "Run full XCTest regression" in workflow
 
-print("PR107 Slice 1 FIR latency/deployment boundary passed")
+print("PR107 Slice 1-2 FIR latency + sparse runtime boundary passed")
