@@ -7,6 +7,8 @@ struct ProductionMultichannelCalibrationWorkspace: View {
     @ObservedObject var profiles: ProductProfileController
     @StateObject private var optimizer: SpeakerOptimizerMeasurementController
     @StateObject private var characterization: SpeakerOptimizerCharacterizationController
+    @StateObject private var guidedOptimizer: SpeakerOptimizerGuidedPEQController
+    @StateObject private var verification: SpeakerOptimizerVerificationController
 
     @State private var actionError: String?
     @State private var resetConfirmation = false
@@ -32,6 +34,18 @@ struct ProductionMultichannelCalibrationWorkspace: View {
         )
         _characterization = StateObject(
             wrappedValue: try! SpeakerOptimizerCharacterizationController(
+                engine: engine,
+                profiles: profiles,
+                microphone: microphone
+            )
+        )
+        _guidedOptimizer = StateObject(
+            wrappedValue: SpeakerOptimizerGuidedPEQController(
+                profileStore: profiles
+            )
+        )
+        _verification = StateObject(
+            wrappedValue: SpeakerOptimizerVerificationController(
                 engine: engine,
                 profiles: profiles,
                 microphone: microphone
@@ -63,9 +77,12 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                 campaignCard
                 speakerOptimizerCard
                 speakerCharacterizationCard
+                speakerOptimizerCommissioningCard
                 designCard
 
                 if let error = actionError
+                    ?? verification.lastErrorDescription
+                    ?? guidedOptimizer.lastErrorDescription
                     ?? characterization.lastErrorDescription
                     ?? optimizer.lastErrorDescription
                     ?? calibration.lastErrorDescription
@@ -133,6 +150,29 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                     actionError = error.localizedDescription
                     break
                 }
+            }
+        }
+        .task(id: verification.state) {
+            guard verification.state == .measuring else { return }
+            while !Task.isCancelled && verification.state == .measuring {
+                try? await Task.sleep(for: .milliseconds(100))
+                guard !Task.isCancelled else { break }
+                do {
+                    if try await verification.finishMeasurementIfComplete() {
+                        break
+                    }
+                } catch {
+                    actionError = error.localizedDescription
+                    break
+                }
+            }
+        }
+        .task(id: verification.verificationReport?.verificationMeasurementSetID) {
+            guard let report = verification.verificationReport else { return }
+            do {
+                try guidedOptimizer.recordVerification(report)
+            } catch {
+                actionError = error.localizedDescription
             }
         }
         .confirmationDialog(
@@ -958,6 +998,382 @@ struct ProductionMultichannelCalibrationWorkspace: View {
             characterization: characterizationSet,
             listeningBaseline: baseline
         )
+    }
+
+
+    private var speakerOptimizerCommissioningCard: some View {
+        GroupBox("Speaker Optimizer · Commission & Verify") {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .top, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Step 4 · Review and apply bounded PEQ")
+                            .font(.headline)
+                        Text(
+                            "Generate a cut-only PEQ proposal from the qualified listening baseline plus speaker characterization. Apply is an explicit user action and is provisional until new microphone verification passes."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text(guidedOptimizer.state.rawValue)
+                        .font(.caption.bold())
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(.quaternary, in: Capsule())
+                }
+
+                Button("Generate PEQ Proposal") {
+                    actionError = nil
+                    do {
+                        guard let baseline = optimizer.measurementSet,
+                              let characterizationSet =
+                                characterization.measurementSet else {
+                            throw SpeakerOptimizerGuidedPEQError
+                                .reviewRequired
+                        }
+                        try guidedOptimizer.prepareReview(
+                            baseline: baseline,
+                            characterization: characterizationSet
+                        )
+                    } catch {
+                        actionError = error.localizedDescription
+                    }
+                }
+                .buttonStyle(.bordered)
+                .disabled(
+                    optimizer.evidenceReport?.optimizerReady != true
+                        || !characterization.characterizationReady
+                        || guidedOptimizer.state
+                            == .appliedPendingVerification
+                        || guidedOptimizer.state == .measuredAccepted
+                        || guidedOptimizer.state == .measuredRejected
+                )
+
+                if let proposal = guidedOptimizer.proposal,
+                   let plan = guidedOptimizer.plan {
+                    Divider()
+                    HStack(spacing: 22) {
+                        status("Sources", "\(proposal.sources.count)")
+                        status(
+                            "PEQ Bands",
+                            "\(guidedOptimizer.candidateBandCount)"
+                        )
+                        status(
+                            "Apply Stage",
+                            proposal.canApply ? "Available" : "Blocked"
+                        )
+                        status(
+                            "Confidence",
+                            "\(Int((plan.candidate.evidenceConfidence * 100).rounded()))%"
+                        )
+                    }
+
+                    Grid(
+                        alignment: .leading,
+                        horizontalSpacing: 16,
+                        verticalSpacing: 6
+                    ) {
+                        GridRow {
+                            Text("Source").font(.caption.bold())
+                            Text("Bands").font(.caption.bold())
+                            Text("Max Cut").font(.caption.bold())
+                            Text("Status").font(.caption.bold())
+                        }
+                        ForEach(
+                            Array(plan.candidate.sources.enumerated()),
+                            id: \.offset
+                        ) { _, candidate in
+                            GridRow {
+                                Text(candidate.source.displayName)
+                                Text("\(candidate.bands.count)")
+                                Text(
+                                    candidate.bands.map(\.gainDB).min().map {
+                                        String(format: "%.1f dB", $0)
+                                    } ?? "—"
+                                )
+                                Text(
+                                    candidate.bands.isEmpty
+                                        ? "Bypass"
+                                        : "Speaker-persistent only"
+                                )
+                            }
+                            .font(.caption)
+                        }
+                    }
+
+                    if guidedOptimizer.applyReceipt == nil {
+                        HStack(spacing: 10) {
+                            Button("Approve & Apply PEQ") {
+                                actionError = nil
+                                do {
+                                    try guidedOptimizer.approveAndApply(
+                                        userInitiated: true
+                                    )
+                                } catch {
+                                    actionError =
+                                        error.localizedDescription
+                                }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(
+                                !guidedOptimizer.canApproveAndApply
+                            )
+
+                            Text(
+                                engine.lifecycleState == .idle
+                                    ? "DSP is stopped; Apply is available after review."
+                                    : "Stop DSP playback before Apply."
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                if let receipt = guidedOptimizer.applyReceipt,
+                   let plan = guidedOptimizer.plan,
+                   let baseline = optimizer.measurementSet {
+                    Divider()
+                    Label(
+                        guidedOptimizer.state == .measuredAccepted
+                            ? "Measured verification accepted"
+                            : guidedOptimizer.state == .measuredRejected
+                                ? "Measured verification failed — rollback recommended"
+                                : "PEQ applied provisionally — measured verification required",
+                        systemImage:
+                            guidedOptimizer.state == .measuredAccepted
+                                ? "checkmark.shield.fill"
+                                : guidedOptimizer.state == .measuredRejected
+                                    ? "exclamationmark.shield.fill"
+                                    : "waveform.badge.magnifyingglass"
+                    )
+                    .font(.callout.bold())
+                    .foregroundStyle(
+                        guidedOptimizer.state == .measuredAccepted
+                            ? .green
+                            : guidedOptimizer.state == .measuredRejected
+                                ? .red
+                                : .orange
+                    )
+
+                    Text("Step 5 · Re-measure the original listening positions")
+                        .font(.headline)
+
+                    HStack(spacing: 10) {
+                        Button(
+                            verification.measurementSet == nil
+                                ? "Start Verification"
+                                : "Refresh / Resume Verification"
+                        ) {
+                            actionError = nil
+                            do {
+                                try verification.startOrResume(
+                                    baseline: baseline,
+                                    plan: plan,
+                                    receipt: receipt
+                                )
+                            } catch {
+                                actionError =
+                                    error.localizedDescription
+                            }
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button("Rollback PEQ", role: .destructive) {
+                            actionError = nil
+                            do {
+                                verification.cancelMeasurement()
+                                try guidedOptimizer.rollback()
+                            } catch {
+                                actionError =
+                                    error.localizedDescription
+                            }
+                        }
+                        .disabled(!guidedOptimizer.canRollback)
+                    }
+
+                    if let verificationSet =
+                            verification.measurementSet,
+                       let progress = verification.progress {
+                        HStack(spacing: 22) {
+                            status(
+                                "Verification Repeats",
+                                "\(progress.completedSweepCount) / \(progress.requiredSweepCount)"
+                            )
+                            status(
+                                "Evidence",
+                                verification.evidenceReport.map {
+                                    $0.optimizerReady ? "Qualified" : "Pending"
+                                } ?? "Pending"
+                            )
+                            status(
+                                "Confidence",
+                                verification.evidenceReport.map {
+                                    "\(Int(($0.confidence * 100).rounded()))%"
+                                } ?? "—"
+                            )
+                        }
+                        ProgressView(value: progress.fractionComplete)
+
+                        if let step = verification.activeOrNextStep {
+                            Text(
+                                verification.state == .measuring
+                                    ? "Measuring \(step.displayName)"
+                                    : "Next: \(step.displayName)"
+                            )
+                            .font(.callout.bold())
+                            Text(
+                                "Return the same calibrated microphone to \(step.position.name) and keep it fixed for the repeated sweeps."
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        } else if progress.complete {
+                            Label(
+                                "Fresh verification capture campaign complete.",
+                                systemImage: "checkmark.circle.fill"
+                            )
+                            .foregroundStyle(.green)
+                        }
+
+                        if verification.state == .measuring {
+                            ProgressView(
+                                value:
+                                    verification.activeMeasurementProgress
+                            ) {
+                                Text("Current verification sweep")
+                            }
+                        }
+
+                        HStack(spacing: 10) {
+                            Button("Measure Next Verification Repeat") {
+                                actionError = nil
+                                do {
+                                    try verification.beginNextMeasurement()
+                                } catch {
+                                    actionError =
+                                        error.localizedDescription
+                                }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(!verification.canBeginMeasurement)
+
+                            if verification.state == .measuring
+                                || verification.state == .analyzing {
+                                Button("Cancel") {
+                                    verification.cancelMeasurement()
+                                }
+                            }
+
+                            if !verificationSet.captures.isEmpty {
+                                Button(
+                                    "Reset Verification",
+                                    role: .destructive
+                                ) {
+                                    actionError = nil
+                                    do {
+                                        try verification
+                                            .resetVerification()
+                                    } catch {
+                                        actionError =
+                                            error.localizedDescription
+                                    }
+                                }
+                                .disabled(
+                                    verification.state == .measuring
+                                        || verification.state
+                                            == .analyzing
+                                )
+                            }
+                        }
+                    }
+
+                    if let report = verification.verificationReport {
+                        Divider()
+                        HStack(spacing: 10) {
+                            Label(
+                                report.accepted
+                                    ? "Measured acceptance passed"
+                                    : "Measured acceptance failed",
+                                systemImage: report.accepted
+                                    ? "checkmark.shield.fill"
+                                    : "exclamationmark.shield.fill"
+                            )
+                            .font(.callout.bold())
+                            .foregroundStyle(
+                                report.accepted ? .green : .red
+                            )
+                            Spacer()
+                            Text(
+                                report.shouldRollback
+                                    ? "Rollback recommended"
+                                    : "Eligible to finalize"
+                            )
+                            .font(.caption.bold())
+                        }
+
+                        Grid(
+                            alignment: .leading,
+                            horizontalSpacing: 14,
+                            verticalSpacing: 6
+                        ) {
+                            GridRow {
+                                Text("Source").font(.caption.bold())
+                                Text("Filter tracking")
+                                    .font(.caption.bold())
+                                Text("Persistent improvement")
+                                    .font(.caption.bold())
+                                Text("Protected regression")
+                                    .font(.caption.bold())
+                                Text("Result").font(.caption.bold())
+                            }
+                            ForEach(
+                                Array(report.sources.enumerated()),
+                                id: \.offset
+                            ) { _, source in
+                                GridRow {
+                                    Text(source.source.displayName)
+                                    Text(
+                                        String(
+                                            format: "%.2f dB",
+                                            source.filterTrackingRMSDB
+                                        )
+                                    )
+                                    Text(
+                                        String(
+                                            format: "%+.2f dB",
+                                            source.persistentImprovementDB
+                                        )
+                                    )
+                                    Text(
+                                        String(
+                                            format: "%+.2f dB",
+                                            source.protectedRegressionDB
+                                        )
+                                    )
+                                    Text(
+                                        source.accepted
+                                            ? "Accepted"
+                                            : "Rejected"
+                                    )
+                                    .foregroundStyle(
+                                        source.accepted
+                                            ? .green : .red
+                                    )
+                                }
+                                .font(.caption)
+                            }
+                        }
+                    }
+                }
+
+                Text(
+                    "FIR deployment and crossover timing/polarity remain blocked. PEQ acceptance here verifies measured magnitude behavior only."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            .padding(6)
+        }
     }
 
     private var designCard: some View {

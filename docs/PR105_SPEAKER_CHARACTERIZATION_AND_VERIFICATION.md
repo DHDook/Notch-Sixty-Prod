@@ -1,6 +1,6 @@
 # PR105 — Guided Speaker Characterization & Verification
 
-Status: **SLICES 1–8 REMOTE SOFTWARE VERIFIED — SLICE 9 CI PENDING — PHYSICAL ACOUSTIC ACCEPTANCE PENDING**
+Status: **SLICES 1–9 REMOTE SOFTWARE VERIFIED — SLICE 10 CI PENDING — PHYSICAL ACOUSTIC ACCEPTANCE PENDING**
 
 Base: PR104 measurement-driven Speaker Optimization Engine.
 
@@ -259,17 +259,39 @@ reflection timing and acoustic benefit remain unverified.
 - This slice produces the independent acceptance report. Automatic rollback/UI
   orchestration comes next.
 
+## Slice 10 — Guided provisional Apply & verification workflow
+
+- Adds a UI-facing PEQ commissioning state machine with explicit states for
+  review-ready, provisional Apply, measured accepted/rejected and rolled back.
+- The Apply method still requires an explicit `userInitiated` argument with no
+  default; the production UI passes it only from the user's Apply button.
+- Adds a receipt-bound verification campaign archive so verification sweeps
+  cannot be silently reused across separate Apply transactions.
+- A fresh verification campaign inherits the exact baseline positions, sources,
+  routing, microphone and sample rate but uses role `.verification`.
+- Stored verification captures must all post-date the Apply receipt and must not
+  reuse baseline capture IDs.
+- Adds a dedicated verification controller that reuses the safe targeted
+  calibration transport and the same three-repeat session orchestrator.
+- Before every verification session/sweep, the selected Playback System must
+  still exactly equal the expected provisional post-Apply state.
+- When all verification sweeps qualify, the controller automatically invokes
+  Slice 9's independent measured verifier and exposes the acceptance report.
+- SYSTEM → Speaker Calibration now presents Step 4 Review/Apply and Step 5
+  Re-measure, including band counts, provisional status, verification progress,
+  per-source measured metrics and rollback recommendation.
+- Rollback remains an explicit user action in this slice. Automatic rollback on
+  measured rejection is intentionally isolated to the next safety slice.
+
 ## Planned follow-on slices
 
-1. Add provisional Apply/rollback UI review plus a guided post-Apply
-   verification capture controller.
-2. Automatically invoke guarded rollback when fresh measured acceptance fails,
+1. Automatically invoke guarded rollback when fresh measured acceptance fails,
    while preserving the existing no-overwrite-on-state-drift rule.
-3. Persist a verified deployment status only after the independent acceptance
+2. Persist a verified deployment status only after the independent acceptance
    report passes.
-4. Add synchronized reference capture before any crossover timing/polarity
+3. Add synchronized reference capture before any crossover timing/polarity
    deployment; saved PR103 v1 evidence remains insufficient for that action.
-5. Keep FIR deployment blocked until a separately owned per-speaker FIR stage
+4. Keep FIR deployment blocked until a separately owned per-speaker FIR stage
    coordinates latency/headroom across channels and video paths.
 
 Physical testing remains required for actual mic-distance guidance, integration

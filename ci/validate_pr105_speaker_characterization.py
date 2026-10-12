@@ -21,11 +21,13 @@ APPLY_SOURCE = ROOT / "NotchSixty/Audio/SpeakerOptimizerPEQApplyTransaction.swif
 APPLY_TESTS = ROOT / "NotchSixtyTests/SpeakerOptimizerPEQApplyTransactionTests.swift"
 VERIFY_SOURCE = ROOT / "NotchSixty/Audio/SpeakerOptimizerPostApplyVerification.swift"
 VERIFY_TESTS = ROOT / "NotchSixtyTests/SpeakerOptimizerPostApplyVerificationTests.swift"
+GUIDED_WORKFLOW_SOURCE = ROOT / "NotchSixty/Audio/SpeakerOptimizerGuidedWorkflow.swift"
+GUIDED_WORKFLOW_TESTS = ROOT / "NotchSixtyTests/SpeakerOptimizerGuidedWorkflowTests.swift"
 PROJECT = ROOT / "NotchSixty.xcodeproj/project.pbxproj"
 DOC = ROOT / "docs/PR105_SPEAKER_CHARACTERIZATION_AND_VERIFICATION.md"
 WORKFLOW = ROOT / ".github/workflows/pr105-speaker-characterization.yml"
 
-for path in (SOURCE, TESTS, EARLY_SOURCE, EARLY_TESTS, CLASSIFIER_SOURCE, CLASSIFIER_TESTS, AWARE_SOURCE, AWARE_TESTS, GUIDED_SOURCE, GUIDED_TESTS, UI_SOURCE, COMMISSION_SOURCE, COMMISSION_TESTS, DEPLOY_SOURCE, DEPLOY_TESTS, APPLY_SOURCE, APPLY_TESTS, VERIFY_SOURCE, VERIFY_TESTS, PROJECT, DOC, WORKFLOW):
+for path in (SOURCE, TESTS, EARLY_SOURCE, EARLY_TESTS, CLASSIFIER_SOURCE, CLASSIFIER_TESTS, AWARE_SOURCE, AWARE_TESTS, GUIDED_SOURCE, GUIDED_TESTS, UI_SOURCE, COMMISSION_SOURCE, COMMISSION_TESTS, DEPLOY_SOURCE, DEPLOY_TESTS, APPLY_SOURCE, APPLY_TESTS, VERIFY_SOURCE, VERIFY_TESTS, GUIDED_WORKFLOW_SOURCE, GUIDED_WORKFLOW_TESTS, PROJECT, DOC, WORKFLOW):
     assert path.is_file(), f"missing PR105 Slice 1 file: {path}"
 
 source = SOURCE.read_text()
@@ -47,6 +49,8 @@ apply_source = APPLY_SOURCE.read_text()
 apply_tests = APPLY_TESTS.read_text()
 verify_source = VERIFY_SOURCE.read_text()
 verify_tests = VERIFY_TESTS.read_text()
+guided_workflow_source = GUIDED_WORKFLOW_SOURCE.read_text()
+guided_workflow_tests = GUIDED_WORKFLOW_TESTS.read_text()
 project = PROJECT.read_text()
 doc = DOC.read_text()
 workflow = WORKFLOW.read_text()
@@ -255,6 +259,37 @@ for token in (
     assert token in verify_tests, f"missing post-Apply verification test: {token}"
 
 for token in (
+    "final class SpeakerOptimizerGuidedPEQController",
+    "approveAndApply(",
+    "userInitiated: Bool",
+    "final class SpeakerOptimizerVerificationController",
+    "struct SpeakerOptimizerVerificationCampaignArchive",
+    "SpeakerOptimizerVerificationSessionFactory",
+    "role: .verification",
+    "capturedAt > receipt.appliedAt",
+    "SpeakerOptimizerPostApplyVerifier",
+):
+    assert token in guided_workflow_source, f"missing guided Apply/verify workflow contract: {token}"
+
+for token in (
+    "testGuidedReviewExplicitApplyMeasuredAcceptanceAndRollback",
+    "testGuidedControllerCannotMintNonUserApproval",
+    "testVerificationFactoryCreatesFreshReceiptBoundCampaign",
+    "testVerificationFactoryRejectsPreApplyCaptureReuse",
+):
+    assert token in guided_workflow_tests, f"missing guided workflow test: {token}"
+
+for token in (
+    "Speaker Optimizer · Commission & Verify",
+    "Step 4 · Review and apply bounded PEQ",
+    "Step 5 · Re-measure the original listening positions",
+    "Approve & Apply PEQ",
+    "Rollback PEQ",
+    "Measured acceptance",
+):
+    assert token in ui_source, f"missing guided commissioning UI contract: {token}"
+
+for token in (
     "F10500000000000000000001",
     "F10500000000000000000002",
     "F10500000000000000000011",
@@ -291,6 +326,10 @@ for token in (
     "F10590000000000000000002",
     "F10590000000000000000011",
     "F10590000000000000000012",
+    "F105A0000000000000000001",
+    "F105A0000000000000000002",
+    "F105A0000000000000000011",
+    "F105A0000000000000000012",
 ):
     assert project.count(token) >= 2, f"missing Xcode registration: {token}"
 
@@ -312,6 +351,7 @@ assert "SpeakerOptimizerCommissioningContractTests" in workflow
 assert "SpeakerOptimizerPEQDeploymentTests" in workflow
 assert "SpeakerOptimizerPEQApplyTransactionTests" in workflow
 assert "SpeakerOptimizerPostApplyVerificationTests" in workflow
+assert "SpeakerOptimizerGuidedWorkflowTests" in workflow
 assert "Run full XCTest regression" in workflow
 assert "Cross-domain speaker-vs-room classification" in doc
 assert "Classification-aware PEQ/FIR correction authority" in doc
@@ -320,4 +360,5 @@ assert "Commissioning contract, explicit approval & rollback snapshot" in doc
 assert "Separately owned live PEQ deployment substrate" in doc
 assert "Transactional PEQ Apply & rollback" in doc
 assert "Independent measured post-Apply verification" in doc
-print("PR105 guided optimizer + transactional Apply + measured verification contracts passed")
+assert "Guided provisional Apply & verification workflow" in doc
+print("PR105 end-to-end guided PEQ Apply + measured verification contracts passed")
