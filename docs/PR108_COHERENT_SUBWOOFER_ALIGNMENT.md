@@ -85,6 +85,14 @@ Multiple Main reports may be supplied for one physical Sub. The search optimizes
 one shared setting across all included Main speakers rather than tuning a Sub
 against only one channel and accidentally degrading another.
 
+### Multi-Sub boundary
+
+Slices 1–4 are deliberately single-Sub. If more than one physical Sub is
+assigned, the single-Sub planner fails closed with multiSubCoordinationRequired.
+Independent sequential application could otherwise accumulate the shared
+speaker-delay compensation and disturb an already aligned Sub. A dedicated
+coordinated multi-Sub slice must solve all Sub relative delays together.
+
 ## Slice 1 safety state
 
 - proposal only;
