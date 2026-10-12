@@ -10,13 +10,14 @@ APPLY = ROOT / "NotchSixty/Audio/CoherentSubwooferAlignmentApplyTransaction.swif
 APPLY_TESTS = ROOT / "NotchSixtyTests/CoherentSubwooferAlignmentApplyTransactionTests.swift"
 VERIFY = ROOT / "NotchSixty/Audio/CoherentSubwooferAlignmentPostApplyVerification.swift"
 VERIFY_TESTS = ROOT / "NotchSixtyTests/CoherentSubwooferAlignmentPostApplyVerificationTests.swift"
+DEPLOYMENT = ROOT / "NotchSixty/Audio/CoherentSubwooferAlignmentDeployment.swift"
 COHERENT = ROOT / "NotchSixty/Audio/SpeakerMeasurementLabCoherentTiming.swift"
 CALIBRATION = ROOT / "NotchSixty/Audio/Routing/OutputDeviceCalibration.swift"
 PROJECT = ROOT / "NotchSixty.xcodeproj/project.pbxproj"
 DOC = ROOT / "docs/PR108_COHERENT_SUBWOOFER_ALIGNMENT.md"
 WORKFLOW = ROOT / ".github/workflows/pr108-coherent-subwoofer-alignment.yml"
 
-for path in (SOURCE, TESTS, COMMISSIONING, COMMISSIONING_TESTS, APPLY, APPLY_TESTS, VERIFY, VERIFY_TESTS, COHERENT, CALIBRATION, PROJECT, DOC, WORKFLOW):
+for path in (SOURCE, TESTS, COMMISSIONING, COMMISSIONING_TESTS, APPLY, APPLY_TESTS, VERIFY, VERIFY_TESTS, DEPLOYMENT, COHERENT, CALIBRATION, PROJECT, DOC, WORKFLOW):
     assert path.is_file(), f"missing PR108 Slice 1 file: {path}"
 
 source = SOURCE.read_text()
@@ -27,6 +28,7 @@ apply_source = APPLY.read_text()
 apply_tests = APPLY_TESTS.read_text()
 verify_source = VERIFY.read_text()
 verify_tests = VERIFY_TESTS.read_text()
+deployment = DEPLOYMENT.read_text()
 coherent = COHERENT.read_text()
 calibration = CALIBRATION.read_text()
 project = PROJECT.read_text()
@@ -133,6 +135,35 @@ for token in (
 ):
     assert token in verify_tests, f"missing PR108 fresh verification test: {token}"
 
+
+for token in (
+    "struct CoherentSubwooferAlignmentDeploymentRecord",
+    "struct CoherentSubwooferAlignmentVerificationRecord",
+    "expectedSpeakerDelays",
+    "expectedSubwooferDelayMilliseconds",
+    "provisional",
+    "verified",
+    "verification",
+):
+    assert token in deployment, f"missing PR108 persistent provenance contract: {token}"
+
+for token in (
+    "finalizeVerified",
+    "CoherentSubwooferAlignmentVerificationFinalizationReceipt",
+    "rollbackSourceStateMatches",
+    "coherentSubwooferAlignment",
+):
+    assert token in apply_source, f"missing PR108 verification finalization contract: {token}"
+
+for token in (
+    "testProvenanceInvalidatesIfLiveCalibrationDrifts",
+    "testLegacyOutputProfileWithoutPR108ProvenanceDecodes",
+):
+    assert token in apply_tests, f"missing PR108 provenance persistence test: {token}"
+
+assert "finalizeVerified" in verify_tests
+assert "deployment.verified" in verify_tests
+
 for token in (
     "wrappedRelativePhaseRadians",
     "relativeArrivalMilliseconds",
@@ -158,6 +189,7 @@ for token in (
     "F10800000000000000000006",
     "F10800000000000000000007",
     "F10800000000000000000008",
+    "F10800000000000000000009",
     "F10800000000000000000011",
     "F10800000000000000000012",
     "F10800000000000000000013",
@@ -166,6 +198,7 @@ for token in (
     "F10800000000000000000016",
     "F10800000000000000000017",
     "F10800000000000000000018",
+    "F10800000000000000000019",
 ):
     assert project.count(token) >= 2, f"missing PR108 Xcode registration: {token}"
 
@@ -175,6 +208,7 @@ for token in (
     "Slice 2 — Commissioning identity and explicit approval",
     "Slice 3 — Transactional Apply and exact rollback",
     "Slice 4 — Fresh coherent post-Apply verification",
+    "Slice 5 — Persistent provisional/verified provenance + finalization",
     "does **not** subtract relativeArrivalMilliseconds again",
     "previewOnly == true",
     "canDeploy == false",
@@ -191,4 +225,4 @@ assert "CoherentSubwooferAlignmentApplyTransactionTests" in workflow
 assert "CoherentSubwooferAlignmentPostApplyVerificationTests" in workflow
 assert "Run full XCTest regression" in workflow
 
-print("PR108 Slice 1-4 proposal + commissioning + Apply + fresh verification boundary passed")
+print("PR108 Slice 1-5 single-Sub proposal through verified provenance boundary passed")
