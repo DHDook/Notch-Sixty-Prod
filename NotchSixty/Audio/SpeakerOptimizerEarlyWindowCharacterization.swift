@@ -70,7 +70,7 @@ struct SpeakerOptimizerEarlyWindowEvidence: Codable, Equatable, Sendable {
             && response.frequenciesHz.allSatisfy(\.isFinite)
             && response.magnitudeDB.allSatisfy(\.isFinite)
             && zip(response.frequenciesHz, response.frequenciesHz.dropFirst())
-                .allSatisfy { $0 < $1 }
+                .allSatisfy { pair in pair.0 < pair.1 }
             && (response.frequenciesHz.first ?? 0) >= minimumReliableFrequencyHz - 1.0e-6
             && (response.frequenciesHz.last ?? .infinity) <= maximumReliableFrequencyHz + 1.0e-6
     }
@@ -353,7 +353,8 @@ struct SpeakerOptimizerCharacterizationCaptureBuilder: Sendable {
     ) {
         guard measurement.seatID == target.id,
               measurement.source == target.source,
-              abs(measurement.sampleRate - measurement.sampleRate) < 0.5 else {
+              measurement.sampleRate.isFinite,
+              measurement.sampleRate > 0 else {
             throw SpeakerOptimizerEarlyWindowError.characterizationIdentityMismatch
         }
         let compact = try SpeakerOptimizerMeasurementCapture(
