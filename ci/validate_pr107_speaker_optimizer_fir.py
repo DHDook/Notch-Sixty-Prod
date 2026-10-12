@@ -6,6 +6,11 @@ SOURCE = ROOT / "NotchSixty/Audio/SpeakerOptimizerFIRDeployment.swift"
 TESTS = ROOT / "NotchSixtyTests/SpeakerOptimizerFIRDeploymentTests.swift"
 APPLY = ROOT / "NotchSixty/Audio/SpeakerOptimizerFIRApplyTransaction.swift"
 APPLY_TESTS = ROOT / "NotchSixtyTests/SpeakerOptimizerFIRApplyTransactionTests.swift"
+AV_SYNC = ROOT / "NotchSixty/Audio/SpeakerOptimizerFIRAVSync.swift"
+AV_SYNC_TESTS = ROOT / "NotchSixtyTests/SpeakerOptimizerFIRAVSyncTests.swift"
+FIR_VERIFY = ROOT / "NotchSixty/Audio/SpeakerOptimizerFIRPostApplyVerification.swift"
+FIR_VERIFY_TESTS = ROOT / "NotchSixtyTests/SpeakerOptimizerFIRPostApplyVerificationTests.swift"
+GUIDED = ROOT / "NotchSixty/Audio/SpeakerOptimizerGuidedWorkflow.swift"
 LANE = ROOT / "NotchSixty/Audio/Realtime/N60ProgramLaneEngine.h"
 CONV = ROOT / "NotchSixty/Audio/Realtime/N60Convolution.h"
 COMMISSIONING = ROOT / "NotchSixty/Audio/SpeakerOptimizerCommissioningContract.swift"
@@ -17,13 +22,18 @@ LIVE_RENDER = ROOT / "NotchSixty/Audio/Realtime/N60LiveNChannelRenderCore.h"
 LIVE_RENDER_HARNESS = ROOT / "ci/validate_pr107_live_fir_render.c"
 WORKFLOW = ROOT / ".github/workflows/pr107-speaker-optimizer-fir.yml"
 
-for path in (SOURCE, TESTS, APPLY, APPLY_TESTS, LANE, CONV, COMMISSIONING, PROJECT, DOC, PROGRAM_FIR, PROGRAM_FIR_HARNESS, LIVE_RENDER, LIVE_RENDER_HARNESS, WORKFLOW):
+for path in (SOURCE, TESTS, APPLY, APPLY_TESTS, AV_SYNC, AV_SYNC_TESTS, FIR_VERIFY, FIR_VERIFY_TESTS, GUIDED, LANE, CONV, COMMISSIONING, PROJECT, DOC, PROGRAM_FIR, PROGRAM_FIR_HARNESS, LIVE_RENDER, LIVE_RENDER_HARNESS, WORKFLOW):
     assert path.is_file(), f"missing PR107 Slice 1 file: {path}"
 
 source = SOURCE.read_text()
 tests = TESTS.read_text()
 apply_source = APPLY.read_text()
 apply_tests = APPLY_TESTS.read_text()
+av_sync = AV_SYNC.read_text()
+av_sync_tests = AV_SYNC_TESTS.read_text()
+fir_verify = FIR_VERIFY.read_text()
+fir_verify_tests = FIR_VERIFY_TESTS.read_text()
+guided = GUIDED.read_text()
 lane = LANE.read_text()
 conv = CONV.read_text()
 commissioning = COMMISSIONING.read_text()
@@ -140,6 +150,42 @@ for token in (
 ):
     assert token in apply_tests, f"missing FIR Apply transaction test: {token}"
 
+for token in (
+    "SpeakerOptimizerFIRAVSyncPolicy",
+    "externalVideoDelayRequired",
+    "externalVideoDelayInsufficient",
+    "requiredVideoDelayMilliseconds",
+    "Notch Sixty does not delay system video",
+):
+    assert token in av_sync, f"missing FIR A/V synchronization contract: {token}"
+
+for token in (
+    "testAudioOnlyAllowsDefaultFIRAndReportsExactLatency",
+    "testSynchronizedVideoWithoutExternalDelayFailsClosed",
+    "testSynchronizedVideoRequiresEnoughExternalDelayRange",
+    "testProgramPathLatencyIncludesIntentionalCalibrationDelay",
+):
+    assert token in av_sync_tests, f"missing FIR A/V synchronization test: {token}"
+
+for token in (
+    "SpeakerOptimizerFIRPostApplyVerifier",
+    "expectedFIRMagnitude",
+    "verificationNotPostApply",
+    "exact persisted FIR taps",
+):
+    assert token in fir_verify, f"missing FIR measured verification contract: {token}"
+
+for token in (
+    "testFreshQualifiedVerificationAcceptsTrackedBeneficialFIR",
+    "testNoAcousticFIRChangeRecommendsRollback",
+    "testAcceptedFIRVerificationPersistsAndRollbackStillRestoresSnapshot",
+):
+    assert token in fir_verify_tests, f"missing FIR measured verification test: {token}"
+
+assert "receipt: SpeakerOptimizerFIRApplyReceipt" in guided
+assert "SpeakerOptimizerFIRVerificationRecord" in source
+assert "finalizeVerified" in apply_source
+
 assert "#define N60_CONVOLUTION_PARTITION_FRAMES 256u" in conv
 assert "blockedDedicatedSpeakerOptimizerFIRStageUnavailable" in commissioning
 
@@ -148,10 +194,18 @@ for token in (
     "F10700000000000000000002",
     "F10700000000000000000003",
     "F10700000000000000000004",
+    "F10700000000000000000005",
+    "F10700000000000000000006",
+    "F10700000000000000000007",
+    "F10700000000000000000008",
     "F10700000000000000000011",
     "F10700000000000000000012",
     "F10700000000000000000013",
     "F10700000000000000000014",
+    "F10700000000000000000015",
+    "F10700000000000000000016",
+    "F10700000000000000000017",
+    "F10700000000000000000018",
 ):
     assert project.count(token) >= 2, f"missing PR107 Xcode registration: {token}"
 
@@ -167,9 +221,11 @@ for token in (
 assert "SpeakerOptimizerFIRDeploymentTests" in workflow
 assert "SpeakerOptimizerFIRApplyTransactionTests" in workflow
 assert "SpeakerOptimizerCommissioningContractTests" in workflow
+assert "SpeakerOptimizerFIRAVSyncTests" in workflow
+assert "SpeakerOptimizerFIRPostApplyVerificationTests" in workflow
 assert "validate_pr107_program_fir_runtime.c" in workflow
 assert "validate_pr107_live_fir_render.c" in workflow
 assert "validate_pr106_speaker_measurement_lab.py" in workflow
 assert "Run full XCTest regression" in workflow
 
-print("PR107 FIR latency + runtime + persistence + Apply boundary passed")
+print("PR107 FIR deployment, A/V and measured-verification boundary passed")
