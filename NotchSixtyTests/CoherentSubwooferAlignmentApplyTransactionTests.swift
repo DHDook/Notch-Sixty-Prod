@@ -50,6 +50,13 @@ final class CoherentSubwooferAlignmentApplyTransactionTests:
             store.profile?.state,
             receipt.expectedAppliedState
         )
+        let deployment = try XCTUnwrap(
+            output.coherentSubwooferAlignment
+        )
+        XCTAssertEqual(deployment.applyReceiptID, receipt.id)
+        XCTAssertTrue(deployment.provisional)
+        XCTAssertFalse(deployment.verified)
+        XCTAssertTrue(deployment.validate(profile: output))
         XCTAssertTrue(receipt.requiresMeasuredVerification)
         XCTAssertFalse(receipt.isMeasuredVerification)
 
