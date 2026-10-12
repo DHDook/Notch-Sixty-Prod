@@ -1154,3 +1154,236 @@ final class AdvancedPlacementDirectivityTests: XCTestCase {
         XCTAssertNotNil(controller.toeInEvidenceMessage)
     }
 }
+
+
+// PR110 Slice 4: real A/B sub placement evidence, no unmeasured predictions.
+final class AdvancedSubPlacementABTests: XCTestCase {
+    private let systemID = UUID(uuidString:
+        "44000000-0000-0000-0000-000000000001")!
+    private let seatIDs = [
+        UUID(uuidString: "44000000-0000-0000-0000-000000000002")!,
+        UUID(uuidString: "44000000-0000-0000-0000-000000000003")!,
+        UUID(uuidString: "44000000-0000-0000-0000-000000000004")!,
+    ]
+    private let mic = SpeakerOptimizerMicrophoneIdentity(
+        deviceUID: "pr110-multi-seat-mic", inputChannelIndex: 0,
+        calibrationFingerprint: "pr110-calibrated-mic"
+    )
+    private let source: MultichannelCalibrationSource = .subwoofer(0)
+
+    private func scenario() throws -> (
+        RoomAdvancedPlacementState, RoomAdvancedPlacementExperiment
+    ) {
+        let room = RoomGeometryModel.template(
+            projectID: UUID(uuidString:
+                "44000000-0000-0000-0000-000000000005")!
+        )
+        let state = RoomAdvancedPlacementState(
+            room: room,
+            secondarySeats: [
+                RoomGeometryPoint3D(x: 1.5, y: 3.5, z: 1.1),
+                RoomGeometryPoint3D(x: 2.5, y: 3.5, z: 1.1),
+            ],
+            subwooferPositions: [
+                RoomGeometryPoint3D(x: 0.5, y: 0.5, z: 0.2)
+            ]
+        )
+        let experiment = try XCTUnwrap(
+            RoomAdvancedPlacementExplorer()
+                .experiments(for: state)
+                .first { $0.id == "sub-0-right" }
+        )
+        return (state, experiment)
+    }
+
+    private func captures(
+        role: SpeakerOptimizerMeasurementRole,
+        spread: Double
+    ) -> SpeakerOptimizerMeasurementSet {
+        let grid = (0..<80).map { i in
+            20.0 * pow(20.0, Double(i) / 79)
+        }
+        let offsets = [-spread, 0.0, spread]
+        let samples: [SpeakerOptimizerMeasurementCapture] = seatIDs
+            .enumerated().flatMap { seatIndex, positionID in
+                (0..<3).map { repeatIndex in
+                    SpeakerOptimizerMeasurementCapture(
+                        capturedAt: Date(timeIntervalSince1970:
+                            (role == .baseline ? 1_700_000_000 : 1_700_000_600)
+                            + Double(seatIndex * 6 + repeatIndex)),
+                        playbackSystemID: systemID,
+                        routingSignature: "pr110-route-one",
+                        microphone: mic,
+                        positionID: positionID,
+                        source: source,
+                        sampleRate: 48_000,
+                        response: RoomCorrectionFrequencyResponse(
+                            frequenciesHz: grid,
+                            magnitudeDB: grid.map { hz in
+                                offsets[seatIndex] + 0.1 * log2(hz / 75)
+                                    + Double(repeatIndex - 1) * 0.02
+                            },
+                            phaseRadians: grid.map { hz in
+                                0.03 * log2(hz / 100)
+                                    + Double(repeatIndex - 1) * 0.005
+                            }
+                        ),
+                        quality: RoomCorrectionMeasurementQuality(
+                            clipped: false,
+                            playbackPeakDBFS: -20,
+                            capturePeakDBFS: -12,
+                            estimatedNoiseFloorDBFS: -70,
+                            estimatedSNRDB: 54,
+                            sweepComplete: true,
+                            directArrivalSeconds:
+                                0.010 + Double(repeatIndex) * 0.00002,
+                            usableLowHz: 25,
+                            usableHighHz: 300,
+                            warnings: []
+                        )
+                    )
+                }
+            }
+        return SpeakerOptimizerMeasurementSet(
+            role: role,
+            playbackSystemID: systemID,
+            routingSignature: "pr110-route-one",
+            microphone: mic,
+            sampleRate: 48_000,
+            positions: seatIDs.enumerated().map { n, id in
+                SpeakerOptimizerMeasurementPosition(id: id,
+                    name: "Seat \(n + 1)")
+            },
+            plannedSources: [source],
+            captures: samples
+        )
+    }
+
+    private func measure(
+        _ baseline: SpeakerOptimizerMeasurementSet,
+        _ candidate: SpeakerOptimizerMeasurementSet,
+        physicalSetupConfirmed: Bool = true
+    ) throws -> RoomAdvancedSubPlacementComparison {
+        let (state, trial) = try scenario()
+        return try RoomAdvancedSubPlacementComparisonAnalyzer().compare(
+            baseline: baseline, candidate: candidate, state: state,
+            experiment: trial, playbackSystemID: systemID,
+            physicalSetupConfirmed: physicalSetupConfirmed
+        )
+    }
+
+    func testMeasuredSubMoveComparesActualThreeSeatLFVariation() throws {
+        let result = try measure(captures(role: .baseline, spread: 6),
+                                 captures(role: .candidate, spread: 2))
+        XCTAssertEqual(result.experimentID, "sub-0-right")
+        XCTAssertEqual(result.source, source)
+        XCTAssertEqual(result.seatCount, 3)
+        XCTAssertGreaterThanOrEqual(result.commonFrequencyPointCount, 12)
+        XCTAssertGreaterThan(result.reductionInInterseatSpreadDB, 2)
+        XCTAssertGreaterThan(result.evidenceConfidence, 0.5)
+        XCTAssertTrue(result.measurementOnly)
+        XCTAssertFalse(result.canDeploy)
+        XCTAssertTrue(result.requiresRealWorldListeningVerification)
+    }
+
+    func testMovingSubCanWorsenMeasuredSeatConsistency() throws {
+        let result = try measure(captures(role: .baseline, spread: 1),
+                                 captures(role: .candidate, spread: 5))
+        XCTAssertLessThan(result.reductionInInterseatSpreadDB, -2)
+    }
+
+    func testCommonGainShiftDoesNotFabricateSeatImprovement() throws {
+        let prior = captures(role: .baseline, spread: 3)
+        var after = captures(role: .candidate, spread: 3)
+        for i in after.captures.indices {
+            after.captures[i].response.magnitudeDB =
+                after.captures[i].response.magnitudeDB.map { $0 + 7 }
+        }
+        let result = try measure(prior, after)
+        XCTAssertEqual(result.reductionInInterseatSpreadDB, 0,
+                       accuracy: 0.0001)
+    }
+
+    func testMissingHumanAttestationFailsClosed() throws {
+        XCTAssertThrowsError(try measure(
+            captures(role: .baseline, spread: 5),
+            captures(role: .candidate, spread: 2),
+            physicalSetupConfirmed: false
+        )) {
+            XCTAssertEqual(
+                $0 as? RoomAdvancedSubPlacementComparisonError,
+                .missingPhysicalAttestation
+            )
+        }
+    }
+
+    func testWrongMicrophoneRouteOrSeatIdentityFailsClosed() throws {
+        let before = captures(role: .baseline, spread: 5)
+        var after = captures(role: .candidate, spread: 2)
+        after.microphone.deviceUID = "other-microphone"
+        XCTAssertThrowsError(try measure(before, after))
+        after = captures(role: .candidate, spread: 2)
+        after.routingSignature = "other-route"
+        XCTAssertThrowsError(try measure(before, after))
+        after = captures(role: .candidate, spread: 2)
+        after.positions.swapAt(0, 1)
+        XCTAssertThrowsError(try measure(before, after))
+    }
+
+    func testIncompleteRepeatsAndClippingFailClosed() throws {
+        let before = captures(role: .baseline, spread: 5)
+        var after = captures(role: .candidate, spread: 2)
+        let seat = after.positions[0].id
+        after.captures.removeAll {
+            $0.positionID == seat && $0.capturedAt
+                == after.captures.first?.capturedAt
+        }
+        // An intact but clipped set is always rejected.
+        after = captures(role: .candidate, spread: 2)
+        after.captures[0].quality.clipped = true
+        XCTAssertThrowsError(try measure(before, after))
+        after = captures(role: .candidate, spread: 2)
+        after.captures.remove(at: 0)
+        XCTAssertThrowsError(try measure(before, after))
+    }
+
+    func testCandidateMustBeCapturedAfterIndependentBaseline() throws {
+        let before = captures(role: .baseline, spread: 5)
+        var after = captures(role: .candidate, spread: 2)
+        for i in after.captures.indices {
+            after.captures[i].capturedAt =
+                Date(timeIntervalSince1970: 1_600_000_000 + Double(i))
+        }
+        XCTAssertThrowsError(try measure(before, after))
+        after = captures(role: .candidate, spread: 2)
+        after.captures[0].id = before.captures[0].id
+        XCTAssertThrowsError(try measure(before, after))
+    }
+
+    func testUnqualifiedSourceOrNoRealSubMoveRejected() throws {
+        let prior = captures(role: .baseline, spread: 5)
+        let after = captures(role: .candidate, spread: 2)
+        let (state, trial) = try scenario()
+        var bad = trial
+        bad.trial.subwooferPositions = state.subwooferPositions
+        XCTAssertThrowsError(try RoomAdvancedSubPlacementComparisonAnalyzer()
+            .compare(baseline: prior, candidate: after, state: state,
+                     experiment: bad, playbackSystemID: systemID,
+                     physicalSetupConfirmed: true))
+        var main = after
+        main.plannedSources = [.speaker(.frontLeft)]
+        XCTAssertThrowsError(try measure(prior, main))
+    }
+
+    func testResponseGridMismatchOrMissingBassCoverageRejected() throws {
+        let prior = captures(role: .baseline, spread: 5)
+        var after = captures(role: .candidate, spread: 2)
+        after.captures[0].response.frequenciesHz[7] *= 1.01
+        XCTAssertThrowsError(try measure(prior, after))
+        after = captures(role: .candidate, spread: 2)
+        for i in after.captures.indices {
+            after.captures[i].quality.usableLowHz = 120
+        }
+        XCTAssertThrowsError(try measure(prior, after))
+    }
+}
