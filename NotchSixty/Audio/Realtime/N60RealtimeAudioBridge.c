@@ -1402,6 +1402,127 @@ bool N60RealtimeAudioBridgeConfigureSpeakerDriverProcessing(
     );
 }
 
+
+static bool protected_measurement_bus_is_supported(
+    const N60SpeakerBusSplitterSnapshot *snapshot,
+    N60SpeakerOutputBus bus
+) {
+    if (snapshot == NULL || !snapshot->enabled) return false;
+    if (snapshot->lowerSectionCount == 0u
+        || snapshot->lowerSectionCount > N60_MAX_CROSSOVER_SECTIONS) {
+        return false;
+    }
+
+    switch (snapshot->mode) {
+    case N60SpeakerCrossoverModeBiAmp:
+        return bus == N60SpeakerOutputBusLeftLow
+            || bus == N60SpeakerOutputBusRightLow
+            || bus == N60SpeakerOutputBusLeftHigh
+            || bus == N60SpeakerOutputBusRightHigh;
+    case N60SpeakerCrossoverModeTriAmp:
+        if (snapshot->upperSectionCount == 0u
+            || snapshot->upperSectionCount > N60_MAX_CROSSOVER_SECTIONS) {
+            return false;
+        }
+        return bus == N60SpeakerOutputBusLeftLow
+            || bus == N60SpeakerOutputBusRightLow
+            || bus == N60SpeakerOutputBusLeftMid
+            || bus == N60SpeakerOutputBusRightMid
+            || bus == N60SpeakerOutputBusLeftHigh
+            || bus == N60SpeakerOutputBusRightHigh;
+    case N60SpeakerCrossoverModeMainsSub:
+    default:
+        return false;
+    }
+}
+
+static bool protected_measurement_bus_is_left(
+    N60SpeakerOutputBus bus
+) {
+    return bus == N60SpeakerOutputBusLeftLow
+        || bus == N60SpeakerOutputBusLeftMid
+        || bus == N60SpeakerOutputBusLeftHigh;
+}
+
+bool N60ProtectedSpeakerBusRenderProgram(
+    const float *monoInput,
+    uint32_t frameCount,
+    N60SpeakerOutputBus targetBus,
+    N60SpeakerBusSplitterSnapshot splitterSnapshot,
+    N60SpeakerDriverProcessingSnapshot driverSnapshot,
+    float *output
+) {
+    if (monoInput == NULL || output == NULL || frameCount == 0u
+        || !protected_measurement_bus_is_supported(
+            &splitterSnapshot, targetBus
+        )
+        || !driverSnapshot.valid || !driverSnapshot.enabled
+        || targetBus < N60SpeakerOutputBusLeftLow
+        || targetBus > N60SpeakerOutputBusRightHigh) {
+        return false;
+    }
+
+    const uint32_t driverIndex = (uint32_t)targetBus;
+    if (driverIndex >= N60_SPEAKER_DRIVER_BUS_COUNT) return false;
+    const N60SpeakerDriverBusSnapshot *targetDriver =
+        &driverSnapshot.buses[driverIndex];
+
+    // A "protected driver" measurement is not allowed to silently downgrade
+    // to crossover-only protection. The exact target bus must be enabled and
+    // its configured limiter must remain in the rendered chain.
+    if (!targetDriver->enabled || !targetDriver->limiterEnabled) {
+        return false;
+    }
+
+    N60SpeakerBusSplitterRuntime splitterRuntime = {0};
+    splitterRuntime.snapshot = splitterSnapshot;
+
+    N60SpeakerDriverProcessingRuntime *driverRuntime =
+        (N60SpeakerDriverProcessingRuntime *)calloc(
+            1u, sizeof(N60SpeakerDriverProcessingRuntime)
+        );
+    if (driverRuntime == NULL) return false;
+    if (!N60SpeakerDriverProcessingRuntimeConfigure(
+            driverRuntime, driverSnapshot)) {
+        free(driverRuntime);
+        return false;
+    }
+
+    const bool left = protected_measurement_bus_is_left(targetBus);
+    for (uint32_t frameIndex = 0u;
+         frameIndex < frameCount;
+         ++frameIndex) {
+        const float input = monoInput[frameIndex];
+        if (!isfinite(input)) {
+            free(driverRuntime);
+            return false;
+        }
+
+        N60SpeakerBusFrame frame;
+        process_speaker_bus_splitter(
+            &splitterRuntime,
+            left ? input : 0.0f,
+            left ? 0.0f : input,
+            &frame
+        );
+        N60SpeakerDriverProcessingRuntimeProcessValues(
+            driverRuntime,
+            frame.values
+        );
+        const float rendered = N60SpeakerBusFrameGet(
+            &frame, targetBus
+        );
+        if (!isfinite(rendered)) {
+            free(driverRuntime);
+            return false;
+        }
+        output[frameIndex] = rendered;
+    }
+
+    free(driverRuntime);
+    return true;
+}
+
 bool N60SameDeviceOutputMapValueForChannel(
     const N60SameDeviceOutputMap *map,
     const N60SpeakerBusFrame *frame,

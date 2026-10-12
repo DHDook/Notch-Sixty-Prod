@@ -1,6 +1,6 @@
 # PR106 — Advanced Speaker Measurement Lab
 
-Status: **SLICES 1–6 SOFTWARE VERIFIED — SLICE 7 CI PENDING**
+Status: **SLICES 1–7 SOFTWARE VERIFIED — SLICE 8A CI PENDING**
 
 Base: PR105 Guided Speaker Optimizer & Acoustic Verification.
 
@@ -233,9 +233,48 @@ targeted measurement-lab tests and full XCTest regression.
   threshold or loudspeaker defect certification is claimed.
 - Measurement-only: `canDeploy == false`.
 
+## Slice 7 exact-head verification
+
+Slice 7 exact head `a5981be2049263eb85c4ca5436b9bdc57dda84d9` passed both
+GitHub Actions paths:
+
+- push run 38222284730;
+- pull-request run 38222289440.
+
+Both paths passed the PR106/PR105 validators, Apple Silicon Debug build,
+targeted measurement-lab tests and full XCTest regression.
+
+## Slice 8A — Exact protected-driver excitation compiler substrate
+
+- Adds a control-plane C renderer that calls the SAME production speaker-bus
+  splitter routine used by live playback and then the SAME production
+  per-driver processor used for EQ/trim/polarity/delay/limiter protection.
+- The C renderer accepts only split Low/Mid/High buses produced by Bi-Amp or
+  Tri-Amp crossover snapshots. Full-range, Sub and Mains+Sub targets are
+  rejected.
+- The exact target driver bus must be enabled AND limiter-protected. A direct
+  driver measurement cannot silently downgrade to crossover-only protection.
+- The Swift compiler additionally requires a bounded input peak (-24 dBFS by
+  default) and rejects empty, non-finite or silent programs.
+- The input is padded with a bounded control-plane flush interval so configured
+  driver delay and crossover/driver IIR ring-out are included rather than
+  silently truncating the protected waveform.
+- The result retains the exact Bass Management and per-driver configuration
+  used to render the program so the later transport slice can detect any state
+  drift before hardware output.
+- Deterministic tests verify high-pass/low-pass isolation, Tri-Amp Mid support,
+  limiter capping, limiter-required fail-closed behavior, target restrictions,
+  hot/non-finite rejection and preservation of the existing Lab live block.
+- IMPORTANT: Slice 8A does NOT unblock `.protectedDriverNearField`.
+  The current raw physical-lane calibration transport remains blocked until
+  Slice 8B binds this pre-rendered program to one exact physical route and
+  revalidates the crossover/driver state immediately before playback.
+- Measurement-only; no DSP mutation and `canDeploy == false`.
+
 ## Planned follow-on slices
 
-1. Crossover-preserving protected-driver excitation path.
+1. Slice 8B: bind the verified protected excitation to one exact physical
+   driver route with immediate pre-playback state revalidation.
 2. Authenticated shared-clock reference capture for coherent relative timing and
    phase diagnostics.
 3. Production Advanced Speaker Measurement Lab UI and export/reporting.
