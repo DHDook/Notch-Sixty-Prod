@@ -82,9 +82,10 @@ struct SpeakerOptimizerFIRLatencyPlan:
     }
 
     var canInstallLiveFIR: Bool {
-        // Slice 1 is planning/validation only. A later PR107 slice owns the
-        // per-program-channel convolver runtime and transactional Apply path.
-        false
+        // The dedicated sparse runtime, persistent ownership, automatic
+        // headroom reserve and transactional Apply path now exist. Candidate
+        // identity/headroom/approval gates are still enforced by commissioning.
+        true
     }
 }
 
