@@ -28,6 +28,8 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
     @ObservedObject var microphone: RoomCorrectionCalibrationController
     @ObservedObject var profiles: ProductProfileController
     @StateObject private var lab: SpeakerMeasurementLabController
+    @StateObject private var alignment:
+        CoherentSubwooferAlignmentGuidedController
 
     private let store = SpeakerMeasurementLabSessionStore()
     private let reportBuilder = SpeakerMeasurementLabReportBuilder()
@@ -60,6 +62,12 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                 microphone: microphone
             )
         )
+        _alignment = StateObject(
+            wrappedValue:
+                CoherentSubwooferAlignmentGuidedController(
+                    profileStore: profiles
+                )
+        )
     }
 
     var body: some View {
@@ -70,9 +78,11 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                 protocolComposerCard
                 sessionCard
                 reportCard
+                coherentAlignmentCard
                 historyCard
 
                 if let error = actionError
+                    ?? alignment.lastErrorDescription
                     ?? lab.lastErrorDescription
                     ?? microphone.lastErrorDescription {
                     Label(
@@ -140,7 +150,10 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                     .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Label("MEASUREMENT ONLY", systemImage: "lock.shield")
+                Label(
+                    "MEASURE → REVIEW → VERIFY",
+                    systemImage: "checkmark.shield"
+                )
                     .font(.caption.bold())
                     .tracking(1.0)
                     .foregroundStyle(.secondary)
@@ -150,7 +163,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
             }
 
             Text(
-                "Lab results never deploy DSP. Installed-room, near-field, quasi-anechoic and coherent-reference interpretations remain explicitly separated."
+                "Lab analyses never mutate DSP on their own. Coherent Sub Alignment below can turn authenticated Main/Sub timing evidence into an explicit reviewed transaction, followed by mandatory fresh measured verification."
             )
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -844,6 +857,459 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                 .foregroundStyle(.secondary)
                 .padding(6)
             }
+        }
+    }
+
+    private var coherentAlignmentCard: some View {
+        GroupBox("Coherent Sub Alignment") {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .top, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("PR108 · Crossover timing & polarity")
+                            .font(.headline)
+                        Text(
+                            "Use a completed shared-reference Main/Sub Lab session to review a bounded timing/polarity proposal. Apply is explicit, provisional, and accepted only after a new measured session passes."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text(
+                        alignment.state.rawValue
+                            .replacingOccurrences(
+                                of: "([a-z])([A-Z])",
+                                with: "$1 $2",
+                                options: .regularExpression
+                            )
+                            .uppercased()
+                    )
+                    .font(.caption.bold())
+                    .tracking(0.8)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(.quaternary, in: Capsule())
+                }
+
+                HStack(spacing: 10) {
+                    Button("Generate Alignment Proposal") {
+                        actionError = nil
+                        do {
+                            if alignment.state == .rolledBack {
+                                alignment.resetAfterRollback()
+                            }
+                            guard let session = lab.session else {
+                                throw CoherentSubwooferAlignmentGuidedError
+                                    .coherentEvidenceRequired
+                            }
+                            try alignment.prepareReview(
+                                baselineSession: session
+                            )
+                        } catch {
+                            actionError = error.localizedDescription
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!canGenerateAlignmentProposal)
+
+                    if alignment.canRollback {
+                        Button("Rollback", role: .destructive) {
+                            actionError = nil
+                            do {
+                                try alignment.rollback()
+                            } catch {
+                                actionError = error.localizedDescription
+                            }
+                        }
+                    }
+
+                    if alignment.state == .rolledBack {
+                        Button("Reset Workflow") {
+                            alignment.resetAfterRollback()
+                            actionError = nil
+                        }
+                    }
+                }
+
+                if let mode = alignment.mode {
+                    Divider()
+
+                    HStack(spacing: 22) {
+                        status("Mode", mode.displayName)
+                        status(
+                            "Subs",
+                            "\(alignment.subwooferCount)"
+                        )
+                        status(
+                            "Predicted Δ",
+                            alignment.predictedImprovementDB.map {
+                                String(
+                                    format: "%+.2f dB",
+                                    $0
+                                )
+                            } ?? "—"
+                        )
+                        status(
+                            "Common Main Delay",
+                            alignment
+                                .speakerCommonDelayMilliseconds
+                                .map {
+                                    String(
+                                        format: "%.2f ms",
+                                        $0
+                                    )
+                                } ?? "—"
+                        )
+                    }
+
+                    alignmentCandidateDetails
+
+                    if alignment.state == .reviewReady {
+                        Label(
+                            "Preview only. The raw candidate cannot deploy; Apply requires this exact commissioned proposal plus an explicit user action.",
+                            systemImage: "hand.raised.fill"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                        Button("Approve & Apply Provisionally") {
+                            actionError = nil
+                            do {
+                                try alignment.approveAndApply(
+                                    userInitiated: true
+                                )
+                            } catch {
+                                actionError =
+                                    error.localizedDescription
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!alignment.canApproveAndApply)
+                    }
+
+                    if alignment.state
+                        == .appliedPendingVerification {
+                        Divider()
+
+                        Label(
+                            "Provisional timing/polarity is live in the Playback System profile. Do not accept by ear alone: capture a fresh coherent verification session.",
+                            systemImage:
+                                "exclamationmark.shield.fill"
+                        )
+                        .font(.callout.bold())
+                        .foregroundStyle(.orange)
+
+                        HStack(spacing: 10) {
+                            Button("Start Fresh Verification Session") {
+                                startFreshAlignmentVerificationSession()
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(
+                                !canStartAlignmentVerificationSession
+                            )
+
+                            Button("Verify Current Lab Session") {
+                                actionError = nil
+                                do {
+                                    guard let session = lab.session else {
+                                        throw CoherentSubwooferAlignmentGuidedError
+                                            .coherentEvidenceRequired
+                                    }
+                                    try alignment.verify(
+                                        freshSession: session
+                                    )
+                                } catch {
+                                    actionError =
+                                        error.localizedDescription
+                                }
+                            }
+                            .disabled(
+                                !canVerifyCurrentAlignmentSession
+                            )
+                        }
+
+                        Text(
+                            "The verification session clones the approved coherent geometry, repeat count, excitation level and shared electrical-reference configuration, but receives new session and pair identities."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+
+                    if alignment.state == .measuredAccepted {
+                        Divider()
+                        Label(
+                            "Fresh measured verification accepted. PR108 timing/polarity provenance is persisted as VERIFIED.",
+                            systemImage: "checkmark.shield.fill"
+                        )
+                        .font(.callout.bold())
+                        .foregroundStyle(.green)
+
+                        if let improvement =
+                                alignmentMeasuredImprovementDB {
+                            Text(
+                                "Measured aggregate crossover-coherence improvement: \(String(format: "%+.2f dB", improvement))."
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    if alignment.state == .rolledBack {
+                        Divider()
+                        Label(
+                            "The provisional PR108 alignment was rolled back to the exact pre-Apply Playback System snapshot.",
+                            systemImage:
+                                "arrow.uturn.backward.circle.fill"
+                        )
+                        .font(.callout.bold())
+                        .foregroundStyle(.secondary)
+                    }
+                } else if let persisted = persistedAlignmentStatus {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label(
+                            persisted.verified
+                                ? "Persisted PR108 alignment · VERIFIED"
+                                : "Persisted PR108 alignment · PROVISIONAL",
+                            systemImage: persisted.verified
+                                ? "checkmark.shield.fill"
+                                : "clock.badge.checkmark"
+                        )
+                        .font(.callout.bold())
+                        .foregroundStyle(
+                            persisted.verified ? .green : .orange
+                        )
+
+                        Text(persisted.detail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Text(
+                            "This deployment provenance survived profile reload. A new alignment proposal is blocked while it owns the live timing/polarity calibration. The guided controller does not reconstruct an old Apply receipt after relaunch."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text(
+                        "Complete a coherent Main/Sub Lab session with simultaneous shared-time electrical reference, then generate a proposal here. One Sub uses the single-Sub path; two or more Subs are solved and applied atomically."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+            }
+            .padding(6)
+        }
+    }
+
+    @ViewBuilder
+    private var alignmentCandidateDetails: some View {
+        if let candidate = alignment.singleCandidate {
+            HStack(spacing: 22) {
+                status(
+                    "Relative Adjustment",
+                    String(
+                        format: "%+.2f ms",
+                        candidate
+                            .signedRelativeDelayAdjustmentMilliseconds
+                    )
+                )
+                status(
+                    "Physical Sub Delay",
+                    String(
+                        format: "+%.2f ms",
+                        candidate
+                            .subwooferDelayAdjustmentMilliseconds
+                    )
+                )
+                status(
+                    "Sub Polarity",
+                    candidate.toggleSubwooferPolarity
+                        ? "Toggle" : "Keep"
+                )
+                status(
+                    "Predicted",
+                    String(
+                        format: "%.2f → %.2f dB",
+                        candidate.predictedCoherenceBeforeDB,
+                        candidate.predictedCoherenceAfterDB
+                    )
+                )
+            }
+        } else if let candidate = alignment.multiCandidate {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(
+                    candidate.subwoofers,
+                    id: \.subwooferIndex
+                ) { sub in
+                    HStack(spacing: 18) {
+                        Text("Sub \(sub.subwooferIndex + 1)")
+                            .font(.callout.bold())
+                            .frame(width: 70, alignment: .leading)
+                        status(
+                            "Measured Optimum",
+                            String(
+                                format: "%+.2f ms",
+                                sub
+                                    .signedRelativeDelayAdjustmentMilliseconds
+                            )
+                        )
+                        status(
+                            "Added Sub Delay",
+                            String(
+                                format: "+%.2f ms",
+                                sub
+                                    .subwooferDelayAdjustmentMilliseconds
+                            )
+                        )
+                        status(
+                            "Polarity",
+                            sub.toggleSubwooferPolarity
+                                ? "Toggle" : "Keep"
+                        )
+                        status(
+                            "Predicted Δ",
+                            String(
+                                format: "%+.2f dB",
+                                sub.predictedImprovementDB
+                            )
+                        )
+                    }
+                    .padding(.vertical, 3)
+                }
+            }
+        }
+    }
+
+    private var persistedAlignmentStatus:
+        (verified: Bool, detail: String)? {
+        guard let output = currentProfile else { return nil }
+
+        if let record = output.coherentMultiSubwooferAlignment {
+            return (
+                verified: record.verified,
+                detail:
+                    "Coordinated \(record.subwoofers.count)-Sub provenance · crossover \(String(format: "%.0f Hz", record.crossoverFrequencyHz)) · applied \(record.appliedAt.formatted(date: .abbreviated, time: .shortened))."
+            )
+        }
+
+        if let record = output.coherentSubwooferAlignment {
+            return (
+                verified: record.verified,
+                detail:
+                    "Sub \(record.subwooferIndex + 1) provenance · crossover \(String(format: "%.0f Hz", record.crossoverFrequencyHz)) · applied \(record.appliedAt.formatted(date: .abbreviated, time: .shortened))."
+            )
+        }
+
+        return nil
+    }
+
+    private var canGenerateAlignmentProposal: Bool {
+        guard lab.progress?.complete == true,
+              currentSessionHasCoherentPairs,
+              engine.lifecycleState == .idle,
+              persistedAlignmentStatus == nil else {
+            return false
+        }
+        switch alignment.state {
+        case .idle, .reviewReady, .failed, .rolledBack:
+            return true
+        case .appliedPendingVerification,
+             .measuredAccepted,
+             .measuredRejected:
+            return false
+        }
+    }
+
+    private var canStartAlignmentVerificationSession: Bool {
+        alignment.state == .appliedPendingVerification
+            && engine.lifecycleState == .idle
+            && lab.state != .measuring
+            && lab.state != .analyzing
+            && lab.progress?.complete == true
+            && lab.session?.id == alignment.baselineSessionID
+    }
+
+    private var canVerifyCurrentAlignmentSession: Bool {
+        alignment.canVerify
+            && lab.progress?.complete == true
+            && currentSessionHasCoherentPairs
+            && lab.session?.id != alignment.baselineSessionID
+    }
+
+    private var currentSessionHasCoherentPairs: Bool {
+        lab.session?.protocols.contains {
+            $0.request.mode == .coherentMainsSubTiming
+                && $0.coherentPairID != nil
+                && $0.coherentLeg != nil
+        } == true
+    }
+
+    private var alignmentMeasuredImprovementDB: Double? {
+        alignment.singleVerificationReport?
+            .measuredImprovementDB
+            ?? alignment.multiVerificationReport?
+                .measuredImprovementDB
+    }
+
+    private func startFreshAlignmentVerificationSession() {
+        actionError = nil
+        do {
+            guard let baseline = lab.session,
+                  baseline.id == alignment.baselineSessionID,
+                  let reference =
+                    baseline.sharedClockReferenceConfiguration else {
+                throw CoherentSubwooferAlignmentGuidedError
+                    .coherentEvidenceRequired
+            }
+
+            let coherent = baseline.protocols.filter {
+                $0.request.mode == .coherentMainsSubTiming
+            }
+            let originalPairIDs = Set(
+                coherent.compactMap(\.coherentPairID)
+            ).sorted {
+                $0.uuidString < $1.uuidString
+            }
+            guard !originalPairIDs.isEmpty else {
+                throw CoherentSubwooferAlignmentGuidedError
+                    .coherentEvidenceRequired
+            }
+
+            var fresh: [SpeakerMeasurementLabProtocol] = []
+            for originalPairID in originalPairIDs {
+                let pair = coherent.filter {
+                    $0.coherentPairID == originalPairID
+                }
+                guard pair.count == 2 else {
+                    throw CoherentSubwooferAlignmentGuidedError
+                        .coherentEvidenceShapeMismatch
+                }
+                let freshPairID = UUID()
+                for item in pair.sorted(by: {
+                    ($0.coherentLeg == .main ? 0 : 1)
+                        < ($1.coherentLeg == .main ? 0 : 1)
+                }) {
+                    fresh.append(
+                        SpeakerMeasurementLabProtocol(
+                            name: "Verify · \(item.name)",
+                            request: item.request,
+                            excitationLevelDBFS:
+                                item.excitationLevelDBFS,
+                            nearFieldComponent:
+                                item.nearFieldComponent,
+                            coherentPairID: freshPairID,
+                            coherentLeg: item.coherentLeg
+                        )
+                    )
+                }
+            }
+
+            try lab.startNewSession(
+                protocols: fresh,
+                sharedClockReferenceConfiguration: reference
+            )
+            refreshRecentSessions()
+        } catch {
+            actionError = error.localizedDescription
         }
     }
 

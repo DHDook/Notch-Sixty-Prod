@@ -16,7 +16,7 @@ Legacy parity is the minimum capability floor. The commercial rewrite should exc
 
 Future portability must not materially delay the flagship Mac launch.
 
-## Current execution status — PR102
+## Current execution status — PR108
 
 The historical parity/rewrite stages below are retained as project history.
 They are **not** the current execution state.
@@ -33,22 +33,32 @@ The cumulative product has progressed through:
 - Active Acoustics / Quiet Zone software foundations;
 - hardware-timing/feed-forward runtime scaffolding;
 - Active Acoustics commissioning UX; and
-- PR101 full-system reliability and remote/software acceptance.
+- PR101 full-system reliability and remote/software acceptance;
+- PR102 integration/commercial release preparation;
+- PR103 Speaker Optimizer measurement foundation;
+- PR104 measurement-driven optimization design;
+- PR105 guided characterization, PEQ deployment and fresh verification;
+- PR106 Advanced Speaker Measurement Lab;
+- PR107 Speaker Optimizer FIR deployment and latency coordination; and
+- PR108 coherent physical Sub timing/polarity optimization through guided
+  production commissioning.
 
-### PR102 — Integration & Commercial Release Preparation
+### PR108 — Coherent Physical Subwoofer Timing & Polarity Optimization
 
 Current work:
 
-- reconcile the cumulative product boundary and release-facing documentation;
-- reconcile sandbox/privacy/signing/package configuration;
-- reconcile all production third-party notices and provenance;
-- build an SBOM/dependency manifest;
-- validate Release/archive/package outputs;
-- preserve PR101 fail-closed hardware gates; and
-- create the final hardware/credential acceptance handoff.
+- consume PR106 reference-authenticated coherent Main/Sub evidence;
+- generate bounded single-Sub or coordinated multi-Sub timing/polarity proposals;
+- bind proposal/evidence to immutable commissioning identity and explicit approval;
+- apply only speaker/Sub timing and Sub polarity transactionally;
+- require fresh post-Apply coherent Measurement Lab verification;
+- persist provisional/verified PR108 provenance independently of ordinary
+  multichannel calibration;
+- provide guided Measurement Lab review/Apply/verify/rollback UI; and
+- hand off real DAC/ADC/reference-path acoustic acceptance.
 
-PR102 may close remotely while explicitly leaving genuine hardware and Apple
-release-credential gates unresolved.
+PR108 may close remotely while explicitly leaving real coherent hardware,
+acoustic benefit and subjective listening acceptance unresolved.
 
 ### Approved post-PR102 feature track
 
@@ -56,9 +66,14 @@ release-credential gates unresolved.
 - **PR104 — Measurement-Driven Speaker Optimization Engine**
 - **PR105 — Guided Speaker Optimizer & Acoustic Verification**
 - **PR106 — Advanced Speaker Measurement Lab**
+- **PR107 — Speaker Optimizer FIR Deployment & Latency Coordination**
+- **PR108 — Coherent Physical Subwoofer Timing & Polarity Optimization**
 
-The Speaker Optimizer track is intentionally sequenced after PR102 so release
-integration is not obscured by another feature expansion.
+The Speaker Optimizer / Measurement Lab track is intentionally sequenced after
+PR102. PR107 adds a separately owned FIR deployment path with explicit latency
+coordination; PR108 then uses PR106's authenticated coherent timing evidence to
+commission physical Main/Sub integration without conflating it with spectral
+speaker correction.
 
 ## Migration rule
 
