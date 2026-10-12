@@ -489,7 +489,7 @@ final class SpeakerMeasurementLabSessionTests: XCTestCase {
     func testDualInputTargetedBridgeCapturesMicAndReferenceOnSameTimeline()
         throws {
         let sweep: [Float] = [0.1, 0.2, 0.3, 0.4]
-        let bridge = sweep.withUnsafeBufferPointer {
+        let maybeBridge = sweep.withUnsafeBufferPointer {
             N60TargetedRoomMeasurementBridgeCreateDualInput(
                 $0.baseAddress!,
                 UInt32($0.count),
@@ -500,7 +500,7 @@ final class SpeakerMeasurementLabSessionTests: XCTestCase {
                 0
             )
         }
-        let bridge = try XCTUnwrap(bridge)
+        let bridge = try XCTUnwrap(maybeBridge)
         defer { N60TargetedRoomMeasurementBridgeDestroy(bridge) }
 
         let mic: [Float] = [1, 2, 3, 4, 5, 6, 7, 8]
