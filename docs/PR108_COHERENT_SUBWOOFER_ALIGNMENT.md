@@ -1,6 +1,6 @@
 # PR108 — Coherent Physical Subwoofer Timing & Polarity Optimization
 
-Status: **IN PROGRESS — SLICES 1–2 PROPOSAL + COMMISSIONING IDENTITY**
+Status: **IN PROGRESS — SLICES 1–3 PROPOSAL + COMMISSIONING + TRANSACTIONAL APPLY**
 
 Base: PR107 Speaker Optimizer FIR Deployment & Latency Coordination.
 
@@ -119,18 +119,50 @@ Any crossover change, Playback System mismatch, output-profile removal,
 measurement mutation or hand-edited candidate invalidates commissioning.
 
 Explicit approval is separately fingerprint-bound and requires a user-initiated
-action. Slice 2 still has no mutation path: proposal canDeploy remains false.
+action. The raw Slice 1 candidate remains preview-only; once Slice 3 is present,
+the exact commissioned proposal reports canApply/canDeploy true.
+
+## Slice 3 — Transactional Apply and exact rollback
+
+Implemented in CoherentSubwooferAlignmentApplyTransaction.swift.
+
+Apply requires:
+
+- DSP engine idle;
+- explicit fingerprint-bound approval;
+- exact selected Playback System identity;
+- exact complete PlaybackSystemState equality with the commissioning snapshot;
+- unchanged bass-management state/crossover; and
+- the target physical Sub still present.
+
+The transaction changes only calibration timing/polarity:
+
+- positive signed adjustment adds physical Sub delay;
+- negative signed adjustment adds the opposite common delay to every non-LFE
+  speaker calibration;
+- the selected Sub receives the candidate's resulting physical polarity.
+
+Existing speaker trim/EQ/polarity, Sub gain/EQ, crossover settings, Room
+Correction, Speaker Optimizer state and all unrelated Playback System fields
+remain untouched.
+
+Every changed calibration is revalidated at the candidate sample rate. The
+Output Device Profile is then validated as a whole before mutation.
+
+The write is engine-idle and exact-state verified. Rollback restores the
+immutable pre-Apply Output Device Profile and refuses to overwrite unrelated
+post-Apply edits.
+
+Apply receipts remain provisional and require fresh measured verification.
 
 ## Planned follow-on slices
 
-1. Transactional Apply / rollback — engine-idle mutation of only the required
-   speaker-common delay and physical Sub delay/polarity.
-2. Multi-sub coordination — avoid independent per-Sub choices that conflict
+1. Multi-sub coordination — avoid independent per-Sub choices that conflict
    with the existing multi-sub relationship.
-3. Fresh coherent verification — repeat authenticated Main/Sub measurement
+2. Fresh coherent verification — repeat authenticated Main/Sub measurement
    after Apply and verify summation/timing improvement.
-4. Guided production workflow/UI — capture, review, Apply, verify, rollback.
-5. Physical commissioning handoff — real DAC/ADC/subwoofer timing, crossover
+3. Guided production workflow/UI — capture, review, Apply, verify, rollback.
+4. Physical commissioning handoff — real DAC/ADC/subwoofer timing, crossover
    summation, restart/rollback and subjective bass integration.
 
 ## Slice 1 validation
@@ -148,3 +180,11 @@ XCTest suite.
 CoherentSubwooferAlignmentCommissioningTests verifies exact Playback System
 snapshot binding, deterministic evidence/candidate fingerprints, candidate
 regeneration, crossover-drift rejection, and mandatory explicit approval.
+
+
+## Slice 3 validation
+
+CoherentSubwooferAlignmentApplyTransactionTests verifies late-Sub common speaker
+delay, early-Sub physical delay, isolated polarity mutation, engine-idle/exact
+snapshot gates, stale-approval rejection, exact rollback and rollback state-drift
+protection.
