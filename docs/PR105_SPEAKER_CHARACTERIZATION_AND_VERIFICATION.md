@@ -1,6 +1,6 @@
 # PR105 — Guided Speaker Characterization & Verification
 
-Status: **SLICE 1 VERIFIED; SLICE 2 IMPLEMENTED — EXACT-HEAD CI PENDING**
+Status: **SLICES 1–2 REMOTE SOFTWARE VERIFIED — PHYSICAL ACOUSTIC ACCEPTANCE PENDING**
 
 Base: PR104 measurement-driven Speaker Optimization Engine.
 
@@ -69,6 +69,23 @@ speaker only through an already safe acoustic-source route.
   rely on the ordinary listening-position campaign.
 - Compact characterization persistence stores only the derived frequency
   response and audit metadata, never the raw sweep or impulse response.
+
+## Slice 2 exact-head verification
+
+Slice 2 code at `3052415b759b86f483b36e90651d9659add380cf` passed both
+GitHub Actions paths:
+
+- push run 38204073457;
+- pull-request run 38204076224.
+
+Both runs passed the PR105/PR104/PR103 contract validators, Apple Silicon Debug
+build, targeted Speaker Optimizer characterization tests, and full XCTest
+regression. This documentation-only checkpoint creates a subsequent head that
+must pass the same workflow before it is treated as the final verified Slice 2
+handoff.
+
+Physical microphone distance, loudspeaker integration distance, actual room
+reflection timing and acoustic benefit remain unverified.
 
 ## Planned follow-on slices
 
