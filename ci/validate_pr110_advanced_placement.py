@@ -145,6 +145,72 @@ for token in (
 
 assert "AdvancedPlacementSidecarTests" in workflow
 
+# Slice 3: enforce that only repeat-qualified PR106 Lab directivity
+# influences toe-in, and that geometry-only trials never gain DSP authority.
+for token in (
+    "struct RoomAdvancedToeInEvidenceAnalyzer: Sendable",
+    "SpeakerMeasurementLabDirectivityAnalyzer()",
+    "session.playbackSystemID == playbackSystemID",
+    "report.source == requiredSource",
+    "report.sessionID == session.id",
+    "enum RoomAdvancedDirectivityStatus",
+    "case measuredComparison",
+    "case inconclusive",
+    "minimumQualifiedConfidence",
+    "minimumFrequencyHz = 1_000.0",
+    "maximumFrequencyHz = 8_000.0",
+    "maximumMeasuredAngularGapDegrees = 20.0",
+    "report.commonUsableLowHz <= Self.minimumFrequencyHz",
+    "report.commonUsableHighHz >= Self.maximumFrequencyHz",
+    "traces.allSatisfy({ $0.frequenciesHz == exemplar.frequenciesHz })",
+    "positive = traces.first",
+    "negative = traces.last",
+    "var indicatedSpectralChangeDB: Double?",
+    "No repeat-qualified, signed off-axis evidence brackets both angles",
+    "NOT a predicted in-room improvement or acoustic score",
+):
+    assert token in source, f"PR110 qualified toe-in scoring missing {token}"
+
+for token in (
+    "func inspectRecentDirectivity(",
+    "physicalGeometryMatchesCapture: Bool",
+    "room == savedGeometry",
+    "settings == savedAdvancedPlacement",
+    ".listRecentSessions(limit: 24)",
+    "session.playbackSystemID == project.playbackSystemID",
+    "RoomAdvancedToeInEvidenceAnalyzer()",
+    "toeInMeasurementEvidence = []",
+    "status == .measuredComparison",
+):
+    assert token in controller, f"PR110 source-matched read-only Lab linkage missing {token}"
+
+for token in (
+    "Measurement-Informed Toe-In",
+    "confirmsUnchangedLabGeometry",
+    "Inspect Latest Qualified Lab Directivity",
+    "advisor.inspectRecentDirectivity(",
+    "advisor.toeInMeasurementEvidence",
+    "result.status == .measuredComparison",
+    "INCONCLUSIVE · insufficient angular or frequency coverage",
+):
+    assert token in ui, f"PR110 measurement quality indication missing {token}"
+
+for token in (
+    "final class AdvancedPlacementDirectivityTests",
+    "testQualifiedSignedAnglesProduceExplicitlyNonDeployableComparisons",
+    "testSingleAngleDoesNotExtrapolateMissingNegativeSide",
+    "testWideAngleGapDoesNotInventInterpolation",
+    "testWrongPlaybackSystemRejectedBeforeLabAnalysis",
+    "testWrongSpeakerRejectedDespiteOtherSideHavingValidData",
+    "testLowSNRNotConvertedIntoPlacementScore",
+    "testClippedDirectivityCannotInformToeIn",
+    "testUndersampledDirectivityCannotInformToeIn",
+    "testMismatchedMeasurementRadiusCannotInformToeIn",
+    "testControllerRequiresExplicitSavedGeometryConfirmation",
+):
+    assert token in test, f"PR110 measurement confidence regression missing {token}"
+assert "AdvancedPlacementDirectivityTests" in workflow
+
 assert "Read-only hypotheses" in document
 assert "REMOTE SCOPE ONLY" in document
 assert "Current execution status — PR110" in roadmap
