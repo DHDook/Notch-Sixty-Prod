@@ -11,13 +11,15 @@ APPLY_TESTS = ROOT / "NotchSixtyTests/CoherentSubwooferAlignmentApplyTransaction
 VERIFY = ROOT / "NotchSixty/Audio/CoherentSubwooferAlignmentPostApplyVerification.swift"
 VERIFY_TESTS = ROOT / "NotchSixtyTests/CoherentSubwooferAlignmentPostApplyVerificationTests.swift"
 DEPLOYMENT = ROOT / "NotchSixty/Audio/CoherentSubwooferAlignmentDeployment.swift"
+MULTI = ROOT / "NotchSixty/Audio/CoherentMultiSubwooferAlignment.swift"
+MULTI_TESTS = ROOT / "NotchSixtyTests/CoherentMultiSubwooferAlignmentTests.swift"
 COHERENT = ROOT / "NotchSixty/Audio/SpeakerMeasurementLabCoherentTiming.swift"
 CALIBRATION = ROOT / "NotchSixty/Audio/Routing/OutputDeviceCalibration.swift"
 PROJECT = ROOT / "NotchSixty.xcodeproj/project.pbxproj"
 DOC = ROOT / "docs/PR108_COHERENT_SUBWOOFER_ALIGNMENT.md"
 WORKFLOW = ROOT / ".github/workflows/pr108-coherent-subwoofer-alignment.yml"
 
-for path in (SOURCE, TESTS, COMMISSIONING, COMMISSIONING_TESTS, APPLY, APPLY_TESTS, VERIFY, VERIFY_TESTS, DEPLOYMENT, COHERENT, CALIBRATION, PROJECT, DOC, WORKFLOW):
+for path in (SOURCE, TESTS, COMMISSIONING, COMMISSIONING_TESTS, APPLY, APPLY_TESTS, VERIFY, VERIFY_TESTS, DEPLOYMENT, MULTI, MULTI_TESTS, COHERENT, CALIBRATION, PROJECT, DOC, WORKFLOW):
     assert path.is_file(), f"missing PR108 Slice 1 file: {path}"
 
 source = SOURCE.read_text()
@@ -29,6 +31,8 @@ apply_tests = APPLY_TESTS.read_text()
 verify_source = VERIFY.read_text()
 verify_tests = VERIFY_TESTS.read_text()
 deployment = DEPLOYMENT.read_text()
+multi = MULTI.read_text()
+multi_tests = MULTI_TESTS.read_text()
 coherent = COHERENT.read_text()
 calibration = CALIBRATION.read_text()
 project = PROJECT.read_text()
@@ -164,6 +168,28 @@ for token in (
 assert "finalizeVerified" in verify_tests
 assert "deployment.verified" in verify_tests
 
+
+for token in (
+    "struct CoherentMultiSubwooferAlignmentPlanner",
+    "struct CoherentMultiSubwooferAlignmentCandidate",
+    "speakerCommonDelayAdjustmentMilliseconds",
+    "subwooferDelayAdjustmentMilliseconds",
+    "coordinatedMultiSubwooferMode: true",
+    "duplicateSubwoofer",
+    "mainRoleSetMismatch",
+    "var canDeploy: Bool { false }",
+):
+    assert token in multi, f"missing PR108 coordinated multi-Sub contract: {token}"
+
+for token in (
+    "testCoordinatedSolveUsesMinimumLatencyCommonSpeakerDelay",
+    "testCoordinatedSolveCarriesIndependentPolarityPerSub",
+    "testDuplicateAndIncompleteEvidenceFailClosed",
+    "testEverySubMustUseSameMainRoleSet",
+    "testCommonSpeakerDelayCapacityFailsClosed",
+):
+    assert token in multi_tests, f"missing PR108 coordinated multi-Sub test: {token}"
+
 for token in (
     "wrappedRelativePhaseRadians",
     "relativeArrivalMilliseconds",
@@ -190,6 +216,8 @@ for token in (
     "F10800000000000000000007",
     "F10800000000000000000008",
     "F10800000000000000000009",
+    "F1080000000000000000000A",
+    "F1080000000000000000000B",
     "F10800000000000000000011",
     "F10800000000000000000012",
     "F10800000000000000000013",
@@ -199,6 +227,8 @@ for token in (
     "F10800000000000000000017",
     "F10800000000000000000018",
     "F10800000000000000000019",
+    "F1080000000000000000001A",
+    "F1080000000000000000001B",
 ):
     assert project.count(token) >= 2, f"missing PR108 Xcode registration: {token}"
 
@@ -209,6 +239,7 @@ for token in (
     "Slice 3 — Transactional Apply and exact rollback",
     "Slice 4 — Fresh coherent post-Apply verification",
     "Slice 5 — Persistent provisional/verified provenance + finalization",
+    "Slice 6 — Coordinated multi-Sub proposal",
     "does **not** subtract relativeArrivalMilliseconds again",
     "previewOnly == true",
     "canDeploy == false",
@@ -223,6 +254,7 @@ assert "CoherentSubwooferAlignmentTests" in workflow
 assert "CoherentSubwooferAlignmentCommissioningTests" in workflow
 assert "CoherentSubwooferAlignmentApplyTransactionTests" in workflow
 assert "CoherentSubwooferAlignmentPostApplyVerificationTests" in workflow
+assert "CoherentMultiSubwooferAlignmentTests" in workflow
 assert "Run full XCTest regression" in workflow
 
-print("PR108 Slice 1-5 single-Sub proposal through verified provenance boundary passed")
+print("PR108 Slice 1-6 single-Sub verified path + coordinated multi-Sub proposal boundary passed")
