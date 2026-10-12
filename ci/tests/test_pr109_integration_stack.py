@@ -34,7 +34,7 @@ class StackManifestTests(unittest.TestCase):
 
     def test_wrong_github_pr_number_fails(self):
         data = copy.deepcopy(BASE)
-        data["milestones"][5]["githubPR"] = 105
+        data["milestones"][5]["githubPR"] = 110
         with self.assertRaises(ValueError):
             module.validate_manifest(data)
 
