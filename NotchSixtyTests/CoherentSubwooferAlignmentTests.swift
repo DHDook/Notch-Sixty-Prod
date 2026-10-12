@@ -174,6 +174,38 @@ final class CoherentSubwooferAlignmentTests: XCTestCase {
         })
     }
 
+    func testSingleSubPlannerBlocksMultiSubProfileUntilCoordinated() throws {
+        var profile = makeProfile()
+        profile.subwooferAssignments.append(
+            PhysicalSubwooferOutputAssignment(
+                index: 1,
+                destination: PhysicalOutputEndpoint(
+                    deviceUID: "pr108-output",
+                    channelIndex: 3
+                )
+            )
+        )
+        let report = makeReport(
+            profile: profile,
+            mainRole: .frontLeft,
+            relativeArrivalMilliseconds: 3
+        )
+
+        XCTAssertThrowsError(
+            try CoherentSubwooferAlignmentPlanner().propose(
+                reports: [report],
+                profile: profile,
+                bassManagementEnabled: true,
+                crossoverFrequencyHz: 80
+            )
+        ) {
+            XCTAssertEqual(
+                $0 as? CoherentSubwooferAlignmentError,
+                .multiSubCoordinationRequired
+            )
+        }
+    }
+
     func testEvidenceIdentityAndBassManagementFailClosed() throws {
         let profile = makeProfile()
         var left = makeReport(
