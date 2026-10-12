@@ -66,7 +66,7 @@ CONTRACTS: dict[str, tuple[str, ...]] = {
         "guard targetDriver.limiterEnabled else",
         "targetDriverProcessingRequired",
         "physicalCrossoverRequired",
-        "maximumInputPeakDB: Double = -24",
+        "maximumInputPeakDBFS: Double = -24",
     ),
     "NotchSixty/Audio/Realtime/N60LiveNChannelRenderCore.h": (
         "N60ProgramFIRRuntimeProcessFrame(",
