@@ -55,6 +55,46 @@ final class CoherentMultiSubwooferAlignmentPostApplyVerificationTests:
             $0.phaseTrackingRMSRadians < 0.05
                 && $0.magnitudeTrackingRMSDB < 0.05
         })
+
+        let transaction =
+            CoherentMultiSubwooferAlignmentApplyTransaction()
+        let finalized = try transaction.finalizeVerified(
+            report,
+            receipt: fixture.receipt,
+            profileStore: fixture.store,
+            verifiedAt: Date(
+                timeIntervalSince1970: 1_705_100_300
+            )
+        )
+        let verifiedOutput = try XCTUnwrap(
+            fixture.store.profile?.state.outputDeviceProfile
+        )
+        let deployment = try XCTUnwrap(
+            verifiedOutput.coherentMultiSubwooferAlignment
+        )
+        XCTAssertTrue(deployment.verified)
+        XCTAssertFalse(deployment.provisional)
+        XCTAssertEqual(
+            deployment.verification?.applyReceiptID,
+            fixture.receipt.id
+        )
+        XCTAssertEqual(
+            fixture.store.profile?.state,
+            finalized.expectedVerifiedState
+        )
+
+        let rollback = try transaction.rollback(
+            fixture.receipt,
+            profileStore: fixture.store,
+            rolledBackAt: Date(
+                timeIntervalSince1970: 1_705_100_400
+            )
+        )
+        XCTAssertEqual(
+            rollback.restoredState,
+            fixture.receipt.rollbackSnapshot
+                .playbackSystemState
+        )
     }
 
     func testOneUncorrectedSubRejectsWholeCoordinatedVerification()
