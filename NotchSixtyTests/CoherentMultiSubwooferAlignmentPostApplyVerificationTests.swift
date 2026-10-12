@@ -428,7 +428,8 @@ final class CoherentMultiSubwooferAlignmentPostApplyVerificationTests:
             let subIndex: UInt32
             guard case .sourcePair(_, .subwoofer(let index))
                     = labProtocol.request.target else {
-                throw XCTSkip("Unexpected coherent target")
+                throw CoherentMultiSubwooferAlignmentVerificationError
+                    .verificationSessionInvalid
             }
             subIndex = index
             let acousticArrival =
