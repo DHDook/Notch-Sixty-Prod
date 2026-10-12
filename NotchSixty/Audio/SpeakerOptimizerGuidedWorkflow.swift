@@ -426,6 +426,82 @@ struct SpeakerOptimizerVerificationSessionFactory: Sendable {
             throw SpeakerOptimizerVerificationSessionError.invalidArchive
         }
     }
+
+
+    func fresh(
+        baseline: SpeakerOptimizerMeasurementSet,
+        receipt: SpeakerOptimizerFIRApplyReceipt,
+        createdAt: Date = Date()
+    ) throws -> SpeakerOptimizerVerificationCampaignArchive {
+        guard baseline.role == .baseline,
+              baseline.id == receipt.baselineMeasurementSetID,
+              baseline.playbackSystemID == receipt.playbackSystemID,
+              baseline.routingSignature == receipt.routingSignature,
+              abs(
+                baseline.sampleRate
+                    - receipt.deployment.sampleRate
+              ) < 0.5 else {
+            throw SpeakerOptimizerVerificationSessionError
+                .baselineRequired
+        }
+        let set = SpeakerOptimizerMeasurementSet(
+            role: .verification,
+            playbackSystemID: baseline.playbackSystemID,
+            routingSignature: baseline.routingSignature,
+            microphone: baseline.microphone,
+            sampleRate: baseline.sampleRate,
+            positions: baseline.positions,
+            plannedSources: baseline.plannedSources,
+            captures: [],
+            createdAt: createdAt,
+            modifiedAt: createdAt
+        )
+        try set.validatePersistenceStructure()
+        return SpeakerOptimizerVerificationCampaignArchive(
+            applyReceiptID: receipt.id,
+            baselineMeasurementSetID: baseline.id,
+            measurementSet: set
+        )
+    }
+
+    func validate(
+        _ archive: SpeakerOptimizerVerificationCampaignArchive,
+        baseline: SpeakerOptimizerMeasurementSet,
+        receipt: SpeakerOptimizerFIRApplyReceipt
+    ) throws {
+        let set = archive.measurementSet
+        guard archive.schemaVersion
+                == SpeakerOptimizerVerificationCampaignArchive
+                    .currentSchemaVersion,
+              archive.applyReceiptID == receipt.id,
+              archive.baselineMeasurementSetID == baseline.id,
+              set.role == .verification,
+              set.id != baseline.id,
+              set.playbackSystemID
+                == baseline.playbackSystemID,
+              set.routingSignature
+                == baseline.routingSignature,
+              set.microphone == baseline.microphone,
+              abs(
+                set.sampleRate - baseline.sampleRate
+              ) < 0.5,
+              set.positions == baseline.positions,
+              set.plannedSources
+                == baseline.plannedSources else {
+            throw SpeakerOptimizerVerificationSessionError
+                .invalidArchive
+        }
+        try set.validatePersistenceStructure()
+        let baselineCaptureIDs =
+            Set(baseline.captures.map(\.id))
+        guard set.captures.allSatisfy({
+            $0.capturedAt > receipt.appliedAt
+                && !baselineCaptureIDs.contains($0.id)
+        }) else {
+            throw SpeakerOptimizerVerificationSessionError
+                .invalidArchive
+        }
+    }
 }
 
 /// Guided fresh-capture controller for the provisional PEQ Apply receipt.
