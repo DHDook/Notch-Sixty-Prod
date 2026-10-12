@@ -400,6 +400,13 @@ verification, measured result, and guarded rollback.
 The UI never treats the proposal as measured proof. Fresh verification is
 mandatory before the deployment becomes VERIFIED.
 
+On profile reload/relaunch, the Measurement Lab card reads persisted single- or
+multi-Sub PR108 provenance directly from the live Output Device Profile and
+surfaces PROVISIONAL/VERIFIED ownership. New proposal generation is disabled
+while that record owns the live timing/polarity calibration. The UI does not
+invent or reconstruct an old in-memory Apply receipt/rollback snapshot after
+relaunch.
+
 ## Planned follow-on slices
 
 1. Physical commissioning handoff — real DAC/ADC/subwoofer timing, crossover
