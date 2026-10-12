@@ -66,6 +66,9 @@ struct SpeakerMeasurementLabCapture:
     var playbackSystemID: UUID
     var routingSignature: String
     var microphone: SpeakerOptimizerMicrophoneIdentity
+    /// Exact sweep-program level used for this capture when known.
+    /// Optional preserves decoding of older Lab archives.
+    var excitationLevelDBFS: Double? = nil
     var sampleRate: Double
     var source: MultichannelCalibrationSource
     var impulseResponse: [Float]
@@ -84,9 +87,6 @@ struct SpeakerMeasurementLabSession:
     var microphone: SpeakerOptimizerMicrophoneIdentity
     /// Optional for backward compatibility with pre-Slice-6 lab archives.
     var microphoneCalibration: RoomCorrectionMicrophoneCalibration? = nil
-    /// Actual sweep-program level used for this capture when known.
-    /// Optional keeps older persisted lab sessions decodable.
-    var excitationLevelDBFS: Double? = nil
     var sampleRate: Double
     var protocols: [SpeakerMeasurementLabProtocol]
     var captures: [SpeakerMeasurementLabCapture]
