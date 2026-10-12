@@ -185,6 +185,28 @@ enum LiveNChannelRenderGraphCompiler {
                     }
                 }
             }
+            let calibrationBandCount = calibration?.eqBands.count ?? 0
+            if let optimizerBands = routePlan.speakerOptimizerPEQ[role] {
+                guard calibrationBandCount + optimizerBands.count
+                        <= Int(N60_PROGRAM_LANE_MAX_EQ_SECTIONS) else {
+                    throw LiveNChannelTransportError.renderGraphInvalid
+                }
+                for (offset, band) in optimizerBands.enumerated() {
+                    try band.validate(sampleRate: sampleRate)
+                    guard N60ProgramLaneGraphSetEQBand(
+                        &lanes,
+                        channel,
+                        UInt32(calibrationBandCount + offset),
+                        N60BiquadFilterTypePeaking,
+                        band.frequencyHz,
+                        band.gainDB,
+                        band.q,
+                        true
+                    ) else {
+                        throw LiveNChannelTransportError.renderGraphInvalid
+                    }
+                }
+            }
         }
         guard N60ProgramLaneGraphFinalize(&lanes) else {
             throw LiveNChannelTransportError.renderGraphInvalid
