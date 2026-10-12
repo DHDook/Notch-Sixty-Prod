@@ -224,7 +224,8 @@ struct CoherentMultiSubwooferAlignmentPostApplyVerifier:
             verificationReports,
             candidate: candidate
         )
-        guard baselineByKey.keys == verificationByKey.keys else {
+        guard Set(baselineByKey.keys)
+                == Set(verificationByKey.keys) else {
             throw CoherentMultiSubwooferAlignmentVerificationError
                 .pairSetMismatch
         }
