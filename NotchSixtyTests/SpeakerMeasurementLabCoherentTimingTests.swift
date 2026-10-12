@@ -69,12 +69,13 @@ final class SpeakerMeasurementLabCoherentTimingTests: XCTestCase {
         )
         for index in session.captures.indices
             where session.captures[index].protocolID == subProtocol.id {
-            session.captures[index]
-                .sharedClockReference?.directArrivalSeconds += 0.001
-            session.captures[index]
-                .sharedClockReference?.quality.directArrivalSeconds =
-                    session.captures[index]
-                        .sharedClockReference?.directArrivalSeconds
+            var reference = try XCTUnwrap(
+                session.captures[index].sharedClockReference
+            )
+            reference.directArrivalSeconds += 0.001
+            reference.quality.directArrivalSeconds =
+                reference.directArrivalSeconds
+            session.captures[index].sharedClockReference = reference
         }
         XCTAssertNoThrow(try session.validateStructure())
         XCTAssertThrowsError(
@@ -91,12 +92,15 @@ final class SpeakerMeasurementLabCoherentTimingTests: XCTestCase {
     func testReferenceMagnitudeOrPhaseInstabilityFailsClosed() throws {
         var session = try makeSession()
         let last = session.captures.indices.last!
-        session.captures[last]
-            .sharedClockReference?
-            .transferFunction.magnitudeDB =
-                session.captures[last]
-                    .sharedClockReference!
-                    .transferFunction.magnitudeDB.map { $0 + 3 }
+        var magnitudeReference = try XCTUnwrap(
+            session.captures[last].sharedClockReference
+        )
+        magnitudeReference.transferFunction.magnitudeDB =
+            magnitudeReference.transferFunction.magnitudeDB.map {
+                $0 + 3
+            }
+        session.captures[last].sharedClockReference =
+            magnitudeReference
         XCTAssertThrowsError(
             try SpeakerMeasurementLabCoherentTimingAnalyzer()
                 .analyze(session: session, coherentPairID: pairID)
@@ -109,14 +113,17 @@ final class SpeakerMeasurementLabCoherentTimingTests: XCTestCase {
 
         session = try makeSession()
         let phaseIndex = session.captures.indices.last!
-        session.captures[phaseIndex]
-            .sharedClockReference?
-            .transferFunction.phaseRadians =
-                session.captures[phaseIndex]
-                    .sharedClockReference!
-                    .transferFunction.phaseRadians!.map {
-                        $0 + Double.pi
-                    }
+        var phaseReference = try XCTUnwrap(
+            session.captures[phaseIndex].sharedClockReference
+        )
+        phaseReference.transferFunction.phaseRadians =
+            try XCTUnwrap(
+                phaseReference.transferFunction.phaseRadians
+            ).map {
+                $0 + Double.pi
+            }
+        session.captures[phaseIndex].sharedClockReference =
+            phaseReference
         XCTAssertThrowsError(
             try SpeakerMeasurementLabCoherentTimingAnalyzer()
                 .analyze(session: session, coherentPairID: pairID)
