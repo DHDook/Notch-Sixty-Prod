@@ -1,5 +1,14 @@
 import Foundation
 
+enum CoherentSubwooferAlignmentDeploymentError:
+    Error, Equatable, LocalizedError {
+    case invalidRecord
+
+    var errorDescription: String? {
+        "Persisted coherent Sub alignment provenance is invalid or no longer matches the live speaker/Sub calibration."
+    }
+}
+
 struct CoherentSubwooferAlignmentSpeakerDelayRecord:
     Codable, Equatable, Sendable {
     var role: OutputProgramRole
