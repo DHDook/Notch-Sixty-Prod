@@ -359,7 +359,8 @@ struct SpeakerOptimizerCommissioningPlanner: Sendable {
               abs(proposal.sampleRate - plan.candidate.sampleRate) < 0.5,
               let outputProfile = profile.state.outputDeviceProfile,
               outputProfile.enabled,
-              outputProfile.speakerOptimizerPEQ == nil else {
+              outputProfile.speakerOptimizerPEQ == nil,
+              outputProfile.speakerOptimizerFIR == nil else {
             throw SpeakerOptimizerCommissioningError
                 .candidateIdentityMismatch
         }
@@ -445,6 +446,7 @@ struct SpeakerOptimizerCommissioningPlanner: Sendable {
               role != .lowFrequencyEffects,
               let outputProfile = profile.state.outputDeviceProfile,
               outputProfile.enabled,
+              outputProfile.speakerOptimizerFIR == nil,
               outputProfile.programLayout.roles.contains(role),
               !candidate.bands.isEmpty,
               candidate.bands.count
@@ -485,6 +487,7 @@ struct SpeakerOptimizerCommissioningPlanner: Sendable {
               let outputProfile = profile.state.outputDeviceProfile,
               outputProfile.enabled,
               outputProfile.speakerOptimizerPEQ == nil,
+              outputProfile.speakerOptimizerFIR == nil,
               outputProfile.programLayout.roles.contains(role),
               outputProfile.speakerAssignments.contains(where: {
                   $0.role == role
