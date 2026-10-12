@@ -242,17 +242,21 @@ for token in (
 for token in (
     "PR107 — Speaker Optimizer FIR Deployment & Latency Coordination",
     "1280 frames / 26.67 ms",
-    "canInstallLiveFIR == false",
-    "A/V latency policy",
+    "canInstallLiveFIR == true",
+    "Explicit A/V synchronization policy",
     "Sparse per-program-channel FIR realtime substrate",
+    "Fresh measured FIR verification",
+    "Guided FIR review and verification workflow",
+    "Physical / hardware handoff",
 ):
-    assert token in doc, f"missing PR107 Slice 1 documentation: {token}"
+    assert token in doc, f"missing PR107 closure documentation: {token}"
 
 assert "SpeakerOptimizerFIRDeploymentTests" in workflow
 assert "SpeakerOptimizerFIRApplyTransactionTests" in workflow
 assert "SpeakerOptimizerCommissioningContractTests" in workflow
 assert "SpeakerOptimizerFIRAVSyncTests" in workflow
 assert "SpeakerOptimizerFIRPostApplyVerificationTests" in workflow
+assert "SpeakerOptimizerGuidedFIRWorkflowTests" in workflow
 assert "validate_pr107_program_fir_runtime.c" in workflow
 assert "validate_pr107_live_fir_render.c" in workflow
 assert "validate_pr106_speaker_measurement_lab.py" in workflow
