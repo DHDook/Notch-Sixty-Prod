@@ -126,7 +126,8 @@ struct CoherentSubwooferAlignmentPlanner: Sendable {
         profile: OutputDeviceProfileConfiguration,
         bassManagementEnabled: Bool,
         crossoverFrequencyHz: Double,
-        options: CoherentSubwooferAlignmentOptions = .init()
+        options: CoherentSubwooferAlignmentOptions = .init(),
+        coordinatedMultiSubwooferMode: Bool = false
     ) throws -> CoherentSubwooferAlignmentCandidate {
         guard options.validate(),
               crossoverFrequencyHz.isFinite,
@@ -147,9 +148,11 @@ struct CoherentSubwooferAlignmentPlanner: Sendable {
               !profile.subwooferAssignments.isEmpty else {
             throw CoherentSubwooferAlignmentError.bassManagementRequired
         }
-        guard profile.subwooferAssignments.count == 1 else {
-            throw CoherentSubwooferAlignmentError
-                .multiSubCoordinationRequired
+        if !coordinatedMultiSubwooferMode {
+            guard profile.subwooferAssignments.count == 1 else {
+                throw CoherentSubwooferAlignmentError
+                    .multiSubCoordinationRequired
+            }
         }
         guard let first = reports.first else {
             throw CoherentSubwooferAlignmentError.evidenceRequired
