@@ -179,8 +179,8 @@ for token in (
     "previewOnly == true",
     "canDeploy == false",
     "multiSubCoordinationRequired",
-    "Transactional Apply / rollback",
-    "Fresh coherent verification",
+    "Persistent provisional/verified PR108 provenance record",
+    "Fresh coherent post-Apply verification",
 ):
     assert token in doc, f"missing PR108 Slice 1 documentation: {token}"
 
