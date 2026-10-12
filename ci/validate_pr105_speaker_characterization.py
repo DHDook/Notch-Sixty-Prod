@@ -175,9 +175,9 @@ for token in (
     assert token in commission_source, f"missing commissioning safety contract: {token}"
 
 for token in (
-    "testPEQProposalCapturesRollbackStateAndBlocksExistingCalibrationStageReuse",
+    "testPEQProposalCapturesRollbackStateAndUsesSeparateOptimizerStage",
     "testFIRProposalFailsClosedBecauseNoDedicatedPerSpeakerFIRStageExists",
-    "testExplicitApprovalIsBoundToExactCandidateFingerprintButStillCannotApply",
+    "testExplicitApprovalIsBoundToExactCandidateAndBuildsDedicatedPEQConfiguration",
     "testApprovalCannotBeReusedAfterCandidateChanges",
     "testProfileOrClassificationIdentityDriftFailsClosed",
 ):
