@@ -1,6 +1,6 @@
 # PR108 — Coherent Physical Subwoofer Timing & Polarity Optimization
 
-Status: **IN PROGRESS — SLICES 1–8 THROUGH ATOMIC COORDINATED MULTI-SUB APPLY**
+Status: **IN PROGRESS — SLICES 1–9 THROUGH COORDINATED FRESH VERIFICATION**
 
 Base: PR107 Speaker Optimizer FIR Deployment & Latency Coordination.
 
@@ -323,9 +323,34 @@ The write is exact-state checked. Rollback restores the immutable commissioning
 snapshot and refuses to overwrite unrelated post-Apply edits. The Apply receipt
 remains provisional and requires fresh measured coordinated verification.
 
+## Slice 9 — Coordinated fresh coherent verification
+
+Implemented in CoherentMultiSubwooferAlignmentPostApplyVerification.swift.
+
+Verification requires one fresh PR106 coherent pair for every commissioned
+Main × physical-Sub combination. All selected captures must be newer than Apply,
+use the same Playback System/route/calibrated microphone/sample rate, and use
+new session/pair identities.
+
+For each Main/Sub pair the verifier:
+
+- re-runs the PR106 reference-authenticated coherent analyzer;
+- checks measured phase delta against that physical Sub's own signed delay and
+  polarity signature;
+- requires relative crossover magnitude to remain stable; and
+- blocks material per-pair coherence regression.
+
+It then evaluates normalized coherent summation across the complete coordinated
+set. Aggregate improvement and final coherence must clear the acceptance floors.
+
+Acceptance is atomic: one rejected Sub/Main pair rejects the full coordinated
+deployment and sets shouldRollback true. Modeled Slice 6 prediction cannot
+satisfy this measured gate.
+
 ## Planned follow-on slices
 
-1. Coordinated fresh coherent verification + persistent verified finalization.
+1. Persist the accepted coordinated verification record and support verified
+   rollback/finalization across relaunch.
 2. Guided production workflow/UI — capture, review, Apply, verify, rollback.
 3. Physical commissioning handoff — real DAC/ADC/subwoofer timing, crossover
    summation, restart/rollback and subjective bass integration.
@@ -393,3 +418,11 @@ speaker-delay materialization, simultaneous per-Sub delay/polarity application,
 preservation of existing gain/EQ, provisional provenance identity, exact
 rollback, engine-idle/current-snapshot gates, stale approval rejection, and
 rollback state-drift protection.
+
+
+## Slice 9 validation
+
+CoherentMultiSubwooferAlignmentPostApplyVerificationTests verifies fresh
+all-Sub acceptance, whole-system rejection when one Sub fails to follow its
+applied phase signature, complete pair-set requirements, post-Apply timestamps,
+baseline evidence fingerprint binding, and current-state drift rejection.
