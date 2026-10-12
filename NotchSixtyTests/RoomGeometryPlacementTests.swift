@@ -1204,46 +1204,53 @@ final class AdvancedSubPlacementABTests: XCTestCase {
             20.0 * pow(20.0, Double(i) / 79)
         }
         let offsets = [-spread, 0.0, spread]
-        let samples: [SpeakerOptimizerMeasurementCapture] = seatIDs
-            .enumerated().flatMap { seatIndex, positionID in
-                (0..<3).map { repeatIndex in
-                    SpeakerOptimizerMeasurementCapture(
-                        capturedAt: Date(timeIntervalSince1970:
-                            (role == .baseline ? 1_700_000_000 : 1_700_000_600)
-                            + Double(seatIndex * 6 + repeatIndex)),
-                        playbackSystemID: systemID,
-                        routingSignature: "pr110-route-one",
-                        microphone: mic,
-                        positionID: positionID,
-                        source: source,
-                        sampleRate: 48_000,
-                        response: RoomCorrectionFrequencyResponse(
-                            frequenciesHz: grid,
-                            magnitudeDB: grid.map { hz in
-                                offsets[seatIndex] + 0.1 * log2(hz / 75)
-                                    + Double(repeatIndex - 1) * 0.02
-                            },
-                            phaseRadians: grid.map { hz in
-                                0.03 * log2(hz / 100)
-                                    + Double(repeatIndex - 1) * 0.005
-                            }
-                        ),
-                        quality: RoomCorrectionMeasurementQuality(
-                            clipped: false,
-                            playbackPeakDBFS: -20,
-                            capturePeakDBFS: -12,
-                            estimatedNoiseFloorDBFS: -70,
-                            estimatedSNRDB: 54,
-                            sweepComplete: true,
-                            directArrivalSeconds:
-                                0.010 + Double(repeatIndex) * 0.00002,
-                            usableLowHz: 25,
-                            usableHighHz: 300,
-                            warnings: []
-                        )
-                    )
+        var samples: [SpeakerOptimizerMeasurementCapture] = []
+        let baseTime: Double = role == .baseline
+            ? 1_700_000_000 : 1_700_000_600
+        for (seatIndex, positionID) in seatIDs.enumerated() {
+            for repeatIndex in 0..<3 {
+                let drift = Double(repeatIndex - 1) * 0.02
+                let magnitude: [Double] = grid.map { hz in
+                    offsets[seatIndex] + 0.1 * log2(hz / 75) + drift
                 }
+                let phase: [Double] = grid.map { hz in
+                    0.03 * log2(hz / 100)
+                        + Double(repeatIndex - 1) * 0.005
+                }
+                let response = RoomCorrectionFrequencyResponse(
+                    frequenciesHz: grid,
+                    magnitudeDB: magnitude,
+                    phaseRadians: phase
+                )
+                let quality = RoomCorrectionMeasurementQuality(
+                    clipped: false,
+                    playbackPeakDBFS: -20,
+                    capturePeakDBFS: -12,
+                    estimatedNoiseFloorDBFS: -70,
+                    estimatedSNRDB: 54,
+                    sweepComplete: true,
+                    directArrivalSeconds:
+                        0.010 + Double(repeatIndex) * 0.00002,
+                    usableLowHz: 25,
+                    usableHighHz: 300,
+                    warnings: []
+                )
+                let timestamp = baseTime
+                    + Double(seatIndex * 6 + repeatIndex)
+                let capture = SpeakerOptimizerMeasurementCapture(
+                    capturedAt: Date(timeIntervalSince1970: timestamp),
+                    playbackSystemID: systemID,
+                    routingSignature: "pr110-route-one",
+                    microphone: mic,
+                    positionID: positionID,
+                    source: source,
+                    sampleRate: 48_000,
+                    response: response,
+                    quality: quality
+                )
+                samples.append(capture)
             }
+        }
         return SpeakerOptimizerMeasurementSet(
             role: role,
             playbackSystemID: systemID,
