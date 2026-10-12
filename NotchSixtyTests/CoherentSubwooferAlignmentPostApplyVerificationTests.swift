@@ -405,20 +405,20 @@ final class CoherentSubwooferAlignmentPostApplyVerificationTests:
                 labProtocol.coherentLeg == .main
                     ? acousticMainArrival
                     : acousticSubArrival
-            for repeat in 0..<3 {
+            for repeatIndex in 0..<3 {
                 let referenceArrival =
-                    0.002 + Double(repeat) * 0.00001
+                    0.002 + Double(repeatIndex) * 0.00001
                 session.captures.append(
                     SpeakerMeasurementLabCapture(
                         protocolID: labProtocol.id,
-                        repeatIndex: repeat,
+                        repeatIndex: repeatIndex,
                         capturedAt: Date(
                             timeIntervalSince1970:
                                 capturedAtBase
                                 + Double(
                                     (labProtocol.coherentLeg
                                         == .main ? 0 : 10)
-                                    + repeat
+                                    + repeatIndex
                                 )
                         ),
                         playbackSystemID: playbackID,
@@ -430,7 +430,7 @@ final class CoherentSubwooferAlignmentPostApplyVerificationTests:
                         sharedClockReference:
                             referenceEvidence(
                                 arrival: referenceArrival,
-                                repeat: repeat
+                                repeatIndex: repeatIndex
                             ),
                         impulseResponse: [0, 0.1, 1, 0.2, 0],
                         transferFunction:
@@ -457,7 +457,7 @@ final class CoherentSubwooferAlignmentPostApplyVerificationTests:
                                 sweepComplete: true,
                                 directArrivalSeconds:
                                     acousticArrival
-                                    + Double(repeat) * 0.00001,
+                                    + Double(repeatIndex) * 0.00001,
                                 usableLowHz: 40,
                                 usableHighHz: 140,
                                 warnings: []
@@ -472,7 +472,7 @@ final class CoherentSubwooferAlignmentPostApplyVerificationTests:
 
     private func referenceEvidence(
         arrival: Double,
-        repeat: Int
+        repeatIndex: Int
     ) -> SpeakerMeasurementLabSharedClockReferenceEvidence {
         SpeakerMeasurementLabSharedClockReferenceEvidence(
             inputDeviceUID: mic.deviceUID,
@@ -484,11 +484,11 @@ final class CoherentSubwooferAlignmentPostApplyVerificationTests:
                 RoomCorrectionFrequencyResponse(
                     frequenciesHz: frequencies,
                     magnitudeDB: Array(
-                        repeating: Double(repeat - 1) * 0.005,
+                        repeating: Double(repeatIndex - 1) * 0.005,
                         count: frequencies.count
                     ),
                     phaseRadians: Array(
-                        repeating: Double(repeat - 1) * 0.002,
+                        repeating: Double(repeatIndex - 1) * 0.002,
                         count: frequencies.count
                     )
                 ),
