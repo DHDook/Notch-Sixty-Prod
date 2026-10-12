@@ -180,6 +180,145 @@ final class SpeakerOptimizerFIRDeploymentTests: XCTestCase {
         }
     }
 
+    func testPersistentFIRValidatesAndMapsTapsInSemanticLayoutOrder() throws {
+        var profile = makeStereoProfile()
+        let deployment = makeDeployment(
+            profile: profile,
+            sources: [
+                makeSource(role: .frontRight, centerTap: 0.5),
+                makeSource(role: .frontLeft, centerTap: 1.0),
+            ],
+            requiredHeadroomDB: 1.0
+        )
+        profile.speakerOptimizerFIR = deployment
+
+        XCTAssertNoThrow(
+            try profile.validateStructure(
+                bassManagementEnabled: false
+            )
+        )
+        let preparation = try deployment.makeRuntimePreparation(
+            programLayout: .stereo
+        )
+        XCTAssertEqual(preparation.activeChannelMask, 0b11)
+        XCTAssertEqual(preparation.tapCount, 257)
+        XCTAssertEqual(preparation.declaredGroupDelayFrames, 128)
+        XCTAssertEqual(preparation.requiredHeadroomDB, 1.0)
+        XCTAssertEqual(preparation.flattenedTaps.count, 514)
+        XCTAssertEqual(preparation.flattenedTaps[128], 1.0)
+        XCTAssertEqual(preparation.flattenedTaps[257 + 128], 0.5)
+    }
+
+    func testPersistentFIRRejectsAsymmetricTaps() throws {
+        let profile = makeStereoProfile()
+        var source = makeSource(
+            role: .frontLeft,
+            centerTap: 1.0
+        )
+        source.taps[0] = 0.25
+        let deployment = makeDeployment(
+            profile: profile,
+            sources: [source],
+            requiredHeadroomDB: 1.0
+        )
+
+        XCTAssertThrowsError(
+            try deployment.validate(profile: profile)
+        ) {
+            XCTAssertEqual(
+                $0 as? SpeakerOptimizerFIRDeploymentError,
+                .invalidTaps(.frontLeft)
+            )
+        }
+    }
+
+    func testPersistentFIRRejectsInsufficientHeadroomAndWrongRate() throws {
+        let profile = makeStereoProfile()
+        var source = makeSource(
+            role: .frontLeft,
+            centerTap: 1.0
+        )
+        source.maximumPositiveGainDB = 1.5
+        source.recommendedHeadroomDB = 1.0
+        let deployment = makeDeployment(
+            profile: profile,
+            sources: [source],
+            requiredHeadroomDB: 1.0
+        )
+        XCTAssertThrowsError(
+            try deployment.validate(profile: profile)
+        )
+
+        let valid = makeDeployment(
+            profile: profile,
+            sources: [
+                makeSource(
+                    role: .frontLeft,
+                    centerTap: 1.0
+                )
+            ],
+            requiredHeadroomDB: 1.0
+        )
+        XCTAssertThrowsError(
+            try valid.validateLiveSampleRate(96_000)
+        ) {
+            XCTAssertEqual(
+                $0 as? SpeakerOptimizerFIRDeploymentError,
+                .sampleRateMismatch(
+                    expected: 48_000,
+                    actual: 96_000
+                )
+            )
+        }
+    }
+
+    func testLegacyOutputDeviceProfileDecodesWithFIRAbsent() throws {
+        let profile = makeStereoProfile()
+        let data = try JSONEncoder().encode(profile)
+        let decoded = try JSONDecoder().decode(
+            OutputDeviceProfileConfiguration.self,
+            from: data
+        )
+        XCTAssertNil(decoded.speakerOptimizerFIR)
+        XCTAssertEqual(decoded, profile)
+    }
+
+    private func makeSource(
+        role: OutputProgramRole,
+        centerTap: Float
+    ) -> SpeakerOptimizerFIRSourceDeployment {
+        var taps = [Float](repeating: 0, count: 257)
+        taps[128] = centerTap
+        return SpeakerOptimizerFIRSourceDeployment(
+            role: role,
+            candidateFingerprint: "candidate-\(role.rawValue)",
+            taps: taps,
+            maximumPositiveGainDB: 0.5,
+            recommendedHeadroomDB: 1.0
+        )
+    }
+
+    private func makeDeployment(
+        profile: OutputDeviceProfileConfiguration,
+        sources: [SpeakerOptimizerFIRSourceDeployment],
+        requiredHeadroomDB: Double
+    ) -> SpeakerOptimizerFIRDeploymentConfiguration {
+        SpeakerOptimizerFIRDeploymentConfiguration(
+            proposalID: UUID(),
+            baselineMeasurementSetID: UUID(),
+            characterizationMeasurementSetID: UUID(),
+            routingSignature:
+                profile.multichannelCalibrationRoutingSignature,
+            sampleRate: 48_000,
+            aggregateCandidateFingerprint: "aggregate-fir",
+            approvedAt: Date(timeIntervalSince1970: 123),
+            tapCount: 257,
+            declaredGroupDelayFrames: 128,
+            requiredHeadroomDB: requiredHeadroomDB,
+            sources: sources
+        )
+    }
+
     private func makeStereoProfile(
         leftDelayMilliseconds: Double = 0,
         rightDelayMilliseconds: Double = 0
