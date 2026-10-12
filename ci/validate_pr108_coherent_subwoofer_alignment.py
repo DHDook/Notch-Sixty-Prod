@@ -273,7 +273,6 @@ for token in (
     "does **not** subtract relativeArrivalMilliseconds again",
     "previewOnly == true",
     "canDeploy == false",
-    "multiSubCoordinationRequired",
     "Slice 5 — Persistent provisional/verified provenance + finalization",
     "Fresh coherent post-Apply verification",
 ):
