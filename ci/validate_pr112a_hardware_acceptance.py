@@ -7,8 +7,10 @@ SOURCE = ROOT / "NotchSixty/Acceptance/HardwareAcceptance.swift"
 CONTROLLER = ROOT / "NotchSixty/Acceptance/HardwareAcceptanceController.swift"
 ADAPTERS = ROOT / "NotchSixty/Acceptance/HardwareAcceptanceEvidenceAdapters.swift"
 PREFLIGHT = ROOT / "NotchSixty/Acceptance/HardwareAcceptancePreflight.swift"
+REPORT = ROOT / "NotchSixty/Acceptance/HardwareAcceptanceReport.swift"
 ADAPTER_TESTS = ROOT / "NotchSixtyTests/HardwareAcceptanceEvidenceAdapterTests.swift"
 PREFLIGHT_TESTS = ROOT / "NotchSixtyTests/HardwareAcceptancePreflightTests.swift"
+REPORT_TESTS = ROOT / "NotchSixtyTests/HardwareAcceptanceReportTests.swift"
 UI = ROOT / "NotchSixty/UI/ProductionHardwareAcceptanceWorkspace.swift"
 ROOT_VIEW = ROOT / "NotchSixty/UI/ProductionRootView.swift"
 APP = ROOT / "NotchSixty/NotchSixtyApp.swift"
@@ -21,7 +23,7 @@ PROJECT = ROOT / "NotchSixty.xcodeproj/project.pbxproj"
 
 for path in (
     SOURCE, CONTROLLER, ADAPTERS, ADAPTER_TESTS, PREFLIGHT,
-    PREFLIGHT_TESTS, UI, ROOT_VIEW, APP, TESTS, DOC, WORKFLOW,
+    PREFLIGHT_TESTS, REPORT, REPORT_TESTS, UI, ROOT_VIEW, APP, TESTS, DOC, WORKFLOW,
     MANIFEST, ROADMAP, PROJECT
 ):
     assert path.is_file(), f"PR112A missing artifact: {path}"
@@ -32,6 +34,8 @@ adapters = ADAPTERS.read_text(encoding="utf-8")
 adapter_tests = ADAPTER_TESTS.read_text(encoding="utf-8")
 preflight = PREFLIGHT.read_text(encoding="utf-8")
 preflight_tests = PREFLIGHT_TESTS.read_text(encoding="utf-8")
+report = REPORT.read_text(encoding="utf-8")
+report_tests = REPORT_TESTS.read_text(encoding="utf-8")
 ui = UI.read_text(encoding="utf-8")
 root_view = ROOT_VIEW.read_text(encoding="utf-8")
 app = APP.read_text(encoding="utf-8")
@@ -169,6 +173,40 @@ for token in (
     assert token in preflight_tests, f"PR112A preflight regression missing {token}"
 
 for token in (
+    "struct HardwareAcceptanceReport:",
+    "struct HardwareAcceptanceReportBuilder: Sendable",
+    "struct HardwareAcceptanceReportExporter: Sendable",
+    "artifactManifest:",
+    "unresolvedGateIDs:",
+    "runbook:",
+    "var releaseAcceptanceComplete: Bool { false }",
+    "var mayMergeIntoMain: Bool { false }",
+    "var physicalEvidenceSuppliedByCI: Bool { false }",
+    "Remote CI cannot create physical evidence",
+    "Never feed speaker-level output directly into an ADC",
+):
+    assert token in report, f"PR112A report/runbook boundary missing {token}"
+
+for forbidden in (
+    "AudioIOEngine",
+    "ProductProfileController",
+    "replaceSelectedSystem",
+    "makeRealtimeSnapshot(",
+    "approveAndApply(",
+    "func apply(",
+):
+    assert forbidden not in report, f"PR112A report gained runtime authority: {forbidden}"
+
+for token in (
+    "testRemotePassStaysInsufficientInMachineAndHumanReport",
+    "testArtifactManifestAndObservationsPreserveExactEvidenceIDs",
+    "testPhysicalCompletionCanNeverCreateReleaseOrMergeAuthority",
+    "testRunbookListsEveryGateAndKeepsSafetyBoundaries",
+    "testNewestRegressionAppearsInReportInsteadOfStalePass",
+):
+    assert token in report_tests, f"PR112A report regression missing {token}"
+
+for token in (
     "final class HardwareAcceptanceController: ObservableObject",
     "func createCampaign(",
     "func loadMostRecentCampaign()",
@@ -209,6 +247,11 @@ for token in (
     "HardwareAcceptancePreflightAnalyzer()",
     "HardwareAcceptanceCommissioningDraftLocator()",
     "physicalAcceptanceEstablished = false",
+    '"Acceptance Packet & Physical Runbook"',
+    '"Export JSON Packet"',
+    '"Export Markdown Runbook"',
+    "HardwareAcceptanceReportBuilder()",
+    "HardwareAcceptanceReportExporter()",
 ):
     assert token in ui, f"PR112A guided acceptance UI missing {token}"
 
@@ -282,12 +325,15 @@ for token in (
     "HardwareAcceptanceEvidenceAdapterTests.swift in Sources",
     "HardwareAcceptancePreflight.swift in Sources",
     "HardwareAcceptancePreflightTests.swift in Sources",
+    "HardwareAcceptanceReport.swift in Sources",
+    "HardwareAcceptanceReportTests.swift in Sources",
 ):
     assert token in project, f"PR112A Xcode target missing {token}"
 
 assert "HardwareAcceptanceTests" in workflow
 assert "HardwareAcceptanceEvidenceAdapterTests" in workflow
 assert "HardwareAcceptancePreflightTests" in workflow
+assert "HardwareAcceptanceReportTests" in workflow
 assert "build_pr112a_remote_hardware_readiness.py" in workflow
 assert "validate_pr111_protected_driver_optimizer.py" in workflow
 assert "PR112A" in roadmap
