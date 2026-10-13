@@ -1362,6 +1362,39 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         )
     }
 
+    func testHeadroomAssistantRangeLimitFailsConservatively() {
+        var evidence = HeadroomAssistantEvidence()
+        evidence.observationSeconds = 30
+        evidence.sampleCount = 30
+        evidence.maximumPreRiderTruePeakDBTP = 6.0
+        evidence.maximumMeasuredInputTruePeakDBTP = 6.0
+        evidence.maximumSustainedLimiterGainReductionDB = 12.0
+        evidence.safetyClampSamples = 10
+        evidence.truePeakGuardObserved = true
+
+        let recommendation =
+            HeadroomAssistantRecommendation.make(
+                evidence: evidence,
+                currentHeadroomAttenuationDB: -47.5,
+                targetPeakDBTP: -1.0
+            )
+
+        XCTAssertEqual(recommendation.disposition, .rangeLimited)
+        XCTAssertEqual(
+            recommendation.recommendedHeadroomAttenuationDB,
+            DSPGainConfiguration
+                .headroomAttenuationRange.lowerBound,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            recommendation.additionalAttenuationDB,
+            0.5,
+            accuracy: 0.0001
+        )
+        XCTAssertTrue(recommendation.rangeLimited)
+        XCTAssertTrue(recommendation.canApply)
+    }
+
     @MainActor
     func testHeadroomAssistantBoundaryFailsClosedOnContentDrift()
         throws {
