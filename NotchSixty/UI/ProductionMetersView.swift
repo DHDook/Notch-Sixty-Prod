@@ -437,7 +437,7 @@ struct ProductionMetersView: View {
                     )
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                )
+                }
                 Spacer()
                 Text(headroomAssistantPhaseLabel)
                     .font(.caption.bold())
