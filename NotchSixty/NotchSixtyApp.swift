@@ -221,25 +221,19 @@ final class ProductController: ObservableObject {
     }
 
     func openNormallyFromSafeLaunch() throws {
-        guard audioEngine.lifecycleState == .idle else {
-            throw ProductRecoveryError.invalidState
-        }
+        try normalizeRecoveryLifecycleToIdle()
         try profiles.applySelectedLayersNow()
         recovery.openNormally()
     }
 
     func openWithPlugInsBypassedFromSafeLaunch() throws {
-        guard audioEngine.lifecycleState == .idle else {
-            throw ProductRecoveryError.invalidState
-        }
+        try normalizeRecoveryLifecycleToIdle()
         try profiles.applySelectedLayersNow()
         recovery.openWithPlugInsBypassed()
     }
 
     func restoreLastKnownGoodFromSafeLaunch() throws {
-        guard audioEngine.lifecycleState == .idle else {
-            throw ProductRecoveryError.invalidState
-        }
+        try normalizeRecoveryLifecycleToIdle()
         let previous = profiles.makeBackupSnapshot()
         let lastKnownGood = try recovery.lastKnownGoodSnapshot()
 
@@ -410,6 +404,15 @@ final class ProductController: ObservableObject {
         calibration.cancelMeasurement()
         audioEngine.shutdownForTermination()
         recovery.markCleanTermination()
+    }
+
+    private func normalizeRecoveryLifecycleToIdle() throws {
+        if audioEngine.lifecycleState == .failed {
+            audioEngine.stop()
+        }
+        guard audioEngine.lifecycleState == .idle else {
+            throw ProductRecoveryError.invalidState
+        }
     }
 
     func diagnosticsReport(
