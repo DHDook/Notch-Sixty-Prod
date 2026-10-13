@@ -61,12 +61,13 @@ jobs:
           -configuration Debug -destination 'platform=macOS,arch=arm64'
           CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES build
 
-      - name: Run production IA and A/B foundation tests
+      - name: Run production IA, product finish and Lab export tests
         run: >-
           xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
           -configuration Debug -destination 'platform=macOS,arch=arm64'
           CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES
           -only-testing:NotchSixtyTests/ProductionInformationArchitectureTests
+          -only-testing:NotchSixtyTests/SpeakerMeasurementLabReportTests
           test
 
       - name: Build unsigned arm64 Release app
