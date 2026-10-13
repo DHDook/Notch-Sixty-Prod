@@ -90,9 +90,10 @@ enum NotchSixtyBackupError: Error, LocalizedError, Equatable {
 }
 
 /// Versioned, integrity-checked backup service. The service has no audio-start
-/// authority. Profile restore is allowed only while the audio engine is idle,
-/// and ProductProfileController disarms all live hardware bindings before the
-/// restored profiles are persisted.
+/// authority. Profile restore is allowed only while the audio engine is idle.
+/// ProductProfileController preserves imported stable hardware identities for
+/// review but persists unavailable bindings behind a Needs Mapping gate, so a
+/// backup can never silently claim a different physical device.
 @MainActor
 final class NotchSixtyBackupService {
     private let profiles: ProductProfileController
@@ -257,7 +258,10 @@ final class NotchSixtyBackupService {
             var rollbackFailures: [String] = []
 
             do {
-                _ = try profiles.restoreBackupSnapshot(priorProfiles)
+                _ = try profiles.restoreBackupSnapshot(
+                    priorProfiles,
+                    recomputeHardwareRequirements: false
+                )
             } catch {
                 rollbackFailures.append(
                     "profiles: \(error.localizedDescription)"
