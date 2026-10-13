@@ -1,6 +1,6 @@
 # PR111 — Automatic Per-Driver Speaker Optimization
 
-**Status: Slice 1 remote CI passed; Slice 2 implemented, exact-head CI pending; physical commissioning deferred.**
+**Status: Slices 1–2 remote CI passed; Slice 3 implemented, exact-head CI pending; physical commissioning deferred.**
 
 **REMOTE SOFTWARE ONLY.** All existing PRs remain draft, open and unmerged;
 no live Apply, hardware acceptance, App Store release or change to `main`.
@@ -102,12 +102,43 @@ crossover summation, acoustic-center timing, explicit approval/rollback,
 and physical speaker-safe capture. This Slice 2 does **not** authorize
 filter compilation or deployment.
 
-**Slice 3 — Acoustic center and timing recommendations.** Authenticate a
-shared timing reference across each independently measured driver pair.
-Require exact session, physical endpoint, shared ADC/timebase and limiter/
-crossover topology matching. With independent-clock or absent timing
-evidence, produce no delay or polarity recommendation. Keep phase at the
-physical crossover in the verification loop.
+**Slice 3 — Acoustic-center timing and polarity hypotheses
+(implemented, exact-head CI pending).** Adjacent protected-driver pairs can
+now be analyzed only when every repeat includes a qualified simultaneous
+electrical reference captured on the second input of the same ADC timeline.
+The analyzer accepts Low↔High in Bi-Amp mode, or Low↔Mid / Mid↔High in
+Tri-Amp mode, on the same speaker side only; Low↔High is explicitly rejected
+as non-adjacent in Tri-Amp mode.
+
+Both drivers must retain identical multi-output routing and Bass Management
+crossover topology, exact per-repeat protected provenance, active limiter,
+common sample/frequency grid, complete unclipped sweeps, SNR ≥35 dB and
+measured coverage around the crossover. The shared reference itself must
+remain stable across both driver protocols: arrival spread ≤0.25 ms,
+magnitude-repeatability RMS ≤0.50 dB, and phase consistency ≥98%.
+Independent-clock data, missing reference captures, mismatched routing or
+unstable reference evidence produce no timing result.
+
+The measured acoustic arrival is corrected by each sweep's simultaneous
+electrical-reference arrival. If the adjacent drivers differ by 0.05–2.0 ms,
+the report may hypothesize *additional delay on the currently earlier bus*;
+larger offsets are reported without inventing a safe delay value. Residual
+phase is calculated only after the acoustic and reference arrival terms have
+already been removed. A ≥45° advantage is required before reporting either
+**retain current polarity** or **compare inversion of the second driver**;
+otherwise polarity remains inconclusive.
+
+These values are visible in Measurement Lab → Analysis & Export with
+crossover, relative arrival, bounded delay hypothesis, residual phase,
+polarity hypothesis, reference stability, evidence confidence and
+**Never · review only** deployment status. JSON/CSV remain compact diagnostics.
+No delay, polarity, crossover, limiter, PEQ or live routing field is changed.
+
+The polarity result is not a permission to invert a driver. The next slice
+must evaluate actual combined-driver crossover summation, and a later guarded
+Apply must require fresh real measurements and rollback. The electrical
+reference authenticates relative per-sweep timing only; it does not certify
+absolute DAC/ADC latency or exposed-driver hardware safety.
 
 **Slice 4 — Combined-driver crossover summation verification.** Model and
 eventually verify aggregate response with safely captured pairs and
