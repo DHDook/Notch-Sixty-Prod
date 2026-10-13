@@ -1,6 +1,6 @@
 # PR114 — Commercial Release Candidate
 
-Status: **IN PROGRESS — SLICE 1 RELEASE BASELINE**
+Status: **IN PROGRESS — SLICES 1–2 IMPLEMENTED; EXACT-HEAD VALIDATION PENDING**
 
 PR114 is stacked directly on the exact remotely-complete PR113B head
 `f10008d8330c2dc29f195163c56cf4723fc16a6c`.
@@ -81,6 +81,53 @@ Re-audit the actual PR113B shipping tree rather than inheriting PR102 assumption
 - publish a machine-readable PR114 release-candidate readiness artifact;
 - leave physical, credential, public-release and merge authority false until
   genuine evidence is supplied.
+
+## Slice 1 implementation — release baseline reconciliation
+
+Slice 1 is implemented as release-contract work only. It:
+
+- pins the exact PR113B base at
+  `f10008d8330c2dc29f195163c56cf4723fc16a6c`;
+- reconciles README and roadmap status to PR114;
+- records the actual shipping version/build/deployment target, architecture,
+  bundle identifier, entitlements and classified production dependency;
+- carries forward current release-hardening rules without freezing obsolete
+  PR45 source strings or historical icon hashes; and
+- records final commercial app-icon owner approval as an explicit unresolved
+  public-release gate.
+
+The pinned Slice 1 candidate `a4fc2eda5f72e1711f7dee91d308c75dce2950be`
+passed its portable contract. Its macOS job was later cancelled by normal
+workflow concurrency when Slice 2 advanced the same branch. The combined
+Slices 1–2 exact-head matrix therefore serves as the authoritative macOS
+checkpoint rather than fabricating an intermediate result.
+
+## Slice 2 implementation — App Store privacy & security
+
+Slice 2 adds `docs/PR114_APP_STORE_PRIVACY_SECURITY.md` and a branch-local
+source audit.
+
+It:
+
+- preserves the exact three-entitlement App Sandbox posture;
+- broadens the microphone purpose string from stale “Room Correction only”
+  wording to all explicitly initiated measurement/calibration workflows;
+- aligns Preferences permission copy with the same boundary;
+- scans the actual PR114 checkout for unreconciled app-owned network clients,
+  analytics/tracking/crash-upload SDKs, advertising identifiers, self-updaters,
+  privileged helpers and persistent HAL-install architecture;
+- records that the one classified bundled third-party production component is
+  still local-only libmysofa v1.3.4 under BSD-3-Clause;
+- distinguishes user-installed Audio Units from bundled Notch Sixty SDKs;
+- records a deliberate macOS-only decision not to add an empty
+  `PrivacyInfo.xcprivacy` when the current source/dependency audit does not
+  require one; and
+- leaves App Store Connect privacy-policy URL and App Privacy questionnaire
+  completion false until genuine owner/account evidence exists.
+
+The privacy-manifest conclusion is release-date sensitive and must be
+re-evaluated if Apple changes the macOS requirement, a manifest-requiring SDK
+is added, or another Apple platform target is introduced.
 
 ## Existing release foundations to reuse
 
