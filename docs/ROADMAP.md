@@ -36,7 +36,7 @@ core-DSP expansion:
 The modal first-run assistant and Playback-System lock are deliberately
 deferred.
 
-**Slices 1–4 are implemented remotely.** Slice 1 established the temporary,
+**Slices 1–5 are implemented remotely.** Slice 1 established the temporary,
 in-memory safe A/B capture boundary. The allowed audition payload is limited to stereo EQ, input preamp,
 headroom attenuation and content dynamics. Audio Unit rack topology and every
 Playback-System/hardware-domain setting remain outside the A/B payload. Each
@@ -64,6 +64,15 @@ flags; interoperability exports provide lossless transfer CSV, impulse CSV,
 FRD-compatible selected-capture response data and mono 32-bit float WAV impulse
 data. Export is read-only and carries no DSP, deployment or physical-acceptance
 authority.
+
+Slice 5 adds machine-local Safe Launch / Recovery Mode. An unclean-session
+sentinel plus repeated audio-start and plug-in-failure counters can hold the
+app in an explicit idle recovery state. The user can Open Normally, temporarily
+bypass plug-ins without editing the saved rack, Restore Last Known Good, or
+Copy Diagnostics. Last Known Good is updated only by a successful normal start
+with a healthy plug-in chain. Every production Start path now routes through
+the same ProductController transaction. Recovery state is excluded from general
+backup and has no PR112 physical-acceptance or release authority.
 
 PR113B software work cannot satisfy PR112 physical acceptance and cannot set
 `releaseAcceptanceComplete`, `liveFeedForwardANCAuthorized`, or
