@@ -9,14 +9,17 @@ PROJECT = ROOT / "NotchSixty.xcodeproj/project.pbxproj"
 ENGINE = ROOT / "NotchSixty/Audio/AudioIOEngine.swift"
 APP = ROOT / "NotchSixty/NotchSixtyApp.swift"
 TOOLBAR = ROOT / "NotchSixty/UI/ProductionProfileToolbar.swift"
+LAB_REPORT = ROOT / "NotchSixty/Audio/SpeakerMeasurementLabReport.swift"
+LAB_UI = ROOT / "NotchSixty/UI/ProductionSpeakerMeasurementLabWorkspace.swift"
+LAB_TESTS = ROOT / "NotchSixtyTests/SpeakerMeasurementLabReportTests.swift"
 TESTS = ROOT / "NotchSixtyTests/ProductionInformationArchitectureTests.swift"
 DOC = ROOT / "docs/PR113B_WORLD_CLASS_PRODUCT_FINISH.md"
 ROADMAP = ROOT / "docs/ROADMAP.md"
 WORKFLOW = ROOT / ".github/workflows/pr113b-world-class-product-finish.yml"
 
 for path in (
-    PROFILES, BACKUP, PROJECT, ENGINE, APP, TOOLBAR, TESTS, DOC, ROADMAP,
-    WORKFLOW
+    PROFILES, BACKUP, PROJECT, ENGINE, APP, TOOLBAR, LAB_REPORT, LAB_UI,
+    LAB_TESTS, TESTS, DOC, ROADMAP, WORKFLOW
 ):
     assert path.is_file(), f"PR113B Slice 1 missing artifact: {path}"
 
@@ -26,6 +29,9 @@ project = PROJECT.read_text(encoding="utf-8")
 engine = ENGINE.read_text(encoding="utf-8")
 app = APP.read_text(encoding="utf-8")
 toolbar = TOOLBAR.read_text(encoding="utf-8")
+lab_report = LAB_REPORT.read_text(encoding="utf-8")
+lab_ui = LAB_UI.read_text(encoding="utf-8")
+lab_tests = LAB_TESTS.read_text(encoding="utf-8")
 tests = TESTS.read_text(encoding="utf-8")
 doc = DOC.read_text(encoding="utf-8")
 roadmap = ROADMAP.read_text(encoding="utf-8")
@@ -246,6 +252,73 @@ for token in (
 ):
     assert token in tests, f"PR113B Slice 3 regression missing {token}"
 
+
+for token in (
+    "struct SpeakerMeasurementLabFullFidelityExportEnvelope:",
+    "measurementOnly: Bool = true",
+    "canDeploy: Bool = false",
+    "containsRawImpulseData: Bool = true",
+    "containsFullTransferFunctionData: Bool = true",
+    "struct SpeakerMeasurementLabFullFidelityExporter: Sendable",
+    "func fullJSONData(",
+    "func transferCSVData(",
+    "func impulseCSVData(",
+    "func frdData(",
+    "func impulseWAVData(",
+    "magnitude_domain=transfer_function_db_not_absolute_spl",
+    "WAVE_FORMAT_IEEE_FLOAT",
+):
+    assert token in lab_report, (
+        f"PR113B Slice 4 full-fidelity Lab exporter missing {token}"
+    )
+
+for forbidden in (
+    "replaceSelectedSystem",
+    "approveAndApply",
+    "setRoomCorrection",
+    "engine.start",
+    "engine.stop",
+):
+    full_start = lab_report.index(
+        "struct SpeakerMeasurementLabFullFidelityExporter: Sendable"
+    )
+    full_end = lab_report.index(
+        "extension SpeakerMeasurementLabSessionStore",
+        full_start,
+    )
+    assert forbidden not in lab_report[full_start:full_end], (
+        f"PR113B Slice 4 exporter gained mutation authority: {forbidden}"
+    )
+
+for token in (
+    '"Compact Report"',
+    '"Full-Fidelity Data"',
+    '"Export Full JSON"',
+    '"Export Transfer CSV"',
+    '"Export Impulse CSV"',
+    '"Export Capture FRD"',
+    '"Export Impulse WAV"',
+    "SpeakerMeasurementLabFullFidelityExporter()",
+):
+    assert token in lab_ui, (
+        f"PR113B Slice 4 production Lab UI missing {token}"
+    )
+
+for token in (
+    "testFullJSONPreservesRawEvidenceAndSafetyBoundary",
+    "testDetailedCSVsPreserveTransferAndImpulseSamples",
+    "testFRDPreservesTransferGridWithoutClaimingAbsoluteSPL",
+    "testImpulseWAVIsMonoFloat32AtCaptureRate",
+):
+    assert token in lab_tests, (
+        f"PR113B Slice 4 Lab export regression missing {token}"
+    )
+
+assert (
+    "-only-testing:NotchSixtyTests/SpeakerMeasurementLabReportTests"
+    in workflow
+), "PR113B Slice 4 Lab export tests are not in the targeted CI gate"
+
 for token in (
     "Slice 1 — Safe A/B comparison foundation",
     "Audio Unit rack topology",
@@ -255,6 +328,9 @@ for token in (
     "attenuation-only",
     "Exit A/B and Restore",
     "Slice 3 — Full Notch Sixty backup & restore",
+    "Slice 4 — Full-fidelity Measurement Lab export",
+    "32-bit IEEE-float WAV",
+    "transfer-function dB",
     "binaural",
     "Needs Mapping",
     "SHA-256",
@@ -280,4 +356,4 @@ for token in (
 ):
     assert token in workflow, f"PR113B workflow missing {token}"
 
-print("PR113B Slices 1–3 world-class product contract: PASS")
+print("PR113B Slices 1–4 world-class product contract: PASS")
