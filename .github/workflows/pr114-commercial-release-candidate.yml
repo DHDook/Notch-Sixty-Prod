@@ -29,6 +29,9 @@ jobs:
       - name: Validate PR114 release baseline
         run: python3 ci/validate_pr114_release_baseline.py
 
+      - name: Validate PR114 App Store privacy and security
+        run: python3 ci/validate_pr114_privacy_security.py
+
       - name: Preserve PR113B product-finish contract
         run: python3 ci/validate_pr113b_ab_foundation.py
 
@@ -52,6 +55,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 ci/validate_pr114_release_baseline.py
+          python3 ci/validate_pr114_privacy_security.py
           python3 ci/validate_pr113b_ab_foundation.py
           python3 ci/validate_pr102_release_readiness.py
           python3 ci/validate_pr102_app_store_boundary.py
