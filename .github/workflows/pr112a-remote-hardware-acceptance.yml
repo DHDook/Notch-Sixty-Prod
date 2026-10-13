@@ -79,6 +79,7 @@ jobs:
           CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES
           -only-testing:NotchSixtyTests/HardwareAcceptanceTests
           -only-testing:NotchSixtyTests/HardwareAcceptanceEvidenceAdapterTests
+          -only-testing:NotchSixtyTests/HardwareAcceptancePreflightTests
           test
 
       - name: Build unsigned arm64 Release app
