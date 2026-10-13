@@ -988,12 +988,14 @@ final class ProtectedDriverPEQRecommendationTests: XCTestCase {
                 routingSignature: "pr111-active-route",
                 microphone: mic,
                 sharedClockReferenceConfiguration:
-                    SpeakerMeasurementLabSharedClockReferenceConfiguration(
+                    includeReference
+                    ? SpeakerMeasurementLabSharedClockReferenceConfiguration(
                         inputDeviceUID: mic.deviceUID,
                         inputChannelIndex: 1,
                         outputReferenceDeviceUID: "PR111 Device",
                         minimumSNRDB: 35
-                    ),
+                    )
+                    : nil,
                 sampleRate: 48_000,
                 protocols: [lowProtocol, highProtocol],
                 captures: captures
