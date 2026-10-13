@@ -75,6 +75,7 @@ final class ProductController: ObservableObject {
     let ambientCompensation: AmbientCompensationController
     let activeQuietZone: ActiveQuietZoneController
     let hardwareAcceptance: HardwareAcceptanceController
+    let reference: ProductionReferenceNavigator
     private var audioEngineObservation: AnyCancellable?
     private var calibrationObservation: AnyCancellable?
     private var multichannelCalibrationObservation: AnyCancellable?
@@ -119,6 +120,7 @@ final class ProductController: ObservableObject {
             ambient: ambientCompensation
         )
         self.hardwareAcceptance = HardwareAcceptanceController()
+        self.reference = ProductionReferenceNavigator()
         observeAudioEngine()
     }
 
@@ -158,6 +160,7 @@ final class ProductController: ObservableObject {
             ambient: ambientCompensation
         )
         self.hardwareAcceptance = HardwareAcceptanceController()
+        self.reference = ProductionReferenceNavigator()
         observeAudioEngine()
     }
 
@@ -1504,6 +1507,7 @@ private struct ProductionMenuBarView: View {
 private struct ProductionSettingsView: View {
     @ObservedObject var preferences: ApplicationPreferences
     @ObservedObject var product: ProductController
+    @ObservedObject var reference: ProductionReferenceNavigator
 
     private var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
@@ -1560,22 +1564,30 @@ private struct ProductionSettingsView: View {
     }
 
     var body: some View {
-        TabView {
+        TabView(selection: $reference.selectedTab) {
             generalSettings
                 .tabItem {
                     Label("General", systemImage: "gearshape")
                 }
+                .tag(ProductionReferenceTab.general)
 
-            ProductionUserGuideView()
+            ProductionUserGuideView(navigator: reference)
                 .tabItem {
                     Label("User Guide", systemImage: "book.closed")
                 }
+                .tag(ProductionReferenceTab.userGuide)
+
+            ProductionDSPReferenceView(navigator: reference)
+                .tabItem {
+                    Label("DSP Reference", systemImage: "function")
+                }
+                .tag(ProductionReferenceTab.dspReference)
         }
         .task {
             preferences.apply(to: product.audioEngine)
             preferences.refreshLaunchAtLoginStatus()
         }
-        .frame(width: 920)
+        .frame(width: 960)
         .frame(minHeight: 680)
     }
 
@@ -1781,7 +1793,11 @@ struct NotchSixtyApp: App {
         .menuBarExtraStyle(.window)
 
         Settings {
-            ProductionSettingsView(preferences: preferences, product: product)
+            ProductionSettingsView(
+                preferences: preferences,
+                product: product,
+                reference: product.reference
+            )
         }
 
         #if DEBUG
