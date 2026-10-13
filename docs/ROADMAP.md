@@ -16,6 +16,47 @@ Legacy parity is the minimum capability floor. The commercial rewrite should exc
 
 Future portability must not materially delay the flagship Mac launch.
 
+## Current execution status — PR113B
+
+**PR113B — World-Class Product Finish** is the active remote milestone,
+stacked directly on the exact remotely-complete PR113 head
+`f0a260336a0df7284a0c414f39a6e43b7d86ca1b`.
+
+The agreed pre-RC scope is intentionally product-focused rather than another
+core-DSP expansion:
+
+- Slice 1 — safe A/B comparison foundation and snapshot boundary;
+- Slice 2 — click-free / loudness-matched A/B audition UI;
+- Slice 3 — full Notch Sixty backup & restore bundle;
+- Slice 4 — full-fidelity Measurement Lab export;
+- Slice 5 — Safe Launch / Recovery Mode;
+- Slice 6 — Headroom Assistant; and
+- Slice 7 — non-intrusive Getting Started guide refresh plus cumulative closeout.
+
+The modal first-run assistant and Playback-System lock are deliberately
+deferred.
+
+**Slice 1 is implemented remotely.** A/B capture is temporary, in-memory and
+non-live. The allowed audition payload is limited to stereo EQ, input preamp,
+headroom attenuation and content dynamics. Audio Unit rack topology and every
+Playback-System/hardware-domain setting remain outside the A/B payload. Each
+snapshot pins the selected Playback System identity plus exact
+`PlaybackSystemState`; later audition must fail closed on identity or state
+drift.
+
+Slice 1 deliberately introduces **no live A/B Apply/switch method**. The
+click-free executor moves to Slice 2 after the safety boundary is regression
+locked.
+
+PR113B software work cannot satisfy PR112 physical acceptance and cannot set
+`releaseAcceptanceComplete`, `liveFeedForwardANCAuthorized`, or
+`mayMergeIntoMain` true. PR113B, PR113 and all ancestors remain **OPEN,
+DRAFT and UNMERGED**; `main` is unchanged.
+
+See `docs/PR113B_WORLD_CLASS_PRODUCT_FINISH.md`.
+
+---
+
 ## Current execution status — PR113
 
 **PR113 — Production UX, Preferences & Reference** is the active remote
