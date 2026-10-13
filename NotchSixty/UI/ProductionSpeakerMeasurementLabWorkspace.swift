@@ -802,7 +802,10 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                                 )
                                 Spacer()
                                 Text(
-                                    analysis.kind == .protectedDriverOptimization
+                                    (
+                                        analysis.kind == .protectedDriverOptimization
+                                            || analysis.kind == .protectedDriverTiming
+                                    )
                                         ? (analysis.available ? "REVIEW ONLY" : "UNQUALIFIED")
                                         : (analysis.available ? "AVAILABLE" : "UNAVAILABLE")
                                 )
