@@ -231,7 +231,7 @@ for token in (
     assert token in app, f"PR113B backup production UI missing {token}"
 
 for token in (
-    '"Needs Mapping"',
+    "Needs Mapping",
     '"Confirm Hardware Mapping"',
     "selectedSystemHardwareMappingRequirement",
 ):
