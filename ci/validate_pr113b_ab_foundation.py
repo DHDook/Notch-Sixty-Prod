@@ -4,7 +4,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PROFILES = ROOT / "NotchSixty/State/ProductProfiles.swift"
-BACKUP = ROOT / "NotchSixty/State/ProductBackup.swift"
+BACKUP = ROOT / "NotchSixty/Backup/NotchSixtyBackup.swift"
 PROJECT = ROOT / "NotchSixty.xcodeproj/project.pbxproj"
 ENGINE = ROOT / "NotchSixty/Audio/AudioIOEngine.swift"
 APP = ROOT / "NotchSixty/NotchSixtyApp.swift"
@@ -174,52 +174,59 @@ for token in (
     "case hardwareMappingRequired(profile: String)",
     "func makeBackupSnapshot()",
     "func restoreBackupSnapshot(",
-    "availableOutputUIDs: Set<String>",
+    "availableOutputUIDs: Set<String>? = nil",
     "recomputeHardwareRequirements: Bool = true",
     "func confirmSelectedSystemHardwareMapping()",
+    "hardwareMappingRequiredSystemIDs",
 ):
     assert token in profiles, f"PR113B Slice 3 profile backup contract missing {token}"
 
 for token in (
-    "struct ProductBackupPreferences:",
-    "struct ProductBackupPayload:",
-    "struct ProductBackupManifest:",
-    "struct ProductBackupEnvelope:",
-    "final class ProductBackupController: ObservableObject",
-    "func exportData(now: Date = Date()) throws -> Data",
-    "func inspect(data: Data) throws -> ProductBackupInspection",
+    "struct NotchSixtyBackupPreferences:",
+    "struct NotchSixtyBackupManifestEntry:",
+    "struct NotchSixtyBackupManifest:",
+    "struct NotchSixtyBackupBundle:",
+    "final class NotchSixtyBackupService",
+    "func exportData(",
+    "func inspect(_ data: Data)",
     "func restore(",
-    "payloadSHA256",
     "SHA256.hash(data: data)",
-    "hardwareAcceptanceReferenceEvidence",
-    "restoreRequiresIdle",
-    "existingSessionIDs()",
+    "roomCorrectionProjects",
+    "measurementLabSessions",
+    "binauralAssets",
 ):
-    assert token in backup, f"PR113B Slice 3 backup engine missing {token}"
+    assert token in backup, f"PR113B Slice 3 backup service missing {token}"
 
+# General backup must never recreate physical acceptance authority.
 for forbidden in (
-    "hardwareAcceptanceStore.create(",
-    "hardwareAcceptanceStore.append(",
+    "HardwareAcceptanceCampaign",
+    "HardwareAcceptanceCampaignStore",
+    "physicalAcceptanceComplete",
+    "mayMergeIntoMain",
 ):
     assert forbidden not in backup, (
-        f"PR113B backup restore gained acceptance authority: {forbidden}"
+        f"PR113B backup gained acceptance authority/evidence coupling: {forbidden}"
     )
 
 for token in (
-    "ProductBackup.swift in Sources",
-    "ProductBackup.swift",
+    "NotchSixtyBackup.swift in Sources",
+    "NotchSixtyBackup.swift",
 ):
     assert token in project, f"PR113B backup target membership missing {token}"
 
+assert "ProductBackup.swift" not in project
+assert not (ROOT / "NotchSixty/State/ProductBackup.swift").exists()
+
 for token in (
-    "let backup: ProductBackupController",
-    "ProductBackupController(",
+    "let backup: NotchSixtyBackupService",
+    "NotchSixtyBackupService(",
     'title: "Backup & Restore"',
     '"Save Backup…"',
     '"Restore Backup…"',
     '"n60backup"',
-    "product.backup.restore(data: data)",
-    "preferences.reloadFromDefaults()",
+    "product.backup.restore(data)",
+    "preferences.makeBackupSnapshot()",
+    "preferences.restoreBackupSnapshot(",
 ):
     assert token in app, f"PR113B backup production UI missing {token}"
 
@@ -233,8 +240,8 @@ for token in (
 for token in (
     "testBackupRestoreMarksUnavailablePlaybackHardwareForMapping",
     "testBackupRestoreKeepsKnownHardwareEligibleWithoutRemapping",
-    "testBackupPreferencesRoundTripSafeKeysOnly",
-    "testBackupInspectionRejectsPayloadTampering",
+    "testBackupPreferencesExcludeOSOwnedLaunchState",
+    "testBackupInspectionRejectsDomainTampering",
 ):
     assert token in tests, f"PR113B Slice 3 regression missing {token}"
 
@@ -247,8 +254,8 @@ for token in (
     "attenuation-only",
     "Exit A/B and Restore",
     "Slice 3 — Full Notch Sixty backup & restore",
+    "binaural",
     "Needs Mapping",
-    "reference-only evidence",
     "SHA-256",
     "OPEN, DRAFT and UNMERGED",
 ):
