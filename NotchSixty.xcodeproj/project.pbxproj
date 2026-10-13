@@ -266,6 +266,10 @@
 		F92000000000000000000002 /* RoomTreatmentAdvisorController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F92000000000000000000012 /* RoomTreatmentAdvisorController.swift */; };
 		F92000000000000000000003 /* ProductionRoomTreatmentAdvisorWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = F92000000000000000000013 /* ProductionRoomTreatmentAdvisorWorkspace.swift */; };
 		F92000000000000000000004 /* RoomTreatmentAdvisorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F92000000000000000000014 /* RoomTreatmentAdvisorTests.swift */; };
+		F112A0000000000000000001 /* HardwareAcceptance.swift in Sources */ = {isa = PBXBuildFile; fileRef = F112A0000000000000000011 /* HardwareAcceptance.swift */; };
+		F112A0000000000000000002 /* HardwareAcceptanceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F112A0000000000000000012 /* HardwareAcceptanceController.swift */; };
+		F112A0000000000000000003 /* ProductionHardwareAcceptanceWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = F112A0000000000000000013 /* ProductionHardwareAcceptanceWorkspace.swift */; };
+		F112A0000000000000000004 /* HardwareAcceptanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F112A0000000000000000014 /* HardwareAcceptanceTests.swift */; };
 		F93000000000000000000001 /* RoomGeometryPlacement.swift in Sources */ = {isa = PBXBuildFile; fileRef = F93000000000000000000011 /* RoomGeometryPlacement.swift */; };
 		F93000000000000000000002 /* ProductionRoomGeometrySection.swift in Sources */ = {isa = PBXBuildFile; fileRef = F93000000000000000000012 /* ProductionRoomGeometrySection.swift */; };
 		F93000000000000000000003 /* RoomGeometryPlacementTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F93000000000000000000013 /* RoomGeometryPlacementTests.swift */; };
@@ -565,6 +569,10 @@
 		F92000000000000000000012 /* RoomTreatmentAdvisorController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomTreatmentAdvisorController.swift; sourceTree = "<group>"; };
 		F92000000000000000000013 /* ProductionRoomTreatmentAdvisorWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionRoomTreatmentAdvisorWorkspace.swift; sourceTree = "<group>"; };
 		F92000000000000000000014 /* RoomTreatmentAdvisorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomTreatmentAdvisorTests.swift; sourceTree = "<group>"; };
+		F112A0000000000000000011 /* HardwareAcceptance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Acceptance/HardwareAcceptance.swift; sourceTree = "<group>"; };
+		F112A0000000000000000012 /* HardwareAcceptanceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Acceptance/HardwareAcceptanceController.swift; sourceTree = "<group>"; };
+		F112A0000000000000000013 /* ProductionHardwareAcceptanceWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionHardwareAcceptanceWorkspace.swift; sourceTree = "<group>"; };
+		F112A0000000000000000014 /* HardwareAcceptanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HardwareAcceptanceTests.swift; sourceTree = "<group>"; };
 		F93000000000000000000011 /* RoomGeometryPlacement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomGeometryPlacement.swift; sourceTree = "<group>"; };
 		F93000000000000000000012 /* ProductionRoomGeometrySection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionRoomGeometrySection.swift; sourceTree = "<group>"; };
 		F93000000000000000000013 /* RoomGeometryPlacementTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomGeometryPlacementTests.swift; sourceTree = "<group>"; };
@@ -598,6 +606,8 @@
 				A20000000000000000000050 /* Audio */,
 				A20000000000000000000054 /* State */,
 				A20000000000000000000055 /* Diagnostics */,
+				F112A0000000000000000011 /* HardwareAcceptance.swift */,
+				F112A0000000000000000012 /* HardwareAcceptanceController.swift */,
 				A40000000000000000000050 /* UI */,
 				A10000000000000000000020 /* NotchSixtyApp.swift */,
 				A10000000000000000000021 /* ContentView.swift */,
@@ -717,6 +727,7 @@
 				F10600000000000000000034 /* SpeakerMeasurementLabUIModelTests.swift */,
 				F92000000000000000000014 /* RoomTreatmentAdvisorTests.swift */,
 				F93000000000000000000013 /* RoomGeometryPlacementTests.swift */,
+				F112A0000000000000000014 /* HardwareAcceptanceTests.swift */,
 				F94000000000000000000014 /* RoomTreatmentDesignVerificationTests.swift */,
 				F95000000000000000000012 /* ActiveQuietZoneSpatialTests.swift */,
 			);
@@ -961,6 +972,9 @@
 				F65000000000000000000005 /* ProductionHeadphoneWorkspace.swift in Sources */,
 				F78000000000000000000001 /* ProductionActiveAcousticsWorkspace.swift in Sources */,
 				F78000000000000000000002 /* ProductionPluginWorkspace.swift in Sources */,
+				F112A0000000000000000001 /* HardwareAcceptance.swift in Sources */,
+				F112A0000000000000000002 /* HardwareAcceptanceController.swift in Sources */,
+				F112A0000000000000000003 /* ProductionHardwareAcceptanceWorkspace.swift in Sources */,
 				A20000000000000000000010 /* AudioIOEngine.swift in Sources */,
 				A20000000000000000000011 /* CoreAudioError.swift in Sources */,
 				F63000000000000000000001 /* CoreAudioNChannelTransportSession.swift in Sources */,
@@ -1219,6 +1233,7 @@
 				F10600000000000000000024 /* SpeakerMeasurementLabUIModelTests.swift in Sources */,
 				F92000000000000000000004 /* RoomTreatmentAdvisorTests.swift in Sources */,
 				F93000000000000000000003 /* RoomGeometryPlacementTests.swift in Sources */,
+				F112A0000000000000000004 /* HardwareAcceptanceTests.swift in Sources */,
 				F94000000000000000000004 /* RoomTreatmentDesignVerificationTests.swift in Sources */,
 				F95000000000000000000002 /* ActiveQuietZoneSpatialTests.swift in Sources */,
 			);
