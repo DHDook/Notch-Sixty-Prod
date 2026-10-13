@@ -1,6 +1,6 @@
 # PR113B — World-Class Product Finish
 
-Status: **IN PROGRESS — SLICES 1–2 IMPLEMENTED REMOTELY**
+Status: **IN PROGRESS — SLICES 1–3 IMPLEMENTED REMOTELY**
 
 PR113B is stacked directly on the exact remotely-complete PR113 head
 `f0a260336a0df7284a0c414f39a6e43b7d86ca1b`.
@@ -183,6 +183,71 @@ level-matching attenuation cannot accidentally become a new source snapshot.
 
 ---
 
+## Slice 3 — Full Notch Sixty backup & restore
+
+Slice 3 adds a versioned \`.n60backup\` bundle for disaster recovery and
+Mac-to-Mac migration without turning a file import into hardware authority.
+
+### Bundle contents
+
+The bundle is human-inspectable JSON with a schema-versioned manifest and
+payload. It includes:
+
+- Content Presets, including Audio Unit rack configuration references;
+- Playback Systems and their DSP/calibration state;
+- Room Correction projects, including captured measurements and designs;
+- Advanced Speaker Measurement Lab sessions;
+- safe app preferences: appearance, Dock/Menu Bar presence and volume-key
+  resolution; and
+- hardware-acceptance campaigns as **reference-only evidence**.
+
+Launch at Login is intentionally excluded because it is an OS-level
+registration/consent decision.
+
+### Integrity and restore transaction
+
+The manifest records a SHA-256 digest of the canonical sorted-key payload.
+Inspection and restore recompute that digest before any local state is changed.
+
+Restore requires the audio engine to be idle. The full payload is decoded and
+structurally validated before writes begin. Existing profile state,
+preferences, colliding Room Correction projects and colliding Measurement Lab
+sessions are retained for rollback. If a later write fails, new records are
+removed and retained records are restored.
+
+### Hardware portability
+
+A restored Playback System retains its DSP, crossover, alignment, correction
+and calibration data. Notch Sixty never guesses that a different Core Audio
+device is equivalent to an imported stable UID.
+
+Every device UID referenced by the restored system is compared with currently
+available outputs. A system with unavailable bindings is persisted as
+**Needs Mapping**:
+
+- it may be selected for inspection;
+- its imported hardware-domain state is not activated;
+- automatic startup restore cannot activate it; and
+- the production Playback System menu exposes the Needs Mapping status until
+  the user reviews/remaps the hardware.
+
+### Acceptance authority
+
+Hardware-acceptance campaigns are included in a backup so the user's records
+are not lost. They are deliberately **not written into the live acceptance
+store during restore**. A backup therefore cannot recreate, promote or
+authenticate PR112 physical acceptance on another installation.
+
+### Production Preferences
+
+Preferences & Reference → General now includes **Backup & Restore** with
+**Save Backup…** and **Restore Backup…**. Restore has an explicit confirmation
+dialog describing replacement scope, hardware remapping and the reference-only
+acceptance-evidence rule.
+
+
+---
+
 ## Regression coverage
 
 `ProductionInformationArchitectureTests` verifies:
@@ -190,6 +255,10 @@ level-matching attenuation cannot accidentally become a new source snapshot.
 - level matching attenuates only the louder measured capture;
 - level matching is bounded and rejects missing/invalid low-level evidence;
 - captured LUFS metadata does not broaden the four-field safe audition payload;
+- unavailable imported hardware produces a persisted Needs Mapping gate;
+- known hardware can remain eligible without a remapping gate;
+- only the safe application-preference keys round-trip; and
+- backup inspection rejects payload tampering when the SHA-256 digest changes;
 
 - the A/B payload contains only the four allowed content-domain fields;
 - Audio Unit rack state survives A/B-state reconstruction unchanged;
