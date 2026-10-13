@@ -168,6 +168,62 @@ for token in (
     "testTriAmpCannotTreatLowAndHighAsAdjacentTimingPair",
 ):
     assert token in tests, f"PR111 timing regression missing {token}"
+# Slice 4 — complex protected crossover-sum model. This is explicitly
+# MODEL ONLY and can never substitute for a real combined-driver capture.
+for token in (
+    "struct ProtectedDriverCrossoverSumModelAnalyzer: Sendable",
+    "ProtectedDriverCrossoverSumModel",
+    "enum ProtectedDriverCrossoverSumHypothesis",
+    "currentMeanCoherenceDeficitDB",
+    "candidateMeanCoherenceDeficitDB",
+    "modeledDeficitReductionDB",
+    "minimumModeledImprovementDB = 0.25",
+    "ProtectedDriverTimingRecommendationAnalyzer()",
+    "referenceAlignedMean(",
+    "meanCoherenceDeficit(",
+    "var measurementOnly: Bool { true }",
+    "var modelOnly: Bool { true }",
+    "var canDeploy: Bool { false }",
+    "var combinedDriverCaptureVerified: Bool { false }",
+    "var requiresPhysicalCombinedDriverCapture: Bool { true }",
+    "MODEL ONLY:",
+    "combined-driver crossover capture",
+):
+    assert token in source, f"PR111 crossover-sum model contract missing {token}"
+
+sum_model = source.split("// MARK: - PR111 Slice 4:", 1)[1]
+for forbidden in (
+    "delayMilliseconds =",
+    "polarityInverted =",
+    "setSpeakerDriverProcessing",
+    "driverProcessing.replace(",
+    "makeRealtimeSnapshot(",
+    "startPhysical",
+):
+    assert forbidden not in sum_model, f"PR111 crossover model gained live authority: {forbidden}"
+
+for token in (
+    "case protectedDriverCrossoverSum",
+    "private func protectedDriverCrossoverSumSummaries(",
+    "ProtectedDriverCrossoverSumModelAnalyzer()",
+    'metric("Best hypothesis", hypothesis)',
+    '"REQUIRED · not yet verified"',
+    '"Never · model only"',
+):
+    assert token in report, f"PR111 crossover-sum report missing {token}"
+
+assert "analysis.kind == .protectedDriverCrossoverSum" in ui
+
+for token in (
+    "testCrossoverSumModelSelectsBoundedDelayWhenItReducesCancellation",
+    "testCrossoverSumModelCanCompareCombinedDelayAndPolarityHypothesis",
+    "testCrossoverSumModelWithoutQualifiedReferenceFailsClosed",
+    "testLargeTimingMismatchDoesNotBecomeModeledSafeAdjustment",
+    "testCrossoverSumModelRejectsMismatchedComplexGrid",
+    "testLabReportPublishesCrossoverSumModelAsModelOnly",
+    "testLabReportCrossoverSumIsUnavailableWithoutTimingEvidence",
+):
+    assert token in tests, f"PR111 crossover-sum regression missing {token}"
 assert "SpeakerMeasurementLabReportTests" in workflow
 assert "SpeakerDriverBusProcessingConfiguration" in route
 assert "ProtectedDriverPEQRecommendationTests" in workflow
