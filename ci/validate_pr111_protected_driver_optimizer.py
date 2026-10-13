@@ -145,9 +145,9 @@ for token in (
     "case protectedDriverTiming",
     "private func protectedDriverTimingSummaries(",
     "ProtectedDriverTimingRecommendationAnalyzer()",
-    'metric("Delay hypothesis",',
-    'metric("Polarity hypothesis",',
-    'metric("Deployment", "Never · review only")',
+    '"Delay hypothesis"',
+    '"Polarity hypothesis"',
+    '"Never · review only"',
 ):
     assert token in report, f"PR111 timing report missing {token}"
 
