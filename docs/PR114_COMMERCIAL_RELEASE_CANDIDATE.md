@@ -104,6 +104,27 @@ PR102 already established:
 PR114 revalidates and modernizes those foundations against the much larger
 PR113B product. It does not assume PR102 evidence alone is sufficient.
 
+## Historical release-hardening reconciliation
+
+PR114 does not run the historical PR45 validator wholesale. PR45 mixed durable
+release safeguards with source-string assumptions and exact icon hashes that
+the modern PR113B product has legitimately superseded.
+
+PR114 carries forward the durable requirements in its own validator:
+
+- engineering/validation UI remains DEBUG-only;
+- Launch at Login uses public `SMAppService` APIs and does not start audio;
+- permission and support/diagnostic affordances remain present;
+- the manual Release-DMG lane remains arm64, checksummed and explicitly
+  ad-hoc/not notarized;
+- one-shot PR45 staging machinery remains absent; and
+- current icon assets must be technically complete.
+
+**Final commercial app-icon owner approval remains pending by explicit owner
+choice.** PR114 must not treat historical PR45 icon hashes as final release
+approval. The RC baseline records `finalAppIconOwnerApproved=false`, and public
+release remains blocked until that owner approval is supplied.
+
 ## Hard authority boundary
 
 PR114 remote completion must **not** establish or imply:
