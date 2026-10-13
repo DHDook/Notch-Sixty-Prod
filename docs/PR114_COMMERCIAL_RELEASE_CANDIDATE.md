@@ -1,6 +1,6 @@
 # PR114 — Commercial Release Candidate
 
-Status: **IN PROGRESS — SLICES 1–2 IMPLEMENTED; EXACT-HEAD VALIDATION PENDING**
+Status: **IN PROGRESS — SLICES 1–3 IMPLEMENTED; EXACT-HEAD VALIDATION PENDING**
 
 PR114 is stacked directly on the exact remotely-complete PR113B head
 `f10008d8330c2dc29f195163c56cf4723fc16a6c`.
@@ -128,6 +128,34 @@ It:
 The privacy-manifest conclusion is release-date sensitive and must be
 re-evaluated if Apple changes the macOS requirement, a manifest-requiring SDK
 is added, or another Apple platform target is introduced.
+
+## Slice 3 implementation — licensing, provenance & SBOM
+
+Slice 3 closes the post-PR102 supply-chain/provenance gap.
+
+The audit finds:
+
+- no Swift Package dependency;
+- no CocoaPods or Cartfile dependency;
+- no packaged third-party framework/XCFramework/dylib/static library;
+- exactly one production vendor root;
+- exactly one bundled third-party production component:
+  **libmysofa v1.3.4 / BSD-3-Clause**;
+- no unclassified GPL/AGPL production dependency; and
+- user-installed Audio Units and REW/EasyEffects/CamillaDSP interoperability are
+  not bundled Notch Sixty dependencies.
+
+`docs/PROVENANCE.md` now reconciles the major first-party post-PR42 feature
+families through PR113B.
+
+`ci/build_pr114_sbom.py` emits deterministic **CycloneDX 1.5** JSON tied to
+the exact source commit, with libmysofa license/notice/source-set SHA-256
+evidence. CI publishes that document as the `pr114-production-sbom` artifact.
+
+`externalLegalIPReviewComplete` remains false. Automated provenance evidence is
+engineering evidence, not legal advice or external-review authority.
+
+See `docs/PR114_PROVENANCE_SBOM.md`.
 
 ## Existing release foundations to reuse
 
