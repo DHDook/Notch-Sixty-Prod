@@ -546,12 +546,16 @@ final class ProtectedDriverPEQRecommendationTests: XCTestCase {
             enabled: true,
             routes: [
                 SpeakerOutputRoute(
+                    id: UUID(uuidString:
+                        "11100000-0000-0000-0000-000000000010")!,
                     name: "Left Low", bus: .leftLow,
                     destination: PhysicalOutputEndpoint(
                         deviceUID: "PR111 Device", channelIndex: 0
                     )
                 ),
                 SpeakerOutputRoute(
+                    id: UUID(uuidString:
+                        "11100000-0000-0000-0000-000000000011")!,
                     name: "Left High", bus: .leftHigh,
                     destination: PhysicalOutputEndpoint(
                         deviceUID: "PR111 Device", channelIndex: 1
