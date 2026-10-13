@@ -283,7 +283,10 @@ struct ProductionRootView: View {
         case .dynamics:
             ProductionDynamicsView(engine: engine, reference: product.reference)
         case .meters:
-            ProductionMetersView(engine: engine)
+            ProductionMetersView(
+                engine: engine,
+                assistant: product.headroomAssistant
+            )
         case .speakers:
             ProductionSpeakersView(engine: engine, profiles: product.profiles)
         case .headphones:
