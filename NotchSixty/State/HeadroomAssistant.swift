@@ -423,7 +423,7 @@ final class HeadroomAssistantController: ObservableObject {
             throw HeadroomAssistantError.stateChanged
         }
 
-        try engine.setHeadroomAttenuationDB(
+        try engine.transitionHeadroomAttenuationDB(
             recommendation
                 .recommendedHeadroomAttenuationDB
         )
