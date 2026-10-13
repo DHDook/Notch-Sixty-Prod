@@ -483,24 +483,15 @@ struct SpeakerMeasurementLabReportBuilder: Sendable {
                     ),
                     metric(
                         "Current modeled deficit",
-                        "\(format(
-                            model.currentMeanCoherenceDeficitDB,
-                            2
-                        )) dB"
+                        format(model.currentMeanCoherenceDeficitDB, 2) + " dB"
                     ),
                     metric(
                         "Candidate modeled deficit",
-                        "\(format(
-                            model.candidateMeanCoherenceDeficitDB,
-                            2
-                        )) dB"
+                        format(model.candidateMeanCoherenceDeficitDB, 2) + " dB"
                     ),
                     metric(
                         "Modeled reduction",
-                        "\(format(
-                            model.modeledDeficitReductionDB,
-                            2
-                        )) dB"
+                        format(model.modeledDeficitReductionDB, 2) + " dB"
                     ),
                     metric("Best hypothesis", hypothesis),
                     metric(
