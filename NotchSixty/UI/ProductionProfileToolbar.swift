@@ -351,7 +351,7 @@ struct ProductionProfileToolbar: View {
                                     for: system.id
                                 ) == nil
                                     ? displayName(for: system)
-                                    : "(displayName(for: system)) · Needs Mapping"
+                                    : "\(displayName(for: system)) · Needs Mapping"
                             )
                         }
                     }
