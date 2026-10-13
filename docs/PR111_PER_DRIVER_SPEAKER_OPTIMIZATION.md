@@ -1,6 +1,6 @@
 # PR111 — Automatic Per-Driver Speaker Optimization
 
-**Status: Slices 1–2 remote CI passed; Slices 3–5 implemented, exact-head CI pending; physical commissioning and Apply deferred.**
+**Status: Slices 1–5 remote/software CI passed at `1b2560749119dfe02edb4b932e6ef4c0fa6b0cef` (Actions run 38346176045); physical commissioning and Apply deferred to PR112.**
 
 **REMOTE SOFTWARE ONLY.** All existing PRs remain draft, open and unmerged;
 no live Apply, hardware acceptance, App Store release or change to `main`.
@@ -244,3 +244,27 @@ PR106/PR109/PR110 structural safety guards, and executes full XCTest.
 All hard-gated physical acceptance remains pending. A passing CI build does
 not certify live amplifiers, individual exposed drivers, loudspeaker safety,
 phase integration, clock coherence or acoustic improvement.
+
+
+## Remote closeout — Slices 1–5
+
+PR111 reached remote/software closeout at commit
+`1b2560749119dfe02edb4b932e6ef4c0fa6b0cef`, validated by GitHub Actions
+run `38346176045`: portable PR111/PR106/PR109/PR110 guards, Apple Silicon
+arm64 Debug, targeted protected-driver/Measurement-Lab/commissioning tests,
+unsigned arm64 Release, and the full cumulative XCTest regression all passed.
+
+The resulting remote boundary is intentionally **hardware-blocked**. PR111
+can analyze protected individual-driver measurements, emit bounded cut-only
+PEQ hypotheses, derive shared-reference timing/polarity hypotheses, model
+adjacent-driver crossover cancellation, and persist an exact-state
+commissioning preview with rollback provenance. It still cannot approve,
+apply, deploy, or mutate those recommendations. A true combined-driver
+measurement, exposed-driver safety validation, active-hardware acceptance,
+and any transactional Apply/rollback belong to PR112.
+
+This CI result is software evidence only. It is not proof that a real
+amplifier/driver topology is wired safely, that the microphone/reference
+path is physically correct, that acoustic summation improves, or that any
+release/merge criterion has been met. PR111 and all ancestors remain
+**OPEN, DRAFT, UNMERGED**.
