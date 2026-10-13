@@ -1220,4 +1220,170 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         XCTAssertFalse(labels.contains("liveFeedForwardANCAuthorized"))
     }
 
+
+    func testHeadroomAssistantReconstructsPeakBeforeGainRider() {
+        var evidence = HeadroomAssistantEvidence()
+        let inputLinear =
+            Float(pow(10.0, -3.0 / 20.0))
+
+        for index in 0..<20 {
+            evidence.ingest(
+                inputTruePeakLinear: inputLinear,
+                outputTruePeakLinear: inputLinear,
+                limiterGainReductionDB: 0.2,
+                sustainedLimiterGainReductionDB: 0.1,
+                gainRiderAttenuationDB: 2.0,
+                truePeakGuardActive: true,
+                cumulativeSafetyClampSamples: 0,
+                initialSafetyClampSamples: 0,
+                elapsedSeconds: 10.0 + Double(index) * 0.1
+            )
+        }
+
+        XCTAssertEqual(
+            evidence.maximumMeasuredInputTruePeakDBTP ?? 0,
+            -3.0,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            evidence.maximumPreRiderTruePeakDBTP ?? 0,
+            -1.0,
+            accuracy: 0.001
+        )
+        XCTAssertTrue(evidence.isSufficientForRecommendation)
+    }
+
+    func testHeadroomAssistantNeverReclaimsExistingAttenuation() {
+        var evidence = HeadroomAssistantEvidence()
+        evidence.observationSeconds = 30
+        evidence.sampleCount = 30
+        evidence.maximumPreRiderTruePeakDBTP = -6
+        evidence.maximumMeasuredInputTruePeakDBTP = -6
+        evidence.truePeakGuardObserved = true
+
+        let recommendation =
+            HeadroomAssistantRecommendation.make(
+                evidence: evidence,
+                currentHeadroomAttenuationDB: -4,
+                targetPeakDBTP: -1
+            )
+
+        XCTAssertEqual(
+            recommendation.disposition,
+            .currentReserveSufficient
+        )
+        XCTAssertEqual(
+            recommendation.recommendedHeadroomAttenuationDB,
+            -4,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            recommendation.additionalAttenuationDB,
+            0,
+            accuracy: 0.0001
+        )
+        XCTAssertFalse(recommendation.canApply)
+    }
+
+    func testHeadroomAssistantUsesLargestReserveNeedPlusClampReserve() {
+        var evidence = HeadroomAssistantEvidence()
+        evidence.observationSeconds = 30
+        evidence.sampleCount = 30
+        evidence.maximumPreRiderTruePeakDBTP = -0.2
+        evidence.maximumMeasuredInputTruePeakDBTP = -0.2
+        evidence.maximumSustainedLimiterGainReductionDB = 1.0
+        evidence.maximumLimiterGainReductionDB = 2.0
+        evidence.safetyClampSamples = 4
+        evidence.truePeakGuardObserved = true
+
+        let recommendation =
+            HeadroomAssistantRecommendation.make(
+                evidence: evidence,
+                currentHeadroomAttenuationDB: -1,
+                targetPeakDBTP: -1
+            )
+
+        // Peak need is 0.8 dB. Sustained-limiter need is 0.5 dB.
+        // Use the larger need, then add the 0.5 dB clamp reserve.
+        XCTAssertEqual(
+            recommendation.peakDrivenAttenuationDB,
+            0.8,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            recommendation
+                .sustainedLimiterDrivenAttenuationDB,
+            0.5,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            recommendation.safetyClampReserveDB,
+            0.5,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            recommendation.additionalAttenuationDB,
+            1.3,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            recommendation.recommendedHeadroomAttenuationDB,
+            -2.3,
+            accuracy: 0.0001
+        )
+        XCTAssertTrue(recommendation.canApply)
+    }
+
+    func testHeadroomAssistantRequiresAuthoritativeRepresentativeEvidence() {
+        var tooShort = HeadroomAssistantEvidence()
+        tooShort.observationSeconds = 5
+        tooShort.sampleCount = 30
+        tooShort.maximumPreRiderTruePeakDBTP = 0
+        tooShort.truePeakGuardObserved = true
+
+        XCTAssertEqual(
+            HeadroomAssistantRecommendation.make(
+                evidence: tooShort,
+                currentHeadroomAttenuationDB: 0
+            ).disposition,
+            .insufficientEvidence
+        )
+
+        var noTruePeakGuard = tooShort
+        noTruePeakGuard.observationSeconds = 30
+        noTruePeakGuard.truePeakGuardObserved = false
+
+        XCTAssertEqual(
+            HeadroomAssistantRecommendation.make(
+                evidence: noTruePeakGuard,
+                currentHeadroomAttenuationDB: 0
+            ).disposition,
+            .insufficientEvidence
+        )
+    }
+
+    @MainActor
+    func testHeadroomAssistantBoundaryFailsClosedOnContentDrift()
+        throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "pr113b-headroom-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let engine = AudioIOEngine()
+        let profiles = ProductProfileController(
+            engine: engine,
+            storageURL:
+                root.appendingPathComponent("profiles.json")
+        )
+        let boundary =
+            HeadroomAssistantBoundary(profiles: profiles)
+
+        XCTAssertTrue(boundary.matches(profiles))
+        try engine.setHeadroomAttenuationDB(-1.0)
+        XCTAssertFalse(boundary.matches(profiles))
+    }
+
 }
