@@ -1466,4 +1466,45 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         )
     }
 
+
+    func testGettingStartedCoversNonIntrusiveFirstSessionPath()
+        throws {
+        let article = try XCTUnwrap(
+            ProductionUserGuideCatalog.article(
+                id: "getting-started"
+            )
+        )
+        let searchable = article.searchableText
+
+        for token in [
+            "system audio",
+            "measurement microphone",
+            "screen & system audio recording",
+            "conservative listening level",
+            "needs mapping",
+            "start processing",
+            "headroom assistant",
+            "content preset",
+            "a/b",
+            "measurement lab",
+            "room correction",
+            "backup & restore",
+            ".n60backup",
+            "safe launch",
+            "restore last known good",
+            "copy diagnostics",
+            "physical hardware-acceptance",
+        ] {
+            XCTAssertTrue(
+                searchable.contains(token),
+                "Getting Started is missing \(token)"
+            )
+        }
+
+        XCTAssertGreaterThanOrEqual(
+            article.sections.count,
+            7
+        )
+    }
+
 }
