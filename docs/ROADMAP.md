@@ -16,9 +16,40 @@ Legacy parity is the minimum capability floor. The commercial rewrite should exc
 
 Future portability must not materially delay the flagship Mac launch.
 
+## Current execution status — PR114
+
+**PR114 — Commercial Release Candidate** is now the active remote milestone,
+stacked directly on the exact remotely-complete PR113B head
+`f10008d8330c2dc29f195163c56cf4723fc16a6c`.
+
+PR114 does not add another DSP subsystem. It reconciles the final PR113B product
+against commercial release requirements and produces one exact-head,
+machine-auditable release-candidate handoff.
+
+Planned slices:
+
+- Slice 1 — release baseline reconciliation;
+- Slice 2 — App Store / privacy / security finalization;
+- Slice 3 — licensing / provenance / dependency / SBOM final audit;
+- Slice 4 — packaging, archive and release-manifest hardening;
+- Slice 5 — commercial metadata / support / release documentation; and
+- Slice 6 — integrated RC gate and credential/physical handoff.
+
+Remote PR114 work may establish software/package readiness only. It cannot
+complete PR112 physical H01–H08 acceptance, production Apple signing, App Store
+Connect/TestFlight/App Review, live feed-forward ANC authorization, public
+release authorization, or merge authority.
+
+PR114, PR113B, PR113, PR112A and every ancestor remain **OPEN, DRAFT and
+UNMERGED**; `main` is unchanged.
+
+See `docs/PR114_COMMERCIAL_RELEASE_CANDIDATE.md`.
+
+---
+
 ## Current execution status — PR113B
 
-**PR113B — World-Class Product Finish** is the active remote milestone,
+**PR113B — World-Class Product Finish** is remotely complete,
 stacked directly on the exact remotely-complete PR113 head
 `f0a260336a0df7284a0c414f39a6e43b7d86ca1b`.
 
@@ -36,7 +67,7 @@ core-DSP expansion:
 The modal first-run assistant and Playback-System lock are deliberately
 deferred.
 
-**Slices 1–7 are implemented remotely; the final exact-head closeout gate is pending.** Slice 1 established the temporary,
+**Slices 1–7 are remotely complete. Final exact-head closeout passed at `f10008d8330c2dc29f195163c56cf4723fc16a6c` / Actions run `38467523568`.** Slice 1 established the temporary,
 in-memory safe A/B capture boundary. The allowed audition payload is limited to stereo EQ, input preamp,
 headroom attenuation and content dynamics. Audio Unit rack topology and every
 Playback-System/hardware-domain setting remain outside the A/B payload. Each
