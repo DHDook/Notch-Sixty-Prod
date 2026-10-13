@@ -446,6 +446,11 @@ Every observation pins the selected Content Preset identity, selected Playback
 System identity and their exact current states. Content or system drift
 invalidates the observation and requires a new one.
 
+Headroom Assistant is also isolated from live A/B audition. It refuses to start
+while an A/B session is open and invalidates an observation if A/B begins
+mid-run, so temporary loudness-match attenuation cannot contaminate static
+headroom evidence.
+
 Apply is always explicit. `HeadroomAssistantController.applyRecommendation()`
 is the only assistant mutation path and calls the existing
 `AudioIOEngine.transitionHeadroomAttenuationDB` silent-boundary graph
