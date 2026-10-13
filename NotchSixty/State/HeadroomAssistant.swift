@@ -15,10 +15,18 @@ struct HeadroomAssistantBoundary: Equatable, Sendable {
     }
 
     @MainActor
-    func matches(_ profiles: ProductProfileController) -> Bool {
-        selectedContentPresetID == profiles.selectedContentPresetID
+    func matches(
+        _ profiles: ProductProfileController,
+        expectedHeadroomAttenuationDB: Double? = nil
+    ) -> Bool {
+        var expectedContent = contentState
+        if let expectedHeadroomAttenuationDB {
+            expectedContent.headroomAttenuationDB =
+                expectedHeadroomAttenuationDB
+        }
+        return selectedContentPresetID == profiles.selectedContentPresetID
             && selectedSystemProfileID == profiles.selectedSystemProfileID
-            && contentState == profiles.captureContentState()
+            && expectedContent == profiles.captureContentState()
             && systemState == profiles.captureSystemState()
     }
 }
@@ -280,6 +288,7 @@ enum HeadroomAssistantError: Error, LocalizedError, Equatable {
     case authoritativeTruePeakUnavailable
     case stateChanged
     case noApplicableRecommendation
+    case noAppliedRecommendationToRevert
 
     var errorDescription: String? {
         switch self {
@@ -291,6 +300,8 @@ enum HeadroomAssistantError: Error, LocalizedError, Equatable {
             return "The Content Preset or Playback System changed during the observation. Start a new Headroom Assistant observation for the current state."
         case .noApplicableRecommendation:
             return "There is no additional headroom attenuation to apply from this observation."
+        case .noAppliedRecommendationToRevert:
+            return "There is no unchanged Headroom Assistant Apply transaction to revert."
         }
     }
 }
@@ -304,6 +315,7 @@ final class HeadroomAssistantController: ObservableObject {
     private var startedAt: Date?
     private var initialSafetyClampSamples: UInt64 = 0
     private var startingHeadroomAttenuationDB = 0.0
+    private var appliedHeadroomAttenuationDB: Double?
 
     @Published private(set) var phase: HeadroomAssistantPhase = .idle
     @Published private(set) var evidence = HeadroomAssistantEvidence()
@@ -363,6 +375,7 @@ final class HeadroomAssistantController: ObservableObject {
             diagnostics.limiterSafetyClampSamples
         startingHeadroomAttenuationDB =
             engine.gainConfiguration.headroomAttenuationDB
+        appliedHeadroomAttenuationDB = nil
         evidence = HeadroomAssistantEvidence()
         recommendation = nil
         lastErrorDescription = nil
@@ -402,6 +415,7 @@ final class HeadroomAssistantController: ObservableObject {
         observationTask = nil
         boundary = nil
         startedAt = nil
+        appliedHeadroomAttenuationDB = nil
         evidence = HeadroomAssistantEvidence()
         recommendation = nil
         lastErrorDescription = nil
@@ -427,10 +441,43 @@ final class HeadroomAssistantController: ObservableObject {
             recommendation
                 .recommendedHeadroomAttenuationDB
         )
+        appliedHeadroomAttenuationDB =
+            recommendation.recommendedHeadroomAttenuationDB
         observationTask?.cancel()
         observationTask = nil
         phase = .applied
         lastErrorDescription = nil
+    }
+
+    var canRevertAppliedRecommendation: Bool {
+        phase == .applied
+            && appliedHeadroomAttenuationDB != nil
+            && boundary != nil
+    }
+
+    func revertAppliedRecommendation() throws {
+        guard phase == .applied,
+              let boundary,
+              let appliedHeadroomAttenuationDB else {
+            throw HeadroomAssistantError
+                .noAppliedRecommendationToRevert
+        }
+        guard boundary.matches(
+            profiles,
+            expectedHeadroomAttenuationDB:
+                appliedHeadroomAttenuationDB
+        ) else {
+            invalidate(HeadroomAssistantError.stateChanged)
+            throw HeadroomAssistantError.stateChanged
+        }
+
+        try engine.transitionHeadroomAttenuationDB(
+            startingHeadroomAttenuationDB
+        )
+        self.appliedHeadroomAttenuationDB = nil
+        phase = .review
+        lastErrorDescription = nil
+        refreshRecommendation()
     }
 
     private func sample(now: Date) {
