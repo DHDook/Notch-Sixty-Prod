@@ -72,6 +72,7 @@ final class ProductController: ObservableObject {
     let calibration: RoomCorrectionCalibrationController
     let multichannelCalibration: MultichannelCalibrationController
     let roomCorrectionProjects: RoomCorrectionProjectController
+    let backup: ProductBackupController
     let roomTreatmentAdvisor: RoomTreatmentAdvisorController
     let ambientCompensation: AmbientCompensationController
     let activeQuietZone: ActiveQuietZoneController
@@ -106,6 +107,10 @@ final class ProductController: ObservableObject {
         let roomProjects =
             RoomCorrectionProjectController(profiles: profiles)
         self.roomCorrectionProjects = roomProjects
+        self.backup = ProductBackupController(
+            profiles: profiles,
+            roomCorrectionStore: roomProjects.store
+        )
         self.roomTreatmentAdvisor =
             RoomTreatmentAdvisorController(
                 store: roomProjects.store
@@ -151,6 +156,10 @@ final class ProductController: ObservableObject {
         let roomProjects =
             RoomCorrectionProjectController(profiles: profiles)
         self.roomCorrectionProjects = roomProjects
+        self.backup = ProductBackupController(
+            profiles: profiles,
+            roomCorrectionStore: roomProjects.store
+        )
         self.roomTreatmentAdvisor =
             RoomTreatmentAdvisorController(
                 store: roomProjects.store
@@ -1290,6 +1299,18 @@ final class ApplicationPreferences: ObservableObject {
         refreshLaunchAtLoginStatus()
     }
 
+    func reloadFromDefaults() {
+        appearance = ApplicationAppearanceMode(
+            rawValue: defaults.string(forKey: Key.appearance) ?? ""
+        ) ?? .system
+        presence = ApplicationPresenceMode(
+            rawValue: defaults.string(forKey: Key.presence) ?? ""
+        ) ?? .both
+        volumeStepResolution = ApplicationVolumeStepResolution(
+            rawValue: defaults.integer(forKey: Key.volumeStepResolution)
+        ) ?? .standard
+    }
+
     func setTrayInserted(_ inserted: Bool) {
         if inserted {
             if presence == .dock { presence = .both }
@@ -1551,6 +1572,7 @@ private struct ProductionSettingsView: View {
     @ObservedObject var preferences: ApplicationPreferences
     @ObservedObject var product: ProductController
     @ObservedObject var reference: ProductionReferenceNavigator
+    @State private var backupMessage: String?
 
     private var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
@@ -1604,6 +1626,88 @@ private struct ProductionSettingsView: View {
     private func copyDiagnostics() {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(diagnosticsReport, forType: .string)
+    }
+
+
+    private func saveBackup() {
+        let panel = NSSavePanel()
+        panel.title = "Save Notch Sixty Backup"
+        panel.prompt = "Save Backup"
+        panel.nameFieldStringValue = "Notch-Sixty-Backup.n60backup"
+        panel.allowedFileTypes = ["n60backup"]
+        guard panel.runModal() == .OK, let url = panel.url else {
+            return
+        }
+
+        let accessed = url.startAccessingSecurityScopedResource()
+        defer {
+            if accessed { url.stopAccessingSecurityScopedResource() }
+        }
+
+        do {
+            let data = try product.backup.exportData()
+            try data.write(to: url, options: .atomic)
+            let inspection = try product.backup.inspect(data: data)
+            backupMessage =
+                "Backup saved: \(inspection.manifest.contentPresetCount) presets · "
+                + "\(inspection.manifest.playbackSystemCount) playback systems · "
+                + "\(inspection.roomCorrectionProjectCount) room projects · "
+                + "\(inspection.measurementLabSessionCount) lab sessions."
+        } catch {
+            backupMessage = "Backup failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func restoreBackup() {
+        guard product.audioEngine.lifecycleState == .idle else {
+            backupMessage =
+                "Stop audio processing before restoring a backup."
+            return
+        }
+
+        let panel = NSOpenPanel()
+        panel.title = "Restore Notch Sixty Backup"
+        panel.prompt = "Review Backup"
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.allowedFileTypes = ["n60backup"]
+        guard panel.runModal() == .OK, let url = panel.url else {
+            return
+        }
+
+        let accessed = url.startAccessingSecurityScopedResource()
+        defer {
+            if accessed { url.stopAccessingSecurityScopedResource() }
+        }
+
+        do {
+            let data = try Data(contentsOf: url)
+            let inspection = try product.backup.inspect(data: data)
+
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Restore this Notch Sixty backup?"
+            alert.informativeText =
+                "This will replace saved Content Presets and Playback Systems "
+                + "and restore \(inspection.roomCorrectionProjectCount) room-correction "
+                + "projects plus \(inspection.measurementLabSessionCount) Measurement Lab "
+                + "sessions. Hardware bindings that are unavailable on this Mac will be "
+                + "marked Needs Mapping. Hardware-acceptance evidence is preserved in the "
+                + "backup for reference only and is not reactivated."
+            alert.addButton(withTitle: "Restore")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else {
+                return
+            }
+
+            product.abComparison.clearAll()
+            let report = try product.backup.restore(data: data)
+            preferences.reloadFromDefaults()
+            product.roomCorrectionProjects.prepareForUse()
+            backupMessage = "Restore complete: \(report.summary)."
+        } catch {
+            backupMessage = "Restore failed: \(error.localizedDescription)"
+        }
     }
 
     var body: some View {
@@ -1753,6 +1857,62 @@ private struct ProductionSettingsView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    settingsCard(
+                        title: "Backup & Restore",
+                        systemImage: "externaldrive.badge.timemachine"
+                    ) {
+                        HStack(spacing: 10) {
+                            Button {
+                                saveBackup()
+                            } label: {
+                                Label(
+                                    "Save Backup…",
+                                    systemImage: "square.and.arrow.up"
+                                )
+                            }
+                            .buttonStyle(.glass)
+
+                            Button {
+                                restoreBackup()
+                            } label: {
+                                Label(
+                                    "Restore Backup…",
+                                    systemImage: "square.and.arrow.down"
+                                )
+                            }
+                            .buttonStyle(.glass)
+                            .disabled(
+                                product.audioEngine.lifecycleState != .idle
+                            )
+                        }
+
+                        Text(
+                            "The .n60backup bundle includes saved presets and "
+                            + "Playback Systems, Room Correction projects, "
+                            + "Measurement Lab sessions, safe app preferences, "
+                            + "and reference-only hardware-acceptance records. "
+                            + "Launch at Login is never changed by restore."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                        Text(
+                            "Restored hardware bindings are never silently "
+                            + "reassigned. Systems that reference unavailable "
+                            + "devices are marked Needs Mapping and remain "
+                            + "blocked from activation until reviewed."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                        if let backupMessage {
+                            Text(backupMessage)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
                     }
 
                     settingsCard(title: "Support", systemImage: "wrench.and.screwdriver") {
