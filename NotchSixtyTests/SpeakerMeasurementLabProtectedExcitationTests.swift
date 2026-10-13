@@ -1203,4 +1203,110 @@ final class ProtectedDriverPEQRecommendationTests: XCTestCase {
         )
     }
 
+
+    func testCrossoverSumModelSelectsBoundedDelayWhenItReducesCancellation()
+        throws {
+        let (session, lowID, highID) = timingFixture(
+            relativeArrivalMilliseconds: 0.8
+        )
+        let result = try ProtectedDriverCrossoverSumModelAnalyzer()
+            .analyze(
+                session: session,
+                firstProtocolID: lowID,
+                secondProtocolID: highID
+            )
+        XCTAssertEqual(result.firstBus, .leftLow)
+        XCTAssertEqual(result.secondBus, .leftHigh)
+        XCTAssertEqual(result.bestHypothesis, .addBoundedDelay)
+        XCTAssertEqual(
+            result.modeledAdditionalDelayMilliseconds,
+            0.8,
+            accuracy: 0.03
+        )
+        XCTAssertFalse(result.modeledInvertsComparedDriver)
+        XCTAssertGreaterThan(result.modeledDeficitReductionDB, 0.25)
+        XCTAssertLessThan(
+            result.candidateMeanCoherenceDeficitDB,
+            result.currentMeanCoherenceDeficitDB
+        )
+        XCTAssertTrue(result.measurementOnly)
+        XCTAssertTrue(result.modelOnly)
+        XCTAssertFalse(result.canDeploy)
+        XCTAssertFalse(result.combinedDriverCaptureVerified)
+        XCTAssertTrue(result.requiresPhysicalCombinedDriverCapture)
+    }
+
+    func testCrossoverSumModelCanCompareCombinedDelayAndPolarityHypothesis()
+        throws {
+        let (session, lowID, highID) = timingFixture(
+            relativeArrivalMilliseconds: 0.2,
+            secondResidualPhaseRadians: .pi
+        )
+        let result = try ProtectedDriverCrossoverSumModelAnalyzer()
+            .analyze(
+                session: session,
+                firstProtocolID: lowID,
+                secondProtocolID: highID
+            )
+        XCTAssertTrue(result.modeledInvertsComparedDriver)
+        XCTAssertTrue(
+            result.bestHypothesis == .invertComparedDriver
+                || result.bestHypothesis
+                    == .addDelayAndInvertComparedDriver
+        )
+        XCTAssertGreaterThan(result.modeledDeficitReductionDB, 0.25)
+        XCTAssertFalse(result.canDeploy)
+    }
+
+    func testCrossoverSumModelWithoutQualifiedReferenceFailsClosed() throws {
+        let (session, lowID, highID) = timingFixture(
+            includeReference: false
+        )
+        XCTAssertThrowsError(
+            try ProtectedDriverCrossoverSumModelAnalyzer()
+                .analyze(
+                    session: session,
+                    firstProtocolID: lowID,
+                    secondProtocolID: highID
+                )
+        ) {
+            XCTAssertEqual(
+                $0 as? ProtectedDriverCrossoverSumModelError,
+                .timingEvidenceUnavailable
+            )
+        }
+    }
+
+    func testLargeTimingMismatchDoesNotBecomeModeledSafeAdjustment() throws {
+        let (session, lowID, highID) = timingFixture(
+            relativeArrivalMilliseconds: 3.5
+        )
+        let result = try ProtectedDriverCrossoverSumModelAnalyzer()
+            .analyze(
+                session: session,
+                firstProtocolID: lowID,
+                secondProtocolID: highID
+            )
+        XCTAssertEqual(result.bestHypothesis, .retainCurrent)
+        XCTAssertNil(result.modeledAdditionalDelayMilliseconds)
+        XCTAssertFalse(result.modeledInvertsComparedDriver)
+        XCTAssertEqual(result.modeledDeficitReductionDB, 0, accuracy: 0.0001)
+        XCTAssertFalse(result.canDeploy)
+    }
+
+    func testCrossoverSumModelRejectsMismatchedComplexGrid() throws {
+        var (session, lowID, highID) = timingFixture()
+        session.captures[3]
+            .sharedClockReference?
+            .transferFunction.frequenciesHz[15] *= 1.001
+        XCTAssertThrowsError(
+            try ProtectedDriverCrossoverSumModelAnalyzer()
+                .analyze(
+                    session: session,
+                    firstProtocolID: lowID,
+                    secondProtocolID: highID
+                )
+        )
+    }
+
 }
