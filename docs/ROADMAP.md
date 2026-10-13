@@ -21,8 +21,8 @@ Future portability must not materially delay the flagship Mac launch.
 **PR112A — Remote Hardware-Acceptance Infrastructure** is now the active
 remote milestone, stacked on exact-head remote/software-complete PR111.
 
-Slices 1–2 introduce the authoritative H01–H08 physical-acceptance
-domain and guided production workflow: monotonic evidence authority, exact
+Slices 1–3 introduce the authoritative H01–H08 physical-acceptance
+domain, guided production workflow, and typed H03–H07 evidence linking: monotonic evidence authority, exact
 campaign/build identity, physical environment metadata, explicit
 topology/release-scope decisions, append-only evidence, corruption-safe
 persistence, human physical/reviewer attestations, and a TOOLS workspace that
@@ -36,9 +36,8 @@ The dedicated PR112A CI artifact must always retain
 `liveFeedForwardANCAuthorized=false`, and
 `mayMergeIntoMain=false`.
 
-Remaining PR112A remote slices add H03–H07 evidence adapters,
-state/topology preflight for the PR111 commissioning handoff, and exportable
-acceptance packets. Real unplug/replug, sleep/wake, thermal/endurance,
+Remaining PR112A remote slices add state/topology preflight for the PR111
+commissioning handoff and exportable acceptance packets. Real unplug/replug, sleep/wake, thermal/endurance,
 speaker safety, calibrated acoustic measurements, combined-driver
 verification and any physical Apply remain hands-on PR112 work.
 
