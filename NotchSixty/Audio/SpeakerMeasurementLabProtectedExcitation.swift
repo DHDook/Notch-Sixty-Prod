@@ -1770,7 +1770,7 @@ enum ProtectedDriverCommissioningError:
 
 /// Re-runs PR111 analysis from the persisted Lab session instead of trusting
 /// caller-supplied cut/timing values. The output is a reviewable configuration
-/// snapshot only. It has no reference to AudioIOEngine or ProductProfile
+/// snapshot only. It has no reference to the live engine or profile-controller
 /// mutation APIs and cannot deploy anything.
 struct ProtectedDriverCommissioningPlanner: Sendable {
     func draft(
