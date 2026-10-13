@@ -35,7 +35,7 @@ for token in (
     "struct HardwareAcceptanceCampaignStore: Sendable",
     "scopeDecisions:",
     "supplementalCapabilities:",
-    "HardwareAcceptanceCapability.liveFeedForwardANC",
+    ".liveFeedForwardANC",
     "physicalAcceptanceComplete",
     "liveFeedForwardANCAuthorized",
     "newest.outcome",
