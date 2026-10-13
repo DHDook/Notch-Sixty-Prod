@@ -1681,3 +1681,405 @@ struct ProtectedDriverCrossoverSumModelAnalyzer: Sendable {
         return values.reduce(0, +) / Double(values.count)
     }
 }
+
+
+// MARK: - PR111 Slice 5: hardware-blocked commissioning draft
+
+struct ProtectedDriverCommissioningTimingReview:
+    Codable, Equatable, Sendable {
+    var firstBus: SpeakerOutputBus
+    var secondBus: SpeakerOutputBus
+    var crossoverFrequencyHz: Double
+    var bestHypothesis: ProtectedDriverCrossoverSumHypothesis
+    var modeledDeficitReductionDB: Double
+    var modeledAdditionalDelayMilliseconds: Double?
+    var modeledInvertsComparedDriver: Bool
+    var combinedDriverCaptureVerified: Bool
+}
+
+struct ProtectedDriverCommissioningDraft:
+    Identifiable, Codable, Equatable, Sendable {
+    static let currentSchemaVersion = 1
+
+    var schemaVersion: Int = currentSchemaVersion
+    var id: UUID = UUID()
+    var createdAt: Date = Date()
+    var playbackSystemID: UUID
+    var sessionID: UUID
+    var routingSignature: String
+    var sampleRate: Double
+    var rollbackPlaybackSystemState: PlaybackSystemState
+    var previewDriverProcessing: SpeakerDriverProcessingConfiguration
+    var affectedBuses: [SpeakerOutputBus]
+    var sourceProtocolIDs: [UUID]
+    var sourceCaptureIDs: [UUID]
+    var timingReviews: [ProtectedDriverCommissioningTimingReview]
+    var evidenceSummary: String
+
+    var approvalRequired: Bool { true }
+    var physicalCombinedDriverVerificationComplete: Bool {
+        !timingReviews.isEmpty
+            && timingReviews.allSatisfy(\.combinedDriverCaptureVerified)
+    }
+    /// PR111 remote closeout intentionally has no Apply transaction. PR112
+    /// must replace this hard false only after physical combined-driver
+    /// verification and exposed-driver safety acceptance exist.
+    var readyForApproval: Bool { false }
+    var canApply: Bool { false }
+    var canDeploy: Bool { false }
+    var rollbackSnapshotAvailable: Bool { true }
+    var stateDriftCheckRequired: Bool { true }
+    var requiresPhysicalCombinedDriverCapture: Bool { true }
+}
+
+enum ProtectedDriverCommissioningError:
+    Error, Equatable, LocalizedError {
+    case invalidSession
+    case playbackSystemMismatch
+    case outputProfileRequired
+    case protectedStateDrift
+    case noQualifiedProtectedDriverEvidence
+    case insufficientEQCapacity
+    case invalidPreview
+    case currentStateDrift
+    case unsupportedSchema
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidSession:
+            return "Per-driver commissioning requires a valid protected Measurement Lab session."
+        case .playbackSystemMismatch:
+            return "The Lab session does not belong to the selected Playback System."
+        case .outputProfileRequired:
+            return "An enabled Output Device Profile is required for per-driver commissioning review."
+        case .protectedStateDrift:
+            return "Routing, crossover, limiter, or per-driver processing changed after the protected measurements."
+        case .noQualifiedProtectedDriverEvidence:
+            return "No protected driver protocol produced repeat-qualified commissioning evidence."
+        case .insufficientEQCapacity:
+            return "The existing per-driver EQ has no safe free slots for the bounded review cuts."
+        case .invalidPreview:
+            return "The generated per-driver preview does not satisfy the existing realtime processing limits."
+        case .currentStateDrift:
+            return "The Playback System changed after commissioning review; regenerate the draft before any future Apply."
+        case .unsupportedSchema:
+            return "Saved per-driver commissioning draft uses an unsupported schema version."
+        }
+    }
+}
+
+/// Re-runs PR111 analysis from the persisted Lab session instead of trusting
+/// caller-supplied cut/timing values. The output is a reviewable configuration
+/// snapshot only. It has no reference to AudioIOEngine or ProductProfile
+/// mutation APIs and cannot deploy anything.
+struct ProtectedDriverCommissioningPlanner: Sendable {
+    func draft(
+        profile: PlaybackSystemProfile,
+        session: SpeakerMeasurementLabSession,
+        createdAt: Date = Date()
+    ) throws -> ProtectedDriverCommissioningDraft {
+        do { try session.validateStructure() }
+        catch { throw ProtectedDriverCommissioningError.invalidSession }
+
+        guard profile.id == session.playbackSystemID else {
+            throw ProtectedDriverCommissioningError
+                .playbackSystemMismatch
+        }
+        guard let output = profile.state.outputDeviceProfile,
+              output.enabled,
+              output.multichannelCalibrationRoutingSignature
+                == session.routingSignature else {
+            throw ProtectedDriverCommissioningError
+                .outputProfileRequired
+        }
+        guard let baselineProcessing =
+                profile.state.speakerDriverProcessing,
+              profile.state.bassManagement.enabled,
+              profile.state.outputRouting?.enabled == true else {
+            throw ProtectedDriverCommissioningError
+                .protectedStateDrift
+        }
+
+        let protectedProtocols = session.protocols.filter {
+            $0.request.mode == .protectedDriverNearField
+                && $0.protectedDriverBus != nil
+        }
+        guard !protectedProtocols.isEmpty else {
+            throw ProtectedDriverCommissioningError
+                .noQualifiedProtectedDriverEvidence
+        }
+
+        // Every measured protocol must still describe the exact current
+        // route, bass-management/crossover and driver-processing snapshot.
+        for labProtocol in protectedProtocols {
+            let captures = session.captures.filter {
+                $0.protocolID == labProtocol.id
+            }
+            guard !captures.isEmpty,
+                  captures.allSatisfy({
+                      $0.protectedDriverProvenance?
+                        .routingConfiguration
+                            == profile.state.outputRouting
+                        && $0.protectedDriverProvenance?
+                            .bassManagementConfiguration
+                            == profile.state.bassManagement
+                        && $0.protectedDriverProvenance?
+                            .targetDriverConfiguration
+                            == baselineProcessing.configuration(
+                                for: labProtocol.protectedDriverBus!
+                            )
+                  }) else {
+                throw ProtectedDriverCommissioningError
+                    .protectedStateDrift
+            }
+        }
+
+        var preview = baselineProcessing
+        var affected = Set<SpeakerOutputBus>()
+        var qualifiedProtocolIDs: [UUID] = []
+        var qualifiedCaptureIDs: [UUID] = []
+
+        for labProtocol in protectedProtocols {
+            guard let bus = labProtocol.protectedDriverBus else { continue }
+            let recommendation: ProtectedDriverPEQRecommendation
+            do {
+                recommendation =
+                    try ProtectedDriverPEQRecommendationAnalyzer()
+                        .recommend(
+                            session: session,
+                            protocolID: labProtocol.id
+                        )
+            } catch {
+                continue
+            }
+            qualifiedProtocolIDs.append(labProtocol.id)
+            qualifiedCaptureIDs.append(
+                contentsOf: recommendation.repeatedCaptureIDs
+            )
+            guard !recommendation.cuts.isEmpty else { continue }
+
+            var busConfiguration = preview.configuration(for: bus)
+            guard busConfiguration.limiterEnabled,
+                  busConfiguration.eqBands.count
+                    + recommendation.cuts.count
+                    <= SpeakerDriverBusProcessingConfiguration
+                        .maximumEQBandCount else {
+                throw ProtectedDriverCommissioningError
+                    .insufficientEQCapacity
+            }
+            for cut in recommendation.cuts {
+                busConfiguration.eqBands.append(
+                    EQBand(
+                        enabled: true,
+                        type: .peaking,
+                        frequencyHz: cut.frequencyHz,
+                        gainDB: cut.gainDB,
+                        q: cut.q,
+                        slope: .db12
+                    )
+                )
+            }
+            // Never modify these protection/alignment fields in remote draft.
+            guard busConfiguration.trimDB
+                    == recommendation.protectedConfiguration.trimDB,
+                  busConfiguration.polarityInverted
+                    == recommendation.protectedConfiguration
+                        .polarityInverted,
+                  busConfiguration.delayMilliseconds
+                    == recommendation.protectedConfiguration
+                        .delayMilliseconds,
+                  busConfiguration.limiterEnabled
+                    == recommendation.protectedConfiguration
+                        .limiterEnabled,
+                  busConfiguration.limiterThresholdDBFS
+                    == recommendation.protectedConfiguration
+                        .limiterThresholdDBFS else {
+                throw ProtectedDriverCommissioningError
+                    .invalidPreview
+            }
+            preview.replace(busConfiguration)
+            affected.insert(bus)
+        }
+        guard !qualifiedProtocolIDs.isEmpty else {
+            throw ProtectedDriverCommissioningError
+                .noQualifiedProtectedDriverEvidence
+        }
+        do { try preview.validateStructure() }
+        catch { throw ProtectedDriverCommissioningError.invalidPreview }
+
+        let timingReviews = makeTimingReviews(
+            session: session,
+            protectedProtocols: protectedProtocols
+        )
+
+        return ProtectedDriverCommissioningDraft(
+            createdAt: createdAt,
+            playbackSystemID: profile.id,
+            sessionID: session.id,
+            routingSignature: session.routingSignature,
+            sampleRate: session.sampleRate,
+            rollbackPlaybackSystemState: profile.state,
+            previewDriverProcessing: preview,
+            affectedBuses: affected.sorted {
+                $0.rawValue < $1.rawValue
+            },
+            sourceProtocolIDs: qualifiedProtocolIDs.sorted {
+                $0.uuidString < $1.uuidString
+            },
+            sourceCaptureIDs: qualifiedCaptureIDs.sorted {
+                $0.uuidString < $1.uuidString
+            },
+            timingReviews: timingReviews,
+            evidenceSummary:
+                "Remote commissioning draft only: cut-only PEQ preview plus model-only adjacent-driver timing reviews. " +
+                "Exact Playback System rollback snapshot retained. No Apply until fresh physical combined-driver verification and PR112 hardware acceptance."
+        )
+    }
+
+    func validateCurrentState(
+        _ profile: PlaybackSystemProfile,
+        against draft: ProtectedDriverCommissioningDraft
+    ) throws {
+        guard draft.schemaVersion
+                == ProtectedDriverCommissioningDraft
+                    .currentSchemaVersion else {
+            throw ProtectedDriverCommissioningError
+                .unsupportedSchema
+        }
+        guard profile.id == draft.playbackSystemID else {
+            throw ProtectedDriverCommissioningError
+                .playbackSystemMismatch
+        }
+        guard profile.state
+                == draft.rollbackPlaybackSystemState else {
+            throw ProtectedDriverCommissioningError.currentStateDrift
+        }
+    }
+
+    private func makeTimingReviews(
+        session: SpeakerMeasurementLabSession,
+        protectedProtocols: [SpeakerMeasurementLabProtocol]
+    ) -> [ProtectedDriverCommissioningTimingReview] {
+        var reviews: [ProtectedDriverCommissioningTimingReview] = []
+        let buses = Dictionary(
+            uniqueKeysWithValues: protectedProtocols.compactMap {
+                protocolItem in
+                protocolItem.protectedDriverBus.map {
+                    ($0, protocolItem)
+                }
+            }
+        )
+        let pairs: [(SpeakerOutputBus, SpeakerOutputBus)] = [
+            (.leftLow, .leftMid),
+            (.leftMid, .leftHigh),
+            (.leftLow, .leftHigh),
+            (.rightLow, .rightMid),
+            (.rightMid, .rightHigh),
+            (.rightLow, .rightHigh),
+        ]
+        for pair in pairs {
+            guard let first = buses[pair.0],
+                  let second = buses[pair.1],
+                  let model = try? ProtectedDriverCrossoverSumModelAnalyzer()
+                    .analyze(
+                        session: session,
+                        firstProtocolID: first.id,
+                        secondProtocolID: second.id
+                    ) else {
+                continue
+            }
+            reviews.append(
+                ProtectedDriverCommissioningTimingReview(
+                    firstBus: model.firstBus,
+                    secondBus: model.secondBus,
+                    crossoverFrequencyHz:
+                        model.crossoverFrequencyHz,
+                    bestHypothesis: model.bestHypothesis,
+                    modeledDeficitReductionDB:
+                        model.modeledDeficitReductionDB,
+                    modeledAdditionalDelayMilliseconds:
+                        model.modeledAdditionalDelayMilliseconds,
+                    modeledInvertsComparedDriver:
+                        model.modeledInvertsComparedDriver,
+                    combinedDriverCaptureVerified:
+                        model.combinedDriverCaptureVerified
+                )
+            )
+        }
+        return reviews.sorted {
+            if $0.firstBus.rawValue != $1.firstBus.rawValue {
+                return $0.firstBus.rawValue < $1.firstBus.rawValue
+            }
+            return $0.secondBus.rawValue < $1.secondBus.rawValue
+        }
+    }
+}
+
+struct ProtectedDriverCommissioningDraftStore: Sendable {
+    let rootDirectory: URL
+
+    init(rootDirectory: URL? = nil) {
+        self.rootDirectory = rootDirectory
+            ?? SpeakerMeasurementLabSessionStore()
+                .rootDirectory
+                .appendingPathComponent(
+                    "PR111 Commissioning Drafts",
+                    isDirectory: true
+                )
+    }
+
+    func url(for sessionID: UUID) -> URL {
+        rootDirectory.appendingPathComponent(
+            "\(sessionID.uuidString.lowercased()).json",
+            isDirectory: false
+        )
+    }
+
+    func save(_ draft: ProtectedDriverCommissioningDraft) throws {
+        guard draft.schemaVersion
+                == ProtectedDriverCommissioningDraft
+                    .currentSchemaVersion,
+              !draft.canApply,
+              !draft.canDeploy,
+              draft.requiresPhysicalCombinedDriverCapture,
+              draft.rollbackSnapshotAvailable else {
+            throw ProtectedDriverCommissioningError.invalidPreview
+        }
+        try FileManager.default.createDirectory(
+            at: rootDirectory,
+            withIntermediateDirectories: true
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .millisecondsSince1970
+        try encoder.encode(draft).write(
+            to: url(for: draft.sessionID),
+            options: .atomic
+        )
+    }
+
+    func load(_ sessionID: UUID)
+        throws -> ProtectedDriverCommissioningDraft? {
+        let path = url(for: sessionID)
+        guard FileManager.default.fileExists(atPath: path.path) else {
+            return nil
+        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .millisecondsSince1970
+        let draft = try decoder.decode(
+            ProtectedDriverCommissioningDraft.self,
+            from: Data(contentsOf: path)
+        )
+        guard draft.sessionID == sessionID,
+              draft.schemaVersion
+                == ProtectedDriverCommissioningDraft
+                    .currentSchemaVersion,
+              !draft.canApply,
+              !draft.canDeploy,
+              draft.requiresPhysicalCombinedDriverCapture else {
+            throw ProtectedDriverCommissioningError
+                .unsupportedSchema
+        }
+        return draft
+    }
+}
