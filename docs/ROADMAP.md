@@ -19,8 +19,9 @@ Future portability must not materially delay the flagship Mac launch.
 ## Current execution status — PR111
 
 **PR111 — Automatic Per-Driver Speaker Optimization** remains an OPEN,
-DRAFT, UNMERGED stack above PR110. Slices 1–2 passed exact-head portable,
-Apple Silicon Debug/Release, targeted and full regression. Slices 3–5 are
+DRAFT, UNMERGED stack above PR110. Slices 1–5 passed remote/software
+portable, Apple Silicon Debug/Release, targeted and full regression at
+`1b2560749119dfe02edb4b932e6ef4c0fa6b0cef` / Actions run `38346176045`. They are
 implemented on the current branch and awaiting one final exact-head CI pass.
 
 The implemented remote PR111 stack now provides:
