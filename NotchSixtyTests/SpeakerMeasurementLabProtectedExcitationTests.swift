@@ -1219,7 +1219,7 @@ final class ProtectedDriverPEQRecommendationTests: XCTestCase {
         XCTAssertEqual(result.secondBus, .leftHigh)
         XCTAssertEqual(result.bestHypothesis, .addBoundedDelay)
         XCTAssertEqual(
-            result.modeledAdditionalDelayMilliseconds,
+            try XCTUnwrap(result.modeledAdditionalDelayMilliseconds),
             0.8,
             accuracy: 0.03
         )
