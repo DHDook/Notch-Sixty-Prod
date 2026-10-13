@@ -202,17 +202,21 @@ final class HardwareAcceptanceTests: XCTestCase {
         }
     }
 
-    func testExcludedTopologyGateIsExplicitButNeverAuthorizesANC()
+    func testSplitDriverExclusionDoesNotWaiveMandatoryH05()
         throws {
         let value = campaign()
         let result = try value.evaluate()
 
-        if case .excluded(let reason) =
-            result.statuses[.h05AdvancedMeasurementLab] {
-            XCTAssertTrue(reason.contains("split-driver"))
-        } else {
-            XCTFail("H05 should carry the explicit topology exclusion.")
-        }
+        XCTAssertEqual(
+            result.statuses[.h05AdvancedMeasurementLab],
+            .missing
+        )
+        XCTAssertEqual(
+            HardwareAcceptanceCatalog.definition(
+                .h05AdvancedMeasurementLab
+            ).supplementalCapabilities,
+            [.protectedSplitDriverMeasurement]
+        )
         if case .excluded =
             result.statuses[.h08LiveFeedForwardANC] {
             // Expected.
@@ -231,6 +235,7 @@ final class HardwareAcceptanceTests: XCTestCase {
             .h02ThermalResourceSpeakerSafety,
             .h03MeasurementBaselines,
             .h04SpeakerOptimizerVerification,
+            .h05AdvancedMeasurementLab,
             .h06FIRPhysicalAcceptance,
         ]
         for (index, gate) in required.enumerated() {
