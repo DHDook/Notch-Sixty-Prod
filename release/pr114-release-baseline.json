@@ -86,14 +86,10 @@
     "externalLegalIPReviewComplete": false
   },
   "packaging": {
-    "unsignedGenericArchivePreflightConfigured": true,
-    "adhocSandboxRCPackageConfigured": true,
-    "exactHeadRCManifestConfigured": true,
-    "remoteRCDMGChecksummed": true,
-    "remoteRCPackageProductionSigned": false,
-    "remoteRCPackageNotarized": false,
-    "remoteRCPackagePublicDistributionReady": false,
-    "manualReleaseDMGLaneProductionSigned": false,
-    "manualReleaseDMGLaneNotarized": false
+    "unsignedArchivePreflightRequired": true,
+    "adhocSandboxPackagePreflightRequired": true,
+    "exactArtifactHashesRequired": true,
+    "manualReleaseDMGLaneAdHocOnly": true,
+    "remoteRCPackagePublicDistributionReady": false
   }
 }
