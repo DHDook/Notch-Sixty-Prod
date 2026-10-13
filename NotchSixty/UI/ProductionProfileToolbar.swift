@@ -337,7 +337,22 @@ struct ProductionProfileToolbar: View {
                             if profiles.selectedSystemProfileID == system.id {
                                 Image(systemName: "checkmark")
                             }
-                            Text(displayName(for: system))
+                            if profiles.hardwareMappingRequirement(
+                                for: system.id
+                            ) != nil {
+                                Image(
+                                    systemName:
+                                        "exclamationmark.triangle.fill"
+                                )
+                                .foregroundStyle(.orange)
+                            }
+                            Text(
+                                profiles.hardwareMappingRequirement(
+                                    for: system.id
+                                ) == nil
+                                    ? displayName(for: system)
+                                    : "(displayName(for: system)) · Needs Mapping"
+                            )
                         }
                     }
                 }
@@ -365,6 +380,12 @@ struct ProductionProfileToolbar: View {
                 Button("Associate with Current Output") {
                     profiles.associateSelectedSystemWithCurrentOutput()
                 }
+
+                if profiles.selectedSystemHardwareMappingRequirement != nil {
+                    Button("Confirm Hardware Mapping") {
+                        profiles.confirmSelectedSystemHardwareMapping()
+                    }
+                }
             }
         } label: {
             HStack(spacing: 6) {
@@ -376,9 +397,11 @@ struct ProductionProfileToolbar: View {
         }
         .buttonStyle(.glass)
         .help(
-            profiles.selectedSystemProfileIsDirty
-                ? "Playback System — unsaved changes"
-                : "Playback System: output association, crossover, alignment, output trim, room correction, and speaker correction"
+            profiles.selectedSystemHardwareMappingRequirement != nil
+                ? "Restored Playback System — Needs Mapping before activation"
+                : profiles.selectedSystemProfileIsDirty
+                    ? "Playback System — unsaved changes"
+                    : "Playback System: output association, crossover, alignment, output trim, room correction, and speaker correction"
         )
     }
 
