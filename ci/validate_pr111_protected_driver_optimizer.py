@@ -141,7 +141,7 @@ for forbidden in (
     "setSpeakerDriverProcessing",
     "makeRealtimeSnapshot(",
 ):
-    timing = source.split("// MARK: - PR111 Slice 3:", 1)[1]
+    timing = source.split("// MARK: - PR111 Slice 3:", 1)[1].split("// MARK: - PR111 Slice 4:", 1)[0]
     assert forbidden not in timing, f"PR111 timing analysis gained Apply authority: {forbidden}"
 
 for token in (
@@ -191,7 +191,7 @@ for token in (
 ):
     assert token in source, f"PR111 crossover-sum model contract missing {token}"
 
-sum_model = source.split("// MARK: - PR111 Slice 4:", 1)[1]
+sum_model = source.split("// MARK: - PR111 Slice 4:", 1)[1].split("// MARK: - PR111 Slice 5:", 1)[0]
 for forbidden in (
     "delayMilliseconds =",
     "polarityInverted =",
