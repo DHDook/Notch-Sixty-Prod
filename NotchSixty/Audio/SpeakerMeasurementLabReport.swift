@@ -471,6 +471,29 @@ struct SpeakerMeasurementLabReportBuilder: Sendable {
             case .inconclusive:
                 polarity = "Inconclusive"
             }
+            let relativeArrivalText =
+                format(result.relativeArrivalMilliseconds, 3) + " ms"
+            let phaseDegrees =
+                result.wrappedRelativePhaseAtCrossoverRadians
+                    * 180 / Double.pi
+            let residualPhaseText =
+                format(phaseDegrees, 1) + "°"
+            let referenceSpreadText =
+                format(
+                    result.referenceArrivalSpreadMilliseconds,
+                    3
+                ) + " ms"
+            let referenceConsistencyText =
+                String(
+                    Int(
+                        (result.referencePhaseConsistency * 100)
+                            .rounded()
+                    )
+                ) + "%"
+            let confidenceText =
+                String(
+                    Int((result.evidenceConfidence * 100).rounded())
+                ) + "%"
             return available(
                 .protectedDriverTiming,
                 title: title,
@@ -479,44 +502,19 @@ struct SpeakerMeasurementLabReportBuilder: Sendable {
                         "Crossover",
                         formatHz(result.crossoverFrequencyHz)
                     ),
-                    metric(
-                        "Relative arrival",
-                        "\(format(result.relativeArrivalMilliseconds, 3)) ms"
-                    ),
-                    metric(
-                        "Delay hypothesis",
-                        delay
-                    ),
-                    metric(
-                        "Residual phase",
-                        "\(format(
-                            result.wrappedRelativePhaseAtCrossoverRadians
-                                * 180 / .pi,
-                            1
-                        ))°"
-                    ),
-                    metric(
-                        "Polarity hypothesis",
-                        polarity
-                    ),
+                    metric("Relative arrival", relativeArrivalText),
+                    metric("Delay hypothesis", delay),
+                    metric("Residual phase", residualPhaseText),
+                    metric("Polarity hypothesis", polarity),
                     metric(
                         "Reference arrival spread",
-                        "\(format(
-                            result.referenceArrivalSpreadMilliseconds,
-                            3
-                        )) ms"
+                        referenceSpreadText
                     ),
                     metric(
                         "Reference phase consistency",
-                        "\(Int(
-                            (result.referencePhaseConsistency * 100)
-                                .rounded()
-                        ))%"
+                        referenceConsistencyText
                     ),
-                    metric(
-                        "Evidence confidence",
-                        "\(Int((result.evidenceConfidence * 100).rounded()))%"
-                    ),
+                    metric("Evidence confidence", confidenceText),
                     metric("Deployment", "Never · review only"),
                 ],
                 warnings: result.warnings
