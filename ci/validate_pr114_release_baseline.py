@@ -24,6 +24,13 @@ DOC = ROOT / "docs" / "PR114_COMMERCIAL_RELEASE_CANDIDATE.md"
 ROOT_NOTICES = ROOT / "THIRD_PARTY_NOTICES.md"
 SHIPPED_NOTICE = ROOT / "NotchSixty" / "ThirdPartyNotices.txt"
 PROVENANCE = ROOT / "docs" / "PROVENANCE.md"
+APP = ROOT / "NotchSixty" / "NotchSixtyApp.swift"
+ROOT_VIEW = ROOT / "NotchSixty" / "UI" / "ProductionRootView.swift"
+LEGACY_VIEW = ROOT / "NotchSixty" / "ContentView.swift"
+RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release-dmg.yml"
+APP_ICON_CATALOG = ROOT / "NotchSixty" / "Assets.xcassets" / "AppIcon.appiconset" / "Contents.json"
+DOCK_LIGHT = ROOT / "NotchSixty" / "Assets.xcassets" / "DockIconLight.imageset" / "DockIconLight@2x.png"
+DOCK_DARK = ROOT / "NotchSixty" / "Assets.xcassets" / "DockIconDark.imageset" / "DockIconDark@2x.png"
 
 ALLOWED_SLICE1_PATHS = {
     "README.md",
@@ -57,6 +64,13 @@ for path in (
     ROOT_NOTICES,
     SHIPPED_NOTICE,
     PROVENANCE,
+    APP,
+    ROOT_VIEW,
+    LEGACY_VIEW,
+    RELEASE_WORKFLOW,
+    APP_ICON_CATALOG,
+    DOCK_LIGHT,
+    DOCK_DARK,
 ):
     require(path.is_file(), f"missing required artifact: {path.relative_to(ROOT)}")
 
@@ -69,6 +83,10 @@ doc = DOC.read_text(encoding="utf-8")
 root_notices = ROOT_NOTICES.read_text(encoding="utf-8")
 shipped_notice = SHIPPED_NOTICE.read_text(encoding="utf-8")
 provenance = PROVENANCE.read_text(encoding="utf-8")
+app = APP.read_text(encoding="utf-8")
+root_view = ROOT_VIEW.read_text(encoding="utf-8")
+legacy = LEGACY_VIEW.read_text(encoding="utf-8")
+release_workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
 
 with INFO.open("rb") as handle:
     info = plistlib.load(handle)
@@ -160,6 +178,14 @@ require(
     "provisioning profile must remain external",
 )
 
+release_assets = baseline.get("releaseAssets", {})
+require(release_assets.get("shippingIconAssetsPresent") is True,
+        "shipping icon assets are not inventoried")
+require(release_assets.get("finalAppIconOwnerApproved") is False,
+        "PR114 must not self-approve final app artwork")
+require(release_assets.get("finalAppIconApprovalRequiredBeforePublicRelease") is True,
+        "public release must retain owner icon-approval gate")
+
 authority = baseline.get("releaseAuthority", {})
 require(authority.get("remoteSoftwareBaselineReconciled") is True, "remote baseline not marked reconciled")
 for key in (
@@ -203,6 +229,73 @@ for text, label in (
     (provenance, "provenance"),
 ):
     require("libmysofa" in text and "1.3.4" in text, f"{label} lost libmysofa identity")
+
+
+# Durable release-hardening rules formerly exercised by PR45, expressed against
+# the current PR113B product architecture instead of obsolete source strings or
+# historical icon hashes.
+require(legacy.lstrip().startswith("#if DEBUG"), "legacy engineering view is not DEBUG-only")
+require(legacy.rstrip().endswith("#endif"), "legacy engineering view lost DEBUG closure")
+for token in (
+    "#if DEBUG\nprivate struct PR27ProtectionValidationView",
+    '#if DEBUG\n        Window("Engineering Validation", id: "engineering-validation")',
+    "import ServiceManagement",
+    "SMAppService.mainApp.status",
+    "SMAppService.mainApp.register()",
+    "SMAppService.mainApp.unregister()",
+    '"Launch at Login"',
+    "does not automatically start audio processing",
+    'settingsCard(title: "Permissions"',
+    'settingsCard(title: "Support"',
+    'Label("Copy Diagnostics", systemImage: "doc.on.doc")',
+    "func diagnosticsReport(",
+    '"Content Preset: \\(profiles.selectedContentPresetName)"',
+    '"Playback System: \\(profiles.selectedSystemProfileName)"',
+    '"DSP Latency: \\(latency)"',
+    "product.diagnosticsReport(",
+    "does not include captured audio or room-measurement samples",
+):
+    require(token in app, f"current release-hardening app contract missing {token!r}")
+
+engineering_call = 'openWindow(id: "engineering-validation")'
+engineering_index = root_view.find(engineering_call)
+require(engineering_index >= 0, "Engineering Validation toolbar action is missing")
+debug_index = root_view.rfind("#if DEBUG", 0, engineering_index)
+endif_index = root_view.find("#endif", engineering_index)
+require(debug_index >= 0 and endif_index >= 0,
+        "Engineering Validation toolbar action is not DEBUG-gated")
+
+for token in (
+    "workflow_dispatch:",
+    "Build Release app",
+    "-destination 'platform=macOS,arch=arm64'",
+    "Ad-hoc sign Release app",
+    "shasum -a 256",
+    "Upload Release DMG",
+    "not Developer-ID signed or notarized",
+):
+    require(token in release_workflow, f"manual Release-DMG contract missing {token!r}")
+
+# Current icon files must remain technically present, but owner approval of the
+# final commercial artwork deliberately remains unresolved.
+icon_manifest = json.loads(APP_ICON_CATALOG.read_text(encoding="utf-8"))
+icon_files = [entry.get("filename") for entry in icon_manifest.get("images", []) if entry.get("filename")]
+require(len(icon_files) == 20 and len(set(icon_files)) == 20,
+        "AppIcon catalog must contain 20 unique light/dark slots")
+require(DOCK_LIGHT.stat().st_size > 0 and DOCK_DARK.stat().st_size > 0,
+        "runtime Dock icon assets are empty")
+
+for relative in (
+    ".github/workflows/pr45-apply-release-hardening.yml",
+    "ci/pr45_apply_release_hardening.py",
+    ".github/workflows/pr45-apply-launch-at-login-menu.yml",
+    "ci/pr45_add_launch_at_login_menu.py",
+    ".github/workflows/pr45-apply-login-placement.yml",
+    "ci/pr45_remove_login_toggle_from_tray.py",
+    ".github/workflows/pr45-apply-final-app-icons.yml",
+    ".github/workflows/pr45-export-current-icons.yml",
+):
+    require(not (ROOT / relative).exists(), f"one-shot release staging file remains: {relative}")
 
 for token in (
     "PR114 — Commercial Release Candidate",
