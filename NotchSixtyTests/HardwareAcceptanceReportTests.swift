@@ -152,6 +152,15 @@ final class HardwareAcceptanceReportTests: XCTestCase {
         XCTAssertTrue(text.contains(
             value.identity.commitSHA
         ))
+        XCTAssertTrue(text.contains(
+            "\"releaseAcceptanceComplete\" : false"
+        ))
+        XCTAssertTrue(text.contains(
+            "\"mayMergeIntoMain\" : false"
+        ))
+        XCTAssertTrue(text.contains(
+            "\"physicalEvidenceSuppliedByCI\" : false"
+        ))
     }
 
     func testPhysicalCompletionCanNeverCreateReleaseOrMergeAuthority()
