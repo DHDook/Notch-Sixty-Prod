@@ -704,7 +704,7 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         )
     }
 
-    func testABSnapshotCanCarryMeasuredLoudnessWithoutBroadeningAuditionState() {
+    func testABSnapshotCanCarryMeasuredLoudnessWithoutBroadeningAuditionState() throws {
         let snapshot = ContentABSnapshot(
             sourceContentPresetID: nil,
             sourceContentPresetName: "Fixture",
@@ -719,7 +719,7 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         )
 
         XCTAssertEqual(
-            snapshot.loudnessReferenceLUFS,
+            try XCTUnwrap(snapshot.loudnessReferenceLUFS),
             -18.5,
             accuracy: 0.0001
         )
