@@ -8,6 +8,7 @@ enum SpeakerMeasurementLabReportAnalysisKind:
     case levelDependence
     case coherentTiming
     case protectedDriverOptimization
+    case protectedDriverTiming
 }
 
 struct SpeakerMeasurementLabReportMetric:
@@ -319,6 +320,10 @@ struct SpeakerMeasurementLabReportBuilder: Sendable {
             )
         }
 
+        summaries.append(
+            contentsOf: protectedDriverTimingSummaries(session: session)
+        )
+
         return summaries
     }
 
@@ -366,6 +371,159 @@ struct SpeakerMeasurementLabReportBuilder: Sendable {
         } catch {
             return unavailable(
                 .protectedDriverOptimization,
+                title: title,
+                error: error
+            )
+        }
+    }
+
+    private func protectedDriverTimingSummaries(
+        session: SpeakerMeasurementLabSession
+    ) -> [SpeakerMeasurementLabAnalysisSummary] {
+        let protected = session.protocols.filter {
+            $0.request.mode == .protectedDriverNearField
+                && $0.protectedDriverBus != nil
+        }
+        guard protected.count >= 2 else { return [] }
+
+        let mode = session.captures.compactMap {
+            $0.protectedDriverProvenance?
+                .bassManagementConfiguration.physicalOutputMode
+        }.first
+        guard let mode else { return [] }
+
+        let pairs: [(SpeakerOutputBus, SpeakerOutputBus)]
+        switch mode {
+        case .biAmp:
+            pairs = [
+                (.leftLow, .leftHigh),
+                (.rightLow, .rightHigh),
+            ]
+        case .triAmp:
+            pairs = [
+                (.leftLow, .leftMid),
+                (.leftMid, .leftHigh),
+                (.rightLow, .rightMid),
+                (.rightMid, .rightHigh),
+            ]
+        default:
+            return []
+        }
+
+        return pairs.compactMap { firstBus, secondBus in
+            let firstMatches = protected.filter {
+                $0.protectedDriverBus == firstBus
+            }
+            let secondMatches = protected.filter {
+                $0.protectedDriverBus == secondBus
+            }
+            guard !firstMatches.isEmpty || !secondMatches.isEmpty else {
+                return nil
+            }
+            guard firstMatches.count == 1,
+                  secondMatches.count == 1 else {
+                return unavailable(
+                    .protectedDriverTiming,
+                    title:
+                        "\(firstBus.displayName) + \(secondBus.displayName) protected timing",
+                    error:
+                        ProtectedDriverTimingRecommendationError.invalidPair
+                )
+            }
+            return protectedDriverTimingSummary(
+                session: session,
+                first: firstMatches[0],
+                second: secondMatches[0]
+            )
+        }
+    }
+
+    private func protectedDriverTimingSummary(
+        session: SpeakerMeasurementLabSession,
+        first: SpeakerMeasurementLabProtocol,
+        second: SpeakerMeasurementLabProtocol
+    ) -> SpeakerMeasurementLabAnalysisSummary {
+        let title =
+            "\(first.protectedDriverBus?.displayName ?? first.name) + " +
+            "\(second.protectedDriverBus?.displayName ?? second.name) · protected timing"
+        do {
+            let result = try ProtectedDriverTimingRecommendationAnalyzer()
+                .recommend(
+                    session: session,
+                    firstProtocolID: first.id,
+                    secondProtocolID: second.id
+                )
+            let delay: String
+            if let bus = result.delayBus,
+               let milliseconds = result.additionalDelayMilliseconds {
+                delay =
+                    "Add \(format(milliseconds, 3)) ms to \(bus.displayName)"
+            } else {
+                delay = "No bounded delay suggestion"
+            }
+            let polarity: String
+            switch result.polarityHypothesis {
+            case .retainCurrent:
+                polarity = "Retain current polarity"
+            case .invertComparedDriver:
+                polarity =
+                    "Compare inversion of \(result.secondBus.displayName)"
+            case .inconclusive:
+                polarity = "Inconclusive"
+            }
+            return available(
+                .protectedDriverTiming,
+                title: title,
+                metrics: [
+                    metric(
+                        "Crossover",
+                        formatHz(result.crossoverFrequencyHz)
+                    ),
+                    metric(
+                        "Relative arrival",
+                        "\(format(result.relativeArrivalMilliseconds, 3)) ms"
+                    ),
+                    metric(
+                        "Delay hypothesis",
+                        delay
+                    ),
+                    metric(
+                        "Residual phase",
+                        "\(format(
+                            result.wrappedRelativePhaseAtCrossoverRadians
+                                * 180 / .pi,
+                            1
+                        ))°"
+                    ),
+                    metric(
+                        "Polarity hypothesis",
+                        polarity
+                    ),
+                    metric(
+                        "Reference arrival spread",
+                        "\(format(
+                            result.referenceArrivalSpreadMilliseconds,
+                            3
+                        )) ms"
+                    ),
+                    metric(
+                        "Reference phase consistency",
+                        "\(Int(
+                            (result.referencePhaseConsistency * 100)
+                                .rounded()
+                        ))%"
+                    ),
+                    metric(
+                        "Evidence confidence",
+                        "\(Int((result.evidenceConfidence * 100).rounded()))%"
+                    ),
+                    metric("Deployment", "Never · review only"),
+                ],
+                warnings: result.warnings
+            )
+        } catch {
+            return unavailable(
+                .protectedDriverTiming,
                 title: title,
                 error: error
             )
