@@ -555,4 +555,21 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         XCTAssertTrue(coherence.contains { $0.id == "workflow-glossary" })
     }
 
+
+    func testRoomCorrectionReferenceMatchesMinimumPhaseImplementation() throws {
+        let article = try XCTUnwrap(
+            ProductionUserGuideCatalog.article(id: "room-correction")
+        )
+        let formula = try XCTUnwrap(
+            article.formulas.first { $0.id == "minimum-phase-fir" }
+        )
+
+        XCTAssertTrue(formula.title.contains("Minimum-phase"))
+        XCTAssertTrue(formula.explanation.contains("causal minimum-phase"))
+        XCTAssertTrue(formula.expression.contains("IFFT"))
+        XCTAssertFalse(
+            formula.explanation.contains("symmetric linear-phase")
+        )
+    }
+
 }
