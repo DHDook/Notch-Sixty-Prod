@@ -1062,17 +1062,21 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         controller.openNormally()
         XCTAssertFalse(controller.safeLaunchActive)
 
-        controller.recordStartFailure(
+        let plugInController = ProductRecoveryController(
+            store: ProductRecoveryStore(storageURL: nil)
+        )
+        plugInController.prepareForLaunch()
+        plugInController.recordStartFailure(
             .plugInStart,
             description: "plug-in one"
         )
-        XCTAssertFalse(controller.safeLaunchActive)
-        controller.recordStartFailure(
+        XCTAssertFalse(plugInController.safeLaunchActive)
+        plugInController.recordStartFailure(
             .plugInStart,
             description: "plug-in two"
         )
         XCTAssertTrue(
-            controller.safeLaunchReasons.contains(
+            plugInController.safeLaunchReasons.contains(
                 .repeatedPlugInFailures
             )
         )
