@@ -6,7 +6,7 @@ enum ProductRecoveryFailureKind: String, Codable, Equatable, Sendable {
     case plugInStart
 }
 
-enum ProductSafeLaunchReason: String, Codable, CaseIterable, Equatable, Sendable {
+enum ProductSafeLaunchReason: String, Codable, CaseIterable, Equatable, Hashable, Sendable {
     case uncleanTermination
     case repeatedAudioStartFailures
     case repeatedPlugInFailures
@@ -286,7 +286,7 @@ final class ProductRecoveryController: ObservableObject {
             "Consecutive Audio Start Failures: \(persistentState.consecutiveAudioStartFailures)",
             "Consecutive Plug-in Start Failures: \(persistentState.consecutivePlugInFailures)",
             "Last Recovery Failure: \(persistentState.lastFailureDescription ?? "None")",
-            "Last Known Good: \(persistentState.lastKnownGoodAt?.formatted(date: .iso8601, time: .standard) ?? "Unavailable")",
+            "Last Known Good: \(persistentState.lastKnownGoodAt.map { ISO8601DateFormatter().string(from: $0) } ?? "Unavailable")",
             "Recovery Persistence Error: \(lastPersistenceErrorDescription ?? "None")",
         ]
     }
