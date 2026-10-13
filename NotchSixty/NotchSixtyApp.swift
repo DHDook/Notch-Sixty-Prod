@@ -1560,6 +1560,26 @@ private struct ProductionSettingsView: View {
     }
 
     var body: some View {
+        TabView {
+            generalSettings
+                .tabItem {
+                    Label("General", systemImage: "gearshape")
+                }
+
+            ProductionUserGuideView()
+                .tabItem {
+                    Label("User Guide", systemImage: "book.closed")
+                }
+        }
+        .task {
+            preferences.apply(to: product.audioEngine)
+            preferences.refreshLaunchAtLoginStatus()
+        }
+        .frame(width: 920)
+        .frame(minHeight: 680)
+    }
+
+    private var generalSettings: some View {
         ScrollView {
             GlassEffectContainer(spacing: 14) {
                 VStack(alignment: .leading, spacing: 14) {
@@ -1690,12 +1710,8 @@ private struct ProductionSettingsView: View {
             }
             .padding(18)
         }
-        .task {
-            preferences.apply(to: product.audioEngine)
-            preferences.refreshLaunchAtLoginStatus()
-        }
-        .frame(width: 540)
-        .frame(minHeight: 580)
+            .frame(maxWidth: 560)
+            .frame(maxWidth: .infinity, alignment: .top)
     }
 
     private func settingsCard<Content: View>(
