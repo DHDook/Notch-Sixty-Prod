@@ -1927,6 +1927,141 @@ final class AudioIOEngine: ObservableObject {
         try applyGainConfiguration(configuration)
     }
 
+    /// Applies the PR113B A/B-safe content domain as one complete graph
+    /// transition. Playback-System state, output routing, room/speaker
+    /// correction, master/output gain and Audio Unit topology remain owned by
+    /// their existing domains and are only reattached to the candidate graph.
+    ///
+    /// The extra attenuation is intentionally non-positive and exists only for
+    /// measured A/B level matching. It is not written back into the captured
+    /// snapshot.
+    func transitionContentAuditionState(
+        _ state: ContentABAuditionState,
+        additionalInputAttenuationDB: Double = 0
+    ) throws {
+        guard additionalInputAttenuationDB.isFinite,
+              (-24.0...0.0).contains(additionalInputAttenuationDB) else {
+            throw DSPGainConfigurationError.invalidInputPreamp(
+                state.inputPreampDB + additionalInputAttenuationDB
+            )
+        }
+
+        try validateStereoEQStorage(state.stereoEQ)
+
+        var targetGain = gainConfiguration
+        targetGain.inputPreampDB = min(
+            max(
+                state.inputPreampDB + additionalInputAttenuationDB,
+                DSPGainConfiguration.inputPreampRange.lowerBound
+            ),
+            DSPGainConfiguration.inputPreampRange.upperBound
+        )
+        targetGain.headroomAttenuationDB = state.headroomAttenuationDB
+
+        guard DSPGainConfiguration.inputPreampRange
+                .contains(targetGain.inputPreampDB) else {
+            throw DSPGainConfigurationError.invalidInputPreamp(
+                targetGain.inputPreampDB
+            )
+        }
+        guard DSPGainConfiguration.headroomAttenuationRange
+                .contains(targetGain.headroomAttenuationDB) else {
+            throw DSPGainConfigurationError.invalidHeadroomAttenuation(
+                targetGain.headroomAttenuationDB
+            )
+        }
+
+        if immutableSemanticTransportActive,
+           state.stereoEQ != stereoEQConfiguration
+            || state.dynamics != dynamicsConfiguration
+            || targetGain != gainConfiguration {
+            throw LiveNChannelTransportError.configurationChangeRequiresRestart
+        }
+
+        let clampedAmbientTarget =
+            ambientTargetClampedToHeadroom(
+                ambientCompensationRuntimeTarget,
+                gainConfiguration: targetGain
+            )
+        let candidateQuietZone =
+            activeQuietZoneTargetAfterHeadroomChange(
+                activeQuietZoneRuntimeTarget,
+                gainConfiguration: targetGain,
+                ambientTarget: clampedAmbientTarget
+            )
+
+        if let session = transportSession {
+            var graph = try state.stereoEQ.makeGraphSnapshot(
+                sampleRate: session.outputFormat.sampleRate,
+                gainConfiguration: targetGain,
+                bassManagementConfiguration:
+                    renderBassManagementConfiguration(),
+                dynamicsConfiguration: state.dynamics,
+                playbackConfiguration: playbackControlConfiguration,
+                masterGainLinear: currentMasterSoftwareGain
+            )
+
+            var preparedEQFIRProgram: PreparedEQFIRProgram?
+            if !processingIsBypassed(playbackControlConfiguration),
+               state.stereoEQ.requiresEQFIRProgram,
+               !state.stereoEQ.bypassed {
+                let prepared =
+                    try prepareEQFIRProgram(state.stereoEQ, for: session)
+                try attachEQFIRProgram(prepared, to: &graph)
+                preparedEQFIRProgram = prepared
+            }
+
+            try attachActiveRoomCorrectionProgramIfNeeded(
+                to: &graph,
+                playbackConfiguration: playbackControlConfiguration
+            )
+            try attachActiveSpeakerIRProgramIfNeeded(
+                to: &graph,
+                playbackConfiguration: playbackControlConfiguration
+            )
+            try applyAudioUnitRackLatency(to: &graph)
+            try attachAmbientCompensation(
+                clampedAmbientTarget,
+                to: &graph
+            )
+            try attachActiveQuietZone(
+                candidateQuietZone,
+                to: &graph
+            )
+
+            // Always use the sample-domain structural transition for A/B.
+            // Even when only biquad/gain values differ this avoids an
+            // instantaneous coefficient/gain discontinuity at the output.
+            try session.transitionDSPGraph(graph)
+            activeEQFIRProgram = preparedEQFIRProgram
+            linearPhaseDesignInfo = preparedEQFIRProgram?.designInfo
+        } else {
+            // Validate the complete target graph while idle even though there
+            // is no transport to publish it to yet.
+            let validationRate =
+                selectedOutputDevice?.nominalSampleRate ?? 48_000
+            _ = try state.stereoEQ.makeGraphSnapshot(
+                sampleRate: validationRate,
+                gainConfiguration: targetGain,
+                bassManagementConfiguration:
+                    renderBassManagementConfiguration(),
+                dynamicsConfiguration: state.dynamics,
+                playbackConfiguration: playbackControlConfiguration,
+                masterGainLinear: currentMasterSoftwareGain
+            )
+            activeEQFIRProgram = nil
+            linearPhaseDesignInfo = nil
+        }
+
+        stereoEQConfiguration = state.stereoEQ
+        eqConfiguration = legacyEQConfiguration(from: state.stereoEQ)
+        dynamicsConfiguration = state.dynamics
+        gainConfiguration = targetGain
+        ambientCompensationRuntimeTarget = clampedAmbientTarget
+        activeQuietZoneRuntimeTarget = candidateQuietZone
+        lastErrorDescription = nil
+    }
+
     func setInputPreampDB(_ value: Double) throws {
         guard value.isFinite, DSPGainConfiguration.inputPreampRange.contains(value) else {
             throw DSPGainConfigurationError.invalidInputPreamp(value)
