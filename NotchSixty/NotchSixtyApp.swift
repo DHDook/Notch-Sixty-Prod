@@ -76,6 +76,7 @@ final class ProductController: ObservableObject {
     let ambientCompensation: AmbientCompensationController
     let activeQuietZone: ActiveQuietZoneController
     let hardwareAcceptance: HardwareAcceptanceController
+    let backup: NotchSixtyBackupService
     let reference: ProductionReferenceNavigator
     private var audioEngineObservation: AnyCancellable?
     private var calibrationObservation: AnyCancellable?
@@ -122,6 +123,10 @@ final class ProductController: ObservableObject {
             ambient: ambientCompensation
         )
         self.hardwareAcceptance = HardwareAcceptanceController()
+        self.backup = NotchSixtyBackupService(
+            profiles: profiles,
+            roomStore: roomProjects.store
+        )
         self.reference = ProductionReferenceNavigator()
         observeAudioEngine()
     }
@@ -163,6 +168,10 @@ final class ProductController: ObservableObject {
             ambient: ambientCompensation
         )
         self.hardwareAcceptance = HardwareAcceptanceController()
+        self.backup = NotchSixtyBackupService(
+            profiles: profiles,
+            roomStore: roomProjects.store
+        )
         self.reference = ProductionReferenceNavigator()
         observeAudioEngine()
     }
@@ -1138,7 +1147,7 @@ private struct EngineeringValidationView: View {
 
 #endif
 
-private enum ApplicationAppearanceMode: String, CaseIterable, Identifiable {
+enum ApplicationAppearanceMode: String, CaseIterable, Identifiable {
     case system
     case light
     case dark
@@ -1154,7 +1163,7 @@ private enum ApplicationAppearanceMode: String, CaseIterable, Identifiable {
     }
 }
 
-private enum ApplicationPresenceMode: String, CaseIterable, Identifiable {
+enum ApplicationPresenceMode: String, CaseIterable, Identifiable {
     case dock
     case tray
     case both
@@ -1170,7 +1179,7 @@ private enum ApplicationPresenceMode: String, CaseIterable, Identifiable {
     }
 }
 
-private enum ApplicationVolumeStepResolution: Int, CaseIterable, Identifiable {
+enum ApplicationVolumeStepResolution: Int, CaseIterable, Identifiable {
     case standard = 16
     case fine = 32
     case precision = 64
@@ -1190,7 +1199,7 @@ private enum ApplicationVolumeStepResolution: Int, CaseIterable, Identifiable {
 }
 
 @MainActor
-private final class ApplicationPreferences: ObservableObject {
+final class ApplicationPreferences: ObservableObject {
     private enum Key {
         static let appearance = "application.appearance"
         static let presence = "application.presence"
@@ -1297,6 +1306,37 @@ private final class ApplicationPreferences: ObservableObject {
         didApplyInitialPreferences = true
         applyAppearance()
         applyActivationPolicy()
+    }
+
+
+    func makeBackupSnapshot() -> NotchSixtyBackupPreferences {
+        NotchSixtyBackupPreferences(
+            appearance: appearance.rawValue,
+            presence: presence.rawValue,
+            volumeStepResolution: volumeStepResolution.rawValue
+        )
+    }
+
+    /// Restores only portable app-owned preferences. macOS permission grants
+    /// and Launch at Login are intentionally excluded from the backup format.
+    func restoreBackupSnapshot(
+        _ snapshot: NotchSixtyBackupPreferences
+    ) throws {
+        try snapshot.validate()
+        guard let appearance =
+                ApplicationAppearanceMode(rawValue: snapshot.appearance),
+              let presence =
+                ApplicationPresenceMode(rawValue: snapshot.presence),
+              let resolution =
+                ApplicationVolumeStepResolution(
+                    rawValue: snapshot.volumeStepResolution
+                ) else {
+            throw NotchSixtyBackupError.invalidPreferences
+        }
+
+        self.appearance = appearance
+        self.presence = presence
+        self.volumeStepResolution = resolution
     }
 
     private func applyAppearance() {
