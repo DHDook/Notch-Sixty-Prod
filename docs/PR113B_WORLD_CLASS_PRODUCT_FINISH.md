@@ -457,7 +457,10 @@ attenuation, while `revertAppliedRecommendation()` can restore the exact
 pre-observation attenuation only if the applied content/system boundary is
 still unchanged. Both use the existing
 `AudioIOEngine.transitionHeadroomAttenuationDB` silent-boundary graph
-transition. No background auto-adjustment is permitted.
+transition. After Apply, a new observation is blocked until the user explicitly
+chooses **Undo Applied Headroom** or **Keep & Clear**, so starting another
+measurement cannot silently commit the prior change. No background
+auto-adjustment is permitted.
 
 For immutable semantic N-channel / virtual-speaker transports, the existing
 restart-required transport rule remains authoritative; the assistant does not
