@@ -238,12 +238,18 @@ final class ProductController: ObservableObject {
         let lastKnownGood = try recovery.lastKnownGoodSnapshot()
 
         do {
-            _ = try profiles.restoreBackupSnapshot(
+            let report = try profiles.restoreBackupSnapshot(
                 lastKnownGood,
                 availableOutputUIDs:
                     Set(audioEngine.outputDevices.map(\.uid)),
                 recomputeHardwareRequirements: true
             )
+            guard report.hardwareMappingRequiredCount == 0 else {
+                throw ProductRecoveryError
+                    .lastKnownGoodRequiresHardwareMapping(
+                        report.hardwareMappingRequiredCount
+                    )
+            }
             try profiles.applySelectedLayersNow()
             abComparison.clearAll()
             recovery.resolveAfterLastKnownGoodRestore()
@@ -316,7 +322,7 @@ final class ProductController: ObservableObject {
             recovery.recordSuccessfulStart(
                 profiles: profiles.makeBackupSnapshot(),
                 plugInChainHealthy:
-                    audioUnitHost.quarantinedComponentCount == 0
+                    !audioUnitHost.activeRackHasQuarantinedComponent
             )
         } catch {
             // AudioIOEngine owns any staged live rack until the failed state is
@@ -411,7 +417,7 @@ final class ProductController: ObservableObject {
             audioEngine.stop()
         }
         guard audioEngine.lifecycleState == .idle else {
-            throw ProductRecoveryError.invalidState
+            throw ProductRecoveryError.recoveryRequiresIdle
         }
     }
 
