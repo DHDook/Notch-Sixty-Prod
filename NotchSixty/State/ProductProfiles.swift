@@ -1207,6 +1207,7 @@ final class ProductProfileController: ObservableObject {
             if let preset = selectedContentPreset {
                 try applyContentState(preset.state)
             }
+            didRestoreSelection = true
             lastErrorDescription = nil
         } catch {
             try? applySystemState(
