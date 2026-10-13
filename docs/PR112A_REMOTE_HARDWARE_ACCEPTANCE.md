@@ -298,10 +298,55 @@ drift, missing limiter protection, coherent same-ADC/clock/reference gates,
 independent Sub routing, permanent H08 blocking, and latest commissioning
 draft selection by Playback System.
 
-**Slice 5 — Reports, export & physical runbook closeout.**
-Generate a human-readable/machine-readable acceptance packet, unresolved-gate
-summary, exact build/capture manifest, and later merge/release handoff. CI can
-validate report correctness but cannot make a physical gate green.
+**Slice 5 — Reports, export & physical runbook closeout
+(implemented; exact-head CI pending).**
+
+The Hardware Acceptance workspace now exports an immutable JSON acceptance
+packet and a human-readable Markdown physical runbook from the current
+campaign. Both are built directly from the append-only campaign/evaluation;
+they do not maintain a second acceptance database and cannot change evidence.
+
+The packet contains:
+
+- exact campaign ID, source commit/branch, app version/build and Playback
+  System ID;
+- every immutable capability-scope decision and exclusion reason;
+- normalized H01–H08 status, required/actual authority, latest observation
+  identity and unresolved-gate list;
+- the complete evidence log with reviewer, physical environment, input/output
+  UIDs, microphone identity and covered supplemental capabilities;
+- a deterministic artifact manifest preserving capture/session/report
+  identifiers and optional SHA-256 digests; and
+- one safety-bounded physical runbook step per H01–H08 gate with objective,
+  required authority, current state and next action.
+
+The runbook deliberately avoids converting software preflight into test
+completion. It repeats the critical physical boundaries: calibrated real input
+for acoustic evidence, real rollback/before-after verification, protected
+split-driver amplification/crossover/limiter requirements, speaker-safe FIR
+and endurance testing, and same-ADC/common-output-clock/safe-line-level
+reference requirements for coherent Main/Sub testing. It explicitly warns
+never to feed speaker-level amplifier output directly into an ADC. H08 remains
+disabled unless separately included and independently physically reviewed.
+
+Even a future packet where every in-scope physical H01–H08 gate is accepted
+still hard-codes releaseAcceptanceComplete=false and mayMergeIntoMain=false.
+PR112A hardware evidence is not App Store, provenance/legal,
+release-credential or owner merge authorization.
+
+New deterministic report tests prove that:
+
+- a remote-software PASS remains insufficientAuthority in both JSON and
+  Markdown;
+- exact artifact/observation IDs survive export;
+- complete physical H01–H08 acceptance still cannot create release/merge
+  authority;
+- every runbook gate carries its safety boundary; and
+- a newer failure replaces a stale earlier pass in the exported status.
+
+The UI exposes Export JSON Packet and Export Markdown Runbook only.
+Export does not start audio, mutate DSP/routing, authorize ANC, merge a branch,
+or alter campaign evidence.
 
 ## Merge/release boundary
 
