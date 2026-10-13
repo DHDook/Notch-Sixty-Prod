@@ -223,7 +223,8 @@ for token in (
     "PR114 — Commercial Release Candidate",
     "PR113B — World-Class Product Finish",
     "f10008d8330c2dc29f195163c56cf4723fc16a6c",
-    "production Apple signing",
+    "PR112 physical H01–H08 acceptance",
+    "Apple signing",
     "App Store Connect",
 ):
     require(token in readme, f"README release status missing {token!r}")
