@@ -57,6 +57,7 @@ jobs:
           CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES
           -only-testing:NotchSixtyTests/SpeakerMeasurementLabProtectedExcitationTests
           -only-testing:NotchSixtyTests/ProtectedDriverPEQRecommendationTests
+          -only-testing:NotchSixtyTests/SpeakerMeasurementLabReportTests
           test
       - name: Build unsigned arm64 Release app
         run: >-
