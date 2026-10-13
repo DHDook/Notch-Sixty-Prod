@@ -1817,14 +1817,19 @@ struct ProtectedDriverCommissioningPlanner: Sendable {
             }
             guard !captures.isEmpty,
                   captures.allSatisfy({
-                      $0.protectedDriverProvenance?
-                        .routingConfiguration
-                            == profile.state.outputRouting
-                        && $0.protectedDriverProvenance?
-                            .bassManagementConfiguration
+                      guard let provenance =
+                            $0.protectedDriverProvenance,
+                            let currentRouting =
+                            profile.state.outputRouting else {
+                          return false
+                      }
+                      return sameRoutingTopology(
+                          provenance.routingConfiguration,
+                          currentRouting
+                      )
+                        && provenance.bassManagementConfiguration
                             == profile.state.bassManagement
-                        && $0.protectedDriverProvenance?
-                            .targetDriverConfiguration
+                        && provenance.targetDriverConfiguration
                             == baselineProcessing.configuration(
                                 for: labProtocol.protectedDriverBus!
                             )
@@ -1953,6 +1958,37 @@ struct ProtectedDriverCommissioningPlanner: Sendable {
         guard profile.state
                 == draft.rollbackPlaybackSystemState else {
             throw ProtectedDriverCommissioningError.currentStateDrift
+        }
+    }
+
+    private func sameRoutingTopology(
+        _ lhs: MultiOutputRoutingConfiguration,
+        _ rhs: MultiOutputRoutingConfiguration
+    ) -> Bool {
+        guard lhs.enabled == rhs.enabled,
+              lhs.synchronizationMode == rhs.synchronizationMode,
+              lhs.resolvedReferenceDeviceUID
+                == rhs.resolvedReferenceDeviceUID else {
+            return false
+        }
+        let left = lhs.enabledRoutes.map {
+            ($0.bus.rawValue, $0.destination.deviceUID,
+             $0.destination.channelIndex)
+        }.sorted {
+            if $0.0 != $1.0 { return $0.0 < $1.0 }
+            if $0.1 != $1.1 { return $0.1 < $1.1 }
+            return $0.2 < $1.2
+        }
+        let right = rhs.enabledRoutes.map {
+            ($0.bus.rawValue, $0.destination.deviceUID,
+             $0.destination.channelIndex)
+        }.sorted {
+            if $0.0 != $1.0 { return $0.0 < $1.0 }
+            if $0.1 != $1.1 { return $0.1 < $1.1 }
+            return $0.2 < $1.2
+        }
+        return left.elementsEqual(right) {
+            $0.0 == $1.0 && $0.1 == $1.1 && $0.2 == $1.2
         }
     }
 
