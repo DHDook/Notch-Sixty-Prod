@@ -334,10 +334,6 @@ final class HeadroomAssistantController: ObservableObject {
         self.profiles = profiles
     }
 
-    deinit {
-        observationTask?.cancel()
-    }
-
     var isObserving: Bool { phase == .observing }
 
     var observationProgress: Double {
