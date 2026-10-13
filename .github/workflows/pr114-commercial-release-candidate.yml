@@ -35,6 +35,9 @@ jobs:
       - name: Validate PR114 licensing, provenance and SBOM
         run: python3 ci/validate_pr114_provenance_sbom.py
 
+      - name: Validate PR114 packaging and release manifest
+        run: python3 ci/validate_pr114_packaging.py
+
       - name: Build deterministic PR114 production SBOM
         run: >-
           python3 ci/build_pr114_sbom.py
@@ -73,181 +76,201 @@ jobs:
           python3 ci/validate_pr114_release_baseline.py
           python3 ci/validate_pr114_privacy_security.py
           python3 ci/validate_pr114_provenance_sbom.py
+          python3 ci/validate_pr114_packaging.py
           python3 ci/validate_pr113b_ab_foundation.py
           python3 ci/validate_pr102_release_readiness.py
           python3 ci/validate_pr102_app_store_boundary.py
           python3 ci/validate_pr102_dependency_manifest.py
-          touch "${RUNNER_TEMP}/pr114-validators.ok"
+          touch /tmp/pr114-validators.passed
+
+      - name: Build deterministic PR114 production SBOM
+        run: >-
+          python3 ci/build_pr114_sbom.py
+          --output "${RUNNER_TEMP}/pr114-production-sbom.json"
 
       - name: Build unsigned arm64 Debug app
         run: |
           set -euo pipefail
           xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty \
-            -configuration Debug \
-            -destination 'platform=macOS,arch=arm64' \
-            -derivedDataPath "${RUNNER_TEMP}/PR114DebugDerivedData" \
+            -configuration Debug -destination 'platform=macOS,arch=arm64' \
             CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES build
-          touch "${RUNNER_TEMP}/pr114-debug-build.ok"
+          touch /tmp/pr114-debug-build.passed
 
       - name: Run product-finish targeted tests
         run: |
           set -euo pipefail
           xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty \
-            -configuration Debug \
-            -destination 'platform=macOS,arch=arm64' \
-            -derivedDataPath "${RUNNER_TEMP}/PR114DebugDerivedData" \
+            -configuration Debug -destination 'platform=macOS,arch=arm64' \
             CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES \
             -only-testing:NotchSixtyTests/ProductionInformationArchitectureTests \
             -only-testing:NotchSixtyTests/SpeakerMeasurementLabReportTests \
             test
-          touch "${RUNNER_TEMP}/pr114-targeted-tests.ok"
+          touch /tmp/pr114-targeted-tests.passed
 
       - name: Build unsigned arm64 Release app
         run: |
           set -euo pipefail
           xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty \
-            -configuration Release \
-            -destination 'platform=macOS,arch=arm64' \
-            -derivedDataPath "${RUNNER_TEMP}/PR114ReleaseDerivedData" \
+            -configuration Release -destination 'platform=macOS,arch=arm64' \
+            -derivedDataPath "$RUNNER_TEMP/PR114ReleaseDerivedData" \
             CODE_SIGNING_ALLOWED=NO GENERATE_INFOPLIST_FILE=NO \
             INFOPLIST_FILE=NotchSixty/Info.plist build
-          touch "${RUNNER_TEMP}/pr114-release-build.ok"
+          touch /tmp/pr114-release-build.passed
 
       - name: Archive unsigned Release preflight
         run: |
           set -euo pipefail
-          ARCHIVE="${RUNNER_TEMP}/NotchSixty-PR114.xcarchive"
-          rm -rf "$ARCHIVE"
           xcodebuild archive \
             -project NotchSixty.xcodeproj \
             -scheme NotchSixty \
             -configuration Release \
             -destination 'generic/platform=macOS' \
-            -archivePath "$ARCHIVE" \
-            CODE_SIGNING_ALLOWED=NO GENERATE_INFOPLIST_FILE=NO \
+            -archivePath "$RUNNER_TEMP/NotchSixty-PR114.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO \
+            GENERATE_INFOPLIST_FILE=NO \
             INFOPLIST_FILE=NotchSixty/Info.plist
 
-          APP="$ARCHIVE/Products/Applications/Notch Sixty.app"
-          INFO="$APP/Contents/Info.plist"
-          EXECUTABLE="$APP/Contents/MacOS/Notch Sixty"
-          NOTICE="$APP/Contents/Resources/ThirdPartyNotices.txt"
-
-          test -d "$APP"
-          test -f "$INFO"
-          test -x "$EXECUTABLE"
-          test -f "$NOTICE"
-          test "$(lipo -archs "$EXECUTABLE")" = "arm64"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$INFO")" = "com.dhdook.NotchSixty"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$INFO")" = "1.0.0"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$INFO")" = "1"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$INFO")" = "27.0"
-          test -n "$(/usr/libexec/PlistBuddy -c 'Print :NSAudioCaptureUsageDescription' "$INFO")"
-          test -n "$(/usr/libexec/PlistBuddy -c 'Print :NSMicrophoneUsageDescription' "$INFO")"
-          grep -q 'libmysofa v1.3.4' "$NOTICE"
-          grep -q 'BSD 3-Clause' "$NOTICE"
-          touch "${RUNNER_TEMP}/pr114-archive.ok"
-
-      - name: Build ad-hoc sandboxed remote RC DMG
-        id: rc_package
+      - name: Verify unsigned archive preflight
         shell: bash
         run: |
           set -euo pipefail
-          ARCHIVE="${RUNNER_TEMP}/NotchSixty-PR114.xcarchive"
+          RELEASE_APP="$RUNNER_TEMP/PR114ReleaseDerivedData/Build/Products/Release/Notch Sixty.app"
+          ARCHIVE="$RUNNER_TEMP/NotchSixty-PR114.xcarchive"
           ARCHIVE_APP="$ARCHIVE/Products/Applications/Notch Sixty.app"
-          RC_ROOT="${RUNNER_TEMP}/PR114RemoteRC"
+
+          for APP in "$RELEASE_APP" "$ARCHIVE_APP"; do
+            INFO="$APP/Contents/Info.plist"
+            EXECUTABLE="$APP/Contents/MacOS/Notch Sixty"
+            NOTICE="$APP/Contents/Resources/ThirdPartyNotices.txt"
+            test -d "$APP"
+            test -f "$INFO"
+            test -x "$EXECUTABLE"
+            test -f "$NOTICE"
+            test "$(lipo -archs "$EXECUTABLE")" = "arm64"
+            test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$INFO")" = "com.dhdook.NotchSixty"
+            test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$INFO")" = "1.0.0"
+            test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$INFO")" = "1"
+            test "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$INFO")" = "27.0"
+            test -n "$(/usr/libexec/PlistBuddy -c 'Print :NSAudioCaptureUsageDescription' "$INFO")"
+            test -n "$(/usr/libexec/PlistBuddy -c 'Print :NSMicrophoneUsageDescription' "$INFO")"
+            grep -q 'libmysofa v1.3.4' "$NOTICE"
+            grep -q 'BSD 3-Clause' "$NOTICE"
+          done
+
+          cmp \
+            "$RELEASE_APP/Contents/Info.plist" \
+            "$ARCHIVE_APP/Contents/Info.plist"
+          touch /tmp/pr114-archive.passed
+
+      - name: Create ad-hoc sandbox RC copy
+        shell: bash
+        run: |
+          set -euo pipefail
+          RELEASE_APP="$RUNNER_TEMP/PR114ReleaseDerivedData/Build/Products/Release/Notch Sixty.app"
+          RC_ROOT="$RUNNER_TEMP/PR114RemoteRC"
           RC_APP="$RC_ROOT/Notch Sixty.app"
-          ENTITLEMENTS="${RUNNER_TEMP}/pr114-effective-entitlements.plist"
-          STAGE="${RUNNER_TEMP}/PR114DMGStage"
+          rm -rf "$RC_ROOT"
+          mkdir -p "$RC_ROOT"
+          cp -R "$RELEASE_APP" "$RC_APP"
 
-          rm -rf "$RC_ROOT" "$STAGE"
-          mkdir -p "$RC_ROOT" "$STAGE"
-          ditto "$ARCHIVE_APP" "$RC_APP"
-
-          codesign --force --sign - --timestamp=none \
-            --entitlements NotchSixty/NotchSixty.entitlements "$RC_APP"
+          codesign \
+            --force \
+            --sign - \
+            --timestamp=none \
+            --entitlements NotchSixty/NotchSixty.entitlements \
+            "$RC_APP"
           codesign --verify --strict --verbose=2 "$RC_APP"
+          codesign -d --entitlements :- "$RC_APP" \
+            > "$RUNNER_TEMP/pr114-effective-entitlements.plist" \
+            2>/dev/null
 
-          codesign -d --entitlements :- "$RC_APP" 2>&1 \
-            | python3 -c 'import sys; s=sys.stdin.read(); a=s.find("<?xml"); b=s.rfind("</plist>"); assert a >= 0 and b >= a; sys.stdout.write(s[a:b+8])' \
-            > "$ENTITLEMENTS"
-          plutil -lint "$ENTITLEMENTS"
-          /usr/libexec/PlistBuddy -c 'Print :com.apple.security.app-sandbox' "$ENTITLEMENTS" | grep -qx 'true'
-          /usr/libexec/PlistBuddy -c 'Print :com.apple.security.device.audio-input' "$ENTITLEMENTS" | grep -qx 'true'
-          /usr/libexec/PlistBuddy -c 'Print :com.apple.security.files.user-selected.read-write' "$ENTITLEMENTS" | grep -qx 'true'
+      - name: Verify ad-hoc RC effective entitlements
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import plistlib
+          from pathlib import Path
+          import os
 
+          root = Path.cwd()
+          expected = plistlib.loads(
+              (root / "NotchSixty" / "NotchSixty.entitlements").read_bytes()
+          )
+          actual = plistlib.loads(
+              (Path(os.environ["RUNNER_TEMP"]) / "pr114-effective-entitlements.plist").read_bytes()
+          )
+          if actual != expected:
+              raise SystemExit(
+                  f"effective ad-hoc RC entitlements differ: {actual!r} != {expected!r}"
+              )
+          PY
+
+      - name: Create remote RC DMG
+        shell: bash
+        run: |
+          set -euo pipefail
+          RC_APP="$RUNNER_TEMP/PR114RemoteRC/Notch Sixty.app"
           INFO="$RC_APP/Contents/Info.plist"
           VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$INFO")"
           BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$INFO")"
-          SAFE_VERSION="$(printf '%s' "$VERSION" | tr -c 'A-Za-z0-9._-' '-')"
-          SAFE_BUILD="$(printf '%s' "$BUILD" | tr -c 'A-Za-z0-9._-' '-')"
-          DMG_NAME="Notch-Sixty-${SAFE_VERSION}-build-${SAFE_BUILD}-arm64-PR114-remote-RC.dmg"
-          DMG="${RUNNER_TEMP}/$DMG_NAME"
+          DMG="$RUNNER_TEMP/Notch-Sixty-${VERSION}-build-${BUILD}-PR114-remote-rc-arm64.dmg"
+          STAGE="$RUNNER_TEMP/PR114RemoteRCStage"
 
-          ditto "$RC_APP" "$STAGE/Notch Sixty.app"
+          rm -rf "$STAGE" "$DMG" "$DMG.sha256"
+          mkdir -p "$STAGE"
+          cp -R "$RC_APP" "$STAGE/"
           ln -s /Applications "$STAGE/Applications"
+
           hdiutil create \
-            -volname "Notch Sixty $VERSION PR114 Remote RC" \
+            -volname "Notch Sixty ${VERSION} PR114 RC" \
             -srcfolder "$STAGE" \
-            -ov -format UDZO "$DMG"
+            -ov \
+            -format UDZO \
+            "$DMG"
           shasum -a 256 "$DMG" | tee "$DMG.sha256"
 
-          echo "dmg_name=$DMG_NAME" >> "$GITHUB_OUTPUT"
-          touch "${RUNNER_TEMP}/pr114-package.ok"
-
-          {
-            echo '### PR114 remote RC package'
-            echo
-            echo "- Artifact: `$DMG_NAME`"
-            echo "- Signature: ad-hoc sandbox preflight"
-            echo "- Developer-ID signed: **no**"
-            echo "- Notarized: **no**"
-            echo "- Public distribution ready: **no**"
-          } >> "$GITHUB_STEP_SUMMARY"
+          echo "PR114_RC_DMG=$DMG" >> "$GITHUB_ENV"
+          touch /tmp/pr114-package.passed
 
       - name: Run cumulative XCTest regression
         run: |
           set -euo pipefail
           xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty \
-            -configuration Debug \
-            -destination 'platform=macOS,arch=arm64' \
-            -derivedDataPath "${RUNNER_TEMP}/PR114DebugDerivedData" \
+            -configuration Debug -destination 'platform=macOS,arch=arm64' \
             CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES test
-          touch "${RUNNER_TEMP}/pr114-xctest.ok"
+          touch /tmp/pr114-xctest.passed
 
-      - name: Build macOS production SBOM
-        run: >-
-          python3 ci/build_pr114_sbom.py
-          --output "${RUNNER_TEMP}/pr114-production-sbom.json"
-
-      - name: Build exact-head PR114 RC manifest
+      - name: Build PR114 remote commercial RC manifest
+        shell: bash
         run: |
           set -euo pipefail
           python3 ci/build_pr114_release_candidate_manifest.py \
-            --release-app "${RUNNER_TEMP}/PR114ReleaseDerivedData/Build/Products/Release/Notch Sixty.app" \
-            --archive "${RUNNER_TEMP}/NotchSixty-PR114.xcarchive" \
-            --rc-app "${RUNNER_TEMP}/PR114RemoteRC/Notch Sixty.app" \
-            --rc-dmg "${RUNNER_TEMP}/${{ steps.rc_package.outputs.dmg_name }}" \
-            --effective-entitlements "${RUNNER_TEMP}/pr114-effective-entitlements.plist" \
-            --sbom "${RUNNER_TEMP}/pr114-production-sbom.json" \
-            --validators-marker "${RUNNER_TEMP}/pr114-validators.ok" \
-            --debug-build-marker "${RUNNER_TEMP}/pr114-debug-build.ok" \
-            --targeted-tests-marker "${RUNNER_TEMP}/pr114-targeted-tests.ok" \
-            --release-build-marker "${RUNNER_TEMP}/pr114-release-build.ok" \
-            --archive-marker "${RUNNER_TEMP}/pr114-archive.ok" \
-            --package-marker "${RUNNER_TEMP}/pr114-package.ok" \
-            --xctest-marker "${RUNNER_TEMP}/pr114-xctest.ok" \
-            --output "${RUNNER_TEMP}/pr114-release-candidate.json"
-          python3 -m json.tool "${RUNNER_TEMP}/pr114-release-candidate.json" >/dev/null
+            --release-app "$RUNNER_TEMP/PR114ReleaseDerivedData/Build/Products/Release/Notch Sixty.app" \
+            --archive "$RUNNER_TEMP/NotchSixty-PR114.xcarchive" \
+            --rc-app "$RUNNER_TEMP/PR114RemoteRC/Notch Sixty.app" \
+            --rc-dmg "$PR114_RC_DMG" \
+            --effective-entitlements "$RUNNER_TEMP/pr114-effective-entitlements.plist" \
+            --sbom "$RUNNER_TEMP/pr114-production-sbom.json" \
+            --validators-marker /tmp/pr114-validators.passed \
+            --debug-build-marker /tmp/pr114-debug-build.passed \
+            --targeted-tests-marker /tmp/pr114-targeted-tests.passed \
+            --release-build-marker /tmp/pr114-release-build.passed \
+            --archive-marker /tmp/pr114-archive.passed \
+            --package-marker /tmp/pr114-package.passed \
+            --xctest-marker /tmp/pr114-xctest.passed \
+            --output "$RUNNER_TEMP/pr114-remote-commercial-rc.json"
+          python3 -m json.tool "$RUNNER_TEMP/pr114-remote-commercial-rc.json" >/dev/null
 
       - name: Upload PR114 remote RC evidence
         uses: actions/upload-artifact@v4
         with:
           name: pr114-remote-commercial-rc
           path: |
-            ${{ runner.temp }}/${{ steps.rc_package.outputs.dmg_name }}
-            ${{ runner.temp }}/${{ steps.rc_package.outputs.dmg_name }}.sha256
-            ${{ runner.temp }}/pr114-release-candidate.json
+            ${{ runner.temp }}/pr114-remote-commercial-rc.json
             ${{ runner.temp }}/pr114-production-sbom.json
             ${{ runner.temp }}/pr114-effective-entitlements.plist
+            ${{ env.PR114_RC_DMG }}
+            ${{ env.PR114_RC_DMG }}.sha256
           if-no-files-found: error
           retention-days: 90
