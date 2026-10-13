@@ -70,9 +70,13 @@ sentinel plus repeated audio-start and plug-in-failure counters can hold the
 app in an explicit idle recovery state. The user can Open Normally, temporarily
 bypass plug-ins without editing the saved rack, Restore Last Known Good, or
 Copy Diagnostics. Last Known Good is updated only by a successful normal start
-with a healthy plug-in chain. Every production Start path now routes through
-the same ProductController transaction. Recovery state is excluded from general
-backup and has no PR112 physical-acceptance or release authority.
+whose enabled active plug-in rack is healthy; unrelated quarantined components
+do not block certification. Restore Last Known Good refuses unavailable
+hardware rather than silently rebinding it, and plug-in bypass never persists
+across a clean relaunch. Failed engine state is normalized before an explicit
+retry/recovery action. Every production Start path now routes through the same
+ProductController transaction. Recovery state is excluded from general backup
+and has no PR112 physical-acceptance or release authority.
 
 PR113B software work cannot satisfy PR112 physical acceptance and cannot set
 `releaseAcceptanceComplete`, `liveFeedForwardANCAuthorized`, or
