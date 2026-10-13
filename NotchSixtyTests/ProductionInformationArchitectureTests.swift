@@ -660,4 +660,83 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         XCTAssertEqual(ContentABSlot.b.opposite, .a)
     }
 
+
+    func testABLoudnessMatchOnlyAttenuatesTheLouderCapture() throws {
+        let plan = try XCTUnwrap(
+            ContentABLoudnessMatchPlan.make(
+                aLUFS: -14.0,
+                bLUFS: -17.0
+            )
+        )
+
+        XCTAssertEqual(plan.referenceLUFS, -17.0, accuracy: 0.0001)
+        XCTAssertEqual(plan.attenuationA_DB, -3.0, accuracy: 0.0001)
+        XCTAssertEqual(plan.attenuationB_DB, 0.0, accuracy: 0.0001)
+        XCTAssertLessThanOrEqual(plan.attenuationA_DB, 0)
+        XCTAssertLessThanOrEqual(plan.attenuationB_DB, 0)
+    }
+
+    func testABLoudnessMatchIsBoundedAndRequiresValidSignal() throws {
+        let bounded = try XCTUnwrap(
+            ContentABLoudnessMatchPlan.make(
+                aLUFS: -10.0,
+                bLUFS: -30.0
+            )
+        )
+        XCTAssertEqual(
+            bounded.attenuationA_DB,
+            -ContentABLoudnessMatchPlan.maximumAttenuationDB,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(bounded.attenuationB_DB, 0, accuracy: 0.0001)
+
+        XCTAssertNil(
+            ContentABLoudnessMatchPlan.make(
+                aLUFS: nil,
+                bLUFS: -18
+            )
+        )
+        XCTAssertNil(
+            ContentABLoudnessMatchPlan.make(
+                aLUFS: -70,
+                bLUFS: -18
+            )
+        )
+    }
+
+    func testABSnapshotCanCarryMeasuredLoudnessWithoutBroadeningAuditionState() {
+        let snapshot = ContentABSnapshot(
+            sourceContentPresetID: nil,
+            sourceContentPresetName: "Fixture",
+            loudnessReferenceLUFS: -18.5,
+            auditionState: ContentABAuditionState(
+                contentState: ContentPresetState()
+            ),
+            systemBoundary: ContentABSystemBoundary(
+                selectedSystemProfileID: nil,
+                systemState: PlaybackSystemState()
+            )
+        )
+
+        XCTAssertEqual(
+            snapshot.loudnessReferenceLUFS,
+            -18.5,
+            accuracy: 0.0001
+        )
+
+        let labels = Set(
+            Mirror(reflecting: snapshot.auditionState)
+                .children.compactMap { $0.label }
+        )
+        XCTAssertEqual(
+            labels,
+            Set([
+                "stereoEQ",
+                "inputPreampDB",
+                "headroomAttenuationDB",
+                "dynamics",
+            ])
+        )
+    }
+
 }
