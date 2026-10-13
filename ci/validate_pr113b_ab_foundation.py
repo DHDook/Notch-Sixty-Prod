@@ -4,15 +4,21 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PROFILES = ROOT / "NotchSixty/State/ProductProfiles.swift"
+ENGINE = ROOT / "NotchSixty/Audio/AudioIOEngine.swift"
+APP = ROOT / "NotchSixty/NotchSixtyApp.swift"
+TOOLBAR = ROOT / "NotchSixty/UI/ProductionProfileToolbar.swift"
 TESTS = ROOT / "NotchSixtyTests/ProductionInformationArchitectureTests.swift"
 DOC = ROOT / "docs/PR113B_WORLD_CLASS_PRODUCT_FINISH.md"
 ROADMAP = ROOT / "docs/ROADMAP.md"
 WORKFLOW = ROOT / ".github/workflows/pr113b-world-class-product-finish.yml"
 
-for path in (PROFILES, TESTS, DOC, ROADMAP, WORKFLOW):
+for path in (PROFILES, ENGINE, APP, TOOLBAR, TESTS, DOC, ROADMAP, WORKFLOW):
     assert path.is_file(), f"PR113B Slice 1 missing artifact: {path}"
 
 profiles = PROFILES.read_text(encoding="utf-8")
+engine = ENGINE.read_text(encoding="utf-8")
+app = APP.read_text(encoding="utf-8")
+toolbar = TOOLBAR.read_text(encoding="utf-8")
 tests = TESTS.read_text(encoding="utf-8")
 doc = DOC.read_text(encoding="utf-8")
 roadmap = ROADMAP.read_text(encoding="utf-8")
@@ -43,6 +49,12 @@ for token in (
     "func swapSnapshots()",
     "func compatibility(for slot: ContentABSlot)",
     "func currentContentDiffers(from slot: ContentABSlot)",
+    "struct ContentABLoudnessMatchPlan:",
+    "static let maximumAttenuationDB = 12.0",
+    "levelMatchingEnabled",
+    "loudnessMatchPlan",
+    "func audition(_ slot: ContentABSlot) async",
+    "func endAudition(restoringBaseline: Bool = true) async",
 ):
     assert token in ab, f"PR113B A/B foundation missing {token}"
 
@@ -91,14 +103,70 @@ for token in (
     "testABAuditionMergePreservesCurrentAudioUnitRack",
     "testABSystemBoundaryFailsClosedOnIdentityAndStateDrift",
     "testABSlotsHaveStableIdentityAndOpposites",
+    "testABLoudnessMatchOnlyAttenuatesTheLouderCapture",
+    "testABLoudnessMatchIsBoundedAndRequiresValidSignal",
+    "testABSnapshotCanCarryMeasuredLoudnessWithoutBroadeningAuditionState",
 ):
     assert token in tests, f"PR113B A/B regression missing {token}"
+
+
+for token in (
+    "func transitionContentAuditionState(",
+    "additionalInputAttenuationDB: Double = 0",
+    "try session.transitionDSPGraph(graph)",
+    "renderBassManagementConfiguration()",
+    "attachActiveRoomCorrectionProgramIfNeeded(",
+    "attachActiveSpeakerIRProgramIfNeeded(",
+    "applyAudioUnitRackLatency(to: &graph)",
+):
+    assert token in engine, f"PR113B Slice 2 engine contract missing {token}"
+
+# The A/B executor may only call the dedicated content-domain transition.
+# It must not gain direct system/hardware mutation authority.
+controller_start = ab.index("final class ContentABComparisonController")
+controller = ab[controller_start:]
+for forbidden_call in (
+    "selectOutput(",
+    "replaceBassManagementConfiguration(",
+    "replaceMultiOutputRoutingConfiguration(",
+    "replaceOutputDeviceProfileConfiguration(",
+    "replaceHeadphoneDeviceProfileConfiguration(",
+    "replaceSpeakerDriverProcessingConfiguration(",
+    "replaceRoomCorrectionConfiguration(",
+    "replaceSpeakerIRConfiguration(",
+    "replaceRackConfiguration(",
+):
+    assert forbidden_call not in controller, (
+        f"PR113B A/B controller gained hardware/system authority: {forbidden_call}"
+    )
+
+for token in (
+    "let abComparison: ContentABComparisonController",
+    "ContentABComparisonController(profiles: profiles)",
+):
+    assert token in app, f"PR113B product ownership missing {token}"
+
+for token in (
+    "abComparisonControl",
+    'Label("A/B", systemImage: "arrow.left.arrow.right")',
+    '"Capture Current as A"',
+    '"Capture Current as B"',
+    '"Measured Level Match"',
+    '"Swap A / B"',
+    '"Exit A/B and Restore"',
+    "await comparison.audition(.a)",
+    "await comparison.audition(.b)",
+):
+    assert token in toolbar, f"PR113B A/B production UI missing {token}"
 
 for token in (
     "Slice 1 — Safe A/B comparison foundation",
     "Audio Unit rack topology",
     "Playback System boundary",
     "No live mutation in Slice 1",
+    "Slice 2 — Click-free, measured-level A/B audition",
+    "attenuation-only",
+    "Exit A/B and Restore",
     "OPEN, DRAFT and UNMERGED",
 ):
     assert token in doc, f"PR113B Slice 1 documentation missing {token}"
@@ -121,4 +189,4 @@ for token in (
 ):
     assert token in workflow, f"PR113B workflow missing {token}"
 
-print("PR113B Slice 1 safe A/B foundation contract: PASS")
+print("PR113B Slices 1–2 A/B comparison contract: PASS")
