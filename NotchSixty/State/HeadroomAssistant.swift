@@ -287,6 +287,7 @@ enum HeadroomAssistantPhase: String, Equatable, Sendable {
 enum HeadroomAssistantError: Error, LocalizedError, Equatable {
     case processingRequired
     case authoritativeTruePeakUnavailable
+    case abComparisonActive
     case stateChanged
     case noApplicableRecommendation
     case noAppliedRecommendationToRevert
@@ -297,6 +298,8 @@ enum HeadroomAssistantError: Error, LocalizedError, Equatable {
             return "Start processing before beginning a Headroom Assistant observation."
         case .authoritativeTruePeakUnavailable:
             return "Authoritative true-peak telemetry is unavailable. Enable the limiter True Peak Guard and start a new observation."
+        case .abComparisonActive:
+            return "Exit the active A/B audition and restore its baseline before using Headroom Assistant."
         case .stateChanged:
             return "The Content Preset or Playback System changed during the observation. Start a new Headroom Assistant observation for the current state."
         case .noApplicableRecommendation:
@@ -311,6 +314,7 @@ enum HeadroomAssistantError: Error, LocalizedError, Equatable {
 final class HeadroomAssistantController: ObservableObject {
     private let engine: AudioIOEngine
     private let profiles: ProductProfileController
+    private let abComparison: ContentABComparisonController?
     private var observationTask: Task<Void, Never>?
     private var boundary: HeadroomAssistantBoundary?
     private var startedAt: Date?
@@ -341,10 +345,12 @@ final class HeadroomAssistantController: ObservableObject {
 
     init(
         engine: AudioIOEngine,
-        profiles: ProductProfileController
+        profiles: ProductProfileController,
+        abComparison: ContentABComparisonController? = nil
     ) {
         self.engine = engine
         self.profiles = profiles
+        self.abComparison = abComparison
     }
 
     var isObserving: Bool { phase == .observing }
@@ -359,6 +365,9 @@ final class HeadroomAssistantController: ObservableObject {
     }
 
     func startObservation(now: Date = Date()) throws {
+        guard !abAuditionSessionActive else {
+            throw HeadroomAssistantError.abComparisonActive
+        }
         guard engine.lifecycleState == .running else {
             throw HeadroomAssistantError.processingRequired
         }
@@ -487,6 +496,10 @@ final class HeadroomAssistantController: ObservableObject {
               let boundary else {
             return
         }
+        guard !abAuditionSessionActive else {
+            invalidate(HeadroomAssistantError.abComparisonActive)
+            return
+        }
         guard boundary.matches(profiles) else {
             invalidate(HeadroomAssistantError.stateChanged)
             return
@@ -555,6 +568,13 @@ final class HeadroomAssistantController: ObservableObject {
                     startingHeadroomAttenuationDB,
                 targetPeakDBTP: targetPeakDBTP
             )
+    }
+
+    private var abAuditionSessionActive: Bool {
+        guard let abComparison else { return false }
+        return abComparison.sessionBaseline != nil
+            || abComparison.activeSlot != nil
+            || abComparison.isSwitching
     }
 
     private func invalidate(_ error: HeadroomAssistantError) {
