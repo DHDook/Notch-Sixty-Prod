@@ -590,12 +590,22 @@ struct ProductionMetersView: View {
                         .buttonStyle(.borderedProminent)
                     }
 
-                    if assistant.phase != .idle {
-                        Button(
-                            assistant.phase == .applied
-                                ? "Clear Result"
-                                : "Clear"
-                        ) {
+                    if assistant.phase == .applied,
+                       assistant.canRevertAppliedRecommendation {
+                        Button("Undo Applied Headroom") {
+                            do {
+                                try assistant
+                                    .revertAppliedRecommendation()
+                            } catch {
+                                assistantCommandError =
+                                    error.localizedDescription
+                            }
+                        }
+                        Button("Keep & Clear") {
+                            assistant.cancelObservation()
+                        }
+                    } else if assistant.phase != .idle {
+                        Button("Clear") {
                             assistant.cancelObservation()
                         }
                     }
