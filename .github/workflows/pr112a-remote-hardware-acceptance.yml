@@ -78,6 +78,7 @@ jobs:
           -configuration Debug -destination 'platform=macOS,arch=arm64'
           CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES
           -only-testing:NotchSixtyTests/HardwareAcceptanceTests
+          -only-testing:NotchSixtyTests/HardwareAcceptanceEvidenceAdapterTests
           test
 
       - name: Build unsigned arm64 Release app
