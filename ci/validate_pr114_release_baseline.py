@@ -12,6 +12,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_SHA = "f10008d8330c2dc29f195163c56cf4723fc16a6c"
+SLICE1_CHECKPOINT_SHA = "a4fc2eda5f72e1711f7dee91d308c75dce2950be"
 
 BASELINE = ROOT / "release" / "pr114-release-baseline.json"
 PROJECT = ROOT / "NotchSixty.xcodeproj" / "project.pbxproj"
@@ -330,23 +331,32 @@ for token in (
 ):
     require(token in roadmap, f"roadmap PR114 status missing {token!r}")
 
-# Slice 1 must remain release-contract-only. Runtime/app behavior changes move
-# to an explicitly reviewed later slice, never into baseline reconciliation.
+# Slice 1 remains independently auditable even after later PR114 slices move
+# HEAD forward. The pinned checkpoint itself must contain release-contract-only
+# changes relative to the exact PR113B base.
 try:
+    subprocess.run(
+        ["git", "merge-base", "--is-ancestor", BASE_SHA, SLICE1_CHECKPOINT_SHA],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
     changed = subprocess.run(
-        ["git", "diff", "--name-only", f"{BASE_SHA}..HEAD"],
+        ["git", "diff", "--name-only", f"{BASE_SHA}..{SLICE1_CHECKPOINT_SHA}"],
         cwd=ROOT,
         check=True,
         capture_output=True,
         text=True,
     ).stdout.splitlines()
 except subprocess.CalledProcessError as exc:
-    fail(f"unable to diff exact PR113B base: {exc}")
+    fail(f"unable to audit pinned Slice 1 checkpoint: {exc}")
 
 unexpected = sorted(set(changed) - ALLOWED_SLICE1_PATHS)
 require(
     not unexpected,
-    "Slice 1 contains non-baseline changes: " + ", ".join(unexpected),
+    "Pinned Slice 1 checkpoint contains non-baseline changes: "
+    + ", ".join(unexpected),
 )
 
 print("PR114 Slice 1 commercial release baseline: PASS")
