@@ -5,6 +5,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "NotchSixty/Acceptance/HardwareAcceptance.swift"
 CONTROLLER = ROOT / "NotchSixty/Acceptance/HardwareAcceptanceController.swift"
+ADAPTERS = ROOT / "NotchSixty/Acceptance/HardwareAcceptanceEvidenceAdapters.swift"
+ADAPTER_TESTS = ROOT / "NotchSixtyTests/HardwareAcceptanceEvidenceAdapterTests.swift"
 UI = ROOT / "NotchSixty/UI/ProductionHardwareAcceptanceWorkspace.swift"
 ROOT_VIEW = ROOT / "NotchSixty/UI/ProductionRootView.swift"
 APP = ROOT / "NotchSixty/NotchSixtyApp.swift"
@@ -16,13 +18,15 @@ ROADMAP = ROOT / "docs/ROADMAP.md"
 PROJECT = ROOT / "NotchSixty.xcodeproj/project.pbxproj"
 
 for path in (
-    SOURCE, CONTROLLER, UI, ROOT_VIEW, APP,
+    SOURCE, CONTROLLER, ADAPTERS, ADAPTER_TESTS, UI, ROOT_VIEW, APP,
     TESTS, DOC, WORKFLOW, MANIFEST, ROADMAP, PROJECT
 ):
     assert path.is_file(), f"PR112A missing artifact: {path}"
 
 source = SOURCE.read_text(encoding="utf-8")
 controller = CONTROLLER.read_text(encoding="utf-8")
+adapters = ADAPTERS.read_text(encoding="utf-8")
+adapter_tests = ADAPTER_TESTS.read_text(encoding="utf-8")
 ui = UI.read_text(encoding="utf-8")
 root_view = ROOT_VIEW.read_text(encoding="utf-8")
 app = APP.read_text(encoding="utf-8")
@@ -68,6 +72,44 @@ for forbidden in (
     "func apply(",
 ):
     assert forbidden not in source, f"PR112A evidence model gained runtime authority: {forbidden}"
+
+for token in (
+    "struct HardwareAcceptanceLinkedEvidence:",
+    "enum HardwareAcceptanceLinkedEvidenceKind:",
+    "var automaticAuthority:",
+    "{ .remoteSoftware }",
+    "var canEstablishPhysicalAuthority: Bool { false }",
+    "var canAuthorizeLiveFeedForwardANC: Bool { false }",
+    "func h03Baseline(",
+    "func h04PEQVerification(",
+    "func h05MeasurementLab(",
+    "func h06FIRVerification(",
+    "func h07SingleSubVerification(",
+    "func h07MultiSubVerification(",
+    "SpeakerOptimizerMeasurementEvidenceEvaluator()",
+    "SpeakerMeasurementLabReportBuilder()",
+):
+    assert token in adapters, f"PR112A evidence adapter missing {token}"
+
+for forbidden in (
+    "AudioIOEngine",
+    "ProductProfileController",
+    "replaceSelectedSystem",
+    "approveAndApply",
+    "func apply(",
+    "physicalHardware",
+    "independentPhysicalReview",
+):
+    assert forbidden not in adapters, f"PR112A adapter gained physical/runtime authority: {forbidden}"
+
+for token in (
+    "testQualifiedH03BaselineLinksIdsButStaysRemoteAuthority",
+    "testUnqualifiedH03BaselineRecommendsFailureNotPhysicalPass",
+    "testH05RequiresWholeSpeakerAndCompleteRepeatedSession",
+    "testFinalizedH04PEQVerificationLinksExactReceiptIdentity",
+    "testFinalizedH07CoherentVerificationStillNeedsPhysicalAuthority",
+):
+    assert token in adapter_tests, f"PR112A linked-evidence regression missing {token}"
 
 for token in (
     "final class HardwareAcceptanceController: ObservableObject",
@@ -175,10 +217,13 @@ for token in (
     "HardwareAcceptanceController.swift in Sources",
     "ProductionHardwareAcceptanceWorkspace.swift in Sources",
     "HardwareAcceptanceTests.swift in Sources",
+    "HardwareAcceptanceEvidenceAdapters.swift in Sources",
+    "HardwareAcceptanceEvidenceAdapterTests.swift in Sources",
 ):
     assert token in project, f"PR112A Xcode target missing {token}"
 
 assert "HardwareAcceptanceTests" in workflow
+assert "HardwareAcceptanceEvidenceAdapterTests" in workflow
 assert "build_pr112a_remote_hardware_readiness.py" in workflow
 assert "validate_pr111_protected_driver_optimizer.py" in workflow
 assert "PR112A" in roadmap
