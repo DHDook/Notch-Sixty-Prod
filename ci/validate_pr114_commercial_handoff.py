@@ -155,7 +155,8 @@ def main():
         check(a.rc_dmg is not None and a.sbom is not None, "DMG and SBOM required")
         sha = subprocess.check_output(["git", "rev-parse", "HEAD"],
                                       cwd=ROOT, text=True).strip()
-        check(os.environ.get("GITHUB_SHA") == sha, "checkout not current Actions SHA")
+        check(os.environ.get("PR114_EXPECTED_HEAD") == sha,
+              "checkout does not match selected PR head SHA")
         manifest = json.loads(a.rc_manifest.read_text())
         validate_rc(manifest, h, baseline, a.rc_dmg, a.sbom,
                     sha, os.environ.get("GITHUB_RUN_ID", ""))

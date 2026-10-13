@@ -268,6 +268,8 @@ jobs:
 
       - name: PR114 integrated RC gate
         shell: bash
+        env:
+          PR114_EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
           python3 ci/validate_pr114_commercial_handoff.py \
