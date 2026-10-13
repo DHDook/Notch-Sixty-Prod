@@ -1656,4 +1656,251 @@ final class ProtectedDriverPEQRecommendationTests: XCTestCase {
         XCTAssertThrowsError(try store.save(unsupported))
     }
 
+
+    private func commissioningFixture(
+        addHighDriverPeak: Bool = true
+    ) throws -> (
+        SpeakerMeasurementLabSession,
+        PlaybackSystemProfile
+    ) {
+        var (session, _, highID) = timingFixture(
+            relativeArrivalMilliseconds: 0.8
+        )
+        if addHighDriverPeak {
+            for index in session.captures.indices
+            where session.captures[index].protocolID == highID {
+                let grid = session.captures[index]
+                    .transferFunction.frequenciesHz
+                session.captures[index]
+                    .transferFunction.magnitudeDB = zip(
+                        grid,
+                        session.captures[index]
+                            .transferFunction.magnitudeDB
+                    ).map { frequency, existing in
+                        existing + 5.0 * exp(
+                            -0.5
+                                * pow(
+                                    log2(frequency / 4_000) / 0.23,
+                                    2
+                                )
+                        )
+                    }
+            }
+        }
+
+        let provenances = session.captures.compactMap {
+            $0.protectedDriverProvenance
+        }
+        let bass = try XCTUnwrap(
+            provenances.first?.bassManagementConfiguration
+        )
+        let routing = try XCTUnwrap(
+            provenances.first?.routingConfiguration
+        )
+        var byBus: [SpeakerOutputBus:
+            SpeakerDriverBusProcessingConfiguration] = [:]
+        for provenance in provenances {
+            byBus[provenance.targetBus] =
+                provenance.targetDriverConfiguration
+        }
+        let driverProcessing = SpeakerDriverProcessingConfiguration(
+            buses: byBus.values.sorted {
+                $0.bus.rawValue < $1.bus.rawValue
+            }
+        )
+        let outputProfile = OutputDeviceProfileConfiguration(
+            enabled: true,
+            programLayout: .stereo,
+            speakerAssignments: [
+                SemanticSpeakerOutputAssignment(
+                    role: .frontLeft,
+                    destination: PhysicalOutputEndpoint(
+                        deviceUID: "PR111 Device",
+                        channelIndex: 2
+                    )
+                ),
+                SemanticSpeakerOutputAssignment(
+                    role: .frontRight,
+                    destination: PhysicalOutputEndpoint(
+                        deviceUID: "PR111 Device",
+                        channelIndex: 3
+                    )
+                ),
+            ],
+            synchronizationMode: .automatic,
+            referenceDeviceUID: "PR111 Device"
+        )
+        let signature =
+            outputProfile.multichannelCalibrationRoutingSignature
+        XCTAssertFalse(signature.isEmpty)
+        session.routingSignature = signature
+        for index in session.captures.indices {
+            session.captures[index].routingSignature = signature
+        }
+        try session.validateStructure()
+
+        let state = PlaybackSystemState(
+            bassManagement: bass,
+            outputRouting: routing,
+            outputDeviceProfile: outputProfile,
+            speakerDriverProcessing: driverProcessing
+        )
+        let profile = PlaybackSystemProfile(
+            id: systemID,
+            name: "PR111 Active Prototype",
+            state: state
+        )
+        return (session, profile)
+    }
+
+    func testCommissioningDraftAddsOnlyBoundedCutPEQAndKeepsRollback()
+        throws {
+        let (session, profile) = try commissioningFixture()
+        let draft = try ProtectedDriverCommissioningPlanner()
+            .draft(
+                profile: profile,
+                session: session,
+                createdAt: Date(timeIntervalSince1970: 1_720_000_000)
+            )
+        XCTAssertEqual(draft.playbackSystemID, profile.id)
+        XCTAssertEqual(draft.sessionID, session.id)
+        XCTAssertEqual(draft.rollbackPlaybackSystemState, profile.state)
+        XCTAssertTrue(draft.rollbackSnapshotAvailable)
+        XCTAssertTrue(draft.approvalRequired)
+        XCTAssertFalse(draft.readyForApproval)
+        XCTAssertFalse(draft.canApply)
+        XCTAssertFalse(draft.canDeploy)
+        XCTAssertTrue(draft.stateDriftCheckRequired)
+        XCTAssertTrue(draft.requiresPhysicalCombinedDriverCapture)
+        XCTAssertFalse(draft.physicalCombinedDriverVerificationComplete)
+        XCTAssertFalse(draft.timingReviews.isEmpty)
+        XCTAssertTrue(draft.timingReviews.allSatisfy {
+            !$0.combinedDriverCaptureVerified
+        })
+
+        let before = try XCTUnwrap(
+            profile.state.speakerDriverProcessing
+        ).configuration(for: .leftHigh)
+        let after = draft.previewDriverProcessing
+            .configuration(for: .leftHigh)
+        XCTAssertGreaterThan(after.eqBands.count, before.eqBands.count)
+        XCTAssertEqual(after.trimDB, before.trimDB)
+        XCTAssertEqual(after.delayMilliseconds, before.delayMilliseconds)
+        XCTAssertEqual(after.polarityInverted, before.polarityInverted)
+        XCTAssertEqual(after.limiterEnabled, before.limiterEnabled)
+        XCTAssertEqual(
+            after.limiterThresholdDBFS,
+            before.limiterThresholdDBFS
+        )
+        let added = after.eqBands.dropFirst(before.eqBands.count)
+        XCTAssertTrue(added.allSatisfy {
+            $0.type == .peaking
+                && $0.gainDB < 0
+                && $0.gainDB >= -2.5
+                && $0.q <= 1.4
+        })
+        XCTAssertTrue(draft.affectedBuses.contains(.leftHigh))
+        XCTAssertNoThrow(try draft.validated())
+    }
+
+    func testCommissioningDraftDetectsCurrentPlaybackSystemDrift() throws {
+        let (session, profile) = try commissioningFixture()
+        let planner = ProtectedDriverCommissioningPlanner()
+        let draft = try planner.draft(
+            profile: profile, session: session
+        )
+        XCTAssertNoThrow(
+            try planner.validateCurrentState(profile, against: draft)
+        )
+        var changed = profile
+        changed.state.outputGainDB = -1
+        XCTAssertThrowsError(
+            try planner.validateCurrentState(changed, against: draft)
+        ) {
+            XCTAssertEqual(
+                $0 as? ProtectedDriverCommissioningError,
+                .currentStateDrift
+            )
+        }
+    }
+
+    func testCommissioningPlannerRejectsPostMeasurementProtectionDrift()
+        throws {
+        let (session, profile) = try commissioningFixture()
+        var changed = profile
+        changed.state.bassManagement.frequencyHz += 100
+        XCTAssertThrowsError(
+            try ProtectedDriverCommissioningPlanner()
+                .draft(profile: changed, session: session)
+        ) {
+            XCTAssertEqual(
+                $0 as? ProtectedDriverCommissioningError,
+                .protectedStateDrift
+            )
+        }
+    }
+
+    func testCommissioningDraftPersistenceRoundTripAndTamperBlock()
+        throws {
+        let (session, profile) = try commissioningFixture()
+        let draft = try ProtectedDriverCommissioningPlanner()
+            .draft(profile: profile, session: session)
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "PR111-Drafts-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ProtectedDriverCommissioningDraftStore(
+            rootDirectory: root
+        )
+        try store.save(draft)
+        XCTAssertEqual(try store.load(session.id), draft)
+
+        var unsafe = draft
+        var high = unsafe.previewDriverProcessing
+            .configuration(for: .leftHigh)
+        high.delayMilliseconds += 0.25
+        unsafe.previewDriverProcessing.replace(high)
+        XCTAssertThrowsError(try unsafe.validated()) {
+            XCTAssertEqual(
+                $0 as? ProtectedDriverCommissioningError,
+                .invalidPreview
+            )
+        }
+        XCTAssertThrowsError(try store.save(unsafe))
+        XCTAssertEqual(try store.load(session.id), draft)
+    }
+
+    func testCommissioningDraftCannotHideAddedCutsFromAffectedBusList()
+        throws {
+        let (session, profile) = try commissioningFixture()
+        var draft = try ProtectedDriverCommissioningPlanner()
+            .draft(profile: profile, session: session)
+        XCTAssertFalse(draft.affectedBuses.isEmpty)
+        draft.affectedBuses = []
+        XCTAssertThrowsError(try draft.validated()) {
+            XCTAssertEqual(
+                $0 as? ProtectedDriverCommissioningError,
+                .invalidPreview
+            )
+        }
+    }
+
+    func testCommissioningDraftWithSmoothDriversStaysNoOpAndBlocked()
+        throws {
+        let (session, profile) = try commissioningFixture(
+            addHighDriverPeak: false
+        )
+        let draft = try ProtectedDriverCommissioningPlanner()
+            .draft(profile: profile, session: session)
+        XCTAssertTrue(draft.affectedBuses.isEmpty)
+        XCTAssertEqual(
+            draft.previewDriverProcessing,
+            try XCTUnwrap(profile.state.speakerDriverProcessing)
+        )
+        XCTAssertFalse(draft.canApply)
+        XCTAssertFalse(draft.readyForApproval)
+    }
+
 }
