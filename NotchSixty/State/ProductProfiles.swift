@@ -1185,24 +1185,38 @@ final class ProductProfileController: ObservableObject {
     }
 
     /// Explicitly applies the currently selected saved layers even after the
-    /// one-time launch restore has been consumed. Safe Launch uses this only
-    /// after the user chooses Restore Last Known Good.
+    /// one-time launch restore has been consumed. Safe Launch calls this only
+    /// after an explicit recovery choice. The apply is transactional across
+    /// Playback-System and Content-Preset domains.
     func applySelectedLayersNow() throws {
-        if let system = selectedSystemProfile {
-            guard hardwareMappingRequirement(for: system.id) == nil else {
-                throw ProductProfileError.hardwareMappingRequired(
-                    profile: system.name
+        let previousSystem = captureSystemState()
+        let previousContent = captureContentState()
+
+        do {
+            if let system = selectedSystemProfile {
+                guard hardwareMappingRequirement(for: system.id) == nil else {
+                    throw ProductProfileError.hardwareMappingRequired(
+                        profile: system.name
+                    )
+                }
+                try applySystemState(
+                    system.state,
+                    profileName: system.name
                 )
             }
-            try applySystemState(
-                system.state,
-                profileName: system.name
+            if let preset = selectedContentPreset {
+                try applyContentState(preset.state)
+            }
+            lastErrorDescription = nil
+        } catch {
+            try? applySystemState(
+                previousSystem,
+                profileName: "Recovery rollback"
             )
+            try? applyContentState(previousContent)
+            lastErrorDescription = error.localizedDescription
+            throw error
         }
-        if let preset = selectedContentPreset {
-            try applyContentState(preset.state)
-        }
-        lastErrorDescription = nil
     }
 
     func selectContentPreset(_ id: UUID) {
