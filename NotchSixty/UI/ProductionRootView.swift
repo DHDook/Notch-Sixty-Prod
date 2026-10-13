@@ -257,9 +257,9 @@ struct ProductionRootView: View {
         case .dashboard:
             ProductionDashboardView(engine: engine)
         case .equalizer:
-            ProductionEqualizerView(engine: engine)
+            ProductionEqualizerView(engine: engine, reference: product.reference)
         case .dynamics:
-            ProductionDynamicsView(engine: engine)
+            ProductionDynamicsView(engine: engine, reference: product.reference)
         case .meters:
             ProductionMetersView(engine: engine)
         case .speakers:
@@ -379,8 +379,8 @@ struct ProductionRootView: View {
         ToolbarItemGroup(placement: .primaryAction) {
             ProductionReferenceHelpButton(
                 navigator: product.reference,
-                articleID: ProductionUserGuideCatalog.articleID(for: selection),
-                label: "Open \(selection.title) in the User Guide"
+                articleID: ProductionUserGuideCatalog.articleID(for: selection ?? .dashboard),
+                label: "Open \((selection ?? .dashboard).title) in the User Guide"
             )
             .buttonStyle(.glass)
 
