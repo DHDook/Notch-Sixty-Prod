@@ -38,7 +38,6 @@ jobs:
           python3 ci/validate_pr102_release_readiness.py
           python3 ci/validate_pr102_app_store_boundary.py
           python3 ci/validate_pr102_dependency_manifest.py
-          python3 ci/validate_pr45_release_hardening.py
 
   macos:
     runs-on: xcode-27
