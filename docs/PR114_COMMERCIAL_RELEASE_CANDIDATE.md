@@ -1,6 +1,6 @@
 # PR114 — Commercial Release Candidate
 
-Status: **IN PROGRESS — SLICES 1–3 IMPLEMENTED; EXACT-HEAD VALIDATION PENDING**
+Status: **IN PROGRESS — SLICES 1–4 IMPLEMENTED; EXACT-HEAD VALIDATION PENDING**
 
 PR114 is stacked directly on the exact remotely-complete PR113B head
 `f10008d8330c2dc29f195163c56cf4723fc16a6c`.
@@ -156,6 +156,46 @@ evidence. CI publishes that document as the `pr114-production-sbom` artifact.
 engineering evidence, not legal advice or external-review authority.
 
 See `docs/PR114_PROVENANCE_SBOM.md`.
+
+## Slice 4 implementation — packaging, archive & release-manifest hardening
+
+Slice 4 activates and hardens the packaging evidence that was intentionally
+dormant during Slices 1–3.
+
+The PR114 macOS gate now creates all release-candidate software evidence in one
+exact-head workflow run:
+
+- Apple-Silicon Debug build;
+- targeted production/product-finish tests;
+- unsigned Apple-Silicon Release build;
+- an **unsigned archive** using `generic/platform=macOS`;
+- Release/archive metadata, architecture and shipped-notice verification;
+- an ad-hoc-signed sandbox RC copy whose effective entitlements must exactly
+  equal the source shipping entitlements;
+- a versioned remote RC DMG and SHA-256 sidecar;
+- the deterministic CycloneDX production SBOM;
+- the full cumulative XCTest regression; and
+- a machine-readable PR114 remote commercial RC manifest.
+
+The RC manifest binds those results to the **exact-commit** source identity and
+records SHA-256 values for the Release, archive and ad-hoc RC executables, the
+remote RC DMG, SBOM, release baseline, dependency manifest, shipping
+entitlements, notices and provenance/security documents.
+
+The remote RC package is deliberately signed **ad-hoc** only. It is **not
+notarized**, does not contain production Apple credentials and is not
+public-distribution ready. Its purpose is to prove package shape, metadata,
+architecture, sandbox entitlement continuity and deterministic artifact
+identity before credentialed release work.
+
+The manual DMG workflow remains a separate operator-triggered lane. Slice 4
+hardens it by emitting `release-package-manifest.json` alongside the DMG and
+SHA-256 file. That manifest records source commit, marketing version, build
+number, arm64 architecture, artifact name/hash, `signature=ad-hoc`,
+`notarized=false` and `publicDistributionReady=false`.
+
+Slice 4 does not perform App Store export, production signing, notarization,
+upload, TestFlight or App Review. Those remain `releaseCredential` evidence.
 
 ## Existing release foundations to reuse
 
