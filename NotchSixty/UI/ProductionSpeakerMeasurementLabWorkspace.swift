@@ -802,26 +802,28 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                                 )
                                 Spacer()
                                 Text(
-                                    analysis.available
-                                        ? "AVAILABLE" : "UNAVAILABLE"
+                                    analysis.kind == .protectedDriverOptimization
+                                        ? (analysis.available ? "REVIEW ONLY" : "UNQUALIFIED")
+                                        : (analysis.available ? "AVAILABLE" : "UNAVAILABLE")
                                 )
                                 .font(.caption.bold())
                                 .foregroundStyle(.secondary)
                             }
                             if !analysis.metrics.isEmpty {
-                                HStack(spacing: 18) {
+                                LazyVGrid(
+                                    columns: [GridItem(.adaptive(minimum: 180), spacing: 12)],
+                                    alignment: .leading,
+                                    spacing: 10
+                                ) {
                                     ForEach(
-                                        Array(
-                                            analysis.metrics.enumerated()
-                                        ),
+                                        Array(analysis.metrics.enumerated()),
                                         id: \.offset
                                     ) { _, metric in
                                         status(metric.name, metric.value)
                                     }
                                 }
                             }
-                            if let warning =
-                                    analysis.warnings.first {
+                            ForEach(analysis.warnings, id: \.self) { warning in
                                 Text(warning)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
