@@ -496,10 +496,18 @@ for token in (
 for token in (
     "ProductionMetersView(",
     "assistant: product.headroomAssistant",
-    "abComparison: abComparison",
 ):
     assert token in root_ui, (
         f"PR113B Slice 6 Meters integration missing {token}"
+    )
+
+for token in (
+    "let headroomAssistant: HeadroomAssistantController",
+    "HeadroomAssistantController(",
+    "abComparison: abComparison",
+):
+    assert token in app, (
+        f"PR113B Slice 6 product/A-B ownership missing {token}"
     )
 
 for token in (
