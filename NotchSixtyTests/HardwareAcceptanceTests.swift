@@ -480,4 +480,196 @@ final class HardwareAcceptanceTests: XCTestCase {
             )
         }
     }
+
+    @MainActor
+    func testControllerRequiresPhysicalAndIndependentAttestations()
+        throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "PR112A-Controller-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let controller = HardwareAcceptanceController(
+            store: HardwareAcceptanceCampaignStore(
+                rootDirectory: root
+            )
+        )
+        try controller.createCampaign(
+            identity: identity(),
+            scopeDecisions: scope()
+        )
+        let physical = observation(
+            gate: .h01DeviceLifecycleRecovery,
+            authority: .physicalHardware
+        )
+        XCTAssertThrowsError(
+            try controller.recordObservation(
+                physical,
+                physicalAttestationConfirmed: false,
+                independentReviewAttestationConfirmed: false
+            )
+        ) {
+            XCTAssertEqual(
+                $0 as? HardwareAcceptanceWorkflowError,
+                .physicalAttestationRequired
+            )
+        }
+        XCTAssertTrue(
+            controller.campaign?.observations.isEmpty == true
+        )
+
+        let reviewed = observation(
+            gate: .h02ThermalResourceSpeakerSafety,
+            authority: .independentPhysicalReview
+        )
+        XCTAssertThrowsError(
+            try controller.recordObservation(
+                reviewed,
+                physicalAttestationConfirmed: true,
+                independentReviewAttestationConfirmed: false
+            )
+        ) {
+            XCTAssertEqual(
+                $0 as? HardwareAcceptanceWorkflowError,
+                .independentReviewAttestationRequired
+            )
+        }
+        try controller.recordObservation(
+            reviewed,
+            physicalAttestationConfirmed: true,
+            independentReviewAttestationConfirmed: true
+        )
+        if case .passed =
+            controller.status(
+                for: .h02ThermalResourceSpeakerSafety
+            ) {
+            // Expected.
+        } else {
+            XCTFail("Independent physical review should satisfy H02.")
+        }
+    }
+
+    @MainActor
+    func testControllerRejectsEvidenceForExcludedConditionalGate()
+        throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "PR112A-Excluded-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let controller = HardwareAcceptanceController(
+            store: HardwareAcceptanceCampaignStore(
+                rootDirectory: root
+            )
+        )
+        try controller.createCampaign(
+            identity: identity(),
+            scopeDecisions: scope()
+        )
+        let h08 = observation(
+            gate: .h08LiveFeedForwardANC,
+            authority: .independentPhysicalReview
+        )
+        XCTAssertThrowsError(
+            try controller.recordObservation(
+                h08,
+                physicalAttestationConfirmed: true,
+                independentReviewAttestationConfirmed: true
+            )
+        ) {
+            XCTAssertEqual(
+                $0 as? HardwareAcceptanceWorkflowError,
+                .gateExcludedFromScope
+            )
+        }
+        XCTAssertFalse(
+            controller.evaluation?
+                .liveFeedForwardANCAuthorized ?? true
+        )
+    }
+
+    @MainActor
+    func testControllerLocksSupplementalCoverageToIncludedScope()
+        throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "PR112A-Supplemental-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let controller = HardwareAcceptanceController(
+            store: HardwareAcceptanceCampaignStore(
+                rootDirectory: root
+            )
+        )
+        try controller.createCampaign(
+            identity: identity(),
+            scopeDecisions: scope()
+        )
+        let invalid = observation(
+            gate: .h05AdvancedMeasurementLab,
+            authority: .independentPhysicalReview,
+            coveredCapabilities: [
+                .protectedSplitDriverMeasurement
+            ]
+        )
+        XCTAssertThrowsError(
+            try controller.recordObservation(
+                invalid,
+                physicalAttestationConfirmed: true,
+                independentReviewAttestationConfirmed: true
+            )
+        ) {
+            XCTAssertEqual(
+                $0 as? HardwareAcceptanceWorkflowError,
+                .invalidSupplementalCoverage
+            )
+        }
+    }
+
+    @MainActor
+    func testControllerPrepareForUseLoadsNewestCampaign()
+        throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "PR112A-Latest-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = HardwareAcceptanceCampaignStore(
+            rootDirectory: root
+        )
+        var olderIdentity = identity()
+        olderIdentity.id = UUID()
+        olderIdentity.createdAt =
+            Date(timeIntervalSince1970: 1_800_010_000)
+        var newerIdentity = identity()
+        newerIdentity.id = UUID()
+        newerIdentity.createdAt =
+            Date(timeIntervalSince1970: 1_800_020_000)
+        try store.create(
+            HardwareAcceptanceCampaign(
+                identity: olderIdentity,
+                scopeDecisions: scope()
+            )
+        )
+        try store.create(
+            HardwareAcceptanceCampaign(
+                identity: newerIdentity,
+                scopeDecisions: scope()
+            )
+        )
+        let controller = HardwareAcceptanceController(
+            store: store
+        )
+        controller.prepareForUse()
+        XCTAssertEqual(
+            controller.campaign?.identity.id,
+            newerIdentity.id
+        )
+        XCTAssertNil(controller.errorDescription)
+    }
+
 }
