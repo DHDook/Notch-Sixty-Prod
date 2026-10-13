@@ -484,6 +484,10 @@ assert headroom.count("engine.transitionHeadroomAttenuationDB(") == 2, (
     "PR113B Slice 6 must keep exactly two explicit mutation paths: Apply and Undo"
 )
 
+assert headroom.count("diagnostics.truePeakGuardActive") >= 2, (
+    "PR113B Slice 6 must verify authoritative True Peak Guard both at observation start and while sampling"
+)
+
 for token in (
     "func transitionHeadroomAttenuationDB(",
     "session.transitionDSPGraph(graph)",
