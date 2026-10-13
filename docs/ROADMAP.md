@@ -16,6 +16,43 @@ Legacy parity is the minimum capability floor. The commercial rewrite should exc
 
 Future portability must not materially delay the flagship Mac launch.
 
+## Current execution status — PR111
+
+**PR111 — Automatic Per-Driver Speaker Optimization** remains an OPEN,
+DRAFT, UNMERGED stack above PR110. Slices 1–5 passed remote/software
+portable, Apple Silicon Debug/Release, targeted and full regression at
+`1b2560749119dfe02edb4b932e6ef4c0fa6b0cef` / Actions run `38346176045`. They are
+implemented on the current branch and awaiting one final exact-head CI pass.
+
+The implemented remote PR111 stack now provides:
+
+- repeat-qualified protected Low/Mid/High cut-only PEQ recommendations;
+- Measurement Lab driver evidence, blockers and compact exports;
+- simultaneous electrical-reference adjacent-driver timing and residual
+  polarity hypotheses, topology-aware for Bi-Amp versus Tri-Amp;
+- model-only complex crossover-summation comparison of only those bounded
+  timing/polarity hypotheses; and
+- a persisted, exact-state commissioning **preview** with a full rollback
+  snapshot, state-drift validation and hard `canApply=false` /
+  `canDeploy=false` gates.
+
+PR111 deliberately stops before any live driver mutation. A real
+combined-driver crossover capture does not yet exist, so timing/polarity
+or PEQ deployment cannot be physically verified. The Measurement Lab UI
+therefore reports **HARDWARE BLOCKED / Apply BLOCKED** and exposes no PR111
+Apply control.
+
+The transactional Apply/rollback executor moves to **PR112 physical hardware
+acceptance**, where it must require engine idle, explicit user approval, exact
+state/evidence identity, preserved crossover/limiter protection, fresh
+combined-driver measurement and rollback on rejection. PR113 production UX
+polish and PR114 commercial release preparation remain later.
+
+PR110, PR109 and every predecessor remain OPEN/DRAFT/UNMERGED; `main` is
+unchanged. See `docs/PR111_PER_DRIVER_SPEAKER_OPTIMIZATION.md`.
+
+---
+
 ## Current execution status — PR110
 
 **PR110 — Advanced Speaker & Subwoofer Placement Optimizer** is now in
