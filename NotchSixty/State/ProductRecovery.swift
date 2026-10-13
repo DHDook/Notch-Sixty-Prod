@@ -66,6 +66,8 @@ enum ProductRecoveryError: Error, LocalizedError, Equatable {
     case invalidState
     case noLastKnownGood
     case safeLaunchDecisionRequired
+    case recoveryRequiresIdle
+    case lastKnownGoodRequiresHardwareMapping(Int)
     case persistence(String)
 
     var errorDescription: String? {
@@ -76,6 +78,10 @@ enum ProductRecoveryError: Error, LocalizedError, Equatable {
             return "No successful normal processing start has been recorded yet."
         case .safeLaunchDecisionRequired:
             return "Choose a Safe Launch recovery option before starting audio processing."
+        case .recoveryRequiresIdle:
+            return "Stop audio processing before using Safe Launch recovery."
+        case .lastKnownGoodRequiresHardwareMapping(let count):
+            return "Last Known Good references unavailable hardware in \(count) Playback System\(count == 1 ? "" : "s"). Reconnect or remap that hardware before restoring it."
         case .persistence(let reason):
             return "Recovery state could not be saved: \(reason)"
         }
@@ -165,7 +171,7 @@ final class ProductRecoveryController: ObservableObject {
         persistentState.lastKnownGoodProfiles != nil
     }
 
-    func prepareForLaunch(now: Date = Date()) {
+    func prepareForLaunch() {
         guard !prepared else { return }
         prepared = true
 
