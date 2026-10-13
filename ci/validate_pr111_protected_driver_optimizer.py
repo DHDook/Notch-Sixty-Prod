@@ -9,7 +9,9 @@ ROUTE = ROOT / "NotchSixty/Audio/Routing/AudioRouteConfiguration.swift"
 WORKFLOW = ROOT / ".github/workflows/pr111-protected-driver-optimizer.yml"
 DOCUMENT = ROOT / "docs/PR111_PER_DRIVER_SPEAKER_OPTIMIZATION.md"
 ROADMAP = ROOT / "docs/ROADMAP.md"
-for path in (AUDIO, TESTS, ROUTE, WORKFLOW, DOCUMENT, ROADMAP):
+REPORT = ROOT / "NotchSixty/Audio/SpeakerMeasurementLabReport.swift"
+UI = ROOT / "NotchSixty/UI/ProductionSpeakerMeasurementLabWorkspace.swift"
+for path in (AUDIO, TESTS, ROUTE, WORKFLOW, DOCUMENT, ROADMAP, REPORT, UI):
     assert path.is_file(), f"PR111 missing artifact: {path}"
 
 audio = AUDIO.read_text(encoding="utf-8")
@@ -18,6 +20,8 @@ route = ROUTE.read_text(encoding="utf-8")
 workflow = WORKFLOW.read_text(encoding="utf-8")
 doc = DOCUMENT.read_text(encoding="utf-8")
 roadmap = ROADMAP.read_text(encoding="utf-8")
+report = REPORT.read_text(encoding="utf-8")
+ui = UI.read_text(encoding="utf-8")
 section = audio.split("// MARK: - PR111 Slice 1:", 1)
 assert len(section) == 2, "PR111 engine must stay reviewable as its own slice"
 source = section[1]
@@ -64,6 +68,41 @@ for token in (
     "testUnstableRepeatsDoNotAuthorizeCuts",
 ):
     assert token in tests, f"PR111 safety regression missing {token}"
+# Slice 2 — qualified protected driver diagnostics within existing Lab
+# report/export/UI. Missing or unqualified driver evidence must remain visible.
+for token in (
+    "case protectedDriverOptimization",
+    "private func protectedDriverOptimizationSummary(",
+    "ProtectedDriverPEQRecommendationAnalyzer()",
+    "session.protocols where",
+    "labProtocol.request.mode == .protectedDriverNearField",
+    'metric("Driver", candidate.targetBus.displayName)',
+    'metric("Suggested cuts", "\\(candidate.cuts.count)")',
+    'metric("Deployment", "Never · review only")',
+    "candidate.protectedConfiguration.limiterEnabled",
+    "return unavailable(",
+    "near field",
+    "no live Apply",
+):
+    assert token in report, f"PR111 protected Lab report missing {token}"
+
+for token in (
+    "analysis.kind == .protectedDriverOptimization",
+    '"REVIEW ONLY"',
+    "LazyVGrid(",
+    "GridItem(.adaptive(minimum: 180)",
+    "ForEach(analysis.warnings, id: \\.self)",
+):
+    assert token in ui, f"PR111 driver diagnostic UX missing {token}"
+
+for token in (
+    "testLabReportPublishesDriverCutReviewWithoutDSPDeployment",
+    "testLabReportSurfacesInconclusiveDriverOnMissingRepeats",
+    "testLabReportSurfacedProtectedDriverWithoutFabricatingBands",
+    "testReportRejectsUnprotectedLimiterCaptureEvenIfGridLooksGood",
+):
+    assert token in tests, f"PR111 Lab report regression missing {token}"
+assert "SpeakerMeasurementLabReportTests" in workflow
 assert "SpeakerDriverBusProcessingConfiguration" in route
 assert "ProtectedDriverPEQRecommendationTests" in workflow
 assert "PR111" in roadmap
