@@ -8,6 +8,7 @@ RECOVERY = ROOT / "NotchSixty/State/ProductRecovery.swift"
 BACKUP = ROOT / "NotchSixty/Backup/NotchSixtyBackup.swift"
 PROJECT = ROOT / "NotchSixty.xcodeproj/project.pbxproj"
 ENGINE = ROOT / "NotchSixty/Audio/AudioIOEngine.swift"
+HOST = ROOT / "NotchSixty/Audio/AudioUnitHostController.swift"
 APP = ROOT / "NotchSixty/NotchSixtyApp.swift"
 TOOLBAR = ROOT / "NotchSixty/UI/ProductionProfileToolbar.swift"
 ROOT_UI = ROOT / "NotchSixty/UI/ProductionRootView.swift"
@@ -20,7 +21,7 @@ ROADMAP = ROOT / "docs/ROADMAP.md"
 WORKFLOW = ROOT / ".github/workflows/pr113b-world-class-product-finish.yml"
 
 for path in (
-    PROFILES, RECOVERY, BACKUP, PROJECT, ENGINE, APP, TOOLBAR, ROOT_UI,
+    PROFILES, RECOVERY, BACKUP, PROJECT, ENGINE, HOST, APP, TOOLBAR, ROOT_UI,
     LAB_REPORT, LAB_UI, LAB_TESTS, TESTS, DOC, ROADMAP, WORKFLOW
 ):
     assert path.is_file(), f"PR113B Slice 1 missing artifact: {path}"
@@ -30,6 +31,7 @@ recovery = RECOVERY.read_text(encoding="utf-8")
 backup = BACKUP.read_text(encoding="utf-8")
 project = PROJECT.read_text(encoding="utf-8")
 engine = ENGINE.read_text(encoding="utf-8")
+host = HOST.read_text(encoding="utf-8")
 app = APP.read_text(encoding="utf-8")
 toolbar = TOOLBAR.read_text(encoding="utf-8")
 root_ui = ROOT_UI.read_text(encoding="utf-8")
@@ -347,6 +349,8 @@ for token in (
     "func recordSuccessfulStart(",
     "func lastKnownGoodSnapshot()",
     "func markCleanTermination()",
+    "case lastKnownGoodRequiresHardwareMapping(Int)",
+    "case recoveryRequiresIdle",
 ):
     assert token in recovery, (
         f"PR113B Slice 5 recovery state missing {token}"
@@ -388,15 +392,28 @@ for token in (
     "func diagnosticsReport(",
     "recovery.markCleanTermination()",
     "NSApplication.willTerminateNotification",
+    "report.hardwareMappingRequiredCount == 0",
+    "lastKnownGoodRequiresHardwareMapping(",
+    "!audioUnitHost.activeRackHasQuarantinedComponent",
 ):
     assert token in app, f"PR113B Slice 5 product integration missing {token}"
 
 for token in (
     "func applySelectedLayersNow() throws",
     "hardwareMappingRequirement(for: system.id) == nil",
+    'profileName: "Recovery rollback"',
 ):
     assert token in profiles, (
         f"PR113B recovery selected-layer contract missing {token}"
+    )
+
+for token in (
+    "var activeRackHasQuarantinedComponent: Bool",
+    "!slot.bypassed",
+    "quarantine.isQuarantined(component)",
+):
+    assert token in host, (
+        f"PR113B Slice 5 active-rack health contract missing {token}"
     )
 
 for token in (
@@ -420,6 +437,8 @@ for token in (
     "testRecoveryDetectsUncleanPriorLaunchButNotCleanTermination",
     "testRecoveryRepeatedFailuresTriggerSafeLaunchThreshold",
     "testRecoveryOnlyHealthyNormalStartUpdatesLastKnownGood",
+    "testRecoveryUnreadableStateRequiresSafeLaunch",
+    "testRecoveryPlugInBypassIsTransientAcrossCleanLaunch",
     "testRecoveryStateIsMachineLocalAndHasNoReleaseAuthority",
 ):
     assert token in tests, (
