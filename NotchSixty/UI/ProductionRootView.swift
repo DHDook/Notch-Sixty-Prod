@@ -385,7 +385,13 @@ struct ProductionRootView: View {
                         if engine.lifecycleState == .running {
                             engine.stop()
                             commandError = nil
-                        } else if engine.lifecycleState == .idle {
+                        } else {
+                            if engine.lifecycleState == .failed {
+                                engine.stop()
+                            }
+                            guard engine.lifecycleState == .idle else {
+                                return
+                            }
                             do {
                                 try await product.startProcessing()
                                 commandError = nil
@@ -412,6 +418,7 @@ struct ProductionRootView: View {
                         || (
                             engine.lifecycleState != .idle
                                 && engine.lifecycleState != .running
+                                && engine.lifecycleState != .failed
                         )
                 )
             }
