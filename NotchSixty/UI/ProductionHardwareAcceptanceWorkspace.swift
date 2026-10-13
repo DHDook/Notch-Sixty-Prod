@@ -1,4 +1,21 @@
 import SwiftUI
+import UniformTypeIdentifiers
+
+private struct HardwareAcceptanceExportDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.json, .plainText] }
+
+    var data: Data
+
+    init(data: Data) { self.data = data }
+
+    init(configuration: ReadConfiguration) throws {
+        data = configuration.file.regularFileContents ?? Data()
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: data)
+    }
+}
 
 struct ProductionHardwareAcceptanceWorkspace: View {
     @ObservedObject var engine: AudioIOEngine
@@ -6,6 +23,13 @@ struct ProductionHardwareAcceptanceWorkspace: View {
     @ObservedObject var acceptance: HardwareAcceptanceController
 
     @State private var showingCampaignForm = false
+
+    private let reportBuilder = HardwareAcceptanceReportBuilder()
+    private let reportExporter = HardwareAcceptanceReportExporter()
+    @State private var exportDocument: HardwareAcceptanceExportDocument?
+    @State private var exportContentType: UTType = .json
+    @State private var exportFilename = "notch-sixty-hardware-acceptance"
+    @State private var showingExporter = false
 
     @State private var commitSHA = ""
     @State private var branchName =
@@ -90,6 +114,7 @@ struct ProductionHardwareAcceptanceWorkspace: View {
                 if let campaign = acceptance.campaign {
                     campaignSummary(campaign)
                     gateMatrix
+                    acceptancePacketCard(campaign)
                     preflightCard
                     evidenceEntry
                 } else {
@@ -110,6 +135,16 @@ struct ProductionHardwareAcceptanceWorkspace: View {
             }
             .padding(28)
             .frame(maxWidth: 1_120, alignment: .topLeading)
+        }
+        .fileExporter(
+            isPresented: $showingExporter,
+            document: exportDocument,
+            contentType: exportContentType,
+            defaultFilename: exportFilename
+        ) { result in
+            if case .failure(let error) = result {
+                actionMessage = error.localizedDescription
+            }
         }
         .task {
             acceptance.prepareForUse()
@@ -156,6 +191,61 @@ struct ProductionHardwareAcceptanceWorkspace: View {
                 .padding(.horizontal, 11)
                 .padding(.vertical, 7)
                 .glassEffect(.regular, in: .capsule)
+        }
+    }
+
+    private func acceptancePacketCard(
+        _ campaign: HardwareAcceptanceCampaign
+    ) -> some View {
+        let evaluation = acceptance.evaluation
+        return GroupBox("Acceptance Packet & Physical Runbook") {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(
+                    "Export the immutable campaign identity, H01-H08 status matrix, unresolved gates, evidence log, artifact manifest, and safety-bounded physical runbook. Export never changes acceptance state."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+                HStack(spacing: 10) {
+                    Button("Export JSON Packet") {
+                        prepareAcceptanceExport(
+                            campaign: campaign,
+                            json: true
+                        )
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Button("Export Markdown Runbook") {
+                        prepareAcceptanceExport(
+                            campaign: campaign,
+                            json: false
+                        )
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                HStack(spacing: 18) {
+                    summaryMetric(
+                        "Unresolved gates",
+                        "\(evaluation?.unresolvedGateIDs.count ?? HardwareAcceptanceGateID.allCases.count)"
+                    )
+                    summaryMetric(
+                        "Release acceptance",
+                        "BLOCKED"
+                    )
+                    summaryMetric(
+                        "Merge to main",
+                        "BLOCKED"
+                    )
+                }
+
+                Text(
+                    "Hard boundary: packet export cannot create physical evidence, release acceptance, ANC authorization, DSP authority, or merge permission."
+                )
+                .font(.caption2.bold())
+                .foregroundStyle(.secondary)
+            }
+            .padding(6)
         }
     }
 
@@ -1041,6 +1131,31 @@ struct ProductionHardwareAcceptanceWorkspace: View {
             artifactIdentifier = ""
             splitDriverCovered = false
             resetObservationAttestations()
+        } catch {
+            actionMessage = error.localizedDescription
+        }
+    }
+
+    private func prepareAcceptanceExport(
+        campaign: HardwareAcceptanceCampaign,
+        json: Bool
+    ) {
+        actionMessage = nil
+        do {
+            let report = try reportBuilder.build(
+                campaign: campaign
+            )
+            let data = json
+                ? try reportExporter.jsonData(report)
+                : reportExporter.markdownData(report)
+            exportDocument =
+                HardwareAcceptanceExportDocument(data: data)
+            exportContentType = json
+                ? .json
+                : (UTType(filenameExtension: "md") ?? .plainText)
+            exportFilename =
+                "notch-sixty-hardware-acceptance-\(String(campaign.identity.id.uuidString.prefix(8)))"
+            showingExporter = true
         } catch {
             actionMessage = error.localizedDescription
         }
