@@ -1403,12 +1403,159 @@ enum ApplicationVolumeStepResolution: Int, CaseIterable, Identifiable {
     var percentPerPress: Double { 100.0 / Double(rawValue) }
 }
 
+enum VolumeFeedbackPresentation {
+    static func percentage(_ level: Double) -> Int {
+        guard level.isFinite else { return 0 }
+        return Int((min(max(level, 0.0), 1.0) * 100.0).rounded())
+    }
+
+    static func readout(level: Double, muted: Bool) -> String {
+        muted ? "Muted" : "\(percentage(level))%"
+    }
+}
+
+// Presentation only: no audio callback, key interception, driver, or system HUD manipulation.
+@MainActor
+private final class VolumeFeedbackHUDController {
+    private var panel: NSPanel?
+    private var dismissal: Task<Void, Never>?
+
+    func show(_ configuration: MasterVolumeConfiguration) {
+        guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
+        let width: CGFloat = 264
+        let height: CGFloat = 88
+        let window: NSPanel
+        if let panel {
+            window = panel
+        } else {
+            window = NSPanel(
+                contentRect: NSRect(x: 0, y: 0, width: width, height: height),
+                styleMask: [.borderless, .nonactivatingPanel],
+                backing: .buffered,
+                defer: false
+            )
+            window.level = .floating
+            window.isOpaque = false
+            window.backgroundColor = .clear
+            window.ignoresMouseEvents = true
+            window.hidesOnDeactivate = false
+            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+            window.isReleasedWhenClosed = false
+            panel = window
+        }
+
+        window.contentView = NSHostingView(
+            rootView: VolumeFeedbackHUDView(configuration: configuration)
+                .frame(width: width, height: height)
+        )
+        let visible = screen.visibleFrame
+        window.setFrameOrigin(
+            NSPoint(x: visible.midX - width / 2, y: visible.minY + 84)
+        )
+        window.orderFrontRegardless()
+        dismissal?.cancel()
+        dismissal = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(1.4))
+            guard !Task.isCancelled else { return }
+            self?.panel?.orderOut(nil)
+        }
+    }
+
+    func dismiss() {
+        dismissal?.cancel()
+        dismissal = nil
+        panel?.orderOut(nil)
+    }
+}
+
+private struct VolumeFeedbackHUDView: View {
+    let configuration: MasterVolumeConfiguration
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(
+                systemName: configuration.muted
+                    ? "speaker.slash.fill" : "speaker.wave.2.fill"
+            )
+            .font(.title2)
+            .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("NOTCH SIXTY")
+                        .font(.system(size: 10, weight: .semibold))
+                        .tracking(1.2)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 8)
+                    Text(
+                        VolumeFeedbackPresentation.readout(
+                            level: configuration.level,
+                            muted: configuration.muted
+                        )
+                    )
+                    .font(.headline)
+                    .monospacedDigit()
+                }
+                ProgressView(
+                    value: configuration.muted ? 0.0 :
+                        min(max(configuration.level, 0.0), 1.0)
+                )
+                .tint(.orange)
+            }
+        }
+        .padding(.horizontal, 18)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            "Notch Sixty volume " +
+                VolumeFeedbackPresentation.readout(
+                    level: configuration.level,
+                    muted: configuration.muted
+                )
+        )
+    }
+}
+
+private struct MenuBarVolumeLabel: View {
+    @ObservedObject var engine: AudioIOEngine
+    @ObservedObject var preferences: ApplicationPreferences
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image("TrayIcon")
+                .renderingMode(.template)
+            if preferences.showVolumeInMenuBar {
+                Text(
+                    VolumeFeedbackPresentation.readout(
+                        level: engine.masterVolumeConfiguration.level,
+                        muted: engine.masterVolumeConfiguration.muted
+                    )
+                )
+                .font(.system(size: 12, weight: .medium))
+                .monospacedDigit()
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            "Notch Sixty" + (
+                preferences.showVolumeInMenuBar
+                ? ", volume " + VolumeFeedbackPresentation.readout(
+                    level: engine.masterVolumeConfiguration.level,
+                    muted: engine.masterVolumeConfiguration.muted
+                ) : ""
+            )
+        )
+    }
+}
+
 @MainActor
 final class ApplicationPreferences: ObservableObject {
     private enum Key {
         static let appearance = "application.appearance"
         static let presence = "application.presence"
         static let volumeStepResolution = "application.volumeStepResolution"
+        static let showVolumeInMenuBar = "application.showVolumeInMenuBar"
+        static let showVolumePopup = "application.showVolumePopup"
     }
 
     private let defaults: UserDefaults
@@ -1435,6 +1582,20 @@ final class ApplicationPreferences: ObservableObject {
         }
     }
 
+    @Published var showVolumeInMenuBar: Bool {
+        didSet { defaults.set(showVolumeInMenuBar, forKey: Key.showVolumeInMenuBar) }
+    }
+
+    @Published var showVolumePopup: Bool {
+        didSet {
+            defaults.set(showVolumePopup, forKey: Key.showVolumePopup)
+            if !showVolumePopup { volumeHUD.dismiss() }
+        }
+    }
+
+    private let volumeHUD = VolumeFeedbackHUDController()
+    private var volumeFeedbackObservation: AnyCancellable?
+
     @Published private(set) var launchAtLoginEnabled: Bool
     @Published private(set) var launchAtLoginError: String?
     private var appearanceObservation: NSKeyValueObservation?
@@ -1451,6 +1612,8 @@ final class ApplicationPreferences: ObservableObject {
         volumeStepResolution = ApplicationVolumeStepResolution(
             rawValue: defaults.integer(forKey: Key.volumeStepResolution)
         ) ?? .standard
+        showVolumeInMenuBar = defaults.object(forKey: Key.showVolumeInMenuBar) as? Bool ?? true
+        showVolumePopup = defaults.bool(forKey: Key.showVolumePopup)
         launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
         launchAtLoginError = nil
         appearanceObservation = NSApplication.shared.observe(\.effectiveAppearance, options: [.new]) { [weak self] _, _ in
@@ -1509,6 +1672,13 @@ final class ApplicationPreferences: ObservableObject {
         audioEngine.setSoftwareVolumeKeyStepDenominator(volumeStepResolution.denominator)
         guard !didApplyInitialPreferences else { return }
         didApplyInitialPreferences = true
+        volumeFeedbackObservation = audioEngine.$masterVolumeConfiguration
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] configuration in
+                guard let self, self.showVolumePopup else { return }
+                self.volumeHUD.show(configuration)
+            }
         applyAppearance()
         applyActivationPolicy()
     }
@@ -1518,7 +1688,9 @@ final class ApplicationPreferences: ObservableObject {
         NotchSixtyBackupPreferences(
             appearance: appearance.rawValue,
             presence: presence.rawValue,
-            volumeStepResolution: volumeStepResolution.rawValue
+            volumeStepResolution: volumeStepResolution.rawValue,
+            showVolumeInMenuBar: showVolumeInMenuBar,
+            showVolumePopup: showVolumePopup
         )
     }
 
@@ -1542,6 +1714,8 @@ final class ApplicationPreferences: ObservableObject {
         self.appearance = appearance
         self.presence = presence
         self.volumeStepResolution = resolution
+        if let show = snapshot.showVolumeInMenuBar { showVolumeInMenuBar = show }
+        if let show = snapshot.showVolumePopup { showVolumePopup = show }
     }
 
     private func applyAppearance() {
@@ -1957,7 +2131,7 @@ private struct ProductionSettingsView: View {
                         }
                     }
 
-                    settingsCard(title: "Volume Keys", systemImage: "speaker.wave.2") {
+                    settingsCard(title: "Volume & Feedback", systemImage: "speaker.wave.2") {
                         HStack(spacing: 10) {
                             Text("Step size")
                             Spacer()
@@ -1973,6 +2147,19 @@ private struct ProductionSettingsView: View {
                         }
 
                         Text("Controls Notch Sixty's software master-volume change for each intercepted volume-key press. 1/16 = 6.25%, 1/32 = 3.125%, and 1/64 = 1.5625%. The physical output-device volume is not stepped by this setting.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Divider()
+
+                        Toggle("Show volume in menu bar", isOn: $preferences.showVolumeInMenuBar)
+                            .disabled(preferences.presence == .dock)
+                        Text("Show Notch Sixty's master-volume percentage beside the tray icon. Requires Menu Bar or Both in App Presence.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Toggle("Show volume popup", isOn: $preferences.showVolumePopup)
+                        Text("Briefly display Notch Sixty's volume when it changes. The macOS volume indicator is not suppressed and may also appear.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -2174,16 +2361,14 @@ struct NotchSixtyApp: App {
         .windowResizability(.contentMinSize)
         .windowToolbarStyle(.unified(showsTitle: false))
 
-        MenuBarExtra(
-            "Notch Sixty",
-            image: "TrayIcon",
-            isInserted: trayInserted
-        ) {
+        MenuBarExtra(isInserted: trayInserted) {
             ProductionMenuBarView(product: product)
                 .task {
                     product.prepareForUse()
                     preferences.apply(to: product.audioEngine)
                 }
+        } label: {
+            MenuBarVolumeLabel(engine: product.audioEngine, preferences: preferences)
         }
         .menuBarExtraStyle(.window)
 

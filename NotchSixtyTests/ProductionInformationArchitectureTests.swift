@@ -3,6 +3,37 @@ import XCTest
 @testable import NotchSixty
 
 final class ProductionInformationArchitectureTests: XCTestCase {
+    func testVolumeFeedbackRoundingAndMuteSemantics() {
+        XCTAssertEqual(VolumeFeedbackPresentation.percentage(0), 0)
+        XCTAssertEqual(VolumeFeedbackPresentation.percentage(0.678), 68)
+        XCTAssertEqual(VolumeFeedbackPresentation.percentage(1), 100)
+        XCTAssertEqual(VolumeFeedbackPresentation.percentage(-0.5), 0)
+        XCTAssertEqual(VolumeFeedbackPresentation.percentage(1.5), 100)
+        XCTAssertEqual(VolumeFeedbackPresentation.percentage(.nan), 0)
+        XCTAssertEqual(VolumeFeedbackPresentation.readout(level: 0.678, muted: false), "68%")
+        XCTAssertEqual(VolumeFeedbackPresentation.readout(level: 0.678, muted: true), "Muted")
+    }
+
+    func testVolumeFeedbackBackupFieldsAreOptionalForLegacySnapshots() throws {
+        let json = #"{"appearance":"system","presence":"both","volumeStepResolution":16,"schemaVersion":1}"#
+        let decoded = try JSONDecoder().decode(
+            NotchSixtyBackupPreferences.self,
+            from: Data(json.utf8)
+        )
+        XCTAssertNil(decoded.showVolumeInMenuBar)
+        XCTAssertNil(decoded.showVolumePopup)
+        try decoded.validate()
+        var updated = decoded
+        updated.showVolumeInMenuBar = false
+        updated.showVolumePopup = true
+        let roundtrip = try JSONDecoder().decode(
+            NotchSixtyBackupPreferences.self,
+            from: JSONEncoder().encode(updated)
+        )
+        XCTAssertEqual(roundtrip.showVolumeInMenuBar, false)
+        XCTAssertEqual(roundtrip.showVolumePopup, true)
+    }
+
     func testDashboardIsStandaloneAndNotInAGroup() {
         let grouped =
             ProductionSection.playback

@@ -8,6 +8,9 @@ struct NotchSixtyBackupPreferences: Codable, Equatable, Sendable {
     var appearance: String
     var presence: String
     var volumeStepResolution: Int
+    // Optional for backward-compatible decoding of existing schema-1 backups.
+    var showVolumeInMenuBar: Bool? = nil
+    var showVolumePopup: Bool? = nil
 
     func validate() throws {
         guard schemaVersion == Self.currentSchemaVersion,
