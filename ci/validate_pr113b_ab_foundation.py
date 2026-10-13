@@ -472,6 +472,7 @@ for token in (
     "func applyRecommendation() throws",
     "func revertAppliedRecommendation() throws",
     "canRevertAppliedRecommendation",
+    "appliedRecommendationPendingDecision",
     "boundary.matches(profiles)",
     "engine.transitionHeadroomAttenuationDB(",
 ):
