@@ -36,7 +36,7 @@ core-DSP expansion:
 The modal first-run assistant and Playback-System lock are deliberately
 deferred.
 
-**Slices 1–5 are implemented remotely.** Slice 1 established the temporary,
+**Slices 1–6 are implemented remotely.** Slice 1 established the temporary,
 in-memory safe A/B capture boundary. The allowed audition payload is limited to stereo EQ, input preamp,
 headroom attenuation and content dynamics. Audio Unit rack topology and every
 Playback-System/hardware-domain setting remain outside the A/B payload. Each
@@ -77,6 +77,20 @@ across a clean relaunch. Failed engine state is normalized before an explicit
 retry/recovery action. Every production Start path now routes through the same
 ProductController transaction. Recovery state is excluded from general backup
 and has no PR112 physical-acceptance or release authority.
+
+Slice 6 adds the advisory Headroom Assistant to Meters → Dynamics. It uses the
+existing authoritative protection telemetry rather than a new realtime
+detector, reconstructs pre-Gain-Rider true peak, and evaluates that evidence
+alongside sustained limiter pressure and safety-clamp events. The default
+target is −1.0 dBTP; observations require at least 10 seconds and the UI
+recommends 30 seconds of representative loud program.
+
+Recommendations are conservative and attenuation-only: the assistant can add
+Headroom Attenuation but never reclaim existing reserve from a finite sample.
+Apply is explicit, state-drift guarded and uses the existing silent-boundary
+graph transition. It does not silently overwrite the selected Content Preset,
+does not bypass restart-required semantic transports, and has no
+physical/release authority.
 
 PR113B software work cannot satisfy PR112 physical acceptance and cannot set
 `releaseAcceptanceComplete`, `liveFeedForwardANCAuthorized`, or
