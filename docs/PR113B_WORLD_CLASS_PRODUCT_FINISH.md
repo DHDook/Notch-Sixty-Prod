@@ -197,23 +197,28 @@ payload. It includes:
 - Playback Systems and their DSP/calibration state;
 - Room Correction projects, including captured measurements and designs;
 - Advanced Speaker Measurement Lab sessions;
-- safe app preferences: appearance, Dock/Menu Bar presence and volume-key
-  resolution; and
-- hardware-acceptance campaigns as **reference-only evidence**.
+- imported binaural/HRTF profile assets; and
+- portable app preferences: appearance, Dock/Menu Bar presence and volume-key
+  resolution.
 
-Launch at Login is intentionally excluded because it is an OS-level
-registration/consent decision.
+Launch at Login and macOS permission grants are intentionally excluded because
+they are OS-level registration/consent decisions. Physical hardware-acceptance
+campaigns are also excluded from the general product backup; their dedicated
+acceptance packets remain the authoritative archival/export path.
 
 ### Integrity and restore transaction
 
-The manifest records a SHA-256 digest of the canonical sorted-key payload.
-Inspection and restore recompute that digest before any local state is changed.
+The manifest records a SHA-256 digest and byte count for each canonical
+sorted-key portable domain: profiles, Room Correction projects, Measurement
+Lab sessions, binaural assets and preferences. Inspection and restore recompute
+the complete manifest before any local state is changed.
 
 Restore requires the audio engine to be idle. The full payload is decoded and
 structurally validated before writes begin. Existing profile state,
-preferences, colliding Room Correction projects and colliding Measurement Lab
-sessions are retained for rollback. If a later write fails, new records are
-removed and retained records are restored.
+colliding Room Correction projects, colliding Measurement Lab sessions and
+colliding binaural assets are retained for rollback. Preferences are returned
+to the UI only after product-data restore succeeds. If a later write fails,
+new records are removed and retained records are restored.
 
 ### Hardware portability
 
@@ -233,10 +238,11 @@ available outputs. A system with unavailable bindings is persisted as
 
 ### Acceptance authority
 
-Hardware-acceptance campaigns are included in a backup so the user's records
-are not lost. They are deliberately **not written into the live acceptance
-store during restore**. A backup therefore cannot recreate, promote or
-authenticate PR112 physical acceptance on another installation.
+The general `.n60backup` format does **not** contain hardware-acceptance
+campaigns and has no acceptance-store dependency. PR112 acceptance evidence
+continues to use its dedicated export packets and review workflow. A product
+backup therefore cannot recreate, promote or authenticate physical acceptance
+on another installation.
 
 ### Production Preferences
 
@@ -258,7 +264,8 @@ acceptance-evidence rule.
 - unavailable imported hardware produces a persisted Needs Mapping gate;
 - known hardware can remain eligible without a remapping gate;
 - only the safe application-preference keys round-trip; and
-- backup inspection rejects payload tampering when the SHA-256 digest changes;
+- backup inspection rejects domain tampering when a SHA-256 manifest entry no
+  longer matches;
 
 - the A/B payload contains only the four allowed content-domain fields;
 - Audio Unit rack state survives A/B-state reconstruction unchanged;
