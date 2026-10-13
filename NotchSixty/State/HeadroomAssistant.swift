@@ -6,6 +6,7 @@ struct HeadroomAssistantBoundary: Equatable, Sendable {
     let contentState: ContentPresetState
     let systemState: PlaybackSystemState
 
+    @MainActor
     init(profiles: ProductProfileController) {
         selectedContentPresetID = profiles.selectedContentPresetID
         selectedSystemProfileID = profiles.selectedSystemProfileID
@@ -13,6 +14,7 @@ struct HeadroomAssistantBoundary: Equatable, Sendable {
         systemState = profiles.captureSystemState()
     }
 
+    @MainActor
     func matches(_ profiles: ProductProfileController) -> Bool {
         selectedContentPresetID == profiles.selectedContentPresetID
             && selectedSystemProfileID == profiles.selectedSystemProfileID
@@ -261,5 +263,261 @@ struct HeadroomAssistantRecommendation: Equatable, Sendable {
         guard value.isFinite, value > 0 else { return 0 }
         return ceil(value / quantizationStepDB)
             * quantizationStepDB
+    }
+}
+
+
+enum HeadroomAssistantPhase: String, Equatable, Sendable {
+    case idle
+    case observing
+    case review
+    case applied
+    case invalidated
+}
+
+enum HeadroomAssistantError: Error, LocalizedError, Equatable {
+    case processingRequired
+    case authoritativeTruePeakUnavailable
+    case stateChanged
+    case noApplicableRecommendation
+
+    var errorDescription: String? {
+        switch self {
+        case .processingRequired:
+            return "Start processing before beginning a Headroom Assistant observation."
+        case .authoritativeTruePeakUnavailable:
+            return "Authoritative true-peak telemetry is unavailable. Enable the limiter True Peak Guard and start a new observation."
+        case .stateChanged:
+            return "The Content Preset or Playback System changed during the observation. Start a new Headroom Assistant observation for the current state."
+        case .noApplicableRecommendation:
+            return "There is no additional headroom attenuation to apply from this observation."
+        }
+    }
+}
+
+@MainActor
+final class HeadroomAssistantController: ObservableObject {
+    private let engine: AudioIOEngine
+    private let profiles: ProductProfileController
+    private var observationTask: Task<Void, Never>?
+    private var boundary: HeadroomAssistantBoundary?
+    private var startedAt: Date?
+    private var initialSafetyClampSamples: UInt64 = 0
+    private var startingHeadroomAttenuationDB = 0.0
+
+    @Published private(set) var phase: HeadroomAssistantPhase = .idle
+    @Published private(set) var evidence = HeadroomAssistantEvidence()
+    @Published private(set) var recommendation:
+        HeadroomAssistantRecommendation?
+    @Published private(set) var lastErrorDescription: String?
+    @Published var targetPeakDBTP =
+        HeadroomAssistantRecommendation.defaultTargetPeakDBTP {
+        didSet {
+            targetPeakDBTP = min(
+                max(
+                    targetPeakDBTP,
+                    HeadroomAssistantRecommendation
+                        .targetPeakRange.lowerBound
+                ),
+                HeadroomAssistantRecommendation
+                    .targetPeakRange.upperBound
+            )
+            refreshRecommendation()
+        }
+    }
+
+    init(
+        engine: AudioIOEngine,
+        profiles: ProductProfileController
+    ) {
+        self.engine = engine
+        self.profiles = profiles
+    }
+
+    deinit {
+        observationTask?.cancel()
+    }
+
+    var isObserving: Bool { phase == .observing }
+
+    var observationProgress: Double {
+        min(
+            evidence.observationSeconds
+                / HeadroomAssistantEvidence
+                    .recommendedObservationSeconds,
+            1
+        )
+    }
+
+    func startObservation(now: Date = Date()) throws {
+        guard engine.lifecycleState == .running else {
+            throw HeadroomAssistantError.processingRequired
+        }
+        guard let diagnostics =
+                engine.diagnosticsSnapshot().renderKernelDiagnostics,
+              diagnostics.truePeakGuardActive else {
+            throw HeadroomAssistantError
+                .authoritativeTruePeakUnavailable
+        }
+
+        observationTask?.cancel()
+        boundary = HeadroomAssistantBoundary(profiles: profiles)
+        startedAt = now
+        initialSafetyClampSamples =
+            diagnostics.limiterSafetyClampSamples
+        startingHeadroomAttenuationDB =
+            engine.gainConfiguration.headroomAttenuationDB
+        evidence = HeadroomAssistantEvidence()
+        recommendation = nil
+        lastErrorDescription = nil
+        phase = .observing
+
+        sample(now: now)
+
+        observationTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(
+                    nanoseconds: 125_000_000
+                )
+                guard let self, !Task.isCancelled else {
+                    return
+                }
+                self.sample(now: Date())
+                if self.phase != .observing {
+                    return
+                }
+            }
+        }
+    }
+
+    func stopObservation(now: Date = Date()) {
+        guard phase == .observing else { return }
+        sample(now: now)
+        observationTask?.cancel()
+        observationTask = nil
+        if phase == .observing {
+            phase = .review
+            refreshRecommendation()
+        }
+    }
+
+    func cancelObservation() {
+        observationTask?.cancel()
+        observationTask = nil
+        boundary = nil
+        startedAt = nil
+        evidence = HeadroomAssistantEvidence()
+        recommendation = nil
+        lastErrorDescription = nil
+        phase = .idle
+    }
+
+    func applyRecommendation() throws {
+        guard phase == .review,
+              let recommendation,
+              recommendation.canApply else {
+            throw HeadroomAssistantError
+                .noApplicableRecommendation
+        }
+        guard let boundary,
+              boundary.matches(profiles) else {
+            invalidate(
+                HeadroomAssistantError.stateChanged
+            )
+            throw HeadroomAssistantError.stateChanged
+        }
+
+        try engine.setHeadroomAttenuationDB(
+            recommendation
+                .recommendedHeadroomAttenuationDB
+        )
+        observationTask?.cancel()
+        observationTask = nil
+        phase = .applied
+        lastErrorDescription = nil
+    }
+
+    private func sample(now: Date) {
+        guard phase == .observing,
+              let startedAt,
+              let boundary else {
+            return
+        }
+        guard boundary.matches(profiles) else {
+            invalidate(HeadroomAssistantError.stateChanged)
+            return
+        }
+        guard engine.lifecycleState == .running else {
+            stopForProcessingEnd(now: now)
+            return
+        }
+        guard let diagnostics =
+                engine.diagnosticsSnapshot()
+                    .renderKernelDiagnostics else {
+            invalidate(
+                HeadroomAssistantError
+                    .authoritativeTruePeakUnavailable
+            )
+            return
+        }
+
+        evidence.ingest(
+            inputTruePeakLinear:
+                diagnostics.inputTruePeakLinear,
+            outputTruePeakLinear:
+                diagnostics.outputTruePeakLinear,
+            limiterGainReductionDB:
+                diagnostics.limiterGainReductionDB,
+            sustainedLimiterGainReductionDB:
+                diagnostics.sustainedLimiterGainReductionDB,
+            gainRiderAttenuationDB:
+                diagnostics.gainRiderAttenuationDB,
+            truePeakGuardActive:
+                diagnostics.truePeakGuardActive,
+            cumulativeSafetyClampSamples:
+                diagnostics.limiterSafetyClampSamples,
+            initialSafetyClampSamples:
+                initialSafetyClampSamples,
+            elapsedSeconds:
+                max(now.timeIntervalSince(startedAt), 0)
+        )
+        refreshRecommendation()
+    }
+
+    private func stopForProcessingEnd(now: Date) {
+        if let startedAt {
+            evidence.observationSeconds = max(
+                evidence.observationSeconds,
+                max(now.timeIntervalSince(startedAt), 0)
+            )
+        }
+        observationTask?.cancel()
+        observationTask = nil
+        phase = .review
+        refreshRecommendation()
+    }
+
+    private func refreshRecommendation() {
+        guard phase == .observing
+                || phase == .review
+                || phase == .applied else {
+            recommendation = nil
+            return
+        }
+        recommendation =
+            HeadroomAssistantRecommendation.make(
+                evidence: evidence,
+                currentHeadroomAttenuationDB:
+                    startingHeadroomAttenuationDB,
+                targetPeakDBTP: targetPeakDBTP
+            )
+    }
+
+    private func invalidate(_ error: HeadroomAssistantError) {
+        observationTask?.cancel()
+        observationTask = nil
+        phase = .invalidated
+        recommendation = nil
+        lastErrorDescription = error.localizedDescription
     }
 }
