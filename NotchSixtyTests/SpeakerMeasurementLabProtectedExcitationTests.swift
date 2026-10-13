@@ -1110,4 +1110,89 @@ final class ProtectedDriverPEQRecommendationTests: XCTestCase {
         )
     }
 
+
+    func testLabReportPublishesProtectedTimingAsReviewOnly() throws {
+        let (session, _, _) = timingFixture(
+            relativeArrivalMilliseconds: 0.8
+        )
+        let report = try SpeakerMeasurementLabReportBuilder()
+            .build(session: session)
+        let timing = try XCTUnwrap(
+            report.analysisSummaries.first {
+                $0.kind == .protectedDriverTiming
+            }
+        )
+        XCTAssertTrue(timing.available)
+        XCTAssertTrue(timing.title.contains("Left Low"))
+        XCTAssertTrue(timing.title.contains("Left High"))
+        XCTAssertEqual(
+            timing.metrics.first { $0.name == "Deployment" }?.value,
+            "Never · review only"
+        )
+        XCTAssertTrue(timing.metrics.contains {
+            $0.name == "Delay hypothesis"
+                && $0.value.contains("Left Low")
+        })
+        XCTAssertTrue(timing.metrics.contains {
+            $0.name == "Polarity hypothesis"
+                && $0.value.contains("Retain")
+        })
+        XCTAssertTrue(timing.warnings.contains {
+            $0.contains("Combined-driver crossover summation")
+        })
+        XCTAssertFalse(report.canDeploy)
+
+        let csv = try SpeakerMeasurementLabReportExporter()
+            .csvData(report)
+        let text = try XCTUnwrap(String(data: csv, encoding: .utf8))
+        XCTAssertTrue(text.contains("protectedDriverTiming"))
+        XCTAssertTrue(text.contains("Never"))
+        let json = try SpeakerMeasurementLabReportExporter()
+            .jsonData(report)
+        let jsonText = try XCTUnwrap(
+            String(data: json, encoding: .utf8)
+        )
+        XCTAssertTrue(jsonText.contains("protectedDriverTiming"))
+        XCTAssertFalse(jsonText.contains("impulseResponse"))
+    }
+
+    func testLabReportShowsUnqualifiedTimingWhenReferenceIsUnstable() throws {
+        let (session, _, _) = timingFixture(
+            referenceDriftMilliseconds: 0.7
+        )
+        let report = try SpeakerMeasurementLabReportBuilder()
+            .build(session: session)
+        let timing = try XCTUnwrap(
+            report.analysisSummaries.first {
+                $0.kind == .protectedDriverTiming
+            }
+        )
+        XCTAssertFalse(timing.available)
+        XCTAssertTrue(timing.metrics.isEmpty)
+        XCTAssertTrue(timing.warnings.contains {
+            $0.localizedCaseInsensitiveContains("reference")
+        })
+        XCTAssertFalse(report.canDeploy)
+    }
+
+    func testTriAmpCannotTreatLowAndHighAsAdjacentTimingPair() throws {
+        var (session, lowID, highID) = timingFixture()
+        for index in session.captures.indices {
+            session.captures[index]
+                .protectedDriverProvenance?
+                .bassManagementConfiguration.physicalOutputMode = .triAmp
+            session.captures[index]
+                .protectedDriverProvenance?
+                .bassManagementConfiguration.upperFrequencyHz = 4_000
+        }
+        XCTAssertThrowsError(
+            try ProtectedDriverTimingRecommendationAnalyzer()
+                .recommend(
+                    session: session,
+                    firstProtocolID: lowID,
+                    secondProtocolID: highID
+                )
+        )
+    }
+
 }
