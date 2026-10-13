@@ -36,7 +36,7 @@ core-DSP expansion:
 The modal first-run assistant and Playback-System lock are deliberately
 deferred.
 
-**Slices 1–2 are implemented remotely.** Slice 1 established the temporary,
+**Slices 1–3 are implemented remotely.** Slice 1 established the temporary,
 in-memory safe A/B capture boundary. The allowed audition payload is limited to stereo EQ, input preamp,
 headroom attenuation and content dynamics. Audio Unit rack topology and every
 Playback-System/hardware-domain setting remain outside the A/B payload. Each
@@ -49,6 +49,13 @@ fade/silent-boundary graph transition, optional attenuation-only measured
 level matching from captured short-term LUFS, direct A/B toolbar controls, and
 pre-session content restore. Playback-System identity/state drift still fails
 closed, and Audio Unit topology remains outside the A/B payload.
+
+Slice 3 adds the versioned human-inspectable `.n60backup` bundle with
+canonical-payload SHA-256 integrity, validate-first transactional restore,
+rollback of colliding local records, persisted Needs Mapping gates for
+unavailable hardware UIDs, Room Correction and Measurement Lab session
+coverage, safe app-preference restore, and hardware-acceptance campaigns
+preserved as reference-only evidence that is never reactivated by restore.
 
 PR113B software work cannot satisfy PR112 physical acceptance and cannot set
 `releaseAcceptanceComplete`, `liveFeedForwardANCAuthorized`, or
