@@ -1,6 +1,6 @@
 # PR112A — Remote Hardware-Acceptance Infrastructure
 
-**Status: Slice 1 implemented; exact-head CI pending.**
+**Status: Slices 1–2 implemented; exact-head CI pending.**
 
 PR112A is the remote-preparation half of roadmap PR112. It is stacked on the
 exact remote/software-complete PR111 head and intentionally stops before any
@@ -188,10 +188,38 @@ authorize speaker-connected live ANC.
 
 ## Planned remote PR112A follow-on slices
 
-**Slice 2 — Guided acceptance campaign controller & UI.**
-Create/reopen campaigns, enter immutable build/environment identity, walk H01–H08
-in order, record PASS/FAIL/BLOCKED observations, show authority requirements,
-and expose topology decisions without allowing synthetic acceptance.
+**Slice 2 — Guided acceptance campaign controller & UI
+(implemented; exact-head CI pending).**
+
+The product now owns a `HardwareAcceptanceController` and restores the most
+recent persisted campaign at startup. A dedicated **Hardware Acceptance** entry
+appears under **TOOLS** beside Room Advisor while retaining the normal Playback
+System toolbar context.
+
+Campaign creation freezes the exact commit/branch, app version/build, selected
+Playback System and all three conditional scope decisions. Existing campaigns
+are never edited or deleted; starting again creates a new campaign identity.
+
+The H01–H08 matrix shows each gate's minimum evidence authority and current
+status. Selecting a gate opens an evidence form with physical Mac/macOS,
+sample-rate/buffer, stable I/O device UIDs, microphone/instrument, speaker
+topology and safe-reference metadata plus reviewer notes and optional artifact
+identifier.
+
+The form deliberately defaults to **Remote software / BLOCKED**. Selecting
+`physicalHardware` requires an explicit attestation that the test was actually
+performed on the recorded hardware. Selecting
+`independentPhysicalReview` additionally requires a separate reviewer
+attestation. Excluded conditional gates cannot receive evidence, and campaign
+scope cannot be rewritten in place.
+
+When split-driver testing is included, H05 exposes a separate checkbox stating
+that the observation actually covered protected independently routed
+Low/Mid/High drivers. Merely passing whole-speaker H05 without that coverage
+leaves H05 in **INSUFFICIENT SCOPE**.
+
+The UI exposes no Apply, routing, DSP, audio-start, correction, merge or release
+control. It only appends evidence through the acceptance store.
 
 **Slice 3 — Gate-specific evidence adapters.**
 Link H03–H07 to existing Speaker Optimizer / Measurement Lab / FIR / coherent
