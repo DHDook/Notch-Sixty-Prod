@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SwiftUI
 
@@ -190,6 +191,7 @@ struct ProductionRootView: View {
     @Environment(\.openWindow) private var openWindow
     #endif
     @State private var selection: ProductionSection? = .dashboard
+    @State private var commandError: String?
 
     private var engine: AudioIOEngine { product.audioEngine }
 
@@ -249,6 +251,26 @@ struct ProductionRootView: View {
         }
         .frame(minWidth: minimumWindowWidth, minHeight: 680)
         .task { product.prepareForUse() }
+        .sheet(
+            isPresented: Binding(
+                get: { product.recovery.safeLaunchActive },
+                set: { _ in }
+            )
+        ) {
+            ProductSafeLaunchSheet(product: product)
+                .interactiveDismissDisabled()
+        }
+        .alert(
+            "Processing Error",
+            isPresented: Binding(
+                get: { commandError != nil },
+                set: { if !$0 { commandError = nil } }
+            )
+        ) {
+            Button("OK") { commandError = nil }
+        } message: {
+            Text(commandError ?? "")
+        }
     }
 
     @ViewBuilder
@@ -360,17 +382,38 @@ struct ProductionRootView: View {
                 Button {
                     Task { @MainActor in
                         await Task.yield()
-                        if engine.lifecycleState == .running { engine.stop() }
-                        else if engine.lifecycleState == .idle { try? engine.start() }
+                        if engine.lifecycleState == .running {
+                            engine.stop()
+                            commandError = nil
+                        } else if engine.lifecycleState == .idle {
+                            do {
+                                try await product.startProcessing()
+                                commandError = nil
+                            } catch {
+                                commandError =
+                                    error.localizedDescription
+                            }
+                        }
                     }
                 } label: {
                     Label(
-                        engine.lifecycleState == .running ? "Stop Processing" : "Start Processing",
-                        systemImage: engine.lifecycleState == .running ? "stop.fill" : "play.fill"
+                        engine.lifecycleState == .running
+                            ? "Stop Processing"
+                            : "Start Processing",
+                        systemImage:
+                            engine.lifecycleState == .running
+                            ? "stop.fill"
+                            : "play.fill"
                     )
                 }
                 .buttonStyle(.glassProminent)
-                .disabled(engine.lifecycleState != .idle && engine.lifecycleState != .running)
+                .disabled(
+                    product.recovery.safeLaunchActive
+                        || (
+                            engine.lifecycleState != .idle
+                                && engine.lifecycleState != .running
+                        )
+                )
             }
         }
 
@@ -393,6 +436,151 @@ struct ProductionRootView: View {
     }
 }
 
+
+
+private struct ProductSafeLaunchSheet: View {
+    @ObservedObject var product: ProductController
+    @State private var actionError: String?
+
+    private var version: String {
+        Bundle.main.object(
+            forInfoDictionaryKey: "CFBundleShortVersionString"
+        ) as? String ?? "—"
+    }
+
+    private var build: String {
+        Bundle.main.object(
+            forInfoDictionaryKey: "CFBundleVersion"
+        ) as? String ?? "—"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .top, spacing: 14) {
+                Image(systemName: "lifepreserver.fill")
+                    .font(.system(size: 28))
+                    .foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Safe Launch")
+                        .font(.title2.bold())
+                    Text(
+                        "Notch Sixty detected recovery evidence. Audio processing remains stopped until you choose how to continue."
+                    )
+                    .foregroundStyle(.secondary)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(
+                    product.recovery.safeLaunchReasons,
+                    id: \.self
+                ) { reason in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Label(
+                            reason.title,
+                            systemImage:
+                                "exclamationmark.triangle.fill"
+                        )
+                        .font(.headline)
+                        Text(reason.detail)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 10) {
+                Button {
+                    perform {
+                        try product.openNormallyFromSafeLaunch()
+                    }
+                } label: {
+                    Label(
+                        "Open Normally",
+                        systemImage: "arrow.right.circle.fill"
+                    )
+                }
+                .buttonStyle(.glassProminent)
+
+                Button {
+                    perform {
+                        try product
+                            .openWithPlugInsBypassedFromSafeLaunch()
+                    }
+                } label: {
+                    Label(
+                        "Open with Plug-ins Bypassed This Launch",
+                        systemImage: "puzzlepiece.extension.fill"
+                    )
+                }
+                .buttonStyle(.glass)
+
+                Button {
+                    perform {
+                        try product
+                            .restoreLastKnownGoodFromSafeLaunch()
+                    }
+                } label: {
+                    Label(
+                        "Restore Last Known Good",
+                        systemImage: "clock.arrow.circlepath"
+                    )
+                }
+                .buttonStyle(.glass)
+                .disabled(
+                    !product.recovery.lastKnownGoodAvailable
+                )
+
+                Button {
+                    let report = product.diagnosticsReport(
+                        version: version,
+                        build: build
+                    )
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(
+                        report,
+                        forType: .string
+                    )
+                } label: {
+                    Label(
+                        "Copy Diagnostics",
+                        systemImage: "doc.on.doc"
+                    )
+                }
+                .buttonStyle(.glass)
+            }
+
+            Text(
+                "Plug-in bypass is temporary and does not edit the saved rack. Restore Last Known Good changes saved product profiles only after an explicit choice and never grants hardware-acceptance or release authority."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+            if let actionError {
+                Label(
+                    actionError,
+                    systemImage: "exclamationmark.triangle.fill"
+                )
+                .font(.callout)
+                .foregroundStyle(.red)
+                .textSelection(.enabled)
+            }
+        }
+        .padding(24)
+        .frame(width: 620)
+    }
+
+    private func perform(_ action: () throws -> Void) {
+        do {
+            try action()
+            actionError = nil
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+}
 
 private struct ProductionSidebarBrand: View {
     var body: some View {
