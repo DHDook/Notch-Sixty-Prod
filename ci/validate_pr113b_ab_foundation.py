@@ -5,6 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PROFILES = ROOT / "NotchSixty/State/ProductProfiles.swift"
 RECOVERY = ROOT / "NotchSixty/State/ProductRecovery.swift"
+HEADROOM = ROOT / "NotchSixty/State/HeadroomAssistant.swift"
 BACKUP = ROOT / "NotchSixty/Backup/NotchSixtyBackup.swift"
 PROJECT = ROOT / "NotchSixty.xcodeproj/project.pbxproj"
 ENGINE = ROOT / "NotchSixty/Audio/AudioIOEngine.swift"
@@ -12,6 +13,7 @@ HOST = ROOT / "NotchSixty/Audio/AudioUnitHostController.swift"
 APP = ROOT / "NotchSixty/NotchSixtyApp.swift"
 TOOLBAR = ROOT / "NotchSixty/UI/ProductionProfileToolbar.swift"
 ROOT_UI = ROOT / "NotchSixty/UI/ProductionRootView.swift"
+METERS_UI = ROOT / "NotchSixty/UI/ProductionMetersView.swift"
 LAB_REPORT = ROOT / "NotchSixty/Audio/SpeakerMeasurementLabReport.swift"
 LAB_UI = ROOT / "NotchSixty/UI/ProductionSpeakerMeasurementLabWorkspace.swift"
 LAB_TESTS = ROOT / "NotchSixtyTests/SpeakerMeasurementLabReportTests.swift"
@@ -21,13 +23,15 @@ ROADMAP = ROOT / "docs/ROADMAP.md"
 WORKFLOW = ROOT / ".github/workflows/pr113b-world-class-product-finish.yml"
 
 for path in (
-    PROFILES, RECOVERY, BACKUP, PROJECT, ENGINE, HOST, APP, TOOLBAR, ROOT_UI,
-    LAB_REPORT, LAB_UI, LAB_TESTS, TESTS, DOC, ROADMAP, WORKFLOW
+    PROFILES, RECOVERY, HEADROOM, BACKUP, PROJECT, ENGINE, HOST, APP, TOOLBAR,
+    ROOT_UI, METERS_UI, LAB_REPORT, LAB_UI, LAB_TESTS, TESTS, DOC, ROADMAP,
+    WORKFLOW
 ):
     assert path.is_file(), f"PR113B Slice 1 missing artifact: {path}"
 
 profiles = PROFILES.read_text(encoding="utf-8")
 recovery = RECOVERY.read_text(encoding="utf-8")
+headroom = HEADROOM.read_text(encoding="utf-8")
 backup = BACKUP.read_text(encoding="utf-8")
 project = PROJECT.read_text(encoding="utf-8")
 engine = ENGINE.read_text(encoding="utf-8")
@@ -35,6 +39,7 @@ host = HOST.read_text(encoding="utf-8")
 app = APP.read_text(encoding="utf-8")
 toolbar = TOOLBAR.read_text(encoding="utf-8")
 root_ui = ROOT_UI.read_text(encoding="utf-8")
+meters_ui = METERS_UI.read_text(encoding="utf-8")
 lab_report = LAB_REPORT.read_text(encoding="utf-8")
 lab_ui = LAB_UI.read_text(encoding="utf-8")
 lab_tests = LAB_TESTS.read_text(encoding="utf-8")
@@ -445,6 +450,80 @@ for token in (
         f"PR113B Slice 5 recovery regression missing {token}"
     )
 
+
+# Slice 6 — Headroom Assistant. Analysis consumes existing authoritative
+# protection telemetry and can only add reserve after an explicit Apply.
+for token in (
+    "struct HeadroomAssistantBoundary:",
+    "struct HeadroomAssistantEvidence:",
+    "maximumPreRiderTruePeakDBTP",
+    "gainRiderAttenuationDB",
+    "truePeakGuardObserved",
+    "struct HeadroomAssistantRecommendation:",
+    "currentReserveSufficient",
+    "recommendAdditionalAttenuation",
+    "rangeLimited",
+    "static let defaultTargetPeakDBTP = -1.0",
+    "max(peakNeed, limiterNeed) + clampReserve",
+    "final class HeadroomAssistantController: ObservableObject",
+    "func startObservation(",
+    "func applyRecommendation() throws",
+    "boundary.matches(profiles)",
+    "engine.transitionHeadroomAttenuationDB(",
+):
+    assert token in headroom, (
+        f"PR113B Slice 6 Headroom Assistant contract missing {token}"
+    )
+
+assert headroom.count("engine.transitionHeadroomAttenuationDB(") == 1, (
+    "PR113B Slice 6 gained a hidden/automatic headroom mutation path"
+)
+
+for token in (
+    "func transitionHeadroomAttenuationDB(",
+    "session.transitionDSPGraph(graph)",
+    "it does not save/overwrite the selected Content Preset",
+):
+    assert token in engine, (
+        f"PR113B Slice 6 live transition contract missing {token}"
+    )
+
+for token in (
+    "ProductionMetersView(",
+    "assistant: product.headroomAssistant",
+):
+    assert token in root_ui, (
+        f"PR113B Slice 6 Meters integration missing {token}"
+    )
+
+for token in (
+    "@ObservedObject var assistant: HeadroomAssistantController",
+    '"Headroom Assistant"',
+    '"Observe Program"',
+    '"Stop & Review"',
+    '"Apply Additional Headroom"',
+    '"Target True Peak"',
+    '"Pre-Rider True Peak"',
+    "never removes existing headroom",
+    "never auto-adjusts in the background",
+    "save or update the Content Preset separately",
+):
+    assert token in meters_ui, (
+        f"PR113B Slice 6 production UI missing {token}"
+    )
+
+for token in (
+    "testHeadroomAssistantReconstructsPeakBeforeGainRider",
+    "testHeadroomAssistantNeverReclaimsExistingAttenuation",
+    "testHeadroomAssistantUsesLargestReserveNeedPlusClampReserve",
+    "testHeadroomAssistantRequiresAuthoritativeRepresentativeEvidence",
+    "testHeadroomAssistantRangeLimitFailsConservatively",
+    "testHeadroomAssistantBoundaryFailsClosedOnContentDrift",
+):
+    assert token in tests, (
+        f"PR113B Slice 6 regression missing {token}"
+    )
+
 for token in (
     "Slice 1 — Safe A/B comparison foundation",
     "Audio Unit rack topology",
@@ -486,4 +565,4 @@ for token in (
 ):
     assert token in workflow, f"PR113B workflow missing {token}"
 
-print("PR113B Slices 1–5 world-class product contract: PASS")
+print("PR113B Slices 1–6 world-class product contract: PASS")
