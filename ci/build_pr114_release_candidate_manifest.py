@@ -20,6 +20,7 @@ REMOTE_REQUIREMENTS = (
     "privacySecurityValidation",
     "provenanceSBOMValidation",
     "pr113bProductFinishInheritance",
+    "commercialMetadataValidation",
     "debugArm64Build",
     "targetedProductTests",
     "releaseArm64Build",
@@ -257,6 +258,9 @@ def main() -> int:
     remote["pr113bProductFinishInheritance"]["basis"] = (
         "ci/validate_pr113b_ab_foundation.py"
     )
+    remote["commercialMetadataValidation"]["basis"] = (
+        "ci/validate_pr114_commercial_handoff.py"
+    )
 
     artifact_hashes = {
         "releaseExecutableSHA256": sha256_file(executable_paths["release"]),
@@ -271,6 +275,9 @@ def main() -> int:
         "provenanceSHA256": sha256_file(provenance_path),
         "privacySecurityDocSHA256": sha256_file(privacy_doc_path),
         "provenanceSBOMDocSHA256": sha256_file(provenance_doc_path),
+        "commercialMetadataSHA256": sha256_file(ROOT / "release/pr114-commercial-metadata.json"),
+        "commercialHandoffDocSHA256": sha256_file(ROOT / "docs/PR114_COMMERCIAL_METADATA_SUPPORT.md"),
+        "releaseHandoffDocSHA256": sha256_file(ROOT / "docs/PR114_RELEASE_HANDOFF.md"),
     }
 
     report: dict[str, Any] = {

@@ -38,6 +38,9 @@ jobs:
       - name: Validate PR114 packaging and release manifest
         run: python3 ci/validate_pr114_packaging.py
 
+      - name: Validate PR114 commercial metadata and negative gates
+        run: python3 ci/validate_pr114_commercial_handoff.py --self-test
+
       - name: Build deterministic PR114 production SBOM
         run: >-
           python3 ci/build_pr114_sbom.py
@@ -77,6 +80,7 @@ jobs:
           python3 ci/validate_pr114_privacy_security.py
           python3 ci/validate_pr114_provenance_sbom.py
           python3 ci/validate_pr114_packaging.py
+          python3 ci/validate_pr114_commercial_handoff.py --self-test
           python3 ci/validate_pr113b_ab_foundation.py
           python3 ci/validate_pr102_release_readiness.py
           python3 ci/validate_pr102_app_store_boundary.py
@@ -261,6 +265,15 @@ jobs:
             --xctest-marker /tmp/pr114-xctest.passed \
             --output "$RUNNER_TEMP/pr114-remote-commercial-rc.json"
           python3 -m json.tool "$RUNNER_TEMP/pr114-remote-commercial-rc.json" >/dev/null
+
+      - name: PR114 integrated RC gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 ci/validate_pr114_commercial_handoff.py \
+            --rc-manifest "$RUNNER_TEMP/pr114-remote-commercial-rc.json" \
+            --rc-dmg "$PR114_RC_DMG" \
+            --sbom "$RUNNER_TEMP/pr114-production-sbom.json"
 
       - name: Upload PR114 remote RC evidence
         uses: actions/upload-artifact@v4

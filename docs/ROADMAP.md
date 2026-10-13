@@ -35,8 +35,8 @@ Planned slices:
 - Slice 5 — commercial metadata / support / release documentation; and
 - Slice 6 — integrated RC gate and credential/physical handoff.
 
-**Slices 1–4 are implemented remotely; the combined exact-head validation
-gate is pending.**
+**Slices 1–6 are implemented remotely; final exact-head integrated CI validation
+remains pending.**
 
 Slice 1 reconciles the actual PR113B shipping tree into a machine-readable
 release baseline, preserves modern release-hardening contracts, and leaves
@@ -63,6 +63,13 @@ remote RC DMG, the deterministic SBOM and a release-manifest containing
 exact-commit/version/build/artifact hashes. The manual DMG lane also emits a
 machine-readable package manifest. Both lanes remain explicitly ad-hoc and
 not notarized/public-ready.
+
+Slice 5 supplies honest draft store listing, owner-only icon/screenshot approvals,
+public privacy/support handoff and clean-machine review steps. Slice 6 adds
+negative owner/authority tests, exact-head SBOM/DMG/manifest binding and a
+separate PR112 physical/Apple-credential handoff. See
+`docs/PR114_COMMERCIAL_METADATA_SUPPORT.md` and
+`docs/PR114_RELEASE_HANDOFF.md`.
 
 Remote PR114 work may establish software/package readiness only. It cannot
 complete PR112 physical H01–H08 acceptance, production Apple signing, App Store

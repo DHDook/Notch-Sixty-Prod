@@ -30,6 +30,11 @@ notice reconciliation, credential-neutral packaging evidence, and explicit
 physical/credential release gates. PR114 preserves that work while re-auditing
 it against the much larger PR113B product.
 
+PR114 Slices 1–6 are implemented remotely; final exact-head CI remains the
+software acceptance gate. See `docs/PR114_COMMERCIAL_METADATA_SUPPORT.md`
+and `docs/PR114_RELEASE_HANDOFF.md`. The final icon, screenshots and public
+support/privacy URLs are not owner-approved or published by repository CI.
+
 The stacked PRs deliberately remain open, draft and unmerged while the owner is
 away from the Mac/audio system. PR112 physical H01–H08 acceptance, production
 Apple signing, App Store Connect/TestFlight/App Review and public-release

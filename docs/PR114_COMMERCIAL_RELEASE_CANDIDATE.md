@@ -1,6 +1,6 @@
 # PR114 — Commercial Release Candidate
 
-Status: **IN PROGRESS — SLICES 1–4 IMPLEMENTED; EXACT-HEAD VALIDATION PENDING**
+Status: **SLICES 1–6 IMPLEMENTED REMOTELY — EXACT-HEAD CI PENDING**
 
 PR114 is stacked directly on the exact remotely-complete PR113B head
 `f10008d8330c2dc29f195163c56cf4723fc16a6c`.
@@ -196,6 +196,23 @@ number, arm64 architecture, artifact name/hash, `signature=ad-hoc`,
 
 Slice 4 does not perform App Store export, production signing, notarization,
 upload, TestFlight or App Review. Those remain `releaseCredential` evidence.
+
+## Slice 5 — commercial metadata and support handoff
+
+The draft store copy, real-screenshot plan, owner-only support/privacy URLs,
+final icon choice and App Review/TestFlight smoke checklist are in
+`release/pr114-commercial-metadata.json` and
+`docs/PR114_COMMERCIAL_METADATA_SUPPORT.md`. No owner/store gate is
+automatically accepted. Final artwork approval remains pending.
+
+## Slice 6 — integrated release gate and handoff
+
+`ci/validate_pr114_commercial_handoff.py` adds fail-closed negative authority
+tests and same-run, exact-head source/SBOM/DMG/metadata hash verification.
+It runs before publishing the remote RC artifact. Its physical, credential,
+external-review, icon and merge handoff is
+`docs/PR114_RELEASE_HANDOFF.md`. Only a final-head SUCCESS may establish
+remote software completion; it cannot authorize public release or merge.
 
 ## Existing release foundations to reuse
 
