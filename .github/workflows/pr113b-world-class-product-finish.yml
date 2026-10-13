@@ -1,0 +1,83 @@
+name: PR113B World-Class Product Finish
+
+on:
+  push:
+    branches:
+      - feature/pr113b-world-class-product-finish
+  pull_request:
+    branches:
+      - feature/pr113-production-ux-user-guide
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr113b-world-class-finish-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Verify PR113B A/B foundation contract
+        run: python3 ci/validate_pr113b_ab_foundation.py
+
+      - name: Preserve inherited production and safety contracts
+        run: |
+          set -euo pipefail
+          python3 ci/validate_pr113_production_ux.py
+          python3 ci/validate_pr112a_hardware_acceptance.py
+          python3 ci/validate_pr111_protected_driver_optimizer.py
+          python3 ci/validate_pr110_advanced_placement.py
+          python3 ci/validate_pr109_cross_feature_contracts.py
+
+  macos:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Verify PR113B and inherited contracts
+        run: |
+          set -euo pipefail
+          python3 ci/validate_pr113b_ab_foundation.py
+          python3 ci/validate_pr113_production_ux.py
+          python3 ci/validate_pr112a_hardware_acceptance.py
+          python3 ci/validate_pr111_protected_driver_optimizer.py
+          python3 ci/validate_pr110_advanced_placement.py
+          python3 ci/validate_pr109_cross_feature_contracts.py
+
+      - name: Build unsigned arm64 Debug app
+        run: >-
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
+          -configuration Debug -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES build
+
+      - name: Run production IA and A/B foundation tests
+        run: >-
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
+          -configuration Debug -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES
+          -only-testing:NotchSixtyTests/ProductionInformationArchitectureTests
+          test
+
+      - name: Build unsigned arm64 Release app
+        run: >-
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
+          -configuration Release -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO GENERATE_INFOPLIST_FILE=NO
+          INFOPLIST_FILE=NotchSixty/Info.plist build
+
+      - name: Run cumulative XCTest regression
+        run: >-
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
+          -configuration Debug -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES test
