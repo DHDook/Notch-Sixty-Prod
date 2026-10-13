@@ -1070,15 +1070,11 @@ struct ProtectedDriverTimingRecommendationAnalyzer: Sendable {
         let secondPhase = try correctedPhase(
             second, indices: indices, grid: grid
         )
-        // Remove the measured relative-arrival slope before judging
-        // residual crossover polarity. Otherwise a real acoustic-center
-        // offset can be mistaken for a 180° polarity error.
-        let relativeSeconds = secondArrival - firstArrival
-        let relativePhases = indices.enumerated().map { offset, gridIndex in
-            wrap(
-                secondPhase[offset] - firstPhase[offset]
-                    + 2 * .pi * grid[gridIndex] * relativeSeconds
-            )
+        // correctedPhase() has already removed each acoustic arrival
+        // against its simultaneous electrical reference. Compare only the
+        // remaining residual phase; do not subtract the timing slope twice.
+        let relativePhases = zip(secondPhase, firstPhase).map {
+            wrap($0.0 - $0.1)
         }
         let relativePhase = circularMean(relativePhases)
 
