@@ -11,24 +11,23 @@ configuration.
 
 ## Current status
 
-**PR109 — Remote Integration & Stack Consolidation (draft, stacked).**
+**PR114 — Commercial Release Candidate (draft, stacked).**
 
-The clean-room rewrite and cumulative remote/software feature implementations
-are complete through PR108, including Speaker Optimizer PEQ/FIR, advanced
-Measurement Lab, and coherent Main/Sub alignment. PR109 is integrating their
-cross-feature ownership, regression and release contracts. The PR109 branch is
-stacked on PR108; existing feature PRs deliberately remain open, draft and
-unmerged while the owner is away from the Mac.
+The cumulative proprietary product is remotely complete through
+**PR113B — World-Class Product Finish**. PR113B closed at exact tested head
+`f10008d8330c2dc29f195163c56cf4723fc16a6c` with Debug/Release builds,
+targeted product-finish tests, full cumulative XCTest, and a fail-closed
+remote-readiness artifact.
 
-The earlier **PR102 integration and commercial-release preparation** delivered
-the remote release-candidate foundation. That milestone did **not** satisfy
-physical hardware/acoustic acceptance, production signing, TestFlight/App
-Review or public-release authorization. Those remain later gates, as does
-live speaker-connected feed-forward ANC safety qualification.
+PR114 is the final commercial release-candidate reconciliation milestone. It
+revalidates the complete shipping tree against App Store/privacy/security,
+licensing/provenance/dependency, packaging/archive, commercial metadata and
+release-handoff requirements.
 
-Upcoming roadmap milestones: PR110 advanced speaker/subwoofer placement,
-PR111 automatic protected per-driver correction, PR112 physical acceptance,
-PR113 UX polish, PR114 commercial release-candidate preparation.
+The stacked PRs deliberately remain open, draft and unmerged while the owner is
+away from the Mac/audio system. PR112 physical H01–H08 acceptance, production
+Apple signing, App Store Connect/TestFlight/App Review and public-release
+authorization remain genuine external gates; remote CI cannot satisfy them.
 
 ## Current product boundary
 
