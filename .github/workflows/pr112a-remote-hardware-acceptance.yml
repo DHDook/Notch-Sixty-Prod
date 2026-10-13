@@ -80,6 +80,7 @@ jobs:
           -only-testing:NotchSixtyTests/HardwareAcceptanceTests
           -only-testing:NotchSixtyTests/HardwareAcceptanceEvidenceAdapterTests
           -only-testing:NotchSixtyTests/HardwareAcceptancePreflightTests
+          -only-testing:NotchSixtyTests/HardwareAcceptanceReportTests
           test
 
       - name: Build unsigned arm64 Release app
