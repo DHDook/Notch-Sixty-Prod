@@ -442,11 +442,7 @@ struct ProductionMetersView: View {
                 Text(headroomAssistantPhaseLabel)
                     .font(.caption.bold())
                     .tracking(0.8)
-                    .foregroundStyle(
-                        assistant.phase == .invalidated
-                            ? .orange
-                            : .secondary
-                    )
+                    .foregroundStyle(.secondary)
             }
 
             if assistant.isObserving {
@@ -565,11 +561,7 @@ struct ProductionMetersView: View {
                                 error.localizedDescription
                         }
                     }
-                    .buttonStyle(
-                        assistant.phase == .idle
-                            ? .borderedProminent
-                            : .bordered
-                    )
+                    .buttonStyle(.borderedProminent)
                     .disabled(
                         engine.lifecycleState != .running
                     )
@@ -630,7 +622,10 @@ struct ProductionMetersView: View {
         case .currentReserveSufficient:
             return "This observation does not justify adding attenuation. Existing reserve is left unchanged."
         case .recommendAdditionalAttenuation:
-            return "Recommend \(recommendation.additionalAttenuationDB, specifier: "%.1f") dB of additional reserve."
+            return String(
+                format: "Recommend %.1f dB of additional reserve.",
+                recommendation.additionalAttenuationDB
+            )
         case .rangeLimited:
             return "Recommendation reaches the −48 dB headroom limit; review the wider gain structure."
         }
