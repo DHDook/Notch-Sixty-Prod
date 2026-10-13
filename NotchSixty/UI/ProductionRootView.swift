@@ -30,6 +30,7 @@ enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
     case roomCorrection
     case activeAcoustics
     case roomAdvisor
+    case hardwareAcceptance
     case plugins
 
     static let playback: [ProductionSection] = [
@@ -49,6 +50,7 @@ enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
 
     static let tools: [ProductionSection] = [
         .roomAdvisor,
+        .hardwareAcceptance,
     ]
 
     static let extensions: [ProductionSection] = [
@@ -70,6 +72,7 @@ enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
         case .roomCorrection: return "Room Correction"
         case .activeAcoustics: return "Active Acoustics"
         case .roomAdvisor: return "Room Advisor"
+        case .hardwareAcceptance: return "Hardware Acceptance"
         case .plugins: return "Plug-ins"
         }
     }
@@ -87,6 +90,7 @@ enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
         case .roomCorrection: return "waveform.badge.magnifyingglass"
         case .activeAcoustics: return "waveform.and.mic"
         case .roomAdvisor: return "wand.and.stars.inverse"
+        case .hardwareAcceptance: return "checkmark.shield.fill"
         case .plugins: return "puzzlepiece.extension"
         }
     }
@@ -294,6 +298,12 @@ struct ProductionRootView: View {
             ProductionRoomTreatmentAdvisorWorkspace(
                 advisor: product.roomTreatmentAdvisor
             )
+        case .hardwareAcceptance:
+            ProductionHardwareAcceptanceWorkspace(
+                engine: engine,
+                profiles: product.profiles,
+                acceptance: product.hardwareAcceptance
+            )
         case .plugins:
             ProductionPluginWorkspace(product: product)
         }
@@ -314,6 +324,16 @@ struct ProductionRootView: View {
                 .glassEffect(.regular, in: .capsule)
             } else {
                 ProductionProfileToolbar(product: product)
+
+                if selection == .hardwareAcceptance {
+                    Label(
+                        "Hardware Acceptance · Evidence Only",
+                        systemImage: "lock.shield"
+                    )
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                }
 
                 if let output = engine.selectedOutputDevice {
                     HStack(spacing: 5) {

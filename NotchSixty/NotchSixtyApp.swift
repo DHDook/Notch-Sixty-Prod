@@ -74,6 +74,7 @@ final class ProductController: ObservableObject {
     let roomTreatmentAdvisor: RoomTreatmentAdvisorController
     let ambientCompensation: AmbientCompensationController
     let activeQuietZone: ActiveQuietZoneController
+    let hardwareAcceptance: HardwareAcceptanceController
     private var audioEngineObservation: AnyCancellable?
     private var calibrationObservation: AnyCancellable?
     private var multichannelCalibrationObservation: AnyCancellable?
@@ -117,6 +118,7 @@ final class ProductController: ObservableObject {
             profiles: profiles,
             ambient: ambientCompensation
         )
+        self.hardwareAcceptance = HardwareAcceptanceController()
         observeAudioEngine()
     }
 
@@ -155,6 +157,7 @@ final class ProductController: ObservableObject {
             profiles: profiles,
             ambient: ambientCompensation
         )
+        self.hardwareAcceptance = HardwareAcceptanceController()
         observeAudioEngine()
     }
 
@@ -184,6 +187,7 @@ final class ProductController: ObservableObject {
         multichannelCalibration.prepareForUse()
         ambientCompensation.prepareForUse()
         activeQuietZone.prepareForUse()
+        hardwareAcceptance.prepareForUse()
     }
 
     func startProcessing() async throws {

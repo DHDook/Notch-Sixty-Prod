@@ -266,6 +266,16 @@
 		F92000000000000000000002 /* RoomTreatmentAdvisorController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F92000000000000000000012 /* RoomTreatmentAdvisorController.swift */; };
 		F92000000000000000000003 /* ProductionRoomTreatmentAdvisorWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = F92000000000000000000013 /* ProductionRoomTreatmentAdvisorWorkspace.swift */; };
 		F92000000000000000000004 /* RoomTreatmentAdvisorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F92000000000000000000014 /* RoomTreatmentAdvisorTests.swift */; };
+		F112A0000000000000000001 /* HardwareAcceptance.swift in Sources */ = {isa = PBXBuildFile; fileRef = F112A0000000000000000011 /* HardwareAcceptance.swift */; };
+		F112A0000000000000000002 /* HardwareAcceptanceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F112A0000000000000000012 /* HardwareAcceptanceController.swift */; };
+		F112A0000000000000000003 /* ProductionHardwareAcceptanceWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = F112A0000000000000000013 /* ProductionHardwareAcceptanceWorkspace.swift */; };
+		F112A0000000000000000005 /* HardwareAcceptanceEvidenceAdapters.swift in Sources */ = {isa = PBXBuildFile; fileRef = F112A0000000000000000015 /* HardwareAcceptanceEvidenceAdapters.swift */; };
+		F112A0000000000000000004 /* HardwareAcceptanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F112A0000000000000000014 /* HardwareAcceptanceTests.swift */; };
+		F112A0000000000000000006 /* HardwareAcceptanceEvidenceAdapterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F112A0000000000000000016 /* HardwareAcceptanceEvidenceAdapterTests.swift */; };
+		F112A0000000000000000007 /* HardwareAcceptancePreflight.swift in Sources */ = {isa = PBXBuildFile; fileRef = F112A0000000000000000017 /* HardwareAcceptancePreflight.swift */; };
+		F112A0000000000000000008 /* HardwareAcceptancePreflightTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F112A0000000000000000018 /* HardwareAcceptancePreflightTests.swift */; };
+		F112A0000000000000000009 /* HardwareAcceptanceReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F112A0000000000000000019 /* HardwareAcceptanceReport.swift */; };
+		F112A000000000000000000A /* HardwareAcceptanceReportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F112A000000000000000001A /* HardwareAcceptanceReportTests.swift */; };
 		F93000000000000000000001 /* RoomGeometryPlacement.swift in Sources */ = {isa = PBXBuildFile; fileRef = F93000000000000000000011 /* RoomGeometryPlacement.swift */; };
 		F93000000000000000000002 /* ProductionRoomGeometrySection.swift in Sources */ = {isa = PBXBuildFile; fileRef = F93000000000000000000012 /* ProductionRoomGeometrySection.swift */; };
 		F93000000000000000000003 /* RoomGeometryPlacementTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F93000000000000000000013 /* RoomGeometryPlacementTests.swift */; };
@@ -565,6 +575,16 @@
 		F92000000000000000000012 /* RoomTreatmentAdvisorController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomTreatmentAdvisorController.swift; sourceTree = "<group>"; };
 		F92000000000000000000013 /* ProductionRoomTreatmentAdvisorWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionRoomTreatmentAdvisorWorkspace.swift; sourceTree = "<group>"; };
 		F92000000000000000000014 /* RoomTreatmentAdvisorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomTreatmentAdvisorTests.swift; sourceTree = "<group>"; };
+		F112A0000000000000000011 /* HardwareAcceptance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Acceptance/HardwareAcceptance.swift; sourceTree = "<group>"; };
+		F112A0000000000000000012 /* HardwareAcceptanceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Acceptance/HardwareAcceptanceController.swift; sourceTree = "<group>"; };
+		F112A0000000000000000015 /* HardwareAcceptanceEvidenceAdapters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Acceptance/HardwareAcceptanceEvidenceAdapters.swift; sourceTree = "<group>"; };
+		F112A0000000000000000013 /* ProductionHardwareAcceptanceWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionHardwareAcceptanceWorkspace.swift; sourceTree = "<group>"; };
+		F112A0000000000000000014 /* HardwareAcceptanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HardwareAcceptanceTests.swift; sourceTree = "<group>"; };
+		F112A0000000000000000016 /* HardwareAcceptanceEvidenceAdapterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HardwareAcceptanceEvidenceAdapterTests.swift; sourceTree = "<group>"; };
+		F112A0000000000000000017 /* HardwareAcceptancePreflight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Acceptance/HardwareAcceptancePreflight.swift; sourceTree = "<group>"; };
+		F112A0000000000000000018 /* HardwareAcceptancePreflightTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HardwareAcceptancePreflightTests.swift; sourceTree = "<group>"; };
+		F112A0000000000000000019 /* HardwareAcceptanceReport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Acceptance/HardwareAcceptanceReport.swift; sourceTree = "<group>"; };
+		F112A000000000000000001A /* HardwareAcceptanceReportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HardwareAcceptanceReportTests.swift; sourceTree = "<group>"; };
 		F93000000000000000000011 /* RoomGeometryPlacement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomGeometryPlacement.swift; sourceTree = "<group>"; };
 		F93000000000000000000012 /* ProductionRoomGeometrySection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionRoomGeometrySection.swift; sourceTree = "<group>"; };
 		F93000000000000000000013 /* RoomGeometryPlacementTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomGeometryPlacementTests.swift; sourceTree = "<group>"; };
@@ -598,6 +618,11 @@
 				A20000000000000000000050 /* Audio */,
 				A20000000000000000000054 /* State */,
 				A20000000000000000000055 /* Diagnostics */,
+				F112A0000000000000000011 /* HardwareAcceptance.swift */,
+				F112A0000000000000000012 /* HardwareAcceptanceController.swift */,
+				F112A0000000000000000015 /* HardwareAcceptanceEvidenceAdapters.swift */,
+				F112A0000000000000000017 /* HardwareAcceptancePreflight.swift */,
+				F112A0000000000000000019 /* HardwareAcceptanceReport.swift */,
 				A40000000000000000000050 /* UI */,
 				A10000000000000000000020 /* NotchSixtyApp.swift */,
 				A10000000000000000000021 /* ContentView.swift */,
@@ -717,6 +742,10 @@
 				F10600000000000000000034 /* SpeakerMeasurementLabUIModelTests.swift */,
 				F92000000000000000000014 /* RoomTreatmentAdvisorTests.swift */,
 				F93000000000000000000013 /* RoomGeometryPlacementTests.swift */,
+				F112A0000000000000000014 /* HardwareAcceptanceTests.swift */,
+				F112A0000000000000000016 /* HardwareAcceptanceEvidenceAdapterTests.swift */,
+				F112A0000000000000000018 /* HardwareAcceptancePreflightTests.swift */,
+				F112A000000000000000001A /* HardwareAcceptanceReportTests.swift */,
 				F94000000000000000000014 /* RoomTreatmentDesignVerificationTests.swift */,
 				F95000000000000000000012 /* ActiveQuietZoneSpatialTests.swift */,
 			);
@@ -885,7 +914,7 @@
 			path = Realtime;
 			sourceTree = "<group>";
 		};
-		A40000000000000000000050 /* UI */ = {isa = PBXGroup; children = (A40000000000000000000020 /* ProductionRootView.swift */, A40000000000000000000021 /* ProductionEqualizerView.swift */, A40000000000000000000022 /* ProductionDynamicsView.swift */, A40000000000000000000023 /* ProductionDynamicsTelemetryView.swift */, A40000000000000000000024 /* ProductionMetersView.swift */, A40000000000000000000025 /* ProductionAnalysisViews.swift */, A40000000000000000000026 /* ProductionProfileToolbar.swift */, F65000000000000000000015 /* ProductionHeadphoneWorkspace.swift */, F64000000000000000000015 /* ProductionMultichannelCalibrationWorkspace.swift */,F64000000000000000000015 /* ProductionMultichannelCalibrationWorkspace.swift */, F10600000000000000000035 /* ProductionSpeakerMeasurementLabWorkspace.swift */, A40000000000000000000027 /* ProductionRoomCorrectionWorkspace.swift */, F78000000000000000000011 /* ProductionActiveAcousticsWorkspace.swift */, F92000000000000000000013 /* ProductionRoomTreatmentAdvisorWorkspace.swift */, F96000000000000000000013 /* ProductionFeedForwardReadinessCard.swift */, F93000000000000000000012 /* ProductionRoomGeometrySection.swift */, F94000000000000000000013 /* ProductionRoomTreatmentDesignSection.swift */, F78000000000000000000012 /* ProductionPluginWorkspace.swift */,); path = UI; sourceTree = "<group>"; };
+		A40000000000000000000050 /* UI */ = {isa = PBXGroup; children = (A40000000000000000000020 /* ProductionRootView.swift */, A40000000000000000000021 /* ProductionEqualizerView.swift */, A40000000000000000000022 /* ProductionDynamicsView.swift */, A40000000000000000000023 /* ProductionDynamicsTelemetryView.swift */, A40000000000000000000024 /* ProductionMetersView.swift */, A40000000000000000000025 /* ProductionAnalysisViews.swift */, A40000000000000000000026 /* ProductionProfileToolbar.swift */, F65000000000000000000015 /* ProductionHeadphoneWorkspace.swift */, F64000000000000000000015 /* ProductionMultichannelCalibrationWorkspace.swift */,F64000000000000000000015 /* ProductionMultichannelCalibrationWorkspace.swift */, F10600000000000000000035 /* ProductionSpeakerMeasurementLabWorkspace.swift */, A40000000000000000000027 /* ProductionRoomCorrectionWorkspace.swift */, F78000000000000000000011 /* ProductionActiveAcousticsWorkspace.swift */, F92000000000000000000013 /* ProductionRoomTreatmentAdvisorWorkspace.swift */, F96000000000000000000013 /* ProductionFeedForwardReadinessCard.swift */, F93000000000000000000012 /* ProductionRoomGeometrySection.swift */, F94000000000000000000013 /* ProductionRoomTreatmentDesignSection.swift */, F78000000000000000000012 /* ProductionPluginWorkspace.swift */, F112A0000000000000000013 /* ProductionHardwareAcceptanceWorkspace.swift */,); path = UI; sourceTree = "<group>"; };
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -961,6 +990,12 @@
 				F65000000000000000000005 /* ProductionHeadphoneWorkspace.swift in Sources */,
 				F78000000000000000000001 /* ProductionActiveAcousticsWorkspace.swift in Sources */,
 				F78000000000000000000002 /* ProductionPluginWorkspace.swift in Sources */,
+				F112A0000000000000000001 /* HardwareAcceptance.swift in Sources */,
+				F112A0000000000000000002 /* HardwareAcceptanceController.swift in Sources */,
+				F112A0000000000000000005 /* HardwareAcceptanceEvidenceAdapters.swift in Sources */,
+				F112A0000000000000000007 /* HardwareAcceptancePreflight.swift in Sources */,
+				F112A0000000000000000009 /* HardwareAcceptanceReport.swift in Sources */,
+				F112A0000000000000000003 /* ProductionHardwareAcceptanceWorkspace.swift in Sources */,
 				A20000000000000000000010 /* AudioIOEngine.swift in Sources */,
 				A20000000000000000000011 /* CoreAudioError.swift in Sources */,
 				F63000000000000000000001 /* CoreAudioNChannelTransportSession.swift in Sources */,
@@ -1219,6 +1254,10 @@
 				F10600000000000000000024 /* SpeakerMeasurementLabUIModelTests.swift in Sources */,
 				F92000000000000000000004 /* RoomTreatmentAdvisorTests.swift in Sources */,
 				F93000000000000000000003 /* RoomGeometryPlacementTests.swift in Sources */,
+				F112A0000000000000000004 /* HardwareAcceptanceTests.swift in Sources */,
+				F112A0000000000000000006 /* HardwareAcceptanceEvidenceAdapterTests.swift in Sources */,
+				F112A0000000000000000008 /* HardwareAcceptancePreflightTests.swift in Sources */,
+				F112A000000000000000000A /* HardwareAcceptanceReportTests.swift in Sources */,
 				F94000000000000000000004 /* RoomTreatmentDesignVerificationTests.swift in Sources */,
 				F95000000000000000000002 /* ActiveQuietZoneSpatialTests.swift in Sources */,
 			);
