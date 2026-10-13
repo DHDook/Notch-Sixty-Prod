@@ -2071,6 +2071,91 @@ final class AudioIOEngine: ObservableObject {
         try applyGainConfiguration(updated)
     }
 
+    /// Applies a Headroom Assistant recommendation through the same
+    /// sample-domain silent-boundary transition used for other click-sensitive
+    /// structural graph changes. This changes only the existing headroom gain;
+    /// it does not save/overwrite the selected Content Preset.
+    func transitionHeadroomAttenuationDB(_ value: Double) throws {
+        guard value.isFinite,
+              DSPGainConfiguration.headroomAttenuationRange
+                .contains(value) else {
+            throw DSPGainConfigurationError
+                .invalidHeadroomAttenuation(value)
+        }
+
+        var updated = gainConfiguration
+        updated.headroomAttenuationDB = value
+
+        if immutableSemanticTransportActive,
+           updated != gainConfiguration {
+            throw LiveNChannelTransportError
+                .configurationChangeRequiresRestart
+        }
+
+        let clampedAmbientTarget =
+            ambientTargetClampedToHeadroom(
+                ambientCompensationRuntimeTarget,
+                gainConfiguration: updated
+            )
+        let candidateQuietZone =
+            activeQuietZoneTargetAfterHeadroomChange(
+                activeQuietZoneRuntimeTarget,
+                gainConfiguration: updated,
+                ambientTarget: clampedAmbientTarget
+            )
+
+        if let session = transportSession {
+            var graph = try stereoEQConfiguration
+                .makeGraphSnapshot(
+                    sampleRate:
+                        session.outputFormat.sampleRate,
+                    gainConfiguration: updated,
+                    bassManagementConfiguration:
+                        renderBassManagementConfiguration(),
+                    dynamicsConfiguration:
+                        dynamicsConfiguration,
+                    playbackConfiguration:
+                        playbackControlConfiguration,
+                    masterGainLinear:
+                        currentMasterSoftwareGain
+                )
+            try attachActiveEQFIRProgramIfNeeded(
+                to: &graph,
+                stereoConfiguration:
+                    stereoEQConfiguration,
+                playbackConfiguration:
+                    playbackControlConfiguration
+            )
+            try attachActiveRoomCorrectionProgramIfNeeded(
+                to: &graph,
+                playbackConfiguration:
+                    playbackControlConfiguration
+            )
+            try attachActiveSpeakerIRProgramIfNeeded(
+                to: &graph,
+                playbackConfiguration:
+                    playbackControlConfiguration
+            )
+            try applyAudioUnitRackLatency(to: &graph)
+            try attachAmbientCompensation(
+                clampedAmbientTarget,
+                to: &graph
+            )
+            try attachActiveQuietZone(
+                candidateQuietZone,
+                to: &graph
+            )
+            try session.transitionDSPGraph(graph)
+        }
+
+        gainConfiguration = updated
+        ambientCompensationRuntimeTarget =
+            clampedAmbientTarget
+        activeQuietZoneRuntimeTarget =
+            candidateQuietZone
+        lastErrorDescription = nil
+    }
+
     func setHeadroomAttenuationDB(_ value: Double) throws {
         guard value.isFinite, DSPGainConfiguration.headroomAttenuationRange.contains(value) else {
             throw DSPGainConfigurationError.invalidHeadroomAttenuation(value)
