@@ -267,6 +267,8 @@ for token in (
     "func impulseWAVData(",
     "magnitude_domain=transfer_function_db_not_absolute_spl",
     "WAVE_FORMAT_IEEE_FLOAT",
+    'Locale(identifier: "en_US_POSIX")',
+    'appendASCII("fact", to: &data)',
 ):
     assert token in lab_report, (
         f"PR113B Slice 4 full-fidelity Lab exporter missing {token}"
@@ -309,6 +311,7 @@ for token in (
     "testDetailedCSVsPreserveTransferAndImpulseSamples",
     "testFRDPreservesTransferGridWithoutClaimingAbsoluteSPL",
     "testImpulseWAVIsMonoFloat32AtCaptureRate",
+    "testDetailedNumericExportsUsePOSIXDecimalPoint",
 ):
     assert token in lab_tests, (
         f"PR113B Slice 4 Lab export regression missing {token}"
