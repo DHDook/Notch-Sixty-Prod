@@ -19,7 +19,7 @@ enum HardwareAcceptanceEvidenceAuthority:
 }
 
 enum HardwareAcceptanceGateID:
-    String, Codable, CaseIterable, Sendable {
+    String, Codable, CaseIterable, Hashable, Sendable {
     case h01DeviceLifecycleRecovery = "H01"
     case h02ThermalResourceSpeakerSafety = "H02"
     case h03MeasurementBaselines = "H03"
@@ -31,7 +31,7 @@ enum HardwareAcceptanceGateID:
 }
 
 enum HardwareAcceptanceCapability:
-    String, Codable, CaseIterable, Sendable {
+    String, Codable, CaseIterable, Hashable, Sendable {
     case protectedSplitDriverMeasurement
     case coherentIndependentSubAlignment
     case liveFeedForwardANC
