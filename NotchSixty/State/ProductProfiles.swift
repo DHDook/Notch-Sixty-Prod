@@ -634,11 +634,99 @@ struct PlaybackSystemProfile: Identifiable, Codable, Equatable, Sendable {
     }
 }
 
+
+struct PlaybackSystemHardwareMappingRequirement:
+    Identifiable, Codable, Equatable, Sendable {
+    var systemProfileID: UUID
+    var importedDeviceUIDs: [String]
+    var createdAt: Date
+
+    var id: UUID { systemProfileID }
+
+    init(
+        systemProfileID: UUID,
+        importedDeviceUIDs: [String],
+        createdAt: Date = Date()
+    ) {
+        self.systemProfileID = systemProfileID
+        self.importedDeviceUIDs = Array(Set(importedDeviceUIDs))
+            .sorted()
+        self.createdAt = createdAt
+    }
+}
+
+struct ProductProfileBackupSnapshot: Codable, Equatable, Sendable {
+    static let currentSchemaVersion = 1
+
+    var schemaVersion: Int
+    var contentPresets: [ContentPreset]
+    var systemProfiles: [PlaybackSystemProfile]
+    var selectedContentPresetID: UUID?
+    var selectedSystemProfileID: UUID?
+    var hardwareMappingRequirements:
+        [PlaybackSystemHardwareMappingRequirement]
+
+    init(
+        schemaVersion: Int = ProductProfileBackupSnapshot.currentSchemaVersion,
+        contentPresets: [ContentPreset],
+        systemProfiles: [PlaybackSystemProfile],
+        selectedContentPresetID: UUID?,
+        selectedSystemProfileID: UUID?,
+        hardwareMappingRequirements:
+            [PlaybackSystemHardwareMappingRequirement] = []
+    ) {
+        self.schemaVersion = schemaVersion
+        self.contentPresets = contentPresets
+        self.systemProfiles = systemProfiles
+        self.selectedContentPresetID = selectedContentPresetID
+        self.selectedSystemProfileID = selectedSystemProfileID
+        self.hardwareMappingRequirements = hardwareMappingRequirements
+    }
+}
+
+extension PlaybackSystemState {
+    var referencedHardwareDeviceUIDs: Set<String> {
+        var result = Set<String>()
+
+        func include(_ value: String?) {
+            guard let value else { return }
+            let trimmed = value.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            )
+            if !trimmed.isEmpty {
+                result.insert(trimmed)
+            }
+        }
+
+        include(associatedOutputUID)
+
+        if let routing = outputRouting {
+            include(routing.referenceDeviceUID)
+            for route in routing.routes {
+                include(route.destination.deviceUID)
+            }
+        }
+
+        if let outputProfile = outputDeviceProfile {
+            include(outputProfile.referenceDeviceUID)
+            result.formUnion(outputProfile.requiredDeviceUIDs)
+        }
+
+        if let headphone = headphoneDeviceProfile {
+            include(headphone.outputDeviceUID)
+            include(headphone.programSourceDeviceUID)
+        }
+
+        return result
+    }
+}
+
 enum ProductProfileError: Error, LocalizedError {
     case outputChangeRequiresIdle(profile: String)
     case persistenceVersion(Int)
     case roomCorrectionCalibrationVersion(Int)
     case selectedSystemProfileRequired
+    case hardwareMappingRequired(profile: String)
 
     var errorDescription: String? {
         switch self {
@@ -650,6 +738,8 @@ enum ProductProfileError: Error, LocalizedError {
             return "Room-correction calibration metadata uses unsupported schema version \(version)."
         case .selectedSystemProfileRequired:
             return "Select a Playback System before changing deployed room correction."
+        case .hardwareMappingRequired(let profile):
+            return "(profile) was restored from a backup and still references hardware that is not available on this Mac. Review its output mapping before activation."
         }
     }
 }
@@ -657,13 +747,15 @@ enum ProductProfileError: Error, LocalizedError {
 @MainActor
 final class ProductProfileController: ObservableObject {
     private struct Archive: Codable {
-        static let currentSchemaVersion = 2
+        static let currentSchemaVersion = 3
         var schemaVersion: Int = currentSchemaVersion
         var contentPresets: [ContentPreset]?
         var userContentPresets: [ContentPreset]?
         var systemProfiles: [PlaybackSystemProfile]
         var selectedContentPresetID: UUID?
         var selectedSystemProfileID: UUID?
+        var hardwareMappingRequirements:
+            [PlaybackSystemHardwareMappingRequirement]?
     }
 
     private static let referencePresetID = UUID(uuidString: "6A782AB6-492B-46C9-A0A0-000000000001")!
@@ -958,6 +1050,8 @@ final class ProductProfileController: ObservableObject {
     @Published private(set) var systemProfiles: [PlaybackSystemProfile] = []
     @Published private(set) var selectedContentPresetID: UUID?
     @Published private(set) var selectedSystemProfileID: UUID?
+    @Published private(set) var hardwareMappingRequirements:
+        [PlaybackSystemHardwareMappingRequirement] = []
     @Published private(set) var lastErrorDescription: String?
 
     init(
@@ -1003,6 +1097,20 @@ final class ProductProfileController: ObservableObject {
     }
     var canOverwriteSelectedContentPreset: Bool { selectedContentPreset != nil }
 
+    var selectedSystemHardwareMappingRequirement:
+        PlaybackSystemHardwareMappingRequirement? {
+        guard let selectedSystemProfileID else { return nil }
+        return hardwareMappingRequirement(for: selectedSystemProfileID)
+    }
+
+    func hardwareMappingRequirement(
+        for systemProfileID: UUID
+    ) -> PlaybackSystemHardwareMappingRequirement? {
+        hardwareMappingRequirements.first {
+            $0.systemProfileID == systemProfileID
+        }
+    }
+
     var selectedContentPresetIsDirty: Bool {
         guard let preset = selectedContentPreset else { return true }
         return preset.state != captureContentState()
@@ -1025,6 +1133,11 @@ final class ProductProfileController: ObservableObject {
         didRestoreSelection = true
         do {
             if let system = selectedSystemProfile {
+                guard hardwareMappingRequirement(for: system.id) == nil else {
+                    throw ProductProfileError.hardwareMappingRequired(
+                        profile: system.name
+                    )
+                }
                 try applySystemState(system.state, profileName: system.name)
             }
             if let preset = selectedContentPreset {
@@ -1102,7 +1215,20 @@ final class ProductProfileController: ObservableObject {
     }
 
     func selectSystemProfile(_ id: UUID) {
-        guard let profile = systemProfiles.first(where: { $0.id == id }) else { return }
+        guard let profile = systemProfiles.first(where: { $0.id == id }) else {
+            return
+        }
+        if hardwareMappingRequirement(for: profile.id) != nil {
+            // Safe-select the restored profile so the user can inspect/remap
+            // it, but do not activate any imported hardware-domain state.
+            selectedSystemProfileID = profile.id
+            lastErrorDescription =
+                ProductProfileError.hardwareMappingRequired(
+                    profile: profile.name
+                ).localizedDescription
+            persist()
+            return
+        }
         do {
             try applySystemState(profile.state, profileName: profile.name)
             selectedSystemProfileID = profile.id
@@ -1133,6 +1259,9 @@ final class ProductProfileController: ObservableObject {
         var state = captureSystemState()
         state.associatedOutputUID = association
         systemProfiles[index].state = state
+        hardwareMappingRequirements.removeAll {
+            $0.systemProfileID == selectedSystemProfileID
+        }
         lastErrorDescription = nil
         persist()
     }
@@ -1157,7 +1286,11 @@ final class ProductProfileController: ObservableObject {
     func associateSelectedSystemWithCurrentOutput() {
         guard let selectedSystemProfileID,
               let index = systemProfiles.firstIndex(where: { $0.id == selectedSystemProfileID }) else { return }
-        systemProfiles[index].state.associatedOutputUID = engine.routeConfiguration.selectedOutputUID
+        systemProfiles[index].state.associatedOutputUID =
+            engine.routeConfiguration.selectedOutputUID
+        reevaluateHardwareMappingRequirement(
+            for: selectedSystemProfileID
+        )
         lastErrorDescription = nil
         persist()
     }
@@ -1184,6 +1317,9 @@ final class ProductProfileController: ObservableObject {
         do {
             try engine.replaceMultiOutputRoutingConfiguration(configuration)
             systemProfiles[index].state.outputRouting = configuration
+            reevaluateHardwareMappingRequirement(
+                for: selectedSystemProfileID
+            )
             try persistThrowing()
             lastErrorDescription = nil
         } catch {
@@ -1218,6 +1354,9 @@ final class ProductProfileController: ObservableObject {
         do {
             try engine.replaceOutputDeviceProfileConfiguration(configuration)
             systemProfiles[index].state.outputDeviceProfile = configuration
+            reevaluateHardwareMappingRequirement(
+                for: selectedSystemProfileID
+            )
             try persistThrowing()
             lastErrorDescription = nil
         } catch {
@@ -1248,6 +1387,9 @@ final class ProductProfileController: ObservableObject {
         do {
             try engine.replaceHeadphoneDeviceProfileConfiguration(configuration)
             systemProfiles[index].state.headphoneDeviceProfile = configuration
+            reevaluateHardwareMappingRequirement(
+                for: selectedSystemProfileID
+            )
             try persistThrowing()
             lastErrorDescription = nil
         } catch {
@@ -1598,6 +1740,153 @@ final class ProductProfileController: ObservableObject {
         persist()
     }
 
+    func makeBackupSnapshot() -> ProductProfileBackupSnapshot {
+        ProductProfileBackupSnapshot(
+            contentPresets: userContentPresets,
+            systemProfiles: systemProfiles,
+            selectedContentPresetID: selectedContentPresetID,
+            selectedSystemProfileID: selectedSystemProfileID,
+            hardwareMappingRequirements: hardwareMappingRequirements
+        )
+    }
+
+    @discardableResult
+    func restoreBackupSnapshot(
+        _ snapshot: ProductProfileBackupSnapshot,
+        availableOutputUIDs: Set<String>,
+        recomputeHardwareRequirements: Bool = true,
+        now: Date = Date()
+    ) throws -> [PlaybackSystemHardwareMappingRequirement] {
+        guard snapshot.schemaVersion
+                == ProductProfileBackupSnapshot.currentSchemaVersion else {
+            throw ProductProfileError.persistenceVersion(
+                snapshot.schemaVersion
+            )
+        }
+
+        guard snapshot.contentPresets.allSatisfy({
+            $0.schemaVersion == ContentPreset.currentSchemaVersion
+                && $0.state.schemaVersion
+                    == ContentPresetState.currentSchemaVersion
+        }) else {
+            throw ProductProfileError.persistenceVersion(
+                snapshot.schemaVersion
+            )
+        }
+
+        guard snapshot.systemProfiles.allSatisfy({
+            $0.schemaVersion == PlaybackSystemProfile.currentSchemaVersion
+                && $0.state.schemaVersion
+                    == PlaybackSystemState.currentSchemaVersion
+                && Self.storedSystemTopologyIsValid($0.state)
+        }) else {
+            throw ProductProfileError.persistenceVersion(
+                snapshot.schemaVersion
+            )
+        }
+
+        userContentPresets = snapshot.contentPresets
+        systemProfiles = snapshot.systemProfiles
+
+        if recomputeHardwareRequirements {
+            hardwareMappingRequirements = snapshot.systemProfiles
+                .compactMap { profile in
+                    let referenced =
+                        profile.state.referencedHardwareDeviceUIDs
+                    let missing =
+                        referenced.subtracting(availableOutputUIDs)
+                    guard !missing.isEmpty else { return nil }
+                    return PlaybackSystemHardwareMappingRequirement(
+                        systemProfileID: profile.id,
+                        importedDeviceUIDs: Array(referenced),
+                        createdAt: now
+                    )
+                }
+        } else {
+            hardwareMappingRequirements =
+                snapshot.hardwareMappingRequirements.filter { requirement in
+                    snapshot.systemProfiles.contains {
+                        $0.id == requirement.systemProfileID
+                    }
+                }
+        }
+
+        selectedContentPresetID =
+            snapshot.selectedContentPresetID.flatMap { id in
+                userContentPresets.contains { $0.id == id } ? id : nil
+            }
+
+        selectedSystemProfileID =
+            snapshot.selectedSystemProfileID.flatMap { id in
+                guard systemProfiles.contains(where: { $0.id == id }),
+                      hardwareMappingRequirement(for: id) == nil else {
+                    return nil
+                }
+                return id
+            }
+
+        reconcileSelections()
+        // Never auto-apply imported state during the restore transaction.
+        didRestoreSelection = true
+        try persistThrowing()
+        lastErrorDescription = nil
+        return hardwareMappingRequirements
+    }
+
+    func confirmSelectedSystemHardwareMapping() {
+        guard let selectedSystemProfile else { return }
+        let referenced =
+            selectedSystemProfile.state.referencedHardwareDeviceUIDs
+        let available = Set(engine.outputDevices.map(\.uid))
+        let missing = referenced.subtracting(available)
+        guard missing.isEmpty else {
+            lastErrorDescription =
+                "\(selectedSystemProfile.name) still needs mapping for: "
+                + missing.sorted().joined(separator: ", ")
+            return
+        }
+
+        hardwareMappingRequirements.removeAll {
+            $0.systemProfileID == selectedSystemProfile.id
+        }
+        lastErrorDescription = nil
+        persist()
+    }
+
+    private func reevaluateHardwareMappingRequirement(
+        for systemProfileID: UUID
+    ) {
+        guard let profile = systemProfiles.first(where: {
+            $0.id == systemProfileID
+        }) else {
+            hardwareMappingRequirements.removeAll {
+                $0.systemProfileID == systemProfileID
+            }
+            return
+        }
+
+        let available = Set(engine.outputDevices.map(\.uid))
+        let referenced = profile.state.referencedHardwareDeviceUIDs
+        guard !referenced.subtracting(available).isEmpty else {
+            hardwareMappingRequirements.removeAll {
+                $0.systemProfileID == systemProfileID
+            }
+            return
+        }
+
+        let requirement = PlaybackSystemHardwareMappingRequirement(
+            systemProfileID: systemProfileID,
+            importedDeviceUIDs: Array(referenced)
+        )
+        if let index = hardwareMappingRequirements.firstIndex(where: {
+            $0.systemProfileID == systemProfileID
+        }) {
+            hardwareMappingRequirements[index] = requirement
+        } else {
+            hardwareMappingRequirements.append(requirement)
+        }
+    }
+
     private func reconcileSelections() {
         if let selectedContentPresetID,
            !contentPresets.contains(where: { $0.id == selectedContentPresetID }) {
@@ -1699,7 +1988,7 @@ final class ProductProfileController: ObservableObject {
             switch archive.schemaVersion {
             case 1:
                 storedContent = Self.factoryContentPresets + (archive.userContentPresets ?? [])
-            case Archive.currentSchemaVersion:
+            case 2, Archive.currentSchemaVersion:
                 storedContent = archive.contentPresets ?? []
             default:
                 throw ProductProfileError.persistenceVersion(archive.schemaVersion)
@@ -1718,6 +2007,19 @@ final class ProductProfileController: ObservableObject {
             }
             selectedContentPresetID = archive.selectedContentPresetID
             selectedSystemProfileID = archive.selectedSystemProfileID
+            hardwareMappingRequirements =
+                (archive.hardwareMappingRequirements ?? []).filter {
+                    requirement in
+                    systemProfiles.contains {
+                        $0.id == requirement.systemProfileID
+                    }
+                }
+            if let selectedSystemProfileID,
+               hardwareMappingRequirement(
+                    for: selectedSystemProfileID
+               ) != nil {
+                self.selectedSystemProfileID = nil
+            }
             didLoadArchive = true
             if archive.schemaVersion < Archive.currentSchemaVersion {
                 persist()
@@ -1743,7 +2045,9 @@ final class ProductProfileController: ObservableObject {
             userContentPresets: nil,
             systemProfiles: systemProfiles,
             selectedContentPresetID: selectedContentPresetID,
-            selectedSystemProfileID: selectedSystemProfileID
+            selectedSystemProfileID: selectedSystemProfileID,
+            hardwareMappingRequirements:
+                hardwareMappingRequirements
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
