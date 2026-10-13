@@ -1,6 +1,6 @@
 # PR111 — Automatic Per-Driver Speaker Optimization
 
-**Status: Slices 1–2 remote CI passed; Slice 3 implemented, exact-head CI pending; physical commissioning deferred.**
+**Status: Slices 1–2 remote CI passed; Slices 3–4 implemented, exact-head CI pending; physical commissioning deferred.**
 
 **REMOTE SOFTWARE ONLY.** All existing PRs remain draft, open and unmerged;
 no live Apply, hardware acceptance, App Store release or change to `main`.
@@ -140,10 +140,48 @@ Apply must require fresh real measurements and rollback. The electrical
 reference authenticates relative per-sweep timing only; it does not certify
 absolute DAC/ADC latency or exposed-driver hardware safety.
 
-**Slice 4 — Combined-driver crossover summation verification.** Model and
-eventually verify aggregate response with safely captured pairs and
-protected drivers. Recommend adjustments, never weaken mandatory crossover
-slopes or overdrive a raw driver. Explicit rollback on failed verification.
+**Slice 4 — Reference-aligned crossover-sum model & verification gate
+(implemented, exact-head CI pending).** The protected adjacent-driver
+captures from Slice 3 are now combined mathematically in the complex domain
+around their active crossover. Each driver transfer is normalized by its
+simultaneous electrical reference before repeat averaging, preserving the
+measured relative acoustic timing and phase while removing sweep/reference
+path variation.
+
+For the current protected state, the analyzer computes a **mean coherence
+deficit**: the dB shortfall between the ideal magnitude sum of the two
+measured drivers and their complex vector sum. This is a narrow cancellation
+diagnostic around the crossover, not a target curve, SPL prediction,
+anechoic response, or listening-quality score.
+
+The model compares only hypotheses already bounded by Slice 3:
+- retain current protected state;
+- add the Slice-3 bounded delay to the measured earlier driver;
+- compare inversion of the second adjacent driver *only when* Slice 3 found
+  a strong residual-phase basis for that hypothesis;
+- or the combined bounded-delay + inversion case.
+
+A candidate must reduce modeled crossover coherence deficit by at least
+0.25 dB before it is surfaced as the preferred model; otherwise the model
+retains the current state. No arbitrary delay search, phase rotation, PEQ
+application, crossover redesign, limiter change, or amplitude boost occurs.
+
+The Measurement Lab report now shows current versus candidate modeled
+deficit, modeled reduction, selected hypothesis, crossover and shared point
+count. The status is **REVIEW ONLY / Never · model only** and always displays
+**Combined-driver capture: REQUIRED · not yet verified**.
+
+This slice deliberately does **not** claim true crossover verification:
+the two drivers were measured independently. A later real capture with both
+protected drivers reproducing the exact candidate state is still required
+before any driver delay/polarity/PEQ field may change. `canDeploy=false`,
+`combinedDriverCaptureVerified=false`, and
+`requiresPhysicalCombinedDriverCapture=true` are hard model properties.
+
+New tests cover modeled delay improvement, combined delay/polarity cases,
+missing shared reference, large out-of-bound arrival mismatch, mismatched
+complex grids, Lab report/export labeling and no-deploy behavior. Mandatory
+crossover/limiter state remains authoritative throughout.
 
 **Slice 5 — Guarded Apply/rollback, UI, persistence and remote closeout.**
 Approval must be explicit, state-drift checked, and limited to verified
