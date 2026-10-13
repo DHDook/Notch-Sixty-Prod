@@ -77,6 +77,7 @@ final class ProductController: ObservableObject {
     let activeQuietZone: ActiveQuietZoneController
     let hardwareAcceptance: HardwareAcceptanceController
     let backup: NotchSixtyBackupService
+    let recovery: ProductRecoveryController
     let reference: ProductionReferenceNavigator
     private var audioEngineObservation: AnyCancellable?
     private var calibrationObservation: AnyCancellable?
@@ -84,6 +85,8 @@ final class ProductController: ObservableObject {
     private var ambientCompensationObservation: AnyCancellable?
     private var activeQuietZoneObservation: AnyCancellable?
     private var audioUnitHostObservation: AnyCancellable?
+    private var recoveryObservation: AnyCancellable?
+    private var terminationObservation: AnyCancellable?
 
     init() {
         let audioEngine = AudioIOEngine()
@@ -127,11 +130,17 @@ final class ProductController: ObservableObject {
             profiles: profiles,
             roomStore: roomProjects.store
         )
+        self.recovery = ProductRecoveryController()
         self.reference = ProductionReferenceNavigator()
         observeAudioEngine()
+        observeTermination()
     }
 
-    init(audioEngine: AudioIOEngine) {
+    init(
+        audioEngine: AudioIOEngine,
+        recoveryStore: ProductRecoveryStore =
+            ProductRecoveryStore(storageURL: nil)
+    ) {
         let audioUnitHost = AudioUnitHostController()
         let profiles = ProductProfileController(
             engine: audioEngine,
@@ -172,6 +181,9 @@ final class ProductController: ObservableObject {
             profiles: profiles,
             roomStore: roomProjects.store
         )
+        self.recovery = ProductRecoveryController(
+            store: recoveryStore
+        )
         self.reference = ProductionReferenceNavigator()
         observeAudioEngine()
     }
@@ -194,8 +206,11 @@ final class ProductController: ObservableObject {
     }
 
     func prepareForUse() {
+        recovery.prepareForLaunch()
         audioEngine.prepareForUse()
-        profiles.restoreSelectedLayers()
+        if !recovery.safeLaunchActive {
+            profiles.restoreSelectedLayers()
+        }
         roomCorrectionProjects.prepareForUse()
         roomTreatmentAdvisor.prepareForUse()
         calibration.prepareForUse()
@@ -205,19 +220,118 @@ final class ProductController: ObservableObject {
         hardwareAcceptance.prepareForUse()
     }
 
-    func startProcessing() async throws {
-        let format =
-            try audioEngine.audioUnitRackProcessingFormatForNextStart()
-        await audioUnitHost.prepareActiveSlotsForLive(format: format)
-        let liveRack =
-            try await audioUnitHost.makeLiveRackRuntime(format: format)
-        try audioEngine.stageAudioUnitRackForNextStart(liveRack)
+    func openNormallyFromSafeLaunch() throws {
+        guard audioEngine.lifecycleState == .idle else {
+            throw ProductRecoveryError.invalidState
+        }
+        try profiles.applySelectedLayersNow()
+        recovery.openNormally()
+    }
+
+    func openWithPlugInsBypassedFromSafeLaunch() throws {
+        guard audioEngine.lifecycleState == .idle else {
+            throw ProductRecoveryError.invalidState
+        }
+        try profiles.applySelectedLayersNow()
+        recovery.openWithPlugInsBypassed()
+    }
+
+    func restoreLastKnownGoodFromSafeLaunch() throws {
+        guard audioEngine.lifecycleState == .idle else {
+            throw ProductRecoveryError.invalidState
+        }
+        let previous = profiles.makeBackupSnapshot()
+        let lastKnownGood = try recovery.lastKnownGoodSnapshot()
+
         do {
+            _ = try profiles.restoreBackupSnapshot(
+                lastKnownGood,
+                availableOutputUIDs:
+                    Set(audioEngine.outputDevices.map(\.uid)),
+                recomputeHardwareRequirements: true
+            )
+            try profiles.applySelectedLayersNow()
+            abComparison.clearAll()
+            recovery.resolveAfterLastKnownGoodRestore()
+        } catch {
+            _ = try? profiles.restoreBackupSnapshot(
+                previous,
+                availableOutputUIDs:
+                    Set(audioEngine.outputDevices.map(\.uid)),
+                recomputeHardwareRequirements: false
+            )
+            try? profiles.applySelectedLayersNow()
+            throw error
+        }
+    }
+
+    func startProcessing() async throws {
+        guard !recovery.safeLaunchActive else {
+            throw ProductRecoveryError.safeLaunchDecisionRequired
+        }
+
+        let format: AudioUnitRackProcessingFormat
+        do {
+            format =
+                try audioEngine.audioUnitRackProcessingFormatForNextStart()
+        } catch {
+            recovery.recordStartFailure(
+                .audioStart,
+                description: error.localizedDescription
+            )
+            throw error
+        }
+
+        if recovery.plugInsBypassedForThisLaunch {
+            do {
+                try audioEngine.stageAudioUnitRackForNextStart(nil)
+                try audioEngine.start()
+                recovery.recordSuccessfulStart(
+                    profiles: profiles.makeBackupSnapshot(),
+                    plugInChainHealthy: false
+                )
+                return
+            } catch {
+                recovery.recordStartFailure(
+                    .audioStart,
+                    description: error.localizedDescription
+                )
+                throw error
+            }
+        }
+
+        await audioUnitHost.prepareActiveSlotsForLive(format: format)
+
+        let liveRack: AudioUnitLiveRackRuntime?
+        do {
+            liveRack =
+                try await audioUnitHost.makeLiveRackRuntime(
+                    format: format
+                )
+        } catch {
+            recovery.recordStartFailure(
+                .plugInStart,
+                description: error.localizedDescription
+            )
+            throw error
+        }
+
+        do {
+            try audioEngine.stageAudioUnitRackForNextStart(liveRack)
             try audioEngine.start()
+            recovery.recordSuccessfulStart(
+                profiles: profiles.makeBackupSnapshot(),
+                plugInChainHealthy:
+                    audioUnitHost.quarantinedComponentCount == 0
+            )
         } catch {
             // AudioIOEngine owns any staged live rack until the failed state is
             // explicitly stopped. Do not tear it out from under a transport
             // teardown that may still be completing.
+            recovery.recordStartFailure(
+                .audioStart,
+                description: error.localizedDescription
+            )
             throw error
         }
     }
@@ -295,6 +409,57 @@ final class ProductController: ObservableObject {
         multichannelCalibration.cancelMeasurement()
         calibration.cancelMeasurement()
         audioEngine.shutdownForTermination()
+        recovery.markCleanTermination()
+    }
+
+    func diagnosticsReport(
+        version: String,
+        build: String
+    ) -> String {
+        let output = audioEngine.selectedOutputDevice
+        let kernel =
+            audioEngine.diagnosticsSnapshot().renderKernelDiagnostics
+
+        let outputName = output?.name ?? "None selected"
+        let outputUID = output?.uid ?? "None"
+        let outputRate = output.map {
+            String(
+                format: "%.1f kHz",
+                $0.nominalSampleRate / 1_000.0
+            )
+        } ?? "Unavailable"
+        let latency: String
+        if let kernel, kernel.sampleRate > 0 {
+            latency = String(
+                format: "%u frames / %.3f ms",
+                kernel.latencyFrames,
+                Double(kernel.latencyFrames)
+                    / kernel.sampleRate * 1_000.0
+            )
+        } else {
+            latency = "Unavailable"
+        }
+
+        return ([
+            "Notch Sixty Diagnostics",
+            "Version: \(version) (\(build))",
+            "macOS: \(ProcessInfo.processInfo.operatingSystemVersionString)",
+            "Architecture: Apple Silicon",
+            "Lifecycle: \(audioEngine.lifecycleState.rawValue)",
+            "Output: \(outputName)",
+            "Output UID: \(outputUID)",
+            "Output Rate: \(outputRate)",
+            "Content Preset: \(profiles.selectedContentPresetName)",
+            "Playback System: \(profiles.selectedSystemProfileName)",
+            "Global Bypass: \(audioEngine.playbackControlConfiguration.globalBypassed ? "On" : "Off")",
+            "EQ Phase: \(audioEngine.stereoEQConfiguration.phaseMode.displayName)",
+            "EQ Bands Enabled: \(audioEngine.stereoEQConfiguration.enabledBandCount)",
+            "Bass Management: \(audioEngine.bassManagementConfiguration.enabled ? "On" : "Off")",
+            "Room Correction: \(audioEngine.roomCorrectionConfiguration.enabled ? "On" : "Off")",
+            "DSP Latency: \(latency)",
+            "Quarantined Plug-ins: \(audioUnitHost.quarantinedComponentCount)",
+        ] + recovery.diagnosticsLines())
+            .joined(separator: "\n")
     }
 
     private func observeAudioEngine() {
@@ -316,6 +481,19 @@ final class ProductController: ObservableObject {
         audioUnitHostObservation = audioUnitHost.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
+        recoveryObservation = recovery.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+    }
+
+    private func observeTermination() {
+        terminationObservation = NotificationCenter.default
+            .publisher(for: NSApplication.willTerminateNotification)
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.shutdownForTermination()
+                }
+            }
     }
 }
 
