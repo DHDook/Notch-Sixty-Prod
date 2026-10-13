@@ -84,5 +84,16 @@
     "sbomFormat": "CycloneDX 1.5",
     "deterministicSBOMGeneratedByCI": true,
     "externalLegalIPReviewComplete": false
+  },
+  "packaging": {
+    "unsignedGenericArchivePreflightConfigured": true,
+    "adhocSandboxRCPackageConfigured": true,
+    "exactHeadRCManifestConfigured": true,
+    "remoteRCDMGChecksummed": true,
+    "remoteRCPackageProductionSigned": false,
+    "remoteRCPackageNotarized": false,
+    "remoteRCPackagePublicDistributionReady": false,
+    "manualReleaseDMGLaneProductionSigned": false,
+    "manualReleaseDMGLaneNotarized": false
   }
 }
