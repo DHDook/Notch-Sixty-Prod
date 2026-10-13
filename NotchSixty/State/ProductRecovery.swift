@@ -178,12 +178,14 @@ final class ProductRecoveryController: ObservableObject {
 
         var loaded = ProductRecoveryPersistentState()
         var unreadable = false
+        var readErrorDescription: String?
         do {
             if let existing = try store.load() {
                 loaded = existing
             }
         } catch {
             unreadable = true
+            readErrorDescription = error.localizedDescription
             lastPersistenceErrorDescription =
                 error.localizedDescription
         }
@@ -208,6 +210,13 @@ final class ProductRecoveryController: ObservableObject {
         safeLaunchReasons = Self.uniqueReasons(reasons)
         persistentState.launchSessionOpen = true
         persistNonFatal()
+        if unreadable,
+           let readErrorDescription,
+           lastPersistenceErrorDescription == nil {
+            // Keep the original read failure visible for this launch even
+            // though a clean replacement recovery record was written.
+            lastPersistenceErrorDescription = readErrorDescription
+        }
     }
 
     func openNormally() {
