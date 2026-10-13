@@ -133,6 +133,9 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
             refreshRecentSessions()
             loadDriverCommissioningDraft()
         }
+        .task(id: profiles.selectedSystemProfileID) {
+            loadDriverCommissioningDraft()
+        }
         .fileExporter(
             isPresented: $showingExporter,
             document: exportDocument,
@@ -1064,9 +1067,26 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
             return
         }
         do {
-            driverCommissioningDraft =
-                try driverCommissioningStore.load(sessionID)
-            driverCommissioningMessage = nil
+            let loaded = try driverCommissioningStore.load(sessionID)
+            driverCommissioningDraft = loaded
+            guard let loaded else {
+                driverCommissioningMessage = nil
+                return
+            }
+            guard let profile = profiles.selectedSystemProfile else {
+                driverCommissioningMessage =
+                    "Saved draft retained, but its Playback System is not selected."
+                return
+            }
+            do {
+                try ProtectedDriverCommissioningPlanner()
+                    .validateCurrentState(profile, against: loaded)
+                driverCommissioningMessage =
+                    "Saved draft matches the current Playback System. Apply remains blocked."
+            } catch {
+                driverCommissioningMessage =
+                    "STALE DRAFT · (error.localizedDescription)"
+            }
         } catch {
             driverCommissioningDraft = nil
             driverCommissioningMessage =
