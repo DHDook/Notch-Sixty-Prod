@@ -1,0 +1,88 @@
+name: PR114 Commercial Release Candidate
+
+on:
+  push:
+    branches:
+      - feature/pr114-commercial-release-candidate
+  pull_request:
+    branches:
+      - feature/pr113b-world-class-product-finish
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr114-commercial-release-candidate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate PR114 release baseline
+        run: python3 ci/validate_pr114_release_baseline.py
+
+      - name: Preserve PR113B product-finish contract
+        run: python3 ci/validate_pr113b_ab_foundation.py
+
+      - name: Preserve commercial and App Store foundations
+        run: |
+          set -euo pipefail
+          python3 ci/validate_pr102_release_readiness.py
+          python3 ci/validate_pr102_app_store_boundary.py
+          python3 ci/validate_pr102_dependency_manifest.py
+          python3 ci/validate_pr45_release_hardening.py
+
+  macos:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate PR114 and inherited release contracts
+        run: |
+          set -euo pipefail
+          python3 ci/validate_pr114_release_baseline.py
+          python3 ci/validate_pr113b_ab_foundation.py
+          python3 ci/validate_pr102_release_readiness.py
+          python3 ci/validate_pr102_app_store_boundary.py
+          python3 ci/validate_pr102_dependency_manifest.py
+          python3 ci/validate_pr45_release_hardening.py
+
+      - name: Build unsigned arm64 Debug app
+        run: >-
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
+          -configuration Debug -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES build
+
+      - name: Run product-finish targeted tests
+        run: >-
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
+          -configuration Debug -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES
+          -only-testing:NotchSixtyTests/ProductionInformationArchitectureTests
+          -only-testing:NotchSixtyTests/SpeakerMeasurementLabReportTests
+          test
+
+      - name: Build unsigned arm64 Release app
+        run: >-
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
+          -configuration Release -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO GENERATE_INFOPLIST_FILE=NO
+          INFOPLIST_FILE=NotchSixty/Info.plist build
+
+      - name: Run cumulative XCTest regression
+        run: >-
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
+          -configuration Debug -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES test
