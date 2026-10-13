@@ -21,14 +21,13 @@ Future portability must not materially delay the flagship Mac launch.
 **PR112A — Remote Hardware-Acceptance Infrastructure** is now the active
 remote milestone, stacked on exact-head remote/software-complete PR111.
 
-Slices 1–3 introduce the authoritative H01–H08 physical-acceptance
-domain, guided production workflow, and typed H03–H07 evidence linking: monotonic evidence authority, exact
-campaign/build identity, physical environment metadata, explicit
-topology/release-scope decisions, append-only evidence, corruption-safe
-persistence, human physical/reviewer attestations, and a TOOLS workspace that
-cannot convert CI into physical acceptance. H05 whole-speaker Measurement Lab
-acceptance remains mandatory even when protected split-driver work is excluded
-for a passive speaker topology.
+Slices 1–5 now implement the complete remote PR112A acceptance
+infrastructure: authoritative H01–H08 evidence authority, guided campaign/UI,
+typed H03–H07 evidence links, state/topology preflight including the PR111
+commissioning handoff, and exportable JSON/Markdown acceptance packets with
+artifact manifests and a safety-bounded physical runbook. H05 whole-speaker
+Measurement Lab acceptance remains mandatory even when protected split-driver
+work is excluded for a passive speaker topology.
 
 The dedicated PR112A CI artifact must always retain
 `physicalAcceptanceComplete=false`,
@@ -36,10 +35,10 @@ The dedicated PR112A CI artifact must always retain
 `liveFeedForwardANCAuthorized=false`, and
 `mayMergeIntoMain=false`.
 
-Remaining PR112A remote slices add state/topology preflight for the PR111
-commissioning handoff and exportable acceptance packets. Real unplug/replug, sleep/wake, thermal/endurance,
-speaker safety, calibrated acoustic measurements, combined-driver
-verification and any physical Apply remain hands-on PR112 work.
+PR112A remote implementation is now feature-complete pending exact-head CI.
+Real unplug/replug, sleep/wake, thermal/endurance, speaker safety, calibrated
+acoustic measurements, combined-driver verification, physical driver
+commissioning and any transactional Apply remain hands-on PR112 work.
 
 See `docs/PR112A_REMOTE_HARDWARE_ACCEPTANCE.md`.
 
