@@ -936,4 +936,58 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         }
     }
 
+
+    @MainActor
+    func testLocalOfflineRoutingDoesNotAcquireImportMappingGate()
+        throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let storageURL = root.appendingPathComponent("profiles.json")
+        let profiles = ProductProfileController(
+            engine: AudioIOEngine(),
+            storageURL: storageURL
+        )
+        let routing = MultiOutputRoutingConfiguration(
+            enabled: true,
+            routes: [
+                SpeakerOutputRoute(
+                    name: "Left Main",
+                    bus: .leftFullRange,
+                    destination: PhysicalOutputEndpoint(
+                        deviceUID: "offline-main-dac",
+                        channelIndex: 0
+                    )
+                ),
+                SpeakerOutputRoute(
+                    name: "Right Main",
+                    bus: .rightFullRange,
+                    destination: PhysicalOutputEndpoint(
+                        deviceUID: "offline-main-dac",
+                        channelIndex: 1
+                    )
+                ),
+            ],
+            synchronizationMode: .softwarePLL,
+            referenceDeviceUID: "offline-main-dac"
+        )
+
+        try profiles.replaceSelectedSystemOutputRouting(routing)
+        XCTAssertNil(
+            profiles.selectedSystemHardwareMappingRequirement
+        )
+
+        let restored = ProductProfileController(
+            engine: AudioIOEngine(),
+            storageURL: storageURL
+        )
+        XCTAssertEqual(
+            restored.selectedSystemProfile?.state.outputRouting,
+            routing
+        )
+        XCTAssertNil(
+            restored.selectedSystemHardwareMappingRequirement
+        )
+    }
+
 }
