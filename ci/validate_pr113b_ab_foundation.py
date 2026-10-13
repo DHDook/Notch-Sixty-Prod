@@ -521,6 +521,7 @@ for token in (
     "testHeadroomAssistantUsesLargestReserveNeedPlusClampReserve",
     "testHeadroomAssistantRequiresAuthoritativeRepresentativeEvidence",
     "testHeadroomAssistantRangeLimitFailsConservatively",
+    "testHeadroomAssistantRejectsOpenABAuditionSession",
     "testHeadroomAssistantBoundaryFailsClosedOnContentDrift",
 ):
     assert token in tests, (
