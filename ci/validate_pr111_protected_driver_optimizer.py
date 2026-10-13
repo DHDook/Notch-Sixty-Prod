@@ -102,6 +102,68 @@ for token in (
     "testReportRejectsUnprotectedLimiterCaptureEvenIfGridLooksGood",
 ):
     assert token in tests, f"PR111 Lab report regression missing {token}"
+# Slice 3 — adjacent protected-driver timing/polarity hypotheses require
+# simultaneous shared-clock reference evidence and actual crossover topology.
+for token in (
+    "struct ProtectedDriverTimingRecommendationAnalyzer: Sendable",
+    "ProtectedDriverTimingRecommendation",
+    "SpeakerMeasurementLabSharedClockReferenceConfiguration",
+    "sharedTimeOriginQualified == true",
+    "maximumReferenceArrivalSpreadMilliseconds = 0.25",
+    "maximumReferenceMagnitudeRepeatabilityRMSDB = 0.50",
+    "minimumReferencePhaseConsistency = 0.98",
+    "maximumAdditionalDelayMilliseconds = 2.0",
+    "minimumMeaningfulDelayMilliseconds = 0.05",
+    "sameSpeakerSide(firstBus, secondBus)",
+    "adjacent(firstBus, secondBus, mode: mode)",
+    "mode == .biAmp || mode == .triAmp",
+    "firstProvenance.routingConfiguration",
+    "== secondProvenance.routingConfiguration",
+    "firstProvenance.bassManagementConfiguration",
+    "== secondProvenance.bassManagementConfiguration",
+    "correctedArrival(first)",
+    "correctedArrival(second)",
+    "correctedPhase(",
+    "var measurementOnly: Bool { true }",
+    "var canDeploy: Bool { false }",
+    "var canChangeCrossoverOrLimiter: Bool { false }",
+    "var requiresCombinedDriverVerification: Bool { true }",
+):
+    assert token in source, f"PR111 protected timing guard missing {token}"
+
+for forbidden in (
+    "polarityInverted =",
+    "delayMilliseconds =",
+    "setSpeakerDriverProcessing",
+    "makeRealtimeSnapshot(",
+):
+    timing = source.split("// MARK: - PR111 Slice 3:", 1)[1]
+    assert forbidden not in timing, f"PR111 timing analysis gained Apply authority: {forbidden}"
+
+for token in (
+    "case protectedDriverTiming",
+    "private func protectedDriverTimingSummaries(",
+    "ProtectedDriverTimingRecommendationAnalyzer()",
+    'metric("Delay hypothesis",',
+    'metric("Polarity hypothesis",',
+    'metric("Deployment", "Never · review only")',
+):
+    assert token in report, f"PR111 timing report missing {token}"
+
+assert "analysis.kind == .protectedDriverOptimization" in ui
+assert "analysis.kind == .protectedDriverTiming" in ui
+
+for token in (
+    "testSharedReferenceTimingSuggestsBoundedDelayForEarlierDriver",
+    "testResidualPiPhaseProducesOnlyPolarityHypothesis",
+    "testMissingOrUnstableSharedReferenceFailsClosed",
+    "testLargeArrivalMismatchDoesNotInventSafeDelayAdjustment",
+    "testCrossSpeakerOrUnprotectedPairCannotProduceTimingAdvice",
+    "testLabReportPublishesProtectedTimingAsReviewOnly",
+    "testLabReportShowsUnqualifiedTimingWhenReferenceIsUnstable",
+    "testTriAmpCannotTreatLowAndHighAsAdjacentTimingPair",
+):
+    assert token in tests, f"PR111 timing regression missing {token}"
 assert "SpeakerMeasurementLabReportTests" in workflow
 assert "SpeakerDriverBusProcessingConfiguration" in route
 assert "ProtectedDriverPEQRecommendationTests" in workflow
