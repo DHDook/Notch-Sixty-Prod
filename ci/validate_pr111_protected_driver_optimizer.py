@@ -243,6 +243,16 @@ for token in (
     "ProtectedDriverCrossoverSumModelAnalyzer()",
     "options: .atomic",
     "PR111 Commissioning Drafts",
+    "func validated() throws -> Self",
+    "after.trimDB == before.trimDB",
+    "after.polarityInverted == before.polarityInverted",
+    "after.delayMilliseconds == before.delayMilliseconds",
+    "after.limiterEnabled == before.limiterEnabled",
+    "after.limiterThresholdDBFS",
+    "Array(after.eqBands.prefix(before.eqBands.count))",
+    "changed == Set(affectedBuses)",
+    "_ = try draft.validated()",
+    "return try draft.validated()",
 ):
     assert token in source, f"PR111 blocked commissioning contract missing {token}"
 
@@ -268,6 +278,8 @@ for token in (
     "No Apply control exists in PR111 remote closeout",
     "driverCommissioningStore.save(prepared)",
     "validateCurrentState(",
+    '"STALE DRAFT ·',
+    "Apply remains blocked",
 ):
     assert token in ui, f"PR111 blocked commissioning UX missing {token}"
 
@@ -278,6 +290,9 @@ for token in (
     "testCommissioningRejectsProtectedRouteOrDriverStateDrift",
     "testCommissioningFailsWhenMeasuredBusHasNoEQCapacity",
     "testCommissioningDraftStoreRoundTripAndSchemaGate",
+    "testCommissioningDraftPersistenceRoundTripAndTamperBlock",
+    "testCommissioningDraftCannotHideAddedCutsFromAffectedBusList",
+    "testCommissioningDraftWithSmoothDriversStaysNoOpAndBlocked",
 ):
     assert token in tests, f"PR111 commissioning regression missing {token}"
 assert "SpeakerMeasurementLabReportTests" in workflow
