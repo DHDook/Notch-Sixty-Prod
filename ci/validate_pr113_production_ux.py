@@ -6,18 +6,25 @@ ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "NotchSixty/NotchSixtyApp.swift"
 GUIDE = ROOT / "NotchSixty/UI/ProductionUserGuideView.swift"
 ROOT_VIEW = ROOT / "NotchSixty/UI/ProductionRootView.swift"
+EQUALIZER = ROOT / "NotchSixty/UI/ProductionEqualizerView.swift"
+DYNAMICS = ROOT / "NotchSixty/UI/ProductionDynamicsView.swift"
 TESTS = ROOT / "NotchSixtyTests/ProductionInformationArchitectureTests.swift"
 PROJECT = ROOT / "NotchSixty.xcodeproj/project.pbxproj"
 DOC = ROOT / "docs/PR113_PRODUCTION_UX.md"
 ROADMAP = ROOT / "docs/ROADMAP.md"
 WORKFLOW = ROOT / ".github/workflows/pr113-production-ux.yml"
 
-for path in (APP, GUIDE, ROOT_VIEW, TESTS, PROJECT, DOC, ROADMAP, WORKFLOW):
+for path in (
+    APP, GUIDE, ROOT_VIEW, EQUALIZER, DYNAMICS, TESTS,
+    PROJECT, DOC, ROADMAP, WORKFLOW
+):
     assert path.is_file(), f"PR113 missing artifact: {path}"
 
 app = APP.read_text(encoding="utf-8")
 guide = GUIDE.read_text(encoding="utf-8")
 root_view = ROOT_VIEW.read_text(encoding="utf-8")
+equalizer = EQUALIZER.read_text(encoding="utf-8")
+dynamics = DYNAMICS.read_text(encoding="utf-8")
 tests = TESTS.read_text(encoding="utf-8")
 project = PROJECT.read_text(encoding="utf-8")
 doc = DOC.read_text(encoding="utf-8")
@@ -25,10 +32,12 @@ roadmap = ROADMAP.read_text(encoding="utf-8")
 workflow = WORKFLOW.read_text(encoding="utf-8")
 
 for token in (
-    "TabView {",
+    "TabView(selection: $reference.selectedTab)",
     'Label("General", systemImage: "gearshape")',
-    "ProductionUserGuideView()",
+    "ProductionUserGuideView(navigator: reference)",
     'Label("User Guide", systemImage: "book.closed")',
+    "ProductionDSPReferenceView(navigator: reference)",
+    'Label("DSP Reference", systemImage: "function")',
     "private var generalSettings: some View",
 ):
     assert token in app, f"PR113 Settings IA missing {token}"
@@ -46,7 +55,12 @@ for token in (
     "static func search(",
     "static func articleID(for section: ProductionSection)",
     "static var uncoveredProductionSections:",
+    "enum ProductionWorkflowTerm:",
+    "enum ProductionReferenceTab:",
+    "final class ProductionReferenceNavigator: ObservableObject",
+    "struct ProductionReferenceHelpButton: View",
     "struct ProductionUserGuideView: View",
+    "struct ProductionDSPReferenceView: View",
     '"Math & DSP Details"',
     '"Core equation"',
     '"Implementation relationship"',
@@ -70,6 +84,7 @@ for article_id in (
     "hardware-acceptance",
     "plugins",
     "settings",
+    "workflow-glossary",
     "math-reference",
 ):
     assert f'id: "{article_id}"' in guide, f"PR113 guide missing {article_id}"
@@ -115,8 +130,31 @@ for token in (
     "testUserGuideSearchFindsFeatureMathAndSafetyLanguage",
     "testMathBearingGuideArticlesExplainFormulaScope",
     "testGuideKeepsSoftwareAndPhysicalAuthorityDistinct",
+    "testReferenceNavigatorRoutesGuideAndDSPDeepLinks",
+    "testWorkflowVocabularySeparatesDraftAndLiveRecoverySemantics",
+    "testReferenceSearchFindsWorkflowAndDSPGlossaryTerms",
 ):
     assert token in tests, f"PR113 guide regression missing {token}"
+
+for token in (
+    'Label("Preferences & Reference", systemImage: "gearshape")',
+    "ProductionReferenceHelpButton(",
+    "ProductionUserGuideCatalog.articleID(for: selection ?? .dashboard)",
+):
+    assert token in root_view, f"PR113 contextual reference link missing {token}"
+
+for token in (
+    'formulaID: "biquad"',
+    'destination: .dspReference',
+):
+    assert token in equalizer, f"PR113 EQ reference deep-link missing {token}"
+
+for token in (
+    'referenceFormulaID: "compressor-ratio"',
+    'referenceFormulaID: "expander-ratio"',
+    'referenceFormulaID: "time-constant"',
+):
+    assert token in dynamics, f"PR113 Dynamics reference deep-link missing {token}"
 
 assert "ProductionUserGuideView.swift in Sources" in project
 assert "ProductionUserGuideView.swift" in project
