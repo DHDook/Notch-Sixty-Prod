@@ -1,0 +1,94 @@
+name: PR112A Remote Hardware Acceptance Infrastructure
+
+on:
+  push:
+    branches:
+      - feature/pr112a-remote-hardware-acceptance-infrastructure
+  pull_request:
+    branches:
+      - feature/pr111-protected-per-driver-optimizer
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr112a-hardware-acceptance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Verify PR112A hardware-acceptance authority boundary
+        run: python3 ci/validate_pr112a_hardware_acceptance.py
+
+      - name: Preserve PR111 and inherited integration safety
+        run: |
+          set -euo pipefail
+          python3 ci/validate_pr111_protected_driver_optimizer.py
+          python3 ci/validate_pr109_cross_feature_contracts.py
+          python3 ci/validate_pr110_advanced_placement.py
+
+      - name: Build remote-only hardware readiness manifest
+        run: >-
+          python3 ci/build_pr112a_remote_hardware_readiness.py
+          --commit "${{ github.event.pull_request.head.sha || github.sha }}"
+          --branch "${{ github.head_ref || github.ref_name }}"
+          --output "$RUNNER_TEMP/pr112a-remote-hardware-readiness.json"
+
+      - name: Publish remote readiness evidence only
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr112a-remote-hardware-readiness
+          path: ${{ runner.temp }}/pr112a-remote-hardware-readiness.json
+          retention-days: 30
+          if-no-files-found: error
+
+  macos:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Verify PR112A and inherited contracts
+        run: |
+          set -euo pipefail
+          python3 ci/validate_pr112a_hardware_acceptance.py
+          python3 ci/validate_pr111_protected_driver_optimizer.py
+          python3 ci/validate_pr109_cross_feature_contracts.py
+          python3 ci/validate_pr110_advanced_placement.py
+
+      - name: Build unsigned arm64 Debug app
+        run: >-
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
+          -configuration Debug -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES build
+
+      - name: Run hardware-acceptance model tests
+        run: >-
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
+          -configuration Debug -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES
+          -only-testing:NotchSixtyTests/HardwareAcceptanceTests
+          test
+
+      - name: Build unsigned arm64 Release app
+        run: >-
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
+          -configuration Release -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO GENERATE_INFOPLIST_FILE=NO
+          INFOPLIST_FILE=NotchSixty/Info.plist build
+
+      - name: Run cumulative XCTest regression
+        run: >-
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
+          -configuration Debug -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES test
