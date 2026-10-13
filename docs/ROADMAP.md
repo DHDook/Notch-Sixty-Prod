@@ -35,7 +35,7 @@ The dedicated PR112A CI artifact must always retain
 `liveFeedForwardANCAuthorized=false`, and
 `mayMergeIntoMain=false`.
 
-PR112A remote implementation is now feature-complete pending exact-head CI.
+PR112A remote/software implementation is complete. Implementation head `d00ae1d35a82d5e594ce431b7d08823592211f0d` passed portable, Apple Silicon Debug/Release, targeted acceptance/IA tests, and full cumulative XCTest in Actions run `38364855616`.
 Real unplug/replug, sleep/wake, thermal/endurance, speaker safety, calibrated
 acoustic measurements, combined-driver verification, physical driver
 commissioning and any transactional Apply remain hands-on PR112 work.
