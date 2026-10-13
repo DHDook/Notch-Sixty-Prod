@@ -805,6 +805,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                                     (
                                         analysis.kind == .protectedDriverOptimization
                                             || analysis.kind == .protectedDriverTiming
+                                            || analysis.kind == .protectedDriverCrossoverSum
                                     )
                                         ? (analysis.available ? "REVIEW ONLY" : "UNQUALIFIED")
                                         : (analysis.available ? "AVAILABLE" : "UNAVAILABLE")
