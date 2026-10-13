@@ -2,7 +2,13 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 private struct HardwareAcceptanceExportDocument: FileDocument {
-    static var readableContentTypes: [UTType] { [.json, .plainText] }
+    static var readableContentTypes: [UTType] {
+        [
+            .json,
+            UTType(filenameExtension: "md") ?? .plainText,
+            .plainText,
+        ]
+    }
 
     var data: Data
 
