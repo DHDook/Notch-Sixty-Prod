@@ -1,6 +1,6 @@
 # PR111 — Automatic Per-Driver Speaker Optimization
 
-**Status: Slice 1 implemented, exact-head CI pending; physical driver commissioning deferred.**
+**Status: Slice 1 remote CI passed; Slice 2 implemented, exact-head CI pending; physical commissioning deferred.**
 
 **REMOTE SOFTWARE ONLY.** All existing PRs remain draft, open and unmerged;
 no live Apply, hardware acceptance, App Store release or change to `main`.
@@ -70,10 +70,37 @@ correct acoustic summation or stereo imaging.
 
 ## Planned follow-on slices
 
-**Slice 2 — Per-driver protected measurement and crossover evidence.**
-Expand qualified driver response characterization by woofer/mid/tweeter
-bands and physically justified passbands. Show recommendations beside
-current protection, with unsupported/unmeasured states explicit.
+**Slice 2 — Per-driver measurement, protected evidence & report UI
+(implemented, exact-head CI pending).** The existing Measurement Lab
+`Analysis & Export` card now includes one read-only `protectedDriverOptimization`
+analysis per protected Low/Mid/High Lab protocol, including incomplete ones.
+For each qualified capture protocol, the analysis displays the exact bus,
+crossover-guarded usable frequency range, number of repeat-qualified
+captures, protection/limiter status, number of suggested cut-only peaks,
+and each frequency, gain and Q value. The display explicitly reads
+**REVIEW ONLY**, not `Applied`, and warns that per-driver near-field
+measurements do not establish anechoic or aggregate whole-speaker response.
+
+Failed PR106 provenance, insufficient repeats, invalid frequency samples,
+clipping, low SNR or inadequate protected passband are shown as unavailable
+with the underlying blocker; an absent qualified measurement never becomes
+a neutral or flat driver response. Smooth, otherwise qualified data result
+in **zero suggested cuts**, not manufactured correction. JSON and CSV
+exports contain *compact measured diagnostics only*, never raw impulse,
+capture grids, DSP program state, profile changes, live routing, or an
+apply-able preset. The existing metric rendering uses adaptive columns so
+several low/mid/high driver results remain readable on narrow windows;
+the UI now shows all diagnostic caveats instead of hiding all but the first.
+
+Additional XCTest checks qualified report status, cut metrics, no-op results,
+incomplete repeats, unprotected limiter rejection, and the no-deploy
+export boundaries. Full Apple Silicon application regression remains the
+remote acceptance gate.
+
+Future PR111 slices must still independently validate speaker source and
+crossover summation, acoustic-center timing, explicit approval/rollback,
+and physical speaker-safe capture. This Slice 2 does **not** authorize
+filter compilation or deployment.
 
 **Slice 3 — Acoustic center and timing recommendations.** Authenticate a
 shared timing reference across each independently measured driver pair.
