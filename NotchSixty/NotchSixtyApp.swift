@@ -72,7 +72,6 @@ final class ProductController: ObservableObject {
     let calibration: RoomCorrectionCalibrationController
     let multichannelCalibration: MultichannelCalibrationController
     let roomCorrectionProjects: RoomCorrectionProjectController
-    let backup: ProductBackupController
     let roomTreatmentAdvisor: RoomTreatmentAdvisorController
     let ambientCompensation: AmbientCompensationController
     let activeQuietZone: ActiveQuietZoneController
@@ -107,10 +106,6 @@ final class ProductController: ObservableObject {
         let roomProjects =
             RoomCorrectionProjectController(profiles: profiles)
         self.roomCorrectionProjects = roomProjects
-        self.backup = ProductBackupController(
-            profiles: profiles,
-            roomCorrectionStore: roomProjects.store
-        )
         self.roomTreatmentAdvisor =
             RoomTreatmentAdvisorController(
                 store: roomProjects.store
@@ -156,10 +151,6 @@ final class ProductController: ObservableObject {
         let roomProjects =
             RoomCorrectionProjectController(profiles: profiles)
         self.roomCorrectionProjects = roomProjects
-        self.backup = ProductBackupController(
-            profiles: profiles,
-            roomCorrectionStore: roomProjects.store
-        )
         self.roomTreatmentAdvisor =
             RoomTreatmentAdvisorController(
                 store: roomProjects.store
@@ -1299,18 +1290,6 @@ final class ApplicationPreferences: ObservableObject {
         refreshLaunchAtLoginStatus()
     }
 
-    func reloadFromDefaults() {
-        appearance = ApplicationAppearanceMode(
-            rawValue: defaults.string(forKey: Key.appearance) ?? ""
-        ) ?? .system
-        presence = ApplicationPresenceMode(
-            rawValue: defaults.string(forKey: Key.presence) ?? ""
-        ) ?? .both
-        volumeStepResolution = ApplicationVolumeStepResolution(
-            rawValue: defaults.integer(forKey: Key.volumeStepResolution)
-        ) ?? .standard
-    }
-
     func setTrayInserted(_ inserted: Bool) {
         if inserted {
             if presence == .dock { presence = .both }
@@ -1645,16 +1624,22 @@ private struct ProductionSettingsView: View {
         }
 
         do {
-            let data = try product.backup.exportData()
+            let data = try product.backup.exportData(
+                preferences: preferences.makeBackupSnapshot(),
+                appVersion: version,
+                appBuild: build
+            )
             try data.write(to: url, options: .atomic)
-            let inspection = try product.backup.inspect(data: data)
+            let bundle = try product.backup.inspect(data)
             backupMessage =
-                "Backup saved: \(inspection.manifest.contentPresetCount) presets · "
-                + "\(inspection.manifest.playbackSystemCount) playback systems · "
-                + "\(inspection.roomCorrectionProjectCount) room projects · "
-                + "\(inspection.measurementLabSessionCount) lab sessions."
+                "Backup saved: \(bundle.profiles.contentPresets.count) presets · "
+                + "\(bundle.profiles.systemProfiles.count) playback systems · "
+                + "\(bundle.roomCorrectionProjects.count) room projects · "
+                + "\(bundle.measurementLabSessions.count) lab sessions · "
+                + "\(bundle.binauralAssets.count) binaural profiles."
         } catch {
-            backupMessage = "Backup failed: \(error.localizedDescription)"
+            backupMessage =
+                "Backup failed: \(error.localizedDescription)"
         }
     }
 
@@ -1682,18 +1667,18 @@ private struct ProductionSettingsView: View {
 
         do {
             let data = try Data(contentsOf: url)
-            let inspection = try product.backup.inspect(data: data)
+            let bundle = try product.backup.inspect(data)
 
             let alert = NSAlert()
             alert.alertStyle = .warning
             alert.messageText = "Restore this Notch Sixty backup?"
             alert.informativeText =
                 "This will replace saved Content Presets and Playback Systems "
-                + "and restore \(inspection.roomCorrectionProjectCount) room-correction "
-                + "projects plus \(inspection.measurementLabSessionCount) Measurement Lab "
-                + "sessions. Hardware bindings that are unavailable on this Mac will be "
-                + "marked Needs Mapping. Hardware-acceptance evidence is preserved in the "
-                + "backup for reference only and is not reactivated."
+                + "and restore \(bundle.roomCorrectionProjects.count) Room Correction "
+                + "projects, \(bundle.measurementLabSessions.count) Measurement Lab "
+                + "sessions, and \(bundle.binauralAssets.count) binaural profiles. "
+                + "Hardware bindings that are not available on this Mac will be "
+                + "marked Needs Mapping and cannot activate until reviewed."
             alert.addButton(withTitle: "Restore")
             alert.addButton(withTitle: "Cancel")
             guard alert.runModal() == .alertFirstButtonReturn else {
@@ -1701,12 +1686,26 @@ private struct ProductionSettingsView: View {
             }
 
             product.abComparison.clearAll()
-            let report = try product.backup.restore(data: data)
-            preferences.reloadFromDefaults()
+            let restored = try product.backup.restore(data)
+            try preferences.restoreBackupSnapshot(
+                restored.preferences
+            )
             product.roomCorrectionProjects.prepareForUse()
-            backupMessage = "Restore complete: \(report.summary)."
+
+            var message =
+                "Restore complete: \(restored.report.contentPresetCount) presets · "
+                + "\(restored.report.playbackSystemCount) playback systems · "
+                + "\(restored.report.roomCorrectionProjectCount) room projects · "
+                + "\(restored.report.measurementLabSessionCount) lab sessions · "
+                + "\(restored.report.binauralAssetCount) binaural profiles"
+            if restored.report.hardwareMappingRequiredCount > 0 {
+                message +=
+                    " · \(restored.report.hardwareMappingRequiredCount) systems need hardware mapping"
+            }
+            backupMessage = message + "."
         } catch {
-            backupMessage = "Restore failed: \(error.localizedDescription)"
+            backupMessage =
+                "Restore failed: \(error.localizedDescription)"
         }
     }
 
@@ -1891,9 +1890,10 @@ private struct ProductionSettingsView: View {
                         Text(
                             "The .n60backup bundle includes saved presets and "
                             + "Playback Systems, Room Correction projects, "
-                            + "Measurement Lab sessions, safe app preferences, "
-                            + "and reference-only hardware-acceptance records. "
-                            + "Launch at Login is never changed by restore."
+                            + "Measurement Lab sessions, binaural profiles, "
+                            + "and portable app preferences. Launch at Login, "
+                            + "macOS permissions, and physical acceptance "
+                            + "authority are never changed by restore."
                         )
                         .font(.caption)
                         .foregroundStyle(.secondary)
