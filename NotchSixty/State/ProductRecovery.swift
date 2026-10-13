@@ -65,6 +65,7 @@ struct ProductRecoveryPersistentState: Codable, Equatable, Sendable {
 enum ProductRecoveryError: Error, LocalizedError, Equatable {
     case invalidState
     case noLastKnownGood
+    case safeLaunchDecisionRequired
     case persistence(String)
 
     var errorDescription: String? {
@@ -73,6 +74,8 @@ enum ProductRecoveryError: Error, LocalizedError, Equatable {
             return "The machine-local recovery record is invalid."
         case .noLastKnownGood:
             return "No successful normal processing start has been recorded yet."
+        case .safeLaunchDecisionRequired:
+            return "Choose a Safe Launch recovery option before starting audio processing."
         case .persistence(let reason):
             return "Recovery state could not be saved: \(reason)"
         }
@@ -248,12 +251,13 @@ final class ProductRecoveryController: ObservableObject {
 
     func recordSuccessfulStart(
         profiles: ProductProfileBackupSnapshot,
+        plugInChainHealthy: Bool = true,
         now: Date = Date()
     ) {
         persistentState.consecutiveAudioStartFailures = 0
-        if plugInsBypassedForThisLaunch {
-            // A core-audio success with the rack omitted does not certify the
-            // saved plug-in chain as known-good.
+        if plugInsBypassedForThisLaunch || !plugInChainHealthy {
+            // A core-audio success with the rack omitted or quarantined does
+            // not certify the saved plug-in chain as known-good.
             persistNonFatal()
             return
         }
