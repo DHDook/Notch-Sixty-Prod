@@ -35,7 +35,7 @@ Planned slices:
 - Slice 5 — commercial metadata / support / release documentation; and
 - Slice 6 — integrated RC gate and credential/physical handoff.
 
-**Slices 1–2 are implemented remotely; the combined exact-head validation
+**Slices 1–3 are implemented remotely; the combined exact-head validation
 gate is pending.**
 
 Slice 1 reconciles the actual PR113B shipping tree into a machine-readable
@@ -48,6 +48,13 @@ Mac-only RC has no bundled app-owned network/analytics/tracking SDK, no privacy
 manifest added by ritual, and no completed App Store Connect privacy-policy or
 App Privacy metadata claim. Those account metadata items remain external
 release gates.
+
+Slice 3 reconciles post-PR42 provenance and the production dependency surface.
+The shipping tree has no Swift Package/CocoaPods/Cartfile or packaged binary
+dependency, and the only classified bundled third-party component remains
+libmysofa v1.3.4 under BSD-3-Clause. CI generates a deterministic CycloneDX 1.5
+SBOM with exact source identity and dependency license/notice/source-set hashes.
+External legal/IP review remains a separate unresolved evidence class.
 
 Remote PR114 work may establish software/package readiness only. It cannot
 complete PR112 physical H01–H08 acceptance, production Apple signing, App Store
