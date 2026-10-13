@@ -4,11 +4,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PROFILES = ROOT / "NotchSixty/State/ProductProfiles.swift"
+RECOVERY = ROOT / "NotchSixty/State/ProductRecovery.swift"
 BACKUP = ROOT / "NotchSixty/Backup/NotchSixtyBackup.swift"
 PROJECT = ROOT / "NotchSixty.xcodeproj/project.pbxproj"
 ENGINE = ROOT / "NotchSixty/Audio/AudioIOEngine.swift"
 APP = ROOT / "NotchSixty/NotchSixtyApp.swift"
 TOOLBAR = ROOT / "NotchSixty/UI/ProductionProfileToolbar.swift"
+ROOT_UI = ROOT / "NotchSixty/UI/ProductionRootView.swift"
 LAB_REPORT = ROOT / "NotchSixty/Audio/SpeakerMeasurementLabReport.swift"
 LAB_UI = ROOT / "NotchSixty/UI/ProductionSpeakerMeasurementLabWorkspace.swift"
 LAB_TESTS = ROOT / "NotchSixtyTests/SpeakerMeasurementLabReportTests.swift"
@@ -18,17 +20,19 @@ ROADMAP = ROOT / "docs/ROADMAP.md"
 WORKFLOW = ROOT / ".github/workflows/pr113b-world-class-product-finish.yml"
 
 for path in (
-    PROFILES, BACKUP, PROJECT, ENGINE, APP, TOOLBAR, LAB_REPORT, LAB_UI,
-    LAB_TESTS, TESTS, DOC, ROADMAP, WORKFLOW
+    PROFILES, RECOVERY, BACKUP, PROJECT, ENGINE, APP, TOOLBAR, ROOT_UI,
+    LAB_REPORT, LAB_UI, LAB_TESTS, TESTS, DOC, ROADMAP, WORKFLOW
 ):
     assert path.is_file(), f"PR113B Slice 1 missing artifact: {path}"
 
 profiles = PROFILES.read_text(encoding="utf-8")
+recovery = RECOVERY.read_text(encoding="utf-8")
 backup = BACKUP.read_text(encoding="utf-8")
 project = PROJECT.read_text(encoding="utf-8")
 engine = ENGINE.read_text(encoding="utf-8")
 app = APP.read_text(encoding="utf-8")
 toolbar = TOOLBAR.read_text(encoding="utf-8")
+root_ui = ROOT_UI.read_text(encoding="utf-8")
 lab_report = LAB_REPORT.read_text(encoding="utf-8")
 lab_ui = LAB_UI.read_text(encoding="utf-8")
 lab_tests = LAB_TESTS.read_text(encoding="utf-8")
@@ -322,6 +326,106 @@ assert (
     in workflow
 ), "PR113B Slice 4 Lab export tests are not in the targeted CI gate"
 
+# Slice 5 Safe Launch / Recovery Mode is machine-local and fail-closed.
+for token in (
+    "enum ProductRecoveryFailureKind:",
+    "enum ProductSafeLaunchReason:",
+    "struct ProductRecoveryPersistentState:",
+    "var launchSessionOpen = false",
+    "var consecutiveAudioStartFailures = 0",
+    "var consecutivePlugInFailures = 0",
+    "var lastKnownGoodProfiles: ProductProfileBackupSnapshot?",
+    "struct ProductRecoveryStore: Sendable",
+    '"Recovery"',
+    '"recovery-state.json"',
+    "final class ProductRecoveryController: ObservableObject",
+    "static let failureThreshold = 2",
+    "func prepareForLaunch(",
+    "func openNormally()",
+    "func openWithPlugInsBypassed()",
+    "func recordStartFailure(",
+    "func recordSuccessfulStart(",
+    "func lastKnownGoodSnapshot()",
+    "func markCleanTermination()",
+):
+    assert token in recovery, (
+        f"PR113B Slice 5 recovery state missing {token}"
+    )
+
+for forbidden in (
+    "physicalAcceptanceComplete",
+    "releaseAcceptanceComplete",
+    "liveFeedForwardANCAuthorized",
+    "mayMergeIntoMain",
+    "HardwareAcceptanceCampaign",
+):
+    assert forbidden not in recovery, (
+        f"PR113B recovery gained forbidden authority: {forbidden}"
+    )
+
+assert "ProductRecovery" not in backup, (
+    "Machine-local recovery state leaked into general backup"
+)
+
+for token in (
+    "ProductRecovery.swift in Sources",
+    "ProductRecovery.swift",
+):
+    assert token in project, (
+        f"PR113B recovery target membership missing {token}"
+    )
+
+for token in (
+    "let recovery: ProductRecoveryController",
+    "recovery.prepareForLaunch()",
+    "if !recovery.safeLaunchActive",
+    "func openNormallyFromSafeLaunch() throws",
+    "func openWithPlugInsBypassedFromSafeLaunch() throws",
+    "func restoreLastKnownGoodFromSafeLaunch() throws",
+    "try audioEngine.stageAudioUnitRackForNextStart(nil)",
+    "recovery.recordStartFailure(",
+    "recovery.recordSuccessfulStart(",
+    "func diagnosticsReport(",
+    "recovery.markCleanTermination()",
+    "NSApplication.willTerminateNotification",
+):
+    assert token in app, f"PR113B Slice 5 product integration missing {token}"
+
+for token in (
+    "func applySelectedLayersNow() throws",
+    "hardwareMappingRequirement(for: system.id) == nil",
+):
+    assert token in profiles, (
+        f"PR113B recovery selected-layer contract missing {token}"
+    )
+
+for token in (
+    "ProductSafeLaunchSheet",
+    '"Safe Launch"',
+    '"Open Normally"',
+    '"Open with Plug-ins Bypassed This Launch"',
+    '"Restore Last Known Good"',
+    '"Copy Diagnostics"',
+    "try await product.startProcessing()",
+):
+    assert token in root_ui, (
+        f"PR113B Slice 5 production recovery UI missing {token}"
+    )
+
+assert "try? engine.start()" not in root_ui, (
+    "Main production toolbar bypasses ProductController.startProcessing"
+)
+
+for token in (
+    "testRecoveryDetectsUncleanPriorLaunchButNotCleanTermination",
+    "testRecoveryRepeatedFailuresTriggerSafeLaunchThreshold",
+    "testRecoveryOnlyHealthyNormalStartUpdatesLastKnownGood",
+    "testRecoveryStateIsMachineLocalAndHasNoReleaseAuthority",
+):
+    assert token in tests, (
+        f"PR113B Slice 5 recovery regression missing {token}"
+    )
+
 for token in (
     "Slice 1 — Safe A/B comparison foundation",
     "Audio Unit rack topology",
@@ -332,6 +436,10 @@ for token in (
     "Exit A/B and Restore",
     "Slice 3 — Full Notch Sixty backup & restore",
     "Slice 4 — Full-fidelity Measurement Lab export",
+    "Slice 5 — Safe Launch / Recovery Mode",
+    "Restore Last Known Good",
+    "Plug-ins Bypassed This Launch",
+    "machine-local",
     "32-bit IEEE-float WAV",
     "transfer-function dB",
     "binaural",
@@ -359,4 +467,4 @@ for token in (
 ):
     assert token in workflow, f"PR113B workflow missing {token}"
 
-print("PR113B Slices 1–4 world-class product contract: PASS")
+print("PR113B Slices 1–5 world-class product contract: PASS")
