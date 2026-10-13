@@ -51,11 +51,11 @@ pre-session content restore. Playback-System identity/state drift still fails
 closed, and Audio Unit topology remains outside the A/B payload.
 
 Slice 3 adds the versioned human-inspectable `.n60backup` bundle with
-canonical-payload SHA-256 integrity, validate-first transactional restore,
-rollback of colliding local records, persisted Needs Mapping gates for
-unavailable hardware UIDs, Room Correction and Measurement Lab session
-coverage, safe app-preference restore, and hardware-acceptance campaigns
-preserved as reference-only evidence that is never reactivated by restore.
+per-domain SHA-256 integrity, validate-first transactional restore, rollback of
+colliding Room Correction / Measurement Lab / binaural records, persisted
+Needs Mapping gates for unavailable hardware UIDs, portable app-preference
+restore, and explicit separation from PR112 hardware-acceptance campaigns and
+authority.
 
 PR113B software work cannot satisfy PR112 physical acceptance and cannot set
 `releaseAcceptanceComplete`, `liveFeedForwardANCAuthorized`, or
