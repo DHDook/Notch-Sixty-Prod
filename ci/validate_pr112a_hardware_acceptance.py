@@ -4,16 +4,27 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "NotchSixty/Acceptance/HardwareAcceptance.swift"
+CONTROLLER = ROOT / "NotchSixty/Acceptance/HardwareAcceptanceController.swift"
+UI = ROOT / "NotchSixty/UI/ProductionHardwareAcceptanceWorkspace.swift"
+ROOT_VIEW = ROOT / "NotchSixty/UI/ProductionRootView.swift"
+APP = ROOT / "NotchSixty/NotchSixtyApp.swift"
 TESTS = ROOT / "NotchSixtyTests/HardwareAcceptanceTests.swift"
 DOC = ROOT / "docs/PR112A_REMOTE_HARDWARE_ACCEPTANCE.md"
 WORKFLOW = ROOT / ".github/workflows/pr112a-remote-hardware-acceptance.yml"
 MANIFEST = ROOT / "ci/build_pr112a_remote_hardware_readiness.py"
 ROADMAP = ROOT / "docs/ROADMAP.md"
 
-for path in (SOURCE, TESTS, DOC, WORKFLOW, MANIFEST, ROADMAP):
+for path in (
+    SOURCE, CONTROLLER, UI, ROOT_VIEW, APP,
+    TESTS, DOC, WORKFLOW, MANIFEST, ROADMAP
+):
     assert path.is_file(), f"PR112A missing artifact: {path}"
 
 source = SOURCE.read_text(encoding="utf-8")
+controller = CONTROLLER.read_text(encoding="utf-8")
+ui = UI.read_text(encoding="utf-8")
+root_view = ROOT_VIEW.read_text(encoding="utf-8")
+app = APP.read_text(encoding="utf-8")
 tests = TESTS.read_text(encoding="utf-8")
 doc = DOC.read_text(encoding="utf-8")
 workflow = WORKFLOW.read_text(encoding="utf-8")
@@ -57,9 +68,79 @@ for forbidden in (
     assert forbidden not in source, f"PR112A evidence model gained runtime authority: {forbidden}"
 
 for token in (
+    "final class HardwareAcceptanceController: ObservableObject",
+    "func createCampaign(",
+    "func loadMostRecentCampaign()",
+    "func recordObservation(",
+    "physicalAttestationConfirmed: Bool",
+    "independentReviewAttestationConfirmed: Bool",
+    ".physicalAttestationRequired",
+    ".independentReviewAttestationRequired",
+    ".gateExcludedFromScope",
+    ".invalidSupplementalCoverage",
+    "try store.append(",
+):
+    assert token in controller, f"PR112A campaign controller missing {token}"
+
+for forbidden in (
+    "AudioIOEngine",
+    "ProductProfileController",
+    "replaceSelectedSystem",
+    "startProcessing",
+    "approveAndApply",
+    "func apply(",
+):
+    assert forbidden not in controller, f"PR112A controller gained runtime/DSP authority: {forbidden}"
+
+for token in (
+    "struct ProductionHardwareAcceptanceWorkspace: View",
+    '"Hardware Acceptance"',
+    '"EVIDENCE ONLY"',
+    '"Remote CI cannot pass physical gates"',
+    '"Append Evidence Observation"',
+    '"Create Immutable Campaign"',
+    "physicalAttestation",
+    "independentReviewAttestation",
+    "splitDriverCovered",
+    "acceptance.recordObservation(",
+    "engine.selectedOutputDevice",
+):
+    assert token in ui, f"PR112A guided acceptance UI missing {token}"
+
+for forbidden in (
+    'Button("Apply',
+    "engine.start(",
+    "engine.stop(",
+    "replaceBassManagement",
+    "replaceSpeakerDriver",
+    "setRoomCorrection",
+    "approveAndApply(",
+):
+    assert forbidden not in ui, f"PR112A UI gained live mutation authority: {forbidden}"
+
+for token in (
+    "case hardwareAcceptance",
+    ".hardwareAcceptance,",
+    'return "Hardware Acceptance"',
+    "ProductionHardwareAcceptanceWorkspace(",
+):
+    assert token in root_view, f"PR112A production navigation missing {token}"
+
+for token in (
+    "let hardwareAcceptance: HardwareAcceptanceController",
+    "self.hardwareAcceptance = HardwareAcceptanceController()",
+    "hardwareAcceptance.prepareForUse()",
+):
+    assert token in app, f"PR112A ProductController ownership missing {token}"
+
+for token in (
     "testRemoteSoftwarePassCannotSatisfyPhysicalGate",
     "testSplitDriverExclusionDoesNotWaiveMandatoryH05",
     "testIncludedSplitDriverScopeRequiresExplicitH05Coverage",
+    "testControllerRequiresPhysicalAndIndependentAttestations",
+    "testControllerRejectsEvidenceForExcludedConditionalGate",
+    "testControllerLocksSupplementalCoverageToIncludedScope",
+    "testControllerPrepareForUseLoadsNewestCampaign",
     "testRequiredPhysicalCampaignCanCompleteWithConditionalFeaturesExcluded",
     "testLiveANCAuthorizationRequiresIncludedH08IndependentReviewAndAllGates",
     "testNewestObservationCanRegressPreviouslyPassedGate",
