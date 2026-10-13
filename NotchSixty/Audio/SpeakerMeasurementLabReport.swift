@@ -1246,15 +1246,19 @@ struct SpeakerMeasurementLabFullFidelityExporter: Sendable {
 
         let sampleRate = UInt32(roundedRate)
         let sampleBytes = capture.impulseResponse.count * 4
-        guard sampleBytes <= Int(UInt32.max) - 36 else {
+        // IEEE-float WAVE is non-PCM, so include the standards-defined
+        // fact chunk. RIFF payload is WAVE + fmt + fact + data headers.
+        guard sampleBytes <= Int(UInt32.max) - 48,
+              capture.impulseResponse.count <= Int(UInt32.max) else {
             throw SpeakerMeasurementLabFullFidelityExportError
                 .exportEncodingFailed
         }
         let dataSize = UInt32(sampleBytes)
+        let sampleCount = UInt32(capture.impulseResponse.count)
 
         var data = Data()
         appendASCII("RIFF", to: &data)
-        appendLE(UInt32(36) + dataSize, to: &data)
+        appendLE(UInt32(48) + dataSize, to: &data)
         appendASCII("WAVE", to: &data)
         appendASCII("fmt ", to: &data)
         appendLE(UInt32(16), to: &data)
@@ -1264,6 +1268,9 @@ struct SpeakerMeasurementLabFullFidelityExporter: Sendable {
         appendLE(sampleRate * 4, to: &data)
         appendLE(UInt16(4), to: &data)
         appendLE(UInt16(32), to: &data)
+        appendASCII("fact", to: &data)
+        appendLE(UInt32(4), to: &data)
+        appendLE(sampleCount, to: &data)
         appendASCII("data", to: &data)
         appendLE(dataSize, to: &data)
 
@@ -1321,7 +1328,11 @@ struct SpeakerMeasurementLabFullFidelityExporter: Sendable {
 
     private func decimal(_ value: Double) -> String {
         value.isFinite
-            ? String(format: "%.9f", value)
+            ? String(
+                format: "%.9f",
+                locale: Locale(identifier: "en_US_POSIX"),
+                value
+            )
             : ""
     }
 
