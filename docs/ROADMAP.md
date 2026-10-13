@@ -22,12 +22,13 @@ Future portability must not materially delay the flagship Mac launch.
 draft above PR110. Slices 1–2 have passed exact-head Apple Silicon and portable
 regression gates. Slice 3 adds reference-authenticated adjacent-driver
 acoustic-center timing and residual-polarity hypotheses for protected Bi-Amp
-and Tri-Amp paths. It requires simultaneous electrical reference evidence,
-stable shared timing, exact crossover/routing provenance, and remains
-measurement-only with no delay/polarity Apply authority. Slice 3 CI is
+and Tri-Amp paths. Slice 4 adds a complex crossover-sum model that compares
+only those bounded timing/polarity hypotheses against the current protected
+state. Both remain measurement/model-only: a new real combined-driver capture
+is still mandatory before any future Apply. Slices 3–4 exact-head CI is
 pending.
 No DSP stage, gain, driver phase/polarity, delay, physical routing or
-protection is changed by a recommendation.
+protection is changed by a recommendation or model.
 
 PR110's five slices are remotely/software-verified; PR110, PR109 and all
 predecessor PRs remain OPEN/DRAFT/UNMERGED. PR111's source and CI gates do
