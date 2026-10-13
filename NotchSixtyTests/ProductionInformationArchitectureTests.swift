@@ -567,8 +567,8 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         XCTAssertTrue(formula.title.contains("Minimum-phase"))
         XCTAssertTrue(formula.explanation.contains("causal minimum-phase"))
         XCTAssertTrue(formula.expression.contains("IFFT"))
-        XCTAssertFalse(
-            formula.explanation.contains("symmetric linear-phase")
+        XCTAssertTrue(
+            formula.explanation.contains("not a symmetric linear-phase FIR")
         )
     }
 
