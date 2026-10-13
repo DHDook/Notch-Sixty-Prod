@@ -820,3 +820,451 @@ struct ProtectedDriverPEQRecommendationAnalyzer: Sendable {
         )
     }
 }
+
+
+// MARK: - PR111 Slice 3: shared-reference driver timing hypotheses
+
+enum ProtectedDriverTimingPolarityHypothesis:
+    String, Equatable, Sendable {
+    case retainCurrent
+    case invertComparedDriver
+    case inconclusive
+}
+
+/// Recommendation-only evidence for ONE adjacent protected driver pair.
+/// The measured captures already include the installed crossover, current
+/// per-driver delay and polarity. Any suggested delay is therefore an
+/// *additional* bounded adjustment to the earlier driver, never an absolute
+/// acoustic-center value or a command to mutate the DSP.
+struct ProtectedDriverTimingRecommendation: Equatable, Sendable {
+    var sessionID: UUID
+    var firstProtocolID: UUID
+    var secondProtocolID: UUID
+    var playbackSystemID: UUID
+    var routingSignature: String
+    var firstBus: SpeakerOutputBus
+    var secondBus: SpeakerOutputBus
+    var crossoverFrequencyHz: Double
+    /// second minus first after subtracting each simultaneous electrical
+    /// reference arrival. Positive means the second acoustic path is later.
+    var relativeArrivalMilliseconds: Double
+    var referenceArrivalSpreadMilliseconds: Double
+    var referenceMagnitudeRepeatabilityRMSDB: Double
+    var referencePhaseConsistency: Double
+    var wrappedRelativePhaseAtCrossoverRadians: Double
+    var delayBus: SpeakerOutputBus?
+    var additionalDelayMilliseconds: Double?
+    var polarityHypothesis: ProtectedDriverTimingPolarityHypothesis
+    var evidenceConfidence: Double
+    var warnings: [String]
+
+    var measurementOnly: Bool { true }
+    var canDeploy: Bool { false }
+    var canChangeCrossoverOrLimiter: Bool { false }
+    var requiresCombinedDriverVerification: Bool { true }
+}
+
+enum ProtectedDriverTimingRecommendationError:
+    Error, Equatable, LocalizedError {
+    case invalidSession
+    case invalidPair
+    case protectedPathMismatch
+    case sharedReferenceRequired
+    case referencePathUnstable
+    case inadequateRepeatedEvidence
+    case incompatibleFrequencyGrid
+    case crossoverBandUnavailable
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidSession:
+            return "Protected driver timing requires a structurally valid Measurement Lab session."
+        case .invalidPair:
+            return "Select two adjacent Low/Mid/High buses on the same physical speaker."
+        case .protectedPathMismatch:
+            return "Both drivers must share the same protected routing and active crossover topology."
+        case .sharedReferenceRequired:
+            return "Every repeat requires a qualified simultaneous electrical reference on the same ADC timeline."
+        case .referencePathUnstable:
+            return "The electrical reference changed too much across the driver sweeps to authenticate cross-driver timing."
+        case .inadequateRepeatedEvidence:
+            return "Each driver needs at least three complete, unclipped, stable protected sweeps."
+        case .incompatibleFrequencyGrid:
+            return "Both protected drivers and their reference captures need one identical finite frequency grid."
+        case .crossoverBandUnavailable:
+            return "The pair lacks sufficient qualified measured evidence around its protected crossover."
+        }
+    }
+}
+
+struct ProtectedDriverTimingRecommendationAnalyzer: Sendable {
+    static let minimumRepeats = 3
+    static let minimumSNRDB = 35.0
+    static let maximumReferenceArrivalSpreadMilliseconds = 0.25
+    static let maximumReferenceMagnitudeRepeatabilityRMSDB = 0.50
+    static let minimumReferencePhaseConsistency = 0.98
+    static let maximumAdditionalDelayMilliseconds = 2.0
+    static let minimumMeaningfulDelayMilliseconds = 0.05
+    static let polarityDecisionMarginRadians = Double.pi / 4
+
+    func recommend(
+        session: SpeakerMeasurementLabSession,
+        firstProtocolID: UUID,
+        secondProtocolID: UUID
+    ) throws -> ProtectedDriverTimingRecommendation {
+        do { try session.validateStructure() }
+        catch { throw ProtectedDriverTimingRecommendationError.invalidSession }
+        guard session.sharedClockReferenceConfiguration != nil,
+              let firstProtocol = session.protocols.first(
+                where: { $0.id == firstProtocolID }
+              ),
+              let secondProtocol = session.protocols.first(
+                where: { $0.id == secondProtocolID }
+              ),
+              firstProtocol.request.mode == .protectedDriverNearField,
+              secondProtocol.request.mode == .protectedDriverNearField,
+              let firstBus = firstProtocol.protectedDriverBus,
+              let secondBus = secondProtocol.protectedDriverBus,
+              adjacent(firstBus, secondBus) else {
+            throw ProtectedDriverTimingRecommendationError.invalidPair
+        }
+        let first = session.captures.filter {
+            $0.protocolID == firstProtocolID
+        }.sorted { $0.repeatIndex < $1.repeatIndex }
+        let second = session.captures.filter {
+            $0.protocolID == secondProtocolID
+        }.sorted { $0.repeatIndex < $1.repeatIndex }
+        guard first.count >= Self.minimumRepeats,
+              second.count >= Self.minimumRepeats,
+              first.count == firstProtocol.request.repeatCount,
+              second.count == secondProtocol.request.repeatCount,
+              first.map(\.repeatIndex) == Array(0..<first.count),
+              second.map(\.repeatIndex) == Array(0..<second.count) else {
+            throw ProtectedDriverTimingRecommendationError
+                .inadequateRepeatedEvidence
+        }
+        guard let firstProvenance = first.first?.protectedDriverProvenance,
+              let secondProvenance = second.first?.protectedDriverProvenance,
+              firstProvenance.validatesProtectedPath(for: firstBus),
+              secondProvenance.validatesProtectedPath(for: secondBus),
+              first.allSatisfy({
+                  $0.protectedDriverProvenance == firstProvenance
+              }),
+              second.allSatisfy({
+                  $0.protectedDriverProvenance == secondProvenance
+              }),
+              firstProvenance.routingConfiguration
+                == secondProvenance.routingConfiguration,
+              firstProvenance.bassManagementConfiguration
+                == secondProvenance.bassManagementConfiguration else {
+            throw ProtectedDriverTimingRecommendationError
+                .protectedPathMismatch
+        }
+        let bass = firstProvenance.bassManagementConfiguration
+        guard bass.enabled,
+              let mode = bass.physicalOutputMode,
+              (mode == .biAmp || mode == .triAmp),
+              mode.supports(bus: firstBus),
+              mode.supports(bus: secondBus),
+              let crossover = crossoverFrequency(
+                firstBus, secondBus, bass
+              ),
+              crossover.isFinite, crossover > 0 else {
+            throw ProtectedDriverTimingRecommendationError.invalidPair
+        }
+
+        let captures = first + second
+        guard captures.allSatisfy({
+            $0.quality.sweepComplete
+                && !$0.quality.clipped
+                && $0.quality.estimatedSNRDB.map({
+                    $0.isFinite && $0 >= Self.minimumSNRDB
+                }) == true
+                && $0.quality.directArrivalSeconds?.isFinite == true
+                && $0.sharedClockReference?.sharedTimeOriginQualified == true
+        }) else {
+            throw ProtectedDriverTimingRecommendationError
+                .inadequateRepeatedEvidence
+        }
+        guard let grid = captures.first?.transferFunction.frequenciesHz,
+              grid.count >= 48,
+              grid.allSatisfy({ $0.isFinite && $0 > 0 }),
+              zip(grid, grid.dropFirst()).allSatisfy({ $0.0 < $0.1 }),
+              captures.allSatisfy({
+                  $0.transferFunction.frequenciesHz == grid
+                    && $0.transferFunction.magnitudeDB.count == grid.count
+                    && $0.transferFunction.phaseRadians?.count == grid.count
+                    && $0.sharedClockReference?
+                        .transferFunction.frequenciesHz == grid
+                    && $0.sharedClockReference?
+                        .transferFunction.magnitudeDB.count == grid.count
+                    && $0.sharedClockReference?
+                        .transferFunction.phaseRadians?.count == grid.count
+              }) else {
+            throw ProtectedDriverTimingRecommendationError
+                .incompatibleFrequencyGrid
+        }
+
+        let lower = crossover / 1.35
+        let upper = crossover * 1.35
+        let indices = grid.indices.filter {
+            grid[$0] >= lower && grid[$0] <= upper
+        }
+        guard indices.count >= 8,
+              captures.allSatisfy({
+                  ($0.quality.usableLowHz ?? .infinity) <= lower
+                    && ($0.quality.usableHighHz ?? 0) >= upper
+              }) else {
+            throw ProtectedDriverTimingRecommendationError
+                .crossoverBandUnavailable
+        }
+
+        let references = captures.compactMap(\.sharedClockReference)
+        guard references.count == captures.count else {
+            throw ProtectedDriverTimingRecommendationError
+                .sharedReferenceRequired
+        }
+        let referenceArrivals = references.map(\.directArrivalSeconds)
+        let referenceArrivalSpread = (
+            (referenceArrivals.max() ?? .infinity)
+                - (referenceArrivals.min() ?? -.infinity)
+        ) * 1_000
+        let referenceMagnitudeRMS = rmsDeviationFromMean(
+            references.map { reference in
+                indices.map {
+                    reference.transferFunction.magnitudeDB[$0]
+                }
+            }
+        )
+        let referencePhaseConsistency = circularConsistency(
+            references.map { reference in
+                indices.map {
+                    reference.transferFunction.phaseRadians![$0]
+                }
+            }
+        )
+        guard referenceArrivalSpread.isFinite,
+              referenceArrivalSpread
+                <= Self.maximumReferenceArrivalSpreadMilliseconds,
+              referenceMagnitudeRMS.isFinite,
+              referenceMagnitudeRMS
+                <= Self.maximumReferenceMagnitudeRepeatabilityRMSDB,
+              referencePhaseConsistency.isFinite,
+              referencePhaseConsistency
+                >= Self.minimumReferencePhaseConsistency else {
+            throw ProtectedDriverTimingRecommendationError
+                .referencePathUnstable
+        }
+
+        let firstArrival = try correctedArrival(first)
+        let secondArrival = try correctedArrival(second)
+        let relativeArrival = (secondArrival - firstArrival) * 1_000
+        let firstPhase = try correctedPhase(
+            first, indices: indices, grid: grid
+        )
+        let secondPhase = try correctedPhase(
+            second, indices: indices, grid: grid
+        )
+        let relativePhases = zip(secondPhase, firstPhase).map {
+            wrap($0.0 - $0.1)
+        }
+        let relativePhase = circularMean(relativePhases)
+
+        let delayMagnitude = abs(relativeArrival)
+        let delayBus: SpeakerOutputBus?
+        let additionalDelay: Double?
+        if delayMagnitude >= Self.minimumMeaningfulDelayMilliseconds,
+           delayMagnitude <= Self.maximumAdditionalDelayMilliseconds {
+            // Delay whichever acoustic path currently arrives first.
+            delayBus = relativeArrival > 0 ? firstBus : secondBus
+            additionalDelay = delayMagnitude
+        } else {
+            delayBus = nil
+            additionalDelay = nil
+        }
+
+        let currentDistance = abs(wrap(relativePhase))
+        let invertedDistance = abs(wrap(relativePhase + .pi))
+        let polarity: ProtectedDriverTimingPolarityHypothesis
+        if invertedDistance + Self.polarityDecisionMarginRadians
+            < currentDistance {
+            polarity = .invertComparedDriver
+        } else if currentDistance + Self.polarityDecisionMarginRadians
+                    < invertedDistance {
+            polarity = .retainCurrent
+        } else {
+            polarity = .inconclusive
+        }
+
+        let captureConfidence = captures.map {
+            min(
+                1.0,
+                max(
+                    0.0,
+                    (($0.quality.estimatedSNRDB ?? Self.minimumSNRDB)
+                        - Self.minimumSNRDB) / 30.0
+                )
+            )
+        }.min() ?? 0
+        return ProtectedDriverTimingRecommendation(
+            sessionID: session.id,
+            firstProtocolID: firstProtocolID,
+            secondProtocolID: secondProtocolID,
+            playbackSystemID: session.playbackSystemID,
+            routingSignature: session.routingSignature,
+            firstBus: firstBus,
+            secondBus: secondBus,
+            crossoverFrequencyHz: crossover,
+            relativeArrivalMilliseconds: relativeArrival,
+            referenceArrivalSpreadMilliseconds: referenceArrivalSpread,
+            referenceMagnitudeRepeatabilityRMSDB: referenceMagnitudeRMS,
+            referencePhaseConsistency: referencePhaseConsistency,
+            wrappedRelativePhaseAtCrossoverRadians: relativePhase,
+            delayBus: delayBus,
+            additionalDelayMilliseconds: additionalDelay,
+            polarityHypothesis: polarity,
+            evidenceConfidence: min(
+                captureConfidence, referencePhaseConsistency
+            ),
+            warnings: [
+                "Reference-aligned driver timing is valid only for this exact protected routing, crossover, microphone/reference input, sample rate and session.",
+                "Delay is a bounded additional hypothesis for the currently earlier driver; it is not an absolute acoustic-center distance.",
+                "Polarity is a phase-comparison hypothesis only. Combined-driver crossover summation must be measured before any Apply.",
+                "No driver delay, polarity, crossover, limiter, PEQ or live route is changed by this analysis."
+            ]
+        )
+    }
+
+    private func adjacent(
+        _ first: SpeakerOutputBus,
+        _ second: SpeakerOutputBus
+    ) -> Bool {
+        switch (first, second) {
+        case (.leftLow, .leftHigh), (.leftHigh, .leftLow),
+             (.rightLow, .rightHigh), (.rightHigh, .rightLow),
+             (.leftLow, .leftMid), (.leftMid, .leftLow),
+             (.leftMid, .leftHigh), (.leftHigh, .leftMid),
+             (.rightLow, .rightMid), (.rightMid, .rightLow),
+             (.rightMid, .rightHigh), (.rightHigh, .rightMid):
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func crossoverFrequency(
+        _ first: SpeakerOutputBus,
+        _ second: SpeakerOutputBus,
+        _ bass: BassManagementConfiguration
+    ) -> Double? {
+        let pair = Set([first, second])
+        if pair == Set([.leftLow, .leftHigh])
+            || pair == Set([.rightLow, .rightHigh])
+            || pair == Set([.leftLow, .leftMid])
+            || pair == Set([.rightLow, .rightMid]) {
+            return bass.frequencyHz
+        }
+        if pair == Set([.leftMid, .leftHigh])
+            || pair == Set([.rightMid, .rightHigh]) {
+            return bass.upperFrequencyHz
+        }
+        return nil
+    }
+
+    private func correctedArrival(
+        _ captures: [SpeakerMeasurementLabCapture]
+    ) throws -> Double {
+        let values = try captures.map { capture -> Double in
+            guard let acoustic = capture.quality.directArrivalSeconds,
+                  let reference = capture.sharedClockReference?
+                    .directArrivalSeconds else {
+                throw ProtectedDriverTimingRecommendationError
+                    .sharedReferenceRequired
+            }
+            return acoustic - reference
+        }
+        let mean = values.reduce(0, +) / Double(values.count)
+        guard mean.isFinite else {
+            throw ProtectedDriverTimingRecommendationError
+                .sharedReferenceRequired
+        }
+        return mean
+    }
+
+    private func correctedPhase(
+        _ captures: [SpeakerMeasurementLabCapture],
+        indices: [Int],
+        grid: [Double]
+    ) throws -> [Double] {
+        var real = Array(repeating: 0.0, count: indices.count)
+        var imag = Array(repeating: 0.0, count: indices.count)
+        for capture in captures {
+            guard let acousticPhase =
+                    capture.transferFunction.phaseRadians,
+                  let acousticArrival =
+                    capture.quality.directArrivalSeconds,
+                  let reference = capture.sharedClockReference,
+                  let referencePhase =
+                    reference.transferFunction.phaseRadians else {
+                throw ProtectedDriverTimingRecommendationError
+                    .sharedReferenceRequired
+            }
+            for (out, index) in indices.enumerated() {
+                let frequency = grid[index]
+                let acousticAbsolute = acousticPhase[index]
+                    - 2 * .pi * frequency * acousticArrival
+                let referenceAbsolute = referencePhase[index]
+                    - 2 * .pi * frequency
+                        * reference.directArrivalSeconds
+                let corrected = acousticAbsolute - referenceAbsolute
+                real[out] += cos(corrected) / Double(captures.count)
+                imag[out] += sin(corrected) / Double(captures.count)
+            }
+        }
+        return zip(real, imag).map { atan2($0.1, $0.0) }
+    }
+
+    private func rmsDeviationFromMean(
+        _ rows: [[Double]]
+    ) -> Double {
+        guard let count = rows.first?.count,
+              count > 0,
+              rows.allSatisfy({ $0.count == count }) else {
+            return .infinity
+        }
+        var squared = 0.0
+        var samples = 0
+        for index in 0..<count {
+            let values = rows.map { $0[index] }
+            let mean = values.reduce(0, +) / Double(values.count)
+            for value in values {
+                squared += pow(value - mean, 2)
+                samples += 1
+            }
+        }
+        return samples > 0 ? sqrt(squared / Double(samples)) : .infinity
+    }
+
+    private func circularConsistency(
+        _ rows: [[Double]]
+    ) -> Double {
+        let values = rows.flatMap { $0 }
+        guard !values.isEmpty, values.allSatisfy(\.isFinite) else {
+            return 0
+        }
+        let real = values.map(cos).reduce(0, +) / Double(values.count)
+        let imag = values.map(sin).reduce(0, +) / Double(values.count)
+        return hypot(real, imag)
+    }
+
+    private func circularMean(_ values: [Double]) -> Double {
+        guard !values.isEmpty else { return .nan }
+        let real = values.map(cos).reduce(0, +) / Double(values.count)
+        let imag = values.map(sin).reduce(0, +) / Double(values.count)
+        return atan2(imag, real)
+    }
+
+    private func wrap(_ value: Double) -> Double {
+        atan2(sin(value), cos(value))
+    }
+}
