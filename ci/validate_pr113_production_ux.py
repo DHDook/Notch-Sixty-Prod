@@ -172,7 +172,7 @@ assert "ProductionUserGuideView.swift" in project
 for token in (
     "Slice 1",
     "User Guide",
-    "Math & DSP",
+    "DSP Reference",
     "Slice 2",
     "Workflow consistency",
     "Accessibility",
