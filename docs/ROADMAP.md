@@ -18,22 +18,42 @@ Future portability must not materially delay the flagship Mac launch.
 
 ## Current execution status — PR113
 
-**PR113 — Production UX, Workflow Polish & In-App User Guide** is now the
-active remote milestone, stacked on the exact remote/software-complete PR112A
-head `0df13292ba02ea5d21c094fabeb48894d94c2b1d`.
+**PR113 — Production UX, Preferences & Reference** is the active remote
+milestone, stacked on the exact remote/software-complete PR112A head
+`0df13292ba02ea5d21c094fabeb48894d94c2b1d`.
 
-Slice 1 establishes a two-tab Settings information architecture with existing
-preferences under **General** and a searchable **User Guide** workspace. The
-guide is data-driven, has explicit coverage for every production sidebar
-workspace, and includes expandable **Math & DSP Details** classified as core
-equations, implementation relationships, or diagnostic/model definitions.
+Slices 1–4 are implemented:
 
-PR113 remains a presentation/control-plane milestone. It does not establish any
-PR112 physical H01–H08 evidence, release acceptance, live feed-forward ANC
-authorization or permission to merge the stacked PRs. Follow-on slices audit
-the guide math against exact implementations, add contextual help, standardize
-Preview/Apply/Verify/Rollback language, and complete accessibility,
-responsiveness and visual-polish work.
+- **Preferences & Reference** replaces the former single Settings scroll with
+  General, User Guide and DSP Reference destinations.
+- The data-driven User Guide has explicit coverage for every production
+  workspace plus Getting Started, app preferences, workflow vocabulary and a
+  DSP glossary.
+- DSP Reference exposes implementation-audited equations and distinguishes core
+  math, implementation relationships and diagnostic/model definitions.
+- Every main workspace has a contextual reference entry point; selected EQ and
+  dynamics controls deep-link directly to the matching math.
+- Preview / Apply / Verify / Revert / Rollback / Deploy now have explicit
+  product-wide semantics.
+- The documentation surface is responsive and contextual help has explicit
+  accessibility labels.
+- The math audit corrected Room Correction documentation to its actual
+  **causal minimum-phase cepstral FIR** implementation rather than a
+  linear-phase approximation.
+
+Slice 5 is the remote closeout gate: PR113/inherited safety audits, Apple
+Silicon Debug/Release builds, targeted production-IA/reference tests, full
+cumulative XCTest, and a machine-readable remote UX readiness artifact.
+
+That artifact can mark PR113 remote UX/software complete but must always retain
+`physicalAcceptanceComplete=false`,
+`releaseAcceptanceComplete=false`,
+`liveFeedForwardANCAuthorized=false`,
+`mayMergeIntoMain=false`, and
+`physicalEvidenceSuppliedByCI=false`.
+
+Physical PR112 H01–H08 execution remains separate hands-on work. PR113, PR112A
+and every ancestor remain **OPEN, DRAFT and UNMERGED**; `main` is unchanged.
 
 See `docs/PR113_PRODUCTION_UX.md`.
 
