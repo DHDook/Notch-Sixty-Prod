@@ -13,10 +13,11 @@ DOC = ROOT / "docs/PR112A_REMOTE_HARDWARE_ACCEPTANCE.md"
 WORKFLOW = ROOT / ".github/workflows/pr112a-remote-hardware-acceptance.yml"
 MANIFEST = ROOT / "ci/build_pr112a_remote_hardware_readiness.py"
 ROADMAP = ROOT / "docs/ROADMAP.md"
+PROJECT = ROOT / "NotchSixty.xcodeproj/project.pbxproj"
 
 for path in (
     SOURCE, CONTROLLER, UI, ROOT_VIEW, APP,
-    TESTS, DOC, WORKFLOW, MANIFEST, ROADMAP
+    TESTS, DOC, WORKFLOW, MANIFEST, ROADMAP, PROJECT
 ):
     assert path.is_file(), f"PR112A missing artifact: {path}"
 
@@ -30,6 +31,7 @@ doc = DOC.read_text(encoding="utf-8")
 workflow = WORKFLOW.read_text(encoding="utf-8")
 manifest = MANIFEST.read_text(encoding="utf-8")
 roadmap = ROADMAP.read_text(encoding="utf-8")
+project = PROJECT.read_text(encoding="utf-8")
 
 for gate in ("H01", "H02", "H03", "H04", "H05", "H06", "H07", "H08"):
     assert f'"{gate}"' in source or f'= "{gate}"' in source, f"missing gate {gate}"
@@ -167,6 +169,14 @@ for token in (
     "PR112A remains OPEN, DRAFT and UNMERGED",
 ):
     assert token in doc, f"PR112A documentation boundary missing {token}"
+
+for token in (
+    "HardwareAcceptance.swift in Sources",
+    "HardwareAcceptanceController.swift in Sources",
+    "ProductionHardwareAcceptanceWorkspace.swift in Sources",
+    "HardwareAcceptanceTests.swift in Sources",
+):
+    assert token in project, f"PR112A Xcode target missing {token}"
 
 assert "HardwareAcceptanceTests" in workflow
 assert "build_pr112a_remote_hardware_readiness.py" in workflow
