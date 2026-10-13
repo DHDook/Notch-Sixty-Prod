@@ -990,4 +990,174 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         )
     }
 
+
+    @MainActor
+    func testRecoveryDetectsUncleanPriorLaunchButNotCleanTermination()
+        throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "pr113b-recovery-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("recovery.json")
+        let store = ProductRecoveryStore(storageURL: url)
+
+        let first = ProductRecoveryController(store: store)
+        first.prepareForLaunch(
+            now: Date(timeIntervalSince1970: 100)
+        )
+        XCTAssertFalse(first.safeLaunchActive)
+
+        let afterUnclean = ProductRecoveryController(store: store)
+        afterUnclean.prepareForLaunch(
+            now: Date(timeIntervalSince1970: 200)
+        )
+        XCTAssertTrue(afterUnclean.safeLaunchActive)
+        XCTAssertTrue(
+            afterUnclean.safeLaunchReasons.contains(
+                .uncleanTermination
+            )
+        )
+
+        afterUnclean.markCleanTermination()
+
+        let afterClean = ProductRecoveryController(store: store)
+        afterClean.prepareForLaunch(
+            now: Date(timeIntervalSince1970: 300)
+        )
+        XCTAssertFalse(afterClean.safeLaunchActive)
+        XCTAssertFalse(
+            afterClean.safeLaunchReasons.contains(
+                .uncleanTermination
+            )
+        )
+    }
+
+    @MainActor
+    func testRecoveryRepeatedFailuresTriggerSafeLaunchThreshold()
+        throws {
+        let controller = ProductRecoveryController(
+            store: ProductRecoveryStore(storageURL: nil)
+        )
+        controller.prepareForLaunch()
+
+        controller.recordStartFailure(
+            .audioStart,
+            description: "first"
+        )
+        XCTAssertFalse(controller.safeLaunchActive)
+
+        controller.recordStartFailure(
+            .audioStart,
+            description: "second"
+        )
+        XCTAssertTrue(controller.safeLaunchActive)
+        XCTAssertTrue(
+            controller.safeLaunchReasons.contains(
+                .repeatedAudioStartFailures
+            )
+        )
+
+        controller.openNormally()
+        XCTAssertFalse(controller.safeLaunchActive)
+
+        controller.recordStartFailure(
+            .plugInStart,
+            description: "plug-in one"
+        )
+        XCTAssertFalse(controller.safeLaunchActive)
+        controller.recordStartFailure(
+            .plugInStart,
+            description: "plug-in two"
+        )
+        XCTAssertTrue(
+            controller.safeLaunchReasons.contains(
+                .repeatedPlugInFailures
+            )
+        )
+    }
+
+    @MainActor
+    func testRecoveryOnlyHealthyNormalStartUpdatesLastKnownGood()
+        throws {
+        let controller = ProductRecoveryController(
+            store: ProductRecoveryStore(storageURL: nil)
+        )
+        controller.prepareForLaunch()
+
+        let firstPreset = ContentPreset(
+            name: "Known Good",
+            origin: .user,
+            state: ContentPresetState()
+        )
+        let firstSnapshot = ProductProfileBackupSnapshot(
+            contentPresets: [firstPreset],
+            systemProfiles: [],
+            selectedContentPresetID: firstPreset.id,
+            selectedSystemProfileID: nil
+        )
+
+        controller.recordSuccessfulStart(
+            profiles: firstSnapshot,
+            plugInChainHealthy: true,
+            now: Date(timeIntervalSince1970: 100)
+        )
+        XCTAssertEqual(
+            try controller.lastKnownGoodSnapshot()
+                .contentPresets.first?.name,
+            "Known Good"
+        )
+
+        let secondPreset = ContentPreset(
+            name: "Bypassed Candidate",
+            origin: .user,
+            state: ContentPresetState()
+        )
+        let secondSnapshot = ProductProfileBackupSnapshot(
+            contentPresets: [secondPreset],
+            systemProfiles: [],
+            selectedContentPresetID: secondPreset.id,
+            selectedSystemProfileID: nil
+        )
+
+        controller.openWithPlugInsBypassed()
+        controller.recordSuccessfulStart(
+            profiles: secondSnapshot,
+            plugInChainHealthy: true,
+            now: Date(timeIntervalSince1970: 200)
+        )
+        XCTAssertEqual(
+            try controller.lastKnownGoodSnapshot()
+                .contentPresets.first?.name,
+            "Known Good"
+        )
+
+        controller.openNormally()
+        controller.recordSuccessfulStart(
+            profiles: secondSnapshot,
+            plugInChainHealthy: false,
+            now: Date(timeIntervalSince1970: 300)
+        )
+        XCTAssertEqual(
+            try controller.lastKnownGoodSnapshot()
+                .contentPresets.first?.name,
+            "Known Good"
+        )
+    }
+
+    @MainActor
+    func testRecoveryStateIsMachineLocalAndHasNoReleaseAuthority()
+        throws {
+        let labels = Set(
+            Mirror(
+                reflecting: ProductRecoveryPersistentState()
+            ).children.compactMap { $0.label }
+        )
+        XCTAssertFalse(labels.contains("physicalAcceptanceComplete"))
+        XCTAssertFalse(labels.contains("releaseAcceptanceComplete"))
+        XCTAssertFalse(labels.contains("mayMergeIntoMain"))
+        XCTAssertFalse(labels.contains("liveFeedForwardANCAuthorized"))
+    }
+
 }
