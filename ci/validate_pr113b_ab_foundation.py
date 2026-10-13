@@ -4,6 +4,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PROFILES = ROOT / "NotchSixty/State/ProductProfiles.swift"
+BACKUP = ROOT / "NotchSixty/State/ProductBackup.swift"
+PROJECT = ROOT / "NotchSixty.xcodeproj/project.pbxproj"
 ENGINE = ROOT / "NotchSixty/Audio/AudioIOEngine.swift"
 APP = ROOT / "NotchSixty/NotchSixtyApp.swift"
 TOOLBAR = ROOT / "NotchSixty/UI/ProductionProfileToolbar.swift"
@@ -12,10 +14,15 @@ DOC = ROOT / "docs/PR113B_WORLD_CLASS_PRODUCT_FINISH.md"
 ROADMAP = ROOT / "docs/ROADMAP.md"
 WORKFLOW = ROOT / ".github/workflows/pr113b-world-class-product-finish.yml"
 
-for path in (PROFILES, ENGINE, APP, TOOLBAR, TESTS, DOC, ROADMAP, WORKFLOW):
+for path in (
+    PROFILES, BACKUP, PROJECT, ENGINE, APP, TOOLBAR, TESTS, DOC, ROADMAP,
+    WORKFLOW
+):
     assert path.is_file(), f"PR113B Slice 1 missing artifact: {path}"
 
 profiles = PROFILES.read_text(encoding="utf-8")
+backup = BACKUP.read_text(encoding="utf-8")
+project = PROJECT.read_text(encoding="utf-8")
 engine = ENGINE.read_text(encoding="utf-8")
 app = APP.read_text(encoding="utf-8")
 toolbar = TOOLBAR.read_text(encoding="utf-8")
@@ -159,6 +166,78 @@ for token in (
 ):
     assert token in toolbar, f"PR113B A/B production UI missing {token}"
 
+
+for token in (
+    "struct PlaybackSystemHardwareMappingRequirement:",
+    "struct ProductProfileBackupSnapshot:",
+    "var referencedHardwareDeviceUIDs: Set<String>",
+    "case hardwareMappingRequired(profile: String)",
+    "func makeBackupSnapshot()",
+    "func restoreBackupSnapshot(",
+    "availableOutputUIDs: Set<String>",
+    "recomputeHardwareRequirements: Bool = true",
+    "func confirmSelectedSystemHardwareMapping()",
+):
+    assert token in profiles, f"PR113B Slice 3 profile backup contract missing {token}"
+
+for token in (
+    "struct ProductBackupPreferences:",
+    "struct ProductBackupPayload:",
+    "struct ProductBackupManifest:",
+    "struct ProductBackupEnvelope:",
+    "final class ProductBackupController: ObservableObject",
+    "func exportData(now: Date = Date()) throws -> Data",
+    "func inspect(data: Data) throws -> ProductBackupInspection",
+    "func restore(",
+    "payloadSHA256",
+    "SHA256.hash(data: data)",
+    "hardwareAcceptanceReferenceEvidence",
+    "restoreRequiresIdle",
+    "existingSessionIDs()",
+):
+    assert token in backup, f"PR113B Slice 3 backup engine missing {token}"
+
+for forbidden in (
+    "hardwareAcceptanceStore.create(",
+    "hardwareAcceptanceStore.append(",
+):
+    assert forbidden not in backup, (
+        f"PR113B backup restore gained acceptance authority: {forbidden}"
+    )
+
+for token in (
+    "ProductBackup.swift in Sources",
+    "ProductBackup.swift",
+):
+    assert token in project, f"PR113B backup target membership missing {token}"
+
+for token in (
+    "let backup: ProductBackupController",
+    "ProductBackupController(",
+    'title: "Backup & Restore"',
+    '"Save Backup…"',
+    '"Restore Backup…"',
+    '"n60backup"',
+    "product.backup.restore(data: data)",
+    "preferences.reloadFromDefaults()",
+):
+    assert token in app, f"PR113B backup production UI missing {token}"
+
+for token in (
+    '"Needs Mapping"',
+    '"Confirm Hardware Mapping"',
+    "selectedSystemHardwareMappingRequirement",
+):
+    assert token in toolbar, f"PR113B hardware remapping UI missing {token}"
+
+for token in (
+    "testBackupRestoreMarksUnavailablePlaybackHardwareForMapping",
+    "testBackupRestoreKeepsKnownHardwareEligibleWithoutRemapping",
+    "testBackupPreferencesRoundTripSafeKeysOnly",
+    "testBackupInspectionRejectsPayloadTampering",
+):
+    assert token in tests, f"PR113B Slice 3 regression missing {token}"
+
 for token in (
     "Slice 1 — Safe A/B comparison foundation",
     "Audio Unit rack topology",
@@ -167,6 +246,10 @@ for token in (
     "Slice 2 — Click-free, measured-level A/B audition",
     "attenuation-only",
     "Exit A/B and Restore",
+    "Slice 3 — Full Notch Sixty backup & restore",
+    "Needs Mapping",
+    "reference-only evidence",
+    "SHA-256",
     "OPEN, DRAFT and UNMERGED",
 ):
     assert token in doc, f"PR113B Slice 1 documentation missing {token}"
@@ -189,4 +272,4 @@ for token in (
 ):
     assert token in workflow, f"PR113B workflow missing {token}"
 
-print("PR113B Slices 1–2 A/B comparison contract: PASS")
+print("PR113B Slices 1–3 world-class product contract: PASS")
