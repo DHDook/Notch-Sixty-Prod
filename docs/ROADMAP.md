@@ -16,13 +16,43 @@ Legacy parity is the minimum capability floor. The commercial rewrite should exc
 
 Future portability must not materially delay the flagship Mac launch.
 
+## Current execution status — PR112A
+
+**PR112A — Remote Hardware-Acceptance Infrastructure** is now the active
+remote milestone, stacked on exact-head remote/software-complete PR111.
+
+Slice 1 introduces the authoritative H01–H08 physical-acceptance domain:
+monotonic evidence authority, exact campaign/build identity, physical
+environment metadata, explicit topology/release-scope decisions, append-only
+evidence, corruption-safe persistence, and rollups that cannot convert CI into
+physical acceptance. H05 whole-speaker Measurement Lab acceptance remains
+mandatory even when protected split-driver work is excluded for a passive
+speaker topology.
+
+The dedicated PR112A CI artifact must always retain
+`physicalAcceptanceComplete=false`,
+`releaseAcceptanceComplete=false`,
+`liveFeedForwardANCAuthorized=false`, and
+`mayMergeIntoMain=false`.
+
+Planned remote slices add the guided campaign UI, H03–H07 evidence adapters,
+state/topology preflight for the PR111 commissioning handoff, and exportable
+acceptance packets. Real unplug/replug, sleep/wake, thermal/endurance,
+speaker safety, calibrated acoustic measurements, combined-driver
+verification and any physical Apply remain hands-on PR112 work.
+
+See `docs/PR112A_REMOTE_HARDWARE_ACCEPTANCE.md`.
+
+---
+
 ## Current execution status — PR111
 
 **PR111 — Automatic Per-Driver Speaker Optimization** remains an OPEN,
 DRAFT, UNMERGED stack above PR110. Slices 1–5 passed remote/software
 portable, Apple Silicon Debug/Release, targeted and full regression at
-`1b2560749119dfe02edb4b932e6ef4c0fa6b0cef` / Actions run `38346176045`. They are
-implemented on the current branch and awaiting one final exact-head CI pass.
+`f8ef81a80d1aac262ec21da23abef5ed29825506` / Actions run `38347561995`.
+PR111 remote/software implementation is complete; physical commissioning
+and Apply remain deferred to PR112.
 
 The implemented remote PR111 stack now provides:
 
