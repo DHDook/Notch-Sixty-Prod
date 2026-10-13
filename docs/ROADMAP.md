@@ -16,6 +16,29 @@ Legacy parity is the minimum capability floor. The commercial rewrite should exc
 
 Future portability must not materially delay the flagship Mac launch.
 
+## Current execution status — PR113
+
+**PR113 — Production UX, Workflow Polish & In-App User Guide** is now the
+active remote milestone, stacked on the exact remote/software-complete PR112A
+head `0df13292ba02ea5d21c094fabeb48894d94c2b1d`.
+
+Slice 1 establishes a two-tab Settings information architecture with existing
+preferences under **General** and a searchable **User Guide** workspace. The
+guide is data-driven, has explicit coverage for every production sidebar
+workspace, and includes expandable **Math & DSP Details** classified as core
+equations, implementation relationships, or diagnostic/model definitions.
+
+PR113 remains a presentation/control-plane milestone. It does not establish any
+PR112 physical H01–H08 evidence, release acceptance, live feed-forward ANC
+authorization or permission to merge the stacked PRs. Follow-on slices audit
+the guide math against exact implementations, add contextual help, standardize
+Preview/Apply/Verify/Rollback language, and complete accessibility,
+responsiveness and visual-polish work.
+
+See `docs/PR113_PRODUCTION_UX.md`.
+
+---
+
 ## Current execution status — PR112A
 
 **PR112A — Remote Hardware-Acceptance Infrastructure** is now the active
