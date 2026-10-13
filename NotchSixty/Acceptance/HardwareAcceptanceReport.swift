@@ -87,9 +87,9 @@ struct HardwareAcceptanceReport:
     // PR112A cannot confer commercial release or merge authority. Those
     // remain separate PR114 / owner-controlled decisions even if a future
     // physical campaign eventually passes every H01-H08 gate.
-    var releaseAcceptanceComplete: Bool { false }
-    var mayMergeIntoMain: Bool { false }
-    var physicalEvidenceSuppliedByCI: Bool { false }
+    var releaseAcceptanceComplete: Bool = false
+    var mayMergeIntoMain: Bool = false
+    var physicalEvidenceSuppliedByCI: Bool = false
 }
 
 enum HardwareAcceptanceReportError:
