@@ -36,6 +36,21 @@ jobs:
           python3 ci/validate_pr109_cross_feature_contracts.py
           python3 ci/validate_pr110_advanced_placement.py
 
+      - name: Build PR113 remote UX readiness manifest
+        run: >-
+          python3 ci/build_pr113_remote_ux_readiness.py
+          --commit "${{ github.event.pull_request.head.sha || github.sha }}"
+          --branch "${{ github.head_ref || github.ref_name }}"
+          --output "$RUNNER_TEMP/pr113-remote-ux-readiness.json"
+
+      - name: Publish PR113 remote UX readiness
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr113-remote-ux-readiness
+          path: ${{ runner.temp }}/pr113-remote-ux-readiness.json
+          retention-days: 30
+          if-no-files-found: error
+
   macos:
     runs-on: xcode-27
     steps:
