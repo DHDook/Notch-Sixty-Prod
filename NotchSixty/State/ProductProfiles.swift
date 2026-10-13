@@ -1334,9 +1334,6 @@ final class ProductProfileController: ObservableObject {
               let index = systemProfiles.firstIndex(where: { $0.id == selectedSystemProfileID }) else { return }
         systemProfiles[index].state.associatedOutputUID =
             engine.routeConfiguration.selectedOutputUID
-        reevaluateHardwareMappingRequirement(
-            for: selectedSystemProfileID
-        )
         lastErrorDescription = nil
         persist()
     }
@@ -1363,9 +1360,6 @@ final class ProductProfileController: ObservableObject {
         do {
             try engine.replaceMultiOutputRoutingConfiguration(configuration)
             systemProfiles[index].state.outputRouting = configuration
-            reevaluateHardwareMappingRequirement(
-                for: selectedSystemProfileID
-            )
             try persistThrowing()
             lastErrorDescription = nil
         } catch {
@@ -1400,9 +1394,6 @@ final class ProductProfileController: ObservableObject {
         do {
             try engine.replaceOutputDeviceProfileConfiguration(configuration)
             systemProfiles[index].state.outputDeviceProfile = configuration
-            reevaluateHardwareMappingRequirement(
-                for: selectedSystemProfileID
-            )
             try persistThrowing()
             lastErrorDescription = nil
         } catch {
@@ -1433,9 +1424,6 @@ final class ProductProfileController: ObservableObject {
         do {
             try engine.replaceHeadphoneDeviceProfileConfiguration(configuration)
             systemProfiles[index].state.headphoneDeviceProfile = configuration
-            reevaluateHardwareMappingRequirement(
-                for: selectedSystemProfileID
-            )
             try persistThrowing()
             lastErrorDescription = nil
         } catch {
@@ -1915,40 +1903,6 @@ final class ProductProfileController: ObservableObject {
         }
         lastErrorDescription = nil
         persist()
-    }
-
-    private func reevaluateHardwareMappingRequirement(
-        for systemProfileID: UUID
-    ) {
-        guard let profile = systemProfiles.first(where: {
-            $0.id == systemProfileID
-        }) else {
-            hardwareMappingRequirements.removeAll {
-                $0.systemProfileID == systemProfileID
-            }
-            return
-        }
-
-        let available = Set(engine.outputDevices.map(\.uid))
-        let referenced = profile.state.referencedHardwareDeviceUIDs
-        guard !referenced.subtracting(available).isEmpty else {
-            hardwareMappingRequirements.removeAll {
-                $0.systemProfileID == systemProfileID
-            }
-            return
-        }
-
-        let requirement = PlaybackSystemHardwareMappingRequirement(
-            systemProfileID: systemProfileID,
-            importedDeviceUIDs: Array(referenced)
-        )
-        if let index = hardwareMappingRequirements.firstIndex(where: {
-            $0.systemProfileID == systemProfileID
-        }) {
-            hardwareMappingRequirements[index] = requirement
-        } else {
-            hardwareMappingRequirements.append(requirement)
-        }
     }
 
     private func reconcileSelections() {
