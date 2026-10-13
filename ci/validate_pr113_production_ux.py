@@ -13,10 +13,11 @@ PROJECT = ROOT / "NotchSixty.xcodeproj/project.pbxproj"
 DOC = ROOT / "docs/PR113_PRODUCTION_UX.md"
 ROADMAP = ROOT / "docs/ROADMAP.md"
 WORKFLOW = ROOT / ".github/workflows/pr113-production-ux.yml"
+MANIFEST = ROOT / "ci/build_pr113_remote_ux_readiness.py"
 
 for path in (
     APP, GUIDE, ROOT_VIEW, EQUALIZER, DYNAMICS, TESTS,
-    PROJECT, DOC, ROADMAP, WORKFLOW
+    PROJECT, DOC, ROADMAP, WORKFLOW, MANIFEST
 ):
     assert path.is_file(), f"PR113 missing artifact: {path}"
 
@@ -30,6 +31,7 @@ project = PROJECT.read_text(encoding="utf-8")
 doc = DOC.read_text(encoding="utf-8")
 roadmap = ROADMAP.read_text(encoding="utf-8")
 workflow = WORKFLOW.read_text(encoding="utf-8")
+manifest = MANIFEST.read_text(encoding="utf-8")
 
 for token in (
     "TabView(selection: $reference.selectedTab)",
@@ -39,6 +41,9 @@ for token in (
     "ProductionDSPReferenceView(navigator: reference)",
     'Label("DSP Reference", systemImage: "function")',
     "private var generalSettings: some View",
+    '.navigationTitle("Preferences & Reference")',
+    'minWidth: 760',
+    'idealWidth: 960',
 ):
     assert token in app, f"PR113 Settings IA missing {token}"
 
@@ -65,6 +70,10 @@ for token in (
     '"Core equation"',
     '"Implementation relationship"',
     '"Diagnostic / model definition"',
+    '"minimum-phase-fir"',
+    "causal minimum-phase",
+    "ProductionWorkflowTerm.allCases",
+    ".accessibilityLabel(label)",
 ):
     assert token in guide, f"PR113 guide architecture missing {token}"
 
@@ -133,6 +142,7 @@ for token in (
     "testReferenceNavigatorRoutesGuideAndDSPDeepLinks",
     "testWorkflowVocabularySeparatesDraftAndLiveRecoverySemantics",
     "testReferenceSearchFindsWorkflowAndDSPGlossaryTerms",
+    "testRoomCorrectionReferenceMatchesMinimumPhaseImplementation",
 ):
     assert token in tests, f"PR113 guide regression missing {token}"
 
@@ -173,6 +183,23 @@ for token in (
 assert "PR113" in roadmap
 assert "validate_pr112a_hardware_acceptance.py" in workflow
 assert "ProductionInformationArchitectureTests" in workflow
+assert "build_pr113_remote_ux_readiness.py" in workflow
+assert "pr113-remote-ux-readiness" in workflow
+
+for key in (
+    '"remoteUXSoftwareComplete": True',
+    '"preferencesAndReferenceAvailable": True',
+    '"userGuideCoverageComplete": True',
+    '"dspReferenceAvailable": True',
+    '"contextualReferenceLinksAvailable": True',
+    '"workflowVocabularyStandardized": True',
+    '"physicalAcceptanceComplete": False',
+    '"releaseAcceptanceComplete": False',
+    '"liveFeedForwardANCAuthorized": False',
+    '"mayMergeIntoMain": False',
+    '"physicalEvidenceSuppliedByCI": False',
+):
+    assert key in manifest, f"PR113 readiness manifest authority changed: {key}"
 
 # PR113 is a presentation/control-plane milestone. Its guide must map the
 # production IA without adding another navigation destination to the main
