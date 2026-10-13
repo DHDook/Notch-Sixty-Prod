@@ -498,10 +498,10 @@ enum ProductionUserGuideCatalog {
                     .implementationRelationship
                 ),
                 formula(
-                    "fir-latency",
-                    "Linear-phase correction delay",
-                    "τ_filter = (N−1) / (2fₛ)",
-                    "A symmetric linear-phase correction FIR has constant group delay determined by tap count and sample rate. Notch Sixty reports total DSP latency so A/V-sensitive use can be evaluated.",
+                    "minimum-phase-fir",
+                    "Minimum-phase FIR synthesis",
+                    "L[k] = C_dB[k] · ln(10)/20;  c = IFFT{L};  c_min[n>0] = 2c[n] for n<N/2;  h = IFFT{exp(FFT{c_min})}",
+                    "Room Correction converts the desired dB correction to a log-magnitude spectrum, transforms it to the real cepstrum, keeps the causal minimum-phase cepstrum by doubling positive-time coefficients, exponentiates the resulting complex log spectrum, and transforms back to FIR taps. This is a causal minimum-phase design, not a symmetric linear-phase FIR; total playback latency is reported separately by the complete DSP path.",
                     .implementationRelationship
                 )
             ]
