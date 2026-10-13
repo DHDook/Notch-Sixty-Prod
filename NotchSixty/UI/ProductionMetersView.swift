@@ -558,22 +558,24 @@ struct ProductionMetersView: View {
                         assistant.cancelObservation()
                     }
                 } else {
-                    Button(
-                        assistant.phase == .idle
-                            ? "Observe Program"
-                            : "Observe Again"
-                    ) {
-                        do {
-                            try assistant.startObservation()
-                        } catch {
-                            assistantCommandError =
-                                error.localizedDescription
+                    if assistant.phase != .applied {
+                        Button(
+                            assistant.phase == .idle
+                                ? "Observe Program"
+                                : "Observe Again"
+                        ) {
+                            do {
+                                try assistant.startObservation()
+                            } catch {
+                                assistantCommandError =
+                                    error.localizedDescription
+                            }
                         }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(
+                            engine.lifecycleState != .running
+                        )
                     }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(
-                        engine.lifecycleState != .running
-                    )
 
                     if let recommendation =
                         assistant.recommendation,
