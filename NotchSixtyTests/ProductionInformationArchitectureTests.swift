@@ -1458,6 +1458,12 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         XCTAssertTrue(boundary.matches(profiles))
         try engine.setHeadroomAttenuationDB(-1.0)
         XCTAssertFalse(boundary.matches(profiles))
+        XCTAssertTrue(
+            boundary.matches(
+                profiles,
+                expectedHeadroomAttenuationDB: -1.0
+            )
+        )
     }
 
 }
