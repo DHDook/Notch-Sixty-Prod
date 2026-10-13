@@ -563,7 +563,8 @@ final class ProtectedDriverPEQRecommendationTests: XCTestCase {
         return SpeakerMeasurementLabProtectedDriverCaptureProvenance(
             targetBus: bus,
             physicalDestination: PhysicalOutputEndpoint(
-                deviceUID: "PR111 Device", channelIndex: 1
+                deviceUID: "PR111 Device",
+                channelIndex: bus == .leftLow ? 0 : 1
             ),
             routingConfiguration: route,
             bassManagementConfiguration: bass,
@@ -836,6 +837,276 @@ final class ProtectedDriverPEQRecommendationTests: XCTestCase {
             try SpeakerMeasurementLabReportBuilder().build(
                 session: session
             )
+        )
+    }
+
+
+    private func timingFixture(
+        relativeArrivalMilliseconds: Double = 0.8,
+        secondResidualPhaseRadians: Double = 0,
+        referenceDriftMilliseconds: Double = 0.02,
+        includeReference: Bool = true
+    ) -> (SpeakerMeasurementLabSession, UUID, UUID) {
+        let lowProtocol = SpeakerMeasurementLabProtocol(
+            name: "PR111 Left Low timing",
+            request: SpeakerMeasurementLabRequest(
+                mode: .protectedDriverNearField,
+                target: .protectedDriverBus(.leftLow),
+                geometry: SpeakerMeasurementLabGeometry(
+                    distanceMeters: 0.05
+                )
+            ),
+            excitationLevelDBFS: -30
+        )
+        let highProtocol = SpeakerMeasurementLabProtocol(
+            name: "PR111 Left High timing",
+            request: SpeakerMeasurementLabRequest(
+                mode: .protectedDriverNearField,
+                target: .protectedDriverBus(.leftHigh),
+                geometry: SpeakerMeasurementLabGeometry(
+                    distanceMeters: 0.05
+                )
+            ),
+            excitationLevelDBFS: -30
+        )
+        let grid = (0..<120).map { i in
+            200.0 * pow(50.0, Double(i) / 119)
+        }
+        let lowReceipt = provenance(bus: .leftLow)
+        let highReceipt = provenance(bus: .leftHigh)
+        var captures: [SpeakerMeasurementLabCapture] = []
+        for (labProtocol, receipt, arrival, phase) in [
+            (
+                lowProtocol,
+                lowReceipt,
+                0.010,
+                0.0
+            ),
+            (
+                highProtocol,
+                highReceipt,
+                0.010 + relativeArrivalMilliseconds / 1_000,
+                secondResidualPhaseRadians
+            ),
+        ] {
+            for repeatIndex in 0..<3 {
+                let referenceArrival = 0.002
+                    + Double(repeatIndex)
+                        * referenceDriftMilliseconds / 2_000
+                let shared = includeReference
+                    ? SpeakerMeasurementLabSharedClockReferenceEvidence(
+                        inputDeviceUID: mic.deviceUID,
+                        inputChannelIndex: 1,
+                        outputReferenceDeviceUID: "PR111 Device",
+                        sampleRate: 48_000,
+                        directArrivalSeconds: referenceArrival,
+                        transferFunction:
+                            RoomCorrectionFrequencyResponse(
+                                frequenciesHz: grid,
+                                magnitudeDB: grid.map { _ in
+                                    Double(repeatIndex - 1) * 0.01
+                                },
+                                phaseRadians: grid.map { _ in
+                                    Double(repeatIndex - 1) * 0.004
+                                }
+                            ),
+                        quality: RoomCorrectionMeasurementQuality(
+                            clipped: false,
+                            playbackPeakDBFS: -30,
+                            capturePeakDBFS: -8,
+                            estimatedNoiseFloorDBFS: -85,
+                            estimatedSNRDB: 65,
+                            sweepComplete: true,
+                            directArrivalSeconds: referenceArrival,
+                            usableLowHz: 200,
+                            usableHighHz: 10_000,
+                            warnings: []
+                        )
+                    ) : nil
+                let transferPhase = grid.map { frequency in
+                    // The measured phase includes the acoustic time-of-flight.
+                    // Slice 3 removes that delay slope before residual
+                    // polarity comparison.
+                    2 * Double.pi * frequency * arrival
+                        + phase
+                        + Double(repeatIndex - 1) * 0.002
+                }
+                captures.append(
+                    SpeakerMeasurementLabCapture(
+                        protocolID: labProtocol.id,
+                        repeatIndex: repeatIndex,
+                        capturedAt: Date(
+                            timeIntervalSince1970:
+                                1_710_000_000
+                                + Double(repeatIndex)
+                        ),
+                        playbackSystemID: systemID,
+                        routingSignature: "pr111-active-route",
+                        microphone: mic,
+                        excitationLevelDBFS: -30,
+                        sampleRate: 48_000,
+                        source: .speaker(.frontLeft),
+                        protectedDriverProvenance: receipt,
+                        sharedClockReference: shared,
+                        impulseResponse: [0, 0.1, 1, 0.2, 0],
+                        transferFunction:
+                            RoomCorrectionFrequencyResponse(
+                                frequenciesHz: grid,
+                                magnitudeDB: grid.map { frequency in
+                                    -1.5
+                                        - 0.15
+                                            * abs(log2(frequency / 1_000))
+                                        + Double(repeatIndex - 1) * 0.01
+                                },
+                                phaseRadians: transferPhase
+                            ),
+                        quality: RoomCorrectionMeasurementQuality(
+                            clipped: false,
+                            playbackPeakDBFS: -30,
+                            capturePeakDBFS: -18,
+                            estimatedNoiseFloorDBFS: -85,
+                            estimatedSNRDB: 58,
+                            sweepComplete: true,
+                            directArrivalSeconds:
+                                arrival
+                                    + Double(repeatIndex) * 0.00001,
+                            usableLowHz: 250,
+                            usableHighHz: 8_000,
+                            warnings: []
+                        )
+                    )
+                )
+            }
+        }
+        return (
+            SpeakerMeasurementLabSession(
+                playbackSystemID: systemID,
+                routingSignature: "pr111-active-route",
+                microphone: mic,
+                sharedClockReferenceConfiguration:
+                    SpeakerMeasurementLabSharedClockReferenceConfiguration(
+                        inputDeviceUID: mic.deviceUID,
+                        inputChannelIndex: 1,
+                        outputReferenceDeviceUID: "PR111 Device",
+                        minimumSNRDB: 35
+                    ),
+                sampleRate: 48_000,
+                protocols: [lowProtocol, highProtocol],
+                captures: captures
+            ),
+            lowProtocol.id,
+            highProtocol.id
+        )
+    }
+
+    func testSharedReferenceTimingSuggestsBoundedDelayForEarlierDriver() throws {
+        let (session, lowID, highID) = timingFixture(
+            relativeArrivalMilliseconds: 0.8
+        )
+        let result = try ProtectedDriverTimingRecommendationAnalyzer()
+            .recommend(
+                session: session,
+                firstProtocolID: lowID,
+                secondProtocolID: highID
+            )
+        XCTAssertEqual(result.firstBus, .leftLow)
+        XCTAssertEqual(result.secondBus, .leftHigh)
+        XCTAssertEqual(result.crossoverFrequencyHz, 1_000, accuracy: 0.001)
+        XCTAssertEqual(result.relativeArrivalMilliseconds, 0.8, accuracy: 0.03)
+        XCTAssertEqual(result.delayBus, .leftLow)
+        XCTAssertEqual(result.additionalDelayMilliseconds, 0.8, accuracy: 0.03)
+        XCTAssertEqual(result.polarityHypothesis, .retainCurrent)
+        XCTAssertTrue(result.measurementOnly)
+        XCTAssertFalse(result.canDeploy)
+        XCTAssertFalse(result.canChangeCrossoverOrLimiter)
+        XCTAssertTrue(result.requiresCombinedDriverVerification)
+    }
+
+    func testResidualPiPhaseProducesOnlyPolarityHypothesis() throws {
+        let (session, lowID, highID) = timingFixture(
+            relativeArrivalMilliseconds: 0.2,
+            secondResidualPhaseRadians: .pi
+        )
+        let result = try ProtectedDriverTimingRecommendationAnalyzer()
+            .recommend(
+                session: session,
+                firstProtocolID: lowID,
+                secondProtocolID: highID
+            )
+        XCTAssertEqual(
+            result.polarityHypothesis,
+            .invertComparedDriver
+        )
+        XCTAssertFalse(result.canDeploy)
+    }
+
+    func testMissingOrUnstableSharedReferenceFailsClosed() throws {
+        var (session, lowID, highID) = timingFixture(
+            includeReference: false
+        )
+        XCTAssertThrowsError(
+            try ProtectedDriverTimingRecommendationAnalyzer()
+                .recommend(
+                    session: session,
+                    firstProtocolID: lowID,
+                    secondProtocolID: highID
+                )
+        )
+        (session, lowID, highID) = timingFixture(
+            referenceDriftMilliseconds: 0.7
+        )
+        XCTAssertThrowsError(
+            try ProtectedDriverTimingRecommendationAnalyzer()
+                .recommend(
+                    session: session,
+                    firstProtocolID: lowID,
+                    secondProtocolID: highID
+                )
+        ) {
+            XCTAssertEqual(
+                $0 as? ProtectedDriverTimingRecommendationError,
+                .referencePathUnstable
+            )
+        }
+    }
+
+    func testLargeArrivalMismatchDoesNotInventSafeDelayAdjustment() throws {
+        let (session, lowID, highID) = timingFixture(
+            relativeArrivalMilliseconds: 3.5
+        )
+        let result = try ProtectedDriverTimingRecommendationAnalyzer()
+            .recommend(
+                session: session,
+                firstProtocolID: lowID,
+                secondProtocolID: highID
+            )
+        XCTAssertNil(result.delayBus)
+        XCTAssertNil(result.additionalDelayMilliseconds)
+        XCTAssertFalse(result.canDeploy)
+    }
+
+    func testCrossSpeakerOrUnprotectedPairCannotProduceTimingAdvice() throws {
+        var (session, lowID, highID) = timingFixture()
+        session.protocols[1].request.target =
+            .protectedDriverBus(.rightHigh)
+        XCTAssertThrowsError(
+            try ProtectedDriverTimingRecommendationAnalyzer()
+                .recommend(
+                    session: session,
+                    firstProtocolID: lowID,
+                    secondProtocolID: highID
+                )
+        )
+        (session, lowID, highID) = timingFixture()
+        session.captures[3].protectedDriverProvenance?
+            .routingConfiguration.referenceDeviceUID = "other-device"
+        XCTAssertThrowsError(
+            try ProtectedDriverTimingRecommendationAnalyzer()
+                .recommend(
+                    session: session,
+                    firstProtocolID: lowID,
+                    secondProtocolID: highID
+                )
         )
     }
 
