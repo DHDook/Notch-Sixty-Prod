@@ -925,7 +925,11 @@ struct ProtectedDriverTimingRecommendationAnalyzer: Sendable {
               secondProtocol.request.mode == .protectedDriverNearField,
               let firstBus = firstProtocol.protectedDriverBus,
               let secondBus = secondProtocol.protectedDriverBus,
-              adjacent(firstBus, secondBus) else {
+              SpeakerMeasurementLabProtectedDriverRoutePlanner
+                .isProtectedSplitBus(firstBus),
+              SpeakerMeasurementLabProtectedDriverRoutePlanner
+                .isProtectedSplitBus(secondBus),
+              sameSpeakerSide(firstBus, secondBus) else {
             throw ProtectedDriverTimingRecommendationError.invalidPair
         }
         let first = session.captures.filter {
@@ -966,6 +970,7 @@ struct ProtectedDriverTimingRecommendationAnalyzer: Sendable {
               (mode == .biAmp || mode == .triAmp),
               mode.supports(bus: firstBus),
               mode.supports(bus: secondBus),
+              adjacent(firstBus, secondBus, mode: mode),
               let crossover = crossoverFrequency(
                 firstBus, secondBus, bass
               ),
@@ -1142,18 +1147,49 @@ struct ProtectedDriverTimingRecommendationAnalyzer: Sendable {
         )
     }
 
-    private func adjacent(
+    private func sameSpeakerSide(
         _ first: SpeakerOutputBus,
         _ second: SpeakerOutputBus
     ) -> Bool {
-        switch (first, second) {
-        case (.leftLow, .leftHigh), (.leftHigh, .leftLow),
-             (.rightLow, .rightHigh), (.rightHigh, .rightLow),
-             (.leftLow, .leftMid), (.leftMid, .leftLow),
-             (.leftMid, .leftHigh), (.leftHigh, .leftMid),
-             (.rightLow, .rightMid), (.rightMid, .rightLow),
-             (.rightMid, .rightHigh), (.rightHigh, .rightMid):
-            return true
+        let left: Set<String> = [
+            SpeakerOutputBus.leftLow.rawValue,
+            SpeakerOutputBus.leftMid.rawValue,
+            SpeakerOutputBus.leftHigh.rawValue,
+        ]
+        let right: Set<String> = [
+            SpeakerOutputBus.rightLow.rawValue,
+            SpeakerOutputBus.rightMid.rawValue,
+            SpeakerOutputBus.rightHigh.rawValue,
+        ]
+        return (left.contains(first.rawValue) && left.contains(second.rawValue))
+            || (right.contains(first.rawValue)
+                && right.contains(second.rawValue))
+    }
+
+    private func adjacent(
+        _ first: SpeakerOutputBus,
+        _ second: SpeakerOutputBus,
+        mode: PhysicalSpeakerOutputMode
+    ) -> Bool {
+        switch mode {
+        case .biAmp:
+            switch (first, second) {
+            case (.leftLow, .leftHigh), (.leftHigh, .leftLow),
+                 (.rightLow, .rightHigh), (.rightHigh, .rightLow):
+                return true
+            default:
+                return false
+            }
+        case .triAmp:
+            switch (first, second) {
+            case (.leftLow, .leftMid), (.leftMid, .leftLow),
+                 (.leftMid, .leftHigh), (.leftHigh, .leftMid),
+                 (.rightLow, .rightMid), (.rightMid, .rightLow),
+                 (.rightMid, .rightHigh), (.rightHigh, .rightMid):
+                return true
+            default:
+                return false
+            }
         default:
             return false
         }
