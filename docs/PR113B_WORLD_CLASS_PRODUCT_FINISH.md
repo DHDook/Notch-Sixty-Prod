@@ -292,7 +292,11 @@ The Lab can also export:
   the header explicitly labels the magnitude domain as transfer-function dB,
   **not absolute SPL**; and
 - **Impulse WAV** — a selected capture's raw impulse response as mono
-  **32-bit IEEE-float WAV** at the capture's actual sample rate.
+  **32-bit IEEE-float WAV** at the capture's actual sample rate, including the
+  non-PCM `fact` chunk for broad reader compatibility.
+
+CSV and FRD numeric formatting is pinned to the POSIX decimal point for
+locale-independent interoperability.
 
 No averaging, smoothing or response compaction is introduced by the export
 layer.
