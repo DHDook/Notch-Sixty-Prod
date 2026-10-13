@@ -1396,6 +1396,47 @@ final class ProductionInformationArchitectureTests: XCTestCase {
     }
 
     @MainActor
+    func testHeadroomAssistantRejectsOpenABAuditionSession()
+        async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "pr113b-headroom-ab-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let engine = AudioIOEngine()
+        let profiles = ProductProfileController(
+            engine: engine,
+            storageURL:
+                root.appendingPathComponent("profiles.json")
+        )
+        let comparison =
+            ContentABComparisonController(profiles: profiles)
+        comparison.capture(.a)
+        await comparison.audition(.a)
+        XCTAssertNotNil(comparison.sessionBaseline)
+
+        let assistant = HeadroomAssistantController(
+            engine: engine,
+            profiles: profiles,
+            abComparison: comparison
+        )
+        XCTAssertThrowsError(
+            try assistant.startObservation()
+        ) { error in
+            XCTAssertEqual(
+                error as? HeadroomAssistantError,
+                .abComparisonActive
+            )
+        }
+
+        await comparison.endAudition(
+            restoringBaseline: false
+        )
+    }
+
+    @MainActor
     func testHeadroomAssistantBoundaryFailsClosedOnContentDrift()
         throws {
         let root = FileManager.default.temporaryDirectory
