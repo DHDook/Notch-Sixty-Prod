@@ -96,6 +96,35 @@ struct ProductionUserGuideArticle: Identifiable, Hashable {
     }
 }
 
+
+enum ProductionWorkflowTerm: String, CaseIterable, Identifiable {
+    case preview = "Preview"
+    case apply = "Apply"
+    case verify = "Verify"
+    case revert = "Revert"
+    case rollback = "Rollback"
+    case deploy = "Deploy"
+
+    var id: String { rawValue }
+
+    var definition: String {
+        switch self {
+        case .preview:
+            return "Calculate or display a proposed result without changing saved or live playback state."
+        case .apply:
+            return "Make an explicit state change. In measurement-driven workflows, Apply can be provisional until fresh verification passes."
+        case .verify:
+            return "Collect or evaluate fresh evidence after a change to confirm that the intended result was actually achieved."
+        case .revert:
+            return "Discard uncommitted editor or draft changes and return to the previously saved value before a live Apply."
+        case .rollback:
+            return "Restore the exact retained pre-Apply state after a live or saved change has already occurred."
+        case .deploy:
+            return "Move a reviewed offline design into the selected Playback System so it becomes part of that system's playback configuration."
+        }
+    }
+}
+
 enum ProductionUserGuideCatalog {
     static let articles: [ProductionUserGuideArticle] = [
         article(
@@ -571,10 +600,10 @@ enum ProductionUserGuideCatalog {
         article(
             id: "settings",
             category: .reference,
-            title: "Settings & App Behavior",
+            title: "Preferences & App Behavior",
             summary: "Appearance, volume-key resolution, app presence, launch-at-login, permissions, diagnostics and support.",
             systemImage: "gearshape",
-            keywords: ["settings", "appearance", "volume keys", "menu bar", "launch at login", "permissions", "diagnostics"],
+            keywords: ["preferences", "settings", "appearance", "volume keys", "menu bar", "launch at login", "permissions", "diagnostics"],
             sections: [
                 section(
                     "preferences",
@@ -583,6 +612,56 @@ enum ProductionUserGuideCatalog {
                         "Volume-key step size changes Notch Sixty's software master-volume increment; it does not redefine the physical output device's hardware volume step.",
                         "Launch at Login is optional and does not automatically start audio processing. System-audio and microphone permissions are requested only when the relevant workflows need them.",
                         "Copy Diagnostics includes application/build identity, macOS, selected audio device/rate, preset/system state and DSP latency. It intentionally excludes captured audio and room-measurement samples."
+                    ]
+                )
+            ]
+        ),
+        article(
+            id: "workflow-glossary",
+            category: .reference,
+            title: "Workflow & DSP Glossary",
+            summary: "The product vocabulary used for state changes, verification, measurement confidence and common DSP concepts.",
+            systemImage: "text.book.closed",
+            keywords: [
+                "preview", "apply", "verify", "revert", "rollback", "deploy",
+                "dBFS", "dBTP", "Q", "FIR", "IIR", "phase", "coherence",
+                "latency", "confidence", "headroom", "evidence authority"
+            ],
+            sections: [
+                section(
+                    "workflow-verbs",
+                    "Workflow verbs",
+                    ProductionWorkflowTerm.allCases.map {
+                        "\($0.rawValue) — \($0.definition)"
+                    }
+                ),
+                section(
+                    "levels",
+                    "Level & headroom",
+                    [
+                        "dBFS — digital level relative to full scale. 0 dBFS is the maximum representable sample magnitude; ordinary playback should retain margin below it.",
+                        "dBTP — estimated true-peak level of the reconstructed waveform, including inter-sample peaks. The true-peak limiter protects against this quantity rather than sample peak alone.",
+                        "Headroom — remaining level margin before the relevant ceiling or overload boundary. Boost, correction filters and plug-ins can consume headroom even when master volume is unchanged."
+                    ]
+                ),
+                section(
+                    "filters",
+                    "Filters & time",
+                    [
+                        "IIR — an infinite-impulse-response recursive filter. Parametric minimum-phase EQ uses second-order IIR biquads.",
+                        "FIR — a finite-impulse-response filter expressed as a finite coefficient sequence. FIR is used where controlled impulse/phase behavior or measured correction requires convolution.",
+                        "Q — the filter selectivity parameter used by the biquad design. Higher Q produces a narrower affected region around the center frequency for the same filter family.",
+                        "Phase — angular relationship between frequency components. A fixed time delay creates frequency-dependent phase rotation.",
+                        "Latency — elapsed time added by buffering, filtering, plug-ins and transport. Notch Sixty reports the complete DSP path rather than treating FIR delay as the only contributor."
+                    ]
+                ),
+                section(
+                    "measurement",
+                    "Measurement & evidence",
+                    [
+                        "Coherence — evidence that compared signals share a trustworthy timing/reference relationship. It is not synonymous with a visually smooth response curve.",
+                        "Confidence — a bounded assessment of how strongly available repeated evidence supports a conclusion. Confidence does not upgrade software/model evidence into physical acceptance.",
+                        "Evidence authority — the provenance class that determines what an observation is allowed to establish. Remote software, physical hardware and independent physical review remain intentionally distinct."
                     ]
                 )
             ]
