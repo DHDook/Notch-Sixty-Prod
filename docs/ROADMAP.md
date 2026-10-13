@@ -18,28 +18,37 @@ Future portability must not materially delay the flagship Mac launch.
 
 ## Current execution status — PR111
 
-**PR111 — Automatic Per-Driver Speaker Optimization** is an open, stacked
-draft above PR110. Slices 1–2 have passed exact-head Apple Silicon and portable
-regression gates. Slice 3 adds reference-authenticated adjacent-driver
-acoustic-center timing and residual-polarity hypotheses for protected Bi-Amp
-and Tri-Amp paths. Slice 4 adds a complex crossover-sum model that compares
-only those bounded timing/polarity hypotheses against the current protected
-state. Both remain measurement/model-only: a new real combined-driver capture
-is still mandatory before any future Apply. Slices 3–4 exact-head CI is
-pending.
-No DSP stage, gain, driver phase/polarity, delay, physical routing or
-protection is changed by a recommendation or model.
+**PR111 — Automatic Per-Driver Speaker Optimization** remains an OPEN,
+DRAFT, UNMERGED stack above PR110. Slices 1–2 passed exact-head portable,
+Apple Silicon Debug/Release, targeted and full regression. Slices 3–5 are
+implemented on the current branch and awaiting one final exact-head CI pass.
 
-PR110's five slices are remotely/software-verified; PR110, PR109 and all
-predecessor PRs remain OPEN/DRAFT/UNMERGED. PR111's source and CI gates do
-not authorize a merge or physical speaker-connected testing.
+The implemented remote PR111 stack now provides:
 
-Next PR111 slices will add richer driver-specific evidence, protected acoustic
-center/phase verification, cross-driver summation, and eventually explicit
-reversible commissioning. PR112 physical hardware acceptance, PR113
-production UX polish and PR114 commercial release preparation remain pending.
+- repeat-qualified protected Low/Mid/High cut-only PEQ recommendations;
+- Measurement Lab driver evidence, blockers and compact exports;
+- simultaneous electrical-reference adjacent-driver timing and residual
+  polarity hypotheses, topology-aware for Bi-Amp versus Tri-Amp;
+- model-only complex crossover-summation comparison of only those bounded
+  timing/polarity hypotheses; and
+- a persisted, exact-state commissioning **preview** with a full rollback
+  snapshot, state-drift validation and hard `canApply=false` /
+  `canDeploy=false` gates.
 
-See `docs/PR111_PER_DRIVER_SPEAKER_OPTIMIZATION.md`.
+PR111 deliberately stops before any live driver mutation. A real
+combined-driver crossover capture does not yet exist, so timing/polarity
+or PEQ deployment cannot be physically verified. The Measurement Lab UI
+therefore reports **HARDWARE BLOCKED / Apply BLOCKED** and exposes no PR111
+Apply control.
+
+The transactional Apply/rollback executor moves to **PR112 physical hardware
+acceptance**, where it must require engine idle, explicit user approval, exact
+state/evidence identity, preserved crossover/limiter protection, fresh
+combined-driver measurement and rollback on rejection. PR113 production UX
+polish and PR114 commercial release preparation remain later.
+
+PR110, PR109 and every predecessor remain OPEN/DRAFT/UNMERGED; `main` is
+unchanged. See `docs/PR111_PER_DRIVER_SPEAKER_OPTIMIZATION.md`.
 
 ---
 
