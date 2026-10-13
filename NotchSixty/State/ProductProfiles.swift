@@ -1619,6 +1619,9 @@ final class ProductProfileController: ObservableObject {
     func deleteSelectedSystemProfile() {
         guard let selectedSystemProfileID else { return }
         systemProfiles.removeAll { $0.id == selectedSystemProfileID }
+        hardwareMappingRequirements.removeAll {
+            $0.systemProfileID == selectedSystemProfileID
+        }
         self.selectedSystemProfileID = systemProfiles.first?.id
         ensureDefaultSystemProfile()
         persist()
