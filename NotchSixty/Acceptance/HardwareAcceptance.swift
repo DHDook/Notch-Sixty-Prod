@@ -243,6 +243,9 @@ struct HardwareAcceptanceObservation:
     var environment: HardwareAcceptanceEnvironment
     var reviewer: String
     var notes: String
+    /// Supplemental feature scopes actually exercised by this observation.
+    /// A generic H05 pass cannot silently satisfy split-driver acceptance.
+    var coveredCapabilities: [HardwareAcceptanceCapability] = []
     var artifacts: [HardwareAcceptanceArtifactReference] = []
 
     func validated() throws -> Self {
@@ -251,6 +254,8 @@ struct HardwareAcceptanceObservation:
                 .isEmpty,
               !notes.trimmingCharacters(in: .whitespacesAndNewlines)
                 .isEmpty,
+              Set(coveredCapabilities).count
+                == coveredCapabilities.count,
               Set(artifacts.map(\.identifier)).count
                 == artifacts.count else {
             throw HardwareAcceptanceError.invalidObservation
@@ -272,6 +277,10 @@ enum HardwareAcceptanceGateStatus:
         observationID: UUID,
         actual: HardwareAcceptanceEvidenceAuthority,
         required: HardwareAcceptanceEvidenceAuthority
+    )
+    case insufficientScope(
+        observationID: UUID,
+        missing: [HardwareAcceptanceCapability]
     )
     case passed(
         observationID: UUID,
@@ -398,12 +407,7 @@ struct HardwareAcceptanceCampaign:
                 )
             case .passed:
                 if newest.authority
-                    >= definition.minimumAuthority {
-                    statuses[definition.id] = .passed(
-                        observationID: newest.id,
-                        authority: newest.authority
-                    )
-                } else {
+                    < definition.minimumAuthority {
                     statuses[definition.id] =
                         .insufficientAuthority(
                             observationID: newest.id,
@@ -411,6 +415,27 @@ struct HardwareAcceptanceCampaign:
                             required:
                                 definition.minimumAuthority
                         )
+                    continue
+                }
+                let requiredSupplemental =
+                    definition.supplementalCapabilities.filter {
+                        scopeDecisions[$0]?.isIncluded == true
+                    }
+                let missingSupplemental =
+                    requiredSupplemental.filter {
+                        !newest.coveredCapabilities.contains($0)
+                    }
+                if !missingSupplemental.isEmpty {
+                    statuses[definition.id] =
+                        .insufficientScope(
+                            observationID: newest.id,
+                            missing: missingSupplemental
+                        )
+                } else {
+                    statuses[definition.id] = .passed(
+                        observationID: newest.id,
+                        authority: newest.authority
+                    )
                 }
             }
         }
@@ -423,10 +448,10 @@ struct HardwareAcceptanceCampaign:
         let liveANCStatus = statuses[.h08LiveFeedForwardANC]
         let liveANCAuthorized: Bool
         if liveANCIncluded,
-           case .passed(
+           case .some(.passed(
                 _,
                 let authority
-           ) = liveANCStatus,
+           )) = liveANCStatus,
            authority >= .independentPhysicalReview,
            complete {
             liveANCAuthorized = true
