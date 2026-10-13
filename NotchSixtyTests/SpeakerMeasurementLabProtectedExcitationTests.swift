@@ -1014,7 +1014,11 @@ final class ProtectedDriverPEQRecommendationTests: XCTestCase {
         XCTAssertEqual(result.crossoverFrequencyHz, 1_000, accuracy: 0.001)
         XCTAssertEqual(result.relativeArrivalMilliseconds, 0.8, accuracy: 0.03)
         XCTAssertEqual(result.delayBus, .leftLow)
-        XCTAssertEqual(result.additionalDelayMilliseconds, 0.8, accuracy: 0.03)
+        XCTAssertEqual(
+            try XCTUnwrap(result.additionalDelayMilliseconds),
+            0.8,
+            accuracy: 0.03
+        )
         XCTAssertEqual(result.polarityHypothesis, .retainCurrent)
         XCTAssertTrue(result.measurementOnly)
         XCTAssertFalse(result.canDeploy)
