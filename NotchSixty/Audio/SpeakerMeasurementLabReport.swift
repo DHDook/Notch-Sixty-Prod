@@ -1056,6 +1056,309 @@ struct SpeakerMeasurementLabReportExporter: Sendable {
     }
 }
 
+
+struct SpeakerMeasurementLabFullFidelityExportEnvelope:
+    Codable, Equatable, Sendable {
+    static let currentSchemaVersion = 1
+
+    var schemaVersion: Int = currentSchemaVersion
+    var generatedAt: Date
+    var measurementOnly: Bool = true
+    var canDeploy: Bool = false
+    var containsRawImpulseData: Bool = true
+    var containsFullTransferFunctionData: Bool = true
+    var session: SpeakerMeasurementLabSession
+}
+
+enum SpeakerMeasurementLabFullFidelityExportError:
+    Error, Equatable, LocalizedError {
+    case invalidSession
+    case captureUnavailable(UUID)
+    case invalidSampleRate
+    case exportEncodingFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidSession:
+            return "Full-fidelity Measurement Lab export requires a structurally valid session."
+        case .captureUnavailable:
+            return "The selected Measurement Lab capture is not available in this session."
+        case .invalidSampleRate:
+            return "The selected capture sample rate cannot be represented safely in a WAV file."
+        case .exportEncodingFailed:
+            return "Full-fidelity Measurement Lab export could not be encoded."
+        }
+    }
+}
+
+/// Detailed, read-only Measurement Lab interoperability export.
+///
+/// Unlike SpeakerMeasurementLabReportExporter, this type intentionally
+/// preserves raw impulse samples and the complete transfer-function grid. It
+/// never mutates DSP, never promotes measurement evidence, and never grants
+/// deployment or physical-acceptance authority.
+struct SpeakerMeasurementLabFullFidelityExporter: Sendable {
+    func fullJSONData(
+        _ session: SpeakerMeasurementLabSession,
+        generatedAt: Date = Date()
+    ) throws -> Data {
+        try validate(session)
+        let envelope =
+            SpeakerMeasurementLabFullFidelityExportEnvelope(
+                generatedAt: generatedAt,
+                session: session
+            )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        do {
+            return try encoder.encode(envelope)
+        } catch {
+            throw SpeakerMeasurementLabFullFidelityExportError
+                .exportEncodingFailed
+        }
+    }
+
+    func transferCSVData(
+        _ session: SpeakerMeasurementLabSession
+    ) throws -> Data {
+        try validate(session)
+        var lines = [
+            "session_id,capture_id,protocol_id,protocol_name,repeat_index,captured_at_unix_ms,sample_rate_hz,frequency_hz,magnitude_db,phase_degrees"
+        ]
+
+        let protocolNames = Dictionary(
+            uniqueKeysWithValues:
+                session.protocols.map { ($0.id, $0.name) }
+        )
+        for capture in session.captures.sorted(by: captureOrder) {
+            let response = capture.transferFunction
+            for index in response.frequenciesHz.indices {
+                let phaseDegrees: String
+                if let phase = response.phaseRadians {
+                    phaseDegrees = decimal(
+                        phase[index] * 180.0 / .pi
+                    )
+                } else {
+                    phaseDegrees = ""
+                }
+
+                lines.append([
+                    session.id.uuidString,
+                    capture.id.uuidString,
+                    capture.protocolID.uuidString,
+                    protocolNames[capture.protocolID] ?? "",
+                    "\(capture.repeatIndex)",
+                    "\(unixMilliseconds(capture.capturedAt))",
+                    decimal(capture.sampleRate),
+                    decimal(response.frequenciesHz[index]),
+                    decimal(response.magnitudeDB[index]),
+                    phaseDegrees,
+                ].map(csv).joined(separator: ","))
+            }
+        }
+        return try utf8(lines.joined(separator: "\n"))
+    }
+
+    func impulseCSVData(
+        _ session: SpeakerMeasurementLabSession
+    ) throws -> Data {
+        try validate(session)
+        var lines = [
+            "session_id,capture_id,protocol_id,repeat_index,sample_rate_hz,sample_index,time_seconds,amplitude"
+        ]
+        for capture in session.captures.sorted(by: captureOrder) {
+            for (index, sample) in capture.impulseResponse.enumerated() {
+                lines.append([
+                    session.id.uuidString,
+                    capture.id.uuidString,
+                    capture.protocolID.uuidString,
+                    "\(capture.repeatIndex)",
+                    decimal(capture.sampleRate),
+                    "\(index)",
+                    decimal(Double(index) / capture.sampleRate),
+                    decimal(Double(sample)),
+                ].map(csv).joined(separator: ","))
+            }
+        }
+        return try utf8(lines.joined(separator: "\n"))
+    }
+
+    func frdData(
+        _ session: SpeakerMeasurementLabSession,
+        captureID: UUID
+    ) throws -> Data {
+        let capture = try capture(
+            in: session,
+            id: captureID
+        )
+        let response = capture.transferFunction
+        var lines = [
+            "# Notch Sixty Measurement Lab FRD-compatible export",
+            "# measurement_only=true",
+            "# can_deploy=false",
+            "# capture_id=\(capture.id.uuidString)",
+            "# protocol_id=\(capture.protocolID.uuidString)",
+            "# sample_rate_hz=\(decimal(capture.sampleRate))",
+            "# magnitude_domain=transfer_function_db_not_absolute_spl",
+        ]
+        if response.phaseRadians != nil {
+            lines.append(
+                "# columns=frequency_hz magnitude_db phase_degrees"
+            )
+        } else {
+            lines.append(
+                "# columns=frequency_hz magnitude_db"
+            )
+        }
+
+        for index in response.frequenciesHz.indices {
+            var columns = [
+                decimal(response.frequenciesHz[index]),
+                decimal(response.magnitudeDB[index]),
+            ]
+            if let phase = response.phaseRadians {
+                columns.append(
+                    decimal(phase[index] * 180.0 / .pi)
+                )
+            }
+            lines.append(columns.joined(separator: "\t"))
+        }
+        return try utf8(lines.joined(separator: "\n"))
+    }
+
+    func impulseWAVData(
+        _ session: SpeakerMeasurementLabSession,
+        captureID: UUID
+    ) throws -> Data {
+        let capture = try capture(
+            in: session,
+            id: captureID
+        )
+        let roundedRate = capture.sampleRate.rounded()
+        guard capture.sampleRate.isFinite,
+              roundedRate >= 1,
+              roundedRate <= Double(UInt32.max / 4),
+              abs(capture.sampleRate - roundedRate) < 0.5 else {
+            throw SpeakerMeasurementLabFullFidelityExportError
+                .invalidSampleRate
+        }
+
+        let sampleRate = UInt32(roundedRate)
+        let sampleBytes = capture.impulseResponse.count * 4
+        guard sampleBytes <= Int(UInt32.max) - 36 else {
+            throw SpeakerMeasurementLabFullFidelityExportError
+                .exportEncodingFailed
+        }
+        let dataSize = UInt32(sampleBytes)
+
+        var data = Data()
+        appendASCII("RIFF", to: &data)
+        appendLE(UInt32(36) + dataSize, to: &data)
+        appendASCII("WAVE", to: &data)
+        appendASCII("fmt ", to: &data)
+        appendLE(UInt32(16), to: &data)
+        appendLE(UInt16(3), to: &data) // WAVE_FORMAT_IEEE_FLOAT
+        appendLE(UInt16(1), to: &data) // mono
+        appendLE(sampleRate, to: &data)
+        appendLE(sampleRate * 4, to: &data)
+        appendLE(UInt16(4), to: &data)
+        appendLE(UInt16(32), to: &data)
+        appendASCII("data", to: &data)
+        appendLE(dataSize, to: &data)
+
+        for sample in capture.impulseResponse {
+            appendLE(sample.bitPattern, to: &data)
+        }
+        return data
+    }
+
+    private func validate(
+        _ session: SpeakerMeasurementLabSession
+    ) throws {
+        do {
+            try session.validateStructure()
+        } catch {
+            throw SpeakerMeasurementLabFullFidelityExportError
+                .invalidSession
+        }
+    }
+
+    private func capture(
+        in session: SpeakerMeasurementLabSession,
+        id: UUID
+    ) throws -> SpeakerMeasurementLabCapture {
+        try validate(session)
+        guard let capture = session.captures.first(
+            where: { $0.id == id }
+        ) else {
+            throw SpeakerMeasurementLabFullFidelityExportError
+                .captureUnavailable(id)
+        }
+        return capture
+    }
+
+    private func captureOrder(
+        _ lhs: SpeakerMeasurementLabCapture,
+        _ rhs: SpeakerMeasurementLabCapture
+    ) -> Bool {
+        if lhs.capturedAt != rhs.capturedAt {
+            return lhs.capturedAt < rhs.capturedAt
+        }
+        if lhs.protocolID != rhs.protocolID {
+            return lhs.protocolID.uuidString
+                < rhs.protocolID.uuidString
+        }
+        if lhs.repeatIndex != rhs.repeatIndex {
+            return lhs.repeatIndex < rhs.repeatIndex
+        }
+        return lhs.id.uuidString < rhs.id.uuidString
+    }
+
+    private func unixMilliseconds(_ date: Date) -> Int64 {
+        Int64((date.timeIntervalSince1970 * 1_000).rounded())
+    }
+
+    private func decimal(_ value: Double) -> String {
+        value.isFinite
+            ? String(format: "%.9f", value)
+            : ""
+    }
+
+    private func csv(_ value: String) -> String {
+        let escaped = value.replacingOccurrences(
+            of: "\"",
+            with: "\"\""
+        )
+        return "\"\(escaped)\""
+    }
+
+    private func utf8(_ value: String) throws -> Data {
+        guard let data = value.data(using: .utf8) else {
+            throw SpeakerMeasurementLabFullFidelityExportError
+                .exportEncodingFailed
+        }
+        return data
+    }
+
+    private func appendASCII(
+        _ value: String,
+        to data: inout Data
+    ) {
+        data.append(contentsOf: value.utf8)
+    }
+
+    private func appendLE<T: FixedWidthInteger>(
+        _ value: T,
+        to data: inout Data
+    ) {
+        var little = value.littleEndian
+        withUnsafeBytes(of: &little) { bytes in
+            data.append(contentsOf: bytes)
+        }
+    }
+}
+
 extension SpeakerMeasurementLabSessionStore {
     func listRecentSessions(
         limit: Int = 12
