@@ -3,7 +3,7 @@ import SwiftUI
 
 struct ProductionDynamicsView: View {
     @ObservedObject var engine: AudioIOEngine
-    var reference: ProductionReferenceNavigator?
+    var reference: ProductionReferenceNavigator? = nil
     @State private var selectedModule: ProductionDynamicsModule = .compressor
     @State private var mainsDetectInFlight = false
     @State private var mainsDetectionMessage: String?
