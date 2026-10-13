@@ -100,6 +100,11 @@ final class NotchSixtyBackupService {
     private let labStore: SpeakerMeasurementLabSessionStore
     private let binauralStore: BinauralProfileAssetStore
 
+    private enum RollbackValue<T> {
+        case absent
+        case present(T)
+    }
+
     init(
         profiles: ProductProfileController,
         roomStore: RoomCorrectionProjectStore,
@@ -194,17 +199,29 @@ final class NotchSixtyBackupService {
         let bundle = try inspect(data)
 
         let priorProfiles = profiles.makeBackupSnapshot()
+        let existingProjectIDs = Set(try roomStore.existingProjectIDs())
+        let existingSessionIDs = Set(try labStore.existingSessionIDs())
+        let existingAssetIDs = Set(try binauralStore.existingAssetIDs())
+
         let projectRollback = try rollbackMap(
             ids: bundle.roomCorrectionProjects.map(\.id),
-            loader: { try? roomStore.load($0) }
+            existingIDs: existingProjectIDs,
+            loader: { try roomStore.load($0) }
         )
         let sessionRollback = try rollbackMap(
             ids: bundle.measurementLabSessions.map(\.id),
-            loader: { try? labStore.load($0) }
+            existingIDs: existingSessionIDs,
+            loader: {
+                guard let session = try labStore.load($0) else {
+                    throw NotchSixtyBackupError.corruptBundle
+                }
+                return session
+            }
         )
         let assetRollback = try rollbackMap(
             ids: bundle.binauralAssets.map(\.id),
-            loader: { try? binauralStore.load(id: $0) }
+            existingIDs: existingAssetIDs,
+            loader: { try binauralStore.load(id: $0) }
         )
 
         do {
@@ -383,17 +400,22 @@ final class NotchSixtyBackupService {
 
     private func rollbackMap<T>(
         ids: [UUID],
-        loader: (UUID) -> T?
-    ) throws -> [UUID: T?] {
-        var result: [UUID: T?] = [:]
+        existingIDs: Set<UUID>,
+        loader: (UUID) throws -> T
+    ) throws -> [UUID: RollbackValue<T>] {
+        var result: [UUID: RollbackValue<T>] = [:]
         for id in Set(ids) {
-            result[id] = loader(id)
+            if existingIDs.contains(id) {
+                result[id] = .present(try loader(id))
+            } else {
+                result[id] = .absent
+            }
         }
         return result
     }
 
     private func restore<T>(
-        _ rollback: [UUID: T?],
+        _ rollback: [UUID: RollbackValue<T>],
         saver: (T) throws -> Void,
         deleter: (UUID) throws -> Void,
         failures: inout [String],
@@ -401,9 +423,10 @@ final class NotchSixtyBackupService {
     ) {
         for (id, previous) in rollback {
             do {
-                if let previous {
-                    try saver(previous)
-                } else {
+                switch previous {
+                case .present(let value):
+                    try saver(value)
+                case .absent:
                     try deleter(id)
                 }
             } catch {
