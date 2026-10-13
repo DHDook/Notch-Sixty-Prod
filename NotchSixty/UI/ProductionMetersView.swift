@@ -539,6 +539,15 @@ struct ProductionMetersView: View {
                     .textSelection(.enabled)
             }
 
+            if assistant.phase == .applied {
+                Label(
+                    "Applied to live content state · saved Content Preset unchanged",
+                    systemImage: "checkmark.circle.fill"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
             HStack(spacing: 10) {
                 if assistant.isObserving {
                     Button("Stop & Review") {
@@ -582,7 +591,11 @@ struct ProductionMetersView: View {
                     }
 
                     if assistant.phase != .idle {
-                        Button("Clear") {
+                        Button(
+                            assistant.phase == .applied
+                                ? "Clear Result"
+                                : "Clear"
+                        ) {
                             assistant.cancelObservation()
                         }
                     }
