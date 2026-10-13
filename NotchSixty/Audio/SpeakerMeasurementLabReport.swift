@@ -1110,7 +1110,9 @@ struct SpeakerMeasurementLabFullFidelityExporter: Sendable {
             )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
+        // Match the persisted Lab archive's time representation so the
+        // detailed export does not throw away sub-second capture identity.
+        encoder.dateEncodingStrategy = .millisecondsSince1970
         do {
             return try encoder.encode(envelope)
         } catch {
