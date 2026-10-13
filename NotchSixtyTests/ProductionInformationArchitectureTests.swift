@@ -739,4 +739,237 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         )
     }
 
+
+    @MainActor
+    func testBackupRestoreMarksUnavailablePlaybackHardwareForMapping()
+        throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let profiles = ProductProfileController(
+            engine: AudioIOEngine(),
+            storageURL: root.appendingPathComponent("profiles.json")
+        )
+        let content = ContentPreset(
+            name: "Backup Content",
+            origin: .user,
+            state: ContentPresetState()
+        )
+        let system = PlaybackSystemProfile(
+            name: "Backup System",
+            state: PlaybackSystemState(
+                associatedOutputUID: "missing-output"
+            )
+        )
+        let snapshot = ProductProfileBackupSnapshot(
+            contentPresets: [content],
+            systemProfiles: [system],
+            selectedContentPresetID: content.id,
+            selectedSystemProfileID: system.id
+        )
+
+        let requirements = try profiles.restoreBackupSnapshot(
+            snapshot,
+            availableOutputUIDs: []
+        )
+
+        XCTAssertEqual(requirements.count, 1)
+        XCTAssertEqual(
+            requirements.first?.systemProfileID,
+            system.id
+        )
+        XCTAssertEqual(
+            requirements.first?.importedDeviceUIDs,
+            ["missing-output"]
+        )
+        XCTAssertNil(profiles.selectedSystemProfileID)
+        XCTAssertNotNil(
+            profiles.hardwareMappingRequirement(for: system.id)
+        )
+    }
+
+    @MainActor
+    func testBackupRestoreKeepsKnownHardwareEligibleWithoutRemapping()
+        throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let profiles = ProductProfileController(
+            engine: AudioIOEngine(),
+            storageURL: root.appendingPathComponent("profiles.json")
+        )
+        let content = ContentPreset(
+            name: "Backup Content",
+            origin: .user,
+            state: ContentPresetState()
+        )
+        let system = PlaybackSystemProfile(
+            name: "Known System",
+            state: PlaybackSystemState(
+                associatedOutputUID: "known-output"
+            )
+        )
+        let snapshot = ProductProfileBackupSnapshot(
+            contentPresets: [content],
+            systemProfiles: [system],
+            selectedContentPresetID: content.id,
+            selectedSystemProfileID: system.id
+        )
+
+        let requirements = try profiles.restoreBackupSnapshot(
+            snapshot,
+            availableOutputUIDs: ["known-output"]
+        )
+
+        XCTAssertTrue(requirements.isEmpty)
+        XCTAssertEqual(profiles.selectedSystemProfileID, system.id)
+        XCTAssertNil(
+            profiles.hardwareMappingRequirement(for: system.id)
+        )
+    }
+
+    func testBackupPreferencesRoundTripSafeKeysOnly() throws {
+        let suite = "NotchSixtyTests.BackupPreferences.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(
+            UserDefaults(suiteName: suite)
+        )
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        defaults.set(
+            "dark",
+            forKey: ProductBackupPreferences.appearanceKey
+        )
+        defaults.set(
+            "both",
+            forKey: ProductBackupPreferences.presenceKey
+        )
+        defaults.set(
+            64,
+            forKey: ProductBackupPreferences.volumeStepResolutionKey
+        )
+
+        let captured = ProductBackupPreferences.capture(
+            from: defaults
+        )
+        XCTAssertEqual(captured.appearanceRawValue, "dark")
+        XCTAssertEqual(captured.presenceRawValue, "both")
+        XCTAssertEqual(captured.volumeStepResolution, 64)
+
+        defaults.removePersistentDomain(forName: suite)
+        captured.apply(to: defaults)
+
+        XCTAssertEqual(
+            defaults.string(
+                forKey: ProductBackupPreferences.appearanceKey
+            ),
+            "dark"
+        )
+        XCTAssertEqual(
+            defaults.string(
+                forKey: ProductBackupPreferences.presenceKey
+            ),
+            "both"
+        )
+        XCTAssertEqual(
+            defaults.integer(
+                forKey:
+                    ProductBackupPreferences.volumeStepResolutionKey
+            ),
+            64
+        )
+
+        let labels = Set(
+            Mirror(reflecting: captured).children
+                .compactMap { $0.label }
+        )
+        XCTAssertFalse(labels.contains("launchAtLogin"))
+        XCTAssertFalse(labels.contains("launchAtLoginEnabled"))
+    }
+
+    @MainActor
+    func testBackupInspectionRejectsPayloadTampering() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let defaultsSuite =
+            "NotchSixtyTests.BackupTamper.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(
+            UserDefaults(suiteName: defaultsSuite)
+        )
+        defer {
+            defaults.removePersistentDomain(forName: defaultsSuite)
+        }
+
+        let profiles = ProductProfileController(
+            engine: AudioIOEngine(),
+            storageURL: root.appendingPathComponent("profiles.json")
+        )
+        let backup = ProductBackupController(
+            profiles: profiles,
+            roomCorrectionStore: RoomCorrectionProjectStore(
+                rootDirectory: root.appendingPathComponent(
+                    "room",
+                    isDirectory: true
+                )
+            ),
+            measurementLabStore:
+                SpeakerMeasurementLabSessionStore(
+                    rootDirectory: root.appendingPathComponent(
+                        "lab",
+                        isDirectory: true
+                    )
+                ),
+            hardwareAcceptanceStore:
+                HardwareAcceptanceCampaignStore(
+                    rootDirectory: root.appendingPathComponent(
+                        "acceptance",
+                        isDirectory: true
+                    )
+                ),
+            defaults: defaults
+        )
+
+        let original = try backup.exportData(
+            now: Date(timeIntervalSince1970: 1_000)
+        )
+        XCTAssertNoThrow(try backup.inspect(data: original))
+
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: original)
+                as? [String: Any]
+        )
+        var payload = try XCTUnwrap(
+            object["payload"] as? [String: Any]
+        )
+        var profilesJSON = try XCTUnwrap(
+            payload["profiles"] as? [String: Any]
+        )
+        var presets = try XCTUnwrap(
+            profilesJSON["contentPresets"]
+                as? [[String: Any]]
+        )
+        XCTAssertFalse(presets.isEmpty)
+        presets[0]["name"] = "Tampered"
+        profilesJSON["contentPresets"] = presets
+        payload["profiles"] = profilesJSON
+        object["payload"] = payload
+
+        let tampered = try JSONSerialization.data(
+            withJSONObject: object,
+            options: [.sortedKeys]
+        )
+
+        XCTAssertThrowsError(
+            try backup.inspect(data: tampered)
+        ) { error in
+            XCTAssertEqual(
+                error as? ProductBackupError,
+                .checksumMismatch
+            )
+        }
+    }
+
 }
