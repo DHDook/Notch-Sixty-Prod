@@ -260,7 +260,9 @@ final class ProductController: ObservableObject {
                     Set(audioEngine.outputDevices.map(\.uid)),
                 recomputeHardwareRequirements: false
             )
-            try? profiles.applySelectedLayersNow()
+            // applySelectedLayersNow() already rolls engine state back to its
+            // pre-recovery state on failure. Keep Safe Launch neutral here;
+            // the user can still explicitly choose Open Normally afterward.
             throw error
         }
     }
