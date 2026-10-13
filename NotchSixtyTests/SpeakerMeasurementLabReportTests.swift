@@ -48,7 +48,7 @@ final class SpeakerMeasurementLabReportTests: XCTestCase {
         throws {
         let session = makeSession(includeCapture: true)
         let generatedAt =
-            Date(timeIntervalSince1970: 1_704_100_200)
+            Date(timeIntervalSince1970: 1_704_100_200.123)
         let data = try SpeakerMeasurementLabFullFidelityExporter()
             .fullJSONData(
                 session,
@@ -56,7 +56,7 @@ final class SpeakerMeasurementLabReportTests: XCTestCase {
             )
 
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .millisecondsSince1970
         let envelope = try decoder.decode(
             SpeakerMeasurementLabFullFidelityExportEnvelope.self,
             from: data
