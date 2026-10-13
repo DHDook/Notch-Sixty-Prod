@@ -1309,4 +1309,69 @@ final class ProtectedDriverPEQRecommendationTests: XCTestCase {
         )
     }
 
+
+    func testLabReportPublishesCrossoverSumModelAsModelOnly() throws {
+        let (session, _, _) = timingFixture(
+            relativeArrivalMilliseconds: 0.8
+        )
+        let report = try SpeakerMeasurementLabReportBuilder()
+            .build(session: session)
+        let summary = try XCTUnwrap(
+            report.analysisSummaries.first {
+                $0.kind == .protectedDriverCrossoverSum
+            }
+        )
+        XCTAssertTrue(summary.available)
+        XCTAssertEqual(
+            summary.metrics.first {
+                $0.name == "Combined-driver capture"
+            }?.value,
+            "REQUIRED · not yet verified"
+        )
+        XCTAssertEqual(
+            summary.metrics.first {
+                $0.name == "Deployment"
+            }?.value,
+            "Never · model only"
+        )
+        XCTAssertTrue(summary.metrics.contains {
+            $0.name == "Modeled reduction"
+                && $0.value.contains("dB")
+        })
+        XCTAssertTrue(summary.warnings.contains {
+            $0.contains("MODEL ONLY")
+        })
+        XCTAssertTrue(summary.warnings.contains {
+            $0.contains("combined-driver crossover capture")
+        })
+        XCTAssertFalse(report.canDeploy)
+
+        let json = try SpeakerMeasurementLabReportExporter()
+            .jsonData(report)
+        let jsonText = try XCTUnwrap(
+            String(data: json, encoding: .utf8)
+        )
+        XCTAssertTrue(
+            jsonText.contains("protectedDriverCrossoverSum")
+        )
+        XCTAssertFalse(jsonText.contains("impulseResponse"))
+    }
+
+    func testLabReportCrossoverSumIsUnavailableWithoutTimingEvidence() throws {
+        let (session, _, _) = timingFixture(
+            includeReference: false
+        )
+        let report = try SpeakerMeasurementLabReportBuilder()
+            .build(session: session)
+        let summary = try XCTUnwrap(
+            report.analysisSummaries.first {
+                $0.kind == .protectedDriverCrossoverSum
+            }
+        )
+        XCTAssertFalse(summary.available)
+        XCTAssertTrue(summary.metrics.isEmpty)
+        XCTAssertFalse(summary.warnings.isEmpty)
+        XCTAssertFalse(report.canDeploy)
+    }
+
 }
