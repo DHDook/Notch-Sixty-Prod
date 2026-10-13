@@ -93,7 +93,8 @@ final class HardwareAcceptanceTests: XCTestCase {
         authority: HardwareAcceptanceEvidenceAuthority,
         outcome: HardwareAcceptanceObservationOutcome = .passed,
         id: UUID = UUID(),
-        time: TimeInterval = 1_800_000_100
+        time: TimeInterval = 1_800_000_100,
+        coveredCapabilities: [HardwareAcceptanceCapability] = []
     ) -> HardwareAcceptanceObservation {
         HardwareAcceptanceObservation(
             id: id,
@@ -104,6 +105,7 @@ final class HardwareAcceptanceTests: XCTestCase {
             environment: environment(),
             reviewer: "Acceptance reviewer",
             notes: "Observed directly and recorded for the test fixture.",
+            coveredCapabilities: coveredCapabilities,
             artifacts: [
                 HardwareAcceptanceArtifactReference(
                     label: "Acceptance capture",
@@ -217,7 +219,7 @@ final class HardwareAcceptanceTests: XCTestCase {
             ).supplementalCapabilities,
             [.protectedSplitDriverMeasurement]
         )
-        if case .excluded =
+        if case .some(.excluded) =
             result.statuses[.h08LiveFeedForwardANC] {
             // Expected.
         } else {
@@ -225,6 +227,40 @@ final class HardwareAcceptanceTests: XCTestCase {
         }
         XCTAssertFalse(result.liveFeedForwardANCAuthorized)
         XCTAssertFalse(result.physicalAcceptanceComplete)
+    }
+
+    func testIncludedSplitDriverScopeRequiresExplicitH05Coverage()
+        throws {
+        var value = campaign(splitDriver: .included)
+        let h05 = observation(
+            gate: .h05AdvancedMeasurementLab,
+            authority: .independentPhysicalReview
+        )
+        value = try value.appending(h05)
+        XCTAssertEqual(
+            try value.evaluate()
+                .statuses[.h05AdvancedMeasurementLab],
+            .insufficientScope(
+                observationID: h05.id,
+                missing: [.protectedSplitDriverMeasurement]
+            )
+        )
+
+        let covered = observation(
+            gate: .h05AdvancedMeasurementLab,
+            authority: .independentPhysicalReview,
+            time: 1_800_000_200,
+            coveredCapabilities: [.protectedSplitDriverMeasurement]
+        )
+        value = try value.appending(covered)
+        XCTAssertEqual(
+            try value.evaluate()
+                .statuses[.h05AdvancedMeasurementLab],
+            .passed(
+                observationID: covered.id,
+                authority: .independentPhysicalReview
+            )
+        )
     }
 
     func testRequiredPhysicalCampaignCanCompleteWithConditionalFeaturesExcluded()
@@ -267,7 +303,11 @@ final class HardwareAcceptanceTests: XCTestCase {
                 observation(
                     gate: gate,
                     authority: satisfyingAuthority(for: gate),
-                    time: 1_800_002_000 + Double(index)
+                    time: 1_800_002_000 + Double(index),
+                    coveredCapabilities:
+                        gate == .h05AdvancedMeasurementLab
+                        ? [.protectedSplitDriverMeasurement]
+                        : []
                 )
             )
         }
@@ -290,7 +330,11 @@ final class HardwareAcceptanceTests: XCTestCase {
                         gate == .h08LiveFeedForwardANC
                         ? .physicalHardware
                         : satisfyingAuthority(for: gate),
-                    time: 1_800_003_000 + Double(index)
+                    time: 1_800_003_000 + Double(index),
+                    coveredCapabilities:
+                        gate == .h05AdvancedMeasurementLab
+                        ? [.protectedSplitDriverMeasurement]
+                        : []
                 )
             )
         }
