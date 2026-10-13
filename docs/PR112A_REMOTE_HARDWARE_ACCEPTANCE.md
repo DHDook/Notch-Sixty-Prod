@@ -1,6 +1,6 @@
 # PR112A — Remote Hardware-Acceptance Infrastructure
 
-**Status: Slices 1–4 implemented; exact-head CI pending.**
+**Status: Slices 1–5 remote/software complete; implementation head `d00ae1d35a82d5e594ce431b7d08823592211f0d` passed portable + Apple Silicon Debug/Release + targeted acceptance/IA tests + full cumulative XCTest in Actions run `38364855616`. Physical H01–H08 execution remains pending.**
 
 PR112A is the remote-preparation half of roadmap PR112. It is stacked on the
 exact remote/software-complete PR111 head and intentionally stops before any
@@ -189,7 +189,7 @@ authorize speaker-connected live ANC.
 ## Planned remote PR112A follow-on slices
 
 **Slice 2 — Guided acceptance campaign controller & UI
-(implemented; exact-head CI pending).**
+(remote/software complete; physical execution pending).**
 
 The product now owns a `HardwareAcceptanceController` and restores the most
 recent persisted campaign at startup. A dedicated **Hardware Acceptance** entry
@@ -222,7 +222,7 @@ The UI exposes no Apply, routing, DSP, audio-start, correction, merge or release
 control. It only appends evidence through the acceptance store.
 
 **Slice 3 — Gate-specific evidence adapters
-(implemented; exact-head CI pending).**
+(remote/software complete; physical execution pending).**
 
 Typed adapters now link existing product evidence into H03–H07 without copying
 raw sweep data or inventing a second verification format:
@@ -252,7 +252,7 @@ easier to audit, but it still evaluates as insufficient hardware authority
 until Slice 2 records the actual physical/reviewer attestations.
 
 **Slice 4 — Preflight & protected commissioning handoff
-(implemented; exact-head CI pending).**
+(remote/software complete; physical execution pending).**
 
 The Hardware Acceptance workspace now has a **Run Read-Only Preflight** card
 for the selected H01–H08 gate. It is deliberately separate from append-only
@@ -299,7 +299,7 @@ independent Sub routing, permanent H08 blocking, and latest commissioning
 draft selection by Playback System.
 
 **Slice 5 — Reports, export & physical runbook closeout
-(implemented; exact-head CI pending).**
+(remote/software complete; physical execution pending).**
 
 The Hardware Acceptance workspace now exports an immutable JSON acceptance
 packet and a human-readable Markdown physical runbook from the current
@@ -354,3 +354,30 @@ PR112A remains OPEN, DRAFT and UNMERGED. It does not merge ancestors or change
 \`main\`. PR113 UX polish and PR114 commercial release preparation remain later
 milestones. Production signing/TestFlight/App Review and external provenance/IP
 review are not PR112A acceptance evidence.
+
+
+## Remote closeout
+
+PR112A's complete remote implementation was validated at
+`d00ae1d35a82d5e594ce431b7d08823592211f0d` by GitHub Actions run
+`38364855616`. The portable authority audit, inherited PR111/PR109/PR110
+contracts, Apple Silicon arm64 Debug build, targeted hardware-acceptance and
+Production Information Architecture tests, unsigned arm64 Release build, and
+full cumulative XCTest regression all passed.
+
+That result validates the **acceptance infrastructure**, not the hardware.
+No H01–H08 gate has been physically passed by CI. The exported remote-readiness
+manifest must continue to report:
+
+- `physicalAcceptanceComplete = false`;
+- `releaseAcceptanceComplete = false`;
+- `liveFeedForwardANCAuthorized = false`;
+- `mayMergeIntoMain = false`; and
+- `physicalEvidenceSuppliedByCI = false`.
+
+The remaining PR112 work is hands-on execution of the runbook: real device
+lifecycle and endurance, speaker safety, calibrated acoustic measurements,
+Speaker Optimizer/FIR verification, safe coherent Main/Sub validation where
+the hardware topology supports it, and protected active-driver verification
+only on genuinely independent crossed-over/limited outputs. PR112A itself
+remains OPEN, DRAFT and UNMERGED.
