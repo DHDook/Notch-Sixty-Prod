@@ -924,8 +924,10 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         XCTAssertThrowsError(
             try backup.inspect(tampered)
         ) { error in
-            guard case .integrityMismatch(let domain) =
-                error as? NotchSixtyBackupError else {
+            guard let backupError =
+                    error as? NotchSixtyBackupError,
+                  case .integrityMismatch(let domain) =
+                    backupError else {
                 return XCTFail(
                     "Expected integrity mismatch, got \(error)"
                 )
