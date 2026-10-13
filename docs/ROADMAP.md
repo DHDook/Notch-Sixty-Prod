@@ -36,7 +36,7 @@ core-DSP expansion:
 The modal first-run assistant and Playback-System lock are deliberately
 deferred.
 
-**Slices 1–3 are implemented remotely.** Slice 1 established the temporary,
+**Slices 1–4 are implemented remotely.** Slice 1 established the temporary,
 in-memory safe A/B capture boundary. The allowed audition payload is limited to stereo EQ, input preamp,
 headroom attenuation and content dynamics. Audio Unit rack topology and every
 Playback-System/hardware-domain setting remain outside the A/B payload. Each
@@ -55,6 +55,14 @@ per-domain SHA-256 integrity, validate-first transactional restore, rollback of
 colliding Room Correction / Measurement Lab / binaural records, persisted
 Needs Mapping gates for unavailable hardware UIDs, portable app-preference
 restore, and explicit separation from PR112 hardware-acceptance campaigns and
+authority.
+
+Slice 4 adds a parallel full-fidelity Measurement Lab export path while
+preserving the existing compact-report contract. A versioned full JSON envelope
+retains the complete persisted session and explicit measurement-only/no-deploy
+flags; interoperability exports provide lossless transfer CSV, impulse CSV,
+FRD-compatible selected-capture response data and mono 32-bit float WAV impulse
+data. Export is read-only and carries no DSP, deployment or physical-acceptance
 authority.
 
 PR113B software work cannot satisfy PR112 physical acceptance and cannot set
