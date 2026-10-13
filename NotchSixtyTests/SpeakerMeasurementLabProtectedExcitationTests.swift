@@ -1848,7 +1848,11 @@ final class ProtectedDriverPEQRecommendationTests: XCTestCase {
         throws {
         let (session, profile) = try commissioningFixture()
         let draft = try ProtectedDriverCommissioningPlanner()
-            .draft(profile: profile, session: session)
+            .draft(
+                profile: profile,
+                session: session,
+                createdAt: Date(timeIntervalSince1970: 1_700_000_000.456)
+            )
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(
                 "PR111-Drafts-\(UUID().uuidString)",
