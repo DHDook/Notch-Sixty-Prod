@@ -1,0 +1,57 @@
+name: PR115 Volume Feedback
+
+on:
+  push:
+    branches:
+      - feature/pr115-volume-feedback
+  pull_request:
+    branches:
+      - feature/pr114-commercial-release-candidate
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr115-volume-feedback-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Preserve PR114 commercial baseline
+        run: |
+          set -euo pipefail
+          python3 ci/validate_pr114_release_baseline.py
+          python3 ci/validate_pr114_privacy_security.py
+          python3 ci/validate_pr114_provenance_sbom.py
+          python3 ci/validate_pr114_packaging.py
+          python3 ci/validate_pr114_commercial_handoff.py --self-test
+          python3 ci/validate_pr113b_ab_foundation.py
+
+  macos:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Run target UI tests on arm64 Debug build
+        run: |
+          set -euo pipefail
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty \
+            -configuration Debug -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES \
+            -only-testing:NotchSixtyTests/ProductionInformationArchitectureTests \
+            test
+      - name: Build unsigned arm64 Release app
+        run: |
+          set -euo pipefail
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty \
+            -configuration Release -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO build
