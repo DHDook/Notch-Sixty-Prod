@@ -3,6 +3,7 @@ import SwiftUI
 
 struct ProductionEqualizerView: View {
     @ObservedObject var engine: AudioIOEngine
+    var reference: ProductionReferenceNavigator?
     @State private var selectedBandID: UUID?
     @State private var dragPreview: EQBand?
     @State private var pendingDragBand: EQBand?
@@ -344,11 +345,24 @@ struct ProductionEqualizerView: View {
                 }
             }
 
-            LabeledContent("Q") {
+            LabeledContent {
                 TextField("Q", value: binding.q, format: .number.precision(.fractionLength(2...3)))
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 90)
                     .disabled(band.type == .tilt || band.type == .fir)
+            } label: {
+                HStack(spacing: 5) {
+                    Text("Q")
+                    if let reference {
+                        ProductionReferenceHelpButton(
+                            navigator: reference,
+                            articleID: "equalizer",
+                            formulaID: "biquad",
+                            destination: .dspReference,
+                            label: "Open EQ filter math in DSP Reference"
+                        )
+                    }
+                }
             }
 
             if band.type.supportsSlope {
