@@ -107,7 +107,8 @@ for token in (
 for token in (
     "struct ProtectedDriverTimingRecommendationAnalyzer: Sendable",
     "ProtectedDriverTimingRecommendation",
-    "SpeakerMeasurementLabSharedClockReferenceConfiguration",
+    "session.sharedClockReferenceConfiguration != nil",
+    "sharedClockReference?.sharedTimeOriginQualified == true",
     "sharedTimeOriginQualified == true",
     "maximumReferenceArrivalSpreadMilliseconds = 0.25",
     "maximumReferenceMagnitudeRepeatabilityRMSDB = 0.50",
