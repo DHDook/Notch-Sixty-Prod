@@ -533,6 +533,26 @@ struct HardwareAcceptanceCampaignStore: Sendable {
         try persist(campaign, to: path)
     }
 
+    func existingCampaignIDs() throws -> [UUID] {
+        guard FileManager.default.fileExists(
+            atPath: rootDirectory.path
+        ) else { return [] }
+        let files = try FileManager.default.contentsOfDirectory(
+            at: rootDirectory,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        )
+        return files.compactMap { url in
+            guard url.pathExtension.lowercased() == "json" else {
+                return nil
+            }
+            return UUID(
+                uuidString:
+                    url.deletingPathExtension().lastPathComponent
+            )
+        }.sorted { $0.uuidString < $1.uuidString }
+    }
+
     func load(_ campaignID: UUID)
         throws -> HardwareAcceptanceCampaign? {
         let path = url(for: campaignID)
