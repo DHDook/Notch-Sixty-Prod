@@ -88,11 +88,13 @@ recommends 30 seconds of representative loud program.
 Recommendations are conservative and attenuation-only: the assistant can add
 Headroom Attenuation but never reclaim existing reserve from a finite sample.
 Apply is explicit, state-drift guarded and uses the existing silent-boundary
-graph transition. Headroom observation is blocked during an open A/B audition
-and invalidates if A/B begins, preventing temporary level-match attenuation
-from becoming static headroom evidence. Apply does not silently overwrite the
-selected Content Preset, does not bypass restart-required semantic transports,
-and has no physical/release authority.
+graph transition. A matching explicit Undo can restore the exact pre-observation
+attenuation only while the applied Content/Playback boundary is unchanged.
+Headroom observation is blocked during an open A/B audition and invalidates if
+A/B begins, preventing temporary level-match attenuation from becoming static
+headroom evidence. Apply does not silently overwrite the selected Content
+Preset, does not bypass restart-required semantic transports, and has no
+physical/release authority.
 
 PR113B software work cannot satisfy PR112 physical acceptance and cannot set
 `releaseAcceptanceComplete`, `liveFeedForwardANCAuthorized`, or
