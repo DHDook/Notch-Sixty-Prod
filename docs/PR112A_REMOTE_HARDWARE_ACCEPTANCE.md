@@ -1,6 +1,6 @@
 # PR112A — Remote Hardware-Acceptance Infrastructure
 
-**Status: Slices 1–3 implemented; exact-head CI pending.**
+**Status: Slices 1–4 implemented; exact-head CI pending.**
 
 PR112A is the remote-preparation half of roadmap PR112. It is stacked on the
 exact remote/software-complete PR111 head and intentionally stops before any
@@ -251,11 +251,52 @@ Thus a fully accepted product verification can make later physical review much
 easier to audit, but it still evaluates as insufficient hardware authority
 until Slice 2 records the actual physical/reviewer attestations.
 
-**Slice 4 — Preflight & protected commissioning handoff.**
-Validate engine-idle state, exact Playback System identity, routing/crossover/
-limiter state, same-clock requirements and PR111 commissioning rollback
-provenance before a hands-on test can begin. PR111 Apply remains blocked until
-the corresponding real combined-driver verification exists.
+**Slice 4 — Preflight & protected commissioning handoff
+(implemented; exact-head CI pending).**
+
+The Hardware Acceptance workspace now has a **Run Read-Only Preflight** card
+for the selected H01–H08 gate. It is deliberately separate from append-only
+acceptance evidence: a green preflight means only that software/configuration
+prerequisites are consistent enough to begin the recorded physical procedure.
+
+Every preflight requires the selected Playback System to match the immutable
+campaign identity, its saved system state to be clean, the audio engine to be
+idle, and the recorded physical output UID to match the engine-selected output
+(and the Playback System's associated UID where present). Measurement gates
+also require a real ADC/input UID and microphone/calibration identity.
+
+When protected split-driver H05 scope is included, preflight additionally
+requires enabled protected multi-output/crossover state, per-driver processing,
+explicit confirmation of the independently amplified/crossed-over/limited
+wiring, and the latest matching **PR111 commissioning draft**. The draft is
+revalidated and checked against the exact current Playback System rollback
+snapshot. Every affected bus must still retain limiter protection. PR111's
+PEQ/timing/polarity hypotheses remain unapplied; preflight merely allows the
+later combined-driver physical verification procedure to begin.
+
+For H07, preflight requires an independently addressable `subMono` route plus
+explicit declarations that the calibrated microphone and electrical reference
+occupy separate channels of the **same physical ADC**, Main/Sub playback share
+the required output clock domain, and the reference is a documented safe
+line-level path. Powered speaker/amplifier output is never an acceptable ADC
+reference source.
+
+H08 stays hard-blocked in PR112A even when explicitly included in campaign
+scope. Live speaker-connected feed-forward ANC still requires its separate
+physical safety protocol and independent review.
+
+The result hard-codes:
+`physicalAcceptanceEstablished=false`,
+`canSatisfyHardwareGate=false`, `canApplyDSP=false`,
+`canDeploy=false`, `canAuthorizeLiveFeedForwardANC=false`, and
+`mayMergeIntoMain=false`. The UI has no Start-Test, Apply, route mutation,
+DSP mutation, merge, or release action.
+
+New deterministic tests cover exact-system/idle/output readiness, dirty and
+wrong Playback Systems, missing measurement input/microphone, PR111 state
+drift, missing limiter protection, coherent same-ADC/clock/reference gates,
+independent Sub routing, permanent H08 blocking, and latest commissioning
+draft selection by Playback System.
 
 **Slice 5 — Reports, export & physical runbook closeout.**
 Generate a human-readable/machine-readable acceptance packet, unresolved-gate
