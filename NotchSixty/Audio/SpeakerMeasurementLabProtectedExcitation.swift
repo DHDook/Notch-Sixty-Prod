@@ -1737,8 +1737,6 @@ struct ProtectedDriverCommissioningDraft:
               !routingSignature.trimmingCharacters(
                   in: .whitespacesAndNewlines
               ).isEmpty,
-              playbackSystemID == rollbackPlaybackSystemState
-                .outputDeviceProfile.map({ _ in playbackSystemID }),
               Set(sourceProtocolIDs).count == sourceProtocolIDs.count,
               Set(sourceCaptureIDs).count == sourceCaptureIDs.count,
               Set(affectedBuses).count == affectedBuses.count,
