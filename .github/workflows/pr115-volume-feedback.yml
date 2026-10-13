@@ -100,6 +100,8 @@ jobs:
 
       - name: Package ad-hoc arm64 PR115 hardware-test DMG
         shell: bash
+        env:
+          PR115_SOURCE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
           APP="$RUNNER_TEMP/PR115HardwareTest/Notch Sixty.app"
@@ -122,7 +124,7 @@ jobs:
               "schemaVersion": 1,
               "milestone": "PR115",
               "purpose": "owner supervised hardware and UX testing only",
-              "sourceCommit": os.environ["GITHUB_SHA"],
+              "sourceCommit": os.environ["PR115_SOURCE_HEAD"],
               "version": "1.0.0",
               "buildNumber": "1",
               "minMacOS": "27.0",
