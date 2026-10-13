@@ -49,6 +49,12 @@ struct ProductionHardwareAcceptanceWorkspace: View {
     @State private var physicalAttestation = false
     @State private var independentReviewAttestation = false
     @State private var actionMessage: String?
+    @State private var preflightResult:
+        HardwareAcceptancePreflightResult?
+    @State private var protectedDriverWiringPreflightConfirmed = false
+    @State private var sameADCPreflightConfirmed = false
+    @State private var commonClockPreflightConfirmed = false
+    @State private var safeLineReferencePreflightConfirmed = false
 
     private var appVersion: String {
         Bundle.main.object(
@@ -84,6 +90,7 @@ struct ProductionHardwareAcceptanceWorkspace: View {
                 if let campaign = acceptance.campaign {
                     campaignSummary(campaign)
                     gateMatrix
+                    preflightCard
                     evidenceEntry
                 } else {
                     noCampaignCard
@@ -113,6 +120,13 @@ struct ProductionHardwareAcceptanceWorkspace: View {
         }
         .onChange(of: selectedGate) { _, _ in
             resetObservationAttestations()
+            resetPreflight()
+        }
+        .onChange(of: profiles.selectedSystemProfileID) { _, _ in
+            resetPreflight()
+        }
+        .onChange(of: engine.lifecycleState) { _, _ in
+            preflightResult = nil
         }
         .onChange(of: authority) { _, newValue in
             if newValue == .remoteSoftware {
@@ -313,6 +327,111 @@ struct ProductionHardwareAcceptanceWorkspace: View {
             )
         }
         .buttonStyle(.plain)
+    }
+
+    private var preflightCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Physical test preflight")
+                        .font(.headline)
+                    Text(
+                        "Read-only readiness check for \(selectedGate.rawValue). It does not start audio, apply DSP, or create acceptance evidence."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if let preflightResult {
+                    Text(
+                        preflightResult.readyToBeginPhysicalTest
+                            ? "READY TO BEGIN"
+                            : "BLOCKED"
+                    )
+                    .font(.caption.bold())
+                    .tracking(0.7)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        .secondary.opacity(0.10),
+                        in: Capsule()
+                    )
+                }
+            }
+
+            if selectedGate == .h05AdvancedMeasurementLab,
+               acceptance.supplementalCapabilityIsIncluded(
+                .protectedSplitDriverMeasurement
+               ) {
+                Toggle(
+                    "I verified the independently amplified Low/Mid/High wiring, mandatory crossover, and limiter topology before exposed-driver testing",
+                    isOn: $protectedDriverWiringPreflightConfirmed
+                )
+                .font(.caption)
+            }
+
+            if selectedGate == .h07CoherentMainSubAlignment {
+                Toggle(
+                    "Microphone and safe electrical reference use separate channels of the same physical ADC",
+                    isOn: $sameADCPreflightConfirmed
+                )
+                .font(.caption)
+                Toggle(
+                    "Main and independently routed Sub share the required output clock domain",
+                    isOn: $commonClockPreflightConfirmed
+                )
+                .font(.caption)
+                Toggle(
+                    "Electrical reference is safe line-level — never powered speaker/amplifier output",
+                    isOn: $safeLineReferencePreflightConfirmed
+                )
+                .font(.caption)
+            }
+
+            Button("Run Read-Only Preflight") {
+                runPreflight()
+            }
+            .buttonStyle(.bordered)
+            .disabled(acceptance.campaign == nil)
+
+            if let result = preflightResult {
+                if result.blockers.isEmpty {
+                    Label(
+                        "Software prerequisites are consistent enough to begin the recorded physical procedure. This is NOT a gate pass.",
+                        systemImage: "checkmark.shield"
+                    )
+                    .font(.caption.bold())
+                } else {
+                    ForEach(result.blockers) { blocker in
+                        Label(
+                            blocker.message,
+                            systemImage: "exclamationmark.triangle"
+                        )
+                        .font(.caption)
+                    }
+                }
+                ForEach(result.warnings, id: \.self) { warning in
+                    Text(warning)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                if let draftID = result.commissioningDraftID {
+                    Text(
+                        "PR111 rollback-bound draft: \(draftID.uuidString)"
+                    )
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                }
+                Text(
+                    "Hard boundary: physicalAcceptanceEstablished = false · canApplyDSP = false · canDeploy = false · mayMergeIntoMain = false"
+                )
+                .font(.caption2.bold())
+                .foregroundStyle(.secondary)
+            }
+        }
+        .padding(18)
+        .glassEffect(.regular, in: .rect(cornerRadius: 18))
     }
 
     private var evidenceEntry: some View {
@@ -775,6 +894,87 @@ struct ProductionHardwareAcceptanceWorkspace: View {
         } catch {
             actionMessage = error.localizedDescription
         }
+    }
+
+    private func runPreflight() {
+        do {
+            guard let campaign = acceptance.campaign else {
+                throw HardwareAcceptanceWorkflowError
+                    .campaignRequired
+            }
+            let environment = HardwareAcceptanceEnvironment(
+                macModel: macModel,
+                macOSVersion: macOSVersion,
+                sampleRate: sampleRate,
+                ioBufferFrames: ioBufferFrames,
+                outputDeviceName: outputDeviceName,
+                outputDeviceUID: outputDeviceUID,
+                inputDeviceName: optionalText(inputDeviceName),
+                inputDeviceUID: optionalText(inputDeviceUID),
+                microphoneIdentifier:
+                    optionalText(microphoneIdentifier),
+                speakerTopology: speakerTopology,
+                referencePathDescription:
+                    optionalText(referencePathDescription)
+            )
+            _ = try environment.validated()
+
+            var draft: ProtectedDriverCommissioningDraft?
+            if selectedGate == .h05AdvancedMeasurementLab,
+               acceptance.supplementalCapabilityIsIncluded(
+                .protectedSplitDriverMeasurement
+               ) {
+                draft = try HardwareAcceptanceCommissioningDraftLocator()
+                    .latest(
+                        for: campaign.identity.playbackSystemID
+                    )
+            }
+
+            let runtime = HardwareAcceptanceRuntimeSnapshot(
+                lifecycleState: engine.lifecycleState,
+                selectedPlaybackSystem:
+                    profiles.selectedSystemProfile,
+                selectedPlaybackSystemIsDirty:
+                    profiles.selectedSystemProfileIsDirty,
+                engineSelectedOutputUID:
+                    engine.routeConfiguration.selectedOutputUID
+            )
+            let attestations =
+                HardwareAcceptancePreflightAttestations(
+                    protectedDriverWiringConfirmed:
+                        protectedDriverWiringPreflightConfirmed,
+                    sameADCMicrophoneAndReferenceConfirmed:
+                        sameADCPreflightConfirmed,
+                    commonOutputClockConfirmed:
+                        commonClockPreflightConfirmed,
+                    safeLineLevelReferenceConfirmed:
+                        safeLineReferencePreflightConfirmed
+                )
+            let result = HardwareAcceptancePreflightAnalyzer()
+                .evaluate(
+                    campaign: campaign,
+                    gateID: selectedGate,
+                    runtime: runtime,
+                    environment: environment,
+                    attestations: attestations,
+                    commissioningDraft: draft
+                )
+            preflightResult = result
+            actionMessage = result.readyToBeginPhysicalTest
+                ? "Preflight is ready to begin the physical procedure; no acceptance status changed."
+                : "Preflight found blockers. No acceptance status changed."
+        } catch {
+            preflightResult = nil
+            actionMessage = error.localizedDescription
+        }
+    }
+
+    private func resetPreflight() {
+        preflightResult = nil
+        protectedDriverWiringPreflightConfirmed = false
+        sameADCPreflightConfirmed = false
+        commonClockPreflightConfirmed = false
+        safeLineReferencePreflightConfirmed = false
     }
 
     private func recordObservation() {
