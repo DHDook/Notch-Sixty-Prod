@@ -714,22 +714,92 @@ enum ProductionUserGuideCatalog {
     }
 }
 
+enum ProductionReferenceTab: String, Hashable {
+    case general
+    case userGuide
+    case dspReference
+}
+
+@MainActor
+final class ProductionReferenceNavigator: ObservableObject {
+    @Published var selectedTab: ProductionReferenceTab = .general
+    @Published var selectedArticleID: String? = "getting-started"
+    @Published var selectedFormulaID: String?
+
+    func openGuide(articleID: String) {
+        selectedArticleID = articleID
+        selectedFormulaID = nil
+        selectedTab = .userGuide
+    }
+
+    func openDSPReference(
+        articleID: String,
+        formulaID: String? = nil
+    ) {
+        selectedArticleID = articleID
+        selectedFormulaID = formulaID
+        selectedTab = .dspReference
+    }
+
+    func resetFormulaFocus() {
+        selectedFormulaID = nil
+    }
+}
+
+struct ProductionReferenceHelpButton: View {
+    enum Destination {
+        case userGuide
+        case dspReference
+    }
+
+    @ObservedObject var navigator: ProductionReferenceNavigator
+    let articleID: String
+    var formulaID: String? = nil
+    var destination: Destination = .userGuide
+    var label: String = "Open reference"
+
+    @Environment(\.openSettings) private var openSettings
+
+    var body: some View {
+        Button {
+            switch destination {
+            case .userGuide:
+                navigator.openGuide(articleID: articleID)
+            case .dspReference:
+                navigator.openDSPReference(
+                    articleID: articleID,
+                    formulaID: formulaID
+                )
+            }
+            openSettings()
+        } label: {
+            Image(systemName: "questionmark.circle")
+                .imageScale(.medium)
+        }
+        .buttonStyle(.borderless)
+        .help(label)
+        .accessibilityLabel(label)
+    }
+}
+
 struct ProductionUserGuideView: View {
+    @ObservedObject var navigator: ProductionReferenceNavigator
     @State private var searchText = ""
-    @State private var selectedArticleID: String? = "getting-started"
 
     private var filteredArticles: [ProductionUserGuideArticle] {
         ProductionUserGuideCatalog.search(searchText)
     }
 
     private var selectedArticle: ProductionUserGuideArticle? {
-        guard let selectedArticleID else { return nil }
+        guard let selectedArticleID = navigator.selectedArticleID else {
+            return nil
+        }
         return ProductionUserGuideCatalog.article(id: selectedArticleID)
     }
 
     var body: some View {
         NavigationSplitView {
-            List(selection: $selectedArticleID) {
+            List(selection: selectedArticleBinding) {
                 ForEach(ProductionUserGuideCategory.allCases) { category in
                     let matches = filteredArticles.filter {
                         $0.category == category
@@ -738,7 +808,7 @@ struct ProductionUserGuideView: View {
                         Section {
                             ForEach(matches) { article in
                                 Label(article.title, systemImage: article.systemImage)
-                                    .tag(article.id)
+                                    .tag(Optional(article.id))
                             }
                         } header: {
                             Label(category.title, systemImage: category.systemImage)
@@ -766,83 +836,279 @@ struct ProductionUserGuideView: View {
                     )
                 )
             } else if let article = selectedArticle {
-                ProductionUserGuideArticleView(article: article)
+                ProductionUserGuideArticleView(
+                    article: article,
+                    targetFormulaID: navigator.selectedFormulaID
+                )
             } else if let first = filteredArticles.first {
-                ProductionUserGuideArticleView(article: first)
+                ProductionUserGuideArticleView(
+                    article: first,
+                    targetFormulaID: nil
+                )
             } else {
                 EmptyView()
             }
         }
+        .onAppear {
+            if navigator.selectedArticleID == nil {
+                navigator.selectedArticleID = "getting-started"
+            }
+        }
+    }
+
+    private var selectedArticleBinding: Binding<String?> {
+        Binding(
+            get: { navigator.selectedArticleID },
+            set: { newValue in
+                navigator.selectedArticleID = newValue
+                navigator.resetFormulaFocus()
+            }
+        )
+    }
+}
+
+struct ProductionDSPReferenceView: View {
+    @ObservedObject var navigator: ProductionReferenceNavigator
+    @State private var searchText = ""
+
+    private var mathArticles: [ProductionUserGuideArticle] {
+        ProductionUserGuideCatalog.search(searchText)
+            .filter { !$0.formulas.isEmpty }
+    }
+
+    private var selectedArticle: ProductionUserGuideArticle? {
+        guard
+            let id = navigator.selectedArticleID,
+            let article = ProductionUserGuideCatalog.article(id: id),
+            !article.formulas.isEmpty
+        else {
+            return mathArticles.first
+        }
+        return article
+    }
+
+    var body: some View {
+        NavigationSplitView {
+            List(selection: selectedArticleBinding) {
+                ForEach(ProductionUserGuideCategory.allCases) { category in
+                    let matches = mathArticles.filter {
+                        $0.category == category
+                    }
+                    if !matches.isEmpty {
+                        Section {
+                            ForEach(matches) { article in
+                                Label(article.title, systemImage: "function")
+                                    .tag(Optional(article.id))
+                            }
+                        } header: {
+                            Label(category.title, systemImage: category.systemImage)
+                        }
+                    }
+                }
+            }
+            .searchable(
+                text: $searchText,
+                placement: .sidebar,
+                prompt: "Search equations, terms or features"
+            )
+            .navigationSplitViewColumnWidth(
+                min: 220,
+                ideal: 270,
+                max: 340
+            )
+        } detail: {
+            if mathArticles.isEmpty {
+                ContentUnavailableView(
+                    "No DSP Reference Results",
+                    systemImage: "function",
+                    description: Text(
+                        "Try a processor, measurement term or equation name."
+                    )
+                )
+            } else if let article = selectedArticle {
+                ProductionDSPReferenceArticleView(
+                    article: article,
+                    targetFormulaID: navigator.selectedFormulaID
+                )
+            }
+        }
+        .onAppear {
+            if selectedArticle == nil {
+                navigator.selectedArticleID = mathArticles.first?.id
+            }
+        }
+    }
+
+    private var selectedArticleBinding: Binding<String?> {
+        Binding(
+            get: { selectedArticle?.id },
+            set: { newValue in
+                navigator.selectedArticleID = newValue
+                navigator.resetFormulaFocus()
+            }
+        )
     }
 }
 
 private struct ProductionUserGuideArticleView: View {
     let article: ProductionUserGuideArticle
+    let targetFormulaID: String?
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Label(article.title, systemImage: article.systemImage)
-                        .font(.largeTitle.bold())
-                    Text(article.summary)
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                ForEach(article.sections) { section in
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text(section.title)
-                            .font(.title2.bold())
-                        ForEach(
-                            Array(section.paragraphs.enumerated()),
-                            id: \.offset
-                        ) { _, paragraph in
-                            Text(paragraph)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label(article.title, systemImage: article.systemImage)
+                            .font(.largeTitle.bold())
+                        Text(article.summary)
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
 
-                if !article.formulas.isEmpty {
-                    Divider()
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            Label("Math & DSP Details", systemImage: "function")
+                    ForEach(article.sections) { section in
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(section.title)
                                 .font(.title2.bold())
-                            Spacer()
-                            Text("Expandable")
-                                .font(.caption.bold())
-                                .foregroundStyle(.secondary)
+                            ForEach(
+                                Array(section.paragraphs.enumerated()),
+                                id: \.offset
+                            ) { _, paragraph in
+                                Text(paragraph)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
 
-                        Text(
-                            "These equations describe the real signal-processing relationship or diagnostic metric used by the feature. Implementation notes call out where qualification, smoothing, bounds, buffering or safety logic adds constraints beyond the compact equation."
-                        )
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                    if !article.formulas.isEmpty {
+                        Divider()
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack {
+                                Label("Math & DSP Details", systemImage: "function")
+                                    .font(.title2.bold())
+                                Spacer()
+                                Text("Expandable")
+                                    .font(.caption.bold())
+                                    .foregroundStyle(.secondary)
+                            }
 
-                        ForEach(article.formulas) { formula in
-                            ProductionUserGuideFormulaView(formula: formula)
+                            Text(
+                                "These equations describe the real signal-processing relationship or diagnostic metric used by the feature. Implementation notes call out where qualification, smoothing, bounds, buffering or safety logic adds constraints beyond the compact equation."
+                            )
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+
+                            ForEach(article.formulas) { formula in
+                                ProductionUserGuideFormulaView(
+                                    formula: formula,
+                                    targeted: targetFormulaID == formula.id
+                                )
+                                .id(formula.id)
+                            }
                         }
                     }
                 }
+                .padding(26)
+                .frame(maxWidth: 780, alignment: .topLeading)
             }
-            .padding(26)
-            .frame(maxWidth: 780, alignment: .topLeading)
+            .navigationTitle(article.title)
+            .onAppear {
+                scrollToTarget(proxy)
+            }
+            .onChange(of: targetFormulaID) { _, _ in
+                scrollToTarget(proxy)
+            }
         }
-        .navigationTitle(article.title)
+    }
+
+    private func scrollToTarget(_ proxy: ScrollViewProxy) {
+        guard let targetFormulaID else { return }
+        Task { @MainActor in
+            await Task.yield()
+            withAnimation {
+                proxy.scrollTo(targetFormulaID, anchor: .center)
+            }
+        }
+    }
+}
+
+private struct ProductionDSPReferenceArticleView: View {
+    let article: ProductionUserGuideArticle
+    let targetFormulaID: String?
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label(article.title, systemImage: "function")
+                            .font(.largeTitle.bold())
+                        Text(article.summary)
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Text(
+                        "Reference equations are implementation-audited during PR113. Core equations describe the mathematical operation itself; implementation relationships include product-specific constraints; diagnostic/model definitions describe a metric and do not by themselves establish physical acceptance."
+                    )
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                    ForEach(article.formulas) { formula in
+                        ProductionUserGuideFormulaView(
+                            formula: formula,
+                            targeted: targetFormulaID == formula.id,
+                            initiallyExpanded: true
+                        )
+                        .id(formula.id)
+                    }
+                }
+                .padding(26)
+                .frame(maxWidth: 780, alignment: .topLeading)
+            }
+            .navigationTitle("\(article.title) · DSP Reference")
+            .onAppear {
+                scrollToTarget(proxy)
+            }
+            .onChange(of: targetFormulaID) { _, _ in
+                scrollToTarget(proxy)
+            }
+        }
+    }
+
+    private func scrollToTarget(_ proxy: ScrollViewProxy) {
+        guard let targetFormulaID else { return }
+        Task { @MainActor in
+            await Task.yield()
+            withAnimation {
+                proxy.scrollTo(targetFormulaID, anchor: .center)
+            }
+        }
     }
 }
 
 private struct ProductionUserGuideFormulaView: View {
     let formula: ProductionUserGuideFormula
+    let targeted: Bool
+    @State private var expanded: Bool
+
+    init(
+        formula: ProductionUserGuideFormula,
+        targeted: Bool = false,
+        initiallyExpanded: Bool = false
+    ) {
+        self.formula = formula
+        self.targeted = targeted
+        _expanded = State(
+            initialValue: initiallyExpanded || targeted
+        )
+    }
 
     var body: some View {
-        DisclosureGroup {
+        DisclosureGroup(isExpanded: $expanded) {
             VStack(alignment: .leading, spacing: 12) {
                 Text(formula.expression)
                     .font(.system(.body, design: .monospaced))
@@ -868,5 +1134,17 @@ private struct ProductionUserGuideFormulaView: View {
         }
         .padding(14)
         .glassEffect(.regular, in: .rect(cornerRadius: 16))
+        .overlay {
+            if targeted {
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(.tint, lineWidth: 1.5)
+            }
+        }
+        .onChange(of: targeted) { _, isTargeted in
+            if isTargeted {
+                expanded = true
+            }
+        }
     }
 }
+
