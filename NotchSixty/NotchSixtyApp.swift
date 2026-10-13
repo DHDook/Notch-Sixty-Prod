@@ -270,6 +270,9 @@ final class ProductController: ObservableObject {
             throw ProductRecoveryError.safeLaunchDecisionRequired
         }
 
+        if audioEngine.lifecycleState == .failed {
+            audioEngine.stop()
+        }
         let format: AudioUnitRackProcessingFormat
         do {
             format =
