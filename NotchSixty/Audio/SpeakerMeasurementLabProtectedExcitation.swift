@@ -1730,6 +1730,87 @@ struct ProtectedDriverCommissioningDraft:
     var rollbackSnapshotAvailable: Bool { true }
     var stateDriftCheckRequired: Bool { true }
     var requiresPhysicalCombinedDriverCapture: Bool { true }
+
+    func validated() throws -> Self {
+        guard schemaVersion == Self.currentSchemaVersion,
+              sampleRate.isFinite, sampleRate > 0,
+              !routingSignature.trimmingCharacters(
+                  in: .whitespacesAndNewlines
+              ).isEmpty,
+              playbackSystemID == rollbackPlaybackSystemState
+                .outputDeviceProfile.map({ _ in playbackSystemID }),
+              Set(sourceProtocolIDs).count == sourceProtocolIDs.count,
+              Set(sourceCaptureIDs).count == sourceCaptureIDs.count,
+              Set(affectedBuses).count == affectedBuses.count,
+              timingReviews.allSatisfy({
+                  !$0.combinedDriverCaptureVerified
+                      && $0.crossoverFrequencyHz.isFinite
+                      && $0.crossoverFrequencyHz > 0
+                      && $0.modeledDeficitReductionDB.isFinite
+              }),
+              !canApply, !canDeploy, !readyForApproval,
+              rollbackSnapshotAvailable,
+              stateDriftCheckRequired,
+              requiresPhysicalCombinedDriverCapture else {
+            throw ProtectedDriverCommissioningError.invalidPreview
+        }
+        guard let baseline =
+                rollbackPlaybackSystemState.speakerDriverProcessing else {
+            throw ProtectedDriverCommissioningError.invalidPreview
+        }
+        do {
+            try baseline.validateStructure()
+            try previewDriverProcessing.validateStructure()
+        } catch {
+            throw ProtectedDriverCommissioningError.invalidPreview
+        }
+
+        var changed = Set<SpeakerOutputBus>()
+        for bus in SpeakerOutputBus.allCases {
+            let before = baseline.configuration(for: bus)
+            let after = previewDriverProcessing.configuration(for: bus)
+            guard after.enabled == before.enabled,
+                  after.trimDB == before.trimDB,
+                  after.polarityInverted == before.polarityInverted,
+                  after.delayMilliseconds == before.delayMilliseconds,
+                  after.limiterEnabled == before.limiterEnabled,
+                  after.limiterThresholdDBFS
+                    == before.limiterThresholdDBFS,
+                  after.eqBands.count >= before.eqBands.count,
+                  Array(after.eqBands.prefix(before.eqBands.count))
+                    == before.eqBands else {
+                throw ProtectedDriverCommissioningError.invalidPreview
+            }
+            let added = Array(
+                after.eqBands.dropFirst(before.eqBands.count)
+            )
+            guard added.allSatisfy({
+                $0.enabled
+                    && $0.type == .peaking
+                    && $0.frequencyHz.isFinite
+                    && $0.frequencyHz > 0
+                    && $0.gainDB.isFinite
+                    && $0.gainDB < 0
+                    && $0.gainDB >=
+                        -ProtectedDriverPEQRecommendationAnalyzer
+                            .maximumCutDB
+                    && $0.q.isFinite
+                    && $0.q > 0
+                    && $0.q <=
+                        ProtectedDriverPEQRecommendationAnalyzer
+                            .maximumBandQ
+                    && $0.firKernel == nil
+                    && !$0.dynamic.enabled
+            }) else {
+                throw ProtectedDriverCommissioningError.invalidPreview
+            }
+            if !added.isEmpty { changed.insert(bus) }
+        }
+        guard changed == Set(affectedBuses) else {
+            throw ProtectedDriverCommissioningError.invalidPreview
+        }
+        return self
+    }
 }
 
 enum ProtectedDriverCommissioningError:
@@ -1917,7 +1998,7 @@ struct ProtectedDriverCommissioningPlanner: Sendable {
             protectedProtocols: protectedProtocols
         )
 
-        return ProtectedDriverCommissioningDraft(
+        let draft = ProtectedDriverCommissioningDraft(
             createdAt: createdAt,
             playbackSystemID: profile.id,
             sessionID: session.id,
@@ -1939,6 +2020,7 @@ struct ProtectedDriverCommissioningPlanner: Sendable {
                 "Remote commissioning draft only: cut-only PEQ preview plus model-only adjacent-driver timing reviews. " +
                 "Exact Playback System rollback snapshot retained. No Apply until fresh physical combined-driver verification and PR112 hardware acceptance."
         )
+        return try draft.validated()
     }
 
     func validateCurrentState(
@@ -1997,14 +2079,9 @@ struct ProtectedDriverCommissioningPlanner: Sendable {
         protectedProtocols: [SpeakerMeasurementLabProtocol]
     ) -> [ProtectedDriverCommissioningTimingReview] {
         var reviews: [ProtectedDriverCommissioningTimingReview] = []
-        let buses = Dictionary(
-            uniqueKeysWithValues: protectedProtocols.compactMap {
-                protocolItem in
-                protocolItem.protectedDriverBus.map {
-                    ($0, protocolItem)
-                }
-            }
-        )
+        let grouped = Dictionary(
+            grouping: protectedProtocols
+        ) { $0.protectedDriverBus! }
         let pairs: [(SpeakerOutputBus, SpeakerOutputBus)] = [
             (.leftLow, .leftMid),
             (.leftMid, .leftHigh),
@@ -2014,8 +2091,12 @@ struct ProtectedDriverCommissioningPlanner: Sendable {
             (.rightLow, .rightHigh),
         ]
         for pair in pairs {
-            guard let first = buses[pair.0],
-                  let second = buses[pair.1],
+            guard let firstGroup = grouped[pair.0],
+                  let secondGroup = grouped[pair.1],
+                  firstGroup.count == 1,
+                  secondGroup.count == 1,
+                  let first = firstGroup.first,
+                  let second = secondGroup.first,
                   let model = try? ProtectedDriverCrossoverSumModelAnalyzer()
                     .analyze(
                         session: session,
@@ -2072,15 +2153,7 @@ struct ProtectedDriverCommissioningDraftStore: Sendable {
     }
 
     func save(_ draft: ProtectedDriverCommissioningDraft) throws {
-        guard draft.schemaVersion
-                == ProtectedDriverCommissioningDraft
-                    .currentSchemaVersion,
-              !draft.canApply,
-              !draft.canDeploy,
-              draft.requiresPhysicalCombinedDriverCapture,
-              draft.rollbackSnapshotAvailable else {
-            throw ProtectedDriverCommissioningError.invalidPreview
-        }
+        _ = try draft.validated()
         try FileManager.default.createDirectory(
             at: rootDirectory,
             withIntermediateDirectories: true
@@ -2106,16 +2179,9 @@ struct ProtectedDriverCommissioningDraftStore: Sendable {
             ProtectedDriverCommissioningDraft.self,
             from: Data(contentsOf: path)
         )
-        guard draft.sessionID == sessionID,
-              draft.schemaVersion
-                == ProtectedDriverCommissioningDraft
-                    .currentSchemaVersion,
-              !draft.canApply,
-              !draft.canDeploy,
-              draft.requiresPhysicalCombinedDriverCapture else {
-            throw ProtectedDriverCommissioningError
-                .unsupportedSchema
+        guard draft.sessionID == sessionID else {
+            throw ProtectedDriverCommissioningError.unsupportedSchema
         }
-        return draft
+        return try draft.validated()
     }
 }
