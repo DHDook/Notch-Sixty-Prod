@@ -48,7 +48,7 @@ final class SpeakerMeasurementLabReportTests: XCTestCase {
         throws {
         let session = makeSession(includeCapture: true)
         let generatedAt =
-            Date(timeIntervalSince1970: 1_704_100_200.123)
+            Date(timeIntervalSince1970: 1_704_100_200.125)
         let data = try SpeakerMeasurementLabFullFidelityExporter()
             .fullJSONData(
                 session,
