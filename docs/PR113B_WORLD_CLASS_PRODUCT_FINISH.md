@@ -356,14 +356,23 @@ When recovery evidence exists, the main window presents a non-dismissible
   Preferences & Reference, including recovery state.
 
 Restore Last Known Good rolls profile persistence back to the pre-recovery
-snapshot if selected-layer application fails.
+snapshot if selected-layer application fails. It also refuses to complete if
+any restored Playback System references unavailable hardware; the user must
+reconnect or remap that hardware rather than accepting a silent substitute.
 
 ### Last-known-good authority
 
 A successful normal start records the current saved product-profile snapshot as
 Last Known Good and resets failure counters. A start with plug-ins bypassed, or
-with any quarantined Audio Unit component, may prove the core audio path works
-but **cannot overwrite Last Known Good**.
+with an enabled active-rack Audio Unit component quarantined, may prove the core
+audio path works but **cannot overwrite Last Known Good**. Quarantined
+components that are unrelated to the enabled active rack do not block a healthy
+configuration from becoming Last Known Good.
+
+The plug-in-bypassed choice is transient for the current launch and is never
+persisted as a saved rack edit or next-launch preference. If the recovery record
+itself is unreadable, Safe Launch fails closed and retains the original read
+error in diagnostics even after writing a clean replacement record.
 
 Recovery bookkeeping failures are diagnostic only; they do not turn an
 otherwise successful audio start into a playback failure.
@@ -407,7 +416,13 @@ PR112 evidence requirements or promote the stacked PRs.
 - WAV export is mono 32-bit IEEE float at the capture sample rate;
 - unclean launches and clean termination are distinguished persistently;
 - repeated audio and plug-in failures trigger Safe Launch independently;
-- bypassed/quarantined plug-in starts cannot overwrite Last Known Good; and
+- bypassed or active-rack-quarantined plug-in starts cannot overwrite Last
+  Known Good;
+- unavailable Last Known Good hardware fails closed instead of silently
+  rebinding;
+- unreadable machine-local recovery state forces Safe Launch and preserves the
+  read error in diagnostics;
+- plug-in bypass is transient across a clean relaunch; and
 - recovery state carries no physical/release/merge authority;
 
 - the A/B payload contains only the four allowed content-domain fields;
