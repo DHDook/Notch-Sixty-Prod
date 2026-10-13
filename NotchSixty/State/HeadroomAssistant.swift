@@ -290,6 +290,7 @@ enum HeadroomAssistantError: Error, LocalizedError, Equatable {
     case abComparisonActive
     case stateChanged
     case noApplicableRecommendation
+    case appliedRecommendationPendingDecision
     case noAppliedRecommendationToRevert
 
     var errorDescription: String? {
@@ -304,6 +305,8 @@ enum HeadroomAssistantError: Error, LocalizedError, Equatable {
             return "The Content Preset or Playback System changed during the observation. Start a new Headroom Assistant observation for the current state."
         case .noApplicableRecommendation:
             return "There is no additional headroom attenuation to apply from this observation."
+        case .appliedRecommendationPendingDecision:
+            return "Undo Applied Headroom or choose Keep & Clear before starting a new observation."
         case .noAppliedRecommendationToRevert:
             return "There is no unchanged Headroom Assistant Apply transaction to revert."
         }
@@ -365,6 +368,10 @@ final class HeadroomAssistantController: ObservableObject {
     }
 
     func startObservation(now: Date = Date()) throws {
+        guard !canRevertAppliedRecommendation else {
+            throw HeadroomAssistantError
+                .appliedRecommendationPendingDecision
+        }
         guard !abAuditionSessionActive else {
             throw HeadroomAssistantError.abComparisonActive
         }
