@@ -1165,7 +1165,7 @@ struct ProtectedDriverTimingRecommendationAnalyzer: Sendable {
     private func adjacent(
         _ first: SpeakerOutputBus,
         _ second: SpeakerOutputBus,
-        mode: PhysicalSpeakerOutputMode
+        mode: SpeakerCrossoverMode
     ) -> Bool {
         switch mode {
         case .biAmp:
