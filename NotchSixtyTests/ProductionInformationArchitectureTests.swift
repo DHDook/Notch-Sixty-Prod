@@ -578,7 +578,7 @@ final class ProductionInformationArchitectureTests: XCTestCase {
             contentState: ContentPresetState()
         )
         let labels = Set(
-            Mirror(reflecting: audition).children.compactMap(\.label)
+            Mirror(reflecting: audition).children.compactMap { $0.label }
         )
 
         XCTAssertEqual(
