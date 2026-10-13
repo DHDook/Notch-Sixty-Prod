@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 
 struct HeadroomAssistantBoundary: Equatable, Sendable {
     let selectedContentPresetID: UUID?
