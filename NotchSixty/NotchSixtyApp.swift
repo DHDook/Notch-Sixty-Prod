@@ -1587,8 +1587,14 @@ private struct ProductionSettingsView: View {
             preferences.apply(to: product.audioEngine)
             preferences.refreshLaunchAtLoginStatus()
         }
-        .frame(width: 960)
-        .frame(minHeight: 680)
+        .navigationTitle("Preferences & Reference")
+        .accessibilityLabel("Preferences & Reference")
+        .frame(
+            minWidth: 760,
+            idealWidth: 960,
+            minHeight: 620,
+            idealHeight: 720
+        )
     }
 
     private var generalSettings: some View {
