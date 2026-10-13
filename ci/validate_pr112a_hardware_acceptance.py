@@ -35,6 +35,8 @@ for token in (
     "struct HardwareAcceptanceCampaignStore: Sendable",
     "scopeDecisions:",
     "supplementalCapabilities:",
+    "coveredCapabilities:",
+    ".insufficientScope(",
     ".liveFeedForwardANC",
     "physicalAcceptanceComplete",
     "liveFeedForwardANCAuthorized",
@@ -57,6 +59,7 @@ for forbidden in (
 for token in (
     "testRemoteSoftwarePassCannotSatisfyPhysicalGate",
     "testSplitDriverExclusionDoesNotWaiveMandatoryH05",
+    "testIncludedSplitDriverScopeRequiresExplicitH05Coverage",
     "testRequiredPhysicalCampaignCanCompleteWithConditionalFeaturesExcluded",
     "testLiveANCAuthorizationRequiresIncludedH08IndependentReviewAndAllGates",
     "testNewestObservationCanRegressPreviouslyPassedGate",
