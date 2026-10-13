@@ -376,12 +376,19 @@ struct ProductionRootView: View {
 
         ToolbarSpacer(.flexible)
 
-        ToolbarItem(placement: .primaryAction) {
+        ToolbarItemGroup(placement: .primaryAction) {
+            ProductionReferenceHelpButton(
+                navigator: product.reference,
+                articleID: ProductionUserGuideCatalog.articleID(for: selection),
+                label: "Open \(selection.title) in the User Guide"
+            )
+            .buttonStyle(.glass)
+
             SettingsLink {
-                Label("Settings", systemImage: "gearshape")
+                Label("Preferences & Reference", systemImage: "gearshape")
             }
             .buttonStyle(.glass)
-            .help("Open Notch Sixty Settings")
+            .help("Open Preferences & Reference")
         }
     }
 }
