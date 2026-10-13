@@ -111,6 +111,413 @@ struct ContentPreset: Identifiable, Codable, Equatable, Sendable {
     }
 }
 
+
+enum ContentABSlot: String, CaseIterable, Identifiable, Sendable {
+    case a
+    case b
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        rawValue.uppercased()
+    }
+
+    var opposite: ContentABSlot {
+        self == .a ? .b : .a
+    }
+}
+
+/// The deliberately narrow state that may participate in instantaneous A/B
+/// auditioning. It contains content-facing DSP only. Audio Unit rack topology
+/// and every Playback-System / hardware-domain setting are intentionally
+/// outside this type.
+struct ContentABAuditionState: Equatable, Sendable {
+    var stereoEQ: StereoEQConfiguration
+    var inputPreampDB: Double
+    var headroomAttenuationDB: Double
+    var dynamics: DynamicsConfiguration
+
+    init(
+        stereoEQ: StereoEQConfiguration,
+        inputPreampDB: Double,
+        headroomAttenuationDB: Double,
+        dynamics: DynamicsConfiguration
+    ) {
+        self.stereoEQ = stereoEQ
+        self.inputPreampDB = inputPreampDB
+        self.headroomAttenuationDB = headroomAttenuationDB
+        self.dynamics = dynamics
+    }
+
+    init(contentState: ContentPresetState) {
+        self.init(
+            stereoEQ: contentState.stereoEQ,
+            inputPreampDB: contentState.inputPreampDB,
+            headroomAttenuationDB: contentState.headroomAttenuationDB,
+            dynamics: contentState.dynamics
+        )
+    }
+
+    /// Reconstitutes the safe audition subset over the *current* content
+    /// state. The current Audio Unit rack is retained rather than captured or
+    /// silently replaced by an A/B snapshot.
+    func merging(into current: ContentPresetState) -> ContentPresetState {
+        var result = current
+        result.stereoEQ = stereoEQ
+        result.inputPreampDB = inputPreampDB
+        result.headroomAttenuationDB = headroomAttenuationDB
+        result.dynamics = dynamics
+        return result
+    }
+}
+
+enum ContentABSystemCompatibility: Equatable, Sendable {
+    case ready
+    case playbackSystemChanged
+    case playbackSystemStateChanged
+
+    var isReady: Bool {
+        self == .ready
+    }
+}
+
+/// Pins the Playback System identity and exact system-domain state that was
+/// present when an A/B snapshot was captured. A later audition must fail
+/// closed if either changes; A/B is never authority to alter this boundary.
+struct ContentABSystemBoundary: Equatable, Sendable {
+    var selectedSystemProfileID: UUID?
+    var systemState: PlaybackSystemState
+
+    func compatibility(
+        currentSystemProfileID: UUID?,
+        currentSystemState: PlaybackSystemState
+    ) -> ContentABSystemCompatibility {
+        guard currentSystemProfileID == selectedSystemProfileID else {
+            return .playbackSystemChanged
+        }
+        guard currentSystemState == systemState else {
+            return .playbackSystemStateChanged
+        }
+        return .ready
+    }
+}
+
+struct ContentABSnapshot: Identifiable, Equatable, Sendable {
+    let id: UUID
+    let capturedAt: Date
+    let sourceContentPresetID: UUID?
+    let sourceContentPresetName: String
+    let loudnessReferenceLUFS: Double?
+    let auditionState: ContentABAuditionState
+    let systemBoundary: ContentABSystemBoundary
+
+    init(
+        id: UUID = UUID(),
+        capturedAt: Date = Date(),
+        sourceContentPresetID: UUID?,
+        sourceContentPresetName: String,
+        loudnessReferenceLUFS: Double? = nil,
+        auditionState: ContentABAuditionState,
+        systemBoundary: ContentABSystemBoundary
+    ) {
+        self.id = id
+        self.capturedAt = capturedAt
+        self.sourceContentPresetID = sourceContentPresetID
+        self.sourceContentPresetName = sourceContentPresetName
+        self.loudnessReferenceLUFS = loudnessReferenceLUFS
+        self.auditionState = auditionState
+        self.systemBoundary = systemBoundary
+    }
+}
+
+
+struct ContentABLoudnessMatchPlan: Equatable, Sendable {
+    static let maximumAttenuationDB = 12.0
+
+    let referenceLUFS: Double
+    let attenuationA_DB: Double
+    let attenuationB_DB: Double
+
+    static func make(
+        aLUFS: Double?,
+        bLUFS: Double?
+    ) -> ContentABLoudnessMatchPlan? {
+        guard let aLUFS, let bLUFS,
+              aLUFS.isFinite, bLUFS.isFinite,
+              aLUFS > -60, bLUFS > -60,
+              aLUFS < 6, bLUFS < 6 else {
+            return nil
+        }
+
+        // Never boost a side to create a perceptual advantage or spend
+        // headroom. The quieter measured side becomes the reference and only
+        // the louder side is attenuated, with a conservative bound.
+        let reference = min(aLUFS, bLUFS)
+        let a = max(reference - aLUFS, -maximumAttenuationDB)
+        let b = max(reference - bLUFS, -maximumAttenuationDB)
+        return ContentABLoudnessMatchPlan(
+            referenceLUFS: reference,
+            attenuationA_DB: min(a, 0),
+            attenuationB_DB: min(b, 0)
+        )
+    }
+
+    func attenuation(for slot: ContentABSlot) -> Double {
+        slot == .a ? attenuationA_DB : attenuationB_DB
+    }
+}
+
+enum ContentABComparisonError: Error, LocalizedError, Equatable {
+    case emptySlot(ContentABSlot)
+    case playbackSystemChanged
+    case playbackSystemStateChanged
+    case restoreBoundaryChanged
+
+    var errorDescription: String? {
+        switch self {
+        case .emptySlot(let slot):
+            return "Capture \(slot.displayName) before auditioning it."
+        case .playbackSystemChanged:
+            return "A/B is blocked because the selected Playback System changed after capture."
+        case .playbackSystemStateChanged:
+            return "A/B is blocked because the Playback System state changed after capture."
+        case .restoreBoundaryChanged:
+            return "The pre-A/B state was not restored because the Playback System changed during comparison."
+        }
+    }
+}
+
+/// PR113B Slice 1 is capture/validation only. This controller intentionally
+/// has no live-audio apply or switch method. Slice 2 will add the click-free
+/// executor only after the snapshot safety boundary is regression-locked.
+@MainActor
+final class ContentABComparisonController: ObservableObject {
+    private let profiles: ProductProfileController
+
+    @Published private(set) var snapshotA: ContentABSnapshot?
+    @Published private(set) var snapshotB: ContentABSnapshot?
+    @Published private(set) var activeSlot: ContentABSlot?
+    @Published private(set) var sessionBaseline: ContentABAuditionState?
+    @Published private(set) var sessionBoundary: ContentABSystemBoundary?
+    @Published private(set) var isSwitching = false
+    @Published var levelMatchingEnabled = false
+    @Published private(set) var lastErrorDescription: String?
+
+    init(profiles: ProductProfileController) {
+        self.profiles = profiles
+    }
+
+    var loudnessMatchPlan: ContentABLoudnessMatchPlan? {
+        ContentABLoudnessMatchPlan.make(
+            aLUFS: snapshotA?.loudnessReferenceLUFS,
+            bLUFS: snapshotB?.loudnessReferenceLUFS
+        )
+    }
+
+    var levelMatchingAvailable: Bool {
+        loudnessMatchPlan != nil
+    }
+
+    func snapshot(for slot: ContentABSlot) -> ContentABSnapshot? {
+        switch slot {
+        case .a: return snapshotA
+        case .b: return snapshotB
+        }
+    }
+
+    func capture(_ slot: ContentABSlot) {
+        let snapshot = ContentABSnapshot(
+            sourceContentPresetID: profiles.selectedContentPresetID,
+            sourceContentPresetName: profiles.selectedContentPresetName,
+            loudnessReferenceLUFS: currentLoudnessReferenceLUFS(),
+            auditionState: ContentABAuditionState(
+                contentState: profiles.captureContentState()
+            ),
+            systemBoundary: ContentABSystemBoundary(
+                selectedSystemProfileID: profiles.selectedSystemProfileID,
+                systemState: profiles.captureSystemState()
+            )
+        )
+
+        switch slot {
+        case .a: snapshotA = snapshot
+        case .b: snapshotB = snapshot
+        }
+
+        if loudnessMatchPlan == nil {
+            levelMatchingEnabled = false
+        }
+        activeSlot = nil
+        lastErrorDescription = nil
+    }
+
+    func clear(_ slot: ContentABSlot) {
+        switch slot {
+        case .a: snapshotA = nil
+        case .b: snapshotB = nil
+        }
+        if activeSlot == slot {
+            activeSlot = nil
+        }
+        if loudnessMatchPlan == nil {
+            levelMatchingEnabled = false
+        }
+        lastErrorDescription = nil
+    }
+
+    func clearAll() {
+        snapshotA = nil
+        snapshotB = nil
+        activeSlot = nil
+        sessionBaseline = nil
+        sessionBoundary = nil
+        levelMatchingEnabled = false
+        lastErrorDescription = nil
+    }
+
+    func swapSnapshots() {
+        let previousA = snapshotA
+        snapshotA = snapshotB
+        snapshotB = previousA
+
+        if let activeSlot {
+            self.activeSlot = activeSlot.opposite
+        }
+        lastErrorDescription = nil
+    }
+
+    func compatibility(for slot: ContentABSlot) -> ContentABSystemCompatibility? {
+        guard let snapshot = snapshot(for: slot) else { return nil }
+        return snapshot.systemBoundary.compatibility(
+            currentSystemProfileID: profiles.selectedSystemProfileID,
+            currentSystemState: profiles.captureSystemState()
+        )
+    }
+
+    func currentContentDiffers(from slot: ContentABSlot) -> Bool? {
+        guard let snapshot = snapshot(for: slot) else { return nil }
+        return ContentABAuditionState(
+            contentState: profiles.captureContentState()
+        ) != snapshot.auditionState
+    }
+
+    func audition(_ slot: ContentABSlot) async {
+        guard !isSwitching else { return }
+        do {
+            try validate(slot)
+            guard let snapshot = snapshot(for: slot) else {
+                throw ContentABComparisonError.emptySlot(slot)
+            }
+
+            if sessionBaseline == nil {
+                sessionBaseline = ContentABAuditionState(
+                    contentState: profiles.captureContentState()
+                )
+                sessionBoundary = ContentABSystemBoundary(
+                    selectedSystemProfileID: profiles.selectedSystemProfileID,
+                    systemState: profiles.captureSystemState()
+                )
+            }
+
+            let matchAttenuation =
+                levelMatchingEnabled
+                ? (loudnessMatchPlan?.attenuation(for: slot) ?? 0)
+                : 0
+
+            isSwitching = true
+            try profiles.engine.transitionContentAuditionState(
+                snapshot.auditionState,
+                additionalInputAttenuationDB: matchAttenuation
+            )
+            activeSlot = slot
+            lastErrorDescription = nil
+
+            // The transport transition is 8 ms down + 8 ms up. Keep UI
+            // switching locked slightly longer so a second FIR preparation
+            // cannot race the in-flight structural transition.
+            try? await Task.sleep(nanoseconds: 25_000_000)
+            isSwitching = false
+        } catch {
+            isSwitching = false
+            lastErrorDescription = error.localizedDescription
+        }
+    }
+
+    func endAudition(restoringBaseline: Bool = true) async {
+        guard !isSwitching else { return }
+
+        defer {
+            activeSlot = nil
+            sessionBaseline = nil
+            sessionBoundary = nil
+            isSwitching = false
+        }
+
+        guard restoringBaseline,
+              let baseline = sessionBaseline,
+              let boundary = sessionBoundary else {
+            lastErrorDescription = nil
+            return
+        }
+
+        let compatibility = boundary.compatibility(
+            currentSystemProfileID: profiles.selectedSystemProfileID,
+            currentSystemState: profiles.captureSystemState()
+        )
+        guard compatibility.isReady else {
+            lastErrorDescription =
+                ContentABComparisonError.restoreBoundaryChanged.localizedDescription
+            return
+        }
+
+        do {
+            isSwitching = true
+            try profiles.engine.transitionContentAuditionState(
+                baseline,
+                additionalInputAttenuationDB: 0
+            )
+            try? await Task.sleep(nanoseconds: 25_000_000)
+            lastErrorDescription = nil
+        } catch {
+            lastErrorDescription = error.localizedDescription
+        }
+    }
+
+    func clearError() {
+        lastErrorDescription = nil
+    }
+
+    private func validate(_ slot: ContentABSlot) throws {
+        guard snapshot(for: slot) != nil else {
+            throw ContentABComparisonError.emptySlot(slot)
+        }
+        switch compatibility(for: slot) {
+        case .ready:
+            return
+        case .playbackSystemChanged:
+            throw ContentABComparisonError.playbackSystemChanged
+        case .playbackSystemStateChanged:
+            throw ContentABComparisonError.playbackSystemStateChanged
+        case .none:
+            throw ContentABComparisonError.emptySlot(slot)
+        }
+    }
+
+    private func currentLoudnessReferenceLUFS() -> Double? {
+        guard profiles.engine.lifecycleState == .running,
+              let diagnostics =
+                profiles.engine.diagnosticsSnapshot().renderKernelDiagnostics
+        else {
+            return nil
+        }
+        let value = Double(diagnostics.loudnessShortTermLUFS)
+        guard value.isFinite, value > -60, value < 6 else {
+            return nil
+        }
+        return value
+    }
+}
+
 struct PlaybackSystemControlState: Codable, Equatable, Sendable {
     var balance: Double
     var symmetryBalanceEnabled: Bool
@@ -227,11 +634,141 @@ struct PlaybackSystemProfile: Identifiable, Codable, Equatable, Sendable {
     }
 }
 
+
+struct PlaybackSystemHardwareMappingRequirement:
+    Identifiable, Codable, Equatable, Sendable {
+    var systemProfileID: UUID
+    var importedDeviceUIDs: [String]
+    var createdAt: Date
+
+    var id: UUID { systemProfileID }
+
+    init(
+        systemProfileID: UUID,
+        importedDeviceUIDs: [String],
+        createdAt: Date = Date()
+    ) {
+        self.systemProfileID = systemProfileID
+        self.importedDeviceUIDs = Array(Set(importedDeviceUIDs))
+            .sorted()
+        self.createdAt = createdAt
+    }
+}
+
+struct ProductProfileBackupSnapshot: Codable, Equatable, Sendable {
+    static let currentSchemaVersion = 1
+
+    var schemaVersion: Int = currentSchemaVersion
+    var contentPresets: [ContentPreset]
+    var systemProfiles: [PlaybackSystemProfile]
+    var selectedContentPresetID: UUID?
+    var selectedSystemProfileID: UUID?
+    var hardwareMappingRequirements:
+        [PlaybackSystemHardwareMappingRequirement] = []
+
+    func validate() throws {
+        guard schemaVersion == Self.currentSchemaVersion else {
+            throw ProductProfileError.persistenceVersion(schemaVersion)
+        }
+        guard contentPresets.allSatisfy({
+            $0.schemaVersion == ContentPreset.currentSchemaVersion
+                && $0.state.schemaVersion
+                    == ContentPresetState.currentSchemaVersion
+        }) else {
+            throw ProductProfileError.persistenceVersion(schemaVersion)
+        }
+        guard systemProfiles.allSatisfy({
+            $0.schemaVersion == PlaybackSystemProfile.currentSchemaVersion
+                && $0.state.schemaVersion
+                    == PlaybackSystemState.currentSchemaVersion
+        }) else {
+            throw ProductProfileError.persistenceVersion(schemaVersion)
+        }
+        guard Set(contentPresets.map(\.id)).count
+                == contentPresets.count,
+              Set(systemProfiles.map(\.id)).count
+                == systemProfiles.count,
+              Set(hardwareMappingRequirements.map(\.systemProfileID))
+                .count == hardwareMappingRequirements.count else {
+            throw ProductProfileError.invalidBackupSnapshot
+        }
+        if let selectedContentPresetID,
+           !contentPresets.contains(where: {
+               $0.id == selectedContentPresetID
+           }) {
+            throw ProductProfileError.invalidBackupSnapshot
+        }
+        if let selectedSystemProfileID,
+           !systemProfiles.contains(where: {
+               $0.id == selectedSystemProfileID
+           }) {
+            throw ProductProfileError.invalidBackupSnapshot
+        }
+        guard hardwareMappingRequirements.allSatisfy({
+            requirement in
+            systemProfiles.contains {
+                $0.id == requirement.systemProfileID
+            }
+        }) else {
+            throw ProductProfileError.invalidBackupSnapshot
+        }
+    }
+}
+
+extension PlaybackSystemState {
+    var referencedHardwareDeviceUIDs: Set<String> {
+        var result = Set<String>()
+
+        func include(_ value: String?) {
+            guard let value else { return }
+            let trimmed = value.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            )
+            if !trimmed.isEmpty {
+                result.insert(trimmed)
+            }
+        }
+
+        include(associatedOutputUID)
+
+        if let routing = outputRouting {
+            include(routing.referenceDeviceUID)
+            for route in routing.routes {
+                include(route.destination.deviceUID)
+            }
+        }
+
+        if let outputProfile = outputDeviceProfile {
+            include(outputProfile.referenceDeviceUID)
+            result.formUnion(outputProfile.requiredDeviceUIDs)
+        }
+
+        if let headphone = headphoneDeviceProfile {
+            include(headphone.outputDeviceUID)
+            include(headphone.programSourceDeviceUID)
+        }
+
+        return result
+    }
+}
+
+
+struct ProductProfileRestoreReport: Equatable, Sendable {
+    var hardwareMappingRequiredSystemIDs: [UUID]
+
+    var hardwareMappingRequiredCount: Int {
+        hardwareMappingRequiredSystemIDs.count
+    }
+}
+
 enum ProductProfileError: Error, LocalizedError {
     case outputChangeRequiresIdle(profile: String)
     case persistenceVersion(Int)
     case roomCorrectionCalibrationVersion(Int)
     case selectedSystemProfileRequired
+    case invalidBackupSnapshot
+    case backupRestoreRequiresIdle
+    case hardwareMappingRequired(profile: String)
 
     var errorDescription: String? {
         switch self {
@@ -243,6 +780,12 @@ enum ProductProfileError: Error, LocalizedError {
             return "Room-correction calibration metadata uses unsupported schema version \(version)."
         case .selectedSystemProfileRequired:
             return "Select a Playback System before changing deployed room correction."
+        case .invalidBackupSnapshot:
+            return "The backup contains invalid or internally inconsistent profile data."
+        case .backupRestoreRequiresIdle:
+            return "Stop audio processing before restoring a Notch Sixty backup."
+        case .hardwareMappingRequired(let profile):
+            return "\(profile) was restored from a backup and still references hardware that is not available on this Mac. Review its output mapping before activation."
         }
     }
 }
@@ -250,13 +793,15 @@ enum ProductProfileError: Error, LocalizedError {
 @MainActor
 final class ProductProfileController: ObservableObject {
     private struct Archive: Codable {
-        static let currentSchemaVersion = 2
+        static let currentSchemaVersion = 3
         var schemaVersion: Int = currentSchemaVersion
         var contentPresets: [ContentPreset]?
         var userContentPresets: [ContentPreset]?
         var systemProfiles: [PlaybackSystemProfile]
         var selectedContentPresetID: UUID?
         var selectedSystemProfileID: UUID?
+        var hardwareMappingRequirements:
+            [PlaybackSystemHardwareMappingRequirement]?
     }
 
     private static let referencePresetID = UUID(uuidString: "6A782AB6-492B-46C9-A0A0-000000000001")!
@@ -551,6 +1096,8 @@ final class ProductProfileController: ObservableObject {
     @Published private(set) var systemProfiles: [PlaybackSystemProfile] = []
     @Published private(set) var selectedContentPresetID: UUID?
     @Published private(set) var selectedSystemProfileID: UUID?
+    @Published private(set) var hardwareMappingRequirements:
+        [PlaybackSystemHardwareMappingRequirement] = []
     @Published private(set) var lastErrorDescription: String?
 
     init(
@@ -596,6 +1143,20 @@ final class ProductProfileController: ObservableObject {
     }
     var canOverwriteSelectedContentPreset: Bool { selectedContentPreset != nil }
 
+    var selectedSystemHardwareMappingRequirement:
+        PlaybackSystemHardwareMappingRequirement? {
+        guard let selectedSystemProfileID else { return nil }
+        return hardwareMappingRequirement(for: selectedSystemProfileID)
+    }
+
+    func hardwareMappingRequirement(
+        for systemProfileID: UUID
+    ) -> PlaybackSystemHardwareMappingRequirement? {
+        hardwareMappingRequirements.first {
+            $0.systemProfileID == systemProfileID
+        }
+    }
+
     var selectedContentPresetIsDirty: Bool {
         guard let preset = selectedContentPreset else { return true }
         return preset.state != captureContentState()
@@ -617,15 +1178,45 @@ final class ProductProfileController: ObservableObject {
         guard !didRestoreSelection else { return }
         didRestoreSelection = true
         do {
+            try applySelectedLayersNow()
+        } catch {
+            lastErrorDescription = error.localizedDescription
+        }
+    }
+
+    /// Explicitly applies the currently selected saved layers even after the
+    /// one-time launch restore has been consumed. Safe Launch calls this only
+    /// after an explicit recovery choice. The apply is transactional across
+    /// Playback-System and Content-Preset domains.
+    func applySelectedLayersNow() throws {
+        let previousSystem = captureSystemState()
+        let previousContent = captureContentState()
+
+        do {
             if let system = selectedSystemProfile {
-                try applySystemState(system.state, profileName: system.name)
+                guard hardwareMappingRequirement(for: system.id) == nil else {
+                    throw ProductProfileError.hardwareMappingRequired(
+                        profile: system.name
+                    )
+                }
+                try applySystemState(
+                    system.state,
+                    profileName: system.name
+                )
             }
             if let preset = selectedContentPreset {
                 try applyContentState(preset.state)
             }
+            didRestoreSelection = true
             lastErrorDescription = nil
         } catch {
+            try? applySystemState(
+                previousSystem,
+                profileName: "Recovery rollback"
+            )
+            try? applyContentState(previousContent)
             lastErrorDescription = error.localizedDescription
+            throw error
         }
     }
 
@@ -695,7 +1286,20 @@ final class ProductProfileController: ObservableObject {
     }
 
     func selectSystemProfile(_ id: UUID) {
-        guard let profile = systemProfiles.first(where: { $0.id == id }) else { return }
+        guard let profile = systemProfiles.first(where: { $0.id == id }) else {
+            return
+        }
+        if hardwareMappingRequirement(for: profile.id) != nil {
+            // Safe-select the restored profile so the user can inspect/remap
+            // it, but do not activate any imported hardware-domain state.
+            selectedSystemProfileID = profile.id
+            lastErrorDescription =
+                ProductProfileError.hardwareMappingRequired(
+                    profile: profile.name
+                ).localizedDescription
+            persist()
+            return
+        }
         do {
             try applySystemState(profile.state, profileName: profile.name)
             selectedSystemProfileID = profile.id
@@ -726,6 +1330,9 @@ final class ProductProfileController: ObservableObject {
         var state = captureSystemState()
         state.associatedOutputUID = association
         systemProfiles[index].state = state
+        hardwareMappingRequirements.removeAll {
+            $0.systemProfileID == selectedSystemProfileID
+        }
         lastErrorDescription = nil
         persist()
     }
@@ -750,7 +1357,8 @@ final class ProductProfileController: ObservableObject {
     func associateSelectedSystemWithCurrentOutput() {
         guard let selectedSystemProfileID,
               let index = systemProfiles.firstIndex(where: { $0.id == selectedSystemProfileID }) else { return }
-        systemProfiles[index].state.associatedOutputUID = engine.routeConfiguration.selectedOutputUID
+        systemProfiles[index].state.associatedOutputUID =
+            engine.routeConfiguration.selectedOutputUID
         lastErrorDescription = nil
         persist()
     }
@@ -1015,6 +1623,9 @@ final class ProductProfileController: ObservableObject {
     func deleteSelectedSystemProfile() {
         guard let selectedSystemProfileID else { return }
         systemProfiles.removeAll { $0.id == selectedSystemProfileID }
+        hardwareMappingRequirements.removeAll {
+            $0.systemProfileID == selectedSystemProfileID
+        }
         self.selectedSystemProfileID = systemProfiles.first?.id
         ensureDefaultSystemProfile()
         persist()
@@ -1191,6 +1802,134 @@ final class ProductProfileController: ObservableObject {
         persist()
     }
 
+    func makeBackupSnapshot() -> ProductProfileBackupSnapshot {
+        ProductProfileBackupSnapshot(
+            contentPresets: userContentPresets,
+            systemProfiles: systemProfiles,
+            selectedContentPresetID: selectedContentPresetID,
+            selectedSystemProfileID: selectedSystemProfileID,
+            hardwareMappingRequirements: hardwareMappingRequirements
+        )
+    }
+
+    /// Restores portable product state without giving the backup authority to
+    /// bind unavailable hardware. Exact stable UIDs are retained for review;
+    /// systems whose referenced devices are not present are persisted as
+    /// Needs Mapping and cannot auto-activate.
+    func restoreBackupSnapshot(
+        _ snapshot: ProductProfileBackupSnapshot,
+        availableOutputUIDs: Set<String>? = nil,
+        recomputeHardwareRequirements: Bool = true,
+        now: Date = Date()
+    ) throws -> ProductProfileRestoreReport {
+        guard engine.lifecycleState == .idle else {
+            throw ProductProfileError.backupRestoreRequiresIdle
+        }
+        try snapshot.validate()
+        guard snapshot.systemProfiles.allSatisfy({
+            Self.storedSystemTopologyIsValid($0.state)
+        }) else {
+            throw ProductProfileError.invalidBackupSnapshot
+        }
+
+        let previousContent = userContentPresets
+        let previousSystems = systemProfiles
+        let previousContentID = selectedContentPresetID
+        let previousSystemID = selectedSystemProfileID
+        let previousRequirements = hardwareMappingRequirements
+
+        do {
+            userContentPresets = snapshot.contentPresets
+            systemProfiles = snapshot.systemProfiles
+
+            if recomputeHardwareRequirements {
+                let available = availableOutputUIDs
+                    ?? Set(engine.outputDevices.map(\.uid))
+                hardwareMappingRequirements = snapshot.systemProfiles
+                    .compactMap { profile in
+                        let referenced =
+                            profile.state.referencedHardwareDeviceUIDs
+                        let missing =
+                            referenced.subtracting(available)
+                        guard !missing.isEmpty else { return nil }
+                        return PlaybackSystemHardwareMappingRequirement(
+                            systemProfileID: profile.id,
+                            importedDeviceUIDs: Array(referenced),
+                            createdAt: now
+                        )
+                    }
+            } else {
+                hardwareMappingRequirements =
+                    snapshot.hardwareMappingRequirements.filter {
+                        requirement in
+                        snapshot.systemProfiles.contains {
+                            $0.id == requirement.systemProfileID
+                        }
+                    }
+            }
+
+            selectedContentPresetID =
+                snapshot.selectedContentPresetID.flatMap { id in
+                    userContentPresets.contains { $0.id == id }
+                        ? id : nil
+                }
+
+            selectedSystemProfileID =
+                snapshot.selectedSystemProfileID.flatMap { id in
+                    guard systemProfiles.contains(where: {
+                        $0.id == id
+                    }),
+                    hardwareMappingRequirement(for: id) == nil else {
+                        return nil
+                    }
+                    return id
+                }
+
+            reconcileSelections()
+            // The restore transaction itself never applies imported state.
+            // A subsequent explicit user selection may activate a system only
+            // after its Needs Mapping gate has cleared.
+            didRestoreSelection = true
+            try persistThrowing()
+            lastErrorDescription = nil
+            return ProductProfileRestoreReport(
+                hardwareMappingRequiredSystemIDs:
+                    hardwareMappingRequirements.map(\.systemProfileID)
+                        .sorted {
+                            $0.uuidString < $1.uuidString
+                        }
+            )
+        } catch {
+            userContentPresets = previousContent
+            systemProfiles = previousSystems
+            selectedContentPresetID = previousContentID
+            selectedSystemProfileID = previousSystemID
+            hardwareMappingRequirements = previousRequirements
+            try? persistThrowing()
+            throw error
+        }
+    }
+
+    func confirmSelectedSystemHardwareMapping() {
+        guard let selectedSystemProfile else { return }
+        let referenced =
+            selectedSystemProfile.state.referencedHardwareDeviceUIDs
+        let available = Set(engine.outputDevices.map(\.uid))
+        let missing = referenced.subtracting(available)
+        guard missing.isEmpty else {
+            lastErrorDescription =
+                "\(selectedSystemProfile.name) still needs mapping for: "
+                + missing.sorted().joined(separator: ", ")
+            return
+        }
+
+        hardwareMappingRequirements.removeAll {
+            $0.systemProfileID == selectedSystemProfile.id
+        }
+        lastErrorDescription = nil
+        persist()
+    }
+
     private func reconcileSelections() {
         if let selectedContentPresetID,
            !contentPresets.contains(where: { $0.id == selectedContentPresetID }) {
@@ -1283,6 +2022,7 @@ final class ProductProfileController: ObservableObject {
         }
     }
 
+
     private func loadArchive() {
         guard FileManager.default.fileExists(atPath: storageURL.path) else { return }
         do {
@@ -1292,7 +2032,7 @@ final class ProductProfileController: ObservableObject {
             switch archive.schemaVersion {
             case 1:
                 storedContent = Self.factoryContentPresets + (archive.userContentPresets ?? [])
-            case Archive.currentSchemaVersion:
+            case 2, Archive.currentSchemaVersion:
                 storedContent = archive.contentPresets ?? []
             default:
                 throw ProductProfileError.persistenceVersion(archive.schemaVersion)
@@ -1311,6 +2051,19 @@ final class ProductProfileController: ObservableObject {
             }
             selectedContentPresetID = archive.selectedContentPresetID
             selectedSystemProfileID = archive.selectedSystemProfileID
+            hardwareMappingRequirements =
+                (archive.hardwareMappingRequirements ?? []).filter {
+                    requirement in
+                    systemProfiles.contains {
+                        $0.id == requirement.systemProfileID
+                    }
+                }
+            if let selectedSystemProfileID,
+               hardwareMappingRequirement(
+                    for: selectedSystemProfileID
+               ) != nil {
+                self.selectedSystemProfileID = nil
+            }
             didLoadArchive = true
             if archive.schemaVersion < Archive.currentSchemaVersion {
                 persist()
@@ -1336,7 +2089,9 @@ final class ProductProfileController: ObservableObject {
             userContentPresets: nil,
             systemProfiles: systemProfiles,
             selectedContentPresetID: selectedContentPresetID,
-            selectedSystemProfileID: selectedSystemProfileID
+            selectedSystemProfileID: selectedSystemProfileID,
+            hardwareMappingRequirements:
+                hardwareMappingRequirements
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

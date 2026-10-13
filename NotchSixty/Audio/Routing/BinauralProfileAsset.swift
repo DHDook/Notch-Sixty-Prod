@@ -358,6 +358,27 @@ final class BinauralProfileAssetStore {
         }
     }
 
+
+    func existingAssetIDs() throws -> [UUID] {
+        guard FileManager.default.fileExists(atPath: rootURL.path) else {
+            return []
+        }
+        return try FileManager.default.contentsOfDirectory(
+            at: rootURL,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        )
+        .filter { $0.pathExtension.lowercased() == "n60binaural" }
+        .compactMap { UUID(uuidString: $0.deletingPathExtension().lastPathComponent) }
+        .sorted { $0.uuidString < $1.uuidString }
+    }
+
+    func delete(id: UUID) throws {
+        let path = url(for: id)
+        guard FileManager.default.fileExists(atPath: path.path) else { return }
+        try FileManager.default.removeItem(at: path)
+    }
+
     private func url(for id: UUID) -> URL {
         rootURL.appendingPathComponent(id.uuidString).appendingPathExtension("n60binaural")
     }

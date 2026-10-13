@@ -16,6 +16,104 @@ Legacy parity is the minimum capability floor. The commercial rewrite should exc
 
 Future portability must not materially delay the flagship Mac launch.
 
+## Current execution status — PR113B
+
+**PR113B — World-Class Product Finish** is the active remote milestone,
+stacked directly on the exact remotely-complete PR113 head
+`f0a260336a0df7284a0c414f39a6e43b7d86ca1b`.
+
+The agreed pre-RC scope is intentionally product-focused rather than another
+core-DSP expansion:
+
+- Slice 1 — safe A/B comparison foundation and snapshot boundary;
+- Slice 2 — click-free / loudness-matched A/B audition UI;
+- Slice 3 — full Notch Sixty backup & restore bundle;
+- Slice 4 — full-fidelity Measurement Lab export;
+- Slice 5 — Safe Launch / Recovery Mode;
+- Slice 6 — Headroom Assistant; and
+- Slice 7 — non-intrusive Getting Started guide refresh plus cumulative closeout.
+
+The modal first-run assistant and Playback-System lock are deliberately
+deferred.
+
+**Slices 1–7 are implemented remotely; the final exact-head closeout gate is pending.** Slice 1 established the temporary,
+in-memory safe A/B capture boundary. The allowed audition payload is limited to stereo EQ, input preamp,
+headroom attenuation and content dynamics. Audio Unit rack topology and every
+Playback-System/hardware-domain setting remain outside the A/B payload. Each
+snapshot pins the selected Playback System identity plus exact
+`PlaybackSystemState`; later audition must fail closed on identity or state
+drift.
+
+Slice 2 adds live A/B audition through the existing 8 ms sample-domain
+fade/silent-boundary graph transition, optional attenuation-only measured
+level matching from captured short-term LUFS, direct A/B toolbar controls, and
+pre-session content restore. Playback-System identity/state drift still fails
+closed, and Audio Unit topology remains outside the A/B payload.
+
+Slice 3 adds the versioned human-inspectable `.n60backup` bundle with
+per-domain SHA-256 integrity, validate-first transactional restore, rollback of
+colliding Room Correction / Measurement Lab / binaural records, persisted
+Needs Mapping gates for unavailable hardware UIDs, portable app-preference
+restore, and explicit separation from PR112 hardware-acceptance campaigns and
+authority.
+
+Slice 4 adds a parallel full-fidelity Measurement Lab export path while
+preserving the existing compact-report contract. A versioned full JSON envelope
+retains the complete persisted session and explicit measurement-only/no-deploy
+flags; interoperability exports provide lossless transfer CSV, impulse CSV,
+FRD-compatible selected-capture response data and mono 32-bit float WAV impulse
+data. Export is read-only and carries no DSP, deployment or physical-acceptance
+authority.
+
+Slice 5 adds machine-local Safe Launch / Recovery Mode. An unclean-session
+sentinel plus repeated audio-start and plug-in-failure counters can hold the
+app in an explicit idle recovery state. The user can Open Normally, temporarily
+bypass plug-ins without editing the saved rack, Restore Last Known Good, or
+Copy Diagnostics. Last Known Good is updated only by a successful normal start
+whose enabled active plug-in rack is healthy; unrelated quarantined components
+do not block certification. Restore Last Known Good refuses unavailable
+hardware rather than silently rebinding it, and plug-in bypass never persists
+across a clean relaunch. Failed engine state is normalized before an explicit
+retry/recovery action. Every production Start path now routes through the same
+ProductController transaction. Recovery state is excluded from general backup
+and has no PR112 physical-acceptance or release authority.
+
+Slice 6 adds the advisory Headroom Assistant to Meters → Dynamics. It uses the
+existing authoritative protection telemetry rather than a new realtime
+detector, reconstructs pre-Gain-Rider true peak, and evaluates that evidence
+alongside sustained limiter pressure and safety-clamp events. The default
+target is −1.0 dBTP; observations require at least 10 seconds and the UI
+recommends 30 seconds of representative loud program.
+
+Recommendations are conservative and attenuation-only: the assistant can add
+Headroom Attenuation but never reclaim existing reserve from a finite sample.
+Apply is explicit, state-drift guarded and uses the existing silent-boundary
+graph transition. A matching explicit Undo can restore the exact pre-observation
+attenuation only while the applied Content/Playback boundary is unchanged.
+Headroom observation is blocked during an open A/B audition and invalidates if
+A/B begins, preventing temporary level-match attenuation from becoming static
+headroom evidence. Apply does not silently overwrite the selected Content
+Preset, does not bypass restart-required semantic transports, and has no
+physical/release authority.
+Slice 7 strengthens the existing Getting Started User Guide instead of adding a
+modal first-run wizard. The guide now walks through only-needed permissions,
+stable output identity, Playback System selection / Needs Mapping, conservative
+first sound, Content Presets, optional measurement/calibration, A/B and
+Headroom Assistant use, backup, Safe Launch and diagnostics. The final CI gate
+also publishes a machine-readable PR113B_REMOTE_PRODUCT_FINISH_READINESS
+artifact. That artifact can mark the remote product-finish surface complete but
+must keep physical acceptance, release acceptance, live feed-forward ANC
+authorization, merge authority and CI-supplied physical evidence false.
+
+PR113B software work cannot satisfy PR112 physical acceptance and cannot set
+`releaseAcceptanceComplete`, `liveFeedForwardANCAuthorized`, or
+`mayMergeIntoMain` true. PR113B, PR113 and all ancestors remain **OPEN,
+DRAFT and UNMERGED**; `main` is unchanged.
+
+See `docs/PR113B_WORLD_CLASS_PRODUCT_FINISH.md`.
+
+---
+
 ## Current execution status — PR113
 
 **PR113 — Production UX, Preferences & Reference** is the active remote

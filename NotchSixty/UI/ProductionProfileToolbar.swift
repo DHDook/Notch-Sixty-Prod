@@ -6,6 +6,7 @@ struct ProductionProfileToolbar: View {
     let product: ProductController
     @ObservedObject private var profiles: ProductProfileController
     @ObservedObject private var engine: AudioIOEngine
+    @ObservedObject private var comparison: ContentABComparisonController
 
     @State private var editorPrompt: EditorPrompt?
     @State private var draftName = ""
@@ -16,6 +17,7 @@ struct ProductionProfileToolbar: View {
         self.product = product
         _profiles = ObservedObject(wrappedValue: product.profiles)
         _engine = ObservedObject(wrappedValue: product.audioEngine)
+        _comparison = ObservedObject(wrappedValue: product.abComparison)
     }
 
     private enum EditorPrompt {
@@ -44,6 +46,8 @@ struct ProductionProfileToolbar: View {
     var body: some View {
         HStack(spacing: 8) {
             contentPresetMenu
+                .controlSize(.small)
+            abComparisonControl
                 .controlSize(.small)
             systemMenu
                 .controlSize(.small)
@@ -96,6 +100,17 @@ struct ProductionProfileToolbar: View {
             Button("OK") { interchangeMessage = nil }
         } message: {
             Text(interchangeMessage ?? "")
+        }
+        .alert(
+            "A/B Comparison",
+            isPresented: Binding(
+                get: { comparison.lastErrorDescription != nil },
+                set: { if !$0 { comparison.clearError() } }
+            )
+        ) {
+            Button("OK") { comparison.clearError() }
+        } message: {
+            Text(comparison.lastErrorDescription ?? "")
         }
         .alert(
             "Preset Change Failed",
@@ -180,6 +195,137 @@ struct ProductionProfileToolbar: View {
         )
     }
 
+    private var abComparisonControl: some View {
+        HStack(spacing: 4) {
+            Menu {
+                Section("Capture") {
+                    Button("Capture Current as A") {
+                        comparison.capture(.a)
+                    }
+                    Button("Capture Current as B") {
+                        comparison.capture(.b)
+                    }
+                }
+                .disabled(comparison.sessionBaseline != nil)
+
+                Divider()
+
+                Toggle(
+                    "Measured Level Match",
+                    isOn: $comparison.levelMatchingEnabled
+                )
+                .disabled(!comparison.levelMatchingAvailable)
+
+                if let plan = comparison.loudnessMatchPlan {
+                    Text(
+                        String(
+                            format: "Match: A %+.1f dB · B %+.1f dB",
+                            plan.attenuationA_DB,
+                            plan.attenuationB_DB
+                        )
+                    )
+                    Text("Uses the 3-second LUFS reading captured with each slot.")
+                } else {
+                    Text("Capture A and B during the same program passage to enable LUFS matching.")
+                }
+
+                Divider()
+
+                Button("Swap A / B") {
+                    comparison.swapSnapshots()
+                }
+                .disabled(
+                    comparison.snapshotA == nil
+                        && comparison.snapshotB == nil
+                )
+
+                if comparison.sessionBaseline != nil {
+                    Button("Exit A/B and Restore") {
+                        Task { @MainActor in
+                            await comparison.endAudition()
+                        }
+                    }
+                    .disabled(comparison.isSwitching)
+                }
+
+                Button("Clear A/B", role: .destructive) {
+                    comparison.clearAll()
+                }
+                .disabled(
+                    comparison.snapshotA == nil
+                        && comparison.snapshotB == nil
+                        && comparison.sessionBaseline == nil
+                )
+            } label: {
+                Label("A/B", systemImage: "arrow.left.arrow.right")
+            }
+            .buttonStyle(.glass)
+            .help(
+                "Capture two content-DSP states and compare them without changing Playback System or hardware state."
+            )
+
+            Button {
+                Task { @MainActor in
+                    await comparison.audition(.a)
+                }
+            } label: {
+                abSlotLabel(.a)
+            }
+            .buttonStyle(.glass)
+            .disabled(!canAudition(.a))
+            .help(abSlotHelp(.a))
+
+            Button {
+                Task { @MainActor in
+                    await comparison.audition(.b)
+                }
+            } label: {
+                abSlotLabel(.b)
+            }
+            .buttonStyle(.glass)
+            .disabled(!canAudition(.b))
+            .help(abSlotHelp(.b))
+        }
+    }
+
+    @ViewBuilder
+    private func abSlotLabel(_ slot: ContentABSlot) -> some View {
+        HStack(spacing: 4) {
+            Text(slot.displayName)
+                .fontWeight(.semibold)
+            if comparison.activeSlot == slot {
+                Image(systemName: "speaker.wave.1.fill")
+                    .imageScale(.small)
+            }
+        }
+        .frame(minWidth: 24)
+    }
+
+    private func canAudition(_ slot: ContentABSlot) -> Bool {
+        guard !comparison.isSwitching,
+              comparison.snapshot(for: slot) != nil else {
+            return false
+        }
+        return comparison.compatibility(for: slot)?.isReady == true
+    }
+
+    private func abSlotHelp(_ slot: ContentABSlot) -> String {
+        guard let snapshot = comparison.snapshot(for: slot) else {
+            return "Capture \(slot.displayName) before auditioning it."
+        }
+        guard comparison.compatibility(for: slot)?.isReady == true else {
+            return "\(slot.displayName) is blocked because the Playback System changed after capture."
+        }
+
+        let level: String
+        if let lufs = snapshot.loudnessReferenceLUFS {
+            level = String(format: " · %.1f LUFS reference", lufs)
+        } else {
+            level = ""
+        }
+        return "Audition \(slot.displayName): \(snapshot.sourceContentPresetName)\(level)"
+    }
+
     private var systemMenu: some View {
         Menu {
             Section("Playback Systems") {
@@ -191,7 +337,22 @@ struct ProductionProfileToolbar: View {
                             if profiles.selectedSystemProfileID == system.id {
                                 Image(systemName: "checkmark")
                             }
-                            Text(displayName(for: system))
+                            if profiles.hardwareMappingRequirement(
+                                for: system.id
+                            ) != nil {
+                                Image(
+                                    systemName:
+                                        "exclamationmark.triangle.fill"
+                                )
+                                .foregroundStyle(.orange)
+                            }
+                            Text(
+                                profiles.hardwareMappingRequirement(
+                                    for: system.id
+                                ) == nil
+                                    ? displayName(for: system)
+                                    : "\(displayName(for: system)) · Needs Mapping"
+                            )
                         }
                     }
                 }
@@ -219,6 +380,12 @@ struct ProductionProfileToolbar: View {
                 Button("Associate with Current Output") {
                     profiles.associateSelectedSystemWithCurrentOutput()
                 }
+
+                if profiles.selectedSystemHardwareMappingRequirement != nil {
+                    Button("Confirm Hardware Mapping") {
+                        profiles.confirmSelectedSystemHardwareMapping()
+                    }
+                }
             }
         } label: {
             HStack(spacing: 6) {
@@ -230,9 +397,11 @@ struct ProductionProfileToolbar: View {
         }
         .buttonStyle(.glass)
         .help(
-            profiles.selectedSystemProfileIsDirty
-                ? "Playback System — unsaved changes"
-                : "Playback System: output association, crossover, alignment, output trim, room correction, and speaker correction"
+            profiles.selectedSystemHardwareMappingRequirement != nil
+                ? "Restored Playback System — Needs Mapping before activation"
+                : profiles.selectedSystemProfileIsDirty
+                    ? "Playback System — unsaved changes"
+                    : "Playback System: output association, crossover, alignment, output trim, room correction, and speaker correction"
         )
     }
 

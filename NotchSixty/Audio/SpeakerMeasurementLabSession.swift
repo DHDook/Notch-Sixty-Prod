@@ -755,6 +755,27 @@ struct SpeakerMeasurementLabSessionStore: Sendable {
         return session
     }
 
+
+    func existingSessionIDs() throws -> [UUID] {
+        guard FileManager.default.fileExists(atPath: rootDirectory.path) else {
+            return []
+        }
+        return try FileManager.default.contentsOfDirectory(
+            at: rootDirectory,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        )
+        .filter { $0.pathExtension.lowercased() == "json" }
+        .compactMap { UUID(uuidString: $0.deletingPathExtension().lastPathComponent) }
+        .sorted { $0.uuidString < $1.uuidString }
+    }
+
+    func delete(_ sessionID: UUID) throws {
+        let path = url(for: sessionID)
+        guard FileManager.default.fileExists(atPath: path.path) else { return }
+        try FileManager.default.removeItem(at: path)
+    }
+
     private static func defaultRootDirectory() -> URL {
         let root = FileManager.default.urls(
             for: .applicationSupportDirectory,

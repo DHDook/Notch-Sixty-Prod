@@ -107,7 +107,9 @@ private enum ProductionDetailedMeterDemand {
 
 struct ProductionMetersView: View {
     @ObservedObject var engine: AudioIOEngine
+    @ObservedObject var assistant: HeadroomAssistantController
     @State private var page: ProductionMetersPage = .levels
+    @State private var assistantCommandError: String?
     @State private var snapshot = ProductionMetersSnapshot()
     @State private var analysisSnapshot = ProductionAnalysisSnapshot.empty
     @State private var transportMeterSnapshot: ProductionTransportMeterSnapshot?
@@ -144,6 +146,17 @@ struct ProductionMetersView: View {
         }
         .task(id: "\(engine.lifecycleState.rawValue)|\(page.rawValue)") {
             await runVisiblePageLoop()
+        }
+        .alert(
+            "Headroom Assistant",
+            isPresented: Binding(
+                get: { assistantCommandError != nil },
+                set: { if !$0 { assistantCommandError = nil } }
+            )
+        ) {
+            Button("OK") { assistantCommandError = nil }
+        } message: {
+            Text(assistantCommandError ?? "")
         }
     }
 
@@ -379,6 +392,8 @@ struct ProductionMetersView: View {
             Text("Existing processor telemetry is summarized here without enabling the detailed Input / Post-EQ / Output meter accumulator.")
                 .foregroundStyle(.secondary)
 
+            headroomAssistantCard
+
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 12)], spacing: 12) {
                 dynamicsMetric("Compressor GR", snapshot.compressorGainReductionDB)
                 dynamicsMetric("De-Esser GR", snapshot.deEsserGainReductionDB)
@@ -406,6 +421,263 @@ struct ProductionMetersView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    private var headroomAssistantCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label(
+                        "Headroom Assistant",
+                        systemImage: "gauge.with.dots.needle.50percent"
+                    )
+                    .font(.headline)
+                    Text(
+                        "Observe a representative loud passage and estimate whether the existing Headroom Attenuation needs more reserve."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text(headroomAssistantPhaseLabel)
+                    .font(.caption.bold())
+                    .tracking(0.8)
+                    .foregroundStyle(.secondary)
+            }
+
+            if assistant.isObserving {
+                VStack(alignment: .leading, spacing: 6) {
+                    ProgressView(
+                        value: assistant.observationProgress
+                    )
+                    Text(
+                        "Observed \(assistant.evidence.observationSeconds, specifier: "%.1f") s · 10 s minimum · 30 s recommended"
+                    )
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                }
+            }
+
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Target True Peak")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 10) {
+                        Slider(
+                            value: $assistant.targetPeakDBTP,
+                            in: HeadroomAssistantRecommendation
+                                .targetPeakRange,
+                            step: 0.1
+                        )
+                        Text(
+                            "\(assistant.targetPeakDBTP, specifier: "%.1f") dBTP"
+                        )
+                        .font(.caption.monospacedDigit())
+                        .frame(width: 76, alignment: .trailing)
+                    }
+                }
+
+                if let recommendation = assistant.recommendation {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("Headroom Attenuation")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(
+                            "\(recommendation.currentHeadroomAttenuationDB, specifier: "%+.1f") → \(recommendation.recommendedHeadroomAttenuationDB, specifier: "%+.1f") dB"
+                        )
+                        .font(.headline.monospacedDigit())
+                        Text(headroomRecommendationSummary(recommendation))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(minWidth: 225, alignment: .leading)
+                }
+            }
+
+            if assistant.phase != .idle {
+                LazyVGrid(
+                    columns: [
+                        GridItem(.adaptive(minimum: 170), spacing: 10)
+                    ],
+                    spacing: 10
+                ) {
+                    assistantMetric(
+                        "Pre-Rider True Peak",
+                        formatOptionalDBTP(
+                            assistant.evidence
+                                .maximumPreRiderTruePeakDBTP
+                        )
+                    )
+                    assistantMetric(
+                        "Sustained Limiter GR",
+                        String(
+                            format: "%.1f dB",
+                            assistant.evidence
+                                .maximumSustainedLimiterGainReductionDB
+                        )
+                    )
+                    assistantMetric(
+                        "Peak Limiter GR",
+                        String(
+                            format: "%.1f dB",
+                            assistant.evidence
+                                .maximumLimiterGainReductionDB
+                        )
+                    )
+                    assistantMetric(
+                        "Safety Clamps",
+                        "\(assistant.evidence.safetyClampSamples)"
+                    )
+                }
+            }
+
+            if let error = assistant.lastErrorDescription {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .textSelection(.enabled)
+            }
+
+            if assistant.phase == .applied {
+                Label(
+                    "Applied to live content state · saved Content Preset unchanged",
+                    systemImage: "checkmark.circle.fill"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 10) {
+                if assistant.isObserving {
+                    Button("Stop & Review") {
+                        assistant.stopObservation()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    Button("Cancel") {
+                        assistant.cancelObservation()
+                    }
+                } else {
+                    if assistant.phase != .applied {
+                        Button(
+                            assistant.phase == .idle
+                                ? "Observe Program"
+                                : "Observe Again"
+                        ) {
+                            do {
+                                try assistant.startObservation()
+                            } catch {
+                                assistantCommandError =
+                                    error.localizedDescription
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(
+                            engine.lifecycleState != .running
+                        )
+                    }
+
+                    if let recommendation =
+                        assistant.recommendation,
+                       recommendation.canApply,
+                       assistant.phase == .review {
+                        Button("Apply Additional Headroom") {
+                            do {
+                                try assistant.applyRecommendation()
+                            } catch {
+                                assistantCommandError =
+                                    error.localizedDescription
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+
+                    if assistant.phase == .applied,
+                       assistant.canRevertAppliedRecommendation {
+                        Button("Undo Applied Headroom") {
+                            do {
+                                try assistant
+                                    .revertAppliedRecommendation()
+                            } catch {
+                                assistantCommandError =
+                                    error.localizedDescription
+                            }
+                        }
+                        Button("Keep & Clear") {
+                            assistant.cancelObservation()
+                        }
+                    } else if assistant.phase != .idle {
+                        Button("Clear") {
+                            assistant.cancelObservation()
+                        }
+                    }
+                }
+            }
+
+            Text(
+                "Advisory only: the assistant never removes existing headroom and never auto-adjusts in the background. Apply changes the live content state only; save or update the Content Preset separately if you want to keep it. Use a representative loud passage—short observations cannot prove worst-case program headroom."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .padding(16)
+        .background(
+            .quaternary.opacity(0.22),
+            in: .rect(cornerRadius: 18)
+        )
+        .accessibilityElement(children: .contain)
+    }
+
+    private var headroomAssistantPhaseLabel: String {
+        switch assistant.phase {
+        case .idle: return "READY"
+        case .observing: return "OBSERVING"
+        case .review: return "REVIEW"
+        case .applied: return "APPLIED"
+        case .invalidated: return "INVALIDATED"
+        }
+    }
+
+    private func headroomRecommendationSummary(
+        _ recommendation: HeadroomAssistantRecommendation
+    ) -> String {
+        switch recommendation.disposition {
+        case .insufficientEvidence:
+            return "Keep observing: at least 10 seconds of valid true-peak evidence is required."
+        case .currentReserveSufficient:
+            return "This observation does not justify adding attenuation. Existing reserve is left unchanged."
+        case .recommendAdditionalAttenuation:
+            return String(
+                format: "Recommend %.1f dB of additional reserve.",
+                recommendation.additionalAttenuationDB
+            )
+        case .rangeLimited:
+            return "Recommendation reaches the −48 dB headroom limit; review the wider gain structure."
+        }
+    }
+
+    private func assistantMetric(
+        _ title: String,
+        _ value: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.caption.monospacedDigit().bold())
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            .quaternary.opacity(0.18),
+            in: .rect(cornerRadius: 12)
+        )
+    }
+
+    private func formatOptionalDBTP(_ value: Double?) -> String {
+        guard let value, value.isFinite else { return "—" }
+        return String(format: "%.1f dBTP", value)
     }
 
     private func transportChannelCard(_ channel: ProductionTransportChannelMeter) -> some View {

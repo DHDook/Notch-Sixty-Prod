@@ -572,4 +572,939 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         )
     }
 
+
+    func testABAuditionStateContainsOnlySafeContentDSP() {
+        let audition = ContentABAuditionState(
+            contentState: ContentPresetState()
+        )
+        let labels = Set(
+            Mirror(reflecting: audition).children.compactMap { $0.label }
+        )
+
+        XCTAssertEqual(
+            labels,
+            Set([
+                "stereoEQ",
+                "inputPreampDB",
+                "headroomAttenuationDB",
+                "dynamics",
+            ])
+        )
+        XCTAssertFalse(labels.contains("audioUnitRack"))
+        XCTAssertFalse(labels.contains("outputRouting"))
+        XCTAssertFalse(labels.contains("bassManagement"))
+        XCTAssertFalse(labels.contains("roomCorrection"))
+        XCTAssertFalse(labels.contains("speakerIR"))
+        XCTAssertFalse(labels.contains("speakerDriverProcessing"))
+        XCTAssertFalse(labels.contains("outputGainDB"))
+    }
+
+    func testABAuditionMergePreservesCurrentAudioUnitRack() {
+        let base = ContentPresetState()
+        let audition = ContentABAuditionState(
+            stereoEQ: StereoEQConfiguration(),
+            inputPreampDB: -3.0,
+            headroomAttenuationDB: -1.5,
+            dynamics: DynamicsConfiguration()
+        )
+
+        let merged = audition.merging(into: base)
+
+        XCTAssertEqual(merged.stereoEQ, audition.stereoEQ)
+        XCTAssertEqual(merged.inputPreampDB, -3.0)
+        XCTAssertEqual(merged.headroomAttenuationDB, -1.5)
+        XCTAssertEqual(merged.dynamics, audition.dynamics)
+        XCTAssertEqual(merged.audioUnitRack, base.audioUnitRack)
+    }
+
+    func testABSystemBoundaryFailsClosedOnIdentityAndStateDrift() {
+        let systemID = UUID()
+        let state = PlaybackSystemState()
+        let boundary = ContentABSystemBoundary(
+            selectedSystemProfileID: systemID,
+            systemState: state
+        )
+
+        XCTAssertEqual(
+            boundary.compatibility(
+                currentSystemProfileID: systemID,
+                currentSystemState: state
+            ),
+            .ready
+        )
+
+        XCTAssertEqual(
+            boundary.compatibility(
+                currentSystemProfileID: UUID(),
+                currentSystemState: state
+            ),
+            .playbackSystemChanged
+        )
+
+        var changedState = state
+        changedState.outputGainDB = -1.0
+        XCTAssertEqual(
+            boundary.compatibility(
+                currentSystemProfileID: systemID,
+                currentSystemState: changedState
+            ),
+            .playbackSystemStateChanged
+        )
+    }
+
+    func testABSlotsHaveStableIdentityAndOpposites() {
+        XCTAssertEqual(ContentABSlot.allCases, [.a, .b])
+        XCTAssertEqual(ContentABSlot.a.displayName, "A")
+        XCTAssertEqual(ContentABSlot.b.displayName, "B")
+        XCTAssertEqual(ContentABSlot.a.opposite, .b)
+        XCTAssertEqual(ContentABSlot.b.opposite, .a)
+    }
+
+
+    func testABLoudnessMatchOnlyAttenuatesTheLouderCapture() throws {
+        let plan = try XCTUnwrap(
+            ContentABLoudnessMatchPlan.make(
+                aLUFS: -14.0,
+                bLUFS: -17.0
+            )
+        )
+
+        XCTAssertEqual(plan.referenceLUFS, -17.0, accuracy: 0.0001)
+        XCTAssertEqual(plan.attenuationA_DB, -3.0, accuracy: 0.0001)
+        XCTAssertEqual(plan.attenuationB_DB, 0.0, accuracy: 0.0001)
+        XCTAssertLessThanOrEqual(plan.attenuationA_DB, 0)
+        XCTAssertLessThanOrEqual(plan.attenuationB_DB, 0)
+    }
+
+    func testABLoudnessMatchIsBoundedAndRequiresValidSignal() throws {
+        let bounded = try XCTUnwrap(
+            ContentABLoudnessMatchPlan.make(
+                aLUFS: -10.0,
+                bLUFS: -30.0
+            )
+        )
+        XCTAssertEqual(
+            bounded.attenuationA_DB,
+            -ContentABLoudnessMatchPlan.maximumAttenuationDB,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(bounded.attenuationB_DB, 0, accuracy: 0.0001)
+
+        XCTAssertNil(
+            ContentABLoudnessMatchPlan.make(
+                aLUFS: nil,
+                bLUFS: -18
+            )
+        )
+        XCTAssertNil(
+            ContentABLoudnessMatchPlan.make(
+                aLUFS: -70,
+                bLUFS: -18
+            )
+        )
+    }
+
+    func testABSnapshotCanCarryMeasuredLoudnessWithoutBroadeningAuditionState() throws {
+        let snapshot = ContentABSnapshot(
+            sourceContentPresetID: nil,
+            sourceContentPresetName: "Fixture",
+            loudnessReferenceLUFS: -18.5,
+            auditionState: ContentABAuditionState(
+                contentState: ContentPresetState()
+            ),
+            systemBoundary: ContentABSystemBoundary(
+                selectedSystemProfileID: nil,
+                systemState: PlaybackSystemState()
+            )
+        )
+
+        XCTAssertEqual(
+            try XCTUnwrap(snapshot.loudnessReferenceLUFS),
+            -18.5,
+            accuracy: 0.0001
+        )
+
+        let labels = Set(
+            Mirror(reflecting: snapshot.auditionState)
+                .children.compactMap { $0.label }
+        )
+        XCTAssertEqual(
+            labels,
+            Set([
+                "stereoEQ",
+                "inputPreampDB",
+                "headroomAttenuationDB",
+                "dynamics",
+            ])
+        )
+    }
+
+
+    @MainActor
+    func testBackupRestoreMarksUnavailablePlaybackHardwareForMapping()
+        throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let profiles = ProductProfileController(
+            engine: AudioIOEngine(),
+            storageURL: root.appendingPathComponent("profiles.json")
+        )
+        let content = ContentPreset(
+            name: "Backup Content",
+            origin: .user,
+            state: ContentPresetState()
+        )
+        let system = PlaybackSystemProfile(
+            name: "Backup System",
+            state: PlaybackSystemState(
+                associatedOutputUID: "missing-output"
+            )
+        )
+        let snapshot = ProductProfileBackupSnapshot(
+            contentPresets: [content],
+            systemProfiles: [system],
+            selectedContentPresetID: content.id,
+            selectedSystemProfileID: system.id
+        )
+
+        let report = try profiles.restoreBackupSnapshot(
+            snapshot,
+            availableOutputUIDs: []
+        )
+
+        XCTAssertEqual(
+            report.hardwareMappingRequiredSystemIDs,
+            [system.id]
+        )
+        XCTAssertNil(profiles.selectedSystemProfileID)
+        let requirement = try XCTUnwrap(
+            profiles.hardwareMappingRequirement(for: system.id)
+        )
+        XCTAssertEqual(
+            requirement.importedDeviceUIDs,
+            ["missing-output"]
+        )
+    }
+
+    @MainActor
+    func testBackupRestoreKeepsKnownHardwareEligibleWithoutRemapping()
+        throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let profiles = ProductProfileController(
+            engine: AudioIOEngine(),
+            storageURL: root.appendingPathComponent("profiles.json")
+        )
+        let content = ContentPreset(
+            name: "Backup Content",
+            origin: .user,
+            state: ContentPresetState()
+        )
+        let system = PlaybackSystemProfile(
+            name: "Known System",
+            state: PlaybackSystemState(
+                associatedOutputUID: "known-output"
+            )
+        )
+        let snapshot = ProductProfileBackupSnapshot(
+            contentPresets: [content],
+            systemProfiles: [system],
+            selectedContentPresetID: content.id,
+            selectedSystemProfileID: system.id
+        )
+
+        let report = try profiles.restoreBackupSnapshot(
+            snapshot,
+            availableOutputUIDs: ["known-output"]
+        )
+
+        XCTAssertTrue(
+            report.hardwareMappingRequiredSystemIDs.isEmpty
+        )
+        XCTAssertEqual(profiles.selectedSystemProfileID, system.id)
+        XCTAssertNil(
+            profiles.hardwareMappingRequirement(for: system.id)
+        )
+    }
+
+    func testBackupPreferencesExcludeOSOwnedLaunchState() throws {
+        let preferences = NotchSixtyBackupPreferences(
+            appearance: "dark",
+            presence: "both",
+            volumeStepResolution: 64
+        )
+        XCTAssertNoThrow(try preferences.validate())
+
+        let labels = Set(
+            Mirror(reflecting: preferences).children
+                .compactMap { $0.label }
+        )
+        XCTAssertFalse(labels.contains("launchAtLogin"))
+        XCTAssertFalse(labels.contains("launchAtLoginEnabled"))
+        XCTAssertFalse(labels.contains("permissions"))
+
+        let invalid = NotchSixtyBackupPreferences(
+            appearance: "invalid",
+            presence: "both",
+            volumeStepResolution: 64
+        )
+        XCTAssertThrowsError(try invalid.validate())
+    }
+
+    @MainActor
+    func testBackupInspectionRejectsDomainTampering() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let profiles = ProductProfileController(
+            engine: AudioIOEngine(),
+            storageURL: root.appendingPathComponent("profiles.json")
+        )
+        let backup = NotchSixtyBackupService(
+            profiles: profiles,
+            roomStore: RoomCorrectionProjectStore(
+                rootDirectory: root.appendingPathComponent(
+                    "room",
+                    isDirectory: true
+                )
+            ),
+            labStore: SpeakerMeasurementLabSessionStore(
+                rootDirectory: root.appendingPathComponent(
+                    "lab",
+                    isDirectory: true
+                )
+            ),
+            binauralStore: BinauralProfileAssetStore(
+                rootURL: root.appendingPathComponent(
+                    "binaural",
+                    isDirectory: true
+                )
+            )
+        )
+        let preferences = NotchSixtyBackupPreferences(
+            appearance: "dark",
+            presence: "both",
+            volumeStepResolution: 32
+        )
+
+        let original = try backup.exportData(
+            preferences: preferences,
+            appVersion: "1.0",
+            appBuild: "1",
+            createdAt: Date(timeIntervalSince1970: 1_000)
+        )
+        XCTAssertNoThrow(try backup.inspect(original))
+
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: original)
+                as? [String: Any]
+        )
+        var profilesJSON = try XCTUnwrap(
+            object["profiles"] as? [String: Any]
+        )
+        var presets = try XCTUnwrap(
+            profilesJSON["contentPresets"]
+                as? [[String: Any]]
+        )
+        XCTAssertFalse(presets.isEmpty)
+        presets[0]["name"] = "Tampered"
+        profilesJSON["contentPresets"] = presets
+        object["profiles"] = profilesJSON
+
+        let tampered = try JSONSerialization.data(
+            withJSONObject: object,
+            options: [.sortedKeys]
+        )
+
+        XCTAssertThrowsError(
+            try backup.inspect(tampered)
+        ) { error in
+            guard let backupError =
+                    error as? NotchSixtyBackupError,
+                  case .integrityMismatch(let domain) =
+                    backupError else {
+                return XCTFail(
+                    "Expected integrity mismatch, got \(error)"
+                )
+            }
+            XCTAssertEqual(domain, "profiles")
+        }
+    }
+
+
+    @MainActor
+    func testLocalOfflineRoutingDoesNotAcquireImportMappingGate()
+        throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let storageURL = root.appendingPathComponent("profiles.json")
+        let profiles = ProductProfileController(
+            engine: AudioIOEngine(),
+            storageURL: storageURL
+        )
+        let routing = MultiOutputRoutingConfiguration(
+            enabled: true,
+            routes: [
+                SpeakerOutputRoute(
+                    name: "Left Main",
+                    bus: .leftFullRange,
+                    destination: PhysicalOutputEndpoint(
+                        deviceUID: "offline-main-dac",
+                        channelIndex: 0
+                    )
+                ),
+                SpeakerOutputRoute(
+                    name: "Right Main",
+                    bus: .rightFullRange,
+                    destination: PhysicalOutputEndpoint(
+                        deviceUID: "offline-main-dac",
+                        channelIndex: 1
+                    )
+                ),
+            ],
+            synchronizationMode: .softwarePLL,
+            referenceDeviceUID: "offline-main-dac"
+        )
+
+        try profiles.replaceSelectedSystemOutputRouting(routing)
+        XCTAssertNil(
+            profiles.selectedSystemHardwareMappingRequirement
+        )
+
+        let restored = ProductProfileController(
+            engine: AudioIOEngine(),
+            storageURL: storageURL
+        )
+        XCTAssertEqual(
+            restored.selectedSystemProfile?.state.outputRouting,
+            routing
+        )
+        XCTAssertNil(
+            restored.selectedSystemHardwareMappingRequirement
+        )
+    }
+
+
+    @MainActor
+    func testRecoveryDetectsUncleanPriorLaunchButNotCleanTermination()
+        throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "pr113b-recovery-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("recovery.json")
+        let store = ProductRecoveryStore(storageURL: url)
+
+        let first = ProductRecoveryController(store: store)
+        first.prepareForLaunch(
+            now: Date(timeIntervalSince1970: 100)
+        )
+        XCTAssertFalse(first.safeLaunchActive)
+
+        let afterUnclean = ProductRecoveryController(store: store)
+        afterUnclean.prepareForLaunch(
+            now: Date(timeIntervalSince1970: 200)
+        )
+        XCTAssertTrue(afterUnclean.safeLaunchActive)
+        XCTAssertTrue(
+            afterUnclean.safeLaunchReasons.contains(
+                .uncleanTermination
+            )
+        )
+
+        afterUnclean.markCleanTermination()
+
+        let afterClean = ProductRecoveryController(store: store)
+        afterClean.prepareForLaunch(
+            now: Date(timeIntervalSince1970: 300)
+        )
+        XCTAssertFalse(afterClean.safeLaunchActive)
+        XCTAssertFalse(
+            afterClean.safeLaunchReasons.contains(
+                .uncleanTermination
+            )
+        )
+    }
+
+    @MainActor
+    func testRecoveryRepeatedFailuresTriggerSafeLaunchThreshold()
+        throws {
+        let controller = ProductRecoveryController(
+            store: ProductRecoveryStore(storageURL: nil)
+        )
+        controller.prepareForLaunch()
+
+        controller.recordStartFailure(
+            .audioStart,
+            description: "first"
+        )
+        XCTAssertFalse(controller.safeLaunchActive)
+
+        controller.recordStartFailure(
+            .audioStart,
+            description: "second"
+        )
+        XCTAssertTrue(controller.safeLaunchActive)
+        XCTAssertTrue(
+            controller.safeLaunchReasons.contains(
+                .repeatedAudioStartFailures
+            )
+        )
+
+        controller.openNormally()
+        XCTAssertFalse(controller.safeLaunchActive)
+
+        let plugInController = ProductRecoveryController(
+            store: ProductRecoveryStore(storageURL: nil)
+        )
+        plugInController.prepareForLaunch()
+        plugInController.recordStartFailure(
+            .plugInStart,
+            description: "plug-in one"
+        )
+        XCTAssertFalse(plugInController.safeLaunchActive)
+        plugInController.recordStartFailure(
+            .plugInStart,
+            description: "plug-in two"
+        )
+        XCTAssertTrue(
+            plugInController.safeLaunchReasons.contains(
+                .repeatedPlugInFailures
+            )
+        )
+    }
+
+    @MainActor
+    func testRecoveryOnlyHealthyNormalStartUpdatesLastKnownGood()
+        throws {
+        let controller = ProductRecoveryController(
+            store: ProductRecoveryStore(storageURL: nil)
+        )
+        controller.prepareForLaunch()
+
+        let firstPreset = ContentPreset(
+            name: "Known Good",
+            origin: .user,
+            state: ContentPresetState()
+        )
+        let firstSnapshot = ProductProfileBackupSnapshot(
+            contentPresets: [firstPreset],
+            systemProfiles: [],
+            selectedContentPresetID: firstPreset.id,
+            selectedSystemProfileID: nil
+        )
+
+        controller.recordSuccessfulStart(
+            profiles: firstSnapshot,
+            plugInChainHealthy: true,
+            now: Date(timeIntervalSince1970: 100)
+        )
+        XCTAssertEqual(
+            try controller.lastKnownGoodSnapshot()
+                .contentPresets.first?.name,
+            "Known Good"
+        )
+
+        let secondPreset = ContentPreset(
+            name: "Bypassed Candidate",
+            origin: .user,
+            state: ContentPresetState()
+        )
+        let secondSnapshot = ProductProfileBackupSnapshot(
+            contentPresets: [secondPreset],
+            systemProfiles: [],
+            selectedContentPresetID: secondPreset.id,
+            selectedSystemProfileID: nil
+        )
+
+        controller.openWithPlugInsBypassed()
+        controller.recordSuccessfulStart(
+            profiles: secondSnapshot,
+            plugInChainHealthy: true,
+            now: Date(timeIntervalSince1970: 200)
+        )
+        XCTAssertEqual(
+            try controller.lastKnownGoodSnapshot()
+                .contentPresets.first?.name,
+            "Known Good"
+        )
+
+        controller.openNormally()
+        controller.recordSuccessfulStart(
+            profiles: secondSnapshot,
+            plugInChainHealthy: false,
+            now: Date(timeIntervalSince1970: 300)
+        )
+        XCTAssertEqual(
+            try controller.lastKnownGoodSnapshot()
+                .contentPresets.first?.name,
+            "Known Good"
+        )
+    }
+
+
+    @MainActor
+    func testRecoveryUnreadableStateRequiresSafeLaunch() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "pr113b-recovery-corrupt-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(
+            at: root,
+            withIntermediateDirectories: true
+        )
+        let url = root.appendingPathComponent("recovery.json")
+        try Data("not-json".utf8).write(to: url)
+
+        let controller = ProductRecoveryController(
+            store: ProductRecoveryStore(storageURL: url)
+        )
+        controller.prepareForLaunch()
+
+        XCTAssertTrue(controller.safeLaunchActive)
+        XCTAssertTrue(
+            controller.safeLaunchReasons.contains(
+                .recoveryStateUnreadable
+            )
+        )
+        XCTAssertNotNil(
+            controller.lastPersistenceErrorDescription
+        )
+    }
+
+    @MainActor
+    func testRecoveryPlugInBypassIsTransientAcrossCleanLaunch()
+        throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "pr113b-recovery-bypass-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("recovery.json")
+        let store = ProductRecoveryStore(storageURL: url)
+
+        let first = ProductRecoveryController(store: store)
+        first.prepareForLaunch()
+        first.openWithPlugInsBypassed()
+        XCTAssertTrue(first.plugInsBypassedForThisLaunch)
+        first.markCleanTermination()
+
+        let second = ProductRecoveryController(store: store)
+        second.prepareForLaunch()
+        XCTAssertFalse(second.safeLaunchActive)
+        XCTAssertFalse(second.plugInsBypassedForThisLaunch)
+    }
+
+    @MainActor
+    func testRecoveryStateIsMachineLocalAndHasNoReleaseAuthority()
+        throws {
+        let labels = Set(
+            Mirror(
+                reflecting: ProductRecoveryPersistentState()
+            ).children.compactMap { $0.label }
+        )
+        XCTAssertFalse(labels.contains("physicalAcceptanceComplete"))
+        XCTAssertFalse(labels.contains("releaseAcceptanceComplete"))
+        XCTAssertFalse(labels.contains("mayMergeIntoMain"))
+        XCTAssertFalse(labels.contains("liveFeedForwardANCAuthorized"))
+    }
+
+
+    func testHeadroomAssistantReconstructsPeakBeforeGainRider() {
+        var evidence = HeadroomAssistantEvidence()
+        let inputLinear =
+            Float(pow(10.0, -3.0 / 20.0))
+
+        for index in 0..<20 {
+            evidence.ingest(
+                inputTruePeakLinear: inputLinear,
+                outputTruePeakLinear: inputLinear,
+                limiterGainReductionDB: 0.2,
+                sustainedLimiterGainReductionDB: 0.1,
+                gainRiderAttenuationDB: 2.0,
+                truePeakGuardActive: true,
+                cumulativeSafetyClampSamples: 0,
+                initialSafetyClampSamples: 0,
+                elapsedSeconds: 10.0 + Double(index) * 0.1
+            )
+        }
+
+        XCTAssertEqual(
+            evidence.maximumMeasuredInputTruePeakDBTP ?? 0,
+            -3.0,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            evidence.maximumPreRiderTruePeakDBTP ?? 0,
+            -1.0,
+            accuracy: 0.001
+        )
+        XCTAssertTrue(evidence.isSufficientForRecommendation)
+    }
+
+    func testHeadroomAssistantNeverReclaimsExistingAttenuation() {
+        var evidence = HeadroomAssistantEvidence()
+        evidence.observationSeconds = 30
+        evidence.sampleCount = 30
+        evidence.maximumPreRiderTruePeakDBTP = -6
+        evidence.maximumMeasuredInputTruePeakDBTP = -6
+        evidence.truePeakGuardObserved = true
+
+        let recommendation =
+            HeadroomAssistantRecommendation.make(
+                evidence: evidence,
+                currentHeadroomAttenuationDB: -4,
+                targetPeakDBTP: -1
+            )
+
+        XCTAssertEqual(
+            recommendation.disposition,
+            .currentReserveSufficient
+        )
+        XCTAssertEqual(
+            recommendation.recommendedHeadroomAttenuationDB,
+            -4,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            recommendation.additionalAttenuationDB,
+            0,
+            accuracy: 0.0001
+        )
+        XCTAssertFalse(recommendation.canApply)
+    }
+
+    func testHeadroomAssistantUsesLargestReserveNeedPlusClampReserve() {
+        var evidence = HeadroomAssistantEvidence()
+        evidence.observationSeconds = 30
+        evidence.sampleCount = 30
+        evidence.maximumPreRiderTruePeakDBTP = -0.2
+        evidence.maximumMeasuredInputTruePeakDBTP = -0.2
+        evidence.maximumSustainedLimiterGainReductionDB = 1.0
+        evidence.maximumLimiterGainReductionDB = 2.0
+        evidence.safetyClampSamples = 4
+        evidence.truePeakGuardObserved = true
+
+        let recommendation =
+            HeadroomAssistantRecommendation.make(
+                evidence: evidence,
+                currentHeadroomAttenuationDB: -1,
+                targetPeakDBTP: -1
+            )
+
+        // Peak need is 0.8 dB. Sustained-limiter need is 0.5 dB.
+        // Use the larger need, then add the 0.5 dB clamp reserve.
+        XCTAssertEqual(
+            recommendation.peakDrivenAttenuationDB,
+            0.8,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            recommendation
+                .sustainedLimiterDrivenAttenuationDB,
+            0.5,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            recommendation.safetyClampReserveDB,
+            0.5,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            recommendation.additionalAttenuationDB,
+            1.3,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            recommendation.recommendedHeadroomAttenuationDB,
+            -2.3,
+            accuracy: 0.0001
+        )
+        XCTAssertTrue(recommendation.canApply)
+    }
+
+    func testHeadroomAssistantRequiresAuthoritativeRepresentativeEvidence() {
+        var tooShort = HeadroomAssistantEvidence()
+        tooShort.observationSeconds = 5
+        tooShort.sampleCount = 30
+        tooShort.maximumPreRiderTruePeakDBTP = 0
+        tooShort.truePeakGuardObserved = true
+
+        XCTAssertEqual(
+            HeadroomAssistantRecommendation.make(
+                evidence: tooShort,
+                currentHeadroomAttenuationDB: 0
+            ).disposition,
+            .insufficientEvidence
+        )
+
+        var noTruePeakGuard = tooShort
+        noTruePeakGuard.observationSeconds = 30
+        noTruePeakGuard.truePeakGuardObserved = false
+
+        XCTAssertEqual(
+            HeadroomAssistantRecommendation.make(
+                evidence: noTruePeakGuard,
+                currentHeadroomAttenuationDB: 0
+            ).disposition,
+            .insufficientEvidence
+        )
+    }
+
+    func testHeadroomAssistantRangeLimitFailsConservatively() {
+        var evidence = HeadroomAssistantEvidence()
+        evidence.observationSeconds = 30
+        evidence.sampleCount = 30
+        evidence.maximumPreRiderTruePeakDBTP = 6.0
+        evidence.maximumMeasuredInputTruePeakDBTP = 6.0
+        evidence.maximumSustainedLimiterGainReductionDB = 12.0
+        evidence.safetyClampSamples = 10
+        evidence.truePeakGuardObserved = true
+
+        let recommendation =
+            HeadroomAssistantRecommendation.make(
+                evidence: evidence,
+                currentHeadroomAttenuationDB: -47.5,
+                targetPeakDBTP: -1.0
+            )
+
+        XCTAssertEqual(recommendation.disposition, .rangeLimited)
+        XCTAssertEqual(
+            recommendation.recommendedHeadroomAttenuationDB,
+            DSPGainConfiguration
+                .headroomAttenuationRange.lowerBound,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            recommendation.additionalAttenuationDB,
+            0.5,
+            accuracy: 0.0001
+        )
+        XCTAssertTrue(recommendation.rangeLimited)
+        XCTAssertTrue(recommendation.canApply)
+    }
+
+    @MainActor
+    func testHeadroomAssistantRejectsOpenABAuditionSession()
+        async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "pr113b-headroom-ab-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let engine = AudioIOEngine()
+        let profiles = ProductProfileController(
+            engine: engine,
+            storageURL:
+                root.appendingPathComponent("profiles.json")
+        )
+        let comparison =
+            ContentABComparisonController(profiles: profiles)
+        comparison.capture(.a)
+        await comparison.audition(.a)
+        XCTAssertNotNil(comparison.sessionBaseline)
+
+        let assistant = HeadroomAssistantController(
+            engine: engine,
+            profiles: profiles,
+            abComparison: comparison
+        )
+        XCTAssertThrowsError(
+            try assistant.startObservation()
+        ) { error in
+            XCTAssertEqual(
+                error as? HeadroomAssistantError,
+                .abComparisonActive
+            )
+        }
+
+        await comparison.endAudition(
+            restoringBaseline: false
+        )
+    }
+
+    @MainActor
+    func testHeadroomAssistantBoundaryFailsClosedOnContentDrift()
+        throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "pr113b-headroom-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let engine = AudioIOEngine()
+        let profiles = ProductProfileController(
+            engine: engine,
+            storageURL:
+                root.appendingPathComponent("profiles.json")
+        )
+        let boundary =
+            HeadroomAssistantBoundary(profiles: profiles)
+
+        XCTAssertTrue(boundary.matches(profiles))
+        try engine.setHeadroomAttenuationDB(-1.0)
+        XCTAssertFalse(boundary.matches(profiles))
+        XCTAssertTrue(
+            boundary.matches(
+                profiles,
+                expectedHeadroomAttenuationDB: -1.0
+            )
+        )
+    }
+
+
+    func testGettingStartedCoversNonIntrusiveFirstSessionPath()
+        throws {
+        let article = try XCTUnwrap(
+            ProductionUserGuideCatalog.article(
+                id: "getting-started"
+            )
+        )
+        let searchable = article.searchableText
+
+        for token in [
+            "system audio",
+            "measurement microphone",
+            "screen & system audio recording",
+            "conservative listening level",
+            "needs mapping",
+            "start processing",
+            "headroom assistant",
+            "content preset",
+            "a/b",
+            "measurement lab",
+            "room correction",
+            "backup & restore",
+            ".n60backup",
+            "safe launch",
+            "restore last known good",
+            "copy diagnostics",
+            "physical hardware-acceptance",
+        ] {
+            XCTAssertTrue(
+                searchable.contains(token),
+                "Getting Started is missing \(token)"
+            )
+        }
+
+        XCTAssertGreaterThanOrEqual(
+            article.sections.count,
+            7
+        )
+    }
+
 }

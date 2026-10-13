@@ -131,25 +131,72 @@ enum ProductionUserGuideCatalog {
             id: "getting-started",
             category: .gettingStarted,
             title: "Getting Started",
-            summary: "Choose an output, select a Playback System and Content Preset, then start processing deliberately.",
+            summary: "A non-intrusive first-session path from permissions and output selection to safe playback, optional measurement and your first Content Preset.",
             systemImage: "sparkles",
-            keywords: ["first run", "output", "start", "processing", "preset", "playback system"],
+            keywords: [
+                "first run", "first session", "permissions", "system audio",
+                "microphone", "output", "safe level", "start processing",
+                "preset", "playback system", "calibration", "backup",
+                "safe launch"
+            ],
             sections: [
                 section(
-                    "workflow",
-                    "A safe first session",
+                    "permissions",
+                    "1. Grant only the permissions you need",
                     [
-                        "Select the physical output device you actually intend to use. Device identity matters because routing, calibration, measurement evidence and hardware acceptance are tied to stable device identifiers.",
-                        "Choose the Playback System that describes the connected loudspeakers, subwoofers or headphones. Content Presets sit above that system description and should not be used to hide a hardware mismatch.",
-                        "Start Processing only after routing and system state look correct. Global Bypass provides a fast processed-versus-unprocessed comparison without discarding your configuration."
+                        "Ordinary playback processing may cause macOS to request System Audio access. If you previously denied it and processing receives no system audio, allow Notch Sixty under Privacy & Security → Screen & System Audio Recording, then relaunch the app.",
+                        "Measurement Microphone access is separate and is not required for ordinary listening. Request it only when you choose to measure or calibrate. A calibration-file workflow can identify microphone response, but it does not turn a microphone or measurement into hardware-acceptance evidence."
+                    ]
+                ),
+                section(
+                    "output-system",
+                    "2. Choose the real output and Playback System",
+                    [
+                        "Select the physical output device you actually intend to use. Notch Sixty deliberately follows stable device identity rather than silently substituting the current macOS default output.",
+                        "Choose the Playback System that describes the connected loudspeakers, subwoofers or headphones. A restored system marked Needs Mapping must be reviewed before activation; do not use a Content Preset to hide a hardware mismatch.",
+                        "Before first sound, set the amplifier or downstream system to a conservative listening level and verify that the expected output, crossover and routing are selected."
+                    ]
+                ),
+                section(
+                    "first-sound",
+                    "3. Make first sound deliberately",
+                    [
+                        "Start Processing only after routing and system state look correct. Processing never starts merely because Notch Sixty launches or because Launch at Login is enabled.",
+                        "Use familiar program material at a conservative level. Confirm that the expected device is producing sound and that Dashboard or Meters activity follows the program. Global Bypass provides a fast processed-versus-unprocessed check without discarding configuration.",
+                        "After basic playback is stable, Meters → Dynamics can show true-peak and gain-structure evidence. Headroom Assistant is optional: use a representative loud passage, not a quiet excerpt, and treat its result as an advisory reserve recommendation rather than a guarantee about every possible recording."
+                    ]
+                ),
+                section(
+                    "content",
+                    "4. Choose or create your first Content Preset",
+                    [
+                        "Playback Systems describe the physical playback chain; Content Presets describe content-facing DSP such as EQ, gain and dynamics. Keep those roles separate so a music or cinema preset remains portable across listening sessions without silently changing physical routing.",
+                        "Use A/B when comparing two content-DSP choices. Its snapshots cannot change the Playback System, and measured level matching only attenuates the louder captured side so loudness is less likely to bias the comparison."
+                    ]
+                ),
+                section(
+                    "optional-calibration",
+                    "5. Add measurement and calibration only when useful",
+                    [
+                        "Speaker Calibration, Measurement Lab and Room Correction are optional next steps after ordinary playback works correctly. Use the measurement microphone and its calibration data when accuracy matters, and keep the documented microphone placement, routing and provenance with the evidence.",
+                        "Preview measurement-derived changes before Apply, verify after Apply, and retain rollback where the workflow provides it. Software plausibility, confidence and CI results do not replace an acoustic verification or the separate PR112 physical hardware-acceptance process."
+                    ]
+                ),
+                section(
+                    "recovery-backup",
+                    "6. Protect a good setup",
+                    [
+                        "Preferences & Reference → General → Backup & Restore can save a .n60backup before major system changes. Restored hardware identities that are unavailable on a different Mac remain Needs Mapping rather than being silently rebound.",
+                        "If a prior launch ended unexpectedly or repeated audio / plug-in starts fail, Safe Launch keeps audio idle and offers Open Normally, a temporary Plug-ins Bypassed launch, Restore Last Known Good and Copy Diagnostics. Recovery does not overwrite physical-acceptance authority.",
+                        "Copy Diagnostics when troubleshooting or asking for support. Diagnostics are evidence about software/runtime state, not permission to deploy an unverified physical configuration."
                     ]
                 ),
                 section(
                     "signal-flow",
                     "How to think about Notch Sixty",
                     [
-                        "Notch Sixty separates transport, system configuration, content-facing DSP and measurement workflows. That separation is intentional: measurement evidence should describe the actual system, while music or cinema presets can remain flexible.",
-                        "Features that can change loudspeaker routing, correction or timing use explicit preview, verification and rollback boundaries. A green software diagnostic is not a substitute for a real acoustic or hardware test."
+                        "Notch Sixty separates transport, Playback-System configuration, content-facing DSP and measurement workflows. That separation is intentional: measurement evidence should describe the actual system, while music or cinema presets can remain flexible.",
+                        "Use the workflow vocabulary literally: Preview shows a proposal, Apply makes an explicit change, Verify collects fresh evidence, Revert discards uncommitted edits, Rollback restores retained pre-Apply state, and Deploy moves a reviewed offline design into the selected Playback System."
                     ]
                 )
             ]

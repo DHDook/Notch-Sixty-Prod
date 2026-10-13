@@ -3,7 +3,7 @@ import UniformTypeIdentifiers
 
 private struct SpeakerMeasurementLabExportDocument: FileDocument {
     static var readableContentTypes: [UTType] {
-        [.json, .plainText]
+        [.json, .plainText, .data]
     }
 
     var data: Data
@@ -34,6 +34,8 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
     private let store = SpeakerMeasurementLabSessionStore()
     private let reportBuilder = SpeakerMeasurementLabReportBuilder()
     private let exporter = SpeakerMeasurementLabReportExporter()
+    private let fullFidelityExporter =
+        SpeakerMeasurementLabFullFidelityExporter()
     private let driverCommissioningStore =
         ProtectedDriverCommissioningDraftStore()
 
@@ -48,6 +50,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
     @State private var exportContentType: UTType = .json
     @State private var exportFilename = "notch-sixty-speaker-lab"
     @State private var showingExporter = false
+    @State private var selectedDetailedCaptureID: UUID?
     @State private var driverCommissioningDraft:
         ProtectedDriverCommissioningDraft?
     @State private var driverCommissioningMessage: String?
@@ -132,6 +135,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
         .task(id: lab.session?.modifiedAt) {
             refreshRecentSessions()
             loadDriverCommissioningDraft()
+            reconcileDetailedExportCapture()
         }
         .task(id: profiles.selectedSystemProfileID) {
             loadDriverCommissioningDraft()
@@ -850,17 +854,80 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                         )
                     }
 
+                    Divider()
+
+                    Text("Compact Report")
+                        .font(.callout.bold())
+
                     HStack(spacing: 10) {
-                        Button("Export JSON") {
+                        Button("Export Compact JSON") {
                             prepareExport(json: true)
                         }
-                        Button("Export CSV") {
+                        Button("Export Compact CSV") {
                             prepareExport(json: false)
                         }
                     }
 
                     Text(
-                        "Compact exports intentionally exclude raw impulse arrays and full transfer grids. The persisted Lab session remains the detailed analysis archive."
+                        "Compact exports intentionally exclude raw impulse arrays and full transfer grids."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                    Divider()
+
+                    Text("Full-Fidelity Data")
+                        .font(.callout.bold())
+
+                    HStack(spacing: 10) {
+                        Button("Export Full JSON") {
+                            prepareFullJSONExport()
+                        }
+                        Button("Export Transfer CSV") {
+                            prepareTransferCSVExport()
+                        }
+                        .disabled(
+                            lab.session?.captures.isEmpty != false
+                        )
+                        Button("Export Impulse CSV") {
+                            prepareImpulseCSVExport()
+                        }
+                        .disabled(
+                            lab.session?.captures.isEmpty != false
+                        )
+                    }
+
+                    if let session = lab.session,
+                       !session.captures.isEmpty {
+                        Picker(
+                            "Capture",
+                            selection: $selectedDetailedCaptureID
+                        ) {
+                            ForEach(session.captures) { capture in
+                                Text(
+                                    detailedCaptureLabel(
+                                        capture,
+                                        session: session
+                                    )
+                                )
+                                .tag(Optional(capture.id))
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .frame(maxWidth: 430)
+
+                        HStack(spacing: 10) {
+                            Button("Export Capture FRD") {
+                                prepareCaptureFRDExport()
+                            }
+                            Button("Export Impulse WAV") {
+                                prepareCaptureWAVExport()
+                            }
+                        }
+                    }
+
+                    Text(
+                        "Full-fidelity export preserves every captured impulse sample and transfer-function bin plus the session's routing, microphone-calibration, protected-path and shared-clock provenance. Exports remain measurement-only and cannot Deploy or establish physical acceptance."
                     )
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -1687,17 +1754,191 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
             let data = json
                 ? try exporter.jsonData(report)
                 : try exporter.csvData(report)
-            exportDocument =
-                SpeakerMeasurementLabExportDocument(data: data)
-            exportContentType = json
-                ? .json
-                : (UTType(filenameExtension: "csv") ?? .plainText)
-            exportFilename =
-                "notch-sixty-lab-\(String(report.sessionID.uuidString.prefix(8)))"
-            showingExporter = true
+            stageExport(
+                data: data,
+                contentType: json
+                    ? .json
+                    : (UTType(filenameExtension: "csv")
+                        ?? .plainText),
+                filename:
+                    "notch-sixty-lab-\(String(report.sessionID.uuidString.prefix(8)))-compact"
+                    + (json ? ".json" : ".csv")
+            )
         } catch {
             actionError = error.localizedDescription
         }
+    }
+
+    private func prepareFullJSONExport() {
+        actionError = nil
+        guard let session = lab.session else { return }
+        do {
+            stageExport(
+                data: try fullFidelityExporter
+                    .fullJSONData(session),
+                contentType: .json,
+                filename:
+                    detailedExportStem(session) + "-full.json"
+            )
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    private func prepareTransferCSVExport() {
+        actionError = nil
+        guard let session = lab.session else { return }
+        do {
+            stageExport(
+                data: try fullFidelityExporter
+                    .transferCSVData(session),
+                contentType:
+                    UTType(filenameExtension: "csv")
+                        ?? .plainText,
+                filename:
+                    detailedExportStem(session)
+                    + "-transfer.csv"
+            )
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    private func prepareImpulseCSVExport() {
+        actionError = nil
+        guard let session = lab.session else { return }
+        do {
+            stageExport(
+                data: try fullFidelityExporter
+                    .impulseCSVData(session),
+                contentType:
+                    UTType(filenameExtension: "csv")
+                        ?? .plainText,
+                filename:
+                    detailedExportStem(session)
+                    + "-impulse.csv"
+            )
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    private func prepareCaptureFRDExport() {
+        actionError = nil
+        guard let session = lab.session,
+              let capture = selectedDetailedCapture(
+                  in: session
+              ) else { return }
+        do {
+            stageExport(
+                data: try fullFidelityExporter.frdData(
+                    session,
+                    captureID: capture.id
+                ),
+                contentType:
+                    UTType(filenameExtension: "frd")
+                        ?? .plainText,
+                filename:
+                    detailedCaptureStem(
+                        capture,
+                        session: session
+                    ) + ".frd"
+            )
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    private func prepareCaptureWAVExport() {
+        actionError = nil
+        guard let session = lab.session,
+              let capture = selectedDetailedCapture(
+                  in: session
+              ) else { return }
+        do {
+            stageExport(
+                data: try fullFidelityExporter
+                    .impulseWAVData(
+                        session,
+                        captureID: capture.id
+                    ),
+                contentType:
+                    UTType(filenameExtension: "wav")
+                        ?? .data,
+                filename:
+                    detailedCaptureStem(
+                        capture,
+                        session: session
+                    ) + "-impulse.wav"
+            )
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    private func stageExport(
+        data: Data,
+        contentType: UTType,
+        filename: String
+    ) {
+        exportDocument =
+            SpeakerMeasurementLabExportDocument(data: data)
+        exportContentType = contentType
+        exportFilename = filename
+        showingExporter = true
+    }
+
+    private func reconcileDetailedExportCapture() {
+        guard let session = lab.session else {
+            selectedDetailedCaptureID = nil
+            return
+        }
+        if let selectedDetailedCaptureID,
+           session.captures.contains(where: {
+               $0.id == selectedDetailedCaptureID
+           }) {
+            return
+        }
+        selectedDetailedCaptureID =
+            session.captures.first?.id
+    }
+
+    private func selectedDetailedCapture(
+        in session: SpeakerMeasurementLabSession
+    ) -> SpeakerMeasurementLabCapture? {
+        if let selectedDetailedCaptureID,
+           let capture = session.captures.first(where: {
+               $0.id == selectedDetailedCaptureID
+           }) {
+            return capture
+        }
+        return session.captures.first
+    }
+
+    private func detailedCaptureLabel(
+        _ capture: SpeakerMeasurementLabCapture,
+        session: SpeakerMeasurementLabSession
+    ) -> String {
+        let name = session.protocols.first {
+            $0.id == capture.protocolID
+        }?.name ?? "Capture"
+        return "\(name) · Repeat \(capture.repeatIndex + 1)"
+    }
+
+    private func detailedExportStem(
+        _ session: SpeakerMeasurementLabSession
+    ) -> String {
+        "notch-sixty-lab-"
+            + String(session.id.uuidString.prefix(8))
+    }
+
+    private func detailedCaptureStem(
+        _ capture: SpeakerMeasurementLabCapture,
+        session: SpeakerMeasurementLabSession
+    ) -> String {
+        detailedExportStem(session)
+            + "-capture-"
+            + String(capture.id.uuidString.prefix(8))
     }
 
     private func status(

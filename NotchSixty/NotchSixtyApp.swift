@@ -68,6 +68,7 @@ final class ProductController: ObservableObject {
     let audioEngine: AudioIOEngine
     let audioUnitHost: AudioUnitHostController
     let profiles: ProductProfileController
+    let abComparison: ContentABComparisonController
     let calibration: RoomCorrectionCalibrationController
     let multichannelCalibration: MultichannelCalibrationController
     let roomCorrectionProjects: RoomCorrectionProjectController
@@ -75,6 +76,9 @@ final class ProductController: ObservableObject {
     let ambientCompensation: AmbientCompensationController
     let activeQuietZone: ActiveQuietZoneController
     let hardwareAcceptance: HardwareAcceptanceController
+    let backup: NotchSixtyBackupService
+    let recovery: ProductRecoveryController
+    let headroomAssistant: HeadroomAssistantController
     let reference: ProductionReferenceNavigator
     private var audioEngineObservation: AnyCancellable?
     private var calibrationObservation: AnyCancellable?
@@ -82,6 +86,8 @@ final class ProductController: ObservableObject {
     private var ambientCompensationObservation: AnyCancellable?
     private var activeQuietZoneObservation: AnyCancellable?
     private var audioUnitHostObservation: AnyCancellable?
+    private var recoveryObservation: AnyCancellable?
+    private var terminationObservation: AnyCancellable?
 
     init() {
         let audioEngine = AudioIOEngine()
@@ -94,6 +100,8 @@ final class ProductController: ObservableObject {
         self.audioEngine = audioEngine
         self.audioUnitHost = audioUnitHost
         self.profiles = profiles
+        let abComparison = ContentABComparisonController(profiles: profiles)
+        self.abComparison = abComparison
         self.calibration = calibration
         self.multichannelCalibration = MultichannelCalibrationController(
             engine: audioEngine,
@@ -120,11 +128,26 @@ final class ProductController: ObservableObject {
             ambient: ambientCompensation
         )
         self.hardwareAcceptance = HardwareAcceptanceController()
+        self.backup = NotchSixtyBackupService(
+            profiles: profiles,
+            roomStore: roomProjects.store
+        )
+        self.recovery = ProductRecoveryController()
+        self.headroomAssistant = HeadroomAssistantController(
+            engine: audioEngine,
+            profiles: profiles,
+            abComparison: abComparison
+        )
         self.reference = ProductionReferenceNavigator()
         observeAudioEngine()
+        observeTermination()
     }
 
-    init(audioEngine: AudioIOEngine) {
+    init(
+        audioEngine: AudioIOEngine,
+        recoveryStore: ProductRecoveryStore =
+            ProductRecoveryStore(storageURL: nil)
+    ) {
         let audioUnitHost = AudioUnitHostController()
         let profiles = ProductProfileController(
             engine: audioEngine,
@@ -134,6 +157,8 @@ final class ProductController: ObservableObject {
         self.audioEngine = audioEngine
         self.audioUnitHost = audioUnitHost
         self.profiles = profiles
+        let abComparison = ContentABComparisonController(profiles: profiles)
+        self.abComparison = abComparison
         self.calibration = calibration
         self.multichannelCalibration = MultichannelCalibrationController(
             engine: audioEngine,
@@ -160,6 +185,18 @@ final class ProductController: ObservableObject {
             ambient: ambientCompensation
         )
         self.hardwareAcceptance = HardwareAcceptanceController()
+        self.backup = NotchSixtyBackupService(
+            profiles: profiles,
+            roomStore: roomProjects.store
+        )
+        self.recovery = ProductRecoveryController(
+            store: recoveryStore
+        )
+        self.headroomAssistant = HeadroomAssistantController(
+            engine: audioEngine,
+            profiles: profiles,
+            abComparison: abComparison
+        )
         self.reference = ProductionReferenceNavigator()
         observeAudioEngine()
     }
@@ -182,8 +219,11 @@ final class ProductController: ObservableObject {
     }
 
     func prepareForUse() {
+        recovery.prepareForLaunch()
         audioEngine.prepareForUse()
-        profiles.restoreSelectedLayers()
+        if !recovery.safeLaunchActive {
+            profiles.restoreSelectedLayers()
+        }
         roomCorrectionProjects.prepareForUse()
         roomTreatmentAdvisor.prepareForUse()
         calibration.prepareForUse()
@@ -193,19 +233,123 @@ final class ProductController: ObservableObject {
         hardwareAcceptance.prepareForUse()
     }
 
-    func startProcessing() async throws {
-        let format =
-            try audioEngine.audioUnitRackProcessingFormatForNextStart()
-        await audioUnitHost.prepareActiveSlotsForLive(format: format)
-        let liveRack =
-            try await audioUnitHost.makeLiveRackRuntime(format: format)
-        try audioEngine.stageAudioUnitRackForNextStart(liveRack)
+    func openNormallyFromSafeLaunch() throws {
+        try normalizeRecoveryLifecycleToIdle()
+        try profiles.applySelectedLayersNow()
+        recovery.openNormally()
+    }
+
+    func openWithPlugInsBypassedFromSafeLaunch() throws {
+        try normalizeRecoveryLifecycleToIdle()
+        try profiles.applySelectedLayersNow()
+        recovery.openWithPlugInsBypassed()
+    }
+
+    func restoreLastKnownGoodFromSafeLaunch() throws {
+        try normalizeRecoveryLifecycleToIdle()
+        let previous = profiles.makeBackupSnapshot()
+        let lastKnownGood = try recovery.lastKnownGoodSnapshot()
+
         do {
+            let report = try profiles.restoreBackupSnapshot(
+                lastKnownGood,
+                availableOutputUIDs:
+                    Set(audioEngine.outputDevices.map(\.uid)),
+                recomputeHardwareRequirements: true
+            )
+            guard report.hardwareMappingRequiredCount == 0 else {
+                throw ProductRecoveryError
+                    .lastKnownGoodRequiresHardwareMapping(
+                        report.hardwareMappingRequiredCount
+                    )
+            }
+            try profiles.applySelectedLayersNow()
+            abComparison.clearAll()
+            recovery.resolveAfterLastKnownGoodRestore()
+        } catch {
+            _ = try? profiles.restoreBackupSnapshot(
+                previous,
+                availableOutputUIDs:
+                    Set(audioEngine.outputDevices.map(\.uid)),
+                recomputeHardwareRequirements: false
+            )
+            // applySelectedLayersNow() already rolls engine state back to its
+            // pre-recovery state on failure. Keep Safe Launch neutral here;
+            // the user can still explicitly choose Open Normally afterward.
+            throw error
+        }
+    }
+
+    func startProcessing() async throws {
+        guard !recovery.safeLaunchActive else {
+            throw ProductRecoveryError.safeLaunchDecisionRequired
+        }
+
+        if audioEngine.lifecycleState == .failed {
+            audioEngine.stop()
+        }
+        let format: AudioUnitRackProcessingFormat
+        do {
+            format =
+                try audioEngine.audioUnitRackProcessingFormatForNextStart()
+        } catch {
+            recovery.recordStartFailure(
+                .audioStart,
+                description: error.localizedDescription
+            )
+            throw error
+        }
+
+        if recovery.plugInsBypassedForThisLaunch {
+            do {
+                try audioEngine.stageAudioUnitRackForNextStart(nil)
+                try audioEngine.start()
+                recovery.recordSuccessfulStart(
+                    profiles: profiles.makeBackupSnapshot(),
+                    plugInChainHealthy: false
+                )
+                return
+            } catch {
+                recovery.recordStartFailure(
+                    .audioStart,
+                    description: error.localizedDescription
+                )
+                throw error
+            }
+        }
+
+        await audioUnitHost.prepareActiveSlotsForLive(format: format)
+
+        let liveRack: AudioUnitLiveRackRuntime?
+        do {
+            liveRack =
+                try await audioUnitHost.makeLiveRackRuntime(
+                    format: format
+                )
+        } catch {
+            recovery.recordStartFailure(
+                .plugInStart,
+                description: error.localizedDescription
+            )
+            throw error
+        }
+
+        do {
+            try audioEngine.stageAudioUnitRackForNextStart(liveRack)
             try audioEngine.start()
+            recovery.recordSuccessfulStart(
+                profiles: profiles.makeBackupSnapshot(),
+                plugInChainHealthy:
+                    !audioUnitHost.activeRackHasQuarantinedComponent
+            )
         } catch {
             // AudioIOEngine owns any staged live rack until the failed state is
             // explicitly stopped. Do not tear it out from under a transport
             // teardown that may still be completing.
+            recovery.recordStartFailure(
+                .audioStart,
+                description: error.localizedDescription
+            )
             throw error
         }
     }
@@ -283,6 +427,66 @@ final class ProductController: ObservableObject {
         multichannelCalibration.cancelMeasurement()
         calibration.cancelMeasurement()
         audioEngine.shutdownForTermination()
+        recovery.markCleanTermination()
+    }
+
+    private func normalizeRecoveryLifecycleToIdle() throws {
+        if audioEngine.lifecycleState == .failed {
+            audioEngine.stop()
+        }
+        guard audioEngine.lifecycleState == .idle else {
+            throw ProductRecoveryError.recoveryRequiresIdle
+        }
+    }
+
+    func diagnosticsReport(
+        version: String,
+        build: String
+    ) -> String {
+        let output = audioEngine.selectedOutputDevice
+        let kernel =
+            audioEngine.diagnosticsSnapshot().renderKernelDiagnostics
+
+        let outputName = output?.name ?? "None selected"
+        let outputUID = output?.uid ?? "None"
+        let outputRate = output.map {
+            String(
+                format: "%.1f kHz",
+                $0.nominalSampleRate / 1_000.0
+            )
+        } ?? "Unavailable"
+        let latency: String
+        if let kernel, kernel.sampleRate > 0 {
+            latency = String(
+                format: "%u frames / %.3f ms",
+                kernel.latencyFrames,
+                Double(kernel.latencyFrames)
+                    / kernel.sampleRate * 1_000.0
+            )
+        } else {
+            latency = "Unavailable"
+        }
+
+        return ([
+            "Notch Sixty Diagnostics",
+            "Version: \(version) (\(build))",
+            "macOS: \(ProcessInfo.processInfo.operatingSystemVersionString)",
+            "Architecture: Apple Silicon",
+            "Lifecycle: \(audioEngine.lifecycleState.rawValue)",
+            "Output: \(outputName)",
+            "Output UID: \(outputUID)",
+            "Output Rate: \(outputRate)",
+            "Content Preset: \(profiles.selectedContentPresetName)",
+            "Playback System: \(profiles.selectedSystemProfileName)",
+            "Global Bypass: \(audioEngine.playbackControlConfiguration.globalBypassed ? "On" : "Off")",
+            "EQ Phase: \(audioEngine.stereoEQConfiguration.phaseMode.displayName)",
+            "EQ Bands Enabled: \(audioEngine.stereoEQConfiguration.enabledBandCount)",
+            "Bass Management: \(audioEngine.bassManagementConfiguration.enabled ? "On" : "Off")",
+            "Room Correction: \(audioEngine.roomCorrectionConfiguration.enabled ? "On" : "Off")",
+            "DSP Latency: \(latency)",
+            "Quarantined Plug-ins: \(audioUnitHost.quarantinedComponentCount)",
+        ] + recovery.diagnosticsLines())
+            .joined(separator: "\n")
     }
 
     private func observeAudioEngine() {
@@ -304,6 +508,19 @@ final class ProductController: ObservableObject {
         audioUnitHostObservation = audioUnitHost.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
+        recoveryObservation = recovery.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+    }
+
+    private func observeTermination() {
+        terminationObservation = NotificationCenter.default
+            .publisher(for: NSApplication.willTerminateNotification)
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.shutdownForTermination()
+                }
+            }
     }
 }
 
@@ -1135,7 +1352,7 @@ private struct EngineeringValidationView: View {
 
 #endif
 
-private enum ApplicationAppearanceMode: String, CaseIterable, Identifiable {
+enum ApplicationAppearanceMode: String, CaseIterable, Identifiable {
     case system
     case light
     case dark
@@ -1151,7 +1368,7 @@ private enum ApplicationAppearanceMode: String, CaseIterable, Identifiable {
     }
 }
 
-private enum ApplicationPresenceMode: String, CaseIterable, Identifiable {
+enum ApplicationPresenceMode: String, CaseIterable, Identifiable {
     case dock
     case tray
     case both
@@ -1167,7 +1384,7 @@ private enum ApplicationPresenceMode: String, CaseIterable, Identifiable {
     }
 }
 
-private enum ApplicationVolumeStepResolution: Int, CaseIterable, Identifiable {
+enum ApplicationVolumeStepResolution: Int, CaseIterable, Identifiable {
     case standard = 16
     case fine = 32
     case precision = 64
@@ -1187,7 +1404,7 @@ private enum ApplicationVolumeStepResolution: Int, CaseIterable, Identifiable {
 }
 
 @MainActor
-private final class ApplicationPreferences: ObservableObject {
+final class ApplicationPreferences: ObservableObject {
     private enum Key {
         static let appearance = "application.appearance"
         static let presence = "application.presence"
@@ -1296,6 +1513,37 @@ private final class ApplicationPreferences: ObservableObject {
         applyActivationPolicy()
     }
 
+
+    func makeBackupSnapshot() -> NotchSixtyBackupPreferences {
+        NotchSixtyBackupPreferences(
+            appearance: appearance.rawValue,
+            presence: presence.rawValue,
+            volumeStepResolution: volumeStepResolution.rawValue
+        )
+    }
+
+    /// Restores only portable app-owned preferences. macOS permission grants
+    /// and Launch at Login are intentionally excluded from the backup format.
+    func restoreBackupSnapshot(
+        _ snapshot: NotchSixtyBackupPreferences
+    ) throws {
+        try snapshot.validate()
+        guard let appearance =
+                ApplicationAppearanceMode(rawValue: snapshot.appearance),
+              let presence =
+                ApplicationPresenceMode(rawValue: snapshot.presence),
+              let resolution =
+                ApplicationVolumeStepResolution(
+                    rawValue: snapshot.volumeStepResolution
+                ) else {
+            throw NotchSixtyBackupError.invalidPreferences
+        }
+
+        self.appearance = appearance
+        self.presence = presence
+        self.volumeStepResolution = resolution
+    }
+
     private func applyAppearance() {
         switch appearance {
         case .system:
@@ -1370,6 +1618,9 @@ private struct ProductionMenuBarView: View {
     }
 
     private var canToggleProcessing: Bool {
+        guard !product.recovery.safeLaunchActive else {
+            return false
+        }
         switch engine.lifecycleState {
         case .idle, .running, .reconfiguring, .recoveringOutput, .failed:
             return true
@@ -1403,6 +1654,9 @@ private struct ProductionMenuBarView: View {
     }
 
     private var statusLabel: String {
+        if product.recovery.safeLaunchActive {
+            return "Safe Launch"
+        }
         switch engine.lifecycleState {
         case .idle: return "Stopped"
         case .running: return "Processing"
@@ -1416,6 +1670,9 @@ private struct ProductionMenuBarView: View {
     }
 
     private var statusSymbol: String {
+        if product.recovery.safeLaunchActive {
+            return "lifepreserver.fill"
+        }
         switch engine.lifecycleState {
         case .running: return "waveform.circle.fill"
         case .failed: return "exclamationmark.triangle.fill"
@@ -1432,7 +1689,13 @@ private struct ProductionMenuBarView: View {
                         .font(.headline)
                     Label(statusLabel, systemImage: statusSymbol)
                         .font(.caption)
-                        .foregroundStyle(engine.lifecycleState == .failed ? .red : .secondary)
+                        .foregroundStyle(
+                            product.recovery.safeLaunchActive
+                                ? .orange
+                                : engine.lifecycleState == .failed
+                                    ? .red
+                                    : .secondary
+                        )
                 }
                 Spacer(minLength: 16)
             }
@@ -1508,6 +1771,7 @@ private struct ProductionSettingsView: View {
     @ObservedObject var preferences: ApplicationPreferences
     @ObservedObject var product: ProductController
     @ObservedObject var reference: ProductionReferenceNavigator
+    @State private var backupMessage: String?
 
     private var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
@@ -1518,49 +1782,117 @@ private struct ProductionSettingsView: View {
     }
 
     private var diagnosticsReport: String {
-        let engine = product.audioEngine
-        let output = engine.selectedOutputDevice
-        let kernel = engine.diagnosticsSnapshot().renderKernelDiagnostics
-
-        let outputName = output?.name ?? "None selected"
-        let outputUID = output?.uid ?? "None"
-        let outputRate = output.map {
-            String(format: "%.1f kHz", $0.nominalSampleRate / 1_000.0)
-        } ?? "Unavailable"
-        let latency: String
-        if let kernel, kernel.sampleRate > 0 {
-            latency = String(
-                format: "%u frames / %.3f ms",
-                kernel.latencyFrames,
-                Double(kernel.latencyFrames) / kernel.sampleRate * 1_000.0
-            )
-        } else {
-            latency = "Unavailable"
-        }
-
-        return [
-            "Notch Sixty Diagnostics",
-            "Version: \(version) (\(build))",
-            "macOS: \(ProcessInfo.processInfo.operatingSystemVersionString)",
-            "Architecture: Apple Silicon",
-            "Lifecycle: \(engine.lifecycleState.rawValue)",
-            "Output: \(outputName)",
-            "Output UID: \(outputUID)",
-            "Output Rate: \(outputRate)",
-            "Content Preset: \(product.profiles.selectedContentPresetName)",
-            "Playback System: \(product.profiles.selectedSystemProfileName)",
-            "Global Bypass: \(engine.playbackControlConfiguration.globalBypassed ? "On" : "Off")",
-            "EQ Phase: \(engine.stereoEQConfiguration.phaseMode.displayName)",
-            "EQ Bands Enabled: \(engine.stereoEQConfiguration.enabledBandCount)",
-            "Bass Management: \(engine.bassManagementConfiguration.enabled ? "On" : "Off")",
-            "Room Correction: \(engine.roomCorrectionConfiguration.enabled ? "On" : "Off")",
-            "DSP Latency: \(latency)",
-        ].joined(separator: "\n")
+        product.diagnosticsReport(
+            version: version,
+            build: build
+        )
     }
 
     private func copyDiagnostics() {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(diagnosticsReport, forType: .string)
+    }
+
+
+    private func saveBackup() {
+        let panel = NSSavePanel()
+        panel.title = "Save Notch Sixty Backup"
+        panel.prompt = "Save Backup"
+        panel.nameFieldStringValue = "Notch-Sixty-Backup.n60backup"
+        panel.allowedFileTypes = ["n60backup"]
+        guard panel.runModal() == .OK, let url = panel.url else {
+            return
+        }
+
+        let accessed = url.startAccessingSecurityScopedResource()
+        defer {
+            if accessed { url.stopAccessingSecurityScopedResource() }
+        }
+
+        do {
+            let data = try product.backup.exportData(
+                preferences: preferences.makeBackupSnapshot(),
+                appVersion: version,
+                appBuild: build
+            )
+            try data.write(to: url, options: .atomic)
+            let bundle = try product.backup.inspect(data)
+            backupMessage =
+                "Backup saved: \(bundle.profiles.contentPresets.count) presets · "
+                + "\(bundle.profiles.systemProfiles.count) playback systems · "
+                + "\(bundle.roomCorrectionProjects.count) room projects · "
+                + "\(bundle.measurementLabSessions.count) lab sessions · "
+                + "\(bundle.binauralAssets.count) binaural profiles."
+        } catch {
+            backupMessage =
+                "Backup failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func restoreBackup() {
+        guard product.audioEngine.lifecycleState == .idle else {
+            backupMessage =
+                "Stop audio processing before restoring a backup."
+            return
+        }
+
+        let panel = NSOpenPanel()
+        panel.title = "Restore Notch Sixty Backup"
+        panel.prompt = "Review Backup"
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.allowedFileTypes = ["n60backup"]
+        guard panel.runModal() == .OK, let url = panel.url else {
+            return
+        }
+
+        let accessed = url.startAccessingSecurityScopedResource()
+        defer {
+            if accessed { url.stopAccessingSecurityScopedResource() }
+        }
+
+        do {
+            let data = try Data(contentsOf: url)
+            let bundle = try product.backup.inspect(data)
+
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Restore this Notch Sixty backup?"
+            alert.informativeText =
+                "This will replace saved Content Presets and Playback Systems "
+                + "and restore \(bundle.roomCorrectionProjects.count) Room Correction "
+                + "projects, \(bundle.measurementLabSessions.count) Measurement Lab "
+                + "sessions, and \(bundle.binauralAssets.count) binaural profiles. "
+                + "Hardware bindings that are not available on this Mac will be "
+                + "marked Needs Mapping and cannot activate until reviewed."
+            alert.addButton(withTitle: "Restore")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else {
+                return
+            }
+
+            product.abComparison.clearAll()
+            let restored = try product.backup.restore(data)
+            try preferences.restoreBackupSnapshot(
+                restored.preferences
+            )
+            product.roomCorrectionProjects.prepareForUse()
+
+            var message =
+                "Restore complete: \(restored.report.contentPresetCount) presets · "
+                + "\(restored.report.playbackSystemCount) playback systems · "
+                + "\(restored.report.roomCorrectionProjectCount) room projects · "
+                + "\(restored.report.measurementLabSessionCount) lab sessions · "
+                + "\(restored.report.binauralAssetCount) binaural profiles"
+            if restored.report.hardwareMappingRequiredCount > 0 {
+                message +=
+                    " · \(restored.report.hardwareMappingRequiredCount) systems need hardware mapping"
+            }
+            backupMessage = message + "."
+        } catch {
+            backupMessage =
+                "Restore failed: \(error.localizedDescription)"
+        }
     }
 
     var body: some View {
@@ -1710,6 +2042,63 @@ private struct ProductionSettingsView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    settingsCard(
+                        title: "Backup & Restore",
+                        systemImage: "externaldrive.badge.timemachine"
+                    ) {
+                        HStack(spacing: 10) {
+                            Button {
+                                saveBackup()
+                            } label: {
+                                Label(
+                                    "Save Backup…",
+                                    systemImage: "square.and.arrow.up"
+                                )
+                            }
+                            .buttonStyle(.glass)
+
+                            Button {
+                                restoreBackup()
+                            } label: {
+                                Label(
+                                    "Restore Backup…",
+                                    systemImage: "square.and.arrow.down"
+                                )
+                            }
+                            .buttonStyle(.glass)
+                            .disabled(
+                                product.audioEngine.lifecycleState != .idle
+                            )
+                        }
+
+                        Text(
+                            "The .n60backup bundle includes saved presets and "
+                            + "Playback Systems, Room Correction projects, "
+                            + "Measurement Lab sessions, binaural profiles, "
+                            + "and portable app preferences. Launch at Login, "
+                            + "macOS permissions, and physical acceptance "
+                            + "authority are never changed by restore."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                        Text(
+                            "Restored hardware bindings are never silently "
+                            + "reassigned. Systems that reference unavailable "
+                            + "devices are marked Needs Mapping and remain "
+                            + "blocked from activation until reviewed."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                        if let backupMessage {
+                            Text(backupMessage)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
                     }
 
                     settingsCard(title: "Support", systemImage: "wrench.and.screwdriver") {

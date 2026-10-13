@@ -48,6 +48,9 @@
 		A20000000000000000000019 /* DynamicsConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000029 /* DynamicsConfiguration.swift */; };
 		A2000000000000000000001A /* ProductionAnalysisWorker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000002A /* ProductionAnalysisWorker.swift */; };
 		A2000000000000000000001B /* ProductProfiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000002B /* ProductProfiles.swift */; };
+		B113B0000000000000000062 /* ProductRecovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = B113B0000000000000000061 /* ProductRecovery.swift */; };
+		B113B0000000000000000072 /* HeadroomAssistant.swift in Sources */ = {isa = PBXBuildFile; fileRef = B113B0000000000000000071 /* HeadroomAssistant.swift */; };
+		B113B0000000000000000001 /* NotchSixtyBackup.swift in Sources */ = {isa = PBXBuildFile; fileRef = B113B0000000000000000011 /* NotchSixtyBackup.swift */; };
 		A2000000000000000000001C /* RoomCorrectionCalibrationTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000002C /* RoomCorrectionCalibrationTransport.swift */; };
 		A2000000000000000000001D /* RoomCorrectionCalibrationController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000002D /* RoomCorrectionCalibrationController.swift */; };
 		A2000000000000000000001E /* RoomCorrectionMeasurementAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000002E /* RoomCorrectionMeasurementAnalyzer.swift */; };
@@ -339,6 +342,9 @@
 		A20000000000000000000029 /* DynamicsConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DynamicsConfiguration.swift; sourceTree = "<group>"; };
 		A2000000000000000000002A /* ProductionAnalysisWorker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionAnalysisWorker.swift; sourceTree = "<group>"; };
 		A2000000000000000000002B /* ProductProfiles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductProfiles.swift; sourceTree = "<group>"; };
+		B113B0000000000000000061 /* ProductRecovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductRecovery.swift; sourceTree = "<group>"; };
+		B113B0000000000000000071 /* HeadroomAssistant.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeadroomAssistant.swift; sourceTree = "<group>"; };
+		B113B0000000000000000011 /* NotchSixtyBackup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchSixtyBackup.swift; sourceTree = "<group>"; };
 		A2000000000000000000002C /* RoomCorrectionCalibrationTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionCalibrationTransport.swift; sourceTree = "<group>"; };
 		A2000000000000000000002D /* RoomCorrectionCalibrationController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionCalibrationController.swift; sourceTree = "<group>"; };
 		A2000000000000000000002E /* RoomCorrectionMeasurementAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionMeasurementAnalyzer.swift; sourceTree = "<group>"; };
@@ -619,6 +625,7 @@
 			children = (
 				A20000000000000000000050 /* Audio */,
 				A20000000000000000000054 /* State */,
+				B113B0000000000000000050 /* Backup */,
 				A20000000000000000000055 /* Diagnostics */,
 				F112A0000000000000000011 /* HardwareAcceptance.swift */,
 				F112A0000000000000000012 /* HardwareAcceptanceController.swift */,
@@ -875,7 +882,15 @@
 		A20000000000000000000051 /* CoreAudio */ = {isa = PBXGroup; children = (A20000000000000000000021 /* CoreAudioError.swift */, F63000000000000000000011 /* CoreAudioNChannelTransportSession.swift */, F65000000000000000000013 /* CoreAudioSemanticTransportSupport.swift */, F65000000000000000000014 /* CoreAudioBinauralHeadphoneTransportSession.swift */, F64000000000000000000013 /* MultichannelCalibrationTransport.swift */, A20000000000000000000028 /* MasterVolumeDeviceController.swift */, A2000000000000000000002C /* RoomCorrectionCalibrationTransport.swift */,); path = CoreAudio; sourceTree = "<group>"; };
 		A20000000000000000000052 /* Devices */ = {isa = PBXGroup; children = (A20000000000000000000022 /* AudioOutputDevice.swift */, A20000000000000000000023 /* OutputDeviceCatalog.swift */,); path = Devices; sourceTree = "<group>"; };
 		A20000000000000000000053 /* Routing */ = {isa = PBXGroup; children = (A20000000000000000000024 /* AudioRouteConfiguration.swift */, F62000000000000000000011 /* OutputDeviceProfileConfiguration.swift */, F65000000000000000000011 /* HeadphoneDeviceProfileConfiguration.swift */, F65000000000000000000012 /* BinauralProfileAsset.swift */, F64000000000000000000011 /* OutputDeviceCalibration.swift */,); path = Routing; sourceTree = "<group>"; };
-		A20000000000000000000054 /* State */ = {isa = PBXGroup; children = (A20000000000000000000025 /* AudioLifecycleState.swift */, A2000000000000000000002B /* ProductProfiles.swift */, F64000000000000000000014 /* MultichannelCalibrationController.swift */, A2000000000000000000002D /* RoomCorrectionCalibrationController.swift */, A2000000000000000000002F /* RoomCorrectionProjectController.swift */, F89300000000000000000011 /* AmbientCompensationController.swift */, F90200000000000000000011 /* ActiveQuietZoneController.swift */, F92000000000000000000012 /* RoomTreatmentAdvisorController.swift */,); path = State; sourceTree = "<group>"; };
+		B113B0000000000000000050 /* Backup */ = {
+			isa = PBXGroup;
+			children = (
+				B113B0000000000000000011 /* NotchSixtyBackup.swift */,
+			);
+			path = Backup;
+			sourceTree = "<group>";
+		};
+		A20000000000000000000054 /* State */ = {isa = PBXGroup; children = (A20000000000000000000025 /* AudioLifecycleState.swift */, A2000000000000000000002B /* ProductProfiles.swift */, B113B0000000000000000061 /* ProductRecovery.swift */, B113B0000000000000000071 /* HeadroomAssistant.swift */, F64000000000000000000014 /* MultichannelCalibrationController.swift */, A2000000000000000000002D /* RoomCorrectionCalibrationController.swift */, A2000000000000000000002F /* RoomCorrectionProjectController.swift */, F89300000000000000000011 /* AmbientCompensationController.swift */, F90200000000000000000011 /* ActiveQuietZoneController.swift */, F92000000000000000000012 /* RoomTreatmentAdvisorController.swift */,); path = State; sourceTree = "<group>"; };
 		A20000000000000000000055 /* Diagnostics */ = {isa = PBXGroup; children = (A20000000000000000000026 /* AudioDiagnosticsSnapshot.swift */, A2000000000000000000002A /* ProductionAnalysisWorker.swift */,); path = Diagnostics; sourceTree = "<group>"; };
 		A30000000000000000000050 /* Realtime */ = {
 			isa = PBXGroup;
@@ -1064,6 +1079,9 @@
 				A20000000000000000000016 /* AudioDiagnosticsSnapshot.swift in Sources */,
 				A2000000000000000000001A /* ProductionAnalysisWorker.swift in Sources */,
 				A2000000000000000000001B /* ProductProfiles.swift in Sources */,
+				B113B0000000000000000062 /* ProductRecovery.swift in Sources */,
+				B113B0000000000000000072 /* HeadroomAssistant.swift in Sources */,
+				B113B0000000000000000001 /* NotchSixtyBackup.swift in Sources */,
 				A2000000000000000000001C /* RoomCorrectionCalibrationTransport.swift in Sources */,
 				A2000000000000000000001D /* RoomCorrectionCalibrationController.swift in Sources */,
 				A2000000000000000000001E /* RoomCorrectionMeasurementAnalyzer.swift in Sources */,

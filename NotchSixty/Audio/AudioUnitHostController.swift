@@ -149,6 +149,16 @@ final class AudioUnitHostController: ObservableObject {
         quarantine.entries.count
     }
 
+    var activeRackHasQuarantinedComponent: Bool {
+        rackConfiguration.slots.contains { slot in
+            guard !slot.bypassed,
+                  let component = slot.component else {
+                return false
+            }
+            return quarantine.isQuarantined(component)
+        }
+    }
+
     func preparationReport(
         forSlotID slotID: UUID
     ) -> AudioUnitOfflinePreparationReport? {
