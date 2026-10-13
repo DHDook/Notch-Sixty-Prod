@@ -35,6 +35,20 @@ Planned slices:
 - Slice 5 — commercial metadata / support / release documentation; and
 - Slice 6 — integrated RC gate and credential/physical handoff.
 
+**Slices 1–2 are implemented remotely; the combined exact-head validation
+gate is pending.**
+
+Slice 1 reconciles the actual PR113B shipping tree into a machine-readable
+release baseline, preserves modern release-hardening contracts, and leaves
+final commercial app-icon owner approval explicitly unresolved.
+
+Slice 2 aligns microphone permission wording with the finished measurement
+surface and adds a branch-local App Store privacy/security audit. The current
+Mac-only RC has no bundled app-owned network/analytics/tracking SDK, no privacy
+manifest added by ritual, and no completed App Store Connect privacy-policy or
+App Privacy metadata claim. Those account metadata items remain external
+release gates.
+
 Remote PR114 work may establish software/package readiness only. It cannot
 complete PR112 physical H01–H08 acceptance, production Apple signing, App Store
 Connect/TestFlight/App Review, live feed-forward ANC authorization, public
