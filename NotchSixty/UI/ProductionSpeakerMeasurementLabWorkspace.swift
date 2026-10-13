@@ -34,6 +34,8 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
     private let store = SpeakerMeasurementLabSessionStore()
     private let reportBuilder = SpeakerMeasurementLabReportBuilder()
     private let exporter = SpeakerMeasurementLabReportExporter()
+    private let driverCommissioningStore =
+        ProtectedDriverCommissioningDraftStore()
 
     @State private var draft = SpeakerMeasurementLabProtocolDraft()
     @State private var queuedProtocols: [SpeakerMeasurementLabProtocol] = []
@@ -46,6 +48,9 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
     @State private var exportContentType: UTType = .json
     @State private var exportFilename = "notch-sixty-speaker-lab"
     @State private var showingExporter = false
+    @State private var driverCommissioningDraft:
+        ProtectedDriverCommissioningDraft?
+    @State private var driverCommissioningMessage: String?
 
     init(
         engine: AudioIOEngine,
@@ -78,6 +83,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                 protocolComposerCard
                 sessionCard
                 reportCard
+                protectedDriverCommissioningCard
                 coherentAlignmentCard
                 historyCard
 
@@ -125,6 +131,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
         }
         .task(id: lab.session?.modifiedAt) {
             refreshRecentSessions()
+            loadDriverCommissioningDraft()
         }
         .fileExporter(
             isPresented: $showingExporter,
@@ -863,6 +870,207 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                 .foregroundStyle(.secondary)
                 .padding(6)
             }
+        }
+    }
+
+    private var protectedDriverCommissioningCard: some View {
+        GroupBox("Per-Driver Commissioning Preview") {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("PR111 · Protected driver optimizer")
+                            .font(.headline)
+                        Text(
+                            "Build an exact state-bound preview from qualified protected Low/Mid/High measurements. This remote draft snapshots rollback state but cannot Apply until a real combined-driver verification and PR112 hardware acceptance exist."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Text(
+                        driverCommissioningDraft == nil
+                            ? "NO DRAFT" : "HARDWARE BLOCKED"
+                    )
+                    .font(.caption.bold())
+                    .tracking(0.8)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(.quaternary, in: Capsule())
+                }
+
+                HStack(spacing: 10) {
+                    Button("Prepare Commissioning Draft") {
+                        actionError = nil
+                        driverCommissioningMessage = nil
+                        do {
+                            guard let session = lab.session,
+                                  let profile =
+                                    profiles.selectedSystemProfile else {
+                                throw ProtectedDriverCommissioningError
+                                    .invalidSession
+                            }
+                            let prepared =
+                                try ProtectedDriverCommissioningPlanner()
+                                    .draft(
+                                        profile: profile,
+                                        session: session
+                                    )
+                            try driverCommissioningStore.save(prepared)
+                            driverCommissioningDraft = prepared
+                            driverCommissioningMessage =
+                                "Draft saved. No DSP was changed."
+                        } catch {
+                            driverCommissioningDraft = nil
+                            driverCommissioningMessage =
+                                error.localizedDescription
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(
+                        lab.progress?.complete != true
+                            || profiles.selectedSystemProfile == nil
+                            || engine.lifecycleState != .idle
+                    )
+
+                    if let draft = driverCommissioningDraft {
+                        Button("Check Current State") {
+                            actionError = nil
+                            do {
+                                guard let profile =
+                                    profiles.selectedSystemProfile else {
+                                    throw ProtectedDriverCommissioningError
+                                        .playbackSystemMismatch
+                                }
+                                try ProtectedDriverCommissioningPlanner()
+                                    .validateCurrentState(
+                                        profile,
+                                        against: draft
+                                    )
+                                driverCommissioningMessage =
+                                    "Playback System still matches the exact rollback snapshot."
+                            } catch {
+                                driverCommissioningMessage =
+                                    error.localizedDescription
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+
+                if let draft = driverCommissioningDraft {
+                    Divider()
+                    LazyVGrid(
+                        columns: [
+                            GridItem(
+                                .adaptive(minimum: 180),
+                                spacing: 12
+                            )
+                        ],
+                        alignment: .leading,
+                        spacing: 10
+                    ) {
+                        status(
+                            "Affected buses",
+                            draft.affectedBuses.isEmpty
+                                ? "No PEQ cuts"
+                                : draft.affectedBuses
+                                    .map(\.displayName)
+                                    .joined(separator: ", ")
+                        )
+                        status(
+                            "Qualified protocols",
+                            "\(draft.sourceProtocolIDs.count)"
+                        )
+                        status(
+                            "Qualified captures",
+                            "\(draft.sourceCaptureIDs.count)"
+                        )
+                        status(
+                            "Timing models",
+                            "\(draft.timingReviews.count)"
+                        )
+                        status(
+                            "Rollback snapshot",
+                            draft.rollbackSnapshotAvailable
+                                ? "Captured" : "Missing"
+                        )
+                        status("Apply", "BLOCKED")
+                    }
+
+                    ForEach(
+                        Array(draft.timingReviews.enumerated()),
+                        id: \.offset
+                    ) { _, review in
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(
+                                "\(review.firstBus.displayName) + \(review.secondBus.displayName)"
+                            )
+                            .font(.caption.bold())
+                            Text(
+                                String(
+                                    format:
+                                        "Crossover %.0f Hz · modeled Δ %.2f dB · %@",
+                                    review.crossoverFrequencyHz,
+                                    review.modeledDeficitReductionDB,
+                                    review.bestHypothesis.rawValue
+                                )
+                            )
+                            .font(.caption.monospacedDigit())
+                            Text(
+                                "Combined-driver capture: NOT VERIFIED"
+                            )
+                            .font(.caption2.bold())
+                            .foregroundStyle(.secondary)
+                        }
+                        .padding(8)
+                        .frame(
+                            maxWidth: .infinity,
+                            alignment: .leading
+                        )
+                        .background(
+                            .secondary.opacity(0.04),
+                            in: RoundedRectangle(cornerRadius: 8)
+                        )
+                    }
+
+                    Label(
+                        "No Apply control exists in PR111 remote closeout. The draft cannot change PEQ, delay, polarity, crossover, limiter, routing, or live output.",
+                        systemImage: "hand.raised.fill"
+                    )
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
+                } else {
+                    Text(
+                        "Complete a protected-driver Lab session to build a review-only state snapshot."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+
+                if let message = driverCommissioningMessage {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(6)
+        }
+    }
+
+    private func loadDriverCommissioningDraft() {
+        guard let sessionID = lab.session?.id else {
+            driverCommissioningDraft = nil
+            driverCommissioningMessage = nil
+            return
+        }
+        do {
+            driverCommissioningDraft =
+                try driverCommissioningStore.load(sessionID)
+            driverCommissioningMessage = nil
+        } catch {
+            driverCommissioningDraft = nil
+            driverCommissioningMessage =
+                error.localizedDescription
         }
     }
 
