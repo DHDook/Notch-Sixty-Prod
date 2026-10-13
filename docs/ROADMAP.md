@@ -36,17 +36,19 @@ core-DSP expansion:
 The modal first-run assistant and Playback-System lock are deliberately
 deferred.
 
-**Slice 1 is implemented remotely.** A/B capture is temporary, in-memory and
-non-live. The allowed audition payload is limited to stereo EQ, input preamp,
+**Slices 1–2 are implemented remotely.** Slice 1 established the temporary,
+in-memory safe A/B capture boundary. The allowed audition payload is limited to stereo EQ, input preamp,
 headroom attenuation and content dynamics. Audio Unit rack topology and every
 Playback-System/hardware-domain setting remain outside the A/B payload. Each
 snapshot pins the selected Playback System identity plus exact
 `PlaybackSystemState`; later audition must fail closed on identity or state
 drift.
 
-Slice 1 deliberately introduces **no live A/B Apply/switch method**. The
-click-free executor moves to Slice 2 after the safety boundary is regression
-locked.
+Slice 2 adds live A/B audition through the existing 8 ms sample-domain
+fade/silent-boundary graph transition, optional attenuation-only measured
+level matching from captured short-term LUFS, direct A/B toolbar controls, and
+pre-session content restore. Playback-System identity/state drift still fails
+closed, and Audio Unit topology remains outside the A/B payload.
 
 PR113B software work cannot satisfy PR112 physical acceptance and cannot set
 `releaseAcceptanceComplete`, `liveFeedForwardANCAuthorized`, or
