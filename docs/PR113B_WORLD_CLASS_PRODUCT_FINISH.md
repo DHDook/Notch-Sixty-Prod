@@ -1,6 +1,6 @@
 # PR113B — World-Class Product Finish
 
-Status: **IN PROGRESS — SLICES 1–4 IMPLEMENTED REMOTELY**
+Status: **IN PROGRESS — SLICES 1–5 IMPLEMENTED REMOTELY**
 
 PR113B is stacked directly on the exact remotely-complete PR113 head
 `f0a260336a0df7284a0c414f39a6e43b7d86ca1b`.
@@ -314,6 +314,80 @@ release authority.
 
 ---
 
+## Slice 5 — Safe Launch / Recovery Mode
+
+Slice 5 adds a machine-local recovery layer around the existing idle-by-default
+audio lifecycle. It does not create a second audio engine and does not
+automatically start processing.
+
+### Recovery evidence and launch sentinel
+
+\`ProductRecoveryController\` persists a versioned
+\`recovery-state.json\` under Application Support / Notch Sixty / Recovery.
+This state is intentionally machine-local and is **not** part of
+\`.n60backup\`.
+
+The record tracks:
+
+- whether the previous launch session was closed cleanly;
+- consecutive audio-start failures;
+- consecutive plug-in preparation/build failures;
+- the last failure kind, description and timestamp; and
+- the profile snapshot from the most recent successful **normal** processing
+  start.
+
+Safe Launch is requested when the prior launch was unclean, when either
+start-failure counter reaches two, or when the recovery record itself cannot be
+trusted.
+
+### Explicit recovery choices
+
+When recovery evidence exists, the main window presents a non-dismissible
+**Safe Launch** sheet while processing remains stopped. The user may choose:
+
+- **Open Normally** — apply the currently saved selected Playback System and
+  Content Preset, then continue normally;
+- **Open with Plug-ins Bypassed This Launch** — apply the saved product layers
+  but stage no Audio Unit runtime for this launch; the saved rack is not edited;
+- **Restore Last Known Good** — transactionally restore the saved profile
+  snapshot from the most recent successful normal start, then explicitly apply
+  its selected layers; or
+- **Copy Diagnostics** — copy the same shared diagnostic report used by
+  Preferences & Reference, including recovery state.
+
+Restore Last Known Good rolls profile persistence back to the pre-recovery
+snapshot if selected-layer application fails.
+
+### Last-known-good authority
+
+A successful normal start records the current saved product-profile snapshot as
+Last Known Good and resets failure counters. A start with plug-ins bypassed, or
+with any quarantined Audio Unit component, may prove the core audio path works
+but **cannot overwrite Last Known Good**.
+
+Recovery bookkeeping failures are diagnostic only; they do not turn an
+otherwise successful audio start into a playback failure.
+
+### Unified processing start
+
+All production Start controls now route through
+\`ProductController.startProcessing()\`. The main toolbar no longer calls
+\`AudioIOEngine.start()\` directly, so Audio Unit preparation, quarantine,
+recovery accounting and safe-launch gating cannot be bypassed by choosing a
+different UI surface.
+
+An engine left in \`.failed\` after a start attempt is normalized back to idle
+before an explicit recovery action or retry.
+
+### Authority boundary
+
+Recovery state contains no physical-acceptance, release, merge or live
+feed-forward ANC authority. A machine-local recovery record cannot satisfy
+PR112 evidence requirements or promote the stacked PRs.
+
+
+---
+
 ## Regression coverage
 
 `ProductionInformationArchitectureTests` verifies:
@@ -331,6 +405,10 @@ release authority.
 - transfer and impulse CSV retain the raw grids/samples;
 - FRD preserves measured phase and labels transfer-function dB honestly; and
 - WAV export is mono 32-bit IEEE float at the capture sample rate;
+- unclean launches and clean termination are distinguished persistently;
+- repeated audio and plug-in failures trigger Safe Launch independently;
+- bypassed/quarantined plug-in starts cannot overwrite Last Known Good; and
+- recovery state carries no physical/release/merge authority;
 
 - the A/B payload contains only the four allowed content-domain fields;
 - Audio Unit rack state survives A/B-state reconstruction unchanged;
