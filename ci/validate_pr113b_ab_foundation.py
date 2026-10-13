@@ -14,6 +14,8 @@ APP = ROOT / "NotchSixty/NotchSixtyApp.swift"
 TOOLBAR = ROOT / "NotchSixty/UI/ProductionProfileToolbar.swift"
 ROOT_UI = ROOT / "NotchSixty/UI/ProductionRootView.swift"
 METERS_UI = ROOT / "NotchSixty/UI/ProductionMetersView.swift"
+GUIDE = ROOT / "NotchSixty/UI/ProductionUserGuideView.swift"
+READINESS = ROOT / "ci/build_pr113b_remote_product_finish_readiness.py"
 LAB_REPORT = ROOT / "NotchSixty/Audio/SpeakerMeasurementLabReport.swift"
 LAB_UI = ROOT / "NotchSixty/UI/ProductionSpeakerMeasurementLabWorkspace.swift"
 LAB_TESTS = ROOT / "NotchSixtyTests/SpeakerMeasurementLabReportTests.swift"
@@ -24,8 +26,8 @@ WORKFLOW = ROOT / ".github/workflows/pr113b-world-class-product-finish.yml"
 
 for path in (
     PROFILES, RECOVERY, HEADROOM, BACKUP, PROJECT, ENGINE, HOST, APP, TOOLBAR,
-    ROOT_UI, METERS_UI, LAB_REPORT, LAB_UI, LAB_TESTS, TESTS, DOC, ROADMAP,
-    WORKFLOW
+    ROOT_UI, METERS_UI, GUIDE, READINESS, LAB_REPORT, LAB_UI, LAB_TESTS, TESTS,
+    DOC, ROADMAP, WORKFLOW
 ):
     assert path.is_file(), f"PR113B Slice 1 missing artifact: {path}"
 
@@ -40,6 +42,8 @@ app = APP.read_text(encoding="utf-8")
 toolbar = TOOLBAR.read_text(encoding="utf-8")
 root_ui = ROOT_UI.read_text(encoding="utf-8")
 meters_ui = METERS_UI.read_text(encoding="utf-8")
+guide = GUIDE.read_text(encoding="utf-8")
+readiness = READINESS.read_text(encoding="utf-8")
 lab_report = LAB_REPORT.read_text(encoding="utf-8")
 lab_ui = LAB_UI.read_text(encoding="utf-8")
 lab_tests = LAB_TESTS.read_text(encoding="utf-8")
@@ -545,6 +549,76 @@ for token in (
         f"PR113B Slice 6 regression missing {token}"
     )
 
+
+# Slice 7 — non-intrusive Getting Started and cumulative remote closeout.
+getting_start = guide.index('id: "getting-started"')
+getting_end = guide.index('id: "dashboard"', getting_start)
+getting_started = guide[getting_start:getting_end]
+
+for token in (
+    '"1. Grant only the permissions you need"',
+    "Screen & System Audio Recording",
+    "Measurement Microphone",
+    '"2. Choose the real output and Playback System"',
+    "Needs Mapping",
+    "conservative listening level",
+    '"3. Make first sound deliberately"',
+    "never starts merely because Notch Sixty launches",
+    "Headroom Assistant",
+    '"4. Choose or create your first Content Preset"',
+    "Use A/B",
+    '"5. Add measurement and calibration only when useful"',
+    "Measurement Lab",
+    "PR112 physical hardware-acceptance",
+    '"6. Protect a good setup"',
+    ".n60backup",
+    "Safe Launch",
+    "Restore Last Known Good",
+    "Copy Diagnostics",
+):
+    assert token in getting_started, (
+        f"PR113B Slice 7 Getting Started coverage missing {token}"
+    )
+
+for token in (
+    "testGettingStartedCoversNonIntrusiveFirstSessionPath",
+    '"getting-started"',
+    '"safe launch"',
+    '"restore last known good"',
+    '"physical hardware-acceptance"',
+):
+    assert token in tests, (
+        f"PR113B Slice 7 Getting Started regression missing {token}"
+    )
+
+for token in (
+    '"schema": "PR113B_REMOTE_PRODUCT_FINISH_READINESS"',
+    '"remoteProductFinishComplete": True',
+    '"abComparisonAvailable": True',
+    '"backupRestoreAvailable": True',
+    '"fullFidelityMeasurementExportAvailable": True',
+    '"safeLaunchRecoveryAvailable": True',
+    '"headroomAssistantAvailable": True',
+    '"gettingStartedCoverageComplete": True',
+    '"physicalAcceptanceComplete": False',
+    '"releaseAcceptanceComplete": False',
+    '"liveFeedForwardANCAuthorized": False',
+    '"mayMergeIntoMain": False',
+    '"physicalEvidenceSuppliedByCI": False',
+):
+    assert token in readiness, (
+        f"PR113B Slice 7 readiness manifest missing {token}"
+    )
+
+for token in (
+    "build_pr113b_remote_product_finish_readiness.py",
+    "pr113b-remote-product-finish-readiness",
+    "actions/upload-artifact@v4",
+):
+    assert token in workflow, (
+        f"PR113B Slice 7 closeout workflow missing {token}"
+    )
+
 for token in (
     "Slice 1 — Safe A/B comparison foundation",
     "Audio Unit rack topology",
@@ -586,4 +660,4 @@ for token in (
 ):
     assert token in workflow, f"PR113B workflow missing {token}"
 
-print("PR113B Slices 1–6 world-class product contract: PASS")
+print("PR113B Slices 1–7 world-class product closeout contract: PASS")
