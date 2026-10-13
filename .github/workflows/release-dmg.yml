@@ -154,6 +154,7 @@ jobs:
 
           shasum -a 256 "$DMG" | tee "$DMG.sha256"
           SHA256="$(awk '{print $1}' "$DMG.sha256")"
+          echo "DMG_SHA256=$SHA256" >> "$GITHUB_ENV"
 
           {
             echo
@@ -165,6 +166,40 @@ jobs:
             echo '> This workflow currently uses an ad-hoc signature. The artifact is a Release build, but it is not Developer-ID signed or notarized. Add production signing/notarization before public direct distribution.'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Create machine-readable package manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACTUAL_SHA="$(git rev-parse HEAD)"
+          test "$ACTUAL_SHA" = "$GITHUB_SHA"
+          export ACTUAL_SHA
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          out = Path(os.environ["RUNNER_TEMP"]) / "release-package-manifest.json"
+          manifest = {
+              "schemaVersion": 1,
+              "product": "Notch Sixty",
+              "sourceCommitSHA": os.environ["ACTUAL_SHA"],
+              "marketingVersion": os.environ["VERSION"],
+              "buildNumber": os.environ["BUILD_NUMBER"],
+              "architecture": "arm64",
+              "dmgName": os.environ["DMG_NAME"],
+              "dmgSHA256": os.environ["DMG_SHA256"],
+              "signature": "ad-hoc",
+              "notarized": False,
+              "publicDistributionReady": False,
+          }
+          out.write_text(
+              json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          print(out.read_text(encoding="utf-8"))
+          PY
+          python3 -m json.tool "$RUNNER_TEMP/release-package-manifest.json" >/dev/null
+
       - name: Upload Release DMG
         uses: actions/upload-artifact@v4
         with:
@@ -172,5 +207,6 @@ jobs:
           path: |
             ${{ runner.temp }}/${{ steps.metadata.outputs.dmg_name }}
             ${{ runner.temp }}/${{ steps.metadata.outputs.dmg_name }}.sha256
+            ${{ runner.temp }}/release-package-manifest.json
           if-no-files-found: error
           retention-days: 90

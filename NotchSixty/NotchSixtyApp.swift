@@ -2033,7 +2033,7 @@ private struct ProductionSettingsView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Measurement Microphone")
                                 .font(.subheadline.weight(.medium))
-                            Text("Requested only from Room Correction when you choose Request Access.")
+                            Text("Requested only when you start a microphone-based measurement or calibration workflow.")
                                 .foregroundStyle(.secondary)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)

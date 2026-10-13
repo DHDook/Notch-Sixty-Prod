@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "milestone": "PR114",
+  "product": {
+    "name": "Notch Sixty",
+    "platform": "macOS",
+    "architecture": "arm64",
+    "bundleIdentifier": "com.dhdook.NotchSixty",
+    "marketingVersion": "1.0.0",
+    "buildNumber": "1",
+    "minimumMacOS": "27.0",
+    "hardenedRuntime": true,
+    "appSandbox": true
+  },
+  "stack": {
+    "exactPR113BBaseHead": "f10008d8330c2dc29f195163c56cf4723fc16a6c",
+    "exactPR113BCloseoutRun": 38467523568,
+    "mainModifiedByPR114": false
+  },
+  "shippingEntitlements": [
+    "com.apple.security.app-sandbox",
+    "com.apple.security.device.audio-input",
+    "com.apple.security.files.user-selected.read-write"
+  ],
+  "privacyPurposeStrings": [
+    "NSAudioCaptureUsageDescription",
+    "NSMicrophoneUsageDescription"
+  ],
+  "productionDependencies": [
+    {
+      "id": "libmysofa",
+      "version": "1.3.4",
+      "license": "BSD-3-Clause",
+      "shippingNoticeRequired": true
+    }
+  ],
+  "evidenceClasses": [
+    "remoteSoftware",
+    "physicalHardware",
+    "releaseCredential",
+    "externalReview"
+  ],
+  "releaseAuthority": {
+    "remoteSoftwareBaselineReconciled": true,
+    "physicalAcceptanceComplete": false,
+    "releaseCredentialAcceptanceComplete": false,
+    "productionAppleSigningComplete": false,
+    "appStoreConnectUploadComplete": false,
+    "testFlightAcceptanceComplete": false,
+    "appReviewApproved": false,
+    "developerIDNotarizationComplete": false,
+    "publicReleaseAuthorized": false,
+    "liveFeedForwardANCAuthorized": false,
+    "mayMergeIntoMain": false,
+    "physicalEvidenceSuppliedByCI": false
+  },
+  "releaseAssets": {
+    "shippingIconAssetsPresent": true,
+    "finalAppIconOwnerApproved": false,
+    "finalAppIconApprovalRequiredBeforePublicRelease": true
+  },
+  "privacySecurity": {
+    "tracking": false,
+    "bundledAnalyticsSDK": false,
+    "bundledNetworkClient": false,
+    "appOwnedAutomaticTelemetryUpload": false,
+    "diagnosticsUpload": false,
+    "capturedAudioUpload": false,
+    "measurementDataUpload": false,
+    "privacyManifestPresent": false,
+    "privacyManifestRequiredForCurrentMacTarget": false,
+    "userInstalledAudioUnitsAreBundledDependencies": false,
+    "appStorePrivacyPolicyURLConfigured": false,
+    "appStorePrivacyResponsesComplete": false
+  },
+  "provenanceSupplyChain": {
+    "productionDependencyManifestReconciled": true,
+    "postPR42ProvenanceReconciled": true,
+    "bundledThirdPartyComponentCount": 1,
+    "vendorRootCount": 1,
+    "swiftPackageDependencyCount": 0,
+    "cocoaPodsDependencyCount": 0,
+    "packagedBinaryDependencyCount": 0,
+    "sbomFormat": "CycloneDX 1.5",
+    "deterministicSBOMGeneratedByCI": true,
+    "externalLegalIPReviewComplete": false
+  },
+  "packaging": {
+    "unsignedArchivePreflightRequired": true,
+    "adhocSandboxPackagePreflightRequired": true,
+    "exactArtifactHashesRequired": true,
+    "manualReleaseDMGLaneAdHocOnly": true,
+    "remoteRCPackagePublicDistributionReady": false
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "milestone": "PR114",
+  "status": "DRAFT_NOT_SUBMITTED",
+  "evidenceAuthority": "remoteSoftware",
+  "product": {
+    "name": "Notch Sixty",
+    "platform": "macOS",
+    "architecture": "arm64",
+    "bundleIdentifier": "com.dhdook.NotchSixty",
+    "marketingVersion": "1.0.0",
+    "buildNumber": "1",
+    "minimumMacOS": "27.0"
+  },
+  "copy": {
+    "subtitleDraft": "Precision audio processing for Mac",
+    "promotionalTextDraft": "Audio processing, room measurement and speaker calibration in one local-first Mac workspace.",
+    "descriptionDraft": "Notch Sixty is a macOS audio processing workspace with equalization, dynamics, speaker and subwoofer management, room measurement and correction, listening profiles, and selected binaural and multichannel tools. Availability and safe operation of some calibration and Active Acoustics functions depend on supported hardware and commissioning. Playback and measurements are handled locally.",
+    "keywordsDraft": [
+      "DSP",
+      "equalizer",
+      "room correction",
+      "speaker calibration",
+      "audio measurement",
+      "subwoofer"
+    ]
+  },
+  "ownerApprovals": {
+    "listingCopyApproved": false,
+    "categoryPricingAgeRatingConfirmed": false,
+    "localizationsApproved": false,
+    "finalIconApproved": false,
+    "realBuildScreenshotsApproved": false,
+    "hardwareClaimsVerified": false,
+    "contentRightsAttested": false,
+    "exportComplianceReviewed": false
+  },
+  "publicEndpoints": {
+    "supportURL": null,
+    "privacyPolicyURL": null,
+    "marketingURL": null,
+    "supportContactPublished": false,
+    "privacyPolicyPublished": false
+  },
+  "appStoreConnect": {
+    "appRecordPrepared": false,
+    "privacyQuestionnaireSubmitted": false,
+    "reviewContactConfigured": false,
+    "productionBuildUploaded": false,
+    "testFlightAccepted": false,
+    "appReviewApproved": false
+  },
+  "support": {
+    "inAppUserGuide": true,
+    "inAppDSPReference": true,
+    "copyDiagnosticsLocalOnly": true,
+    "userInstalledAudioUnitPracticesIndependent": true
+  },
+  "authority": {
+    "physicalAcceptanceComplete": false,
+    "releaseCredentialsAccepted": false,
+    "externalLegalReviewComplete": false,
+    "liveFeedForwardANCAuthorized": false,
+    "publicReleaseAuthorized": false,
+    "mayMergeIntoMain": false
+  }
+}

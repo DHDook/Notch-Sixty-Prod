@@ -25,7 +25,7 @@
 	<key>NSAudioCaptureUsageDescription</key>
 	<string>Notch Sixty captures system audio so it can process and play it through your selected output device.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Notch Sixty uses your selected measurement microphone only when you start Room Correction calibration, so it can measure your speakers and room.</string>
+	<string>Notch Sixty uses your selected measurement microphone only when you start a measurement or calibration workflow, so it can measure your speakers, room, or ambient acoustic field.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 </dict>
