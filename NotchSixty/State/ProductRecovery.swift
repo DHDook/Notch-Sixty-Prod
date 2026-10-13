@@ -171,7 +171,8 @@ final class ProductRecoveryController: ObservableObject {
         persistentState.lastKnownGoodProfiles != nil
     }
 
-    func prepareForLaunch() {
+    func prepareForLaunch(now: Date = Date()) {
+        _ = now
         guard !prepared else { return }
         prepared = true
 
