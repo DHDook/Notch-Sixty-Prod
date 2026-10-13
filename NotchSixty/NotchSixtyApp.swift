@@ -68,6 +68,7 @@ final class ProductController: ObservableObject {
     let audioEngine: AudioIOEngine
     let audioUnitHost: AudioUnitHostController
     let profiles: ProductProfileController
+    let abComparison: ContentABComparisonController
     let calibration: RoomCorrectionCalibrationController
     let multichannelCalibration: MultichannelCalibrationController
     let roomCorrectionProjects: RoomCorrectionProjectController
@@ -94,6 +95,7 @@ final class ProductController: ObservableObject {
         self.audioEngine = audioEngine
         self.audioUnitHost = audioUnitHost
         self.profiles = profiles
+        self.abComparison = ContentABComparisonController(profiles: profiles)
         self.calibration = calibration
         self.multichannelCalibration = MultichannelCalibrationController(
             engine: audioEngine,
@@ -134,6 +136,7 @@ final class ProductController: ObservableObject {
         self.audioEngine = audioEngine
         self.audioUnitHost = audioUnitHost
         self.profiles = profiles
+        self.abComparison = ContentABComparisonController(profiles: profiles)
         self.calibration = calibration
         self.multichannelCalibration = MultichannelCalibrationController(
             engine: audioEngine,
