@@ -794,7 +794,7 @@ enum ProductProfileError: Error, LocalizedError {
         case .backupRestoreRequiresIdle:
             return "Stop audio processing before restoring a Notch Sixty backup."
         case .hardwareMappingRequired(let profile):
-            return "(profile) was restored from a backup and still references hardware that is not available on this Mac. Review its output mapping before activation."
+            return "\(profile) was restored from a backup and still references hardware that is not available on this Mac. Review its output mapping before activation."
         }
     }
 }
