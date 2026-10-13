@@ -1,6 +1,6 @@
 # PR111 — Automatic Per-Driver Speaker Optimization
 
-**Status: Slices 1–2 remote CI passed; Slices 3–4 implemented, exact-head CI pending; physical commissioning deferred.**
+**Status: Slices 1–2 remote CI passed; Slices 3–5 implemented, exact-head CI pending; physical commissioning and Apply deferred.**
 
 **REMOTE SOFTWARE ONLY.** All existing PRs remain draft, open and unmerged;
 no live Apply, hardware acceptance, App Store release or change to `main`.
@@ -183,11 +183,58 @@ missing shared reference, large out-of-bound arrival mismatch, mismatched
 complex grids, Lab report/export labeling and no-deploy behavior. Mandatory
 crossover/limiter state remains authoritative throughout.
 
-**Slice 5 — Guarded Apply/rollback, UI, persistence and remote closeout.**
-Approval must be explicit, state-drift checked, and limited to verified
-safe fields while retaining installed crossover/limiter and device mapping.
-Independent before/after hardware capture must confirm changes. Never
-treat CI as physical proof.
+**Slice 5 — Hardware-blocked commissioning draft, rollback snapshot,
+UI/persistence and remote closeout (implemented, exact-head CI pending).**
+
+PR111 now creates a **commissioning draft**, not an Apply transaction.
+The planner re-runs Slice 1 PEQ analysis and Slice 4 crossover-sum modeling
+from the exact saved Lab session rather than trusting UI scalars. It binds
+the resulting preview to the selected Playback System, session, routing
+signature, sample rate, every source protocol/capture ID, the current active
+Bass Management / routing / protected-driver state, and an exact
+`PlaybackSystemState` rollback snapshot.
+
+The preview can append only the already-bounded, cut-only peaking filters
+from qualified protected-driver measurements. Existing trim, delay, polarity,
+limiter enable/threshold, crossover topology and physical route stay unchanged.
+If a measured bus has no remaining per-driver EQ capacity, draft generation
+fails rather than replacing an existing band. Timing/polarity findings remain
+separate **model-only** reviews and are not materialized into the preview.
+
+The commissioning draft hard-codes:
+- `readyForApproval=false`;
+- `canApply=false`;
+- `canDeploy=false`;
+- `rollbackSnapshotAvailable=true`;
+- `stateDriftCheckRequired=true`; and
+- `requiresPhysicalCombinedDriverCapture=true`.
+
+A state validator requires the selected Playback System to remain *exactly*
+equal to the rollback snapshot. Any gain, routing, crossover, limiter,
+driver-processing, room-correction or other system-state drift invalidates
+future commissioning and requires regeneration. The draft persists atomically
+in a dedicated Measurement Lab `PR111 Commissioning Drafts` sidecar and
+reloads by Lab session identity.
+
+Measurement Lab now has a **Per-Driver Commissioning Preview** panel with
+Prepare Draft and Check Current State controls, affected buses, evidence
+counts, model reviews and rollback status. Its state badge reads
+**HARDWARE BLOCKED** and the only Apply status is **BLOCKED**. There is
+intentionally **no Apply button or mutation API** in PR111's remote closeout.
+
+This changes the previously planned boundary: the actual transactional Apply
+and rollback executor is **deferred to PR112 hardware acceptance**, after a
+safe real combined-driver crossover capture exists. That future transaction
+should follow the already proven PR108 pattern: engine idle, explicit user
+approval, exact state/fingerprint match, atomic mutation, post-write state
+verification, fresh measured verification, and automatic/explicit rollback.
+It must never weaken mandatory crossover/limiter protection.
+
+Additional tests cover cut-only preview generation, no-Apply invariants,
+exact Playback System state drift, routing/crossover/limiter drift, exhausted
+PEQ capacity, model-only timing records and atomic persistence/schema gates.
+Remote CI still cannot certify amplifier wiring, raw-driver safety or acoustic
+benefit.
 
 ## Remote verification
 
