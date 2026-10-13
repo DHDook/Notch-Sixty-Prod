@@ -1,6 +1,6 @@
 # PR113B — World-Class Product Finish
 
-Status: **IN PROGRESS — SLICES 1–5 IMPLEMENTED REMOTELY**
+Status: **IN PROGRESS — SLICES 1–6 IMPLEMENTED REMOTELY**
 
 PR113B is stacked directly on the exact remotely-complete PR113 head
 `f0a260336a0df7284a0c414f39a6e43b7d86ca1b`.
@@ -394,6 +394,93 @@ Recovery state contains no physical-acceptance, release, merge or live
 feed-forward ANC authority. A machine-local recovery record cannot satisfy
 PR112 evidence requirements or promote the stacked PRs.
 
+---
+
+## Slice 6 — Headroom Assistant
+
+Slice 6 adds an advisory gain-structure assistant on **Meters & Analysis →
+Dynamics**. It consumes existing protection telemetry and introduces no new
+realtime DSP stage, detector or automatic gain loop.
+
+### Observation evidence
+
+The assistant observes a representative loud program passage while processing
+is running. A recommendation requires at least **10 seconds** and 10 valid
+true-peak samples; **30 seconds** is recommended in the UI.
+
+The evidence model retains:
+
+- measured protection-input true peak;
+- a reconstructed **pre-Gain-Rider true peak** by adding the current Gain Rider
+  attenuation back to the detector reading;
+- protection-output true peak;
+- peak and sustained limiter gain reduction;
+- the maximum Gain Rider attenuation;
+- the delta of cumulative limiter safety-clamp samples; and
+- confirmation that the authoritative limiter **True Peak Guard** was active.
+
+The default target is **−1.0 dBTP**, adjustable from −6.0 to −0.5 dBTP.
+
+### Conservative recommendation
+
+The assistant can recommend **additional** Headroom Attenuation only. It never
+reclaims or reduces attenuation from a finite observation.
+
+The recommendation compares two independent indicators of missing reserve:
+
+1. pre-rider true peak above the selected target; and
+2. sustained limiter gain reduction above a 0.5 dB tolerance.
+
+Because those indicators describe the same underlying reserve deficit, the
+assistant uses the larger value rather than summing them. If the limiter's
+final safety clamp fired during the observation, it adds a further 0.5 dB
+reserve. The result is rounded upward to 0.1 dB and bounded by the existing
+−48...0 dB Headroom Attenuation range.
+
+If the required reserve exceeds that range, the result is explicitly marked
+**range limited** rather than reported as fully solved.
+
+### State boundary and Apply
+
+Every observation pins the selected Content Preset identity, selected Playback
+System identity and their exact current states. Content or system drift
+invalidates the observation and requires a new one.
+
+Apply is always explicit. `HeadroomAssistantController.applyRecommendation()`
+is the only assistant mutation path and calls the existing
+`AudioIOEngine.transitionHeadroomAttenuationDB` silent-boundary graph
+transition. No background auto-adjustment is permitted.
+
+For immutable semantic N-channel / virtual-speaker transports, the existing
+restart-required transport rule remains authoritative; the assistant does not
+bypass it.
+
+Applying a recommendation changes the **live content state only**. It does not
+silently overwrite the selected Content Preset. The user keeps normal preset
+save/update authority.
+
+### Product UI
+
+The Headroom Assistant card shows:
+
+- observation progress;
+- target true peak;
+- current → recommended Headroom Attenuation;
+- reconstructed pre-rider true peak;
+- sustained and peak limiter reduction;
+- safety-clamp count;
+- explanation of insufficient/sufficient/range-limited evidence; and
+- explicit Observe / Stop & Review / Apply / Clear controls.
+
+The UI states that short observations cannot prove worst-case program headroom
+and that the assistant never removes existing headroom.
+
+### Authority boundary
+
+Headroom Assistant evidence is program/gain-structure guidance only. It is not
+hardware acceptance, speaker-safety acceptance, release acceptance or
+permission to merge the stacked PRs.
+
 
 ---
 
@@ -424,6 +511,13 @@ PR112 evidence requirements or promote the stacked PRs.
   read error in diagnostics;
 - plug-in bypass is transient across a clean relaunch; and
 - recovery state carries no physical/release/merge authority;
+
+- Gain Rider attenuation is reconstructed into the pre-rider true-peak estimate;
+- existing Headroom Attenuation is never reclaimed from a finite observation;
+- peak/limiter reserve uses the larger need plus explicit safety-clamp reserve;
+- insufficient or non-authoritative observations cannot produce an applicable recommendation;
+- the −48 dB range limit fails conservatively and is reported explicitly; and
+- Content/Playback state drift invalidates Headroom Assistant evidence;
 
 - the A/B payload contains only the four allowed content-domain fields;
 - Audio Unit rack state survives A/B-state reconstruction unchanged;
