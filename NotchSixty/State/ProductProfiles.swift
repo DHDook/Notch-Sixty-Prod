@@ -207,6 +207,7 @@ struct ContentABSnapshot: Identifiable, Equatable, Sendable {
     let capturedAt: Date
     let sourceContentPresetID: UUID?
     let sourceContentPresetName: String
+    let loudnessReferenceLUFS: Double?
     let auditionState: ContentABAuditionState
     let systemBoundary: ContentABSystemBoundary
 
@@ -215,6 +216,7 @@ struct ContentABSnapshot: Identifiable, Equatable, Sendable {
         capturedAt: Date = Date(),
         sourceContentPresetID: UUID?,
         sourceContentPresetName: String,
+        loudnessReferenceLUFS: Double? = nil,
         auditionState: ContentABAuditionState,
         systemBoundary: ContentABSystemBoundary
     ) {
@@ -222,8 +224,66 @@ struct ContentABSnapshot: Identifiable, Equatable, Sendable {
         self.capturedAt = capturedAt
         self.sourceContentPresetID = sourceContentPresetID
         self.sourceContentPresetName = sourceContentPresetName
+        self.loudnessReferenceLUFS = loudnessReferenceLUFS
         self.auditionState = auditionState
         self.systemBoundary = systemBoundary
+    }
+}
+
+
+struct ContentABLoudnessMatchPlan: Equatable, Sendable {
+    static let maximumAttenuationDB = 12.0
+
+    let referenceLUFS: Double
+    let attenuationA_DB: Double
+    let attenuationB_DB: Double
+
+    static func make(
+        aLUFS: Double?,
+        bLUFS: Double?
+    ) -> ContentABLoudnessMatchPlan? {
+        guard let aLUFS, let bLUFS,
+              aLUFS.isFinite, bLUFS.isFinite,
+              aLUFS > -60, bLUFS > -60,
+              aLUFS < 6, bLUFS < 6 else {
+            return nil
+        }
+
+        // Never boost a side to create a perceptual advantage or spend
+        // headroom. The quieter measured side becomes the reference and only
+        // the louder side is attenuated, with a conservative bound.
+        let reference = min(aLUFS, bLUFS)
+        let a = max(reference - aLUFS, -maximumAttenuationDB)
+        let b = max(reference - bLUFS, -maximumAttenuationDB)
+        return ContentABLoudnessMatchPlan(
+            referenceLUFS: reference,
+            attenuationA_DB: min(a, 0),
+            attenuationB_DB: min(b, 0)
+        )
+    }
+
+    func attenuation(for slot: ContentABSlot) -> Double {
+        slot == .a ? attenuationA_DB : attenuationB_DB
+    }
+}
+
+enum ContentABComparisonError: Error, LocalizedError, Equatable {
+    case emptySlot(ContentABSlot)
+    case playbackSystemChanged
+    case playbackSystemStateChanged
+    case restoreBoundaryChanged
+
+    var errorDescription: String? {
+        switch self {
+        case .emptySlot(let slot):
+            return "Capture \(slot.displayName) before auditioning it."
+        case .playbackSystemChanged:
+            return "A/B is blocked because the selected Playback System changed after capture."
+        case .playbackSystemStateChanged:
+            return "A/B is blocked because the Playback System state changed after capture."
+        case .restoreBoundaryChanged:
+            return "The pre-A/B state was not restored because the Playback System changed during comparison."
+        }
     }
 }
 
@@ -237,10 +297,25 @@ final class ContentABComparisonController: ObservableObject {
     @Published private(set) var snapshotA: ContentABSnapshot?
     @Published private(set) var snapshotB: ContentABSnapshot?
     @Published private(set) var activeSlot: ContentABSlot?
+    @Published private(set) var sessionBaseline: ContentABAuditionState?
+    @Published private(set) var sessionBoundary: ContentABSystemBoundary?
+    @Published private(set) var isSwitching = false
+    @Published var levelMatchingEnabled = false
     @Published private(set) var lastErrorDescription: String?
 
     init(profiles: ProductProfileController) {
         self.profiles = profiles
+    }
+
+    var loudnessMatchPlan: ContentABLoudnessMatchPlan? {
+        ContentABLoudnessMatchPlan.make(
+            aLUFS: snapshotA?.loudnessReferenceLUFS,
+            bLUFS: snapshotB?.loudnessReferenceLUFS
+        )
+    }
+
+    var levelMatchingAvailable: Bool {
+        loudnessMatchPlan != nil
     }
 
     func snapshot(for slot: ContentABSlot) -> ContentABSnapshot? {
@@ -254,6 +329,7 @@ final class ContentABComparisonController: ObservableObject {
         let snapshot = ContentABSnapshot(
             sourceContentPresetID: profiles.selectedContentPresetID,
             sourceContentPresetName: profiles.selectedContentPresetName,
+            loudnessReferenceLUFS: currentLoudnessReferenceLUFS(),
             auditionState: ContentABAuditionState(
                 contentState: profiles.captureContentState()
             ),
@@ -268,6 +344,9 @@ final class ContentABComparisonController: ObservableObject {
         case .b: snapshotB = snapshot
         }
 
+        if loudnessMatchPlan == nil {
+            levelMatchingEnabled = false
+        }
         activeSlot = nil
         lastErrorDescription = nil
     }
@@ -280,6 +359,9 @@ final class ContentABComparisonController: ObservableObject {
         if activeSlot == slot {
             activeSlot = nil
         }
+        if loudnessMatchPlan == nil {
+            levelMatchingEnabled = false
+        }
         lastErrorDescription = nil
     }
 
@@ -287,6 +369,9 @@ final class ContentABComparisonController: ObservableObject {
         snapshotA = nil
         snapshotB = nil
         activeSlot = nil
+        sessionBaseline = nil
+        sessionBoundary = nil
+        levelMatchingEnabled = false
         lastErrorDescription = nil
     }
 
@@ -314,6 +399,122 @@ final class ContentABComparisonController: ObservableObject {
         return ContentABAuditionState(
             contentState: profiles.captureContentState()
         ) != snapshot.auditionState
+    }
+
+    func audition(_ slot: ContentABSlot) async {
+        guard !isSwitching else { return }
+        do {
+            try validate(slot)
+            guard let snapshot = snapshot(for: slot) else {
+                throw ContentABComparisonError.emptySlot(slot)
+            }
+
+            if sessionBaseline == nil {
+                sessionBaseline = ContentABAuditionState(
+                    contentState: profiles.captureContentState()
+                )
+                sessionBoundary = ContentABSystemBoundary(
+                    selectedSystemProfileID: profiles.selectedSystemProfileID,
+                    systemState: profiles.captureSystemState()
+                )
+            }
+
+            let matchAttenuation =
+                levelMatchingEnabled
+                ? (loudnessMatchPlan?.attenuation(for: slot) ?? 0)
+                : 0
+
+            isSwitching = true
+            try profiles.engine.transitionContentAuditionState(
+                snapshot.auditionState,
+                additionalInputAttenuationDB: matchAttenuation
+            )
+            activeSlot = slot
+            lastErrorDescription = nil
+
+            // The transport transition is 8 ms down + 8 ms up. Keep UI
+            // switching locked slightly longer so a second FIR preparation
+            // cannot race the in-flight structural transition.
+            try? await Task.sleep(nanoseconds: 25_000_000)
+            isSwitching = false
+        } catch {
+            isSwitching = false
+            lastErrorDescription = error.localizedDescription
+        }
+    }
+
+    func endAudition(restoringBaseline: Bool = true) async {
+        guard !isSwitching else { return }
+
+        defer {
+            activeSlot = nil
+            sessionBaseline = nil
+            sessionBoundary = nil
+            isSwitching = false
+        }
+
+        guard restoringBaseline,
+              let baseline = sessionBaseline,
+              let boundary = sessionBoundary else {
+            lastErrorDescription = nil
+            return
+        }
+
+        let compatibility = boundary.compatibility(
+            currentSystemProfileID: profiles.selectedSystemProfileID,
+            currentSystemState: profiles.captureSystemState()
+        )
+        guard compatibility.isReady else {
+            lastErrorDescription =
+                ContentABComparisonError.restoreBoundaryChanged.localizedDescription
+            return
+        }
+
+        do {
+            isSwitching = true
+            try profiles.engine.transitionContentAuditionState(
+                baseline,
+                additionalInputAttenuationDB: 0
+            )
+            try? await Task.sleep(nanoseconds: 25_000_000)
+            lastErrorDescription = nil
+        } catch {
+            lastErrorDescription = error.localizedDescription
+        }
+    }
+
+    func clearError() {
+        lastErrorDescription = nil
+    }
+
+    private func validate(_ slot: ContentABSlot) throws {
+        guard snapshot(for: slot) != nil else {
+            throw ContentABComparisonError.emptySlot(slot)
+        }
+        switch compatibility(for: slot) {
+        case .ready:
+            return
+        case .playbackSystemChanged:
+            throw ContentABComparisonError.playbackSystemChanged
+        case .playbackSystemStateChanged:
+            throw ContentABComparisonError.playbackSystemStateChanged
+        case .none:
+            throw ContentABComparisonError.emptySlot(slot)
+        }
+    }
+
+    private func currentLoudnessReferenceLUFS() -> Double? {
+        guard profiles.engine.lifecycleState == .running,
+              let diagnostics =
+                profiles.engine.diagnosticsSnapshot().renderKernelDiagnostics
+        else {
+            return nil
+        }
+        let value = Double(diagnostics.loudnessShortTermLUFS)
+        guard value.isFinite, value > -60, value < 6 else {
+            return nil
+        }
+        return value
     }
 }
 
