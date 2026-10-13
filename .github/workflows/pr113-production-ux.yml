@@ -1,0 +1,81 @@
+name: PR113 Production UX and User Guide
+
+on:
+  push:
+    branches:
+      - feature/pr113-production-ux-user-guide
+  pull_request:
+    branches:
+      - feature/pr112a-remote-hardware-acceptance-infrastructure
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr113-production-ux-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Verify PR113 production UX and guide contracts
+        run: python3 ci/validate_pr113_production_ux.py
+
+      - name: Preserve inherited acceptance and integration safety
+        run: |
+          set -euo pipefail
+          python3 ci/validate_pr112a_hardware_acceptance.py
+          python3 ci/validate_pr111_protected_driver_optimizer.py
+          python3 ci/validate_pr109_cross_feature_contracts.py
+          python3 ci/validate_pr110_advanced_placement.py
+
+  macos:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Verify PR113 and inherited contracts
+        run: |
+          set -euo pipefail
+          python3 ci/validate_pr113_production_ux.py
+          python3 ci/validate_pr112a_hardware_acceptance.py
+          python3 ci/validate_pr111_protected_driver_optimizer.py
+          python3 ci/validate_pr109_cross_feature_contracts.py
+          python3 ci/validate_pr110_advanced_placement.py
+
+      - name: Build unsigned arm64 Debug app
+        run: >-
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
+          -configuration Debug -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES build
+
+      - name: Run production IA and user-guide tests
+        run: >-
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
+          -configuration Debug -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES
+          -only-testing:NotchSixtyTests/ProductionInformationArchitectureTests
+          test
+
+      - name: Build unsigned arm64 Release app
+        run: >-
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
+          -configuration Release -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO GENERATE_INFOPLIST_FILE=NO
+          INFOPLIST_FILE=NotchSixty/Info.plist build
+
+      - name: Run cumulative XCTest regression
+        run: >-
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
+          -configuration Debug -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES test
