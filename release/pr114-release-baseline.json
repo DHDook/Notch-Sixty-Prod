@@ -72,5 +72,17 @@
     "userInstalledAudioUnitsAreBundledDependencies": false,
     "appStorePrivacyPolicyURLConfigured": false,
     "appStorePrivacyResponsesComplete": false
+  },
+  "provenanceSupplyChain": {
+    "productionDependencyManifestReconciled": true,
+    "postPR42ProvenanceReconciled": true,
+    "bundledThirdPartyComponentCount": 1,
+    "vendorRootCount": 1,
+    "swiftPackageDependencyCount": 0,
+    "cocoaPodsDependencyCount": 0,
+    "packagedBinaryDependencyCount": 0,
+    "sbomFormat": "CycloneDX 1.5",
+    "deterministicSBOMGeneratedByCI": true,
+    "externalLegalIPReviewComplete": false
   }
 }
