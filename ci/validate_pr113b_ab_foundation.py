@@ -242,6 +242,7 @@ for token in (
     "testBackupRestoreKeepsKnownHardwareEligibleWithoutRemapping",
     "testBackupPreferencesExcludeOSOwnedLaunchState",
     "testBackupInspectionRejectsDomainTampering",
+    "testLocalOfflineRoutingDoesNotAcquireImportMappingGate",
 ):
     assert token in tests, f"PR113B Slice 3 regression missing {token}"
 
