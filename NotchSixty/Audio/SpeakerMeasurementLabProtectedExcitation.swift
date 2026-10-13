@@ -1340,3 +1340,344 @@ struct ProtectedDriverTimingRecommendationAnalyzer: Sendable {
         atan2(sin(value), cos(value))
     }
 }
+
+
+// MARK: - PR111 Slice 4: reference-aligned crossover-sum model
+
+enum ProtectedDriverCrossoverSumHypothesis:
+    String, Codable, Equatable, Sendable {
+    case retainCurrent
+    case addBoundedDelay
+    case invertComparedDriver
+    case addDelayAndInvertComparedDriver
+}
+
+/// Offline model of the two measured protected driver responses around one
+/// crossover. This evaluates cancellation/coherence in the *captured* complex
+/// responses. It is not a real combined-driver measurement and cannot verify
+/// amplifier polarity, driver safety, radiation geometry or room response.
+struct ProtectedDriverCrossoverSumModel: Equatable, Sendable {
+    var sessionID: UUID
+    var firstProtocolID: UUID
+    var secondProtocolID: UUID
+    var firstBus: SpeakerOutputBus
+    var secondBus: SpeakerOutputBus
+    var crossoverFrequencyHz: Double
+    var frequencyPointCount: Int
+    var currentMeanCoherenceDeficitDB: Double
+    var candidateMeanCoherenceDeficitDB: Double
+    var modeledDeficitReductionDB: Double
+    var bestHypothesis: ProtectedDriverCrossoverSumHypothesis
+    var modeledAdditionalDelayMilliseconds: Double?
+    var modeledInvertsComparedDriver: Bool
+    var evidenceConfidence: Double
+    var warnings: [String]
+
+    var measurementOnly: Bool { true }
+    var modelOnly: Bool { true }
+    var canDeploy: Bool { false }
+    var combinedDriverCaptureVerified: Bool { false }
+    var requiresPhysicalCombinedDriverCapture: Bool { true }
+}
+
+enum ProtectedDriverCrossoverSumModelError:
+    Error, Equatable, LocalizedError {
+    case timingEvidenceUnavailable
+    case incompatibleComplexResponse
+    case insufficientCrossoverEvidence
+
+    var errorDescription: String? {
+        switch self {
+        case .timingEvidenceUnavailable:
+            return "Reference-authenticated adjacent-driver timing evidence is required before modeling crossover summation."
+        case .incompatibleComplexResponse:
+            return "Both driver and electrical-reference sweeps need matching finite magnitude/phase grids."
+        case .insufficientCrossoverEvidence:
+            return "The protected pair lacks enough shared measured points around its crossover."
+        }
+    }
+}
+
+struct ProtectedDriverCrossoverSumModelAnalyzer: Sendable {
+    static let minimumPointCount = 8
+    static let minimumModeledImprovementDB = 0.25
+
+    func analyze(
+        session: SpeakerMeasurementLabSession,
+        firstProtocolID: UUID,
+        secondProtocolID: UUID
+    ) throws -> ProtectedDriverCrossoverSumModel {
+        let timing: ProtectedDriverTimingRecommendation
+        do {
+            timing = try ProtectedDriverTimingRecommendationAnalyzer()
+                .recommend(
+                    session: session,
+                    firstProtocolID: firstProtocolID,
+                    secondProtocolID: secondProtocolID
+                )
+        } catch {
+            throw ProtectedDriverCrossoverSumModelError
+                .timingEvidenceUnavailable
+        }
+        let first = session.captures.filter {
+            $0.protocolID == firstProtocolID
+        }.sorted { $0.repeatIndex < $1.repeatIndex }
+        let second = session.captures.filter {
+            $0.protocolID == secondProtocolID
+        }.sorted { $0.repeatIndex < $1.repeatIndex }
+        guard let grid = first.first?.transferFunction.frequenciesHz,
+              !grid.isEmpty,
+              (first + second).allSatisfy({
+                  $0.transferFunction.frequenciesHz == grid
+                    && $0.transferFunction.magnitudeDB.count == grid.count
+                    && $0.transferFunction.phaseRadians?.count == grid.count
+                    && $0.sharedClockReference?
+                        .transferFunction.frequenciesHz == grid
+                    && $0.sharedClockReference?
+                        .transferFunction.magnitudeDB.count == grid.count
+                    && $0.sharedClockReference?
+                        .transferFunction.phaseRadians?.count == grid.count
+              }) else {
+            throw ProtectedDriverCrossoverSumModelError
+                .incompatibleComplexResponse
+        }
+        let lower = timing.crossoverFrequencyHz / 1.35
+        let upper = timing.crossoverFrequencyHz * 1.35
+        let indices = grid.indices.filter {
+            grid[$0] >= lower && grid[$0] <= upper
+        }
+        guard indices.count >= Self.minimumPointCount else {
+            throw ProtectedDriverCrossoverSumModelError
+                .insufficientCrossoverEvidence
+        }
+
+        let firstMean = try referenceAlignedMean(
+            first, indices: indices
+        )
+        let secondMean = try referenceAlignedMean(
+            second, indices: indices
+        )
+        guard firstMean.count == secondMean.count,
+              firstMean.count == indices.count else {
+            throw ProtectedDriverCrossoverSumModelError
+                .incompatibleComplexResponse
+        }
+
+        let current = meanCoherenceDeficit(
+            firstMean, secondMean
+        )
+        var candidates: [(
+            ProtectedDriverCrossoverSumHypothesis,
+            Double,
+            Double?,
+            Bool
+        )] = [
+            (.retainCurrent, current, nil, false)
+        ]
+
+        if let delay = timing.additionalDelayMilliseconds,
+           let delayBus = timing.delayBus {
+            let delayed = modeledPair(
+                firstMean,
+                secondMean,
+                indices: indices,
+                grid: grid,
+                delayMilliseconds: delay,
+                delayBus: delayBus,
+                firstBus: timing.firstBus,
+                invertSecond: false
+            )
+            candidates.append((
+                .addBoundedDelay,
+                meanCoherenceDeficit(delayed.0, delayed.1),
+                delay,
+                false
+            ))
+        }
+
+        if timing.polarityHypothesis == .invertComparedDriver {
+            let inverted = modeledPair(
+                firstMean,
+                secondMean,
+                indices: indices,
+                grid: grid,
+                delayMilliseconds: nil,
+                delayBus: nil,
+                firstBus: timing.firstBus,
+                invertSecond: true
+            )
+            candidates.append((
+                .invertComparedDriver,
+                meanCoherenceDeficit(inverted.0, inverted.1),
+                nil,
+                true
+            ))
+            if let delay = timing.additionalDelayMilliseconds,
+               let delayBus = timing.delayBus {
+                let combined = modeledPair(
+                    firstMean,
+                    secondMean,
+                    indices: indices,
+                    grid: grid,
+                    delayMilliseconds: delay,
+                    delayBus: delayBus,
+                    firstBus: timing.firstBus,
+                    invertSecond: true
+                )
+                candidates.append((
+                    .addDelayAndInvertComparedDriver,
+                    meanCoherenceDeficit(combined.0, combined.1),
+                    delay,
+                    true
+                ))
+            }
+        }
+
+        let lowest = candidates.min {
+            if abs($0.1 - $1.1) > 1.0e-9 {
+                return $0.1 < $1.1
+            }
+            return $0.0.rawValue < $1.0.rawValue
+        }!
+        let improvement = current - lowest.1
+        let selected = improvement >= Self.minimumModeledImprovementDB
+            ? lowest
+            : candidates[0]
+
+        return ProtectedDriverCrossoverSumModel(
+            sessionID: session.id,
+            firstProtocolID: firstProtocolID,
+            secondProtocolID: secondProtocolID,
+            firstBus: timing.firstBus,
+            secondBus: timing.secondBus,
+            crossoverFrequencyHz: timing.crossoverFrequencyHz,
+            frequencyPointCount: indices.count,
+            currentMeanCoherenceDeficitDB: current,
+            candidateMeanCoherenceDeficitDB: selected.1,
+            modeledDeficitReductionDB: current - selected.1,
+            bestHypothesis: selected.0,
+            modeledAdditionalDelayMilliseconds: selected.2,
+            modeledInvertsComparedDriver: selected.3,
+            evidenceConfidence: timing.evidenceConfidence,
+            warnings: [
+                "MODEL ONLY: complex protected-driver measurements are summed mathematically; the two drivers were not measured playing together.",
+                "A lower coherence-deficit value means less modeled cancellation relative to the sum of the two measured magnitudes. It is not a target-curve, SPL or sound-quality score.",
+                "Any candidate must be verified by a new safe combined-driver crossover capture before delay, polarity, PEQ, crossover or limiter state can change.",
+                "Mandatory crossover and limiter state from the protected captures remain authoritative; this model cannot weaken either."
+            ]
+        )
+    }
+
+    private struct ComplexSample: Equatable {
+        var real: Double
+        var imag: Double
+
+        var magnitude: Double { hypot(real, imag) }
+    }
+
+    private func referenceAlignedMean(
+        _ captures: [SpeakerMeasurementLabCapture],
+        indices: [Int]
+    ) throws -> [ComplexSample] {
+        guard !captures.isEmpty else {
+            throw ProtectedDriverCrossoverSumModelError
+                .incompatibleComplexResponse
+        }
+        var real = Array(repeating: 0.0, count: indices.count)
+        var imag = Array(repeating: 0.0, count: indices.count)
+        for capture in captures {
+            guard let phase = capture.transferFunction.phaseRadians,
+                  let reference = capture.sharedClockReference,
+                  let referencePhase =
+                    reference.transferFunction.phaseRadians else {
+                throw ProtectedDriverCrossoverSumModelError
+                    .incompatibleComplexResponse
+            }
+            for (out, index) in indices.enumerated() {
+                let relativeDB =
+                    capture.transferFunction.magnitudeDB[index]
+                    - reference.transferFunction.magnitudeDB[index]
+                let magnitude = pow(10.0, relativeDB / 20.0)
+                let relativePhase = atan2(
+                    sin(phase[index] - referencePhase[index]),
+                    cos(phase[index] - referencePhase[index])
+                )
+                real[out] += magnitude * cos(relativePhase)
+                    / Double(captures.count)
+                imag[out] += magnitude * sin(relativePhase)
+                    / Double(captures.count)
+            }
+        }
+        let result = zip(real, imag).map {
+            ComplexSample(real: $0.0, imag: $0.1)
+        }
+        guard result.allSatisfy({
+            $0.real.isFinite && $0.imag.isFinite
+                && $0.magnitude.isFinite
+        }) else {
+            throw ProtectedDriverCrossoverSumModelError
+                .incompatibleComplexResponse
+        }
+        return result
+    }
+
+    private func modeledPair(
+        _ first: [ComplexSample],
+        _ second: [ComplexSample],
+        indices: [Int],
+        grid: [Double],
+        delayMilliseconds: Double?,
+        delayBus: SpeakerOutputBus?,
+        firstBus: SpeakerOutputBus,
+        invertSecond: Bool
+    ) -> ([ComplexSample], [ComplexSample]) {
+        var lhs = first
+        var rhs = second
+        if let delayMilliseconds, let delayBus {
+            let seconds = delayMilliseconds / 1_000
+            for offset in lhs.indices {
+                let frequency = grid[indices[offset]]
+                let phase = 2 * Double.pi * frequency * seconds
+                if delayBus == firstBus {
+                    lhs[offset] = rotated(lhs[offset], phase)
+                } else {
+                    rhs[offset] = rotated(rhs[offset], phase)
+                }
+            }
+        }
+        if invertSecond {
+            for offset in rhs.indices {
+                rhs[offset].real *= -1
+                rhs[offset].imag *= -1
+            }
+        }
+        return (lhs, rhs)
+    }
+
+    private func rotated(
+        _ sample: ComplexSample,
+        _ radians: Double
+    ) -> ComplexSample {
+        ComplexSample(
+            real: sample.real * cos(radians)
+                - sample.imag * sin(radians),
+            imag: sample.real * sin(radians)
+                + sample.imag * cos(radians)
+        )
+    }
+
+    private func meanCoherenceDeficit(
+        _ first: [ComplexSample],
+        _ second: [ComplexSample]
+    ) -> Double {
+        let values = zip(first, second).map { lhs, rhs -> Double in
+            let ideal = max(lhs.magnitude + rhs.magnitude, 1.0e-12)
+            let summed = max(
+                hypot(lhs.real + rhs.real, lhs.imag + rhs.imag),
+                1.0e-12
+            )
+            return max(0, 20 * log10(ideal / summed))
+        }
+        return values.reduce(0, +) / Double(values.count)
+    }
+}
