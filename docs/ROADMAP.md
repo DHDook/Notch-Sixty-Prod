@@ -36,7 +36,7 @@ core-DSP expansion:
 The modal first-run assistant and Playback-System lock are deliberately
 deferred.
 
-**Slices 1–6 are implemented remotely.** Slice 1 established the temporary,
+**Slices 1–7 are implemented remotely; the final exact-head closeout gate is pending.** Slice 1 established the temporary,
 in-memory safe A/B capture boundary. The allowed audition payload is limited to stereo EQ, input preamp,
 headroom attenuation and content dynamics. Audio Unit rack topology and every
 Playback-System/hardware-domain setting remain outside the A/B payload. Each
@@ -95,6 +95,15 @@ A/B begins, preventing temporary level-match attenuation from becoming static
 headroom evidence. Apply does not silently overwrite the selected Content
 Preset, does not bypass restart-required semantic transports, and has no
 physical/release authority.
+Slice 7 strengthens the existing Getting Started User Guide instead of adding a
+modal first-run wizard. The guide now walks through only-needed permissions,
+stable output identity, Playback System selection / Needs Mapping, conservative
+first sound, Content Presets, optional measurement/calibration, A/B and
+Headroom Assistant use, backup, Safe Launch and diagnostics. The final CI gate
+also publishes a machine-readable PR113B_REMOTE_PRODUCT_FINISH_READINESS
+artifact. That artifact can mark the remote product-finish surface complete but
+must keep physical acceptance, release acceptance, live feed-forward ANC
+authorization, merge authority and CI-supplied physical evidence false.
 
 PR113B software work cannot satisfy PR112 physical acceptance and cannot set
 `releaseAcceptanceComplete`, `liveFeedForwardANCAuthorized`, or
