@@ -522,6 +522,7 @@ permission to merge the stacked PRs.
 - peak/limiter reserve uses the larger need plus explicit safety-clamp reserve;
 - insufficient or non-authoritative observations cannot produce an applicable recommendation;
 - the −48 dB range limit fails conservatively and is reported explicitly; and
+- an open A/B audition session blocks Headroom Assistant observation; and
 - Content/Playback state drift invalidates Headroom Assistant evidence;
 
 - the A/B payload contains only the four allowed content-domain fields;
