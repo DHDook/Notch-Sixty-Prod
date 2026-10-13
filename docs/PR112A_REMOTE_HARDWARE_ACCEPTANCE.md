@@ -1,6 +1,6 @@
 # PR112A — Remote Hardware-Acceptance Infrastructure
 
-**Status: Slices 1–2 implemented; exact-head CI pending.**
+**Status: Slices 1–3 implemented; exact-head CI pending.**
 
 PR112A is the remote-preparation half of roadmap PR112. It is stacked on the
 exact remote/software-complete PR111 head and intentionally stops before any
@@ -221,10 +221,35 @@ leaves H05 in **INSUFFICIENT SCOPE**.
 The UI exposes no Apply, routing, DSP, audio-start, correction, merge or release
 control. It only appends evidence through the acceptance store.
 
-**Slice 3 — Gate-specific evidence adapters.**
-Link H03–H07 to existing Speaker Optimizer / Measurement Lab / FIR / coherent
-Sub capture IDs and verification records. Adapters reference existing evidence;
-they do not forge physical evidence or mutate DSP.
+**Slice 3 — Gate-specific evidence adapters
+(implemented; exact-head CI pending).**
+
+Typed adapters now link existing product evidence into H03–H07 without copying
+raw sweep data or inventing a second verification format:
+
+- **H03** links a Speaker Optimizer baseline measurement set plus every compact
+  capture ID and re-runs the existing repeat/quality evaluator.
+- **H04** links an accepted PEQ post-Apply verification and its matching
+  finalization receipt, baseline set ID, verification set ID and Apply receipt
+  ID.
+- **H05** links a structurally valid, complete whole-speaker Measurement Lab
+  session and its capture IDs. Protected split-driver supplemental coverage is
+  claimed only when protected protocols are present, complete, unclipped and
+  retain valid crossover/limiter route provenance.
+- **H06** links accepted FIR measured verification with its matching FIR
+  finalization receipt and exact baseline/verification/Apply identities.
+- **H07** supports finalized single-Sub or coordinated multi-Sub coherent
+  verification, preserving Apply receipt and verification Lab session IDs.
+
+Every linked packet carries a recommended PASS/FAIL/BLOCKED interpretation for
+the human reviewer, but its automatic authority is permanently
+`remoteSoftware`. `canEstablishPhysicalAuthority=false` and
+`canAuthorizeLiveFeedForwardANC=false` are hard properties. The adapters
+contain no AudioIO, ProductProfile mutation, Apply or output-control path.
+
+Thus a fully accepted product verification can make later physical review much
+easier to audit, but it still evaluates as insufficient hardware authority
+until Slice 2 records the actual physical/reviewer attestations.
 
 **Slice 4 — Preflight & protected commissioning handoff.**
 Validate engine-idle state, exact Playback System identity, routing/crossover/
