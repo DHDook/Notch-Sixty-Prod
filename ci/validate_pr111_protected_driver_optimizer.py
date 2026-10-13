@@ -238,7 +238,7 @@ for token in (
     "var rollbackSnapshotAvailable: Bool { true }",
     "var stateDriftCheckRequired: Bool { true }",
     "var requiresPhysicalCombinedDriverCapture: Bool { true }",
-    "profile.state == draft.rollbackPlaybackSystemState",
+    "== draft.rollbackPlaybackSystemState",
     "ProtectedDriverPEQRecommendationAnalyzer()",
     "ProtectedDriverCrossoverSumModelAnalyzer()",
     "options: .atomic",
