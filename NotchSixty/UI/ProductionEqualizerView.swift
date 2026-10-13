@@ -3,7 +3,7 @@ import SwiftUI
 
 struct ProductionEqualizerView: View {
     @ObservedObject var engine: AudioIOEngine
-    var reference: ProductionReferenceNavigator?
+    var reference: ProductionReferenceNavigator? = nil
     @State private var selectedBandID: UUID?
     @State private var dragPreview: EQBand?
     @State private var pendingDragBand: EQBand?
