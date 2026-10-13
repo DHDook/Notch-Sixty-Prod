@@ -517,7 +517,8 @@ final class HeadroomAssistantController: ObservableObject {
         }
         guard let diagnostics =
                 engine.diagnosticsSnapshot()
-                    .renderKernelDiagnostics else {
+                    .renderKernelDiagnostics,
+              diagnostics.truePeakGuardActive else {
             invalidate(
                 HeadroomAssistantError
                     .authoritativeTruePeakUnavailable
