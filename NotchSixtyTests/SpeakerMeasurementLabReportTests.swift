@@ -155,23 +155,58 @@ final class SpeakerMeasurementLabReportTests: XCTestCase {
         XCTAssertEqual(uint16LE(data, at: 34), 32)
         XCTAssertEqual(
             String(data: data[36..<40], encoding: .ascii),
+            "fact"
+        )
+        XCTAssertEqual(uint32LE(data, at: 40), 4)
+        XCTAssertEqual(uint32LE(data, at: 44), 3)
+        XCTAssertEqual(
+            String(data: data[48..<52], encoding: .ascii),
             "data"
         )
-        XCTAssertEqual(uint32LE(data, at: 40), 12)
+        XCTAssertEqual(uint32LE(data, at: 52), 12)
         XCTAssertEqual(
-            uint32LE(data, at: 44),
+            uint32LE(data, at: 56),
             Float(0.25).bitPattern
         )
         XCTAssertEqual(
-            uint32LE(data, at: 48),
+            uint32LE(data, at: 60),
             Float(-0.5).bitPattern
         )
         XCTAssertEqual(
-            uint32LE(data, at: 52),
+            uint32LE(data, at: 64),
             Float(1.0).bitPattern
         )
     }
 
+
+
+    func testDetailedNumericExportsUsePOSIXDecimalPoint() throws {
+        let session = makeSession(includeCapture: true)
+        let exporter =
+            SpeakerMeasurementLabFullFidelityExporter()
+
+        let csv = try XCTUnwrap(
+            String(
+                data: try exporter.transferCSVData(session),
+                encoding: .utf8
+            )
+        )
+        let frd = try XCTUnwrap(
+            String(
+                data: try exporter.frdData(
+                    session,
+                    captureID:
+                        XCTUnwrap(session.captures.first).id
+                ),
+                encoding: .utf8
+            )
+        )
+
+        XCTAssertTrue(csv.contains("100.000000000"))
+        XCTAssertFalse(csv.contains("100,000000000"))
+        XCTAssertTrue(frd.contains("100.000000000"))
+        XCTAssertFalse(frd.contains("100,000000000"))
+    }
     func testRecentSessionListingIsNewestFirstAndIgnoresInvalidJSON()
         throws {
         let root = FileManager.default.temporaryDirectory
