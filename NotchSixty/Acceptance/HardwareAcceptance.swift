@@ -227,7 +227,7 @@ struct HardwareAcceptanceArtifactReference:
 }
 
 enum HardwareAcceptanceObservationOutcome:
-    String, Equatable, Codable, Sendable {
+    String, Equatable, Codable, CaseIterable, Sendable {
     case passed
     case failed
     case blocked
