@@ -224,6 +224,62 @@ for token in (
     "testLabReportCrossoverSumIsUnavailableWithoutTimingEvidence",
 ):
     assert token in tests, f"PR111 crossover-sum regression missing {token}"
+# Slice 5 — remote commissioning draft only. It captures exact rollback and
+# drift state but is structurally incapable of Apply/Deploy before PR112.
+for token in (
+    "struct ProtectedDriverCommissioningDraft:",
+    "struct ProtectedDriverCommissioningPlanner: Sendable",
+    "struct ProtectedDriverCommissioningDraftStore: Sendable",
+    "rollbackPlaybackSystemState: PlaybackSystemState",
+    "previewDriverProcessing: SpeakerDriverProcessingConfiguration",
+    "var readyForApproval: Bool { false }",
+    "var canApply: Bool { false }",
+    "var canDeploy: Bool { false }",
+    "var rollbackSnapshotAvailable: Bool { true }",
+    "var stateDriftCheckRequired: Bool { true }",
+    "var requiresPhysicalCombinedDriverCapture: Bool { true }",
+    "profile.state == draft.rollbackPlaybackSystemState",
+    "ProtectedDriverPEQRecommendationAnalyzer()",
+    "ProtectedDriverCrossoverSumModelAnalyzer()",
+    "options: .atomic",
+    "PR111 Commissioning Drafts",
+):
+    assert token in source, f"PR111 blocked commissioning contract missing {token}"
+
+commissioning = source.split("// MARK: - PR111 Slice 5:", 1)[1]
+for forbidden in (
+    "replaceSelectedSystemSpeakerDriverProcessing(",
+    "replaceSpeakerDriverProcessingConfiguration(",
+    "AudioIOEngine",
+    "makeRealtimeSnapshot(",
+    "approveAndApply(",
+    "func apply(",
+    "canApply: Bool { true }",
+    "canDeploy: Bool { true }",
+):
+    assert forbidden not in commissioning, f"PR111 remote commissioning gained Apply authority: {forbidden}"
+
+for token in (
+    "Per-Driver Commissioning Preview",
+    "Prepare Commissioning Draft",
+    "Check Current State",
+    '"HARDWARE BLOCKED"',
+    'status("Apply", "BLOCKED")',
+    "No Apply control exists in PR111 remote closeout",
+    "driverCommissioningStore.save(prepared)",
+    "validateCurrentState(",
+):
+    assert token in ui, f"PR111 blocked commissioning UX missing {token}"
+
+for token in (
+    "testCommissioningDraftCompilesCutPreviewButCannotApply",
+    "testCommissioningDraftRetainsModelOnlyTimingReviews",
+    "testCommissioningExactStateDriftAndIdentityFailClosed",
+    "testCommissioningRejectsProtectedRouteOrDriverStateDrift",
+    "testCommissioningFailsWhenMeasuredBusHasNoEQCapacity",
+    "testCommissioningDraftStoreRoundTripAndSchemaGate",
+):
+    assert token in tests, f"PR111 commissioning regression missing {token}"
 assert "SpeakerMeasurementLabReportTests" in workflow
 assert "SpeakerDriverBusProcessingConfiguration" in route
 assert "ProtectedDriverPEQRecommendationTests" in workflow
