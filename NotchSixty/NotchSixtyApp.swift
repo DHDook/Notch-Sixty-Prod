@@ -1591,6 +1591,9 @@ private struct ProductionMenuBarView: View {
     }
 
     private var canToggleProcessing: Bool {
+        guard !product.recovery.safeLaunchActive else {
+            return false
+        }
         switch engine.lifecycleState {
         case .idle, .running, .reconfiguring, .recoveringOutput, .failed:
             return true
@@ -1624,6 +1627,9 @@ private struct ProductionMenuBarView: View {
     }
 
     private var statusLabel: String {
+        if product.recovery.safeLaunchActive {
+            return "Safe Launch"
+        }
         switch engine.lifecycleState {
         case .idle: return "Stopped"
         case .running: return "Processing"
@@ -1637,6 +1643,9 @@ private struct ProductionMenuBarView: View {
     }
 
     private var statusSymbol: String {
+        if product.recovery.safeLaunchActive {
+            return "lifepreserver.fill"
+        }
         switch engine.lifecycleState {
         case .running: return "waveform.circle.fill"
         case .failed: return "exclamationmark.triangle.fill"
@@ -1653,7 +1662,13 @@ private struct ProductionMenuBarView: View {
                         .font(.headline)
                     Label(statusLabel, systemImage: statusSymbol)
                         .font(.caption)
-                        .foregroundStyle(engine.lifecycleState == .failed ? .red : .secondary)
+                        .foregroundStyle(
+                            product.recovery.safeLaunchActive
+                                ? .orange
+                                : engine.lifecycleState == .failed
+                                    ? .red
+                                    : .secondary
+                        )
                 }
                 Spacer(minLength: 16)
             }
@@ -1740,44 +1755,10 @@ private struct ProductionSettingsView: View {
     }
 
     private var diagnosticsReport: String {
-        let engine = product.audioEngine
-        let output = engine.selectedOutputDevice
-        let kernel = engine.diagnosticsSnapshot().renderKernelDiagnostics
-
-        let outputName = output?.name ?? "None selected"
-        let outputUID = output?.uid ?? "None"
-        let outputRate = output.map {
-            String(format: "%.1f kHz", $0.nominalSampleRate / 1_000.0)
-        } ?? "Unavailable"
-        let latency: String
-        if let kernel, kernel.sampleRate > 0 {
-            latency = String(
-                format: "%u frames / %.3f ms",
-                kernel.latencyFrames,
-                Double(kernel.latencyFrames) / kernel.sampleRate * 1_000.0
-            )
-        } else {
-            latency = "Unavailable"
-        }
-
-        return [
-            "Notch Sixty Diagnostics",
-            "Version: \(version) (\(build))",
-            "macOS: \(ProcessInfo.processInfo.operatingSystemVersionString)",
-            "Architecture: Apple Silicon",
-            "Lifecycle: \(engine.lifecycleState.rawValue)",
-            "Output: \(outputName)",
-            "Output UID: \(outputUID)",
-            "Output Rate: \(outputRate)",
-            "Content Preset: \(product.profiles.selectedContentPresetName)",
-            "Playback System: \(product.profiles.selectedSystemProfileName)",
-            "Global Bypass: \(engine.playbackControlConfiguration.globalBypassed ? "On" : "Off")",
-            "EQ Phase: \(engine.stereoEQConfiguration.phaseMode.displayName)",
-            "EQ Bands Enabled: \(engine.stereoEQConfiguration.enabledBandCount)",
-            "Bass Management: \(engine.bassManagementConfiguration.enabled ? "On" : "Off")",
-            "Room Correction: \(engine.roomCorrectionConfiguration.enabled ? "On" : "Off")",
-            "DSP Latency: \(latency)",
-        ].joined(separator: "\n")
+        product.diagnosticsReport(
+            version: version,
+            build: build
+        )
     }
 
     private func copyDiagnostics() {
