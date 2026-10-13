@@ -39,10 +39,10 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         )
     }
 
-    func testToolsGroupContainsOccasionalRoomAdvisor() {
+    func testToolsGroupContainsOccasionalAdvisoryAndAcceptanceWorkflows() {
         XCTAssertEqual(
             ProductionSection.tools,
-            [.roomAdvisor]
+            [.roomAdvisor, .hardwareAcceptance]
         )
     }
 
@@ -67,6 +67,10 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         XCTAssertEqual(
             ProductionSection.roomAdvisor.title,
             "Room Advisor"
+        )
+        XCTAssertEqual(
+            ProductionSection.hardwareAcceptance.title,
+            "Hardware Acceptance"
         )
         XCTAssertEqual(ProductionSection.plugins.title, "Plug-ins")
     }
