@@ -134,7 +134,7 @@ for token in (
     require(token in doc, f"PR114 Slice 4 docs missing {token!r}")
 
 for token in (
-    "Slices 1–4 are implemented remotely",
+    "Slices 1–6 are implemented remotely",
     "packaging",
     "archive",
     "release-manifest",
