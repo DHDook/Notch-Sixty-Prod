@@ -28,3 +28,13 @@ Deterministic tests cover boundary rounding, mute semantics, and old backup deco
 Still requires real Mac verification: live tray readability across light/dark, menu bar crowding, menu panel activation, popup stacking/full-screen positioning, no focus theft, mute state, key repeat at boundaries, keyboard/hardware and UI synchronization, Dock-only behavior and preference persistence. Apple App Store release signing/review and PR112 H01–H08 remain separate and unfulfilled. This does not upgrade RC or physical evidence.
 
 Keep PR115 and PR114 and all ancestors **OPEN / DRAFT / UNMERGED**; do not mutate `main`.
+
+## Hardware-testing installer (PR115)
+
+The PR115 workflow packages its own `Notch-Sixty-1.0.0-build-1-PR115-hardware-test-arm64.dmg` only after unsigned Release compilation and complete cumulative XCTest. The published GitHub Actions artifact also contains a SHA-256 checksum, verified effective sandbox entitlements, and an exact-head manifest.
+
+**System requirements:** Apple Silicon and **macOS 27.0 or later**. If the test machine is on macOS 26, do not attempt to force the installer to run; the deployment target must be deliberately revisited and compatibility tested first.
+
+This is an ad-hoc-signed, nonnotarized **owner-only test build**. It is neither an App Store nor an Apple Developer-ID public release. Download the artifact ZIP from the successful workflow run, unpack the DMG, mount it, and drag the app to Applications. Gatekeeper may reject a nonnotarized downloaded build; prefer a proper signed/notarized test channel when available, and only use macOS's explicit *Open Anyway* UI for a build whose repo/commit and SHA-256 you have independently verified. Do not disable Gatekeeper systemwide.
+
+Do not run external speaker-connected feed-forward ANC tests or infer hardware pass from a successfully installing build. Record PR112 H01–H08 physical evidence independently.
