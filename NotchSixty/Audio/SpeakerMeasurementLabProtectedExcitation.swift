@@ -957,8 +957,10 @@ struct ProtectedDriverTimingRecommendationAnalyzer: Sendable {
               second.allSatisfy({
                   $0.protectedDriverProvenance == secondProvenance
               }),
-              firstProvenance.routingConfiguration
-                == secondProvenance.routingConfiguration,
+              sameProtectedRoutingTopology(
+                  firstProvenance.routingConfiguration,
+                  secondProvenance.routingConfiguration
+              ),
               firstProvenance.bassManagementConfiguration
                 == secondProvenance.bassManagementConfiguration else {
             throw ProtectedDriverTimingRecommendationError
@@ -1141,6 +1143,37 @@ struct ProtectedDriverTimingRecommendationAnalyzer: Sendable {
                 "No driver delay, polarity, crossover, limiter, PEQ or live route is changed by this analysis."
             ]
         )
+    }
+
+    private func sameProtectedRoutingTopology(
+        _ lhs: MultiOutputRoutingConfiguration,
+        _ rhs: MultiOutputRoutingConfiguration
+    ) -> Bool {
+        guard lhs.enabled == rhs.enabled,
+              lhs.synchronizationMode == rhs.synchronizationMode,
+              lhs.resolvedReferenceDeviceUID
+                == rhs.resolvedReferenceDeviceUID else {
+            return false
+        }
+        let left = lhs.enabledRoutes.map {
+            ($0.bus.rawValue, $0.destination.deviceUID,
+             $0.destination.channelIndex)
+        }.sorted {
+            if $0.0 != $1.0 { return $0.0 < $1.0 }
+            if $0.1 != $1.1 { return $0.1 < $1.1 }
+            return $0.2 < $1.2
+        }
+        let right = rhs.enabledRoutes.map {
+            ($0.bus.rawValue, $0.destination.deviceUID,
+             $0.destination.channelIndex)
+        }.sorted {
+            if $0.0 != $1.0 { return $0.0 < $1.0 }
+            if $0.1 != $1.1 { return $0.1 < $1.1 }
+            return $0.2 < $1.2
+        }
+        return left.elementsEqual(right) {
+            $0.0 == $1.0 && $0.1 == $1.1 && $0.2 == $1.2
+        }
     }
 
     private func sameSpeakerSide(
