@@ -49,6 +49,9 @@ struct HardwareAcceptanceGateDefinition:
     var title: String
     var minimumAuthority: HardwareAcceptanceEvidenceAuthority
     var scopeRequirement: HardwareAcceptanceScopeRequirement
+    /// Optional feature-specific work that must be covered by this same gate
+    /// only when the capability is explicitly included in campaign scope.
+    var supplementalCapabilities: [HardwareAcceptanceCapability] = []
     var evidenceSummary: String
 }
 
@@ -90,8 +93,10 @@ enum HardwareAcceptanceCatalog {
             id: .h05AdvancedMeasurementLab,
             title: "Advanced Measurement Lab",
             minimumAuthority: .independentPhysicalReview,
-            scopeRequirement:
-                .conditional(.protectedSplitDriverMeasurement),
+            scopeRequirement: .required,
+            supplementalCapabilities: [
+                .protectedSplitDriverMeasurement
+            ],
             evidenceSummary:
                 "Whole-speaker Lab acceptance plus protected Low/Mid/High driver work only where independently routed, crossed-over and limited hardware exists."
         ),
@@ -449,6 +454,7 @@ enum HardwareAcceptanceError:
     case unsupportedSchema
     case corruptPersistence
     case campaignIdentityMismatch
+    case campaignAlreadyExists
 
     var errorDescription: String? {
         switch self {
@@ -472,6 +478,8 @@ enum HardwareAcceptanceError:
             return "Hardware acceptance campaign data is corrupt; existing evidence was not overwritten."
         case .campaignIdentityMismatch:
             return "Loaded hardware acceptance campaign identity does not match the requested campaign."
+        case .campaignAlreadyExists:
+            return "Hardware acceptance campaign already exists and cannot be recreated over recorded evidence."
         }
     }
 }
@@ -495,7 +503,7 @@ struct HardwareAcceptanceCampaignStore: Sendable {
         _ = try campaign.validated()
         let path = url(for: campaign.identity.id)
         guard !FileManager.default.fileExists(atPath: path.path) else {
-            throw HardwareAcceptanceError.duplicateObservation
+            throw HardwareAcceptanceError.campaignAlreadyExists
         }
         try persist(campaign, to: path)
     }
