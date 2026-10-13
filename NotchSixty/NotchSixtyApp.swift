@@ -100,7 +100,8 @@ final class ProductController: ObservableObject {
         self.audioEngine = audioEngine
         self.audioUnitHost = audioUnitHost
         self.profiles = profiles
-        self.abComparison = ContentABComparisonController(profiles: profiles)
+        let abComparison = ContentABComparisonController(profiles: profiles)
+        self.abComparison = abComparison
         self.calibration = calibration
         self.multichannelCalibration = MultichannelCalibrationController(
             engine: audioEngine,
@@ -134,7 +135,8 @@ final class ProductController: ObservableObject {
         self.recovery = ProductRecoveryController()
         self.headroomAssistant = HeadroomAssistantController(
             engine: audioEngine,
-            profiles: profiles
+            profiles: profiles,
+            abComparison: abComparison
         )
         self.reference = ProductionReferenceNavigator()
         observeAudioEngine()
@@ -155,7 +157,8 @@ final class ProductController: ObservableObject {
         self.audioEngine = audioEngine
         self.audioUnitHost = audioUnitHost
         self.profiles = profiles
-        self.abComparison = ContentABComparisonController(profiles: profiles)
+        let abComparison = ContentABComparisonController(profiles: profiles)
+        self.abComparison = abComparison
         self.calibration = calibration
         self.multichannelCalibration = MultichannelCalibrationController(
             engine: audioEngine,
@@ -191,7 +194,8 @@ final class ProductController: ObservableObject {
         )
         self.headroomAssistant = HeadroomAssistantController(
             engine: audioEngine,
-            profiles: profiles
+            profiles: profiles,
+            abComparison: abComparison
         )
         self.reference = ProductionReferenceNavigator()
         observeAudioEngine()
