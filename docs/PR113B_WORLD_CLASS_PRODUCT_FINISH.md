@@ -1,6 +1,6 @@
 # PR113B — World-Class Product Finish
 
-Status: **IN PROGRESS — SLICE 1 IMPLEMENTED REMOTELY**
+Status: **IN PROGRESS — SLICES 1–2 IMPLEMENTED REMOTELY**
 
 PR113B is stacked directly on the exact remotely-complete PR113 head
 `f0a260336a0df7284a0c414f39a6e43b7d86ca1b`.
@@ -102,9 +102,94 @@ boundary and must not broaden A/B authority merely to support UI convenience.
 
 ---
 
+## Slice 2 — Click-free, measured-level A/B audition
+
+Slice 2 adds live audition without broadening Slice 1's authority.
+
+### Atomic click-free transition
+
+\`AudioIOEngine.transitionContentAuditionState\` constructs one complete
+candidate DSP graph from the A/B-safe content payload while reusing the current
+Playback-System-owned bass management, Room Correction, Speaker IR, output
+gain, routing and Audio Unit latency.
+
+The candidate is published through the existing
+\`CoreAudioTransportSession.transitionDSPGraph\` path. That path performs the
+production 8 ms sample-domain fade to a silent boundary, atomically publishes
+the newest complete graph, then fades back up. A/B therefore does not perform
+three independent EQ/dynamics/gain mutations and does not introduce an
+instantaneous coefficient discontinuity.
+
+Linear-phase/FIR EQ candidates prepare an inactive FIR program before the
+transition. UI switching remains locked for 25 ms so repeated A/B clicks cannot
+race the in-flight FIR program ownership window.
+
+Semantic N-channel / Virtual Speaker transports retain their existing immutable
+live-configuration rule. A/B cannot use this feature to bypass a
+restart-required transport contract.
+
+### Measured level matching
+
+Each A/B capture may retain the already-available 3-second K-weighted
+short-term LUFS telemetry when:
+
+- audio is running;
+- the reading is finite; and
+- signal is above the existing -60 LUFS measurement gate.
+
+Level matching becomes available only when both A and B have valid captured
+references.
+
+The match is deliberately attenuation-only:
+
+- the quieter measured side becomes the reference;
+- only the louder side is attenuated;
+- neither side is ever boosted;
+- correction is bounded to 12 dB; and
+- the adjustment is temporary and is not written into the captured snapshot.
+
+Because the two readings are captured at different moments, the UI explicitly
+instructs the user to capture A and B during the same program passage when
+measured matching is desired. It is an audition aid, not an EBU loudness
+certification.
+
+### Session restore
+
+The first live audition retains the exact pre-A/B content state and the current
+Playback System boundary. **Exit A/B and Restore** transitions back to that
+content state only if the same Playback System identity and exact system state
+are still present.
+
+If the Playback System changed during comparison, restoration fails closed
+rather than mutating system state to recreate the old environment.
+
+### Production UI
+
+The production profile toolbar now contains:
+
+- an **A/B** management menu;
+- **Capture Current as A**;
+- **Capture Current as B**;
+- direct **A** and **B** audition buttons;
+- optional **Measured Level Match**;
+- measured attenuation readout when available;
+- **Swap A / B**;
+- **Exit A/B and Restore**; and
+- **Clear A/B**.
+
+Capture is disabled during an active audition session so temporary
+level-matching attenuation cannot accidentally become a new source snapshot.
+
+
+---
+
 ## Regression coverage
 
 `ProductionInformationArchitectureTests` verifies:
+
+- level matching attenuates only the louder measured capture;
+- level matching is bounded and rejects missing/invalid low-level evidence;
+- captured LUFS metadata does not broaden the four-field safe audition payload;
 
 - the A/B payload contains only the four allowed content-domain fields;
 - Audio Unit rack state survives A/B-state reconstruction unchanged;
