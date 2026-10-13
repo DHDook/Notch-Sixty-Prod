@@ -78,6 +78,7 @@ final class ProductController: ObservableObject {
     let hardwareAcceptance: HardwareAcceptanceController
     let backup: NotchSixtyBackupService
     let recovery: ProductRecoveryController
+    let headroomAssistant: HeadroomAssistantController
     let reference: ProductionReferenceNavigator
     private var audioEngineObservation: AnyCancellable?
     private var calibrationObservation: AnyCancellable?
@@ -131,6 +132,10 @@ final class ProductController: ObservableObject {
             roomStore: roomProjects.store
         )
         self.recovery = ProductRecoveryController()
+        self.headroomAssistant = HeadroomAssistantController(
+            engine: audioEngine,
+            profiles: profiles
+        )
         self.reference = ProductionReferenceNavigator()
         observeAudioEngine()
         observeTermination()
@@ -183,6 +188,10 @@ final class ProductController: ObservableObject {
         )
         self.recovery = ProductRecoveryController(
             store: recoveryStore
+        )
+        self.headroomAssistant = HeadroomAssistantController(
+            engine: audioEngine,
+            profiles: profiles
         )
         self.reference = ProductionReferenceNavigator()
         observeAudioEngine()
