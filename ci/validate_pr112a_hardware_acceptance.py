@@ -208,7 +208,7 @@ for token in (
     '"Run Read-Only Preflight"',
     "HardwareAcceptancePreflightAnalyzer()",
     "HardwareAcceptanceCommissioningDraftLocator()",
-    '"physicalAcceptanceEstablished = false',
+    "physicalAcceptanceEstablished = false",
 ):
     assert token in ui, f"PR112A guided acceptance UI missing {token}"
 
