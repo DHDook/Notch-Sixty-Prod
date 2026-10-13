@@ -37,6 +37,22 @@ jobs:
           python3 ci/validate_pr110_advanced_placement.py
           python3 ci/validate_pr109_cross_feature_contracts.py
 
+
+      - name: Build PR113B remote product-finish readiness manifest
+        run: >-
+          python3 ci/build_pr113b_remote_product_finish_readiness.py
+          --commit "${{ github.event.pull_request.head.sha || github.sha }}"
+          --branch "${{ github.head_ref || github.ref_name }}"
+          --output "$RUNNER_TEMP/pr113b-remote-product-finish-readiness.json"
+
+      - name: Publish PR113B remote product-finish readiness
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr113b-remote-product-finish-readiness
+          path: ${{ runner.temp }}/pr113b-remote-product-finish-readiness.json
+          retention-days: 30
+          if-no-files-found: error
+
   macos:
     runs-on: xcode-27
     steps:
@@ -61,7 +77,7 @@ jobs:
           -configuration Debug -destination 'platform=macOS,arch=arm64'
           CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES build
 
-      - name: Run production IA, recovery and Lab export tests
+      - name: Run production IA, product finish and Lab export tests
         run: >-
           xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
           -configuration Debug -destination 'platform=macOS,arch=arm64'
