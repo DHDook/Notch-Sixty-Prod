@@ -572,4 +572,92 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         )
     }
 
+
+    func testABAuditionStateContainsOnlySafeContentDSP() {
+        let audition = ContentABAuditionState(
+            contentState: ContentPresetState()
+        )
+        let labels = Set(
+            Mirror(reflecting: audition).children.compactMap(\.label)
+        )
+
+        XCTAssertEqual(
+            labels,
+            Set([
+                "stereoEQ",
+                "inputPreampDB",
+                "headroomAttenuationDB",
+                "dynamics",
+            ])
+        )
+        XCTAssertFalse(labels.contains("audioUnitRack"))
+        XCTAssertFalse(labels.contains("outputRouting"))
+        XCTAssertFalse(labels.contains("bassManagement"))
+        XCTAssertFalse(labels.contains("roomCorrection"))
+        XCTAssertFalse(labels.contains("speakerIR"))
+        XCTAssertFalse(labels.contains("speakerDriverProcessing"))
+        XCTAssertFalse(labels.contains("outputGainDB"))
+    }
+
+    func testABAuditionMergePreservesCurrentAudioUnitRack() {
+        let base = ContentPresetState()
+        let audition = ContentABAuditionState(
+            stereoEQ: StereoEQConfiguration(),
+            inputPreampDB: -3.0,
+            headroomAttenuationDB: -1.5,
+            dynamics: DynamicsConfiguration()
+        )
+
+        let merged = audition.merging(into: base)
+
+        XCTAssertEqual(merged.stereoEQ, audition.stereoEQ)
+        XCTAssertEqual(merged.inputPreampDB, -3.0)
+        XCTAssertEqual(merged.headroomAttenuationDB, -1.5)
+        XCTAssertEqual(merged.dynamics, audition.dynamics)
+        XCTAssertEqual(merged.audioUnitRack, base.audioUnitRack)
+    }
+
+    func testABSystemBoundaryFailsClosedOnIdentityAndStateDrift() {
+        let systemID = UUID()
+        let state = PlaybackSystemState()
+        let boundary = ContentABSystemBoundary(
+            selectedSystemProfileID: systemID,
+            systemState: state
+        )
+
+        XCTAssertEqual(
+            boundary.compatibility(
+                currentSystemProfileID: systemID,
+                currentSystemState: state
+            ),
+            .ready
+        )
+
+        XCTAssertEqual(
+            boundary.compatibility(
+                currentSystemProfileID: UUID(),
+                currentSystemState: state
+            ),
+            .playbackSystemChanged
+        )
+
+        var changedState = state
+        changedState.outputGainDB = -1.0
+        XCTAssertEqual(
+            boundary.compatibility(
+                currentSystemProfileID: systemID,
+                currentSystemState: changedState
+            ),
+            .playbackSystemStateChanged
+        )
+    }
+
+    func testABSlotsHaveStableIdentityAndOpposites() {
+        XCTAssertEqual(ContentABSlot.allCases, [.a, .b])
+        XCTAssertEqual(ContentABSlot.a.displayName, "A")
+        XCTAssertEqual(ContentABSlot.b.displayName, "B")
+        XCTAssertEqual(ContentABSlot.a.opposite, .b)
+        XCTAssertEqual(ContentABSlot.b.opposite, .a)
+    }
+
 }
