@@ -753,4 +753,90 @@ final class ProtectedDriverPEQRecommendationTests: XCTestCase {
             session: session, protocolID: protocolID
         ))
     }
+
+    func testLabReportPublishesDriverCutReviewWithoutDSPDeployment() throws {
+        let (session, _) = fixture(peakDB: 5)
+        let report = try SpeakerMeasurementLabReportBuilder()
+            .build(session: session)
+        let summary = try XCTUnwrap(report.analysisSummaries.first {
+            $0.kind == .protectedDriverOptimization
+        })
+        XCTAssertTrue(summary.available)
+        XCTAssertTrue(summary.title.contains("Left High"))
+        XCTAssertEqual(summary.metrics.first {
+            $0.name == "Driver"
+        }?.value, "Left High")
+        XCTAssertEqual(summary.metrics.first {
+            $0.name == "Limiting"
+        }?.value, "Required / preserved")
+        XCTAssertEqual(summary.metrics.first {
+            $0.name == "Deployment"
+        }?.value, "Never · review only")
+        XCTAssertTrue(summary.metrics.contains {
+            $0.name.hasPrefix("Cut ")
+                && $0.value.contains("dB, Q")
+        })
+        XCTAssertTrue(summary.warnings.contains {
+            $0.contains("no live Apply")
+        })
+        XCTAssertFalse(report.canDeploy)
+
+        let csv = try SpeakerMeasurementLabReportExporter()
+            .csvData(report)
+        let csvText = try XCTUnwrap(
+            String(data: csv, encoding: .utf8)
+        )
+        XCTAssertTrue(csvText.contains("protectedDriverOptimization"))
+        XCTAssertTrue(csvText.contains("review only"))
+        XCTAssertFalse(csvText.contains("impulseResponse"))
+        let json = try SpeakerMeasurementLabReportExporter()
+            .jsonData(report)
+        let jsonText = try XCTUnwrap(
+            String(data: json, encoding: .utf8)
+        )
+        XCTAssertTrue(jsonText.contains("protectedDriverOptimization"))
+        XCTAssertFalse(jsonText.contains("transferFunction"))
+    }
+
+    func testLabReportSurfacesInconclusiveDriverOnMissingRepeats() throws {
+        var (session, _) = fixture()
+        session.captures.removeLast()
+        let report = try SpeakerMeasurementLabReportBuilder()
+            .build(session: session)
+        let matching = report.analysisSummaries.filter {
+            $0.kind == .protectedDriverOptimization
+        }
+        XCTAssertEqual(matching.count, 1)
+        XCTAssertFalse(matching[0].available)
+        XCTAssertTrue(matching[0].metrics.isEmpty)
+        XCTAssertFalse(matching[0].warnings.isEmpty)
+        XCTAssertFalse(report.canDeploy)
+    }
+
+    func testLabReportSurfacedProtectedDriverWithoutFabricatingBands() throws {
+        let (session, _) = fixture(peakDB: 0)
+        let report = try SpeakerMeasurementLabReportBuilder()
+            .build(session: session)
+        let advice = try XCTUnwrap(report.analysisSummaries.first {
+            $0.kind == .protectedDriverOptimization
+        })
+        XCTAssertTrue(advice.available)
+        XCTAssertEqual(advice.metrics.first {
+            $0.name == "Suggested cuts"
+        }?.value, "0")
+        XCTAssertFalse(advice.metrics.contains {
+            $0.name.hasPrefix("Cut ")
+        })
+        XCTAssertFalse(report.canDeploy)
+    }
+
+    func testReportRejectsUnprotectedLimiterCaptureEvenIfGridLooksGood() throws {
+        let (session, _) = fixture(limiter: false)
+        XCTAssertThrowsError(
+            try SpeakerMeasurementLabReportBuilder().build(
+                session: session
+            )
+        )
+    }
+
 }
