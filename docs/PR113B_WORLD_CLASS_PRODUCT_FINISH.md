@@ -451,8 +451,11 @@ while an A/B session is open and invalidates an observation if A/B begins
 mid-run, so temporary loudness-match attenuation cannot contaminate static
 headroom evidence.
 
-Apply is always explicit. `HeadroomAssistantController.applyRecommendation()`
-is the only assistant mutation path and calls the existing
+Apply and Undo are always explicit. The assistant has exactly two mutation
+paths: `HeadroomAssistantController.applyRecommendation()` applies the proposed
+attenuation, while `revertAppliedRecommendation()` can restore the exact
+pre-observation attenuation only if the applied content/system boundary is
+still unchanged. Both use the existing
 `AudioIOEngine.transitionHeadroomAttenuationDB` silent-boundary graph
 transition. No background auto-adjustment is permitted.
 
@@ -475,7 +478,7 @@ The Headroom Assistant card shows:
 - sustained and peak limiter reduction;
 - safety-clamp count;
 - explanation of insufficient/sufficient/range-limited evidence; and
-- explicit Observe / Stop & Review / Apply / Clear controls.
+- explicit Observe / Stop & Review / Apply / Undo / Keep & Clear controls.
 
 The UI states that short observations cannot prove worst-case program headroom
 and that the assistant never removes existing headroom.
