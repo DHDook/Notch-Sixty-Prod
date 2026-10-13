@@ -502,4 +502,57 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         )
     }
 
+
+    @MainActor
+    func testReferenceNavigatorRoutesGuideAndDSPDeepLinks() {
+        let navigator = ProductionReferenceNavigator()
+
+        navigator.openGuide(articleID: "room-correction")
+        XCTAssertEqual(navigator.selectedTab, .userGuide)
+        XCTAssertEqual(navigator.selectedArticleID, "room-correction")
+        XCTAssertNil(navigator.selectedFormulaID)
+
+        navigator.openDSPReference(
+            articleID: "dynamics",
+            formulaID: "compressor-ratio"
+        )
+        XCTAssertEqual(navigator.selectedTab, .dspReference)
+        XCTAssertEqual(navigator.selectedArticleID, "dynamics")
+        XCTAssertEqual(navigator.selectedFormulaID, "compressor-ratio")
+    }
+
+    func testWorkflowVocabularySeparatesDraftAndLiveRecoverySemantics() {
+        XCTAssertEqual(
+            Set(ProductionWorkflowTerm.allCases.map(\.rawValue)),
+            Set(["Preview", "Apply", "Verify", "Revert", "Rollback", "Deploy"])
+        )
+        XCTAssertTrue(
+            ProductionWorkflowTerm.preview.definition
+                .contains("without changing saved or live playback state")
+        )
+        XCTAssertTrue(
+            ProductionWorkflowTerm.revert.definition
+                .contains("before a live Apply")
+        )
+        XCTAssertTrue(
+            ProductionWorkflowTerm.rollback.definition
+                .contains("after a live or saved change")
+        )
+        XCTAssertTrue(
+            ProductionWorkflowTerm.verify.definition
+                .contains("fresh evidence")
+        )
+    }
+
+    func testReferenceSearchFindsWorkflowAndDSPGlossaryTerms() {
+        let workflow = ProductionUserGuideCatalog.search("rollback evidence")
+        XCTAssertTrue(workflow.contains { $0.id == "workflow-glossary" })
+
+        let dsp = ProductionUserGuideCatalog.search("dBTP headroom")
+        XCTAssertTrue(dsp.contains { $0.id == "workflow-glossary" })
+
+        let coherence = ProductionUserGuideCatalog.search("coherence confidence")
+        XCTAssertTrue(coherence.contains { $0.id == "workflow-glossary" })
+    }
+
 }
