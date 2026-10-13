@@ -403,4 +403,103 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         XCTAssertFalse(provenance.liveOutputAuthorized)
     }
 
+
+    func testUserGuideCoversEveryProductionWorkspace() {
+        XCTAssertTrue(
+            ProductionUserGuideCatalog.uncoveredProductionSections.isEmpty
+        )
+
+        for section in ProductionSection.allCases {
+            let articleID = ProductionUserGuideCatalog.articleID(for: section)
+            XCTAssertNotNil(
+                ProductionUserGuideCatalog.article(id: articleID),
+                "Missing guide article for \(section.title)"
+            )
+        }
+    }
+
+    func testUserGuideIdentifiersAreStableAndUnique() {
+        let articles = ProductionUserGuideCatalog.articles
+        XCTAssertEqual(
+            Set(articles.map(\.id)).count,
+            articles.count
+        )
+
+        for article in articles {
+            XCTAssertEqual(
+                Set(article.sections.map(\.id)).count,
+                article.sections.count,
+                "Duplicate section ID in \(article.id)"
+            )
+            XCTAssertEqual(
+                Set(article.formulas.map(\.id)).count,
+                article.formulas.count,
+                "Duplicate formula ID in \(article.id)"
+            )
+        }
+    }
+
+    func testUserGuideSearchFindsFeatureMathAndSafetyLanguage() {
+        XCTAssertTrue(
+            ProductionUserGuideCatalog.search("compressor ratio")
+                .contains { $0.id == "dynamics" }
+        )
+        XCTAssertTrue(
+            ProductionUserGuideCatalog.search("transfer function impulse")
+                .contains { $0.id == "measurement-lab" }
+        )
+        XCTAssertTrue(
+            ProductionUserGuideCatalog.search("physical evidence H08")
+                .contains { $0.id == "hardware-acceptance" }
+        )
+        XCTAssertTrue(
+            ProductionUserGuideCatalog.search("causality budget")
+                .contains { $0.id == "active-acoustics" }
+        )
+    }
+
+    func testMathBearingGuideArticlesExplainFormulaScope() throws {
+        let requiredMathArticles = [
+            "dashboard",
+            "equalizer",
+            "dynamics",
+            "meters",
+            "speakers",
+            "headphones",
+            "speaker-calibration",
+            "measurement-lab",
+            "room-correction",
+            "active-acoustics",
+            "room-advisor",
+            "math-reference",
+        ]
+
+        for id in requiredMathArticles {
+            let article = try XCTUnwrap(
+                ProductionUserGuideCatalog.article(id: id)
+            )
+            XCTAssertFalse(article.formulas.isEmpty, id)
+            for formula in article.formulas {
+                XCTAssertFalse(formula.expression.isEmpty, formula.id)
+                XCTAssertFalse(formula.explanation.isEmpty, formula.id)
+                XCTAssertFalse(formula.scope.title.isEmpty, formula.id)
+            }
+        }
+    }
+
+    func testGuideKeepsSoftwareAndPhysicalAuthorityDistinct() throws {
+        let acceptance = try XCTUnwrap(
+            ProductionUserGuideCatalog.article(id: "hardware-acceptance")
+        )
+        XCTAssertTrue(
+            acceptance.searchableText.contains("ci test labeled pass")
+        )
+        XCTAssertTrue(
+            acceptance.searchableText.contains("physical-hardware evidence")
+        )
+        XCTAssertTrue(
+            acceptance.searchableText.contains("independent physical review")
+        )
+    }
+
 }
