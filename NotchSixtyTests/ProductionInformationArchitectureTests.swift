@@ -403,4 +403,173 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         XCTAssertFalse(provenance.liveOutputAuthorized)
     }
 
+
+    func testUserGuideCoversEveryProductionWorkspace() {
+        XCTAssertTrue(
+            ProductionUserGuideCatalog.uncoveredProductionSections.isEmpty
+        )
+
+        for section in ProductionSection.allCases {
+            let articleID = ProductionUserGuideCatalog.articleID(for: section)
+            XCTAssertNotNil(
+                ProductionUserGuideCatalog.article(id: articleID),
+                "Missing guide article for \(section.title)"
+            )
+        }
+    }
+
+    func testUserGuideIdentifiersAreStableAndUnique() {
+        let articles = ProductionUserGuideCatalog.articles
+        XCTAssertEqual(
+            Set(articles.map(\.id)).count,
+            articles.count
+        )
+
+        for article in articles {
+            XCTAssertEqual(
+                Set(article.sections.map(\.id)).count,
+                article.sections.count,
+                "Duplicate section ID in \(article.id)"
+            )
+            XCTAssertEqual(
+                Set(article.formulas.map(\.id)).count,
+                article.formulas.count,
+                "Duplicate formula ID in \(article.id)"
+            )
+        }
+    }
+
+    func testUserGuideSearchFindsFeatureMathAndSafetyLanguage() {
+        XCTAssertTrue(
+            ProductionUserGuideCatalog.search("compressor ratio")
+                .contains { $0.id == "dynamics" }
+        )
+        XCTAssertTrue(
+            ProductionUserGuideCatalog.search("transfer function impulse")
+                .contains { $0.id == "measurement-lab" }
+        )
+        XCTAssertTrue(
+            ProductionUserGuideCatalog.search("physical evidence H08")
+                .contains { $0.id == "hardware-acceptance" }
+        )
+        XCTAssertTrue(
+            ProductionUserGuideCatalog.search("causality budget")
+                .contains { $0.id == "active-acoustics" }
+        )
+    }
+
+    func testMathBearingGuideArticlesExplainFormulaScope() throws {
+        let requiredMathArticles = [
+            "dashboard",
+            "equalizer",
+            "dynamics",
+            "meters",
+            "speakers",
+            "headphones",
+            "speaker-calibration",
+            "measurement-lab",
+            "room-correction",
+            "active-acoustics",
+            "room-advisor",
+            "math-reference",
+        ]
+
+        for id in requiredMathArticles {
+            let article = try XCTUnwrap(
+                ProductionUserGuideCatalog.article(id: id)
+            )
+            XCTAssertFalse(article.formulas.isEmpty, id)
+            for formula in article.formulas {
+                XCTAssertFalse(formula.expression.isEmpty, formula.id)
+                XCTAssertFalse(formula.explanation.isEmpty, formula.id)
+                XCTAssertFalse(formula.scope.title.isEmpty, formula.id)
+            }
+        }
+    }
+
+    func testGuideKeepsSoftwareAndPhysicalAuthorityDistinct() throws {
+        let acceptance = try XCTUnwrap(
+            ProductionUserGuideCatalog.article(id: "hardware-acceptance")
+        )
+        XCTAssertTrue(
+            acceptance.searchableText.contains("ci test labeled pass")
+        )
+        XCTAssertTrue(
+            acceptance.searchableText.contains("physical-hardware evidence")
+        )
+        XCTAssertTrue(
+            acceptance.searchableText.contains("independent physical review")
+        )
+    }
+
+
+    @MainActor
+    func testReferenceNavigatorRoutesGuideAndDSPDeepLinks() {
+        let navigator = ProductionReferenceNavigator()
+
+        navigator.openGuide(articleID: "room-correction")
+        XCTAssertEqual(navigator.selectedTab, .userGuide)
+        XCTAssertEqual(navigator.selectedArticleID, "room-correction")
+        XCTAssertNil(navigator.selectedFormulaID)
+
+        navigator.openDSPReference(
+            articleID: "dynamics",
+            formulaID: "compressor-ratio"
+        )
+        XCTAssertEqual(navigator.selectedTab, .dspReference)
+        XCTAssertEqual(navigator.selectedArticleID, "dynamics")
+        XCTAssertEqual(navigator.selectedFormulaID, "compressor-ratio")
+    }
+
+    func testWorkflowVocabularySeparatesDraftAndLiveRecoverySemantics() {
+        XCTAssertEqual(
+            Set(ProductionWorkflowTerm.allCases.map(\.rawValue)),
+            Set(["Preview", "Apply", "Verify", "Revert", "Rollback", "Deploy"])
+        )
+        XCTAssertTrue(
+            ProductionWorkflowTerm.preview.definition
+                .contains("without changing saved or live playback state")
+        )
+        XCTAssertTrue(
+            ProductionWorkflowTerm.revert.definition
+                .contains("before a live Apply")
+        )
+        XCTAssertTrue(
+            ProductionWorkflowTerm.rollback.definition
+                .contains("after a live or saved change")
+        )
+        XCTAssertTrue(
+            ProductionWorkflowTerm.verify.definition
+                .contains("fresh evidence")
+        )
+    }
+
+    func testReferenceSearchFindsWorkflowAndDSPGlossaryTerms() {
+        let workflow = ProductionUserGuideCatalog.search("rollback evidence")
+        XCTAssertTrue(workflow.contains { $0.id == "workflow-glossary" })
+
+        let dsp = ProductionUserGuideCatalog.search("dBTP headroom")
+        XCTAssertTrue(dsp.contains { $0.id == "workflow-glossary" })
+
+        let coherence = ProductionUserGuideCatalog.search("coherence confidence")
+        XCTAssertTrue(coherence.contains { $0.id == "workflow-glossary" })
+    }
+
+
+    func testRoomCorrectionReferenceMatchesMinimumPhaseImplementation() throws {
+        let article = try XCTUnwrap(
+            ProductionUserGuideCatalog.article(id: "room-correction")
+        )
+        let formula = try XCTUnwrap(
+            article.formulas.first { $0.id == "minimum-phase-fir" }
+        )
+
+        XCTAssertTrue(formula.title.contains("Minimum-phase"))
+        XCTAssertTrue(formula.explanation.contains("causal minimum-phase"))
+        XCTAssertTrue(formula.expression.contains("IFFT"))
+        XCTAssertTrue(
+            formula.explanation.contains("not a symmetric linear-phase FIR")
+        )
+    }
+
 }

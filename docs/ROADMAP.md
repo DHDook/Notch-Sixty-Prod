@@ -16,6 +16,49 @@ Legacy parity is the minimum capability floor. The commercial rewrite should exc
 
 Future portability must not materially delay the flagship Mac launch.
 
+## Current execution status — PR113
+
+**PR113 — Production UX, Preferences & Reference** is the active remote
+milestone, stacked on the exact remote/software-complete PR112A head
+`0df13292ba02ea5d21c094fabeb48894d94c2b1d`.
+
+Slices 1–4 are implemented:
+
+- **Preferences & Reference** replaces the former single Settings scroll with
+  General, User Guide and DSP Reference destinations.
+- The data-driven User Guide has explicit coverage for every production
+  workspace plus Getting Started, app preferences, workflow vocabulary and a
+  DSP glossary.
+- DSP Reference exposes implementation-audited equations and distinguishes core
+  math, implementation relationships and diagnostic/model definitions.
+- Every main workspace has a contextual reference entry point; selected EQ and
+  dynamics controls deep-link directly to the matching math.
+- Preview / Apply / Verify / Revert / Rollback / Deploy now have explicit
+  product-wide semantics.
+- The documentation surface is responsive and contextual help has explicit
+  accessibility labels.
+- The math audit corrected Room Correction documentation to its actual
+  **causal minimum-phase cepstral FIR** implementation rather than a
+  linear-phase approximation.
+
+Slice 5 is the remote closeout gate: PR113/inherited safety audits, Apple
+Silicon Debug/Release builds, targeted production-IA/reference tests, full
+cumulative XCTest, and a machine-readable remote UX readiness artifact.
+
+That artifact can mark PR113 remote UX/software complete but must always retain
+`physicalAcceptanceComplete=false`,
+`releaseAcceptanceComplete=false`,
+`liveFeedForwardANCAuthorized=false`,
+`mayMergeIntoMain=false`, and
+`physicalEvidenceSuppliedByCI=false`.
+
+Physical PR112 H01–H08 execution remains separate hands-on work. PR113, PR112A
+and every ancestor remain **OPEN, DRAFT and UNMERGED**; `main` is unchanged.
+
+See `docs/PR113_PRODUCTION_UX.md`.
+
+---
+
 ## Current execution status — PR112A
 
 **PR112A — Remote Hardware-Acceptance Infrastructure** is now the active

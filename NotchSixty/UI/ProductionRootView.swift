@@ -257,9 +257,9 @@ struct ProductionRootView: View {
         case .dashboard:
             ProductionDashboardView(engine: engine)
         case .equalizer:
-            ProductionEqualizerView(engine: engine)
+            ProductionEqualizerView(engine: engine, reference: product.reference)
         case .dynamics:
-            ProductionDynamicsView(engine: engine)
+            ProductionDynamicsView(engine: engine, reference: product.reference)
         case .meters:
             ProductionMetersView(engine: engine)
         case .speakers:
@@ -376,12 +376,19 @@ struct ProductionRootView: View {
 
         ToolbarSpacer(.flexible)
 
-        ToolbarItem(placement: .primaryAction) {
+        ToolbarItemGroup(placement: .primaryAction) {
+            ProductionReferenceHelpButton(
+                navigator: product.reference,
+                articleID: ProductionUserGuideCatalog.articleID(for: selection ?? .dashboard),
+                label: "Open \((selection ?? .dashboard).title) in the User Guide"
+            )
+            .buttonStyle(.glass)
+
             SettingsLink {
-                Label("Settings", systemImage: "gearshape")
+                Label("Preferences & Reference", systemImage: "gearshape")
             }
             .buttonStyle(.glass)
-            .help("Open Notch Sixty Settings")
+            .help("Open Preferences & Reference")
         }
     }
 }

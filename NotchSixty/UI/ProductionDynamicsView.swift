@@ -3,6 +3,7 @@ import SwiftUI
 
 struct ProductionDynamicsView: View {
     @ObservedObject var engine: AudioIOEngine
+    var reference: ProductionReferenceNavigator? = nil
     @State private var selectedModule: ProductionDynamicsModule = .compressor
     @State private var mainsDetectInFlight = false
     @State private var mainsDetectionMessage: String?
@@ -132,10 +133,10 @@ struct ProductionDynamicsView: View {
         ) {
             ProductionDynamicsTelemetryView(engine: engine, kind: .compressor)
             DynamicsParameterRow("Threshold", value: doubleBinding({ $0.compressor.thresholdDB }, { $0.compressor.thresholdDB = $1 }), range: -60...0, step: 0.5, unit: "dB", digits: 1)
-            DynamicsParameterRow("Ratio", value: doubleBinding({ $0.compressor.ratio }, { $0.compressor.ratio = $1 }), range: 1...20, step: 0.1, unit: ":1", digits: 1)
+            DynamicsParameterRow("Ratio", value: doubleBinding({ $0.compressor.ratio }, { $0.compressor.ratio = $1 }), range: 1...20, step: 0.1, unit: ":1", digits: 1, reference: reference, referenceFormulaID: "compressor-ratio")
             DynamicsParameterRow("Knee", value: doubleBinding({ $0.compressor.kneeWidthDB }, { $0.compressor.kneeWidthDB = $1 }), range: 0...20, step: 0.5, unit: "dB", digits: 1)
-            DynamicsParameterRow("Attack", value: doubleBinding({ $0.compressor.attackMs }, { $0.compressor.attackMs = $1 }), range: 0.1...100, step: 0.5, unit: "ms", digits: 1)
-            DynamicsParameterRow("Release", value: doubleBinding({ $0.compressor.releaseMs }, { $0.compressor.releaseMs = $1 }), range: 5...1_000, step: 5, unit: "ms", digits: 0)
+            DynamicsParameterRow("Attack", value: doubleBinding({ $0.compressor.attackMs }, { $0.compressor.attackMs = $1 }), range: 0.1...100, step: 0.5, unit: "ms", digits: 1, reference: reference, referenceFormulaID: "time-constant")
+            DynamicsParameterRow("Release", value: doubleBinding({ $0.compressor.releaseMs }, { $0.compressor.releaseMs = $1 }), range: 5...1_000, step: 5, unit: "ms", digits: 0, reference: reference, referenceFormulaID: "time-constant")
             DynamicsParameterRow("Makeup Gain", value: doubleBinding({ $0.compressor.makeupGainDB }, { $0.compressor.makeupGainDB = $1 }), range: -24...24, step: 0.5, unit: "dB", digits: 1)
 
             Divider()
@@ -222,10 +223,10 @@ struct ProductionDynamicsView: View {
         moduleCard(module: .expander, enabled: boolBinding({ $0.expander.enabled }, { $0.expander.enabled = $1 }), reset: { preserveEnabledReset(\.expander, defaultValue: ExpanderConfiguration()) }) {
             ProductionDynamicsTelemetryView(engine: engine, kind: .expander)
             DynamicsParameterRow("Threshold", value: doubleBinding({ $0.expander.thresholdDB }, { $0.expander.thresholdDB = $1 }), range: -60...0, step: 0.5, unit: "dB", digits: 1)
-            DynamicsParameterRow("Ratio", value: doubleBinding({ $0.expander.ratio }, { $0.expander.ratio = $1 }), range: 1...4, step: 0.1, unit: ":1", digits: 1)
+            DynamicsParameterRow("Ratio", value: doubleBinding({ $0.expander.ratio }, { $0.expander.ratio = $1 }), range: 1...4, step: 0.1, unit: ":1", digits: 1, reference: reference, referenceFormulaID: "expander-ratio")
             DynamicsParameterRow("Range", value: doubleBinding({ $0.expander.rangeDB }, { $0.expander.rangeDB = $1 }), range: -40...0, step: 0.5, unit: "dB", digits: 1)
-            DynamicsParameterRow("Attack", value: doubleBinding({ $0.expander.attackMs }, { $0.expander.attackMs = $1 }), range: 0.1...100, step: 0.5, unit: "ms", digits: 1)
-            DynamicsParameterRow("Release", value: doubleBinding({ $0.expander.releaseMs }, { $0.expander.releaseMs = $1 }), range: 10...1_000, step: 10, unit: "ms", digits: 0)
+            DynamicsParameterRow("Attack", value: doubleBinding({ $0.expander.attackMs }, { $0.expander.attackMs = $1 }), range: 0.1...100, step: 0.5, unit: "ms", digits: 1, reference: reference, referenceFormulaID: "time-constant")
+            DynamicsParameterRow("Release", value: doubleBinding({ $0.expander.releaseMs }, { $0.expander.releaseMs = $1 }), range: 10...1_000, step: 10, unit: "ms", digits: 0, reference: reference, referenceFormulaID: "time-constant")
         }
     }
 
@@ -770,6 +771,8 @@ private struct DynamicsParameterRow: View {
     let step: Double
     let unit: String
     let digits: Int
+    let reference: ProductionReferenceNavigator?
+    let referenceFormulaID: String?
 
     init(
         _ title: String,
@@ -777,7 +780,9 @@ private struct DynamicsParameterRow: View {
         range: ClosedRange<Double>,
         step: Double,
         unit: String,
-        digits: Int
+        digits: Int,
+        reference: ProductionReferenceNavigator? = nil,
+        referenceFormulaID: String? = nil
     ) {
         self.title = title
         self._value = value
@@ -785,10 +790,12 @@ private struct DynamicsParameterRow: View {
         self.step = step
         self.unit = unit
         self.digits = digits
+        self.reference = reference
+        self.referenceFormulaID = referenceFormulaID
     }
 
     var body: some View {
-        LabeledContent(title) {
+        LabeledContent {
             HStack(spacing: 10) {
                 Slider(value: $value, in: range, step: step)
                     .frame(minWidth: 220)
@@ -809,6 +816,19 @@ private struct DynamicsParameterRow: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .frame(minWidth: 38, alignment: .leading)
+                }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Text(title)
+                if let reference, let referenceFormulaID {
+                    ProductionReferenceHelpButton(
+                        navigator: reference,
+                        articleID: "dynamics",
+                        formulaID: referenceFormulaID,
+                        destination: .dspReference,
+                        label: "Open \(title) math in DSP Reference"
+                    )
                 }
             }
         }
