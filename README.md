@@ -24,6 +24,12 @@ revalidates the complete shipping tree against App Store/privacy/security,
 licensing/provenance/dependency, packaging/archive, commercial metadata and
 release-handoff requirements.
 
+The earlier **PR102 integration and commercial-release preparation** established
+the first remote release foundation: sandbox/archive preflight, dependency and
+notice reconciliation, credential-neutral packaging evidence, and explicit
+physical/credential release gates. PR114 preserves that work while re-auditing
+it against the much larger PR113B product.
+
 The stacked PRs deliberately remain open, draft and unmerged while the owner is
 away from the Mac/audio system. PR112 physical H01–H08 acceptance, production
 Apple signing, App Store Connect/TestFlight/App Review and public-release
