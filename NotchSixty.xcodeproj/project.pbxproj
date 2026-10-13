@@ -269,6 +269,7 @@
 		F112A0000000000000000001 /* HardwareAcceptance.swift in Sources */ = {isa = PBXBuildFile; fileRef = F112A0000000000000000011 /* HardwareAcceptance.swift */; };
 		F112A0000000000000000002 /* HardwareAcceptanceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F112A0000000000000000012 /* HardwareAcceptanceController.swift */; };
 		F112A0000000000000000003 /* ProductionHardwareAcceptanceWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = F112A0000000000000000013 /* ProductionHardwareAcceptanceWorkspace.swift */; };
+		F112A0000000000000000005 /* HardwareAcceptanceEvidenceAdapters.swift in Sources */ = {isa = PBXBuildFile; fileRef = F112A0000000000000000015 /* HardwareAcceptanceEvidenceAdapters.swift */; };
 		F112A0000000000000000004 /* HardwareAcceptanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F112A0000000000000000014 /* HardwareAcceptanceTests.swift */; };
 		F93000000000000000000001 /* RoomGeometryPlacement.swift in Sources */ = {isa = PBXBuildFile; fileRef = F93000000000000000000011 /* RoomGeometryPlacement.swift */; };
 		F93000000000000000000002 /* ProductionRoomGeometrySection.swift in Sources */ = {isa = PBXBuildFile; fileRef = F93000000000000000000012 /* ProductionRoomGeometrySection.swift */; };
@@ -571,6 +572,7 @@
 		F92000000000000000000014 /* RoomTreatmentAdvisorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomTreatmentAdvisorTests.swift; sourceTree = "<group>"; };
 		F112A0000000000000000011 /* HardwareAcceptance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Acceptance/HardwareAcceptance.swift; sourceTree = "<group>"; };
 		F112A0000000000000000012 /* HardwareAcceptanceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Acceptance/HardwareAcceptanceController.swift; sourceTree = "<group>"; };
+		F112A0000000000000000015 /* HardwareAcceptanceEvidenceAdapters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Acceptance/HardwareAcceptanceEvidenceAdapters.swift; sourceTree = "<group>"; };
 		F112A0000000000000000013 /* ProductionHardwareAcceptanceWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionHardwareAcceptanceWorkspace.swift; sourceTree = "<group>"; };
 		F112A0000000000000000014 /* HardwareAcceptanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HardwareAcceptanceTests.swift; sourceTree = "<group>"; };
 		F93000000000000000000011 /* RoomGeometryPlacement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomGeometryPlacement.swift; sourceTree = "<group>"; };
@@ -608,6 +610,7 @@
 				A20000000000000000000055 /* Diagnostics */,
 				F112A0000000000000000011 /* HardwareAcceptance.swift */,
 				F112A0000000000000000012 /* HardwareAcceptanceController.swift */,
+				F112A0000000000000000015 /* HardwareAcceptanceEvidenceAdapters.swift */,
 				A40000000000000000000050 /* UI */,
 				A10000000000000000000020 /* NotchSixtyApp.swift */,
 				A10000000000000000000021 /* ContentView.swift */,
@@ -974,6 +977,7 @@
 				F78000000000000000000002 /* ProductionPluginWorkspace.swift in Sources */,
 				F112A0000000000000000001 /* HardwareAcceptance.swift in Sources */,
 				F112A0000000000000000002 /* HardwareAcceptanceController.swift in Sources */,
+				F112A0000000000000000005 /* HardwareAcceptanceEvidenceAdapters.swift in Sources */,
 				F112A0000000000000000003 /* ProductionHardwareAcceptanceWorkspace.swift in Sources */,
 				A20000000000000000000010 /* AudioIOEngine.swift in Sources */,
 				A20000000000000000000011 /* CoreAudioError.swift in Sources */,
