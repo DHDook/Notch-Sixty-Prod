@@ -769,23 +769,22 @@ final class ProductionInformationArchitectureTests: XCTestCase {
             selectedSystemProfileID: system.id
         )
 
-        let requirements = try profiles.restoreBackupSnapshot(
+        let report = try profiles.restoreBackupSnapshot(
             snapshot,
             availableOutputUIDs: []
         )
 
-        XCTAssertEqual(requirements.count, 1)
         XCTAssertEqual(
-            requirements.first?.systemProfileID,
-            system.id
-        )
-        XCTAssertEqual(
-            requirements.first?.importedDeviceUIDs,
-            ["missing-output"]
+            report.hardwareMappingRequiredSystemIDs,
+            [system.id]
         )
         XCTAssertNil(profiles.selectedSystemProfileID)
-        XCTAssertNotNil(
+        let requirement = try XCTUnwrap(
             profiles.hardwareMappingRequirement(for: system.id)
+        )
+        XCTAssertEqual(
+            requirement.importedDeviceUIDs,
+            ["missing-output"]
         )
     }
 
@@ -818,134 +817,95 @@ final class ProductionInformationArchitectureTests: XCTestCase {
             selectedSystemProfileID: system.id
         )
 
-        let requirements = try profiles.restoreBackupSnapshot(
+        let report = try profiles.restoreBackupSnapshot(
             snapshot,
             availableOutputUIDs: ["known-output"]
         )
 
-        XCTAssertTrue(requirements.isEmpty)
+        XCTAssertTrue(
+            report.hardwareMappingRequiredSystemIDs.isEmpty
+        )
         XCTAssertEqual(profiles.selectedSystemProfileID, system.id)
         XCTAssertNil(
             profiles.hardwareMappingRequirement(for: system.id)
         )
     }
 
-    func testBackupPreferencesRoundTripSafeKeysOnly() throws {
-        let suite = "NotchSixtyTests.BackupPreferences.\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(
-            UserDefaults(suiteName: suite)
+    func testBackupPreferencesExcludeOSOwnedLaunchState() throws {
+        let preferences = NotchSixtyBackupPreferences(
+            appearance: "dark",
+            presence: "both",
+            volumeStepResolution: 64
         )
-        defer { defaults.removePersistentDomain(forName: suite) }
-
-        defaults.set(
-            "dark",
-            forKey: ProductBackupPreferences.appearanceKey
-        )
-        defaults.set(
-            "both",
-            forKey: ProductBackupPreferences.presenceKey
-        )
-        defaults.set(
-            64,
-            forKey: ProductBackupPreferences.volumeStepResolutionKey
-        )
-
-        let captured = ProductBackupPreferences.capture(
-            from: defaults
-        )
-        XCTAssertEqual(captured.appearanceRawValue, "dark")
-        XCTAssertEqual(captured.presenceRawValue, "both")
-        XCTAssertEqual(captured.volumeStepResolution, 64)
-
-        defaults.removePersistentDomain(forName: suite)
-        captured.apply(to: defaults)
-
-        XCTAssertEqual(
-            defaults.string(
-                forKey: ProductBackupPreferences.appearanceKey
-            ),
-            "dark"
-        )
-        XCTAssertEqual(
-            defaults.string(
-                forKey: ProductBackupPreferences.presenceKey
-            ),
-            "both"
-        )
-        XCTAssertEqual(
-            defaults.integer(
-                forKey:
-                    ProductBackupPreferences.volumeStepResolutionKey
-            ),
-            64
-        )
+        XCTAssertNoThrow(try preferences.validate())
 
         let labels = Set(
-            Mirror(reflecting: captured).children
+            Mirror(reflecting: preferences).children
                 .compactMap { $0.label }
         )
         XCTAssertFalse(labels.contains("launchAtLogin"))
         XCTAssertFalse(labels.contains("launchAtLoginEnabled"))
+        XCTAssertFalse(labels.contains("permissions"))
+
+        let invalid = NotchSixtyBackupPreferences(
+            appearance: "invalid",
+            presence: "both",
+            volumeStepResolution: 64
+        )
+        XCTAssertThrowsError(try invalid.validate())
     }
 
     @MainActor
-    func testBackupInspectionRejectsPayloadTampering() throws {
+    func testBackupInspectionRejectsDomainTampering() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
-
-        let defaultsSuite =
-            "NotchSixtyTests.BackupTamper.\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(
-            UserDefaults(suiteName: defaultsSuite)
-        )
-        defer {
-            defaults.removePersistentDomain(forName: defaultsSuite)
-        }
 
         let profiles = ProductProfileController(
             engine: AudioIOEngine(),
             storageURL: root.appendingPathComponent("profiles.json")
         )
-        let backup = ProductBackupController(
+        let backup = NotchSixtyBackupService(
             profiles: profiles,
-            roomCorrectionStore: RoomCorrectionProjectStore(
+            roomStore: RoomCorrectionProjectStore(
                 rootDirectory: root.appendingPathComponent(
                     "room",
                     isDirectory: true
                 )
             ),
-            measurementLabStore:
-                SpeakerMeasurementLabSessionStore(
-                    rootDirectory: root.appendingPathComponent(
-                        "lab",
-                        isDirectory: true
-                    )
-                ),
-            hardwareAcceptanceStore:
-                HardwareAcceptanceCampaignStore(
-                    rootDirectory: root.appendingPathComponent(
-                        "acceptance",
-                        isDirectory: true
-                    )
-                ),
-            defaults: defaults
+            labStore: SpeakerMeasurementLabSessionStore(
+                rootDirectory: root.appendingPathComponent(
+                    "lab",
+                    isDirectory: true
+                )
+            ),
+            binauralStore: BinauralProfileAssetStore(
+                rootURL: root.appendingPathComponent(
+                    "binaural",
+                    isDirectory: true
+                )
+            )
+        )
+        let preferences = NotchSixtyBackupPreferences(
+            appearance: "dark",
+            presence: "both",
+            volumeStepResolution: 32
         )
 
         let original = try backup.exportData(
-            now: Date(timeIntervalSince1970: 1_000)
+            preferences: preferences,
+            appVersion: "1.0",
+            appBuild: "1",
+            createdAt: Date(timeIntervalSince1970: 1_000)
         )
-        XCTAssertNoThrow(try backup.inspect(data: original))
+        XCTAssertNoThrow(try backup.inspect(original))
 
         var object = try XCTUnwrap(
             JSONSerialization.jsonObject(with: original)
                 as? [String: Any]
         )
-        var payload = try XCTUnwrap(
-            object["payload"] as? [String: Any]
-        )
         var profilesJSON = try XCTUnwrap(
-            payload["profiles"] as? [String: Any]
+            object["profiles"] as? [String: Any]
         )
         var presets = try XCTUnwrap(
             profilesJSON["contentPresets"]
@@ -954,8 +914,7 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         XCTAssertFalse(presets.isEmpty)
         presets[0]["name"] = "Tampered"
         profilesJSON["contentPresets"] = presets
-        payload["profiles"] = profilesJSON
-        object["payload"] = payload
+        object["profiles"] = profilesJSON
 
         let tampered = try JSONSerialization.data(
             withJSONObject: object,
@@ -963,12 +922,15 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         )
 
         XCTAssertThrowsError(
-            try backup.inspect(data: tampered)
+            try backup.inspect(tampered)
         ) { error in
-            XCTAssertEqual(
-                error as? ProductBackupError,
-                .checksumMismatch
-            )
+            guard case .integrityMismatch(let domain) =
+                error as? NotchSixtyBackupError else {
+                return XCTFail(
+                    "Expected integrity mismatch, got \(error)"
+                )
+            }
+            XCTAssertEqual(domain, "profiles")
         }
     }
 
