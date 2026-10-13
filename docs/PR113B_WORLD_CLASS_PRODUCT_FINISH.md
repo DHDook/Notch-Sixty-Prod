@@ -1,6 +1,6 @@
 # PR113B — World-Class Product Finish
 
-Status: **IN PROGRESS — SLICES 1–3 IMPLEMENTED REMOTELY**
+Status: **IN PROGRESS — SLICES 1–4 IMPLEMENTED REMOTELY**
 
 PR113B is stacked directly on the exact remotely-complete PR113 head
 `f0a260336a0df7284a0c414f39a6e43b7d86ca1b`.
@@ -254,6 +254,62 @@ acceptance-evidence rule.
 
 ---
 
+## Slice 4 — Full-fidelity Measurement Lab export
+
+Slice 4 adds a detailed interoperability path alongside the existing compact
+report export. The compact JSON/CSV contract is unchanged and continues to
+exclude raw arrays.
+
+### Full JSON
+
+**Export Full JSON** serializes a versioned
+\`SpeakerMeasurementLabFullFidelityExportEnvelope\` containing the complete
+persisted Lab session. This preserves:
+
+- every raw impulse-response sample;
+- every transfer-function frequency / magnitude / optional phase bin;
+- exact capture and protocol identities;
+- repeat index and timestamps;
+- Playback-System and routing signature;
+- microphone identity and calibration;
+- excitation level and measurement quality;
+- protected-driver capture provenance; and
+- shared-clock reference configuration/evidence where present.
+
+The envelope explicitly persists \`measurementOnly=true\`,
+\`canDeploy=false\`, \`containsRawImpulseData=true\` and
+\`containsFullTransferFunctionData=true\`.
+
+### Interoperability exports
+
+The Lab can also export:
+
+- **Transfer CSV** — one lossless row per capture/frequency bin, including phase
+  in degrees when measured;
+- **Impulse CSV** — one lossless row per capture/sample with exact sample index,
+  time and amplitude;
+- **Capture FRD** — a selected capture's transfer grid in FRD-compatible text;
+  the header explicitly labels the magnitude domain as transfer-function dB,
+  **not absolute SPL**; and
+- **Impulse WAV** — a selected capture's raw impulse response as mono
+  **32-bit IEEE-float WAV** at the capture's actual sample rate.
+
+No averaging, smoothing or response compaction is introduced by the export
+layer.
+
+### Product UI and authority boundary
+
+Analysis & Export now separates **Compact Report** from **Full-Fidelity Data**
+so a user can choose between a human-sized report and the actual measurement
+evidence.
+
+Detailed export is read-only. It cannot mutate DSP, Apply a candidate, Deploy a
+design, promote confidence, satisfy PR112 physical acceptance, or create
+release authority.
+
+
+---
+
 ## Regression coverage
 
 `ProductionInformationArchitectureTests` verifies:
@@ -266,6 +322,11 @@ acceptance-evidence rule.
 - only the safe application-preference keys round-trip; and
 - backup inspection rejects domain tampering when a SHA-256 manifest entry no
   longer matches;
+- full Lab JSON round-trips the complete raw session while retaining
+  measurement-only/no-deploy flags;
+- transfer and impulse CSV retain the raw grids/samples;
+- FRD preserves measured phase and labels transfer-function dB honestly; and
+- WAV export is mono 32-bit IEEE float at the capture sample rate;
 
 - the A/B payload contains only the four allowed content-domain fields;
 - Audio Unit rack state survives A/B-state reconstruction unchanged;
