@@ -18,10 +18,12 @@ Future portability must not materially delay the flagship Mac launch.
 
 ## Current execution status — PR111
 
-**PR111 — Automatic Per-Driver Speaker Optimization** has begun as a
-remote-only, stacked draft above PR110. Slice 1 adds original, cut-only,
-bounded per-driver PEQ recommendations derived from independently protected
-Low/Mid/High Lab sweeps with mandatory active crossover and limiter.
+**PR111 — Automatic Per-Driver Speaker Optimization** is an open, stacked
+draft above PR110. Slice 1 has passed its exact-head Apple Silicon and
+portable regression gates. Slice 2 adds a protected-driver evidence and
+recommendation readout to the existing Lab Analysis & Export view, including
+low/mid/high bus-specific passbands, repeated-capture qualification, visible
+blockers, and compact JSON/CSV diagnostics. Slice 2 CI is pending.
 No DSP stage, gain, driver phase/polarity, delay, physical routing or
 protection is changed by a recommendation.
 
