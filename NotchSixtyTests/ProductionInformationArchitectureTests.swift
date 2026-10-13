@@ -1150,6 +1150,62 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         )
     }
 
+
+    @MainActor
+    func testRecoveryUnreadableStateRequiresSafeLaunch() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "pr113b-recovery-corrupt-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(
+            at: root,
+            withIntermediateDirectories: true
+        )
+        let url = root.appendingPathComponent("recovery.json")
+        try Data("not-json".utf8).write(to: url)
+
+        let controller = ProductRecoveryController(
+            store: ProductRecoveryStore(storageURL: url)
+        )
+        controller.prepareForLaunch()
+
+        XCTAssertTrue(controller.safeLaunchActive)
+        XCTAssertTrue(
+            controller.safeLaunchReasons.contains(
+                .recoveryStateUnreadable
+            )
+        )
+        XCTAssertNotNil(
+            controller.lastPersistenceErrorDescription
+        )
+    }
+
+    @MainActor
+    func testRecoveryPlugInBypassIsTransientAcrossCleanLaunch()
+        throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "pr113b-recovery-bypass-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("recovery.json")
+        let store = ProductRecoveryStore(storageURL: url)
+
+        let first = ProductRecoveryController(store: store)
+        first.prepareForLaunch()
+        first.openWithPlugInsBypassed()
+        XCTAssertTrue(first.plugInsBypassedForThisLaunch)
+        first.markCleanTermination()
+
+        let second = ProductRecoveryController(store: store)
+        second.prepareForLaunch()
+        XCTAssertFalse(second.safeLaunchActive)
+        XCTAssertFalse(second.plugInsBypassedForThisLaunch)
+    }
+
     @MainActor
     func testRecoveryStateIsMachineLocalAndHasNoReleaseAuthority()
         throws {
