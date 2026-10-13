@@ -470,6 +470,8 @@ for token in (
     "case abComparisonActive",
     "abAuditionSessionActive",
     "func applyRecommendation() throws",
+    "func revertAppliedRecommendation() throws",
+    "canRevertAppliedRecommendation",
     "boundary.matches(profiles)",
     "engine.transitionHeadroomAttenuationDB(",
 ):
@@ -477,8 +479,8 @@ for token in (
         f"PR113B Slice 6 Headroom Assistant contract missing {token}"
     )
 
-assert headroom.count("engine.transitionHeadroomAttenuationDB(") == 1, (
-    "PR113B Slice 6 gained a hidden/automatic headroom mutation path"
+assert headroom.count("engine.transitionHeadroomAttenuationDB(") == 2, (
+    "PR113B Slice 6 must keep exactly two explicit mutation paths: Apply and Undo"
 )
 
 for token in (
@@ -505,6 +507,8 @@ for token in (
     '"Observe Program"',
     '"Stop & Review"',
     '"Apply Additional Headroom"',
+    '"Undo Applied Headroom"',
+    '"Keep & Clear"',
     '"Target True Peak"',
     '"Pre-Rider True Peak"',
     "never removes existing headroom",
