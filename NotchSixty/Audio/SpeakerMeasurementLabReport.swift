@@ -7,6 +7,7 @@ enum SpeakerMeasurementLabReportAnalysisKind:
     case quasiAnechoic
     case levelDependence
     case coherentTiming
+    case protectedDriverOptimization
 }
 
 struct SpeakerMeasurementLabReportMetric:
@@ -307,7 +308,68 @@ struct SpeakerMeasurementLabReportBuilder: Sendable {
             }
         }
 
+        // PR111: display every protected driver intent, even when incomplete
+        // or unqualified. Never mistake a missing result for a flat response.
+        for labProtocol in session.protocols where
+            labProtocol.request.mode == .protectedDriverNearField {
+            summaries.append(
+                protectedDriverOptimizationSummary(
+                    session: session, labProtocol: labProtocol
+                )
+            )
+        }
+
         return summaries
+    }
+
+    private func protectedDriverOptimizationSummary(
+        session: SpeakerMeasurementLabSession,
+        labProtocol: SpeakerMeasurementLabProtocol
+    ) -> SpeakerMeasurementLabAnalysisSummary {
+        let title = "\(labProtocol.protectedDriverBus?.displayName ?? labProtocol.name) · protected driver PEQ"
+        do {
+            let candidate = try ProtectedDriverPEQRecommendationAnalyzer()
+                .recommend(
+                    session: session,
+                    protocolID: labProtocol.id
+                )
+            var metrics: [SpeakerMeasurementLabReportMetric] = [
+                metric("Driver", candidate.targetBus.displayName),
+                metric(
+                    "Protected usable passband",
+                    "\(formatHz(candidate.passbandLowHz))–\(formatHz(candidate.passbandHighHz))"
+                ),
+                metric("Qualified repeats",
+                       "\(candidate.repeatedCaptureIDs.count)"),
+                metric("Limiting", candidate.protectedConfiguration.limiterEnabled
+                       ? "Required / preserved" : "BLOCKED"),
+                metric("Suggested cuts", "\(candidate.cuts.count)"),
+                metric("Deployment", "Never · review only")
+            ]
+            for (index, cut) in candidate.cuts.enumerated() {
+                metrics.append(
+                    metric(
+                        "Cut \(index + 1)",
+                        "\(formatHz(cut.frequencyHz)): \(format(cut.gainDB, 2)) dB, Q \(format(cut.q, 2))"
+                    )
+                )
+            }
+            return available(
+                .protectedDriverOptimization,
+                title: title,
+                metrics: metrics,
+                warnings: [
+                    "Measured protected driver *near field*, not an anechoic whole-speaker response. Spectral cuts are only hypotheses; no live Apply or filter deployment.",
+                    "Driver polarity, acoustic-center delay, mandatory crossover and limiter are unchanged. Combined-driver summation remains unverified."
+                ]
+            )
+        } catch {
+            return unavailable(
+                .protectedDriverOptimization,
+                title: title,
+                error: error
+            )
+        }
     }
 
     private func directivitySummary(
