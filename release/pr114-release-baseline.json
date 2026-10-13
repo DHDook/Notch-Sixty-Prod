@@ -58,5 +58,19 @@
     "shippingIconAssetsPresent": true,
     "finalAppIconOwnerApproved": false,
     "finalAppIconApprovalRequiredBeforePublicRelease": true
+  },
+  "privacySecurity": {
+    "tracking": false,
+    "bundledAnalyticsSDK": false,
+    "bundledNetworkClient": false,
+    "appOwnedAutomaticTelemetryUpload": false,
+    "diagnosticsUpload": false,
+    "capturedAudioUpload": false,
+    "measurementDataUpload": false,
+    "privacyManifestPresent": false,
+    "privacyManifestRequiredForCurrentMacTarget": false,
+    "userInstalledAudioUnitsAreBundledDependencies": false,
+    "appStorePrivacyPolicyURLConfigured": false,
+    "appStorePrivacyResponsesComplete": false
   }
 }
