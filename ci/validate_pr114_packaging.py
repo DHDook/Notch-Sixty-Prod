@@ -74,8 +74,8 @@ for token in (
     "Create machine-readable package manifest",
     "release-package-manifest.json",
     '"signature": "ad-hoc"',
-    '"notarized": false',
-    '"publicDistributionReady": false',
+    '"notarized": False',
+    '"publicDistributionReady": False',
     "sourceCommitSHA",
     "dmgSHA256",
 ):
