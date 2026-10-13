@@ -1,6 +1,6 @@
 # PR113B — World-Class Product Finish
 
-Status: **IN PROGRESS — SLICES 1–6 IMPLEMENTED REMOTELY**
+Status: **IN PROGRESS — SLICES 1–7 IMPLEMENTED REMOTELY; FINAL CLOSEOUT GATE PENDING**
 
 PR113B is stacked directly on the exact remotely-complete PR113 head
 `f0a260336a0df7284a0c414f39a6e43b7d86ca1b`.
@@ -495,9 +495,71 @@ permission to merge the stacked PRs.
 
 ---
 
+## Slice 7 — Getting Started and cumulative remote closeout
+
+Slice 7 completes PR113B without adding a modal first-run wizard.
+
+### Non-intrusive first session
+
+The existing **Getting Started** article now provides a six-step path that the
+user can consult when useful rather than dismissing or stepping through a
+mandatory setup flow:
+
+1. grant only the permissions actually needed;
+2. choose the exact physical output and correct Playback System;
+3. make first sound deliberately at a conservative downstream level;
+4. choose or create the first Content Preset;
+5. add measurement / calibration only when it serves the user's goal; and
+6. protect a known-good setup with backup, Safe Launch and diagnostics.
+
+The article matches production behavior:
+
+- System Audio permission is requested when processing needs system-audio
+  capture;
+- microphone permission is optional for ordinary listening and belongs to
+  measurement/calibration workflows;
+- Launch at Login does not start processing;
+- restored systems with unresolved hardware remain **Needs Mapping**;
+- Headroom Assistant is advisory and needs representative loud program;
+- A/B cannot change the Playback System;
+- measurement/software confidence does not establish PR112 physical
+  acceptance; and
+- .n60backup, Safe Launch / Restore Last Known Good and Copy Diagnostics are
+  part of the first-session recovery story rather than a blocking onboarding
+  wizard.
+
+### Remote closeout artifact
+
+ci/build_pr113b_remote_product_finish_readiness.py produces the
+PR113B_REMOTE_PRODUCT_FINISH_READINESS schema-v1 manifest.
+
+The manifest can affirm remote/software availability of the PR113B product
+finish — A/B, measured level match, backup/restore, full-fidelity Measurement
+Lab export, Safe Launch, Headroom Assistant and Getting Started coverage — but
+it is structurally forbidden from promoting software evidence into physical or
+release authority.
+
+The hard closeout flags remain:
+
+- physicalAcceptanceComplete=false;
+- releaseAcceptanceComplete=false;
+- liveFeedForwardANCAuthorized=false;
+- mayMergeIntoMain=false; and
+- physicalEvidenceSuppliedByCI=false.
+
+The portable workflow publishes the manifest as
+pr113b-remote-product-finish-readiness. Final remote closeout additionally
+requires inherited contract validation, unsigned Apple Silicon Debug and
+Release builds, targeted product/Lab tests and the full cumulative XCTest
+regression on one exact head.
+
+---
+
 ## Regression coverage
 
 `ProductionInformationArchitectureTests` verifies:
+
+- Getting Started covers the non-intrusive permissions → output/system → safe first sound → Content Preset → optional calibration → backup/recovery path;
 
 - level matching attenuates only the louder measured capture;
 - level matching is bounded and rejects missing/invalid low-level evidence;
