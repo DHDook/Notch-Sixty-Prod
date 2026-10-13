@@ -111,6 +111,212 @@ struct ContentPreset: Identifiable, Codable, Equatable, Sendable {
     }
 }
 
+
+enum ContentABSlot: String, CaseIterable, Identifiable, Sendable {
+    case a
+    case b
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        rawValue.uppercased()
+    }
+
+    var opposite: ContentABSlot {
+        self == .a ? .b : .a
+    }
+}
+
+/// The deliberately narrow state that may participate in instantaneous A/B
+/// auditioning. It contains content-facing DSP only. Audio Unit rack topology
+/// and every Playback-System / hardware-domain setting are intentionally
+/// outside this type.
+struct ContentABAuditionState: Equatable, Sendable {
+    var stereoEQ: StereoEQConfiguration
+    var inputPreampDB: Double
+    var headroomAttenuationDB: Double
+    var dynamics: DynamicsConfiguration
+
+    init(
+        stereoEQ: StereoEQConfiguration,
+        inputPreampDB: Double,
+        headroomAttenuationDB: Double,
+        dynamics: DynamicsConfiguration
+    ) {
+        self.stereoEQ = stereoEQ
+        self.inputPreampDB = inputPreampDB
+        self.headroomAttenuationDB = headroomAttenuationDB
+        self.dynamics = dynamics
+    }
+
+    init(contentState: ContentPresetState) {
+        self.init(
+            stereoEQ: contentState.stereoEQ,
+            inputPreampDB: contentState.inputPreampDB,
+            headroomAttenuationDB: contentState.headroomAttenuationDB,
+            dynamics: contentState.dynamics
+        )
+    }
+
+    /// Reconstitutes the safe audition subset over the *current* content
+    /// state. The current Audio Unit rack is retained rather than captured or
+    /// silently replaced by an A/B snapshot.
+    func merging(into current: ContentPresetState) -> ContentPresetState {
+        var result = current
+        result.stereoEQ = stereoEQ
+        result.inputPreampDB = inputPreampDB
+        result.headroomAttenuationDB = headroomAttenuationDB
+        result.dynamics = dynamics
+        return result
+    }
+}
+
+enum ContentABSystemCompatibility: Equatable, Sendable {
+    case ready
+    case playbackSystemChanged
+    case playbackSystemStateChanged
+
+    var isReady: Bool {
+        self == .ready
+    }
+}
+
+/// Pins the Playback System identity and exact system-domain state that was
+/// present when an A/B snapshot was captured. A later audition must fail
+/// closed if either changes; A/B is never authority to alter this boundary.
+struct ContentABSystemBoundary: Equatable, Sendable {
+    var selectedSystemProfileID: UUID?
+    var systemState: PlaybackSystemState
+
+    func compatibility(
+        currentSystemProfileID: UUID?,
+        currentSystemState: PlaybackSystemState
+    ) -> ContentABSystemCompatibility {
+        guard currentSystemProfileID == selectedSystemProfileID else {
+            return .playbackSystemChanged
+        }
+        guard currentSystemState == systemState else {
+            return .playbackSystemStateChanged
+        }
+        return .ready
+    }
+}
+
+struct ContentABSnapshot: Identifiable, Equatable, Sendable {
+    let id: UUID
+    let capturedAt: Date
+    let sourceContentPresetID: UUID?
+    let sourceContentPresetName: String
+    let auditionState: ContentABAuditionState
+    let systemBoundary: ContentABSystemBoundary
+
+    init(
+        id: UUID = UUID(),
+        capturedAt: Date = Date(),
+        sourceContentPresetID: UUID?,
+        sourceContentPresetName: String,
+        auditionState: ContentABAuditionState,
+        systemBoundary: ContentABSystemBoundary
+    ) {
+        self.id = id
+        self.capturedAt = capturedAt
+        self.sourceContentPresetID = sourceContentPresetID
+        self.sourceContentPresetName = sourceContentPresetName
+        self.auditionState = auditionState
+        self.systemBoundary = systemBoundary
+    }
+}
+
+/// PR113B Slice 1 is capture/validation only. This controller intentionally
+/// has no live-audio apply or switch method. Slice 2 will add the click-free
+/// executor only after the snapshot safety boundary is regression-locked.
+@MainActor
+final class ContentABComparisonController: ObservableObject {
+    private let profiles: ProductProfileController
+
+    @Published private(set) var snapshotA: ContentABSnapshot?
+    @Published private(set) var snapshotB: ContentABSnapshot?
+    @Published private(set) var activeSlot: ContentABSlot?
+    @Published private(set) var lastErrorDescription: String?
+
+    init(profiles: ProductProfileController) {
+        self.profiles = profiles
+    }
+
+    func snapshot(for slot: ContentABSlot) -> ContentABSnapshot? {
+        switch slot {
+        case .a: return snapshotA
+        case .b: return snapshotB
+        }
+    }
+
+    func capture(_ slot: ContentABSlot) {
+        let snapshot = ContentABSnapshot(
+            sourceContentPresetID: profiles.selectedContentPresetID,
+            sourceContentPresetName: profiles.selectedContentPresetName,
+            auditionState: ContentABAuditionState(
+                contentState: profiles.captureContentState()
+            ),
+            systemBoundary: ContentABSystemBoundary(
+                selectedSystemProfileID: profiles.selectedSystemProfileID,
+                systemState: profiles.captureSystemState()
+            )
+        )
+
+        switch slot {
+        case .a: snapshotA = snapshot
+        case .b: snapshotB = snapshot
+        }
+
+        activeSlot = nil
+        lastErrorDescription = nil
+    }
+
+    func clear(_ slot: ContentABSlot) {
+        switch slot {
+        case .a: snapshotA = nil
+        case .b: snapshotB = nil
+        }
+        if activeSlot == slot {
+            activeSlot = nil
+        }
+        lastErrorDescription = nil
+    }
+
+    func clearAll() {
+        snapshotA = nil
+        snapshotB = nil
+        activeSlot = nil
+        lastErrorDescription = nil
+    }
+
+    func swapSnapshots() {
+        let previousA = snapshotA
+        snapshotA = snapshotB
+        snapshotB = previousA
+
+        if let activeSlot {
+            self.activeSlot = activeSlot.opposite
+        }
+        lastErrorDescription = nil
+    }
+
+    func compatibility(for slot: ContentABSlot) -> ContentABSystemCompatibility? {
+        guard let snapshot = snapshot(for: slot) else { return nil }
+        return snapshot.systemBoundary.compatibility(
+            currentSystemProfileID: profiles.selectedSystemProfileID,
+            currentSystemState: profiles.captureSystemState()
+        )
+    }
+
+    func currentContentDiffers(from slot: ContentABSlot) -> Bool? {
+        guard let snapshot = snapshot(for: slot) else { return nil }
+        return ContentABAuditionState(
+            contentState: profiles.captureContentState()
+        ) != snapshot.auditionState
+    }
+}
+
 struct PlaybackSystemControlState: Codable, Equatable, Sendable {
     var balance: Double
     var symmetryBalanceEnabled: Bool
