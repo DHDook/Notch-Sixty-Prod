@@ -721,11 +721,62 @@ extension PlaybackSystemState {
     }
 }
 
+
+struct ProductProfileBackupSnapshot: Codable, Equatable, Sendable {
+    static let currentSchemaVersion = 1
+
+    var schemaVersion: Int = currentSchemaVersion
+    var contentPresets: [ContentPreset]
+    var systemProfiles: [PlaybackSystemProfile]
+    var selectedContentPresetID: UUID?
+    var selectedSystemProfileID: UUID?
+
+    func validate() throws {
+        guard schemaVersion == Self.currentSchemaVersion else {
+            throw ProductProfileError.persistenceVersion(schemaVersion)
+        }
+        guard contentPresets.allSatisfy({
+            $0.schemaVersion == ContentPreset.currentSchemaVersion
+                && $0.state.schemaVersion == ContentPresetState.currentSchemaVersion
+        }) else {
+            throw ProductProfileError.persistenceVersion(schemaVersion)
+        }
+        guard systemProfiles.allSatisfy({
+            $0.schemaVersion == PlaybackSystemProfile.currentSchemaVersion
+                && $0.state.schemaVersion == PlaybackSystemState.currentSchemaVersion
+        }) else {
+            throw ProductProfileError.persistenceVersion(schemaVersion)
+        }
+        guard Set(contentPresets.map(\.id)).count == contentPresets.count,
+              Set(systemProfiles.map(\.id)).count == systemProfiles.count else {
+            throw ProductProfileError.invalidBackupSnapshot
+        }
+        if let selectedContentPresetID,
+           !contentPresets.contains(where: { $0.id == selectedContentPresetID }) {
+            throw ProductProfileError.invalidBackupSnapshot
+        }
+        if let selectedSystemProfileID,
+           !systemProfiles.contains(where: { $0.id == selectedSystemProfileID }) {
+            throw ProductProfileError.invalidBackupSnapshot
+        }
+    }
+}
+
+struct ProductProfileRestoreReport: Equatable, Sendable {
+    var hardwareMappingRequiredSystemIDs: [UUID]
+
+    var hardwareMappingRequiredCount: Int {
+        hardwareMappingRequiredSystemIDs.count
+    }
+}
+
 enum ProductProfileError: Error, LocalizedError {
     case outputChangeRequiresIdle(profile: String)
     case persistenceVersion(Int)
     case roomCorrectionCalibrationVersion(Int)
     case selectedSystemProfileRequired
+    case invalidBackupSnapshot
+    case backupRestoreRequiresIdle
     case hardwareMappingRequired(profile: String)
 
     var errorDescription: String? {
@@ -738,6 +789,10 @@ enum ProductProfileError: Error, LocalizedError {
             return "Room-correction calibration metadata uses unsupported schema version \(version)."
         case .selectedSystemProfileRequired:
             return "Select a Playback System before changing deployed room correction."
+        case .invalidBackupSnapshot:
+            return "The backup contains invalid or internally inconsistent profile data."
+        case .backupRestoreRequiresIdle:
+            return "Stop audio processing before restoring a Notch Sixty backup."
         case .hardwareMappingRequired(let profile):
             return "(profile) was restored from a backup and still references hardware that is not available on this Mac. Review its output mapping before activation."
         }
@@ -1977,6 +2032,115 @@ final class ProductProfileController: ObservableObject {
         } catch {
             return false
         }
+    }
+
+
+    func makeBackupSnapshot() -> ProductProfileBackupSnapshot {
+        ProductProfileBackupSnapshot(
+            contentPresets: userContentPresets,
+            systemProfiles: systemProfiles,
+            selectedContentPresetID: selectedContentPresetID,
+            selectedSystemProfileID: selectedSystemProfileID
+        )
+    }
+
+    /// Restores the product profile layer while deliberately disarming every
+    /// hardware binding. The saved design/calibration state remains available
+    /// for review, but a restored Playback System cannot silently claim a
+    /// device on this or another Mac.
+    func restoreBackupSnapshot(
+        _ snapshot: ProductProfileBackupSnapshot
+    ) throws -> ProductProfileRestoreReport {
+        guard engine.lifecycleState == .idle else {
+            throw ProductProfileError.backupRestoreRequiresIdle
+        }
+        try snapshot.validate()
+        guard snapshot.systemProfiles.allSatisfy({
+            Self.storedSystemTopologyIsValid($0.state)
+        }) else {
+            throw ProductProfileError.invalidBackupSnapshot
+        }
+
+        let previousContent = userContentPresets
+        let previousSystems = systemProfiles
+        let previousContentID = selectedContentPresetID
+        let previousSystemID = selectedSystemProfileID
+
+        let sanitizedSystems = snapshot.systemProfiles.map {
+            Self.disarmingHardwareBindings(in: $0)
+        }
+        let mappingRequired = sanitizedSystems.compactMap { profile -> UUID? in
+            let original = snapshot.systemProfiles.first { $0.id == profile.id }
+            return original.map { Self.hasHardwareBinding($0.state) } == true
+                ? profile.id : nil
+        }
+
+        do {
+            userContentPresets = snapshot.contentPresets
+            systemProfiles = sanitizedSystems
+            selectedContentPresetID = snapshot.selectedContentPresetID
+            selectedSystemProfileID = snapshot.selectedSystemProfileID
+            reconcileSelections()
+            try persistThrowing()
+            lastErrorDescription = nil
+            return ProductProfileRestoreReport(
+                hardwareMappingRequiredSystemIDs: mappingRequired
+            )
+        } catch {
+            userContentPresets = previousContent
+            systemProfiles = previousSystems
+            selectedContentPresetID = previousContentID
+            selectedSystemProfileID = previousSystemID
+            try? persistThrowing()
+            throw error
+        }
+    }
+
+    private static func hasHardwareBinding(_ state: PlaybackSystemState) -> Bool {
+        if state.associatedOutputUID != nil { return true }
+        if let routing = state.outputRouting,
+           routing.enabled || !routing.routes.isEmpty || routing.referenceDeviceUID != nil {
+            return true
+        }
+        if let profile = state.outputDeviceProfile,
+           profile.enabled || !profile.requiredDeviceUIDs.isEmpty
+                || profile.referenceDeviceUID != nil {
+            return true
+        }
+        if let headphone = state.headphoneDeviceProfile,
+           headphone.enabled || headphone.outputDeviceUID != nil
+                || headphone.programSourceDeviceUID != nil {
+            return true
+        }
+        return false
+    }
+
+    private static func disarmingHardwareBindings(
+        in profile: PlaybackSystemProfile
+    ) -> PlaybackSystemProfile {
+        var result = profile
+        result.state.associatedOutputUID = nil
+
+        if var routing = result.state.outputRouting {
+            routing.enabled = false
+            routing.referenceDeviceUID = nil
+            result.state.outputRouting = routing
+        }
+
+        if var output = result.state.outputDeviceProfile {
+            output.enabled = false
+            output.referenceDeviceUID = nil
+            result.state.outputDeviceProfile = output
+        }
+
+        if var headphone = result.state.headphoneDeviceProfile {
+            headphone.enabled = false
+            headphone.outputDeviceUID = nil
+            headphone.programSourceDeviceUID = nil
+            result.state.headphoneDeviceProfile = headphone
+        }
+
+        return result
     }
 
     private func loadArchive() {
