@@ -9,6 +9,7 @@ enum SpeakerMeasurementLabReportAnalysisKind:
     case coherentTiming
     case protectedDriverOptimization
     case protectedDriverTiming
+    case protectedDriverCrossoverSum
 }
 
 struct SpeakerMeasurementLabReportMetric:
@@ -323,6 +324,11 @@ struct SpeakerMeasurementLabReportBuilder: Sendable {
         summaries.append(
             contentsOf: protectedDriverTimingSummaries(session: session)
         )
+        summaries.append(
+            contentsOf: protectedDriverCrossoverSumSummaries(
+                session: session
+            )
+        )
 
         return summaries
     }
@@ -371,6 +377,143 @@ struct SpeakerMeasurementLabReportBuilder: Sendable {
         } catch {
             return unavailable(
                 .protectedDriverOptimization,
+                title: title,
+                error: error
+            )
+        }
+    }
+
+    private func protectedDriverCrossoverSumSummaries(
+        session: SpeakerMeasurementLabSession
+    ) -> [SpeakerMeasurementLabAnalysisSummary] {
+        let protected = session.protocols.filter {
+            $0.request.mode == .protectedDriverNearField
+                && $0.protectedDriverBus != nil
+        }
+        guard protected.count >= 2 else { return [] }
+        let mode = session.captures.compactMap {
+            $0.protectedDriverProvenance?
+                .bassManagementConfiguration.physicalOutputMode
+        }.first
+        guard let mode else { return [] }
+
+        let pairs: [(SpeakerOutputBus, SpeakerOutputBus)]
+        switch mode {
+        case .biAmp:
+            pairs = [
+                (.leftLow, .leftHigh),
+                (.rightLow, .rightHigh),
+            ]
+        case .triAmp:
+            pairs = [
+                (.leftLow, .leftMid),
+                (.leftMid, .leftHigh),
+                (.rightLow, .rightMid),
+                (.rightMid, .rightHigh),
+            ]
+        default:
+            return []
+        }
+
+        return pairs.compactMap { firstBus, secondBus in
+            let first = protected.filter {
+                $0.protectedDriverBus == firstBus
+            }
+            let second = protected.filter {
+                $0.protectedDriverBus == secondBus
+            }
+            guard !first.isEmpty || !second.isEmpty else { return nil }
+            guard first.count == 1, second.count == 1 else {
+                return unavailable(
+                    .protectedDriverCrossoverSum,
+                    title:
+                        "\(firstBus.displayName) + \(secondBus.displayName) crossover sum model",
+                    error:
+                        ProtectedDriverCrossoverSumModelError
+                            .timingEvidenceUnavailable
+                )
+            }
+            return protectedDriverCrossoverSumSummary(
+                session: session,
+                first: first[0],
+                second: second[0]
+            )
+        }
+    }
+
+    private func protectedDriverCrossoverSumSummary(
+        session: SpeakerMeasurementLabSession,
+        first: SpeakerMeasurementLabProtocol,
+        second: SpeakerMeasurementLabProtocol
+    ) -> SpeakerMeasurementLabAnalysisSummary {
+        let title =
+            "\(first.protectedDriverBus?.displayName ?? first.name) + " +
+            "\(second.protectedDriverBus?.displayName ?? second.name) · crossover sum model"
+        do {
+            let model = try ProtectedDriverCrossoverSumModelAnalyzer()
+                .analyze(
+                    session: session,
+                    firstProtocolID: first.id,
+                    secondProtocolID: second.id
+                )
+            let hypothesis: String
+            switch model.bestHypothesis {
+            case .retainCurrent:
+                hypothesis = "Retain current state"
+            case .addBoundedDelay:
+                hypothesis = "Compare bounded delay"
+            case .invertComparedDriver:
+                hypothesis =
+                    "Compare inversion of \(model.secondBus.displayName)"
+            case .addDelayAndInvertComparedDriver:
+                hypothesis =
+                    "Compare bounded delay + \(model.secondBus.displayName) inversion"
+            }
+            return available(
+                .protectedDriverCrossoverSum,
+                title: title,
+                metrics: [
+                    metric(
+                        "Crossover",
+                        formatHz(model.crossoverFrequencyHz)
+                    ),
+                    metric(
+                        "Shared samples",
+                        "\(model.frequencyPointCount)"
+                    ),
+                    metric(
+                        "Current modeled deficit",
+                        "\(format(
+                            model.currentMeanCoherenceDeficitDB,
+                            2
+                        )) dB"
+                    ),
+                    metric(
+                        "Candidate modeled deficit",
+                        "\(format(
+                            model.candidateMeanCoherenceDeficitDB,
+                            2
+                        )) dB"
+                    ),
+                    metric(
+                        "Modeled reduction",
+                        "\(format(
+                            model.modeledDeficitReductionDB,
+                            2
+                        )) dB"
+                    ),
+                    metric("Best hypothesis", hypothesis),
+                    metric(
+                        "Combined-driver capture",
+                        "REQUIRED · not yet verified"
+                    ),
+                    metric("Deployment", "Never · model only"),
+                ],
+                warnings: model.warnings
+            )
+        } catch {
+            return unavailable(
+                .protectedDriverCrossoverSum,
                 title: title,
                 error: error
             )
