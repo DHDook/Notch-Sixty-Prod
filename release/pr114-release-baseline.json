@@ -53,5 +53,10 @@
     "liveFeedForwardANCAuthorized": false,
     "mayMergeIntoMain": false,
     "physicalEvidenceSuppliedByCI": false
+  },
+  "releaseAssets": {
+    "shippingIconAssetsPresent": true,
+    "finalAppIconOwnerApproved": false,
+    "finalAppIconApprovalRequiredBeforePublicRelease": true
   }
 }
