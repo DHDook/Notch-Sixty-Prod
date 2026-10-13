@@ -467,6 +467,8 @@ for token in (
     "max(peakNeed, limiterNeed) + clampReserve",
     "final class HeadroomAssistantController: ObservableObject",
     "func startObservation(",
+    "case abComparisonActive",
+    "abAuditionSessionActive",
     "func applyRecommendation() throws",
     "boundary.matches(profiles)",
     "engine.transitionHeadroomAttenuationDB(",
@@ -491,6 +493,7 @@ for token in (
 for token in (
     "ProductionMetersView(",
     "assistant: product.headroomAssistant",
+    "abComparison: abComparison",
 ):
     assert token in root_ui, (
         f"PR113B Slice 6 Meters integration missing {token}"
