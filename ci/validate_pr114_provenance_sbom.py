@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 PROJECT = ROOT / "NotchSixty.xcodeproj" / "project.pbxproj"
 DEPENDENCIES = ROOT / "release" / "production-dependencies.json"
+BASELINE = ROOT / "release" / "pr114-release-baseline.json"
 PROVENANCE = ROOT / "docs" / "PROVENANCE.md"
 ROOT_LICENSE = ROOT / "LICENSE"
 ROOT_NOTICES = ROOT / "THIRD_PARTY_NOTICES.md"
@@ -45,6 +46,7 @@ def require(condition: bool, message: str) -> None:
 for path in (
     PROJECT,
     DEPENDENCIES,
+    BASELINE,
     PROVENANCE,
     ROOT_LICENSE,
     ROOT_NOTICES,
@@ -56,6 +58,7 @@ for path in (
 
 project = PROJECT.read_text(encoding="utf-8")
 dependencies = json.loads(DEPENDENCIES.read_text(encoding="utf-8"))
+baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
 provenance = PROVENANCE.read_text(encoding="utf-8")
 license_text = ROOT_LICENSE.read_text(encoding="utf-8")
 root_notices = ROOT_NOTICES.read_text(encoding="utf-8")
@@ -64,6 +67,21 @@ doc = DOC.read_text(encoding="utf-8")
 
 require("proprietary and confidential" in license_text.lower(),
         "root proprietary license contract changed")
+
+supply = baseline.get("provenanceSupplyChain", {})
+expected_supply = {
+    "productionDependencyManifestReconciled": True,
+    "postPR42ProvenanceReconciled": True,
+    "bundledThirdPartyComponentCount": 1,
+    "vendorRootCount": 1,
+    "swiftPackageDependencyCount": 0,
+    "cocoaPodsDependencyCount": 0,
+    "packagedBinaryDependencyCount": 0,
+    "sbomFormat": "CycloneDX 1.5",
+    "deterministicSBOMGeneratedByCI": True,
+    "externalLegalIPReviewComplete": False,
+}
+require(supply == expected_supply, f"supply-chain baseline drift: {supply!r}")
 
 for token in (
     "XCRemoteSwiftPackageReference",
