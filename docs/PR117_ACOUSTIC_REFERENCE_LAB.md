@@ -1,6 +1,6 @@
 # PR117 — Acoustic Reference Laboratory
 
-**Status: Slice 1 CI passed on Linux and macOS. Slice 2 expands the independent lab and sample-rate matrix; exact-head CI for Slice 2 and physical testing remain required.**
+**Status: The original numerical reference, 384-kHz crossover precision hardening (PR117A), FIR/headroom (PR117B), normalized SOFA (PR117C), and real generated SOFA file tests (PR117D) have passing scoped software CI. Batch 1 now consolidates the 141 independent references and a deliberately triggered exact-head full Apple Silicon integration gate. Real-Mac hardware and listening acceptance remain outstanding.**
 
 ## Product purpose
 
@@ -113,40 +113,43 @@ The portable and macOS CI jobs reuse the existing PR117 workflow rather than
 starting a separate expensive build pipeline. CI reports are explicit about
 software-only authority and contain the evaluated sample-rate matrix.
 
-## High-rate regression discovered by expanded PR117 probes
+## 384-kHz defect found and corrected in stacked PR117A
 
-The exact-head 352.8/384-kHz C-snapshot crossover checks have identified a
-**production precision defect**, not merely a test-harness discrepancy:
-float-normalized 80-Hz LR24/LR48 biquad coefficients can cause approximately
-5–10% coherent bass summation error at selected low frequencies (e.g.
-25–45 Hz). The baseline 44.1/48/96-kHz tests did not exercise the highest
-sample-rate condition. The peaking-EQ reference is now checked using a
-physically meaningful **0.005-dB** transfer bound, with observed deviation
-recorded; this does **not** relax the independent LR crossover unity bound.
+The reference lab originally exposed 5–10% phase-coherent bass
+summation drift at 352.8/384 kHz with float low-frequency SOS feedback
+coefficients. **PR117A** fixes only the crossover path using double
+coefficients and states in both stereo and physical speaker bus paths.
+The independent 44.1–384-kHz LR24/LR48 suite, arm64 Release build and
+cumulative XCTest passed on its final PR head. The unrelated EQ float
+ABI is preserved. This is numerical and software validation, not proof
+of real-device native 384-kHz throughput, DAC negotiation or thermal
+performance. Keep issue #121 associated with the physical performance
+follow-up until owner-supervised hardware acceptance.
 
-We intentionally do not mark full 384-kHz DSP compatibility as validated,
-modify production DSP in a measurement-lab-only PR, or soften this crossover
-test. The full PR117 production-reference jobs stay red until a separate
-precision-safe real DSP fix is reviewed and validated, including CPU and
-realtime stability at the high rate. A cheap independent Slice 2 Ubuntu
-job runs and uploads its 384-kHz analytical fixtures separately so that
-progress in the acoustic lab can be validated without hiding the release
-blocker.
+## Completed stacked PR117 evidence and consolidated remaining work
 
-Any subsequent high-rate precision implementation must preserve legacy
-rates, deterministic latency, independent routing, hardware protection and
-the real-hardware acceptance gate.
+- **PR117 original:** PEQ, 80-Hz Linkwitz–Riley crossover, room
+  reflection, three-seat, headphone and binaural synthetic references.
+- **PR117B:** actual production partitioned FIR versus independent direct
+  convolution, 256-frame buffer plus intrinsic FIR group delay,
+  bounded headroom and analytical intersample true-peak.
+- **PR117C:** actual HRTF renderer fed synthetic pre-normalized SOFA
+  source directions, left/right impulses, ±180° wrap and 128-frame delay.
+- **PR117D:** existing native SOFA parser exercised on license-clean
+  *real generated NetCDF4/HDF5 files* at 44.1, 48 and 384 kHz,
+  including integer/fractional/negative receiver delays, invalid
+  nonfinite data and normalized asset persistence.
+- **Batch 1 closeout in draft PR #125:** combined 80 + 19 + 42 =
+  **141** reproducible independent cases; one portable exact-head
+  machine-readable certificate, plus one deliberate macOS integration
+  gate for full arm64 Release and cumulative XCTest including generated
+  SOFA file imports. No new micro-PR is required for closeout.
 
-## Remaining PR117 slices (not yet implemented)
-
-
-
-- Slice 3 — FIR/convolver comparisons, ringing/latency/headroom/true-peak
-  metrics, fault and clipping fixtures.
-- Slice 4 — small license-clean native SOFA Data.Delay and coordinate tests,
-  directional rendering and prepared head-tracking transition checks.
-- Slice 5 — golden-fixture inventory, report comparison, performance
-  benchmarks, acceptance documentation and exact-head remote closeout.
+A hypothetical 48-kHz HRIR may not be applied at 384 kHz without
+verified resampling: the current view boundary rejects mismatch.
+Actual sample-rate conversion, native DAC capability and headphone
+perception remain separate tests. See
+docs/ACOUSTIC_FOUR_BATCH_EXECUTION.md.
 
 ## Stack and hardware boundaries
 

@@ -1,0 +1,117 @@
+name: Batch 1 Acoustic Reference Closeout
+
+on:
+  pull_request:
+    branches:
+      - feature/pr117c-sofa-spatial-reference
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - labeled
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Exactly one active Batch 1 run per branch/event class, without duplicate
+# push + PR CI for one commit. Integration is deliberately opt-in.
+concurrency:
+  group: batch1-acoustic-${{ github.ref }}-${{ github.event.action || github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  fast-reference:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Run aggregated 141-case production acoustic reference
+        env:
+          N60_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          python3 ci/validate_acoustic_batch1.py \
+            --commit "$N60_COMMIT" \
+            --report "$RUNNER_TEMP/batch1-acoustic-portable.json"
+      - name: Publish one synthetic/remote reference certificate
+        uses: actions/upload-artifact@v4
+        with:
+          name: batch1-acoustic-portable
+          path: ${{ runner.temp }}/batch1-acoustic-portable.json
+          retention-days: 30
+          if-no-files-found: error
+
+  exact-head-macos-integration:
+    # Never spend Xcode runner minutes on each intermediate git commit.
+    # An explicit integration-ci PR label *event* or manual dispatch is
+    # required. A persistent label does not retrigger on synchronize.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       github.event.action == 'labeled' &&
+       github.event.label.name == 'integration-ci')
+    needs: fast-reference
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Independent 141-case numerical and safety audit with Apple Clang
+        env:
+          N60_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          python3 ci/validate_acoustic_batch1.py \
+            --commit "$N60_COMMIT" \
+            --report "$RUNNER_TEMP/batch1-acoustic-apple.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: batch1-acoustic-apple
+          path: ${{ runner.temp }}/batch1-acoustic-apple.json
+          retention-days: 30
+          if-no-files-found: error
+      - name: Install SOFA fixture generator dependencies (CI only)
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/batch1-python"
+          "$RUNNER_TEMP/batch1-python/bin/python" -m pip install --quiet netCDF4 numpy
+      - name: Generate actual SOFA NetCDF4 HDF5 datasets at 44.1 48 and 384 kHz
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/batch1-python/bin/python" \
+            ci/generate_pr117d_sofa_fixtures.py "$RUNNER_TEMP/batch1-sofa"
+          "$RUNNER_TEMP/batch1-python/bin/python" \
+            ci/generate_pr85_sofa_fixture.py "$RUNNER_TEMP/batch1-pr85.sofa"
+          for fixture in integer384 fractional48 negative441 nonfinite384; do
+            test -f "$RUNNER_TEMP/batch1-sofa/$fixture.sofa"
+          done
+      - name: Build full app Release arm64
+        run: |
+          set -euo pipefail
+          xcodebuild -project NotchSixty.xcodeproj \
+            -scheme NotchSixty -configuration Release \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            GENERATE_INFOPLIST_FILE=NO \
+            INFOPLIST_FILE=NotchSixty/Info.plist \
+            build
+      - name: Run complete arm64 XCTest suite including real SOFA imports
+        env:
+          PR85_SOFA_FIXTURE: ${{ runner.temp }}/batch1-pr85.sofa
+          PR117D_SOFA_FIXTURE_DIR: ${{ runner.temp }}/batch1-sofa
+        run: |
+          set -euo pipefail
+          xcodebuild -project NotchSixty.xcodeproj \
+            -scheme NotchSixty -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            test
+      - name: Preserve owner-only physical acceptance boundary
+        run: |
+          set -euo pipefail
+          python3 ci/validate_pr112a_hardware_acceptance.py
