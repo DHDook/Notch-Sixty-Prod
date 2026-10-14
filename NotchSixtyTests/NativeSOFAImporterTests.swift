@@ -130,6 +130,111 @@ final class NativeSOFAImporterTests: XCTestCase {
         XCTAssertEqual(asset.importProvenance?.dataType, "FIR")
     }
 
+    // PR117D: these three cases read actual generated NetCDF4/HDF5
+    // AES69 SOFA files through the product's native bridge and Swift adapter.
+    // The fixtures are generated only in CI, never redistributed.
+    func testPR117DReal384kHzSOFAIntegerDelayAndPersistence() throws {
+        let url = try pr117dFixture("integer384")
+        let dataset = try NativeSOFAImporter().load(from: url)
+        XCTAssertEqual(dataset.sampleRate, 384_000, accuracy: 0.000_001)
+        XCTAssertEqual(dataset.measurementCount, 2)
+        XCTAssertEqual(dataset.receiverCount, 2)
+        XCTAssertEqual(dataset.delaysSamples, [2, 5, 2, 5])
+        XCTAssertEqual(dataset.impulseResponse(
+            measurement: 0, receiver: 0, emitter: 0
+        ).first, 1.0)
+
+        let asset = try SOFABinauralAssetAdapter().makeAsset(
+            from: dataset, sourceURL: url
+        )
+        XCTAssertEqual(asset.sampleRate, 384_000, accuracy: 0.000_001)
+        XCTAssertEqual(asset.tapCount, 13)
+        XCTAssertEqual(asset.measurements.count, 2)
+        XCTAssertEqual(asset.measurements[0].azimuthDegrees,
+                       -30, accuracy: 0.01)
+        XCTAssertEqual(asset.measurements[1].azimuthDegrees,
+                       30, accuracy: 0.01)
+        XCTAssertEqual(asset.measurements[0].leftIR[2],
+                       1.0, accuracy: 1.0e-6)
+        XCTAssertEqual(asset.measurements[0].rightIR[5],
+                       0.5, accuracy: 1.0e-6)
+        XCTAssertEqual(asset.measurements[1].leftIR[2],
+                       0.25, accuracy: 1.0e-6)
+        XCTAssertEqual(asset.measurements[1].rightIR[5],
+                       0.75, accuracy: 1.0e-6)
+        XCTAssertEqual(asset.importProvenance?.dataType, "FIR")
+        XCTAssertEqual(asset.importProvenance?.sourceLicense, "CC0-1.0")
+        XCTAssertEqual(asset.importProvenance?.delayBakeCommonOffsetSamples,
+                       0)
+
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pr117d-" + UUID().uuidString,
+                                    isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = BinauralProfileAssetStore(rootURL: root)
+        let reference = try store.importNormalizedDocument(from: url)
+        let restored = try store.load(id: reference.assetID)
+        XCTAssertEqual(restored.sampleRate, 384_000, accuracy: 1.0e-6)
+        XCTAssertEqual(restored.tapCount, asset.tapCount)
+        XCTAssertEqual(restored.measurements, asset.measurements)
+        XCTAssertEqual(restored.importProvenance?.dataType, "FIR")
+    }
+
+    func testPR117DRealSOFAFractionalDelayIsBakedWithoutDroppingEnergy() throws {
+        let url = try pr117dFixture("fractional48")
+        let dataset = try NativeSOFAImporter().load(from: url)
+        XCTAssertEqual(dataset.sampleRate, 48_000, accuracy: 1.0e-6)
+        XCTAssertEqual(Array(dataset.delaysSamples.prefix(2)), [0.5, 1.0])
+        let asset = try SOFABinauralAssetAdapter().makeAsset(
+            from: dataset, sourceURL: url
+        )
+        let left = asset.measurements[0].leftIR
+        let right = asset.measurements[0].rightIR
+        XCTAssertEqual(asset.sampleRate, 48_000, accuracy: 1.0e-6)
+        XCTAssertEqual(asset.importProvenance?.fractionalDelayKernelRadius,
+                       SOFABinauralAssetAdapter.fractionalDelayKernelRadius)
+        XCTAssertTrue(left.allSatisfy(\.isFinite))
+        XCTAssertTrue(right.allSatisfy(\.isFinite))
+        XCTAssertEqual(left.reduce(0, +), 1.0, accuracy: 0.003)
+        XCTAssertEqual(right.reduce(0, +), 0.5, accuracy: 0.000_001)
+    }
+
+    func testPR117DRealSOFANegativeDelayPreservesRelativeTiming() throws {
+        let url = try pr117dFixture("negative441")
+        let dataset = try NativeSOFAImporter().load(from: url)
+        XCTAssertEqual(dataset.sampleRate, 44_100, accuracy: 1.0e-6)
+        XCTAssertEqual(Array(dataset.delaysSamples.prefix(2)), [-1.0, 0.0])
+        let asset = try SOFABinauralAssetAdapter().makeAsset(
+            from: dataset, sourceURL: url
+        )
+        XCTAssertEqual(asset.sampleRate, 44_100, accuracy: 1.0e-6)
+        XCTAssertEqual(asset.tapCount, 9)
+        XCTAssertEqual(asset.importProvenance?.delayBakeCommonOffsetSamples,
+                       1.0)
+        XCTAssertEqual(asset.measurements[0].leftIR[0],
+                       1.0, accuracy: 1.0e-6)
+        XCTAssertEqual(asset.measurements[0].rightIR[1],
+                       0.5, accuracy: 1.0e-6)
+    }
+
+    func testPR117DRealSOFANonfiniteIRFailsClosed() throws {
+        let url = try pr117dFixture("nonfinite384")
+        XCTAssertThrowsError(try NativeSOFAImporter().load(from: url))
+    }
+
+    private func pr117dFixture(_ name: String) throws -> URL {
+        guard let folder = ProcessInfo.processInfo.environment[
+            "PR117D_SOFA_FIXTURE_DIR"
+        ], !folder.isEmpty else {
+            throw XCTSkip("PR117D_SOFA_FIXTURE_DIR not configured")
+        }
+        let url = URL(fileURLWithPath: folder, isDirectory: true)
+            .appendingPathComponent(name).appendingPathExtension("sofa")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path),
+                      "Expected generated SOFA fixture: \(url.lastPathComponent)")
+        return url
+    }
+
     private func makeDataset(
         delays: [Double],
         emitterCount: Int,

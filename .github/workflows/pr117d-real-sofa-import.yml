@@ -1,0 +1,80 @@
+name: PR117D Real SOFA File Import
+
+on:
+  push:
+    branches:
+      - feature/pr117d-real-sofa-import-384khz-fixtures
+  pull_request:
+    branches:
+      - feature/pr117c-sofa-spatial-reference
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr117d-real-sofa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portable-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Verify native SOFA reader and generated file fixture ownership
+        run: |
+          set -euo pipefail
+          python3 ci/validate_pr85_native_sofa.py
+          python3 ci/validate_pr117d_real_sofa.py
+          python3 ci/validate_pr117c_spatial_reference.py
+          python3 ci/validate_pr112a_hardware_acceptance.py
+
+  real-file-macos:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Validate independent offline source and imported-file boundaries
+        run: |
+          set -euo pipefail
+          python3 ci/validate_pr85_native_sofa.py
+          python3 ci/validate_pr117d_real_sofa.py
+      - name: Install fixture-only Python dependencies
+        run: |
+          python3 -m venv "$RUNNER_TEMP/pr117d-venv"
+          "$RUNNER_TEMP/pr117d-venv/bin/python" -m pip install --quiet netCDF4 numpy
+      - name: Generate real NetCDF4 HDF5 SOFA reference files at 44.1, 48 and 384 kHz
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/pr117d-venv/bin/python" \
+            ci/generate_pr117d_sofa_fixtures.py "$RUNNER_TEMP/pr117d-sofa"
+          "$RUNNER_TEMP/pr117d-venv/bin/python" \
+            ci/generate_pr85_sofa_fixture.py "$RUNNER_TEMP/pr117d-pr85.sofa"
+          test -f "$RUNNER_TEMP/pr117d-sofa/integer384.sofa"
+          test -f "$RUNNER_TEMP/pr117d-sofa/fractional48.sofa"
+          test -f "$RUNNER_TEMP/pr117d-sofa/negative441.sofa"
+          test -f "$RUNNER_TEMP/pr117d-sofa/nonfinite384.sofa"
+      - name: Run actual product SOFA import and asset-persistence XCTest
+        env:
+          PR85_SOFA_FIXTURE: ${{ runner.temp }}/pr117d-pr85.sofa
+          PR117D_SOFA_FIXTURE_DIR: ${{ runner.temp }}/pr117d-sofa
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            -only-testing:NotchSixtyTests/NativeSOFAImporterTests \
+            test
+      - name: Verify reference and hardware release gates are still separate
+        run: |
+          python3 ci/validate_pr117a_crossover_precision.py --source-only
+          python3 ci/validate_pr112a_hardware_acceptance.py
