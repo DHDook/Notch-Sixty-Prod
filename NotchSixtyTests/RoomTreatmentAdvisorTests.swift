@@ -3,6 +3,124 @@ import XCTest
 @testable import NotchSixty
 
 final class RoomTreatmentAdvisorTests: XCTestCase {
+    func testUnifiedAcousticCoordinatorPrioritizesPhysicalRemediesAndNeverDeploys() {
+        let projectID = UUID()
+        func finding(
+            _ id: String, _ kind: RoomTreatmentAdvisorFindingKind,
+            _ remedy: RoomTreatmentAdvisorRemedy
+        ) -> RoomTreatmentAdvisorFinding {
+            RoomTreatmentAdvisorFinding(
+                id: id, kind: kind, severity: .important,
+                title: id, measuredEvidence: "Synthetic",
+                interpretation: "Review this modeled condition.",
+                recommendation: "Inspect measurement before changing DSP.",
+                primaryRemedy: remedy, confidence: 0.8,
+                frequencyHz: 80, delayMilliseconds: nil,
+                decaySeconds: nil
+            )
+        }
+        let room = RoomTreatmentAdvisorReport(
+            projectID: projectID,
+            projectName: "Three-seat fixture",
+            retainedMeasurementCount: 3,
+            includedMeasurementCount: 3,
+            analysisMode: .multiPosition,
+            microphoneName: "Synthetic",
+            calibratedMicrophone: false,
+            qualityWarnings: ["Microphone is not calibrated."],
+            findings: [
+                finding("dsp", .measurementQuality, .dspCorrection),
+                finding("placement", .spatialBassVariation, .placement),
+                finding("measure", .measurementReadiness, .measureMore)
+            ],
+            actionPriorities: []
+        )
+        let identity = UnifiedAcousticEvidenceIdentity(
+            projectID: projectID, playbackSystemID: nil,
+            routingSignature: nil, sampleRate: nil,
+            baselineMeasurementSetID: nil
+        )
+        let advice = UnifiedAcousticIntelligenceCoordinator()
+            .summarize(room: room, identity: identity)
+        XCTAssertEqual(
+            advice.advice.map(\.remedy),
+            [.measureMore, .speakerPlacement, .roomCorrectionReview]
+        )
+        XCTAssertFalse(advice.canApply)
+        XCTAssertFalse(advice.canDeploy)
+        XCTAssertFalse(advice.hardwareVerified)
+        XCTAssertTrue(advice.previewOnly)
+        XCTAssertFalse(advice.advice[2].blockers.isEmpty)
+        XCTAssertTrue(advice.advice.allSatisfy {
+            !$0.canApply && !$0.canDeploy
+        })
+    }
+
+    func testUnifiedAcousticCoordinatorRejectsForeignProject() {
+        let project = UUID()
+        let report = RoomTreatmentAdvisorReport(
+            projectID: project,
+            projectName: "Untrusted external project",
+            retainedMeasurementCount: 2,
+            includedMeasurementCount: 2,
+            analysisMode: .multiPosition,
+            microphoneName: nil,
+            calibratedMicrophone: false,
+            qualityWarnings: [],
+            findings: [],
+            actionPriorities: []
+        )
+        let identity = UnifiedAcousticEvidenceIdentity(
+            projectID: UUID(), playbackSystemID: nil,
+            routingSignature: nil, sampleRate: nil,
+            baselineMeasurementSetID: nil
+        )
+        let advice = UnifiedAcousticIntelligenceCoordinator()
+            .summarize(room: report, identity: identity)
+        XCTAssertTrue(advice.advice.isEmpty)
+        XCTAssertFalse(advice.warnings.isEmpty)
+        XCTAssertFalse(advice.canDeploy)
+    }
+
+    func testUnifiedAcousticCoordinatorSingleSeatBlocksDSPReview() {
+        let id = UUID()
+        let room = RoomTreatmentAdvisorReport(
+            projectID: id,
+            projectName: "Single seat",
+            retainedMeasurementCount: 1,
+            includedMeasurementCount: 1,
+            analysisMode: .singlePosition,
+            microphoneName: nil,
+            calibratedMicrophone: false,
+            qualityWarnings: [],
+            findings: [
+                RoomTreatmentAdvisorFinding(
+                    id: "bass", kind: .deepBassCancellation,
+                    severity: .important, title: "Bass dip",
+                    measuredEvidence: "Synthetic -12 dB",
+                    interpretation: "One seat does not establish common response.",
+                    recommendation: "Measure further.",
+                    primaryRemedy: .dspCorrection, confidence: 0.9,
+                    frequencyHz: 80, delayMilliseconds: nil,
+                    decaySeconds: nil
+                )
+            ],
+            actionPriorities: []
+        )
+        let result = UnifiedAcousticIntelligenceCoordinator().summarize(
+            room: room,
+            identity: UnifiedAcousticEvidenceIdentity(
+                projectID: id, playbackSystemID: nil,
+                routingSignature: nil, sampleRate: nil,
+                baselineMeasurementSetID: nil
+            )
+        )
+        XCTAssertTrue(result.advice[0].blockers.contains {
+            $0.contains("Multi-seat")
+        } || !result.advice[0].blockers.isEmpty)
+        XCTAssertFalse(result.canApply)
+    }
+
     func testMultiPositionBassVariationPrefersPlacement() {
         let frequencies = bassFrequencies
         let first = position(
