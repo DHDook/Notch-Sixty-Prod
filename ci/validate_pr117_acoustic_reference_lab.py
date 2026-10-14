@@ -74,10 +74,12 @@ def probe():
     check(SOURCE.is_file(), "production C probe missing")
     with tempfile.TemporaryDirectory(prefix="n60-pr117-") as temp:
         executable = Path(temp) / "lab"
-        subprocess.run(
+        compiled = subprocess.run(
             [cc, "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
              "-I" + str(INCLUDE), str(SOURCE), "-lm", "-o", str(executable)],
-            capture_output=True, text=True, check=True, timeout=120)
+            capture_output=True, text=True, timeout=120)
+        check(compiled.returncode == 0,
+              "production C probe Clang build failed:\n" + compiled.stderr)
         run = subprocess.run(
             [str(executable)], capture_output=True, text=True,
             check=True, timeout=120)

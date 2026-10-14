@@ -37,7 +37,7 @@ def main() -> None:
     require("height * 1.14" in root, "VU virtual pivot is not below the visible face")
     require("radius: radius * 0.62" in root and "radius: radius * 0.985" in root,
             "short visible needle segment is missing")
-    meter = block(root, "private struct StereoSignatureVUMeter: View {", "private struct ProductionActiveCrossoverView: View {")
+    meter = block(root, "private struct StereoSignatureVUMeter: View {", "private struct ProductionSpeakersView: View {")
     require(".glassEffect(.regular, in: .rect(cornerRadius: 22))" in meter,
             "Liquid Glass meter overlay is missing")
     require("StereoSignatureVUPalette" in root and
