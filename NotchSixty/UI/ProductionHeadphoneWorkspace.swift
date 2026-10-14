@@ -8,6 +8,21 @@ struct ProductionHeadphoneWorkspace: View {
 
     @State private var draft = HeadphoneDeviceProfileConfiguration()
     @State private var importingSpatialProfile = false
+    @State private var importingEQProposal = false
+    @State private var pendingEQProposal: HeadphoneCorrectionProposal?
+    private static let sofaFileType: UTType =
+        UTType(filenameExtension: "sofa")
+            ?? UTType(importedAs: "org.aes69.sofa", conformingTo: .data)
+
+    private var selectedSampleRate: Double? {
+        engine.selectedOutputDevice?.nominalSampleRate
+    }
+
+    // A display fallback ONLY when no output is selected; Apply requires a
+    // real selected device and its actual rate for activation validation.
+    private var previewSampleRate: Double {
+        selectedSampleRate ?? 48_000
+    }
     @State private var actionError: String?
     @State private var statusMessage: String?
 
@@ -17,6 +32,7 @@ struct ProductionHeadphoneWorkspace: View {
                 header
                 modeCard
                 correctionCard
+                perEarEQCard
                 crossfeedCard
                 if draft.spatialMode == .virtualSpeakers {
                     spatialCard
@@ -47,10 +63,17 @@ struct ProductionHeadphoneWorkspace: View {
         .task(id: profiles.selectedSystemProfileID) { syncFromSelectedSystem() }
         .fileImporter(
             isPresented: $importingSpatialProfile,
-            allowedContentTypes: [.json, .data],
+            allowedContentTypes: [.json, Self.sofaFileType],
             allowsMultipleSelection: false
         ) { result in
             importSpatialProfile(result)
+        }
+        .fileImporter(
+            isPresented: $importingEQProposal,
+            allowedContentTypes: [.json],
+            allowsMultipleSelection: false
+        ) { result in
+            importEQProposal(result)
         }
     }
 
@@ -120,7 +143,7 @@ struct ProductionHeadphoneWorkspace: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Correction Headroom").font(.caption.bold()).foregroundStyle(.secondary)
                     HStack {
-                        Slider(value: $draft.headroomAttenuationDB, in: 0...18, step: 0.5)
+                        Slider(value: $draft.headroomAttenuationDB, in: 0...30, step: 0.5)
                         Text("\(draft.headroomAttenuationDB, specifier: "%.1f") dB")
                             .monospacedDigit()
                             .frame(width: 68, alignment: .trailing)
@@ -134,11 +157,329 @@ struct ProductionHeadphoneWorkspace: View {
                 channelControls(title: "Right", correction: binding(\.right))
             }
 
-            Text("Independent PEQ bands are part of the saved Headphone Device Profile. Detailed per-band editing remains in the later advanced profile editor; this workspace exposes the channel-matching controls needed for branch acceptance.")
+            Text(
+                "Device correction is separate from Content Presets. The editor below exposes all 16 independently enabled parametric EQ bands per ear, with a preview of the electrical DSP response."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+            let required = draft.conservativeRequiredHeadroomDB
+            HStack {
+                Label(
+                    String(format: "Conservative positive-gain allowance: %.1f dB", required),
+                    systemImage: "waveform.path"
+                )
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                Spacer()
+                Text(
+                    draft.headroomAttenuationDB + 0.000001 >= required
+                        ? "Headroom covered" : "Increase headroom before applying"
+                )
+                .foregroundStyle(
+                    draft.headroomAttenuationDB + 0.000001 >= required
+                        ? Color.secondary : Color.orange
+                )
+                .font(.caption.bold())
+            }
         }
         .productionCard()
+    }
+
+    // MARK: - Batch 3 headphone PEQ completion
+
+    private var perEarEQCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("Per-Ear Parametric Equalizer")
+                    .font(.headline)
+                Spacer()
+                Text("16 bands per ear")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+
+            Text(
+                "Preview is calculated from the production filter coefficients at "
+                + String(format: "%.1f kHz", previewSampleRate / 1000)
+                + (selectedSampleRate == nil
+                   ? " (illustration only: choose an output to validate)." : ".")
+                + " Includes per-ear trim and common attenuation. It is not an acoustic headphone measurement."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            headphoneResponseGraph
+                .frame(height: 210)
+
+            HStack(alignment: .top, spacing: 16) {
+                channelEQEditor(
+                    "Left ear", correction: binding(\.left),
+                    accent: .orange
+                )
+                channelEQEditor(
+                    "Right ear", correction: binding(\.right),
+                    accent: .cyan
+                )
+            }
+
+            Divider()
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Optional local correction proposal").font(.subheadline.bold())
+                    Text(
+                        "Import a user-supplied, explicitly attributed JSON PEQ proposal. It is reviewed as a draft and never downloads, automatically selects, or distributes a model correction database."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                Button("Import EQ Proposal…") {
+                    importingEQProposal = true
+                }
+                .buttonStyle(.bordered)
+            }
+            if let proposal = pendingEQProposal {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(proposal.headphoneModel)
+                        .font(.subheadline.bold())
+                    Text(
+                        "Source: " + proposal.sourceName
+                        + " · Attribution: " + proposal.sourceAttribution
+                        + " · Stated license: " + proposal.sourceLicense
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    Text(
+                        "This metadata does not establish redistribution rights or verify the measurements. Review before using; no automatic deployment."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    HStack {
+                        Button("Stage Bands in Draft") {
+                            stageEQProposal(proposal)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        Button("Discard") {
+                            pendingEQProposal = nil
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+            }
+        }
+        .productionCard()
+    }
+
+    private var headphoneResponseGraph: some View {
+        let leftCurve = HeadphoneEQResponsePreview.curve(
+            draft.left, sampleRate: previewSampleRate,
+            headroomAttenuationDB: draft.headroomAttenuationDB
+        )
+        let rightCurve = HeadphoneEQResponsePreview.curve(
+            draft.right, sampleRate: previewSampleRate,
+            headroomAttenuationDB: draft.headroomAttenuationDB
+        )
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Label("Left", systemImage: "waveform").foregroundStyle(.orange)
+                Label("Right", systemImage: "waveform").foregroundStyle(.cyan)
+                Spacer()
+                Text("20 Hz – 20 kHz · modeled dB")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            .font(.caption)
+            Canvas { context, size in
+                let height = max(size.height, 1)
+                let width = max(size.width, 1)
+                let minDB = -30.0, maxDB = 24.0
+                let zeroY = CGFloat((maxDB) / (maxDB - minDB)) * height
+                var zero = Path()
+                zero.move(to: CGPoint(x: 0, y: zeroY))
+                zero.addLine(to: CGPoint(x: width, y: zeroY))
+                context.stroke(zero, with: .color(.secondary.opacity(0.4)),
+                               lineWidth: 1)
+                for curve in [
+                    (points: leftCurve, color: Color.orange),
+                    (points: rightCurve, color: Color.cyan)
+                ] {
+                    guard curve.points.count > 1 else { continue }
+                    var path = Path()
+                    for (index, point) in curve.points.enumerated() {
+                        let x = CGFloat(index) / CGFloat(curve.points.count - 1)
+                            * width
+                        let fraction = (maxDB - point.db) / (maxDB - minDB)
+                        let y = CGFloat(min(1, max(0, fraction))) * height
+                        if index == 0 {
+                            path.move(to: CGPoint(x: x, y: y))
+                        } else {
+                            path.addLine(to: CGPoint(x: x, y: y))
+                        }
+                    }
+                    context.stroke(path, with: .color(curve.color),
+                                   style: StrokeStyle(lineWidth: 2))
+                }
+            }
+            .accessibilityLabel("Estimated left and right electrical headphone EQ response")
+            .background(.secondary.opacity(0.055),
+                        in: RoundedRectangle(cornerRadius: 10))
+        }
+    }
+
+    private func channelEQEditor(
+        _ title: String,
+        correction: Binding<HeadphoneChannelCorrection>,
+        accent: Color
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Circle().fill(accent).frame(width: 9, height: 9)
+                Text(title).font(.subheadline.bold())
+                Spacer()
+                Text("\(correction.wrappedValue.eqBands.count)/16")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Button {
+                    guard correction.wrappedValue.eqBands.count
+                        < Int(N60_HEADPHONE_MAX_EQ_SECTIONS) else { return }
+                    var next = correction.wrappedValue
+                    next.eqBands.append(HeadphoneCorrectionEQBand())
+                    correction.wrappedValue = next
+                } label: {
+                    Label("Add", systemImage: "plus.circle")
+                }
+                .disabled(
+                    correction.wrappedValue.eqBands.count
+                        >= Int(N60_HEADPHONE_MAX_EQ_SECTIONS)
+                )
+                .buttonStyle(.bordered)
+            }
+            ForEach(
+                correction.wrappedValue.eqBands.indices,
+                id: \.self
+            ) { index in
+                perEarBandControls(correction: correction, index: index)
+            }
+            if correction.wrappedValue.eqBands.isEmpty {
+                Text("No filters. Use Add to create a band.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 65)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private func perEarBandControls(
+        correction: Binding<HeadphoneChannelCorrection>,
+        index: Int
+    ) -> some View {
+        let band = Binding<HeadphoneCorrectionEQBand>(
+            get: {
+                guard correction.wrappedValue.eqBands.indices.contains(index)
+                else { return HeadphoneCorrectionEQBand() }
+                return correction.wrappedValue.eqBands[index]
+            },
+            set: { value in
+                guard correction.wrappedValue.eqBands.indices.contains(index)
+                else { return }
+                var changed = correction.wrappedValue
+                changed.eqBands[index] = value
+                correction.wrappedValue = changed
+            }
+        )
+        let upper = min(20_000.0, previewSampleRate * 0.45)
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Toggle("Band \(index + 1)", isOn: band.enabled)
+                    .toggleStyle(.switch)
+                Spacer()
+                Button(role: .destructive) {
+                    guard correction.wrappedValue.eqBands.indices.contains(index)
+                    else { return }
+                    var next = correction.wrappedValue
+                    next.eqBands.remove(at: index)
+                    correction.wrappedValue = next
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Delete band \(index + 1)")
+            }
+            Picker("Filter", selection: band.type) {
+                ForEach(HeadphoneCorrectionFilterType.allCases) { type in
+                    Text(type.displayName).tag(type)
+                }
+            }
+            .productionGlassPickerChrome()
+            HStack {
+                Text("Hz").frame(width: 37, alignment: .leading)
+                Slider(
+                    value: Binding(
+                        get: {
+                            log10(min(upper, max(20, band.wrappedValue.frequencyHz)))
+                        },
+                        set: {
+                            band.wrappedValue.frequencyHz = pow(10, $0)
+                        }
+                    ),
+                    in: log10(20.0)...log10(upper),
+                    step: 0.01
+                )
+                Text(
+                    String(format: "%.0f", band.wrappedValue.frequencyHz)
+                )
+                .frame(width: 52, alignment: .trailing)
+            }
+            HStack {
+                Text("dB").frame(width: 37, alignment: .leading)
+                Slider(value: band.gainDB, in: -18...18, step: 0.25)
+                Text(String(format: "%+.2f", band.wrappedValue.gainDB))
+                    .frame(width: 57, alignment: .trailing)
+            }
+            HStack {
+                Text("Q").frame(width: 37, alignment: .leading)
+                Slider(value: band.q, in: 0.2...12, step: 0.05)
+                Text(String(format: "%.2f", band.wrappedValue.q))
+                    .frame(width: 52, alignment: .trailing)
+            }
+            .font(.caption.monospacedDigit())
+        }
+        .padding(10)
+        .background(.secondary.opacity(0.05),
+                    in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func importEQProposal(_ result: Result<[URL], Error>) {
+        actionError = nil
+        do {
+            guard let url = try result.get().first else { return }
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            guard let rate = selectedSampleRate else {
+                throw HeadphoneDeviceProfileError.outputDeviceRequired
+            }
+            pendingEQProposal = try HeadphoneCorrectionProposal.load(
+                from: url, sampleRate: rate
+            )
+            statusMessage = "Local correction proposal loaded for review. No bands have been applied."
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    private func stageEQProposal(_ proposal: HeadphoneCorrectionProposal) {
+        actionError = nil
+        do {
+            guard let rate = selectedSampleRate else {
+                throw HeadphoneDeviceProfileError.outputDeviceRequired
+            }
+            try draft.stageLocalProposal(proposal, sampleRate: rate)
+            pendingEQProposal = nil
+            statusMessage = "EQ bands staged in the editable draft. Headroom adjusted conservatively. Apply while playback is stopped to save."
+        } catch {
+            actionError = error.localizedDescription
+        }
     }
 
     private var crossfeedCard: some View {
@@ -213,7 +554,7 @@ struct ProductionHeadphoneWorkspace: View {
                     }
                 }
                 Spacer()
-                Button("Import Normalized Profile…") {
+                Button("Import HRTF / SOFA…") {
                     importingSpatialProfile = true
                 }
                 .buttonStyle(.glass)
@@ -222,9 +563,24 @@ struct ProductionHeadphoneWorkspace: View {
             Divider()
             headTrackingControls
 
-            Text("Notch Sixty currently imports its documented normalized two-ear HRTF/BRIR JSON boundary. Native AES69 .sofa files use HDF5 and are intentionally not parsed until that dependency receives an explicit license, sandbox and provenance review. The realtime renderer itself is SOFA-oriented and uses the same normalized measurements.")
+            Text(
+                "Import native AES69 .sofa files or the normalized JSON profile. SOFA/HDF5 decoding, coordinate conversion and receiver-delay baking occur only while importing, never on the audio callback."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            if let profile = draft.binauralProfile {
+                let matching = selectedSampleRate.map {
+                    abs($0 - profile.sampleRate) < 0.5
+                } ?? false
+                Label(
+                    matching
+                        ? "HRTF rate matches the selected headphone output."
+                        : "Sample-rate mismatch: profile \(Int(profile.sampleRate)) Hz. Select a matching output rate or import a matching HRTF. Automatic HRTF resampling is not implemented.",
+                    systemImage: matching ? "checkmark.shield" : "exclamationmark.shield"
+                )
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(matching ? Color.secondary : Color.orange)
+            }
 
             if draft.programSourceDeviceUID == nil {
                 Text("Using the headphone endpoint as the program source. If it exposes only stereo, Virtual Speakers will render a stereo virtual pair. Select a multichannel decoded endpoint to preserve 5.1/7.1.4 channels.")
@@ -349,6 +705,14 @@ struct ProductionHeadphoneWorkspace: View {
         statusMessage = nil
         do {
             draft.outputDeviceUID = engine.selectedOutputDevice?.uid
+            guard let rate = selectedSampleRate,
+                  rate.isFinite,
+                  (8_000...384_000).contains(rate) else {
+                throw HeadphoneDeviceProfileError.sampleRateUnsupported(
+                    previewSampleRate
+                )
+            }
+            try draft.validateStructure(sampleRate: rate)
             try profiles.replaceSelectedSystemHeadphoneDeviceProfile(draft)
             statusMessage = draft.enabled
                 ? "Headphone Device Profile deployed. Start processing to use \(draft.spatialMode.displayName)."

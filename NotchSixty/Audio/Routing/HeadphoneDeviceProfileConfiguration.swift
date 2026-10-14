@@ -436,3 +436,149 @@ struct HeadphoneDeviceProfileConfiguration: Codable, Equatable, Sendable {
         return true
     }
 }
+
+
+// MARK: - Batch 3: provenance-gated optional local EQ proposals
+
+/// A user's OWN local correction proposal, not a bundled headphone database.
+/// Attribution and license strings are provenance only; they are not a grant
+/// of redistribution rights or evidence that any measurement was performed.
+struct HeadphoneCorrectionProposal: Codable, Equatable, Sendable {
+    var schemaVersion: Int
+    var headphoneModel: String
+    var sourceName: String
+    var sourceAttribution: String
+    var sourceLicense: String
+    var referenceSampleRate: Double?
+    var leftBands: [HeadphoneCorrectionEQBand]
+    var rightBands: [HeadphoneCorrectionEQBand]
+
+    func validate(sampleRate: Double) throws {
+        guard schemaVersion == 1,
+              sampleRate.isFinite, (8_000...384_000).contains(sampleRate),
+              !headphoneModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !sourceName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !sourceAttribution.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !sourceLicense.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              referenceSampleRate.map({
+                  $0.isFinite && abs($0 - sampleRate) < 0.5
+              }) ?? true,
+              leftBands.count <= Int(N60_HEADPHONE_MAX_EQ_SECTIONS),
+              rightBands.count <= Int(N60_HEADPHONE_MAX_EQ_SECTIONS),
+              Set(leftBands.map(\.id)).count == leftBands.count,
+              Set(rightBands.map(\.id)).count == rightBands.count else {
+            throw HeadphoneCorrectionProposalError.invalidSourceOrRate
+        }
+        for band in leftBands + rightBands {
+            try band.validate(sampleRate: sampleRate)
+        }
+    }
+
+    static func load(from file: URL, sampleRate: Double) throws -> Self {
+        let data = try Data(contentsOf: file)
+        guard data.count <= 64 * 1024 else {
+            throw HeadphoneCorrectionProposalError.fileTooLarge
+        }
+        let proposal = try JSONDecoder().decode(Self.self, from: data)
+        try proposal.validate(sampleRate: sampleRate)
+        return proposal
+    }
+}
+
+enum HeadphoneCorrectionProposalError: Error, LocalizedError {
+    case fileTooLarge
+    case invalidSourceOrRate
+
+    var errorDescription: String? {
+        switch self {
+        case .fileTooLarge:
+            return "The local headphone proposal exceeds the 64-KB limit."
+        case .invalidSourceOrRate:
+            return "The proposal has invalid or uncredited source metadata, an incompatible declared sample rate, duplicated band IDs, or more than 16 bands per ear."
+        }
+    }
+}
+
+extension HeadphoneDeviceProfileConfiguration {
+    /// Stage the proposal in an editable draft. This never saves a Playback
+    /// System, changes audio or downloads a profile. Do not auto-apply.
+    mutating func stageLocalProposal(
+        _ proposal: HeadphoneCorrectionProposal, sampleRate: Double
+    ) throws {
+        try proposal.validate(sampleRate: sampleRate)
+        var updated = self
+        updated.left.eqBands = proposal.leftBands
+        updated.right.eqBands = proposal.rightBands
+        let need = updated.conservativeRequiredHeadroomDB
+        guard need.isFinite, need <= 30 else {
+            throw HeadphoneDeviceProfileError.insufficientHeadroom(
+                requiredDB: need, configuredDB: headroomAttenuationDB
+            )
+        }
+        updated.headroomAttenuationDB = max(updated.headroomAttenuationDB, need)
+        try updated.validateStructure(sampleRate: sampleRate)
+        self = updated
+    }
+}
+
+/// Control/UI-only response visualization from the SAME production float
+/// coefficient design. This is electrical DSP transfer, not measured SPL,
+/// headphone compensation target or physical frequency-response prediction.
+enum HeadphoneEQResponsePreview {
+    static func magnitudeDB(
+        _ correction: HeadphoneChannelCorrection,
+        frequencyHz: Double,
+        sampleRate: Double,
+        headroomAttenuationDB: Double
+    ) -> Double? {
+        guard sampleRate.isFinite, (8_000...384_000).contains(sampleRate),
+              frequencyHz.isFinite, frequencyHz > 0,
+              frequencyHz < sampleRate / 2,
+              headroomAttenuationDB.isFinite else { return nil }
+        var db = correction.gainDB - headroomAttenuationDB
+        let w = 2 * Double.pi * frequencyHz / sampleRate
+        let c1 = cos(w), c2 = cos(2 * w)
+        let s1 = sin(w), s2 = sin(2 * w)
+        for band in correction.eqBands where band.enabled {
+            var c = N60BiquadCoefficientsMakeIdentity()
+            guard N60BiquadDesign(
+                band.type.realtimeCType, sampleRate, band.frequencyHz,
+                band.gainDB, band.q, &c
+            ) else { return nil }
+            let nr = Double(c.b0) + Double(c.b1) * c1
+                + Double(c.b2) * c2
+            let ni = -(Double(c.b1) * s1 + Double(c.b2) * s2)
+            let dr = 1 + Double(c.a1) * c1 + Double(c.a2) * c2
+            let di = -(Double(c.a1) * s1 + Double(c.a2) * s2)
+            let numerator = nr * nr + ni * ni
+            let denominator = dr * dr + di * di
+            guard numerator.isFinite, numerator > 1e-24,
+                  denominator.isFinite, denominator > 1e-24 else {
+                return nil
+            }
+            db += 10 * log10(numerator / denominator)
+        }
+        return db.isFinite ? db : nil
+    }
+
+    static func curve(
+        _ correction: HeadphoneChannelCorrection,
+        sampleRate: Double,
+        headroomAttenuationDB: Double,
+        pointCount: Int = 96
+    ) -> [(hz: Double, db: Double)] {
+        guard (2...512).contains(pointCount), sampleRate.isFinite,
+              sampleRate >= 8_000, sampleRate <= 384_000 else { return [] }
+        let low = 20.0
+        let high = min(20_000.0, 0.45 * sampleRate)
+        return (0..<pointCount).compactMap { i in
+            let t = Double(i) / Double(pointCount - 1)
+            let hz = low * pow(high / low, t)
+            guard let db = magnitudeDB(
+                correction, frequencyHz: hz, sampleRate: sampleRate,
+                headroomAttenuationDB: headroomAttenuationDB
+            ) else { return nil }
+            return (hz: hz, db: db)
+        }
+    }
+}
