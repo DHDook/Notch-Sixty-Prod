@@ -56,6 +56,23 @@ review, live ANC authorization and owner merge approval remain distinct gates.
 
 ---
 
+## Final integrated distribution candidate (post-PR129)
+
+Final software features are stacked in five owner-controlled draft PRs.
+The consolidated **Final RC & QA** branch now exercises the latest exact
+source commit through commercial PR114 checks, Apple Silicon Release,
+unsigned archive, ad-hoc signed installer DMG, mounted-DMG verification,
+full cumulative XCTest, generated native SOFA fixtures, third-party notices,
+CycloneDX SBOM and a strict owner-only release/physical-acceptance report.
+
+The actual DMG and SHA-bound validation packet must be downloaded from the
+**successful exact-head** GitHub Actions run. This is a controlled **test**
+RC only: neither the real device H01–H08 gates nor Apple credentials/legal
+review, public release or merge approvals are satisfied by remote CI.
+See `docs/FINAL_INTEGRATED_RC_QA.md`.
+
+---
+
 ## Software completion tracking — consolidated core batches
 
 - **Batch 1 PR #125:** 141 independent acoustic references and real
