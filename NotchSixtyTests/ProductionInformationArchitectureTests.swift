@@ -73,7 +73,7 @@ final class ProductionInformationArchitectureTests: XCTestCase {
     func testToolsGroupContainsOccasionalAdvisoryAndAcceptanceWorkflows() {
         XCTAssertEqual(
             ProductionSection.tools,
-            [.roomAdvisor, .blindListening, .hardwareAcceptance]
+            [.roomAdvisor, .blindListening, .acousticResearch, .hardwareAcceptance]
         )
     }
 
@@ -102,6 +102,10 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         XCTAssertEqual(
             ProductionSection.blindListening.title,
             "Blind Listening"
+        )
+        XCTAssertEqual(
+            ProductionSection.acousticResearch.title,
+            "Acoustic Research"
         )
         XCTAssertEqual(
             ProductionSection.hardwareAcceptance.title,
