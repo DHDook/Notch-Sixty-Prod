@@ -90,15 +90,22 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
     private func unifiedAcousticIntelligenceCard(
         _ room: RoomTreatmentAdvisorReport
     ) -> some View {
+        let selected = advisor.unifiedSpeakerBaselines.first {
+            $0.id == advisor.unifiedSpeakerBaselineID
+        }
+        // Only the explicitly selected, qualified Speaker Optimizer baseline
+        // can supply source, route, playback system and clock identity.
+        let identity = UnifiedAcousticEvidenceIdentity(
+            projectID: room.projectID,
+            playbackSystemID: selected?.playbackSystemID,
+            routingSignature: selected?.routingSignature,
+            sampleRate: selected?.sampleRate,
+            baselineMeasurementSetID: selected?.id
+        )
         let summary = UnifiedAcousticIntelligenceCoordinator().summarize(
-            room: room,
-            identity: UnifiedAcousticEvidenceIdentity(
-                projectID: room.projectID,
-                playbackSystemID: nil,
-                routingSignature: nil,
-                sampleRate: nil,
-                baselineMeasurementSetID: nil
-            )
+            room: room, identity: identity,
+            speaker: advisor.unifiedSpeakerComparison,
+            physicalSub: advisor.physicalSubComparison
         )
         return VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -113,12 +120,83 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
                     .foregroundStyle(.secondary)
             }
             Text(
-                "Combines the selected room findings into one physical-first sequence. Speaker Optimizer and coherent Sub proposals are intentionally excluded until their measurement, route and Playback System identities are verified."
+                "Combines selected room findings into physical-first advice. Speaker Optimizer baselines require explicit selection and verified playback/route identity. Physical Sub comparisons appear only after the existing before/after measurement workflow approves them."
             )
             .font(.caption)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
 
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Source-specific speaker evidence")
+                        .font(.subheadline.bold())
+                    Spacer()
+                    Button("Find baselines") {
+                        advisor.refreshUnifiedSpeakerBaselines()
+                    }
+                    .buttonStyle(.bordered)
+                }
+                Picker(
+                    "Qualified baseline",
+                    selection: Binding(
+                        get: { advisor.unifiedSpeakerBaselineID },
+                        set: {
+                            advisor.unifiedSpeakerBaselineID = $0
+                            // Revalidate the stored selected identity. The
+                            // controller clears a previous unrelated plan.
+                            advisor.clearUnifiedSpeakerComparison()
+                        }
+                    )
+                ) {
+                    Text("Choose a baseline…").tag(UUID?.none)
+                    ForEach(advisor.unifiedSpeakerBaselines) { baseline in
+                        Text(
+                            "\(baseline.plannedSources.count) sources · "
+                            + "\(Int(baseline.sampleRate)) Hz · "
+                            + String(baseline.id.uuidString.prefix(8))
+                        )
+                        .tag(UUID?.some(baseline.id))
+                    }
+                }
+                .frame(maxWidth: 580)
+                Button("Review selected baseline") {
+                    advisor.reviewUnifiedSpeakerBaseline()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(advisor.unifiedSpeakerBaselineID == nil)
+                if let selected {
+                    Text(
+                        "Explicitly selected route: " + selected.routingSignature
+                        + " · Microphone: " + selected.microphone.deviceUID
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                }
+                if let status = advisor.unifiedSpeakerMessage {
+                    Text(status)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if let sub = advisor.physicalSubComparison {
+                    Text(
+                        String(
+                            format: "Physical Sub placement A/B: %.2f dB change in 35–160 Hz seat-spread RMS across %d seats. This is NOT a target-response, SPL, coherence, decay or headroom measurement.",
+                            sub.reductionInInterseatSpreadDB,
+                            sub.seatCount
+                        )
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                } else {
+                    Text(
+                        "For measured Sub placement tradeoffs, use the existing verified before/after placement comparison. Coordinated multi-Sub timing additionally requires independent output mapping and a common phase reference."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+            }
+            Divider()
             if summary.advice.isEmpty {
                 Text(
                     "No recommendation is available for this project. Capture and include room measurements first."

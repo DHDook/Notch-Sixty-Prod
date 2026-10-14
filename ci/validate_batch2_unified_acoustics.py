@@ -11,6 +11,7 @@ SOURCE = ROOT / "NotchSixty/Audio/UnifiedAcousticIntelligenceCoordinator.swift"
 PROJECT = ROOT / "NotchSixty.xcodeproj/project.pbxproj"
 TESTS = ROOT / "NotchSixtyTests/RoomTreatmentAdvisorTests.swift"
 WORKSPACE = ROOT / "NotchSixty/UI/ProductionRoomTreatmentAdvisorWorkspace.swift"
+CONTROLLER = ROOT / "NotchSixty/State/RoomTreatmentAdvisorController.swift"
 COMPARISON_TESTS = ROOT / "NotchSixtyTests/SpeakerOptimizerCandidateComparisonTests.swift"
 DOC = ROOT / "docs/BATCH2_UNIFIED_ACOUSTIC_INTELLIGENCE.md"
 
@@ -24,6 +25,7 @@ source = SOURCE.read_text()
 pbx = PROJECT.read_text()
 tests = TESTS.read_text()
 workspace = WORKSPACE.read_text()
+controller = CONTROLLER.read_text()
 comparison_tests = COMPARISON_TESTS.read_text()
 doc = DOC.read_text()
 for token in (
@@ -56,6 +58,10 @@ for token in (
     "absoluteMeasurementUncertaintyDB",
     "heldOutSeatIndices",
     "heldOutSeatWorstRegressionDB",
+    "UnifiedAcousticBassTradeoffEvaluator",
+    "paretoFrontier",
+    "physicalSub: RoomAdvancedSubPlacementComparison?",
+    "candidate.kind == .bypass",
     "candidate.kind == .bypass",
 ):
     require(token in source, "missing read-only arbitration contract: " + token)
@@ -85,6 +91,32 @@ for method in (
 
 require("testUnifiedCoordinatorOnlyAcceptsMatchingSpeakerEvidenceContext"
         in comparison_tests, "missing real speaker proposal source identity test")
+
+for token in (
+    "refreshUnifiedSpeakerBaselines()",
+    "reviewUnifiedSpeakerBaseline()",
+    "clearUnifiedSpeakerComparison()",
+    "role == .baseline",
+    "playbackSystemID == project.playbackSystemID",
+    "SpeakerOptimizerMeasurementEvidenceEvaluator()",
+    "SpeakerOptimizerCandidateComparisonDesigner()",
+):
+    require(token in controller, "source-owner read-only controller missing: " + token)
+for token in (
+    "Find baselines",
+    "Review selected baseline",
+    "physicalSub: advisor.physicalSubComparison",
+    "speaker: advisor.unifiedSpeakerComparison",
+    "selected?.routingSignature",
+    "selected?.playbackSystemID",
+):
+    require(token in workspace, "authenticated Room Advisor UI missing: " + token)
+for testName in (
+    "testBatch2MultiObjectiveBassKeepsParetoChoicesWithoutRankingDifferentObjectives",
+    "testBatch2BassScenariosRejectForeignRouteOrSampleRateAndRequirePhysicalOutputs",
+    "testBatch2MeasuredPhysicalSubComparisonPreservesLimitedObjective",
+):
+    require(testName in tests, "multi-objective bass Swift regression missing: " + testName)
 
 require("unifiedAcousticIntelligenceCard(report)" in workspace
         and "UnifiedAcousticIntelligenceCoordinator().summarize(" in workspace,

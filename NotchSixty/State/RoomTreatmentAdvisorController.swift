@@ -46,6 +46,13 @@ final class RoomTreatmentAdvisorController: ObservableObject {
     @Published var physicalSubCandidateID: UUID?
     @Published private(set) var physicalSubComparison: RoomAdvancedSubPlacementComparison?
     @Published private(set) var physicalSubComparisonMessage: String?
+    // Explicit, user-selected read-only source evidence. No selection
+    // automatically changes Playback System, measurements or DSP graph.
+    @Published private(set) var unifiedSpeakerBaselines: [SpeakerOptimizerMeasurementSet] = []
+    @Published var unifiedSpeakerBaselineID: UUID?
+    @Published private(set) var unifiedSpeakerComparison: SpeakerOptimizerComparisonPlan?
+    @Published private(set) var unifiedSpeakerMessage: String?
+
     @Published private(set) var placementReviewHistory: [RoomAdvancedPlacementReviewRecord] = []
     @Published private(set) var placementReviewMessage: String?
     @Published var treatmentDraft: RoomPassiveTreatmentPlan?
@@ -156,6 +163,10 @@ final class RoomTreatmentAdvisorController: ObservableObject {
         physicalSubCandidateID = nil
         physicalSubComparison = nil
         physicalSubComparisonMessage = nil
+        unifiedSpeakerBaselines = []
+        unifiedSpeakerBaselineID = nil
+        unifiedSpeakerComparison = nil
+        unifiedSpeakerMessage = nil
         guard let id,
               let project = availableProjects.first(
                 where: { $0.id == id }
@@ -549,6 +560,74 @@ final class RoomTreatmentAdvisorController: ObservableObject {
     /// Scan local compact PR103 measurement archives, never initiate a sweep
     /// or modify correction/physical routing. The user explicitly picks
     /// BEFORE/AFTER physical Sub capture sets and confirms the matching seats.
+    /// User-triggered enumeration; loaded archives are filtered by the
+    /// selected project's Playback System and the explicit baseline role.
+    /// A cross-project routing identity is NEVER synthesized from this data.
+    func refreshUnifiedSpeakerBaselines() {
+        unifiedSpeakerBaselines = []
+        unifiedSpeakerBaselineID = nil
+        unifiedSpeakerComparison = nil
+        unifiedSpeakerMessage = nil
+        guard let project = selectedProject else {
+            unifiedSpeakerMessage = "Select a room project first."
+            return
+        }
+        do {
+            let sets = try SpeakerOptimizerMeasurementSetStore()
+                .listRecentSets(limit: 64)
+            unifiedSpeakerBaselines = sets.filter {
+                $0.role == .baseline
+                    && $0.playbackSystemID == project.playbackSystemID
+                    && $0.sampleRate.isFinite
+                    && (8_000...384_000).contains($0.sampleRate)
+                    && !$0.routingSignature.isEmpty
+            }
+            if unifiedSpeakerBaselines.isEmpty {
+                unifiedSpeakerMessage =
+                    "No qualifying Speaker Optimizer baseline is saved for this Playback System. Capture and qualify one in Speaker Optimizer."
+            }
+        } catch {
+            unifiedSpeakerMessage = error.localizedDescription
+        }
+    }
+
+    func clearUnifiedSpeakerComparison() {
+        unifiedSpeakerComparison = nil
+        unifiedSpeakerMessage = nil
+    }
+
+    func reviewUnifiedSpeakerBaseline() {
+        unifiedSpeakerComparison = nil
+        unifiedSpeakerMessage = nil
+        guard let project = selectedProject,
+              let id = unifiedSpeakerBaselineID,
+              let baseline = unifiedSpeakerBaselines.first(where: {
+                  $0.id == id
+                    && $0.role == .baseline
+                    && $0.playbackSystemID == project.playbackSystemID
+              }) else {
+            unifiedSpeakerMessage =
+                "Select an explicitly identified Speaker Optimizer baseline for this Playback System."
+            return
+        }
+        do {
+            let quality = try SpeakerOptimizerMeasurementEvidenceEvaluator()
+                .evaluate(baseline)
+            guard quality.optimizerReady else {
+                unifiedSpeakerMessage =
+                    "The selected baseline has unqualified repeated measurements. Review its quality warnings in Speaker Optimizer."
+                return
+            }
+            unifiedSpeakerComparison =
+                try SpeakerOptimizerCandidateComparisonDesigner()
+                    .compare(baseline: baseline)
+            unifiedSpeakerMessage =
+                "Speaker comparison is modeled and read-only. The route and microphone shown belong to this explicitly selected baseline; room-project captures are not automatically considered the same evidence."
+        } catch {
+            unifiedSpeakerMessage = error.localizedDescription
+        }
+    }
+
     func refreshPhysicalSubMeasurementSets() {
         availablePhysicalSubSets = []
         physicalSubComparison = nil

@@ -72,22 +72,89 @@ physical-first priority, project mismatch and single-seat DSP blockers.
   mismatch. Fast source/UI ownership contracts run on Ubuntu; Apple
   Silicon integration is a deliberate checkpoint.
 
-## Remaining work IN THIS SAME BATCH
+## Unified Batch 2 integrated closeout scope
 
-- Connect the coordinator to selected Room Advisor / Speaker Optimizer /
-  subwoofer evidence in the real read-only production workspace.
-- Add deterministic repeat-noise, timing perturbation, seat-weighting and
-  held-out-seat robustness using the PR117 synthetic reference principles,
-  without presenting simulated confidence as measured precision.
-- Add multi-objective trade-off tables: seat response spread, modeled
-  target error, sub headroom, phase/coherent-clock evidence, latency,
-  complexity and route feasibility. Require independent physical outputs.
-- Add guidance for actionable measurement, placement and treatment before
-  proposing bounded DSP designs; any Apply path remains separately gated by
-  the existing authoritative commissioning controllers.
-- Finish with one deliberately triggered Apple Silicon Debug/Release/full
-  XCTest integration gate and machine-readable evidence. No unverified
-  runtime graph modifications, and no release or hardware authority.
+**Live Room Advisor integration:** its new Acoustic Intelligence panel now
+offers "Find baselines" and "Review selected baseline" with real, saved,
+qualified Speaker Optimizer captures. The controller reads archives without
+performing measurements, changing Playback System, or altering the DSP graph.
+It excludes baselines from another Playback System, requires a valid 8–384
+kHz sample rate and nonempty recorded route, and always asks the user to
+select a source. Existing SpeakerOptimizerMeasurementEvidenceEvaluator and
+SpeakerOptimizerCandidateComparisonDesigner are authoritative: rejected
+baseline evidence produces an explanatory message, not a fabricated curve.
+
+**Cross-domain evidence ownership:** the selected baseline supplies the
+exact route, sample rate, microphone, measurement set and Playback System
+for the coordinator to verify against the existing speaker proposal.
+Changing the source clears the old proposal. The Room Advisor report is
+its own selected project evidence; merely matching Playback System does
+NOT make the room capture and speaker capture contemporaneous or a
+common repeat-measurement series. If bypass ranks first, advice explicitly
+recommends no correction.
+
+**Physical bass outcomes:** the coordinator and UI consume
+RoomAdvancedSubPlacementComparison only after the existing physical
+placement analyzer has authenticated before/after measurement IDs,
+unchanged signal-chain attestation, identical seat IDs, repeated quality,
+route and playback system. The displayed number is *measured relative
+35–160 Hz inter-seat variation*, not a target response, SPL, acoustic
+decay, amplifier headroom, or coherent multi-sub timing claim. Other
+objectives remain identified as unavailable.
+
+**Full multi-objective review:** UnifiedAcousticBassTradeoffEvaluator is
+an immutable read-only Pareto reviewer for comparable source-authenticated
+bass scenarios. Its independent axes are seat spread, target RMSE, decay,
+headroom cost, added latency and filter complexity; never a secretly
+weighted "best bass" score. It refuses inconsistent playback systems,
+routes, rate, evidence set IDs or nonfinite inputs; warns about missing
+independently addressable Sub outputs, common-clock coherence,
+headroom >3.5 dB, and additional latency >30 ms. Scenario values are
+hypothetical until a producing measurement/optimizer workflow can supply
+qualified quantities for all axes. No scenario is silently generated
+from a spread-only placement comparison.
+
+**Uncertainty and held-out seats:** the per-seat candidate reviewer
+distinguishes modeling a correction on training seats from evaluating
+unfitted held-out seats. Bounded errors apply separately before/after.
+It fails closed for high-rate invalidity, noise-sensitive nominal wins,
+regressed seats, excessive headroom or A/V latency, noncoherent
+multi-sub source mapping, or absent independent outputs. Its supplied
+uncertainty in dB MUST come from a separately qualified measurement
+boundary; this method does not estimate actual microphone confidence.
+No reviewed scenario is measured verification or a deployment permit.
+
+**Coherent multi-Sub owner:** The existing
+CoherentMultiSubwooferAlignmentPlanner retains phase-coherent timing,
+independent physical output and protection authority. The coordinator
+may display a signed candidate when explicitly supplied from that
+workflow, but it **does not** generate new signed candidates from
+mismatched room sweeps or set speaker delays. Hardware clock,
+subwoofer output mapping, summed-response and acoustic verification
+remain physical owner acceptance items.
+
+**UI and tests:** the existing Room Advisor shows a single physical-first
+sequence plus source-specific evidence and warnings, without adding a
+sidebar or duplicate DSP engine. The Room Advisor and Speaker Optimizer
+XCTest suites cover no-deploy, explicit identity, held-out-seat
+regression, conservative uncertainty, rate-dependent latency and
+multiobjective Pareto dominance/guard failures.
+
+## Completion and authority
+
+The final exact-head Apple Silicon Release build and cumulative XCTest
+is required for Batch 2 software closure, following its fast source
+contract. CI does not grant speaker-room acoustic performance, real
+384-kHz DAC capability, coherent multi-Sub physical mapping, headphone
+SPL, ANC authorization, or owner hardware PR112 H01–H08 acceptance.
+
+Batch 2 stays in one OPEN/DRAFT/UNMERGED PR and must not touch main.
+
+## Deferred physical workflow, not another software slice
+
+No automatic DSP apply path, fabricated multi-Sub clock evidence or new
+physical audio captures are needed to close the read-only software batch.
+Owner-supervised PR112 hardware acceptance is separately outstanding.
 
 ## Efficiency and approval
 

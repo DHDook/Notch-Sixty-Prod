@@ -73,7 +73,8 @@ struct UnifiedAcousticIntelligenceCoordinator: Sendable {
         room: RoomTreatmentAdvisorReport,
         identity: UnifiedAcousticEvidenceIdentity,
         speaker: SpeakerOptimizerComparisonPlan? = nil,
-        multiSub: CoherentMultiSubwooferAlignmentCandidate? = nil
+        multiSub: CoherentMultiSubwooferAlignmentCandidate? = nil,
+        physicalSub: RoomAdvancedSubPlacementComparison? = nil
     ) -> UnifiedAcousticIntelligenceReport {
         guard room.projectID == identity.projectID else {
             return UnifiedAcousticIntelligenceReport(
@@ -218,6 +219,39 @@ struct UnifiedAcousticIntelligenceCoordinator: Sendable {
                     modeledOnly: true
                 ))
             }
+        }
+
+        // This report is independently qualified by the existing physical
+        // Sub A/B analyzer (same source, microphone, route, positions and
+        // user-confirmed physical setup). Do not confuse its relative LF
+        // seat spread with absolute SPL, room target error or coherence.
+        if let physicalSub {
+            var blockers: [String] = []
+            if physicalSub.seatCount < 2
+                || !physicalSub.reductionInInterseatSpreadDB.isFinite
+                || !physicalSub.evidenceConfidence.isFinite
+                || !(0...1).contains(physicalSub.evidenceConfidence) {
+                blockers.append("Physical Sub evidence needs valid repeated multi-seat measurements.")
+            }
+            if physicalSub.reductionInInterseatSpreadDB <= 0 {
+                blockers.append("The physical Sub move did not reduce measured inter-seat bass variation.")
+            }
+            blockers.append(
+                "Only 35–160 Hz measured seat-spread variation is known; target-response, SPL, headroom, decay, coherent timing and latency require separate evidence."
+            )
+            advice.append(UnifiedAcousticAdvice(
+                id: "physical-sub-placement",
+                remedy: .speakerPlacement,
+                title: "Review measured physical Sub placement",
+                rationale: "The qualified physical before/after captures changed low-frequency inter-seat RMS spread by "
+                    + String(format: "%.2f", physicalSub.reductionInInterseatSpreadDB)
+                    + " dB across "
+                    + String(physicalSub.seatCount)
+                    + " positions. A positive value means lower spread, not guaranteed better bass at each seat.",
+                evidenceSource: "RoomAdvancedSubPlacementComparison",
+                blockers: blockers,
+                modeledOnly: false
+            ))
         }
 
         // Prioritize physical/measurement remedies over DSP. A stable sort
@@ -398,6 +432,153 @@ struct UnifiedAcousticRobustnessEvaluator: Sendable {
             latencyMilliseconds: latencyMS,
             blockingReasons: blockers,
             heldOutSeatWorstRegressionDB: heldOut.isEmpty ? nil : heldOutWorst
+        )
+    }
+}
+
+
+// MARK: - Multi-objective bass hypothesis tradeoffs
+// Physical-source response, phase coherence and room target error are
+// distinct metrics. Rank only explicitly *comparable* hypothetical scenarios
+// from the SAME measured base and route, and never authorize deployment.
+
+struct UnifiedAcousticBassScenario: Equatable, Sendable {
+    var id: String
+    var playbackSystemID: UUID
+    var routingSignature: String
+    var sampleRate: Double
+    var baselineEvidenceID: UUID
+    var seatSpreadRMSDB: Double
+    var targetRMSEDB: Double
+    var decaySeconds: Double
+    var extraHeadroomDB: Double
+    var extraLatencyFrames: Int
+    var filterCount: Int
+    var physicalSubOutputCount: Int
+    var coherentClockAuthenticated: Bool
+}
+
+struct UnifiedAcousticBassTradeoff: Equatable, Sendable {
+    var scenarioID: String
+    var seatSpreadRMSDB: Double
+    var targetRMSEDB: Double
+    var decaySeconds: Double
+    var headroomCostDB: Double
+    var latencyMilliseconds: Double
+    var filterCount: Int
+    var paretoFrontier: Bool
+    var blockers: [String]
+    var canDeploy: Bool { false }
+    var isMeasuredVerification: Bool { false }
+}
+
+struct UnifiedAcousticBassComparison: Equatable, Sendable {
+    var baselineID: UUID
+    var options: [UnifiedAcousticBassTradeoff]
+    var warnings: [String]
+    var previewOnly: Bool { true }
+    var canApply: Bool { false }
+    var canDeploy: Bool { false }
+}
+
+/// No weighted scalar "best bass" score: a 1-dB improvement in seating
+/// uniformity cannot objectively be declared worth 10 ms latency or 2 dB
+/// amplifier headroom. Show the non-dominated choices and transparent costs.
+struct UnifiedAcousticBassTradeoffEvaluator: Sendable {
+    func compare(
+        baseline: UnifiedAcousticBassScenario,
+        candidates: [UnifiedAcousticBassScenario]
+    ) -> UnifiedAcousticBassComparison {
+        let all = [baseline] + candidates
+        let validContext = all.allSatisfy {
+            $0.playbackSystemID == baseline.playbackSystemID
+                && $0.routingSignature == baseline.routingSignature
+                && $0.baselineEvidenceID == baseline.baselineEvidenceID
+                && $0.sampleRate == baseline.sampleRate
+        }
+        let inputValid = !baseline.routingSignature.isEmpty
+            && baseline.sampleRate.isFinite
+            && (8_000...384_000).contains(baseline.sampleRate)
+            && (1...16).contains(all.count)
+            && Set(all.map(\.id)).count == all.count
+            && all.allSatisfy {
+                !$0.id.isEmpty
+                    && $0.seatSpreadRMSDB.isFinite
+                    && $0.seatSpreadRMSDB >= 0
+                    && $0.targetRMSEDB.isFinite
+                    && $0.targetRMSEDB >= 0
+                    && $0.decaySeconds.isFinite
+                    && $0.decaySeconds >= 0
+                    && $0.extraHeadroomDB.isFinite
+                    && $0.extraHeadroomDB >= 0
+                    && $0.extraLatencyFrames >= 0
+                    && (0...128).contains($0.filterCount)
+                    && (0...16).contains($0.physicalSubOutputCount)
+            }
+        guard validContext && inputValid else {
+            return UnifiedAcousticBassComparison(
+                baselineID: baseline.baselineEvidenceID,
+                options: [], warnings: [
+                    "Bass scenario identities, sample rates, evidence baseline, unique IDs, or numeric objectives are inconsistent."
+                ]
+            )
+        }
+
+        func objectiveVector(_ scenario: UnifiedAcousticBassScenario) -> [Double] {
+            [
+                scenario.seatSpreadRMSDB,
+                scenario.targetRMSEDB,
+                scenario.decaySeconds,
+                scenario.extraHeadroomDB,
+                Double(scenario.extraLatencyFrames) / scenario.sampleRate,
+                Double(scenario.filterCount)
+            ]
+        }
+        func dominates(_ other: UnifiedAcousticBassScenario,
+                       _ current: UnifiedAcousticBassScenario) -> Bool {
+            let a = objectiveVector(other), b = objectiveVector(current)
+            return zip(a, b).allSatisfy { pair in pair.0 <= pair.1 + 1e-9 }
+                && zip(a, b).contains { pair in pair.0 < pair.1 - 1e-9 }
+        }
+
+        let options = all.map { scenario -> UnifiedAcousticBassTradeoff in
+            let latencyMs = Double(scenario.extraLatencyFrames) * 1000
+                / scenario.sampleRate
+            var blockers: [String] = []
+            if scenario.extraHeadroomDB > 3.5 {
+                blockers.append("Extra headroom exceeds 3.5 dB.")
+            }
+            if latencyMs > 30 {
+                blockers.append("Additional A/V latency exceeds 30 ms.")
+            }
+            if scenario.physicalSubOutputCount < 2 {
+                blockers.append("True multi-Sub control needs independently addressable Sub outputs.")
+            }
+            if !scenario.coherentClockAuthenticated {
+                blockers.append("Common-clock phase reference has not been authenticated.")
+            }
+            let onFrontier = !all.contains {
+                $0.id != scenario.id && dominates($0, scenario)
+            }
+            return UnifiedAcousticBassTradeoff(
+                scenarioID: scenario.id,
+                seatSpreadRMSDB: scenario.seatSpreadRMSDB,
+                targetRMSEDB: scenario.targetRMSEDB,
+                decaySeconds: scenario.decaySeconds,
+                headroomCostDB: scenario.extraHeadroomDB,
+                latencyMilliseconds: latencyMs,
+                filterCount: scenario.filterCount,
+                paretoFrontier: onFrontier,
+                blockers: blockers
+            )
+        }
+        return UnifiedAcousticBassComparison(
+            baselineID: baseline.baselineEvidenceID,
+            options: options,
+            warnings: [
+                "These comparable modeled scenarios are not verified measurements, and a Pareto frontier is NOT permission to deploy.",
+                "Multi-Sub output mapping, microphone timing and DSP headroom require verified source evidence and owner hardware tests."
+            ]
         )
     }
 }
