@@ -31,6 +31,7 @@ enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
     case roomCorrection
     case activeAcoustics
     case roomAdvisor
+    case blindListening
     case hardwareAcceptance
     case plugins
 
@@ -51,6 +52,7 @@ enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
 
     static let tools: [ProductionSection] = [
         .roomAdvisor,
+        .blindListening,
         .hardwareAcceptance,
     ]
 
@@ -73,6 +75,7 @@ enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
         case .roomCorrection: return "Room Correction"
         case .activeAcoustics: return "Active Acoustics"
         case .roomAdvisor: return "Room Advisor"
+        case .blindListening: return "Blind Listening"
         case .hardwareAcceptance: return "Hardware Acceptance"
         case .plugins: return "Plug-ins"
         }
@@ -91,6 +94,7 @@ enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
         case .roomCorrection: return "waveform.badge.magnifyingglass"
         case .activeAcoustics: return "waveform.and.mic"
         case .roomAdvisor: return "wand.and.stars.inverse"
+        case .blindListening: return "ear.badge.waveform"
         case .hardwareAcceptance: return "checkmark.shield.fill"
         case .plugins: return "puzzlepiece.extension"
         }
@@ -323,6 +327,8 @@ struct ProductionRootView: View {
             ProductionRoomTreatmentAdvisorWorkspace(
                 advisor: product.roomTreatmentAdvisor
             )
+        case .blindListening:
+            ProductionBlindListeningWorkspace(engine: engine)
         case .hardwareAcceptance:
             ProductionHardwareAcceptanceWorkspace(
                 engine: engine,

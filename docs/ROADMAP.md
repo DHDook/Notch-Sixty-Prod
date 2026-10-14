@@ -56,6 +56,32 @@ review, live ANC authorization and owner merge approval remain distinct gates.
 
 ---
 
+## Software completion tracking — consolidated core batches
+
+- **Batch 1 PR #125:** 141 independent acoustic references and real
+  generated SOFA evidence; exact-head arm64 Release/XCTest verified
+  remotely. Physical H01–H08 remain outstanding.
+- **Batch 2 PR #126:** unified read-only acoustic recommendations,
+  qualified speaker/physical sub evidence, robust held-out seats and
+  Pareto bass review; exact-head arm64 Release/XCTest verified remotely.
+- **Batch 3 PR #127:** per-ear 16-band PEQ, electrical transfer preview,
+  native AES69 .sofa picker, credited local proposals and fail-closed
+  rate/headroom policy; exact-head arm64 Release/XCTest verified remotely.
+- **Batch 4:** optional offline Blind Listening ABX, integrated full
+  exact-head software regression and immutable SHA/SBOM owner packet
+  (see docs/BATCH4_FINAL_PRODUCT_HANDOFF.md). CI outcome on the actual
+  Batch 4 head is separately required before marking software complete.
+
+**Hardware/release:** PR112 H01–H08 real-Mac testing, actual physical
+DAC/Core Audio 384 kHz throughput, speaker/multi-Sub/headphone listening
+acceptance, third-party rights/legal review, Apple credentials, signing
+and App Store operations remain **not completed by remote CI**.
+All four product batches stay OPEN/DRAFT/UNMERGED; main is untouched.
+PR120 and PR126 research, and an independently licensed third-party
+headphone correction database, remain optional post-core research.
+
+---
+
 ## Forward roadmap — Acoustic Intelligence and Headphone Completion (proposed)
 
 These future milestones are **proposals**, not implemented changes or release
