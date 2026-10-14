@@ -608,6 +608,32 @@ enum ProductionUserGuideCatalog {
             ]
         ),
         article(
+            id: "blind-listening",
+            category: .advanced,
+            title: "Blind Listening",
+            summary: "Explore differences between two local, carefully matched audio excerpts with randomized A/B/X trials.",
+            systemImage: "ear.badge.waveform",
+            keywords: ["blind", "ABX", "listening", "trial", "statistical", "p-value", "audio test"],
+            sections: [
+                section(
+                    "abx-start",
+                    "Prepare a fair, safe offline comparison",
+                    [
+                        "Stop Notch Sixty live processing before using Blind Listening. This tool plays user-provided audio files through macOS default audio playback at reduced software volume; it does not switch processing presets or verify the selected device. Start with your system hardware volume low.",
+                        "Import two stereo PCM excerpts of the same passage and length, with identical sample rate, arrangement and mastering except for the deliberately compared difference. The app refuses file RMS mismatch greater than 0.10 dB and unsafe sample peaks; this is not a perceptual loudness-match or an alignment proof."
+                    ]
+                ),
+                section(
+                    "abx-use",
+                    "Listen to A, B and the hidden X source",
+                    [
+                        "Choose 12, 16 or 24 trials. During each trial, audition the known A and B references and hidden X, then guess whether X matches A or B. The hidden assignment changes independently on every trial, without a predictable fixed balance. X must be played before making a choice.",
+                        "After all trials, the app reveals the count correct and an exact one-sided binomial fair-guess probability. Even a low p-value does not establish universal audibility, physical acoustic improvement, headphone SPL safety, or release approval. You can export the evidence as JSON, or leave it on-device."
+                    ]
+                )
+            ]
+        ),
+        article(
             id: "hardware-acceptance",
             category: .advanced,
             title: "Hardware Acceptance",
@@ -778,6 +804,7 @@ enum ProductionUserGuideCatalog {
         case .roomCorrection: return "room-correction"
         case .activeAcoustics: return "active-acoustics"
         case .roomAdvisor: return "room-advisor"
+        case .blindListening: return "blind-listening"
         case .hardwareAcceptance: return "hardware-acceptance"
         case .plugins: return "plugins"
         }

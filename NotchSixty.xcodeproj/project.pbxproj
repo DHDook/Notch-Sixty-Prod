@@ -33,6 +33,9 @@
 		F62000000000000000000001 /* OutputDeviceProfileConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = F62000000000000000000011 /* OutputDeviceProfileConfiguration.swift */; };
 		F65000000000000000000001 /* HeadphoneDeviceProfileConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = F65000000000000000000011 /* HeadphoneDeviceProfileConfiguration.swift */; };
 		B3A000000000000000000001 /* HeadphoneCompletionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3A000000000000000000011 /* HeadphoneCompletionTests.swift */; };
+		B40000000000000000000001 /* BlindABXValidation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40000000000000000000011 /* BlindABXValidation.swift */; };
+		B40000000000000000000002 /* ProductionBlindListeningWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40000000000000000000012 /* ProductionBlindListeningWorkspace.swift */; };
+		B40000000000000000000003 /* BlindABXValidationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40000000000000000000013 /* BlindABXValidationTests.swift */; };
 		F65000000000000000000002 /* BinauralProfileAsset.swift in Sources */ = {isa = PBXBuildFile; fileRef = F65000000000000000000012 /* BinauralProfileAsset.swift */; };
 		F65000000000000000000003 /* CoreAudioSemanticTransportSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F65000000000000000000013 /* CoreAudioSemanticTransportSupport.swift */; };
 		F65000000000000000000004 /* CoreAudioBinauralHeadphoneTransportSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = F65000000000000000000014 /* CoreAudioBinauralHeadphoneTransportSession.swift */; };
@@ -355,6 +358,9 @@
 		E20000000000000000000012 /* RoomCorrectionFIRDesigner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionFIRDesigner.swift; sourceTree = "<group>"; };
 		F65000000000000000000011 /* HeadphoneDeviceProfileConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeadphoneDeviceProfileConfiguration.swift; sourceTree = "<group>"; };
 		B3A000000000000000000011 /* HeadphoneCompletionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeadphoneCompletionTests.swift; sourceTree = "<group>"; };
+		B40000000000000000000011 /* BlindABXValidation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlindABXValidation.swift; sourceTree = "<group>"; };
+		B40000000000000000000012 /* ProductionBlindListeningWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionBlindListeningWorkspace.swift; sourceTree = "<group>"; };
+		B40000000000000000000013 /* BlindABXValidationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlindABXValidationTests.swift; sourceTree = "<group>"; };
 		F65000000000000000000012 /* BinauralProfileAsset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BinauralProfileAsset.swift; sourceTree = "<group>"; };
 		F65000000000000000000013 /* CoreAudioSemanticTransportSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudioSemanticTransportSupport.swift; sourceTree = "<group>"; };
 		F65000000000000000000014 /* CoreAudioBinauralHeadphoneTransportSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudioBinauralHeadphoneTransportSession.swift; sourceTree = "<group>"; };
@@ -713,6 +719,7 @@
 				F82000000000000000000014 /* AudioUnitRackMutationTests.swift */,
 				F8500000000000000000001C /* NativeSOFAImporterTests.swift */,
 				B3A000000000000000000011 /* HeadphoneCompletionTests.swift */,
+				B40000000000000000000013 /* BlindABXValidationTests.swift */,
 				F86000000000000000000011 /* CalibrationPredictionVerifierTests.swift */,
 				F10300000000000000000012 /* SpeakerOptimizerMeasurementEvidenceTests.swift */,
 				F10400000000000000000012 /* SpeakerOptimizerDesignEngineTests.swift */,
@@ -887,7 +894,7 @@
 		};
 		A20000000000000000000051 /* CoreAudio */ = {isa = PBXGroup; children = (A20000000000000000000021 /* CoreAudioError.swift */, F63000000000000000000011 /* CoreAudioNChannelTransportSession.swift */, F65000000000000000000013 /* CoreAudioSemanticTransportSupport.swift */, F65000000000000000000014 /* CoreAudioBinauralHeadphoneTransportSession.swift */, F64000000000000000000013 /* MultichannelCalibrationTransport.swift */, A20000000000000000000028 /* MasterVolumeDeviceController.swift */, A2000000000000000000002C /* RoomCorrectionCalibrationTransport.swift */,); path = CoreAudio; sourceTree = "<group>"; };
 		A20000000000000000000052 /* Devices */ = {isa = PBXGroup; children = (A20000000000000000000022 /* AudioOutputDevice.swift */, A20000000000000000000023 /* OutputDeviceCatalog.swift */,); path = Devices; sourceTree = "<group>"; };
-		A20000000000000000000053 /* Routing */ = {isa = PBXGroup; children = (A20000000000000000000024 /* AudioRouteConfiguration.swift */, F62000000000000000000011 /* OutputDeviceProfileConfiguration.swift */, F65000000000000000000011 /* HeadphoneDeviceProfileConfiguration.swift */, F65000000000000000000012 /* BinauralProfileAsset.swift */, F64000000000000000000011 /* OutputDeviceCalibration.swift */,); path = Routing; sourceTree = "<group>"; };
+		A20000000000000000000053 /* Routing */ = {isa = PBXGroup; children = (A20000000000000000000024 /* AudioRouteConfiguration.swift */, F62000000000000000000011 /* OutputDeviceProfileConfiguration.swift */, F65000000000000000000011 /* HeadphoneDeviceProfileConfiguration.swift */, B40000000000000000000011 /* BlindABXValidation.swift */, F65000000000000000000012 /* BinauralProfileAsset.swift */, F64000000000000000000011 /* OutputDeviceCalibration.swift */,); path = Routing; sourceTree = "<group>"; };
 		B113B0000000000000000050 /* Backup */ = {
 			isa = PBXGroup;
 			children = (
@@ -937,7 +944,7 @@
 			path = Realtime;
 			sourceTree = "<group>";
 		};
-		A40000000000000000000050 /* UI */ = {isa = PBXGroup; children = (A40000000000000000000020 /* ProductionRootView.swift */, A40000000000000000000021 /* ProductionEqualizerView.swift */, A40000000000000000000022 /* ProductionDynamicsView.swift */, A40000000000000000000023 /* ProductionDynamicsTelemetryView.swift */, A40000000000000000000024 /* ProductionMetersView.swift */, A40000000000000000000025 /* ProductionAnalysisViews.swift */, A40000000000000000000026 /* ProductionProfileToolbar.swift */, F65000000000000000000015 /* ProductionHeadphoneWorkspace.swift */, F64000000000000000000015 /* ProductionMultichannelCalibrationWorkspace.swift */,F64000000000000000000015 /* ProductionMultichannelCalibrationWorkspace.swift */, F10600000000000000000035 /* ProductionSpeakerMeasurementLabWorkspace.swift */, A40000000000000000000027 /* ProductionRoomCorrectionWorkspace.swift */, F78000000000000000000011 /* ProductionActiveAcousticsWorkspace.swift */, F92000000000000000000013 /* ProductionRoomTreatmentAdvisorWorkspace.swift */, F96000000000000000000013 /* ProductionFeedForwardReadinessCard.swift */, F93000000000000000000012 /* ProductionRoomGeometrySection.swift */, F94000000000000000000013 /* ProductionRoomTreatmentDesignSection.swift */, F78000000000000000000012 /* ProductionPluginWorkspace.swift */, F112A0000000000000000013 /* ProductionHardwareAcceptanceWorkspace.swift */, F11300000000000000000011 /* ProductionUserGuideView.swift */,); path = UI; sourceTree = "<group>"; };
+		A40000000000000000000050 /* UI */ = {isa = PBXGroup; children = (A40000000000000000000020 /* ProductionRootView.swift */, A40000000000000000000021 /* ProductionEqualizerView.swift */, A40000000000000000000022 /* ProductionDynamicsView.swift */, A40000000000000000000023 /* ProductionDynamicsTelemetryView.swift */, A40000000000000000000024 /* ProductionMetersView.swift */, A40000000000000000000025 /* ProductionAnalysisViews.swift */, A40000000000000000000026 /* ProductionProfileToolbar.swift */, F65000000000000000000015 /* ProductionHeadphoneWorkspace.swift */, B40000000000000000000012 /* ProductionBlindListeningWorkspace.swift */, F64000000000000000000015 /* ProductionMultichannelCalibrationWorkspace.swift */,F64000000000000000000015 /* ProductionMultichannelCalibrationWorkspace.swift */, F10600000000000000000035 /* ProductionSpeakerMeasurementLabWorkspace.swift */, A40000000000000000000027 /* ProductionRoomCorrectionWorkspace.swift */, F78000000000000000000011 /* ProductionActiveAcousticsWorkspace.swift */, F92000000000000000000013 /* ProductionRoomTreatmentAdvisorWorkspace.swift */, F96000000000000000000013 /* ProductionFeedForwardReadinessCard.swift */, F93000000000000000000012 /* ProductionRoomGeometrySection.swift */, F94000000000000000000013 /* ProductionRoomTreatmentDesignSection.swift */, F78000000000000000000012 /* ProductionPluginWorkspace.swift */, F112A0000000000000000013 /* ProductionHardwareAcceptanceWorkspace.swift */, F11300000000000000000011 /* ProductionUserGuideView.swift */,); path = UI; sourceTree = "<group>"; };
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -1011,6 +1018,7 @@
 				A40000000000000000000016 /* ProductionProfileToolbar.swift in Sources */,
 				A40000000000000000000017 /* ProductionRoomCorrectionWorkspace.swift in Sources */,
 				F65000000000000000000005 /* ProductionHeadphoneWorkspace.swift in Sources */,
+				B40000000000000000000002 /* ProductionBlindListeningWorkspace.swift in Sources */,
 				F78000000000000000000001 /* ProductionActiveAcousticsWorkspace.swift in Sources */,
 				F78000000000000000000002 /* ProductionPluginWorkspace.swift in Sources */,
 				F112A0000000000000000001 /* HardwareAcceptance.swift in Sources */,
@@ -1028,6 +1036,7 @@
 				A20000000000000000000014 /* AudioRouteConfiguration.swift in Sources */,
 				F62000000000000000000001 /* OutputDeviceProfileConfiguration.swift in Sources */,
 				F65000000000000000000001 /* HeadphoneDeviceProfileConfiguration.swift in Sources */,
+				B40000000000000000000001 /* BlindABXValidation.swift in Sources */,
 				F65000000000000000000002 /* BinauralProfileAsset.swift in Sources */,
 				F65000000000000000000003 /* CoreAudioSemanticTransportSupport.swift in Sources */,
 				F65000000000000000000004 /* CoreAudioBinauralHeadphoneTransportSession.swift in Sources */,
@@ -1240,6 +1249,7 @@
 				F82000000000000000000004 /* AudioUnitRackMutationTests.swift in Sources */,
 				F8500000000000000000000C /* NativeSOFAImporterTests.swift in Sources */,
 				B3A000000000000000000001 /* HeadphoneCompletionTests.swift in Sources */,
+				B40000000000000000000003 /* BlindABXValidationTests.swift in Sources */,
 				F86000000000000000000001 /* CalibrationPredictionVerifierTests.swift in Sources */,
 				F10300000000000000000002 /* SpeakerOptimizerMeasurementEvidenceTests.swift in Sources */,
 				F10400000000000000000002 /* SpeakerOptimizerDesignEngineTests.swift in Sources */,
