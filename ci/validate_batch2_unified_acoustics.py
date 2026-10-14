@@ -121,9 +121,11 @@ for testName in (
 require("unifiedAcousticIntelligenceCard(report)" in workspace
         and "UnifiedAcousticIntelligenceCoordinator().summarize(" in workspace,
         "Room Advisor UI does not present the unified report")
-require("playbackSystemID: nil" in workspace
-        and "routingSignature: nil" in workspace,
-        "UI must not fabricate Playback System/route identity")
+require("playbackSystemID: selected?.playbackSystemID" in workspace
+        and "routingSignature: selected?.routingSignature" in workspace
+        and "baselineMeasurementSetID: selected?.id" in workspace
+        and "advisor.unifiedSpeakerBaselines.first" in workspace,
+        "UI must use exact user-selected source identity, never fabricate a Playback System or route")
 require("No EQ, room correction, speaker delays" in workspace,
         "read-only UI warning omitted")
 
