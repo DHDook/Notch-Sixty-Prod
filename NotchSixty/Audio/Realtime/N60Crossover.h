@@ -13,6 +13,79 @@ extern "C" {
 
 #define N60_MAX_CROSSOVER_SECTIONS 4
 
+// Dedicated double-precision crossover SOS and states. At 384 kHz with an
+// 80 Hz cutoff, float feedback coefficients near +/-2 and 1 lose enough
+// significant digits to corrupt the bass response. Keep unrelated EQ ABI
+// and processing unchanged. Design exclusively on the control plane.
+typedef struct {
+    double b0, b1, b2, a1, a2;
+} N60CrossoverPreciseCoefficients;
+
+typedef struct {
+    double z1, z2;
+} N60CrossoverPreciseState;
+
+static inline N60CrossoverPreciseCoefficients N60CrossoverPreciseIdentity(void) {
+    const N60CrossoverPreciseCoefficients c = {
+        .b0 = 1.0, .b1 = 0.0, .b2 = 0.0, .a1 = 0.0, .a2 = 0.0
+    };
+    return c;
+}
+
+static inline bool N60CrossoverPreciseDesign(
+    N60BiquadFilterType type, double rate, double hz, double q,
+    N60CrossoverPreciseCoefficients * _Nonnull out
+) {
+    if (!out || !isfinite(rate) || rate <= 0.0
+        || !isfinite(hz) || hz <= 0.0 || hz >= 0.5 * rate
+        || !isfinite(q) || q <= 0.0) return false;
+    const double omega = 2.0 * M_PI * hz / rate;
+    const double cosine = cos(omega);
+    const double alpha = sin(omega) / (2.0 * q);
+    const double a0 = 1.0 + alpha;
+    if (!isfinite(a0) || fabs(a0) < 1e-20) return false;
+    N60CrossoverPreciseCoefficients c = {0};
+    c.a1 = (-2.0 * cosine) / a0;
+    c.a2 = (1.0 - alpha) / a0;
+    switch (type) {
+    case N60BiquadFilterTypeLowPass:
+        c.b0 = (1.0 - cosine) / (2.0 * a0);
+        c.b1 = 2.0 * c.b0;
+        c.b2 = c.b0;
+        break;
+    case N60BiquadFilterTypeHighPass:
+        c.b0 = (1.0 + cosine) / (2.0 * a0);
+        c.b1 = -2.0 * c.b0;
+        c.b2 = c.b0;
+        break;
+    case N60BiquadFilterTypeAllPass:
+        c.b0 = (1.0 - alpha) / a0;
+        c.b1 = (-2.0 * cosine) / a0;
+        c.b2 = 1.0;
+        break;
+    default:
+        return false;
+    }
+    if (!isfinite(c.b0) || !isfinite(c.b1) || !isfinite(c.b2)
+        || !isfinite(c.a1) || !isfinite(c.a2)) return false;
+    *out = c;
+    return true;
+}
+
+// Realtime-safe, float input/output with double filter state. Never allocate,
+// calculate coefficients, or lock in the audio render callback.
+static inline float N60CrossoverPreciseProcessSample(
+    N60CrossoverPreciseCoefficients c,
+    N60CrossoverPreciseState * _Nonnull state, float input
+) {
+    const double x = (double)input;
+    const double y = c.b0 * x + state->z1;
+    state->z1 = c.b1 * x - c.a1 * y + state->z2;
+    state->z2 = c.b2 * x - c.a2 * y;
+    return (float)y;
+}
+
+
 typedef enum {
     N60CrossoverTopologyLinkwitzRiley24 = 0,
     N60CrossoverTopologyLinkwitzRiley48 = 1,
@@ -34,10 +107,10 @@ typedef struct {
     bool subPhaseAlignmentEnabled;
     double subPhaseAlignmentFrequencyHz;
     double subPhaseAlignmentQ;
-    N60BiquadCoefficients subPhaseAlignmentAllPass;
+    N60CrossoverPreciseCoefficients subPhaseAlignmentAllPass;
     uint32_t sectionCount;
-    N60BiquadCoefficients mainsHighPass[N60_MAX_CROSSOVER_SECTIONS];
-    N60BiquadCoefficients subLowPass[N60_MAX_CROSSOVER_SECTIONS];
+    N60CrossoverPreciseCoefficients mainsHighPass[N60_MAX_CROSSOVER_SECTIONS];
+    N60CrossoverPreciseCoefficients subLowPass[N60_MAX_CROSSOVER_SECTIONS];
 } N60CrossoverSnapshot;
 
 static inline N60CrossoverSnapshot N60CrossoverSnapshotMakeBypassed(void) {
@@ -51,11 +124,11 @@ static inline N60CrossoverSnapshot N60CrossoverSnapshotMakeBypassed(void) {
     snapshot.subPhaseAlignmentEnabled = false;
     snapshot.subPhaseAlignmentFrequencyHz = 80.0;
     snapshot.subPhaseAlignmentQ = 0.7;
-    snapshot.subPhaseAlignmentAllPass = N60BiquadCoefficientsMakeIdentity();
+    snapshot.subPhaseAlignmentAllPass = N60CrossoverPreciseIdentity();
     snapshot.sectionCount = 0;
     for (uint32_t index = 0; index < N60_MAX_CROSSOVER_SECTIONS; ++index) {
-        snapshot.mainsHighPass[index] = N60BiquadCoefficientsMakeIdentity();
-        snapshot.subLowPass[index] = N60BiquadCoefficientsMakeIdentity();
+        snapshot.mainsHighPass[index] = N60CrossoverPreciseIdentity();
+        snapshot.subLowPass[index] = N60CrossoverPreciseIdentity();
     }
     return snapshot;
 }
@@ -141,25 +214,13 @@ static inline bool N60CrossoverSnapshotMake(
     designed.subPolarityInverted = subPolarityInverted;
     designed.sectionCount = sectionCount;
 
-    for (uint32_t index = 0; index < sectionCount; ++index) {
-        if (!N60BiquadDesign(
-                N60BiquadFilterTypeHighPass,
-                sampleRate,
-                frequencyHz,
-                0.0,
-                qValues[index],
-                &designed.mainsHighPass[index])) {
-            return false;
-        }
-        if (!N60BiquadDesign(
-                N60BiquadFilterTypeLowPass,
-                sampleRate,
-                frequencyHz,
-                0.0,
-                qValues[index],
-                &designed.subLowPass[index])) {
-            return false;
-        }
+    for (uint32_t i = 0; i < sectionCount; ++i) {
+        if (!N60CrossoverPreciseDesign(
+                N60BiquadFilterTypeHighPass, sampleRate, frequencyHz,
+                qValues[i], &designed.mainsHighPass[i])
+            || !N60CrossoverPreciseDesign(
+                N60BiquadFilterTypeLowPass, sampleRate, frequencyHz,
+                qValues[i], &designed.subLowPass[i])) return false;
     }
 
     *snapshot = designed;
@@ -181,16 +242,11 @@ static inline bool N60CrossoverSnapshotSetSubPhaseAlignment(
         return false;
     }
 
-    N60BiquadCoefficients coefficients = N60BiquadCoefficientsMakeIdentity();
-    if (enabled && !N60BiquadDesign(
-            N60BiquadFilterTypeAllPass,
-            sampleRate,
-            frequencyHz,
-            0.0,
-            q,
-            &coefficients)) {
-        return false;
-    }
+    N60CrossoverPreciseCoefficients coefficients =
+        N60CrossoverPreciseIdentity();
+    if (enabled && !N60CrossoverPreciseDesign(
+            N60BiquadFilterTypeAllPass, sampleRate, frequencyHz, q,
+            &coefficients)) return false;
 
     snapshot->subPhaseAlignmentEnabled = enabled;
     snapshot->subPhaseAlignmentFrequencyHz = frequencyHz;
@@ -218,13 +274,13 @@ typedef struct {
     bool subPhaseAlignmentEnabled;
     double subPhaseAlignmentFrequencyHz;
     double subPhaseAlignmentQ;
-    N60BiquadCoefficients subPhaseAlignmentAllPass;
+    N60CrossoverPreciseCoefficients subPhaseAlignmentAllPass;
     uint32_t lowerSectionCount;
     uint32_t upperSectionCount;
-    N60BiquadCoefficients lowerLowPass[N60_MAX_CROSSOVER_SECTIONS];
-    N60BiquadCoefficients lowerHighPass[N60_MAX_CROSSOVER_SECTIONS];
-    N60BiquadCoefficients upperLowPass[N60_MAX_CROSSOVER_SECTIONS];
-    N60BiquadCoefficients upperHighPass[N60_MAX_CROSSOVER_SECTIONS];
+    N60CrossoverPreciseCoefficients lowerLowPass[N60_MAX_CROSSOVER_SECTIONS];
+    N60CrossoverPreciseCoefficients lowerHighPass[N60_MAX_CROSSOVER_SECTIONS];
+    N60CrossoverPreciseCoefficients upperLowPass[N60_MAX_CROSSOVER_SECTIONS];
+    N60CrossoverPreciseCoefficients upperHighPass[N60_MAX_CROSSOVER_SECTIONS];
 } N60SpeakerBusSplitterSnapshot;
 
 static inline N60SpeakerBusSplitterSnapshot N60SpeakerBusSplitterSnapshotMakeBypassed(void) {
@@ -238,12 +294,12 @@ static inline N60SpeakerBusSplitterSnapshot N60SpeakerBusSplitterSnapshotMakeByp
     snapshot.subGainLinear = 1.0f;
     snapshot.subPhaseAlignmentFrequencyHz = 80.0;
     snapshot.subPhaseAlignmentQ = 0.7;
-    snapshot.subPhaseAlignmentAllPass = N60BiquadCoefficientsMakeIdentity();
+    snapshot.subPhaseAlignmentAllPass = N60CrossoverPreciseIdentity();
     for (uint32_t index = 0; index < N60_MAX_CROSSOVER_SECTIONS; ++index) {
-        snapshot.lowerLowPass[index] = N60BiquadCoefficientsMakeIdentity();
-        snapshot.lowerHighPass[index] = N60BiquadCoefficientsMakeIdentity();
-        snapshot.upperLowPass[index] = N60BiquadCoefficientsMakeIdentity();
-        snapshot.upperHighPass[index] = N60BiquadCoefficientsMakeIdentity();
+        snapshot.lowerLowPass[index] = N60CrossoverPreciseIdentity();
+        snapshot.lowerHighPass[index] = N60CrossoverPreciseIdentity();
+        snapshot.upperLowPass[index] = N60CrossoverPreciseIdentity();
+        snapshot.upperHighPass[index] = N60CrossoverPreciseIdentity();
     }
     return snapshot;
 }
@@ -308,15 +364,13 @@ static inline bool N60SpeakerBusSplitterSnapshotMake(
     designed.subPhaseAlignmentQ = subPhaseAlignmentQ;
     designed.lowerSectionCount = lowerCount;
 
-    for (uint32_t index = 0; index < lowerCount; ++index) {
-        if (!N60BiquadDesign(
+    for (uint32_t i = 0; i < lowerCount; ++i) {
+        if (!N60CrossoverPreciseDesign(
                 N60BiquadFilterTypeLowPass, sampleRate, lowerFrequencyHz,
-                0.0, lowerQ[index], &designed.lowerLowPass[index])
-            || !N60BiquadDesign(
+                lowerQ[i], &designed.lowerLowPass[i])
+            || !N60CrossoverPreciseDesign(
                 N60BiquadFilterTypeHighPass, sampleRate, lowerFrequencyHz,
-                0.0, lowerQ[index], &designed.lowerHighPass[index])) {
-            return false;
-        }
+                lowerQ[i], &designed.lowerHighPass[i])) return false;
     }
 
     if (mode == N60SpeakerCrossoverModeTriAmp) {
@@ -324,28 +378,21 @@ static inline bool N60SpeakerBusSplitterSnapshotMake(
         uint32_t upperCount = 0;
         if (!N60CrossoverTopologyQValues(upperTopology, upperQ, &upperCount)) return false;
         designed.upperSectionCount = upperCount;
-        for (uint32_t index = 0; index < upperCount; ++index) {
-            if (!N60BiquadDesign(
+        for (uint32_t i = 0; i < upperCount; ++i) {
+            if (!N60CrossoverPreciseDesign(
                     N60BiquadFilterTypeLowPass, sampleRate, upperFrequencyHz,
-                    0.0, upperQ[index], &designed.upperLowPass[index])
-                || !N60BiquadDesign(
+                    upperQ[i], &designed.upperLowPass[i])
+                || !N60CrossoverPreciseDesign(
                     N60BiquadFilterTypeHighPass, sampleRate, upperFrequencyHz,
-                    0.0, upperQ[index], &designed.upperHighPass[index])) {
-                return false;
-            }
+                    upperQ[i], &designed.upperHighPass[i])) return false;
         }
     }
 
     if (designed.subPhaseAlignmentEnabled) {
-        if (!N60BiquadDesign(
-                N60BiquadFilterTypeAllPass,
-                sampleRate,
-                subPhaseAlignmentFrequencyHz,
-                0.0,
-                subPhaseAlignmentQ,
-                &designed.subPhaseAlignmentAllPass)) {
-            return false;
-        }
+        if (!N60CrossoverPreciseDesign(
+                N60BiquadFilterTypeAllPass, sampleRate,
+                subPhaseAlignmentFrequencyHz, subPhaseAlignmentQ,
+                &designed.subPhaseAlignmentAllPass)) return false;
     }
 
     *snapshot = designed;

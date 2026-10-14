@@ -55,10 +55,10 @@ typedef struct {
 
 typedef struct {
     N60CrossoverSnapshot snapshot;
-    N60BiquadState mainsLeft[N60_MAX_CROSSOVER_SECTIONS];
-    N60BiquadState mainsRight[N60_MAX_CROSSOVER_SECTIONS];
-    N60BiquadState subMono[N60_MAX_CROSSOVER_SECTIONS];
-    N60BiquadState subPhaseAlignment;
+    N60CrossoverPreciseState mainsLeft[N60_MAX_CROSSOVER_SECTIONS];
+    N60CrossoverPreciseState mainsRight[N60_MAX_CROSSOVER_SECTIONS];
+    N60CrossoverPreciseState subMono[N60_MAX_CROSSOVER_SECTIONS];
+    N60CrossoverPreciseState subPhaseAlignment;
 } N60CrossoverPathRuntime;
 
 typedef struct {
@@ -204,6 +204,23 @@ static bool coefficients_equal(N60BiquadCoefficients lhs, N60BiquadCoefficients 
         && lhs.a2 == rhs.a2;
 }
 
+// Crossover SOS must preserve all double bits through validity and snapshot
+// comparisons. The ordinary EQ float coefficient contract stays unchanged.
+static bool crossover_coefficients_are_finite(
+    N60CrossoverPreciseCoefficients c
+) {
+    return isfinite(c.b0) && isfinite(c.b1) && isfinite(c.b2)
+        && isfinite(c.a1) && isfinite(c.a2);
+}
+
+static bool crossover_coefficients_equal(
+    N60CrossoverPreciseCoefficients a,
+    N60CrossoverPreciseCoefficients b
+) {
+    return a.b0 == b.b0 && a.b1 == b.b1 && a.b2 == b.b2
+        && a.a1 == b.a1 && a.a2 == b.a2;
+}
+
 static bool channel_mask_is_valid(uint8_t channelMask) {
     return channelMask != 0 && (channelMask & ~N60_EQ_CHANNEL_STEREO) == 0;
 }
@@ -231,7 +248,7 @@ static bool crossover_snapshot_is_valid(N60CrossoverSnapshot crossover, double s
         || crossover.subPhaseAlignmentFrequencyHz >= sampleRate * 0.5
         || !isfinite(crossover.subPhaseAlignmentQ)
         || crossover.subPhaseAlignmentQ <= 0.0
-        || !coefficients_are_finite(crossover.subPhaseAlignmentAllPass)) {
+        || !crossover_coefficients_are_finite(crossover.subPhaseAlignmentAllPass)) {
         return false;
     }
 
@@ -248,8 +265,8 @@ static bool crossover_snapshot_is_valid(N60CrossoverSnapshot crossover, double s
     if (expectedSections == 0 || crossover.sectionCount != expectedSections) return false;
 
     for (uint32_t index = 0; index < crossover.sectionCount; ++index) {
-        if (!coefficients_are_finite(crossover.mainsHighPass[index])
-            || !coefficients_are_finite(crossover.subLowPass[index])) {
+        if (!crossover_coefficients_are_finite(crossover.mainsHighPass[index])
+            || !crossover_coefficients_are_finite(crossover.subLowPass[index])) {
             return false;
         }
     }
@@ -479,13 +496,13 @@ static bool crossover_snapshots_equal(N60CrossoverSnapshot lhs, N60CrossoverSnap
         || lhs.subPhaseAlignmentEnabled != rhs.subPhaseAlignmentEnabled
         || lhs.subPhaseAlignmentFrequencyHz != rhs.subPhaseAlignmentFrequencyHz
         || lhs.subPhaseAlignmentQ != rhs.subPhaseAlignmentQ
-        || !coefficients_equal(lhs.subPhaseAlignmentAllPass, rhs.subPhaseAlignmentAllPass)
+        || !crossover_coefficients_equal(lhs.subPhaseAlignmentAllPass, rhs.subPhaseAlignmentAllPass)
         || lhs.sectionCount != rhs.sectionCount) {
         return false;
     }
     for (uint32_t index = 0; index < lhs.sectionCount; ++index) {
-        if (!coefficients_equal(lhs.mainsHighPass[index], rhs.mainsHighPass[index])
-            || !coefficients_equal(lhs.subLowPass[index], rhs.subLowPass[index])) return false;
+        if (!crossover_coefficients_equal(lhs.mainsHighPass[index], rhs.mainsHighPass[index])
+            || !crossover_coefficients_equal(lhs.subLowPass[index], rhs.subLowPass[index])) return false;
     }
     return true;
 }
@@ -698,12 +715,12 @@ static void process_crossover_path(
     float mainsRight = inputRight;
     float subMono = (inputLeft + inputRight) * 0.5f;
     for (uint32_t index = 0; index < path->snapshot.sectionCount; ++index) {
-        mainsLeft = N60BiquadProcessSample(path->snapshot.mainsHighPass[index], &path->mainsLeft[index], mainsLeft);
-        mainsRight = N60BiquadProcessSample(path->snapshot.mainsHighPass[index], &path->mainsRight[index], mainsRight);
-        subMono = N60BiquadProcessSample(path->snapshot.subLowPass[index], &path->subMono[index], subMono);
+        mainsLeft = N60CrossoverPreciseProcessSample(path->snapshot.mainsHighPass[index], &path->mainsLeft[index], mainsLeft);
+        mainsRight = N60CrossoverPreciseProcessSample(path->snapshot.mainsHighPass[index], &path->mainsRight[index], mainsRight);
+        subMono = N60CrossoverPreciseProcessSample(path->snapshot.subLowPass[index], &path->subMono[index], subMono);
     }
     if (path->snapshot.subPhaseAlignmentEnabled) {
-        subMono = N60BiquadProcessSample(
+        subMono = N60CrossoverPreciseProcessSample(
             path->snapshot.subPhaseAlignmentAllPass,
             &path->subPhaseAlignment,
             subMono

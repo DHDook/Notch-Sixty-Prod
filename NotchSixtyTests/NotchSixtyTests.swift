@@ -154,7 +154,12 @@ final class NotchSixtyTests: XCTestCase {
         XCTAssertTrue(graph.crossover.subPhaseAlignmentEnabled)
         XCTAssertEqual(graph.crossover.subPhaseAlignmentFrequencyHz, 80, accuracy: 0.000_001)
         XCTAssertEqual(graph.crossover.subPhaseAlignmentQ, 0.7, accuracy: 0.000_001)
-        XCTAssertTrue(N60BiquadCoefficientsAreFinite(graph.crossover.subPhaseAlignmentAllPass))
+        let allPass = graph.crossover.subPhaseAlignmentAllPass
+        XCTAssertTrue(allPass.b0.isFinite)
+        XCTAssertTrue(allPass.b1.isFinite)
+        XCTAssertTrue(allPass.b2.isFinite)
+        XCTAssertTrue(allPass.a1.isFinite)
+        XCTAssertTrue(allPass.a2.isFinite)
     }
 
     func testSubBassPhaseAlignmentDisabledIsIdentity() throws {

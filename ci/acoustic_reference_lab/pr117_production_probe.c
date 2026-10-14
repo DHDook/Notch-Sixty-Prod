@@ -30,6 +30,16 @@ static void print_coeff(const char *kind, double rate, int section,
            (double)c.b2, (double)c.a1, (double)c.a2);
 }
 
+// Crossover SOS stay double through the immutable snapshot; do not cast back
+// to the unrelated float EQ coefficients while logging the reference probe.
+static void print_precise_coeff(
+    const char *kind, double rate, int section,
+    N60CrossoverPreciseCoefficients c
+) {
+    printf("%s %.0f %d %.17g %.17g %.17g %.17g %.17g\n",
+           kind, rate, section, c.b0, c.b1, c.b2, c.a1, c.a2);
+}
+
 static void probe_peaking(double rate) {
     N60BiquadCoefficients c;
     require(N60BiquadDesign(N60BiquadFilterTypePeaking,
@@ -51,9 +61,9 @@ static void probe_crossover(double rate, N60CrossoverTopology topology,
     require(s.sectionCount == (label == 24 ? 2u : 4u));
     printf("XO %.0f %d %u\n", rate, label, s.sectionCount);
     for (uint32_t i = 0; i < s.sectionCount; ++i) {
-        print_coeff(label == 24 ? "HP24" : "HP48",
+        print_precise_coeff(label == 24 ? "HP24" : "HP48",
                     rate, (int)i, s.mainsHighPass[i]);
-        print_coeff(label == 24 ? "LP24" : "LP48",
+        print_precise_coeff(label == 24 ? "LP24" : "LP48",
                     rate, (int)i, s.subLowPass[i]);
     }
 }
