@@ -113,7 +113,7 @@ static void probe_binaural(void) {
     require(renderer != NULL);
     require(N60BinauralRendererPrepareProfile(
         renderer, profile, leftIR, rightIR));
-    printf("BRLAT %u\n", N60BinauralRendererLatencyFrames(renderer));
+    printf("BRLAT %llu\n", (unsigned long long)N60BinauralRendererLatencyFrames(renderer));
     for (int n = 0; n <= 129; ++n) {
         float in[2] = {n == 0 ? 1.0f : 0.0f, 0.0f};
         float l = 0.0f, r = 0.0f;

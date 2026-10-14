@@ -73,7 +73,7 @@ def main() -> None:
             "volume-key preflight must not write physical-device volume")
 
     # Application-level persistence rather than Playback System / preset state.
-    require("private enum ApplicationVolumeStepResolution: Int" in app,
+    require("enum ApplicationVolumeStepResolution: Int" in app,
             "application volume resolution enum is missing")
     for raw in ("case standard = 16", "case fine = 32", "case precision = 64"):
         require(raw in app, f"missing volume option: {raw}")
@@ -83,7 +83,7 @@ def main() -> None:
             "volume resolution is not persisted")
     require("audioEngine.setSoftwareVolumeKeyStepDenominator(volumeStepResolution.denominator)" in app,
             "persisted volume resolution is not applied to the engine")
-    require('settingsCard(title: "Volume Keys"' in app,
+    require('settingsCard(title: "Volume & Feedback"' in app,
             "Volume Keys Settings card is missing")
     require("1/16 = 6.25%" in app and "1/32 = 3.125%" in app and "1/64 = 1.5625%" in app,
             "Settings step-size explanation is missing")
