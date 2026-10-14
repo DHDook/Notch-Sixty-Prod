@@ -182,11 +182,33 @@ def main() -> None:
     }
     encoded = (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode("utf-8")
     if args.check:
+        # Portable image *pixels* must match, but zlib/PNG encoding bytes may
+        # legitimately differ across Apple Silicon/macOS and x86/Linux.
+        # The committed manifest separately locks the exact stored PNG bytes.
+        from io import BytesIO
+        require(MANIFEST.is_file(), "generated manifest is missing")
+        locked = json.loads(MANIFEST.read_text(encoding="utf-8"))
+        for field in ("schemaVersion", "milestone", "sourceOfTruth",
+                      "sourceSHA256", "transparentOuterMaskShared",
+                      "generatedSlotCount", "artworkRedesigned",
+                      "productionApprovalAndHardwareAcceptance"):
+            require(locked.get(field) == manifest[field],
+                    f"committed manifest {field} is missing or stale")
+        require(set(locked.get("outputsSHA256", {})) == set(manifest["outputsSHA256"]),
+                "manifest does not enumerate exactly the 24 expected output files")
         for path, content in assets.items():
-            require(path.is_file() and path.read_bytes() == content,
-                    f"shipping icon missing or stale: {path.relative_to(ROOT)}")
-        require(MANIFEST.is_file() and MANIFEST.read_bytes() == encoded,
-                "generated manifest missing or stale")
+            name = str(path.relative_to(ROOT))
+            require(path.is_file(), f"shipping icon missing: {name}")
+            stored = path.read_bytes()
+            require(digest(stored) == locked["outputsSHA256"][name],
+                    f"committed SHA-256 drift: {name}")
+            with Image.open(path) as actual, Image.open(BytesIO(content)) as expected:
+                require(actual.format == "PNG" and actual.mode == "RGBA",
+                        f"expected RGBA PNG: {name}")
+                require(actual.size == expected.size,
+                        f"image dimension mismatch: {name}")
+                require(actual.tobytes() == expected.tobytes(),
+                        f"rendered pixels differ from approved source: {name}")
         print(f"PR116 PASS: {len(slots)} icons validated from exact uploaded masters")
         return
 
