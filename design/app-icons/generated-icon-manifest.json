@@ -1,0 +1,39 @@
+{
+  "artworkRedesigned": false,
+  "generatedSlotCount": 24,
+  "milestone": "PR116",
+  "outputsSHA256": {
+    "NotchSixty/Assets.xcassets/AppIcon.appiconset/icon_128x128.png": "350a96e008cd477cd7d4b8f7f388c0c856f040265d70ce41917847300716eb9b",
+    "NotchSixty/Assets.xcassets/AppIcon.appiconset/icon_128x128@2x.png": "d78aa394a6921a5824596087a80e9306ad451273d92e42eb5ce5410912040deb",
+    "NotchSixty/Assets.xcassets/AppIcon.appiconset/icon_16x16.png": "69c433b3c01d8d21e939b6dd1ba88b030d8bdcaad2749badff414562dc56a7d5",
+    "NotchSixty/Assets.xcassets/AppIcon.appiconset/icon_16x16@2x.png": "23cb2d510a0454ac4cb405498c403b6ef455721c005b845fb148a3d3ac018c1e",
+    "NotchSixty/Assets.xcassets/AppIcon.appiconset/icon_256x256.png": "d78aa394a6921a5824596087a80e9306ad451273d92e42eb5ce5410912040deb",
+    "NotchSixty/Assets.xcassets/AppIcon.appiconset/icon_256x256@2x.png": "d85059bee5e5e4088bf308c26385439519c22961b5be2e7af8d41dca192ee4b4",
+    "NotchSixty/Assets.xcassets/AppIcon.appiconset/icon_32x32.png": "23cb2d510a0454ac4cb405498c403b6ef455721c005b845fb148a3d3ac018c1e",
+    "NotchSixty/Assets.xcassets/AppIcon.appiconset/icon_32x32@2x.png": "57bd0a99884ba7768fbfd7b3ba66c4fafa96ce7f69d79b5fd97676d968108cbb",
+    "NotchSixty/Assets.xcassets/AppIcon.appiconset/icon_512x512.png": "d85059bee5e5e4088bf308c26385439519c22961b5be2e7af8d41dca192ee4b4",
+    "NotchSixty/Assets.xcassets/AppIcon.appiconset/icon_512x512@2x.png": "40737de06bd8cea919f8cdaf82b376acc2f4b3f6bd04f13615243a2701663a65",
+    "NotchSixty/Assets.xcassets/AppIcon.appiconset/icon_dark_128x128.png": "8dabc1a7adc9ad08d8064561759124e008f254056759c956e21d3c7983e2a005",
+    "NotchSixty/Assets.xcassets/AppIcon.appiconset/icon_dark_128x128@2x.png": "b41743290538400fa7934823208f6d665723ff8dda6c5c7fe70f2ce8f0e5ced5",
+    "NotchSixty/Assets.xcassets/AppIcon.appiconset/icon_dark_16x16.png": "73853b21ca9a3c154697d8e88cbe64bd854f8cc5a5515e81db74425dc0cd71bf",
+    "NotchSixty/Assets.xcassets/AppIcon.appiconset/icon_dark_16x16@2x.png": "702a56ee5e6e104fff2c1c60424f30e9f6d33ae8ae5521d26fe3ca16681a0fc9",
+    "NotchSixty/Assets.xcassets/AppIcon.appiconset/icon_dark_256x256.png": "b41743290538400fa7934823208f6d665723ff8dda6c5c7fe70f2ce8f0e5ced5",
+    "NotchSixty/Assets.xcassets/AppIcon.appiconset/icon_dark_256x256@2x.png": "0abecd207fec4776fa1ae2320a9a1ef3c5c56526827a25b5653b6ec1b75d7978",
+    "NotchSixty/Assets.xcassets/AppIcon.appiconset/icon_dark_32x32.png": "702a56ee5e6e104fff2c1c60424f30e9f6d33ae8ae5521d26fe3ca16681a0fc9",
+    "NotchSixty/Assets.xcassets/AppIcon.appiconset/icon_dark_32x32@2x.png": "db962f1f40578a0f205a3e6d110b5a7b5786fad37a927510689f4f7eaafdeee1",
+    "NotchSixty/Assets.xcassets/AppIcon.appiconset/icon_dark_512x512.png": "0abecd207fec4776fa1ae2320a9a1ef3c5c56526827a25b5653b6ec1b75d7978",
+    "NotchSixty/Assets.xcassets/AppIcon.appiconset/icon_dark_512x512@2x.png": "dbe85e58eeb0cf554467b2a31c2d79b320276ac1f322dcc4d8e7e657ae56f8f7",
+    "NotchSixty/Assets.xcassets/DockIconDark.imageset/DockIconDark.png": "0abecd207fec4776fa1ae2320a9a1ef3c5c56526827a25b5653b6ec1b75d7978",
+    "NotchSixty/Assets.xcassets/DockIconDark.imageset/DockIconDark@2x.png": "dbe85e58eeb0cf554467b2a31c2d79b320276ac1f322dcc4d8e7e657ae56f8f7",
+    "NotchSixty/Assets.xcassets/DockIconLight.imageset/DockIconLight.png": "d85059bee5e5e4088bf308c26385439519c22961b5be2e7af8d41dca192ee4b4",
+    "NotchSixty/Assets.xcassets/DockIconLight.imageset/DockIconLight@2x.png": "40737de06bd8cea919f8cdaf82b376acc2f4b3f6bd04f13615243a2701663a65"
+  },
+  "productionApprovalAndHardwareAcceptance": false,
+  "schemaVersion": 1,
+  "sourceOfTruth": "owner-uploaded original PNG masters",
+  "sourceSHA256": {
+    "Notch-Sixty-dark-master.png": "d6608903f7e6be180c204f93701582376b05f584a2e3db9abadaff71c4071313",
+    "Notch-Sixty-light-master.png": "46500fa2ea8080ef30592364dee0b10dc1673775e699ef31c00b6e10ab88b0d9"
+  },
+  "transparentOuterMaskShared": true
+}
