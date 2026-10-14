@@ -291,7 +291,7 @@ struct HRTFAuditionPreferenceStore: Sendable {
     var rootURL: URL
 
     init(rootURL: URL? = nil) {
-        rootURL = rootURL ?? FileManager.default.urls(
+        self.rootURL = rootURL ?? FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask
         )[0]
             .appendingPathComponent("Notch Sixty", isDirectory: true)
