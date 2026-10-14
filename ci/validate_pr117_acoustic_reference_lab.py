@@ -266,15 +266,24 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--report", type=Path)
     parser.add_argument("--commit", default="unknown")
+    parser.add_argument("--slice2-only", action="store_true",
+                        help="Run synthetic multi-seat/uncertainty fixtures without production C probe")
     args = parser.parse_args()
-    cases = (check_real_dsp(parse(probe())) + check_known_acoustics()
-             + run_slice2(RATES))
-    check(len(cases) == 9 * len(RATES) + 8, "unexpected case count")
+    if args.slice2_only:
+        cases = run_slice2(RATES)
+        check(len(cases) == 2 * len(RATES) + 5, "Slice 2 case count")
+    else:
+        cases = (check_real_dsp(parse(probe())) + check_known_acoustics()
+                 + run_slice2(RATES))
+        check(len(cases) == 9 * len(RATES) + 8, "full case count")
     result = {
         "schemaVersion": 1,
         "milestone": "PR117",
         "slice": 2,
         "validationMaxNominalSampleRateHz": 384000,
+        "evidenceScope": "syntheticMultiseat" if args.slice2_only else "productionReferenceAndSynthetic",
+        "highRateCrossoverPrecisionIssueResolved": False,
+        "full384kHzRuntimeAcceptance": False,
         "sampleRateClaim": "offline DSP math only; actual native device rates and throughput require hardware checks",
         "sourceCommit": args.commit,
         "evidenceAuthority": "remoteSoftware",
@@ -285,8 +294,8 @@ def main():
         "liveFeedForwardANCAuthorized": False,
         "mayMergeIntoMain": False,
         "sampleRatesHz": list(RATES),
-        "productionModules": ["N60Biquad", "N60Crossover",
-                              "N60HeadphoneDSP", "N60BinauralRenderer"],
+        "productionModules": [] if args.slice2_only else [
+            "N60Biquad", "N60Crossover", "N60HeadphoneDSP", "N60BinauralRenderer"],
         "caseCount": len(cases),
         "cases": cases,
     }
@@ -294,8 +303,8 @@ def main():
     if args.report is not None:
         args.report.parent.mkdir(parents=True, exist_ok=True)
         args.report.write_text(encoded, encoding="utf-8")
-    print("PR117 slice 2 PASS: %d independent/analytical cases; "
-          "remote/synthetic only" % len(cases))
+    print("PR117 slice 2 %s PASS: %d analytical cases; "
+          "remote/synthetic only" % ("synthetic-only" if args.slice2_only else "full", len(cases)))
 
 
 if __name__ == "__main__":

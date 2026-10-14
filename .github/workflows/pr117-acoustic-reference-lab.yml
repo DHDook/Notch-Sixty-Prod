@@ -17,6 +17,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  synthetic-multiseat:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Independent multi-seat and uncertainty fixtures through 384 kHz
+        env:
+          N60_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          python3 ci/validate_pr117_acoustic_reference_lab.py \
+            --slice2-only --commit "$N60_COMMIT" \
+            --report "$RUNNER_TEMP/pr117-multiseat-384khz-synthetic.json"
+      - name: Publish independent acoustic-fixture evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr117-384khz-multiseat-synthetic
+          path: ${{ runner.temp }}/pr117-multiseat-384khz-synthetic.json
+          if-no-files-found: error
+          retention-days: 30
+
   portable-reference:
     runs-on: ubuntu-latest
     steps:

@@ -113,6 +113,30 @@ The portable and macOS CI jobs reuse the existing PR117 workflow rather than
 starting a separate expensive build pipeline. CI reports are explicit about
 software-only authority and contain the evaluated sample-rate matrix.
 
+## High-rate regression discovered by expanded PR117 probes
+
+The exact-head 352.8/384-kHz C-snapshot crossover checks have identified a
+**production precision defect**, not merely a test-harness discrepancy:
+float-normalized 80-Hz LR24/LR48 biquad coefficients can cause approximately
+5–10% coherent bass summation error at selected low frequencies (e.g.
+25–45 Hz). The baseline 44.1/48/96-kHz tests did not exercise the highest
+sample-rate condition. The peaking-EQ reference is now checked using a
+physically meaningful **0.005-dB** transfer bound, with observed deviation
+recorded; this does **not** relax the independent LR crossover unity bound.
+
+We intentionally do not mark full 384-kHz DSP compatibility as validated,
+modify production DSP in a measurement-lab-only PR, or soften this crossover
+test. The full PR117 production-reference jobs stay red until a separate
+precision-safe real DSP fix is reviewed and validated, including CPU and
+realtime stability at the high rate. A cheap independent Slice 2 Ubuntu
+job runs and uploads its 384-kHz analytical fixtures separately so that
+progress in the acoustic lab can be validated without hiding the release
+blocker.
+
+Any subsequent high-rate precision implementation must preserve legacy
+rates, deterministic latency, independent routing, hardware protection and
+the real-hardware acceptance gate.
+
 ## Remaining PR117 slices (not yet implemented)
 
 
