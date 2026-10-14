@@ -14,11 +14,12 @@ import shutil
 import subprocess
 import tempfile
 from collections import defaultdict
+from acoustic_reference_lab.pr117_multiseat_reference import run_slice2
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "ci/acoustic_reference_lab/pr117_production_probe.c"
 INCLUDE = ROOT / "NotchSixty/Audio/Realtime"
-RATES = (44100, 48000, 96000)
+RATES = (44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000)
 
 
 def check(condition, reason):
@@ -90,7 +91,7 @@ def probe():
 def parse(output):
     width = {"PEQ": 8, "IMP": 4, "XO": 4, "HP24": 8, "LP24": 8,
              "HP48": 8, "LP48": 8, "HPIMP": 5, "XFEED": 4,
-             "BRLAT": 2, "BRIMP": 4}
+             "BRLAT": 3, "BRIMP": 5}
     rows = defaultdict(list)
     for line in output.splitlines():
         if line == "END":
@@ -104,7 +105,8 @@ def parse(output):
     check(len(rows["IMP"]) == len(RATES) * 512, "missing PEQ impulse samples")
     check(len(rows["HPIMP"]) == len(RATES) * 8, "missing headphone samples")
     check(len(rows["XFEED"]) == len(RATES) * 2, "missing crossfeed probes")
-    check(len(rows["BRIMP"]) == 4, "missing binaural probes")
+    check(len(rows["BRLAT"]) == len(RATES), "missing binaural latency")
+    check(len(rows["BRIMP"]) == 4 * len(RATES), "missing binaural probes")
     return rows
 
 
@@ -187,18 +189,22 @@ def check_real_dsp(rows):
                       "80HzContralateralGain": crossfeed[80],
                       "10kHzContralateralGain": crossfeed[10000]})
 
-    check(rows["BRLAT"] == [(128.0,)], "binaural engine latency")
-    taps = {int(n): (l, r) for n, l, r in rows["BRIMP"]}
-    check(set(taps) == {0, 127, 128, 129}, "binaural frame coverage")
-    for n in (0, 127, 129):
-        close(taps[n][0], 0, 1e-4, "binaural left zero")
-        close(taps[n][1], 0, 1e-4, "binaural right zero")
-    close(taps[128][0], 0.8, 2e-4, "binaural ipsilateral")
-    close(taps[128][1], 0.2, 2e-4, "binaural contralateral")
-    cases.append({"name": "binaural_two_ear_impulse",
-                  "type": "production_against_independent_reference",
-                  "latencyFrames": 128,
-                  "observedEarGains": list(taps[128])})
+    for rate in RATES:
+        latencies = [int(x[1]) for x in rows["BRLAT"] if int(x[0]) == rate]
+        check(latencies == [128], "binaural engine latency at %d Hz" % rate)
+        taps = {int(n): (l, r) for rrate, n, l, r in rows["BRIMP"]
+                if int(rrate) == rate}
+        check(set(taps) == {0, 127, 128, 129},
+              "binaural frame coverage at %d Hz" % rate)
+        for n in (0, 127, 129):
+            close(taps[n][0], 0, 1e-4, "binaural left zero")
+            close(taps[n][1], 0, 1e-4, "binaural right zero")
+        close(taps[128][0], 0.8, 2e-4, "binaural ipsilateral")
+        close(taps[128][1], 0.2, 2e-4, "binaural contralateral")
+        cases.append({"name": "binaural_two_ear_impulse_%d" % rate,
+                      "type": "production_against_independent_reference",
+                      "sampleRateHz": rate, "latencyFrames": 128,
+                      "observedEarGains": list(taps[128])})
     return cases
 
 
@@ -249,12 +255,15 @@ def main():
     parser.add_argument("--report", type=Path)
     parser.add_argument("--commit", default="unknown")
     args = parser.parse_args()
-    cases = check_real_dsp(parse(probe())) + check_known_acoustics()
-    check(len(cases) == 22, "unexpected case count")
+    cases = (check_real_dsp(parse(probe())) + check_known_acoustics()
+             + run_slice2(RATES))
+    check(len(cases) == 9 * len(RATES) + 8, "unexpected case count")
     result = {
         "schemaVersion": 1,
         "milestone": "PR117",
-        "slice": 1,
+        "slice": 2,
+        "validationMaxNominalSampleRateHz": 384000,
+        "sampleRateClaim": "offline DSP math only; actual native device rates and throughput require hardware checks",
         "sourceCommit": args.commit,
         "evidenceAuthority": "remoteSoftware",
         "syntheticOnly": True,
@@ -273,7 +282,7 @@ def main():
     if args.report is not None:
         args.report.parent.mkdir(parents=True, exist_ok=True)
         args.report.write_text(encoded, encoding="utf-8")
-    print("PR117 slice 1 PASS: %d independent/analytical cases; "
+    print("PR117 slice 2 PASS: %d independent/analytical cases; "
           "remote/synthetic only" % len(cases))
 
 

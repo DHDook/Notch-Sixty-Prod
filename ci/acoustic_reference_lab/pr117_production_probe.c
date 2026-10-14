@@ -101,34 +101,38 @@ static void probe_crossfeed(double rate, double freq) {
     N60HeadphoneDSPRuntimeDestroy(runtime);
 }
 
-static void probe_binaural(void) {
+static void probe_binaural(double rate) {
     N60ProgramChannelLayout stereo =
         N60ProgramChannelLayoutMakeStandard(N60ProgramLayoutStereo);
     N60BinauralProfileDescriptor profile =
         N60BinauralProfileDescriptorMake(
-            48000.0, stereo, N60BinauralProfileKindHRTF, 1u);
+            rate, stereo, N60BinauralProfileKindHRTF, 1u);
     float leftIR[2] = {0.8f, 0.2f};
     float rightIR[2] = {0.2f, 0.7f};
     N60BinauralRenderer *renderer = N60BinauralRendererCreate();
     require(renderer != NULL);
     require(N60BinauralRendererPrepareProfile(
         renderer, profile, leftIR, rightIR));
-    printf("BRLAT %llu\n", (unsigned long long)N60BinauralRendererLatencyFrames(renderer));
+    printf("BRLAT %.0f %llu\n", rate,
+           (unsigned long long)N60BinauralRendererLatencyFrames(renderer));
     for (int n = 0; n <= 129; ++n) {
         float in[2] = {n == 0 ? 1.0f : 0.0f, 0.0f};
         float l = 0.0f, r = 0.0f;
         require(N60BinauralRendererProcessFrame(
             renderer, in, 2u, &l, &r));
         if (n == 0 || n == 127 || n == 128 || n == 129) {
-            printf("BRIMP %d %.9g %.9g\n",
-                   n, (double)l, (double)r);
+            printf("BRIMP %.0f %d %.9g %.9g\n",
+                   rate, n, (double)l, (double)r);
         }
     }
     N60BinauralRendererDestroy(renderer);
 }
 
 int main(void) {
-    const double rates[] = {44100.0, 48000.0, 96000.0};
+    const double rates[] = {
+        44100.0, 48000.0, 88200.0, 96000.0,
+        176400.0, 192000.0, 352800.0, 384000.0
+    };
     for (size_t i = 0; i < sizeof(rates) / sizeof(rates[0]); ++i) {
         probe_peaking(rates[i]);
         probe_crossover(rates[i], N60CrossoverTopologyLinkwitzRiley24, 24);
@@ -136,8 +140,8 @@ int main(void) {
         probe_headphone(rates[i]);
         probe_crossfeed(rates[i], 80.0);
         probe_crossfeed(rates[i], 10000.0);
+        probe_binaural(rates[i]);
     }
-    probe_binaural();
     puts("END");
     return 0;
 }
