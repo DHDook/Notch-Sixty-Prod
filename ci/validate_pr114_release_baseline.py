@@ -281,8 +281,12 @@ for token in (
 # final commercial artwork deliberately remains unresolved.
 icon_manifest = json.loads(APP_ICON_CATALOG.read_text(encoding="utf-8"))
 icon_files = [entry.get("filename") for entry in icon_manifest.get("images", []) if entry.get("filename")]
-require(len(icon_files) == 20 and len(set(icon_files)) == 20,
-        "AppIcon catalog must contain 20 unique light/dark slots")
+require(len(icon_files) == 10 and len(set(icon_files)) == 10,
+        "macOS AppIcon must contain ten supported sizes")
+require(all(not item.get("appearances") for item in icon_manifest["images"]),
+        "unsupported dark macOS AppIcon appearance slots")
+require(all((APP_ICON_CATALOG.parent / name).is_file() for name in icon_files),
+        "macOS AppIcon size raster missing")
 require(DOCK_LIGHT.stat().st_size > 0 and DOCK_DARK.stat().st_size > 0,
         "runtime Dock icon assets are empty")
 

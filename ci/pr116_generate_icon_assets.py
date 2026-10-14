@@ -76,7 +76,7 @@ def common_silhouette(light: Image.Image) -> Image.Image:
 def metadata() -> list[tuple[Path, int, str]]:
     icons = ASSETS / "AppIcon.appiconset"
     data = json.loads((icons / "Contents.json").read_text(encoding="utf-8"))
-    require(len(data["images"]) == 20, "AppIcon Contents.json must retain 20 slots")
+    require(len(data["images"]) == 10, "AppIcon must retain ten supported macOS slots")
     names: set[str] = set()
     dark_count = 0
     slots: list[tuple[Path, int, str]] = []
@@ -93,11 +93,13 @@ def metadata() -> list[tuple[Path, int, str]]:
         size = int(dim[0]) * int(scale[0])
         require(size in (16, 32, 64, 128, 256, 512, 1024),
                 f"unexpected AppIcon dimensions: {name}")
-        dark = entry.get("appearances") == [{"appearance": "luminosity", "value": "dark"}]
+        require(entry.get("idiom") == "mac" and not entry.get("appearances"),
+                "unsupported macOS AppIcon appearance")
+        dark = False
         if dark:
             dark_count += 1
         slots.append((icons / name, size, "dark" if dark else "light"))
-    require(dark_count == 10, f"need ten dark AppIcon entries; saw {dark_count}")
+    require(dark_count == 0, "unsupported macOS dark icon slots")
 
     for variant in ("Dark", "Light"):
         directory = ASSETS / f"DockIcon{variant}.imageset"
@@ -109,8 +111,8 @@ def metadata() -> list[tuple[Path, int, str]]:
             require(item["scale"] in ("1x", "2x"), "invalid Dock scale")
             slots.append((directory / item["filename"], 1024 if item["scale"] == "2x" else 512,
                           variant.lower()))
-    require(len(slots) == 24 and len({str(s[0]) for s in slots}) == 24,
-            "expected 24 distinct shipping icon files")
+    require(len(slots) == 14 and len({str(s[0]) for s in slots}) == 14,
+            "expected 10 Finder and 4 runtime Dock icons")
     return slots
 
 
@@ -195,7 +197,7 @@ def main() -> None:
             require(locked.get(field) == manifest[field],
                     f"committed manifest {field} is missing or stale")
         require(set(locked.get("outputsSHA256", {})) == set(manifest["outputsSHA256"]),
-                "manifest does not enumerate exactly the 24 expected output files")
+                "manifest does not enumerate exactly the 14 expected output files")
         for path, content in assets.items():
             name = str(path.relative_to(ROOT))
             require(path.is_file(), f"shipping icon missing: {name}")
