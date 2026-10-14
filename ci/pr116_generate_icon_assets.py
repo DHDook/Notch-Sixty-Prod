@@ -133,7 +133,13 @@ def prepare() -> tuple[dict[str, Image.Image], list[tuple[Path, int, str]]]:
 
 
 def render(image: Image.Image, size: int) -> Image.Image:
-    return image.resize((size, size), Image.Resampling.LANCZOS)
+    output = image.resize((size, size), Image.Resampling.LANCZOS)
+    # At 16px, Lanczos can interpolate a 1-2/255 alpha halo into a remote
+    # transparent corner. Clamp just the four outside canvas corners to zero.
+    # This never touches any housing, glass, needle or lettering pixel.
+    for xy in ((0, 0), (size - 1, 0), (0, size - 1), (size - 1, size - 1)):
+        output.putpixel(xy, (0, 0, 0, 0))
+    return output
 
 
 def main() -> None:
