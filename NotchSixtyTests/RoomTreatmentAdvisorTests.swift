@@ -3,6 +3,130 @@ import XCTest
 @testable import NotchSixty
 
 final class RoomTreatmentAdvisorTests: XCTestCase {
+    func testUnifiedAcousticRobustnessRejectsDeceptiveMeanSeatWin() {
+        let review = UnifiedAcousticRobustnessEvaluator().evaluate(
+            UnifiedAcousticSeatCandidate(
+                domain: .speaker,
+                sampleRate: 384_000,
+                seatWeights: [0.6, 0.3, 0.1],
+                baselineTargetErrorDB: [-6, -4, -3],
+                candidateTargetErrorDB: [0, -2, -5],
+                absoluteMeasurementUncertaintyDB: 0.1,
+                additionalHeadroomDB: 2,
+                fixedLatencyFrames: 0,
+                physicalSubwooferOutputCount: 0,
+                coherentClockAuthenticated: false
+            )
+        )
+        XCTAssertGreaterThan(review.nominalWeightedSquaredErrorImprovementDB2, 0)
+        XCTAssertGreaterThan(review.worstSeatTargetErrorRegressionDB, 1.5)
+        XCTAssertFalse(review.eligibleForVisualReview)
+        XCTAssertTrue(review.blockingReasons.contains {
+            $0.contains("listening seat")
+        })
+        XCTAssertFalse(review.canApply)
+        XCTAssertFalse(review.canDeploy)
+    }
+
+    func testUnifiedAcousticRobustnessRejectsMarginalNoiseSensitiveChange() {
+        let review = UnifiedAcousticRobustnessEvaluator().evaluate(
+            UnifiedAcousticSeatCandidate(
+                domain: .room,
+                sampleRate: 48_000,
+                seatWeights: [0.5, 0.3, 0.2],
+                baselineTargetErrorDB: [-3, -3, -3],
+                candidateTargetErrorDB: [-2.9, -2.9, -2.9],
+                absoluteMeasurementUncertaintyDB: 0.35,
+                additionalHeadroomDB: 0,
+                fixedLatencyFrames: 0,
+                physicalSubwooferOutputCount: 0,
+                coherentClockAuthenticated: false
+            )
+        )
+        XCTAssertGreaterThan(review.nominalWeightedSquaredErrorImprovementDB2, 0)
+        XCTAssertLessThan(review.worstCaseWeightedSquaredErrorImprovementDB2, 0)
+        XCTAssertFalse(review.eligibleForVisualReview)
+        XCTAssertTrue(review.blockingReasons.contains {
+            $0.contains("measurement-error")
+        })
+    }
+
+    func testUnifiedAcousticRobustnessAcceptsWellSeparatedBoundedHypothesis() {
+        let review = UnifiedAcousticRobustnessEvaluator().evaluate(
+            UnifiedAcousticSeatCandidate(
+                domain: .speaker,
+                sampleRate: 96_000,
+                seatWeights: [0.5, 0.3, 0.2],
+                baselineTargetErrorDB: [-6, -4, -3],
+                candidateTargetErrorDB: [-3, -2, -1],
+                absoluteMeasurementUncertaintyDB: 0.1,
+                additionalHeadroomDB: 1.5,
+                fixedLatencyFrames: 256,
+                physicalSubwooferOutputCount: 0,
+                coherentClockAuthenticated: false
+            )
+        )
+        XCTAssertTrue(review.eligibleForVisualReview)
+        XCTAssertGreaterThan(review.worstCaseWeightedSquaredErrorImprovementDB2, 0.25)
+        XCTAssertEqual(review.latencyMilliseconds, 256 * 1000.0 / 96_000, accuracy: 1.0e-8)
+        XCTAssertFalse(review.isMeasuredVerification)
+        XCTAssertFalse(review.canDeploy)
+    }
+
+    func testUnifiedAcousticRobustnessChecksPhysicalSubClockAnd384kHzLatency() {
+        var candidate = UnifiedAcousticSeatCandidate(
+            domain: .multiSub,
+            sampleRate: 384_000,
+            seatWeights: [0.5, 0.5],
+            baselineTargetErrorDB: [-6, -5],
+            candidateTargetErrorDB: [-2, -2],
+            absoluteMeasurementUncertaintyDB: 0.05,
+            additionalHeadroomDB: 1,
+            fixedLatencyFrames: 11_521,
+            physicalSubwooferOutputCount: 1,
+            coherentClockAuthenticated: false
+        )
+        var result = UnifiedAcousticRobustnessEvaluator().evaluate(candidate)
+        XCTAssertFalse(result.eligibleForVisualReview)
+        XCTAssertGreaterThan(result.latencyMilliseconds, 30)
+        XCTAssertTrue(result.blockingReasons.contains { $0.contains("outputs") })
+        XCTAssertTrue(result.blockingReasons.contains { $0.contains("clock") })
+        XCTAssertTrue(result.blockingReasons.contains { $0.contains("latency") })
+
+        candidate.fixedLatencyFrames = 11_520
+        candidate.physicalSubwooferOutputCount = 2
+        candidate.coherentClockAuthenticated = true
+        result = UnifiedAcousticRobustnessEvaluator().evaluate(candidate)
+        XCTAssertTrue(result.eligibleForVisualReview)
+        XCTAssertEqual(result.latencyMilliseconds, 30, accuracy: 1.0e-10)
+        XCTAssertFalse(result.canApply)
+    }
+
+    func testUnifiedAcousticRobustnessRejectsMalformedSeatAndSampleRate() {
+        let reviewer = UnifiedAcousticRobustnessEvaluator()
+        var candidate = UnifiedAcousticSeatCandidate(
+            domain: .speaker,
+            sampleRate: 384_001,
+            seatWeights: [1],
+            baselineTargetErrorDB: [1],
+            candidateTargetErrorDB: [0],
+            absoluteMeasurementUncertaintyDB: 0.1,
+            additionalHeadroomDB: 1,
+            fixedLatencyFrames: 0,
+            physicalSubwooferOutputCount: 0,
+            coherentClockAuthenticated: false
+        )
+        XCTAssertFalse(reviewer.evaluate(candidate).eligibleForVisualReview)
+        candidate.sampleRate = 48_000
+        candidate.seatWeights = [0.5, .nan]
+        candidate.baselineTargetErrorDB = [2, 2]
+        candidate.candidateTargetErrorDB = [1, 1]
+        XCTAssertFalse(reviewer.evaluate(candidate).eligibleForVisualReview)
+        candidate.seatWeights = [0.5, 0.5]
+        candidate.absoluteMeasurementUncertaintyDB = .infinity
+        XCTAssertFalse(reviewer.evaluate(candidate).eligibleForVisualReview)
+    }
+
     func testUnifiedAcousticCoordinatorPrioritizesPhysicalRemediesAndNeverDeploys() {
         let projectID = UUID()
         func finding(

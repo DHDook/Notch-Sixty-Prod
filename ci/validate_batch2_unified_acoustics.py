@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "NotchSixty/Audio/UnifiedAcousticIntelligenceCoordinator.swift"
 PROJECT = ROOT / "NotchSixty.xcodeproj/project.pbxproj"
 TESTS = ROOT / "NotchSixtyTests/RoomTreatmentAdvisorTests.swift"
+WORKSPACE = ROOT / "NotchSixty/UI/ProductionRoomTreatmentAdvisorWorkspace.swift"
 DOC = ROOT / "docs/BATCH2_UNIFIED_ACOUSTIC_INTELLIGENCE.md"
 
 
@@ -21,6 +22,7 @@ def require(condition, message):
 source = SOURCE.read_text()
 pbx = PROJECT.read_text()
 tests = TESTS.read_text()
+workspace = WORKSPACE.read_text()
 doc = DOC.read_text()
 for token in (
     "struct UnifiedAcousticIntelligenceCoordinator",
@@ -40,6 +42,16 @@ for token in (
     "canApply: Bool { false }",
     "canDeploy: Bool { false }",
     "hardwareVerified: Bool { false }",
+    "UnifiedAcousticRobustnessEvaluator",
+    "worstCaseWeightedSquaredErrorImprovementDB2",
+    "worstSeatTargetErrorRegressionDB",
+    "coherentClockAuthenticated",
+    "maximumFixedLatencyMilliseconds",
+    "maximumAdditionalHeadroomDB",
+    "minimumRobustImprovementDB2",
+    "baselineTargetErrorDB",
+    "candidateTargetErrorDB",
+    "absoluteMeasurementUncertaintyDB",
 ):
     require(token in source, "missing read-only arbitration contract: " + token)
 
@@ -55,6 +67,24 @@ for test in (
     "testUnifiedAcousticCoordinatorSingleSeatBlocksDSPReview",
 ):
     require(test in tests, "missing Swift regression: " + test)
+
+for method in (
+    "testUnifiedAcousticRobustnessRejectsDeceptiveMeanSeatWin",
+    "testUnifiedAcousticRobustnessRejectsMarginalNoiseSensitiveChange",
+    "testUnifiedAcousticRobustnessAcceptsWellSeparatedBoundedHypothesis",
+    "testUnifiedAcousticRobustnessChecksPhysicalSubClockAnd384kHzLatency",
+    "testUnifiedAcousticRobustnessRejectsMalformedSeatAndSampleRate",
+):
+    require(method in tests, "missing bounded uncertainty regression: " + method)
+
+require("unifiedAcousticIntelligenceCard(report)" in workspace
+        and "UnifiedAcousticIntelligenceCoordinator().summarize(" in workspace,
+        "Room Advisor UI does not present the unified report")
+require("playbackSystemID: nil" in workspace
+        and "routingSignature: nil" in workspace,
+        "UI must not fabricate Playback System/route identity")
+require("No EQ, room correction, speaker delays" in workspace,
+        "read-only UI warning omitted")
 
 for kind in ("PR118", "PR119", "PR121", "OPEN/DRAFT/UNMERGED"):
     require(kind in doc, "batch scope or safety policy incomplete: " + kind)

@@ -12,6 +12,7 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
 
                 if let report = advisor.report {
                     readinessCard(report)
+                    unifiedAcousticIntelligenceCard(report)
                     ProductionRoomGeometrySection(
                         advisor: advisor
                     )
@@ -80,6 +81,93 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
                 .padding(.vertical, 7)
                 .glassEffect(.regular, in: .capsule)
         }
+    }
+
+    /// This surface consumes ONLY the selected Room Advisor report. It does
+    /// not search other projects or silently bind a Playback System. Speaker
+    /// and Multi-Sub comparisons must be presented only once their explicit
+    /// source/playback/route/clock identities have been authenticated.
+    private func unifiedAcousticIntelligenceCard(
+        _ room: RoomTreatmentAdvisorReport
+    ) -> some View {
+        let summary = UnifiedAcousticIntelligenceCoordinator().summarize(
+            room: room,
+            identity: UnifiedAcousticEvidenceIdentity(
+                projectID: room.projectID,
+                playbackSystemID: nil,
+                routingSignature: nil,
+                sampleRate: nil,
+                baselineMeasurementSetID: nil
+            )
+        )
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label(
+                    "Acoustic Intelligence · Recommended Sequence",
+                    systemImage: "waveform.path.ecg.rectangle"
+                )
+                .font(.headline)
+                Spacer()
+                Text("REVIEW ONLY")
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
+            }
+            Text(
+                "Combines the selected room findings into one physical-first sequence. Speaker Optimizer and coherent Sub proposals are intentionally excluded until their measurement, route and Playback System identities are verified."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+            if summary.advice.isEmpty {
+                Text(
+                    "No recommendation is available for this project. Capture and include room measurements first."
+                )
+                .font(.subheadline)
+            } else {
+                ForEach(summary.advice.indices, id: \.self) { index in
+                    let item = summary.advice[index]
+                    HStack(alignment: .top, spacing: 10) {
+                        Text("\(index + 1)")
+                            .font(.subheadline.bold().monospacedDigit())
+                            .frame(width: 24, height: 24)
+                            .background(.secondary.opacity(0.12), in: Circle())
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(item.title)
+                                .font(.subheadline.bold())
+                            Text(item.rationale)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            ForEach(item.blockers, id: \.self) { blocker in
+                                Label(blocker, systemImage: "exclamationmark.shield")
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        Spacer(minLength: 8)
+                    }
+                    if index < summary.advice.count - 1 {
+                        Divider()
+                    }
+                }
+            }
+            if !summary.warnings.isEmpty {
+                Divider()
+                ForEach(summary.warnings, id: \.self) { warning in
+                    Label(warning, systemImage: "info.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Text(
+                "Modeled recommendations are not verified acoustic improvements. No EQ, room correction, speaker delays or Sub routing can be applied here."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .padding(18)
+        .glassEffect(.regular, in: .rect(cornerRadius: 18))
     }
 
     private var workflowCard: some View {

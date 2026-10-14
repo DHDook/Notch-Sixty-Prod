@@ -37,6 +37,31 @@ acoustic optimization:
 The existing Room Advisor XCTest file includes focused cases for
 physical-first priority, project mismatch and single-seat DSP blockers.
 
+## Current increment — real Room Advisor integration + bounded uncertainty
+
+- The shipping Room Advisor workspace now calls the coordinator on its
+  **actually selected project report** and shows ordered physical-first
+  read-only advice, data-quality warnings and per-proposal blockers.
+  It does **not** synthesize a Playback System or insert unbound
+  Speaker Optimizer / Sub measurements. Those will appear only when the
+  existing measurement and routing identity can be verified.
+- A new deterministic UnifiedAcousticRobustnessEvaluator accepts
+  candidate residuals per listening seat, independently declared positive
+  weights, rate up to **384 kHz**, measurement uncertainty bounds,
+  headroom requirements, fixed processing delay, and—when comparing
+  multiple Subs—independent physical outputs and a coherent clock.
+- An improvement in weighted nominal error **cannot override** one seat's
+  potential target-error regression, conservative latency/headroom budgets,
+  or a confidence failure from measurement uncertainty. The model
+  independently pessimizes baseline and after residuals within the
+  supplied error bound. It does not derive statistical confidence or
+  modify active EQ/crossovers/delay.
+- Swift XCTest covers deceptive average wins, uncertainty-sensitive
+  improvements, a strong multi-seat hypothesis, missing coherent
+  subwoofer hardware/timing at 384 kHz, malformed inputs and project
+  mismatch. Fast source/UI ownership contracts run on Ubuntu; Apple
+  Silicon integration is a deliberate checkpoint.
+
 ## Remaining work IN THIS SAME BATCH
 
 - Connect the coordinator to selected Room Advisor / Speaker Optimizer /
