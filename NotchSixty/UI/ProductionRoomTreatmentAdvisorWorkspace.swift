@@ -12,6 +12,7 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
 
                 if let report = advisor.report {
                     readinessCard(report)
+                    unifiedAcousticIntelligenceCard(report)
                     ProductionRoomGeometrySection(
                         advisor: advisor
                     )
@@ -80,6 +81,246 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
                 .padding(.vertical, 7)
                 .glassEffect(.regular, in: .capsule)
         }
+    }
+
+    /// This surface consumes ONLY the selected Room Advisor report. It does
+    /// not search other projects or silently bind a Playback System. Speaker
+    /// and Multi-Sub comparisons must be presented only once their explicit
+    /// source/playback/route/clock identities have been authenticated.
+    private func unifiedAcousticIntelligenceCard(
+        _ room: RoomTreatmentAdvisorReport
+    ) -> some View {
+        let selected = advisor.unifiedSpeakerBaselines.first {
+            $0.id == advisor.unifiedSpeakerBaselineID
+        }
+        // Only the explicitly selected, qualified Speaker Optimizer baseline
+        // can supply source, route, playback system and clock identity.
+        let identity = UnifiedAcousticEvidenceIdentity(
+            projectID: room.projectID,
+            playbackSystemID: selected?.playbackSystemID,
+            routingSignature: selected?.routingSignature,
+            sampleRate: selected?.sampleRate,
+            baselineMeasurementSetID: selected?.id
+        )
+        let summary = UnifiedAcousticIntelligenceCoordinator().summarize(
+            room: room, identity: identity,
+            speaker: advisor.unifiedSpeakerComparison,
+            physicalSub: advisor.physicalSubComparison
+        )
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label(
+                    "Acoustic Intelligence · Recommended Sequence",
+                    systemImage: "waveform.path.ecg.rectangle"
+                )
+                .font(.headline)
+                Spacer()
+                Text("REVIEW ONLY")
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
+            }
+            Text(
+                "Combines selected room findings into physical-first advice. Speaker Optimizer baselines require explicit selection and verified playback/route identity. Physical Sub comparisons appear only after the existing before/after measurement workflow approves them."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Source-specific speaker evidence")
+                        .font(.subheadline.bold())
+                    Spacer()
+                    Button("Find baselines") {
+                        advisor.refreshUnifiedSpeakerBaselines()
+                    }
+                    .buttonStyle(.bordered)
+                }
+                Picker(
+                    "Qualified baseline",
+                    selection: Binding(
+                        get: { advisor.unifiedSpeakerBaselineID },
+                        set: {
+                            advisor.unifiedSpeakerBaselineID = $0
+                            // Revalidate the stored selected identity. The
+                            // controller clears a previous unrelated plan.
+                            advisor.clearUnifiedSpeakerComparison()
+                        }
+                    )
+                ) {
+                    Text("Choose a baseline…").tag(UUID?.none)
+                    ForEach(advisor.unifiedSpeakerBaselines) { baseline in
+                        Text(
+                            "\(baseline.plannedSources.count) sources · "
+                            + "\(Int(baseline.sampleRate)) Hz · "
+                            + String(baseline.id.uuidString.prefix(8))
+                        )
+                        .tag(UUID?.some(baseline.id))
+                    }
+                }
+                .frame(maxWidth: 580)
+                Button("Review selected baseline") {
+                    advisor.reviewUnifiedSpeakerBaseline()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(advisor.unifiedSpeakerBaselineID == nil)
+                if let selected {
+                    Text(
+                        "Explicitly selected route: " + selected.routingSignature
+                        + " · Microphone: " + selected.microphone.deviceUID
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                }
+                if let status = advisor.unifiedSpeakerMessage {
+                    Text(status)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if let comparison = advisor.unifiedSpeakerComparison {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Verified-source candidate tradeoffs · visual review only")
+                            .font(.subheadline.bold())
+                        Text(
+                            "All alternatives use the same explicitly selected qualified Speaker Optimizer baseline. Target error, headroom, seat regression and FIR group delay are modeled—not measured post-correction."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        ForEach(comparison.sources.indices, id: \.self) { row in
+                            let source = comparison.sources[row]
+                            Text(source.source.displayName)
+                                .font(.subheadline.bold())
+                            ForEach(source.alternatives.indices, id: \.self) { ix in
+                                let alternative = source.alternatives[ix]
+                                VStack(alignment: .leading, spacing: 3) {
+                                    HStack(spacing: 10) {
+                                        Text(alternative.kind.rawValue.uppercased())
+                                            .font(.caption.bold())
+                                        Text(
+                                            String(
+                                                format: "Target RMSE: %.2f dB",
+                                                alternative.predictedWeightedRMSEAfterDB
+                                            )
+                                        )
+                                        .font(.caption.monospacedDigit())
+                                        Spacer(minLength: 4)
+                                        Text(
+                                            alternative.eligibleForVisualPreview
+                                                ? "Preview eligible" : "Blocked"
+                                        )
+                                        .font(.caption.bold())
+                                        .foregroundStyle(
+                                            alternative.eligibleForVisualPreview
+                                                ? Color.secondary : Color.orange
+                                        )
+                                    }
+                                    HStack(spacing: 12) {
+                                        Text(
+                                            String(format: "Headroom +%.2f dB", alternative.requiredHeadroomDB)
+                                        )
+                                        Text(
+                                            String(format: "Worst seat +%.2f dB", alternative.worstSeatRegressionDB)
+                                        )
+                                        Text(
+                                            alternative.fixedGroupDelayMilliseconds.map {
+                                                String(format: "FIR %.2f ms", $0)
+                                            } ?? "No declared fixed FIR delay"
+                                        )
+                                    }
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                                    ForEach(alternative.blockingReasons, id: \.self) { warning in
+                                        Text("• " + warning)
+                                            .font(.caption)
+                                            .foregroundStyle(.orange)
+                                    }
+                                }
+                                .padding(9)
+                                .background(.secondary.opacity(0.055),
+                                            in: RoundedRectangle(cornerRadius: 9))
+                            }
+                        }
+                    }
+                }
+                if let sub = advisor.physicalSubComparison {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Physical Sub placement · measured multi-seat LF spread")
+                            .font(.subheadline.bold())
+                        Text(
+                            String(
+                                format: "Before: %.2f dB RMS · After: %.2f dB RMS · Improvement: %.2f dB across %d seats",
+                                sub.baselineInterseatSpreadRMSDB,
+                                sub.candidateInterseatSpreadRMSDB,
+                                sub.reductionInInterseatSpreadDB,
+                                sub.seatCount
+                            )
+                        )
+                        .font(.caption.monospacedDigit())
+                        Text(
+                            "Other objectives: target error unavailable · decay unavailable · headroom unavailable · coherent phase/timing unavailable · added latency unavailable. No physical routing changes are authorized."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text(
+                        "For measured Sub placement tradeoffs, use the existing verified before/after placement comparison. Coordinated multi-Sub timing additionally requires independent output mapping and a common phase reference."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+            }
+            Divider()
+            if summary.advice.isEmpty {
+                Text(
+                    "No recommendation is available for this project. Capture and include room measurements first."
+                )
+                .font(.subheadline)
+            } else {
+                ForEach(summary.advice.indices, id: \.self) { index in
+                    let item = summary.advice[index]
+                    HStack(alignment: .top, spacing: 10) {
+                        Text("\(index + 1)")
+                            .font(.subheadline.bold().monospacedDigit())
+                            .frame(width: 24, height: 24)
+                            .background(.secondary.opacity(0.12), in: Circle())
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(item.title)
+                                .font(.subheadline.bold())
+                            Text(item.rationale)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            ForEach(item.blockers, id: \.self) { blocker in
+                                Label(blocker, systemImage: "exclamationmark.shield")
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        Spacer(minLength: 8)
+                    }
+                    if index < summary.advice.count - 1 {
+                        Divider()
+                    }
+                }
+            }
+            if !summary.warnings.isEmpty {
+                Divider()
+                ForEach(summary.warnings, id: \.self) { warning in
+                    Label(warning, systemImage: "info.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Text(
+                "Modeled recommendations are not verified acoustic improvements. No EQ, room correction, speaker delays or Sub routing can be applied here."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .padding(18)
+        .glassEffect(.regular, in: .rect(cornerRadius: 18))
     }
 
     private var workflowCard: some View {

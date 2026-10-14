@@ -3,6 +3,402 @@ import XCTest
 @testable import NotchSixty
 
 final class RoomTreatmentAdvisorTests: XCTestCase {
+    func testBatch2MultiObjectiveBassKeepsParetoChoicesWithoutRankingDifferentObjectives() {
+        let system = UUID()
+        let baselineID = UUID()
+        func scenario(
+            _ id: String, _ spread: Double, _ target: Double,
+            _ decay: Double, _ headroom: Double, _ frames: Int,
+            _ complexity: Int
+        ) -> UnifiedAcousticBassScenario {
+            UnifiedAcousticBassScenario(
+                id: id,
+                playbackSystemID: system,
+                routingSignature: "coherent-route-384k",
+                sampleRate: 384_000,
+                baselineEvidenceID: baselineID,
+                seatSpreadRMSDB: spread,
+                targetRMSEDB: target,
+                decaySeconds: decay,
+                extraHeadroomDB: headroom,
+                extraLatencyFrames: frames,
+                filterCount: complexity,
+                physicalSubOutputCount: 2,
+                coherentClockAuthenticated: true
+            )
+        }
+        let baseline = scenario("baseline", 5, 4, 0.6, 0, 0, 0)
+        let feasible = scenario("physical-move", 2, 3, 0.4, 2, 3840, 4)
+        let worse = scenario("dominated", 4, 3.5, 0.5, 3, 7680, 8)
+        let latency = scenario("excess-latency", 1, 3, 0.3, 4, 12_000, 8)
+        let result = UnifiedAcousticBassTradeoffEvaluator().compare(
+            baseline: baseline, candidates: [feasible, worse, latency]
+        )
+        XCTAssertEqual(result.options.count, 4)
+        XCTAssertTrue(result.options[0].paretoFrontier)
+        XCTAssertTrue(result.options[1].paretoFrontier)
+        XCTAssertFalse(result.options[2].paretoFrontier)
+        XCTAssertFalse(result.options[3].blockers.isEmpty)
+        XCTAssertEqual(result.options[1].latencyMilliseconds, 10, accuracy: 1e-10)
+        XCTAssertFalse(result.canApply)
+        XCTAssertFalse(result.canDeploy)
+        XCTAssertTrue(result.options.allSatisfy { !$0.canDeploy })
+    }
+
+    func testBatch2BassScenariosRejectForeignRouteOrSampleRateAndRequirePhysicalOutputs() {
+        let system = UUID()
+        let evidence = UUID()
+        let baseline = UnifiedAcousticBassScenario(
+            id: "baseline", playbackSystemID: system,
+            routingSignature: "first-route", sampleRate: 48_000,
+            baselineEvidenceID: evidence,
+            seatSpreadRMSDB: 5, targetRMSEDB: 4,
+            decaySeconds: 0.6, extraHeadroomDB: 0,
+            extraLatencyFrames: 0, filterCount: 0,
+            physicalSubOutputCount: 1, coherentClockAuthenticated: false
+        )
+        var alternative = baseline
+        alternative.id = "candidate"
+        alternative.seatSpreadRMSDB = 2
+        alternative.targetRMSEDB = 2
+        alternative.routingSignature = "second-route"
+        let evaluator = UnifiedAcousticBassTradeoffEvaluator()
+        XCTAssertTrue(evaluator.compare(
+            baseline: baseline, candidates: [alternative]
+        ).options.isEmpty)
+        alternative.routingSignature = "first-route"
+        alternative.sampleRate = 384_000
+        XCTAssertTrue(evaluator.compare(
+            baseline: baseline, candidates: [alternative]
+        ).options.isEmpty)
+        alternative.sampleRate = 48_000
+        let result = evaluator.compare(baseline: baseline, candidates: [alternative])
+        XCTAssertEqual(result.options.count, 2)
+        XCTAssertTrue(result.options[1].blockers.contains { $0.contains("outputs") })
+        XCTAssertTrue(result.options[1].blockers.contains { $0.contains("clock") })
+    }
+
+    func testBatch2MeasuredPhysicalSubComparisonPreservesLimitedObjective() {
+        let id = UUID()
+        let room = RoomTreatmentAdvisorReport(
+            projectID: id, projectName: "Three seats",
+            retainedMeasurementCount: 3,
+            includedMeasurementCount: 3,
+            analysisMode: .multiPosition,
+            microphoneName: "Authorized source",
+            calibratedMicrophone: true,
+            qualityWarnings: [],
+            findings: [], actionPriorities: []
+        )
+        let physical = RoomAdvancedSubPlacementComparison(
+            experimentID: "signed-before-after",
+            source: .subwoofer(0),
+            baselineMeasurementSetID: UUID(),
+            candidateMeasurementSetID: UUID(),
+            seatCount: 3,
+            commonFrequencyPointCount: 20,
+            commonLowHz: 35,
+            commonHighHz: 160,
+            baselineInterseatSpreadRMSDB: 6,
+            candidateInterseatSpreadRMSDB: 3,
+            reductionInInterseatSpreadDB: 3,
+            evidenceConfidence: 0.85
+        )
+        let result = UnifiedAcousticIntelligenceCoordinator().summarize(
+            room: room,
+            identity: UnifiedAcousticEvidenceIdentity(
+                projectID: id, playbackSystemID: nil,
+                routingSignature: nil, sampleRate: nil,
+                baselineMeasurementSetID: nil
+            ),
+            physicalSub: physical
+        )
+        let finding = result.advice.first {
+            $0.evidenceSource == "RoomAdvancedSubPlacementComparison"
+        }
+        XCTAssertNotNil(finding)
+        XCTAssertEqual(finding?.remedy, .speakerPlacement)
+        XCTAssertEqual(finding?.modeledOnly, false)
+        XCTAssertTrue(finding?.blockers.contains {
+            $0.contains("headroom") || $0.contains("latency")
+        } == true)
+        XCTAssertFalse(result.canDeploy)
+    }
+
+    func testUnifiedAcousticRobustnessProtectsHeldOutSeatFromOverfitting() {
+        var candidate = UnifiedAcousticSeatCandidate(
+            domain: .room,
+            sampleRate: 384_000,
+            seatWeights: [0.4, 0.4, 0.2],
+            baselineTargetErrorDB: [-6, -4, -3],
+            candidateTargetErrorDB: [-2, -2, -5],
+            absoluteMeasurementUncertaintyDB: 0.1,
+            additionalHeadroomDB: 0.5,
+            fixedLatencyFrames: 0,
+            physicalSubwooferOutputCount: 0,
+            coherentClockAuthenticated: false,
+            heldOutSeatIndices: [2]
+        )
+        let reviewer = UnifiedAcousticRobustnessEvaluator()
+        var review = reviewer.evaluate(candidate)
+        XCTAssertGreaterThan(review.worstCaseWeightedSquaredErrorImprovementDB2, 0)
+        XCTAssertGreaterThan(review.heldOutSeatWorstRegressionDB ?? 0, 2)
+        XCTAssertFalse(review.eligibleForVisualReview)
+        XCTAssertTrue(review.blockingReasons.contains {
+            $0.contains("Held-out")
+        })
+        XCTAssertFalse(review.isMeasuredVerification)
+
+        candidate.candidateTargetErrorDB[2] = -1
+        review = reviewer.evaluate(candidate)
+        XCTAssertTrue(review.eligibleForVisualReview)
+        XCTAssertLessThan(review.heldOutSeatWorstRegressionDB ?? 99, 0)
+        candidate.heldOutSeatIndices = [2, 2]
+        XCTAssertFalse(reviewer.evaluate(candidate).eligibleForVisualReview)
+    }
+
+    func testUnifiedAcousticRobustnessRejectsDeceptiveMeanSeatWin() {
+        let review = UnifiedAcousticRobustnessEvaluator().evaluate(
+            UnifiedAcousticSeatCandidate(
+                domain: .speaker,
+                sampleRate: 384_000,
+                seatWeights: [0.6, 0.3, 0.1],
+                baselineTargetErrorDB: [-6, -4, -3],
+                candidateTargetErrorDB: [0, -2, -5],
+                absoluteMeasurementUncertaintyDB: 0.1,
+                additionalHeadroomDB: 2,
+                fixedLatencyFrames: 0,
+                physicalSubwooferOutputCount: 0,
+                coherentClockAuthenticated: false
+            )
+        )
+        XCTAssertGreaterThan(review.nominalWeightedSquaredErrorImprovementDB2, 0)
+        XCTAssertGreaterThan(review.worstSeatTargetErrorRegressionDB, 1.5)
+        XCTAssertFalse(review.eligibleForVisualReview)
+        XCTAssertTrue(review.blockingReasons.contains {
+            $0.contains("listening seat")
+        })
+        XCTAssertFalse(review.canApply)
+        XCTAssertFalse(review.canDeploy)
+    }
+
+    func testUnifiedAcousticRobustnessRejectsMarginalNoiseSensitiveChange() {
+        let review = UnifiedAcousticRobustnessEvaluator().evaluate(
+            UnifiedAcousticSeatCandidate(
+                domain: .room,
+                sampleRate: 48_000,
+                seatWeights: [0.5, 0.3, 0.2],
+                baselineTargetErrorDB: [-3, -3, -3],
+                candidateTargetErrorDB: [-2.9, -2.9, -2.9],
+                absoluteMeasurementUncertaintyDB: 0.35,
+                additionalHeadroomDB: 0,
+                fixedLatencyFrames: 0,
+                physicalSubwooferOutputCount: 0,
+                coherentClockAuthenticated: false
+            )
+        )
+        XCTAssertGreaterThan(review.nominalWeightedSquaredErrorImprovementDB2, 0)
+        XCTAssertLessThan(review.worstCaseWeightedSquaredErrorImprovementDB2, 0)
+        XCTAssertFalse(review.eligibleForVisualReview)
+        XCTAssertTrue(review.blockingReasons.contains {
+            $0.contains("measurement-error")
+        })
+    }
+
+    func testUnifiedAcousticRobustnessAcceptsWellSeparatedBoundedHypothesis() {
+        let review = UnifiedAcousticRobustnessEvaluator().evaluate(
+            UnifiedAcousticSeatCandidate(
+                domain: .speaker,
+                sampleRate: 96_000,
+                seatWeights: [0.5, 0.3, 0.2],
+                baselineTargetErrorDB: [-6, -4, -3],
+                candidateTargetErrorDB: [-3, -2, -1],
+                absoluteMeasurementUncertaintyDB: 0.1,
+                additionalHeadroomDB: 1.5,
+                fixedLatencyFrames: 256,
+                physicalSubwooferOutputCount: 0,
+                coherentClockAuthenticated: false
+            )
+        )
+        XCTAssertTrue(review.eligibleForVisualReview)
+        XCTAssertGreaterThan(review.worstCaseWeightedSquaredErrorImprovementDB2, 0.25)
+        XCTAssertEqual(review.latencyMilliseconds, 256 * 1000.0 / 96_000, accuracy: 1.0e-8)
+        XCTAssertFalse(review.isMeasuredVerification)
+        XCTAssertFalse(review.canDeploy)
+    }
+
+    func testUnifiedAcousticRobustnessChecksPhysicalSubClockAnd384kHzLatency() {
+        var candidate = UnifiedAcousticSeatCandidate(
+            domain: .multiSub,
+            sampleRate: 384_000,
+            seatWeights: [0.5, 0.5],
+            baselineTargetErrorDB: [-6, -5],
+            candidateTargetErrorDB: [-2, -2],
+            absoluteMeasurementUncertaintyDB: 0.05,
+            additionalHeadroomDB: 1,
+            fixedLatencyFrames: 11_521,
+            physicalSubwooferOutputCount: 1,
+            coherentClockAuthenticated: false
+        )
+        var result = UnifiedAcousticRobustnessEvaluator().evaluate(candidate)
+        XCTAssertFalse(result.eligibleForVisualReview)
+        XCTAssertGreaterThan(result.latencyMilliseconds, 30)
+        XCTAssertTrue(result.blockingReasons.contains { $0.contains("outputs") })
+        XCTAssertTrue(result.blockingReasons.contains { $0.contains("clock") })
+        XCTAssertTrue(result.blockingReasons.contains { $0.contains("latency") })
+
+        candidate.fixedLatencyFrames = 11_520
+        candidate.physicalSubwooferOutputCount = 2
+        candidate.coherentClockAuthenticated = true
+        result = UnifiedAcousticRobustnessEvaluator().evaluate(candidate)
+        XCTAssertTrue(result.eligibleForVisualReview)
+        XCTAssertEqual(result.latencyMilliseconds, 30, accuracy: 1.0e-10)
+        XCTAssertFalse(result.canApply)
+    }
+
+    func testUnifiedAcousticRobustnessRejectsMalformedSeatAndSampleRate() {
+        let reviewer = UnifiedAcousticRobustnessEvaluator()
+        var candidate = UnifiedAcousticSeatCandidate(
+            domain: .speaker,
+            sampleRate: 384_001,
+            seatWeights: [1],
+            baselineTargetErrorDB: [1],
+            candidateTargetErrorDB: [0],
+            absoluteMeasurementUncertaintyDB: 0.1,
+            additionalHeadroomDB: 1,
+            fixedLatencyFrames: 0,
+            physicalSubwooferOutputCount: 0,
+            coherentClockAuthenticated: false
+        )
+        XCTAssertFalse(reviewer.evaluate(candidate).eligibleForVisualReview)
+        candidate.sampleRate = 48_000
+        candidate.seatWeights = [0.5, .nan]
+        candidate.baselineTargetErrorDB = [2, 2]
+        candidate.candidateTargetErrorDB = [1, 1]
+        XCTAssertFalse(reviewer.evaluate(candidate).eligibleForVisualReview)
+        candidate.seatWeights = [0.5, 0.5]
+        candidate.absoluteMeasurementUncertaintyDB = .infinity
+        XCTAssertFalse(reviewer.evaluate(candidate).eligibleForVisualReview)
+    }
+
+    func testUnifiedAcousticCoordinatorPrioritizesPhysicalRemediesAndNeverDeploys() {
+        let projectID = UUID()
+        func finding(
+            _ id: String, _ kind: RoomTreatmentAdvisorFindingKind,
+            _ remedy: RoomTreatmentAdvisorRemedy
+        ) -> RoomTreatmentAdvisorFinding {
+            RoomTreatmentAdvisorFinding(
+                id: id, kind: kind, severity: .important,
+                title: id, measuredEvidence: "Synthetic",
+                interpretation: "Review this modeled condition.",
+                recommendation: "Inspect measurement before changing DSP.",
+                primaryRemedy: remedy, confidence: 0.8,
+                frequencyHz: 80, delayMilliseconds: nil,
+                decaySeconds: nil
+            )
+        }
+        let room = RoomTreatmentAdvisorReport(
+            projectID: projectID,
+            projectName: "Three-seat fixture",
+            retainedMeasurementCount: 3,
+            includedMeasurementCount: 3,
+            analysisMode: .multiPosition,
+            microphoneName: "Synthetic",
+            calibratedMicrophone: false,
+            qualityWarnings: ["Microphone is not calibrated."],
+            findings: [
+                finding("dsp", .measurementQuality, .dspCorrection),
+                finding("placement", .spatialBassVariation, .placement),
+                finding("measure", .measurementReadiness, .measureMore)
+            ],
+            actionPriorities: []
+        )
+        let identity = UnifiedAcousticEvidenceIdentity(
+            projectID: projectID, playbackSystemID: nil,
+            routingSignature: nil, sampleRate: nil,
+            baselineMeasurementSetID: nil
+        )
+        let advice = UnifiedAcousticIntelligenceCoordinator()
+            .summarize(room: room, identity: identity)
+        XCTAssertEqual(
+            advice.advice.map(\.remedy),
+            [.measureMore, .speakerPlacement, .roomCorrectionReview]
+        )
+        XCTAssertFalse(advice.canApply)
+        XCTAssertFalse(advice.canDeploy)
+        XCTAssertFalse(advice.hardwareVerified)
+        XCTAssertTrue(advice.previewOnly)
+        XCTAssertFalse(advice.advice[2].blockers.isEmpty)
+        XCTAssertTrue(advice.advice.allSatisfy {
+            !$0.canApply && !$0.canDeploy
+        })
+    }
+
+    func testUnifiedAcousticCoordinatorRejectsForeignProject() {
+        let project = UUID()
+        let report = RoomTreatmentAdvisorReport(
+            projectID: project,
+            projectName: "Untrusted external project",
+            retainedMeasurementCount: 2,
+            includedMeasurementCount: 2,
+            analysisMode: .multiPosition,
+            microphoneName: nil,
+            calibratedMicrophone: false,
+            qualityWarnings: [],
+            findings: [],
+            actionPriorities: []
+        )
+        let identity = UnifiedAcousticEvidenceIdentity(
+            projectID: UUID(), playbackSystemID: nil,
+            routingSignature: nil, sampleRate: nil,
+            baselineMeasurementSetID: nil
+        )
+        let advice = UnifiedAcousticIntelligenceCoordinator()
+            .summarize(room: report, identity: identity)
+        XCTAssertTrue(advice.advice.isEmpty)
+        XCTAssertFalse(advice.warnings.isEmpty)
+        XCTAssertFalse(advice.canDeploy)
+    }
+
+    func testUnifiedAcousticCoordinatorSingleSeatBlocksDSPReview() {
+        let id = UUID()
+        let room = RoomTreatmentAdvisorReport(
+            projectID: id,
+            projectName: "Single seat",
+            retainedMeasurementCount: 1,
+            includedMeasurementCount: 1,
+            analysisMode: .singlePosition,
+            microphoneName: nil,
+            calibratedMicrophone: false,
+            qualityWarnings: [],
+            findings: [
+                RoomTreatmentAdvisorFinding(
+                    id: "bass", kind: .deepBassCancellation,
+                    severity: .important, title: "Bass dip",
+                    measuredEvidence: "Synthetic -12 dB",
+                    interpretation: "One seat does not establish common response.",
+                    recommendation: "Measure further.",
+                    primaryRemedy: .dspCorrection, confidence: 0.9,
+                    frequencyHz: 80, delayMilliseconds: nil,
+                    decaySeconds: nil
+                )
+            ],
+            actionPriorities: []
+        )
+        let result = UnifiedAcousticIntelligenceCoordinator().summarize(
+            room: room,
+            identity: UnifiedAcousticEvidenceIdentity(
+                projectID: id, playbackSystemID: nil,
+                routingSignature: nil, sampleRate: nil,
+                baselineMeasurementSetID: nil
+            )
+        )
+        XCTAssertTrue(result.advice[0].blockers.contains {
+            $0.contains("Multi-seat")
+        } || !result.advice[0].blockers.isEmpty)
+        XCTAssertFalse(result.canApply)
+    }
+
     func testMultiPositionBassVariationPrefersPlacement() {
         let frequencies = bassFrequencies
         let first = position(

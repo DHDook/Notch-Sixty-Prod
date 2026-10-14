@@ -266,6 +266,7 @@
 		F10600000000000000000025 /* ProductionSpeakerMeasurementLabWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10600000000000000000035 /* ProductionSpeakerMeasurementLabWorkspace.swift */; };
 		F10600000000000000000026 /* SpeakerMeasurementLabController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10600000000000000000036 /* SpeakerMeasurementLabController.swift */; };
 		F92000000000000000000001 /* RoomTreatmentAdvisor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F92000000000000000000011 /* RoomTreatmentAdvisor.swift */; };
+		F93300000000000000000001 /* UnifiedAcousticIntelligenceCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F93300000000000000000011 /* UnifiedAcousticIntelligenceCoordinator.swift */; };
 		F92000000000000000000002 /* RoomTreatmentAdvisorController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F92000000000000000000012 /* RoomTreatmentAdvisorController.swift */; };
 		F92000000000000000000003 /* ProductionRoomTreatmentAdvisorWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = F92000000000000000000013 /* ProductionRoomTreatmentAdvisorWorkspace.swift */; };
 		F92000000000000000000004 /* RoomTreatmentAdvisorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F92000000000000000000014 /* RoomTreatmentAdvisorTests.swift */; };
@@ -579,6 +580,7 @@
 		F10600000000000000000035 /* ProductionSpeakerMeasurementLabWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionSpeakerMeasurementLabWorkspace.swift; sourceTree = "<group>"; };
 		F10600000000000000000036 /* SpeakerMeasurementLabController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerMeasurementLabController.swift; sourceTree = "<group>"; };
 		F92000000000000000000011 /* RoomTreatmentAdvisor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomTreatmentAdvisor.swift; sourceTree = "<group>"; };
+		F93300000000000000000011 /* UnifiedAcousticIntelligenceCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedAcousticIntelligenceCoordinator.swift; sourceTree = "<group>"; };
 		F92000000000000000000012 /* RoomTreatmentAdvisorController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomTreatmentAdvisorController.swift; sourceTree = "<group>"; };
 		F92000000000000000000013 /* ProductionRoomTreatmentAdvisorWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionRoomTreatmentAdvisorWorkspace.swift; sourceTree = "<group>"; };
 		F92000000000000000000014 /* RoomTreatmentAdvisorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomTreatmentAdvisorTests.swift; sourceTree = "<group>"; };
@@ -866,6 +868,7 @@
 				F75000000000000000000011 /* MIMORoomTreatmentVerification.swift */,
 				F76000000000000000000011 /* MIMORoomTreatmentActivationPermit.swift */,
 				F92000000000000000000011 /* RoomTreatmentAdvisor.swift */,
+				F93300000000000000000011 /* UnifiedAcousticIntelligenceCoordinator.swift */,
 				F93000000000000000000011 /* RoomGeometryPlacement.swift */,
 				F94000000000000000000011 /* RoomPassiveTreatment.swift */,
 				F94000000000000000000012 /* RoomTreatmentVerification.swift */,
@@ -1145,6 +1148,7 @@
 				F75000000000000000000001 /* MIMORoomTreatmentVerification.swift in Sources */,
 				F76000000000000000000001 /* MIMORoomTreatmentActivationPermit.swift in Sources */,
 				F92000000000000000000001 /* RoomTreatmentAdvisor.swift in Sources */,
+				F93300000000000000000001 /* UnifiedAcousticIntelligenceCoordinator.swift in Sources */,
 				F92000000000000000000002 /* RoomTreatmentAdvisorController.swift in Sources */,
 				F92000000000000000000003 /* ProductionRoomTreatmentAdvisorWorkspace.swift in Sources */,
 				F93000000000000000000001 /* RoomGeometryPlacement.swift in Sources */,
