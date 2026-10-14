@@ -37,11 +37,13 @@ def main() -> None:
     require("height * 1.14" in root, "VU virtual pivot is not below the visible face")
     require("radius: radius * 0.62" in root and "radius: radius * 0.985" in root,
             "short visible needle segment is missing")
-    meter = block(root, "private struct StereoSignatureVUMeter: View {", "private struct ProductionActiveCrossoverView: View {")
+    meter = block(root, "private struct StereoSignatureVUMeter: View {", "private struct ProductionSpeakersView: View {")
     require(".glassEffect(.regular, in: .rect(cornerRadius: 22))" in meter,
             "Liquid Glass meter overlay is missing")
-    require("Color(red: 0.96, green: 0.91, blue: 0.76)" in meter,
-            "warm seventies meter face is missing")
+    require("StereoSignatureVUPalette" in root and
+            "Color(red: 0.98, green: 0.955, blue: 0.88)" in root and
+            "Color(red: 0.20, green: 0.20, blue: 0.19)" in root,
+            "PR116B complementary light/dark meter faces are missing")
     require("Path(ellipseIn:" not in meter, "needle pivot cap must remain hidden")
     require("hotArc" in meter, "positive VU hot zone is missing")
     require('specifier: "%.1f"' in root, "fine master-volume readout precision is missing")
@@ -71,7 +73,7 @@ def main() -> None:
             "volume-key preflight must not write physical-device volume")
 
     # Application-level persistence rather than Playback System / preset state.
-    require("private enum ApplicationVolumeStepResolution: Int" in app,
+    require("enum ApplicationVolumeStepResolution: Int" in app,
             "application volume resolution enum is missing")
     for raw in ("case standard = 16", "case fine = 32", "case precision = 64"):
         require(raw in app, f"missing volume option: {raw}")
@@ -81,7 +83,7 @@ def main() -> None:
             "volume resolution is not persisted")
     require("audioEngine.setSoftwareVolumeKeyStepDenominator(volumeStepResolution.denominator)" in app,
             "persisted volume resolution is not applied to the engine")
-    require('settingsCard(title: "Volume Keys"' in app,
+    require('settingsCard(title: "Volume & Feedback"' in app,
             "Volume Keys Settings card is missing")
     require("1/16 = 6.25%" in app and "1/32 = 3.125%" in app and "1/64 = 1.5625%" in app,
             "Settings step-size explanation is missing")

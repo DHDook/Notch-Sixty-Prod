@@ -16,6 +16,84 @@ Legacy parity is the minimum capability floor. The commercial rewrite should exc
 
 Future portability must not materially delay the flagship Mac launch.
 
+## Forward roadmap — Acoustic Intelligence and Headphone Completion (proposed)
+
+These future milestones are **proposals**, not implemented changes or release
+commitments. The highest priority is still PR112 H01–H08 real-hardware
+acceptance; headphone release additionally requires its own physical and
+listening verification. All stacked PRs, including PR116, remain
+OPEN/DRAFT/UNMERGED; main remains unchanged. No CI or synthetic measurement
+constitutes physical/acoustic acceptance.
+
+**PR116B — Dashboard VU / App Icon Visual Alignment (remote UI).**
+Adapt Dashboard dual VU instruments to the PR116 owner-approved palettes:
+macOS Light uses champagne housing with a dark meter face; macOS Dark uses
+espresso housing with a neutral light-cream face. Both use a solid bright
+orange needle, contrast-appropriate scales/legends, and the existing Liquid
+Glass treatment. Retain VU calibration, meter demand, kinetics, and geometry.
+Do not modify the original icon masters or regenerate the raster assets.
+
+**PR117 — Acoustic Reference Laboratory.**
+Independent numerical benchmarks and deterministic offline fixtures for
+EQ, FIR, phase/timing, multi-seat and speaker/sub correction, crossover,
+headroom and safety boundaries; also stereo headphone correction, crossfeed,
+HRTF/BRIR, native SOFA, spatial transitions and headphone output protection.
+No physical-performance claim.
+
+**PR118 — Unified Acoustic Intelligence.**
+Read-only evidence-based coordinator for Room Advisor, speaker correction,
+placement, room correction and multi-sub optimization. Diagnose root causes,
+identify conflicting proposals and prioritize verified physical remedies before
+inappropriate DSP changes, while preserving system ownership boundaries.
+
+**PR119 — Calibration Robustness and Uncertainty.**
+Stress-test suggestions against measurement noise, phase/timing uncertainty,
+source variability and held-out seats. Report limitations without inventing
+statistical confidence or pretending to have real-microphone evidence.
+
+**PR120 — Adaptive Mixed-Phase Research.**
+Offline candidate designer benchmarked against existing causal minimum-phase
+room correction and separate speaker FIR paths. Assess ringing, latency,
+phase fidelity, headroom and video synchronization. No automatic deployment.
+
+**PR121 — Multi-Objective Bass Optimization.**
+Evaluate seat uniformity, target response, decay, output headroom, latency,
+filter complexity and practical routing. Require independently addressable
+subwoofer hardware and coherent clock evidence for relevant operations.
+
+**PR122 — Blind Listening Validation.**
+Optional level-matched ABX testing on PR113B's content-only A/B boundary with
+auditable trials, state isolation and clear interpretation. Never silently
+switch routing, speaker-protection or other hardware-domain controls.
+
+**PR123 — Consolidated Software and Hardware Handoff.**
+Cross-domain regression, acoustic test coverage, licensing/provenance review,
+and updated PR112 and headphone-specific hardware instructions. Software
+evidence cannot close real-world acceptance.
+
+**PR124 — Headphone Correction Experience.**
+Finish direct editing/visualization for the existing 16 PEQ bands per ear.
+Reconcile PR85 native AES69/SOFA import with the stale PR65-era normalized-only
+Headphones picker and copy. Clearly distinguish target-curve *identity* from
+actual correction filter design, and retain dedicated Headphone Device Profile
+ownership and binaural/crossfeed exclusivity.
+
+**PR125 — Model-Based Headphone Correction (optional expansion).**
+License-reviewed, source-provenance-aware headphone measurement profile import,
+target-fitting PEQ generation, bounded headroom, independent output verification
+and editable proposals. A published model response is not individual calibration.
+
+**PR126 — Personalized Binaural Optimization (research).**
+Explore directional HRTF interpolation, coverage validation, smooth motion-
+driven transitions and user-guided profile audition. Do not claim individual
+HRTF accuracy without properly measured/listening-verified evidence.
+
+Scope is home-audio playback and optimization, not a laboratory test instrument
+or creative-effects rack. Advanced research can be deferred beyond first
+commercial release if objective benefits are unproven at PR112 testing.
+
+---
+
 ## Current execution status — PR114
 
 **PR114 — Commercial Release Candidate** is now the active remote milestone,

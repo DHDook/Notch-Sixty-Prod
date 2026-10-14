@@ -901,9 +901,61 @@ private struct StereoSignatureVUMeterPanel: View {
     }
 }
 
+// PR116B: reflect the owner-approved PR116 icon palettes in the live Dashboard.
+// Pure SwiftUI presentation: no meter DSP, calibration, kinetics or audio changes.
+private struct StereoSignatureVUPalette {
+    let housing: [Color]
+    let face: [Color]
+    let bezel: Color
+    let scale: Color
+    let hotScale: Color
+    let legend: Color
+    let branding: Color
+    let needle = Color(red: 1.00, green: 0.36, blue: 0.045)
+
+    init(darkAppearance: Bool) {
+        if darkAppearance {
+            // Espresso housing / light neutral-cream face.
+            housing = [
+                Color(red: 0.28, green: 0.20, blue: 0.16),
+                Color(red: 0.19, green: 0.13, blue: 0.11),
+                Color(red: 0.11, green: 0.08, blue: 0.07),
+            ]
+            face = [
+                Color(red: 0.98, green: 0.955, blue: 0.88),
+                Color(red: 0.94, green: 0.915, blue: 0.84),
+                Color(red: 0.86, green: 0.83, blue: 0.76),
+            ]
+            bezel = Color(red: 0.11, green: 0.085, blue: 0.07)
+            scale = Color(red: 0.20, green: 0.16, blue: 0.14)
+            hotScale = Color(red: 0.70, green: 0.22, blue: 0.08)
+            legend = scale
+            branding = Color(red: 0.94, green: 0.88, blue: 0.76)
+        } else {
+            // Champagne housing / dark charcoal face.
+            housing = [
+                Color(red: 0.96, green: 0.87, blue: 0.71),
+                Color(red: 0.85, green: 0.73, blue: 0.56),
+                Color(red: 0.72, green: 0.60, blue: 0.44),
+            ]
+            face = [
+                Color(red: 0.20, green: 0.20, blue: 0.19),
+                Color(red: 0.145, green: 0.15, blue: 0.145),
+                Color(red: 0.085, green: 0.09, blue: 0.085),
+            ]
+            bezel = Color(red: 0.20, green: 0.17, blue: 0.14)
+            scale = Color(red: 0.94, green: 0.90, blue: 0.82)
+            hotScale = Color(red: 1.00, green: 0.48, blue: 0.17)
+            legend = scale
+            branding = Color(red: 0.25, green: 0.19, blue: 0.13)
+        }
+    }
+}
+
 private struct StereoSignatureVUMeter: View {
     let leftVU: Double
     let rightVU: Double
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         GeometryReader { proxy in
@@ -915,34 +967,27 @@ private struct StereoSignatureVUMeter: View {
             let windowWidth = width * 0.94
             let windowHeight = height * 0.74
             let windowCenter = CGPoint(x: width * 0.50, y: height * 0.43)
+            let palette = StereoSignatureVUPalette(darkAppearance: colorScheme == .dark)
 
             ZStack {
                 RoundedRectangle(cornerRadius: 28, style: .continuous)
                     .fill(
                         LinearGradient(
-                            colors: [
-                                Color(red: 0.13, green: 0.12, blue: 0.10),
-                                Color(red: 0.24, green: 0.21, blue: 0.16),
-                                Color(red: 0.10, green: 0.095, blue: 0.085),
-                            ],
+                            colors: palette.housing,
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
                     )
                     .overlay {
                         RoundedRectangle(cornerRadius: 28, style: .continuous)
-                            .stroke(.white.opacity(0.13), lineWidth: 0.8)
+                            .stroke(.white.opacity(colorScheme == .dark ? 0.13 : 0.32), lineWidth: 0.8)
                     }
                     .shadow(color: .black.opacity(0.30), radius: 18, y: 8)
 
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
                     .fill(
                         LinearGradient(
-                            colors: [
-                                Color(red: 0.96, green: 0.91, blue: 0.76),
-                                Color(red: 0.88, green: 0.80, blue: 0.62),
-                                Color(red: 0.80, green: 0.71, blue: 0.53),
-                            ],
+                            colors: palette.face,
                             startPoint: .top,
                             endPoint: .bottom
                         )
@@ -951,7 +996,7 @@ private struct StereoSignatureVUMeter: View {
                     .position(windowCenter)
                     .overlay {
                         RoundedRectangle(cornerRadius: 22, style: .continuous)
-                            .stroke(.black.opacity(0.38), lineWidth: 1.1)
+                            .stroke(palette.bezel.opacity(0.85), lineWidth: 1.4)
                             .frame(width: windowWidth, height: windowHeight)
                             .position(windowCenter)
                     }
@@ -960,25 +1005,26 @@ private struct StereoSignatureVUMeter: View {
                 StereoSignatureVUScaleFace(
                     leftCenter: leftCenter,
                     rightCenter: rightCenter,
-                    radius: radius
+                    radius: radius,
+                    darkAppearance: colorScheme == .dark
                 )
                 .equatable()
 
                 Canvas { context, _ in
-                    drawNeedle(context: &context, center: leftCenter, radius: radius, vu: leftVU)
-                    drawNeedle(context: &context, center: rightCenter, radius: radius, vu: rightVU)
+                    drawNeedle(context: &context, center: leftCenter, radius: radius, vu: leftVU, color: palette.needle)
+                    drawNeedle(context: &context, center: rightCenter, radius: radius, vu: rightVU, color: palette.needle)
                 }
 
                 Text("LEFT")
                     .font(.system(size: 11, weight: .bold, design: .rounded))
                     .tracking(2.1)
-                    .foregroundStyle(.black.opacity(0.62))
+                    .foregroundStyle(palette.legend.opacity(0.82))
                     .position(x: width * 0.28, y: height * 0.69)
 
                 Text("RIGHT")
                     .font(.system(size: 11, weight: .bold, design: .rounded))
                     .tracking(2.1)
-                    .foregroundStyle(.black.opacity(0.62))
+                    .foregroundStyle(palette.legend.opacity(0.82))
                     .position(x: width * 0.72, y: height * 0.69)
 
                 // A deliberately restrained optical highlight underneath the real
@@ -987,8 +1033,8 @@ private struct StereoSignatureVUMeter: View {
                     .fill(
                         LinearGradient(
                             colors: [
-                                .white.opacity(0.30),
-                                .white.opacity(0.09),
+                                .white.opacity(colorScheme == .dark ? 0.28 : 0.12),
+                                .white.opacity(colorScheme == .dark ? 0.09 : 0.04),
                                 .clear,
                                 .black.opacity(0.035),
                             ],
@@ -1005,7 +1051,7 @@ private struct StereoSignatureVUMeter: View {
                     .frame(width: windowWidth, height: windowHeight)
                     .position(windowCenter)
                     .glassEffect(.regular, in: .rect(cornerRadius: 22))
-                    .opacity(0.24)
+                    .opacity(colorScheme == .dark ? 0.24 : 0.13)
                     .allowsHitTesting(false)
 
                 Capsule()
@@ -1016,12 +1062,12 @@ private struct StereoSignatureVUMeter: View {
                     .allowsHitTesting(false)
 
                 HStack(spacing: 10) {
-                    Rectangle().fill(.white.opacity(0.16)).frame(width: 30, height: 1)
+                    Rectangle().fill(palette.branding.opacity(0.24)).frame(width: 30, height: 1)
                     Text("NOTCH SIXTY")
                         .font(.system(size: 13, weight: .semibold, design: .rounded))
                         .tracking(3.4)
-                        .foregroundStyle(.white.opacity(0.68))
-                    Rectangle().fill(.white.opacity(0.16)).frame(width: 30, height: 1)
+                        .foregroundStyle(palette.branding.opacity(0.88))
+                    Rectangle().fill(palette.branding.opacity(0.24)).frame(width: 30, height: 1)
                 }
                 .position(x: width * 0.50, y: height * 0.90)
             }
@@ -1036,7 +1082,8 @@ private struct StereoSignatureVUMeter: View {
         context: inout GraphicsContext,
         center: CGPoint,
         radius: CGFloat,
-        vu: Double
+        vu: Double,
+        color: Color
     ) {
         let angle = ProductionVUScale.angle(forVU: vu)
         var path = Path()
@@ -1044,12 +1091,7 @@ private struct StereoSignatureVUMeter: View {
         // the upper needle segment is drawn, producing the shallow 1970s sweep.
         path.move(to: ProductionVUScale.point(center: center, radius: radius * 0.62, angle: angle))
         path.addLine(to: ProductionVUScale.point(center: center, radius: radius * 0.985, angle: angle))
-        context.stroke(path, with: .color(.black.opacity(0.24)), lineWidth: 4.4)
-        context.stroke(
-            path,
-            with: .color(Color(red: 0.76, green: 0.16, blue: 0.10).opacity(0.96)),
-            lineWidth: 2.15
-        )
+        context.stroke(path, with: .color(color), lineWidth: 2.55)
     }
 }
 
@@ -1057,6 +1099,7 @@ private struct StereoSignatureVUScaleFace: View, Equatable {
     let leftCenter: CGPoint
     let rightCenter: CGPoint
     let radius: CGFloat
+    let darkAppearance: Bool
 
     var body: some View {
         Canvas { context, _ in
@@ -1066,6 +1109,7 @@ private struct StereoSignatureVUScaleFace: View, Equatable {
     }
 
     private func drawScale(context: inout GraphicsContext, center: CGPoint) {
+        let palette = StereoSignatureVUPalette(darkAppearance: darkAppearance)
         let ticks: [Double] = [-40, -35, -30, -25, -20, -15, -10, -7, -5, -4, -3, -2, -1, 0, 1, 2, 3]
         let labels: Set<Double> = [-40, -30, -20, -10, -7, -5, -3, 0, 3]
         let scaleRadius = radius * 0.985
@@ -1078,7 +1122,7 @@ private struct StereoSignatureVUScaleFace: View, Equatable {
             endAngle: .degrees(ProductionVUScale.endAngleDegrees),
             clockwise: false
         )
-        context.stroke(arc, with: .color(.black.opacity(0.64)), lineWidth: 1.25)
+        context.stroke(arc, with: .color(palette.scale.opacity(0.75)), lineWidth: 1.25)
 
         var hotArc = Path()
         hotArc.addArc(
@@ -1090,7 +1134,7 @@ private struct StereoSignatureVUScaleFace: View, Equatable {
         )
         context.stroke(
             hotArc,
-            with: .color(Color(red: 0.63, green: 0.10, blue: 0.07).opacity(0.86)),
+            with: .color(palette.hotScale.opacity(0.90)),
             lineWidth: 2.0
         )
 
@@ -1108,7 +1152,7 @@ private struct StereoSignatureVUScaleFace: View, Equatable {
             path.addLine(to: outer)
             context.stroke(
                 path,
-                with: .color(value > 0 ? Color.red.opacity(0.82) : .black.opacity(0.70)),
+                with: .color(value > 0 ? palette.hotScale.opacity(0.94) : palette.scale.opacity(0.85)),
                 lineWidth: major ? 1.7 : 0.8
             )
 
@@ -1118,7 +1162,7 @@ private struct StereoSignatureVUScaleFace: View, Equatable {
                 context.draw(
                     Text(label)
                         .font(.system(size: 10, weight: value == 0 ? .bold : .semibold, design: .rounded))
-                        .foregroundStyle(value > 0 ? Color.red.opacity(0.86) : Color.black.opacity(0.70)),
+                        .foregroundStyle(value > 0 ? palette.hotScale : palette.scale),
                     at: point
                 )
             }
@@ -1128,7 +1172,7 @@ private struct StereoSignatureVUScaleFace: View, Equatable {
             Text("VU")
                 .font(.system(size: 10, weight: .bold, design: .rounded))
                 .tracking(1.4)
-                .foregroundStyle(.black.opacity(0.58)),
+                .foregroundStyle(palette.legend.opacity(0.82)),
             at: CGPoint(x: center.x, y: center.y - radius * 0.72)
         )
     }
