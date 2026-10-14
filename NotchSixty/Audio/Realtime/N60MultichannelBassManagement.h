@@ -55,13 +55,13 @@ typedef struct {
 } N60MultichannelBassManagementSnapshot;
 
 typedef struct {
-    N60BiquadState highPass[N60_MAX_CROSSOVER_SECTIONS];
-    N60BiquadState lowPass[N60_MAX_CROSSOVER_SECTIONS];
+    N60CrossoverPreciseState highPass[N60_MAX_CROSSOVER_SECTIONS];
+    N60CrossoverPreciseState lowPass[N60_MAX_CROSSOVER_SECTIONS];
 } N60BassManagedSourceRuntime;
 
 typedef struct N60MultichannelBassManagementRuntime {
     N60BassManagedSourceRuntime sources[N60_MAX_PROGRAM_CHANNELS];
-    N60BiquadState lfeLowPass[N60_MAX_CROSSOVER_SECTIONS];
+    N60CrossoverPreciseState lfeLowPass[N60_MAX_CROSSOVER_SECTIONS];
     N60BiquadState subEQ[N60_MAX_SUBWOOFER_OUTPUTS][N60_SUBWOOFER_MAX_EQ_SECTIONS];
     float * _Nullable subDelayBuffers[N60_MAX_SUBWOOFER_OUTPUTS];
     uint32_t subDelayWriteIndex;
@@ -456,12 +456,12 @@ static inline bool N60MultichannelBassManagementRuntimeIsPreparedForSnapshot(
 
 static inline float N60BassManagementProcessCascade(
     float sample,
-    const N60BiquadCoefficients * _Nonnull coefficients,
-    N60BiquadState * _Nonnull states,
+    const N60CrossoverPreciseCoefficients * _Nonnull coefficients,
+    N60CrossoverPreciseState * _Nonnull states,
     uint32_t sectionCount
 ) {
     for (uint32_t section = 0; section < sectionCount; ++section) {
-        sample = N60BiquadProcessSample(coefficients[section], &states[section], sample);
+        sample = N60CrossoverPreciseProcessSample(coefficients[section], &states[section], sample);
     }
     return sample;
 }

@@ -16,6 +16,23 @@ Legacy parity is the minimum capability floor. The commercial rewrite should exc
 
 Future portability must not materially delay the flagship Mac launch.
 
+## Current integrated RC status — October 14, 2026
+
+Core batches #125–#128, optional research #129, and integrated RC #130 reached
+their remote exact-head software CI checkpoints. Integrated arm64 macOS 27
+Release / cumulative XCTest / test DMG run #38581711406 passed. One final
+hardening batch fixes Xcode group/icon asset warnings, audits selected Release
+and realtime logging paths, and refreshes acceptance handoff. Its final
+`[integration-ci]` exact-head run must pass separately to replace the RC.
+
+The older "planned" and "in progress" headings below are historical planning
+records, not new uncompleted feature commitments. Physical PR112 H01–H08,
+realistic endurance, calibrated acoustic and headphone verification, actual
+DAC compatibility through 384 kHz where supported, external legal rights,
+Apple signing/distribution, icon owner approval and merge authority remain
+pending. macOS 26 support is intentionally deferred; macOS 27 is required.
+All branches stay OPEN/DRAFT/UNMERGED; `main` stays unchanged.
+
 ## Active execution plan — four consolidated integration batches (2026-10-14)
 
 **This plan supersedes the PR117–PR126 proposal as an execution sequence.**
@@ -53,6 +70,23 @@ do not. Source/runtime safety remains mandatory even between full CI gates.
 main remains unchanged. Physical PR112 H01–H08, actual hardware 384-kHz
 transport/CPU/headroom, headphone listening, release credentials, legal
 review, live ANC authorization and owner merge approval remain distinct gates.
+
+---
+
+## Final integrated distribution candidate (post-PR129)
+
+Final software features are stacked in five owner-controlled draft PRs.
+The consolidated **Final RC & QA** branch now exercises the latest exact
+source commit through commercial PR114 checks, Apple Silicon Release,
+unsigned archive, ad-hoc signed installer DMG, mounted-DMG verification,
+full cumulative XCTest, generated native SOFA fixtures, third-party notices,
+CycloneDX SBOM and a strict owner-only release/physical-acceptance report.
+
+The actual DMG and SHA-bound validation packet must be downloaded from the
+**successful exact-head** GitHub Actions run. This is a controlled **test**
+RC only: neither the real device H01–H08 gates nor Apple credentials/legal
+review, public release or merge approvals are satisfied by remote CI.
+See `docs/FINAL_INTEGRATED_RC_QA.md`.
 
 ---
 
