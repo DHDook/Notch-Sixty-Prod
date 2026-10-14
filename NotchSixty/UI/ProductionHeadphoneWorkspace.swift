@@ -10,6 +10,11 @@ struct ProductionHeadphoneWorkspace: View {
     @State private var importingSpatialProfile = false
     @State private var importingEQProposal = false
     @State private var pendingEQProposal: HeadphoneCorrectionProposal?
+    @State private var importingModelResponse = false
+    @State private var modelRecords: [HeadphoneModelMeasurement] = []
+    @State private var selectedModelID: UUID?
+    @State private var modeledCorrection: HeadphoneModelFitResult?
+    @State private var availableImportedHRTFs: [BinauralProfileAsset] = []
     private static let sofaFileType: UTType =
         UTType(filenameExtension: "sofa")
             ?? UTType(importedAs: "org.aes69.sofa", conformingTo: .data)
@@ -59,7 +64,11 @@ struct ProductionHeadphoneWorkspace: View {
             .padding(28)
             .frame(maxWidth: 980, alignment: .topLeading)
         }
-        .task { syncFromSelectedSystem() }
+        .task {
+            syncFromSelectedSystem()
+            loadSavedModelMeasurements()
+            loadImportedHRTFs()
+        }
         .task(id: profiles.selectedSystemProfileID) { syncFromSelectedSystem() }
         .fileImporter(
             isPresented: $importingSpatialProfile,
@@ -74,6 +83,13 @@ struct ProductionHeadphoneWorkspace: View {
             allowsMultipleSelection: false
         ) { result in
             importEQProposal(result)
+        }
+        .fileImporter(
+            isPresented: $importingModelResponse,
+            allowedContentTypes: [.json],
+            allowsMultipleSelection: false
+        ) { result in
+            importLocalModelMeasurement(result)
         }
     }
 
@@ -237,6 +253,7 @@ struct ProductionHeadphoneWorkspace: View {
                 }
                 .buttonStyle(.bordered)
             }
+            modelCorrectionLibraryCard
             if let proposal = pendingEQProposal {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(proposal.headphoneModel)
@@ -268,6 +285,142 @@ struct ProductionHeadphoneWorkspace: View {
             }
         }
         .productionCard()
+    }
+
+    private var modelCorrectionLibraryCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Divider()
+            HStack {
+                Text("Local Headphone Model Measurement Library")
+                    .font(.subheadline.bold())
+                Spacer()
+                Button("Import Response JSON…") {
+                    importingModelResponse = true
+                }
+                .buttonStyle(.bordered)
+                Button("Refresh") {
+                    loadSavedModelMeasurements()
+                }
+                .buttonStyle(.bordered)
+            }
+            Text(
+                "Import your own attributed left/right headphone frequency-response measurement and explicit target points. The app fits bounded PEQ proposals using its production biquad coefficients; there is no bundled third-party correction database, network retrieval or individual-ear calibration claim."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            Picker("Stored measurement", selection: $selectedModelID) {
+                Text("Choose local measurement…").tag(UUID?.none)
+                ForEach(modelRecords) { model in
+                    Text(model.headphoneModel + " · " + model.sourceName)
+                        .tag(UUID?.some(model.id))
+                }
+            }
+            .productionGlassPickerChrome()
+            if let model = modelRecords.first(where: { $0.id == selectedModelID }) {
+                Text(
+                    "Credit: " + model.sourceAttribution
+                    + " · Stated license: " + model.sourceLicense
+                    + " · " + String(model.points.count) + " frequencies"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+                Button("Fit Editable PEQ Proposal") {
+                    fitLocalModel(model)
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            if let fit = modeledCorrection {
+                Text(
+                    String(
+                        format: "Modeled target RMSE L %.2f → %.2f dB; R %.2f → %.2f dB; headroom %.2f dB",
+                        fit.leftRMSEBeforeDB, fit.leftRMSEAfterDB,
+                        fit.rightRMSEBeforeDB, fit.rightRMSEAfterDB,
+                        fit.recommendedHeadroomDB
+                    )
+                )
+                .font(.caption.monospacedDigit())
+                Text(
+                    String(
+                        format: "Maximum frequency-by-frequency error regression: %.2f dB",
+                        fit.worstFrequencyRegressionDB
+                    )
+                )
+                .font(.caption.monospacedDigit())
+                ForEach(fit.warnings, id: \.self) { warning in
+                    Label(warning, systemImage: "info.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Button("Review Fitted Bands Below") {
+                    pendingEQProposal = fit.proposal
+                }
+                .buttonStyle(.bordered)
+                Text("No model fitting automatically changes EQ, saved profiles, or playing audio.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func importLocalModelMeasurement(
+        _ result: Result<[URL], Error>
+    ) {
+        actionError = nil
+        do {
+            guard let url = try result.get().first else { return }
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            guard let rate = selectedSampleRate else {
+                throw HeadphoneDeviceProfileError.outputDeviceRequired
+            }
+            let model = try HeadphoneModelMeasurementLibrary().importFile(
+                url, sampleRate: rate
+            )
+            loadSavedModelMeasurements()
+            selectedModelID = model.id
+            modeledCorrection = nil
+            statusMessage = "Local model measurement imported with source metadata. No EQ was changed."
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    private func loadSavedModelMeasurements() {
+        do {
+            modelRecords = try HeadphoneModelMeasurementLibrary().list(
+                sampleRate: previewSampleRate
+            )
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    private func fitLocalModel(_ model: HeadphoneModelMeasurement) {
+        actionError = nil
+        do {
+            guard let rate = selectedSampleRate else {
+                throw HeadphoneDeviceProfileError.outputDeviceRequired
+            }
+            modeledCorrection = try HeadphoneModelCorrectionDesigner().fit(
+                measurement: model, sampleRate: rate
+            )
+            statusMessage = "PEQ proposal generated for manual review only."
+        } catch {
+            modeledCorrection = nil
+            actionError = error.localizedDescription
+        }
+    }
+
+    private func loadImportedHRTFs() {
+        do {
+            let store = BinauralProfileAssetStore()
+            availableImportedHRTFs = try store.existingAssetIDs().map {
+                try store.load(id: $0)
+            }
+        } catch {
+            actionError = error.localizedDescription
+        }
     }
 
     private var headphoneResponseGraph: some View {
@@ -560,6 +713,30 @@ struct ProductionHeadphoneWorkspace: View {
                 .buttonStyle(.glass)
             }
 
+            if !availableImportedHRTFs.isEmpty {
+                Picker(
+                    "Previously imported spatial profile",
+                    selection: Binding(
+                        get: { draft.binauralProfile?.assetID },
+                        set: { id in
+                            draft.binauralProfile = availableImportedHRTFs
+                                .first { $0.id == id }?.reference
+                        }
+                    )
+                ) {
+                    Text("Choose stored HRTF…").tag(UUID?.none)
+                    ForEach(availableImportedHRTFs) { asset in
+                        Text("\(asset.displayName) · \(Int(asset.sampleRate)) Hz")
+                            .tag(UUID?.some(asset.id))
+                    }
+                }
+                .productionGlassPickerChrome()
+                Text(
+                    "User-rated HRTF preferences can be reviewed in Tools → Acoustic Research. Selection changes this draft only; Apply still requires a matching device rate and stopped playback."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
             Divider()
             headTrackingControls
 

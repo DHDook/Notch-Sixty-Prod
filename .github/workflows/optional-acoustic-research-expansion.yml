@@ -1,0 +1,92 @@
+name: Optional Acoustic Research Expansion
+
+on:
+  pull_request:
+    branches:
+      - feature/batch4-final-product-validation
+    types: [opened, reopened, synchronize, labeled]
+  push:
+    branches:
+      - feature/optional-acoustic-research-expansion
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: optional-acoustics-${{ github.ref }}-${{ github.event.action || github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  portable-contract:
+    if: >-
+      github.event_name != 'push' ||
+      contains(github.event.head_commit.message, '[integration-ci]')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Verify the three new offline research domains and physical authority
+        run: |
+          set -euo pipefail
+          python3 ci/validate_optional_acoustic_research.py
+          python3 ci/validate_batch4_final_validation.py
+          python3 ci/validate_batch3_headphone_completion.py
+          python3 ci/validate_batch2_unified_acoustics.py
+          python3 ci/validate_pr112a_hardware_acceptance.py
+
+  apple-silicon-integration:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       github.event.action == 'labeled' &&
+       github.event.label.name == 'integration-ci') ||
+      (github.event_name == 'push' &&
+       contains(github.event.head_commit.message, '[integration-ci]'))
+    needs: portable-contract
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Validate research model and independent acoustic reference at exact head
+        run: |
+          set -euo pipefail
+          python3 ci/validate_optional_acoustic_research.py
+          python3 ci/validate_acoustic_batch1.py --commit "${{ github.event.pull_request.head.sha || github.sha }}"
+          python3 ci/validate_pr114_provenance_sbom.py
+          python3 ci/validate_pr112a_hardware_acceptance.py
+      - name: Generate actual native SOFA HDF5 import cases
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/research-venv"
+          "$RUNNER_TEMP/research-venv/bin/python" -m pip install --quiet netCDF4 numpy
+          "$RUNNER_TEMP/research-venv/bin/python" \
+            ci/generate_pr117d_sofa_fixtures.py "$RUNNER_TEMP/research-sofa"
+          "$RUNNER_TEMP/research-venv/bin/python" \
+            ci/generate_pr85_sofa_fixture.py "$RUNNER_TEMP/research-pr85.sofa"
+      - name: Compile unsigned Apple Silicon arm64 Release app
+        run: |
+          set -euo pipefail
+          xcodebuild -project NotchSixty.xcodeproj \
+            -scheme NotchSixty -configuration Release \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            GENERATE_INFOPLIST_FILE=NO \
+            INFOPLIST_FILE=NotchSixty/Info.plist build
+      - name: Run all cumulative app XCTest plus optional research cases
+        env:
+          PR85_SOFA_FIXTURE: ${{ runner.temp }}/research-pr85.sofa
+          PR117D_SOFA_FIXTURE_DIR: ${{ runner.temp }}/research-sofa
+        run: |
+          set -euo pipefail
+          xcodebuild -project NotchSixty.xcodeproj \
+            -scheme NotchSixty -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES test
+      - name: Keep real hardware and release/merge authorization false
+        run: |
+          python3 ci/validate_pr112a_hardware_acceptance.py

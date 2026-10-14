@@ -634,6 +634,40 @@ enum ProductionUserGuideCatalog {
             ]
         ),
         article(
+            id: "acoustic-research",
+            category: .advanced,
+            title: "Acoustic Research",
+            summary: "Experimental mixed-phase FIR, measured HRTF interpolation, and local headphone model fitting.",
+            systemImage: "waveform.path.ecg.rectangle",
+            keywords: ["mixed phase", "pre-ringing", "room", "SOFA", "HRTF", "personalization", "headphone model", "correction"],
+            sections: [
+                section(
+                    "research-mixed-phase",
+                    "Offline mixed-phase FIR comparisons",
+                    [
+                        "Select and generate an existing Room Correction minimum-phase FIR. Tools → Acoustic Research can form a bounded mixed-phase candidate by blending a symmetric FIR component and reviewing its actual Fourier magnitude, pre-ringing, A/V delay and headroom. The preview is not installed and cannot establish better room acoustics without a new physical measurement.",
+                        "Larger linear shares can increase ringing, shift phase, alter the target magnitude or exceed latency/headroom. Any blocked proposal stays unapplied."
+                    ]
+                ),
+                section(
+                    "research-spatial",
+                    "HRTF coverage and listener-guided audition",
+                    [
+                        "Import an actual source-attributed AES69 SOFA/HRTF in Headphones. Acoustic Research checks whether requested spatial directions are close enough to recorded measurements and generates an offline onset-aligned interpolation preview. If directional coverage is absent, it refuses to invent a personalized HRTF.",
+                        "Listen to stored candidate profiles using the ordinary Headphones profile workflow, with low hardware volume. Record a subjective 1–5 preference; the rating is local and does not establish individual HRTF transfer accuracy or headphone safety."
+                    ]
+                ),
+                section(
+                    "research-headphones",
+                    "Local model measurement correction library",
+                    [
+                        "In Headphones, import a user-supplied attributed model-response JSON file. It must contain explicit increasing frequency points, separate left/right measured magnitudes, an explicit desired target and source attribution/license metadata. The fitter proposes bounded peak filters per ear using the product's actual biquad design. The model is not individualized for your ears or seal.",
+                        "Review modeled target error, worst-frequency regression, conservative attenuation, source rights, and every editable PEQ band before staging. The existing stopped-playback Apply and sample-rate rules remain authoritative; no third-party database is bundled or automatically downloaded."
+                    ]
+                )
+            ]
+        ),
+        article(
             id: "hardware-acceptance",
             category: .advanced,
             title: "Hardware Acceptance",
@@ -805,6 +839,7 @@ enum ProductionUserGuideCatalog {
         case .activeAcoustics: return "active-acoustics"
         case .roomAdvisor: return "room-advisor"
         case .blindListening: return "blind-listening"
+        case .acousticResearch: return "acoustic-research"
         case .hardwareAcceptance: return "hardware-acceptance"
         case .plugins: return "plugins"
         }
