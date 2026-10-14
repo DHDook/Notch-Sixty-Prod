@@ -7,6 +7,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 header = (ROOT / "NotchSixty/Audio/Realtime/N60Crossover.h").read_text()
 bridge = (ROOT / "NotchSixty/Audio/Realtime/N60RealtimeAudioBridge.c").read_text()
+render = (ROOT / "NotchSixty/Audio/Realtime/N60RenderKernel.c").read_text()
 biquad = (ROOT / "NotchSixty/Audio/Realtime/N60Biquad.h").read_text()
 probe = (ROOT / "ci/acoustic_reference_lab/pr117_production_probe.c").read_text()
 reference = (ROOT / "ci/validate_pr117_acoustic_reference_lab.py").read_text()
@@ -31,6 +32,14 @@ require("N60CrossoverPreciseState lowerLowLeft" in bridge,
         "physical crossover state not upgraded to double")
 require("N60CrossoverPreciseProcessSample(" in bridge,
         "physical crossover runtime not using precise filter")
+require("N60CrossoverPreciseState mainsLeft" in render and
+        "N60CrossoverPreciseState subMono" in render,
+        "stereo crossover render state not upgraded to double")
+require("crossover_coefficients_are_finite(" in render and
+        "crossover_coefficients_equal(" in render,
+        "stereo snapshot comparisons not preserving double coefficients")
+require("N60CrossoverPreciseProcessSample(" in render,
+        "stereo audio render callback not using precise crossover")
 require("float b0;" in biquad and "float z1;" in biquad,
         "other DSP float ABI changed unintentionally")
 require("print_precise_coeff" in probe and "%.17g" in probe,
