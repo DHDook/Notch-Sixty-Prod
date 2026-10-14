@@ -1,0 +1,96 @@
+name: PR116 — Generate Approved Icons
+
+on:
+  push:
+    branches:
+      - feature/pr116-final-app-icons
+  workflow_dispatch:
+
+# This workflow only updates committed icon rasters on this isolated branch.
+# GITHUB_TOKEN-authored commits do not trigger further runs; the same run
+# builds the exact newly pushed revision in its dependent macOS job.
+permissions:
+  contents: write
+
+concurrency:
+  group: pr116-approved-icons
+  cancel-in-progress: false
+
+jobs:
+  generate-and-commit:
+    runs-on: ubuntu-latest
+    outputs:
+      checked_sha: ${{ steps.commit.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feature/pr116-final-app-icons
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Create isolated Pillow environment
+        run: |
+          python3 -m venv "$RUNNER_TEMP/pr116-venv"
+          "$RUNNER_TEMP/pr116-venv/bin/pip" install --disable-pip-version-check pillow==12.3.0
+      - name: Generate all 24 icons and manifest directly from uploaded masters
+        run: |
+          "$RUNNER_TEMP/pr116-venv/bin/python" ci/pr116_generate_icon_assets.py
+          "$RUNNER_TEMP/pr116-venv/bin/python" ci/pr116_generate_icon_assets.py --check
+          python3 ci/validate_pr39_app_identity.py
+      - name: Commit only shipping icon PNGs and generated manifest
+        id: commit
+        env:
+          EXPECTED_BRANCH: feature/pr116-final-app-icons
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "$EXPECTED_BRANCH"
+          test "$(git branch --show-current)" = "$EXPECTED_BRANCH"
+          git add \
+            NotchSixty/Assets.xcassets/AppIcon.appiconset/*.png \
+            NotchSixty/Assets.xcassets/DockIconDark.imageset/*.png \
+            NotchSixty/Assets.xcassets/DockIconLight.imageset/*.png \
+            design/app-icons/generated-icon-manifest.json
+          if ! git diff --cached --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -m "PR116: regenerate 24 approved AppIcon and DockIcon PNGs"
+            git push origin "HEAD:refs/heads/$EXPECTED_BRANCH"
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Publish icon asset ZIP for owner review
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr116-approved-macos-icon-assets
+          path: |
+            NotchSixty/Assets.xcassets/AppIcon.appiconset/*.png
+            NotchSixty/Assets.xcassets/DockIconLight.imageset/*.png
+            NotchSixty/Assets.xcassets/DockIconDark.imageset/*.png
+            design/app-icons/generated-icon-manifest.json
+          if-no-files-found: error
+          retention-days: 90
+
+  build-and-verify:
+    needs: generate-and-commit
+    runs-on: xcode-27
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.generate-and-commit.outputs.checked_sha }}
+          persist-credentials: false
+      - name: Install pinned icon validator
+        run: |
+          python3 -m venv "$RUNNER_TEMP/pr116-venv"
+          "$RUNNER_TEMP/pr116-venv/bin/pip" install --disable-pip-version-check pillow==12.3.0
+      - name: Exact-head icon and baseline checks
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/pr116-venv/bin/python" ci/pr116_generate_icon_assets.py --check
+          python3 ci/validate_pr39_app_identity.py
+          python3 ci/validate_pr114_release_baseline.py
+      - name: Build Apple Silicon Release with new icon assets
+        run: |
+          xcodebuild -project NotchSixty.xcodeproj \
+            -scheme NotchSixty -configuration Release \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO build
