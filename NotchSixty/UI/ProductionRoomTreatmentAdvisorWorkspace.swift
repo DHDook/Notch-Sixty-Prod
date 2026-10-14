@@ -178,16 +178,91 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                if let sub = advisor.physicalSubComparison {
-                    Text(
-                        String(
-                            format: "Physical Sub placement A/B: %.2f dB change in 35–160 Hz seat-spread RMS across %d seats. This is NOT a target-response, SPL, coherence, decay or headroom measurement.",
-                            sub.reductionInInterseatSpreadDB,
-                            sub.seatCount
+                if let comparison = advisor.unifiedSpeakerComparison {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Verified-source candidate tradeoffs · visual review only")
+                            .font(.subheadline.bold())
+                        Text(
+                            "All alternatives use the same explicitly selected qualified Speaker Optimizer baseline. Target error, headroom, seat regression and FIR group delay are modeled—not measured post-correction."
                         )
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        ForEach(comparison.sources.indices, id: \.self) { row in
+                            let source = comparison.sources[row]
+                            Text(source.source.displayName)
+                                .font(.subheadline.bold())
+                            ForEach(source.alternatives.indices, id: \.self) { ix in
+                                let alternative = source.alternatives[ix]
+                                VStack(alignment: .leading, spacing: 3) {
+                                    HStack(spacing: 10) {
+                                        Text(alternative.kind.rawValue.uppercased())
+                                            .font(.caption.bold())
+                                        Text(
+                                            String(
+                                                format: "Target RMSE: %.2f dB",
+                                                alternative.predictedWeightedRMSEAfterDB
+                                            )
+                                        )
+                                        .font(.caption.monospacedDigit())
+                                        Spacer(minLength: 4)
+                                        Text(
+                                            alternative.eligibleForVisualPreview
+                                                ? "Preview eligible" : "Blocked"
+                                        )
+                                        .font(.caption.bold())
+                                        .foregroundStyle(
+                                            alternative.eligibleForVisualPreview
+                                                ? Color.secondary : Color.orange
+                                        )
+                                    }
+                                    HStack(spacing: 12) {
+                                        Text(
+                                            String(format: "Headroom +%.2f dB", alternative.requiredHeadroomDB)
+                                        )
+                                        Text(
+                                            String(format: "Worst seat +%.2f dB", alternative.worstSeatRegressionDB)
+                                        )
+                                        Text(
+                                            alternative.fixedGroupDelayMilliseconds.map {
+                                                String(format: "FIR %.2f ms", $0)
+                                            } ?? "No declared fixed FIR delay"
+                                        )
+                                    }
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                                    ForEach(alternative.blockingReasons, id: \.self) { warning in
+                                        Text("• " + warning)
+                                            .font(.caption)
+                                            .foregroundStyle(.orange)
+                                    }
+                                }
+                                .padding(9)
+                                .background(.secondary.opacity(0.055),
+                                            in: RoundedRectangle(cornerRadius: 9))
+                            }
+                        }
+                    }
+                }
+                if let sub = advisor.physicalSubComparison {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Physical Sub placement · measured multi-seat LF spread")
+                            .font(.subheadline.bold())
+                        Text(
+                            String(
+                                format: "Before: %.2f dB RMS · After: %.2f dB RMS · Improvement: %.2f dB across %d seats",
+                                sub.baselineInterseatSpreadRMSDB,
+                                sub.candidateInterseatSpreadRMSDB,
+                                sub.reductionInInterseatSpreadDB,
+                                sub.seatCount
+                            )
+                        )
+                        .font(.caption.monospacedDigit())
+                        Text(
+                            "Other objectives: target error unavailable · decay unavailable · headroom unavailable · coherent phase/timing unavailable · added latency unavailable. No physical routing changes are authorized."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
                 } else {
                     Text(
                         "For measured Sub placement tradeoffs, use the existing verified before/after placement comparison. Coordinated multi-Sub timing additionally requires independent output mapping and a common phase reference."

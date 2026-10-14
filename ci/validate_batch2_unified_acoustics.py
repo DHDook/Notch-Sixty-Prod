@@ -109,6 +109,14 @@ for token in (
     "speaker: advisor.unifiedSpeakerComparison",
     "selected?.routingSignature",
     "selected?.playbackSystemID",
+    "comparison.sources.indices",
+    "alternatives.indices",
+    "alternative.predictedWeightedRMSEAfterDB",
+    "alternative.worstSeatRegressionDB",
+    "alternative.requiredHeadroomDB",
+    "sub.baselineInterseatSpreadRMSDB",
+    "sub.candidateInterseatSpreadRMSDB",
+    "headroom unavailable",
 ):
     require(token in workspace, "authenticated Room Advisor UI missing: " + token)
 for testName in (
