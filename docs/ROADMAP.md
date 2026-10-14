@@ -16,6 +16,23 @@ Legacy parity is the minimum capability floor. The commercial rewrite should exc
 
 Future portability must not materially delay the flagship Mac launch.
 
+## Current integrated RC status — October 14, 2026
+
+Core batches #125–#128, optional research #129, and integrated RC #130 reached
+their remote exact-head software CI checkpoints. Integrated arm64 macOS 27
+Release / cumulative XCTest / test DMG run #38581711406 passed. One final
+hardening batch fixes Xcode group/icon asset warnings, audits selected Release
+and realtime logging paths, and refreshes acceptance handoff. Its final
+`[integration-ci]` exact-head run must pass separately to replace the RC.
+
+The older "planned" and "in progress" headings below are historical planning
+records, not new uncompleted feature commitments. Physical PR112 H01–H08,
+realistic endurance, calibrated acoustic and headphone verification, actual
+DAC compatibility through 384 kHz where supported, external legal rights,
+Apple signing/distribution, icon owner approval and merge authority remain
+pending. macOS 26 support is intentionally deferred; macOS 27 is required.
+All branches stay OPEN/DRAFT/UNMERGED; `main` stays unchanged.
+
 ## Active execution plan — four consolidated integration batches (2026-10-14)
 
 **This plan supersedes the PR117–PR126 proposal as an execution sequence.**

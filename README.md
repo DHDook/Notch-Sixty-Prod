@@ -11,6 +11,24 @@ configuration.
 
 ## Current status
 
+### October 14, 2026 — integrated RC and final hardening
+
+PR #130 stacks the four validated core batches #125–#128 and optional research
+#129, following PR114. The macOS 27 arm64 Release DMG, unsigned archive,
+full Debug XCTest and integrated QA passed run #38581711406 at commit
+`52f15da6f23bcc28e5b5c19705d3bcfea303aa81`.
+The follow-on consolidated hardening work needs its **own exact-head CI success**
+before its DMG supersedes this reference candidate. See
+`docs/FINAL_RC_REMOTE_HARDENING.md`.
+
+All stacked PRs remain OPEN/DRAFT/UNMERGED; `main` is unchanged.
+Minimum macOS **27** is intentional; macOS 26 support is deferred by owner
+direction. PR112 physical H01–H08, DAC and calibrated acoustic/headphone tests,
+external rights/IP review, final artwork approval, Apple signing/credentials
+and release/merge approval remain pending.
+
+**Historical PR114 release baseline, retained for cumulative auditing:**
+
 **PR114 — Commercial Release Candidate (draft, stacked).**
 
 The cumulative proprietary product is remotely complete through

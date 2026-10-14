@@ -82,3 +82,16 @@ If a hardware issue is identified, it is a new, scoped bugfix requiring
 fresh software builds and revalidation—not a reason to silently
 change a hardware FAIL/PENDING into PASS. The current feature PRs
 and this QA PR remain draft and unmerged until authorized.
+
+## October 14 consolidated RC hardening addendum
+
+Owner specifically selected macOS 27 rather than spending remote time on
+macOS 26 compatibility. The final hardening adds Release and targeted logging
+source gates without injecting instrumentation into the app; corrects one
+duplicate UI file membership and ten unsupported Xcode dark AppIcon variants,
+preserving both approved masters and runtime Light/Dark Dock artwork; and
+refreshes the handoff. No render core, filter or routing behavior changes.
+The follow-on **new exact-head** RC CI must complete successfully for the
+updated DMG to replace prior run #38581711406. See
+`docs/FINAL_RC_REMOTE_HARDENING.md`. Physical, design, IP, Apple credentials,
+merge and public release approvals remain pending.
