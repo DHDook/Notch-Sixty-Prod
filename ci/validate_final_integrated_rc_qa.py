@@ -95,7 +95,9 @@ def audit_source():
         require(baseline["releaseAuthority"].get(f) is False,"release authority promoted")
     wf=text(".github/workflows/final-integrated-rc-qa.yml")
     for token in ("xcodebuild archive","hdiutil create","codesign --verify",
-                  "build_pr114_release_candidate_manifest.py","full_xctest",
+                  "build_pr114_release_candidate_manifest.py",
+                  "Run cumulative XCTest regression",
+                  "touch /tmp/pr114-xctest.passed",
                   "validate_final_integrated_rc_qa.py"):
         require(token in wf,"final RC workflow missing "+token)
     print("Final integrated source/rights/safety/research contract: PASS")
