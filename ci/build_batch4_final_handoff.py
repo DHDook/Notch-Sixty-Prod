@@ -22,7 +22,7 @@ GATES = (
     "hardware_authority_boundary",
 )
 FILES = (
-    "NotchSixty/Audio/BlindABXValidation.swift",
+    "NotchSixty/Audio/Routing/BlindABXValidation.swift",
     "NotchSixty/UI/ProductionBlindListeningWorkspace.swift",
     "NotchSixtyTests/BlindABXValidationTests.swift",
     "NotchSixty/UI/ProductionHeadphoneWorkspace.swift",

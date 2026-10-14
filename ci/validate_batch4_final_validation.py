@@ -9,7 +9,7 @@ from pathlib import Path
 
 R = Path(__file__).resolve().parents[1]
 paths = {
-    "abx": "NotchSixty/Audio/BlindABXValidation.swift",
+    "abx": "NotchSixty/Audio/Routing/BlindABXValidation.swift",
     "ui": "NotchSixty/UI/ProductionBlindListeningWorkspace.swift",
     "test": "NotchSixtyTests/BlindABXValidationTests.swift",
     "root": "NotchSixty/UI/ProductionRootView.swift",
