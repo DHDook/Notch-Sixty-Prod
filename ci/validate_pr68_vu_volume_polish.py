@@ -40,8 +40,10 @@ def main() -> None:
     meter = block(root, "private struct StereoSignatureVUMeter: View {", "private struct ProductionActiveCrossoverView: View {")
     require(".glassEffect(.regular, in: .rect(cornerRadius: 22))" in meter,
             "Liquid Glass meter overlay is missing")
-    require("Color(red: 0.96, green: 0.91, blue: 0.76)" in meter,
-            "warm seventies meter face is missing")
+    require("StereoSignatureVUPalette" in root and
+            "Color(red: 0.98, green: 0.955, blue: 0.88)" in root and
+            "Color(red: 0.20, green: 0.20, blue: 0.19)" in root,
+            "PR116B complementary light/dark meter faces are missing")
     require("Path(ellipseIn:" not in meter, "needle pivot cap must remain hidden")
     require("hotArc" in meter, "positive VU hot zone is missing")
     require('specifier: "%.1f"' in root, "fine master-volume readout precision is missing")
