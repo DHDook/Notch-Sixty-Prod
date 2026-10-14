@@ -45,3 +45,23 @@ acoustics, 384 kHz real-DAC compatibility where supported, final owner icon
 review, third-party rights/IP review, Apple credentials/signing/notarization/
 App Store operations and **explicit owner merge/public-release approval**.
 Speaker-connected feed-forward ANC remains unauthorized. `main` untouched.
+
+## Final CI compiler-warning triage: DSP-critical repair
+
+Review of the preceding full Mac compiler output identified a genuine
+type mismatch in `N60MultichannelBassManagement.h`: crossover snapshots
+hold double-precision `N60CrossoverPreciseCoefficients`, while the
+multichannel processor previously passed them to float biquad coefficients
+and float runtime states. This is a **functional risk**, not cosmetic
+compiler noise. The runtime now uses matching `N60CrossoverPreciseState`
+and `N60CrossoverPreciseProcessSample` for source and LFE crossover
+paths; per-sub ordinary EQ remains its own float biquad stage. A native C
+`-Werror` regression validates stable low/high-pass behavior at 48 and
+384 kHz, including redirected bass and LFE; it runs in portable and Mac CI.
+
+Other compiler messages include Swift `allowedFileTypes`/
+`auAudioUnit` deprecations, local immutable-binding suggestions, and
+integer-narrowing warnings in vendored `libmysofa`. They remain **known
+nonfatal audit findings**, not falsely marked as resolved or silently
+suppressed. Change to vendored code requires provenance and separate
+risk assessment. No hardware sonic validation is inferred from this C fix.

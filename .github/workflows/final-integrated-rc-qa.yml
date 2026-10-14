@@ -43,6 +43,9 @@ jobs:
       - name: Run final RC Release/logging/icon hygiene gate
         run: python3 ci/validate_final_rc_hardening.py
 
+      - name: Validate precise 48/384-kHz multichannel bass management
+        run: python3 ci/validate_pr55_multichannel_bass_management.py
+
       - name: Validate PR114 release baseline
         run: python3 ci/validate_pr114_release_baseline.py
 
@@ -103,6 +106,7 @@ jobs:
           set -euo pipefail
           python3 ci/validate_final_integrated_rc_qa.py --source-only
           python3 ci/validate_final_rc_hardening.py
+          python3 ci/validate_pr55_multichannel_bass_management.py
           python3 ci/validate_optional_acoustic_research.py
           python3 ci/validate_batch4_final_validation.py
           python3 ci/validate_batch3_headphone_completion.py

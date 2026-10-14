@@ -77,6 +77,13 @@ for relative in (
     require(not log.search((ROOT / relative).read_text()),
             "direct synchronous logging in " + relative)
 
+header = (ROOT / "NotchSixty/Audio/Realtime/N60MultichannelBassManagement.h").read_text()
+require("N60CrossoverPreciseState highPass[" in header
+        and "N60CrossoverPreciseState lowPass[" in header
+        and "N60CrossoverPreciseState lfeLowPass[" in header,
+        "bass management must use double-precision state at high rates")
+require("N60CrossoverPreciseProcessSample(coefficients[section]" in header,
+        "multichannel bass management must use matching double coefficients")
 workflow = (ROOT / ".github/workflows/final-integrated-rc-qa.yml").read_text()
 require("-configuration Debug" in workflow and "-configuration Release" in workflow,
         "separate Debug test and Release build lost")
@@ -84,4 +91,6 @@ require('cp -R "$RELEASE_APP" "$RC_APP"' in workflow,
         "test DMG must come from optimized Release app")
 require(workflow.count("python3 ci/validate_final_rc_hardening.py") == 2,
         "hygiene audit must run in portable and macOS CI")
-print("Final RC: optimized Release config, targeted logging, icon integrity and Xcode hygiene PASS")
+require(workflow.count("python3 ci/validate_pr55_multichannel_bass_management.py") == 2,
+        "precise multichannel bass regression must run in both jobs")
+print("Final RC: optimized Release, logging, icon, Xcode and precise bass hygiene PASS")
