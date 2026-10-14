@@ -56,6 +56,16 @@ physical-first priority, project mismatch and single-seat DSP blockers.
   independently pessimizes baseline and after residuals within the
   supplied error bound. It does not derive statistical confidence or
   modify active EQ/crossovers/delay.
+- The robustness evaluator supports **held-out listening seats**: reserved
+  seats are excluded from the weighted fit but must satisfy independent
+  target-error regression limits. Its conservative interval bound tests
+  worst-case measurement error for both before and after. This is an
+  offline mathematical review and not a measured confidence interval.
+- The real Speaker Optimizer plan identity is now tested with matched
+  and mismatched routes and sample-rate contexts. If that optimizer
+  recommends **bypass**, the coordinator advises leaving that speaker
+  uncorrected rather than marketing a DSP change as an improvement.
+  Multi-Sub predictions keep a hardware/clock verification blocker.
 - Swift XCTest covers deceptive average wins, uncertainty-sensitive
   improvements, a strong multi-seat hypothesis, missing coherent
   subwoofer hardware/timing at 384 kHz, malformed inputs and project

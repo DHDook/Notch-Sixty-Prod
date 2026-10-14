@@ -3,6 +3,38 @@ import XCTest
 @testable import NotchSixty
 
 final class RoomTreatmentAdvisorTests: XCTestCase {
+    func testUnifiedAcousticRobustnessProtectsHeldOutSeatFromOverfitting() {
+        var candidate = UnifiedAcousticSeatCandidate(
+            domain: .room,
+            sampleRate: 384_000,
+            seatWeights: [0.4, 0.4, 0.2],
+            baselineTargetErrorDB: [-6, -4, -3],
+            candidateTargetErrorDB: [-2, -2, -5],
+            absoluteMeasurementUncertaintyDB: 0.1,
+            additionalHeadroomDB: 0.5,
+            fixedLatencyFrames: 0,
+            physicalSubwooferOutputCount: 0,
+            coherentClockAuthenticated: false,
+            heldOutSeatIndices: [2]
+        )
+        let reviewer = UnifiedAcousticRobustnessEvaluator()
+        var review = reviewer.evaluate(candidate)
+        XCTAssertGreaterThan(review.worstCaseWeightedSquaredErrorImprovementDB2, 0)
+        XCTAssertGreaterThan(review.heldOutSeatWorstRegressionDB ?? 0, 2)
+        XCTAssertFalse(review.eligibleForVisualReview)
+        XCTAssertTrue(review.blockingReasons.contains {
+            $0.contains("Held-out")
+        })
+        XCTAssertFalse(review.isMeasuredVerification)
+
+        candidate.candidateTargetErrorDB[2] = -1
+        review = reviewer.evaluate(candidate)
+        XCTAssertTrue(review.eligibleForVisualReview)
+        XCTAssertLessThan(review.heldOutSeatWorstRegressionDB ?? 99, 0)
+        candidate.heldOutSeatIndices = [2, 2]
+        XCTAssertFalse(reviewer.evaluate(candidate).eligibleForVisualReview)
+    }
+
     func testUnifiedAcousticRobustnessRejectsDeceptiveMeanSeatWin() {
         let review = UnifiedAcousticRobustnessEvaluator().evaluate(
             UnifiedAcousticSeatCandidate(

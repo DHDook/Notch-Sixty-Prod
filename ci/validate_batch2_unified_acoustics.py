@@ -11,6 +11,7 @@ SOURCE = ROOT / "NotchSixty/Audio/UnifiedAcousticIntelligenceCoordinator.swift"
 PROJECT = ROOT / "NotchSixty.xcodeproj/project.pbxproj"
 TESTS = ROOT / "NotchSixtyTests/RoomTreatmentAdvisorTests.swift"
 WORKSPACE = ROOT / "NotchSixty/UI/ProductionRoomTreatmentAdvisorWorkspace.swift"
+COMPARISON_TESTS = ROOT / "NotchSixtyTests/SpeakerOptimizerCandidateComparisonTests.swift"
 DOC = ROOT / "docs/BATCH2_UNIFIED_ACOUSTIC_INTELLIGENCE.md"
 
 
@@ -23,6 +24,7 @@ source = SOURCE.read_text()
 pbx = PROJECT.read_text()
 tests = TESTS.read_text()
 workspace = WORKSPACE.read_text()
+comparison_tests = COMPARISON_TESTS.read_text()
 doc = DOC.read_text()
 for token in (
     "struct UnifiedAcousticIntelligenceCoordinator",
@@ -52,6 +54,9 @@ for token in (
     "baselineTargetErrorDB",
     "candidateTargetErrorDB",
     "absoluteMeasurementUncertaintyDB",
+    "heldOutSeatIndices",
+    "heldOutSeatWorstRegressionDB",
+    "candidate.kind == .bypass",
 ):
     require(token in source, "missing read-only arbitration contract: " + token)
 
@@ -74,8 +79,12 @@ for method in (
     "testUnifiedAcousticRobustnessAcceptsWellSeparatedBoundedHypothesis",
     "testUnifiedAcousticRobustnessChecksPhysicalSubClockAnd384kHzLatency",
     "testUnifiedAcousticRobustnessRejectsMalformedSeatAndSampleRate",
+    "testUnifiedAcousticRobustnessProtectsHeldOutSeatFromOverfitting",
 ):
     require(method in tests, "missing bounded uncertainty regression: " + method)
+
+require("testUnifiedCoordinatorOnlyAcceptsMatchingSpeakerEvidenceContext"
+        in comparison_tests, "missing real speaker proposal source identity test")
 
 require("unifiedAcousticIntelligenceCard(report)" in workspace
         and "UnifiedAcousticIntelligenceCoordinator().summarize(" in workspace,

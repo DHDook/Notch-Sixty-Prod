@@ -2,6 +2,60 @@ import XCTest
 @testable import NotchSixty
 
 final class SpeakerOptimizerCandidateComparisonTests: XCTestCase {
+    func testUnifiedCoordinatorOnlyAcceptsMatchingSpeakerEvidenceContext() throws {
+        let plan = try SpeakerOptimizerCandidateComparisonDesigner().compare(
+            baseline: makeBaseline()
+        )
+        let projectID = UUID()
+        let room = RoomTreatmentAdvisorReport(
+            projectID: projectID,
+            projectName: "Three-seat fixture",
+            retainedMeasurementCount: 3,
+            includedMeasurementCount: 3,
+            analysisMode: .multiPosition,
+            microphoneName: "Synthetic qualified fixture",
+            calibratedMicrophone: true,
+            qualityWarnings: [],
+            findings: [],
+            actionPriorities: []
+        )
+        var identity = UnifiedAcousticEvidenceIdentity(
+            projectID: projectID,
+            playbackSystemID: plan.playbackSystemID,
+            routingSignature: plan.routingSignature,
+            sampleRate: plan.sampleRate,
+            baselineMeasurementSetID: plan.baselineMeasurementSetID
+        )
+        let coordinator = UnifiedAcousticIntelligenceCoordinator()
+        let permitted = coordinator.summarize(
+            room: room, identity: identity, speaker: plan
+        )
+        XCTAssertEqual(
+            permitted.advice.filter {
+                $0.evidenceSource == "SpeakerOptimizerCandidateComparison"
+            }.count,
+            plan.sources.count
+        )
+        XCTAssertTrue(permitted.advice.allSatisfy { !$0.canApply && !$0.canDeploy })
+
+        identity.routingSignature = "different-route-no-silent-rebind"
+        let refused = coordinator.summarize(
+            room: room, identity: identity, speaker: plan
+        )
+        XCTAssertTrue(refused.advice.isEmpty)
+        XCTAssertTrue(refused.warnings.contains {
+            $0.contains("Speaker Optimizer proposal identity")
+        })
+        XCTAssertFalse(refused.canDeploy)
+
+        identity.routingSignature = plan.routingSignature
+        identity.sampleRate = 384_000
+        let wrongClock = coordinator.summarize(
+            room: room, identity: identity, speaker: plan
+        )
+        XCTAssertTrue(wrongClock.advice.isEmpty)
+    }
+
     private let system = UUID(uuidString: "B1111111-AAAA-BBBB-CCCC-DDDDDDDDDDDD")!
     private let seat = UUID(uuidString: "B2222222-AAAA-BBBB-CCCC-DDDDDDDDDDDD")!
     private let mic = SpeakerOptimizerMicrophoneIdentity(

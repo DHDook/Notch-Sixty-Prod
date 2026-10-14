@@ -139,6 +139,20 @@ struct UnifiedAcousticIntelligenceCoordinator: Sendable {
                     guard let candidate = source.alternatives.first(where: {
                         $0.kind == source.topVisualPreviewKind
                     }) else { continue }
+                    // A selected bypass is evidence *against* adding a
+                    // correction. Do not mislabel it as an EQ recommendation.
+                    if candidate.kind == .bypass {
+                        advice.append(UnifiedAcousticAdvice(
+                            id: "speaker-" + source.source.displayName,
+                            remedy: .noAction,
+                            title: "Keep " + source.source.displayName + " unchanged",
+                            rationale: "The existing independent comparison prefers bypass over PEQ or FIR for this source. Do not add a correction to improve a score.",
+                            evidenceSource: "SpeakerOptimizerCandidateComparison",
+                            blockers: [],
+                            modeledOnly: true
+                        ))
+                        continue
+                    }
                     var blockers = candidate.blockingReasons
                     if !candidate.eligibleForVisualPreview {
                         blockers.append("Existing speaker comparison rejects this alternative.")
@@ -187,6 +201,9 @@ struct UnifiedAcousticIntelligenceCoordinator: Sendable {
                 if multiSub.subwoofers.count < 2 {
                     blockers.append("Multi-Sub optimization needs independently addressable physical Subs.")
                 }
+                blockers.append(
+                    "A common coherent clock and independent Sub output mapping still require owner hardware verification."
+                )
                 if !multiSub.evidenceConfidence.isFinite
                     || !(0.0...1.0).contains(multiSub.evidenceConfidence) {
                     blockers.append("Invalid coherence evidence weight.")
@@ -243,6 +260,8 @@ struct UnifiedAcousticSeatCandidate: Sendable {
     var fixedLatencyFrames: Int
     var physicalSubwooferOutputCount: Int
     var coherentClockAuthenticated: Bool
+    /// Seats excluded from fitting/ranking, checked only for degradation.
+    var heldOutSeatIndices: [Int] = []
 }
 
 struct UnifiedAcousticRobustnessReview: Sendable {
@@ -251,6 +270,7 @@ struct UnifiedAcousticRobustnessReview: Sendable {
     var worstSeatTargetErrorRegressionDB: Double
     var latencyMilliseconds: Double
     var blockingReasons: [String]
+    var heldOutSeatWorstRegressionDB: Double? = nil
 
     /// A calculation being fit for *visual* review is not measured playback
     /// verification, user-approved commissioning, or hardware authorization.
@@ -271,7 +291,11 @@ struct UnifiedAcousticRobustnessEvaluator: Sendable {
     ) -> UnifiedAcousticRobustnessReview {
         var blockers: [String] = []
         let count = candidate.seatWeights.count
+        let heldOut = Set(candidate.heldOutSeatIndices)
         guard (2...16).contains(count),
+              heldOut.count == candidate.heldOutSeatIndices.count,
+              candidate.heldOutSeatIndices.allSatisfy({ (0..<count).contains($0) }),
+              count - heldOut.count >= 2,
               candidate.baselineTargetErrorDB.count == count,
               candidate.candidateTargetErrorDB.count == count,
               candidate.sampleRate.isFinite,
@@ -300,7 +324,9 @@ struct UnifiedAcousticRobustnessEvaluator: Sendable {
                 ]
             )
         }
-        let totalWeight = candidate.seatWeights.reduce(0, +)
+        let totalWeight = candidate.seatWeights.enumerated().reduce(0.0) {
+            $0 + (heldOut.contains($1.offset) ? 0.0 : $1.element)
+        }
         guard totalWeight.isFinite, totalWeight > 0 else {
             return UnifiedAcousticRobustnessReview(
                 nominalWeightedSquaredErrorImprovementDB2: 0,
@@ -320,8 +346,10 @@ struct UnifiedAcousticRobustnessEvaluator: Sendable {
         var optimisticBeforeLower = 0.0
         var pessimisticAfterUpper = 0.0
         var worstSeat = -Double.infinity
+        var heldOutWorst = -Double.infinity
         for i in 0..<count {
-            let weight = candidate.seatWeights[i] / totalWeight
+            let weight = heldOut.contains(i)
+                ? 0.0 : candidate.seatWeights[i] / totalWeight
             let before = abs(candidate.baselineTargetErrorDB[i])
             let after = abs(candidate.candidateTargetErrorDB[i])
             let beforeLower = max(0, before - candidate.absoluteMeasurementUncertaintyDB)
@@ -331,6 +359,9 @@ struct UnifiedAcousticRobustnessEvaluator: Sendable {
             optimisticBeforeLower += weight * beforeLower * beforeLower
             pessimisticAfterUpper += weight * afterUpper * afterUpper
             worstSeat = max(worstSeat, afterUpper - beforeLower)
+            if heldOut.contains(i) {
+                heldOutWorst = max(heldOutWorst, afterUpper - beforeLower)
+            }
         }
         let nominalImprovement = nominalBefore - nominalAfter
         let robustImprovement = optimisticBeforeLower - pessimisticAfterUpper
@@ -342,6 +373,9 @@ struct UnifiedAcousticRobustnessEvaluator: Sendable {
         }
         if worstSeat > maximumWorstSeatRegressionDB {
             blockers.append("At least one listening seat may regress under the supplied measurement uncertainty.")
+        }
+        if heldOutWorst > maximumWorstSeatRegressionDB {
+            blockers.append("Held-out listening seat fails independent target-error regression protection.")
         }
         if candidate.additionalHeadroomDB > maximumAdditionalHeadroomDB {
             blockers.append("Additional headroom requirement exceeds the conservative review budget.")
@@ -362,7 +396,8 @@ struct UnifiedAcousticRobustnessEvaluator: Sendable {
             worstCaseWeightedSquaredErrorImprovementDB2: robustImprovement,
             worstSeatTargetErrorRegressionDB: worstSeat,
             latencyMilliseconds: latencyMS,
-            blockingReasons: blockers
+            blockingReasons: blockers,
+            heldOutSeatWorstRegressionDB: heldOut.isEmpty ? nil : heldOutWorst
         )
     }
 }
