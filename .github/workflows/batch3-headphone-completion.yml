@@ -1,0 +1,95 @@
+name: Batch 3 Headphone Completion
+
+on:
+  pull_request:
+    branches:
+      - feature/batch2-unified-acoustic-intelligence
+    types: [opened, reopened, synchronize, labeled]
+  push:
+    branches:
+      - feature/batch3-headphone-completion
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: batch3-headphone-${{ github.ref }}-${{ github.event.action || github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  fast-reference:
+    if: >-
+      github.event_name != 'push' ||
+      contains(github.event.head_commit.message, '[integration-ci]')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Validate per-ear editor, SOFA picker, provenance and headroom contracts
+        run: |
+          set -euo pipefail
+          python3 ci/validate_batch3_headphone_completion.py
+          python3 ci/validate_pr56_headphone_dsp.py
+          python3 ci/validate_pr57_binaural_renderer.py
+          python3 ci/validate_pr85_native_sofa.py
+          python3 ci/validate_pr117c_spatial_reference.py
+          python3 ci/validate_pr112a_hardware_acceptance.py
+
+  integration-apple-silicon:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       github.event.action == 'labeled' &&
+       github.event.label.name == 'integration-ci') ||
+      (github.event_name == 'push' &&
+       contains(github.event.head_commit.message, '[integration-ci]'))
+    needs: fast-reference
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Verify headphone and SOFA reference modules under Apple Clang
+        run: |
+          set -euo pipefail
+          python3 ci/validate_batch3_headphone_completion.py
+          python3 ci/validate_pr56_headphone_dsp.py
+          python3 ci/validate_pr57_binaural_renderer.py
+          python3 ci/validate_pr117c_spatial_reference.py
+      - name: Install real SOFA fixture-generator requirements (CI only)
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/batch3-venv"
+          "$RUNNER_TEMP/batch3-venv/bin/python" -m pip install --quiet netCDF4 numpy
+      - name: Generate actual licensed synthetic NetCDF4 SOFA files
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/batch3-venv/bin/python" \
+            ci/generate_pr117d_sofa_fixtures.py "$RUNNER_TEMP/batch3-sofa"
+          "$RUNNER_TEMP/batch3-venv/bin/python" \
+            ci/generate_pr85_sofa_fixture.py "$RUNNER_TEMP/batch3-pr85.sofa"
+      - name: Build arm64 Release
+        run: |
+          set -euo pipefail
+          xcodebuild -project NotchSixty.xcodeproj \
+            -scheme NotchSixty -configuration Release \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO \
+            GENERATE_INFOPLIST_FILE=NO \
+            INFOPLIST_FILE=NotchSixty/Info.plist build
+      - name: Run cumulative arm64 Debug XCTest with real-file SOFA coverage
+        env:
+          PR85_SOFA_FIXTURE: ${{ runner.temp }}/batch3-pr85.sofa
+          PR117D_SOFA_FIXTURE_DIR: ${{ runner.temp }}/batch3-sofa
+        run: |
+          set -euo pipefail
+          xcodebuild -project NotchSixty.xcodeproj \
+            -scheme NotchSixty -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES test
+      - name: Verify PR112 physical and headphone acceptance remains owner-gated
+        run: python3 ci/validate_pr112a_hardware_acceptance.py
