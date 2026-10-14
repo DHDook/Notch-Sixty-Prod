@@ -16,6 +16,46 @@ Legacy parity is the minimum capability floor. The commercial rewrite should exc
 
 Future portability must not materially delay the flagship Mac launch.
 
+## Active execution plan — four consolidated integration batches (2026-10-14)
+
+**This plan supersedes the PR117–PR126 proposal as an execution sequence.**
+The PR numbers and feature definitions below remain historical scope references,
+not a requirement to create and wait on nine or more individual feature PRs.
+See docs/ACOUSTIC_FOUR_BATCH_EXECUTION.md for gates, evidence and branch rules.
+
+- **Batch 1 / Acoustic Reference Closeout — in progress on PR #125.**
+  Consolidate existing PR117, PR117A, PR117B, PR117C, PR117D numerical,
+  crossover, FIR/latency, SOFA/HRTF and real native SOFA evidence. Standard
+  rate families through **384 kHz**; do not misstate end-to-end DAC acceptance.
+- **Batch 2 / Acoustic Intelligence — planned.** Combine scope of
+  PR118 + PR119 + PR121 into one coherent, read-only recommendations engine
+  with noise/held-out-seat robustness and multi-objective subwoofer decisions.
+- **Batch 3 / Headphone Completion — planned.** Combine PR124 with the
+  user-facing, independently verifiable subset of optional PR125:
+  per-ear PEQ, usable SOFA selection, explicit sample-rate policy, safe
+  headroom and properly sourced model-based proposals when justified.
+- **Batch 4 / Product Validation — planned.** Combine PR122 + PR123,
+  including safe optional ABX, full software integration, provenance/legal
+  audit and real-Mac owner handoff.
+
+**PR120 and PR126 remain optional post-core research.** The deeper PR125
+headphone model database is optional. Do not defer core completion for
+experimental features without demonstrated measurable benefit.
+
+**CI efficiency rule:** cheap targeted checks on incremental commits;
+a single intentionally triggered arm64 Release/full XCTest gate on each stable
+batch head. For Batch 1, label the draft with "integration-ci" (or manually
+dispatch its workflow) after portable checks pass. Only a PR label event
+or explicit dispatch launches the heavyweight Mac job; ordinary PR updates
+do not. Source/runtime safety remains mandatory even between full CI gates.
+
+**Safety:** all ancestor branches and feature PRs remain OPEN/DRAFT/UNMERGED;
+main remains unchanged. Physical PR112 H01–H08, actual hardware 384-kHz
+transport/CPU/headroom, headphone listening, release credentials, legal
+review, live ANC authorization and owner merge approval remain distinct gates.
+
+---
+
 ## Forward roadmap — Acoustic Intelligence and Headphone Completion (proposed)
 
 These future milestones are **proposals**, not implemented changes or release
