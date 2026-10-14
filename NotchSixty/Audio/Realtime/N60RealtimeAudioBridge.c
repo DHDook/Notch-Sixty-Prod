@@ -52,16 +52,16 @@ typedef struct {
 
 typedef struct {
     N60SpeakerBusSplitterSnapshot snapshot;
-    N60BiquadState lowerLowLeft[N60_MAX_CROSSOVER_SECTIONS];
-    N60BiquadState lowerLowRight[N60_MAX_CROSSOVER_SECTIONS];
-    N60BiquadState lowerLowMono[N60_MAX_CROSSOVER_SECTIONS];
-    N60BiquadState lowerHighLeft[N60_MAX_CROSSOVER_SECTIONS];
-    N60BiquadState lowerHighRight[N60_MAX_CROSSOVER_SECTIONS];
-    N60BiquadState upperLowLeft[N60_MAX_CROSSOVER_SECTIONS];
-    N60BiquadState upperLowRight[N60_MAX_CROSSOVER_SECTIONS];
-    N60BiquadState upperHighLeft[N60_MAX_CROSSOVER_SECTIONS];
-    N60BiquadState upperHighRight[N60_MAX_CROSSOVER_SECTIONS];
-    N60BiquadState subPhaseAlignment;
+    N60CrossoverPreciseState lowerLowLeft[N60_MAX_CROSSOVER_SECTIONS];
+    N60CrossoverPreciseState lowerLowRight[N60_MAX_CROSSOVER_SECTIONS];
+    N60CrossoverPreciseState lowerLowMono[N60_MAX_CROSSOVER_SECTIONS];
+    N60CrossoverPreciseState lowerHighLeft[N60_MAX_CROSSOVER_SECTIONS];
+    N60CrossoverPreciseState lowerHighRight[N60_MAX_CROSSOVER_SECTIONS];
+    N60CrossoverPreciseState upperLowLeft[N60_MAX_CROSSOVER_SECTIONS];
+    N60CrossoverPreciseState upperLowRight[N60_MAX_CROSSOVER_SECTIONS];
+    N60CrossoverPreciseState upperHighLeft[N60_MAX_CROSSOVER_SECTIONS];
+    N60CrossoverPreciseState upperHighRight[N60_MAX_CROSSOVER_SECTIONS];
+    N60CrossoverPreciseState subPhaseAlignment;
 } N60SpeakerBusSplitterRuntime;
 
 
@@ -385,14 +385,14 @@ static void publish_output_vu_meter(
 }
 
 static float process_splitter_sections(
-    const N60BiquadCoefficients *coefficients,
-    N60BiquadState *states,
+    const N60CrossoverPreciseCoefficients *coefficients,
+    N60CrossoverPreciseState *states,
     uint32_t count,
     float input
 ) {
     float output = input;
     for (uint32_t index = 0; index < count; ++index) {
-        output = N60BiquadProcessSample(coefficients[index], &states[index], output);
+        output = N60CrossoverPreciseProcessSample(coefficients[index], &states[index], output);
     }
     return output;
 }
@@ -424,7 +424,7 @@ static void process_speaker_bus_splitter(
             snapshot->lowerSectionCount, subMono
         );
         if (snapshot->subPhaseAlignmentEnabled) {
-            subMono = N60BiquadProcessSample(
+            subMono = N60CrossoverPreciseProcessSample(
                 snapshot->subPhaseAlignmentAllPass,
                 &runtime->subPhaseAlignment,
                 subMono

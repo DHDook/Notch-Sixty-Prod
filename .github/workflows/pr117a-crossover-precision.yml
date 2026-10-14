@@ -1,0 +1,57 @@
+name: PR117A 384 kHz Crossover Precision
+
+on:
+  push:
+    branches:
+      - feature/pr117a-384khz-crossover-precision
+  pull_request:
+    branches:
+      - feature/pr117-acoustic-reference-laboratory
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr117a-precision-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  independent-reference:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Verify precise SOS ABI isolation and full-rate acoustic results
+        run: |
+          set -euo pipefail
+          python3 ci/validate_pr117a_crossover_precision.py
+          python3 ci/validate_pr112a_hardware_acceptance.py
+          python3 ci/validate_pr116b_dashboard_vu.py
+
+  apple-silicon:
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Verify the eight-rate reference and inherited safety
+        run: |
+          set -euo pipefail
+          python3 ci/validate_pr117a_crossover_precision.py
+          python3 ci/validate_pr109_cross_feature_contracts.py
+          python3 ci/validate_pr112a_hardware_acceptance.py
+      - name: Release arm64 build
+        run: >-
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
+          -configuration Release -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO GENERATE_INFOPLIST_FILE=NO
+          INFOPLIST_FILE=NotchSixty/Info.plist build
+      - name: Debug arm64 cumulative XCTest
+        run: >-
+          xcodebuild -project NotchSixty.xcodeproj -scheme NotchSixty
+          -configuration Debug -destination 'platform=macOS,arch=arm64'
+          CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES test
