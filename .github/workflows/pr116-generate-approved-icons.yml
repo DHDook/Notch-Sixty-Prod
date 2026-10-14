@@ -91,7 +91,115 @@ jobs:
           python3 ci/validate_pr114_release_baseline.py
       - name: Build Apple Silicon Release with new icon assets
         run: |
+          set -euo pipefail
           xcodebuild -project NotchSixty.xcodeproj \
             -scheme NotchSixty -configuration Release \
             -destination 'platform=macOS,arch=arm64' \
-            CODE_SIGNING_ALLOWED=NO build
+            -derivedDataPath "$RUNNER_TEMP/PR116DerivedData" \
+            CODE_SIGNING_ALLOWED=NO GENERATE_INFOPLIST_FILE=NO \
+            INFOPLIST_FILE=NotchSixty/Info.plist build
+
+      - name: Run cumulative macOS XCTest regression
+        run: |
+          set -euo pipefail
+          xcodebuild -project NotchSixty.xcodeproj \
+            -scheme NotchSixty -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGNING_ALLOWED=NO ENABLE_TESTABILITY=YES test
+
+      - name: Verify and ad-hoc sign PR116 owner-test app
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE_APP="$RUNNER_TEMP/PR116DerivedData/Build/Products/Release/Notch Sixty.app"
+          PACKAGE_ROOT="$RUNNER_TEMP/PR116OwnerTest"
+          APP="$PACKAGE_ROOT/Notch Sixty.app"
+          test -d "$SOURCE_APP"
+          test -x "$SOURCE_APP/Contents/MacOS/Notch Sixty"
+          test -s "$SOURCE_APP/Contents/Resources/Assets.car"
+          test "$(lipo -archs "$SOURCE_APP/Contents/MacOS/Notch Sixty")" = arm64
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$SOURCE_APP/Contents/Info.plist")" = com.dhdook.NotchSixty
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$SOURCE_APP/Contents/Info.plist")" = 1.0.0
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$SOURCE_APP/Contents/Info.plist")" = 1
+          test "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$SOURCE_APP/Contents/Info.plist")" = 27.0
+          rm -rf "$PACKAGE_ROOT"
+          mkdir -p "$PACKAGE_ROOT"
+          cp -R "$SOURCE_APP" "$APP"
+          codesign --force --sign - --timestamp=none \
+            --entitlements NotchSixty/NotchSixty.entitlements "$APP"
+          codesign --verify --strict --verbose=2 "$APP"
+          codesign -d --entitlements :- "$APP" \
+            > "$RUNNER_TEMP/pr116-effective-entitlements.plist" 2>/dev/null
+          python3 - <<'PY'
+          from pathlib import Path
+          import os, plistlib
+          expected = plistlib.loads(Path("NotchSixty/NotchSixty.entitlements").read_bytes())
+          observed = plistlib.loads((Path(os.environ["RUNNER_TEMP"]) / "pr116-effective-entitlements.plist").read_bytes())
+          if observed != expected:
+              raise SystemExit("PR116 ad-hoc signature changed required sandbox entitlements")
+          PY
+
+      - name: Package versioned PR116 hardware-test DMG with exact-head manifest
+        shell: bash
+        env:
+          PR116_SOURCE_HEAD: ${{ needs.generate-and-commit.outputs.checked_sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$PR116_SOURCE_HEAD"
+          APP="$RUNNER_TEMP/PR116OwnerTest/Notch Sixty.app"
+          STAGE="$RUNNER_TEMP/PR116DMGStage"
+          DMG="$RUNNER_TEMP/Notch-Sixty-1.0.0-build-1-PR116-hardware-test-arm64.dmg"
+          rm -rf "$STAGE" "$DMG" "$DMG.sha256"
+          mkdir -p "$STAGE"
+          cp -R "$APP" "$STAGE/"
+          ln -s /Applications "$STAGE/Applications"
+          hdiutil create -volname "Notch Sixty PR116 Test" \
+            -srcfolder "$STAGE" -ov -format UDZO "$DMG"
+          shasum -a 256 "$DMG" > "$DMG.sha256"
+          echo "PR116_TEST_DMG=$DMG" >> "$GITHUB_ENV"
+          python3 - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          data = Path("design/app-icons/generated-icon-manifest.json")
+          icon_manifest = json.loads(data.read_text(encoding="utf-8"))
+          if icon_manifest.get("generatedSlotCount") != 24:
+              raise SystemExit("PR116 hardware-test DMG requires all 24 approved icon slots")
+          dmg = Path(os.environ["RUNNER_TEMP"]) / "Notch-Sixty-1.0.0-build-1-PR116-hardware-test-arm64.dmg"
+          manifest = {
+              "schemaVersion": 1,
+              "milestone": "PR116",
+              "purpose": "owner supervised hardware and icon appearance testing only",
+              "sourceCommit": os.environ["PR116_SOURCE_HEAD"],
+              "version": "1.0.0",
+              "buildNumber": "1",
+              "minMacOS": "27.0",
+              "architecture": "arm64",
+              "dmgFilename": dmg.name,
+              "dmgSHA256": hashlib.sha256(dmg.read_bytes()).hexdigest(),
+              "iconMasterSHA256": icon_manifest["sourceSHA256"],
+              "verifiedIconAssetCount": 24,
+              "adHocSigned": True,
+              "appSandboxEntitlementsVerified": True,
+              "cumulativeXCTestPassed": True,
+              "physicalHardwareAcceptance": False,
+              "developerIDSignature": False,
+              "notarized": False,
+              "appStoreAccepted": False,
+              "publicDistributionAuthorized": False,
+              "mergedToMain": False,
+          }
+          out = Path(os.environ["RUNNER_TEMP"]) / "pr116-hardware-test-manifest.json"
+          out.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+          PY
+
+      - name: Upload PR116 hardware-test DMG and verification evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr116-hardware-test-arm64
+          path: |
+            ${{ env.PR116_TEST_DMG }}
+            ${{ env.PR116_TEST_DMG }}.sha256
+            ${{ runner.temp }}/pr116-effective-entitlements.plist
+            ${{ runner.temp }}/pr116-hardware-test-manifest.json
+          if-no-files-found: error
+          retention-days: 90
