@@ -48,8 +48,14 @@ struct RoomCorrectionFIRDesignResult: Equatable, Sendable {
 /// finished `RoomCorrectionFilter` through its existing program lifecycle.
 struct RoomCorrectionFIRDesigner: Sendable {
     static let algorithmVersion = "n60-room-minphase-v1"
-    static let minimumTransformSize = 4_096
-    static let maximumTransformSize = Int(N60_CONVOLUTION_MAX_TAPS) * 2
+    static let minimumTransformSize = 16_384
+    /// Cepstral minimum-phase synthesis aliases when the DFT is short relative
+    /// to the impulse it reconstructs; use at least 8× the tap count.
+    static let transformOversampling = 8
+    static let maximumTransformSize = Int(N60_CONVOLUTION_MAX_TAPS) * transformOversampling
+    /// Fraction of the filter given to a half-Hann fade so truncating the
+    /// minimum-phase impulse does not add spectral ripple.
+    static let tailTaperFraction = 0.10
 
     private let previewDesigner = RoomCorrectionCorrectionPreviewDesigner()
 
@@ -228,7 +234,15 @@ struct RoomCorrectionFIRDesigner: Sendable {
         }
 
         let impulse = transform.inverse(real: real, imaginary: imaginary)
-        let taps = Array(impulse.prefix(tapCount))
+        var taps = Array(impulse.prefix(tapCount))
+        let taperCount = min(taps.count - 1, max(1, Int(Double(tapCount) * Self.tailTaperFraction)))
+        if taperCount > 0 {
+            let taperStart = taps.count - taperCount
+            for index in taperStart..<taps.count {
+                let position = Double(index - taperStart + 1) / Double(taperCount)
+                taps[index] *= Float(0.5 + 0.5 * cos(Double.pi * position))
+            }
+        }
         guard taps.count == tapCount, taps.allSatisfy(\.isFinite) else {
             throw RoomCorrectionFIRDesignError.nonFiniteFilter
         }
@@ -344,7 +358,7 @@ struct RoomCorrectionFIRDesigner: Sendable {
         guard tapCount > 0, tapCount <= Int(N60_CONVOLUTION_MAX_TAPS) else {
             throw RoomCorrectionTargetDesignError.invalidTapCount(tapCount)
         }
-        let required = max(minimumTransformSize, tapCount * 2)
+        let required = max(minimumTransformSize, tapCount * transformOversampling)
         guard required <= maximumTransformSize else {
             throw RoomCorrectionFIRDesignError.transformTooLarge(required: required)
         }

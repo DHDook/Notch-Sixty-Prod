@@ -107,7 +107,7 @@ final class HeadphoneCompletionTests: XCTestCase {
         XCTAssertEqual(p.left.eqBands, imported.leftBands)
     }
 
-    func testSofaRateMismatchNeverTriggersSilentSRC() throws {
+    func testSofaRateMismatchIsConvertedWithinRendererTapBudget() throws {
         var p = HeadphoneDeviceProfileConfiguration()
         p.spatialMode = .virtualSpeakers
         p.binauralProfile = BinauralProfileReference(
@@ -115,14 +115,19 @@ final class HeadphoneCompletionTests: XCTestCase {
             originalSourceName: "fixture.sofa", sampleRate: 48_000,
             tapCount: 256
         )
+        // 256 taps at 48 kHz convert to 2048 at 384 kHz: allowed.
+        try p.validateStructure(sampleRate: 384_000)
+        try p.validateStructure(sampleRate: 48_000)
+
+        // A response that would exceed the renderer budget still fails closed.
+        p.binauralProfile?.tapCount = Int(N60_BINAURAL_MAX_TAPS)
         XCTAssertThrowsError(try p.validateStructure(sampleRate: 384_000)) {
             guard case HeadphoneDeviceProfileError
                 .binauralProfileSampleRateMismatch = $0 else {
-                XCTFail("Mismatched spatial profile must fail closed")
+                XCTFail("Over-budget conversion must fail closed")
                 return
             }
         }
-        try p.validateStructure(sampleRate: 48_000)
     }
 
     func testDisabledBandsDoNotAddHeadroomOrGain() throws {

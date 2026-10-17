@@ -54,6 +54,15 @@ struct RoomCorrectionMeasurementAnalyzer: Sendable {
     static let regularizationPowerRatio: Float = 1.0e-10
     static let directArrivalThresholdRatio: Float = 0.10
     static let lowSNRWarningDB = 20.0
+    /// Impulse-response analysis window around the direct arrival (REW-style
+    /// room window). The left side keeps the onset while excluding log-sweep
+    /// harmonic-distortion impulses, which deconvolve to negative time and wrap
+    /// to the end of the circular IR. The right side keeps the room's modal
+    /// decay and excludes the late noise tail.
+    static let leftWindowSeconds = 0.010
+    static let rightWindowSeconds = 0.500
+    /// Fraction of the right window given to its half-Hann taper.
+    static let rightWindowTaperFraction = 0.25
 
     func analyze(
         capture: RoomCorrectionCalibrationCapture,
@@ -207,9 +216,16 @@ struct RoomCorrectionMeasurementAnalyzer: Sendable {
             )
         )
         let impulseResponse = Array(fullImpulse.prefix(max(1, impulseFrameCount)))
+        let windowed = dft.forward(
+            Self.windowedImpulse(
+                fullImpulse,
+                arrivalFrame: arrivalFrame,
+                sampleRate: program.sampleRate
+            )
+        )
         let response = try makeFrequencyResponse(
-            transferReal: transferReal,
-            transferImaginary: transferImaginary,
+            transferReal: windowed.real,
+            transferImaginary: windowed.imaginary,
             transformSize: transformSize,
             sampleRate: program.sampleRate,
             settings: program.settings,
@@ -229,6 +245,36 @@ struct RoomCorrectionMeasurementAnalyzer: Sendable {
             transferFunction: response,
             quality: quality
         )
+    }
+
+    /// Circularly windowed copy of the deconvolved impulse response: half-Hann
+    /// rise over the left window, flat, then a half-Hann fall over the last
+    /// `rightWindowTaperFraction` of the right window. Samples outside are zero.
+    static func windowedImpulse(
+        _ impulse: [Float],
+        arrivalFrame: Int,
+        sampleRate: Double
+    ) -> [Float] {
+        let count = impulse.count
+        guard count > 0, sampleRate.isFinite, sampleRate > 0 else { return impulse }
+        let left = max(1, min(Int((leftWindowSeconds * sampleRate).rounded()), count / 4))
+        let right = max(2, min(Int((rightWindowSeconds * sampleRate).rounded()), count / 2))
+        let taper = max(1, Int((Double(right) * rightWindowTaperFraction).rounded()))
+        let flatEnd = right - taper
+        var result = [Float](repeating: 0, count: count)
+        for offset in -left..<right {
+            let weight: Double
+            if offset < 0 {
+                weight = 0.5 - 0.5 * cos(Double.pi * Double(offset + left) / Double(left))
+            } else if offset < flatEnd {
+                weight = 1
+            } else {
+                weight = 0.5 + 0.5 * cos(Double.pi * Double(offset - flatEnd) / Double(taper))
+            }
+            let index = ((arrivalFrame + offset) % count + count) % count
+            result[index] = impulse[index] * Float(weight)
+        }
+        return result
     }
 
     private func validateProgram(_ program: RoomCorrectionSweepProgram) throws {
@@ -342,17 +388,37 @@ struct RoomCorrectionMeasurementAnalyzer: Sendable {
         var magnitudes = [Double](repeating: 0, count: pointCount)
         var wrappedPhases = [Double](repeating: 0, count: pointCount)
 
+        // Each point represents the band between its geometric neighbours.
+        // Average power over every FFT bin in that band instead of sampling a
+        // single bin, which aliases comb filtering and noise at high frequency.
+        let halfStep = sqrt(pow(ratio, 1.0 / Double(pointCount - 1)))
+        let binsPerHz = Double(transformSize) / sampleRate
+        let nyquistBin = transformSize / 2
         for point in 0..<pointCount {
             let fraction = Double(point) / Double(pointCount - 1)
             let frequency = minimumFrequency * pow(ratio, fraction)
-            let binPosition = frequency * Double(transformSize) / sampleRate
+            let binPosition = frequency * binsPerHz
             let bin = min(
-                transformSize / 2,
+                nyquistBin,
                 max(1, Int(binPosition.rounded()))
             )
+            let lowerBin = max(1, Int(ceil(frequency / halfStep * binsPerHz)))
+            let upperBin = min(nyquistBin, Int(floor(frequency * halfStep * binsPerHz)))
+            var magnitude: Double
+            if upperBin > lowerBin {
+                var power = 0.0
+                for index in lowerBin...upperBin {
+                    let re = Double(transferReal[index])
+                    let im = Double(transferImaginary[index])
+                    power += re * re + im * im
+                }
+                magnitude = sqrt(power / Double(upperBin - lowerBin + 1))
+            } else {
+                magnitude = hypot(Double(transferReal[bin]), Double(transferImaginary[bin]))
+            }
             let real = Double(transferReal[bin])
             let imaginary = Double(transferImaginary[bin])
-            let magnitude = hypot(real, imaginary)
+            if !magnitude.isFinite { magnitude = 0 }
             var magnitudeDB = 20.0 * log10(max(magnitude, 1.0e-12))
             if let calibration {
                 do {

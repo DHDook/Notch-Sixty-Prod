@@ -1055,7 +1055,14 @@ final class AudioIOEngine: ObservableObject {
     private var audioUnitRackRebuildPending = false
     /// Asked, on the main actor, to re-instantiate the plug-in rack at the
     /// current output format after the transport came back without it.
-    var onAudioUnitRackRequiresRebuild: (() -> Void)?
+    var onAudioUnitRackRequiresRebuild: (@MainActor () -> Void)?
+    /// Supplies the deployed room-correction filter re-synthesized for another
+    /// output rate (the product layer owns the design source). The published
+    /// configuration keeps the deployed filter; only the realtime program uses
+    /// the adapted one.
+    var roomCorrectionFilterAdapter: (@MainActor (RoomCorrectionFilter, Double) -> RoomCorrectionFilter?)?
+    private var adaptedRoomCorrectionFilter:
+        (source: RoomCorrectionFilter, sampleRate: Double, filter: RoomCorrectionFilter)?
 
     private(set) var sampleRateChangesHandled: UInt64 = 0
     private(set) var recoveryAttempts: UInt64 = 0
@@ -1541,7 +1548,8 @@ final class AudioIOEngine: ObservableObject {
         let format = AudioUnitRackProcessingFormat(
             sampleRate: output.nominalSampleRate,
             channelCount: channelCount,
-            maximumFramesPerSlice: 4_096
+            maximumFramesPerSlice: AudioUnitRackProcessingFormat
+                .recommendedMaximumFramesPerSlice(sampleRate: output.nominalSampleRate)
         )
         try format.validate()
         return format
@@ -1630,7 +1638,8 @@ final class AudioIOEngine: ObservableObject {
             let format = AudioUnitRackProcessingFormat(
                 sampleRate: output.nominalSampleRate,
                 channelCount: channelCount,
-                maximumFramesPerSlice: 4_096
+                maximumFramesPerSlice: AudioUnitRackProcessingFormat
+                    .recommendedMaximumFramesPerSlice(sampleRate: output.nominalSampleRate)
             )
             try format.validate()
             return format
@@ -3530,10 +3539,31 @@ final class AudioIOEngine: ObservableObject {
         )
     }
 
-    private func validateRoomCorrectionFilter(
+    private func rateAdaptedRoomCorrectionFilter(
         _ filter: RoomCorrectionFilter,
+        sampleRate: Double
+    ) -> RoomCorrectionFilter {
+        guard let designRate = filter.sampleRate,
+              abs(designRate - sampleRate) >= 0.5 else { return filter }
+        if let cached = adaptedRoomCorrectionFilter,
+           abs(cached.sampleRate - sampleRate) < 0.5,
+           cached.source == filter {
+            return cached.filter
+        }
+        guard let adapted = roomCorrectionFilterAdapter?(filter, sampleRate),
+              let adaptedRate = adapted.sampleRate,
+              abs(adaptedRate - sampleRate) < 0.5 else {
+            return filter
+        }
+        adaptedRoomCorrectionFilter = (filter, sampleRate, adapted)
+        return adapted
+    }
+
+    private func validateRoomCorrectionFilter(
+        _ deployedFilter: RoomCorrectionFilter,
         outputSampleRate: Double
     ) throws {
+        let filter = rateAdaptedRoomCorrectionFilter(deployedFilter, sampleRate: outputSampleRate)
         let tapCount = filter.leftTaps.count
         guard tapCount > 0, tapCount <= Int(N60_CONVOLUTION_MAX_TAPS) else {
             throw RoomCorrectionConfigurationError.invalidTapCount(tapCount)
@@ -3552,10 +3582,14 @@ final class AudioIOEngine: ObservableObject {
     }
 
     private func prepareRoomCorrectionProgram(
-        _ filter: RoomCorrectionFilter,
+        _ deployedFilter: RoomCorrectionFilter,
         for session: CoreAudioTransportSession
     ) throws -> PreparedRoomCorrectionProgram {
-        try validateRoomCorrectionFilter(filter, outputSampleRate: session.outputFormat.sampleRate)
+        try validateRoomCorrectionFilter(deployedFilter, outputSampleRate: session.outputFormat.sampleRate)
+        let filter = rateAdaptedRoomCorrectionFilter(
+            deployedFilter,
+            sampleRate: session.outputFormat.sampleRate
+        )
 
         let slot = nextRoomCorrectionProgramSlot % UInt32(N60_CONVOLUTION_PROGRAM_SLOTS)
         let programInfo: N60ConvolutionProgramInfo
@@ -4073,12 +4107,15 @@ final class AudioIOEngine: ObservableObject {
         guard let reference = profile.binauralProfile else {
             throw HeadphoneDeviceProfileError.binauralProfileRequired
         }
-        let asset = try binauralProfileAssetStore.load(id: reference.assetID)
-        guard asset.id == reference.assetID,
-              abs(asset.sampleRate - reference.sampleRate) < 0.5,
-              asset.tapCount == reference.tapCount else {
+        let storedAsset = try binauralProfileAssetStore.load(id: reference.assetID)
+        guard storedAsset.id == reference.assetID,
+              abs(storedAsset.sampleRate - reference.sampleRate) < 0.5,
+              storedAsset.tapCount == reference.tapCount else {
             throw HeadphoneDeviceProfileError.invalidBinauralProfileReference
         }
+        // HRIRs measured at another rate are converted off the realtime path
+        // rather than refusing to start after a nominal-rate change.
+        let asset = try storedAsset.resampled(to: output.nominalSampleRate)
         let prepared = try asset.prepare(for: profile.programLayout)
         let headphoneSnapshot = try profile.makeRealtimeSnapshot(
             sampleRate: output.nominalSampleRate

@@ -625,6 +625,16 @@ private struct ProductionSidebarBrand: View {
 
 private struct ProductionDashboardView: View {
     @ObservedObject var engine: AudioIOEngine
+    @State private var actionError: String?
+
+    private func perform(_ action: () throws -> Void) {
+        do {
+            try action()
+            actionError = nil
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
 
     var body: some View {
         ScrollView {
@@ -644,6 +654,8 @@ private struct ProductionDashboardView: View {
                 }
 
                 StereoSignatureVUMeterPanel(engine: engine)
+
+                ProductionActionErrorBanner(message: $actionError)
 
                 audioControls
                 masterControls
@@ -686,6 +698,18 @@ private struct ProductionDashboardView: View {
         }
     }
 
+    private var masterVolumeReadout: String {
+        let level = engine.masterVolumeConfiguration.level
+        let percent = String(format: "%.1f%%", level * 100)
+        guard engine.masterVolumeCapabilities.controlMode == .softwareDSP else {
+            return percent
+        }
+        guard let db = MasterVolumeConfiguration.softwareTaperDB(forLevel: level) else {
+            return percent + " · −∞ dB"
+        }
+        return percent + String(format: " · %.1f dB", db)
+    }
+
     private var outputSummary: String {
         guard let output = engine.selectedOutputDevice else { return "Choose an output below to begin." }
         return "\(output.name) · \(String(format: "%.1f", output.nominalSampleRate / 1_000)) kHz"
@@ -708,10 +732,24 @@ private struct ProductionDashboardView: View {
     private var dynamicsSummary: String {
         let d = engine.dynamicsConfiguration
         var names: [String] = []
+        if d.stereoMode != .stereo { names.append(d.stereoMode.displayName) }
+        if d.stereoWidener.enabled { names.append("Widener") }
+        if d.dcOffsetFilter.enabled { names.append("DC Filter") }
+        if d.infrasonicFilter.enabled { names.append("Infrasonic Filter") }
+        if d.mainsNotch.enabled { names.append("Hum Notch") }
+        if d.spectralDenoiser.enabled { names.append("Denoiser") }
+        if d.loudnessMatch.enabled { names.append("Loudness Match") }
+        if d.loudnessContour.enabled { names.append("Loudness Contour") }
+        if d.deHarsh.enabled { names.append("De-Harsh") }
+        if d.dialogueRelativeLeveler.enabled { names.append("Dialogue Leveler") }
+        if d.deEsser.enabled { names.append("De-Esser") }
+        if d.multibandCompressor.enabled { names.append("Multiband") }
         if d.compressor.enabled { names.append("Compressor") }
         if d.expander.enabled { names.append("Expander") }
+        if d.gainRider.enabled { names.append("Gain Rider") }
+        if d.automaticHeadroom.enabled { names.append("Auto Headroom") }
+        if d.softClipper.enabled { names.append("Soft Clipper") }
         if d.pauseGate.enabled { names.append("Pause Gate") }
-        if d.spectralDenoiser.enabled { names.append("Denoiser") }
         if d.limiter.enabled { names.append("Limiter") }
         return names.isEmpty ? "No dynamics processors enabled." : names.joined(separator: " · ")
     }
@@ -764,7 +802,7 @@ private struct ProductionDashboardView: View {
                 Text("Output Device").font(.subheadline.bold())
                 Picker("Output Device", selection: Binding(
                     get: { engine.routeConfiguration.selectedOutputUID },
-                    set: { try? engine.selectOutput(uid: $0) }
+                    set: { uid in perform { try engine.selectOutput(uid: uid) } }
                 )) {
                     Text("No Output").tag(String?.none)
                     ForEach(engine.outputDevices) { device in
@@ -777,7 +815,7 @@ private struct ProductionDashboardView: View {
                 .disabled(engine.lifecycleState != .idle)
 
                 Button {
-                    try? engine.refreshOutputDevices()
+                    perform { try engine.refreshOutputDevices() }
                 } label: {
                     Label("Refresh Outputs", systemImage: "arrow.clockwise")
                 }
@@ -803,7 +841,7 @@ private struct ProductionDashboardView: View {
         GlassEffectContainer(spacing: 12) {
             HStack(spacing: 16) {
                 Button {
-                    try? engine.setMasterMuted(!engine.masterVolumeConfiguration.muted)
+                    perform { try engine.setMasterMuted(!engine.masterVolumeConfiguration.muted) }
                 } label: {
                     Image(systemName: engine.masterVolumeConfiguration.muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
                         .frame(width: 28, height: 28)
@@ -814,13 +852,13 @@ private struct ProductionDashboardView: View {
                     HStack {
                         Text("Master Volume").font(.subheadline.bold())
                         Spacer()
-                        Text("\(engine.masterVolumeConfiguration.level * 100, specifier: "%.1f")%")
+                        Text(masterVolumeReadout)
                             .monospacedDigit().foregroundStyle(.secondary)
                     }
                     Slider(
                         value: Binding(
                             get: { engine.masterVolumeConfiguration.level },
-                            set: { try? engine.setMasterVolumeLevel($0) }
+                            set: { level in perform { try engine.setMasterVolumeLevel(level) } }
                         ),
                         in: MasterVolumeConfiguration.levelRange
                     )
@@ -828,7 +866,7 @@ private struct ProductionDashboardView: View {
 
                 Divider().frame(height: 34)
                 Button {
-                    try? engine.setGlobalDSPBypassed(!engine.playbackControlConfiguration.globalBypassed)
+                    perform { try engine.setGlobalDSPBypassed(!engine.playbackControlConfiguration.globalBypassed) }
                 } label: {
                     Label(
                         engine.playbackControlConfiguration.globalBypassed ? "Bypassed" : "DSP Active",
@@ -2084,62 +2122,31 @@ private struct ProductionSpeakersView: View {
     }
 }
 
-private struct ProductionRoomCorrectionView: View {
-    @ObservedObject var engine: AudioIOEngine
+/// Inline banner for an engine rejection of a direct control edit (for
+/// example a change that requires stopping multichannel processing). Controls
+/// bound to the engine snap back on failure; this explains why.
+struct ProductionActionErrorBanner: View {
+    @Binding var message: String?
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                pageHeader(
-                    "Room Correction",
-                    "Measurement, target-curve, and correction-filter workflows are isolated from daily playback controls."
-                )
-
-                VStack(alignment: .leading, spacing: 18) {
-                    HStack {
-                        VStack(alignment: .leading) {
-                            Text("Correction Filter").font(.headline)
-                            Text(engine.roomCorrectionConfiguration.filter?.name ?? "No correction filter loaded")
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Toggle("Enabled", isOn: Binding(
-                            get: { engine.roomCorrectionConfiguration.enabled },
-                            set: { try? engine.setRoomCorrectionEnabled($0) }
-                        ))
-                        .disabled(engine.roomCorrectionConfiguration.filter == nil)
-                    }
-
-                    ContentUnavailableView(
-                        "Measurement & Filter Import",
-                        systemImage: "waveform.badge.magnifyingglass",
-                        description: Text("The production multi-seat measurement, target-curve, and correction workflow will live here.")
-                    )
-                    .frame(maxWidth: .infinity, minHeight: 240)
+        if let message {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Label(message, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .textSelection(.enabled)
+                Spacer(minLength: 8)
+                Button {
+                    self.message = nil
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
                 }
-                .padding(20)
-                .glassEffect(.regular, in: .rect(cornerRadius: 18))
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Dismiss")
             }
-            .padding(28)
-            .frame(maxWidth: 900, alignment: .topLeading)
+            .font(.callout)
+            .padding(10)
+            .background(.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
         }
-    }
-}
-
-private struct ProductionPlaceholderPage: View {
-    let title: String
-    let subtitle: String
-    let systemImage: String
-    let detail: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            pageHeader(title, subtitle)
-            ContentUnavailableView(title, systemImage: systemImage, description: Text(detail))
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .padding(28)
-        .navigationTitle(title)
     }
 }
 

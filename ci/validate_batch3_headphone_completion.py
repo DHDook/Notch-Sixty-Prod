@@ -28,7 +28,7 @@ for token in (
     "HeadphoneCorrectionProposal.load(", "stageLocalProposal(",
     "headroomAttenuationDB", "conservativeRequiredHeadroomDB",
     "sampleRate: rate", "validateStructure(sampleRate: rate)",
-    "profile.sampleRate", "Automatic HRTF resampling is not implemented",
+    "profile.sampleRate", "It will be converted to the output rate when processing starts",
 ):
     need(token in ui, "missing production UX/safety item: " + token)
 for token in (
@@ -47,7 +47,7 @@ for token in (
     "testPerEarElectricalResponsePreviewUsesActualProductionCoefficients",
     "testProposalRequiresSourceCreditAndExplicitMatchingRate",
     "testProposedLocalCorrectionStagesOnlyInDraftWithSufficientHeadroom",
-    "testSofaRateMismatchNeverTriggersSilentSRC",
+    "testSofaRateMismatchIsConvertedWithinRendererTapBudget",
     "testDisabledBandsDoNotAddHeadroomOrGain",
 ):
     need(token in tests, "missing Swift XCTest: " + token)
@@ -68,4 +68,9 @@ need("PR117D_SOFA_FIXTURE_DIR" in workflow
 need("automaticResampleSOFA" not in ui and
      "automaticResampleSOFA" not in configuration,
      "new unverified SOFA resampler must not be silently introduced")
+# RC hardening: HRIR rate conversion is explicit (UI copy above), control-plane
+# only, frequency-response verified, and fails closed over the tap budget.
+need("func resampled(to targetSampleRate: Double)" in assets
+     and "resampledTapCount" in configuration,
+     "HRIR rate conversion must stay the single verified control-plane path")
 print("Batch 3 PEQ/SOFA/proposal UI and fail-closed rate/headroom contract: PASS")

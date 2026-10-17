@@ -744,12 +744,33 @@ struct MasterVolumeDeviceCapabilities: Equatable, Sendable {
 
 struct MasterVolumeConfiguration: Equatable, Sendable {
     static let levelRange = 0.0...1.0
+    /// Software volume uses an audio (cubic) taper: gain = level³, i.e.
+    /// 60 dB per decade of slider position. 50% ≈ -18 dB, 25% ≈ -36 dB, and a
+    /// 1/16 key step from full scale ≈ -1.7 dB, giving fine control at low
+    /// listening levels instead of a linear-amplitude slider whose last step
+    /// jumps from -24 dB to silence. Device-mode outputs use the driver's own
+    /// volume scalar and are unaffected.
+    static let softwareTaperExponent = 3.0
 
     var level: Double = 1.0
     var muted = false
 
+    static func softwareTaperGain(forLevel level: Double) -> Double {
+        guard level.isFinite, level > 0 else { return 0 }
+        return pow(min(level, 1), softwareTaperExponent)
+    }
+
+    /// Attenuation shown beside the percentage, nil at silence.
+    static func softwareTaperDB(forLevel level: Double) -> Double? {
+        let gain = softwareTaperGain(forLevel: level)
+        guard gain > 0 else { return nil }
+        return 20 * log10(gain)
+    }
+
     func softwareGain(for capabilities: MasterVolumeDeviceCapabilities) -> Float {
-        let volumeGain = capabilities.controlMode == .device ? 1.0 : level
+        let volumeGain = capabilities.controlMode == .device
+            ? 1.0
+            : Self.softwareTaperGain(forLevel: level)
         let muteGain = muted && !capabilities.usesDeviceMute ? 0.0 : 1.0
         return Float(volumeGain * muteGain)
     }
@@ -765,10 +786,10 @@ protocol MasterVolumePersisting: AnyObject {
 }
 
 final class UserDefaultsMasterVolumeStore: MasterVolumePersisting {
-    /// Level used the first time a software-volume output is seen. Software
-    /// gain is linear amplitude, so 0.25 is -12 dBFS: never full scale into an
-    /// amplifier that has no volume control of its own.
-    static let firstUseSoftwareLevel = 0.25
+    /// Level used the first time a software-volume output is seen: 50% on the
+    /// software taper (≈ -18 dB), never full scale into an amplifier that has
+    /// no volume control of its own.
+    static let firstUseSoftwareLevel = 0.5
     static let defaultsKey = "audio.masterVolume.softwareByOutputUID"
 
     private let defaults: UserDefaults

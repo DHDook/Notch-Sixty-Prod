@@ -7,12 +7,23 @@ struct ProductionDynamicsView: View {
     @State private var selectedModule: ProductionDynamicsModule = .compressor
     @State private var mainsDetectInFlight = false
     @State private var mainsDetectionMessage: String?
+    @State private var actionError: String?
+
+    private func perform(_ action: () throws -> Void) {
+        do {
+            try action()
+            actionError = nil
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
 
     private var configuration: DynamicsConfiguration { engine.dynamicsConfiguration }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             header
+            ProductionActionErrorBanner(message: $actionError)
 
             HStack(alignment: .top, spacing: 12) {
                 moduleNavigator
@@ -276,7 +287,7 @@ struct ProductionDynamicsView: View {
             ProductionDynamicsTelemetryView(engine: engine, kind: .denoiser)
             Picker("Preset", selection: Binding(
                 get: { configuration.spectralDenoiser.preset },
-                set: { try? engine.applySpectralDenoiserPreset($0) }
+                set: { preset in perform { try engine.applySpectralDenoiserPreset(preset) } }
             )) {
                 ForEach(SpectralDenoiserPreset.allCases) { preset in Text(preset.displayName).tag(preset) }
             }
@@ -316,9 +327,9 @@ struct ProductionDynamicsView: View {
 
             Divider()
             HStack {
-                Button("Capture Noise Profile") { try? engine.captureSpectralNoiseProfile() }
+                Button("Capture Noise Profile") { perform { try engine.captureSpectralNoiseProfile() } }
                     .buttonStyle(.glassProminent)
-                Button("Reset Profile") { try? engine.resetSpectralNoiseProfile() }
+                Button("Reset Profile") { perform { try engine.resetSpectralNoiseProfile() } }
                     .buttonStyle(.glass)
                 Spacer()
             }
@@ -710,7 +721,7 @@ struct ProductionDynamicsView: View {
     private func update(_ mutation: (inout DynamicsConfiguration) -> Void) {
         var updated = engine.dynamicsConfiguration
         mutation(&updated)
-        try? engine.replaceDynamicsConfiguration(updated)
+        perform { try engine.replaceDynamicsConfiguration(updated) }
     }
 
     private func preserveEnabledReset<Value>(_ keyPath: WritableKeyPath<DynamicsConfiguration, Value>, defaultValue: Value) {

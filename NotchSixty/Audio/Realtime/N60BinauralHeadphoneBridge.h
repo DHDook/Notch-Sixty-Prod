@@ -518,6 +518,16 @@ static inline OSStatus N60BinauralHeadphoneOutputIOProc(
         }
     }
 
+    // Underrun: fade the available frames to zero rather than stepping into
+    // dequeued silence, then re-arm the startup gate at the end.
+    const uint32_t underrunAvailableFrames =
+        before.bufferedFrames < frameCount ? (uint32_t)before.bufferedFrames : frameCount;
+    const bool underrunFadeOut = underrunAvailableFrames < frameCount;
+    const float underrunFadeStep = underrunFadeOut && underrunAvailableFrames > 0u
+        ? 1.0f / (float)underrunAvailableFrames
+        : 0.0f;
+    float underrunFade = underrunFadeOut && underrunAvailableFrames == 0u ? 0.0f : 1.0f;
+
     const float masterGain = N60BinauralHeadphoneBitsToFloat(
         atomic_load_explicit(&bridge->outputGainBits, memory_order_acquire)
     );
@@ -545,6 +555,12 @@ static inline OSStatus N60BinauralHeadphoneOutputIOProc(
             atomic_fetch_add_explicit(
                 &bridge->renderFailures, 1u, memory_order_relaxed
             );
+            // Consume this quantum so a rejected callback costs silence, not
+            // a permanent quantum of extra buffered latency.
+            N60ProgramTransportFrame discarded = {0};
+            for (uint32_t frameIndex = 0; frameIndex < underrunAvailableFrames; ++frameIndex) {
+                (void)N60ProgramTransportDequeueFrame(bridge->transport, &discarded);
+            }
             return noErr;
         }
 
@@ -645,7 +661,12 @@ static inline OSStatus N60BinauralHeadphoneOutputIOProc(
         N60ProtectionProcessStereoFrame(
             bridge->protectionRuntime, &bridge->protectionSnapshot, &left, &right
         );
-        const float gain = N60BinauralHeadphoneNextOutputGain(bridge, masterGain);
+        float gain = N60BinauralHeadphoneNextOutputGain(bridge, masterGain);
+        if (underrunFadeOut) {
+            gain *= frameIndex < underrunAvailableFrames ? underrunFade : 0.0f;
+            underrunFade -= underrunFadeStep;
+            if (underrunFade < 0.0f) underrunFade = 0.0f;
+        }
         left *= gain;
         right *= gain;
         if (meterDemand) {
@@ -676,6 +697,10 @@ static inline OSStatus N60BinauralHeadphoneOutputIOProc(
         atomic_store_explicit(&bridge->meterRMSRightBits, N60BinauralHeadphoneFloatToBits((float)sqrt(meterSquareRight / (double)frameCount)), memory_order_relaxed);
         atomic_fetch_add_explicit(&bridge->meterOverRangeLeft, meterOverLeft, memory_order_relaxed);
         atomic_fetch_add_explicit(&bridge->meterOverRangeRight, meterOverRight, memory_order_relaxed);
+    }
+    if (underrunFadeOut) {
+        atomic_store_explicit(&bridge->outputGateOpen, false, memory_order_release);
+        bridge->startupFadeRemaining = bridge->startupFadeFrames;
     }
     return noErr;
 }

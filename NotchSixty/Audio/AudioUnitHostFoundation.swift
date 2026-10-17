@@ -106,6 +106,18 @@ struct AudioUnitRackProcessingFormat: Codable, Equatable, Sendable {
         self.maximumFramesPerSlice = maximumFramesPerSlice
     }
 
+    /// Slice budget scaled with sample rate so high-rate devices, whose HAL
+    /// buffers are proportionally larger, are not rejected by a fixed 4096:
+    /// 4096 through 48 kHz, 8192 at 88.2/96, 16384 at 176.4/192, 32768 at
+    /// 352.8/384 kHz.
+    static func recommendedMaximumFramesPerSlice(sampleRate: Double) -> Int {
+        guard sampleRate.isFinite, sampleRate > 0 else { return 4_096 }
+        let multiple = Int(ceil(sampleRate / 48_000.0 - 1.0e-9))
+        var frames = 4_096
+        while frames < 4_096 * multiple, frames < 32_768 { frames <<= 1 }
+        return frames
+    }
+
     func validate() throws {
         guard sampleRate.isFinite,
               sampleRate > 0,

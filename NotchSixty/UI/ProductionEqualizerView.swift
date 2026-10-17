@@ -8,6 +8,16 @@ struct ProductionEqualizerView: View {
     @State private var dragPreview: EQBand?
     @State private var pendingDragBand: EQBand?
     @State private var pendingPublishTask: Task<Void, Never>?
+    @State private var actionError: String?
+
+    private func perform(_ action: () throws -> Void) {
+        do {
+            try action()
+            actionError = nil
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
 
     private var configuration: StereoEQConfiguration { engine.stereoEQConfiguration }
     private var bands: [EQBand] { configuration.editableBands }
@@ -23,6 +33,7 @@ struct ProductionEqualizerView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             header
+            ProductionActionErrorBanner(message: $actionError)
             modeBar
 
             HSplitView {
@@ -76,7 +87,7 @@ struct ProductionEqualizerView: View {
                     HStack(spacing: 8) {
                         Picker("Channels", selection: Binding(
                             get: { configuration.channelMode },
-                            set: { try? engine.setEQChannelMode($0) }
+                            set: { mode in perform { try engine.setEQChannelMode(mode) } }
                         )) {
                             ForEach(EQChannelMode.allCases) { mode in Text(mode.displayName).tag(mode) }
                         }
@@ -108,7 +119,7 @@ struct ProductionEqualizerView: View {
 
                     Picker("Phase", selection: Binding(
                         get: { configuration.phaseMode },
-                        set: { try? engine.setEQPhaseMode($0) }
+                        set: { mode in perform { try engine.setEQPhaseMode(mode) } }
                     )) {
                         ForEach(EQPhaseMode.allCases) { mode in Text(mode.displayName).tag(mode) }
                     }
@@ -122,7 +133,7 @@ struct ProductionEqualizerView: View {
 
                 Toggle("Bypass", isOn: Binding(
                     get: { configuration.bypassed },
-                    set: { try? engine.setEQBypassed($0) }
+                    set: { bypassed in perform { try engine.setEQBypassed(bypassed) } }
                 ))
                 .toggleStyle(.switch)
                 .fixedSize(horizontal: true, vertical: false)
@@ -171,7 +182,7 @@ struct ProductionEqualizerView: View {
                     pendingDragBand = nil
                     let sanitized = sanitize(band)
                     dragPreview = nil
-                    try? engine.updateEQBand(sanitized)
+                    perform { try engine.updateEQBand(sanitized) }
                 }
             )
             .frame(minHeight: 330)
@@ -495,7 +506,7 @@ struct ProductionEqualizerView: View {
                 pendingPublishTask = nil
                 pendingDragBand = nil
                 dragPreview = nil
-                try? engine.updateEQBand(sanitize(updated))
+                perform { try engine.updateEQBand(sanitize(updated)) }
             }
         )
     }
@@ -553,7 +564,7 @@ struct ProductionEqualizerView: View {
             while !Task.isCancelled {
                 guard let next = pendingDragBand else { break }
                 pendingDragBand = nil
-                try? engine.updateEQBand(next)
+                perform { try engine.updateEQBand(next) }
                 try? await Task.sleep(nanoseconds: 33_000_000)
                 guard !Task.isCancelled else { break }
             }

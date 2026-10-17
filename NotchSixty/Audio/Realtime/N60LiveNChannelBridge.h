@@ -49,8 +49,17 @@ typedef struct {
     bool roomTreatmentConfigured;
     N60MIMOTreatmentLiveSnapshot roomTreatment;
     uint64_t roomTreatmentLatencyFrames;
+    uint64_t safetyLimiterEngagedSamples;
     N60LiveNChannelMeterSnapshot meter;
 } N60LiveNChannelBridgeSnapshot;
+
+/// Final per-physical-channel safety limiter for the semantic path, which has
+/// no dynamics/protection stage of its own. Summed redirected bass, the +10 dB
+/// LFE playback gain, calibration boosts and room treatment can all exceed
+/// full scale; this guarantees no output sample exceeds -0.3 dBFS. Instant
+/// attack (no look-ahead, no added latency), exponential release.
+#define N60_LIVE_SAFETY_LIMITER_CEILING 0.966f
+#define N60_LIVE_SAFETY_LIMITER_RELEASE_SECONDS 0.100
 
 typedef struct N60LiveNChannelBridge {
     N60ProgramTransport * _Nullable transport;
@@ -67,8 +76,11 @@ typedef struct N60LiveNChannelBridge {
     uint32_t outputGateMinimumBufferedFrames;
     uint32_t startupFadeFrames;
     uint32_t startupFadeRemaining;
+    float safetyLimiterGain[N60_LIVE_MAX_PHYSICAL_CHANNELS];
+    float safetyLimiterReleaseAlpha;
 
     _Atomic bool outputGateOpen;
+    _Atomic uint64_t safetyLimiterEngagedSamples;
     _Atomic uint32_t outputGainBits;
     _Atomic bool meteringDemand;
     _Atomic uint32_t meterProgramPeakBits[N60_MAX_PROGRAM_CHANNELS];
@@ -168,6 +180,12 @@ static inline N60LiveNChannelBridge * _Nullable N60LiveNChannelBridgeCreate(
     bridge->outputGateMinimumBufferedFrames = outputGateMinimumBufferedFrames;
     bridge->startupFadeFrames = startupFadeFrames;
     bridge->startupFadeRemaining = 0u;
+    for (uint32_t physical = 0; physical < N60_LIVE_MAX_PHYSICAL_CHANNELS; ++physical) {
+        bridge->safetyLimiterGain[physical] = 1.0f;
+    }
+    bridge->safetyLimiterReleaseAlpha = (float)(
+        1.0 - exp(-1.0 / (N60_LIVE_SAFETY_LIMITER_RELEASE_SECONDS * graph.sampleRate))
+    );
     atomic_store_explicit(
         &bridge->outputGateOpen,
         outputGateMinimumBufferedFrames == 0u,
@@ -290,6 +308,10 @@ static inline bool N60LiveNChannelBridgeReset(
         N60MIMOTreatmentLiveIntegrationReset(bridge->roomTreatment);
     }
     bridge->startupFadeRemaining = 0u;
+    for (uint32_t physical = 0; physical < N60_LIVE_MAX_PHYSICAL_CHANNELS; ++physical) {
+        bridge->safetyLimiterGain[physical] = 1.0f;
+    }
+    atomic_store_explicit(&bridge->safetyLimiterEngagedSamples, 0u, memory_order_relaxed);
     atomic_store_explicit(
         &bridge->outputGateOpen,
         bridge->outputGateMinimumBufferedFrames == 0u,
@@ -586,6 +608,10 @@ static inline N60LiveNChannelBridgeSnapshot N60LiveNChannelBridgeGetSnapshot(
         .transport = N60ProgramTransportGetSnapshot(bridge->transport),
         .adaptiveSampleRateEnabled = bridge->adaptiveSRC != NULL,
         .roomTreatmentConfigured = bridge->roomTreatment != NULL,
+        .safetyLimiterEngagedSamples = atomic_load_explicit(
+            &bridge->safetyLimiterEngagedSamples,
+            memory_order_relaxed
+        ),
         .meter = N60LiveNChannelBridgeGetMeterSnapshot(bridge),
     };
     if (bridge->adaptiveSRC != NULL) {
@@ -613,6 +639,33 @@ static inline void N60LiveNChannelZeroOutput(AudioBufferList * _Nullable outputD
             memset(buffer->mData, 0, buffer->mDataByteSize);
         }
     }
+}
+
+/// Realtime-safe. Applies `gain`, then the per-channel safety ceiling, in place.
+/// Returns the number of samples the limiter had to reduce.
+static inline uint32_t N60LiveNChannelApplySafetyLimiter(
+    N60LiveNChannelBridge * _Nonnull bridge,
+    N60LiveNChannelPhysicalFrame * _Nonnull frame,
+    float gain
+) {
+    uint32_t engaged = 0u;
+    const uint32_t count = frame->physicalChannelCount < N60_LIVE_MAX_PHYSICAL_CHANNELS
+        ? frame->physicalChannelCount
+        : N60_LIVE_MAX_PHYSICAL_CHANNELS;
+    for (uint32_t physical = 0; physical < count; ++physical) {
+        float value = frame->values[physical] * gain;
+        if (!isfinite(value)) value = 0.0f;
+        float limiterGain = bridge->safetyLimiterGain[physical];
+        limiterGain += (1.0f - limiterGain) * bridge->safetyLimiterReleaseAlpha;
+        const float magnitude = fabsf(value);
+        if (magnitude * limiterGain > N60_LIVE_SAFETY_LIMITER_CEILING) {
+            limiterGain = N60_LIVE_SAFETY_LIMITER_CEILING / magnitude;
+            engaged += 1u;
+        }
+        bridge->safetyLimiterGain[physical] = limiterGain;
+        frame->values[physical] = value * limiterGain;
+    }
+    return engaged;
 }
 
 static inline bool N60LiveNChannelWritePhysicalFrame(
@@ -796,6 +849,20 @@ static inline OSStatus N60LiveNChannelOutputIOProc(
         }
     }
 
+    // Matched-rate underrun: fade the available frames to zero rather than
+    // stepping into dequeued silence, then re-arm the startup gate below.
+    uint32_t underrunAvailableFrames = frameCount;
+    if (!adaptiveSampleRate) {
+        const uint32_t buffered =
+            N60ProgramTransportGetSnapshot(bridge->transport).bufferedFrames;
+        if (buffered < frameCount) underrunAvailableFrames = buffered;
+    }
+    const bool underrunFadeOut = underrunAvailableFrames < frameCount;
+    const float underrunFadeStep = underrunFadeOut && underrunAvailableFrames > 0u
+        ? 1.0f / (float)underrunAvailableFrames
+        : 0.0f;
+    float underrunFade = underrunFadeOut && underrunAvailableFrames == 0u ? 0.0f : 1.0f;
+
     const float masterGain = N60LiveNChannelBitsToFloat(
         atomic_load_explicit(&bridge->outputGainBits, memory_order_acquire)
     );
@@ -824,6 +891,14 @@ static inline OSStatus N60LiveNChannelOutputIOProc(
             atomic_fetch_add_explicit(
                 &bridge->renderFailures, 1u, memory_order_relaxed
             );
+            // Consume this quantum so a rejected callback costs silence, not
+            // a permanent quantum of extra buffered latency.
+            if (!adaptiveSampleRate) {
+                N60ProgramTransportFrame discarded = {0};
+                for (uint32_t frameIndex = 0; frameIndex < underrunAvailableFrames; ++frameIndex) {
+                    (void)N60ProgramTransportDequeueFrame(bridge->transport, &discarded);
+                }
+            }
             return noErr;
         }
 
@@ -920,7 +995,19 @@ static inline OSStatus N60LiveNChannelOutputIOProc(
             continue;
         }
 
-        const float gain = N60LiveNChannelBridgeNextOutputGain(bridge, masterGain);
+        float gain = N60LiveNChannelBridgeNextOutputGain(bridge, masterGain);
+        if (underrunFadeOut) {
+            gain *= frameIndex < underrunAvailableFrames ? underrunFade : 0.0f;
+            underrunFade -= underrunFadeStep;
+            if (underrunFade < 0.0f) underrunFade = 0.0f;
+        }
+        const uint32_t limited = N60LiveNChannelApplySafetyLimiter(bridge, &physical, gain);
+        if (limited > 0u) {
+            atomic_fetch_add_explicit(
+                &bridge->safetyLimiterEngagedSamples, limited, memory_order_relaxed
+            );
+        }
+        gain = 1.0f;
         if (meterDemand) {
             for (uint32_t physicalIndex = 0; physicalIndex < physical.physicalChannelCount; ++physicalIndex) {
                 const float value = physical.values[physicalIndex] * gain;
@@ -983,6 +1070,10 @@ static inline OSStatus N60LiveNChannelOutputIOProc(
                 );
             }
         }
+    }
+    if (underrunFadeOut) {
+        atomic_store_explicit(&bridge->outputGateOpen, false, memory_order_release);
+        bridge->startupFadeRemaining = bridge->startupFadeFrames;
     }
     return noErr;
 }

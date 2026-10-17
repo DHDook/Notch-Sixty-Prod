@@ -373,7 +373,7 @@ final class ProductionAnalysisTests: XCTestCase {
 
         let savedURL = try store.save(project)
         XCTAssertTrue(FileManager.default.fileExists(atPath: savedURL.path))
-        XCTAssertEqual(savedURL.lastPathComponent, "project-v2.json")
+        XCTAssertEqual(savedURL.lastPathComponent, "project-v3.json")
         XCTAssertEqual(try store.load(project.id), project)
         XCTAssertEqual(try store.existingProjectIDs(), [project.id])
     }
