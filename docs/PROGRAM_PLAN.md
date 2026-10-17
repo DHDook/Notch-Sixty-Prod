@@ -286,14 +286,23 @@ the C++ core may depend on an Apple framework.
 ## How to run each epic in Claude Code
 
 Run the build work in Claude Code on the Mac, where it can build the Xcode project, run XCTest
-and reach the bench hardware.
+and reach the bench hardware. The repo is preconfigured, so each session needs only a one-line
+instruction such as "Continue the plan" or "Start E2".
 
-1. **Per epic, plan first:** start a session on a fresh branch, ask for a plan of that epic only, and review it before any edits. Save the approved plan as `docs/epics/E<n>.md`.
-2. **Build in slices:** one short-lived branch and PR per slice, each behind the epic's feature flag, merged to `main` when its tests pass.
-3. **Test as you go:** every DSP change gets deterministic XCTests and a reference-lab case at the standard rates; record manual bench checks in the PR.
-4. **Close the epic:** tick its boxes here, update the gate status, and remove the flag once the phase gate passes.
+- **`CLAUDE.md`** holds the session protocol (orient, plan, build one slice, verify, open a PR,
+  close out, stop for bench work), the token rules, and the owner decisions.
+- **`.claude/settings.json`** sets the model to `opusplan` (Opus in plan mode, Sonnet when
+  executing) and pre-approves routine git, build and test commands. Direct pushes to `main` and
+  force pushes are denied, so every change arrives as a PR.
+- **`.claude/agents/`** holds five helper agents that do routine work on cheaper models:
+  `code-scout`, `build-test-runner`, `plan-tracker` and `pr-writer` (Haiku), and
+  `realtime-reviewer` (Sonnet).
 
-Start with E1 and E2 together, then E3 once both land; E5 can run in parallel at any time.
+The owner's part each cycle: start a session, approve the plan, review and merge the PR, and do
+the bench checks the PR lists. Switch to `/model opus` for design-heavy sessions (E4, E6, E10,
+E19) if Sonnet's execution falls short.
+
+Order: E2 first (small, proves the loop), then E1, then E3 at the bench; E5 can run at any time.
 
 ## Risks and open questions
 

@@ -16,3 +16,6 @@ xcuserdata/
 # Local environment
 .env
 .env.*
+
+# Claude Code personal settings
+.claude/settings.local.json

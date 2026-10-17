@@ -26,12 +26,49 @@ update `AGENTS.md`:
   realtime threads (Audio Workgroups), SIMD via a portable layer, best-in-class algorithms.
 - v1 ships only when every scoped epic is complete.
 
-## How to work an epic
+## Session protocol
 
-1. Plan first: produce a plan for one epic (or one slice of it), get it approved, and save it as
-   `docs/epics/E<n>.md` before editing code.
-2. Build in slices with deterministic tests; DSP changes also get an acoustic reference-lab case
-   at the standard rates (44.1, 48, 88.2, 96, 176.4, 192, 352.8, 384 kHz).
-3. Do not add new `ci/validate_*.py` source-text validators; write behavioural XCTests instead.
-4. List required bench/hardware checks in each PR; remote CI never substitutes for them.
-5. When a slice lands, tick its box in `docs/PROGRAM_PLAN.md`.
+The owner already has a local test build of `main`; do not rebuild a baseline unless asked.
+
+1. **Orient cheaply.** Read only the target epic's section of `docs/PROGRAM_PLAN.md` (find it
+   with Grep, then Read that range) and `docs/epics/E<n>.md` if it exists. If the owner did not
+   name an epic, pick the first unchecked slice in the lowest open phase whose dependencies are
+   met, say which, and continue.
+2. **Plan in plan mode.** For a new epic or a slice that touches more than a few files, plan
+   first and save the approved plan to `docs/epics/E<n>.md` (goal, slices, files, tests, bench
+   checks, flag name, status line). Small follow-up slices can go straight to building.
+3. **Build one slice per branch** named `e<n>/<slice>`, behind the epic's feature flag once E1
+   has added the flag mechanism (E1 and E2 do not need flags).
+4. **Verify before committing:** delegate builds and tests to `build-test-runner`; delegate any
+   engine or realtime change to `realtime-reviewer` and fix what it flags.
+5. **Ship:** commit, push the branch, get the PR text from `pr-writer`, and open the PR with
+   `gh pr create`. Never push to `main` directly.
+6. **Close out:** after the owner merges, delegate ticking boxes to `plan-tracker`, then stop
+   and suggest the next slice in one sentence.
+7. **Bench work:** when a step needs physical hardware, write the steps as a checklist in
+   `docs/epics/E<n>.md` under "Bench checks", tell the owner, and stop that slice there.
+
+Ask the owner before: changing `AGENTS.md` policy, adding a third-party dependency, raising the
+minimum OS, removing a user-visible feature, or enabling any live ANC or MIMO treatment path.
+
+## Conserving tokens
+
+- The project model is `opusplan`: Opus plans, Sonnet executes. For design-heavy slices (E4
+  adaptive ANC, E6 graph design, E10 mixed-phase, E19 MIMO), the owner may switch to
+  `/model opus` for that session.
+- Delegate searching to `code-scout`, builds and tests to `build-test-runner`, plan updates to
+  `plan-tracker` and PR text to `pr-writer` (all Haiku). Use `realtime-reviewer` (Sonnet) for
+  engine reviews. Do not do these jobs in the main session.
+- Never read whole large files: `AudioIOEngine.swift` (4,500+ lines), `N60RenderKernel.c`,
+  `ProductProfiles.swift`, `docs/PROGRAM_PLAN.md`. Grep first, then Read a line range.
+- Do not open `docs/PR*.md`, `docs/archive/`, `ci/validate_*.py` or per-PR workflows unless
+  the task is about them.
+- Keep replies short: what changed, test results, what needs the owner. No recaps of the plan.
+- One slice per session; start a new session (or `/compact`) before the next slice.
+
+## Engineering rules for every slice
+
+- DSP changes get deterministic XCTests and an acoustic reference-lab case at the standard
+  rates (44.1, 48, 88.2, 96, 176.4, 192, 352.8, 384 kHz).
+- Do not add new `ci/validate_*.py` source-text validators; write behavioural XCTests instead.
+- List required bench/hardware checks in each PR; remote CI never substitutes for them.
