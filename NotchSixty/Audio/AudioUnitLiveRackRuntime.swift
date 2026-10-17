@@ -488,7 +488,7 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
             count: maximumFramesPerSlice * channelCount
         )
         dryScratch.deallocate()
-        unit.withAUAudioUnit { au in
+        unit.withNodeAUAudioUnit { au in
             if au.renderResourcesAllocated {
                 au.deallocateRenderResources()
             }
@@ -528,7 +528,7 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
             tailFrames: Int
         )
         do {
-            configured = try unit.withAUAudioUnit { au in
+            configured = try unit.withNodeAUAudioUnit { au in
                 guard au.inputBusses.count > 0,
                       au.outputBusses.count > 0,
                       let avFormat = AVAudioFormat(
@@ -605,7 +605,7 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
                 return (au.renderBlock, buffer, latency, tail)
             }
         } catch {
-            unit.withAUAudioUnit { au in
+            unit.withNodeAUAudioUnit { au in
                 if au.renderResourcesAllocated {
                     au.deallocateRenderResources()
                 }
@@ -615,7 +615,7 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
 
         let expectedLatency = report.probe.latencyFrames
         guard abs(configured.latencyFrames - expectedLatency) <= 1 else {
-            unit.withAUAudioUnit { au in
+            unit.withNodeAUAudioUnit { au in
                 if au.renderResourcesAllocated {
                     au.deallocateRenderResources()
                 }
@@ -628,7 +628,7 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
         }
         let expectedTail = report.probe.tailFrames
         guard abs(configured.tailFrames - expectedTail) <= 1 else {
-            unit.withAUAudioUnit { au in
+            unit.withNodeAUAudioUnit { au in
                 if au.renderResourcesAllocated {
                     au.deallocateRenderResources()
                 }
@@ -641,7 +641,7 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
         }
 
         guard let faultGate = N60AudioUnitStageFaultGateCreate() else {
-            unit.withAUAudioUnit { au in
+            unit.withNodeAUAudioUnit { au in
                 if au.renderResourcesAllocated {
                     au.deallocateRenderResources()
                 }
@@ -671,7 +671,7 @@ final class AudioUnitLiveProcessStage: AudioUnitLiveRackStageProcessing {
         guard let component else { return nil }
 
         let issue: AudioUnitLiveRackControlPlaneIssue? =
-            unit.withAUAudioUnit { au in
+            unit.withNodeAUAudioUnit { au in
                 let latencySeconds = au.latency
                 guard let currentLatency =
                     AudioUnitLiveTimingValidator.frameCount(

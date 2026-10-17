@@ -79,7 +79,7 @@ jobs:
           test "$(lipo -archs "$SOURCE_APP/Contents/MacOS/Notch Sixty")" = arm64
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$SOURCE_APP/Contents/Info.plist")" = com.dhdook.NotchSixty
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$SOURCE_APP/Contents/Info.plist")" = 1.0.0
-          test "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$SOURCE_APP/Contents/Info.plist")" = 27.0
+          test "$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$SOURCE_APP/Contents/Info.plist")" = 26.0
           grep -q 'libmysofa v1.3.4' "$SOURCE_APP/Contents/Resources/ThirdPartyNotices.txt"
           rm -rf "$PACKAGE_ROOT"
           mkdir -p "$PACKAGE_ROOT"
@@ -127,7 +127,7 @@ jobs:
               "sourceCommit": os.environ["PR115_SOURCE_HEAD"],
               "version": "1.0.0",
               "buildNumber": "1",
-              "minMacOS": "27.0",
+              "minMacOS": "26.0",
               "architecture": "arm64",
               "package": dmg.name,
               "sha256": hashlib.sha256(dmg.read_bytes()).hexdigest(),

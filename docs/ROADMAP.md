@@ -33,7 +33,7 @@ records, not new uncompleted feature commitments. Physical PR112 H01–H08,
 realistic endurance, calibrated acoustic and headphone verification, actual
 DAC compatibility through 384 kHz where supported, external legal rights,
 Apple signing/distribution, icon owner approval and merge authority remain
-pending. macOS 26 support is intentionally deferred; macOS 27 is required.
+pending. Minimum macOS is now 26 (E2, 17 Oct 2026; supersedes the earlier macOS 27 floor).
 All branches stay OPEN/DRAFT/UNMERGED; `main` stays unchanged.
 
 ## Active execution plan — four consolidated integration batches (2026-10-14)

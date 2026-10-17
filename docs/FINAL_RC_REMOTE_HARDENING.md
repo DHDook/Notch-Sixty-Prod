@@ -1,5 +1,8 @@
 # Final RC — Single-Batch Remote Hardening
 
+> **Superseded (17 Oct 2026):** the minimum macOS is now 26 (epic E2 in
+> `docs/PROGRAM_PLAN.md`). The macOS 27 floor below is a historical record.
+
 Date: October 14, 2026. Branch: `feature/final-integrated-rc-qa`;
 PR #130 stays OPEN/DRAFT/UNMERGED. Owner explicitly defers macOS 26:
 the required deployment floor remains **macOS 27**.

@@ -107,7 +107,7 @@ require(
 )
 require(product.get("marketingVersion") == "1.0.0", "marketing version mismatch")
 require(product.get("buildNumber") == "1", "build number mismatch")
-require(product.get("minimumMacOS") == "27.0", "deployment target mismatch")
+require(product.get("minimumMacOS") == "26.0", "deployment target mismatch")
 require(product.get("hardenedRuntime") is True, "hardened runtime baseline lost")
 require(product.get("appSandbox") is True, "sandbox baseline lost")
 

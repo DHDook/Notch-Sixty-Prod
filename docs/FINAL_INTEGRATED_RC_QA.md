@@ -1,5 +1,8 @@
 # Final Integrated Release Candidate & Quality Assurance
 
+> **Superseded (17 Oct 2026):** the minimum macOS is now 26 (epic E2 in
+> `docs/PROGRAM_PLAN.md`). The macOS 27 floor below is a historical record.
+
 **Status: draft, ad-hoc signed, remote software validation only.**
 This is an integrated run of the complete core and optional-feature stack
 following PR #129. It is not a public release, Developer-ID notarized app,

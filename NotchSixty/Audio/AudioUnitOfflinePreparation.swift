@@ -221,7 +221,7 @@ struct SystemAudioUnitOfflinePreparationBackend: AudioUnitOfflinePreparing {
         }
 
         let unit = try await instantiate(component.identity)
-        return try unit.withAUAudioUnit { au in
+        return try unit.withNodeAUAudioUnit { au in
 
         guard Self.identity(of: unit.audioComponentDescription)
                 == component.identity else {

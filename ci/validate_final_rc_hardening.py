@@ -23,8 +23,8 @@ require(config is not None, "missing Release configuration")
 release = config.group(1)
 require("SWIFT_COMPILATION_MODE = wholemodule;" in release,
         "Release whole-module build lost")
-require("MACOSX_DEPLOYMENT_TARGET = 27.0;" in release,
-        "owner-selected macOS 27 minimum changed")
+require("MACOSX_DEPLOYMENT_TARGET = 26.0;" in release,
+        "owner-selected macOS 26 minimum changed")
 require("SWIFT_ACTIVE_COMPILATION_CONDITIONS" not in release,
         "unexpected Release debug compilation conditions")
 require("ENABLE_TESTABILITY = YES" not in release,

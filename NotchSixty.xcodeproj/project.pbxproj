@@ -13,6 +13,7 @@
 		A10000000000000000000012 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000022 /* Assets.xcassets */; };
 		A10000000000000000000013 /* NotchSixtyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000024 /* NotchSixtyTests.swift */; };
 		A10000000000000000000014 /* ConvolutionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000027 /* ConvolutionTests.swift */; };
+		A100000000000000000E2001 /* DeploymentTargetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000E2002 /* DeploymentTargetTests.swift */; };
 		A10000000000000000000015 /* LiveLinearPhaseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000028 /* LiveLinearPhaseTests.swift */; };
 		A10000000000000000000016 /* StereoPlaybackControlTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000029 /* StereoPlaybackControlTests.swift */; };
 		A10000000000000000000017 /* DynamicsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002A /* DynamicsTests.swift */; };
@@ -167,6 +168,7 @@
 		F79000000000000000000002 /* AudioUnitHostController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F79000000000000000000012 /* AudioUnitHostController.swift */; };
 		F79000000000000000000003 /* AudioUnitHostFoundationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F79000000000000000000013 /* AudioUnitHostFoundationTests.swift */; };
 		F80000000000000000000001 /* AudioUnitOfflinePreparation.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000011 /* AudioUnitOfflinePreparation.swift */; };
+		A100000000000000000E2003 /* AVAudioNodeAUAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000E2004 /* AVAudioNodeAUAccess.swift */; };
 		F80000000000000000000002 /* AudioUnitOfflinePreparationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80000000000000000000012 /* AudioUnitOfflinePreparationTests.swift */; };
 		F81000000000000000000001 /* N60AudioUnitLiveRackBridge.c in Sources */ = {isa = PBXBuildFile; fileRef = F81000000000000000000011 /* N60AudioUnitLiveRackBridge.c */; };
 		F81000000000000000000002 /* AudioUnitLiveRackRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = F81000000000000000000012 /* AudioUnitLiveRackRuntime.swift */; };
@@ -323,6 +325,7 @@
 		A10000000000000000000025 /* Notch Sixty.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Notch Sixty.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000026 /* NotchSixtyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = NotchSixtyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000027 /* ConvolutionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConvolutionTests.swift; sourceTree = "<group>"; };
+		A100000000000000000E2002 /* DeploymentTargetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeploymentTargetTests.swift; sourceTree = "<group>"; };
 		A10000000000000000000028 /* LiveLinearPhaseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveLinearPhaseTests.swift; sourceTree = "<group>"; };
 		A10000000000000000000029 /* StereoPlaybackControlTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StereoPlaybackControlTests.swift; sourceTree = "<group>"; };
 		A1000000000000000000002A /* DynamicsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DynamicsTests.swift; sourceTree = "<group>"; };
@@ -492,6 +495,7 @@
 		F79000000000000000000012 /* AudioUnitHostController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioUnitHostController.swift; sourceTree = "<group>"; };
 		F79000000000000000000013 /* AudioUnitHostFoundationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioUnitHostFoundationTests.swift; sourceTree = "<group>"; };
 		F80000000000000000000011 /* AudioUnitOfflinePreparation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioUnitOfflinePreparation.swift; sourceTree = "<group>"; };
+		A100000000000000000E2004 /* AVAudioNodeAUAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AVAudioNodeAUAccess.swift; sourceTree = "<group>"; };
 		F80000000000000000000012 /* AudioUnitOfflinePreparationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioUnitOfflinePreparationTests.swift; sourceTree = "<group>"; };
 		F81000000000000000000011 /* N60AudioUnitLiveRackBridge.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = N60AudioUnitLiveRackBridge.c; sourceTree = "<group>"; };
 		F81000000000000000000012 /* AudioUnitLiveRackRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioUnitLiveRackRuntime.swift; sourceTree = "<group>"; };
@@ -680,6 +684,7 @@
 			children = (
 				A10000000000000000000024 /* NotchSixtyTests.swift */,
 				A10000000000000000000027 /* ConvolutionTests.swift */,
+				A100000000000000000E2002 /* DeploymentTargetTests.swift */,
 				A10000000000000000000028 /* LiveLinearPhaseTests.swift */,
 				A10000000000000000000029 /* StereoPlaybackControlTests.swift */,
 				A1000000000000000000002A /* DynamicsTests.swift */,
@@ -901,6 +906,7 @@
 				F79000000000000000000011 /* AudioUnitHostFoundation.swift */,
 				F79000000000000000000012 /* AudioUnitHostController.swift */,
 				F80000000000000000000011 /* AudioUnitOfflinePreparation.swift */,
+				A100000000000000000E2004 /* AVAudioNodeAUAccess.swift */,
 				F81000000000000000000012 /* AudioUnitLiveRackRuntime.swift */,
 				F82000000000000000000012 /* AudioUnitLiveRackSwitchboard.swift */,
 				F82000000000000000000013 /* AudioUnitRackMutation.swift */,
@@ -1192,6 +1198,7 @@
 				F79000000000000000000001 /* AudioUnitHostFoundation.swift in Sources */,
 				F79000000000000000000002 /* AudioUnitHostController.swift in Sources */,
 				F80000000000000000000001 /* AudioUnitOfflinePreparation.swift in Sources */,
+				A100000000000000000E2003 /* AVAudioNodeAUAccess.swift in Sources */,
 				F81000000000000000000002 /* AudioUnitLiveRackRuntime.swift in Sources */,
 				F81000000000000000000001 /* N60AudioUnitLiveRackBridge.c in Sources */,
 				F82000000000000000000001 /* N60AudioUnitRackExchange.c in Sources */,
@@ -1217,6 +1224,7 @@
 			files = (
 				A10000000000000000000013 /* NotchSixtyTests.swift in Sources */,
 				A10000000000000000000014 /* ConvolutionTests.swift in Sources */,
+				A100000000000000000E2001 /* DeploymentTargetTests.swift in Sources */,
 				A10000000000000000000015 /* LiveLinearPhaseTests.swift in Sources */,
 				A10000000000000000000016 /* StereoPlaybackControlTests.swift in Sources */,
 				A10000000000000000000017 /* DynamicsTests.swift in Sources */,
@@ -1421,7 +1429,7 @@
 			buildSettings = {
 				ARCHS = arm64;
 				CLANG_ENABLE_MODULES = YES;
-				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = macosx;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
@@ -1434,7 +1442,7 @@
 			buildSettings = {
 				ARCHS = arm64;
 				CLANG_ENABLE_MODULES = YES;
-				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				SDKROOT = macosx;
 				SWIFT_COMPILATION_MODE = wholemodule;
 			};
