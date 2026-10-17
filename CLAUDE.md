@@ -7,7 +7,8 @@
 - Helper agents in `.claude/agents/`: code-scout, build-test-runner, plan-tracker, pr-writer
   (Haiku) and realtime-reviewer (Sonnet).
 
-**Current focus:** E2 (macOS 26 support): S1 merged (#132); next S2 `e2/macos26-fallbacks`. Plan in `docs/epics/E2.md`.
+**Current focus:** E1 (trunk, CI and docs hygiene), no plan yet: next step is to plan it. E2 is done
+apart from S2 in review (#134); macOS 26 is checked by build only (no 26 machine).
 <!-- plan-tracker keeps the line above current -->
 
 @AGENTS.md
