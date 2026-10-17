@@ -755,6 +755,47 @@ struct MasterVolumeConfiguration: Equatable, Sendable {
     }
 }
 
+/// Per-output persistence for the software (DSP) master volume. Device-mode
+/// outputs own their volume in hardware and are never stored here.
+protocol MasterVolumePersisting: AnyObject {
+    /// The volume to restore when this output is first synchronized, or nil to
+    /// keep the current in-memory configuration.
+    func restoredSoftwareVolume(forOutputUID uid: String) -> MasterVolumeConfiguration?
+    func storeSoftwareVolume(_ configuration: MasterVolumeConfiguration, forOutputUID uid: String)
+}
+
+final class UserDefaultsMasterVolumeStore: MasterVolumePersisting {
+    /// Level used the first time a software-volume output is seen. Software
+    /// gain is linear amplitude, so 0.25 is -12 dBFS: never full scale into an
+    /// amplifier that has no volume control of its own.
+    static let firstUseSoftwareLevel = 0.25
+    static let defaultsKey = "audio.masterVolume.softwareByOutputUID"
+
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
+
+    func restoredSoftwareVolume(forOutputUID uid: String) -> MasterVolumeConfiguration? {
+        guard let entry = defaults.dictionary(forKey: Self.defaultsKey)?[uid] as? [String: Any],
+              let level = entry["level"] as? Double,
+              level.isFinite,
+              MasterVolumeConfiguration.levelRange.contains(level) else {
+            return MasterVolumeConfiguration(level: Self.firstUseSoftwareLevel, muted: false)
+        }
+        return MasterVolumeConfiguration(level: level, muted: entry["muted"] as? Bool ?? false)
+    }
+
+    func storeSoftwareVolume(_ configuration: MasterVolumeConfiguration, forOutputUID uid: String) {
+        guard configuration.level.isFinite,
+              MasterVolumeConfiguration.levelRange.contains(configuration.level) else { return }
+        var entries = defaults.dictionary(forKey: Self.defaultsKey) ?? [:]
+        entries[uid] = ["level": configuration.level, "muted": configuration.muted]
+        defaults.set(entries, forKey: Self.defaultsKey)
+    }
+}
+
 enum MasterVolumeConfigurationError: Error, LocalizedError, Equatable {
     case invalidLevel(Double)
 
@@ -763,6 +804,20 @@ enum MasterVolumeConfigurationError: Error, LocalizedError, Equatable {
         case .invalidLevel(let level):
             return "Master volume \(level) is outside the supported 0...1 range."
         }
+    }
+}
+
+extension PlaybackControlConfiguration {
+    /// True when a playback/image control would change the signal. Disabled
+    /// controls are inert even when their parameters differ from defaults.
+    /// Global bypass is reported separately.
+    var hasActiveImageProcessing: Bool {
+        abs(balance) > 1.0e-9
+            || (symmetryBalanceEnabled && abs(symmetryBalancePosition) > 1.0e-9)
+            || (speakerCrossfeedEnabled && speakerCrossfeedAmount > 0)
+            || (crosstalkCancellationEnabled && crosstalkCancellationAmount > 0)
+            || abs(interChannelDelayMs) > 1.0e-9
+            || auditionMode != .processed
     }
 }
 

@@ -1024,6 +1024,11 @@ final class AudioIOEngine: ObservableObject {
     private let masterVolumeController: any MasterVolumeDeviceControlling
     private let globalVolumeKeyMonitor: any GlobalVolumeKeyMonitoring
     private let binauralProfileAssetStore: BinauralProfileAssetStore
+    private let masterVolumeStore: (any MasterVolumePersisting)?
+    /// Output whose stored software volume has already been restored. A sync
+    /// for the same output (external change, device-list refresh) never
+    /// overwrites the user's current level.
+    private var masterVolumeSynchronizedOutputUID: String?
     private var lifecycle: AudioLifecycleStateMachine
     private var transportSession: CoreAudioTransportSession?
     private var nChannelTransportSession: CoreAudioNChannelTransportSession?
@@ -1034,6 +1039,7 @@ final class AudioIOEngine: ObservableObject {
     private var reconfigurationWorkItem: DispatchWorkItem?
     private var recoveryWorkItem: DispatchWorkItem?
     private var recoveryGeneration: UInt64 = 0
+    private var recoveryConsecutiveBuildFailures = 0
     private var resumeAfterWake = false
     private var prepared = false
     private var activeEQFIRProgram: PreparedEQFIRProgram?
@@ -1044,6 +1050,12 @@ final class AudioIOEngine: ObservableObject {
     private var nextSpeakerIRProgramSlot: UInt32 = 0
     private var stagedRoomTreatment: LiveMIMORoomTreatmentPreparation?
     private var stagedAudioUnitRack: AudioUnitLiveRackSwitchboard?
+    /// Set when a rate change or output recovery dropped a rack built for the
+    /// previous format; cleared once the rebuild request has been issued.
+    private var audioUnitRackRebuildPending = false
+    /// Asked, on the main actor, to re-instantiate the plug-in rack at the
+    /// current output format after the transport came back without it.
+    var onAudioUnitRackRequiresRebuild: (() -> Void)?
 
     private(set) var sampleRateChangesHandled: UInt64 = 0
     private(set) var recoveryAttempts: UInt64 = 0
@@ -1083,9 +1095,11 @@ final class AudioIOEngine: ObservableObject {
         eventMonitor: AudioHardwareEventMonitor = AudioHardwareEventMonitor(),
         masterVolumeController: any MasterVolumeDeviceControlling = CoreAudioMasterVolumeController(),
         globalVolumeKeyMonitor: any GlobalVolumeKeyMonitoring = CoreGraphicsGlobalVolumeKeyMonitor(),
-        binauralProfileAssetStore: BinauralProfileAssetStore = BinauralProfileAssetStore()
+        binauralProfileAssetStore: BinauralProfileAssetStore = BinauralProfileAssetStore(),
+        masterVolumeStore: (any MasterVolumePersisting)? = nil
     ) {
         self.deviceCatalog = deviceCatalog
+        self.masterVolumeStore = masterVolumeStore
         self.routeConfiguration = initialRouteConfiguration
         self.eventMonitor = eventMonitor
         self.masterVolumeController = masterVolumeController
@@ -1522,17 +1536,7 @@ final class AudioIOEngine: ObservableObject {
             )
         }
 
-        let channelCount: Int
-        if let headphone = headphoneDeviceProfileConfiguration,
-           headphone.enabled,
-           headphone.spatialMode == .virtualSpeakers {
-            channelCount = headphone.programLayout.roles.count
-        } else if let profile = outputDeviceProfileConfiguration,
-                  profile.enabled {
-            channelCount = profile.programLayout.roles.count
-        } else {
-            channelCount = 2
-        }
+        let channelCount = audioUnitRackChannelCount()
 
         let format = AudioUnitRackProcessingFormat(
             sampleRate: output.nominalSampleRate,
@@ -1541,6 +1545,46 @@ final class AudioIOEngine: ObservableObject {
         )
         try format.validate()
         return format
+    }
+
+    private func audioUnitRackChannelCount() -> Int {
+        if let headphone = headphoneDeviceProfileConfiguration,
+           headphone.enabled,
+           headphone.spatialMode == .virtualSpeakers {
+            return headphone.programLayout.roles.count
+        }
+        if let profile = outputDeviceProfileConfiguration, profile.enabled {
+            return profile.programLayout.roles.count
+        }
+        return 2
+    }
+
+    /// A staged rack is bound to the sample rate and channel count it was
+    /// instantiated for. After a nominal-rate change or output recovery the
+    /// transport would reject it and fail; instead continue dry and ask the
+    /// product layer to rebuild the rack at the new format once running.
+    private func detachAudioUnitRackIfIncompatible(with output: AudioOutputDevice) {
+        guard let rack = stagedAudioUnitRack else { return }
+        let compatible = abs(rack.format.sampleRate - output.nominalSampleRate) < 0.5
+            && rack.format.channelCount == audioUnitRackChannelCount()
+        guard !compatible else { return }
+        stagedAudioUnitRack = nil
+        audioUnitRackRebuildPending = true
+    }
+
+    private func requestAudioUnitRackRebuildIfPending() {
+        guard audioUnitRackRebuildPending, lifecycle.state == .running else { return }
+        audioUnitRackRebuildPending = false
+        onAudioUnitRackRequiresRebuild?()
+    }
+
+    /// Reinstalls a rack rebuilt for the current output format after
+    /// `onAudioUnitRackRequiresRebuild`. Uses the controlled-restart path.
+    func restoreAudioUnitRackAfterFormatChange(
+        _ runtime: AudioUnitLiveRackRuntime
+    ) throws {
+        guard lifecycle.state == .running, stagedAudioUnitRack == nil else { return }
+        try controlledRestartForAudioUnitRackMutation(runtime)
     }
 
     func stageAudioUnitRackForNextStart(
@@ -1582,17 +1626,7 @@ final class AudioIOEngine: ObservableObject {
                         ?? "No output selected"
                 )
             }
-            let channelCount: Int
-            if let headphone = headphoneDeviceProfileConfiguration,
-               headphone.enabled,
-               headphone.spatialMode == .virtualSpeakers {
-                channelCount = headphone.programLayout.roles.count
-            } else if let profile = outputDeviceProfileConfiguration,
-                      profile.enabled {
-                channelCount = profile.programLayout.roles.count
-            } else {
-                channelCount = 2
-            }
+            let channelCount = audioUnitRackChannelCount()
             let format = AudioUnitRackProcessingFormat(
                 sampleRate: output.nominalSampleRate,
                 channelCount: channelCount,
@@ -1730,6 +1764,7 @@ final class AudioIOEngine: ObservableObject {
         guard lifecycle.state == .idle else { return }
         guard let uid else {
             routeConfiguration.selectedOutputUID = nil
+            masterVolumeSynchronizedOutputUID = nil
             masterVolumeController.stopMonitoring()
             globalVolumeKeyMonitor.stop()
             globalVolumeKeyMonitoringState = .stopped
@@ -2509,6 +2544,7 @@ final class AudioIOEngine: ObservableObject {
         tearDownTransport(fadeOut: true)
         try? setLifecycle(.idle)
         clearStagedAudioUnitRack()
+        audioUnitRackRebuildPending = false
     }
 
     func shutdownForTermination() {
@@ -3059,7 +3095,15 @@ final class AudioIOEngine: ObservableObject {
         }
 
         masterVolumeConfiguration = configuration
+        persistSoftwareMasterVolumeIfNeeded()
         lastErrorDescription = nil
+    }
+
+    private func persistSoftwareMasterVolumeIfNeeded() {
+        guard masterVolumeCapabilities.controlMode == .softwareDSP,
+              let uid = selectedOutputDevice?.uid,
+              uid == masterVolumeSynchronizedOutputUID else { return }
+        masterVolumeStore?.storeSoftwareVolume(masterVolumeConfiguration, forOutputUID: uid)
     }
 
     private func syncMasterVolumeMonitorToSelectedOutput() throws {
@@ -3082,12 +3126,21 @@ final class AudioIOEngine: ObservableObject {
         masterVolumeCapabilities = snapshot.capabilities
 
         var updated = masterVolumeConfiguration
+        let firstSyncForOutput = masterVolumeSynchronizedOutputUID != output.uid
         if snapshot.capabilities.controlMode == .device, let level = snapshot.level {
             updated.level = min(max(level, 0), 1)
+        } else if snapshot.capabilities.controlMode == .softwareDSP,
+                  firstSyncForOutput,
+                  let restored = masterVolumeStore?.restoredSoftwareVolume(forOutputUID: output.uid) {
+            updated.level = min(max(restored.level, 0), 1)
+            if !snapshot.capabilities.usesDeviceMute {
+                updated.muted = restored.muted
+            }
         }
         if snapshot.capabilities.usesDeviceMute, let muted = snapshot.muted {
             updated.muted = muted
         }
+        masterVolumeSynchronizedOutputUID = output.uid
 
         let oldGain = masterVolumeConfiguration.softwareGain(for: previousCapabilities)
         let newGain = updated.softwareGain(for: snapshot.capabilities)
@@ -3107,6 +3160,9 @@ final class AudioIOEngine: ObservableObject {
             try session.publishDSPGraph(graph)
         }
         if let session = nChannelTransportSession, abs(oldGain - newGain) > 0.000_001 {
+            session.setOutputGain(newGain)
+        }
+        if let session = binauralHeadphoneTransportSession, abs(oldGain - newGain) > 0.000_001 {
             session.setOutputGain(newGain)
         }
         masterVolumeConfiguration = updated
@@ -3889,10 +3945,15 @@ final class AudioIOEngine: ObservableObject {
                 throw LiveNChannelTransportError.unsupportedActiveDSP("stereo EQ")
             }
         }
-        if playbackControlConfiguration != PlaybackControlConfiguration() {
+        // Gate on what would actually process audio. Disabled processors keep
+        // their edited parameters and must not block activation.
+        if playbackControlConfiguration.globalBypassed {
+            throw LiveNChannelTransportError.globalBypassUnsupported
+        }
+        if playbackControlConfiguration.hasActiveImageProcessing {
             throw LiveNChannelTransportError.unsupportedActiveDSP("stereo playback/image controls")
         }
-        if dynamicsConfiguration != DynamicsConfiguration() {
+        if dynamicsConfiguration.hasActiveProcessing {
             throw LiveNChannelTransportError.unsupportedActiveDSP("stereo dynamics/protection")
         }
         if roomCorrectionConfiguration.enabled {
@@ -3967,10 +4028,13 @@ final class AudioIOEngine: ObservableObject {
                 throw LiveNChannelTransportError.unsupportedActiveDSP("stereo EQ in Virtual Speakers mode")
             }
         }
-        if playbackControlConfiguration != PlaybackControlConfiguration() {
+        if playbackControlConfiguration.globalBypassed {
+            throw LiveNChannelTransportError.globalBypassUnsupported
+        }
+        if playbackControlConfiguration.hasActiveImageProcessing {
             throw LiveNChannelTransportError.unsupportedActiveDSP("stereo playback/image controls in Virtual Speakers mode")
         }
-        if dynamicsConfiguration != DynamicsConfiguration() {
+        if dynamicsConfiguration.hasActiveProcessing {
             throw LiveNChannelTransportError.unsupportedActiveDSP("stereo dynamics in Virtual Speakers mode")
         }
         if bassManagementConfiguration.enabled
@@ -4158,13 +4222,7 @@ final class AudioIOEngine: ObservableObject {
         nextRoomCorrectionProgramSlot = 0
         activeSpeakerIRProgram = nil
         nextSpeakerIRProgramSlot = 0
-        var graph = try stereoEQConfiguration.makeGraphSnapshot(
-            sampleRate: session.outputFormat.sampleRate,
-            gainConfiguration: gainConfiguration,
-            bassManagementConfiguration: renderBassManagementConfiguration(),
-            dynamicsConfiguration: dynamicsConfiguration,
-            playbackConfiguration: playbackControlConfiguration
-        )
+        var graph = try stereoTransportStartGraph(sampleRate: session.outputFormat.sampleRate)
 
         if FIRUpdatePolicy.shouldPrepareEQFIR(
             stereoEQ: stereoEQConfiguration,
@@ -4211,6 +4269,21 @@ final class AudioIOEngine: ObservableObject {
         try applyAudioUnitRackLatency(to: &graph)
         try session.publishDSPGraph(graph)
         transportSession = session
+    }
+
+    /// Base graph for a newly built stereo transport (start, rate change,
+    /// recovery, wake). It must carry the current software master gain and
+    /// mute; the realtime kernel otherwise starts at unity until the next
+    /// volume change republishes the graph.
+    func stereoTransportStartGraph(sampleRate: Double) throws -> N60DSPGraphSnapshot {
+        try stereoEQConfiguration.makeGraphSnapshot(
+            sampleRate: sampleRate,
+            gainConfiguration: gainConfiguration,
+            bassManagementConfiguration: renderBassManagementConfiguration(),
+            dynamicsConfiguration: dynamicsConfiguration,
+            playbackConfiguration: playbackControlConfiguration,
+            masterGainLinear: currentMasterSoftwareGain
+        )
     }
 
     private func tearDownTransport(fadeOut: Bool) {
@@ -4288,7 +4361,12 @@ final class AudioIOEngine: ObservableObject {
             return
         }
 
-        if selectedIsPresent && lifecycle.state == .recoveringOutput {
+        // Fast-path only while waiting for an absent output. After a failed build
+        // the backoff schedule owns retries; our own tap/aggregate teardown also
+        // posts device-list changes and must not turn backoff into a tight loop.
+        if selectedIsPresent,
+           lifecycle.state == .recoveringOutput,
+           recoveryConsecutiveBuildFailures == 0 {
             scheduleRecoveryAttempt(generation: recoveryGeneration, delay: 0)
         }
     }
@@ -4320,6 +4398,7 @@ final class AudioIOEngine: ObservableObject {
                 beginOutputRecovery()
                 return
             }
+            detachAudioUnitRackIfIncompatible(with: output)
             try buildTransport(output: output)
             try eventMonitor.monitorSampleRate(of: output.deviceID)
             try syncMasterVolumeMonitorToSelectedOutput()
@@ -4327,6 +4406,7 @@ final class AudioIOEngine: ObservableObject {
             reconfigurationWorkItem = nil
             try setLifecycle(.running)
             lastErrorDescription = nil
+            requestAudioUnitRackRebuildIfPending()
         } catch {
             tearDownTransport(fadeOut: false)
             forceFailedState(error)
@@ -4336,11 +4416,15 @@ final class AudioIOEngine: ObservableObject {
     private func beginOutputRecovery() {
         guard lifecycle.state == .running || lifecycle.state == .reconfiguring else { return }
         recoveryGeneration &+= 1
+        recoveryConsecutiveBuildFailures = 0
         let generation = recoveryGeneration
         try? setLifecycle(.recoveringOutput)
         eventMonitor.removeSelectedOutputSampleRateMonitor()
         tearDownTransport(fadeOut: false)
-        scheduleRecoveryAttempt(generation: generation, delay: 0.5)
+        scheduleRecoveryAttempt(
+            generation: generation,
+            delay: OutputRecoveryRetryPolicy.absentOutputPollInterval
+        )
     }
 
     private func scheduleRecoveryAttempt(generation: UInt64, delay: TimeInterval) {
@@ -4359,29 +4443,53 @@ final class AudioIOEngine: ObservableObject {
             try refreshOutputDevices()
             guard let output = selectedOutputDevice else {
                 lastErrorDescription = "Waiting for selected output to return."
-                scheduleRecoveryAttempt(generation: generation, delay: 0.5)
+                scheduleRecoveryAttempt(
+                    generation: generation,
+                    delay: OutputRecoveryRetryPolicy.absentOutputPollInterval
+                )
                 return
             }
 
             do {
+                detachAudioUnitRackIfIncompatible(with: output)
                 try buildTransport(output: output)
                 try eventMonitor.monitorSampleRate(of: output.deviceID)
                 try syncMasterVolumeMonitorToSelectedOutput()
                 recoverySuccesses &+= 1
+                recoveryConsecutiveBuildFailures = 0
                 try setLifecycle(.running)
                 lastErrorDescription = nil
                 recoveryWorkItem = nil
+                requestAudioUnitRackRebuildIfPending()
                 return
             } catch {
                 recoveryFailures &+= 1
-                lastErrorDescription = "Selected output is present but not ready yet: \(error.localizedDescription)"
+                recoveryConsecutiveBuildFailures += 1
                 tearDownTransport(fadeOut: false)
+                if OutputRecoveryRetryPolicy.shouldFail(
+                    afterConsecutiveFailures: recoveryConsecutiveBuildFailures
+                ) {
+                    recoveryWorkItem = nil
+                    forceFailedState(error)
+                    return
+                }
+                lastErrorDescription = "Selected output is present but not ready yet: \(error.localizedDescription)"
+                scheduleRecoveryAttempt(
+                    generation: generation,
+                    delay: OutputRecoveryRetryPolicy.buildRetryDelay(
+                        afterConsecutiveFailures: recoveryConsecutiveBuildFailures
+                    )
+                )
+                return
             }
         } catch {
             lastErrorDescription = error.localizedDescription
         }
 
-        scheduleRecoveryAttempt(generation: generation, delay: 0.5)
+        scheduleRecoveryAttempt(
+            generation: generation,
+            delay: OutputRecoveryRetryPolicy.absentOutputPollInterval
+        )
     }
 
     private func handleWillSleep() {
@@ -4400,10 +4508,18 @@ final class AudioIOEngine: ObservableObject {
     private func handleDidWake() {
         guard resumeAfterWake else { return }
         resumeAfterWake = false
+        guard lifecycle.state == .idle else { return }
+        // USB and Thunderbolt outputs often re-enumerate after didWake. Wait for
+        // the same output UID through the recovery loop instead of making one
+        // start attempt that leaves processing stopped if the device is late.
+        recoveryGeneration &+= 1
+        recoveryConsecutiveBuildFailures = 0
         do {
-            try start(resetProcessingSessionCounters: false)
+            try setLifecycle(.recoveringOutput)
         } catch {
             lastErrorDescription = error.localizedDescription
+            return
         }
+        scheduleRecoveryAttempt(generation: recoveryGeneration, delay: 0)
     }
 }

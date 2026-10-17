@@ -43,7 +43,11 @@ struct AudioLifecycleStateMachine: Equatable, Sendable {
     ) -> Bool {
         switch currentState {
         case .idle:
-            return nextState == .requestingPermission || nextState == .creatingTap
+            // recoveringOutput: resume-after-wake waits for the same output UID
+            // to re-enumerate instead of making one start attempt.
+            return nextState == .requestingPermission
+                || nextState == .creatingTap
+                || nextState == .recoveringOutput
         case .requestingPermission:
             return nextState == .creatingTap || nextState == .idle || nextState == .failed
         case .creatingTap:
@@ -65,5 +69,27 @@ struct AudioLifecycleStateMachine: Equatable, Sendable {
         case .failed:
             return nextState == .stopping || nextState == .idle
         }
+    }
+}
+
+/// Retry policy for `recoveringOutput`. Waiting for an absent output is cheap
+/// (device enumeration only) and stays responsive. When the output is present
+/// but the transport cannot be built, each attempt creates and destroys a
+/// process tap and aggregate device, so attempts back off and eventually fail
+/// rather than churning coreaudiod indefinitely.
+enum OutputRecoveryRetryPolicy {
+    static let absentOutputPollInterval: TimeInterval = 0.5
+    static let initialBuildRetryDelay: TimeInterval = 0.5
+    static let maximumBuildRetryDelay: TimeInterval = 10.0
+    static let maximumConsecutiveBuildFailures = 8
+
+    static func buildRetryDelay(afterConsecutiveFailures failures: Int) -> TimeInterval {
+        guard failures > 0 else { return initialBuildRetryDelay }
+        let exponent = Double(min(failures - 1, 16))
+        return min(initialBuildRetryDelay * pow(2.0, exponent), maximumBuildRetryDelay)
+    }
+
+    static func shouldFail(afterConsecutiveFailures failures: Int) -> Bool {
+        failures >= maximumConsecutiveBuildFailures
     }
 }

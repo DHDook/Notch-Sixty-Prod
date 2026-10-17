@@ -90,7 +90,9 @@ final class ProductController: ObservableObject {
     private var terminationObservation: AnyCancellable?
 
     init() {
-        let audioEngine = AudioIOEngine()
+        let audioEngine = AudioIOEngine(
+            masterVolumeStore: UserDefaultsMasterVolumeStore()
+        )
         let audioUnitHost = AudioUnitHostController()
         let profiles = ProductProfileController(
             engine: audioEngine,
@@ -354,6 +356,28 @@ final class ProductController: ObservableObject {
         }
     }
 
+    /// Re-instantiates the plug-in rack after a nominal-rate change or output
+    /// recovery brought the transport back dry because the previous rack was
+    /// bound to another format.
+    func rebuildAudioUnitRackAfterFormatChange() async {
+        guard audioEngine.lifecycleState == .running,
+              !recovery.plugInsBypassedForThisLaunch else { return }
+        do {
+            let format =
+                try audioEngine.audioUnitRackProcessingFormatForMutation()
+            await audioUnitHost.prepareActiveSlotsForLive(format: format)
+            guard let runtime =
+                    try await audioUnitHost.makeLiveRackRuntime(format: format),
+                  audioEngine.lifecycleState == .running else { return }
+            try audioEngine.restoreAudioUnitRackAfterFormatChange(runtime)
+        } catch {
+            recovery.recordStartFailure(
+                .plugInStart,
+                description: error.localizedDescription
+            )
+        }
+    }
+
     func mutateAudioUnitRack(
         _ mutation: AudioUnitRackMutation,
         crossfadeFrames: Int =
@@ -490,6 +514,11 @@ final class ProductController: ObservableObject {
     }
 
     private func observeAudioEngine() {
+        audioEngine.onAudioUnitRackRequiresRebuild = { [weak self] in
+            Task { @MainActor [weak self] in
+                await self?.rebuildAudioUnitRackAfterFormatChange()
+            }
+        }
         audioEngineObservation = audioEngine.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
