@@ -8,7 +8,7 @@
     "bundleIdentifier": "com.dhdook.NotchSixty",
     "marketingVersion": "1.0.0",
     "buildNumber": "1",
-    "minimumMacOS": "27.0",
+    "minimumMacOS": "26.0",
     "hardenedRuntime": true,
     "appSandbox": true
   },

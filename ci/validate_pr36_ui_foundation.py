@@ -30,7 +30,7 @@ def vu_for_dbfs(dbfs: float) -> float:
 
 
 # Shipping target / platform language.
-require(PROJECT, "MACOSX_DEPLOYMENT_TARGET = 27.0;", "project deployment target")
+require(PROJECT, "MACOSX_DEPLOYMENT_TARGET = 26.0;", "project deployment target")
 forbid(PROJECT, "MACOSX_DEPLOYMENT_TARGET = 14.2;", "project deployment target")
 
 # macOS 27 native navigation + selective Liquid Glass control language.

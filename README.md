@@ -22,8 +22,8 @@ before its DMG supersedes this reference candidate. See
 `docs/FINAL_RC_REMOTE_HARDENING.md`.
 
 All stacked PRs remain OPEN/DRAFT/UNMERGED; `main` is unchanged.
-Minimum macOS **27** is intentional; macOS 26 support is deferred by owner
-direction. PR112 physical H01–H08, DAC and calibrated acoustic/headphone tests,
+Minimum macOS is **26** (owner decision of 17 Oct 2026, epic E2; this
+supersedes the earlier macOS 27 floor). PR112 physical H01–H08, DAC and calibrated acoustic/headphone tests,
 external rights/IP review, final artwork approval, Apple signing/credentials
 and release/merge approval remain pending.
 
