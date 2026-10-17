@@ -1272,7 +1272,10 @@ private struct StereoSignatureVUScaleFace: View, Equatable {
     private func drawScale(context: inout GraphicsContext, center: CGPoint) {
         let palette = StereoSignatureVUPalette(darkAppearance: darkAppearance)
         let ticks: [Double] = [-40, -35, -30, -25, -20, -15, -10, -7, -5, -4, -3, -2, -1, 0, 1, 2, 3]
-        let labels: Set<Double> = [-40, -30, -20, -10, -7, -5, -3, 0, 3]
+        // Standard VU face labelling (ANSI C16.5 / classic Weston-Sifam):
+        // tens across the compressed quiet end, every dB across the -3...+3
+        // working range, so the scale has no unexplained gaps around 0 VU.
+        let labels: Set<Double> = [-40, -30, -20, -10, -7, -5, -3, -2, -1, 0, 1, 2, 3]
         let scaleRadius = radius * 0.985
 
         var arc = Path()
