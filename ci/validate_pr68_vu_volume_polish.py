@@ -34,16 +34,19 @@ def main() -> None:
     require("static let startAngleDegrees = 224.0" in root, "shallow VU start angle is missing")
     require("static let sweepDegrees = 92.0" in root, "92-degree flattened VU sweep is missing")
     require("0 VU = −18 dBFS" in root, "VU calibration legend changed unexpectedly")
-    require("height * 1.14" in root, "VU virtual pivot is not below the visible face")
-    require("radius: radius * 0.62" in root and "radius: radius * 0.985" in root,
-            "short visible needle segment is missing")
-    meter = block(root, "private struct StereoSignatureVUMeter: View {", "private struct ProductionSpeakersView: View {")
-    require(".glassEffect(.regular, in: .rect(cornerRadius: 22))" in meter,
-            "Liquid Glass meter overlay is missing")
+    # RC revision: per-channel icon-style windows end above the pivot and clip
+    # the needle, so the pivot stays hidden (replaces the old height * 1.14
+    # placement and the Liquid Glass overlay with an explicit glass lens).
+    require("center.y - radius * 0.45" in root, "VU window no longer ends above the pivot")
+    require("radius: radius * 0.985" in root, "needle tip radius is missing")
+    meter = block(root, "struct StereoSignatureVUMeter: View {", "private struct ProductionSpeakersView: View {")
+    require(".clipShape(windowShape.path(in: rect))" in meter,
+            "needle is not clipped to the meter window")
+    require("glassGlare" in meter, "glass lens overlay is missing")
     require("StereoSignatureVUPalette" in root and
-            "Color(red: 0.98, green: 0.955, blue: 0.88)" in root and
-            "Color(red: 0.20, green: 0.20, blue: 0.19)" in root,
-            "PR116B complementary light/dark meter faces are missing")
+            "Color(red: 0.99, green: 0.97, blue: 0.91)" in root and
+            "Color(red: 0.16, green: 0.155, blue: 0.15)" in root,
+            "icon-matched light/dark meter faces are missing")
     require("Path(ellipseIn:" not in meter, "needle pivot cap must remain hidden")
     require("hotArc" in meter, "positive VU hot zone is missing")
     require('specifier: "%.1f"' in root, "fine master-volume readout precision is missing")

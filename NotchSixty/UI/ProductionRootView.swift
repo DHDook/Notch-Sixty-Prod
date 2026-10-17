@@ -954,58 +954,92 @@ private struct StereoSignatureVUMeterPanel: View {
     }
 }
 
-// PR116B: reflect the owner-approved PR116 icon palettes in the live Dashboard.
-// Pure SwiftUI presentation: no meter DSP, calibration, kinetics or audio changes.
-private struct StereoSignatureVUPalette {
+// Mirrors the approved app icons (DockIconDark / DockIconLight): dark mode is
+// an espresso body with a cream face, light mode an ivory body with a black
+// face; both use a glowing gold bezel, a glass lens with a top glare, and an
+// orange needle whose pivot sits below the window. Pure SwiftUI presentation:
+// no meter DSP, calibration, kinetics, scale geometry or audio changes.
+struct StereoSignatureVUPalette {
     let housing: [Color]
+    let housingRim: Color
     let face: [Color]
-    let bezel: Color
+    let faceVignette: Color
     let scale: Color
     let hotScale: Color
     let legend: Color
     let branding: Color
-    let needle = Color(red: 1.00, green: 0.36, blue: 0.045)
+    let brandingHighlight: Color
+    let bezelGold: [Color]
+    let bezelGlow: Color
+    let glassGlare: Double
+    let needle = Color(red: 1.00, green: 0.40, blue: 0.06)
 
     init(darkAppearance: Bool) {
+        bezelGold = [
+            Color(red: 1.00, green: 0.88, blue: 0.62),
+            Color(red: 0.78, green: 0.52, blue: 0.24),
+            Color(red: 0.42, green: 0.25, blue: 0.10),
+            Color(red: 0.86, green: 0.62, blue: 0.32),
+        ]
+        bezelGlow = Color(red: 1.00, green: 0.70, blue: 0.32)
         if darkAppearance {
-            // Espresso housing / light neutral-cream face.
+            // DockIconDark: espresso body, cream face, near-black scale.
             housing = [
-                Color(red: 0.28, green: 0.20, blue: 0.16),
-                Color(red: 0.19, green: 0.13, blue: 0.11),
-                Color(red: 0.11, green: 0.08, blue: 0.07),
+                Color(red: 0.31, green: 0.24, blue: 0.20),
+                Color(red: 0.22, green: 0.17, blue: 0.14),
+                Color(red: 0.15, green: 0.11, blue: 0.09),
             ]
+            housingRim = Color(red: 0.62, green: 0.52, blue: 0.45)
             face = [
-                Color(red: 0.98, green: 0.955, blue: 0.88),
-                Color(red: 0.94, green: 0.915, blue: 0.84),
-                Color(red: 0.86, green: 0.83, blue: 0.76),
+                Color(red: 0.99, green: 0.97, blue: 0.91),
+                Color(red: 0.95, green: 0.92, blue: 0.84),
             ]
-            bezel = Color(red: 0.11, green: 0.085, blue: 0.07)
-            scale = Color(red: 0.20, green: 0.16, blue: 0.14)
-            hotScale = Color(red: 0.70, green: 0.22, blue: 0.08)
-            legend = scale
-            branding = Color(red: 0.94, green: 0.88, blue: 0.76)
+            faceVignette = Color(red: 0.55, green: 0.47, blue: 0.36)
+            scale = Color(red: 0.08, green: 0.06, blue: 0.05)
+            hotScale = Color(red: 0.80, green: 0.06, blue: 0.05)
+            legend = Color(red: 0.25, green: 0.20, blue: 0.16)
+            branding = Color(red: 0.95, green: 0.90, blue: 0.80)
+            brandingHighlight = .black.opacity(0.55)
+            glassGlare = 0.55
         } else {
-            // Champagne housing / dark charcoal face.
+            // DockIconLight: ivory body, black face, cream scale.
             housing = [
-                Color(red: 0.96, green: 0.87, blue: 0.71),
-                Color(red: 0.85, green: 0.73, blue: 0.56),
-                Color(red: 0.72, green: 0.60, blue: 0.44),
+                Color(red: 0.97, green: 0.96, blue: 0.92),
+                Color(red: 0.92, green: 0.90, blue: 0.85),
+                Color(red: 0.85, green: 0.82, blue: 0.76),
             ]
+            housingRim = .white
             face = [
-                Color(red: 0.20, green: 0.20, blue: 0.19),
-                Color(red: 0.145, green: 0.15, blue: 0.145),
-                Color(red: 0.085, green: 0.09, blue: 0.085),
+                Color(red: 0.16, green: 0.155, blue: 0.15),
+                Color(red: 0.06, green: 0.06, blue: 0.06),
             ]
-            bezel = Color(red: 0.20, green: 0.17, blue: 0.14)
-            scale = Color(red: 0.94, green: 0.90, blue: 0.82)
-            hotScale = Color(red: 1.00, green: 0.48, blue: 0.17)
-            legend = scale
-            branding = Color(red: 0.25, green: 0.19, blue: 0.13)
+            faceVignette = .black
+            scale = Color(red: 0.97, green: 0.94, blue: 0.86)
+            hotScale = Color(red: 1.00, green: 0.10, blue: 0.08)
+            legend = Color(red: 0.86, green: 0.82, blue: 0.74)
+            branding = Color(red: 0.36, green: 0.22, blue: 0.12)
+            brandingHighlight = .white.opacity(0.85)
+            glassGlare = 0.26
         }
     }
 }
 
-private struct StereoSignatureVUMeter: View {
+/// Window geometry for one meter, derived from its pivot and scale radius so
+/// the scale is unchanged: the window spans the scale and labels and ends
+/// above the pivot, which therefore stays hidden like the icon's needle.
+private struct StereoSignatureVUWindow {
+    let center: CGPoint
+    let radius: CGFloat
+    var rect: CGRect {
+        let width = radius * 1.64
+        let top = center.y - radius * 1.08
+        let bottom = center.y - radius * 0.45
+        return CGRect(x: center.x - width / 2, y: top, width: width, height: bottom - top)
+    }
+    var cornerRadius: CGFloat { rect.height * 0.16 }
+}
+
+struct StereoSignatureVUMeter: View {
     let leftVU: Double
     let rightVU: Double
     @Environment(\.colorScheme) private var colorScheme
@@ -1014,121 +1048,196 @@ private struct StereoSignatureVUMeter: View {
         GeometryReader { proxy in
             let width = proxy.size.width
             let height = proxy.size.height
-            let leftCenter = CGPoint(x: width * 0.28, y: height * 1.14)
-            let rightCenter = CGPoint(x: width * 0.72, y: height * 1.14)
-            let radius = min(width * 0.19, height * 0.61)
-            let windowWidth = width * 0.94
-            let windowHeight = height * 0.74
-            let windowCenter = CGPoint(x: width * 0.50, y: height * 0.43)
+            // Two icon-style windows side by side; layout in housing heights.
+            let radius = min(height * 0.80, width * 0.25)
+            let pivotY = height * 0.12 + radius * 1.08
+            let leftCenter = CGPoint(x: width * 0.263, y: pivotY)
+            let rightCenter = CGPoint(x: width * 0.737, y: pivotY)
             let palette = StereoSignatureVUPalette(darkAppearance: colorScheme == .dark)
+            let windows = [
+                StereoSignatureVUWindow(center: leftCenter, radius: radius),
+                StereoSignatureVUWindow(center: rightCenter, radius: radius),
+            ]
 
             ZStack {
-                RoundedRectangle(cornerRadius: 28, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: palette.housing,
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
+                housing(palette: palette)
+
+                ForEach(0..<2, id: \.self) { index in
+                    meterWindow(
+                        windows[index],
+                        vu: index == 0 ? leftVU : rightVU,
+                        legend: index == 0 ? "LEFT" : "RIGHT",
+                        palette: palette,
+                        size: proxy.size
                     )
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 28, style: .continuous)
-                            .stroke(.white.opacity(colorScheme == .dark ? 0.13 : 0.32), lineWidth: 0.8)
-                    }
-                    .shadow(color: .black.opacity(0.30), radius: 18, y: 8)
-
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: palette.face,
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-                    .frame(width: windowWidth, height: windowHeight)
-                    .position(windowCenter)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 22, style: .continuous)
-                            .stroke(palette.bezel.opacity(0.85), lineWidth: 1.4)
-                            .frame(width: windowWidth, height: windowHeight)
-                            .position(windowCenter)
-                    }
-                    .shadow(color: .black.opacity(0.24), radius: 8, y: 4)
-
-                StereoSignatureVUScaleFace(
-                    leftCenter: leftCenter,
-                    rightCenter: rightCenter,
-                    radius: radius,
-                    darkAppearance: colorScheme == .dark
-                )
-                .equatable()
-
-                Canvas { context, _ in
-                    drawNeedle(context: &context, center: leftCenter, radius: radius, vu: leftVU, color: palette.needle)
-                    drawNeedle(context: &context, center: rightCenter, radius: radius, vu: rightVU, color: palette.needle)
                 }
 
-                Text("LEFT")
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                    .tracking(2.1)
-                    .foregroundStyle(palette.legend.opacity(0.82))
-                    .position(x: width * 0.28, y: height * 0.69)
-
-                Text("RIGHT")
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                    .tracking(2.1)
-                    .foregroundStyle(palette.legend.opacity(0.82))
-                    .position(x: width * 0.72, y: height * 0.69)
-
-                // A deliberately restrained optical highlight underneath the real
-                // Liquid Glass surface gives the window a thick, polished lens feel.
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                .white.opacity(colorScheme == .dark ? 0.28 : 0.12),
-                                .white.opacity(colorScheme == .dark ? 0.09 : 0.04),
-                                .clear,
-                                .black.opacity(0.035),
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: windowWidth, height: windowHeight)
-                    .position(windowCenter)
-                    .allowsHitTesting(false)
-
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(.white.opacity(0.001))
-                    .frame(width: windowWidth, height: windowHeight)
-                    .position(windowCenter)
-                    .glassEffect(.regular, in: .rect(cornerRadius: 22))
-                    .opacity(colorScheme == .dark ? 0.24 : 0.13)
-                    .allowsHitTesting(false)
-
-                Capsule()
-                    .fill(.white.opacity(0.23))
-                    .frame(width: width * 0.36, height: 1.2)
-                    .blur(radius: 0.35)
-                    .position(x: width * 0.30, y: height * 0.105)
-                    .allowsHitTesting(false)
-
-                HStack(spacing: 10) {
-                    Rectangle().fill(palette.branding.opacity(0.24)).frame(width: 30, height: 1)
-                    Text("NOTCH SIXTY")
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        .tracking(3.4)
-                        .foregroundStyle(palette.branding.opacity(0.88))
-                    Rectangle().fill(palette.branding.opacity(0.24)).frame(width: 30, height: 1)
-                }
-                .position(x: width * 0.50, y: height * 0.90)
+                Text("NOTCH SIXTY")
+                    .font(.system(size: max(13, height * 0.075), weight: .regular, design: .default))
+                    .tracking(max(4, height * 0.028))
+                    .foregroundStyle(palette.branding)
+                    .shadow(color: palette.brandingHighlight, radius: 0, y: colorScheme == .dark ? -0.8 : 0.9)
+                    .position(x: width * 0.50, y: height * 0.84)
             }
         }
         .aspectRatio(3.2, contentMode: .fit)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Stereo output VU meter")
         .accessibilityValue("Left \(leftVU, specifier: "%.1f") VU, right \(rightVU, specifier: "%.1f") VU")
+    }
+
+    @ViewBuilder
+    private func housing(palette: StereoSignatureVUPalette) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 30, style: .continuous)
+        shape
+            .fill(LinearGradient(colors: palette.housing, startPoint: .top, endPoint: .bottom))
+            .overlay {
+                // Polished top rim, as on the icon body.
+                shape.stroke(
+                    LinearGradient(
+                        colors: [
+                            palette.housingRim.opacity(0.85),
+                            palette.housingRim.opacity(0.10),
+                            .clear,
+                            .black.opacity(0.25),
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ),
+                    lineWidth: 1.6
+                )
+            }
+            .shadow(color: .black.opacity(colorScheme == .dark ? 0.45 : 0.22), radius: 14, y: 6)
+    }
+
+    @ViewBuilder
+    private func meterWindow(
+        _ window: StereoSignatureVUWindow,
+        vu: Double,
+        legend: String,
+        palette: StereoSignatureVUPalette,
+        size: CGSize
+    ) -> some View {
+        let rect = window.rect
+        let corner = window.cornerRadius
+        let windowShape = RoundedRectangle(cornerRadius: corner, style: .continuous)
+
+        ZStack {
+            // Face, scale and needle share one clip: the needle runs off the
+            // window's lower edge and its pivot is never visible.
+            ZStack {
+                windowShape
+                    .fill(LinearGradient(colors: palette.face, startPoint: .top, endPoint: .bottom))
+                    .overlay {
+                        windowShape.fill(
+                            RadialGradient(
+                                colors: [.clear, palette.faceVignette.opacity(0.28)],
+                                center: .center,
+                                startRadius: rect.height * 0.35,
+                                endRadius: rect.width * 0.62
+                            )
+                        )
+                    }
+                    .frame(width: rect.width, height: rect.height)
+                    .position(x: rect.midX, y: rect.midY)
+
+                StereoSignatureVUScaleFace(
+                    center: window.center,
+                    radius: window.radius,
+                    darkAppearance: colorScheme == .dark
+                )
+                .equatable()
+
+                Text(legend)
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .tracking(2.1)
+                    .foregroundStyle(palette.legend.opacity(0.75))
+                    .position(x: window.center.x, y: window.center.y - window.radius * 0.575)
+
+                Canvas { context, _ in
+                    drawNeedle(context: &context, center: window.center, radius: window.radius, vu: vu, color: palette.needle)
+                }
+            }
+            .frame(width: size.width, height: size.height)
+            .clipShape(windowShape.path(in: rect))
+
+            // Glass lens: top glare band, soft edge shading and a fine
+            // specular line, drawn explicitly so it matches the icon.
+            windowShape
+                .fill(
+                    LinearGradient(
+                        stops: [
+                            .init(color: .white.opacity(palette.glassGlare), location: 0),
+                            .init(color: .white.opacity(palette.glassGlare * 0.35), location: 0.22),
+                            .init(color: .white.opacity(0.0), location: 0.46),
+                            .init(color: .clear, location: 0.80),
+                            .init(color: .black.opacity(0.10), location: 1),
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .overlay {
+                    windowShape
+                        .stroke(.black.opacity(0.45), lineWidth: 5)
+                        .blur(radius: 4)
+                        .clipShape(windowShape)
+                }
+                .overlay {
+                    // Curved reflection across the upper lens, as on the icon.
+                    Ellipse()
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    .white.opacity(palette.glassGlare * 0.9),
+                                    .white.opacity(palette.glassGlare * 0.25),
+                                    .clear,
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .frame(width: rect.width * 1.5, height: rect.height * 1.1)
+                        .offset(y: -rect.height * 0.62)
+                        .blendMode(.screen)
+                }
+                .overlay(alignment: .top) {
+                    Capsule()
+                        .fill(.white.opacity(0.30))
+                        .frame(width: rect.width * 0.70, height: 1.0)
+                        .blur(radius: 0.8)
+                        .padding(.top, rect.height * 0.05)
+                }
+                .frame(width: rect.width, height: rect.height)
+                .clipShape(windowShape)
+                .position(x: rect.midX, y: rect.midY)
+                .allowsHitTesting(false)
+
+            // Glowing gold bezel with an inner dark seat, as on the icon.
+            windowShape
+                .stroke(
+                    AngularGradient(
+                        colors: palette.bezelGold + [palette.bezelGold[0]],
+                        center: .center
+                    ),
+                    lineWidth: 3.2
+                )
+                .overlay {
+                    windowShape
+                        .inset(by: 2.4)
+                        .stroke(.black.opacity(0.65), lineWidth: 1.2)
+                }
+                .overlay {
+                    windowShape
+                        .inset(by: -2.6)
+                        .stroke(.black.opacity(colorScheme == .dark ? 0.55 : 0.25), lineWidth: 1.4)
+                }
+                .shadow(color: palette.bezelGlow.opacity(0.65), radius: 5)
+                .shadow(color: palette.bezelGlow.opacity(0.30), radius: 12)
+                .frame(width: rect.width, height: rect.height)
+                .position(x: rect.midX, y: rect.midY)
+                .allowsHitTesting(false)
+        }
     }
 
     private func drawNeedle(
@@ -1140,24 +1249,23 @@ private struct StereoSignatureVUMeter: View {
     ) {
         let angle = ProductionVUScale.angle(forVU: vu)
         var path = Path()
-        // The mechanical pivot intentionally lives below the visible glass. Only
-        // the upper needle segment is drawn, producing the shallow 1970s sweep.
-        path.move(to: ProductionVUScale.point(center: center, radius: radius * 0.62, angle: angle))
+        // Drawn from the hidden pivot; the window clip shows only the upper
+        // segment, emerging from the lower edge like the icon's needle.
+        path.move(to: center)
         path.addLine(to: ProductionVUScale.point(center: center, radius: radius * 0.985, angle: angle))
-        context.stroke(path, with: .color(color), lineWidth: 2.55)
+        context.stroke(path, with: .color(.black.opacity(0.18)), style: StrokeStyle(lineWidth: 3.6, lineCap: .round))
+        context.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: 2.4, lineCap: .round))
     }
 }
 
 private struct StereoSignatureVUScaleFace: View, Equatable {
-    let leftCenter: CGPoint
-    let rightCenter: CGPoint
+    let center: CGPoint
     let radius: CGFloat
     let darkAppearance: Bool
 
     var body: some View {
         Canvas { context, _ in
-            drawScale(context: &context, center: leftCenter)
-            drawScale(context: &context, center: rightCenter)
+            drawScale(context: &context, center: center)
         }
     }
 
