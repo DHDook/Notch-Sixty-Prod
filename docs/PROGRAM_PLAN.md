@@ -68,7 +68,7 @@ Phase 1 makes `main` trustworthy on real hardware before any new feature lands.
 
 ### E2 macOS 26 support
 
-- [ ] Set `MACOSX_DEPLOYMENT_TARGET` to 26.0 and fix every compile error with `#available` gates
+- [x] Set `MACOSX_DEPLOYMENT_TARGET` to 26.0 and fix every compile error with `#available` gates (#132)
 - [ ] Check every macOS 27-only API and UI treatment for a macOS 26 fallback
 - [ ] Add a macOS 26 job to the full CI workflow
 - [ ] Re-run H01–H08 smoke cases on a macOS 26 machine
