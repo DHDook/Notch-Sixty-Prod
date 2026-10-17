@@ -284,9 +284,8 @@ static bool convolution_snapshot_is_valid(N60ConvolutionGraphState convolution) 
         || convolution.engineLatencyFrames != N60_CONVOLUTION_PARTITION_FRAMES) {
         return false;
     }
-    uint32_t expectedPartitions = (convolution.tapCount + N60_CONVOLUTION_PARTITION_FRAMES - 1u)
-        / N60_CONVOLUTION_PARTITION_FRAMES;
-    return convolution.partitionCount == expectedPartitions;
+    return convolution.partitionCount
+        == N60ConvolutionPartitionCountForTapCount(convolution.tapCount);
 }
 
 static bool snapshot_is_valid(N60DSPGraphSnapshot snapshot) {

@@ -117,7 +117,7 @@ struct SpeakerOptimizerFIRLatencyPlanner: Sendable {
             throw SpeakerOptimizerFIRLatencyPlanningError.invalidSampleRate
         }
         guard tapCount >= 3,
-              tapCount <= Int(N60_CONVOLUTION_MAX_TAPS),
+              tapCount <= Int(N60_PROGRAM_FIR_MAX_TAPS),
               tapCount % 2 == 1 else {
             throw SpeakerOptimizerFIRLatencyPlanningError
                 .invalidTapCount(tapCount)
@@ -374,7 +374,7 @@ struct SpeakerOptimizerFIRDeploymentConfiguration:
               profile.speakerOptimizerPEQ == nil,
               !aggregateCandidateFingerprint.isEmpty,
               tapCount >= 257,
-              tapCount <= Int(N60_CONVOLUTION_MAX_TAPS),
+              tapCount <= Int(N60_PROGRAM_FIR_MAX_TAPS),
               tapCount % 2 == 1,
               declaredGroupDelayFrames == (tapCount - 1) / 2,
               requiredHeadroomDB.isFinite,

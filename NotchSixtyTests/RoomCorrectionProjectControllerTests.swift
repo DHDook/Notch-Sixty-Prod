@@ -537,6 +537,66 @@ final class RoomCorrectionProjectControllerTests: XCTestCase {
         XCTAssertEqual(summary.measurementDate, Date(timeIntervalSince1970: 20))
     }
 
+    func testDeployedDesignIsResynthesizedForAnotherOutputRate() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        _ = try fixture.controller.retainMeasurement(
+            analysis(capturedAt: 10),
+            sweep: sweep(),
+            microphone: microphone()
+        )
+        try fixture.controller.setTarget(RoomCorrectionBuiltInTarget.flat.curve)
+        let design = try fixture.controller.generateDesign(
+            parameters: RoomCorrectionDesignParameters(
+                correctionLowHz: 80,
+                correctionHighHz: 2_000,
+                smoothingOctaves: 1.0 / 6.0,
+                maximumBoostDB: 4,
+                maximumCutDB: 8,
+                requestedTapCount: 1_024
+            ),
+            name: "Rate Fixture"
+        )
+        let deployed = try design.deploymentFilter()
+        try fixture.profiles.replaceSelectedSystemRoomCorrection(
+            RoomCorrectionConfiguration(enabled: true, filter: deployed),
+            calibrationSummary: try fixture.controller.deploymentSummary(for: design)
+        )
+
+        let targetRate = design.sampleRate * 2
+        let adapted = try XCTUnwrap(
+            fixture.controller.rateAdaptedDeploymentFilter(matching: deployed, sampleRate: targetRate)
+        )
+        XCTAssertEqual(try XCTUnwrap(adapted.sampleRate), targetRate, accuracy: 0.5)
+        XCTAssertEqual(adapted.leftTaps.count, 2_048, "time span is preserved")
+        XCTAssertNoThrow(try adapted.validateSampleRate(forOutputSampleRate: targetRate))
+        for frequency in [150.0, 400.0, 900.0] {
+            XCTAssertEqual(
+                magnitudeDB(adapted.leftTaps, frequency: frequency, sampleRate: targetRate),
+                magnitudeDB(deployed.leftTaps, frequency: frequency, sampleRate: design.sampleRate),
+                accuracy: 0.5,
+                "\(frequency) Hz"
+            )
+        }
+
+        var foreign = deployed
+        foreign.leftTaps[0] += 0.01
+        XCTAssertNil(
+            fixture.controller.rateAdaptedDeploymentFilter(matching: foreign, sampleRate: targetRate),
+            "a filter that is not the active design is never substituted"
+        )
+    }
+
+    private func magnitudeDB(_ taps: [Float], frequency: Double, sampleRate: Double) -> Double {
+        var re = 0.0, im = 0.0
+        for (n, value) in taps.enumerated() {
+            let phase = -2 * Double.pi * frequency * Double(n) / sampleRate
+            re += Double(value) * cos(phase)
+            im += Double(value) * sin(phase)
+        }
+        return 20 * log10(max(hypot(re, im), 1.0e-12))
+    }
+
     func testProfileRoomCorrectionDeploymentChangesOnlyRoomOwnedStateAndRestoresWithoutSidecar() throws {
         let fixture = try makeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }

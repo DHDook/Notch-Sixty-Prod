@@ -4,18 +4,31 @@ PR #17 establishes the portable FIR engine that later linear-phase EQ and room-c
 
 ## Architecture
 
-The production engine is a uniform partitioned convolution implementation written in portable C. It has no dependency on Core Audio, Swift, Accelerate, AppKit, or another Apple-only API.
+The stereo engine (`N60Convolution.c`) is a **non-uniformly partitioned** convolver in C using Accelerate/vDSP real FFTs. (Earlier revisions were a uniform, portable-C engine capped at 32,768 taps; the product targets macOS on Apple silicon, so the FFT now uses vDSP directly. A platform backend interface can be reintroduced if another platform is ever targeted.)
+
+The impulse response is split into three segments of increasing block size:
+
+| Segment | Block | Taps | Partitions |
+|---|---|---|---|
+| 0 | 256 | 0 – 1,024 | 4 |
+| 1 | 1,024 | 1,024 – 5,120 | 4 |
+| 2 | 4,096 | 5,120 – 262,144 | up to 63 |
+
+Each segment with block B starts at a tap offset of at least B − 256, so its output is ready before it must be emitted: the engine latency stays one 256-frame base block regardless of filter length. Older-partition multiply-accumulates of the larger segments are spread evenly across their block period, so a boundary tick only adds one FFT, one partition multiply and one inverse FFT per segment.
 
 Current constants:
 
-- partition size: 256 frames
-- FFT size: 512 points
-- maximum impulse response: 32,768 taps
-- maximum partitions: 128
-- independent left/right impulse responses
-- two preallocated program slots
+- base block / engine latency: 256 frames
+- maximum impulse response: 262,144 taps (0.68 s at 384 kHz; the same time span as 32,768 taps at 48 kHz)
+- maximum partitions: 71 (`N60ConvolutionPartitionCountForTapCount`)
+- independent left/right impulse responses (right may share the left kernel)
+- three preallocated program slots
 
-FFT twiddle factors, bit-reversal tables, and frequency-domain impulse-response partitions are prepared outside the realtime render call. The render path performs no allocation, locks, trigonometry, logging, disk I/O, or network I/O.
+All buffers and the vDSP FFT setup are allocated at create; prepare and reset are control-plane only, and reset clears only the state the prepared program can read. The render path performs no allocation, locks, trigonometry, logging, disk I/O, or network I/O.
+
+Measured on Apple silicon (stereo, per convolver, `-O2`): 32,768 taps 44 ns/sample (old uniform engine: 176 ns); 262,144 taps 80 ns/sample, about 3 % of one core at 384 kHz, with a worst single tick of ~57 µs against a 667 µs tick period at 384 kHz.
+
+The multichannel semantic program FIR (`N60ProgramFIRRuntime.h`) is a separate uniformly partitioned runtime with its own `N60_PROGRAM_FIR_MAX_TAPS` (32,768) budget.
 
 ## Graph placement
 
@@ -37,7 +50,7 @@ The final output-gain stage therefore remains authoritative after FIR processing
 
 ## Latency
 
-Uniform partitioning adds one 256-frame engine block of latency. The graph also records an independent `declaredLatencyFrames` value for the filter's intentional group delay.
+The engine adds one 256-frame base block of latency, independent of filter length. The graph also records an independent `declaredLatencyFrames` value for the filter's intentional group delay.
 
 Examples of engine-only latency:
 
@@ -56,9 +69,7 @@ PR #17 does not yet expose arbitrary IR import or live IR replacement in the pro
 
 ## Performance direction
 
-The portable implementation is the correctness/reference backend. The 32,768-tap capacity is an architectural ceiling, not a promise that the longest filter is the preferred realtime configuration at every sample rate.
-
-Before shipping very long FIRs at 384 kHz, benchmark callback worst-case time as well as average CPU. If needed, add a platform-neutral backend interface so Apple can use an optimized FFT implementation while Windows/Android use equivalent optimized backends without changing DSP behavior or graph semantics. Non-uniform partitioning remains an available optimization for long room-correction filters.
+Long filters are now cheap enough for 384 kHz room correction; the remaining hardware check is worst-case callback time with all three FIR stages (EQ FIR, room correction, Speaker IR) at full length on the slowest supported Mac, alongside the rest of the graph.
 
 ## Provenance
 

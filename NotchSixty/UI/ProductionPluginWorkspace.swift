@@ -707,7 +707,10 @@ struct ProductionPluginWorkspace: View {
                     channelCount
                 )
             ),
-            maximumFramesPerSlice: 4_096
+            maximumFramesPerSlice: AudioUnitRackProcessingFormat
+                .recommendedMaximumFramesPerSlice(
+                    sampleRate: engine.selectedOutputDevice?.nominalSampleRate ?? 48_000
+                )
         )
     }
 

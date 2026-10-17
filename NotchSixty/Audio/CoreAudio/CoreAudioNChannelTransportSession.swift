@@ -14,6 +14,7 @@ enum LiveNChannelTransportError: Error, Equatable, LocalizedError {
     case captureBufferSizeMismatch(capture: UInt32, output: UInt32)
     case aggregateDeviceNotReady
     case unsupportedActiveDSP(String)
+    case globalBypassUnsupported
     case roomTreatmentPermitMismatch
     case roomTreatmentSourceUnavailable(String)
     case roomTreatmentConfigurationFailed
@@ -42,6 +43,8 @@ enum LiveNChannelTransportError: Error, Equatable, LocalizedError {
             return "Core Audio created the private N-channel aggregate device but it did not become ready for IO."
         case .unsupportedActiveDSP(let feature):
             return "Live N-channel activation currently requires \(feature) to be bypassed or disabled. Stop processing and use the supported semantic transport subset."
+        case .globalBypassUnsupported:
+            return "Global DSP Bypass is not yet available for multichannel or Virtual Speakers playback. Turn Bypass off before starting processing."
         case .roomTreatmentPermitMismatch:
             return "The room-treatment activation permit does not match the prepared FIR program or current output sample rate."
         case .roomTreatmentSourceUnavailable(let source):
@@ -136,6 +139,14 @@ struct LiveMIMORoomTreatmentPreparation: Equatable, Sendable {
 }
 
 enum LiveNChannelRenderGraphCompiler {
+    /// Playback-side LFE in-band gain (ITU-R BS.775 / Dolby / DTS convention):
+    /// the LFE channel is carried 10 dB below the main channels and must be
+    /// restored on playback.
+    static let lfeInBandGainDB = 10.0
+    /// Band limit applied to the native LFE program channel when bass
+    /// management owns the subwoofer feed.
+    static let lfeLowPassHz = 120.0
+
     static func makeGraph(
         routePlan: LiveNChannelOutputRoutePlan,
         sampleRate: Double,
@@ -165,8 +176,15 @@ enum LiveNChannelRenderGraphCompiler {
         for channel in 0..<layout.channelCount {
             let role = programRoles[Int(channel)]
             let calibration = routePlan.speakerCalibrations[role]
+            // With bass management enabled, the LFE in-band gain is applied by
+            // the LFE→sub matrix; without it, the LFE lane carries the gain to
+            // its directly mapped output. Never both.
+            let lfeInBandGainDB = role == .lowFrequencyEffects
+                && !bassManagementConfiguration.enabled
+                ? Self.lfeInBandGainDB
+                : 0
             let calibratedGain = combinedGain * DSPGainConfiguration.linearGain(
-                forDB: calibration?.trimDB ?? 0
+                forDB: (calibration?.trimDB ?? 0) + lfeInBandGainDB
             )
             guard N60ProgramLaneGraphSetGain(&lanes, channel, calibratedGain),
                   N60ProgramLaneGraphSetPolarityInverted(
@@ -233,6 +251,18 @@ enum LiveNChannelRenderGraphCompiler {
                 routePlan.subwooferCount
             )
             let routeGain = 1.0 / Float(max(routePlan.subwooferCount, 1))
+            guard N60MultichannelBassManagementSetLFEGain(
+                    &bass,
+                    DSPGainConfiguration.linearGain(forDB: Self.lfeInBandGainDB)
+                  ),
+                  N60MultichannelBassManagementSetLFELowPass(
+                    &bass,
+                    Self.lfeLowPassHz,
+                    bassManagementConfiguration.topology.cType,
+                    true
+                  ) else {
+                throw LiveNChannelTransportError.renderGraphInvalid
+            }
             for channel in 0..<layout.channelCount {
                 if programRoles[Int(channel)] == .lowFrequencyEffects {
                     continue

@@ -16,6 +16,11 @@ extern "C" {
 #endif
 
 #define N60_PROGRAM_FIR_INACTIVE_ORDINAL UINT32_MAX
+// The semantic program FIR is a separate uniformly partitioned runtime that
+// preallocates per program channel, so it keeps its own smaller tap budget,
+// independent of the stereo non-uniform convolver's maximum.
+#define N60_PROGRAM_FIR_MAX_TAPS 32768u
+#define N60_PROGRAM_FIR_MAX_PARTITIONS (N60_PROGRAM_FIR_MAX_TAPS / N60_CONVOLUTION_PARTITION_FRAMES)
 
 typedef struct {
     float real;
@@ -91,10 +96,10 @@ static inline bool N60ProgramFIRProgramInfoIsValid(
             != N60ProgramFIRPopCount(info.activeChannelMask)
         || info.activeChannelCount > info.channelCount
         || info.tapCount == 0u
-        || info.tapCount > N60_CONVOLUTION_MAX_TAPS
+        || info.tapCount > N60_PROGRAM_FIR_MAX_TAPS
         || info.partitionCount == 0u
         || info.partitionCount
-            > N60_CONVOLUTION_MAX_PARTITIONS
+            > N60_PROGRAM_FIR_MAX_PARTITIONS
         || info.partitionCount
             != (info.tapCount
                 + N60_CONVOLUTION_PARTITION_FRAMES - 1u)
@@ -265,7 +270,7 @@ N60ProgramFIRProgramCreate(
         || activeChannelMask == 0u
         || (activeChannelMask & ~validMask) != 0u
         || tapCount == 0u
-        || tapCount > N60_CONVOLUTION_MAX_TAPS
+        || tapCount > N60_PROGRAM_FIR_MAX_TAPS
         || declaredLatencyFrames >= tapCount) {
         return NULL;
     }
@@ -430,7 +435,7 @@ N60ProgramFIRRuntimeCreate(
         || program->activeChannelCount == 0u
         || program->partitionCount == 0u
         || program->partitionCount
-            > N60_CONVOLUTION_MAX_PARTITIONS) {
+            > N60_PROGRAM_FIR_MAX_PARTITIONS) {
         return NULL;
     }
 

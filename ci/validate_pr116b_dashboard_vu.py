@@ -12,28 +12,32 @@ def require(condition: bool, message: str) -> None:
     if not condition:
         raise SystemExit("PR116B validation failed: " + message)
 
-require("private struct StereoSignatureVUPalette {" in root, "palette absent")
-meter = root.split("private struct StereoSignatureVUPalette {", 1)[1].split(
+require("struct StereoSignatureVUPalette {" in root, "palette absent")
+meter = root.split("struct StereoSignatureVUPalette {", 1)[1].split(
     "private struct ProductionSpeakersView: View {", 1
 )[0]
+# RC revision: the meter follows the approved icons (DockIconDark: espresso
+# body / cream face; DockIconLight: ivory body / black face) with per-channel
+# gold-bezel glass windows and the needle pivot hidden by the window clip.
 for token in (
     "init(darkAppearance: Bool)",
     r"@Environment(\.colorScheme)",
     "darkAppearance: colorScheme == .dark",
-    "Color(red: 0.98, green: 0.955, blue: 0.88)",
-    "Color(red: 0.20, green: 0.20, blue: 0.19)",
-    "let needle = Color(red: 1.00, green: 0.36, blue: 0.045)",
-    "context.stroke(path, with: .color(color), lineWidth: 2.55)",
-    "radius: radius * 0.62",
+    "Color(red: 0.99, green: 0.97, blue: 0.91)",
+    "Color(red: 0.16, green: 0.155, blue: 0.15)",
+    "let needle = Color(red: 1.00, green: 0.40, blue: 0.06)",
+    "struct StereoSignatureVUWindow",
+    "center.y - radius * 0.45",
+    ".clipShape(windowShape.path(in: rect))",
+    "bezelGold",
+    "glassGlare",
     "radius: radius * 0.985",
-    ".glassEffect(.regular, in: .rect(cornerRadius: 22))",
     "hotArc",
     ".accessibilityValue(",
 ):
     require(token in meter, "missing meter contract: " + token)
 require("context.stroke(path, with: .color(.black.opacity(0.24))" not in meter, "old black needle outline remains")
 require("0 VU = −18 dBFS" in root, "reference legend missing")
-require("height * 1.14" in meter, "meter pivot changed")
 require("ProductionVUScale.smoothed(" in root, "meter smoothing removed")
 require("ProductionOutputVUMeterDemand.acquire()" in root, "meter demand removed")
 require("espresso housing" in icons and "champagne housing" in icons, "PR116 colors missing")

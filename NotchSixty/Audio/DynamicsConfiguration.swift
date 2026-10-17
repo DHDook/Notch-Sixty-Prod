@@ -1016,6 +1016,33 @@ struct AutomaticHeadroomConfiguration: Equatable, Codable, Sendable {
     }
 }
 
+extension DynamicsConfiguration {
+    /// True when any dynamics/protection stage would change the signal.
+    /// Oversampling only affects enabled stages, so it is not checked alone.
+    var hasActiveProcessing: Bool {
+        stereoMode != .stereo
+            || stereoWidener.enabled
+            || dcOffsetFilter.enabled
+            || infrasonicFilter.enabled
+            || mainsNotch.enabled
+            || spectralDenoiser.enabled
+            || loudnessMatch.enabled
+            || loudnessContour.enabled
+            || deHarsh.enabled
+            || dialogueRelativeLeveler.enabled
+            || dynamicEQ.enabled
+            || deEsser.enabled
+            || multibandCompressor.enabled
+            || compressor.enabled
+            || expander.enabled
+            || softClipper.enabled
+            || limiter.enabled
+            || gainRider.enabled
+            || automaticHeadroom.enabled
+            || pauseGate.enabled
+    }
+}
+
 struct DynamicsConfiguration: Equatable, Codable, Sendable {
     var stereoMode: StereoProcessingMode = .stereo
     var stereoWidener = StereoWidenerConfiguration()

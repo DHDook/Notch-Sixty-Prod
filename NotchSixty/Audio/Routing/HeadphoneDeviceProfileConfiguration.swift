@@ -326,7 +326,14 @@ struct HeadphoneDeviceProfileConfiguration: Codable, Equatable, Sendable {
                 throw HeadphoneDeviceProfileError.binauralProfileRequired
             }
             try binauralProfile.validate()
-            guard abs(binauralProfile.sampleRate - sampleRate) < 0.5 else {
+            // A profile at another rate is converted at activation (control
+            // plane, explicit in the UI); it only fails when the converted
+            // response would exceed the renderer's tap budget.
+            guard BinauralProfileAsset.resampledTapCount(
+                binauralProfile.tapCount,
+                from: binauralProfile.sampleRate,
+                to: sampleRate
+            ) <= Int(N60_BINAURAL_MAX_TAPS) else {
                 throw HeadphoneDeviceProfileError.binauralProfileSampleRateMismatch(
                     profile: binauralProfile.sampleRate,
                     output: sampleRate

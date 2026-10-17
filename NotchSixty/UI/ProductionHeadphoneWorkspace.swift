@@ -752,11 +752,11 @@ struct ProductionHeadphoneWorkspace: View {
                 Label(
                     matching
                         ? "HRTF rate matches the selected headphone output."
-                        : "Sample-rate mismatch: profile \(Int(profile.sampleRate)) Hz. Select a matching output rate or import a matching HRTF. Automatic HRTF resampling is not implemented.",
-                    systemImage: matching ? "checkmark.shield" : "exclamationmark.shield"
+                        : "HRTF measured at \(Int(profile.sampleRate)) Hz. It will be converted to the output rate when processing starts; importing an HRTF at the output's native rate avoids the conversion.",
+                    systemImage: matching ? "checkmark.shield" : "arrow.triangle.2.circlepath"
                 )
                 .font(.caption)
-                .foregroundStyle(matching ? Color.secondary : Color.orange)
+                .foregroundStyle(Color.secondary)
             }
 
             if draft.programSourceDeviceUID == nil {

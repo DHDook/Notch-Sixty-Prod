@@ -61,6 +61,12 @@ typedef struct {
     N60CrossoverPreciseState upperLowRight[N60_MAX_CROSSOVER_SECTIONS];
     N60CrossoverPreciseState upperHighLeft[N60_MAX_CROSSOVER_SECTIONS];
     N60CrossoverPreciseState upperHighRight[N60_MAX_CROSSOVER_SECTIONS];
+    // Tri-amp phase compensation: the low band passes through the upper
+    // crossover's all-pass (LP2 + HP2) so the three bands sum flat.
+    N60CrossoverPreciseState lowAllPassLowLeft[N60_MAX_CROSSOVER_SECTIONS];
+    N60CrossoverPreciseState lowAllPassLowRight[N60_MAX_CROSSOVER_SECTIONS];
+    N60CrossoverPreciseState lowAllPassHighLeft[N60_MAX_CROSSOVER_SECTIONS];
+    N60CrossoverPreciseState lowAllPassHighRight[N60_MAX_CROSSOVER_SECTIONS];
     N60CrossoverPreciseState subPhaseAlignment;
 } N60SpeakerBusSplitterRuntime;
 
@@ -446,10 +452,10 @@ static void process_speaker_bus_splitter(
         snapshot->lowerLowPass, runtime->lowerLowRight,
         snapshot->lowerSectionCount, right
     );
-    (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusLeftLow, lowLeft);
-    (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusRightLow, lowRight);
 
     if (snapshot->mode == N60SpeakerCrossoverModeBiAmp) {
+        (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusLeftLow, lowLeft);
+        (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusRightLow, lowRight);
         float highLeft = process_splitter_sections(
             snapshot->lowerHighPass, runtime->lowerHighLeft,
             snapshot->lowerSectionCount, left
@@ -463,29 +469,53 @@ static void process_speaker_bus_splitter(
         return;
     }
 
-    float midLeft = process_splitter_sections(
+    // Tri-amp Linkwitz-Riley tree:
+    //   low  = LP1 · (LP2 + HP2)   (upper all-pass compensation)
+    //   mid  = HP1 · LP2
+    //   high = HP1 · HP2
+    // so low + mid + high = AP1 · AP2, an all-pass with flat magnitude.
+    lowLeft = process_splitter_sections(
+            snapshot->upperLowPass, runtime->lowAllPassLowLeft,
+            snapshot->upperSectionCount, lowLeft
+        )
+        + process_splitter_sections(
+            snapshot->upperHighPass, runtime->lowAllPassHighLeft,
+            snapshot->upperSectionCount, lowLeft
+        );
+    lowRight = process_splitter_sections(
+            snapshot->upperLowPass, runtime->lowAllPassLowRight,
+            snapshot->upperSectionCount, lowRight
+        )
+        + process_splitter_sections(
+            snapshot->upperHighPass, runtime->lowAllPassHighRight,
+            snapshot->upperSectionCount, lowRight
+        );
+    (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusLeftLow, lowLeft);
+    (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusRightLow, lowRight);
+
+    const float upperLeft = process_splitter_sections(
         snapshot->lowerHighPass, runtime->lowerHighLeft,
         snapshot->lowerSectionCount, left
     );
-    float midRight = process_splitter_sections(
+    const float upperRight = process_splitter_sections(
         snapshot->lowerHighPass, runtime->lowerHighRight,
         snapshot->lowerSectionCount, right
     );
-    midLeft = process_splitter_sections(
+    const float midLeft = process_splitter_sections(
         snapshot->upperLowPass, runtime->upperLowLeft,
-        snapshot->upperSectionCount, midLeft
+        snapshot->upperSectionCount, upperLeft
     );
-    midRight = process_splitter_sections(
+    const float midRight = process_splitter_sections(
         snapshot->upperLowPass, runtime->upperLowRight,
-        snapshot->upperSectionCount, midRight
+        snapshot->upperSectionCount, upperRight
     );
-    float highLeft = process_splitter_sections(
+    const float highLeft = process_splitter_sections(
         snapshot->upperHighPass, runtime->upperHighLeft,
-        snapshot->upperSectionCount, left
+        snapshot->upperSectionCount, upperLeft
     );
-    float highRight = process_splitter_sections(
+    const float highRight = process_splitter_sections(
         snapshot->upperHighPass, runtime->upperHighRight,
-        snapshot->upperSectionCount, right
+        snapshot->upperSectionCount, upperRight
     );
     (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusLeftMid, midLeft);
     (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusRightMid, midRight);
@@ -1601,6 +1631,33 @@ bool N60SameDeviceOutputMapWriteFrame(
     return true;
 }
 
+// A failed rack/route render still consumed its input-domain frames through
+// the playback kernel. Advance the ring so a failure costs one silent quantum
+// rather than permanently adding a quantum of buffered latency.
+static void consume_frames_after_failed_render(
+    N60RealtimeAudioBridge *bridge,
+    bool adaptiveSampleRate,
+    uint64_t readIndex,
+    UInt32 framesToRead
+) {
+    if (!adaptiveSampleRate) {
+        atomic_store_explicit(&bridge->readIndex, readIndex + framesToRead, memory_order_release);
+    }
+}
+
+// Matched-rate underrun: the partial block was faded out in the render loop.
+// Re-arm the startup gate so playback resumes only after a full re-prime and
+// with the startup fade-in, matching the adaptive-rate policy.
+static void rearm_output_gate_after_underrun(N60RealtimeAudioBridge *bridge) {
+    atomic_store_explicit(&bridge->outputGateOpen, false, memory_order_release);
+    uint32_t fadeFrames = atomic_load_explicit(
+        &bridge->startupFadeFramesTotal,
+        memory_order_relaxed
+    );
+    bridge->startupFadeRuntime.totalFrames = fadeFrames;
+    bridge->startupFadeRuntime.remainingFrames = fadeFrames;
+}
+
 OSStatus N60CaptureIOProc(
     AudioDeviceID inDevice,
     const AudioTimeStamp *inNow,
@@ -1886,6 +1943,14 @@ OSStatus N60OutputIOProc(
                 - 1u
             );
     }
+    // Matched-rate partial block: fade the frames we have to zero instead of
+    // ending them with a hard step into the silent remainder.
+    const bool underrunFadeOut = !adaptiveSampleRate && framesToRead < frameCount;
+    const float underrunFadeStep = underrunFadeOut && framesToRead > 0u
+        ? 1.0f / (float)framesToRead
+        : 0.0f;
+    float underrunFade = 1.0f;
+
     float outputVUPeakLeft = 0.0f;
     float outputVUPeakRight = 0.0f;
     double outputVUSquareSumLeft = 0.0;
@@ -1926,6 +1991,9 @@ OSStatus N60OutputIOProc(
                 bridge->renderKernel,
                 &renderContext,
                 0u
+            );
+            consume_frames_after_failed_render(
+                bridge, adaptiveSampleRate, readIndex, framesToRead
             );
             return noErr;
         }
@@ -1984,6 +2052,9 @@ OSStatus N60OutputIOProc(
                 &renderContext,
                 0u
             );
+            consume_frames_after_failed_render(
+                bridge, adaptiveSampleRate, readIndex, framesToRead
+            );
             return noErr;
         }
 
@@ -2025,7 +2096,12 @@ OSStatus N60OutputIOProc(
                 next_transition_gain(&transitionRamp);
             const float gain =
                 startup_fade_gain(&startupFade, masterGain)
-                * transitionGain;
+                * transitionGain
+                * underrunFade;
+            if (underrunFadeOut) {
+                underrunFade -= underrunFadeStep;
+                if (underrunFade < 0.0f) underrunFade = 0.0f;
+            }
             const float finalLeft = processed.left * gain;
             const float finalRight = processed.right * gain;
             if (frameIndex
@@ -2088,6 +2164,9 @@ OSStatus N60OutputIOProc(
                         bridge->renderKernel,
                         &renderContext,
                         renderedFrames
+                    );
+                    consume_frames_after_failed_render(
+                        bridge, adaptiveSampleRate, readIndex, framesToRead
                     );
                     return noErr;
                 }
@@ -2166,7 +2245,12 @@ OSStatus N60OutputIOProc(
                 next_transition_gain(&transitionRamp);
             const float gain =
                 startup_fade_gain(&startupFade, masterGain)
-                * transitionGain;
+                * transitionGain
+                * underrunFade;
+            if (underrunFadeOut) {
+                underrunFade -= underrunFadeStep;
+                if (underrunFade < 0.0f) underrunFade = 0.0f;
+            }
             const float finalLeft = processed.left * gain;
             const float finalRight = processed.right * gain;
             if (frameIndex
@@ -2229,6 +2313,9 @@ OSStatus N60OutputIOProc(
                         bridge->renderKernel,
                         &renderContext,
                         renderedFrames
+                    );
+                    consume_frames_after_failed_render(
+                        bridge, adaptiveSampleRate, readIndex, framesToRead
                     );
                     return noErr;
                 }
@@ -2357,6 +2444,9 @@ OSStatus N60OutputIOProc(
     bridge->transitionRuntime = transitionRamp;
     bridge->startupFadeRuntime = startupFade;
     publish_transition_runtime(bridge, &transitionRamp);
+    if (underrunFadeOut) {
+        rearm_output_gate_after_underrun(bridge);
+    }
 
     if (!adaptiveSampleRate) {
         atomic_store_explicit(&bridge->readIndex, readIndex + framesToRead, memory_order_release);

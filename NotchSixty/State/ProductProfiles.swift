@@ -804,6 +804,14 @@ final class ProductProfileController: ObservableObject {
             [PlaybackSystemHardwareMappingRequirement]?
     }
 
+    /// Unsaved content edits on top of `presetID`, kept in a small sidecar file
+    /// next to the archive so frequent working-state saves never rewrite the
+    /// archive (which embeds deployed room-correction filters).
+    private struct WorkingContentFile: Codable {
+        var presetID: UUID?
+        var state: ContentPresetState
+    }
+
     private static let referencePresetID = UUID(uuidString: "6A782AB6-492B-46C9-A0A0-000000000001")!
     private static let defaultSystemID = UUID(uuidString: "6A782AB6-492B-46C9-A0A0-000000000002")!
     private static let rockArenaPresetID = UUID(uuidString: "6A782AB6-492B-46C9-A0A0-000000000010")!
@@ -1091,6 +1099,9 @@ final class ProductProfileController: ObservableObject {
     private var didRestoreSelection = false
     private var didLoadArchive = false
     private var audioUnitHostObservation: AnyCancellable?
+    private var workingStateObservation: AnyCancellable?
+    private var workingContentState: ContentPresetState?
+    private var workingContentPresetID: UUID?
 
     @Published private(set) var userContentPresets: [ContentPreset] = []
     @Published private(set) var systemProfiles: [PlaybackSystemProfile] = []
@@ -1113,9 +1124,77 @@ final class ProductProfileController: ObservableObject {
             self?.objectWillChange.send()
         }
         loadArchive()
+        loadWorkingContentState()
         ensureContentPresetsSeeded()
         ensureDefaultSystemProfile()
         reconcileSelections()
+        workingStateObservation = engine.objectWillChange
+            .merge(with: self.audioUnitHost.objectWillChange)
+            .debounce(for: .seconds(1), scheduler: RunLoop.main)
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.recordWorkingContentStateIfNeeded()
+                }
+            }
+    }
+
+    /// Persists the live content state while it differs from the selected
+    /// preset, and clears it once it matches again. Nothing is recorded before
+    /// the launch restore, so default engine state never overwrites saved work.
+    func recordWorkingContentStateIfNeeded() {
+        guard didRestoreSelection else { return }
+        let working: ContentPresetState? = selectedContentPresetIsDirty
+            ? captureContentState()
+            : nil
+        guard working != workingContentState
+                || (working != nil && workingContentPresetID != selectedContentPresetID) else {
+            return
+        }
+        workingContentState = working
+        workingContentPresetID = working == nil ? nil : selectedContentPresetID
+        persistWorkingContentState()
+    }
+
+    private var workingContentURL: URL {
+        storageURL.deletingLastPathComponent().appendingPathComponent(
+            storageURL.deletingPathExtension().lastPathComponent + "-working.json"
+        )
+    }
+
+    private func loadWorkingContentState() {
+        guard let data = try? Data(contentsOf: workingContentURL),
+              let file = try? JSONDecoder().decode(WorkingContentFile.self, from: data),
+              file.state.schemaVersion == ContentPresetState.currentSchemaVersion else {
+            return
+        }
+        workingContentState = file.state
+        workingContentPresetID = file.presetID
+    }
+
+    private func persistWorkingContentState() {
+        do {
+            if let workingContentState {
+                try FileManager.default.createDirectory(
+                    at: workingContentURL.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                let data = try JSONEncoder().encode(
+                    WorkingContentFile(presetID: workingContentPresetID, state: workingContentState)
+                )
+                try data.write(to: workingContentURL, options: .atomic)
+            } else if FileManager.default.fileExists(atPath: workingContentURL.path) {
+                try FileManager.default.removeItem(at: workingContentURL)
+            }
+        } catch {
+            lastErrorDescription = error.localizedDescription
+        }
+    }
+
+    private func clearWorkingContentState() {
+        guard workingContentState != nil || workingContentPresetID != nil else { return }
+        workingContentState = nil
+        workingContentPresetID = nil
+        persistWorkingContentState()
     }
 
     var contentPresets: [ContentPreset] { userContentPresets }
@@ -1181,6 +1260,16 @@ final class ProductProfileController: ObservableObject {
             try applySelectedLayersNow()
         } catch {
             lastErrorDescription = error.localizedDescription
+            return
+        }
+        guard let working = workingContentState,
+              workingContentPresetID == selectedContentPresetID else { return }
+        do {
+            try applyContentState(working)
+        } catch {
+            // A stale working state must never block launch; the saved preset
+            // is already applied.
+            clearWorkingContentState()
         }
     }
 
@@ -1225,6 +1314,7 @@ final class ProductProfileController: ObservableObject {
         do {
             try applyContentState(preset.state)
             selectedContentPresetID = preset.id
+            clearWorkingContentState()
             lastErrorDescription = nil
             persist()
         } catch {
@@ -1241,6 +1331,7 @@ final class ProductProfileController: ObservableObject {
         )
         userContentPresets.append(preset)
         selectedContentPresetID = preset.id
+        clearWorkingContentState()
         lastErrorDescription = nil
         persist()
         return preset.id
@@ -1250,6 +1341,7 @@ final class ProductProfileController: ObservableObject {
         guard let selectedContentPresetID,
               let index = userContentPresets.firstIndex(where: { $0.id == selectedContentPresetID }) else { return }
         userContentPresets[index].state = captureContentState()
+        clearWorkingContentState()
         lastErrorDescription = nil
         persist()
     }
@@ -1696,6 +1788,7 @@ final class ProductProfileController: ObservableObject {
     func commitContentPresetSelection(_ id: UUID) {
         guard contentPresets.contains(where: { $0.id == id }) else { return }
         selectedContentPresetID = id
+        clearWorkingContentState()
         lastErrorDescription = nil
         persist()
     }
@@ -2094,7 +2187,7 @@ final class ProductProfileController: ObservableObject {
                 hardwareMappingRequirements
         )
         let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.outputFormatting = [.sortedKeys]
         let data = try encoder.encode(archive)
         try data.write(to: storageURL, options: .atomic)
     }
@@ -2517,7 +2610,27 @@ enum RoomCorrectionProjectError: Error, LocalizedError, Equatable {
     }
 }
 
+/// On-disk room-correction project.
+///
+/// `project-v3.json` is a compact container holding the project with its bulky
+/// sample arrays (raw captures, impulse responses, design filter taps) moved to
+/// content-addressed little-endian Float32 sidecars under `samples/`. The JSON
+/// is the single atomic commit point: sidecars are written before it and
+/// unreferenced ones are removed after it. Legacy `project-v2.json` files with
+/// inline arrays still load and are migrated on the next save.
 struct RoomCorrectionProjectStore: Sendable {
+    static let projectFileName = "project-v3.json"
+    static let legacyProjectFileName = "project-v2.json"
+    static let sampleDirectoryName = "samples"
+
+    private struct Container: Codable {
+        static let currentFormatVersion = 3
+        var formatVersion: Int
+        var project: RoomCorrectionProject
+        /// "<owner-id>.<role>" → sidecar file name in `samples/`.
+        var sidecars: [String: String]
+    }
+
     let rootDirectory: URL
 
     init(rootDirectory: URL? = nil) {
@@ -2529,39 +2642,163 @@ struct RoomCorrectionProjectStore: Sendable {
     }
 
     func projectURL(for id: UUID) -> URL {
-        projectDirectory(for: id).appendingPathComponent("project-v2.json", isDirectory: false)
+        projectDirectory(for: id).appendingPathComponent(Self.projectFileName, isDirectory: false)
+    }
+
+    func legacyProjectURL(for id: UUID) -> URL {
+        projectDirectory(for: id).appendingPathComponent(Self.legacyProjectFileName, isDirectory: false)
+    }
+
+    private func sampleDirectory(for id: UUID) -> URL {
+        projectDirectory(for: id).appendingPathComponent(Self.sampleDirectoryName, isDirectory: true)
     }
 
     @discardableResult
     func save(_ project: RoomCorrectionProject) throws -> URL {
         try project.validateForPersistence()
         let directory = projectDirectory(for: project.id)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data = try encoder.encode(project)
+        let samples = sampleDirectory(for: project.id)
+        try FileManager.default.createDirectory(at: samples, withIntermediateDirectories: true)
+
+        var stripped = project
+        var sidecars: [String: String] = [:]
+        func externalize(_ values: [Float], key: String) throws {
+            guard !values.isEmpty else { return }
+            sidecars[key] = try Self.writeSidecar(values, key: key, in: samples)
+        }
+        for index in stripped.measurements.indices {
+            let id = stripped.measurements[index].id.uuidString.lowercased()
+            try externalize(stripped.measurements[index].left.rawCapture, key: "\(id).left.capture")
+            try externalize(stripped.measurements[index].left.impulseResponse, key: "\(id).left.impulse")
+            try externalize(stripped.measurements[index].right.rawCapture, key: "\(id).right.capture")
+            try externalize(stripped.measurements[index].right.impulseResponse, key: "\(id).right.impulse")
+            stripped.measurements[index].left.rawCapture = []
+            stripped.measurements[index].left.impulseResponse = []
+            stripped.measurements[index].right.rawCapture = []
+            stripped.measurements[index].right.impulseResponse = []
+        }
+        for index in stripped.designs.indices {
+            let id = stripped.designs[index].id.uuidString.lowercased()
+            try externalize(stripped.designs[index].filter.leftTaps, key: "\(id).filter.left")
+            stripped.designs[index].filter.leftTaps = []
+            if let right = stripped.designs[index].filter.rightTaps {
+                try externalize(right, key: "\(id).filter.right")
+                stripped.designs[index].filter.rightTaps = []
+            }
+        }
+
+        let data = try JSONEncoder().encode(
+            Container(
+                formatVersion: Container.currentFormatVersion,
+                project: stripped,
+                sidecars: sidecars
+            )
+        )
         let url = projectURL(for: project.id)
         try data.write(to: url, options: .atomic)
+
+        // Commit point passed: drop superseded sidecars and the legacy file.
+        let referenced = Set(sidecars.values)
+        if let existing = try? FileManager.default.contentsOfDirectory(atPath: samples.path) {
+            for name in existing where !referenced.contains(name) {
+                try? FileManager.default.removeItem(at: samples.appendingPathComponent(name))
+            }
+        }
+        try? FileManager.default.removeItem(at: directory.appendingPathComponent(Self.legacyProjectFileName))
         return url
     }
 
     func load(_ id: UUID) throws -> RoomCorrectionProject {
         let url = projectURL(for: id)
-        guard FileManager.default.fileExists(atPath: url.path) else {
-            throw RoomCorrectionProjectError.projectNotFound(id)
-        }
-        let data = try Data(contentsOf: url)
         let project: RoomCorrectionProject
-        do {
-            project = try JSONDecoder().decode(RoomCorrectionProject.self, from: data)
-        } catch {
-            throw RoomCorrectionProjectError.corruptProject(id)
+        if FileManager.default.fileExists(atPath: url.path) {
+            let data = try Data(contentsOf: url)
+            let container: Container
+            do {
+                container = try JSONDecoder().decode(Container.self, from: data)
+            } catch {
+                throw RoomCorrectionProjectError.corruptProject(id)
+            }
+            guard container.formatVersion == Container.currentFormatVersion else {
+                throw RoomCorrectionProjectError.corruptProject(id)
+            }
+            project = try internalize(container.project, sidecars: container.sidecars, projectID: id)
+        } else {
+            let legacy = legacyProjectURL(for: id)
+            guard FileManager.default.fileExists(atPath: legacy.path) else {
+                throw RoomCorrectionProjectError.projectNotFound(id)
+            }
+            let data = try Data(contentsOf: legacy)
+            do {
+                project = try JSONDecoder().decode(RoomCorrectionProject.self, from: data)
+            } catch {
+                throw RoomCorrectionProjectError.corruptProject(id)
+            }
         }
         guard project.id == id else {
             throw RoomCorrectionProjectError.identityMismatch(expected: id, decoded: project.id)
         }
         try project.validateForPersistence()
         return project
+    }
+
+    private func internalize(
+        _ stripped: RoomCorrectionProject,
+        sidecars: [String: String],
+        projectID: UUID
+    ) throws -> RoomCorrectionProject {
+        let samples = sampleDirectory(for: projectID)
+        func read(_ key: String) throws -> [Float]? {
+            guard let name = sidecars[key] else { return nil }
+            guard !name.contains("/"),
+                  let values = Self.readSidecar(at: samples.appendingPathComponent(name)) else {
+                throw RoomCorrectionProjectError.corruptProject(projectID)
+            }
+            return values
+        }
+        var project = stripped
+        for index in project.measurements.indices {
+            let id = project.measurements[index].id.uuidString.lowercased()
+            if let values = try read("\(id).left.capture") { project.measurements[index].left.rawCapture = values }
+            if let values = try read("\(id).left.impulse") { project.measurements[index].left.impulseResponse = values }
+            if let values = try read("\(id).right.capture") { project.measurements[index].right.rawCapture = values }
+            if let values = try read("\(id).right.impulse") { project.measurements[index].right.impulseResponse = values }
+        }
+        for index in project.designs.indices {
+            let id = project.designs[index].id.uuidString.lowercased()
+            if let values = try read("\(id).filter.left") { project.designs[index].filter.leftTaps = values }
+            if let values = try read("\(id).filter.right") { project.designs[index].filter.rightTaps = values }
+        }
+        return project
+    }
+
+    /// Writes `values` once under a content-addressed name; identical content
+    /// from a later save reuses the existing file.
+    private static func writeSidecar(_ values: [Float], key: String, in directory: URL) throws -> String {
+        // Float32 little-endian; Apple Silicon is little-endian, so this is the
+        // in-memory representation.
+        let data = values.withUnsafeBufferPointer { Data(buffer: $0) }
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        data.withUnsafeBytes { raw in
+            for byte in raw.bindMemory(to: UInt8.self) {
+                hash ^= UInt64(byte)
+                hash = hash &* 0x0000_0100_0000_01b3
+            }
+        }
+        let name = "\(key)-\(String(hash, radix: 16)).f32"
+        let url = directory.appendingPathComponent(name)
+        if !FileManager.default.fileExists(atPath: url.path) {
+            try data.write(to: url, options: .atomic)
+        }
+        return name
+    }
+
+    private static func readSidecar(at url: URL) -> [Float]? {
+        guard let data = try? Data(contentsOf: url),
+              data.count % MemoryLayout<Float>.size == 0 else { return nil }
+        var values = [Float](repeating: 0, count: data.count / MemoryLayout<Float>.size)
+        _ = values.withUnsafeMutableBytes { data.copyBytes(to: $0) }
+        return values
     }
 
     func delete(_ id: UUID) throws {

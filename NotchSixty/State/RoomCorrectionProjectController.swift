@@ -661,6 +661,70 @@ final class RoomCorrectionProjectController: ObservableObject {
         return result
     }
 
+    /// Re-synthesizes the selected Playback System's deployed room-correction
+    /// filter for another output sample rate from its stored design (same
+    /// aggregate, target and parameters). Returns nil when `deployed` is not the
+    /// filter of the system's active design, or the design's source positions
+    /// no longer match the project's aggregate, so a stale design is never
+    /// silently substituted.
+    func rateAdaptedDeploymentFilter(
+        matching deployed: RoomCorrectionFilter,
+        sampleRate: Double
+    ) -> RoomCorrectionFilter? {
+        guard sampleRate.isFinite, sampleRate > 0,
+              let summary = profiles.selectedSystemProfile?.state.roomCorrectionCalibration,
+              let source = (project?.id == summary.projectID ? project : nil)
+                ?? (try? store.load(summary.projectID)),
+              let design = source.designs.first(where: { $0.id == summary.activeDesignID }),
+              (try? design.deploymentFilter()) == deployed,
+              let aggregate = source.aggregate,
+              let target = design.target ?? source.target else {
+            return nil
+        }
+        if let positions = design.sourcePositions,
+           Set(positions.map(\.id)) != Set(aggregate.includedPositionIDs) {
+            return nil
+        }
+        let nyquistLimit = sampleRate * 0.5 * 0.98
+        func bandLimited(_ response: RoomCorrectionFrequencyResponse) -> RoomCorrectionFrequencyResponse {
+            let keep = response.frequenciesHz.indices.filter { response.frequenciesHz[$0] < nyquistLimit }
+            return RoomCorrectionFrequencyResponse(
+                frequenciesHz: keep.map { response.frequenciesHz[$0] },
+                magnitudeDB: keep.map { response.magnitudeDB[$0] },
+                phaseRadians: response.phaseRadians.map { phases in keep.map { phases[$0] } }
+            )
+        }
+        var limitedAggregate = aggregate
+        limitedAggregate.leftResponse = bandLimited(aggregate.leftResponse)
+        limitedAggregate.rightResponse = bandLimited(aggregate.rightResponse)
+        var parameters = design.parameters
+        parameters.correctionHighHz = min(parameters.correctionHighHz, sampleRate * 0.45)
+        // Keep the filter's time span (and so its low-frequency resolution).
+        parameters.requestedTapCount = min(
+            Int(N60_CONVOLUTION_MAX_TAPS),
+            max(1, Int((Double(design.parameters.requestedTapCount) * sampleRate / design.sampleRate).rounded()))
+        )
+        let usableHigh = design.effectiveCorrectionHighHz.map { min($0, parameters.correctionHighHz) }
+        do {
+            let result = try RoomCorrectionFIRDesigner().design(
+                aggregate: limitedAggregate,
+                target: target,
+                parameters: parameters,
+                sampleRate: sampleRate,
+                usableLowHz: design.effectiveCorrectionLowHz,
+                usableHighHz: usableHigh,
+                sourcePositions: design.sourcePositions,
+                name: design.name,
+                createdAt: design.createdAt,
+                id: design.id
+            )
+            return try result.design.deploymentFilter()
+        } catch {
+            lastErrorDescription = "Room correction could not be re-synthesized for \(Int(sampleRate)) Hz: \(error.localizedDescription)"
+            return nil
+        }
+    }
+
     private func requiredProject() throws -> RoomCorrectionProject {
         guard let systemID = selectedPlaybackSystemID else {
             throw RoomCorrectionProjectControllerError.noSelectedPlaybackSystem

@@ -533,7 +533,7 @@ struct ProductionProfileToolbar: View {
     }
 }
 
-private struct PresetInterchangeImport {
+struct PresetInterchangeImport {
     var stereoEQ: StereoEQConfiguration
     var inputPreampDB: Double?
     var dynamics: DynamicsConfiguration?
@@ -541,7 +541,7 @@ private struct PresetInterchangeImport {
     var warnings: [String]
 }
 
-private struct PresetInterchangeExport {
+struct PresetInterchangeExport {
     var data: Data
     var warnings: [String]
 }
@@ -572,7 +572,7 @@ private enum PresetInterchangeError: Error, LocalizedError {
     }
 }
 
-private enum PresetInterchange {
+enum PresetInterchange {
     private static let defaultQ = 0.707
 
     static func importPreset(data: Data, fileName: String, baseStereo: StereoEQConfiguration) throws -> PresetInterchangeImport {
@@ -854,10 +854,23 @@ private enum PresetInterchange {
     private static func importREW(text: String, fileName: String, baseStereo: StereoEQConfiguration) throws -> PresetInterchangeImport {
         var bands: [EQBand] = []
         var warnings: [String] = []
+        var preampDB: Double?
         for line in text.split(whereSeparator: \.isNewline).map(String.init) {
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { continue }
             let upper = trimmed.uppercased()
+            // Equalizer APO / AutoEQ "Preamp: -6.4 dB". AutoEQ relies on this
+            // negative gain to keep boosted filters from clipping.
+            if upper.hasPrefix("PREAMP") {
+                if let gain = regexNumber("^PREAMP\\s*:?\\s*([-+0-9.E]+)", in: upper) {
+                    let total = (preampDB ?? 0) + gain
+                    preampDB = clamp(total, to: DSPGainConfiguration.inputPreampRange)
+                    if abs(preampDB! - total) > 1.0e-9 {
+                        warnings.append("Preamp \(String(format: "%+.1f", total)) dB was limited to \(String(format: "%+.1f", preampDB!)) dB.")
+                    }
+                }
+                continue
+            }
             if upper.contains(" NONE") || upper.hasSuffix("NONE") { continue }
             guard let token = regexCapture("(?:ON|OFF)\\s+([A-Z]+)", in: upper, group: 1),
                   let type = rewFilterType(token) else { continue }
@@ -888,7 +901,7 @@ private enum PresetInterchange {
         warnings.append("REW filter text is a single EQ bank and was imported in Linked mode.")
         return PresetInterchangeImport(
             stereoEQ: stereo,
-            inputPreampDB: nil,
+            inputPreampDB: preampDB,
             dynamics: nil,
             suggestedName: (fileName as NSString).deletingPathExtension,
             warnings: warnings
