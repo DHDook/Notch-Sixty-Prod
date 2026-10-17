@@ -1,5 +1,15 @@
 # Claude Code instructions for Notch Sixty
 
+## Start here
+
+- The owner starts work with `/next` (or `/next E2`). That command holds the full workflow.
+- Plan: `docs/PROGRAM_PLAN.md`. Per-epic plans and status: `docs/epics/E<n>.md`.
+- Helper agents in `.claude/agents/`: code-scout, build-test-runner, plan-tracker, pr-writer
+  (Haiku) and realtime-reviewer (Sonnet).
+
+**Current focus:** E2 (macOS 26 support), no plan yet: next step is to plan it.
+<!-- plan-tracker keeps the line above current -->
+
 @AGENTS.md
 
 ## Current program

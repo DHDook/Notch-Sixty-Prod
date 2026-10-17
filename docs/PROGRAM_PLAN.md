@@ -286,8 +286,9 @@ the C++ core may depend on an Apple framework.
 ## How to run each epic in Claude Code
 
 Run the build work in Claude Code on the Mac, where it can build the Xcode project, run XCTest
-and reach the bench hardware. The repo is preconfigured, so each session needs only a one-line
-instruction such as "Continue the plan" or "Start E2".
+and reach the bench hardware. The repo is preconfigured: start Claude Code in the repository root
+(the folder containing `CLAUDE.md`) after pulling `main`, then type `/next` or `/next E2`. If
+you pull while a session is open, restart the session so new agents and instructions load.
 
 - **`CLAUDE.md`** holds the session protocol (orient, plan, build one slice, verify, open a PR,
   close out, stop for bench work), the token rules, and the owner decisions.
