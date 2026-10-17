@@ -1,5 +1,8 @@
 # Commercial Roadmap
 
+> **Superseded (17 Oct 2026):** the active plan is `docs/PROGRAM_PLAN.md`. This file is kept
+> unchanged as the historical record until E1 retires the CI validators that read it.
+
 ## North star
 
 Notch Sixty is the first commercial product built on a proprietary, high-end DSP platform.
