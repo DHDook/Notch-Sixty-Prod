@@ -167,6 +167,81 @@ final class RCSafetyReliabilityTests: XCTestCase {
         XCTAssertEqual(resumed[200], 0.5, accuracy: 1.0e-3)
     }
 
+    // A graph publish fades down, swaps, then fades up, waiting for each ramp
+    // to be acknowledged. While the output gate is closed the output is
+    // silent, so the ramp must still complete and be acknowledged; otherwise
+    // the publish waits until input resumes and every later change stalls.
+    func testTransitionRampsAreAcknowledgedWhileOutputGateIsClosed() throws {
+        for sampleRate in Self.standardSampleRates {
+            let bridge = try XCTUnwrap(N60RealtimeAudioBridgeCreate(4_096))
+            defer { N60RealtimeAudioBridgeDestroy(bridge) }
+            XCTAssertTrue(N60RealtimeAudioBridgePublishDSPGraph(bridge, N60DSPGraphSnapshotMakeUnity(sampleRate)))
+            N60RealtimeAudioBridgeConfigureOutputGate(bridge, 256, 1)
+            let harness = StereoIOProcHarness(bridge: bridge)
+
+            // Idle: the gate has never opened.
+            assertRampAcknowledgedInSilence(bridge, harness, sampleRate: sampleRate)
+
+            // After a matched-rate underrun re-armed the gate.
+            harness.capture(frames: 512, value: 0.5)
+            _ = harness.render(frames: 256)
+            harness.capture(frames: 100, value: 0.5)
+            _ = harness.render(frames: 256)
+            _ = harness.render(frames: 256)
+            XCTAssertFalse(N60RealtimeAudioBridgeGetSnapshot(bridge).outputGateOpen, "\(sampleRate) Hz")
+            assertRampAcknowledgedInSilence(bridge, harness, sampleRate: sampleRate)
+
+            // Audio resumes at the acknowledged unity gain after a re-prime.
+            harness.capture(frames: 512, value: 0.5)
+            let resumed = harness.render(frames: 256)
+            XCTAssertTrue(N60RealtimeAudioBridgeGetSnapshot(bridge).outputGateOpen, "\(sampleRate) Hz")
+            XCTAssertEqual(resumed[200], 0.5, accuracy: 1.0e-3, "\(sampleRate) Hz")
+        }
+    }
+
+    func testTransitionRampsAreAcknowledgedWhileAdaptiveRateInputIsStarved() throws {
+        let bridge = try XCTUnwrap(N60RealtimeAudioBridgeCreate(16_384))
+        defer { N60RealtimeAudioBridgeDestroy(bridge) }
+        XCTAssertTrue(N60RealtimeAudioBridgePublishDSPGraph(bridge, N60DSPGraphSnapshotMakeUnity(96_000)))
+        XCTAssertTrue(N60RealtimeAudioBridgeConfigureAdaptiveSampleRate(bridge, 48_000, 96_000, 1_024))
+        N60RealtimeAudioBridgeConfigureOutputGate(bridge, 256, 1)
+        let harness = StereoIOProcHarness(bridge: bridge)
+
+        harness.capture(frames: 4_096, value: 0.5)
+        for _ in 0..<64 { _ = harness.render(frames: 256) }
+        XCTAssertFalse(N60RealtimeAudioBridgeGetSnapshot(bridge).outputGateOpen, "input starved")
+        assertRampAcknowledgedInSilence(bridge, harness, sampleRate: 96_000)
+    }
+
+    private static let standardSampleRates: [Double] = [
+        44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000
+    ]
+
+    private func assertRampAcknowledgedInSilence(
+        _ bridge: OpaquePointer,
+        _ harness: StereoIOProcHarness,
+        sampleRate: Double,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        N60RealtimeAudioBridgeRampTransitionGain(bridge, 0, 64)
+        XCTAssertTrue(harness.render(frames: 256).allSatisfy { $0 == 0 }, file: file, line: line)
+        var snapshot = N60RealtimeAudioBridgeGetSnapshot(bridge)
+        XCTAssertEqual(snapshot.transitionFramesRemaining, 0, "fade-down \(sampleRate) Hz", file: file, line: line)
+        XCTAssertEqual(snapshot.transitionGain, 0, "fade-down \(sampleRate) Hz", file: file, line: line)
+
+        // A ramp longer than one callback advances by the silent frames.
+        N60RealtimeAudioBridgeRampTransitionGain(bridge, 1, 64)
+        _ = harness.render(frames: 32)
+        snapshot = N60RealtimeAudioBridgeGetSnapshot(bridge)
+        XCTAssertEqual(snapshot.transitionFramesRemaining, 32, "fade-up \(sampleRate) Hz", file: file, line: line)
+        XCTAssertEqual(snapshot.transitionGain, 0.5, accuracy: 1.0e-6, "fade-up \(sampleRate) Hz", file: file, line: line)
+        _ = harness.render(frames: 32)
+        snapshot = N60RealtimeAudioBridgeGetSnapshot(bridge)
+        XCTAssertEqual(snapshot.transitionFramesRemaining, 0, "fade-up \(sampleRate) Hz", file: file, line: line)
+        XCTAssertEqual(snapshot.transitionGain, 1, "fade-up \(sampleRate) Hz", file: file, line: line)
+    }
+
     // MARK: Tri-amp crossover
 
     func testTriAmpBandsSumFlatBetweenCrossovers() throws {

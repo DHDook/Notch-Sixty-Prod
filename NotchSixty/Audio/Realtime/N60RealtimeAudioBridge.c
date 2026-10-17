@@ -1658,6 +1658,34 @@ static void rearm_output_gate_after_underrun(N60RealtimeAudioBridge *bridge) {
     bridge->startupFadeRuntime.remainingFrames = fadeFrames;
 }
 
+// Callbacks that return early with zeroed output (gate closed, adaptive
+// partial pull, failed render) are silent, so a pending transition ramp
+// completes in the sample domain. Advance and acknowledge it so the control
+// plane can finish a fade-down/fade-up without waiting for input to resume.
+// Realtime: atomics and float arithmetic only; no allocation or locks; adds no
+// latency; independent of sample rate and channel count (counted in frames);
+// output-thread-only writer of transitionRuntime, as in the normal path.
+static void advance_transition_through_silence(
+    N60RealtimeAudioBridge *bridge,
+    UInt32 frames
+) {
+    latch_transition_command(bridge);
+    N60TransitionRampRuntime *runtime = &bridge->transitionRuntime;
+    if (runtime->remainingFrames != 0 && runtime->totalFrames != 0) {
+        if (frames >= runtime->remainingFrames) {
+            runtime->remainingFrames = 0;
+            runtime->currentGain = runtime->targetGain;
+        } else {
+            runtime->remainingFrames -= frames;
+            uint32_t completed = runtime->totalFrames - runtime->remainingFrames;
+            float mix = (float)completed / (float)runtime->totalFrames;
+            runtime->currentGain = runtime->startGain
+                + (runtime->targetGain - runtime->startGain) * mix;
+        }
+    }
+    publish_transition_runtime(bridge, runtime);
+}
+
 OSStatus N60CaptureIOProc(
     AudioDeviceID inDevice,
     const AudioTimeStamp *inNow,
@@ -1808,6 +1836,7 @@ OSStatus N60OutputIOProc(
             atomic_store_explicit(&bridge->outputGateOpen, true, memory_order_release);
         } else {
             zero_output(outOutputData);
+            advance_transition_through_silence(bridge, frameCount);
             atomic_fetch_add_explicit(&bridge->gatedOutputCallbacks, 1, memory_order_relaxed);
             atomic_fetch_add_explicit(&bridge->gatedOutputFrames, frameCount, memory_order_relaxed);
             return noErr;
@@ -1830,6 +1859,7 @@ OSStatus N60OutputIOProc(
         // discontinuous half-block into the production DSP graph.
         zero_output(outOutputData);
         N60AdaptiveSRCRelockConsumer(bridge->adaptiveSRC);
+        advance_transition_through_silence(bridge, frameCount);
         atomic_store_explicit(&bridge->outputGateOpen, false, memory_order_release);
         uint32_t fadeFrames = atomic_load_explicit(
             &bridge->startupFadeFramesTotal,
@@ -1992,6 +2022,7 @@ OSStatus N60OutputIOProc(
                 &renderContext,
                 0u
             );
+            advance_transition_through_silence(bridge, frameCount);
             consume_frames_after_failed_render(
                 bridge, adaptiveSampleRate, readIndex, framesToRead
             );
@@ -2052,6 +2083,7 @@ OSStatus N60OutputIOProc(
                 &renderContext,
                 0u
             );
+            advance_transition_through_silence(bridge, frameCount);
             consume_frames_after_failed_render(
                 bridge, adaptiveSampleRate, readIndex, framesToRead
             );
@@ -2165,6 +2197,7 @@ OSStatus N60OutputIOProc(
                         &renderContext,
                         renderedFrames
                     );
+                    advance_transition_through_silence(bridge, frameCount);
                     consume_frames_after_failed_render(
                         bridge, adaptiveSampleRate, readIndex, framesToRead
                     );
@@ -2314,6 +2347,7 @@ OSStatus N60OutputIOProc(
                         &renderContext,
                         renderedFrames
                     );
+                    advance_transition_through_silence(bridge, frameCount);
                     consume_frames_after_failed_render(
                         bridge, adaptiveSampleRate, readIndex, framesToRead
                     );
