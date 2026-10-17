@@ -52,7 +52,9 @@ struct RoomCorrectionFIRDesigner: Sendable {
     /// Cepstral minimum-phase synthesis aliases when the DFT is short relative
     /// to the impulse it reconstructs; use at least 8× the tap count.
     static let transformOversampling = 8
-    static let maximumTransformSize = Int(N60_CONVOLUTION_MAX_TAPS) * transformOversampling
+    /// Long filters are already long relative to the minimum-phase impulse, so
+    /// oversampling is relaxed (never below 2x) to keep design interactive.
+    static let maximumTransformSize = max(1 << 20, Int(N60_CONVOLUTION_MAX_TAPS) * 2)
     /// Fraction of the filter given to a half-Hann fade so truncating the
     /// minimum-phase impulse does not add spectral ripple.
     static let tailTaperFraction = 0.10
@@ -358,7 +360,10 @@ struct RoomCorrectionFIRDesigner: Sendable {
         guard tapCount > 0, tapCount <= Int(N60_CONVOLUTION_MAX_TAPS) else {
             throw RoomCorrectionTargetDesignError.invalidTapCount(tapCount)
         }
-        let required = max(minimumTransformSize, tapCount * transformOversampling)
+        let required = max(
+            minimumTransformSize,
+            min(tapCount * transformOversampling, max(tapCount * 2, maximumTransformSize))
+        )
         guard required <= maximumTransformSize else {
             throw RoomCorrectionFIRDesignError.transformTooLarge(required: required)
         }

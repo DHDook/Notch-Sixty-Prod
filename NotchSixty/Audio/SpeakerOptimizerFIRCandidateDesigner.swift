@@ -23,7 +23,7 @@ struct SpeakerOptimizerFIRConstraints: Equatable, Sendable {
     var maximumTruncationOvershootDB = 0.35
 
     func valid() -> Bool {
-        tapCount >= 257 && tapCount <= Int(N60_CONVOLUTION_MAX_TAPS)
+        tapCount >= 257 && tapCount <= Int(N60_PROGRAM_FIR_MAX_TAPS)
             && tapCount % 2 == 1
             && maximumGroupDelayMilliseconds.isFinite
             && (0...100).contains(maximumGroupDelayMilliseconds)
@@ -216,7 +216,7 @@ struct SpeakerOptimizerFIRCandidateDesigner: Sendable {
         // Prefer a transform larger than the truncated impulse so edge
         // tapering is sampled finely without circular aliasing.
         let required = max(4096, tapCount * 4)
-        guard required <= Int(N60_CONVOLUTION_MAX_TAPS) * 8 else {
+        guard required <= Int(N60_PROGRAM_FIR_MAX_TAPS) * 8 else {
             throw SpeakerOptimizerFIRCandidateError.invalidConstraints
         }
         var size = 1

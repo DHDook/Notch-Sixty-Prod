@@ -844,8 +844,8 @@ struct ProductionRoomCorrectionWorkspace: View {
                 GridRow {
                     Text("FIR length").foregroundStyle(.secondary)
                     Picker("FIR length", selection: $requestedTapCount) {
-                        ForEach([1_024, 2_048, 4_096, 8_192, 16_384, 32_768], id: \.self) { taps in
-                            Text("\(taps.formatted()) taps").tag(taps)
+                        ForEach([1_024, 2_048, 4_096, 8_192, 16_384, 32_768, 65_536, 131_072, 262_144], id: \.self) { taps in
+                            Text(firLengthLabel(taps)).tag(taps)
                         }
                     }
                     .productionGlassPickerChrome()
@@ -1383,6 +1383,16 @@ struct ProductionRoomCorrectionWorkspace: View {
             return String(format: "%.1f kHz", frequency / 1_000)
         }
         return String(format: "%.0f Hz", frequency)
+    }
+
+    /// Tap count plus the span it covers at the measured rate; resolution at
+    /// low frequencies follows the span, not the tap count.
+    private func firLengthLabel(_ taps: Int) -> String {
+        guard let rate = projects.project?.sweep?.sampleRate, rate > 0 else {
+            return "\(taps.formatted()) taps"
+        }
+        let milliseconds = Double(taps) / rate * 1_000
+        return "\(taps.formatted()) taps · \(Int(milliseconds.rounded())) ms"
     }
 
     private func formattedRate(_ rate: Double) -> String {

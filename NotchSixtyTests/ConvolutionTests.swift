@@ -141,7 +141,9 @@ final class ConvolutionTests: XCTestCase {
 
         let info = N60PartitionedConvolverProgramInfo(convolver, 0)
         XCTAssertEqual(info.tapCount, UInt32(tapCount))
-        XCTAssertEqual(info.partitionCount, 16)
+        // Non-uniform plan: 4 × 256 + 3 × 1024 partitions for 4096 taps.
+        XCTAssertEqual(info.partitionCount, 7)
+        XCTAssertEqual(info.partitionCount, N60ConvolutionPartitionCountForTapCount(UInt32(tapCount)))
         XCTAssertEqual(info.declaredLatencyFrames, 2_047)
     }
 
@@ -641,5 +643,65 @@ extension ConvolutionTests {
         XCTAssertTrue(diagnostics.roomCorrectionEnabled)
         XCTAssertTrue(diagnostics.crossoverEnabled)
         XCTAssertEqual(diagnostics.eqBandCount, UInt32(N60_MAX_EQ_BANDS))
+    }
+}
+
+extension ConvolutionTests {
+    func testNonUniformPartitionPlanCoversFullTapBudget() {
+        XCTAssertEqual(N60ConvolutionPartitionCountForTapCount(0), 0)
+        XCTAssertEqual(N60ConvolutionPartitionCountForTapCount(1), 1)
+        XCTAssertEqual(N60ConvolutionPartitionCountForTapCount(1_024), 4)
+        XCTAssertEqual(N60ConvolutionPartitionCountForTapCount(1_025), 5)
+        XCTAssertEqual(N60ConvolutionPartitionCountForTapCount(5_120), 8)
+        XCTAssertEqual(N60ConvolutionPartitionCountForTapCount(5_121), 9)
+        XCTAssertEqual(N60_CONVOLUTION_MAX_TAPS, 262_144)
+        // 4 × 256 + 4 × 1024 + 63 × 4096 taps.
+        XCTAssertEqual(N60ConvolutionPartitionCountForTapCount(N60_CONVOLUTION_MAX_TAPS), 71)
+        XCTAssertEqual(N60ConvolutionPartitionCountForTapCount(N60_CONVOLUTION_MAX_TAPS + 1), 0)
+    }
+
+    /// A filter far beyond the old 32,768-tap budget, through the production
+    /// room-correction slot of the render kernel: every segment contributes at
+    /// the exact tap position with the unchanged 256-frame engine latency.
+    func testLongRoomCorrectionFilterIsExactThroughRenderKernel() {
+        guard let kernel = N60RenderKernelCreate() else {
+            return XCTFail("Unable to allocate render kernel")
+        }
+        defer { N60RenderKernelDestroy(kernel) }
+
+        let tapCount = 100_000
+        var taps = [Float](repeating: 0, count: tapCount)
+        let impulses: [(Int, Float)] = [(0, 0.5), (700, -0.2), (3_000, 0.3), (50_000, 0.25), (tapCount - 1, -0.125)]
+        for (index, value) in impulses { taps[index] = value }
+        var info = N60ConvolutionProgramInfo()
+        XCTAssertTrue(
+            taps.withUnsafeBufferPointer { buffer in
+                N60RenderKernelPrepareRoomCorrectionProgram(
+                    kernel, 0, buffer.baseAddress!, nil, UInt32(buffer.count), 0, &info
+                )
+            }
+        )
+        XCTAssertEqual(info.partitionCount, N60ConvolutionPartitionCountForTapCount(UInt32(tapCount)))
+        XCTAssertEqual(info.engineLatencyFrames, UInt32(N60_CONVOLUTION_PARTITION_FRAMES))
+
+        var graph = N60DSPGraphSnapshotMakeUnity(384_000)
+        XCTAssertTrue(N60DSPGraphSnapshotSetRoomCorrectionProgram(&graph, 0, info, true))
+        XCTAssertEqual(graph.latencyFrames, UInt32(N60_CONVOLUTION_PARTITION_FRAMES))
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph))
+
+        let latency = Int(N60_CONVOLUTION_PARTITION_FRAMES)
+        var expected = [Int: Float]()
+        for (index, value) in impulses { expected[index + latency] = value }
+        var left: Float = 0
+        var right: Float = 0
+        var maximumError: Float = 0
+        for frame in 0..<(tapCount + latency + 8) {
+            let input: Float = frame == 0 ? 1 : 0
+            N60RenderKernelProcessStereoFrame(kernel, input, input, &left, &right)
+            let target = expected[frame] ?? 0
+            maximumError = max(maximumError, abs(left - target), abs(right - target))
+        }
+        XCTAssertLessThan(maximumError, 1.0e-5)
+        XCTAssertEqual(N60RenderKernelGetDiagnostics(kernel).roomCorrectionProgramMisses, 0)
     }
 }

@@ -802,10 +802,14 @@ final class ProductProfileController: ObservableObject {
         var selectedSystemProfileID: UUID?
         var hardwareMappingRequirements:
             [PlaybackSystemHardwareMappingRequirement]?
-        /// Unsaved edits on top of `workingContentPresetID`, restored at
-        /// launch so a quit never discards work the user has not saved.
-        var workingContentState: ContentPresetState?
-        var workingContentPresetID: UUID?
+    }
+
+    /// Unsaved content edits on top of `presetID`, kept in a small sidecar file
+    /// next to the archive so frequent working-state saves never rewrite the
+    /// archive (which embeds deployed room-correction filters).
+    private struct WorkingContentFile: Codable {
+        var presetID: UUID?
+        var state: ContentPresetState
     }
 
     private static let referencePresetID = UUID(uuidString: "6A782AB6-492B-46C9-A0A0-000000000001")!
@@ -1120,6 +1124,7 @@ final class ProductProfileController: ObservableObject {
             self?.objectWillChange.send()
         }
         loadArchive()
+        loadWorkingContentState()
         ensureContentPresetsSeeded()
         ensureDefaultSystemProfile()
         reconcileSelections()
@@ -1147,12 +1152,49 @@ final class ProductProfileController: ObservableObject {
         }
         workingContentState = working
         workingContentPresetID = working == nil ? nil : selectedContentPresetID
-        persist()
+        persistWorkingContentState()
+    }
+
+    private var workingContentURL: URL {
+        storageURL.deletingLastPathComponent().appendingPathComponent(
+            storageURL.deletingPathExtension().lastPathComponent + "-working.json"
+        )
+    }
+
+    private func loadWorkingContentState() {
+        guard let data = try? Data(contentsOf: workingContentURL),
+              let file = try? JSONDecoder().decode(WorkingContentFile.self, from: data),
+              file.state.schemaVersion == ContentPresetState.currentSchemaVersion else {
+            return
+        }
+        workingContentState = file.state
+        workingContentPresetID = file.presetID
+    }
+
+    private func persistWorkingContentState() {
+        do {
+            if let workingContentState {
+                try FileManager.default.createDirectory(
+                    at: workingContentURL.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                let data = try JSONEncoder().encode(
+                    WorkingContentFile(presetID: workingContentPresetID, state: workingContentState)
+                )
+                try data.write(to: workingContentURL, options: .atomic)
+            } else if FileManager.default.fileExists(atPath: workingContentURL.path) {
+                try FileManager.default.removeItem(at: workingContentURL)
+            }
+        } catch {
+            lastErrorDescription = error.localizedDescription
+        }
     }
 
     private func clearWorkingContentState() {
+        guard workingContentState != nil || workingContentPresetID != nil else { return }
         workingContentState = nil
         workingContentPresetID = nil
+        persistWorkingContentState()
     }
 
     var contentPresets: [ContentPreset] { userContentPresets }
@@ -1228,7 +1270,6 @@ final class ProductProfileController: ObservableObject {
             // A stale working state must never block launch; the saved preset
             // is already applied.
             clearWorkingContentState()
-            persist()
         }
     }
 
@@ -2103,11 +2144,6 @@ final class ProductProfileController: ObservableObject {
             }
             selectedContentPresetID = archive.selectedContentPresetID
             selectedSystemProfileID = archive.selectedSystemProfileID
-            if let working = archive.workingContentState,
-               working.schemaVersion == ContentPresetState.currentSchemaVersion {
-                workingContentState = working
-                workingContentPresetID = archive.workingContentPresetID
-            }
             hardwareMappingRequirements =
                 (archive.hardwareMappingRequirements ?? []).filter {
                     requirement in
@@ -2148,12 +2184,10 @@ final class ProductProfileController: ObservableObject {
             selectedContentPresetID: selectedContentPresetID,
             selectedSystemProfileID: selectedSystemProfileID,
             hardwareMappingRequirements:
-                hardwareMappingRequirements,
-            workingContentState: workingContentState,
-            workingContentPresetID: workingContentPresetID
+                hardwareMappingRequirements
         )
         let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.outputFormatting = [.sortedKeys]
         let data = try encoder.encode(archive)
         try data.write(to: storageURL, options: .atomic)
     }
