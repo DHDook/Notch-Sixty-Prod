@@ -527,6 +527,64 @@ final class RCSafetyReliabilityTests: XCTestCase {
         XCTAssertEqual(thirdEngine.gainConfiguration.inputPreampDB, savedPreamp, accuracy: 1.0e-9)
     }
 
+    @MainActor
+    func testToolbarSaveButtonShowsOnlyForUnsavedContentEdits() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NotchSixty-Save-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let engine = AudioIOEngine(deviceCatalog: FixedOutputCatalog())
+        let profiles = ProductProfileController(
+            engine: engine,
+            storageURL: root.appendingPathComponent("profiles.json")
+        )
+        profiles.restoreSelectedLayers()
+        func action() -> ProductionProfileToolbarPolicy.ContentSaveAction {
+            ProductionProfileToolbarPolicy.contentSaveAction(
+                isDirty: profiles.selectedContentPresetIsDirty,
+                canOverwrite: profiles.canOverwriteSelectedContentPreset
+            )
+        }
+
+        profiles.saveCurrentContentPreset(named: "Toolbar Save")
+        XCTAssertEqual(action(), .hidden, "a freshly saved preset has nothing to save")
+
+        let savedPreamp = engine.gainConfiguration.inputPreampDB
+        try engine.setInputPreampDB(savedPreamp - 3)
+        XCTAssertEqual(action(), .overwrite)
+
+        profiles.overwriteSelectedContentPreset()
+        XCTAssertEqual(action(), .hidden, "saving hides the button again")
+
+        XCTAssertEqual(
+            ProductionProfileToolbarPolicy.contentSaveAction(isDirty: true, canOverwrite: false),
+            .saveAsNew,
+            "a factory preset with edits offers Save As instead of overwriting"
+        )
+    }
+
+    func testABComparisonToolbarControlStaysHiddenUntilEnabled() {
+        XCTAssertFalse(
+            ProductionProfileToolbarPolicy.showsABComparison(enabled: false, auditionInProgress: false)
+        )
+        XCTAssertTrue(
+            ProductionProfileToolbarPolicy.showsABComparison(enabled: true, auditionInProgress: false)
+        )
+        XCTAssertTrue(
+            ProductionProfileToolbarPolicy.showsABComparison(enabled: false, auditionInProgress: true),
+            "an audition in progress keeps its controls so it can be exited"
+        )
+
+        let suite = "NotchSixty-AB-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        XCTAssertFalse(defaults.bool(forKey: ProductionProfileToolbarPolicy.abComparisonEnabledKey))
+        defaults.set(true, forKey: ProductionProfileToolbarPolicy.abComparisonEnabledKey)
+        XCTAssertTrue(
+            UserDefaults(suiteName: suite)!.bool(forKey: ProductionProfileToolbarPolicy.abComparisonEnabledKey),
+            "the enable switch persists across launches"
+        )
+    }
+
     // MARK: Activation gating
 
     func testDisabledButEditedPlaybackControlsAreInactive() {

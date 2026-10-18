@@ -2014,6 +2014,9 @@ private struct ProductionSettingsView: View {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—"
     }
 
+    @AppStorage(ProductionProfileToolbarPolicy.abComparisonEnabledKey)
+    private var abComparisonEnabled = false
+
     private var diagnosticsReport: String {
         product.diagnosticsReport(
             version: version,
@@ -2219,6 +2222,13 @@ private struct ProductionSettingsView: View {
                         }
 
                         Text("Menu Bar mode keeps processing and preset controls available without a Dock icon. Both shows the app in both places.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    settingsCard(title: "Presets", systemImage: "music.note.list") {
+                        Toggle("Show A/B comparison in the toolbar", isOn: $abComparisonEnabled)
+                        Text("Adds the A/B controls beside the Content Preset menu for capturing and auditioning two content-DSP states. While an A/B audition is running the controls stay visible until you exit it.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
