@@ -60,9 +60,9 @@ XCTest is green on macOS 27. (Owner, 17 Oct 2026: no macOS 26 machine; 26 suppor
 
 ### E1 Trunk, CI and docs hygiene
 
-- [ ] Add a lightweight feature-flag mechanism so unfinished epics merge to `main` dark
-- [ ] Replace the 106 `ci/validate_*.py` source-text checks with behavioural XCTests where intent is still needed; delete the rest
-- [ ] Collapse 86 workflows into three: fast PR check, labelled full macOS build and test, release
+- [x] Add a lightweight feature-flag mechanism so unfinished epics merge to `main` dark (#141)
+- [x] Replace the 106 `ci/validate_*.py` source-text checks with behavioural XCTests where intent is still needed; delete the rest (#137, #143–#145)
+- [x] Collapse 86 workflows into three: fast PR check, labelled full macOS build and test, release (#142)
 - [ ] Rewrite `ARCHITECTURE.md` and `DSP_KERNEL.md` for the current design; archive per-PR closure notes into `docs/archive/`
 - [ ] Archive `docs/ROADMAP.md` (several `ci/validate_*.py` scripts still read it) once those validators are retired; this plan lives in `docs/PROGRAM_PLAN.md`
 - [ ] Investigate the `SpeakerOptimizerCandidateComparisonTests` runner termination reported in #131
