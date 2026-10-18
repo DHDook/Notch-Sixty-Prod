@@ -136,6 +136,8 @@
 		F96900000000000000000002 /* QuietZoneInstrumentedProbeCaptureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F96900000000000000000012 /* QuietZoneInstrumentedProbeCaptureTests.swift */; };
 		F97000000000000000000001 /* QuietZonePhysicalLatencyBudget.swift in Sources */ = {isa = PBXBuildFile; fileRef = F97000000000000000000011 /* QuietZonePhysicalLatencyBudget.swift */; };
 		F97000000000000000000002 /* QuietZonePhysicalLatencyBudgetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F97000000000000000000012 /* QuietZonePhysicalLatencyBudgetTests.swift */; };
+		E4A000000000000000000001 /* QuietZoneLiveAuthorisation.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4A000000000000000000011 /* QuietZoneLiveAuthorisation.swift */; };
+		E4A000000000000000000002 /* QuietZoneLiveAuthorisationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4A000000000000000000012 /* QuietZoneLiveAuthorisationTests.swift */; };
 		F97100000000000000000001 /* QuietZonePhysicalLatencyMeasurementRun.swift in Sources */ = {isa = PBXBuildFile; fileRef = F97100000000000000000011 /* QuietZonePhysicalLatencyMeasurementRun.swift */; };
 		F97100000000000000000002 /* QuietZonePhysicalLatencyMeasurementRunTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F97100000000000000000012 /* QuietZonePhysicalLatencyMeasurementRunTests.swift */; };
 		F97200000000000000000001 /* QuietZoneHardwareCommissioning.swift in Sources */ = {isa = PBXBuildFile; fileRef = F97200000000000000000011 /* QuietZoneHardwareCommissioning.swift */; };
@@ -472,6 +474,8 @@
 		F96900000000000000000012 /* QuietZoneInstrumentedProbeCaptureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneInstrumentedProbeCaptureTests.swift; sourceTree = "<group>"; };
 		F97000000000000000000011 /* QuietZonePhysicalLatencyBudget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZonePhysicalLatencyBudget.swift; sourceTree = "<group>"; };
 		F97000000000000000000012 /* QuietZonePhysicalLatencyBudgetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZonePhysicalLatencyBudgetTests.swift; sourceTree = "<group>"; };
+		E4A000000000000000000011 /* QuietZoneLiveAuthorisation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneLiveAuthorisation.swift; sourceTree = "<group>"; };
+		E4A000000000000000000012 /* QuietZoneLiveAuthorisationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneLiveAuthorisationTests.swift; sourceTree = "<group>"; };
 		F97100000000000000000011 /* QuietZonePhysicalLatencyMeasurementRun.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZonePhysicalLatencyMeasurementRun.swift; sourceTree = "<group>"; };
 		F97100000000000000000012 /* QuietZonePhysicalLatencyMeasurementRunTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZonePhysicalLatencyMeasurementRunTests.swift; sourceTree = "<group>"; };
 		F97200000000000000000011 /* QuietZoneHardwareCommissioning.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneHardwareCommissioning.swift; sourceTree = "<group>"; };
@@ -741,6 +745,7 @@
 				F96800000000000000000012 /* QuietZoneHardwareClockCaptureTests.swift */,
 				F96900000000000000000012 /* QuietZoneInstrumentedProbeCaptureTests.swift */,
 				F97000000000000000000012 /* QuietZonePhysicalLatencyBudgetTests.swift */,
+				E4A000000000000000000012 /* QuietZoneLiveAuthorisationTests.swift */,
 				F97100000000000000000012 /* QuietZonePhysicalLatencyMeasurementRunTests.swift */,
 				F97200000000000000000012 /* QuietZoneHardwareCommissioningTests.swift */,
 				F97300000000000000000012 /* QuietZoneEvidenceHandoffTests.swift */,
@@ -906,6 +911,7 @@
 				F96800000000000000000011 /* QuietZoneHardwareClockCapture.swift */,
 				F96900000000000000000011 /* QuietZoneInstrumentedProbeCapture.swift */,
 				F97000000000000000000011 /* QuietZonePhysicalLatencyBudget.swift */,
+				E4A000000000000000000011 /* QuietZoneLiveAuthorisation.swift */,
 				F97100000000000000000011 /* QuietZonePhysicalLatencyMeasurementRun.swift */,
 				F97200000000000000000011 /* QuietZoneHardwareCommissioning.swift */,
 				F97300000000000000000011 /* QuietZoneEvidenceHandoff.swift */,
@@ -1196,6 +1202,7 @@
 				F96800000000000000000001 /* QuietZoneHardwareClockCapture.swift in Sources */,
 				F96900000000000000000001 /* QuietZoneInstrumentedProbeCapture.swift in Sources */,
 				F97000000000000000000001 /* QuietZonePhysicalLatencyBudget.swift in Sources */,
+				E4A000000000000000000001 /* QuietZoneLiveAuthorisation.swift in Sources */,
 				F97100000000000000000001 /* QuietZonePhysicalLatencyMeasurementRun.swift in Sources */,
 				F97200000000000000000001 /* QuietZoneHardwareCommissioning.swift in Sources */,
 				F97300000000000000000001 /* QuietZoneEvidenceHandoff.swift in Sources */,
@@ -1291,6 +1298,7 @@
 				F96800000000000000000002 /* QuietZoneHardwareClockCaptureTests.swift in Sources */,
 				F96900000000000000000002 /* QuietZoneInstrumentedProbeCaptureTests.swift in Sources */,
 				F97000000000000000000002 /* QuietZonePhysicalLatencyBudgetTests.swift in Sources */,
+				E4A000000000000000000002 /* QuietZoneLiveAuthorisationTests.swift in Sources */,
 				F97100000000000000000002 /* QuietZonePhysicalLatencyMeasurementRunTests.swift in Sources */,
 				F97200000000000000000002 /* QuietZoneHardwareCommissioningTests.swift in Sources */,
 				F97300000000000000000002 /* QuietZoneEvidenceHandoffTests.swift in Sources */,
