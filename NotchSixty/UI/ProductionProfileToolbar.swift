@@ -5,7 +5,7 @@ import SwiftUI
 /// Toolbar visibility rules and the preference keys Settings shares with
 /// the toolbar through UserDefaults.
 enum ProductionProfileToolbarPolicy {
-    static let abComparisonEnabledKey = "toolbar.abComparisonEnabled"
+    static let abComparisonEnabledKey = PreferenceKeys.abComparisonEnabled
 
     enum ContentSaveAction: Equatable {
         case hidden

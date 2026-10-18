@@ -1737,15 +1737,7 @@ private struct MenuBarVolumeLabel: View {
 
 @MainActor
 final class ApplicationPreferences: ObservableObject {
-    private enum Key {
-        static let appearance = "application.appearance"
-        static let presence = "application.presence"
-        static let volumeStepResolution = "application.volumeStepResolution"
-        static let showVolumeInMenuBar = "application.showVolumeInMenuBar"
-        static let showVolumePopup = "application.showVolumePopup"
-        static let volumePopupPosition = "application.volumePopupPosition"
-        static let coverSystemVolumePopup = "application.coverSystemVolumePopup"
-    }
+    private typealias Key = PreferenceKeys.Application
 
     private let defaults: UserDefaults
     private weak var audioEngine: AudioIOEngine?
@@ -2162,6 +2154,7 @@ private struct ProductionMenuBarView: View {
 private struct ProductionSettingsView: View {
     @ObservedObject var preferences: ApplicationPreferences
     @ObservedObject var product: ProductController
+    @ObservedObject var featureFlags: FeatureFlags
     @State private var backupMessage: String?
 
     private var version: String {
@@ -2519,6 +2512,10 @@ private struct ProductionSettingsView: View {
                         }
                     }
 
+                    #if DEBUG
+                    developerSettings
+                    #endif
+
                     settingsCard(title: "Support", systemImage: "wrench.and.screwdriver") {
                         Button {
                             copyDiagnostics()
@@ -2538,6 +2535,34 @@ private struct ProductionSettingsView: View {
             .frame(maxWidth: 560)
             .frame(maxWidth: .infinity, alignment: .top)
     }
+
+    #if DEBUG
+    /// Debug builds only: switch unfinished features on for local testing.
+    private var developerSettings: some View {
+        settingsCard(title: "Developer", systemImage: "hammer") {
+            if featureFlags.known.isEmpty {
+                Text("No features are in development behind a flag.")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(featureFlags.known) { flag in
+                    Toggle(
+                        "\(flag.title) (\(flag.epic))",
+                        isOn: Binding(
+                            get: { featureFlags.isEnabled(flag) },
+                            set: { featureFlags.setEnabled($0, for: flag) }
+                        )
+                    )
+                    .disabled(featureFlags.isForcedByLaunchArgument(flag))
+                }
+                Button("Reset to Defaults") { featureFlags.resetOverrides() }
+                    .buttonStyle(.glass)
+            }
+            Text("Unfinished epics merge behind these flags, off by default. Release builds ignore these switches; testers can enable flags with the launch argument \(FeatureFlags.launchArgument) id1,id2.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+    #endif
 
     private func settingsCard<Content: View>(
         title: String,
@@ -2578,10 +2603,12 @@ struct NotchSixtyApp: App {
     @NSApplicationDelegateAdaptor(NotchSixtyAppDelegate.self) private var appDelegate
     @StateObject private var product: ProductController
     @StateObject private var preferences: ApplicationPreferences
+    @StateObject private var featureFlags: FeatureFlags
 
     init() {
         _product = StateObject(wrappedValue: ProductController())
         _preferences = StateObject(wrappedValue: ApplicationPreferences())
+        _featureFlags = StateObject(wrappedValue: FeatureFlags())
     }
 
     private var trayInserted: Binding<Bool> {
@@ -2594,6 +2621,7 @@ struct NotchSixtyApp: App {
     var body: some Scene {
         Window("Notch Sixty", id: "main") {
             ProductionRootView(product: product)
+                .environmentObject(featureFlags)
                 .task {
                     product.prepareForUse()
                     preferences.apply(to: product.audioEngine)
@@ -2605,6 +2633,7 @@ struct NotchSixtyApp: App {
 
         MenuBarExtra(isInserted: trayInserted) {
             ProductionMenuBarView(product: product)
+                .environmentObject(featureFlags)
                 .task {
                     product.prepareForUse()
                     preferences.apply(to: product.audioEngine)
@@ -2617,7 +2646,8 @@ struct NotchSixtyApp: App {
         Settings {
             ProductionSettingsView(
                 preferences: preferences,
-                product: product
+                product: product,
+                featureFlags: featureFlags
             )
         }
 

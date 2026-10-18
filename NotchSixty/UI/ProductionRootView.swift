@@ -898,7 +898,7 @@ private struct ProductionDashboardView: View {
 
 private struct StereoSignatureVUMeterPanel: View {
     @ObservedObject var engine: AudioIOEngine
-    @AppStorage("production.vuMetersEnabled") private var vuMetersEnabled = true
+    @AppStorage(PreferenceKeys.vuMetersEnabled) private var vuMetersEnabled = true
     @State private var leftVU = ProductionVUScale.minimumVU
     @State private var rightVU = ProductionVUScale.minimumVU
 
