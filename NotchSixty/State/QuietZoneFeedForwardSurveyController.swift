@@ -148,6 +148,26 @@ final class QuietZoneFeedForwardSurveyController: ObservableObject {
 
     var errorChannel: Int? { ambient.projects.project?.microphone?.inputChannelIndex }
 
+    /// What the feed-forward shadow (S9c) runs on, or why it cannot run yet.
+    /// Nothing while a measurement runs, so the shadow never hears a sweep.
+    func shadowInputs() -> (inputs: QuietZoneFeedForwardShadowInputs?, reason: String) {
+        guard activity == .idle else { return (nil, "Paused while a feed-forward measurement runs.") }
+        guard let survey, let assembled else { return (nil, "Measure the feed-forward design first.") }
+        guard let seat = try? seat() else {
+            return (nil, QuietZoneFeedForwardSurveyError.incompatibleProject.localizedDescription)
+        }
+        guard survey.projectID == seat.project.id, survey.microphoneStableID == seat.device.uid,
+              survey.errorChannel == seat.channel, survey.referenceChannel == referenceChannel
+        else { return (nil, QuietZoneFeedForwardSurveyError.noiseSurveyMissing.localizedDescription) }
+        guard let position = ambient.selectedModelPosition else {
+            return (nil, QuietZoneFeedForwardSurveyError.positionModelMissing.localizedDescription)
+        }
+        return (QuietZoneFeedForwardShadowInputs(
+            device: seat.device, referenceChannel: survey.referenceChannel, errorChannel: seat.channel,
+            bands: assembled.bands, design: design, budget: quietZone.feedForwardBudget, position: position
+        ), "")
+    }
+
     func setReferenceChannel(_ channel: Int?) {
         referenceChannel = channel
         defaults.set(channel, forKey: PreferenceKeys.quietZoneFeedForwardReferenceChannel)

@@ -245,6 +245,7 @@ struct ProductionActiveAcousticsWorkspace: View {
     @ObservedObject var quietZone: ActiveQuietZoneController
     @ObservedObject var adaptiveQuietZone: AdaptiveQuietZoneShadow
     @ObservedObject var feedForwardSurvey: QuietZoneFeedForwardSurveyController
+    @ObservedObject var feedForwardShadow: QuietZoneFeedForwardShadow
     @EnvironmentObject private var featureFlags: FeatureFlags
     @ObservedObject var microphone: RoomCorrectionCalibrationController
     @ObservedObject var projects: RoomCorrectionProjectController
@@ -1216,6 +1217,7 @@ struct ProductionActiveAcousticsWorkspace: View {
             ProductionFeedForwardReadinessCard(quietZone: quietZone)
             if featureFlags.isEnabled(.adaptiveANC) {
                 ProductionFeedForwardDesignSurveyCard(survey: feedForwardSurvey)
+                ProductionFeedForwardShadowCard(shadow: feedForwardShadow)
             }
 
             LazyVGrid(
