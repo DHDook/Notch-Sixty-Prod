@@ -145,6 +145,63 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         )
     }
 
+    func testSidebarKeepsTodaysLayoutWithTheUIScopeFlagOff() {
+        let groups = ProductionSection.sidebarGroups(
+            simplifiedLayout: false,
+            selection: .hardwareAcceptance
+        )
+        XCTAssertEqual(groups.map(\.title), ["Playback", "System", "Tools", "Extensions"])
+        XCTAssertEqual(
+            groups.map(\.sections),
+            [
+                ProductionSection.playback,
+                ProductionSection.system,
+                ProductionSection.tools,
+                ProductionSection.extensions,
+            ]
+        )
+    }
+
+    func testSimplifiedSidebarMovesDeveloperToolsOut() {
+        let groups = ProductionSection.sidebarGroups(simplifiedLayout: true)
+        let shown = groups.flatMap(\.sections)
+
+        XCTAssertEqual(groups.map(\.title), ["Playback", "System", "Tools", "Extensions"])
+        for tool in ProductionSection.developerTools {
+            XCTAssertFalse(shown.contains(tool), "\(tool) should open from the Developer menu")
+        }
+        XCTAssertEqual(groups[2].sections, [.roomAdvisor, .blindListening])
+        XCTAssertEqual(
+            Set(shown + ProductionSection.developerTools + [.dashboard]),
+            Set(ProductionSection.allCases),
+            "every section stays reachable from the sidebar or the Developer menu"
+        )
+    }
+
+    func testSimplifiedSidebarKeepsASelectedDeveloperToolVisible() {
+        for tool in ProductionSection.developerTools {
+            let groups = ProductionSection.sidebarGroups(simplifiedLayout: true, selection: tool)
+            XCTAssertEqual(groups.last?.title, "Developer")
+            XCTAssertEqual(groups.last?.sections, [tool])
+        }
+        let groups = ProductionSection.sidebarGroups(simplifiedLayout: true, selection: .equalizer)
+        XCTAssertFalse(groups.map(\.title).contains("Developer"))
+    }
+
+    func testDeveloperToolsKeepTheirTitles() {
+        XCTAssertEqual(
+            ProductionSection.developerTools.map(\.title),
+            ["Hardware Acceptance", "Acoustic Research"]
+        )
+    }
+
+    func testUIScopeFlagIsKnownAndOffByDefault() {
+        XCTAssertTrue(FeatureFlag.all.contains(.uiScope))
+        XCTAssertEqual(FeatureFlag.uiScope.id, "e5.ui-scope")
+        XCTAssertEqual(FeatureFlag.uiScope.epic, "E5")
+        XCTAssertFalse(FeatureFlag.uiScope.defaultEnabled)
+    }
+
     func testExtensionsGroupContainsPluginRackEntryPoint() {
         XCTAssertEqual(
             ProductionSection.extensions,

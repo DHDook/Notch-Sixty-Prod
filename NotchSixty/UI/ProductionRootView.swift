@@ -62,6 +62,44 @@ enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
         .plugins,
     ]
 
+    /// Bench and research workspaces. With the simplified layout they leave
+    /// the sidebar and open from the Developer menu instead.
+    static let developerTools: [ProductionSection] = [
+        .hardwareAcceptance,
+        .acousticResearch,
+    ]
+
+    /// The sidebar's groups, in order. The dashboard is a standalone row
+    /// above them. With `simplifiedLayout` the developer tools are left out,
+    /// except a selected one, which stays visible in a Developer group until
+    /// the user moves to another section.
+    static func sidebarGroups(
+        simplifiedLayout: Bool,
+        selection: ProductionSection? = nil
+    ) -> [ProductionSidebarGroup] {
+        guard simplifiedLayout else {
+            return [
+                ProductionSidebarGroup(title: "Playback", sections: playback),
+                ProductionSidebarGroup(title: "System", sections: system),
+                ProductionSidebarGroup(title: "Tools", sections: tools),
+                ProductionSidebarGroup(title: "Extensions", sections: extensions),
+            ]
+        }
+        var groups = [
+            ProductionSidebarGroup(title: "Playback", sections: playback),
+            ProductionSidebarGroup(title: "System", sections: system),
+            ProductionSidebarGroup(
+                title: "Tools",
+                sections: tools.filter { !developerTools.contains($0) }
+            ),
+            ProductionSidebarGroup(title: "Extensions", sections: extensions),
+        ]
+        if let selection, developerTools.contains(selection) {
+            groups.append(ProductionSidebarGroup(title: "Developer", sections: [selection]))
+        }
+        return groups
+    }
+
     var id: String { rawValue }
 
     var title: String {
@@ -193,15 +231,32 @@ private enum ProductionOutputVUMeterDemand {
     }
 }
 
+struct ProductionSidebarGroup: Hashable, Identifiable {
+    let title: String
+    let sections: [ProductionSection]
+
+    var id: String { title }
+}
+
+/// The main window's selected section. The app owns it so menu commands can
+/// change the selection as well as the sidebar.
+@MainActor
+final class ProductionNavigation: ObservableObject {
+    @Published var selection: ProductionSection? = .dashboard
+}
+
 struct ProductionRootView: View {
     @ObservedObject var product: ProductController
+    @ObservedObject var navigation: ProductionNavigation
+    @EnvironmentObject private var featureFlags: FeatureFlags
     #if DEBUG
     @Environment(\.openWindow) private var openWindow
     #endif
-    @State private var selection: ProductionSection? = .dashboard
     @State private var commandError: String?
 
     private var engine: AudioIOEngine { product.audioEngine }
+
+    private var selection: ProductionSection? { navigation.selection }
 
     private var minimumWindowWidth: CGFloat {
         if selection == .equalizer, engine.stereoEQConfiguration.channelMode != .linked {
@@ -221,38 +276,24 @@ struct ProductionRootView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(selection: $selection) {
+            List(selection: $navigation.selection) {
                 Label(
                     ProductionSection.dashboard.title,
                     systemImage: ProductionSection.dashboard.systemImage
                 )
                 .tag(ProductionSection.dashboard)
 
-                Section("Playback") {
-                    ForEach(ProductionSection.playback) { section in
-                        Label(section.title, systemImage: section.systemImage)
-                            .tag(section)
-                    }
-                }
-
-                Section("System") {
-                    ForEach(ProductionSection.system) { section in
-                        Label(section.title, systemImage: section.systemImage)
-                            .tag(section)
-                    }
-                }
-
-                Section("Tools") {
-                    ForEach(ProductionSection.tools) { section in
-                        Label(section.title, systemImage: section.systemImage)
-                            .tag(section)
-                    }
-                }
-
-                Section("Extensions") {
-                    ForEach(ProductionSection.extensions) { section in
-                        Label(section.title, systemImage: section.systemImage)
-                            .tag(section)
+                ForEach(
+                    ProductionSection.sidebarGroups(
+                        simplifiedLayout: featureFlags.isEnabled(.uiScope),
+                        selection: selection
+                    )
+                ) { group in
+                    Section(group.title) {
+                        ForEach(group.sections) { section in
+                            Label(section.title, systemImage: section.systemImage)
+                                .tag(section)
+                        }
                     }
                 }
             }

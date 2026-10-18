@@ -2170,6 +2170,9 @@ private struct ProductionSettingsView: View {
     @AppStorage(ProductionProfileToolbarPolicy.abComparisonEnabledKey)
     private var abComparisonEnabled = false
 
+    @AppStorage(PreferenceKeys.Application.showDeveloperTools)
+    private var showDeveloperTools = false
+
     private var diagnosticsReport: String {
         product.diagnosticsReport(
             version: version,
@@ -2514,6 +2517,15 @@ private struct ProductionSettingsView: View {
                         }
                     }
 
+                    if featureFlags.isEnabled(.uiScope) {
+                        settingsCard(title: "Developer Tools", systemImage: "wrench.adjustable") {
+                            Toggle("Show developer tools", isOn: $showDeveloperTools)
+                            Text("Adds a Developer menu with Hardware Acceptance and Acoustic Research, the bench and research workspaces used to qualify a system.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
                     #if DEBUG
                     developerSettings
                     #endif
@@ -2594,6 +2606,38 @@ private struct ProductionHelpMenuCommand: View {
     }
 }
 
+/// The Developer menu: bench and research workspaces that the simplified
+/// layout (E5) keeps out of the sidebar. Shown only when the layout flag is on
+/// and the user has turned on "Show developer tools" in Settings.
+private struct ProductionDeveloperCommands: Commands {
+    @ObservedObject var navigation: ProductionNavigation
+    @ObservedObject var featureFlags: FeatureFlags
+    @AppStorage(PreferenceKeys.Application.showDeveloperTools)
+    private var showDeveloperTools = false
+
+    var body: some Commands {
+        if featureFlags.isEnabled(.uiScope), showDeveloperTools {
+            CommandMenu("Developer") {
+                ProductionDeveloperMenuItems(navigation: navigation)
+            }
+        }
+    }
+}
+
+private struct ProductionDeveloperMenuItems: View {
+    @ObservedObject var navigation: ProductionNavigation
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        ForEach(ProductionSection.developerTools) { section in
+            Button(section.title) {
+                openWindow(id: "main")
+                navigation.selection = section
+            }
+        }
+    }
+}
+
 private final class NotchSixtyAppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
@@ -2606,6 +2650,7 @@ struct NotchSixtyApp: App {
     @StateObject private var product: ProductController
     @StateObject private var preferences: ApplicationPreferences
     @StateObject private var featureFlags: FeatureFlags
+    @StateObject private var navigation = ProductionNavigation()
 
     /// Held until the process exits; see `ProductInstanceLock`.
     private static var instanceLock: ProductInstanceLock?
@@ -2651,7 +2696,7 @@ struct NotchSixtyApp: App {
 
     var body: some Scene {
         Window("Notch Sixty", id: "main") {
-            ProductionRootView(product: product)
+            ProductionRootView(product: product, navigation: navigation)
                 .environmentObject(featureFlags)
                 .task {
                     product.prepareForUse()
@@ -2661,6 +2706,9 @@ struct NotchSixtyApp: App {
         .defaultSize(width: 1180, height: 780)
         .windowResizability(.contentMinSize)
         .windowToolbarStyle(.unified)
+        .commands {
+            ProductionDeveloperCommands(navigation: navigation, featureFlags: featureFlags)
+        }
 
         MenuBarExtra(isInserted: trayInserted) {
             ProductionMenuBarView(product: product)

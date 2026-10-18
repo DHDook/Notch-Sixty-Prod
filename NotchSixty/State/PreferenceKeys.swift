@@ -11,6 +11,7 @@ enum PreferenceKeys {
         static let showVolumePopup = "application.showVolumePopup"
         static let volumePopupPosition = "application.volumePopupPosition"
         static let coverSystemVolumePopup = "application.coverSystemVolumePopup"
+        static let showDeveloperTools = "application.showDeveloperTools"
     }
 
     static let abComparisonEnabled = "toolbar.abComparisonEnabled"

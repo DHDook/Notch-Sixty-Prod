@@ -7,7 +7,7 @@
 - Helper agents in `.claude/agents/`: code-scout, build-test-runner, plan-tracker, pr-writer
   (Haiku) and realtime-reviewer (Sonnet).
 
-**Current focus:** E1: S1–S6 done, which closes E1. Next: Phase 1's other epics (E2–E5, E19); see `docs/PROGRAM_PLAN.md`.
+**Current focus:** E5 UI scope clean-up: plan approved (`docs/epics/E5.md`), S1 in review; next S2 (Advanced dynamics group). E3 waits on the bench.
 <!-- plan-tracker keeps the line above current -->
 
 @AGENTS.md

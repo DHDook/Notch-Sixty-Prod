@@ -18,7 +18,14 @@ struct FeatureFlag: Hashable, Identifiable, Sendable {
 extension FeatureFlag {
     /// Every flag the app knows. Add one when an epic starts merging dark;
     /// delete it, and the checks that read it, once the epic ships.
-    static let all: [FeatureFlag] = []
+    static let all: [FeatureFlag] = [.uiScope]
+
+    /// E5: bench and research tools leave the sidebar for a Developer menu.
+    static let uiScope = FeatureFlag(
+        id: "e5.ui-scope",
+        title: "Simplified workspace layout",
+        epic: "E5"
+    )
 }
 
 /// Resolves feature flags.
