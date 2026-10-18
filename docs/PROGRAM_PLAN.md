@@ -96,7 +96,7 @@ XCTest is green on macOS 27. (Owner, 17 Oct 2026: no macOS 26 machine; 26 suppor
 
 ### E5 UI scope clean-up
 
-- [ ] Move Hardware Acceptance and Acoustic Research to a hidden developer menu
+- [ ] Move Hardware Acceptance and Acoustic Research to a hidden developer menu (S1, behind `e5.ui-scope`)
 - [ ] Move spectral de-hiss, mains-hum, de-esser, pause gate and expander into an Advanced group
 - [ ] Fold Speaker Measurement Lab directivity and quasi-anechoic tools into an Advanced tab
 
