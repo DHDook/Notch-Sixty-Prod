@@ -650,6 +650,65 @@ final class ActiveQuietZoneTests: XCTestCase {
         )
     }
 
+    /// Anti-noise is injected after program dynamics and before final
+    /// protection, so program plus a Quiet Zone at its amplitude cap must never
+    /// exceed the protection ceiling, at every standard rate.
+    func testQuietZoneInjectionIsLimitedByFinalProtection() throws {
+        let rates: [Double] = [44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000]
+        let ceilingDB: Float = -1
+        let ceiling = Float(pow(10.0, Double(ceilingDB) / 20.0))
+        // Two in-phase tones at the per-tone cap fill the aggregate cap.
+        let tonePeak = Float(pow(10.0, N60_ACTIVE_QUIET_ZONE_MAX_AGGREGATE_PEAK_DBFS / 20.0) / 2)
+        XCTAssertLessThanOrEqual(Double(tonePeak), pow(10.0, N60_ACTIVE_QUIET_ZONE_MAX_TONE_PEAK_DBFS / 20.0))
+        var tones = [
+            cTone(frequency: 40, leftReal: tonePeak, rightReal: tonePeak),
+            cTone(frequency: 63, leftReal: tonePeak, rightReal: tonePeak),
+        ]
+
+        for rate in rates {
+            func peak(protected: Bool) throws -> (output: Float, frames: Int) {
+                let kernel = try XCTUnwrap(N60RenderKernelCreate())
+                defer { N60RenderKernelDestroy(kernel) }
+                var graph = N60DSPGraphSnapshotMakeUnity(rate)
+                XCTAssertTrue(
+                    N60DSPGraphSnapshotSetActiveQuietZone(&graph, &tones, UInt32(tones.count), 256, true),
+                    "\(rate) Hz: tones at the amplitude cap were rejected"
+                )
+                if protected {
+                    var protection = N60ProtectionSnapshotMakeBypassed(rate)
+                    XCTAssertTrue(N60ProtectionSnapshotSetLimiter(&protection, true, ceilingDB, 0.1, 50, 2))
+                    graph.protection = protection
+                }
+                XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, graph), "\(rate) Hz")
+
+                let frames = Int(rate / 2)
+                let settle = Int(rate / 10)
+                var left: Float = 0
+                var right: Float = 0
+                var outputPeak: Float = 0
+                for frame in 0..<frames {
+                    // Near-full-scale program a few hertz off the anti-noise
+                    // tones, so the sum regularly peaks above full scale.
+                    let program = Float(0.97 * sin(2 * Double.pi * 51 * Double(frame) / rate))
+                    N60RenderKernelProcessStereoFrame(kernel, program, program, &left, &right)
+                    if frame >= settle { outputPeak = max(outputPeak, abs(left), abs(right)) }
+                }
+                return (outputPeak, frames)
+            }
+
+            let unprotected = try peak(protected: false)
+            XCTAssertGreaterThan(
+                unprotected.output, 1.0,
+                "\(rate) Hz: program plus anti-noise did not exceed full scale, so the limit is untested"
+            )
+            let protected = try peak(protected: true)
+            XCTAssertLessThanOrEqual(
+                protected.output, ceiling + 5.0e-4,
+                "\(rate) Hz: Quiet Zone injection escaped final protection"
+            )
+        }
+    }
+
     private func cTone(
         frequency: Double,
         leftReal: Float,
