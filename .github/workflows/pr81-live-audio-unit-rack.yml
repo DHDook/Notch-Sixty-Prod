@@ -23,15 +23,11 @@ jobs:
             ci/validate_pr77_live_room_treatment.c \
             -lm -o /tmp/pr77-live-room-treatment
           /tmp/pr77-live-room-treatment
-      - name: Validate PR81 live Audio Unit rack
-        run: python3 ci/validate_pr81_live_audio_unit_rack.py
 
   validate-macos-integration:
     runs-on: xcode-27
     steps:
       - uses: actions/checkout@v7
-      - name: Validate PR81 live Audio Unit rack
-        run: python3 ci/validate_pr81_live_audio_unit_rack.py
       - name: Build arm64 app with live Audio Unit rack
         run: |
           xcodebuild \

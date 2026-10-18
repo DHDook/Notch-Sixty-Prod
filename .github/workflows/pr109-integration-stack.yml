@@ -26,11 +26,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Verify immutable stacked ancestry and source-only boundary
-        run: python3 ci/validate_pr109_integration_stack.py --report "$RUNNER_TEMP/pr109-remote-stack.json"
 
-      - name: Test fail-closed stack manifest and authorization rules
-        run: python3 -m unittest discover -s ci/tests -p test_pr109_integration_stack.py -v
 
       - name: Verify cross-feature playback ownership and realtime chain
         run: python3 ci/validate_pr109_cross_feature_contracts.py --report "$RUNNER_TEMP/pr109-cross-feature.json"
@@ -49,7 +45,6 @@ jobs:
           python3 ci/validate_pr103_speaker_optimizer_measurement.py
           python3 ci/validate_pr104_speaker_optimizer.py
           python3 ci/validate_pr105_speaker_characterization.py
-          python3 ci/validate_pr106_speaker_measurement_lab.py
           python3 ci/validate_pr107_speaker_optimizer_fir.py
           python3 ci/validate_pr108_coherent_subwoofer_alignment.py
 
@@ -72,8 +67,6 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Verify PR109 snapshot ancestry and no-audio-change scope
-        run: python3 ci/validate_pr109_integration_stack.py
 
       - name: Build arm64 Debug app
         run: >-

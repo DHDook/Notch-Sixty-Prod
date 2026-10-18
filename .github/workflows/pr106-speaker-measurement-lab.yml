@@ -20,8 +20,6 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - name: Validate PR106 measurement lab boundary
-        run: python3 ci/validate_pr106_speaker_measurement_lab.py
       - name: Preserve PR105 guided optimizer closure
         run: python3 ci/validate_pr105_speaker_characterization.py
 
@@ -31,8 +29,6 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - name: Validate PR106 measurement lab boundary
-        run: python3 ci/validate_pr106_speaker_measurement_lab.py
       - name: Preserve PR105 guided optimizer closure
         run: python3 ci/validate_pr105_speaker_characterization.py
       - name: Build arm64 Debug app

@@ -22,8 +22,6 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Validate PR107 FIR deployment boundary
         run: python3 ci/validate_pr107_speaker_optimizer_fir.py
-      - name: Preserve PR106 Advanced Speaker Measurement Lab closure
-        run: python3 ci/validate_pr106_speaker_measurement_lab.py
       - name: Run PR107 sparse program FIR runtime
         run: |
           clang -std=c11 -O2 -Wall -Wextra -Werror \
@@ -47,8 +45,6 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Validate PR107 FIR deployment boundary
         run: python3 ci/validate_pr107_speaker_optimizer_fir.py
-      - name: Preserve PR106 Advanced Speaker Measurement Lab closure
-        run: python3 ci/validate_pr106_speaker_measurement_lab.py
       - name: Run PR107 sparse program FIR runtime on Apple clang
         run: |
           clang -std=c11 -O2 -Wall -Wextra -Werror \

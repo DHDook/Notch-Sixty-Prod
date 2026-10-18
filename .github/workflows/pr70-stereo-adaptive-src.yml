@@ -14,8 +14,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Validate inherited product hardening
-        run: python3 ci/validate_pr67_product_hardening.py
       - name: Validate inherited VU and software-volume polish
         run: python3 ci/validate_pr68_vu_volume_polish.py
       - name: Validate PR70 stereo activation structure

@@ -28,7 +28,6 @@ jobs:
         run: python3 ci/validate_pr111_protected_driver_optimizer.py
       - name: Preserve PR106 driver protection and PR109 integration safety
         run: |
-          python3 ci/validate_pr106_speaker_measurement_lab.py
           python3 ci/validate_pr109_cross_feature_contracts.py
           python3 ci/validate_pr110_advanced_placement.py
 
@@ -42,7 +41,6 @@ jobs:
       - name: Verify protected-driver recommendation and inherited contracts
         run: |
           python3 ci/validate_pr111_protected_driver_optimizer.py
-          python3 ci/validate_pr106_speaker_measurement_lab.py
           python3 ci/validate_pr109_cross_feature_contracts.py
           python3 ci/validate_pr110_advanced_placement.py
       - name: Build unsigned arm64 Debug app

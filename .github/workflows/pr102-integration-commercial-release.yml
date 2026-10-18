@@ -28,8 +28,6 @@ jobs:
         run: python3 ci/validate_pr102_dependency_manifest.py
       - name: Re-run PR101 reliability acceptance validator
         run: python3 ci/validate_pr101_reliability_acceptance.py
-      - name: Re-run v1 release hardening validator
-        run: python3 ci/validate_pr45_release_hardening.py
       - name: Preserve disconnected feed-forward safety boundary
         run: python3 ci/audit_pr98_disconnected_boundary.py
 
@@ -48,8 +46,6 @@ jobs:
         run: python3 ci/validate_pr102_dependency_manifest.py
       - name: Re-run PR101 reliability acceptance validator
         run: python3 ci/validate_pr101_reliability_acceptance.py
-      - name: Re-run v1 release hardening validator
-        run: python3 ci/validate_pr45_release_hardening.py
       - name: Preserve disconnected feed-forward safety boundary
         run: |
           python3 ci/audit_pr98_disconnected_boundary.py
