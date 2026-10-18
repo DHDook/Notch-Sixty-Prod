@@ -84,8 +84,8 @@ XCTest is green on macOS 27. (Owner, 17 Oct 2026: no macOS 26 machine; 26 suppor
 
 ### E4 Speaker ANC to class-leading (runs Phases 1–4)
 
-- [ ] Label the Active Acoustics workspace clearly as a preview until qualification
-- [ ] Set written, measurable targets: attenuation at the primary seat per band, quiet-zone size, and no audible increase at other seats
+- [x] ~~Label the Active Acoustics workspace clearly as a preview until qualification~~ (dropped by owner, 18 Oct 2026: still in development)
+- [x] Set written, measurable targets: attenuation at the primary seat per band, quiet-zone size, and no audible increase at other seats (proposed in `docs/ANC_QUALIFICATION.md`; owner sets final values)
 - [ ] State the physical envelope in the product: broadband feed-forward only works when the reference leads the noise by more than system latency; tonal and periodic noise uses the predictive canceller
 - [ ] Add adaptive control (FxLMS-style) with online secondary-path tracking, so cancellation survives people moving and temperature drift; today's filters are designed offline and fixed
 - [ ] Lowest-latency output path for ANC: minimum buffer size, a measured latency budget per supported interface, and a supported-hardware list for reference microphones
