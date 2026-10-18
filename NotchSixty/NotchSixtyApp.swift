@@ -1552,6 +1552,15 @@ enum VolumeFeedbackPresentation {
         )
     }
 
+    /// The widest strings `readout` can return in one mode, with 8 standing
+    /// in for any digit (digits are tabular, so all share one width).
+    /// The menu bar reserves the widest of these so the readout never
+    /// changes its width as the level moves.
+    static func readoutWidthTemplates(decibels: Bool, alwaysTenths: Bool) -> [String] {
+        guard decibels else { return ["100%", "Muted"] }
+        return [alwaysTenths ? "−88.8 dB" : "−88 dB", "−∞ dB", "Muted"]
+    }
+
     static func decibelReadout(_ decibels: Double?, alwaysTenths: Bool = false) -> String {
         guard let decibels else { return "−∞ dB" }
         let tenths = (decibels * 10).rounded()
@@ -1823,14 +1832,46 @@ private struct MenuBarVolumeLabel: View {
         )
     }
 
-    var body: some View {
-        HStack(spacing: 5) {
+    @Environment(\.displayScale) private var displayScale
+
+    private var widthTemplates: [String] {
+        VolumeFeedbackPresentation.readoutWidthTemplates(
+            decibels: preferences.showsDecibelReadout(for: engine),
+            alwaysTenths: preferences.decibelReadoutShowsTenths
+        )
+    }
+
+    /// The status item ignores most layout modifiers, so the label is drawn
+    /// to a template image. The readout sits in a slot as wide as the widest
+    /// string the current mode can show, so the item's width, and every
+    /// menu-bar item beside it, stays put as the digits change.
+    private var labelImage: NSImage? {
+        let label = HStack(spacing: 5) {
             Image("TrayIcon")
                 .renderingMode(.template)
             if preferences.showVolumeInMenuBar {
-                Text(readout)
-                    .font(.system(size: 12, weight: .medium))
-                    .monospacedDigit()
+                ZStack(alignment: .leading) {
+                    ForEach(widthTemplates, id: \.self) { Text($0).hidden() }
+                    Text(readout)
+                }
+                .font(.system(size: 12, weight: .medium))
+                .monospacedDigit()
+            }
+        }
+        .foregroundStyle(.black)
+        let renderer = ImageRenderer(content: label)
+        renderer.scale = displayScale
+        guard let image = renderer.nsImage else { return nil }
+        image.isTemplate = true
+        return image
+    }
+
+    var body: some View {
+        Group {
+            if let labelImage {
+                Image(nsImage: labelImage)
+            } else {
+                Image("TrayIcon").renderingMode(.template)
             }
         }
         .accessibilityElement(children: .ignore)
@@ -2412,8 +2453,8 @@ private struct ProductionSettingsView: View {
             }
             .navigationTitle("Settings")
             .frame(
-                minWidth: 560,
-                idealWidth: 600,
+                minWidth: 520,
+                idealWidth: 560,
                 minHeight: 520,
                 idealHeight: 720
             )
@@ -2667,8 +2708,6 @@ private struct ProductionSettingsView: View {
             }
             .padding(18)
         }
-            .frame(maxWidth: 560)
-            .frame(maxWidth: .infinity, alignment: .top)
     }
 
     #if DEBUG
@@ -2771,7 +2810,7 @@ extension View {
         toggleStyle(.switch)
     }
 
-    /// Settings' rows are compact, so its switches are one size down.
+    /// Settings' rows are compact, so its switches are two sizes down.
     func productionCompactToggleStyle() -> some View {
         toggleStyle(CompactSwitchToggleStyle())
     }
@@ -2781,7 +2820,7 @@ private struct CompactSwitchToggleStyle: ToggleStyle {
     func makeBody(configuration: Configuration) -> some View {
         Toggle(configuration)
             .toggleStyle(.switch)
-            .controlSize(.small)
+            .controlSize(.mini)
     }
 }
 

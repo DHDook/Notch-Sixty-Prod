@@ -923,22 +923,39 @@ private struct StereoSignatureVUMeterPanel: View {
     @AppStorage(PreferenceKeys.vuMetersEnabled) private var vuMetersEnabled = true
     @State private var leftVU = ProductionVUScale.minimumVU
     @State private var rightVU = ProductionVUScale.minimumVU
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 14) {
-                Text("OUTPUT").font(.caption.bold()).tracking(1.8).foregroundStyle(.secondary)
-                Spacer()
-                Toggle("VU Meters", isOn: $vuMetersEnabled)
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                Text("0 VU = −18 dBFS").font(.caption.monospacedDigit()).foregroundStyle(.tertiary)
+        // The meter switch and calibration note sit on the housing's lower
+        // corners, either side of the branding, like a faceplate's legends.
+        let palette = StereoSignatureVUPalette(darkAppearance: colorScheme == .dark)
+        StereoSignatureVUMeter(leftVU: leftVU, rightVU: rightVU)
+            .frame(minHeight: 285)
+            .overlay(alignment: .bottomLeading) {
+                Text("OUTPUT  ·  0 VU = −18 dBFS")
+                    .font(.caption2.weight(.semibold).monospacedDigit())
+                    .tracking(1.2)
+                    .foregroundStyle(palette.branding.opacity(0.75))
+                    .padding(.leading, 28)
+                    .padding(.bottom, 22)
+                    .accessibilityLabel("Output meters, 0 VU equals −18 dBFS")
             }
-
-            StereoSignatureVUMeter(leftVU: leftVU, rightVU: rightVU)
-                .frame(minHeight: 285)
-        }
-        .task(id: "\(engine.lifecycleState.rawValue)|\(vuMetersEnabled)") { await runMeterLoop() }
+            .overlay(alignment: .bottomTrailing) {
+                HStack(spacing: 8) {
+                    Text("METERS")
+                        .font(.caption2.weight(.semibold))
+                        .tracking(1.2)
+                        .foregroundStyle(palette.branding.opacity(0.75))
+                    Toggle("VU Meters", isOn: $vuMetersEnabled)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.mini)
+                }
+                .padding(.trailing, 28)
+                .padding(.bottom, 20)
+                .help("Turn the output VU meters on or off")
+            }
+            .task(id: "\(engine.lifecycleState.rawValue)|\(vuMetersEnabled)") { await runMeterLoop() }
     }
 
     @MainActor
