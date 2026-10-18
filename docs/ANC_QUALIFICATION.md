@@ -78,7 +78,8 @@ with the independent measurement microphone (not the error microphone).
 
 ## 5. Authorisation criteria
 
-`LiveANCAuthorisation` (E4 S3) is the only code that can decide live ANC is qualified. It
+`LiveANCAuthorisation` (E4 S3) is the only code that can decide live ANC is qualified. It governs broadband feed-forward and adaptive output. The fixed tonal canceller stays live
+within its existing level caps and error-microphone fault fade (owner, 18 Oct 2026). It
 returns "authorised" only when one evidence record contains all of:
 
 - [ ] PR97 timing qualified for this interface
