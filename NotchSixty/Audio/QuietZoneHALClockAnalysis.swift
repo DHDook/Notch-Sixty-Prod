@@ -69,7 +69,7 @@ struct QuietZoneHALClockAnalyzer: Sendable {
         guard !trace.inputDeviceID.isEmpty,
               !trace.outputDeviceID.isEmpty,
               trace.nominalSampleRate.isFinite,
-              (8_000...192_000).contains(trace.nominalSampleRate)
+              (8_000...768_000).contains(trace.nominalSampleRate)
         else { throw QuietZoneHALClockError.invalidTimebase }
 
         let input = try evaluate(trace.inputObservations)

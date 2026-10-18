@@ -101,6 +101,7 @@ final class FeatureFlagsTests: XCTestCase {
         XCTAssertEqual(PreferenceKeys.abComparisonEnabled, "toolbar.abComparisonEnabled")
         XCTAssertEqual(ProductionProfileToolbarPolicy.abComparisonEnabledKey, "toolbar.abComparisonEnabled")
         XCTAssertEqual(PreferenceKeys.vuMetersEnabled, "production.vuMetersEnabled")
+        XCTAssertEqual(PreferenceKeys.quietZoneMeasuredLatency, "quietZone.measuredLatency")
         XCTAssertEqual(PreferenceKeys.featureFlagPrefix, "feature.")
     }
 }

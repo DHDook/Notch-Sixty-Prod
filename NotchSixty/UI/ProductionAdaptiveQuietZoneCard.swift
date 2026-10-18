@@ -4,6 +4,8 @@ import SwiftUI
 /// It runs in shadow: computed and metered, never played.
 struct ProductionAdaptiveQuietZoneCard: View {
     @ObservedObject var shadow: AdaptiveQuietZoneShadow
+    /// E4 S7: output round trip for the current hardware.
+    var latencyText: String
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -51,6 +53,10 @@ struct ProductionAdaptiveQuietZoneCard: View {
                     }
                 }
             }
+
+            Label("Output latency: \(latencyText)", systemImage: "timer")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             HStack(spacing: 18) {
                 Label(guardText, systemImage: guardSymbol)

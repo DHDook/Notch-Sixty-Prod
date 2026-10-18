@@ -495,6 +495,7 @@ final class ActiveQuietZoneController: ObservableObject {
         var updated = configuration
         updated.enabled = enabled
         try persist(updated)
+        syncLowLatencyOutputProfile()
 
         if enabled {
             faultLatched = false
@@ -502,6 +503,20 @@ final class ActiveQuietZoneController: ObservableObject {
         } else {
             stop()
         }
+    }
+
+    /// E4 S7 (flag `e4.adaptive-anc`, set by the app shell): while allowed,
+    /// enabling Quiet Zone switches the output to its lowest-latency buffer
+    /// and disabling restores it. Hold and fault keep it: Quiet Zone is still
+    /// enabled.
+    var lowLatencyOutputProfileAllowed = false {
+        didSet { syncLowLatencyOutputProfile() }
+    }
+
+    private func syncLowLatencyOutputProfile() {
+        engine.setLowLatencyOutputProfile(
+            lowLatencyOutputProfileAllowed && configuration.enabled
+        )
     }
 
     func replaceConfiguration(

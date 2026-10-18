@@ -91,7 +91,7 @@ struct QuietZonePhysicalLatencyMeasurementRun: Sendable {
         guard !rig.microphoneID.isEmpty, rig.microphoneChannel >= 0,
               !rig.outputDeviceID.isEmpty, !rig.routeID.isEmpty,
               !rig.clockID.isEmpty, !rig.triggerID.isEmpty,
-              rig.sampleRate.isFinite, (8_000...192_000).contains(rig.sampleRate)
+              rig.sampleRate.isFinite, (8_000...768_000).contains(rig.sampleRate)
         else { throw QuietZoneLatencyMeasurementError.incompatibleRoute }
         self.rig = rig
         self.startedAt = now
