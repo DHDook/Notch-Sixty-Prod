@@ -32,8 +32,8 @@ and public file-format/configuration specifications may inform independently
 authored code; those references are not bundled third-party software.
 
 The app icon/identity artwork is owner-controlled material documented in
-`docs/PR39_APP_IDENTITY_STATUS.md` and
-`docs/PR42_PROVENANCE_CLOSURE.md`.
+`docs/archive/PR39_APP_IDENTITY_STATUS.md` and
+`docs/archive/PR42_PROVENANCE_CLOSURE.md`.
 
 Before adding any future dependency, record:
 

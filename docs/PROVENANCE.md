@@ -54,7 +54,7 @@ Historical GPL Notch Sixty / Equaliser implementation source is **not** a permit
 | PR38 production Dynamics | Original commercial implementation | Proprietary dynamics model + SwiftUI | No historical view code reused; PR42 later modernizes presentation with semantic native controls. |
 | PR39 metering/RTA/stereo analysis | Specification-derived / original | Standard meter/spectral/stereo-analysis concepts + proprietary telemetry | No external DSP/visualization library bundled. |
 | PR39 Content Presets / Playback Systems | Original commercial implementation | Commercial ownership/persistence requirements | New two-layer archive; not a port of historical store. |
-| PR39 app identity artwork | Asset with verified rights | User-authored Notch Sixty analog-meter artwork; `docs/PR39_APP_IDENTITY_STATUS.md` | Owner deliberately reuses the asset under independent ownership rights. Light/dark PNG derivatives and retained SVG sources are cleared production assets; no Equaliser branding/external font asset imported. |
+| PR39 app identity artwork | Asset with verified rights | User-authored Notch Sixty analog-meter artwork; `docs/archive/PR39_APP_IDENTITY_STATUS.md` | Owner deliberately reuses the asset under independent ownership rights. Light/dark PNG derivatives and retained SVG sources are cleared production assets; no Equaliser branding/external font asset imported. |
 | PR40 Room Correction measurement/workflow | Specification-derived / original | Apple capture APIs, public acoustic/DSP literature incl. exponential sine sweep method, proprietary RC runtime | Calibration controller, ESS path, deconvolution/analyzer, project store, spatial aggregation, target/FIR design and UI independently authored. |
 | PR41 physical output routing / Active Crossover | Specification-derived / original | Apple Core Audio APIs + standard Linkwitz-Riley mathematics + product requirements | 2–8 route model, same-device/aggregate transport, reference clock/HAL drift, speaker-bus splitter and driver-safe bypass independently authored. Legacy Software PLL not ported. |
 | PR42 Dynamics UI modernization | Original commercial implementation | Native SwiftUI semantic controls/materials | `LabeledContent`/native editable values/adaptive surface; DSP/control semantics unchanged. |
@@ -119,7 +119,7 @@ No current production row is classified as **POC-derived, owner-authored**. If P
 
 ## Final PR42 reconciliation
 
-See `docs/PR42_PROVENANCE_CLOSURE.md` for the PR42 release-gate review.
+See `docs/archive/PR42_PROVENANCE_CLOSURE.md` for the PR42 release-gate review.
 
 As of that review:
 

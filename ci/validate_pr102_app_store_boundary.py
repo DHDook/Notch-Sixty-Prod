@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ENTITLEMENTS = ROOT / "NotchSixty" / "NotchSixty.entitlements"
 INFO = ROOT / "NotchSixty" / "Info.plist"
 PROJECT = ROOT / "NotchSixty.xcodeproj" / "project.pbxproj"
-DOC = ROOT / "docs" / "PR102_APP_STORE_DISTRIBUTION_PREFLIGHT.md"
+DOC = ROOT / "docs" / "archive" / "PR102_APP_STORE_DISTRIBUTION_PREFLIGHT.md"
 
 FORBIDDEN_PRODUCTION_TOKENS = (
     "/Library/Audio/Plug-Ins/HAL",

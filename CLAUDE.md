@@ -7,7 +7,7 @@
 - Helper agents in `.claude/agents/`: code-scout, build-test-runner, plan-tracker, pr-writer
   (Haiku) and realtime-reviewer (Sonnet).
 
-**Current focus:** E1 (trunk, CI and docs hygiene): S1–S3 merged; next S4 living docs (ARCHITECTURE.md, DSP_KERNEL.md, archive). Plan in `docs/epics/E1.md`.
+**Current focus:** E1: S1–S4 merged; next S5 (#131 runner termination), then S6 AGENTS.md (needs owner approval). Plan in `docs/epics/E1.md`.
 <!-- plan-tracker keeps the line above current -->
 
 @AGENTS.md
