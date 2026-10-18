@@ -175,23 +175,20 @@ final class MultichannelCalibrationDesignerTests: XCTestCase {
         }
     }
 
-    /// Possible product bug, recorded rather than hidden. The attenuation-only
-    /// speaker PEQ fitter (N60SpeakerCorrectionDesignSource) always picks the
-    /// largest absolute error. When that error needs boost, here a speaker
-    /// roll-off below 45 Hz, the clamp to 0 dB ends the search, so the +9 dB
-    /// midrange peak gets no cut at all. Remove XCTExpectFailure once the
-    /// fitter skips boost-only bins.
+    /// The attenuation-only speaker PEQ fitter must skip bins that need boost
+    /// (here a speaker roll-off below 45 Hz) instead of stopping there, so the
+    /// +9 dB midrange peak is still cut.
     func testAttenuationOnlyFitterStillCutsPeaksWhenDeepDipsExist() throws {
-        let design = try design(sampleRate: 48_000, speakerRollOffHz: 45)
-        for speaker in design.speakers {
-            XCTAssertTrue(speaker.calibration.eqBands.allSatisfy { $0.gainDB <= 0 })
-        }
-        XCTExpectFailure("Speaker PEQ fitter stops at the first boost-only bin") {
+        for rate in Self.standardSampleRates {
+            let design = try design(sampleRate: rate, speakerRollOffHz: 45)
+            for speaker in design.speakers {
+                XCTAssertTrue(speaker.calibration.eqBands.allSatisfy { $0.gainDB <= 0 }, "\(rate) Hz")
+            }
             XCTAssertTrue(
                 design.speakers.allSatisfy { speaker in
                     speaker.calibration.eqBands.contains { $0.gainDB < -1 && abs(log2($0.frequencyHz / 180)) < 0.5 }
                 },
-                "the 180 Hz peak was not cut"
+                "\(rate) Hz: the 180 Hz peak was not cut"
             )
         }
     }

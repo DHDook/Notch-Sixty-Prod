@@ -281,7 +281,7 @@ static inline bool N60SpeakerCorrectionDesignSource(
     for (uint32_t iteration = 0; iteration < settings.maximumBandCount; ++iteration) {
         int32_t bestFrequencyIndex = -1;
         float bestAbsError = settings.minimumUsefulErrorDB;
-        float requestedGain = 0.0f;
+        float gainDB = 0.0f;
 
         for (uint32_t frequency = 0; frequency < matrix->frequencyCount; ++frequency) {
             const float hz = matrix->frequenciesHz[frequency];
@@ -299,19 +299,24 @@ static inline bool N60SpeakerCorrectionDesignSource(
             );
             const float error = targetMagnitudeDB[frequency]
                 - (measured[frequency] + correction);
+            // Skip bins the gain clamp cannot usefully correct (for example a
+            // roll-off or null when boost is limited to 0 dB), so they do not
+            // hide a correctable peak elsewhere.
+            const float clampedGain = N60SpeakerCorrectionClampGain(
+                error * settings.correctionDamping,
+                settings
+            );
+            if (fabsf(clampedGain) < settings.minimumUsefulErrorDB * 0.5f) continue;
             const float absoluteError = fabsf(error);
             if (absoluteError > bestAbsError) {
                 bestAbsError = absoluteError;
                 bestFrequencyIndex = (int32_t)frequency;
-                requestedGain = error;
+                gainDB = clampedGain;
             }
         }
         if (bestFrequencyIndex < 0) break;
 
         const float frequencyHz = matrix->frequenciesHz[(uint32_t)bestFrequencyIndex];
-        const float damped = requestedGain * settings.correctionDamping;
-        const float gainDB = N60SpeakerCorrectionClampGain(damped, settings);
-        if (fabsf(gainDB) < settings.minimumUsefulErrorDB * 0.5f) break;
 
         N60BiquadBandSnapshot candidateBand = {0};
         if (!N60SpeakerCorrectionMakePeakingBand(
