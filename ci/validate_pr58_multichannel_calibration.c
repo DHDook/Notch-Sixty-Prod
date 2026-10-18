@@ -1,6 +1,7 @@
 
 #include <assert.h>
 #include <math.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
 #include "N60MultichannelMeasurementCampaign.h"
@@ -137,6 +138,50 @@ int main(void) {
         assert(frontLeft->bands[band].gainDB <= correctionSettings.maximumBoostDB + 1.0e-6f);
         assert(frontLeft->bands[band].gainDB >= -correctionSettings.maximumCutDB - 1.0e-6f);
         assert(N60BiquadCoefficientsAreFinite(frontLeft->bands[band].coefficients));
+    }
+
+    // Attenuation-only fitting never boosts, and a deep dip (which needs boost)
+    // must not stop the fitter from cutting a peak elsewhere, at every standard rate.
+    const double standardRates[8] = {
+        44100.0, 48000.0, 88200.0, 96000.0, 176400.0, 192000.0, 352800.0, 384000.0
+    };
+    const float dipAndPeak[8] = {-18.0f, -12.0f, 0.0f, 9.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    N60ProgramChannelLayout stereoLayout = N60ProgramChannelLayoutMakeStandard(N60ProgramLayoutStereo);
+    for (uint32_t rate = 0; rate < 8u; ++rate) {
+        N60MultichannelCalibrationMatrix attenuation = N60MultichannelCalibrationMatrixMake(
+            standardRates[rate], stereoLayout, 0u, 1u, speakerFrequencies, 8u);
+        assert(attenuation.sourceCount == 2u);
+        assert(N60MultichannelCalibrationSetSeat(&attenuation, 0u, true, 1.0f));
+        for (uint32_t source = 0; source < attenuation.sourceCount; ++source) {
+            assert(N60MultichannelCalibrationSetResponse(
+                &attenuation, source, 0u, 100u, 1, 0.0f, dipAndPeak, zeroPhase));
+        }
+        assert(N60MultichannelCalibrationMatrixIsValid(&attenuation, 0u));
+        N60SpeakerCorrectionSettings cutOnly = N60SpeakerCorrectionSettingsMakeDefault();
+        cutOnly.maximumBoostDB = 0.0f;
+        cutOnly.maximumCorrectionHz = 16000.0f;
+        N60SpeakerCorrectionPlan cutPlan = {0};
+        assert(N60SpeakerCorrectionDesignPlan(&attenuation, speakerTarget, cutOnly, &cutPlan));
+        for (uint32_t source = 0; source < cutPlan.sourceCount; ++source) {
+            const N60SpeakerCorrectionSourceDesign *design = &cutPlan.sources[source];
+            assert(design->bandCount > 0u);
+            assert(design->postCorrectionRMSErrorDB < design->preCorrectionRMSErrorDB);
+            bool cutPeak = false;
+            for (uint32_t band = 0; band < design->bandCount; ++band) {
+                assert(design->bands[band].gainDB <= 0.0f);
+                for (uint32_t f = 0; f < attenuation.frequencyCount; ++f) {
+                    const float hz = attenuation.frequenciesHz[f];
+                    const float response = N60SpeakerCorrectionBiquadMagnitudeDB(
+                        design->bands[band].coefficients, standardRates[rate], hz);
+                    assert(response <= 1.0e-3f);
+                }
+                if (design->bands[band].gainDB < -1.0f
+                    && fabs(log2(design->bands[band].frequencyHz / 1000.0)) < 0.5) {
+                    cutPeak = true;
+                }
+            }
+            assert(cutPeak);
+        }
     }
 
     // Complex-domain multi-sub optimization must resolve a measured polarity cancellation.
