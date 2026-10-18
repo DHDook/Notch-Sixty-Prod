@@ -1095,6 +1095,14 @@ final class AudioIOEngine: ObservableObject {
     @Published private(set) var headTrackingRuntimeStatus = HeadTrackingRuntimeStatus.disabled
     @Published private(set) var lastErrorDescription: String?
     @Published private(set) var lifecycleState: AudioLifecycleState
+    /// E4 S7: the low-latency output profile Quiet Zone requests, and the
+    /// buffer size it set on the current output (nil when off or not applied).
+    @Published private(set) var lowLatencyOutputProfileActive = false
+    @Published private(set) var lowLatencyOutputBufferFrames: UInt32?
+    private let lowLatencyBufferProfile: LowLatencyOutputBufferProfile
+    /// Restore deferred to the rebuild, so the physical output never changes
+    /// size under a live tap aggregate.
+    private var lowLatencyRestorePending = false
 
     init(
         deviceCatalog: any OutputDeviceCataloging = CoreAudioOutputDeviceCatalog(),
@@ -1103,8 +1111,12 @@ final class AudioIOEngine: ObservableObject {
         masterVolumeController: any MasterVolumeDeviceControlling = CoreAudioMasterVolumeController(),
         globalVolumeKeyMonitor: any GlobalVolumeKeyMonitoring = CoreGraphicsGlobalVolumeKeyMonitor(),
         binauralProfileAssetStore: BinauralProfileAssetStore = BinauralProfileAssetStore(),
-        masterVolumeStore: (any MasterVolumePersisting)? = nil
+        masterVolumeStore: (any MasterVolumePersisting)? = nil,
+        outputBufferSizeController: any OutputBufferSizeControlling = CoreAudioOutputBufferSizeController()
     ) {
+        self.lowLatencyBufferProfile = LowLatencyOutputBufferProfile(
+            controller: outputBufferSizeController
+        )
         self.deviceCatalog = deviceCatalog
         self.masterVolumeStore = masterVolumeStore
         self.routeConfiguration = initialRouteConfiguration
@@ -1117,7 +1129,9 @@ final class AudioIOEngine: ObservableObject {
         self.lifecycleState = lifecycle.state
 
         eventMonitor.onDeviceListChanged = { [weak self] in self?.handleDeviceListChanged() }
-        eventMonitor.onSelectedOutputSampleRateChanged = { [weak self] in self?.scheduleSampleRateReconfiguration() }
+        eventMonitor.onSelectedOutputSampleRateChanged = { [weak self] in
+            self?.scheduleSampleRateReconfiguration()
+        }
         eventMonitor.onWillSleep = { [weak self] in self?.handleWillSleep() }
         eventMonitor.onDidWake = { [weak self] in self?.handleDidWake() }
         masterVolumeController.onExternalChange = { [weak self] in self?.handleMasterVolumeDeviceChange() }
@@ -2554,6 +2568,7 @@ final class AudioIOEngine: ObservableObject {
         try? setLifecycle(.idle)
         clearStagedAudioUnitRack()
         audioUnitRackRebuildPending = false
+        if lowLatencyRestorePending { restoreLowLatencyBuffers() }
     }
 
     func shutdownForTermination() {
@@ -2568,6 +2583,9 @@ final class AudioIOEngine: ObservableObject {
         }
         if lifecycle.state == .idle {
             clearStagedAudioUnitRack()
+            if lowLatencyOutputProfileActive || lowLatencyRestorePending {
+                restoreLowLatencyBuffers()
+            }
         }
         masterVolumeController.stopMonitoring()
         globalVolumeKeyMonitor.stop()
@@ -3946,6 +3964,7 @@ final class AudioIOEngine: ObservableObject {
     }
 
     private func buildTransport(output: AudioOutputDevice) throws {
+        applyLowLatencyOutputProfile(to: output)
         if let headphone = headphoneDeviceProfileConfiguration, headphone.enabled {
             if outputDeviceProfileConfiguration?.enabled == true {
                 throw HeadphoneDeviceProfileError.speakerProfileConflict
@@ -4407,7 +4426,56 @@ final class AudioIOEngine: ObservableObject {
         }
     }
 
-    private func scheduleSampleRateReconfiguration() {
+    /// E4 S7: switches the lowest-latency output buffer on or off. The buffer
+    /// size is read when a transport is built, so a running transport is
+    /// rebuilt through the reconfigure path (one short dropout). Off restores
+    /// the size each device had before.
+    func setLowLatencyOutputProfile(_ enabled: Bool) {
+        guard enabled != lowLatencyOutputProfileActive else { return }
+        lowLatencyOutputProfileActive = enabled
+        if enabled {
+            lowLatencyRestorePending = false
+            lowLatencyBufferProfile.activate()
+        } else {
+            lowLatencyOutputBufferFrames = nil
+            if lifecycle.state == .running {
+                lowLatencyRestorePending = true
+            } else {
+                restoreLowLatencyBuffers()
+            }
+        }
+        scheduleSampleRateReconfiguration(countsAsSampleRateChange: false)
+    }
+
+    /// Puts back the buffer sizes the profile replaced. Only while no
+    /// transport is open.
+    private func restoreLowLatencyBuffers() {
+        lowLatencyRestorePending = false
+        let devices = outputDevices
+        let result = lowLatencyBufferProfile.deactivate { uid in
+            devices.first { $0.uid == uid }?.deviceID
+        }
+        if let failure = result.failures.first {
+            lastErrorDescription = failure.localizedDescription
+        }
+    }
+
+    private func applyLowLatencyOutputProfile(to output: AudioOutputDevice) {
+        guard lowLatencyOutputProfileActive else { return }
+        do {
+            lowLatencyOutputBufferFrames = try lowLatencyBufferProfile.apply(
+                to: output.deviceID,
+                uid: output.uid,
+                sampleRate: output.nominalSampleRate
+            )
+        } catch {
+            // Best effort: the transport opens at the device's current size.
+            lowLatencyOutputBufferFrames = nil
+            lastErrorDescription = error.localizedDescription
+        }
+    }
+
+    private func scheduleSampleRateReconfiguration(countsAsSampleRateChange: Bool = true) {
         guard lifecycle.state == .running else { return }
 
         reconfigurationWorkItem?.cancel()
@@ -4421,12 +4489,14 @@ final class AudioIOEngine: ObservableObject {
             return
         }
 
-        let workItem = DispatchWorkItem { [weak self] in self?.performSampleRateReconfiguration() }
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.performSampleRateReconfiguration(countsAsSampleRateChange: countsAsSampleRateChange)
+        }
         reconfigurationWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: workItem)
     }
 
-    private func performSampleRateReconfiguration() {
+    private func performSampleRateReconfiguration(countsAsSampleRateChange: Bool) {
         guard lifecycle.state == .reconfiguring else { return }
         do {
             try refreshOutputDevices()
@@ -4435,10 +4505,11 @@ final class AudioIOEngine: ObservableObject {
                 return
             }
             detachAudioUnitRackIfIncompatible(with: output)
+            if lowLatencyRestorePending { restoreLowLatencyBuffers() }
             try buildTransport(output: output)
             try eventMonitor.monitorSampleRate(of: output.deviceID)
             try syncMasterVolumeMonitorToSelectedOutput()
-            sampleRateChangesHandled &+= 1
+            if countsAsSampleRateChange { sampleRateChangesHandled &+= 1 }
             reconfigurationWorkItem = nil
             try setLifecycle(.running)
             lastErrorDescription = nil

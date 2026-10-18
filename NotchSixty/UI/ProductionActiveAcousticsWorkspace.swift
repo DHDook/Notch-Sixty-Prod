@@ -1355,13 +1355,38 @@ struct ProductionActiveAcousticsWorkspace: View {
             }
 
             if featureFlags.isEnabled(.adaptiveANC) {
-                ProductionAdaptiveQuietZoneCard(shadow: adaptiveQuietZone)
+                ProductionAdaptiveQuietZoneCard(
+                    shadow: adaptiveQuietZone,
+                    latencyText: ancLatencyText
+                )
             }
 
             safetyNote(
                 "Active Quiet Zone is deliberately limited to stable low-frequency components. It does not cancel speech, claps or broadband room sound and makes no claim of whole-room silence. A low-level probe must measurably improve the physical error microphone before full cancellation is allowed."
             )
         }
+    }
+
+    /// E4 S7: measured round trip for the current output, microphone, rate
+    /// and buffer, from the bench table or this Mac's own measurements.
+    private var ancLatencyText: String {
+        guard let output = engine.selectedOutputDevice,
+              let mic = microphone.selectedInputDevice else {
+            return "Not yet measured (select an output and a microphone)"
+        }
+        let bufferText = engine.lowLatencyOutputBufferFrames.map { "\($0)-frame low-latency buffer" }
+            ?? "low-latency buffer not applied"
+        guard let frames = engine.lowLatencyOutputBufferFrames else {
+            return "Not yet measured (\(bufferText))"
+        }
+        let key = QuietZoneLatencyKey(
+            outputDeviceUID: output.uid,
+            microphoneDeviceUID: mic.uid,
+            sampleRate: output.nominalSampleRate,
+            bufferFrames: frames
+        )
+        let status = ANCSupportedHardware.latency(for: key, store: QuietZoneMeasuredLatencyStore())
+        return "\(status.displayText), \(bufferText)"
     }
 
     private var spatialQuietZoneCard: some View {

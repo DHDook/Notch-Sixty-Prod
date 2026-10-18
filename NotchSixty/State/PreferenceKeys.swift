@@ -16,6 +16,8 @@ enum PreferenceKeys {
 
     static let abComparisonEnabled = "toolbar.abComparisonEnabled"
     static let vuMetersEnabled = "production.vuMetersEnabled"
+    /// E4 S7: measured Quiet Zone round trips, per interface, rate and buffer.
+    static let quietZoneMeasuredLatency = "quietZone.measuredLatency"
 
     /// Feature-flag overrides are stored as `feature.<flag id>`.
     static let featureFlagPrefix = "feature."

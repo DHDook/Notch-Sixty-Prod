@@ -290,6 +290,7 @@ struct ProductionRootView: View {
         .task { product.prepareForUse() }
         .task(id: adaptiveANCEnabled) {
             product.adaptiveQuietZone.setActive(adaptiveANCEnabled)
+            product.activeQuietZone.lowLatencyOutputProfileAllowed = adaptiveANCEnabled
         }
         .sheet(
             isPresented: Binding(

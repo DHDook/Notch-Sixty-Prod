@@ -87,7 +87,7 @@ struct QuietZoneInstrumentedProbeCollector: Sendable {
         guard !microphoneID.isEmpty, microphoneChannel >= 0,
               !sourceFixtureID.isEmpty, !synchronizedClockID.isEmpty,
               !physicalSourceID.isEmpty, !routeLeaseID.isEmpty,
-              sampleRate.isFinite, (8_000...192_000).contains(sampleRate)
+              sampleRate.isFinite, (8_000...768_000).contains(sampleRate)
         else { throw QuietZoneInstrumentedProbeError.incompatibleSource }
         self.position = position
         self.microphoneID = microphoneID

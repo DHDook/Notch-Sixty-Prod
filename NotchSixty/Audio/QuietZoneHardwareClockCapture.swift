@@ -51,7 +51,7 @@ struct QuietZoneHardwareClockAccumulator: Sendable {
 
     init(microphoneID: String, outputID: String, sampleRate: Double) throws {
         guard !microphoneID.isEmpty, !outputID.isEmpty,
-              sampleRate.isFinite, (8_000...192_000).contains(sampleRate)
+              sampleRate.isFinite, (8_000...768_000).contains(sampleRate)
         else { throw QuietZoneHardwareClockCaptureError.incompatibleRoute }
         self.microphoneID = microphoneID
         self.outputID = outputID
