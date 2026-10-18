@@ -1,5 +1,9 @@
 {
   "model": "opusplan",
+  "autoCompactWindow": 200000,
+  "env": {
+    "CLAUDE_CODE_SUBAGENT_MODEL": "haiku"
+  },
   "permissions": {
     "allow": [
       "Bash(git status)",

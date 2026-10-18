@@ -4,6 +4,7 @@ description: Use proactively to build the app and run tests (xcodebuild, XCTest,
 tools: Bash, Read, Grep
 model: haiku
 effort: low
+omitClaudeMd: true
 ---
 
 You build and test Notch Sixty and report results compactly.

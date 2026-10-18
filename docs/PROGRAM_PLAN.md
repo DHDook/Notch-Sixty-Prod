@@ -32,11 +32,11 @@ platforms; E6 (the unified graph) is the critical path, because eleven later epi
 | --- | --- | --- | --- | --- | --- |
 | E1 | Trunk, CI and docs hygiene | 1 | — | Claude Code (Mac) | Text validators retired, 3 workflows, living docs current |
 | E2 | macOS 26 support | 1 | E1 | Claude Code (Mac) | Full XCTest green on macOS 26 and 27 |
-| E3 | Hardware acceptance H01–H08 | 1 | E2 | Bench | All eight cases pass on `main` |
-| E4 | Speaker ANC to class-leading | 1→4 | E3 | Bench + Claude Code | Published attenuation targets met at the seat; live ANC authorised |
+| E3 | Hardware acceptance H01–H08 | deferred to E22 | E2 | Bench | All eight cases pass on `main` |
+| E4 | Speaker ANC to class-leading | 1→4 | E1 (bench parts: E22) | Bench + Claude Code | Published attenuation targets met at the seat; live ANC authorised |
 | E5 | UI scope clean-up | 1 | — | Claude Code (Mac) | Engineering tools behind a developer menu |
-| E19 | MIMO room treatment qualification (ART class) | 1→3 | E3 | Bench + Claude Code | Measured decay reduction at several seats; live treatment authorised |
-| E6 | Unified live N-channel graph | 2 | E3 | Claude Code (Mac) | Stereo is a 2-channel layout; every edit is live in every mode |
+| E19 | MIMO room treatment qualification (ART class) | 1→3 | E4 S3 (bench parts: E22) | Bench + Claude Code | Measured decay reduction at several seats; live treatment authorised |
+| E6 | Unified live N-channel graph | 2 | E1, E2 | Claude Code (Mac) | Stereo is a 2-channel layout; every edit is live in every mode |
 | E7 | 384 kHz everywhere | 2 | E6 | Claude Code + bench | Every feature passes at 44.1–384 kHz |
 | E8 | Routing matrix and crossovers | 2 | E6 | Claude Code + bench | Any-way, any-slope, IIR or FIR crossover on any channel |
 | E9 | Multichannel protection and FIR parity | 2 | E6 | Claude Code (Mac) | N-channel lanes match stereo protection and 262k-tap FIR |
@@ -56,8 +56,9 @@ platforms; E6 (the unified graph) is the critical path, because eleven later epi
 ## Phase 1 — Consolidate and qualify
 
 Phase 1 makes `main` trustworthy on real hardware before any new feature lands.
-**Gate G1:** H01–H08 pass on `main`, the app builds at the macOS 26.0 deployment target, and full
-XCTest is green on macOS 27. (Owner, 17 Oct 2026: no macOS 26 machine; 26 support is checked by build.)
+**Gate G1 (software):** the app builds at the macOS 26.0 deployment target and full XCTest is
+green on macOS 27. The hardware half of G1 (H01–H08) moved to E22 with the owner's 18 Oct 2026
+decision, so Phase 2 starts without it; every later bench check is collected there too. (Owner, 17 Oct 2026: no macOS 26 machine; 26 support is checked by build.)
 
 ### E1 Trunk, CI and docs hygiene
 

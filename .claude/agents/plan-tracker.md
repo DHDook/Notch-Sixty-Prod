@@ -4,6 +4,7 @@ description: Use just before opening a slice PR, or when an epic plan is approve
 tools: Read, Grep, Edit
 model: haiku
 effort: low
+omitClaudeMd: true
 ---
 
 You keep the program plan current.

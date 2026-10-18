@@ -4,10 +4,10 @@
 
 - The owner starts work with `/next` (or `/next E2`). That command holds the full workflow.
 - Plan: `docs/PROGRAM_PLAN.md`. Per-epic plans and status: `docs/epics/E<n>.md`.
-- Helper agents in `.claude/agents/`: code-scout, build-test-runner, plan-tracker, pr-writer
-  (Haiku) and realtime-reviewer (Sonnet).
+- Agents in `.claude/agents/`: slice-builder (Sonnet, builds one slice in a fresh context),
+  realtime-reviewer (Sonnet), and code-scout, build-test-runner, plan-tracker, pr-writer (Haiku).
 
-**Current focus:** E4 (`docs/epics/E4.md`). S2–S7 and S9a–S9b2 merged (#157–#165); S9c (feed-forward shadow wiring) in review (needs-owner). S8 and S10 wait for E22 bench work (E3 also deferred to E22). E19 still needs a plan.
+**Current focus:** E6 (unified live N-channel graph), the Phase 2 critical path: no plan yet, next step is the E6 design note. E4 software slices are merged through S9c (#166); S8 and S10 wait for E22 bench work and S11 for E6. E19 still needs a plan.
 <!-- plan-tracker keeps the line above current -->
 
 @AGENTS.md
@@ -43,13 +43,13 @@ The owner already has a local test build of `main`; do not rebuild a baseline un
 
 `/next` holds the full step-by-step workflow; follow it. In short:
 
-1. **Orient cheaply** from the target epic's section of `docs/PROGRAM_PLAN.md` and
-   `docs/epics/E<n>.md`.
+1. **The main session coordinates; slice-builder builds.** Each slice is built by the
+   slice-builder agent in its own fresh context, so the main conversation only collects short
+   summaries and does not need compacting between slices.
 2. **Plan only for a new epic** or a slice whose approach isn't recorded yet; save it to
    `docs/epics/E<n>.md` and get approval. Otherwise build straight away.
 3. **One branch per PR** named `e<n>/<slice>`, behind the epic's feature flag (add it to
    `FeatureFlag.all`; see `docs/FEATURE_FLAGS.md`). Small related slices may share one PR.
-   E1 and E2 do not need flags.
 4. **Verify narrowly** (affected tests only; CI runs the full suite), and use
    `realtime-reviewer` for any engine or realtime change.
 5. **Plan updates ride in the same PR** (plan-tracker); never open a separate plan-update PR.
@@ -71,17 +71,24 @@ minimum OS, removing a user-visible feature, or enabling any live ANC or MIMO tr
 - The project model is `opusplan`: Opus plans, Sonnet executes. For design-heavy slices (E4
   adaptive ANC, E6 graph design, E10 mixed-phase, E19 MIMO), the owner may switch to
   `/model opus` for that session.
-- Delegate searching to `code-scout`, builds and tests to `build-test-runner`, plan updates to
-  `plan-tracker` and PR text to `pr-writer` (all Haiku). Use `realtime-reviewer` (Sonnet) for
-  engine reviews. Do not do these jobs in the main session.
+- Delegate: slice work to `slice-builder`; searching to `code-scout`; builds and tests to
+  `build-test-runner`; plan updates to `plan-tracker`; PR text to `pr-writer`; engine reviews to
+  `realtime-reviewer`. Any other subagent defaults to Haiku. Do not do these jobs in the main
+  session.
 - Never read whole large files: `AudioIOEngine.swift` (4,500+ lines), `N60RenderKernel.c`,
   `ProductProfiles.swift`, `docs/PROGRAM_PLAN.md`. Grep first, then Read a line range.
 - Do not open `docs/PR*.md`, `docs/archive/`, `ci/validate_*.py` or per-PR workflows unless
   the task is about them.
 - Keep replies short: what changed, test results, what needs the owner. No recaps of the plan.
-- Up to three PRs per session; if the session is getting long, ask the owner to run `/compact`
-  before the next slice. Do not re-read files already read in this session unless they changed.
-- Never read full CI logs: `gh run view --log-failed` for the failing step only.
+- Never read full CI logs: `gh run view --log-failed | tail -60` for the failing step only.
+- Context auto-compacts at 200k tokens (`autoCompactWindow`). Between unrelated tasks the owner
+  can use `/clear`, which costs nothing; `/compact` itself reads the whole conversation.
+
+## Compact instructions
+
+When compacting, keep: the epic and slice in progress, branch names, PR numbers with their
+status (open, merged, needs-owner), failing test names and the one-line cause, and decisions the
+owner made in this session. Drop: file contents, diffs, build and test logs, and search results.
 
 ## Engineering rules for every slice
 

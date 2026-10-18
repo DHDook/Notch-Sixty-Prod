@@ -4,6 +4,7 @@ description: Use when a slice is ready for a pull request, to draft the PR title
 tools: Bash, Read, Grep
 model: haiku
 effort: low
+omitClaudeMd: true
 ---
 
 Draft a pull request for the current branch.
@@ -12,7 +13,8 @@ Draft a pull request for the current branch.
    individual diffs only where needed.
 2. Title: `E<n>: <what changed>` in under 70 characters.
 3. Body sections, each short: Purpose · Architecture impact · Realtime impact ·
-   Provenance / source of truth · Tests added and run · Manual / bench validation required ·
+   Provenance / source of truth (cite the public spec or derivation for any DSP maths) ·
+   Tests added and run · Feature flag used · Manual / bench validation required ·
    App Sandbox / App Store impact.
 4. Under "Manual / bench validation required", list concrete checks as `- [ ]` items, or
    "None" if the slice is software-only.

@@ -205,7 +205,7 @@ If a PR introduces DSP math, cite the public specification or derivation used to
 CI is three workflows:
 
 - `pr.yml`: every PR to `main`. Debug build, XCTest and the behavioural C harnesses. Docs-only PRs skip it.
-- `macos-full.yml`: pushes to `main`, PRs labelled `full-ci`, and manual runs. Full XCTest, the Release performance build and render benchmarks.
+- `macos-full.yml`: nightly on `main`, PRs labelled `full-ci`, and manual runs. Full XCTest, the Release performance build and render benchmarks.
 - `release.yml`: manual only. Builds, checks and packages a release.
 
 Do not add per-PR or per-branch workflows. Extend one of these three instead.

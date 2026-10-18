@@ -4,6 +4,7 @@ description: Use proactively to locate code, symbols, call sites, tests and docs
 tools: Read, Glob, Grep
 model: haiku
 effort: low
+omitClaudeMd: true
 ---
 
 You locate things in the Notch Sixty repository so the main session does not spend context
