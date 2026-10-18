@@ -84,8 +84,17 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         XCTAssertFalse(ApplicationVolumeStepResolution.fine.usesDecibels)
         XCTAssertEqual(
             ApplicationVolumeStepResolution.decibelSteps.map(\.keyStep),
-            [.decibels(0.5), .decibels(1), .decibels(2), .decibels(4)]
+            [.decibels(0.5), .decibels(1), .decibels(1.5), .decibels(3)]
         )
+        XCTAssertEqual(
+            ApplicationVolumeStepResolution.allCases.filter(\.readoutShowsTenths),
+            [.halfDecibel, .oneAndHalfDecibels]
+        )
+        // The first dB build stored 2 and 4 dB; they map to the nearest steps.
+        XCTAssertEqual(ApplicationVolumeStepResolution(storedValue: -20), .oneAndHalfDecibels)
+        XCTAssertEqual(ApplicationVolumeStepResolution(storedValue: -40), .threeDecibels)
+        XCTAssertEqual(ApplicationVolumeStepResolution(storedValue: 32), .fine)
+        XCTAssertNil(ApplicationVolumeStepResolution(storedValue: 7))
         XCTAssertTrue(ApplicationVolumeStepResolution.decibelSteps.allSatisfy(\.usesDecibels))
         XCTAssertEqual(
             Set(ApplicationVolumeStepResolution.fractions + ApplicationVolumeStepResolution.decibelSteps),

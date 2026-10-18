@@ -1454,15 +1454,31 @@ enum ApplicationVolumeStepResolution: Int, CaseIterable, Identifiable {
     case precision = 64
     case halfDecibel = -5
     case oneDecibel = -10
-    case twoDecibels = -20
-    case fourDecibels = -40
+    case oneAndHalfDecibels = -15
+    case threeDecibels = -30
 
     var id: Int { rawValue }
 
     static let fractions: [Self] = [.standard, .fine, .precision]
-    static let decibelSteps: [Self] = [.halfDecibel, .oneDecibel, .twoDecibels, .fourDecibels]
+    /// ⅙, ⅓, ½ and 1 stop of power (1 stop = 3 dB), all on a 0.5 dB grid.
+    static let decibelSteps: [Self] = [.halfDecibel, .oneDecibel, .oneAndHalfDecibels, .threeDecibels]
+
+    /// Reads a stored raw value. The first dB build offered 2 and 4 dB
+    /// (−20, −40); those map to the nearest current steps rather than
+    /// falling back to 1/16.
+    init?(storedValue: Int) {
+        switch storedValue {
+        case -20: self = .oneAndHalfDecibels
+        case -40: self = .threeDecibels
+        default: self.init(rawValue: storedValue)
+        }
+    }
 
     var usesDecibels: Bool { rawValue < 0 }
+
+    /// Steps that land on .5 values keep one decimal in every readout, so
+    /// the menu bar text never changes width.
+    var readoutShowsTenths: Bool { usesDecibels && rawValue % 10 != 0 }
 
     var keyStep: MasterVolumeKeyStep {
         usesDecibels
@@ -1477,8 +1493,8 @@ enum ApplicationVolumeStepResolution: Int, CaseIterable, Identifiable {
         case .precision: return "1/64"
         case .halfDecibel: return "0.5 dB"
         case .oneDecibel: return "1 dB"
-        case .twoDecibels: return "2 dB"
-        case .fourDecibels: return "4 dB"
+        case .oneAndHalfDecibels: return "1.5 dB"
+        case .threeDecibels: return "3 dB"
         }
     }
 }
@@ -1867,7 +1883,7 @@ final class ApplicationPreferences: ObservableObject {
             rawValue: defaults.string(forKey: Key.presence) ?? ""
         ) ?? .both
         volumeStepResolution = ApplicationVolumeStepResolution(
-            rawValue: defaults.integer(forKey: Key.volumeStepResolution)
+            storedValue: defaults.integer(forKey: Key.volumeStepResolution)
         ) ?? .standard
         showVolumeInMenuBar = defaults.object(forKey: Key.showVolumeInMenuBar) as? Bool ?? true
         showVolumePopup = defaults.bool(forKey: Key.showVolumePopup)
@@ -1935,8 +1951,7 @@ final class ApplicationPreferences: ObservableObject {
             && engine.masterVolumeCapabilities.controlMode == .softwareDSP
     }
 
-    /// Half-dB steps land on .0 and .5, so their readout always shows tenths.
-    var decibelReadoutShowsTenths: Bool { volumeStepResolution == .halfDecibel }
+    var decibelReadoutShowsTenths: Bool { volumeStepResolution.readoutShowsTenths }
 
     func apply(to audioEngine: AudioIOEngine) {
         self.audioEngine = audioEngine
@@ -1985,7 +2000,7 @@ final class ApplicationPreferences: ObservableObject {
                 ApplicationPresenceMode(rawValue: snapshot.presence),
               let resolution =
                 ApplicationVolumeStepResolution(
-                    rawValue: snapshot.volumeStepResolution
+                    storedValue: snapshot.volumeStepResolution
                 ) else {
             throw NotchSixtyBackupError.invalidPreferences
         }
