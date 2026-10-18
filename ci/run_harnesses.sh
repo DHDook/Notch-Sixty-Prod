@@ -129,6 +129,14 @@ if selected e4_anc_guard; then
         failed+=(e4_anc_guard)
     fi
 fi
+# E4 S5: adaptive ANC core (FxLMS) on a simulated plant.
+if selected e4_fxlms; then
+    if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -c "$RT/n60_fxlms.cpp" -o "$OUT/n60_fxlms.o"; then
+        harness e4_fxlms "${STRICT[@]}" -O2 -I"$RT" -Ici ci/harness_e4_fxlms.c "$OUT/n60_fxlms.o" -lc++ -lm
+    else
+        failed+=(e4_fxlms)
+    fi
+fi
 
 # Acoustic reference lab: production-header probes checked against independent
 # Python oracles at every standard rate from 44.1 to 384 kHz.
@@ -144,6 +152,15 @@ if selected e4_anc_guard_reference; then
         passed+=(e4_anc_guard_reference)
     else
         failed+=(e4_anc_guard_reference)
+    fi
+    echo "::endgroup::"
+fi
+if selected e4_fxlms_reference; then
+    echo "::group::e4_fxlms_reference"
+    if python3 ci/acoustic_reference_lab/e4_fxlms_reference.py; then
+        passed+=(e4_fxlms_reference)
+    else
+        failed+=(e4_fxlms_reference)
     fi
     echo "::endgroup::"
 fi

@@ -98,6 +98,8 @@
 		F90100000000000000000001 /* N60ActiveQuietZone.c in Sources */ = {isa = PBXBuildFile; fileRef = F90100000000000000000011 /* N60ActiveQuietZone.c */; };
 		E4B000000000000000000003 /* n60_anc_guard.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E4B000000000000000000013 /* n60_anc_guard.cpp */; };
 		E4B000000000000000000004 /* AncGuardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4B000000000000000000014 /* AncGuardTests.swift */; };
+		E4C000000000000000000003 /* n60_fxlms.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E4C000000000000000000013 /* n60_fxlms.cpp */; };
+		E4C000000000000000000004 /* FxlmsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4C000000000000000000014 /* FxlmsTests.swift */; };
 		F89200000000000000000001 /* AmbientMonitorTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F89200000000000000000011 /* AmbientMonitorTransport.swift */; };
 		F89300000000000000000001 /* AmbientCompensationController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F89300000000000000000011 /* AmbientCompensationController.swift */; };
 		F90200000000000000000001 /* ActiveQuietZoneController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F90200000000000000000011 /* ActiveQuietZoneController.swift */; };
@@ -435,6 +437,10 @@
 		E4B000000000000000000012 /* n60_anc_guard.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = n60_anc_guard.hpp; sourceTree = "<group>"; };
 		E4B000000000000000000013 /* n60_anc_guard.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = n60_anc_guard.cpp; sourceTree = "<group>"; };
 		E4B000000000000000000014 /* AncGuardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AncGuardTests.swift; sourceTree = "<group>"; };
+		E4C000000000000000000011 /* N60Fxlms.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60Fxlms.h; sourceTree = "<group>"; };
+		E4C000000000000000000012 /* n60_fxlms.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = n60_fxlms.hpp; sourceTree = "<group>"; };
+		E4C000000000000000000013 /* n60_fxlms.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = n60_fxlms.cpp; sourceTree = "<group>"; };
+		E4C000000000000000000014 /* FxlmsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FxlmsTests.swift; sourceTree = "<group>"; };
 		F90100000000000000000012 /* N60ActiveQuietZone.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60ActiveQuietZone.h; sourceTree = "<group>"; };
 		F89200000000000000000011 /* AmbientMonitorTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudio/AmbientMonitorTransport.swift; sourceTree = "<group>"; };
 		F89300000000000000000011 /* AmbientCompensationController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AmbientCompensationController.swift; sourceTree = "<group>"; };
@@ -752,6 +758,7 @@
 				F96900000000000000000012 /* QuietZoneInstrumentedProbeCaptureTests.swift */,
 				F97000000000000000000012 /* QuietZonePhysicalLatencyBudgetTests.swift */,
 				E4B000000000000000000014 /* AncGuardTests.swift */,
+				E4C000000000000000000014 /* FxlmsTests.swift */,
 				E4A000000000000000000012 /* QuietZoneLiveAuthorisationTests.swift */,
 				F97100000000000000000012 /* QuietZonePhysicalLatencyMeasurementRunTests.swift */,
 				F97200000000000000000012 /* QuietZoneHardwareCommissioningTests.swift */,
@@ -996,6 +1003,9 @@
 				E4B000000000000000000011 /* N60AncGuard.h */,
 				E4B000000000000000000012 /* n60_anc_guard.hpp */,
 				E4B000000000000000000013 /* n60_anc_guard.cpp */,
+				E4C000000000000000000011 /* N60Fxlms.h */,
+				E4C000000000000000000012 /* n60_fxlms.hpp */,
+				E4C000000000000000000013 /* n60_fxlms.cpp */,
 				F90100000000000000000012 /* N60ActiveQuietZone.h */,
 				F96100000000000000000013 /* N60FeedForwardReferenceBridge.c */,
 				F96100000000000000000014 /* N60FeedForwardReferenceBridge.h */,
@@ -1192,6 +1202,7 @@
 				F89100000000000000000001 /* N60AmbientMonitorBridge.c in Sources */,
 				F90100000000000000000001 /* N60ActiveQuietZone.c in Sources */,
 				E4B000000000000000000003 /* n60_anc_guard.cpp in Sources */,
+				E4C000000000000000000003 /* n60_fxlms.cpp in Sources */,
 				F70000000000000000000001 /* N60AdaptiveSampleRate.c in Sources */,
 				F72000000000000000000001 /* AmbientFieldAnalyzer.swift in Sources */,
 				F89000000000000000000001 /* AmbientCompensation.swift in Sources */,
@@ -1310,6 +1321,7 @@
 				F96900000000000000000002 /* QuietZoneInstrumentedProbeCaptureTests.swift in Sources */,
 				F97000000000000000000002 /* QuietZonePhysicalLatencyBudgetTests.swift in Sources */,
 				E4B000000000000000000004 /* AncGuardTests.swift in Sources */,
+				E4C000000000000000000004 /* FxlmsTests.swift in Sources */,
 				E4A000000000000000000002 /* QuietZoneLiveAuthorisationTests.swift in Sources */,
 				F97100000000000000000002 /* QuietZonePhysicalLatencyMeasurementRunTests.swift in Sources */,
 				F97200000000000000000002 /* QuietZoneHardwareCommissioningTests.swift in Sources */,
