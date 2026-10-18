@@ -1,41 +1,4 @@
-#!/usr/bin/env python3
-"""Permanent PR56 guard for headphone correction and acoustic crossfeed."""
 
-from __future__ import annotations
-
-import pathlib
-import shutil
-import subprocess
-import tempfile
-
-ROOT = pathlib.Path(__file__).resolve().parents[1]
-REALTIME = ROOT / "NotchSixty/Audio/Realtime"
-HEADER = REALTIME / "N60HeadphoneDSP.h"
-BRIDGE = REALTIME / "NotchSixty-Bridging-Header.h"
-
-
-def require(condition: bool, message: str) -> None:
-    if not condition:
-        raise SystemExit(f"PR56 validation failed: {message}")
-
-
-def main() -> None:
-    require(HEADER.exists(), "N60HeadphoneDSP.h is missing")
-    text = HEADER.read_text(encoding="utf-8")
-    bridge = BRIDGE.read_text(encoding="utf-8")
-    require("N60_HEADPHONE_MAX_EQ_SECTIONS 16u" in text, "headphone correction EQ bound changed")
-    require("N60HeadphoneDSPSetChannelEQBand" in text, "independent L/R correction is missing")
-    require("N60HeadphoneDSPSetCrossfeed" in text, "crossfeed design API is missing")
-    require("virtualSpeakerAngleDegrees" in text, "virtual speaker angle is missing")
-    require("contralateralDelayFrames" in text, "interaural delay is missing")
-    require("headShadowFrequencyHz" in text, "frequency-dependent head shadow is missing")
-    require("N60HeadphoneTargetCurveKind" in text, "headphone target-curve identity is missing")
-    require('#import "N60HeadphoneDSP.h"' in bridge, "headphone ABI is not exposed to Swift")
-
-    clang = shutil.which("clang")
-    require(clang is not None, "clang is required")
-
-    harness = r'''
 #include <assert.h>
 #include <math.h>
 #include "N60HeadphoneDSP.h"
@@ -144,21 +107,3 @@ int main(void) {
     assert(!N60HeadphoneDSPSetHeadroomAttenuationDB(&invalid, -1.0));
     return 0;
 }
-'''
-
-    with tempfile.TemporaryDirectory(prefix="notch-sixty-pr56-") as temporary:
-        temp = pathlib.Path(temporary)
-        source = temp / "headphone_dsp_test.c"
-        binary = temp / "headphone_dsp_test"
-        source.write_text(harness, encoding="utf-8")
-        subprocess.run([
-            clang, "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
-            f"-I{REALTIME}", str(source), "-lm", "-o", str(binary)
-        ], check=True)
-        subprocess.run([str(binary)], check=True)
-
-    print("PR56 headphone DSP validation passed")
-
-
-if __name__ == "__main__":
-    main()

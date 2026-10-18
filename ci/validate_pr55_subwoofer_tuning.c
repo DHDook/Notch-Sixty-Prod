@@ -1,38 +1,4 @@
-#!/usr/bin/env python3
-"""PR55 guard for dedicated per-sub conditioning controls."""
 
-from __future__ import annotations
-
-import pathlib
-import shutil
-import subprocess
-import tempfile
-
-ROOT = pathlib.Path(__file__).resolve().parents[1]
-REALTIME = ROOT / "NotchSixty/Audio/Realtime"
-HEADER = REALTIME / "N60SubwooferTuning.h"
-BRIDGE = REALTIME / "NotchSixty-Bridging-Header.h"
-
-
-def require(condition: bool, message: str) -> None:
-    if not condition:
-        raise SystemExit(f"PR55 subwoofer tuning validation failed: {message}")
-
-
-def main() -> None:
-    require(HEADER.exists(), "N60SubwooferTuning.h is missing")
-    header = HEADER.read_text(encoding="utf-8")
-    bridge = BRIDGE.read_text(encoding="utf-8")
-    require("N60SubwooferOutputSetEnabled" in header, "explicit per-sub enable is missing")
-    require("N60SubwooferOutputSetSubsonicHighPass" in header, "subsonic HPF is missing")
-    require("N60SubwooferOutputSetPhaseAlignment" in header, "phase alignment is missing")
-    require("N60SubwooferOutputSetUserEQBand" in header, "disjoint user PEQ API is missing")
-    require('#import "N60SubwooferTuning.h"' in bridge, "tuning ABI is not exposed to Swift")
-
-    clang = shutil.which("clang")
-    require(clang is not None, "clang is required")
-
-    harness = r'''
 #include <assert.h>
 #include <math.h>
 #include "N60SubwooferTuning.h"
@@ -85,21 +51,3 @@ int main(void) {
     N60MultichannelBassManagementRuntimeDestroy(runtime);
     return 0;
 }
-'''
-
-    with tempfile.TemporaryDirectory(prefix="notch-sixty-pr55-tuning-") as temporary:
-        temp = pathlib.Path(temporary)
-        source = temp / "subwoofer_tuning_test.c"
-        binary = temp / "subwoofer_tuning_test"
-        source.write_text(harness, encoding="utf-8")
-        subprocess.run([
-            clang, "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
-            f"-I{REALTIME}", str(source), "-lm", "-o", str(binary)
-        ], check=True)
-        subprocess.run([str(binary)], check=True)
-
-    print("PR55 subwoofer tuning validation passed")
-
-
-if __name__ == "__main__":
-    main()

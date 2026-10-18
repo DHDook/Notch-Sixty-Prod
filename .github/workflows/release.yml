@@ -50,6 +50,9 @@ jobs:
           python3 ci/validate_pr114_provenance_sbom.py
           python3 ci/validate_pr102_app_store_boundary.py
           python3 ci/validate_pr102_dependency_manifest.py
+          python3 ci/validate_pr114_privacy_security.py
+          # No SOFA/HRTF datasets ship in the repository.
+          test -z "$(git ls-files '*.sofa')"
           python3 ci/build_pr114_sbom.py --output "$RUNNER_TEMP/production-sbom.json"
 
       - name: Run unit tests

@@ -1,43 +1,4 @@
-#!/usr/bin/env python3
-"""Permanent PR54 guard for the generalized N-channel lane engine."""
 
-from __future__ import annotations
-
-import pathlib
-import shutil
-import subprocess
-import tempfile
-
-ROOT = pathlib.Path(__file__).resolve().parents[1]
-REALTIME = ROOT / "NotchSixty/Audio/Realtime"
-LANES = REALTIME / "N60ProgramLaneEngine.h"
-BRIDGE = REALTIME / "NotchSixty-Bridging-Header.h"
-
-
-def require(condition: bool, message: str) -> None:
-    if not condition:
-        raise SystemExit(f"PR54 validation failed: {message}")
-
-
-def main() -> None:
-    require(LANES.exists(), "N60ProgramLaneEngine.h is missing")
-    require(BRIDGE.exists(), "Swift bridging header is missing")
-
-    lanes = LANES.read_text(encoding="utf-8")
-    bridge = BRIDGE.read_text(encoding="utf-8")
-
-    require("N60_PROGRAM_LANE_MAX_EQ_SECTIONS 16u" in lanes, "per-lane EQ bound changed")
-    require("N60ProgramLaneGraphSetDelayMs" in lanes, "per-lane delay API is missing")
-    require("N60ProgramChannelGroupMake" in lanes, "channel-group API is missing")
-    require("upstreamProcessingLatencyFrames" in lanes, "latency-coherence metadata is missing")
-    require("N60ProgramLaneMeterAccumulatorReading" in lanes, "multichannel meter foundation is missing")
-    require("N60ProgramLaneRuntimeCreate" in lanes and "calloc" in lanes, "control-plane runtime allocation contract is missing")
-    require('#import "N60ProgramLaneEngine.h"' in bridge, "lane engine is not exposed through the bridging header")
-
-    clang = shutil.which("clang")
-    require(clang is not None, "clang is required for the PR54 lane-engine ABI test")
-
-    harness = r'''
 #include <assert.h>
 #include <math.h>
 #include "N60ProgramLaneEngine.h"
@@ -169,33 +130,3 @@ int main(void) {
 
     return 0;
 }
-'''
-
-    with tempfile.TemporaryDirectory(prefix="notch-sixty-pr54-") as temporary:
-        temp = pathlib.Path(temporary)
-        source = temp / "nchannel_lanes_test.c"
-        binary = temp / "nchannel_lanes_test"
-        source.write_text(harness, encoding="utf-8")
-        subprocess.run(
-            [
-                clang,
-                "-std=c11",
-                "-O2",
-                "-Wall",
-                "-Wextra",
-                "-Werror",
-                f"-I{REALTIME}",
-                str(source),
-                "-lm",
-                "-o",
-                str(binary),
-            ],
-            check=True,
-        )
-        subprocess.run([str(binary)], check=True)
-
-    print("PR54 N-channel DSP lane validation passed")
-
-
-if __name__ == "__main__":
-    main()

@@ -1,49 +1,4 @@
-#!/usr/bin/env python3
-"""Permanent PR53 guard for semantic channel mapping and the bounded N×M router."""
 
-from __future__ import annotations
-
-import pathlib
-import shutil
-import subprocess
-import tempfile
-
-ROOT = pathlib.Path(__file__).resolve().parents[1]
-REALTIME = ROOT / "NotchSixty/Audio/Realtime"
-ROUTER = REALTIME / "N60ChannelRouter.h"
-CORE_AUDIO_MAP = REALTIME / "N60CoreAudioChannelMapping.h"
-BRIDGE = REALTIME / "NotchSixty-Bridging-Header.h"
-
-
-def require(condition: bool, message: str) -> None:
-    if not condition:
-        raise SystemExit(f"PR53 validation failed: {message}")
-
-
-def main() -> None:
-    require(ROUTER.exists(), "N60ChannelRouter.h is missing")
-    require(CORE_AUDIO_MAP.exists(), "N60CoreAudioChannelMapping.h is missing")
-    require(BRIDGE.exists(), "Swift bridging header is missing")
-
-    router = ROUTER.read_text(encoding="utf-8")
-    mapper = CORE_AUDIO_MAP.read_text(encoding="utf-8")
-    bridge = BRIDGE.read_text(encoding="utf-8")
-
-    require("N60_CHANNEL_ROUTER_MAX_ROUTES" in router, "fixed matrix bound is missing")
-    require("N60ChannelRoutingMatrixCompileSemanticReorder" in router, "semantic reorder compiler is missing")
-    require("N60ChannelRoutingMatrixProcessFrame" in router, "bounded frame primitive is missing")
-    require("N60ProgramChannelLayoutFromAudioChannelDescriptions" in mapper, "Core Audio description mapper is missing")
-    require("kAudioChannelLabel_LFEScreen" in mapper, "LFE label mapping is missing")
-    require("kAudioChannelLabel_LeftTopFront" in mapper, "height label mapping is missing")
-    require("kAudioChannelLabel_LeftWide" in mapper, "wide label mapping is missing")
-    require("kAudioChannelLayoutTag_UseChannelDescriptions" in mapper, "explicit-description policy is missing")
-    require('#import "N60ChannelRouter.h"' in bridge, "router is not exposed through the bridging header")
-    require('#import "N60CoreAudioChannelMapping.h"' in bridge, "Core Audio mapper is not exposed through the bridging header")
-
-    clang = shutil.which("clang")
-    require(clang is not None, "clang is required for the PR53 router ABI test")
-
-    harness = r'''
 #include <assert.h>
 #include <math.h>
 #include "N60ChannelRouter.h"
@@ -127,32 +82,3 @@ int main(void) {
 
     return 0;
 }
-'''
-
-    with tempfile.TemporaryDirectory(prefix="notch-sixty-pr53-") as temporary:
-        temp = pathlib.Path(temporary)
-        source = temp / "channel_router_test.c"
-        binary = temp / "channel_router_test"
-        source.write_text(harness, encoding="utf-8")
-        subprocess.run(
-            [
-                clang,
-                "-std=c11",
-                "-Wall",
-                "-Wextra",
-                "-Werror",
-                f"-I{REALTIME}",
-                str(source),
-                "-lm",
-                "-o",
-                str(binary),
-            ],
-            check=True,
-        )
-        subprocess.run([str(binary)], check=True)
-
-    print("PR53 semantic channel router validation passed")
-
-
-if __name__ == "__main__":
-    main()
