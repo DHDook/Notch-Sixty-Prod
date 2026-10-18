@@ -1486,27 +1486,99 @@ enum VolumeFeedbackPopupPosition: String, CaseIterable, Identifiable {
         case .topRight: return "Top Right"
         }
     }
+}
 
-    /// Bottom-left window origin for a popup of `size` in a screen's visible
-    /// frame. Top Right sits under the menu bar where macOS shows its own
-    /// volume indicator.
-    func origin(for size: CGSize, in visibleFrame: CGRect) -> CGPoint {
-        switch self {
+/// Where macOS draws its own volume popup. Measured on macOS 27 from the
+/// on-screen window list (owner MenuBarAgent, level 101): a 352 × 149 pt
+/// window flush under the menu bar, 87 pt in from the screen's right edge,
+/// shown for about 1.44 s per key press. The window frame includes its
+/// transparent shadow margin, so covering the whole frame covers the popup.
+enum SystemVolumePopupGeometry {
+    static let size = CGSize(width: 352, height: 149)
+    static let trailingInset: CGFloat = 87
+    static let windowLevel = NSWindow.Level.popUpMenu
+    static let displayDuration: TimeInterval = 1.44
+
+    static func frame(in visibleFrame: CGRect) -> CGRect {
+        CGRect(
+            x: visibleFrame.maxX - trailingInset - size.width,
+            y: visibleFrame.maxY - size.height,
+            width: size.width,
+            height: size.height
+        )
+    }
+}
+
+enum VolumeFeedbackPopupStyle: Equatable {
+    /// Translucent Liquid Glass.
+    case glass
+    /// Opaque base under a glass rim, so a covered system popup cannot show through.
+    case solidGlass
+}
+
+/// Frame, style, window level and display time of Notch Sixty's popup.
+struct VolumeFeedbackPopupLayout: Equatable {
+    static let standardSize = CGSize(width: 264, height: 88)
+    static let gapBesideSystemPopup: CGFloat = 8
+
+    let frame: CGRect
+    let style: VolumeFeedbackPopupStyle
+    let level: NSWindow.Level
+    let displayDuration: TimeInterval
+
+    /// Covering applies only at Top Right, where the system popup appears.
+    static func make(
+        position: VolumeFeedbackPopupPosition,
+        coverSystemPopup: Bool,
+        visibleFrame: CGRect
+    ) -> VolumeFeedbackPopupLayout {
+        let size = standardSize
+        switch position {
         case .bottomCenter:
-            return CGPoint(
-                x: visibleFrame.midX - size.width / 2,
-                y: visibleFrame.minY + 84
+            return VolumeFeedbackPopupLayout(
+                frame: CGRect(
+                    x: visibleFrame.midX - size.width / 2,
+                    y: visibleFrame.minY + 84,
+                    width: size.width,
+                    height: size.height
+                ),
+                style: .glass,
+                level: .floating,
+                displayDuration: 1.4
             )
         case .topRight:
-            return CGPoint(
-                x: visibleFrame.maxX - size.width - 12,
-                y: visibleFrame.maxY - size.height - 10
+            let system = SystemVolumePopupGeometry.frame(in: visibleFrame)
+            if coverSystemPopup {
+                // One level above the system popup, and up longer than it, so
+                // it never peeks out before or after ours.
+                return VolumeFeedbackPopupLayout(
+                    frame: system,
+                    style: .solidGlass,
+                    level: NSWindow.Level(
+                        rawValue: SystemVolumePopupGeometry.windowLevel.rawValue + 1
+                    ),
+                    displayDuration: SystemVolumePopupGeometry.displayDuration + 0.4
+                )
+            }
+            // Beside the system popup: to its left, centred on it vertically.
+            return VolumeFeedbackPopupLayout(
+                frame: CGRect(
+                    x: system.minX - gapBesideSystemPopup - size.width,
+                    y: system.midY - size.height / 2,
+                    width: size.width,
+                    height: size.height
+                ),
+                style: .glass,
+                level: .floating,
+                displayDuration: 1.4
             )
         }
     }
 }
 
-// Presentation only: no audio callback, key interception, driver, or system HUD manipulation.
+// Presentation only: no audio callback, key interception, driver, or system
+// HUD manipulation. Cover mode draws a window above the system popup; it
+// never hides, moves or alters it.
 @MainActor
 private final class VolumeFeedbackHUDController {
     private var panel: NSPanel?
@@ -1514,22 +1586,25 @@ private final class VolumeFeedbackHUDController {
 
     func show(
         _ configuration: MasterVolumeConfiguration,
-        position: VolumeFeedbackPopupPosition
+        position: VolumeFeedbackPopupPosition,
+        coverSystemPopup: Bool
     ) {
         guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
-        let width: CGFloat = 264
-        let height: CGFloat = 88
+        let layout = VolumeFeedbackPopupLayout.make(
+            position: position,
+            coverSystemPopup: coverSystemPopup,
+            visibleFrame: screen.visibleFrame
+        )
         let window: NSPanel
         if let panel {
             window = panel
         } else {
             window = NSPanel(
-                contentRect: NSRect(x: 0, y: 0, width: width, height: height),
+                contentRect: layout.frame,
                 styleMask: [.borderless, .nonactivatingPanel],
                 backing: .buffered,
                 defer: false
             )
-            window.level = .floating
             window.isOpaque = false
             window.backgroundColor = .clear
             window.ignoresMouseEvents = true
@@ -1539,20 +1614,19 @@ private final class VolumeFeedbackHUDController {
             panel = window
         }
 
+        window.level = layout.level
         window.contentView = NSHostingView(
-            rootView: VolumeFeedbackHUDView(configuration: configuration)
-                .frame(width: width, height: height)
-        )
-        window.setFrameOrigin(
-            position.origin(
-                for: CGSize(width: width, height: height),
-                in: screen.visibleFrame
+            rootView: VolumeFeedbackHUDView(
+                configuration: configuration,
+                style: layout.style
             )
+            .frame(width: layout.frame.width, height: layout.frame.height)
         )
+        window.setFrame(layout.frame, display: true)
         window.orderFrontRegardless()
         dismissal?.cancel()
         dismissal = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(1.4))
+            try? await Task.sleep(for: .seconds(layout.displayDuration))
             guard !Task.isCancelled else { return }
             self?.panel?.orderOut(nil)
         }
@@ -1567,14 +1641,41 @@ private final class VolumeFeedbackHUDController {
 
 private struct VolumeFeedbackHUDView: View {
     let configuration: MasterVolumeConfiguration
+    let style: VolumeFeedbackPopupStyle
+
+    private var shape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: style == .solidGlass ? 28 : 22)
+    }
 
     var body: some View {
-        HStack(spacing: 14) {
+        content
+            .padding(.horizontal, style == .solidGlass ? 28 : 18)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .glassEffect(.regular, in: shape)
+            .background {
+                // Glass over an opaque base: the rim and highlight stay, but
+                // nothing behind the window (the system popup) shows through.
+                if style == .solidGlass {
+                    shape.fill(Color(nsColor: .windowBackgroundColor))
+                }
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(
+                "Notch Sixty volume " +
+                    VolumeFeedbackPresentation.readout(
+                        level: configuration.level,
+                        muted: configuration.muted
+                    )
+            )
+    }
+
+    private var content: some View {
+        HStack(spacing: style == .solidGlass ? 18 : 14) {
             Image(
                 systemName: configuration.muted
                     ? "speaker.slash.fill" : "speaker.wave.2.fill"
             )
-            .font(.title2)
+            .font(style == .solidGlass ? .largeTitle : .title2)
             .foregroundStyle(.orange)
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline) {
@@ -1589,7 +1690,7 @@ private struct VolumeFeedbackHUDView: View {
                             muted: configuration.muted
                         )
                     )
-                    .font(.headline)
+                    .font(style == .solidGlass ? .title3.weight(.semibold) : .headline)
                     .monospacedDigit()
                 }
                 ProgressView(
@@ -1599,17 +1700,6 @@ private struct VolumeFeedbackHUDView: View {
                 .tint(.orange)
             }
         }
-        .padding(.horizontal, 18)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .glassEffect(.regular, in: .rect(cornerRadius: 22))
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(
-            "Notch Sixty volume " +
-                VolumeFeedbackPresentation.readout(
-                    level: configuration.level,
-                    muted: configuration.muted
-                )
-        )
     }
 }
 
@@ -1654,6 +1744,7 @@ final class ApplicationPreferences: ObservableObject {
         static let showVolumeInMenuBar = "application.showVolumeInMenuBar"
         static let showVolumePopup = "application.showVolumePopup"
         static let volumePopupPosition = "application.volumePopupPosition"
+        static let coverSystemVolumePopup = "application.coverSystemVolumePopup"
     }
 
     private let defaults: UserDefaults
@@ -1695,6 +1786,15 @@ final class ApplicationPreferences: ObservableObject {
         didSet { defaults.set(volumePopupPosition.rawValue, forKey: Key.volumePopupPosition) }
     }
 
+    /// The stored choice; it only takes effect at Top Right.
+    @Published var coverSystemVolumePopup: Bool {
+        didSet { defaults.set(coverSystemVolumePopup, forKey: Key.coverSystemVolumePopup) }
+    }
+
+    var coversSystemVolumePopup: Bool {
+        coverSystemVolumePopup && volumePopupPosition == .topRight
+    }
+
     private let volumeHUD = VolumeFeedbackHUDController()
     private var volumeFeedbackObservation: AnyCancellable?
 
@@ -1719,6 +1819,7 @@ final class ApplicationPreferences: ObservableObject {
         volumePopupPosition = VolumeFeedbackPopupPosition(
             rawValue: defaults.string(forKey: Key.volumePopupPosition) ?? ""
         ) ?? .bottomCenter
+        coverSystemVolumePopup = defaults.bool(forKey: Key.coverSystemVolumePopup)
         launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
         launchAtLoginError = nil
         appearanceObservation = NSApplication.shared.observe(\.effectiveAppearance, options: [.new]) { [weak self] _, _ in
@@ -1782,7 +1883,11 @@ final class ApplicationPreferences: ObservableObject {
             .removeDuplicates()
             .sink { [weak self] configuration in
                 guard let self, self.showVolumePopup else { return }
-                self.volumeHUD.show(configuration, position: self.volumePopupPosition)
+                self.volumeHUD.show(
+                    configuration,
+                    position: self.volumePopupPosition,
+                    coverSystemPopup: self.coversSystemVolumePopup
+                )
             }
         applyAppearance()
         applyActivationPolicy()
@@ -1796,7 +1901,8 @@ final class ApplicationPreferences: ObservableObject {
             volumeStepResolution: volumeStepResolution.rawValue,
             showVolumeInMenuBar: showVolumeInMenuBar,
             showVolumePopup: showVolumePopup,
-            volumePopupPosition: volumePopupPosition.rawValue
+            volumePopupPosition: volumePopupPosition.rawValue,
+            coverSystemVolumePopup: coverSystemVolumePopup
         )
     }
 
@@ -1827,6 +1933,7 @@ final class ApplicationPreferences: ObservableObject {
         ) {
             volumePopupPosition = position
         }
+        if let cover = snapshot.coverSystemVolumePopup { coverSystemVolumePopup = cover }
     }
 
     private func applyAppearance() {
@@ -2284,7 +2391,16 @@ private struct ProductionSettingsView: View {
                             .frame(width: 220)
                         }
                         .disabled(!preferences.showVolumePopup)
-                        Text("Briefly display Notch Sixty's volume when it changes. The macOS volume indicator is not suppressed and may also appear; macOS gives sandboxed apps no public way to hide it.")
+                        Text("Briefly display Notch Sixty's volume when it changes. At Top Right it appears beside the macOS volume indicator, which macOS gives sandboxed apps no public way to hide.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Toggle("Cover the macOS volume popup", isOn: $preferences.coverSystemVolumePopup)
+                            .disabled(
+                                !preferences.showVolumePopup
+                                    || preferences.volumePopupPosition != .topRight
+                            )
+                        Text("Top Right only. Draws Notch Sixty's popup over the macOS one, with a solid glass style so it does not show through. The macOS popup still appears underneath and may flash briefly.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

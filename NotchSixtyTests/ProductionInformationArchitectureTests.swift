@@ -14,21 +14,34 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         XCTAssertEqual(VolumeFeedbackPresentation.readout(level: 0.678, muted: true), "Muted")
     }
 
-    func testVolumePopupPositionsPlaceThePopupInsideTheVisibleFrame() {
-        let visible = CGRect(x: 0, y: 40, width: 1440, height: 860)
-        let size = CGSize(width: 264, height: 88)
+    func testVolumePopupLayoutPlacesGlassPopupBesideOrOverTheSystemPopup() {
+        // 1920 × 1080 display with a 30 pt menu bar, as measured on macOS 27.
+        let visible = CGRect(x: 0, y: 0, width: 1920, height: 1050)
+        let system = SystemVolumePopupGeometry.frame(in: visible)
+        XCTAssertEqual(system, CGRect(x: 1481, y: 901, width: 352, height: 149))
 
-        let bottom = VolumeFeedbackPopupPosition.bottomCenter.origin(for: size, in: visible)
-        XCTAssertEqual(bottom.x + size.width / 2, visible.midX, accuracy: 0.001)
-        XCTAssertEqual(bottom.y, visible.minY + 84, accuracy: 0.001)
-
-        let topRight = VolumeFeedbackPopupPosition.topRight.origin(for: size, in: visible)
-        XCTAssertGreaterThan(topRight.x, visible.midX)
-        XCTAssertGreaterThan(topRight.y, visible.midY)
-        XCTAssertTrue(
-            visible.contains(CGRect(origin: topRight, size: size)),
-            "top-right popup stays below the menu bar and on screen"
+        let bottom = VolumePopupLayoutFixture.make(.bottomCenter, cover: false, visible)
+        XCTAssertEqual(bottom.style, .glass)
+        XCTAssertEqual(bottom.frame.midX, visible.midX, accuracy: 0.001)
+        XCTAssertEqual(bottom.frame.minY, visible.minY + 84, accuracy: 0.001)
+        XCTAssertEqual(
+            VolumePopupLayoutFixture.make(.bottomCenter, cover: true, visible),
+            bottom,
+            "cover only applies at Top Right"
         )
+
+        let beside = VolumePopupLayoutFixture.make(.topRight, cover: false, visible)
+        XCTAssertEqual(beside.style, .glass)
+        XCTAssertFalse(beside.frame.intersects(system), "glass popup sits beside the system one")
+        XCTAssertEqual(beside.frame.maxX, system.minX - 8, accuracy: 0.001)
+        XCTAssertEqual(beside.frame.midY, system.midY, accuracy: 0.001)
+        XCTAssertTrue(visible.contains(beside.frame))
+
+        let cover = VolumePopupLayoutFixture.make(.topRight, cover: true, visible)
+        XCTAssertEqual(cover.style, .solidGlass)
+        XCTAssertEqual(cover.frame, system)
+        XCTAssertGreaterThan(cover.level.rawValue, SystemVolumePopupGeometry.windowLevel.rawValue)
+        XCTAssertGreaterThan(cover.displayDuration, SystemVolumePopupGeometry.displayDuration)
     }
 
     @MainActor
@@ -40,15 +53,21 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         let first = ApplicationPreferences(defaults: defaults)
         XCTAssertFalse(first.showVolumePopup)
         XCTAssertEqual(first.volumePopupPosition, .bottomCenter)
+        XCTAssertFalse(first.coverSystemVolumePopup)
         first.showVolumePopup = true
+        first.coverSystemVolumePopup = true
+        XCTAssertFalse(first.coversSystemVolumePopup, "cover needs Top Right")
         first.volumePopupPosition = .topRight
+        XCTAssertTrue(first.coversSystemVolumePopup)
 
         let relaunched = ApplicationPreferences(defaults: defaults)
         XCTAssertTrue(relaunched.showVolumePopup)
         XCTAssertEqual(relaunched.volumePopupPosition, .topRight)
+        XCTAssertTrue(relaunched.coverSystemVolumePopup)
 
         var snapshot = relaunched.makeBackupSnapshot()
         XCTAssertEqual(snapshot.volumePopupPosition, "topRight")
+        XCTAssertEqual(snapshot.coverSystemVolumePopup, true)
 
         relaunched.volumePopupPosition = .bottomCenter
         try relaunched.restoreBackupSnapshot(snapshot)
@@ -1595,4 +1614,18 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         )
     }
 
+}
+
+private enum VolumePopupLayoutFixture {
+    static func make(
+        _ position: VolumeFeedbackPopupPosition,
+        cover: Bool,
+        _ visible: CGRect
+    ) -> VolumeFeedbackPopupLayout {
+        VolumeFeedbackPopupLayout.make(
+            position: position,
+            coverSystemPopup: cover,
+            visibleFrame: visible
+        )
+    }
 }

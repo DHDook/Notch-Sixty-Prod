@@ -12,6 +12,7 @@ struct NotchSixtyBackupPreferences: Codable, Equatable, Sendable {
     var showVolumeInMenuBar: Bool? = nil
     var showVolumePopup: Bool? = nil
     var volumePopupPosition: String? = nil
+    var coverSystemVolumePopup: Bool? = nil
 
     func validate() throws {
         guard schemaVersion == Self.currentSchemaVersion,
