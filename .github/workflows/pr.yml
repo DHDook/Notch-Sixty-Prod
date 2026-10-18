@@ -1,0 +1,61 @@
+name: PR check
+
+# Every pull request to main: build, full XCTest, behavioural C harnesses and the
+# remaining legacy validators. Target: under 10 minutes.
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: xcode-27
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+
+      - name: Build and test (Debug)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            test 2>&1 | tee "$RUNNER_TEMP/xctest.log"
+
+      - name: Upload XCTest log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xctest-log
+          path: ${{ runner.temp }}/xctest.log
+          retention-days: 7
+
+  harnesses:
+    runs-on: xcode-27
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Behavioural C harnesses
+        run: ci/run_harnesses.sh
+
+      - name: Legacy validators (retired by E1 S3)
+        run: ci/run_legacy_validators.sh

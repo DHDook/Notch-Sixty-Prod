@@ -1,0 +1,89 @@
+name: macOS full
+
+# Every push to main, pull requests labelled full-ci, and on demand: the PR
+# check plus the Release performance build and the render benchmarks.
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+    types: [labeled, synchronize, opened, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  full:
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')
+    runs-on: xcode-27
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+
+      - name: Build and test (Debug)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project NotchSixty.xcodeproj \
+            -scheme NotchSixty \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_TESTABILITY=YES \
+            test 2>&1 | tee "$RUNNER_TEMP/xctest.log"
+
+      - name: Build Release performance scheme
+        run: >-
+          xcodebuild
+          -project NotchSixty.xcodeproj
+          -scheme NotchSixty-Performance
+          -configuration Release
+          -destination 'platform=macOS,arch=arm64'
+          -derivedDataPath "$RUNNER_TEMP/DerivedDataRelease"
+          CODE_SIGNING_ALLOWED=NO
+          build
+
+      - name: Behavioural C harnesses
+        run: ci/run_harnesses.sh
+
+      - name: Legacy validators (retired by E1 S3)
+        run: ci/run_legacy_validators.sh
+
+      - name: Render and bridge benchmarks
+        run: |
+          set -euo pipefail
+          RT=NotchSixty/Audio/Realtime
+          OUT="$RUNNER_TEMP/benchmarks"
+          mkdir -p "$OUT"
+          NO_BRIDGE=$(find "$RT" -name '*.c' ! -name 'N60RealtimeAudioBridge.c' -print)
+          ALL=$(find "$RT" -name '*.c' -print)
+          for opt in O0 O3; do
+            clang -std=c11 -"$opt" -Wall -Wextra -include stddef.h -I"$RT" \
+              ci/benchmark_pr35_render_kernel.c $NO_BRIDGE -framework Accelerate -o "$OUT/render-$opt"
+            echo "=== render kernel $opt ===" | tee -a "$OUT/benchmarks.txt"
+            "$OUT/render-$opt" | tee -a "$OUT/benchmarks.txt"
+          done
+          clang -std=c11 -O3 -Wall -Wextra -include stddef.h -I"$RT" \
+            ci/benchmark_pr35_realtime_bridge.c $ALL -framework Accelerate -framework CoreAudio -o "$OUT/bridge-O3"
+          echo "=== realtime bridge O3 ===" | tee -a "$OUT/benchmarks.txt"
+          "$OUT/bridge-O3" | tee -a "$OUT/benchmarks.txt"
+
+      - name: Upload logs and benchmarks
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-full-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/xctest.log
+            ${{ runner.temp }}/benchmarks/benchmarks.txt
+          if-no-files-found: warn
+          retention-days: 14
