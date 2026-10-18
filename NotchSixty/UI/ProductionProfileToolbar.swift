@@ -2,6 +2,35 @@ import AppKit
 import Foundation
 import SwiftUI
 
+/// Toolbar visibility rules and the preference keys Settings shares with
+/// the toolbar through UserDefaults.
+enum ProductionProfileToolbarPolicy {
+    static let abComparisonEnabledKey = "toolbar.abComparisonEnabled"
+
+    enum ContentSaveAction: Equatable {
+        case hidden
+        /// Save the edits into the selected user preset.
+        case overwrite
+        /// The selection cannot be overwritten (factory or none): save as new.
+        case saveAsNew
+    }
+
+    /// The A/B control appears once enabled in Settings, and stays visible
+    /// while an audition is in progress so it can always be exited.
+    static func showsABComparison(enabled: Bool, auditionInProgress: Bool) -> Bool {
+        enabled || auditionInProgress
+    }
+
+    /// A Save button appears beside the preset menu only for unsaved edits.
+    static func contentSaveAction(
+        isDirty: Bool,
+        canOverwrite: Bool
+    ) -> ContentSaveAction {
+        guard isDirty else { return .hidden }
+        return canOverwrite ? .overwrite : .saveAsNew
+    }
+}
+
 struct ProductionProfileToolbar: View {
     let product: ProductController
     @ObservedObject private var profiles: ProductProfileController
@@ -12,6 +41,8 @@ struct ProductionProfileToolbar: View {
     @State private var draftName = ""
     @State private var interchangeMessage: String?
     @State private var presetSelectionError: String?
+    @AppStorage(ProductionProfileToolbarPolicy.abComparisonEnabledKey)
+    private var abComparisonEnabled = false
 
     init(product: ProductController) {
         self.product = product
@@ -47,8 +78,17 @@ struct ProductionProfileToolbar: View {
         HStack(spacing: 8) {
             contentPresetMenu
                 .controlSize(.small)
-            abComparisonControl
+            contentSaveButton
                 .controlSize(.small)
+            if ProductionProfileToolbarPolicy.showsABComparison(
+                enabled: abComparisonEnabled,
+                auditionInProgress: comparison.sessionBaseline != nil
+                    || comparison.activeSlot != nil
+                    || comparison.isSwitching
+            ) {
+                abComparisonControl
+                    .controlSize(.small)
+            }
             systemMenu
                 .controlSize(.small)
 
@@ -193,6 +233,35 @@ struct ProductionProfileToolbar: View {
                 ? "Content Preset — unsaved changes"
                 : "Content Preset: EQ/voicing, phase mode, dynamics, and input/headroom gain"
         )
+    }
+
+    @ViewBuilder
+    private var contentSaveButton: some View {
+        switch ProductionProfileToolbarPolicy.contentSaveAction(
+            isDirty: profiles.selectedContentPresetIsDirty,
+            canOverwrite: profiles.canOverwriteSelectedContentPreset
+        ) {
+        case .hidden:
+            EmptyView()
+        case .overwrite:
+            Button {
+                profiles.overwriteSelectedContentPreset()
+            } label: {
+                Label("Save", systemImage: "square.and.arrow.down")
+                    .labelStyle(.titleAndIcon)
+            }
+            .buttonStyle(.glass)
+            .help("Save changes to \(profiles.selectedContentPresetName)")
+        case .saveAsNew:
+            Button {
+                begin(.newContent, defaultName: "My Preset")
+            } label: {
+                Label("Save…", systemImage: "square.and.arrow.down")
+                    .labelStyle(.titleAndIcon)
+            }
+            .buttonStyle(.glass)
+            .help("Save these changes as a new Content Preset")
+        }
     }
 
     private var abComparisonControl: some View {
