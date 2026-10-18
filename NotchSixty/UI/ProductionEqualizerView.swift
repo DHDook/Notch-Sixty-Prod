@@ -63,7 +63,6 @@ struct ProductionEqualizerView: View {
     private var header: some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 5) {
-                Text("Equalizer").font(.largeTitle.bold())
                 Text("Static and Dynamic EQ share one band model. Drag a band on the response graph or use the precision inspector.")
                     .foregroundStyle(.secondary)
             }

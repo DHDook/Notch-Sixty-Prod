@@ -65,8 +65,6 @@ struct ProductionRoomTreatmentAdvisorWorkspace: View {
     private var header: some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Room Advisor")
-                    .font(.largeTitle.bold())
                 Text(
                     "Occasional measurement-guided advice for placement, physical treatment, DSP and active acoustics."
                 )

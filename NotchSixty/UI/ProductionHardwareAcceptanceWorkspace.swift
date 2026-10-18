@@ -182,8 +182,6 @@ struct ProductionHardwareAcceptanceWorkspace: View {
     private var header: some View {
         HStack(alignment: .firstTextBaseline, spacing: 18) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Hardware Acceptance")
-                    .font(.largeTitle.bold())
                 Text(
                     "Guided H01–H08 evidence collection for the later physical PR112 campaign."
                 )

@@ -163,7 +163,6 @@ struct ProductionMetersView: View {
     private var header: some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Meters & Analysis").font(.largeTitle.bold())
                 Text("Signal levels, spectrum, stereo field, and gain structure — with hidden analysis parked.")
                     .foregroundStyle(.secondary)
             }

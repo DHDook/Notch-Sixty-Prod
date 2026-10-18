@@ -128,8 +128,6 @@ struct ProductionRoomCorrectionWorkspace: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Room Correction")
-                .font(.largeTitle.bold())
             Text("Measure the physical stereo playback system independently from daily content DSP, then analyze and design a reproducible correction filter.")
                 .foregroundStyle(.secondary)
         }

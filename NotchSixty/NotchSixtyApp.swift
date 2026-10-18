@@ -2629,7 +2629,7 @@ struct NotchSixtyApp: App {
         }
         .defaultSize(width: 1180, height: 780)
         .windowResizability(.contentMinSize)
-        .windowToolbarStyle(.unified(showsTitle: false))
+        .windowToolbarStyle(.unified)
 
         MenuBarExtra(isInserted: trayInserted) {
             ProductionMenuBarView(product: product)

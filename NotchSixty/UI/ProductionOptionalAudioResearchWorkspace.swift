@@ -29,8 +29,6 @@ struct ProductionOptionalAudioResearchWorkspace: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                Text("Acoustic Research")
-                    .font(.largeTitle.bold())
                 Text(
                     "Optional experimental comparison tools. They never apply a DSP filter, change audio routing or declare measured improvement. Use Room Correction or Headphones for the separate, validated deployment workflows."
                 )
