@@ -709,7 +709,7 @@ private struct FixedOutputCatalog: OutputDeviceCataloging {
 
 /// Drives the stereo bridge's capture/output IOProcs with interleaved stereo
 /// buffers; returns the left channel of each rendered output buffer.
-private final class StereoIOProcHarness {
+final class StereoIOProcHarness {
     private let bridge: OpaquePointer
     private var timestamp = AudioTimeStamp()
 
