@@ -52,11 +52,25 @@ for name in crosstalk_cancellation mixed_phase speaker_crossfeed symmetry_balanc
 done
 harness pr34_dynamic_domains "${STRICT[@]}" -I"$RT" ci/validate_pr34_dynamic_domains.c "$RT/N60DynamicEQ.c" -lm
 
+harness pr34_mid_side "${STRICT[@]}" ci/validate_pr34_mid_side.c -lm
+harness pr43_driver_runtime "${STRICT[@]}" -include stddef.h -I"$RT" ci/validate_pr43_driver_runtime.c $ALL_RT_NO_BRIDGE -framework Accelerate
+
+# Semantic N-channel engine (PR53-60, PR66): router, lanes, bass management,
+# headphone and binaural DSP, calibration, spatial, transport, head tracking.
+harness pr53_channel_router "${STRICT[@]}" -I"$RT" ci/validate_pr53_channel_router.c -lm
+for name in pr54_nchannel_lanes pr55_multichannel_bass_management pr55_subwoofer_tuning pr56_headphone_dsp \
+    pr57_binaural_renderer pr58_multichannel_calibration pr59_advanced_spatial pr60_nchannel_transport \
+    pr60_coreaudio_transport pr66_head_tracking; do
+    harness "$name" "${STRICT[@]}" -O2 -I"$RT" "ci/validate_$name.c" -lm
+done
+
 # Stereo realtime kernel and bridge contracts (PR35, PR38, PR41).
 harness pr35_denoiser_bounded_reset "${STRICT[@]}" -I"$RT" ci/validate_pr35_denoiser_bounded_reset.c "$RT/N60SpectralDenoiser.c"
 harness pr35_denoiser_validated_fastpath "${STRICT[@]}" -I"$RT" ci/validate_pr35_denoiser_validated_fastpath.c "$RT/N60SpectralDenoiser.c"
 harness pr35_disabled_dsp_fastpath "${STRICT[@]}" -include stddef.h -I"$RT" ci/validate_pr35_disabled_dsp_fastpath.c \
     "$RT/N60Dynamics.c" "$RT/N60DynamicEQ.c" "$RT/N60SpectralDenoiser.c" "$RT/N60Protection.c" -lm
+# shellcheck disable=SC2086
+harness pr35_snapshot_pointer_api "${STRICT[@]}" -include stddef.h -I"$RT" ci/validate_pr35_snapshot_pointer_api.c $ALL_RT_NO_BRIDGE -framework Accelerate
 harness pr35_protection_sparse_reset "${STRICT[@]}" -I"$RT" ci/validate_pr35_protection_sparse_reset.c "$RT/N60Protection.c"
 # shellcheck disable=SC2086
 harness pr35_meter_gating "${STRICT[@]}" -include stddef.h -I"$RT" ci/validate_pr35_meter_gating.c $ALL_RT_NO_BRIDGE -framework Accelerate
@@ -105,6 +119,15 @@ harness pr107_program_fir_runtime "${STRICT[@]}" -O2 -I"$RT" ci/validate_pr107_p
 # shellcheck disable=SC2086
 harness pr101_realtime_resource_soak "${STRICT[@]}" -O3 -arch arm64 -include stddef.h -I"$RT" \
     ci/validate_pr101_realtime_resource_soak.c $ALL_RT -framework Accelerate -framework CoreAudio
+
+# Acoustic reference lab: production-header probes checked against independent
+# Python oracles at every standard rate from 44.1 to 384 kHz.
+for name in pr117_acoustic_reference_lab pr117b_fir_latency_headroom pr117c_spatial_reference; do
+    selected "$name" || continue
+    echo "::group::$name"
+    if python3 "ci/validate_$name.py"; then passed+=("$name"); else failed+=("$name"); fi
+    echo "::endgroup::"
+done
 
 echo
 echo "Harnesses passed: ${#passed[@]}"

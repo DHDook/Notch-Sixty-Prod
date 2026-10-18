@@ -76,6 +76,10 @@ jobs:
             ci/benchmark_pr35_realtime_bridge.c $ALL -framework Accelerate -framework CoreAudio -o "$OUT/bridge-O3"
           echo "=== realtime bridge O3 ===" | tee -a "$OUT/benchmarks.txt"
           "$OUT/bridge-O3" | tee -a "$OUT/benchmarks.txt"
+          clang -std=c11 -O2 -Wall -Wextra -I"$RT" "$RT/N60Convolution.c" ci/benchmark_nonuniform_convolution.c \
+            -framework Accelerate -o "$OUT/convolution"
+          echo "=== non-uniform convolution ===" | tee -a "$OUT/benchmarks.txt"
+          "$OUT/convolution" | tee -a "$OUT/benchmarks.txt"
 
       - name: Upload logs and benchmarks
         if: always()

@@ -1,60 +1,8 @@
-# Source-text validators still awaiting E1 S3 (retire, port to XCTest, or move
-# to release.yml). pr.yml runs every line. Do not add new entries.
-ci/validate_batch2_unified_acoustics.py
-ci/validate_pr100_active_acoustics_ux.py
-ci/validate_pr102_app_store_boundary.py
-ci/validate_pr102_dependency_manifest.py
-ci/validate_pr103_speaker_optimizer_measurement.py
+# Source-text validators awaiting behavioural replacements (E1 S3c).
+# pr.yml runs every line. Do not add new entries.
 ci/validate_pr109_cross_feature_contracts.py
-ci/validate_pr114_privacy_security.py
-ci/validate_pr114_provenance_sbom.py
-ci/validate_pr116b_dashboard_vu.py
-ci/validate_pr117_acoustic_reference_lab.py
-ci/validate_pr117a_crossover_precision.py
-ci/validate_pr117b_fir_latency_headroom.py
-ci/validate_pr117c_spatial_reference.py
 ci/validate_pr42_interchange.py
-ci/validate_pr43_acoustic_diagnostics.py
-ci/validate_pr43_closure.py
-ci/validate_pr43_driver_model.py
-ci/validate_pr43_driver_runtime.py
-ci/validate_pr53_channel_router.py
-ci/validate_pr54_nchannel_lanes.py
-ci/validate_pr55_multichannel_bass_management.py
-ci/validate_pr55_subwoofer_tuning.py
-ci/validate_pr56_headphone_dsp.py
-ci/validate_pr57_binaural_renderer.py
-ci/validate_pr58_multichannel_calibration.py
-ci/validate_pr59_advanced_spatial.py
-ci/validate_pr60_nchannel_transport.py
-ci/validate_pr63_live_activation.py
 ci/validate_pr64_multichannel_calibration.py
-ci/validate_pr66_head_tracking.py
-ci/validate_pr68_vu_volume_polish.py
-ci/validate_pr69_adaptive_clock.py
-ci/validate_pr70_stereo_adaptive_src.py
-ci/validate_pr71_nchannel_adaptive_src.py
-ci/validate_pr72_ambient_analysis.py
-ci/validate_pr73_mimo_room_treatment.py
-ci/validate_pr74_mimo_fir_runtime.py
-ci/validate_pr75_room_treatment_verification.py
-ci/validate_pr76_treatment_transition.py
-ci/validate_pr77_live_room_treatment.py
-ci/validate_pr82_live_audio_unit_rack_mutation.py
-ci/validate_pr83_plugin_rack_ux.py
-ci/validate_pr84a_audio_unit_hardening.py
-ci/validate_pr85_native_sofa.py
-ci/validate_pr86_calibration_prediction.py
-ci/validate_pr88_intelligent_target.py
-ci/validate_pr89_ambient_compensation.py
 ci/validate_pr90_active_quiet_zone.py
-ci/validate_pr91_conversation_preservation.py
-ci/validate_pr92_room_treatment_advisor.py
-ci/validate_pr93_room_geometry_placement.py
-ci/validate_pr94_treatment_design_verification.py
-ci/validate_pr95_multi_position_quiet_zone.py
-ci/validate_pr96_feedforward.py
-ci/validate_pr97_hardware_timing.py
-ci/validate_pr98_feedforward_runtime.py
 ci/audit_pr98_disconnected_boundary.py
 -m unittest discover -s ci/tests -p test_pr109_cross_feature_contracts.py

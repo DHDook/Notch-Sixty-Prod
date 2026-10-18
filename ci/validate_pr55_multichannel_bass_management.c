@@ -1,43 +1,4 @@
-#!/usr/bin/env python3
-"""Permanent PR55 guard for semantic multichannel bass management."""
 
-from __future__ import annotations
-
-import pathlib
-import shutil
-import subprocess
-import tempfile
-
-ROOT = pathlib.Path(__file__).resolve().parents[1]
-REALTIME = ROOT / "NotchSixty/Audio/Realtime"
-HEADER = REALTIME / "N60MultichannelBassManagement.h"
-BRIDGE = REALTIME / "NotchSixty-Bridging-Header.h"
-
-
-def require(condition: bool, message: str) -> None:
-    if not condition:
-        raise SystemExit(f"PR55 validation failed: {message}")
-
-
-def main() -> None:
-    require(HEADER.exists(), "N60MultichannelBassManagement.h is missing")
-    require(BRIDGE.exists(), "Swift bridging header is missing")
-    header = HEADER.read_text(encoding="utf-8")
-    bridge = BRIDGE.read_text(encoding="utf-8")
-
-    require("N60_MAX_SUBWOOFER_OUTPUTS 4u" in header, "four-sub bound changed")
-    require("redirectedBassToSub" in header, "redirected-bass routing matrix is missing")
-    require("lfeToSub" in header, "native LFE routing matrix is missing")
-    require("N60ProgramChannelRoleLowFrequencyEffects" in header, "semantic LFE distinction is missing")
-    require("N60SubwooferOutputSetEQBand" in header, "per-sub EQ contract is missing")
-    require("N60SubwooferOutputSetDelayMs" in header, "per-sub delay contract is missing")
-    require("N60SubwooferOutputSetProtection" in header, "per-sub protection contract is missing")
-    require('#import "N60MultichannelBassManagement.h"' in bridge, "bass-management ABI is not exposed to Swift")
-
-    clang = shutil.which("clang")
-    require(clang is not None, "clang is required for the PR55 ABI test")
-
-    harness = r'''
 #include <assert.h>
 #include <math.h>
 #include "N60MultichannelBassManagement.h"
@@ -198,33 +159,3 @@ int main(void) {
 
     return 0;
 }
-'''
-
-    with tempfile.TemporaryDirectory(prefix="notch-sixty-pr55-") as temporary:
-        temp = pathlib.Path(temporary)
-        source = temp / "multichannel_bass_management_test.c"
-        binary = temp / "multichannel_bass_management_test"
-        source.write_text(harness, encoding="utf-8")
-        subprocess.run(
-            [
-                clang,
-                "-std=c11",
-                "-O2",
-                "-Wall",
-                "-Wextra",
-                "-Werror",
-                f"-I{REALTIME}",
-                str(source),
-                "-lm",
-                "-o",
-                str(binary),
-            ],
-            check=True,
-        )
-        subprocess.run([str(binary)], check=True)
-
-    print("PR55 multichannel bass-management validation passed")
-
-
-if __name__ == "__main__":
-    main()

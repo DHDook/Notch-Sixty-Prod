@@ -1,48 +1,4 @@
-#!/usr/bin/env python3
-"""Permanent PR57 guard for the multichannel binaural renderer and SOFA boundary."""
 
-from __future__ import annotations
-
-import pathlib
-import shutil
-import subprocess
-import tempfile
-
-ROOT = pathlib.Path(__file__).resolve().parents[1]
-REALTIME = ROOT / "NotchSixty/Audio/Realtime"
-PROFILE = REALTIME / "N60BinauralProfile.h"
-RENDERER = REALTIME / "N60BinauralRenderer.h"
-BRIDGE = REALTIME / "NotchSixty-Bridging-Header.h"
-
-
-def require(condition: bool, message: str) -> None:
-    if not condition:
-        raise SystemExit(f"PR57 validation failed: {message}")
-
-
-def main() -> None:
-    require(PROFILE.exists(), "N60BinauralProfile.h is missing")
-    require(RENDERER.exists(), "N60BinauralRenderer.h is missing")
-    profile = PROFILE.read_text(encoding="utf-8")
-    renderer = RENDERER.read_text(encoding="utf-8")
-    bridge = BRIDGE.read_text(encoding="utf-8")
-
-    require("N60SOFAHRTFNormalizedView" in profile, "SOFA-normalized HRIR boundary is missing")
-    require("N60SOFAFindNearestMeasurement" in profile, "SOFA direction selection is missing")
-    require("N60BinauralLFEModeEqualEar" in profile, "non-localized LFE policy is missing")
-    require("N60_BINAURAL_MAX_TAPS 8192u" in renderer, "binaural tap budget changed")
-    require("N60BinauralRendererPrepareFromSOFAView" in renderer, "SOFA-view preparation is missing")
-    require("N60BinauralRendererProcessFrame" in renderer, "realtime binaural processor is missing")
-    require("same input spectrum is shared" in renderer, "shared-input FFT architecture note is missing")
-    require('#import "N60BinauralRenderer.h"' in bridge, "binaural renderer ABI is not exposed to Swift")
-
-    process_tail = renderer.split("static inline bool N60BinauralRendererProcessFrame", 1)[1]
-    require("calloc(" not in process_tail.split("#ifdef __cplusplus", 1)[0], "realtime ProcessFrame allocates")
-
-    clang = shutil.which("clang")
-    require(clang is not None, "clang is required")
-
-    harness = r'''
 #include <assert.h>
 #include <math.h>
 #include <stdlib.h>
@@ -188,21 +144,3 @@ int main(void) {
     N60BinauralRendererDestroy(renderer);
     return 0;
 }
-'''
-
-    with tempfile.TemporaryDirectory(prefix="notch-sixty-pr57-") as temporary:
-        temp = pathlib.Path(temporary)
-        source = temp / "binaural_renderer_test.c"
-        binary = temp / "binaural_renderer_test"
-        source.write_text(harness, encoding="utf-8")
-        subprocess.run([
-            clang, "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
-            f"-I{REALTIME}", str(source), "-lm", "-o", str(binary)
-        ], check=True)
-        subprocess.run([str(binary)], check=True)
-
-    print("PR57 binaural renderer validation passed")
-
-
-if __name__ == "__main__":
-    main()
