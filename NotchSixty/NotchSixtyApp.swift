@@ -1474,13 +1474,48 @@ enum VolumeFeedbackPresentation {
     }
 }
 
+enum VolumeFeedbackPopupPosition: String, CaseIterable, Identifiable {
+    case bottomCenter
+    case topRight
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .bottomCenter: return "Bottom Center"
+        case .topRight: return "Top Right"
+        }
+    }
+
+    /// Bottom-left window origin for a popup of `size` in a screen's visible
+    /// frame. Top Right sits under the menu bar where macOS shows its own
+    /// volume indicator.
+    func origin(for size: CGSize, in visibleFrame: CGRect) -> CGPoint {
+        switch self {
+        case .bottomCenter:
+            return CGPoint(
+                x: visibleFrame.midX - size.width / 2,
+                y: visibleFrame.minY + 84
+            )
+        case .topRight:
+            return CGPoint(
+                x: visibleFrame.maxX - size.width - 12,
+                y: visibleFrame.maxY - size.height - 10
+            )
+        }
+    }
+}
+
 // Presentation only: no audio callback, key interception, driver, or system HUD manipulation.
 @MainActor
 private final class VolumeFeedbackHUDController {
     private var panel: NSPanel?
     private var dismissal: Task<Void, Never>?
 
-    func show(_ configuration: MasterVolumeConfiguration) {
+    func show(
+        _ configuration: MasterVolumeConfiguration,
+        position: VolumeFeedbackPopupPosition
+    ) {
         guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
         let width: CGFloat = 264
         let height: CGFloat = 88
@@ -1508,9 +1543,11 @@ private final class VolumeFeedbackHUDController {
             rootView: VolumeFeedbackHUDView(configuration: configuration)
                 .frame(width: width, height: height)
         )
-        let visible = screen.visibleFrame
         window.setFrameOrigin(
-            NSPoint(x: visible.midX - width / 2, y: visible.minY + 84)
+            position.origin(
+                for: CGSize(width: width, height: height),
+                in: screen.visibleFrame
+            )
         )
         window.orderFrontRegardless()
         dismissal?.cancel()
@@ -1564,7 +1601,7 @@ private struct VolumeFeedbackHUDView: View {
         }
         .padding(.horizontal, 18)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .glassEffect(.regular, in: .rect(cornerRadius: 22))
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
             "Notch Sixty volume " +
@@ -1616,6 +1653,7 @@ final class ApplicationPreferences: ObservableObject {
         static let volumeStepResolution = "application.volumeStepResolution"
         static let showVolumeInMenuBar = "application.showVolumeInMenuBar"
         static let showVolumePopup = "application.showVolumePopup"
+        static let volumePopupPosition = "application.volumePopupPosition"
     }
 
     private let defaults: UserDefaults
@@ -1653,6 +1691,10 @@ final class ApplicationPreferences: ObservableObject {
         }
     }
 
+    @Published var volumePopupPosition: VolumeFeedbackPopupPosition {
+        didSet { defaults.set(volumePopupPosition.rawValue, forKey: Key.volumePopupPosition) }
+    }
+
     private let volumeHUD = VolumeFeedbackHUDController()
     private var volumeFeedbackObservation: AnyCancellable?
 
@@ -1674,6 +1716,9 @@ final class ApplicationPreferences: ObservableObject {
         ) ?? .standard
         showVolumeInMenuBar = defaults.object(forKey: Key.showVolumeInMenuBar) as? Bool ?? true
         showVolumePopup = defaults.bool(forKey: Key.showVolumePopup)
+        volumePopupPosition = VolumeFeedbackPopupPosition(
+            rawValue: defaults.string(forKey: Key.volumePopupPosition) ?? ""
+        ) ?? .bottomCenter
         launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
         launchAtLoginError = nil
         appearanceObservation = NSApplication.shared.observe(\.effectiveAppearance, options: [.new]) { [weak self] _, _ in
@@ -1737,7 +1782,7 @@ final class ApplicationPreferences: ObservableObject {
             .removeDuplicates()
             .sink { [weak self] configuration in
                 guard let self, self.showVolumePopup else { return }
-                self.volumeHUD.show(configuration)
+                self.volumeHUD.show(configuration, position: self.volumePopupPosition)
             }
         applyAppearance()
         applyActivationPolicy()
@@ -1750,7 +1795,8 @@ final class ApplicationPreferences: ObservableObject {
             presence: presence.rawValue,
             volumeStepResolution: volumeStepResolution.rawValue,
             showVolumeInMenuBar: showVolumeInMenuBar,
-            showVolumePopup: showVolumePopup
+            showVolumePopup: showVolumePopup,
+            volumePopupPosition: volumePopupPosition.rawValue
         )
     }
 
@@ -1776,6 +1822,11 @@ final class ApplicationPreferences: ObservableObject {
         self.volumeStepResolution = resolution
         if let show = snapshot.showVolumeInMenuBar { showVolumeInMenuBar = show }
         if let show = snapshot.showVolumePopup { showVolumePopup = show }
+        if let position = snapshot.volumePopupPosition.flatMap(
+            VolumeFeedbackPopupPosition.init(rawValue:)
+        ) {
+            volumePopupPosition = position
+        }
     }
 
     private func applyAppearance() {
@@ -2219,7 +2270,21 @@ private struct ProductionSettingsView: View {
                             .foregroundStyle(.secondary)
 
                         Toggle("Show volume popup", isOn: $preferences.showVolumePopup)
-                        Text("Briefly display Notch Sixty's volume when it changes. The macOS volume indicator is not suppressed and may also appear.")
+                        HStack(spacing: 10) {
+                            Text("Popup position")
+                            Spacer()
+                            Picker("Volume popup position", selection: $preferences.volumePopupPosition) {
+                                ForEach(VolumeFeedbackPopupPosition.allCases) { position in
+                                    Text(position.displayName).tag(position)
+                                }
+                            }
+                            .labelsHidden()
+                            .productionGlassPickerChrome()
+                            .pickerStyle(.segmented)
+                            .frame(width: 220)
+                        }
+                        .disabled(!preferences.showVolumePopup)
+                        Text("Briefly display Notch Sixty's volume when it changes. The macOS volume indicator is not suppressed and may also appear; macOS gives sandboxed apps no public way to hide it.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

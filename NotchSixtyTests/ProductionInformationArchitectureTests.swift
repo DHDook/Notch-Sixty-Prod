@@ -14,6 +14,55 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         XCTAssertEqual(VolumeFeedbackPresentation.readout(level: 0.678, muted: true), "Muted")
     }
 
+    func testVolumePopupPositionsPlaceThePopupInsideTheVisibleFrame() {
+        let visible = CGRect(x: 0, y: 40, width: 1440, height: 860)
+        let size = CGSize(width: 264, height: 88)
+
+        let bottom = VolumeFeedbackPopupPosition.bottomCenter.origin(for: size, in: visible)
+        XCTAssertEqual(bottom.x + size.width / 2, visible.midX, accuracy: 0.001)
+        XCTAssertEqual(bottom.y, visible.minY + 84, accuracy: 0.001)
+
+        let topRight = VolumeFeedbackPopupPosition.topRight.origin(for: size, in: visible)
+        XCTAssertGreaterThan(topRight.x, visible.midX)
+        XCTAssertGreaterThan(topRight.y, visible.midY)
+        XCTAssertTrue(
+            visible.contains(CGRect(origin: topRight, size: size)),
+            "top-right popup stays below the menu bar and on screen"
+        )
+    }
+
+    @MainActor
+    func testVolumePopupPreferencesPersistAcrossLaunchesAndBackups() throws {
+        let suite = "NotchSixty-VolumePopup-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let first = ApplicationPreferences(defaults: defaults)
+        XCTAssertFalse(first.showVolumePopup)
+        XCTAssertEqual(first.volumePopupPosition, .bottomCenter)
+        first.showVolumePopup = true
+        first.volumePopupPosition = .topRight
+
+        let relaunched = ApplicationPreferences(defaults: defaults)
+        XCTAssertTrue(relaunched.showVolumePopup)
+        XCTAssertEqual(relaunched.volumePopupPosition, .topRight)
+
+        var snapshot = relaunched.makeBackupSnapshot()
+        XCTAssertEqual(snapshot.volumePopupPosition, "topRight")
+
+        relaunched.volumePopupPosition = .bottomCenter
+        try relaunched.restoreBackupSnapshot(snapshot)
+        XCTAssertEqual(relaunched.volumePopupPosition, .topRight)
+
+        snapshot.volumePopupPosition = "nowhere"
+        relaunched.volumePopupPosition = .bottomCenter
+        try relaunched.restoreBackupSnapshot(snapshot)
+        XCTAssertEqual(
+            relaunched.volumePopupPosition, .bottomCenter,
+            "an unknown position in a backup leaves the current choice alone"
+        )
+    }
+
     func testVolumeFeedbackBackupFieldsAreOptionalForLegacySnapshots() throws {
         let json = #"{"appearance":"system","presence":"both","volumeStepResolution":16,"schemaVersion":1}"#
         let decoded = try JSONDecoder().decode(
