@@ -258,6 +258,25 @@ final class AudioUnitHostFoundationTests: XCTestCase {
         XCTAssertTrue(plan.requiresLatencyMatchedBypass)
     }
 
+    func testRefreshDiscoversOffTheMainThreadAndMatchesScan() async {
+        let component = descriptor(identity: identity, channels: [2])
+        let recorder = DiscoveryThreadRecorder()
+        let host = AudioUnitHostController(
+            catalog: ThreadRecordingCatalog(
+                components: [component],
+                recorder: recorder
+            )
+        )
+
+        await host.refresh()
+
+        XCTAssertEqual(recorder.ranOnMainThread, false)
+        XCTAssertFalse(host.scanInFlight)
+        XCTAssertNotNil(host.lastScanDate)
+        XCTAssertEqual(host.discoveredComponents, [component])
+        XCTAssertEqual(host.lifecycleByComponent[identity], .discovered)
+    }
+
     func testHostControllerScanInstallProbeAndEnableLifecycle() async throws {
         let component = descriptor(identity: identity, channels: [2, 12])
         let host = AudioUnitHostController(
@@ -438,6 +457,30 @@ final class AudioUnitHostFoundationTests: XCTestCase {
             supportsFullState: true,
             supportsHostBypass: true
         )
+    }
+}
+
+private final class DiscoveryThreadRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Bool?
+
+    var ranOnMainThread: Bool? {
+        lock.withLock { value }
+    }
+
+    func record() {
+        let onMain = Thread.isMainThread
+        lock.withLock { value = onMain }
+    }
+}
+
+private struct ThreadRecordingCatalog: AudioUnitComponentCataloging {
+    let components: [AudioUnitComponentDescriptor]
+    let recorder: DiscoveryThreadRecorder
+
+    func discoverEffects() -> [AudioUnitComponentDescriptor] {
+        recorder.record()
+        return components
     }
 }
 

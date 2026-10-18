@@ -142,7 +142,9 @@ final class ProductController: ObservableObject {
             profiles: profiles,
             roomStore: roomProjects.store
         )
-        self.recovery = ProductRecoveryController()
+        self.recovery = ProductRecoveryController(
+            store: .forCurrentProcess()
+        )
         self.headroomAssistant = HeadroomAssistantController(
             engine: audioEngine,
             profiles: profiles,
@@ -2605,10 +2607,39 @@ struct NotchSixtyApp: App {
     @StateObject private var preferences: ApplicationPreferences
     @StateObject private var featureFlags: FeatureFlags
 
+    /// Held until the process exits; see `ProductInstanceLock`.
+    private static var instanceLock: ProductInstanceLock?
+
     init() {
+        Self.claimSingleInstance()
         _product = StateObject(wrappedValue: ProductController())
         _preferences = StateObject(wrappedValue: ApplicationPreferences())
         _featureFlags = StateObject(wrappedValue: FeatureFlags())
+    }
+
+    /// A second process (another copy of the app with the same bundle
+    /// identifier, or a relaunch while one is still alive) hands focus to
+    /// the running instance and exits before it creates any audio or
+    /// recovery state. XCTest hosts are exempt and use in-memory recovery.
+    private static func claimSingleInstance() {
+        guard !ProductProcessEnvironment.isHostingTests else { return }
+        switch ProductInstanceLock.acquire() {
+        case .acquired(let lock):
+            instanceLock = lock
+        case .heldByAnotherInstance:
+            let ownPID = ProcessInfo.processInfo.processIdentifier
+            if let bundleID = Bundle.main.bundleIdentifier {
+                NSRunningApplication
+                    .runningApplications(withBundleIdentifier: bundleID)
+                    .first { $0.processIdentifier != ownPID }?
+                    .activate()
+            }
+            exit(EXIT_SUCCESS)
+        case .unavailable:
+            // Without the lock, fall back to the recovery record alone
+            // rather than refusing to launch.
+            break
+        }
     }
 
     private var trayInserted: Binding<Bool> {
