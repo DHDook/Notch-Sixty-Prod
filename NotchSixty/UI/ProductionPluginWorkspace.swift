@@ -83,13 +83,18 @@ private final class AudioUnitPluginEditorSession: ObservableObject, Identifiable
         do {
             let unit = try await Self.instantiate(descriptor.identity)
             if let initialState {
-                try Self.restore(initialState, to: unit.auAudioUnit)
+                try unit.withNodeAUAudioUnit { au in
+                    try Self.restore(initialState, to: au)
+                }
             }
             self.unit = unit
-            parameters = unit.auAudioUnit.parameterTree?.allParameters ?? []
+            parameters = unit.withNodeAUAudioUnit { au in
+                au.parameterTree?.allParameters ?? []
+            }
             if descriptor.hasCustomView {
+                let au = unit.withNodeAUAudioUnit { au in au }
                 customViewController =
-                    await Self.requestViewController(for: unit.auAudioUnit)
+                    await Self.requestViewController(for: au)
             }
             loadState = .ready
         } catch {
@@ -113,9 +118,9 @@ private final class AudioUnitPluginEditorSession: ObservableObject, Identifiable
         guard let unit else {
             throw AudioUnitPluginEditorError.stateUnavailable
         }
-        guard let state =
-                unit.auAudioUnit.fullState
-                    ?? unit.auAudioUnit.fullStateForDocument else {
+        guard let state = unit.withNodeAUAudioUnit({ au in
+                au.fullState ?? au.fullStateForDocument
+              }) else {
             throw AudioUnitPluginEditorError.stateUnavailable
         }
         guard PropertyListSerialization.propertyList(
