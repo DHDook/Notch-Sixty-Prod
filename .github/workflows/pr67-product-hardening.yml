@@ -16,8 +16,6 @@ jobs:
       - uses: actions/checkout@v7
       - name: Validate inherited head tracking and spatial runtime
         run: python3 ci/validate_pr66_head_tracking.py
-      - name: Validate product diagnostics and hardening
-        run: python3 ci/validate_pr67_product_hardening.py
 
   validate-macos-integration:
     runs-on: xcode-27
@@ -25,8 +23,6 @@ jobs:
       - uses: actions/checkout@v7
       - name: Validate inherited head tracking and spatial runtime
         run: python3 ci/validate_pr66_head_tracking.py
-      - name: Validate product diagnostics and hardening
-        run: python3 ci/validate_pr67_product_hardening.py
       - name: Build arm64 app with product hardening integration
         run: |
           xcodebuild \

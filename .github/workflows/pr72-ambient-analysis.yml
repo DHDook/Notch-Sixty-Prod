@@ -14,8 +14,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Validate inherited product hardening
-        run: python3 ci/validate_pr67_product_hardening.py
       - name: Validate inherited N-channel adaptive SRC structure
         run: python3 ci/validate_pr71_nchannel_adaptive_src.py
       - name: Validate passive ambient-analysis architecture

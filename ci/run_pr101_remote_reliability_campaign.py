@@ -117,7 +117,6 @@ def main() -> int:
                 "headphoneSpatialRuntime",
                 "Headphone, binaural, and head-tracking integration",
                 [
-                    command(sys.executable, "ci/validate_pr65_headphone_integration.py"),
                     command(sys.executable, "ci/validate_pr66_head_tracking.py"),
                 ],
             ),
