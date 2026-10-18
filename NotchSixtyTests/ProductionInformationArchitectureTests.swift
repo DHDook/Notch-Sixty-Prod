@@ -1,3 +1,4 @@
+import AppKit
 import CryptoKit
 import XCTest
 @testable import NotchSixty
@@ -36,6 +37,66 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         XCTAssertEqual(tenths(-27), "−27.0 dB")
         XCTAssertEqual(tenths(-27.5), "−27.5 dB")
         XCTAssertEqual(tenths(0), "0.0 dB")
+    }
+
+    /// The menu bar reserves the widest template's width; every readout a
+    /// mode can show must fit inside it, or the tray item would resize.
+    func testMenuBarReadoutsFitTheirReservedWidth() {
+        let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
+        func width(_ text: String) -> CGFloat {
+            (text as NSString).size(withAttributes: [.font: font]).width
+        }
+        func reserved(decibels: Bool, tenths: Bool) -> CGFloat {
+            VolumeFeedbackPresentation.readoutWidthTemplates(decibels: decibels, alwaysTenths: tenths)
+                .map(width).max() ?? 0
+        }
+
+        let percentSlot = reserved(decibels: false, tenths: false)
+        for percent in 0...100 {
+            let text = VolumeFeedbackPresentation.readout(level: Double(percent) / 100, muted: false)
+            XCTAssertLessThanOrEqual(width(text), percentSlot + 0.01, text)
+        }
+
+        for step in [0.5, 1, 1.5, 3] {
+            let tenths = step.rounded() != step
+            let slot = reserved(decibels: true, tenths: tenths)
+            var db = 0.0
+            while db >= -80 {
+                let text = VolumeFeedbackPresentation.readout(
+                    level: MasterVolumeConfiguration.level(forSoftwareTaperDB: db),
+                    muted: false,
+                    decibels: true,
+                    alwaysTenths: tenths
+                )
+                XCTAssertLessThanOrEqual(width(text), slot + 0.01, text)
+                db -= step
+            }
+            for text in ["−∞ dB", "Muted"] {
+                XCTAssertLessThanOrEqual(width(text), slot + 0.01, text)
+            }
+        }
+    }
+
+    /// dB-scaled bar and fader: equal distances are equal dB, −80 dB just
+    /// above the bottom stop, silence at the stop, and the inverse round-trips.
+    func testDecibelScalePositionIsLinearInDecibels() {
+        func position(_ db: Double) -> Double {
+            VolumeFeedbackPresentation.decibelScalePosition(
+                level: MasterVolumeConfiguration.level(forSoftwareTaperDB: db)
+            )
+        }
+        XCTAssertEqual(position(0), 1, accuracy: 1e-9)
+        XCTAssertEqual(position(-40), 0.5, accuracy: 1e-9)
+        XCTAssertEqual(position(-20), 0.75, accuracy: 1e-9)
+        XCTAssertEqual(position(-80), 0, accuracy: 1e-9)
+        XCTAssertEqual(VolumeFeedbackPresentation.decibelScalePosition(level: 0), 0)
+
+        XCTAssertEqual(VolumeFeedbackPresentation.level(forDecibelScalePosition: 0), 0)
+        XCTAssertEqual(VolumeFeedbackPresentation.level(forDecibelScalePosition: 1), 1, accuracy: 1e-12)
+        for p in stride(from: 0.05, through: 1.0, by: 0.05) {
+            let level = VolumeFeedbackPresentation.level(forDecibelScalePosition: p)
+            XCTAssertEqual(VolumeFeedbackPresentation.decibelScalePosition(level: level), p, accuracy: 1e-9)
+        }
     }
 
     func testDecibelKeyStepsLandOnTheStepGridBetweenSilenceAndZero() throws {
