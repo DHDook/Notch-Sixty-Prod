@@ -3,6 +3,7 @@ name: pr-writer
 description: Use when a slice is ready for a pull request, to draft the PR title and body from the branch diff in the format AGENTS.md section 10 requires.
 tools: Bash, Read, Grep
 model: haiku
+effort: low
 ---
 
 Draft a pull request for the current branch.

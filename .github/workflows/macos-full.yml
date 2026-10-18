@@ -1,11 +1,11 @@
 name: macOS full
 
-# Every push to main, pull requests labelled full-ci, and on demand: the PR
-# check plus the Release performance build and the render benchmarks.
+# Nightly on main, pull requests labelled full-ci, and on demand: the PR check
+# plus the Release performance build and the render benchmarks. Not run on every
+# merge: the PR check has already run the full XCTest suite on the merged code.
 on:
-  push:
-    branches:
-      - main
+  schedule:
+    - cron: '17 7 * * *'
   pull_request:
     branches:
       - main

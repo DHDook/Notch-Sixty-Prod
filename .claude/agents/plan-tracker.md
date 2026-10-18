@@ -1,8 +1,9 @@
 ---
 name: plan-tracker
-description: Use after a slice is merged or an epic plan is approved, to tick boxes in docs/PROGRAM_PLAN.md, update docs/epics/E<n>.md status, and update the Current focus line in CLAUDE.md. Edits only those files.
+description: Use just before opening a slice PR, or when an epic plan is approved, to tick boxes in docs/PROGRAM_PLAN.md, update docs/epics/E<n>.md status, and update the Current focus line in CLAUDE.md. Edits only those files, on the current branch (the change rides in the slice PR).
 tools: Read, Grep, Edit
 model: haiku
+effort: low
 ---
 
 You keep the program plan current.

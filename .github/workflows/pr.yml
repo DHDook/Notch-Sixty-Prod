@@ -6,6 +6,11 @@ on:
   pull_request:
     branches:
       - main
+    # Docs-only PRs (plans, epic notes, guides) skip the build. A PR that also changes code
+    # still runs everything.
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
   workflow_dispatch:
 
 permissions:

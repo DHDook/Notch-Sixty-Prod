@@ -301,8 +301,11 @@ you pull while a session is open, restart the session so new agents and instruct
   `code-scout`, `build-test-runner`, `plan-tracker` and `pr-writer` (Haiku), and
   `realtime-reviewer` (Sonnet).
 
-The owner's part each cycle: start a session, approve the plan, review and merge the PR, and do
-the bench checks the PR lists. Switch to `/model opus` for design-heavy sessions (E4, E6, E10,
+The owner's part each cycle: start a session with `/next`, approve new epic plans, review and
+merge PRs labelled `needs-owner` (engine, transport, ANC/MIMO, protection, workflows, policy),
+and do the bench checks a PR lists. Claude merges other PRs itself once CI is green, records plan
+progress inside each PR, and continues for up to three PRs per session. CI: the PR check (about
+3–5 minutes) runs on every code PR and skips docs-only PRs; the full macOS run is nightly. Switch to `/model opus` for design-heavy sessions (E4, E6, E10,
 E19) if Sonnet's execution falls short.
 
 Order: E2 first (small, proves the loop), then E1, then E3 at the bench; E5 can run at any time.
