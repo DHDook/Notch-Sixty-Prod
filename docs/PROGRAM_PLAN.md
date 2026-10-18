@@ -70,7 +70,7 @@ XCTest is green on macOS 27. (Owner, 17 Oct 2026: no macOS 26 machine; 26 suppor
 ### E2 macOS 26 support
 
 - [x] Set `MACOSX_DEPLOYMENT_TARGET` to 26.0 and fix every compile error with `#available` gates (#132)
-- [ ] Check every macOS 27-only API and UI treatment for a macOS 26 fallback (#134, in review)
+- [x] Check every macOS 27-only API and UI treatment for a macOS 26 fallback (#134)
 - [x] ~~Add a macOS 26 job to the full CI workflow~~ and ~~re-run H01–H08 on a macOS 26 machine~~:
       dropped (owner, 17 Oct 2026). There is no macOS 26 machine; compatibility is checked by building
       at the 26.0 target, which E1's full macOS build must keep doing. Low priority.
