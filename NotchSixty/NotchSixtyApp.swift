@@ -1446,23 +1446,41 @@ enum ApplicationPresenceMode: String, CaseIterable, Identifiable {
     }
 }
 
+/// The volume-key step size. Raw values are persisted: positive ones are
+/// slider fractions (1/16 …), negative ones are dB steps in tenths of a dB.
 enum ApplicationVolumeStepResolution: Int, CaseIterable, Identifiable {
     case standard = 16
     case fine = 32
     case precision = 64
+    case halfDecibel = -5
+    case oneDecibel = -10
+    case twoDecibels = -20
+    case fourDecibels = -40
 
     var id: Int { rawValue }
-    var denominator: Int { rawValue }
+
+    static let fractions: [Self] = [.standard, .fine, .precision]
+    static let decibelSteps: [Self] = [.halfDecibel, .oneDecibel, .twoDecibels, .fourDecibels]
+
+    var usesDecibels: Bool { rawValue < 0 }
+
+    var keyStep: MasterVolumeKeyStep {
+        usesDecibels
+            ? .decibels(Double(-rawValue) / 10)
+            : .fraction(denominator: rawValue)
+    }
 
     var displayName: String {
         switch self {
         case .standard: return "1/16"
         case .fine: return "1/32"
         case .precision: return "1/64"
+        case .halfDecibel: return "0.5 dB"
+        case .oneDecibel: return "1 dB"
+        case .twoDecibels: return "2 dB"
+        case .fourDecibels: return "4 dB"
         }
     }
-
-    var percentPerPress: Double { 100.0 / Double(rawValue) }
 }
 
 enum VolumeFeedbackPresentation {
@@ -1471,8 +1489,33 @@ enum VolumeFeedbackPresentation {
         return Int((min(max(level, 0.0), 1.0) * 100.0).rounded())
     }
 
-    static func readout(level: Double, muted: Bool) -> String {
-        muted ? "Muted" : "\(percentage(level))%"
+    /// With `decibels`, the software taper's attenuation: "−12 dB" climbing
+    /// to "0 dB" at full scale, and "−∞ dB" at silence.
+    /// `alwaysTenths` keeps one decimal ("−27.0 dB") so a 0.5 dB step
+    /// never changes the readout's width in the menu bar.
+    static func readout(
+        level: Double,
+        muted: Bool,
+        decibels: Bool = false,
+        alwaysTenths: Bool = false
+    ) -> String {
+        if muted { return "Muted" }
+        guard decibels else { return "\(percentage(level))%" }
+        return decibelReadout(
+            MasterVolumeConfiguration.softwareTaperDB(forLevel: level),
+            alwaysTenths: alwaysTenths
+        )
+    }
+
+    static func decibelReadout(_ decibels: Double?, alwaysTenths: Bool = false) -> String {
+        guard let decibels else { return "−∞ dB" }
+        let tenths = (decibels * 10).rounded()
+        guard tenths < 0 else { return alwaysTenths ? "0.0 dB" : "0 dB" }
+        let magnitude = -tenths / 10
+        let number = magnitude.rounded() == magnitude && !alwaysTenths
+            ? String(format: "%.0f", magnitude)
+            : String(format: "%.1f", magnitude)
+        return "−\(number) dB"
     }
 }
 
@@ -1521,6 +1564,12 @@ enum VolumeFeedbackPopupStyle: Equatable {
 /// Frame, style, window level and display time of Notch Sixty's popup.
 struct VolumeFeedbackPopupLayout: Equatable {
     static let standardSize = CGSize(width: 264, height: 88)
+    /// Cover mode spans the system popup's full width but not its full
+    /// height: that frame includes a transparent shadow margin, and our
+    /// one-row content looked empty in it. The panel sits just under the menu
+    /// bar, where the visible system popup starts.
+    static let coverHeight: CGFloat = 104
+    static let coverTopInset: CGFloat = 6
     static let gapBesideSystemPopup: CGFloat = 8
 
     let frame: CGRect
@@ -1554,7 +1603,12 @@ struct VolumeFeedbackPopupLayout: Equatable {
                 // One level above the system popup, and up longer than it, so
                 // it never peeks out before or after ours.
                 return VolumeFeedbackPopupLayout(
-                    frame: system,
+                    frame: CGRect(
+                        x: system.minX,
+                        y: system.maxY - coverTopInset - coverHeight,
+                        width: system.width,
+                        height: coverHeight
+                    ),
                     style: .solidGlass,
                     level: NSWindow.Level(
                         rawValue: SystemVolumePopupGeometry.windowLevel.rawValue + 1
@@ -1589,7 +1643,9 @@ private final class VolumeFeedbackHUDController {
     func show(
         _ configuration: MasterVolumeConfiguration,
         position: VolumeFeedbackPopupPosition,
-        coverSystemPopup: Bool
+        coverSystemPopup: Bool,
+        decibels: Bool,
+        alwaysTenths: Bool
     ) {
         guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
         let layout = VolumeFeedbackPopupLayout.make(
@@ -1620,7 +1676,9 @@ private final class VolumeFeedbackHUDController {
         window.contentView = NSHostingView(
             rootView: VolumeFeedbackHUDView(
                 configuration: configuration,
-                style: layout.style
+                style: layout.style,
+                decibels: decibels,
+                alwaysTenths: alwaysTenths
             )
             .frame(width: layout.frame.width, height: layout.frame.height)
         )
@@ -1644,6 +1702,17 @@ private final class VolumeFeedbackHUDController {
 private struct VolumeFeedbackHUDView: View {
     let configuration: MasterVolumeConfiguration
     let style: VolumeFeedbackPopupStyle
+    let decibels: Bool
+    let alwaysTenths: Bool
+
+    private var readout: String {
+        VolumeFeedbackPresentation.readout(
+            level: configuration.level,
+            muted: configuration.muted,
+            decibels: decibels,
+            alwaysTenths: alwaysTenths
+        )
+    }
 
     private var shape: RoundedRectangle {
         RoundedRectangle(cornerRadius: style == .solidGlass ? 28 : 22)
@@ -1663,11 +1732,7 @@ private struct VolumeFeedbackHUDView: View {
             }
             .accessibilityElement(children: .combine)
             .accessibilityLabel(
-                "Notch Sixty volume " +
-                    VolumeFeedbackPresentation.readout(
-                        level: configuration.level,
-                        muted: configuration.muted
-                    )
+                "Notch Sixty volume " + readout
             )
     }
 
@@ -1686,12 +1751,7 @@ private struct VolumeFeedbackHUDView: View {
                         .tracking(1.2)
                         .foregroundStyle(.secondary)
                     Spacer(minLength: 8)
-                    Text(
-                        VolumeFeedbackPresentation.readout(
-                            level: configuration.level,
-                            muted: configuration.muted
-                        )
-                    )
+                    Text(readout)
                     .font(style == .solidGlass ? .title3.weight(.semibold) : .headline)
                     .monospacedDigit()
                 }
@@ -1709,29 +1769,30 @@ private struct MenuBarVolumeLabel: View {
     @ObservedObject var engine: AudioIOEngine
     @ObservedObject var preferences: ApplicationPreferences
 
+    private var readout: String {
+        VolumeFeedbackPresentation.readout(
+            level: engine.masterVolumeConfiguration.level,
+            muted: engine.masterVolumeConfiguration.muted,
+            decibels: preferences.showsDecibelReadout(for: engine),
+            alwaysTenths: preferences.decibelReadoutShowsTenths
+        )
+    }
+
     var body: some View {
         HStack(spacing: 5) {
             Image("TrayIcon")
                 .renderingMode(.template)
             if preferences.showVolumeInMenuBar {
-                Text(
-                    VolumeFeedbackPresentation.readout(
-                        level: engine.masterVolumeConfiguration.level,
-                        muted: engine.masterVolumeConfiguration.muted
-                    )
-                )
-                .font(.system(size: 12, weight: .medium))
-                .monospacedDigit()
+                Text(readout)
+                    .font(.system(size: 12, weight: .medium))
+                    .monospacedDigit()
             }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
             "Notch Sixty" + (
                 preferences.showVolumeInMenuBar
-                ? ", volume " + VolumeFeedbackPresentation.readout(
-                    level: engine.masterVolumeConfiguration.level,
-                    muted: engine.masterVolumeConfiguration.muted
-                ) : ""
+                ? ", volume " + readout : ""
             )
         )
     }
@@ -1761,7 +1822,7 @@ final class ApplicationPreferences: ObservableObject {
     @Published var volumeStepResolution: ApplicationVolumeStepResolution {
         didSet {
             defaults.set(volumeStepResolution.rawValue, forKey: Key.volumeStepResolution)
-            audioEngine?.setSoftwareVolumeKeyStepDenominator(volumeStepResolution.denominator)
+            audioEngine?.setSoftwareVolumeKeyStep(volumeStepResolution.keyStep)
         }
     }
 
@@ -1867,9 +1928,19 @@ final class ApplicationPreferences: ObservableObject {
         }
     }
 
+    /// dB readouts follow a dB step size, but only on the software volume,
+    /// whose taper defines the dB value; device-mode volume stays in percent.
+    func showsDecibelReadout(for engine: AudioIOEngine) -> Bool {
+        volumeStepResolution.usesDecibels
+            && engine.masterVolumeCapabilities.controlMode == .softwareDSP
+    }
+
+    /// Half-dB steps land on .0 and .5, so their readout always shows tenths.
+    var decibelReadoutShowsTenths: Bool { volumeStepResolution == .halfDecibel }
+
     func apply(to audioEngine: AudioIOEngine) {
         self.audioEngine = audioEngine
-        audioEngine.setSoftwareVolumeKeyStepDenominator(volumeStepResolution.denominator)
+        audioEngine.setSoftwareVolumeKeyStep(volumeStepResolution.keyStep)
         guard !didApplyInitialPreferences else { return }
         didApplyInitialPreferences = true
         volumeFeedbackObservation = audioEngine.$masterVolumeConfiguration
@@ -1880,7 +1951,9 @@ final class ApplicationPreferences: ObservableObject {
                 self.volumeHUD.show(
                     configuration,
                     position: self.volumePopupPosition,
-                    coverSystemPopup: self.coversSystemVolumePopup
+                    coverSystemPopup: self.coversSystemVolumePopup,
+                    decibels: self.showsDecibelReadout(for: audioEngine),
+                    alwaysTenths: self.decibelReadoutShowsTenths
                 )
             }
         applyAppearance()
@@ -2335,17 +2408,23 @@ private struct ProductionSettingsView: View {
                             Text("Step size")
                             Spacer()
                             Picker("Volume key step size", selection: $preferences.volumeStepResolution) {
-                                ForEach(ApplicationVolumeStepResolution.allCases) { resolution in
-                                    Text(resolution.displayName).tag(resolution)
+                                Section("Fraction of range") {
+                                    ForEach(ApplicationVolumeStepResolution.fractions) { resolution in
+                                        Text(resolution.displayName).tag(resolution)
+                                    }
+                                }
+                                Section("Decibels") {
+                                    ForEach(ApplicationVolumeStepResolution.decibelSteps) { resolution in
+                                        Text(resolution.displayName).tag(resolution)
+                                    }
                                 }
                             }
                             .labelsHidden()
-                            .productionGlassPickerChrome()
-                            .pickerStyle(.segmented)
-                            .frame(width: 220)
+                            .pickerStyle(.menu)
+                            .frame(width: 140)
                         }
 
-                        Text("Controls Notch Sixty's software master-volume change for each intercepted volume-key press. 1/16 = 6.25%, 1/32 = 3.125%, and 1/64 = 1.5625%. The physical output-device volume is not stepped by this setting.")
+                        Text("Controls Notch Sixty's software master-volume change for each intercepted volume-key press. Fractions move the slider by 1/16, 1/32 or 1/64 of its range. dB steps change the level by a fixed amount, down to −80 dB and then silence, and show the volume in dB (0 dB at full volume) in the menu bar and popup. The physical output-device volume is not stepped by this setting.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
 
@@ -2517,13 +2596,11 @@ private struct ProductionSettingsView: View {
                         }
                     }
 
-                    if featureFlags.isEnabled(.uiScope) {
-                        settingsCard(title: "Developer Tools", systemImage: "wrench.adjustable") {
-                            Toggle("Show developer tools", isOn: $showDeveloperTools)
-                            Text("Adds a Developer menu with Hardware Acceptance and Acoustic Research, the bench and research workspaces used to qualify a system.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
+                    settingsCard(title: "Developer Tools", systemImage: "wrench.adjustable") {
+                        Toggle("Show developer tools", isOn: $showDeveloperTools)
+                        Text("Adds a Developer menu with Hardware Acceptance and Acoustic Research, the bench and research workspaces used to qualify a system.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
 
                     #if DEBUG
@@ -2606,17 +2683,15 @@ private struct ProductionHelpMenuCommand: View {
     }
 }
 
-/// The Developer menu: bench and research workspaces that the simplified
-/// layout (E5) keeps out of the sidebar. Shown only when the layout flag is on
-/// and the user has turned on "Show developer tools" in Settings.
+/// The Developer menu: bench and research workspaces kept out of the sidebar.
+/// Shown only when the user has turned on "Show developer tools" in Settings.
 private struct ProductionDeveloperCommands: Commands {
     @ObservedObject var navigation: ProductionNavigation
-    @ObservedObject var featureFlags: FeatureFlags
     @AppStorage(PreferenceKeys.Application.showDeveloperTools)
     private var showDeveloperTools = false
 
     var body: some Commands {
-        if featureFlags.isEnabled(.uiScope), showDeveloperTools {
+        if showDeveloperTools {
             CommandMenu("Developer") {
                 ProductionDeveloperMenuItems(navigation: navigation)
             }
@@ -2641,6 +2716,28 @@ private struct ProductionDeveloperMenuItems: View {
 private final class NotchSixtyAppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
+    }
+}
+
+extension View {
+    /// Notch Sixty uses switches, never checkboxes. Applied at each window's
+    /// root; the style is inherited, so every Toggle below it, including
+    /// those in Forms, renders as a switch without a per-call modifier.
+    func productionToggleStyle() -> some View {
+        toggleStyle(.switch)
+    }
+
+    /// Settings' rows are compact, so its switches are one size down.
+    func productionCompactToggleStyle() -> some View {
+        toggleStyle(CompactSwitchToggleStyle())
+    }
+}
+
+private struct CompactSwitchToggleStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Toggle(configuration)
+            .toggleStyle(.switch)
+            .controlSize(.small)
     }
 }
 
@@ -2698,6 +2795,7 @@ struct NotchSixtyApp: App {
         Window("Notch Sixty", id: "main") {
             ProductionRootView(product: product, navigation: navigation)
                 .environmentObject(featureFlags)
+                .productionToggleStyle()
                 .task {
                     product.prepareForUse()
                     preferences.apply(to: product.audioEngine)
@@ -2707,12 +2805,13 @@ struct NotchSixtyApp: App {
         .windowResizability(.contentMinSize)
         .windowToolbarStyle(.unified)
         .commands {
-            ProductionDeveloperCommands(navigation: navigation, featureFlags: featureFlags)
+            ProductionDeveloperCommands(navigation: navigation)
         }
 
         MenuBarExtra(isInserted: trayInserted) {
             ProductionMenuBarView(product: product)
                 .environmentObject(featureFlags)
+                .productionToggleStyle()
                 .task {
                     product.prepareForUse()
                     preferences.apply(to: product.audioEngine)
@@ -2728,10 +2827,12 @@ struct NotchSixtyApp: App {
                 product: product,
                 featureFlags: featureFlags
             )
+            .productionCompactToggleStyle()
         }
 
         Window("Notch Sixty Help", id: ProductionReferenceNavigator.windowID) {
             ProductionHelpView(navigator: product.reference)
+                .productionToggleStyle()
         }
         .defaultSize(width: 960, height: 720)
         .commands {
@@ -2743,6 +2844,7 @@ struct NotchSixtyApp: App {
         #if DEBUG
         Window("Engineering Validation", id: "engineering-validation") {
             EngineeringValidationView(engine: product.audioEngine)
+                .productionToggleStyle()
                 .task { product.prepareForUse() }
         }
         .defaultSize(width: 1000, height: 760)

@@ -4,7 +4,6 @@ import SwiftUI
 struct ProductionDynamicsView: View {
     @ObservedObject var engine: AudioIOEngine
     var reference: ProductionReferenceNavigator? = nil
-    @EnvironmentObject private var featureFlags: FeatureFlags
     @State private var selectedModule: ProductionDynamicsModule = .compressor
     @State private var expandedMoreGroups: Set<String> = []
     @State private var mainsDetectInFlight = false
@@ -58,11 +57,7 @@ struct ProductionDynamicsView: View {
     private var moduleNavigator: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 4) {
-                ForEach(
-                    ProductionDynamicsLayout.groups(
-                        signalChainOrder: featureFlags.isEnabled(.uiScope)
-                    )
-                ) { group in
+                ForEach(ProductionDynamicsLayout.groups) { group in
                     Text(group.title.uppercased())
                         .font(.caption2.bold())
                         .tracking(0.6)
@@ -905,29 +900,6 @@ private struct DynamicsParameterRow: View {
     }
 }
 
-enum ProductionDynamicsGroup: String, CaseIterable, Identifiable {
-    case dynamics
-    case restoration
-    case levelDialogue
-    case protection
-    case conditioning
-
-    var id: String { rawValue }
-    var title: String {
-        switch self {
-        case .dynamics: return "DYNAMICS"
-        case .restoration: return "RESTORATION"
-        case .levelDialogue: return "LEVEL & DIALOGUE"
-        case .protection: return "PROTECTION"
-        case .conditioning: return "CONDITIONING"
-        }
-    }
-
-    var modules: [ProductionDynamicsModule] {
-        ProductionDynamicsModule.allCases.filter { $0.group == self }
-    }
-}
-
 enum ProductionDynamicsModule: String, CaseIterable, Identifiable, Hashable {
     case compressor
     case multiband
@@ -951,16 +923,6 @@ enum ProductionDynamicsModule: String, CaseIterable, Identifiable, Hashable {
     case dcOffset
 
     var id: String { rawValue }
-
-    var group: ProductionDynamicsGroup {
-        switch self {
-        case .compressor, .multiband, .expander, .pauseGate, .gainRider: return .dynamics
-        case .denoiser, .deEsser, .mainsHum, .infrasonic: return .restoration
-        case .loudnessMatch, .loudnessContour, .dialogueLeveler: return .levelDialogue
-        case .limiter, .softClipper, .automaticHeadroom, .oversampling: return .protection
-        case .deHarsh, .stereoWidener, .stereoMode, .dcOffset: return .conditioning
-        }
-    }
 
     var title: String {
         switch self {
@@ -1063,10 +1025,9 @@ enum ProductionDynamicsModule: String, CaseIterable, Identifiable, Hashable {
     }
 }
 
-/// The dynamics navigator's groups. Today's layout groups processors by kind.
-/// The E5 layout (`e5.ui-scope`) lists them in the order the engine runs them
-/// (`docs/DSP_KERNEL.md`) and folds niche processors under "More" in their own
-/// group, so the list still reads as the signal path.
+/// The dynamics navigator's groups, in the order the engine runs the
+/// processors (`docs/DSP_KERNEL.md`). Niche processors fold under "More" in
+/// their own group, so the list still reads as the signal path.
 enum ProductionDynamicsLayout {
     struct Group: Identifiable, Equatable {
         let id: String
@@ -1101,15 +1062,7 @@ enum ProductionDynamicsLayout {
         }
     }
 
-    static func groups(signalChainOrder: Bool) -> [Group] {
-        signalChainOrder ? signalChainGroups : legacyGroups
-    }
-
-    static let legacyGroups: [Group] = ProductionDynamicsGroup.allCases.map { group in
-        Group(id: group.rawValue, title: group.title, modules: group.modules)
-    }
-
-    static let signalChainGroups: [Group] = [
+    static let groups: [Group] = [
         Group(
             id: "input",
             title: "Input & Clean-up",

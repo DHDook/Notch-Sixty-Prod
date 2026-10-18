@@ -14,6 +14,98 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         XCTAssertEqual(VolumeFeedbackPresentation.readout(level: 0.678, muted: true), "Muted")
     }
 
+    func testDecibelVolumeReadoutClimbsToZeroAtFullScale() {
+        XCTAssertEqual(VolumeFeedbackPresentation.readout(level: 1, muted: false, decibels: true), "0 dB")
+        let twelveDown = MasterVolumeConfiguration.level(forSoftwareTaperDB: -12)
+        XCTAssertEqual(VolumeFeedbackPresentation.readout(level: twelveDown, muted: false, decibels: true), "−12 dB")
+        let halfDown = MasterVolumeConfiguration.level(forSoftwareTaperDB: -0.5)
+        XCTAssertEqual(VolumeFeedbackPresentation.readout(level: halfDown, muted: false, decibels: true), "−0.5 dB")
+        XCTAssertEqual(VolumeFeedbackPresentation.readout(level: 0, muted: false, decibels: true), "−∞ dB")
+        XCTAssertEqual(VolumeFeedbackPresentation.readout(level: 0.5, muted: true, decibels: true), "Muted")
+        XCTAssertEqual(VolumeFeedbackPresentation.readout(level: 0.678, muted: false), "68%")
+
+        // Half-dB mode keeps one decimal so the menu bar readout never resizes.
+        let tenths = { (db: Double) in
+            VolumeFeedbackPresentation.readout(
+                level: MasterVolumeConfiguration.level(forSoftwareTaperDB: db),
+                muted: false,
+                decibels: true,
+                alwaysTenths: true
+            )
+        }
+        XCTAssertEqual(tenths(-27), "−27.0 dB")
+        XCTAssertEqual(tenths(-27.5), "−27.5 dB")
+        XCTAssertEqual(tenths(0), "0.0 dB")
+    }
+
+    func testDecibelKeyStepsLandOnTheStepGridBetweenSilenceAndZero() throws {
+        func db(_ level: Double) throws -> Double {
+            try XCTUnwrap(MasterVolumeConfiguration.softwareTaperDB(forLevel: level))
+        }
+        let oneDB = MasterVolumeKeyStep.decibels(1)
+        XCTAssertEqual(try db(oneDB.level(afterPress: -1, from: 1)), -1, accuracy: 1e-9)
+        XCTAssertEqual(oneDB.level(afterPress: 1, from: 1), 1, "capped at 0 dB")
+
+        // Off-grid levels snap to the next whole step in the pressed direction.
+        let offGrid = MasterVolumeConfiguration.level(forSoftwareTaperDB: -12.3)
+        XCTAssertEqual(try db(oneDB.level(afterPress: 1, from: offGrid)), -12, accuracy: 1e-9)
+        XCTAssertEqual(try db(oneDB.level(afterPress: -1, from: offGrid)), -13, accuracy: 1e-9)
+
+        var level = 1.0
+        for _ in 0..<4 { level = MasterVolumeKeyStep.decibels(0.5).level(afterPress: -1, from: level) }
+        XCTAssertEqual(try db(level), -2, accuracy: 1e-9, "four half-dB presses")
+        for _ in 0..<4 { level = MasterVolumeKeyStep.decibels(0.5).level(afterPress: 1, from: level) }
+        XCTAssertEqual(level, 1, accuracy: 1e-9)
+
+        let floor = MasterVolumeConfiguration.level(forSoftwareTaperDB: MasterVolumeKeyStep.decibelFloor)
+        let fourDB = MasterVolumeKeyStep.decibels(4)
+        XCTAssertEqual(fourDB.level(afterPress: -1, from: floor), 0, "below the floor is silence")
+        XCTAssertEqual(fourDB.level(afterPress: 1, from: 0), floor, accuracy: 1e-12, "up from silence")
+        XCTAssertEqual(fourDB.level(afterPress: -1, from: 0), 0)
+    }
+
+    func testFractionKeyStepsAndStepValidationAreUnchanged() {
+        XCTAssertEqual(MasterVolumeKeyStep.fraction(denominator: 16).level(afterPress: -1, from: 1), 15.0 / 16, accuracy: 1e-12)
+        XCTAssertEqual(MasterVolumeKeyStep.fraction(denominator: 64).level(afterPress: 1, from: 1), 1)
+        XCTAssertEqual(MasterVolumeKeyStep.fraction(denominator: 16).level(afterPress: -1, from: 0), 0)
+        XCTAssertTrue(MasterVolumeKeyStep.fraction(denominator: 32).isValid)
+        XCTAssertFalse(MasterVolumeKeyStep.fraction(denominator: 10).isValid)
+        XCTAssertTrue(MasterVolumeKeyStep.decibels(0.5).isValid)
+        XCTAssertFalse(MasterVolumeKeyStep.decibels(0).isValid)
+        XCTAssertFalse(MasterVolumeKeyStep.decibels(.nan).isValid)
+    }
+
+    func testVolumeStepResolutionKeepsStoredValuesAndMapsDecibelSteps() {
+        // Raw values are persisted in UserDefaults and backups.
+        XCTAssertEqual(ApplicationVolumeStepResolution.standard.rawValue, 16)
+        XCTAssertEqual(ApplicationVolumeStepResolution.fine.rawValue, 32)
+        XCTAssertEqual(ApplicationVolumeStepResolution.precision.rawValue, 64)
+        XCTAssertEqual(ApplicationVolumeStepResolution.fine.keyStep, .fraction(denominator: 32))
+        XCTAssertFalse(ApplicationVolumeStepResolution.fine.usesDecibels)
+        XCTAssertEqual(
+            ApplicationVolumeStepResolution.decibelSteps.map(\.keyStep),
+            [.decibels(0.5), .decibels(1), .decibels(2), .decibels(4)]
+        )
+        XCTAssertTrue(ApplicationVolumeStepResolution.decibelSteps.allSatisfy(\.usesDecibels))
+        XCTAssertEqual(
+            Set(ApplicationVolumeStepResolution.fractions + ApplicationVolumeStepResolution.decibelSteps),
+            Set(ApplicationVolumeStepResolution.allCases)
+        )
+        for resolution in ApplicationVolumeStepResolution.allCases {
+            XCTAssertTrue(resolution.keyStep.isValid, "\(resolution)")
+        }
+    }
+
+    func testUserGuideListsALoneSameNameArticleWithoutAHeading() throws {
+        let gettingStarted = ProductionUserGuideCatalog.articles.filter { $0.category == .gettingStarted }
+        XCTAssertEqual(gettingStarted.map(\.title), ["Getting Started"])
+        XCTAssertFalse(ProductionUserGuideCategory.gettingStarted.showsSidebarHeader(for: gettingStarted))
+
+        let processing = ProductionUserGuideCatalog.articles.filter { $0.category == .processing }
+        XCTAssertTrue(ProductionUserGuideCategory.processing.showsSidebarHeader(for: processing))
+        XCTAssertFalse(ProductionUserGuideCategory.processing.showsSidebarHeader(for: []))
+    }
+
     func testVolumePopupLayoutPlacesGlassPopupBesideOrOverTheSystemPopup() {
         // 1920 × 1080 display with a 30 pt menu bar, as measured on macOS 27.
         let visible = CGRect(x: 0, y: 0, width: 1920, height: 1050)
@@ -39,7 +131,12 @@ final class ProductionInformationArchitectureTests: XCTestCase {
 
         let cover = VolumePopupLayoutFixture.make(.topRight, cover: true, visible)
         XCTAssertEqual(cover.style, .solidGlass)
-        XCTAssertEqual(cover.frame, system)
+        XCTAssertEqual(cover.frame.width, system.width, accuracy: 0.001)
+        XCTAssertEqual(cover.frame.minX, system.minX, accuracy: 0.001)
+        XCTAssertEqual(cover.frame.maxY, system.maxY - VolumeFeedbackPopupLayout.coverTopInset, accuracy: 0.001, "just under the menu bar")
+        XCTAssertEqual(cover.frame.height, VolumeFeedbackPopupLayout.coverHeight, accuracy: 0.001)
+        XCTAssertLessThan(cover.frame.height, system.height, "tighter than the system frame")
+        XCTAssertTrue(system.contains(cover.frame))
         XCTAssertGreaterThan(cover.level.rawValue, SystemVolumePopupGeometry.windowLevel.rawValue)
         XCTAssertGreaterThan(cover.displayDuration, SystemVolumePopupGeometry.displayDuration)
     }
@@ -102,7 +199,7 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         XCTAssertEqual(roundtrip.showVolumePopup, true)
     }
 
-    func testDashboardIsStandaloneAndNotInAGroup() {
+    func testDashboardIsStandaloneAndEverySectionIsReachable() {
         let grouped =
             ProductionSection.playback
             + ProductionSection.system
@@ -112,9 +209,11 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         XCTAssertFalse(grouped.contains(.dashboard))
         XCTAssertEqual(Set(grouped).count, grouped.count)
         XCTAssertEqual(
-            Set(grouped + [.dashboard]),
-            Set(ProductionSection.allCases)
+            Set(grouped + ProductionSection.developerTools + [.dashboard]),
+            Set(ProductionSection.allCases),
+            "every section is in the sidebar or the Developer menu"
         )
+        XCTAssertTrue(Set(grouped).isDisjoint(with: ProductionSection.developerTools))
     }
 
     func testPlaybackGroupContainsOnlyContentFacingDailyControls() {
@@ -138,18 +237,12 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         )
     }
 
-    func testToolsGroupContainsOccasionalAdvisoryAndAcceptanceWorkflows() {
-        XCTAssertEqual(
-            ProductionSection.tools,
-            [.roomAdvisor, .blindListening, .acousticResearch, .hardwareAcceptance]
-        )
+    func testToolsGroupContainsOccasionalAdvisoryWorkflows() {
+        XCTAssertEqual(ProductionSection.tools, [.roomAdvisor, .blindListening])
     }
 
-    func testSidebarKeepsTodaysLayoutWithTheUIScopeFlagOff() {
-        let groups = ProductionSection.sidebarGroups(
-            simplifiedLayout: false,
-            selection: .hardwareAcceptance
-        )
+    func testSidebarGroupsLeaveDeveloperToolsToTheDeveloperMenu() {
+        let groups = ProductionSection.sidebarGroups()
         XCTAssertEqual(groups.map(\.title), ["Playback", "System", "Tools", "Extensions"])
         XCTAssertEqual(
             groups.map(\.sections),
@@ -162,29 +255,13 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         )
     }
 
-    func testSimplifiedSidebarMovesDeveloperToolsOut() {
-        let groups = ProductionSection.sidebarGroups(simplifiedLayout: true)
-        let shown = groups.flatMap(\.sections)
-
-        XCTAssertEqual(groups.map(\.title), ["Playback", "System", "Tools", "Extensions"])
+    func testSidebarKeepsASelectedDeveloperToolVisible() {
         for tool in ProductionSection.developerTools {
-            XCTAssertFalse(shown.contains(tool), "\(tool) should open from the Developer menu")
-        }
-        XCTAssertEqual(groups[2].sections, [.roomAdvisor, .blindListening])
-        XCTAssertEqual(
-            Set(shown + ProductionSection.developerTools + [.dashboard]),
-            Set(ProductionSection.allCases),
-            "every section stays reachable from the sidebar or the Developer menu"
-        )
-    }
-
-    func testSimplifiedSidebarKeepsASelectedDeveloperToolVisible() {
-        for tool in ProductionSection.developerTools {
-            let groups = ProductionSection.sidebarGroups(simplifiedLayout: true, selection: tool)
+            let groups = ProductionSection.sidebarGroups(selection: tool)
             XCTAssertEqual(groups.last?.title, "Developer")
             XCTAssertEqual(groups.last?.sections, [tool])
         }
-        let groups = ProductionSection.sidebarGroups(simplifiedLayout: true, selection: .equalizer)
+        let groups = ProductionSection.sidebarGroups(selection: .equalizer)
         XCTAssertFalse(groups.map(\.title).contains("Developer"))
     }
 
@@ -195,36 +272,17 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         )
     }
 
-    func testUIScopeFlagIsKnownAndOffByDefault() {
-        XCTAssertTrue(FeatureFlag.all.contains(.uiScope))
-        XCTAssertEqual(FeatureFlag.uiScope.id, "e5.ui-scope")
-        XCTAssertEqual(FeatureFlag.uiScope.epic, "E5")
-        XCTAssertFalse(FeatureFlag.uiScope.defaultEnabled)
-    }
-
-    func testDynamicsNavigatorKeepsTodaysGroupsWithTheUIScopeFlagOff() {
-        let groups = ProductionDynamicsLayout.groups(signalChainOrder: false)
-        XCTAssertEqual(groups.map(\.id), ProductionDynamicsGroup.allCases.map(\.rawValue))
-        for (group, legacy) in zip(groups, ProductionDynamicsGroup.allCases) {
-            XCTAssertEqual(group.shown, legacy.modules)
-            XCTAssertTrue(group.more.isEmpty)
-        }
-    }
-
-    func testDynamicsNavigatorListsEveryProcessorOnceInEitherLayout() {
-        for chainOrder in [false, true] {
-            let modules = ProductionDynamicsLayout.groups(signalChainOrder: chainOrder)
-                .flatMap(\.modules)
-            XCTAssertEqual(modules.count, ProductionDynamicsModule.allCases.count)
-            XCTAssertEqual(Set(modules), Set(ProductionDynamicsModule.allCases))
-        }
+    func testDynamicsNavigatorListsEveryProcessorOnce() {
+        let modules = ProductionDynamicsLayout.groups.flatMap(\.modules)
+        XCTAssertEqual(modules.count, ProductionDynamicsModule.allCases.count)
+        XCTAssertEqual(Set(modules), Set(ProductionDynamicsModule.allCases))
     }
 
     /// The order the engine runs these processors: input headroom gain, the
     /// pre-EQ stages, then core dynamics after room correction, the pause
     /// gate, and protection (`docs/DSP_KERNEL.md`, `N60Dynamics.c`,
     /// `N60Protection.c`). Oversampling sets the protection stage's rate.
-    func testSignalChainNavigatorFollowsTheEngineStageOrder() {
+    func testDynamicsNavigatorFollowsTheEngineStageOrder() {
         let engineOrder: [ProductionDynamicsModule] = [
             .automaticHeadroom,
             .dcOffset, .infrasonic, .mainsHum, .denoiser,
@@ -235,14 +293,11 @@ final class ProductionInformationArchitectureTests: XCTestCase {
             .pauseGate,
             .gainRider, .softClipper, .limiter, .oversampling,
         ]
-        XCTAssertEqual(
-            ProductionDynamicsLayout.groups(signalChainOrder: true).flatMap(\.modules),
-            engineOrder
-        )
+        XCTAssertEqual(ProductionDynamicsLayout.groups.flatMap(\.modules), engineOrder)
     }
 
-    func testSignalChainNavigatorFoldsOnlyNicheProcessorsAndNotesTheEQBoundary() {
-        let groups = ProductionDynamicsLayout.groups(signalChainOrder: true)
+    func testDynamicsNavigatorFoldsOnlyNicheProcessorsAndNotesTheEQBoundary() {
+        let groups = ProductionDynamicsLayout.groups
         XCTAssertEqual(
             groups.map(\.title),
             ["Input & Clean-up", "Stereo", "Level & Dialogue", "Tone", "Dynamics", "Output"]
@@ -260,14 +315,26 @@ final class ProductionInformationArchitectureTests: XCTestCase {
     }
 
     func testFoldedMoreRowShowsABadgeWhenAProcessorUnderItIsOn() throws {
-        let input = try XCTUnwrap(
-            ProductionDynamicsLayout.groups(signalChainOrder: true).first
-        )
+        let input = try XCTUnwrap(ProductionDynamicsLayout.groups.first)
         XCTAssertFalse(input.moreHasActiveModule { _ in false })
         XCTAssertTrue(input.moreHasActiveModule { $0 == .denoiser })
         XCTAssertFalse(
             input.moreHasActiveModule { $0 == .mainsHum },
             "a visible processor that is on does not badge More"
+        )
+    }
+
+    func testMeasurementLabTabsCoverEveryModeOnce() {
+        let measure = SpeakerMeasurementLabTab.measure.modes
+        let advanced = SpeakerMeasurementLabTab.advanced.modes
+        XCTAssertEqual(measure, [.wholeSpeakerOnAxis, .subwooferNearField, .coherentMainsSubTiming])
+        XCTAssertEqual(advanced, [.wholeSpeakerOffAxis, .protectedDriverNearField])
+        XCTAssertEqual(Set(measure + advanced), Set(SpeakerMeasurementLabMode.allCases))
+        XCTAssertEqual(measure.count + advanced.count, SpeakerMeasurementLabMode.allCases.count)
+        XCTAssertEqual(
+            SpeakerMeasurementLabTab.tab(for: SpeakerMeasurementLabProtocolDraft().mode),
+            .measure,
+            "a new protocol draft starts in the Measure tab"
         )
     }
 

@@ -54,44 +54,27 @@ enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
     static let tools: [ProductionSection] = [
         .roomAdvisor,
         .blindListening,
-        .acousticResearch,
-        .hardwareAcceptance,
     ]
 
     static let extensions: [ProductionSection] = [
         .plugins,
     ]
 
-    /// Bench and research workspaces. With the simplified layout they leave
-    /// the sidebar and open from the Developer menu instead.
+    /// Bench and research workspaces. They are not in the sidebar; they open
+    /// from the Developer menu once "Show developer tools" is on in Settings.
     static let developerTools: [ProductionSection] = [
         .hardwareAcceptance,
         .acousticResearch,
     ]
 
     /// The sidebar's groups, in order. The dashboard is a standalone row
-    /// above them. With `simplifiedLayout` the developer tools are left out,
-    /// except a selected one, which stays visible in a Developer group until
-    /// the user moves to another section.
-    static func sidebarGroups(
-        simplifiedLayout: Bool,
-        selection: ProductionSection? = nil
-    ) -> [ProductionSidebarGroup] {
-        guard simplifiedLayout else {
-            return [
-                ProductionSidebarGroup(title: "Playback", sections: playback),
-                ProductionSidebarGroup(title: "System", sections: system),
-                ProductionSidebarGroup(title: "Tools", sections: tools),
-                ProductionSidebarGroup(title: "Extensions", sections: extensions),
-            ]
-        }
+    /// above them. A selected developer tool stays visible in a Developer
+    /// group until the user moves to another section.
+    static func sidebarGroups(selection: ProductionSection? = nil) -> [ProductionSidebarGroup] {
         var groups = [
             ProductionSidebarGroup(title: "Playback", sections: playback),
             ProductionSidebarGroup(title: "System", sections: system),
-            ProductionSidebarGroup(
-                title: "Tools",
-                sections: tools.filter { !developerTools.contains($0) }
-            ),
+            ProductionSidebarGroup(title: "Tools", sections: tools),
             ProductionSidebarGroup(title: "Extensions", sections: extensions),
         ]
         if let selection, developerTools.contains(selection) {
@@ -248,7 +231,6 @@ final class ProductionNavigation: ObservableObject {
 struct ProductionRootView: View {
     @ObservedObject var product: ProductController
     @ObservedObject var navigation: ProductionNavigation
-    @EnvironmentObject private var featureFlags: FeatureFlags
     #if DEBUG
     @Environment(\.openWindow) private var openWindow
     #endif
@@ -283,12 +265,7 @@ struct ProductionRootView: View {
                 )
                 .tag(ProductionSection.dashboard)
 
-                ForEach(
-                    ProductionSection.sidebarGroups(
-                        simplifiedLayout: featureFlags.isEnabled(.uiScope),
-                        selection: selection
-                    )
-                ) { group in
+                ForEach(ProductionSection.sidebarGroups(selection: selection)) { group in
                     Section(group.title) {
                         ForEach(group.sections) { section in
                             Label(section.title, systemImage: section.systemImage)
@@ -413,6 +390,34 @@ struct ProductionRootView: View {
                 .help("Open the retained engineering validation tools")
                 #endif
 
+                // Bypass keeps the tap running and passes audio unprocessed;
+                // Start/Stop beside it tears the tap down.
+                Button {
+                    do {
+                        try engine.setGlobalDSPBypassed(
+                            !engine.playbackControlConfiguration.globalBypassed
+                        )
+                        commandError = nil
+                    } catch {
+                        commandError = error.localizedDescription
+                    }
+                } label: {
+                    Label(
+                        engine.playbackControlConfiguration.globalBypassed
+                            ? "Bypassed" : "Bypass",
+                        // The signal routed around the processing: the usual
+                        // picture of a bypass. Tinted orange while engaged.
+                        systemImage: "arrow.trianglehead.branch"
+                    )
+                }
+                .buttonStyle(.glass)
+                .tint(engine.playbackControlConfiguration.globalBypassed ? .orange : nil)
+                .help(
+                    engine.playbackControlConfiguration.globalBypassed
+                        ? "DSP is bypassed: audio plays unprocessed. Click to process again."
+                        : "Bypass all DSP: audio keeps playing, unprocessed"
+                )
+
                 Button {
                     Task { @MainActor in
                         await Task.yield()
@@ -460,18 +465,18 @@ struct ProductionRootView: View {
 
         ToolbarSpacer(.flexible)
 
+        // No button style: the toolbar draws the two as one shared glass
+        // capsule, help attached to Settings, rather than two buttons.
         ToolbarItemGroup(placement: .primaryAction) {
             ProductionReferenceHelpButton(
                 navigator: product.reference,
                 articleID: ProductionUserGuideCatalog.articleID(for: selection ?? .dashboard),
                 label: "Open \((selection ?? .dashboard).title) in the User Guide"
             )
-            .buttonStyle(.glass)
 
             SettingsLink {
                 Label("Settings", systemImage: "gearshape")
             }
-            .buttonStyle(.glass)
             .help("Open Settings")
         }
     }
@@ -639,26 +644,27 @@ private struct ProductionDashboardView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                HStack(alignment: .firstTextBaseline) {
-                    if engine.selectedOutputDevice == nil {
-                        Text("Choose an output below to begin.")
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Text(engine.lifecycleState == .running ? "PROCESSING" : engine.lifecycleState.rawValue.uppercased())
-                        .font(.caption.bold())
-                        .tracking(1.2)
-                        .padding(.horizontal, 13)
-                        .padding(.vertical, 8)
-                        .glassEffect(.regular, in: .capsule)
+                // Processing state lives in the toolbar's Start/Stop and
+                // Bypass buttons, so the dashboard spends no line on it.
+                if engine.selectedOutputDevice == nil {
+                    Text("Choose an output below to begin.")
+                        .foregroundStyle(.secondary)
                 }
 
                 StereoSignatureVUMeterPanel(engine: engine)
 
                 ProductionActionErrorBanner(message: $actionError)
 
-                audioControls
-                masterControls
+                // Output and volume share one row; equal heights keep the
+                // two glass panels aligned.
+                HStack(alignment: .top, spacing: 16) {
+                    audioControls
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+                    masterControls
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .fixedSize(horizontal: false, vertical: true)
 
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
                     summaryCard(
@@ -792,9 +798,15 @@ private struct ProductionDashboardView: View {
     }
 
     private var audioControls: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 14) {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
                 Text("Output Device").font(.subheadline.bold())
+                Spacer()
+                Text(engine.lifecycleState.rawValue.capitalized)
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
+            }
+            HStack(spacing: 10) {
                 Picker("Output Device", selection: Binding(
                     get: { engine.routeConfiguration.selectedOutputUID },
                     set: { uid in perform { try engine.selectOutput(uid: uid) } }
@@ -806,21 +818,18 @@ private struct ProductionDashboardView: View {
                 }
                 .productionGlassPickerChrome()
                 .labelsHidden()
-                .frame(maxWidth: 360)
+                .frame(maxWidth: .infinity)
                 .disabled(engine.lifecycleState != .idle)
 
                 Button {
                     perform { try engine.refreshOutputDevices() }
                 } label: {
                     Label("Refresh Outputs", systemImage: "arrow.clockwise")
+                        .labelStyle(.iconOnly)
                 }
                 .buttonStyle(.glass)
+                .help("Refresh Outputs")
                 .disabled(engine.lifecycleState != .idle)
-
-                Spacer()
-                Text(engine.lifecycleState.rawValue.capitalized)
-                    .font(.caption.bold())
-                    .foregroundStyle(.secondary)
             }
             if let error = engine.lastErrorDescription {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
@@ -829,7 +838,6 @@ private struct ProductionDashboardView: View {
             }
         }
         .padding(14)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
     }
 
     private var masterControls: some View {
@@ -860,18 +868,25 @@ private struct ProductionDashboardView: View {
                 }
 
                 Divider().frame(height: 34)
-                Button {
-                    perform { try engine.setGlobalDSPBypassed(!engine.playbackControlConfiguration.globalBypassed) }
-                } label: {
-                    Label(
-                        engine.playbackControlConfiguration.globalBypassed ? "Bypassed" : "DSP Active",
-                        systemImage: engine.playbackControlConfiguration.globalBypassed ? "pause.circle" : "waveform.path"
-                    )
-                }
-                .buttonStyle(.glass)
+                // Readout only; the toolbar's Bypass button switches it.
+                Label(
+                    engine.playbackControlConfiguration.globalBypassed ? "Bypassed" : "Active",
+                    systemImage: engine.playbackControlConfiguration.globalBypassed
+                        ? "arrow.trianglehead.branch" : "waveform.path"
+                )
+                .font(.subheadline.bold())
+                .foregroundStyle(
+                    engine.playbackControlConfiguration.globalBypassed
+                        ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary)
+                )
+                .accessibilityLabel(
+                    engine.playbackControlConfiguration.globalBypassed
+                        ? "DSP bypassed" : "DSP active"
+                )
             }
             .padding(14)
-            .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 22))
+            .frame(maxHeight: .infinity)
+            .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 18))
         }
     }
 

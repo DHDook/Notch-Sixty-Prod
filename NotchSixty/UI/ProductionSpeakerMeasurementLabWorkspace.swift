@@ -40,6 +40,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
         ProtectedDriverCommissioningDraftStore()
 
     @State private var draft = SpeakerMeasurementLabProtocolDraft()
+    @State private var tab: SpeakerMeasurementLabTab = .measure
     @State private var queuedProtocols: [SpeakerMeasurementLabProtocol] = []
     @State private var sharedReferenceEnabled = false
     @State private var referenceInputChannel = 2
@@ -82,12 +83,19 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 header
+                tabPicker
+                if tab == .advanced {
+                    advancedNote
+                }
                 environmentCard
                 protocolComposerCard
                 sessionCard
                 reportCard
-                protectedDriverCommissioningCard
-                coherentAlignmentCard
+                if tab == .advanced {
+                    protectedDriverCommissioningCard
+                } else {
+                    coherentAlignmentCard
+                }
                 historyCard
 
                 if let error = actionError
@@ -231,6 +239,30 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
         }
     }
 
+    private var tabPicker: some View {
+        Picker("Lab tools", selection: $tab) {
+            ForEach(SpeakerMeasurementLabTab.allCases) { tab in
+                Text(tab.title).tag(tab)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .frame(maxWidth: 320)
+        .onChange(of: tab) { _, tab in
+            if !tab.modes.contains(draft.mode), let first = tab.modes.first {
+                draft.applyModeDefaults(first)
+            }
+        }
+    }
+
+    private var advancedNote: some View {
+        Text(
+            "Off-axis directivity and per-driver near-field captures. To compare toe-in angles from on- and off-axis captures, use Room Advisor → Measurement-Informed Toe-In, which needs the saved room geometry."
+        )
+        .font(.callout)
+        .foregroundStyle(.secondary)
+    }
+
     private var protocolComposerCard: some View {
         GroupBox("Protocol Composer") {
             VStack(alignment: .leading, spacing: 14) {
@@ -264,7 +296,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                             )
                         ) {
                             ForEach(
-                                SpeakerMeasurementLabMode.allCases,
+                                tab.modes,
                                 id: \.rawValue
                             ) { mode in
                                 Text(modeTitle(mode))
@@ -2014,5 +2046,35 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
             parts.append(leg == .main ? "Main leg" : "Sub leg")
         }
         return parts.joined(separator: " · ")
+    }
+}
+
+/// The lab's two tabs. Measure holds the captures a typical system needs;
+/// Advanced holds directivity and per-driver work. Every mode is in exactly
+/// one tab.
+enum SpeakerMeasurementLabTab: String, CaseIterable, Identifiable {
+    case measure
+    case advanced
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .measure: return "Measure"
+        case .advanced: return "Advanced"
+        }
+    }
+
+    var modes: [SpeakerMeasurementLabMode] {
+        SpeakerMeasurementLabMode.allCases.filter { Self.tab(for: $0) == self }
+    }
+
+    static func tab(for mode: SpeakerMeasurementLabMode) -> SpeakerMeasurementLabTab {
+        switch mode {
+        case .wholeSpeakerOnAxis, .subwooferNearField, .coherentMainsSubTiming:
+            return .measure
+        case .wholeSpeakerOffAxis, .protectedDriverNearField:
+            return .advanced
+        }
     }
 }

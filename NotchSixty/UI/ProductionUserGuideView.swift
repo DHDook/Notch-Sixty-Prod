@@ -34,6 +34,14 @@ enum ProductionUserGuideCategory: String, CaseIterable, Identifiable, Hashable {
         case .reference: return "function"
         }
     }
+
+    /// A category heading earns its line only when it groups something: a
+    /// lone article with the category's own name (Getting Started) is listed
+    /// directly. Empty categories show nothing.
+    func showsSidebarHeader(for articles: [ProductionUserGuideArticle]) -> Bool {
+        guard !articles.isEmpty else { return false }
+        return !(articles.count == 1 && articles[0].title == title)
+    }
 }
 
 enum ProductionUserGuideMathScope: String, Hashable {
@@ -645,7 +653,7 @@ enum ProductionUserGuideCatalog {
                     "research-mixed-phase",
                     "Offline mixed-phase FIR comparisons",
                     [
-                        "Select and generate an existing Room Correction minimum-phase FIR. Tools → Acoustic Research can form a bounded mixed-phase candidate by blending a symmetric FIR component and reviewing its actual Fourier magnitude, pre-ringing, A/V delay and headroom. The preview is not installed and cannot establish better room acoustics without a new physical measurement.",
+                        "Select and generate an existing Room Correction minimum-phase FIR. Developer → Acoustic Research (turn on Show developer tools in Settings) can form a bounded mixed-phase candidate by blending a symmetric FIR component and reviewing its actual Fourier magnitude, pre-ringing, A/V delay and headroom. The preview is not installed and cannot establish better room acoustics without a new physical measurement.",
                         "Larger linear shares can increase ringing, shift phase, alter the target magnitude or exceed latency/headroom. Any blocked proposal stays unapplied."
                     ]
                 ),
@@ -992,7 +1000,7 @@ struct ProductionReferenceHelpButton: View {
 
     @Environment(\.openWindow) private var openWindow
 
-    // No button style here: toolbar call sites use glass, inline ones borderless.
+    // No button style here: the toolbar draws its own, inline call sites use borderless.
     var body: some View {
         Button {
             switch destination {
@@ -1031,6 +1039,15 @@ struct ProductionHelpView: View {
         navigator.displayedArticle(matching: searchText)
     }
 
+    private func sidebarRow(_ article: ProductionUserGuideArticle) -> some View {
+        Label(
+            article.title,
+            systemImage: navigator.mode == .dspReference
+                ? "function" : article.systemImage
+        )
+        .tag(Optional(article.id))
+    }
+
     var body: some View {
         NavigationSplitView {
             List(selection: selectedArticleBinding) {
@@ -1038,18 +1055,17 @@ struct ProductionHelpView: View {
                     let matches = articles.filter {
                         $0.category == category
                     }
-                    if !matches.isEmpty {
+                    if category.showsSidebarHeader(for: matches) {
                         Section {
                             ForEach(matches) { article in
-                                Label(
-                                    article.title,
-                                    systemImage: navigator.mode == .dspReference
-                                        ? "function" : article.systemImage
-                                )
-                                .tag(Optional(article.id))
+                                sidebarRow(article)
                             }
                         } header: {
                             Label(category.title, systemImage: category.systemImage)
+                        }
+                    } else {
+                        ForEach(matches) { article in
+                            sidebarRow(article)
                         }
                     }
                 }
