@@ -7,8 +7,7 @@
 - Helper agents in `.claude/agents/`: code-scout, build-test-runner, plan-tracker, pr-writer
   (Haiku) and realtime-reviewer (Sonnet).
 
-**Current focus:** E1 (trunk, CI and docs hygiene), no plan yet: next step is to plan it. E2 is done
-apart from S2 in review (#134); macOS 26 is checked by build only (no 26 machine).
+**Current focus:** E1 (trunk, CI and docs hygiene): plan in `docs/epics/E1.md`; S1 feature flags in review, next S2 three workflows.
 <!-- plan-tracker keeps the line above current -->
 
 @AGENTS.md
@@ -48,8 +47,8 @@ The owner already has a local test build of `main`; do not rebuild a baseline un
 2. **Plan in plan mode.** For a new epic or a slice that touches more than a few files, plan
    first and save the approved plan to `docs/epics/E<n>.md` (goal, slices, files, tests, bench
    checks, flag name, status line). Small follow-up slices can go straight to building.
-3. **Build one slice per branch** named `e<n>/<slice>`, behind the epic's feature flag once E1
-   has added the flag mechanism (E1 and E2 do not need flags).
+3. **Build one slice per branch** named `e<n>/<slice>`, behind the epic's feature flag (add it to
+   `FeatureFlag.all`; see `docs/FEATURE_FLAGS.md`). E1 and E2 do not need flags.
 4. **Verify before committing:** delegate builds and tests to `build-test-runner`; delegate any
    engine or realtime change to `realtime-reviewer` and fix what it flags.
 5. **Ship:** commit, push the branch, get the PR text from `pr-writer`, and open the PR with
