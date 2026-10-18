@@ -20,7 +20,7 @@ ROOT_LICENSE = ROOT / "LICENSE"
 ROOT_NOTICES = ROOT / "THIRD_PARTY_NOTICES.md"
 SHIPPED_NOTICE = ROOT / "NotchSixty" / "ThirdPartyNotices.txt"
 BUILDER = ROOT / "ci" / "build_pr114_sbom.py"
-DOC = ROOT / "docs" / "PR114_PROVENANCE_SBOM.md"
+DOC = ROOT / "docs" / "archive" / "PR114_PROVENANCE_SBOM.md"
 
 PACKAGE_BASENAMES = {
     "Package.swift",

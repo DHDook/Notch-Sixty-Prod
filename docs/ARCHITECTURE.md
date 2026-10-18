@@ -1,102 +1,144 @@
 # Architecture
 
+How Notch Sixty is built on `main` today, and where the v1 program (`docs/PROGRAM_PLAN.md`) takes it.
+The stereo render kernel is described in `docs/DSP_KERNEL.md`; realtime rules are in
+`docs/REALTIME_RULES.md`.
+
 ## Goals
 
-Notch Sixty is a native macOS stereo DSP application for loudspeakers plus subwoofer, designed for a proprietary Mac App Store distribution.
+- Public Core Audio APIs only: no HAL driver, privileged helper or system extension.
+- App Sandbox and Mac App Store from day one (`docs/APP_STORE_REQUIREMENTS.md`). Minimum macOS 26.
+- A control plane (Swift, may block) kept strictly apart from the render plane (C today, may never
+  block).
+- The selected physical output, identified by its stable UID, is authoritative.
+- Native device rates up to 384 kHz with no hidden transport SRC. Every feature works at every rate.
+- Every DSP stage declares its latency.
 
-Primary architectural goals:
-- public Core Audio APIs only
-- no installed HAL driver
-- App Sandbox from day one
-- explicit separation between control plane and realtime render plane
-- selected physical output by stable device UID
-- native sample-rate transport through device-exposed rates up to 384 kHz
-- no hidden transport SRC
-- modular DSP graph with explicit latency
+## Layers
 
-## High-level flow
+| Layer | Where | Role |
+|---|---|---|
+| App and UI | `NotchSixtyApp.swift` (`NotchSixtyApp`, `ProductController`), `UI/` | SwiftUI views and the product model |
+| Control plane | `Audio/AudioIOEngine.swift`, `State/` | Lifecycle, device selection, transport build/teardown, recovery, graph compilation |
+| Core Audio transport | `Audio/CoreAudio/` | Process tap, aggregate device, IO procs, measurement and reference transports |
+| Render plane | `Audio/Realtime/` (`N60*.c/.h`) | Realtime bridge, render kernels, ANC and MIMO runtimes, AU rack exchange |
+| Gates and evidence | `Acceptance/` | Hardware acceptance, authorisation of hardware-gated features |
+| Devices and routing | `Audio/Devices/`, `Audio/Routing/` | Output catalogue, route, output and headphone profiles |
+
+## Control-plane state machine
+
+`AudioLifecycleState` (`State/AudioLifecycleState.swift`):
 
 ```text
-System applications
-      ↓
-Device-scoped private process tap
-      ↓
-Private aggregate/tap input
-      ↓
-AudioIOEngine
-      ↓
-RealtimeBridge
-      ↓
-RenderKernel
-      ↓
-DSPGraphSnapshot
-      ↓
+Idle → RequestingPermission → CreatingTap → CreatingAggregate → OpeningOutput → Starting → Running
+Running → Reconfiguring → (rebuild) → Running
+Running → RecoveringOutput → (same UID returns) → Running
+any → Stopping → Idle        any → Failed
+```
+
+`AudioLifecycleStateMachine` rejects illegal edges (`AudioLifecycleTransitionError`); `AudioIOEngine`
+drives it through `setLifecycle(_:)`.
+
+- **Reconfiguring:** intentional changes, such as a nominal sample-rate change. The engine tears the
+  transport down and rebuilds it at the new rate, and detaches an Audio Unit rack that can't run at
+  that rate.
+- **RecoveringOutput:** the selected device (or the spatial source device) disappeared. The engine
+  stops transport and retries with backoff, guarded by a recovery generation, until the **same UID**
+  returns. It never falls back to another device or follows a later macOS default-output change.
+- Sleep and wake are handled explicitly. Normal Quit fades out, stops, then destroys the private tap
+  and aggregate. A force-quit can't run cleanup, but the private tap and aggregate must not leave
+  system audio wedged.
+
+## Transport
+
+```text
+Other applications
+    ↓
+Device-scoped private process tap        (AudioHardwareCreateProcessTap)
+    ↓
+Private aggregate device                 (AudioHardwareCreateAggregateDevice)
+    ↓  capture IO proc (tap clock domain)
+Realtime bridge                          (N60RealtimeAudioBridge: lock-free SPSC)
+    ↓  output IO proc (device clock domain)
+Render kernel / N-channel render core
+    ↓
 Selected physical output
 ```
 
-## Production components
+The bridge carries audio between the capture and output clock domains. When the tap and device rates
+match, it is a direct single-producer/single-consumer ring. When they differ, the bridge's adaptive
+SRC (`N60AdaptiveSampleRate`) tracks clock drift and converts to the device's native rate; this is an
+explicit, configured stage, never a hidden one.
 
-### AudioIOEngine
-Owns control-plane Core Audio lifecycle, device selection, tap/aggregate creation, output opening, listeners, reconfiguration, recovery, and teardown.
+## Which path runs
 
-### RealtimeBridge
-Preallocated lock-free transfer between capture and output clock domains. It exposes bounded counters and never performs control-plane work.
+`AudioIOEngine.buildTransport(output:)` picks one transport session per start:
 
-### RenderKernel
-Owns the realtime rendering contract. It acquires one atomically published render-ready graph snapshot per physical-output hardware buffer and uses that immutable generation for the complete callback. Realtime snapshot acquisition is bounded and never waits; graph publication is control-plane-only.
+| Configuration | Session | Render path |
+|---|---|---|
+| Headphone profile, virtual-speaker mode | `CoreAudioBinauralHeadphoneTransportSession` | Binaural renderer (HRTF/SOFA), head-tracking runtime |
+| Headphone profile, stereo mode | `CoreAudioTransportSession` | Stereo kernel with headphone DSP (correction, crossfeed) |
+| Output-device (speaker) profile | `CoreAudioNChannelTransportSession` | N-channel render core: program layout, lanes, bass management, output map |
+| Neither | `CoreAudioTransportSession` | Stereo kernel |
 
-The current PR #12 reference graph is deliberately transparent:
+A headphone profile and a speaker profile can't both be active. The N-channel path refuses to start
+while stereo-only DSP is active (for example the legacy speaker IR or single-sub phase alignment)
+rather than silently dropping it. Program layouts reach 32 channels and 40 physical outputs
+(`N60ProgramLayout.h`, `N60LiveNChannelRenderCore.h`).
 
-```text
-InputGain → IdentityReferenceStage → OutputGain
-```
+Measurement and calibration transports (`RoomCorrectionCalibrationTransport`,
+`MultichannelCalibrationTransport`, `AmbientMonitorTransport`, `FeedForwardReferenceTransport`) are
+kept apart from program playback because they drive controlled excitation or microphone capture.
 
-It has zero algorithmic latency at unity gain. NaN/Inf and denormal values are contained at the render boundary and diagnosed. See `docs/DSP_KERNEL.md`.
+## Getting settings to the render thread
 
-### DSPGraphSnapshot
-A render-ready graph state assembled off the realtime thread and copied into preallocated publication slots. The foundation snapshot carries sample rate, stereo channel count, input/output gain, bypass, latency, and generation metadata.
+1. Swift compiles settings into an immutable render-ready snapshot off the realtime thread, for the
+   device's actual rate (for example `LiveNChannelRenderGraphCompiler.makeGraph` for N-channel).
+   Filters and FIR programs are built here, never on the render thread.
+2. The snapshot goes into a preallocated inactive slot, and an atomic swap publishes it with a new
+   generation (`N60RenderKernelPublishSnapshot`; FIR programs via the `Prepare…Program` calls).
+3. Each hardware buffer pins one snapshot from start to end, so a buffer never mixes two generations.
 
-Planned substantive stages include:
+Feature flags (`State/FeatureFlags.swift`, `docs/FEATURE_FLAGS.md`) are read only in Swift. The
+engine never sees a flag: Swift decides and publishes a configuration through the same snapshot path,
+so the core stays flag-free and portable.
 
-```text
-InputGain
-EQProcessor
-CrossoverProcessor
-RoomCorrectionProcessor
-ConvolutionProcessor
-DynamicsProcessor
-OutputGain
-MeterTap
-```
+## Audio Unit rack
 
-Stages may be absent/bypassed. Every stage declares latency and supported channel/rate constraints. Richer future graphs must preserve the current render-safe publication and lifetime contract.
+The host (`AudioUnitHostController`, `AudioUnitLiveRackRuntime`, `AudioUnitLiveRackSwitchboard`)
+loads and prepares Audio Units off the realtime thread. On the render thread, the rack runs between
+the stereo kernel's playback half and its system half, so speaker, room and protection processing
+always follow third-party plug-ins. `N60AudioUnitLiveRackBridge` and `N60AudioUnitRackExchange`
+exchange the prepared rack with the render thread without locks, and contain a faulting or
+incompatible unit instead of letting it reach the output.
 
-## Lifecycle
+## Hardware-gated paths: ANC and MIMO
 
-```text
-Idle
-RequestingPermission
-CreatingTap
-CreatingAggregate
-OpeningOutput
-Starting
-Running
-Reconfiguring
-RecoveringOutput
-Stopping
-Failed
-```
+Speaker ANC (Quiet Zone) is the flagship differentiator. It and live MIMO room treatment can emit
+energy into a room, so each has one written authorisation path and defaults to off.
 
-`Reconfiguring` covers intentional changes such as nominal sample-rate changes. `RecoveringOutput` covers disappearance/reappearance of the selected physical device.
+- **Live feed-forward ANC.** Authorised only by a passing hardware-acceptance status
+  (`Acceptance/HardwareAcceptance.swift`, `liveFeedForwardANCAuthorized`). Until then, commissioning,
+  survey, shadow and rehearsal stages run, but `liveANCQualified` stays false. Runtime:
+  `N60ActiveQuietZone`, the `N60FeedForward*` bridges, and `QuietZone*.swift`.
+- **Live MIMO room treatment.** Needs a `MIMORoomTreatmentActivationPermit`, which is created only
+  when its gate reports eligibility and must match the accepted profile, the selected output UID and
+  the sample rate. Runtime: `N60MIMOTreatmentTransition`, `N60MIMOTreatmentLiveIntegration`,
+  `N60MIMOFIRRuntime`.
 
-## Output policy
+Never enable either live path outside these authorisation paths (`CLAUDE.md`).
 
-The explicitly selected output device is authoritative. A macOS default-output change must not silently move the session. If the selected device disappears, stop transport safely and wait for the same stable UID rather than silently falling back.
+## Where the program takes it
 
-## Shutdown
-
-Normal termination should ramp output to zero over a short bounded interval, stop output and capture, destroy private Core Audio resources, then allow process termination. Abrupt force-quit cannot depend on cleanup code; the architecture must still allow normal system audio to recover externally.
-
-## Future DSP
-
-Substantive DSP implementation should be based on public math/specifications and clean provenance. Multi-seat correction is measurement/optimization logic and must not introduce an actual multichannel playback architecture.
+- **E6:** one unified live N-channel graph, in C++, replaces the stereo kernel and the N-channel core.
+  Stereo becomes a two-channel layout and the binaural renderer becomes a stage, not a separate
+  transport. Every lane gets the full stereo stage set, and the `unsupportedActiveDSP` restrictions go.
+- **E7:** buffers sized in time for the 384 kHz worst case, the remaining frame caps lifted, and
+  double-precision filters where float32 loses low-frequency accuracy at high rates.
+- **E20:** whole-buffer processing, multirate low-frequency paths, multiple realtime threads (Audio
+  Workgroups), portable SIMD, an enforced CPU budget.
+- **E21:** the engine core moves to C++20/23 behind one versioned C interface, with no Apple framework
+  dependency (an FFT abstraction: vDSP on Apple, a BSD-licensed FFT elsewhere). Swift stays for the
+  app shell, Core Audio control and UI.
+- **E4 / E19:** ANC and MIMO qualification on hardware; their authorisation paths stay the only way
+  to go live.

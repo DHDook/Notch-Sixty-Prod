@@ -11,52 +11,17 @@ configuration.
 
 ## Current status
 
-### October 14, 2026 — integrated RC and final hardening
+`main` is the trunk. All work follows the v1 program plan in
+[`docs/PROGRAM_PLAN.md`](docs/PROGRAM_PLAN.md): 21 epics (E1–E21) in four
+phases with gates G1–G4. Each epic's approved plan and slice status live in
+[`docs/epics/`](docs/epics/). Unfinished epics merge dark behind feature flags
+(see [`docs/FEATURE_FLAGS.md`](docs/FEATURE_FLAGS.md)).
 
-PR #130 stacks the four validated core batches #125–#128 and optional research
-#129, following PR114. The macOS 27 arm64 Release DMG, unsigned archive,
-full Debug XCTest and integrated QA passed run #38581711406 at commit
-`52f15da6f23bcc28e5b5c19705d3bcfea303aa81`.
-The follow-on consolidated hardening work needs its **own exact-head CI success**
-before its DMG supersedes this reference candidate. See
-`docs/FINAL_RC_REMOTE_HARDENING.md`.
+Minimum macOS is **26**. v1 ships only when every scoped epic is complete and
+the hardware regression passes at every rate from 44.1 to 384 kHz.
 
-All stacked PRs remain OPEN/DRAFT/UNMERGED; `main` is unchanged.
-Minimum macOS is **26** (owner decision of 17 Oct 2026, epic E2; this
-supersedes the earlier macOS 27 floor). PR112 physical H01–H08, DAC and calibrated acoustic/headphone tests,
-external rights/IP review, final artwork approval, Apple signing/credentials
-and release/merge approval remain pending.
-
-**Historical PR114 release baseline, retained for cumulative auditing:**
-
-**PR114 — Commercial Release Candidate (draft, stacked).**
-
-The cumulative proprietary product is remotely complete through
-**PR113B — World-Class Product Finish**. PR113B closed at exact tested head
-`f10008d8330c2dc29f195163c56cf4723fc16a6c` with Debug/Release builds,
-targeted product-finish tests, full cumulative XCTest, and a fail-closed
-remote-readiness artifact.
-
-PR114 is the final commercial release-candidate reconciliation milestone. It
-revalidates the complete shipping tree against App Store/privacy/security,
-licensing/provenance/dependency, packaging/archive, commercial metadata and
-release-handoff requirements.
-
-The earlier **PR102 integration and commercial-release preparation** established
-the first remote release foundation: sandbox/archive preflight, dependency and
-notice reconciliation, credential-neutral packaging evidence, and explicit
-physical/credential release gates. PR114 preserves that work while re-auditing
-it against the much larger PR113B product.
-
-PR114 Slices 1–6 are implemented remotely; final exact-head CI remains the
-software acceptance gate. See `docs/PR114_COMMERCIAL_METADATA_SUPPORT.md`
-and `docs/PR114_RELEASE_HANDOFF.md`. The final icon, screenshots and public
-support/privacy URLs are not owner-approved or published by repository CI.
-
-The stacked PRs deliberately remain open, draft and unmerged while the owner is
-away from the Mac/audio system. PR112 physical H01–H08 acceptance, production
-Apple signing, App Store Connect/TestFlight/App Review and public-release
-authorization remain genuine external gates; remote CI cannot satisfy them.
+The pre-trunk history (the stacked PR31–PR117 notes, batch and RC handoffs and
+the old `ROADMAP.md`) is kept unchanged in [`docs/archive/`](docs/archive/).
 
 ## Current product boundary
 
@@ -136,8 +101,10 @@ Key design documents live in `docs/`:
 - `PROVENANCE.md`
 - `APP_STORE_REQUIREMENTS.md`
 - `TEST_STRATEGY.md`
-- `ROADMAP.md`
-- `PR102_INTEGRATION_COMMERCIAL_RELEASE.md`
+- `PROGRAM_PLAN.md` and `epics/`
+- `DSP_KERNEL.md`
+- `FEATURE_FLAGS.md`
+- `archive/` (historical PR notes; not maintained)
 
 ## Licensing
 

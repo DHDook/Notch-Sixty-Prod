@@ -17,7 +17,7 @@ INFO = ROOT / "NotchSixty" / "Info.plist"
 ENTITLEMENTS = ROOT / "NotchSixty" / "NotchSixty.entitlements"
 BASELINE = ROOT / "release" / "pr114-release-baseline.json"
 DEPENDENCIES = ROOT / "release" / "production-dependencies.json"
-DOC = ROOT / "docs" / "PR114_APP_STORE_PRIVACY_SECURITY.md"
+DOC = ROOT / "docs" / "archive" / "PR114_APP_STORE_PRIVACY_SECURITY.md"
 APP = ROOT / "NotchSixty" / "NotchSixtyApp.swift"
 GUIDE = ROOT / "NotchSixty" / "UI" / "ProductionUserGuideView.swift"
 
