@@ -102,6 +102,8 @@
 		E4F000000000000000000001 /* n60_ff_shadow.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E4F000000000000000000012 /* n60_ff_shadow.cpp */; };
 		E4F000000000000000000002 /* QuietZoneFeedForwardShadowSeed.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F000000000000000000013 /* QuietZoneFeedForwardShadowSeed.swift */; };
 		E4F000000000000000000003 /* FeedForwardShadowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F000000000000000000014 /* FeedForwardShadowTests.swift */; };
+		E4F100000000000000000001 /* n60_ff_survey.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E4F100000000000000000012 /* n60_ff_survey.cpp */; };
+		E4F100000000000000000003 /* FeedForwardSurveyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4F100000000000000000014 /* FeedForwardSurveyTests.swift */; };
 		E4C000000000000000000004 /* FxlmsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4C000000000000000000014 /* FxlmsTests.swift */; };
 		F89200000000000000000001 /* AmbientMonitorTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F89200000000000000000011 /* AmbientMonitorTransport.swift */; };
 		F89300000000000000000001 /* AmbientCompensationController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F89300000000000000000011 /* AmbientCompensationController.swift */; };
@@ -455,6 +457,9 @@
 		E4F000000000000000000012 /* n60_ff_shadow.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = n60_ff_shadow.cpp; sourceTree = "<group>"; };
 		E4F000000000000000000013 /* QuietZoneFeedForwardShadowSeed.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietZoneFeedForwardShadowSeed.swift; sourceTree = "<group>"; };
 		E4F000000000000000000014 /* FeedForwardShadowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedForwardShadowTests.swift; sourceTree = "<group>"; };
+		E4F100000000000000000011 /* n60_ff_survey.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = n60_ff_survey.hpp; sourceTree = "<group>"; };
+		E4F100000000000000000012 /* n60_ff_survey.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = n60_ff_survey.cpp; sourceTree = "<group>"; };
+		E4F100000000000000000014 /* FeedForwardSurveyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedForwardSurveyTests.swift; sourceTree = "<group>"; };
 		F90100000000000000000012 /* N60ActiveQuietZone.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60ActiveQuietZone.h; sourceTree = "<group>"; };
 		F89200000000000000000011 /* AmbientMonitorTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudio/AmbientMonitorTransport.swift; sourceTree = "<group>"; };
 		F89300000000000000000011 /* AmbientCompensationController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AmbientCompensationController.swift; sourceTree = "<group>"; };
@@ -781,6 +786,7 @@
 				E4B000000000000000000014 /* AncGuardTests.swift */,
 				E4C000000000000000000014 /* FxlmsTests.swift */,
 				E4F000000000000000000014 /* FeedForwardShadowTests.swift */,
+				E4F100000000000000000014 /* FeedForwardSurveyTests.swift */,
 				E4D000000000000000000013 /* AdaptiveQuietZoneShadowTests.swift */,
 				E4A000000000000000000012 /* QuietZoneLiveAuthorisationTests.swift */,
 				E4E000000000000000000014 /* QuietZoneLatencyPathTests.swift */,
@@ -1035,6 +1041,8 @@
 				E4C000000000000000000013 /* n60_fxlms.cpp */,
 				E4F000000000000000000011 /* n60_ff_shadow.hpp */,
 				E4F000000000000000000012 /* n60_ff_shadow.cpp */,
+				E4F100000000000000000011 /* n60_ff_survey.hpp */,
+				E4F100000000000000000012 /* n60_ff_survey.cpp */,
 				F90100000000000000000012 /* N60ActiveQuietZone.h */,
 				F96100000000000000000013 /* N60FeedForwardReferenceBridge.c */,
 				F96100000000000000000014 /* N60FeedForwardReferenceBridge.h */,
@@ -1234,6 +1242,7 @@
 				E4B000000000000000000003 /* n60_anc_guard.cpp in Sources */,
 				E4C000000000000000000003 /* n60_fxlms.cpp in Sources */,
 				E4F000000000000000000001 /* n60_ff_shadow.cpp in Sources */,
+				E4F100000000000000000001 /* n60_ff_survey.cpp in Sources */,
 				F70000000000000000000001 /* N60AdaptiveSampleRate.c in Sources */,
 				F72000000000000000000001 /* AmbientFieldAnalyzer.swift in Sources */,
 				F89000000000000000000001 /* AmbientCompensation.swift in Sources */,
@@ -1359,6 +1368,7 @@
 				E4B000000000000000000004 /* AncGuardTests.swift in Sources */,
 				E4C000000000000000000004 /* FxlmsTests.swift in Sources */,
 				E4F000000000000000000003 /* FeedForwardShadowTests.swift in Sources */,
+				E4F100000000000000000003 /* FeedForwardSurveyTests.swift in Sources */,
 				E4D000000000000000000003 /* AdaptiveQuietZoneShadowTests.swift in Sources */,
 				E4A000000000000000000002 /* QuietZoneLiveAuthorisationTests.swift in Sources */,
 				E4E000000000000000000004 /* QuietZoneLatencyPathTests.swift in Sources */,
