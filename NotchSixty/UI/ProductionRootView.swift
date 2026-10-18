@@ -358,6 +358,7 @@ struct ProductionRootView: View {
                 ambient: product.ambientCompensation,
                 quietZone: product.activeQuietZone,
                 adaptiveQuietZone: product.adaptiveQuietZone,
+                feedForwardSurvey: product.feedForwardSurvey,
                 microphone: product.calibration,
                 projects: product.roomCorrectionProjects
             )
