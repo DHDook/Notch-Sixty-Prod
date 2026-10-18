@@ -1,8 +1,19 @@
-name: Release DMG (Manual)
+name: Release (manual)
+
+# Manual only. kind=release builds the versioned Release DMG; kind=hardware-test
+# builds an ad-hoc signed DMG for bench validation. Neither publishes anything.
 
 on:
   workflow_dispatch:
     inputs:
+      kind:
+        description: What to package
+        required: true
+        default: release
+        type: choice
+        options:
+          - release
+          - hardware-test
       expected_version:
         description: Optional marketing version to require (for example, 1.0)
         required: false
@@ -17,7 +28,7 @@ permissions:
   contents: read
 
 jobs:
-  release-dmg:
+  package:
     runs-on: xcode-27
     steps:
       - name: Check out selected revision
@@ -31,6 +42,15 @@ jobs:
           xcodebuild -version
           swift --version
           git rev-parse HEAD
+
+      - name: Release source checks and SBOM
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 ci/validate_pr114_provenance_sbom.py
+          python3 ci/validate_pr102_app_store_boundary.py
+          python3 ci/validate_pr102_dependency_manifest.py
+          python3 ci/build_pr114_sbom.py --output "$RUNNER_TEMP/production-sbom.json"
 
       - name: Run unit tests
         if: ${{ inputs.run_tests }}
@@ -76,6 +96,7 @@ jobs:
         shell: bash
         env:
           EXPECTED_VERSION: ${{ inputs.expected_version }}
+          KIND: ${{ inputs.kind }}
         run: |
           set -euo pipefail
           APP="$RUNNER_TEMP/NotchSixtyReleaseDerivedData/Build/Products/Release/Notch Sixty.app"
@@ -112,7 +133,11 @@ jobs:
 
           SAFE_VERSION="$(printf '%s' "$VERSION" | tr -c 'A-Za-z0-9._-' '-')"
           SAFE_BUILD="$(printf '%s' "$BUILD" | tr -c 'A-Za-z0-9._-' '-')"
-          DMG_NAME="Notch-Sixty-${SAFE_VERSION}-build-${SAFE_BUILD}-arm64.dmg"
+          if [[ "$KIND" == "hardware-test" ]]; then
+            DMG_NAME="Notch-Sixty-${SAFE_VERSION}-build-${SAFE_BUILD}-hardware-test-arm64.dmg"
+          else
+            DMG_NAME="Notch-Sixty-${SAFE_VERSION}-build-${SAFE_BUILD}-arm64.dmg"
+          fi
 
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "BUILD_NUMBER=$BUILD" >> "$GITHUB_ENV"
@@ -168,6 +193,8 @@ jobs:
 
       - name: Create machine-readable package manifest
         shell: bash
+        env:
+          KIND: ${{ inputs.kind }}
         run: |
           set -euo pipefail
           ACTUAL_SHA="$(git rev-parse HEAD)"
@@ -188,6 +215,7 @@ jobs:
               "architecture": "arm64",
               "dmgName": os.environ["DMG_NAME"],
               "dmgSHA256": os.environ["DMG_SHA256"],
+              "kind": os.environ["KIND"],
               "signature": "ad-hoc",
               "notarized": False,
               "publicDistributionReady": False,
@@ -203,10 +231,11 @@ jobs:
       - name: Upload Release DMG
         uses: actions/upload-artifact@v4
         with:
-          name: NotchSixty-release-${{ steps.metadata.outputs.version }}-build-${{ steps.metadata.outputs.build }}
+          name: NotchSixty-${{ inputs.kind }}-${{ steps.metadata.outputs.version }}-build-${{ steps.metadata.outputs.build }}
           path: |
             ${{ runner.temp }}/${{ steps.metadata.outputs.dmg_name }}
             ${{ runner.temp }}/${{ steps.metadata.outputs.dmg_name }}.sha256
             ${{ runner.temp }}/release-package-manifest.json
+            ${{ runner.temp }}/production-sbom.json
           if-no-files-found: error
           retention-days: 90

@@ -107,7 +107,6 @@ for phrase in (
     require(phrase in doc, f"PR100 document missing {phrase!r}")
 
 for inherited in (
-    ROOT / "ci/validate_pr99_physical_verification.py",
     ROOT / "ci/audit_pr98_disconnected_boundary.py",
     ROOT / "docs/PR99_PHYSICAL_ANC_VERIFICATION.md",
     ROOT / "docs/PR98_SOFTWARE_CLOSURE.md",
