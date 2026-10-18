@@ -1491,18 +1491,28 @@ enum VolumeFeedbackPresentation {
 
     /// With `decibels`, the software taper's attenuation: "−12 dB" climbing
     /// to "0 dB" at full scale, and "−∞ dB" at silence.
-    static func readout(level: Double, muted: Bool, decibels: Bool = false) -> String {
+    /// `alwaysTenths` keeps one decimal ("−27.0 dB") so a 0.5 dB step
+    /// never changes the readout's width in the menu bar.
+    static func readout(
+        level: Double,
+        muted: Bool,
+        decibels: Bool = false,
+        alwaysTenths: Bool = false
+    ) -> String {
         if muted { return "Muted" }
         guard decibels else { return "\(percentage(level))%" }
-        return decibelReadout(MasterVolumeConfiguration.softwareTaperDB(forLevel: level))
+        return decibelReadout(
+            MasterVolumeConfiguration.softwareTaperDB(forLevel: level),
+            alwaysTenths: alwaysTenths
+        )
     }
 
-    static func decibelReadout(_ decibels: Double?) -> String {
+    static func decibelReadout(_ decibels: Double?, alwaysTenths: Bool = false) -> String {
         guard let decibels else { return "−∞ dB" }
         let tenths = (decibels * 10).rounded()
-        guard tenths < 0 else { return "0 dB" }
+        guard tenths < 0 else { return alwaysTenths ? "0.0 dB" : "0 dB" }
         let magnitude = -tenths / 10
-        let number = magnitude.rounded() == magnitude
+        let number = magnitude.rounded() == magnitude && !alwaysTenths
             ? String(format: "%.0f", magnitude)
             : String(format: "%.1f", magnitude)
         return "−\(number) dB"
@@ -1556,9 +1566,10 @@ struct VolumeFeedbackPopupLayout: Equatable {
     static let standardSize = CGSize(width: 264, height: 88)
     /// Cover mode spans the system popup's full width but not its full
     /// height: that frame includes a transparent shadow margin, and our
-    /// one-row content looked empty in it. Centred on the system frame, the
-    /// panel covers the visible popup inside the margin.
+    /// one-row content looked empty in it. The panel sits just under the menu
+    /// bar, where the visible system popup starts.
     static let coverHeight: CGFloat = 104
+    static let coverTopInset: CGFloat = 6
     static let gapBesideSystemPopup: CGFloat = 8
 
     let frame: CGRect
@@ -1594,7 +1605,7 @@ struct VolumeFeedbackPopupLayout: Equatable {
                 return VolumeFeedbackPopupLayout(
                     frame: CGRect(
                         x: system.minX,
-                        y: system.midY - coverHeight / 2,
+                        y: system.maxY - coverTopInset - coverHeight,
                         width: system.width,
                         height: coverHeight
                     ),
@@ -1633,7 +1644,8 @@ private final class VolumeFeedbackHUDController {
         _ configuration: MasterVolumeConfiguration,
         position: VolumeFeedbackPopupPosition,
         coverSystemPopup: Bool,
-        decibels: Bool
+        decibels: Bool,
+        alwaysTenths: Bool
     ) {
         guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
         let layout = VolumeFeedbackPopupLayout.make(
@@ -1665,7 +1677,8 @@ private final class VolumeFeedbackHUDController {
             rootView: VolumeFeedbackHUDView(
                 configuration: configuration,
                 style: layout.style,
-                decibels: decibels
+                decibels: decibels,
+                alwaysTenths: alwaysTenths
             )
             .frame(width: layout.frame.width, height: layout.frame.height)
         )
@@ -1690,12 +1703,14 @@ private struct VolumeFeedbackHUDView: View {
     let configuration: MasterVolumeConfiguration
     let style: VolumeFeedbackPopupStyle
     let decibels: Bool
+    let alwaysTenths: Bool
 
     private var readout: String {
         VolumeFeedbackPresentation.readout(
             level: configuration.level,
             muted: configuration.muted,
-            decibels: decibels
+            decibels: decibels,
+            alwaysTenths: alwaysTenths
         )
     }
 
@@ -1758,7 +1773,8 @@ private struct MenuBarVolumeLabel: View {
         VolumeFeedbackPresentation.readout(
             level: engine.masterVolumeConfiguration.level,
             muted: engine.masterVolumeConfiguration.muted,
-            decibels: preferences.showsDecibelReadout(for: engine)
+            decibels: preferences.showsDecibelReadout(for: engine),
+            alwaysTenths: preferences.decibelReadoutShowsTenths
         )
     }
 
@@ -1919,6 +1935,9 @@ final class ApplicationPreferences: ObservableObject {
             && engine.masterVolumeCapabilities.controlMode == .softwareDSP
     }
 
+    /// Half-dB steps land on .0 and .5, so their readout always shows tenths.
+    var decibelReadoutShowsTenths: Bool { volumeStepResolution == .halfDecibel }
+
     func apply(to audioEngine: AudioIOEngine) {
         self.audioEngine = audioEngine
         audioEngine.setSoftwareVolumeKeyStep(volumeStepResolution.keyStep)
@@ -1933,7 +1952,8 @@ final class ApplicationPreferences: ObservableObject {
                     configuration,
                     position: self.volumePopupPosition,
                     coverSystemPopup: self.coversSystemVolumePopup,
-                    decibels: self.showsDecibelReadout(for: audioEngine)
+                    decibels: self.showsDecibelReadout(for: audioEngine),
+                    alwaysTenths: self.decibelReadoutShowsTenths
                 )
             }
         applyAppearance()
@@ -2706,6 +2726,19 @@ extension View {
     func productionToggleStyle() -> some View {
         toggleStyle(.switch)
     }
+
+    /// Settings' rows are compact, so its switches are one size down.
+    func productionCompactToggleStyle() -> some View {
+        toggleStyle(CompactSwitchToggleStyle())
+    }
+}
+
+private struct CompactSwitchToggleStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Toggle(configuration)
+            .toggleStyle(.switch)
+            .controlSize(.small)
+    }
 }
 
 @main
@@ -2794,7 +2827,7 @@ struct NotchSixtyApp: App {
                 product: product,
                 featureFlags: featureFlags
             )
-            .productionToggleStyle()
+            .productionCompactToggleStyle()
         }
 
         Window("Notch Sixty Help", id: ProductionReferenceNavigator.windowID) {

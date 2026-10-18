@@ -405,8 +405,9 @@ struct ProductionRootView: View {
                     Label(
                         engine.playbackControlConfiguration.globalBypassed
                             ? "Bypassed" : "Bypass",
-                        systemImage: engine.playbackControlConfiguration.globalBypassed
-                            ? "waveform.slash" : "waveform"
+                        // The signal routed around the processing: the usual
+                        // picture of a bypass. Tinted orange while engaged.
+                        systemImage: "arrow.trianglehead.branch"
                     )
                 }
                 .buttonStyle(.glass)
@@ -654,8 +655,16 @@ private struct ProductionDashboardView: View {
 
                 ProductionActionErrorBanner(message: $actionError)
 
-                audioControls
-                masterControls
+                // Output and volume share one row; equal heights keep the
+                // two glass panels aligned.
+                HStack(alignment: .top, spacing: 16) {
+                    audioControls
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+                    masterControls
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .fixedSize(horizontal: false, vertical: true)
 
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
                     summaryCard(
@@ -789,9 +798,15 @@ private struct ProductionDashboardView: View {
     }
 
     private var audioControls: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 14) {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
                 Text("Output Device").font(.subheadline.bold())
+                Spacer()
+                Text(engine.lifecycleState.rawValue.capitalized)
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
+            }
+            HStack(spacing: 10) {
                 Picker("Output Device", selection: Binding(
                     get: { engine.routeConfiguration.selectedOutputUID },
                     set: { uid in perform { try engine.selectOutput(uid: uid) } }
@@ -803,21 +818,18 @@ private struct ProductionDashboardView: View {
                 }
                 .productionGlassPickerChrome()
                 .labelsHidden()
-                .frame(maxWidth: 360)
+                .frame(maxWidth: .infinity)
                 .disabled(engine.lifecycleState != .idle)
 
                 Button {
                     perform { try engine.refreshOutputDevices() }
                 } label: {
                     Label("Refresh Outputs", systemImage: "arrow.clockwise")
+                        .labelStyle(.iconOnly)
                 }
                 .buttonStyle(.glass)
+                .help("Refresh Outputs")
                 .disabled(engine.lifecycleState != .idle)
-
-                Spacer()
-                Text(engine.lifecycleState.rawValue.capitalized)
-                    .font(.caption.bold())
-                    .foregroundStyle(.secondary)
             }
             if let error = engine.lastErrorDescription {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
@@ -826,7 +838,6 @@ private struct ProductionDashboardView: View {
             }
         }
         .padding(14)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
     }
 
     private var masterControls: some View {
@@ -861,7 +872,7 @@ private struct ProductionDashboardView: View {
                 Label(
                     engine.playbackControlConfiguration.globalBypassed ? "Bypassed" : "Active",
                     systemImage: engine.playbackControlConfiguration.globalBypassed
-                        ? "waveform.slash" : "waveform.path"
+                        ? "arrow.trianglehead.branch" : "waveform.path"
                 )
                 .font(.subheadline.bold())
                 .foregroundStyle(
@@ -874,7 +885,8 @@ private struct ProductionDashboardView: View {
                 )
             }
             .padding(14)
-            .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 22))
+            .frame(maxHeight: .infinity)
+            .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 18))
         }
     }
 

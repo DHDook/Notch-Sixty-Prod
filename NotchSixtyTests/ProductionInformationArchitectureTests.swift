@@ -23,6 +23,19 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         XCTAssertEqual(VolumeFeedbackPresentation.readout(level: 0, muted: false, decibels: true), "−∞ dB")
         XCTAssertEqual(VolumeFeedbackPresentation.readout(level: 0.5, muted: true, decibels: true), "Muted")
         XCTAssertEqual(VolumeFeedbackPresentation.readout(level: 0.678, muted: false), "68%")
+
+        // Half-dB mode keeps one decimal so the menu bar readout never resizes.
+        let tenths = { (db: Double) in
+            VolumeFeedbackPresentation.readout(
+                level: MasterVolumeConfiguration.level(forSoftwareTaperDB: db),
+                muted: false,
+                decibels: true,
+                alwaysTenths: true
+            )
+        }
+        XCTAssertEqual(tenths(-27), "−27.0 dB")
+        XCTAssertEqual(tenths(-27.5), "−27.5 dB")
+        XCTAssertEqual(tenths(0), "0.0 dB")
     }
 
     func testDecibelKeyStepsLandOnTheStepGridBetweenSilenceAndZero() throws {
@@ -120,7 +133,7 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         XCTAssertEqual(cover.style, .solidGlass)
         XCTAssertEqual(cover.frame.width, system.width, accuracy: 0.001)
         XCTAssertEqual(cover.frame.minX, system.minX, accuracy: 0.001)
-        XCTAssertEqual(cover.frame.midY, system.midY, accuracy: 0.001)
+        XCTAssertEqual(cover.frame.maxY, system.maxY - VolumeFeedbackPopupLayout.coverTopInset, accuracy: 0.001, "just under the menu bar")
         XCTAssertEqual(cover.frame.height, VolumeFeedbackPopupLayout.coverHeight, accuracy: 0.001)
         XCTAssertLessThan(cover.frame.height, system.height, "tighter than the system frame")
         XCTAssertTrue(system.contains(cover.frame))
