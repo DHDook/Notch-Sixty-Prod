@@ -18,7 +18,14 @@ struct FeatureFlag: Hashable, Identifiable, Sendable {
 extension FeatureFlag {
     /// Every flag the app knows. Add one when an epic starts merging dark;
     /// delete it, and the checks that read it, once the epic ships.
-    static let all: [FeatureFlag] = []
+    static let all: [FeatureFlag] = [.adaptiveANC]
+
+    /// E4: adaptive Quiet Zone controls and the shadow-mode adaptive path.
+    static let adaptiveANC = FeatureFlag(
+        id: "e4.adaptive-anc",
+        title: "Adaptive Quiet Zone",
+        epic: "E4"
+    )
 }
 
 /// Resolves feature flags.

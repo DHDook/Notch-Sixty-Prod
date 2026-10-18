@@ -7,7 +7,7 @@
 - Helper agents in `.claude/agents/`: code-scout, build-test-runner, plan-tracker, pr-writer
   (Haiku) and realtime-reviewer (Sonnet).
 
-**Current focus:** E4 (`docs/epics/E4.md`). S2 (#157) and S3 (#158) merged; S4 howl guard in review (needs-owner); next S5 FxLMS core. E19 still needs a plan; E3 waits on the bench.
+**Current focus:** E4 (`docs/epics/E4.md`). S2–S4 merged (#157–#159); S5 FxLMS core in review (needs-owner); next S6 adaptive tonal in shadow mode. E19 still needs a plan; E3 waits on the bench.
 <!-- plan-tracker keeps the line above current -->
 
 @AGENTS.md
