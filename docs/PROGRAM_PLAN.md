@@ -65,7 +65,7 @@ XCTest is green on macOS 27. (Owner, 17 Oct 2026: no macOS 26 machine; 26 suppor
 - [x] Collapse 86 workflows into three: fast PR check, labelled full macOS build and test, release (#142)
 - [x] Rewrite `ARCHITECTURE.md` and `DSP_KERNEL.md` for the current design; archive per-PR closure notes into `docs/archive/`
 - [x] Archive `docs/ROADMAP.md` (several `ci/validate_*.py` scripts still read it) once those validators are retired; this plan lives in `docs/PROGRAM_PLAN.md`
-- [ ] Investigate the `SpeakerOptimizerCandidateComparisonTests` runner termination reported in #131
+- [x] Investigate the `SpeakerOptimizerCandidateComparisonTests` runner termination reported in #131
 
 ### E2 macOS 26 support
 
