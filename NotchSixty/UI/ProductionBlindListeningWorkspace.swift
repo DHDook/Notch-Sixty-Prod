@@ -92,8 +92,6 @@ struct ProductionBlindListeningWorkspace: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 9) {
-            Text("Blind Listening")
-                .font(.largeTitle.bold())
             Text(
                 "Compare two user-supplied audio excerpts with a randomly assigned, undisclosed X source. A and B are known; X is revealed only after all trials. This is an optional listening exercise, not a room measurement or physical hardware approval."
             )

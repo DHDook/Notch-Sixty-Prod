@@ -189,8 +189,6 @@ struct ProductionMultichannelCalibrationWorkspace: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Speaker Calibration")
-                .font(.largeTitle.bold())
             Text("Measure every physical speaker and subwoofer at each listening seat, then generate level, polarity, timing and bounded attenuation-only EQ for the selected Playback System.")
                 .foregroundStyle(.secondary)
         }

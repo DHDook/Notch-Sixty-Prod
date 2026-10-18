@@ -285,19 +285,10 @@ struct ProductionActiveAcousticsWorkspace: View {
     private var header: some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Active Acoustics")
-                    .font(.largeTitle.bold())
                 Text("Adapt playback to the room, preserve conversation, and optionally suppress stable low-frequency noise.")
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Text("SYSTEM")
-                .font(.caption.bold())
-                .tracking(1.3)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 11)
-                .padding(.vertical, 7)
-                .glassEffect(.regular, in: .capsule)
         }
     }
 

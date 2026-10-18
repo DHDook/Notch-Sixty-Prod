@@ -95,8 +95,6 @@ struct ProductionHeadphoneWorkspace: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Headphones")
-                .font(.largeTitle.bold())
             Text("Keep headphone hardware correction separate from Content Presets. Stereo mode preserves the normal content DSP chain; Virtual Speakers renders semantic program channels through a prepared HRTF or BRIR before headphone correction and true-peak protection.")
                 .foregroundStyle(.secondary)
         }

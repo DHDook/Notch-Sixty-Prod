@@ -210,51 +210,58 @@ struct ProductionRootView: View {
         return 980
     }
 
+    /// The window subtitle carries the active output, the one piece of
+    /// context every section shares.
+    private var outputSubtitle: String {
+        guard let output = engine.selectedOutputDevice else {
+            return "No output selected"
+        }
+        return "\(output.name) · \(String(format: "%.1f", output.nominalSampleRate / 1_000)) kHz"
+    }
+
     var body: some View {
         NavigationSplitView {
-            VStack(spacing: 0) {
-                ProductionSidebarBrand()
-                Divider()
-                List(selection: $selection) {
-                    Label(
-                        ProductionSection.dashboard.title,
-                        systemImage: ProductionSection.dashboard.systemImage
-                    )
-                    .tag(ProductionSection.dashboard)
+            List(selection: $selection) {
+                Label(
+                    ProductionSection.dashboard.title,
+                    systemImage: ProductionSection.dashboard.systemImage
+                )
+                .tag(ProductionSection.dashboard)
 
-                    Section("PLAYBACK") {
-                        ForEach(ProductionSection.playback) { section in
-                            Label(section.title, systemImage: section.systemImage)
-                                .tag(section)
-                        }
-                    }
-
-                    Section("SYSTEM") {
-                        ForEach(ProductionSection.system) { section in
-                            Label(section.title, systemImage: section.systemImage)
-                                .tag(section)
-                        }
-                    }
-
-                    Section("TOOLS") {
-                        ForEach(ProductionSection.tools) { section in
-                            Label(section.title, systemImage: section.systemImage)
-                                .tag(section)
-                        }
-                    }
-
-                    Section("EXTENSIONS") {
-                        ForEach(ProductionSection.extensions) { section in
-                            Label(section.title, systemImage: section.systemImage)
-                                .tag(section)
-                        }
+                Section("Playback") {
+                    ForEach(ProductionSection.playback) { section in
+                        Label(section.title, systemImage: section.systemImage)
+                            .tag(section)
                     }
                 }
-                .listStyle(.sidebar)
+
+                Section("System") {
+                    ForEach(ProductionSection.system) { section in
+                        Label(section.title, systemImage: section.systemImage)
+                            .tag(section)
+                    }
+                }
+
+                Section("Tools") {
+                    ForEach(ProductionSection.tools) { section in
+                        Label(section.title, systemImage: section.systemImage)
+                            .tag(section)
+                    }
+                }
+
+                Section("Extensions") {
+                    ForEach(ProductionSection.extensions) { section in
+                        Label(section.title, systemImage: section.systemImage)
+                            .tag(section)
+                    }
+                }
             }
+            .listStyle(.sidebar)
             .navigationSplitViewColumnWidth(min: 200, ideal: 232, max: 290)
         } detail: {
             detail(for: selection ?? .dashboard)
+                .navigationTitle((selection ?? .dashboard).title)
+                .navigationSubtitle(outputSubtitle)
                 .toolbar { toolbar }
         }
         .frame(minWidth: minimumWindowWidth, minHeight: 680)
@@ -352,41 +359,9 @@ struct ProductionRootView: View {
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
         ToolbarItemGroup(placement: .primaryAction) {
-            if selection == .roomAdvisor {
-                Label(
-                    "Room Advisor · Read Only",
-                    systemImage: "lock.shield"
-                )
-                .font(.caption.bold())
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .glassEffect(.regular, in: .capsule)
-            } else {
+            if selection != .roomAdvisor {
                 ProductionProfileToolbar(product: product)
 
-                if selection == .hardwareAcceptance {
-                    Label(
-                        "Hardware Acceptance · Evidence Only",
-                        systemImage: "lock.shield"
-                    )
-                    .font(.caption.bold())
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 8)
-                }
-
-                if let output = engine.selectedOutputDevice {
-                    HStack(spacing: 5) {
-                        Image(systemName: "hifispeaker")
-                        Text("\(output.name) · \(output.nominalSampleRate / 1_000, specifier: "%.1f") kHz")
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .padding(.horizontal, 8)
-                    .accessibilityElement(children: .combine)
-                    .accessibilityLabel("Output \(output.name), \(output.nominalSampleRate / 1_000, specifier: "%.1f") kilohertz")
-                }
                 #if DEBUG
                 Button {
                     openWindow(id: "engineering-validation")
@@ -607,22 +582,6 @@ private struct ProductSafeLaunchSheet: View {
     }
 }
 
-private struct ProductionSidebarBrand: View {
-    var body: some View {
-        HStack {
-            Text("Notch Sixty")
-                .textCase(.uppercase)
-                .font(.headline.weight(.semibold))
-                .tracking(1.5)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Notch Sixty")
-    }
-}
-
 private struct ProductionDashboardView: View {
     @ObservedObject var engine: AudioIOEngine
     @State private var actionError: String?
@@ -640,9 +599,9 @@ private struct ProductionDashboardView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Dashboard").font(.largeTitle.bold())
-                        Text(outputSummary).foregroundStyle(.secondary)
+                    if engine.selectedOutputDevice == nil {
+                        Text("Choose an output below to begin.")
+                            .foregroundStyle(.secondary)
                     }
                     Spacer()
                     Text(engine.lifecycleState == .running ? "PROCESSING" : engine.lifecycleState.rawValue.uppercased())
@@ -708,11 +667,6 @@ private struct ProductionDashboardView: View {
             return percent + " · −∞ dB"
         }
         return percent + String(format: " · %.1f dB", db)
-    }
-
-    private var outputSummary: String {
-        guard let output = engine.selectedOutputDevice else { return "Choose an output below to begin." }
-        return "\(output.name) · \(String(format: "%.1f", output.nominalSampleRate / 1_000)) kHz"
     }
 
     private var playbackPathSummary: String {
@@ -1376,10 +1330,8 @@ private struct ProductionSpeakersView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                pageHeader(
-                    "Speakers",
-                    "Speaker topology, bass management, crossover design, physical routing, and driver-level processing."
-                )
+                Text("Speaker topology, bass management, crossover design, physical routing, and driver-level processing.")
+                    .foregroundStyle(.secondary)
 
                 playbackSystemCard
                 crossoverCard
@@ -2259,13 +2211,5 @@ struct ProductionActionErrorBanner: View {
             .padding(10)
             .background(.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
         }
-    }
-}
-
-@ViewBuilder
-private func pageHeader(_ title: String, _ subtitle: String) -> some View {
-    VStack(alignment: .leading, spacing: 6) {
-        Text(title).font(.largeTitle.bold())
-        Text(subtitle).foregroundStyle(.secondary)
     }
 }

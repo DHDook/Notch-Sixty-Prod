@@ -884,8 +884,6 @@ struct ProductionPluginWorkspace: View {
     private var header: some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Plug-ins")
-                    .font(.largeTitle.bold())
                 Text(
                     "Transactional Audio Unit hosting, live rack controls, and Content Preset state."
                 )

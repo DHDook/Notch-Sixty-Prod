@@ -156,8 +156,6 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Advanced Speaker Measurement Lab")
-                        .font(.largeTitle.bold())
                     Text(
                         "Source-specific acoustic diagnostics, protected-driver measurement, and authenticated mains/sub timing evidence."
                     )

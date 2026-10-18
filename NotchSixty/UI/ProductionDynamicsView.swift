@@ -42,7 +42,6 @@ struct ProductionDynamicsView: View {
     private var header: some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 5) {
-                Text("Dynamics").font(.largeTitle.bold())
                 Text("Level control, restoration, protection, and program-aware processing. Select a processor to expose its complete configuration.")
                     .foregroundStyle(.secondary)
             }
