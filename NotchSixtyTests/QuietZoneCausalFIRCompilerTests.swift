@@ -66,6 +66,27 @@ final class QuietZoneCausalFIRCompilerTests: XCTestCase {
         )
     }
 
+    func testCompilesAtEveryStandardRateTo384kHz() throws {
+        let (design, model) = try input()
+        for rate in [44_100.0, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000] {
+            let candidate = try compiler.compile(
+                design: design, measurements: model,
+                budget: budget(), sampleRate: rate, tapCount: 16
+            )
+            XCTAssertEqual(candidate.sampleRate, rate)
+            XCTAssertLessThan(
+                candidate.maximumRelativeFitError,
+                QuietZoneCausalFIRCompiler.maximumRelativeFitError, "\(rate) Hz"
+            )
+        }
+        for rate in [500.0, 1_000_000] {
+            XCTAssertThrowsError(try compiler.compile(
+                design: design, measurements: model,
+                budget: budget(), sampleRate: rate
+            ), "\(rate) Hz")
+        }
+    }
+
     func testNeverCompileWithoutPositiveMeasuredBudget() throws {
         let (design, model) = try input()
         XCTAssertThrowsError(try compiler.compile(

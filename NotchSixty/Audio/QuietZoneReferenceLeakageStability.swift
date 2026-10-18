@@ -111,7 +111,7 @@ struct QuietZoneReferenceLeakageStabilityAnalyzer: Sendable {
         guard candidate.sampleRate.isFinite,
               rig.sampleRate.isFinite,
               abs(candidate.sampleRate - rig.sampleRate) < 0.5,
-              (8_000...192_000).contains(rig.sampleRate),
+              (8_000...768_000).contains(rig.sampleRate),
               !candidate.leftTaps.isEmpty,
               candidate.leftTaps.count == candidate.rightTaps.count,
               candidate.leftTaps.count <= QuietZoneCausalFIRCompiler.maximumTaps,

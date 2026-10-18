@@ -25,7 +25,7 @@ with them, these decisions win until E1/E21 update `AGENTS.md`.
 
 ## Epics at a glance
 
-Twenty-one epics in four phases close every gap in the analysis and set the engine up for other
+Twenty-two epics in four phases close every gap in the analysis and set the engine up for other
 platforms; E6 (the unified graph) is the critical path, because eleven later epics build on it.
 
 | ID | Epic | Phase | Depends on | Where the work happens | Done when |
@@ -50,6 +50,7 @@ platforms; E6 (the unified graph) is the critical path, because eleven later epi
 | E15 | Device-aware profiles | 4 | E6 | Claude Code (Mac) | Profile follows the output when the user opts in |
 | E16 | Automation and remote | 4 | E6 | Claude Code (Mac) | App Intents, local API and iPhone remote ship |
 | E17 | Export and dither | 4 | E8, E10 | Claude Code (Mac) | MiniDSP, APO and WAV exports; automatic dither |
+| E22 | Hardware validation | 4 | all software epics | Bench | Every deferred bench check passes on `main` at every rate |
 | E18 | Launch readiness | 4 | all | Owner + Claude Code | Signed, reviewed, accessible, competitive ABX done, App Store live |
 
 ## Phase 1 — Consolidate and qualify
@@ -87,7 +88,7 @@ XCTest is green on macOS 27. (Owner, 17 Oct 2026: no macOS 26 machine; 26 suppor
 - [x] ~~Label the Active Acoustics workspace clearly as a preview until qualification~~ (dropped by owner, 18 Oct 2026: still in development)
 - [x] Set written, measurable targets: attenuation at the primary seat per band, quiet-zone size, and no audible increase at other seats (proposed in `docs/ANC_QUALIFICATION.md`; owner sets final values)
 - [ ] State the physical envelope in the product: broadband feed-forward only works when the reference leads the noise by more than system latency; tonal and periodic noise uses the predictive canceller
-- [ ] Add adaptive control (FxLMS-style) with online secondary-path tracking, so cancellation survives people moving and temperature drift; today's filters are designed offline and fixed (core built in S5; shadow mode wired in S6; live output after S10)
+- [ ] Add adaptive control (FxLMS-style) with online secondary-path tracking, so cancellation survives people moving and temperature drift; today's filters are designed offline and fixed (core built in S5; tonal shadow wired in S6; feed-forward shadow core in S9a; live output after S10)
 - [ ] Lowest-latency output path for ANC: minimum buffer size, a measured latency budget per supported interface, and a supported-hardware list for reference microphones (S7: low-latency profile and table; bench numbers in S8)
 - [x] Instability and howl detection with fail-to-mute, alongside the emergency analog mute (guard built, E4 S4; wired with adaptive output in E4 S6; analog mute is a bench check)
 - [ ] Run the PR97 hardware timing calibration and the PR99 physical verification campaign on the bench
@@ -259,6 +260,15 @@ complete, speaker ANC qualified, and a full hardware regression passing at every
 
 - [ ] Filter export to MiniDSP, Equalizer APO and WAV convolution sets
 - [ ] Automatic TPDF dither only when the device's physical format is 16-bit integer
+
+### E22 Hardware validation
+
+Owner decision, 18 Oct 2026: there is no bench access for now, so every bench check is deferred to this epic, which runs once the software work is built. Software slices keep listing their checks under "Bench checks" in `docs/epics/E<n>.md`; this epic collects and runs them.
+
+- [ ] Collect every epic's "Bench checks" list and the E3 cases H01–H08 into one campaign
+- [ ] Run E4 S8 (PR97 timing calibration and PR99 verification) and record results against `docs/ANC_QUALIFICATION.md`
+- [ ] Run the remaining bench checks at every rate from 44.1 to 384 kHz
+- [ ] Feed the results into the live-authorisation slices (E4 S10, E19), which still need real evidence
 
 ### E18 Launch readiness
 

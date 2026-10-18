@@ -6,21 +6,22 @@ final class QuietZoneReferenceLeakageStabilityTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
     private let analyzer = QuietZoneReferenceLeakageStabilityAnalyzer()
 
-    private func rig() -> QuietZoneHardwareCalibrationRig {
+    private func rig(rate: Double = 48_000) -> QuietZoneHardwareCalibrationRig {
         .init(
             projectID: UUID(), microphoneID: "hallway-mic",
             microphoneChannel: 0, outputDeviceID: "main-dac",
-            routeID: "selected-output-lease", sampleRate: 48_000,
+            routeID: "selected-output-lease", sampleRate: rate,
             clockID: "measured-clock", triggerID: "isolated-speaker-probe"
         )
     }
 
     private func candidate(
         left: [Float] = [0.01, -0.01],
-        right: [Float] = [0.01, -0.01]
+        right: [Float] = [0.01, -0.01],
+        rate: Double = 48_000
     ) -> QuietZoneCausalFIRCandidate {
         .init(
-            sampleRate: 48_000, leftTaps: left, rightTaps: right,
+            sampleRate: rate, leftTaps: left, rightTaps: right,
             worstPredictedReductionDB: 1.0,
             maximumRelativeFitError: 0.05,
             maximumReferenceEchoFraction: 0.01
@@ -47,6 +48,18 @@ final class QuietZoneReferenceLeakageStabilityTests: XCTestCase {
                     oneSigmaError: Array(repeating: sigma, count: impulse.count)
                 )
             }
+        }
+    }
+
+    func testAssessesAtEveryStandardRateTo384kHz() throws {
+        for rate in [44_100.0, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000] {
+            let r = rig(rate: rate)
+            XCTAssertNoThrow(
+                try analyzer.assess(
+                    candidate: candidate(rate: rate), rig: r, captures: captures(r), now: now
+                ),
+                "\(rate) Hz"
+            )
         }
     }
 

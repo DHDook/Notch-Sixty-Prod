@@ -41,6 +41,10 @@ struct QuietZoneCausalFIRCompiler: Sendable {
     static let maximumTaps = 64
     static let peakGainLimit = 0.06309573444801933
     static let maximumRelativeFitError = 0.18
+    /// Native rates to 768 kHz (every feature runs to 384 kHz), and down to
+    /// 1 kHz so the E4 feed-forward shadow can refit at its ~4 kHz
+    /// adaptation rate.
+    static let sampleRateRange: ClosedRange<Double> = 1_000...768_000
 
     /// Refit the complex-frequency preview with real causal taps using
     /// Tikhonov-regularized least squares and exponentially increasing
@@ -53,7 +57,7 @@ struct QuietZoneCausalFIRCompiler: Sendable {
         sampleRate: Double,
         tapCount: Int = 32
     ) throws -> QuietZoneCausalFIRCandidate {
-        guard sampleRate.isFinite, (8_000...192_000).contains(sampleRate),
+        guard sampleRate.isFinite, Self.sampleRateRange.contains(sampleRate),
               tapCount >= 1, tapCount <= Self.maximumTaps,
               budget.readiness == .physicallyPlausible,
               let reserve = budget.conservativeReserveSeconds,
@@ -148,7 +152,9 @@ struct QuietZoneCausalFIRCompiler: Sendable {
         )
     }
 
-    private func fit(
+    /// Tikhonov-regularized causal real-tap fit of `desired` (convention
+    /// H(f) = sum h[n] exp(-j 2 pi f n / fs)), late taps penalized.
+    func fit(
         _ desired: [ActiveQuietZoneComplex],
         at frequencies: [Double],
         sampleRate: Double,
@@ -232,7 +238,7 @@ struct QuietZoneCausalFIRCompiler: Sendable {
         return solution
     }
 
-    private func response(
+    func response(
         _ taps: [Double],
         frequency: Double,
         sampleRate: Double

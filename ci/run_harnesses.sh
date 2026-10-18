@@ -137,6 +137,16 @@ if selected e4_fxlms; then
         failed+=(e4_fxlms)
     fi
 fi
+# E4 S9a: feed-forward shadow canceller (1 x 2 x 1 block FxLMS) on a simulated plant.
+if selected e4_ff_shadow; then
+    if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -c "$RT/n60_fxlms.cpp" -o "$OUT/n60_fxlms_ff.o" \
+        && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -c "$RT/n60_ff_shadow.cpp" -o "$OUT/n60_ff_shadow.o"; then
+        harness e4_ff_shadow "${STRICT[@]}" -O2 -I"$RT" ci/harness_e4_ff_shadow.c \
+            "$OUT/n60_ff_shadow.o" "$OUT/n60_fxlms_ff.o" -lc++ -lm
+    else
+        failed+=(e4_ff_shadow)
+    fi
+fi
 
 # Acoustic reference lab: production-header probes checked against independent
 # Python oracles at every standard rate from 44.1 to 384 kHz.
@@ -152,6 +162,15 @@ if selected e4_anc_guard_reference; then
         passed+=(e4_anc_guard_reference)
     else
         failed+=(e4_anc_guard_reference)
+    fi
+    echo "::endgroup::"
+fi
+if selected e4_ff_shadow_reference; then
+    echo "::group::e4_ff_shadow_reference"
+    if python3 ci/acoustic_reference_lab/e4_ff_shadow_reference.py; then
+        passed+=(e4_ff_shadow_reference)
+    else
+        failed+=(e4_ff_shadow_reference)
     fi
     echo "::endgroup::"
 fi
