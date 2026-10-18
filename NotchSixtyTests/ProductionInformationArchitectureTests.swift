@@ -202,6 +202,75 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         XCTAssertFalse(FeatureFlag.uiScope.defaultEnabled)
     }
 
+    func testDynamicsNavigatorKeepsTodaysGroupsWithTheUIScopeFlagOff() {
+        let groups = ProductionDynamicsLayout.groups(signalChainOrder: false)
+        XCTAssertEqual(groups.map(\.id), ProductionDynamicsGroup.allCases.map(\.rawValue))
+        for (group, legacy) in zip(groups, ProductionDynamicsGroup.allCases) {
+            XCTAssertEqual(group.shown, legacy.modules)
+            XCTAssertTrue(group.more.isEmpty)
+        }
+    }
+
+    func testDynamicsNavigatorListsEveryProcessorOnceInEitherLayout() {
+        for chainOrder in [false, true] {
+            let modules = ProductionDynamicsLayout.groups(signalChainOrder: chainOrder)
+                .flatMap(\.modules)
+            XCTAssertEqual(modules.count, ProductionDynamicsModule.allCases.count)
+            XCTAssertEqual(Set(modules), Set(ProductionDynamicsModule.allCases))
+        }
+    }
+
+    /// The order the engine runs these processors: input headroom gain, the
+    /// pre-EQ stages, then core dynamics after room correction, the pause
+    /// gate, and protection (`docs/DSP_KERNEL.md`, `N60Dynamics.c`,
+    /// `N60Protection.c`). Oversampling sets the protection stage's rate.
+    func testSignalChainNavigatorFollowsTheEngineStageOrder() {
+        let engineOrder: [ProductionDynamicsModule] = [
+            .automaticHeadroom,
+            .dcOffset, .infrasonic, .mainsHum, .denoiser,
+            .stereoMode, .stereoWidener,
+            .loudnessMatch, .loudnessContour, .dialogueLeveler,
+            .deHarsh, .deEsser,
+            .multiband, .compressor, .expander,
+            .pauseGate,
+            .gainRider, .softClipper, .limiter, .oversampling,
+        ]
+        XCTAssertEqual(
+            ProductionDynamicsLayout.groups(signalChainOrder: true).flatMap(\.modules),
+            engineOrder
+        )
+    }
+
+    func testSignalChainNavigatorFoldsOnlyNicheProcessorsAndNotesTheEQBoundary() {
+        let groups = ProductionDynamicsLayout.groups(signalChainOrder: true)
+        XCTAssertEqual(
+            groups.map(\.title),
+            ["Input & Clean-up", "Stereo", "Level & Dialogue", "Tone", "Dynamics", "Output"]
+        )
+        XCTAssertEqual(
+            Set(groups.flatMap(\.more)),
+            [.dcOffset, .denoiser, .deEsser, .expander, .oversampling]
+        )
+        for group in groups {
+            XCTAssertFalse(group.shown.isEmpty, "\(group.title) needs a visible processor")
+        }
+        XCTAssertEqual(groups[0].note, "Runs before EQ and room correction.")
+        XCTAssertEqual(groups[1].note, "Runs after EQ and room correction.")
+        XCTAssertEqual(groups.dropFirst(2).compactMap(\.note), [])
+    }
+
+    func testFoldedMoreRowShowsABadgeWhenAProcessorUnderItIsOn() throws {
+        let input = try XCTUnwrap(
+            ProductionDynamicsLayout.groups(signalChainOrder: true).first
+        )
+        XCTAssertFalse(input.moreHasActiveModule { _ in false })
+        XCTAssertTrue(input.moreHasActiveModule { $0 == .denoiser })
+        XCTAssertFalse(
+            input.moreHasActiveModule { $0 == .mainsHum },
+            "a visible processor that is on does not badge More"
+        )
+    }
+
     func testExtensionsGroupContainsPluginRackEntryPoint() {
         XCTAssertEqual(
             ProductionSection.extensions,

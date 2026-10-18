@@ -4,7 +4,9 @@ import SwiftUI
 struct ProductionDynamicsView: View {
     @ObservedObject var engine: AudioIOEngine
     var reference: ProductionReferenceNavigator? = nil
+    @EnvironmentObject private var featureFlags: FeatureFlags
     @State private var selectedModule: ProductionDynamicsModule = .compressor
+    @State private var expandedMoreGroups: Set<String> = []
     @State private var mainsDetectInFlight = false
     @State private var mainsDetectionMessage: String?
     @State private var actionError: String?
@@ -56,47 +58,33 @@ struct ProductionDynamicsView: View {
     private var moduleNavigator: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 4) {
-                ForEach(ProductionDynamicsGroup.allCases) { group in
+                ForEach(
+                    ProductionDynamicsLayout.groups(
+                        signalChainOrder: featureFlags.isEnabled(.uiScope)
+                    )
+                ) { group in
                     Text(group.title.uppercased())
                         .font(.caption2.bold())
                         .tracking(0.6)
                         .foregroundStyle(.tertiary)
                         .padding(.horizontal, 8)
                         .padding(.top, 8)
-                        .padding(.bottom, 2)
+                        .padding(.bottom, group.note == nil ? 2 : 0)
 
-                    ForEach(group.modules) { module in
-                        Button {
-                            selectedModule = module
-                        } label: {
-                            HStack(spacing: 9) {
-                                Image(systemName: module.systemImage)
-                                    .frame(width: 18)
-                                    .foregroundStyle(selectedModule == module ? .primary : .secondary)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(module.title)
-                                        .foregroundStyle(.primary)
-                                    Text(module.subtitle)
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                }
-                                Spacer(minLength: 4)
-                                Circle()
-                                    .fill(moduleIsActive(module) ? Color.green : Color.secondary.opacity(0.28))
-                                    .frame(width: 7, height: 7)
-                            }
-                            .contentShape(.rect)
-                            .padding(.horizontal, 9)
-                            .padding(.vertical, 5)
-                            .background {
-                                if selectedModule == module {
-                                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                        .fill(.primary.opacity(0.09))
-                                }
-                            }
-                        }
-                        .buttonStyle(.plain)
+                    if let note = group.note {
+                        Text(note)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 8)
+                            .padding(.bottom, 2)
+                    }
+
+                    ForEach(moreIsExpanded(group) ? group.modules : group.shown) { module in
+                        moduleRow(module)
+                    }
+
+                    if !group.more.isEmpty {
+                        moreRow(for: group)
                     }
                 }
             }
@@ -105,6 +93,77 @@ struct ProductionDynamicsView: View {
         .scrollIndicators(.visible)
         .background(.clear)
         .glassEffect(.regular, in: .rect(cornerRadius: 18))
+    }
+
+    /// "More" stays open while one of its processors is selected, so the
+    /// selection never disappears from the list.
+    private func moreIsExpanded(_ group: ProductionDynamicsLayout.Group) -> Bool {
+        expandedMoreGroups.contains(group.id) || group.more.contains(selectedModule)
+    }
+
+    private func moreRow(for group: ProductionDynamicsLayout.Group) -> some View {
+        let expanded = moreIsExpanded(group)
+        return Button {
+            if expanded {
+                expandedMoreGroups.remove(group.id)
+            } else {
+                expandedMoreGroups.insert(group.id)
+            }
+        } label: {
+            HStack(spacing: 9) {
+                Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                    .frame(width: 18)
+                    .foregroundStyle(.secondary)
+                Text(expanded ? "Fewer" : "More (\(group.more.count))")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 4)
+                if !expanded, group.moreHasActiveModule(isActive: moduleIsActive) {
+                    Text("ON")
+                        .font(.caption2.bold())
+                        .foregroundStyle(.green)
+                        .accessibilityLabel("A processor under More is on")
+                }
+            }
+            .contentShape(.rect)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func moduleRow(_ module: ProductionDynamicsModule) -> some View {
+        Button {
+            selectedModule = module
+        } label: {
+            HStack(spacing: 9) {
+                Image(systemName: module.systemImage)
+                    .frame(width: 18)
+                    .foregroundStyle(selectedModule == module ? .primary : .secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(module.title)
+                        .foregroundStyle(.primary)
+                    Text(module.subtitle)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 4)
+                Circle()
+                    .fill(moduleIsActive(module) ? Color.green : Color.secondary.opacity(0.28))
+                    .frame(width: 7, height: 7)
+            }
+            .contentShape(.rect)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background {
+                if selectedModule == module {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(.primary.opacity(0.09))
+                }
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder
@@ -846,7 +905,7 @@ private struct DynamicsParameterRow: View {
     }
 }
 
-private enum ProductionDynamicsGroup: String, CaseIterable, Identifiable {
+enum ProductionDynamicsGroup: String, CaseIterable, Identifiable {
     case dynamics
     case restoration
     case levelDialogue
@@ -869,7 +928,7 @@ private enum ProductionDynamicsGroup: String, CaseIterable, Identifiable {
     }
 }
 
-private enum ProductionDynamicsModule: String, CaseIterable, Identifiable, Hashable {
+enum ProductionDynamicsModule: String, CaseIterable, Identifiable, Hashable {
     case compressor
     case multiband
     case expander
@@ -1002,4 +1061,87 @@ private enum ProductionDynamicsModule: String, CaseIterable, Identifiable, Hasha
         case .dcOffset: return "waveform.path.ecg.rectangle"
         }
     }
+}
+
+/// The dynamics navigator's groups. Today's layout groups processors by kind.
+/// The E5 layout (`e5.ui-scope`) lists them in the order the engine runs them
+/// (`docs/DSP_KERNEL.md`) and folds niche processors under "More" in their own
+/// group, so the list still reads as the signal path.
+enum ProductionDynamicsLayout {
+    struct Group: Identifiable, Equatable {
+        let id: String
+        let title: String
+        let note: String?
+        /// Every processor in the group, in signal-chain order.
+        let modules: [ProductionDynamicsModule]
+        /// The niche processors folded under "More" until it is expanded.
+        let folded: Set<ProductionDynamicsModule>
+
+        init(
+            id: String,
+            title: String,
+            note: String? = nil,
+            modules: [ProductionDynamicsModule],
+            folded: Set<ProductionDynamicsModule> = []
+        ) {
+            self.id = id
+            self.title = title
+            self.note = note
+            self.modules = modules
+            self.folded = folded
+        }
+
+        var shown: [ProductionDynamicsModule] { modules.filter { !folded.contains($0) } }
+        var more: [ProductionDynamicsModule] { modules.filter { folded.contains($0) } }
+
+        /// Drives the badge on a folded "More" row, so processing that is on
+        /// is never hidden.
+        func moreHasActiveModule(isActive: (ProductionDynamicsModule) -> Bool) -> Bool {
+            more.contains(where: isActive)
+        }
+    }
+
+    static func groups(signalChainOrder: Bool) -> [Group] {
+        signalChainOrder ? signalChainGroups : legacyGroups
+    }
+
+    static let legacyGroups: [Group] = ProductionDynamicsGroup.allCases.map { group in
+        Group(id: group.rawValue, title: group.title, modules: group.modules)
+    }
+
+    static let signalChainGroups: [Group] = [
+        Group(
+            id: "input",
+            title: "Input & Clean-up",
+            note: "Runs before EQ and room correction.",
+            modules: [.automaticHeadroom, .dcOffset, .infrasonic, .mainsHum, .denoiser],
+            folded: [.dcOffset, .denoiser]
+        ),
+        Group(
+            id: "stereo",
+            title: "Stereo",
+            note: "Runs after EQ and room correction.",
+            modules: [.stereoMode, .stereoWidener]
+        ),
+        Group(
+            id: "level",
+            title: "Level & Dialogue",
+            modules: [.loudnessMatch, .loudnessContour, .dialogueLeveler]
+        ),
+        Group(id: "tone", title: "Tone", modules: [.deHarsh, .deEsser], folded: [.deEsser]),
+        Group(
+            id: "dynamics",
+            title: "Dynamics",
+            modules: [.multiband, .compressor, .expander],
+            folded: [.expander]
+        ),
+        Group(
+            id: "output",
+            title: "Output",
+            // Oversampling sets the rate the protection stage runs at, so it
+            // closes the list.
+            modules: [.pauseGate, .gainRider, .softClipper, .limiter, .oversampling],
+            folded: [.oversampling]
+        ),
+    ]
 }
