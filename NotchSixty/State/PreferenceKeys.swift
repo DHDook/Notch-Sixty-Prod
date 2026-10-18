@@ -18,6 +18,9 @@ enum PreferenceKeys {
     static let vuMetersEnabled = "production.vuMetersEnabled"
     /// E4 S7: measured Quiet Zone round trips, per interface, rate and buffer.
     static let quietZoneMeasuredLatency = "quietZone.measuredLatency"
+    /// E4 S9b2: the feed-forward reference microphone's input channel on the
+    /// seat microphone's interface (zero-based).
+    static let quietZoneFeedForwardReferenceChannel = "quietZone.feedForwardReferenceChannel"
 
     /// Feature-flag overrides are stored as `feature.<flag id>`.
     static let featureFlagPrefix = "feature."

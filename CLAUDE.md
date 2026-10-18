@@ -7,7 +7,7 @@
 - Helper agents in `.claude/agents/`: code-scout, build-test-runner, plan-tracker, pr-writer
   (Haiku) and realtime-reviewer (Sonnet).
 
-**Current focus:** E4 (`docs/epics/E4.md`). S2–S7 and S9a merged (#157–#163); S9b1 (pair capture and survey estimator) in review (needs-owner); S9b2 (survey flow) next, then S9c (shadow wiring). Bench work (S8, S10, E3) is deferred to E22. E19 still needs a plan.
+**Current focus:** E4 (`docs/epics/E4.md`). S2–S7, S9a and S9b1 merged (#157–#164); S9b2 (feed-forward survey flow) in review (needs-owner); S9c (shadow wiring) next. Bench work (S8, S10, E3) is deferred to E22. E19 still needs a plan.
 <!-- plan-tracker keeps the line above current -->
 
 @AGENTS.md
