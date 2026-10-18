@@ -37,6 +37,7 @@ constexpr double kReferencePowerFloor = 1e-8;  // -80 dBFS
 constexpr double kErrorLimit = 8.0;            // decimated error clamp
 constexpr double kPathSettleConstants = 3.0;
 constexpr double kFlush = 1e-30;
+constexpr double kMeterSeconds = 0.5;
 
 double amplitudeFromDB(double db) { return std::pow(10.0, db / 20.0); }
 
@@ -171,6 +172,8 @@ AdaptiveTonal::AdaptiveTonal(const N60AdaptiveTonalConfig &config)
       aggregateCap_(amplitudeFromDB(config.aggregateCapDBFS)),
       pathFloor2_(static_cast<double>(config.pathFloor) * config.pathFloor),
       probeEnabled_(config.probeEnabled),
+      shadow_(config.shadow),
+      meterAlpha_(1.0 / (kMeterSeconds * decimatedRate_)),
       probeSeed_(config.probeSeed != 0 ? config.probeSeed : kDefaultProbeSeed),
       chunkFrames_(kChunkDecimated * Decimator::factorFor(config.sampleRate)),
       chunkCount_(std::max<std::uint32_t>(
@@ -349,8 +352,28 @@ void AdaptiveTonal::adapt(std::uint64_t frame, double error, double probe) noexc
     }
     // The decimated sample describes native frame (frame - G).
     const double aligned = static_cast<double>(frame - errorDecimator_.delayFrames());
+    std::array<double, kTones> c{}, s{};
+    double adapted = error;
+    for (std::uint32_t k = 0; k < toneCount_; ++k) {
+        const double phase = kTwoPi * fraction(toneHz_[k] * aligned / sampleRate_);
+        c[k] = std::cos(phase);
+        s[k] = std::sin(phase);
+        if (shadow_) {
+            // Shadow: add what the unplayed output would contribute at the
+            // microphone, Re(S W exp(j phase)), to form the virtual error.
+            const Complex sw = pathAtTone_[k] * weights_[k];
+            adapted += sw.real() * c[k] - sw.imag() * s[k];
+        }
+    }
+    adapted = std::clamp(adapted, -kErrorLimit, kErrorLimit);
     double total = 0;
     for (std::uint32_t k = 0; k < toneCount_; ++k) {
+        // Tone meters: complex amplitude at the microphone, measured and with
+        // the adaptive output (the same thing unless shadowed).
+        measuredTone_[k] += meterAlpha_ * (Complex(2.0 * error * c[k], -2.0 * error * s[k])
+                                           - measuredTone_[k]);
+        predictedTone_[k] += meterAlpha_ * (Complex(2.0 * adapted * c[k], -2.0 * adapted * s[k])
+                                            - predictedTone_[k]);
         double wr = weights_[k].real() * (1.0 - leakage_);
         double wi = weights_[k].imag() * (1.0 - leakage_);
         const double sRe = pathAtTone_[k].real(), sIm = pathAtTone_[k].imag();
@@ -360,12 +383,10 @@ void AdaptiveTonal::adapt(std::uint64_t frame, double error, double probe) noexc
         adapting_[k] = magnitude2 >= pathFloor2_
                        && (!probeEnabled_ || pathUpdates_ >= pathSettleSamples_);
         if (adapting_[k]) {
-            const double phase = kTwoPi * fraction(toneHz_[k] * aligned / sampleRate_);
-            const double c = std::cos(phase), s = std::sin(phase);
             // W -= g e conj(S exp(j phase)).
-            const double qr = sRe * c - sIm * s;
-            const double qi = sRe * s + sIm * c;
-            const double g = updateGain_ * error / magnitude2;
+            const double qr = sRe * c[k] - sIm * s[k];
+            const double qi = sRe * s[k] + sIm * c[k];
+            const double g = updateGain_ * adapted / magnitude2;
             wr -= g * qr;
             wi += g * qi;
         }
@@ -415,6 +436,8 @@ void AdaptiveTonal::restartFilters() noexcept {
 void AdaptiveTonal::resetModel() noexcept {
     weights_ = {};
     adapting_ = {};
+    measuredTone_ = {};
+    predictedTone_ = {};
     path_.reset();
     pathUpdates_ = 0;
     pathAtTone_ = probeEnabled_ ? std::array<Complex, kTones>{} : toneSeed_;
@@ -438,6 +461,10 @@ void AdaptiveTonal::publish() noexcept {
         s.weight[k] = {static_cast<float>(weights_[k].real()), static_cast<float>(weights_[k].imag())};
         s.path[k] = {static_cast<float>(pathAtTone_[k].real()), static_cast<float>(pathAtTone_[k].imag())};
         s.adapting[k] = adapting_[k];
+        s.measuredTone[k] = {static_cast<float>(measuredTone_[k].real()),
+                             static_cast<float>(measuredTone_[k].imag())};
+        s.predictedTone[k] = {static_cast<float>(predictedTone_[k].real()),
+                              static_cast<float>(predictedTone_[k].imag())};
     }
     statusExchange_.publish();
 }
@@ -573,6 +600,7 @@ N60AdaptiveTonalConfig N60AdaptiveTonalConfigDefault(double sampleRate) {
     config.aggregateCapDBFS = -18.0f;
     config.pathFloor = 1e-3f;
     config.probeEnabled = false;
+    config.shadow = false;
     config.probeLevelDBFS = -50.0f;
     config.probeSeed = kDefaultProbeSeed;
     config.pathTaps = 64;
@@ -597,6 +625,7 @@ bool N60AdaptiveTonalConfigIsValid(const N60AdaptiveTonalConfig *config) {
     if (!in(config->toneCapDBFS, -120, -6) || !in(config->aggregateCapDBFS, -120, -6)) return false;
     if (!(config->pathFloor > 0 && config->pathFloor <= 1)) return false;
     if (!in(config->probeLevelDBFS, -90, -40)) return false;
+    if (config->shadow && config->probeEnabled) return false;  // the probe is output
     if (config->pathTaps < 8 || config->pathTaps > N60_FXLMS_MAX_PATH_TAPS) return false;
     if (!in(config->pathConvergenceSeconds, 0.01, 600)) return false;
     if (config->pathTaps / (config->pathConvergenceSeconds * decimatedRate) > 0.5) return false;

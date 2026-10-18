@@ -86,7 +86,13 @@ final class ActiveQuietZoneController: ObservableObject {
         ActiveQuietZoneHoldReason? = .disabled
     @Published private(set) var controlledFrequenciesHz: [Double] = []
     @Published private(set) var toneTelemetry:
-        [ActiveQuietZoneToneTelemetry] = []
+        [ActiveQuietZoneToneTelemetry] = [] {
+        didSet {
+            if toneTelemetry.isEmpty { adaptiveSeeds = [] }
+        }
+    }
+    /// E4 S6: the offline design per controlled tone, for the adaptive shadow.
+    @Published private(set) var adaptiveSeeds: [AdaptiveQuietZoneSeed] = []
     @Published private(set) var availableInjectionPeak: Double = 0
     @Published private(set) var lastErrorDescription: String?
     @Published private(set) var spatialCalibration:
@@ -1068,6 +1074,7 @@ final class ActiveQuietZoneController: ObservableObject {
         var latestSpatialPredictions:
             [ActiveQuietZoneSpatialSeatPrediction] = []
         var telemetry: [ActiveQuietZoneToneTelemetry] = []
+        var seeds: [AdaptiveQuietZoneSeed] = []
         var decisions:
             [ActiveQuietZoneVerification.Decision] = []
 
@@ -1184,6 +1191,15 @@ final class ActiveQuietZoneController: ObservableObject {
                     rightOutput: desiredRight
                 )
             )
+            seeds.append(
+                AdaptiveQuietZoneSeed(
+                    frequencyHz: frequency,
+                    leftPath: leftPath,
+                    rightPath: rightPath,
+                    leftOutput: outputLeft,
+                    rightOutput: outputRight
+                )
+            )
 
             let verification = try planner.verify(
                 beforeLevelDBFS:
@@ -1213,6 +1229,7 @@ final class ActiveQuietZoneController: ObservableObject {
         }
 
         spatialPredictions = latestSpatialPredictions
+        adaptiveSeeds = seeds
         let desired = try aggregateLimitedTarget(
             tones: desiredTones
         )

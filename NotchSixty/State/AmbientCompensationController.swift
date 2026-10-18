@@ -108,6 +108,14 @@ final class AmbientCompensationController: ObservableObject {
     private var latestQuietZoneRawRight: [Float] = []
     private var activeSystemID: UUID?
     private var quietZoneObservationDemand = false
+    /// E4 S6: receives every block of error-microphone frames this controller
+    /// reads (frames, sample rate, monitor epoch, and whether frames were
+    /// skipped since the previous block). The adaptive Quiet Zone shadow uses
+    /// it; it must not retain or modify anything here.
+    var microphoneFramesObserver: (([Float], Double, UUID, Bool) -> Void)?
+    /// Set when a poll returns without reading, so the next block is marked
+    /// as following a gap.
+    private var microphoneFramesSkipped = false
 
     @Published private(set) var configuration =
         AmbientCompensationConfiguration()
@@ -442,6 +450,7 @@ final class AmbientCompensationController: ObservableObject {
             guard playbackAdaptationActive
                     || quietZoneObservationDemand,
                   let monitor else {
+                microphoneFramesSkipped = true
                 return
             }
 
@@ -449,6 +458,15 @@ final class AmbientCompensationController: ObservableObject {
                 maximumFrames: Self.preferredAnalysisFrames
             )
             spatialMicrophoneFrameEnd &+= UInt64(newlyCaptured.count)
+            if !newlyCaptured.isEmpty {
+                microphoneFramesObserver?(
+                    newlyCaptured,
+                    monitor.sampleRate,
+                    spatialMicrophoneEpoch,
+                    microphoneFramesSkipped
+                )
+                microphoneFramesSkipped = false
+            }
             Self.appendCapped(
                 newlyCaptured,
                 to: &microphoneHistory

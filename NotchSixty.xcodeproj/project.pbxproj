@@ -103,6 +103,9 @@
 		F89200000000000000000001 /* AmbientMonitorTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F89200000000000000000011 /* AmbientMonitorTransport.swift */; };
 		F89300000000000000000001 /* AmbientCompensationController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F89300000000000000000011 /* AmbientCompensationController.swift */; };
 		F90200000000000000000001 /* ActiveQuietZoneController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F90200000000000000000011 /* ActiveQuietZoneController.swift */; };
+		E4D000000000000000000001 /* AdaptiveQuietZoneShadow.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4D000000000000000000011 /* AdaptiveQuietZoneShadow.swift */; };
+		E4D000000000000000000002 /* ProductionAdaptiveQuietZoneCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4D000000000000000000012 /* ProductionAdaptiveQuietZoneCard.swift */; };
+		E4D000000000000000000003 /* AdaptiveQuietZoneShadowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4D000000000000000000013 /* AdaptiveQuietZoneShadowTests.swift */; };
 		F70000000000000000000001 /* N60AdaptiveSampleRate.c in Sources */ = {isa = PBXBuildFile; fileRef = F70000000000000000000011 /* N60AdaptiveSampleRate.c */; };
 		F72000000000000000000001 /* AmbientFieldAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F72000000000000000000011 /* AmbientFieldAnalyzer.swift */; };
 		F72000000000000000000002 /* AmbientFieldAnalyzerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F72000000000000000000012 /* AmbientFieldAnalyzerTests.swift */; };
@@ -445,6 +448,9 @@
 		F89200000000000000000011 /* AmbientMonitorTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreAudio/AmbientMonitorTransport.swift; sourceTree = "<group>"; };
 		F89300000000000000000011 /* AmbientCompensationController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AmbientCompensationController.swift; sourceTree = "<group>"; };
 		F90200000000000000000011 /* ActiveQuietZoneController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveQuietZoneController.swift; sourceTree = "<group>"; };
+		E4D000000000000000000011 /* AdaptiveQuietZoneShadow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdaptiveQuietZoneShadow.swift; sourceTree = "<group>"; };
+		E4D000000000000000000012 /* ProductionAdaptiveQuietZoneCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductionAdaptiveQuietZoneCard.swift; sourceTree = "<group>"; };
+		E4D000000000000000000013 /* AdaptiveQuietZoneShadowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdaptiveQuietZoneShadowTests.swift; sourceTree = "<group>"; };
 		F70000000000000000000011 /* N60AdaptiveSampleRate.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = N60AdaptiveSampleRate.c; sourceTree = "<group>"; };
 		F70000000000000000000012 /* N60AdaptiveSampleRate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60AdaptiveSampleRate.h; sourceTree = "<group>"; };
 		F72000000000000000000011 /* AmbientFieldAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AmbientFieldAnalyzer.swift; sourceTree = "<group>"; };
@@ -759,6 +765,7 @@
 				F97000000000000000000012 /* QuietZonePhysicalLatencyBudgetTests.swift */,
 				E4B000000000000000000014 /* AncGuardTests.swift */,
 				E4C000000000000000000014 /* FxlmsTests.swift */,
+				E4D000000000000000000013 /* AdaptiveQuietZoneShadowTests.swift */,
 				E4A000000000000000000012 /* QuietZoneLiveAuthorisationTests.swift */,
 				F97100000000000000000012 /* QuietZonePhysicalLatencyMeasurementRunTests.swift */,
 				F97200000000000000000012 /* QuietZoneHardwareCommissioningTests.swift */,
@@ -973,7 +980,7 @@
 			path = Backup;
 			sourceTree = "<group>";
 		};
-		A20000000000000000000054 /* State */ = {isa = PBXGroup; children = (A20000000000000000000025 /* AudioLifecycleState.swift */, A100000000000000000E2204 /* FeatureFlags.swift */, A100000000000000000E2202 /* PreferenceKeys.swift */, A2000000000000000000002B /* ProductProfiles.swift */, B113B0000000000000000061 /* ProductRecovery.swift */, B113B0000000000000000071 /* HeadroomAssistant.swift */, F64000000000000000000014 /* MultichannelCalibrationController.swift */, A2000000000000000000002D /* RoomCorrectionCalibrationController.swift */, A2000000000000000000002F /* RoomCorrectionProjectController.swift */, F89300000000000000000011 /* AmbientCompensationController.swift */, F90200000000000000000011 /* ActiveQuietZoneController.swift */, F92000000000000000000012 /* RoomTreatmentAdvisorController.swift */,); path = State; sourceTree = "<group>"; };
+		A20000000000000000000054 /* State */ = {isa = PBXGroup; children = (A20000000000000000000025 /* AudioLifecycleState.swift */, A100000000000000000E2204 /* FeatureFlags.swift */, A100000000000000000E2202 /* PreferenceKeys.swift */, A2000000000000000000002B /* ProductProfiles.swift */, B113B0000000000000000061 /* ProductRecovery.swift */, B113B0000000000000000071 /* HeadroomAssistant.swift */, F64000000000000000000014 /* MultichannelCalibrationController.swift */, A2000000000000000000002D /* RoomCorrectionCalibrationController.swift */, A2000000000000000000002F /* RoomCorrectionProjectController.swift */, F89300000000000000000011 /* AmbientCompensationController.swift */, F90200000000000000000011 /* ActiveQuietZoneController.swift */, E4D000000000000000000011 /* AdaptiveQuietZoneShadow.swift */, F92000000000000000000012 /* RoomTreatmentAdvisorController.swift */,); path = State; sourceTree = "<group>"; };
 		A20000000000000000000055 /* Diagnostics */ = {isa = PBXGroup; children = (A20000000000000000000026 /* AudioDiagnosticsSnapshot.swift */, A2000000000000000000002A /* ProductionAnalysisWorker.swift */,); path = Diagnostics; sourceTree = "<group>"; };
 		A30000000000000000000050 /* Realtime */ = {
 			isa = PBXGroup;
@@ -1020,7 +1027,7 @@
 			path = Realtime;
 			sourceTree = "<group>";
 		};
-		A40000000000000000000050 /* UI */ = {isa = PBXGroup; children = (A40000000000000000000020 /* ProductionRootView.swift */, A40000000000000000000021 /* ProductionEqualizerView.swift */, A40000000000000000000022 /* ProductionDynamicsView.swift */, A40000000000000000000023 /* ProductionDynamicsTelemetryView.swift */, A40000000000000000000024 /* ProductionMetersView.swift */, A40000000000000000000025 /* ProductionAnalysisViews.swift */, A40000000000000000000026 /* ProductionProfileToolbar.swift */, F65000000000000000000015 /* ProductionHeadphoneWorkspace.swift */, B40000000000000000000012 /* ProductionBlindListeningWorkspace.swift */, B50000000000000000000013 /* ProductionOptionalAudioResearchWorkspace.swift */, F64000000000000000000015 /* ProductionMultichannelCalibrationWorkspace.swift */, F10600000000000000000035 /* ProductionSpeakerMeasurementLabWorkspace.swift */, A40000000000000000000027 /* ProductionRoomCorrectionWorkspace.swift */, F78000000000000000000011 /* ProductionActiveAcousticsWorkspace.swift */, F92000000000000000000013 /* ProductionRoomTreatmentAdvisorWorkspace.swift */, F96000000000000000000013 /* ProductionFeedForwardReadinessCard.swift */, F93000000000000000000012 /* ProductionRoomGeometrySection.swift */, F94000000000000000000013 /* ProductionRoomTreatmentDesignSection.swift */, F78000000000000000000012 /* ProductionPluginWorkspace.swift */, F112A0000000000000000013 /* ProductionHardwareAcceptanceWorkspace.swift */, F11300000000000000000011 /* ProductionUserGuideView.swift */,); path = UI; sourceTree = "<group>"; };
+		A40000000000000000000050 /* UI */ = {isa = PBXGroup; children = (A40000000000000000000020 /* ProductionRootView.swift */, A40000000000000000000021 /* ProductionEqualizerView.swift */, A40000000000000000000022 /* ProductionDynamicsView.swift */, A40000000000000000000023 /* ProductionDynamicsTelemetryView.swift */, A40000000000000000000024 /* ProductionMetersView.swift */, A40000000000000000000025 /* ProductionAnalysisViews.swift */, A40000000000000000000026 /* ProductionProfileToolbar.swift */, F65000000000000000000015 /* ProductionHeadphoneWorkspace.swift */, B40000000000000000000012 /* ProductionBlindListeningWorkspace.swift */, B50000000000000000000013 /* ProductionOptionalAudioResearchWorkspace.swift */, F64000000000000000000015 /* ProductionMultichannelCalibrationWorkspace.swift */, F10600000000000000000035 /* ProductionSpeakerMeasurementLabWorkspace.swift */, A40000000000000000000027 /* ProductionRoomCorrectionWorkspace.swift */, F78000000000000000000011 /* ProductionActiveAcousticsWorkspace.swift */, F92000000000000000000013 /* ProductionRoomTreatmentAdvisorWorkspace.swift */, F96000000000000000000013 /* ProductionFeedForwardReadinessCard.swift */, E4D000000000000000000012 /* ProductionAdaptiveQuietZoneCard.swift */, F93000000000000000000012 /* ProductionRoomGeometrySection.swift */, F94000000000000000000013 /* ProductionRoomTreatmentDesignSection.swift */, F78000000000000000000012 /* ProductionPluginWorkspace.swift */, F112A0000000000000000013 /* ProductionHardwareAcceptanceWorkspace.swift */, F11300000000000000000011 /* ProductionUserGuideView.swift */,); path = UI; sourceTree = "<group>"; };
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -1191,6 +1198,7 @@
 				F89200000000000000000001 /* AmbientMonitorTransport.swift in Sources */,
 				F89300000000000000000001 /* AmbientCompensationController.swift in Sources */,
 				F90200000000000000000001 /* ActiveQuietZoneController.swift in Sources */,
+				E4D000000000000000000001 /* AdaptiveQuietZoneShadow.swift in Sources */,
 				A30000000000000000000011 /* N60RenderKernel.c in Sources */,
 				A30000000000000000000012 /* N60Convolution.c in Sources */,
 				A30000000000000000000013 /* N60Dynamics.c in Sources */,
@@ -1208,6 +1216,7 @@
 				F89000000000000000000001 /* AmbientCompensation.swift in Sources */,
 				F90000000000000000000001 /* ActiveQuietZone.swift in Sources */,
 				F96000000000000000000003 /* ProductionFeedForwardReadinessCard.swift in Sources */,
+				E4D000000000000000000002 /* ProductionAdaptiveQuietZoneCard.swift in Sources */,
 				F96000000000000000000001 /* QuietZoneFeedForward.swift in Sources */,
 				F96000000000000000000004 /* QuietZoneFeedForwardProbe.swift in Sources */,
 				F96100000000000000000001 /* QuietZoneFeedForwardSurvey.swift in Sources */,
@@ -1322,6 +1331,7 @@
 				F97000000000000000000002 /* QuietZonePhysicalLatencyBudgetTests.swift in Sources */,
 				E4B000000000000000000004 /* AncGuardTests.swift in Sources */,
 				E4C000000000000000000004 /* FxlmsTests.swift in Sources */,
+				E4D000000000000000000003 /* AdaptiveQuietZoneShadowTests.swift in Sources */,
 				E4A000000000000000000002 /* QuietZoneLiveAuthorisationTests.swift in Sources */,
 				F97100000000000000000002 /* QuietZonePhysicalLatencyMeasurementRunTests.swift in Sources */,
 				F97200000000000000000002 /* QuietZoneHardwareCommissioningTests.swift in Sources */,

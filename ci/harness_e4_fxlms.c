@@ -41,6 +41,7 @@ typedef struct {
     uint32_t buffer;
     float *out, *played, *err;
     bool service;
+    bool silent;  /* shadow: the output is computed but never reaches the plant */
     /* Measurement window. */
     bool measuring;
     double residual, noise;
@@ -125,6 +126,9 @@ static void sim_run(Sim *s, double seconds) {
         for (uint32_t n = 0; n < s->buffer; ++n) {
             const float a = fabsf(s->out[n]);
             if (a > s->peak) s->peak = a;
+        }
+        if (s->silent) {
+            memset(s->out, 0, s->buffer * sizeof(float));
         }
         float *t = s->played;
         s->played = s->out;
@@ -366,6 +370,41 @@ static void test_max_step(double fs) {
     CHECK(s.capsHeld, "%.0f Hz: weights left the caps or went non-finite", fs);
     CHECK(excess < 1.0, "%.0f Hz: max step residual %.2f dB above noise", fs, excess);
     printf("  max step %6.0f Hz: residual +%.2f dB over noise\n", fs, excess);
+    sim_free(&s);
+}
+
+/* Shadow mode: the output is never played, so the core adapts on the virtual
+ * error. It reaches the same fixed point it would live, the microphone keeps
+ * hearing the full disturbance, and the predicted residual is the cancelled
+ * one. */
+static void test_shadow(double fs) {
+    const double hz[] = {60.0, 120.0};
+    const uint32_t buffer = 256;
+    Plant p = standard_plant(fs, 3e-4, 41);
+    plant_add_tone(&p, hz[0], 0.02, 0.7);
+    plant_add_tone(&p, hz[1], 0.015, -1.9);
+    N60AdaptiveTonalConfig c = tonal_config(fs, 2, hz);
+    c.shadow = true;
+    seed_exact(&c, &p, buffer, 1.0, 0.0);
+    Sim s = sim_make(fs, buffer, &c, p);
+    s.silent = true;
+    sim_run(&s, 3.0);
+    const N60AdaptiveTonalStatus st = N60AdaptiveTonalReadStatus(s.core);
+    const double lt = c.leakagePerSecond * c.convergenceSeconds;
+    const double amps[] = {0.02, 0.015};
+    for (int k = 0; k < 2; ++k) {
+        const double complex dk = s.plant.dRe[k] + I * s.plant.dIm[k];
+        const double complex fixed = -dk / path_eff(&s.plant, hz[k], buffer) / (1.0 + lt);
+        const double complex w = weight(&st, k);
+        CHECK(cabs(w - fixed) / cabs(fixed) < 0.01, "%.0f Hz shadow tone %d: %.4f from fixed point",
+              fs, k, cabs(w - fixed) / cabs(fixed));
+        const double measured = hypot(st.measuredTone[k].re, st.measuredTone[k].im);
+        const double predicted = hypot(st.predictedTone[k].re, st.predictedTone[k].im);
+        CHECK(fabs(20 * log10(measured / amps[k])) < 0.5, "%.0f Hz shadow tone %d: measured %.2f dB",
+              fs, k, 20 * log10(measured / amps[k]));
+        CHECK(predicted < amps[k] * pow(10, -30.0 / 20), "%.0f Hz shadow tone %d: predicted only %.1f dB down",
+              fs, k, 20 * log10(predicted / amps[k]));
+    }
     sim_free(&s);
 }
 
@@ -619,6 +658,10 @@ static void test_config(void) {
     bad.sampleRate = 1e6;
     CHECK(N60AdaptiveTonalCreate(&bad) == NULL, "1 MHz accepted");
     bad = c;
+    bad.shadow = true;
+    bad.probeEnabled = true;
+    CHECK(!N60AdaptiveTonalConfigIsValid(&bad), "shadow with the probe accepted");
+    bad = c;
     bad.toneCount = 5;
     CHECK(!N60AdaptiveTonalConfigIsValid(&bad), "five tones accepted");
 
@@ -645,6 +688,7 @@ int main(void) {
         test_wiener(fs);
         test_path_tracking(fs);
         test_max_step(fs);
+        test_shadow(fs);
         test_caps(fs);
         test_gap_and_reset(fs);
         test_non_finite(fs);

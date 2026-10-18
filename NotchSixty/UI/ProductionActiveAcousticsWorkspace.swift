@@ -243,6 +243,8 @@ struct ProductionActiveAcousticsWorkspace: View {
     @ObservedObject var engine: AudioIOEngine
     @ObservedObject var ambient: AmbientCompensationController
     @ObservedObject var quietZone: ActiveQuietZoneController
+    @ObservedObject var adaptiveQuietZone: AdaptiveQuietZoneShadow
+    @EnvironmentObject private var featureFlags: FeatureFlags
     @ObservedObject var microphone: RoomCorrectionCalibrationController
     @ObservedObject var projects: RoomCorrectionProjectController
 
@@ -1350,6 +1352,10 @@ struct ProductionActiveAcousticsWorkspace: View {
                 .font(.callout)
                 .foregroundStyle(.red)
                 .textSelection(.enabled)
+            }
+
+            if featureFlags.isEnabled(.adaptiveANC) {
+                ProductionAdaptiveQuietZoneCard(shadow: adaptiveQuietZone)
             }
 
             safetyNote(
