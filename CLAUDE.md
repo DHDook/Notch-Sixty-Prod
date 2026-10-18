@@ -40,22 +40,26 @@ update `AGENTS.md`:
 
 The owner already has a local test build of `main`; do not rebuild a baseline unless asked.
 
-1. **Orient cheaply.** Read only the target epic's section of `docs/PROGRAM_PLAN.md` (find it
-   with Grep, then Read that range) and `docs/epics/E<n>.md` if it exists. If the owner did not
-   name an epic, pick the first unchecked slice in the lowest open phase whose dependencies are
-   met, say which, and continue.
-2. **Plan in plan mode.** For a new epic or a slice that touches more than a few files, plan
-   first and save the approved plan to `docs/epics/E<n>.md` (goal, slices, files, tests, bench
-   checks, flag name, status line). Small follow-up slices can go straight to building.
-3. **Build one slice per branch** named `e<n>/<slice>`, behind the epic's feature flag (add it to
-   `FeatureFlag.all`; see `docs/FEATURE_FLAGS.md`). E1 and E2 do not need flags.
-4. **Verify before committing:** delegate builds and tests to `build-test-runner`; delegate any
-   engine or realtime change to `realtime-reviewer` and fix what it flags.
-5. **Ship:** commit, push the branch, get the PR text from `pr-writer`, and open the PR with
-   `gh pr create`. Never push to `main` directly.
-6. **Close out:** after the owner merges, delegate ticking boxes to `plan-tracker`, then stop
-   and suggest the next slice in one sentence.
-7. **Bench work:** when a step needs physical hardware, write the steps as a checklist in
+`/next` holds the full step-by-step workflow; follow it. In short:
+
+1. **Orient cheaply** from the target epic's section of `docs/PROGRAM_PLAN.md` and
+   `docs/epics/E<n>.md`.
+2. **Plan only for a new epic** or a slice whose approach isn't recorded yet; save it to
+   `docs/epics/E<n>.md` and get approval. Otherwise build straight away.
+3. **One branch per PR** named `e<n>/<slice>`, behind the epic's feature flag (add it to
+   `FeatureFlag.all`; see `docs/FEATURE_FLAGS.md`). Small related slices may share one PR.
+   E1 and E2 do not need flags.
+4. **Verify narrowly** (affected tests only; CI runs the full suite), and use
+   `realtime-reviewer` for any engine or realtime change.
+5. **Plan updates ride in the same PR** (plan-tracker); never open a separate plan-update PR.
+6. **Merge policy:** low-risk PRs are merged by Claude with `gh pr merge --squash
+   --delete-branch` once CI is green. PRs that touch the realtime engine, Core Audio transport,
+   `AudioIOEngine.swift`, ANC / MIMO / protection code, `AGENTS.md`, `.claude/`, workflows,
+   dependencies, the minimum OS, or remove a user-visible feature get the `needs-owner` label
+   and wait for the owner.
+7. **Keep going** to the next slice after a merge; stop after three merged PRs, or at a
+   `needs-owner` PR, a plan approval, bench work, or a phase gate.
+8. **Bench work:** when a step needs physical hardware, write the steps as a checklist in
    `docs/epics/E<n>.md` under "Bench checks", tell the owner, and stop that slice there.
 
 Ask the owner before: changing `AGENTS.md` policy, adding a third-party dependency, raising the
@@ -74,7 +78,9 @@ minimum OS, removing a user-visible feature, or enabling any live ANC or MIMO tr
 - Do not open `docs/PR*.md`, `docs/archive/`, `ci/validate_*.py` or per-PR workflows unless
   the task is about them.
 - Keep replies short: what changed, test results, what needs the owner. No recaps of the plan.
-- One slice per session; start a new session (or `/compact`) before the next slice.
+- Up to three PRs per session; if the session is getting long, ask the owner to run `/compact`
+  before the next slice. Do not re-read files already read in this session unless they changed.
+- Never read full CI logs: `gh run view --log-failed` for the failing step only.
 
 ## Engineering rules for every slice
 

@@ -3,6 +3,7 @@ name: code-scout
 description: Use proactively to locate code, symbols, call sites, tests and docs in this repo before reading files in the main session. Returns paths, line numbers and short excerpts only.
 tools: Read, Glob, Grep
 model: haiku
+effort: low
 ---
 
 You locate things in the Notch Sixty repository so the main session does not spend context
