@@ -8,9 +8,11 @@
 
 struct N60FeedForwardReferenceBridge {
     N60FeedForwardReferenceFrame *frames;
+    float *errors;  /* pair mode only; same indices as frames */
     uint32_t capacity;
     uint32_t mask;
     uint32_t inputChannel;
+    uint32_t errorChannel;
     _Atomic uint64_t writeIndex;
     _Atomic uint64_t readIndex;
     _Atomic uint64_t receivedFrames;
@@ -42,15 +44,41 @@ N60FeedForwardReferenceBridge *N60FeedForwardReferenceBridgeCreate(
     return bridge;
 }
 
+N60FeedForwardReferenceBridge *N60FeedForwardReferenceBridgeCreatePair(
+    uint32_t capacityFrames,
+    uint32_t referenceChannelIndex,
+    uint32_t errorChannelIndex
+) {
+    if (referenceChannelIndex == errorChannelIndex) return NULL;
+    N60FeedForwardReferenceBridge *bridge =
+        N60FeedForwardReferenceBridgeCreate(capacityFrames, referenceChannelIndex);
+    if (bridge == NULL) return NULL;
+    bridge->errors = calloc(capacityFrames, sizeof(*bridge->errors));
+    if (bridge->errors == NULL) {
+        N60FeedForwardReferenceBridgeDestroy(bridge);
+        return NULL;
+    }
+    bridge->errorChannel = errorChannelIndex;
+    return bridge;
+}
+
+bool N60FeedForwardReferenceBridgeIsPair(const N60FeedForwardReferenceBridge *bridge) {
+    return bridge != NULL && bridge->errors != NULL;
+}
+
 void N60FeedForwardReferenceBridgeDestroy(N60FeedForwardReferenceBridge *bridge) {
     if (bridge == NULL) return;
     free(bridge->frames);
+    free(bridge->errors);
     free(bridge);
 }
 
 void N60FeedForwardReferenceBridgeReset(N60FeedForwardReferenceBridge *bridge) {
     if (bridge == NULL) return;
     memset(bridge->frames, 0, bridge->capacity * sizeof(*bridge->frames));
+    if (bridge->errors != NULL) {
+        memset(bridge->errors, 0, bridge->capacity * sizeof(*bridge->errors));
+    }
     atomic_store(&bridge->writeIndex, 0);
     atomic_store(&bridge->readIndex, 0);
     atomic_store(&bridge->receivedFrames, 0);
@@ -80,15 +108,21 @@ N60FeedForwardReferenceSnapshot N60FeedForwardReferenceBridgeGetSnapshot(
     };
 }
 
+/* error / errorStride: the error channel in pair mode, else NULL / 0. */
 static uint32_t process(
     N60FeedForwardReferenceBridge *bridge,
     const float *input,
     uint32_t stride,
+    const float *error,
+    uint32_t errorStride,
     uint32_t count,
     uint64_t host,
     double sampleTime
 ) {
     if (bridge == NULL || input == NULL || stride == 0 || count == 0) return 0;
+    if ((bridge->errors != NULL) != (error != NULL) || (error != NULL && errorStride == 0)) {
+        return 0;
+    }
     if (host == 0 || !isfinite(sampleTime) || sampleTime < 0) {
         atomic_fetch_add_explicit(&bridge->invalidTimestamps, 1, memory_order_relaxed);
         atomic_fetch_add_explicit(&bridge->droppedFrames, count, memory_order_relaxed);
@@ -102,7 +136,7 @@ static uint32_t process(
     const uint32_t accepted = count < space ? count : space;
     for (uint32_t i = 0; i < accepted; ++i) {
         float x = input[(size_t)i * stride];
-        if (!isfinite(x)) {
+        if (!isfinite(x) || (error != NULL && !isfinite(error[(size_t)i * errorStride]))) {
             atomic_fetch_add_explicit(&bridge->droppedFrames, count, memory_order_relaxed);
             return 0;
         }
@@ -115,6 +149,9 @@ static uint32_t process(
                 .firstFrameSampleTime = sampleTime,
                 .frameOffset = i,
             };
+        if (error != NULL) {
+            bridge->errors[(uint32_t)(w + i) & bridge->mask] = error[(size_t)i * errorStride];
+        }
     }
     if (accepted > 0) {
         atomic_store_explicit(&bridge->writeIndex, w + accepted, memory_order_release);
@@ -133,7 +170,53 @@ uint32_t N60FeedForwardReferenceBridgeProcessPlanar(
     uint64_t host,
     double sampleTime
 ) {
-    return process(bridge, input, 1, count, host, sampleTime);
+    if (bridge == NULL || bridge->errors != NULL) return 0;
+    return process(bridge, input, 1, NULL, 0, count, host, sampleTime);
+}
+
+uint32_t N60FeedForwardReferenceBridgeProcessPairPlanar(
+    N60FeedForwardReferenceBridge *bridge,
+    const float *reference,
+    const float *error,
+    uint32_t count,
+    uint64_t host,
+    double sampleTime
+) {
+    if (bridge == NULL || bridge->errors == NULL) return 0;
+    return process(bridge, reference, 1, error, 1, count, host, sampleTime);
+}
+
+static uint32_t read_frames(
+    N60FeedForwardReferenceBridge *bridge,
+    N60FeedForwardReferenceFrame *destination,
+    float *errorDestination,
+    uint32_t capacityFrames
+) {
+    const uint64_t r = atomic_load_explicit(&bridge->readIndex, memory_order_relaxed);
+    const uint64_t w = atomic_load_explicit(&bridge->writeIndex, memory_order_acquire);
+    const uint64_t available = w - r;
+    uint32_t count = available < capacityFrames ? (uint32_t)available : capacityFrames;
+    if (count > bridge->capacity) count = bridge->capacity;
+    for (uint32_t i = 0; i < count; ++i) {
+        const uint32_t slot = (uint32_t)(r + i) & bridge->mask;
+        destination[i] = bridge->frames[slot];
+        if (errorDestination != NULL) errorDestination[i] = bridge->errors[slot];
+    }
+    if (count > 0) {
+        atomic_store_explicit(&bridge->readIndex, r + count, memory_order_release);
+    }
+    return count;
+}
+
+uint32_t N60FeedForwardReferenceBridgeReadPair(
+    N60FeedForwardReferenceBridge *bridge,
+    N60FeedForwardReferenceFrame *destination,
+    float *errorDestination,
+    uint32_t capacityFrames
+) {
+    if (bridge == NULL || bridge->errors == NULL || destination == NULL
+        || errorDestination == NULL || capacityFrames == 0) return 0;
+    return read_frames(bridge, destination, errorDestination, capacityFrames);
 }
 
 uint32_t N60FeedForwardReferenceBridgeRead(
@@ -142,18 +225,35 @@ uint32_t N60FeedForwardReferenceBridgeRead(
     uint32_t capacityFrames
 ) {
     if (bridge == NULL || destination == NULL || capacityFrames == 0) return 0;
-    const uint64_t r = atomic_load_explicit(&bridge->readIndex, memory_order_relaxed);
-    const uint64_t w = atomic_load_explicit(&bridge->writeIndex, memory_order_acquire);
-    const uint64_t available = w - r;
-    uint32_t count = available < capacityFrames ? (uint32_t)available : capacityFrames;
-    if (count > bridge->capacity) count = bridge->capacity;
-    for (uint32_t i = 0; i < count; ++i) {
-        destination[i] = bridge->frames[(uint32_t)(r + i) & bridge->mask];
+    return read_frames(bridge, destination, NULL, capacityFrames);
+}
+
+/* Finds one channel across the buffers: base pointer (at the channel), stride
+ * and frame count. False if absent or the buffer layout is unusable. */
+static bool locate_channel(
+    const AudioBufferList *list,
+    uint32_t channel,
+    const float **base,
+    uint32_t *stride,
+    uint32_t *frames
+) {
+    for (UInt32 i = 0; i < list->mNumberBuffers; ++i) {
+        const AudioBuffer *buffer = &list->mBuffers[i];
+        if (channel >= buffer->mNumberChannels) {
+            channel -= buffer->mNumberChannels;
+            continue;
+        }
+        const uint32_t s = buffer->mNumberChannels;
+        const uint32_t bytes = s * (uint32_t)sizeof(float);
+        if (buffer->mData == NULL || bytes == 0 || buffer->mDataByteSize % bytes != 0) {
+            return false;
+        }
+        *base = ((const float *)buffer->mData) + channel;
+        *stride = s;
+        *frames = buffer->mDataByteSize / bytes;
+        return true;
     }
-    if (count > 0) {
-        atomic_store_explicit(&bridge->readIndex, r + count, memory_order_release);
-    }
-    return count;
+    return false;
 }
 
 OSStatus N60FeedForwardReferenceIOProc(
@@ -183,27 +283,19 @@ OSStatus N60FeedForwardReferenceIOProc(
         atomic_fetch_add_explicit(&bridge->unsupportedBufferLayouts, 1, memory_order_relaxed);
         return noErr;
     }
-    uint32_t channel = bridge->inputChannel;
-    for (UInt32 i = 0; i < inInputData->mNumberBuffers; ++i) {
-        const AudioBuffer *buffer = &inInputData->mBuffers[i];
-        if (channel >= buffer->mNumberChannels) {
-            channel -= buffer->mNumberChannels;
-            continue;
-        }
-        const uint32_t stride = buffer->mNumberChannels;
-        const uint32_t bytes = stride * (uint32_t)sizeof(float);
-        if (buffer->mData == NULL || bytes == 0
-            || buffer->mDataByteSize % bytes != 0) break;
-        (void)process(
-            bridge,
-            ((const float *)buffer->mData) + channel,
-            stride,
-            buffer->mDataByteSize / bytes,
-            inInputTime->mHostTime,
-            inInputTime->mSampleTime
-        );
+    const float *reference = NULL, *error = NULL;
+    uint32_t stride = 0, errorStride = 0, frames = 0, errorFrames = 0;
+    const bool found = locate_channel(inInputData, bridge->inputChannel, &reference, &stride, &frames)
+        && (bridge->errors == NULL
+            || (locate_channel(inInputData, bridge->errorChannel, &error, &errorStride, &errorFrames)
+                && errorFrames == frames));
+    if (!found) {
+        atomic_fetch_add_explicit(&bridge->unsupportedBufferLayouts, 1, memory_order_relaxed);
         return noErr;
     }
-    atomic_fetch_add_explicit(&bridge->unsupportedBufferLayouts, 1, memory_order_relaxed);
+    (void)process(
+        bridge, reference, stride, error, errorStride, frames,
+        inInputTime->mHostTime, inInputTime->mSampleTime
+    );
     return noErr;
 }

@@ -377,6 +377,87 @@ void N60FeedForwardShadowCopyWeights(
     uint32_t count
 );
 
+/* Feed-forward survey (E4 S9b1, worker side) -------------------------------- */
+
+/*
+ * Measures the feed-forward design inputs from the noise itself
+ * (n60_ff_survey.cpp): the transfer from the reference microphone x to the
+ * error microphone e, both channels of one device (one clock), at chosen
+ * band frequencies.
+ *  - Both channels are decimated to fd by the decimator above. Welch averaging
+ *    (P. D. Welch, IEEE Trans. Audio Electroacoust. 15(2), 1967): Hann
+ *    segments of L = round(segmentSeconds fd) samples, w[n] =
+ *    0.5 - 0.5 cos(2 pi n / L), hop L / 2. Per segment and band f, a direct
+ *    DFT at f: X = sum_n w[n] x[n] exp(-j 2 pi f n / fd), likewise E.
+ *  - Sxx = sum |X|^2, See = sum |E|^2, Sxe = sum conj(X) E over segments.
+ *    H1 transfer H = Sxe / Sxx (J. S. Bendat and A. G. Piersol, Random Data,
+ *    2010, ch. 9); coherence g2 = |Sxe|^2 / (Sxx See), in [0, 1]. For
+ *    e = h * x + n with n independent, g2 = S / (S + N) at f, S and N the
+ *    two contributions' spectral densities.
+ *  - The window and phase origin are common to both channels, so they cancel
+ *    in H. A reference lead tau biases |H| low by about the window's
+ *    self-overlap at lag tau: under 0.05 dB for tau <= 10 ms with 1 s
+ *    segments.
+ *  - Coherence is exactly 1 after one segment and biased high for the first
+ *    few: trust it from 8 segments on (about 4.5 s at 1 s segments).
+ *  - Bands stop at 0.15 fd, below the decimator's transition band (0.3 fd).
+ *    No DC removal: the Hann window holds a microphone offset to its
+ *    sidelobes, far below the 25 Hz and up bands Quiet Zone uses.
+ * Realtime behaviour: worker side only, one thread for every call. Create
+ * allocates; nothing else does. No latency (measurement only). Exactly two
+ * channels, sample-aligned (same device). Each completed hop runs
+ * bandCount x L complex steps inside that Process call (64 bands at 4 s:
+ * about 1 M, a few ms), so never call it from an audio callback. Sample rate
+ * fixed per object (8 kHz to 768 kHz native). MarkDiscontinuity drops the
+ * partial segment and restarts the decimators (counted in gaps); Reset also
+ * clears the sums and counters.
+ */
+
+#define N60_FF_SURVEY_MAX_BANDS 64u
+
+typedef struct {
+    double sampleRate;                     /* native, 8 kHz to 768 kHz */
+    uint32_t bandCount;                    /* 1 to 64 */
+    float bandHz[N60_FF_SURVEY_MAX_BANDS]; /* each 10 Hz to 0.15 fd */
+    double segmentSeconds;                 /* 0.25 to 4, default 1 */
+} N60FeedForwardSurveyConfig;
+
+typedef struct {
+    double decimatedRate;
+    uint64_t segments;
+    uint64_t gaps;
+    /// H1 transfer reference -> error per band (zero before any segment).
+    N60AncComplex transfer[N60_FF_SURVEY_MAX_BANDS];
+    float coherence[N60_FF_SURVEY_MAX_BANDS];
+    /// Mean windowed band powers per segment (diagnostic).
+    float referencePower[N60_FF_SURVEY_MAX_BANDS];
+    float errorPower[N60_FF_SURVEY_MAX_BANDS];
+} N60FeedForwardSurveyResult;
+
+typedef struct N60FeedForwardSurvey N60FeedForwardSurvey;
+
+N60FeedForwardSurveyConfig N60FeedForwardSurveyConfigDefault(double sampleRate);
+bool N60FeedForwardSurveyConfigIsValid(
+    const N60FeedForwardSurveyConfig * N60_FXLMS_NONNULL config
+);
+N60FeedForwardSurvey * N60_FXLMS_NULLABLE N60FeedForwardSurveyCreate(
+    const N60FeedForwardSurveyConfig * N60_FXLMS_NONNULL config
+);
+void N60FeedForwardSurveyDestroy(N60FeedForwardSurvey * N60_FXLMS_NULLABLE survey);
+/// Native-rate frames from the two microphones, sample-aligned. A non-finite
+/// sample marks a discontinuity at that frame.
+void N60FeedForwardSurveyProcess(
+    N60FeedForwardSurvey * N60_FXLMS_NONNULL survey,
+    const float * N60_FXLMS_NONNULL reference,
+    const float * N60_FXLMS_NONNULL error,
+    uint32_t frames
+);
+void N60FeedForwardSurveyMarkDiscontinuity(N60FeedForwardSurvey * N60_FXLMS_NONNULL survey);
+void N60FeedForwardSurveyReset(N60FeedForwardSurvey * N60_FXLMS_NONNULL survey);
+N60FeedForwardSurveyResult N60FeedForwardSurveyRead(
+    const N60FeedForwardSurvey * N60_FXLMS_NONNULL survey
+);
+
 #ifdef __cplusplus
 }
 #endif

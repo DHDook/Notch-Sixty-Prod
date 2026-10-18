@@ -29,10 +29,25 @@ enum FeedForwardReferenceTransportError: Error, LocalizedError {
 /// writes samples to a bounded SPSC ring. This class never generates audio.
 /// A separate verified DAC/output path is needed before feed-forward ANC can arm.
 final class FeedForwardReferenceTransport {
-    static let capacityFrames: UInt32 = 8_192
+    static let minimumCapacityFrames: UInt32 = 8_192
+    /// The worker must drain the ring within this time, or frames drop and
+    /// `read` / `readPair` fail closed.
+    static let drainDeadlineSeconds = 0.25
+
+    /// Power of two holding the drain deadline at the device rate (8,192
+    /// frames minimum; 131,072 at 384 kHz).
+    static func capacityFrames(sampleRate: Double) -> UInt32 {
+        let needed = UInt32(min(max(sampleRate * drainDeadlineSeconds, 1), Double(1 << 24)).rounded(.up))
+        var capacity = minimumCapacityFrames
+        while capacity < needed { capacity <<= 1 }
+        return capacity
+    }
 
     let microphone: AudioInputDevice
     let inputChannelIndex: Int
+    /// E4 S9b1: the error microphone's channel on the same device, captured
+    /// sample-aligned with the reference (pair mode); nil for reference only.
+    let errorChannelIndex: Int?
     let sampleRate: Double
 
     private var bridge: OpaquePointer?
@@ -40,9 +55,10 @@ final class FeedForwardReferenceTransport {
     private var started = false
     private var closed = false
 
-    init(microphone: AudioInputDevice, inputChannelIndex: Int) throws {
+    init(microphone: AudioInputDevice, inputChannelIndex: Int, errorChannelIndex: Int? = nil) throws {
         self.microphone = microphone
         self.inputChannelIndex = inputChannelIndex
+        self.errorChannelIndex = errorChannelIndex
 
         var channelProperty = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyStreamConfiguration,
@@ -69,6 +85,12 @@ final class FeedForwardReferenceTransport {
         guard inputChannelIndex >= 0, inputChannelIndex < channels else {
             throw FeedForwardReferenceTransportError.invalidInput
         }
+        if let errorChannelIndex {
+            guard errorChannelIndex >= 0, errorChannelIndex < channels,
+                  errorChannelIndex != inputChannelIndex else {
+                throw FeedForwardReferenceTransportError.invalidInput
+            }
+        }
 
         var stream = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyStreamFormat,
@@ -87,8 +109,13 @@ final class FeedForwardReferenceTransport {
         }
         sampleRate = format.sampleRate
 
-        guard let bridge = N60FeedForwardReferenceBridgeCreate(
-            Self.capacityFrames, UInt32(inputChannelIndex)) else {
+        let capacity = Self.capacityFrames(sampleRate: sampleRate)
+        let created = errorChannelIndex.map {
+            N60FeedForwardReferenceBridgeCreatePair(
+                capacity, UInt32(inputChannelIndex), UInt32($0))
+        } ?? N60FeedForwardReferenceBridgeCreate(
+            capacity, UInt32(inputChannelIndex))
+        guard let bridge = created else {
             throw FeedForwardReferenceTransportError.bridgeUnavailable
         }
         self.bridge = bridge
@@ -160,6 +187,34 @@ final class FeedForwardReferenceTransport {
             frames.removeLast(frames.count - Int(count))
         }
         return frames
+    }
+
+    /// Pair mode: reference frames with the error samples recorded with them.
+    /// Fails closed like `read` on any callback fault.
+    func readPair(maximumFrames: Int = 8_192)
+        throws -> (reference: [N60FeedForwardReferenceFrame], error: [Float]) {
+        guard !closed, let bridge, errorChannelIndex != nil else {
+            throw FeedForwardReferenceTransportError.closed
+        }
+        let snap = N60FeedForwardReferenceBridgeGetSnapshot(bridge)
+        guard snap.unsupportedBufferLayouts == 0,
+              snap.invalidTimestamps == 0,
+              snap.droppedFrames == 0 else {
+            throw FeedForwardReferenceTransportError.callbackFault
+        }
+        let length = min(max(maximumFrames, 0), Int(snap.availableFrames))
+        guard length > 0 else { return ([], []) }
+        var frames = [N60FeedForwardReferenceFrame](repeating: N60FeedForwardReferenceFrame(), count: length)
+        var errors = [Float](repeating: 0, count: length)
+        let count = frames.withUnsafeMutableBufferPointer { f in
+            errors.withUnsafeMutableBufferPointer { e in
+                N60FeedForwardReferenceBridgeReadPair(
+                    bridge, f.baseAddress!, e.baseAddress!, UInt32(length))
+            }
+        }
+        frames.removeLast(length - Int(count))
+        errors.removeLast(length - Int(count))
+        return (frames, errors)
     }
 
     func close() {

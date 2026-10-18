@@ -147,6 +147,16 @@ if selected e4_ff_shadow; then
         failed+=(e4_ff_shadow)
     fi
 fi
+# E4 S9b1: feed-forward survey (Welch H1 transfer and coherence) on a simulated plant.
+if selected e4_ff_survey; then
+    if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -c "$RT/n60_fxlms.cpp" -o "$OUT/n60_fxlms_survey.o" \
+        && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -c "$RT/n60_ff_survey.cpp" -o "$OUT/n60_ff_survey.o"; then
+        harness e4_ff_survey "${STRICT[@]}" -O2 -I"$RT" ci/harness_e4_ff_survey.c \
+            "$OUT/n60_ff_survey.o" "$OUT/n60_fxlms_survey.o" -lc++ -lm
+    else
+        failed+=(e4_ff_survey)
+    fi
+fi
 
 # Acoustic reference lab: production-header probes checked against independent
 # Python oracles at every standard rate from 44.1 to 384 kHz.
@@ -162,6 +172,15 @@ if selected e4_anc_guard_reference; then
         passed+=(e4_anc_guard_reference)
     else
         failed+=(e4_anc_guard_reference)
+    fi
+    echo "::endgroup::"
+fi
+if selected e4_ff_survey_reference; then
+    echo "::group::e4_ff_survey_reference"
+    if python3 ci/acoustic_reference_lab/e4_ff_survey_reference.py; then
+        passed+=(e4_ff_survey_reference)
+    else
+        failed+=(e4_ff_survey_reference)
     fi
     echo "::endgroup::"
 fi
