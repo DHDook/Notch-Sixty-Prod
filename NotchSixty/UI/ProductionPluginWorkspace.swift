@@ -824,7 +824,7 @@ struct ProductionPluginWorkspace: View {
         }
         .task {
             if host.lastScanDate == nil {
-                host.scan(format: processingFormat)
+                await host.refresh(format: processingFormat)
             }
         }
         .sheet(item: $addTarget) { target in
@@ -951,13 +951,13 @@ struct ProductionPluginWorkspace: View {
 
                 Spacer()
 
-                if mutationInFlight {
+                if mutationInFlight || host.scanInFlight {
                     ProgressView()
                         .controlSize(.small)
                 }
 
                 Button {
-                    host.scan(format: processingFormat)
+                    Task { await host.refresh(format: processingFormat) }
                 } label: {
                     Label(
                         "Scan",
@@ -965,7 +965,7 @@ struct ProductionPluginWorkspace: View {
                     )
                 }
                 .buttonStyle(.glass)
-                .disabled(mutationInFlight)
+                .disabled(mutationInFlight || host.scanInFlight)
             }
 
             HStack(spacing: 24) {

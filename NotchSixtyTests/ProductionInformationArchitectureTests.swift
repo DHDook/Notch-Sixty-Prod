@@ -1128,6 +1128,40 @@ final class ProductionInformationArchitectureTests: XCTestCase {
     }
 
 
+    func testInstanceLockAdmitsOneHolderAndReleasesWhenItEnds() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "instance-lock-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("instance.lock")
+
+        do {
+            // The holder lives only in this scope, like a process lifetime.
+            guard case .acquired(let holder) = ProductInstanceLock.acquire(
+                at: url
+            ) else {
+                return XCTFail("First instance must acquire the lock")
+            }
+            guard case .heldByAnotherInstance = ProductInstanceLock.acquire(
+                at: url
+            ) else {
+                return XCTFail("A second instance must see the live holder")
+            }
+            withExtendedLifetime(holder) {}
+        }
+
+        guard case .acquired = ProductInstanceLock.acquire(at: url) else {
+            return XCTFail("The lock must be free once its holder ends")
+        }
+    }
+
+    func testTestHostNeverTouchesTheInstalledAppRecoveryRecord() {
+        XCTAssertTrue(ProductProcessEnvironment.isHostingTests)
+        XCTAssertNil(ProductRecoveryStore.forCurrentProcess().storageURL)
+    }
+
     @MainActor
     func testRecoveryDetectsUncleanPriorLaunchButNotCleanTermination()
         throws {

@@ -3,7 +3,7 @@ import AVFAudio
 import Combine
 import Foundation
 
-protocol AudioUnitComponentCataloging {
+protocol AudioUnitComponentCataloging: Sendable {
     func discoverEffects() -> [AudioUnitComponentDescriptor]
 }
 
@@ -120,6 +120,7 @@ final class AudioUnitHostController: ObservableObject {
     ] = [:]
     @Published private(set) var quarantine = AudioUnitQuarantineRegistry()
     @Published private(set) var lastScanDate: Date?
+    @Published private(set) var scanInFlight = false
     @Published private(set) var lastErrorDescription: String?
 
     private let catalog: any AudioUnitComponentCataloging
@@ -168,7 +169,31 @@ final class AudioUnitHostController: ObservableObject {
     func scan(
         format: AudioUnitRackProcessingFormat? = nil
     ) {
-        let components = catalog.discoverEffects()
+        apply(discovered: catalog.discoverEffects(), format: format)
+    }
+
+    /// Discovery reads `passesAUValidation`, which runs Audio Unit validation
+    /// synchronously and can block for tens of seconds when many plug-ins
+    /// are installed. The UI therefore discovers off the main actor; a
+    /// blocked main thread gets the app force-quit and the next launch
+    /// reports an unclean termination.
+    func refresh(
+        format: AudioUnitRackProcessingFormat? = nil
+    ) async {
+        guard !scanInFlight else { return }
+        scanInFlight = true
+        defer { scanInFlight = false }
+        let catalog = self.catalog
+        let components = await Task.detached(priority: .userInitiated) {
+            catalog.discoverEffects()
+        }.value
+        apply(discovered: components, format: format)
+    }
+
+    private func apply(
+        discovered components: [AudioUnitComponentDescriptor],
+        format: AudioUnitRackProcessingFormat?
+    ) {
         discoveredComponents = components
 
         var nextLifecycle: [

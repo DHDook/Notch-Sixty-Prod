@@ -126,6 +126,17 @@ struct ProductRecoveryStore: Sendable {
         )
     }
 
+    /// The machine-local store, or an in-memory store when this process is
+    /// an XCTest host. A test host shares the installed app's container, so
+    /// it must never read or write the live app's recovery record.
+    static func forCurrentProcess() -> ProductRecoveryStore {
+        ProductRecoveryStore(
+            storageURL: ProductProcessEnvironment.isHostingTests
+                ? nil
+                : defaultStorageURL()
+        )
+    }
+
     static func defaultStorageURL() -> URL {
         let root = FileManager.default.urls(
             for: .applicationSupportDirectory,
@@ -142,6 +153,73 @@ struct ProductRecoveryStore: Sendable {
                 "recovery-state.json",
                 isDirectory: false
             )
+    }
+}
+
+enum ProductProcessEnvironment {
+    static var isHostingTests: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"]
+            != nil
+    }
+}
+
+/// Per-user advisory lock held for the lifetime of the one live Notch Sixty
+/// process. The kernel releases it whenever the holder exits, including a
+/// crash or force-quit, so a held lock means another instance is running,
+/// never that one crashed. That keeps a second copy of the app (another
+/// bundle path with the same identifier) from reading the live instance's
+/// open-session flag as an unclean termination.
+final class ProductInstanceLock {
+    enum AcquireResult {
+        case acquired(ProductInstanceLock)
+        case heldByAnotherInstance
+        case unavailable(String)
+    }
+
+    private let descriptor: Int32
+
+    private init(descriptor: Int32) {
+        self.descriptor = descriptor
+    }
+
+    deinit {
+        flock(descriptor, LOCK_UN)
+        close(descriptor)
+    }
+
+    static func acquire(
+        at url: URL = ProductInstanceLock.defaultURL()
+    ) -> AcquireResult {
+        do {
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+        } catch {
+            return .unavailable(error.localizedDescription)
+        }
+        let descriptor = open(
+            url.path,
+            O_RDWR | O_CREAT | O_CLOEXEC,
+            S_IRUSR | S_IWUSR
+        )
+        guard descriptor >= 0 else {
+            return .unavailable(String(cString: strerror(errno)))
+        }
+        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
+            let code = errno
+            close(descriptor)
+            return code == EWOULDBLOCK
+                ? .heldByAnotherInstance
+                : .unavailable(String(cString: strerror(code)))
+        }
+        return .acquired(ProductInstanceLock(descriptor: descriptor))
+    }
+
+    static func defaultURL() -> URL {
+        ProductRecoveryStore.defaultStorageURL()
+            .deletingLastPathComponent()
+            .appendingPathComponent("instance.lock", isDirectory: false)
     }
 }
 
