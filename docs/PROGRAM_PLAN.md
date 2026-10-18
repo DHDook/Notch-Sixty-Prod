@@ -120,7 +120,7 @@ parity suite, and live edits are click-free on hardware in stereo, 5.1 and binau
 
 ### E6 Unified live N-channel graph
 
-- [ ] Write a design note: lane stage list, snapshot layout, latency alignment, coefficient ramping, rebuild-with-fade rules, threading and multirate boundaries
+- [x] Write a design note (`docs/epics/E6.md`, awaiting owner approval): lane stage list, snapshot layout, latency alignment, coefficient ramping, rebuild-with-fade rules, threading and multirate boundaries
 - [ ] Build the unified graph in C++ from the start, per the engine-language decision (E21)
 - [ ] Give every lane the full stereo stage set: PEQ, M/S where paired, dynamic EQ, dynamics, FIR, delay, protection
 - [ ] Represent stereo as a 2-channel layout and the binaural renderer as a stage, not a separate transport
