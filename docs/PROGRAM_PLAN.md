@@ -55,7 +55,8 @@ platforms; E6 (the unified graph) is the critical path, because eleven later epi
 ## Phase 1 — Consolidate and qualify
 
 Phase 1 makes `main` trustworthy on real hardware before any new feature lands.
-**Gate G1:** H01–H08 pass on `main`, and full XCTest is green on macOS 26 and 27.
+**Gate G1:** H01–H08 pass on `main`, the app builds at the macOS 26.0 deployment target, and full
+XCTest is green on macOS 27. (Owner, 17 Oct 2026: no macOS 26 machine; 26 support is checked by build.)
 
 ### E1 Trunk, CI and docs hygiene
 
@@ -68,10 +69,11 @@ Phase 1 makes `main` trustworthy on real hardware before any new feature lands.
 
 ### E2 macOS 26 support
 
-- [ ] Set `MACOSX_DEPLOYMENT_TARGET` to 26.0 and fix every compile error with `#available` gates
-- [ ] Check every macOS 27-only API and UI treatment for a macOS 26 fallback
-- [ ] Add a macOS 26 job to the full CI workflow
-- [ ] Re-run H01–H08 smoke cases on a macOS 26 machine
+- [x] Set `MACOSX_DEPLOYMENT_TARGET` to 26.0 and fix every compile error with `#available` gates (#132)
+- [ ] Check every macOS 27-only API and UI treatment for a macOS 26 fallback (#134, in review)
+- [x] ~~Add a macOS 26 job to the full CI workflow~~ and ~~re-run H01–H08 on a macOS 26 machine~~:
+      dropped (owner, 17 Oct 2026). There is no macOS 26 machine; compatibility is checked by building
+      at the 26.0 target, which E1's full macOS build must keep doing. Low priority.
 
 ### E3 Hardware acceptance H01–H08
 
