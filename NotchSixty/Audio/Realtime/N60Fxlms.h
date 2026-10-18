@@ -254,6 +254,129 @@ void N60BlockFxlmsSetWeights(
     uint32_t count
 );
 
+/* Feed-forward shadow (E4 S9, worker side) ---------------------------------- */
+
+/*
+ * Broadband feed-forward canceller in shadow mode (n60_ff_shadow.cpp): one
+ * reference microphone, two outputs (left, right) and one error microphone,
+ * the 1 x 2 x 1 multichannel FxLMS (Kuo and Morgan 1996, ch. 5) built from
+ * two block FxLMS cores that share one error. Nothing it computes is played.
+ *  - Both microphones (same device, same clock) are decimated at the native
+ *    rate by the decimator above to fd ~ 4 kHz, then band-limited by the same
+ *    filter: a fourth-order Linkwitz-Riley high-pass at bandLowHz and
+ *    low-pass at bandHighHz, each two cascaded second-order Butterworth
+ *    sections (RBJ Audio EQ Cookbook, Q = 1 / sqrt 2; -6 dB at the corner).
+ *    Microphone samples are clamped to +/-8 first.
+ *    Filtering both commutes with every linear path, so the weights minimise
+ *    the band-limited error only. Fourth order keeps the weakly excited skirts,
+ *    which adapt slowly, from holding up the residual.
+ *  - Per decimated sample n, with x the band-limited reference, e the
+ *    band-limited error, W_c the weights and S_c = z^-delta_c s_c the path
+ *    estimates (bulk delay plus up to 128 taps):
+ *        y_c[n] = sum_k W_c[k] x[n - k]
+ *        e_v[n] = e[n] + sum_c sum_j s_c[j] y_c[n - delta_c - j]
+ *    and core c updates on reference x[n - delta_c], path s_c and error e_v
+ *    (the virtual error: what the microphone would hear if y were played).
+ *    e_v is clamped to +/-8.
+ *  - At every block boundary (when the weights change), each channel's
+ *    sum |W_c| (a bound on its peak gain) is held to peakGainLimit by scaling
+ *    (counted in gainLimited); a non-finite weight restores the seed (counted
+ *    in modelResets).
+ *  - Meters: one-pole 0.5 s mean squares of e, e_v and y_c.
+ *  - Step: per channel at most 0.25, so the two channels together stay within
+ *    the block core's 0.5. The default (0.05 with 8-sample blocks) costs
+ *    about 0.2 dB of misadjustment over the noise floor with an 8-sample path
+ *    delay; 0.2 costs about 1 dB but converges four times faster.
+ * Realtime behaviour: worker side only, one thread for every call. Create
+ * allocates; nothing else does. Latency: none (no output). Sample rate fixed
+ * per object, 8 kHz to 768 kHz native; a rate change needs a new object.
+ * Reset: Reset (and SetSeed) restores the seed weights, clears the meters and
+ * restarts the filters; MarkDiscontinuity restarts the filters and histories
+ * only (weights and meters kept) and counts a gap.
+ * Call it after any break in either microphone stream.
+ */
+
+#define N60_FF_SHADOW_MAX_BULK_DELAY 512u
+#define N60_FF_SHADOW_MAX_STEP 0.25f
+
+typedef struct {
+    double sampleRate;                     /* native, 8 kHz to 768 kHz */
+    uint32_t taps;                         /* at fd, 1 to 512, default 128 */
+    uint32_t blockFrames;                  /* at fd, 1 to 1024, default 8 */
+    float step;                            /* per channel, (0, 0.25], default 0.05 */
+    double leakagePerSecond;               /* 0 to 10, default 0.01 */
+    float bandLowHz;                       /* 10 to 100, default 20 */
+    float bandHighHz;                      /* 2 bandLowHz to 0.25 fd, default 200 */
+    /// Sum |W_c| per channel, (0, 16]; default 0.0631 (-24 dB), the offline
+    /// compiler's limit.
+    float peakGainLimit;
+} N60FeedForwardShadowConfig;
+
+typedef struct {
+    double decimatedRate;
+    uint64_t decimatedSamples;
+    /// Decimated samples adapted since the last restart (gap, reset, create).
+    uint64_t samplesSinceRestart;
+    uint64_t gaps;
+    uint64_t modelResets;
+    uint64_t gainLimited;
+    /// Mean squares at fd: band-limited error microphone, virtual error, and
+    /// each shadow output.
+    float measuredPower;
+    float predictedPower;
+    float outputPower[2];
+    float weightGain[2];                   /* sum |W_c| */
+} N60FeedForwardShadowStatus;
+
+typedef struct N60FeedForwardShadow N60FeedForwardShadow;
+
+N60FeedForwardShadowConfig N60FeedForwardShadowConfigDefault(double sampleRate);
+bool N60FeedForwardShadowConfigIsValid(
+    const N60FeedForwardShadowConfig * N60_FXLMS_NONNULL config
+);
+N60FeedForwardShadow * N60_FXLMS_NULLABLE N60FeedForwardShadowCreate(
+    const N60FeedForwardShadowConfig * N60_FXLMS_NONNULL config
+);
+void N60FeedForwardShadowDestroy(N60FeedForwardShadow * N60_FXLMS_NULLABLE shadow);
+/// channel 0 = left, 1 = right. Path at fd: bulkDelay (0 to 512) decimated
+/// samples, then count (1 to 128) taps. Default: no delay, one unit tap.
+/// Restarts the filters. False if out of range.
+bool N60FeedForwardShadowSetPath(
+    N60FeedForwardShadow * N60_FXLMS_NONNULL shadow,
+    uint32_t channel,
+    uint32_t bulkDelay,
+    const float * N60_FXLMS_NONNULL taps,
+    uint32_t count
+);
+/// Seeds both channels with min(count, taps) weights (the rest zero), keeps
+/// them for Reset, and restarts the filters. False if a weight is non-finite.
+bool N60FeedForwardShadowSetSeed(
+    N60FeedForwardShadow * N60_FXLMS_NONNULL shadow,
+    const float * N60_FXLMS_NONNULL left,
+    const float * N60_FXLMS_NONNULL right,
+    uint32_t count
+);
+/// Native-rate frames from the two microphones, sample-aligned. Non-finite
+/// samples count as zero.
+void N60FeedForwardShadowProcess(
+    N60FeedForwardShadow * N60_FXLMS_NONNULL shadow,
+    const float * N60_FXLMS_NONNULL reference,
+    const float * N60_FXLMS_NONNULL error,
+    uint32_t frames
+);
+void N60FeedForwardShadowMarkDiscontinuity(N60FeedForwardShadow * N60_FXLMS_NONNULL shadow);
+void N60FeedForwardShadowReset(N60FeedForwardShadow * N60_FXLMS_NONNULL shadow);
+N60FeedForwardShadowStatus N60FeedForwardShadowReadStatus(
+    const N60FeedForwardShadow * N60_FXLMS_NONNULL shadow
+);
+/// Copies min(count, taps) weights of one channel.
+void N60FeedForwardShadowCopyWeights(
+    const N60FeedForwardShadow * N60_FXLMS_NONNULL shadow,
+    uint32_t channel,
+    float * N60_FXLMS_NONNULL weights,
+    uint32_t count
+);
+
 #ifdef __cplusplus
 }
 #endif

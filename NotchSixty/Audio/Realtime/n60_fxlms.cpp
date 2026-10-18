@@ -541,6 +541,20 @@ void BlockFxlms::setWeights(const float *in, std::uint32_t count) noexcept {
     for (std::uint32_t k = 0; k < taps_; ++k) weights_[k] = k < count ? in[k] : 0.0;
 }
 
+void BlockFxlms::scaleWeights(double factor) noexcept {
+    for (auto &w : weights_) w *= factor;
+}
+
+void BlockFxlms::clearHistory() noexcept {
+    std::fill(referenceHistory_.begin(), referenceHistory_.end(), 0.0);
+    std::fill(filteredHistory_.begin(), filteredHistory_.end(), 0.0);
+    std::fill(gradient_.begin(), gradient_.end(), 0.0);
+    referencePosition_ = 0;
+    filteredPosition_ = 0;
+    blockPosition_ = 0;
+    power_ = 0;
+}
+
 }  // namespace n60::anc
 
 // C interface --------------------------------------------------------------

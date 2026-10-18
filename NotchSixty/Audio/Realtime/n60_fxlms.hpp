@@ -195,6 +195,11 @@ public:
     void update(const float *reference, const float *error, std::uint32_t frames) noexcept;
     void copyWeights(float *out, std::uint32_t count) const noexcept;
     void setWeights(const float *in, std::uint32_t count) noexcept;
+    std::uint32_t taps() const noexcept { return taps_; }
+    const double *weights() const noexcept { return weights_.data(); }
+    void scaleWeights(double factor) noexcept;
+    // Zeroes the histories, the pending gradient and the power estimate.
+    void clearHistory() noexcept;
 
 private:
     std::uint32_t taps_;
