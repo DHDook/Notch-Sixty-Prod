@@ -77,6 +77,7 @@ final class ProductController: ObservableObject {
     let activeQuietZone: ActiveQuietZoneController
     let adaptiveQuietZone: AdaptiveQuietZoneShadow
     let feedForwardSurvey: QuietZoneFeedForwardSurveyController
+    let feedForwardShadow: QuietZoneFeedForwardShadow
     let hardwareAcceptance: HardwareAcceptanceController
     let backup: NotchSixtyBackupService
     let recovery: ProductRecoveryController
@@ -144,10 +145,14 @@ final class ProductController: ObservableObject {
             quietZone: activeQuietZone,
             ambient: ambientCompensation
         )
-        self.feedForwardSurvey = QuietZoneFeedForwardSurveyController(
+        let feedForwardSurvey = QuietZoneFeedForwardSurveyController(
             quietZone: activeQuietZone,
             calibration: calibration
         )
+        self.feedForwardSurvey = feedForwardSurvey
+        let feedForwardShadow = QuietZoneFeedForwardShadow()
+        feedForwardShadow.observe(feedForwardSurvey)
+        self.feedForwardShadow = feedForwardShadow
         self.hardwareAcceptance = HardwareAcceptanceController()
         self.backup = NotchSixtyBackupService(
             profiles: profiles,
@@ -225,10 +230,14 @@ final class ProductController: ObservableObject {
             quietZone: activeQuietZone,
             ambient: ambientCompensation
         )
-        self.feedForwardSurvey = QuietZoneFeedForwardSurveyController(
+        let feedForwardSurvey = QuietZoneFeedForwardSurveyController(
             quietZone: activeQuietZone,
             calibration: calibration
         )
+        self.feedForwardSurvey = feedForwardSurvey
+        let feedForwardShadow = QuietZoneFeedForwardShadow()
+        feedForwardShadow.observe(feedForwardSurvey)
+        self.feedForwardShadow = feedForwardShadow
         self.hardwareAcceptance = HardwareAcceptanceController()
         self.backup = NotchSixtyBackupService(
             profiles: profiles,

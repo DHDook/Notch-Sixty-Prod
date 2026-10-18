@@ -290,6 +290,7 @@ struct ProductionRootView: View {
         .task { product.prepareForUse() }
         .task(id: adaptiveANCEnabled) {
             product.adaptiveQuietZone.setActive(adaptiveANCEnabled)
+            product.feedForwardShadow.setActive(adaptiveANCEnabled)
             product.activeQuietZone.lowLatencyOutputProfileAllowed = adaptiveANCEnabled
         }
         .sheet(
@@ -359,6 +360,7 @@ struct ProductionRootView: View {
                 quietZone: product.activeQuietZone,
                 adaptiveQuietZone: product.adaptiveQuietZone,
                 feedForwardSurvey: product.feedForwardSurvey,
+                feedForwardShadow: product.feedForwardShadow,
                 microphone: product.calibration,
                 projects: product.roomCorrectionProjects
             )
