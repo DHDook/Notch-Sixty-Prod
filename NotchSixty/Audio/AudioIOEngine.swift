@@ -1077,7 +1077,7 @@ final class AudioIOEngine: ObservableObject {
     @Published private(set) var masterVolumeConfiguration = MasterVolumeConfiguration()
     @Published private(set) var masterVolumeCapabilities = MasterVolumeDeviceCapabilities.softwareOnly
     @Published private(set) var globalVolumeKeyMonitoringState: GlobalVolumeKeyMonitoringState = .stopped
-    private(set) var softwareVolumeKeyStepDenominator: Int = 16
+    private(set) var softwareVolumeKeyStep = MasterVolumeKeyStep.fraction(denominator: 16)
     @Published private(set) var gainConfiguration = DSPGainConfiguration()
     @Published private(set) var bassManagementConfiguration = BassManagementConfiguration()
     @Published private(set) var multiOutputRoutingConfiguration: MultiOutputRoutingConfiguration?
@@ -1947,9 +1947,9 @@ final class AudioIOEngine: ObservableObject {
         try applyPlaybackControlConfiguration(updated)
     }
 
-    func setSoftwareVolumeKeyStepDenominator(_ denominator: Int) {
-        guard denominator == 16 || denominator == 32 || denominator == 64 else { return }
-        softwareVolumeKeyStepDenominator = denominator
+    func setSoftwareVolumeKeyStep(_ step: MasterVolumeKeyStep) {
+        guard step.isValid else { return }
+        softwareVolumeKeyStep = step
     }
 
     func setMasterVolumeLevel(_ level: Double) throws {
@@ -3204,10 +3204,9 @@ final class AudioIOEngine: ObservableObject {
     private func handleGlobalVolumeKey(direction: Double) {
         guard masterVolumeCapabilities.controlMode == .softwareDSP,
               direction == 1.0 || direction == -1.0 else { return }
-        let delta = direction / Double(softwareVolumeKeyStepDenominator)
-        let level = min(
-            max(masterVolumeConfiguration.level + delta, MasterVolumeConfiguration.levelRange.lowerBound),
-            MasterVolumeConfiguration.levelRange.upperBound
+        let level = softwareVolumeKeyStep.level(
+            afterPress: direction,
+            from: masterVolumeConfiguration.level
         )
         guard abs(level - masterVolumeConfiguration.level) > 0.000_001 else { return }
         var updated = masterVolumeConfiguration

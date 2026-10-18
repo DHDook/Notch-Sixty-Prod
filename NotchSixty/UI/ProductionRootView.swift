@@ -390,6 +390,33 @@ struct ProductionRootView: View {
                 .help("Open the retained engineering validation tools")
                 #endif
 
+                // Bypass keeps the tap running and passes audio unprocessed;
+                // Start/Stop beside it tears the tap down.
+                Button {
+                    do {
+                        try engine.setGlobalDSPBypassed(
+                            !engine.playbackControlConfiguration.globalBypassed
+                        )
+                        commandError = nil
+                    } catch {
+                        commandError = error.localizedDescription
+                    }
+                } label: {
+                    Label(
+                        engine.playbackControlConfiguration.globalBypassed
+                            ? "Bypassed" : "Bypass",
+                        systemImage: engine.playbackControlConfiguration.globalBypassed
+                            ? "waveform.slash" : "waveform"
+                    )
+                }
+                .buttonStyle(.glass)
+                .tint(engine.playbackControlConfiguration.globalBypassed ? .orange : nil)
+                .help(
+                    engine.playbackControlConfiguration.globalBypassed
+                        ? "DSP is bypassed: audio plays unprocessed. Click to process again."
+                        : "Bypass all DSP: audio keeps playing, unprocessed"
+                )
+
                 Button {
                     Task { @MainActor in
                         await Task.yield()
@@ -437,18 +464,18 @@ struct ProductionRootView: View {
 
         ToolbarSpacer(.flexible)
 
+        // No button style: the toolbar draws the two as one shared glass
+        // capsule, help attached to Settings, rather than two buttons.
         ToolbarItemGroup(placement: .primaryAction) {
             ProductionReferenceHelpButton(
                 navigator: product.reference,
                 articleID: ProductionUserGuideCatalog.articleID(for: selection ?? .dashboard),
                 label: "Open \((selection ?? .dashboard).title) in the User Guide"
             )
-            .buttonStyle(.glass)
 
             SettingsLink {
                 Label("Settings", systemImage: "gearshape")
             }
-            .buttonStyle(.glass)
             .help("Open Settings")
         }
     }
@@ -616,18 +643,11 @@ private struct ProductionDashboardView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                HStack(alignment: .firstTextBaseline) {
-                    if engine.selectedOutputDevice == nil {
-                        Text("Choose an output below to begin.")
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Text(engine.lifecycleState == .running ? "PROCESSING" : engine.lifecycleState.rawValue.uppercased())
-                        .font(.caption.bold())
-                        .tracking(1.2)
-                        .padding(.horizontal, 13)
-                        .padding(.vertical, 8)
-                        .glassEffect(.regular, in: .capsule)
+                // Processing state lives in the toolbar's Start/Stop and
+                // Bypass buttons, so the dashboard spends no line on it.
+                if engine.selectedOutputDevice == nil {
+                    Text("Choose an output below to begin.")
+                        .foregroundStyle(.secondary)
                 }
 
                 StereoSignatureVUMeterPanel(engine: engine)
@@ -837,15 +857,21 @@ private struct ProductionDashboardView: View {
                 }
 
                 Divider().frame(height: 34)
-                Button {
-                    perform { try engine.setGlobalDSPBypassed(!engine.playbackControlConfiguration.globalBypassed) }
-                } label: {
-                    Label(
-                        engine.playbackControlConfiguration.globalBypassed ? "Bypassed" : "DSP Active",
-                        systemImage: engine.playbackControlConfiguration.globalBypassed ? "pause.circle" : "waveform.path"
-                    )
-                }
-                .buttonStyle(.glass)
+                // Readout only; the toolbar's Bypass button switches it.
+                Label(
+                    engine.playbackControlConfiguration.globalBypassed ? "Bypassed" : "Active",
+                    systemImage: engine.playbackControlConfiguration.globalBypassed
+                        ? "waveform.slash" : "waveform.path"
+                )
+                .font(.subheadline.bold())
+                .foregroundStyle(
+                    engine.playbackControlConfiguration.globalBypassed
+                        ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary)
+                )
+                .accessibilityLabel(
+                    engine.playbackControlConfiguration.globalBypassed
+                        ? "DSP bypassed" : "DSP active"
+                )
             }
             .padding(14)
             .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 22))

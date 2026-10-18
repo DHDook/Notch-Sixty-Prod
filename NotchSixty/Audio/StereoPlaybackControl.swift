@@ -742,6 +742,55 @@ struct MasterVolumeDeviceCapabilities: Equatable, Sendable {
     }
 }
 
+/// How far one intercepted volume-key press moves the software master volume.
+/// Control plane only (main thread); never read on the audio callback.
+enum MasterVolumeKeyStep: Equatable, Sendable {
+    /// 1/denominator of the slider's range per press.
+    case fraction(denominator: Int)
+    /// A fixed change in attenuation on the software taper. Presses land on
+    /// whole multiples of the step (−1, −2 … or −0.5, −1 …), up to 0 dB.
+    case decibels(Double)
+
+    /// The lowest level a dB step lands on; one more press down is silence,
+    /// and the first press up from silence returns here.
+    static let decibelFloor = -80.0
+
+    var isValid: Bool {
+        switch self {
+        case .fraction(let denominator): return [16, 32, 64].contains(denominator)
+        case .decibels(let step): return step.isFinite && step > 0 && step <= 12
+        }
+    }
+
+    /// The level after one press up (`direction` 1) or down (−1).
+    func level(afterPress direction: Double, from level: Double) -> Double {
+        let range = MasterVolumeConfiguration.levelRange
+        switch self {
+        case .fraction(let denominator):
+            return min(max(level + direction / Double(denominator), range.lowerBound), range.upperBound)
+        case .decibels(let step):
+            // The tolerance keeps a level already on the grid from snapping
+            // to itself after the level ↔ dB round trip.
+            let tolerance = 1e-6
+            guard let current = MasterVolumeConfiguration.softwareTaperDB(forLevel: level) else {
+                return direction > 0
+                    ? MasterVolumeConfiguration.level(forSoftwareTaperDB: Self.decibelFloor)
+                    : range.lowerBound
+            }
+            if direction > 0 {
+                let target = max(
+                    (((current + tolerance) / step).rounded(.up)) * step,
+                    Self.decibelFloor
+                )
+                return MasterVolumeConfiguration.level(forSoftwareTaperDB: min(target, 0))
+            }
+            let target = (((current - tolerance) / step).rounded(.down)) * step
+            guard target >= Self.decibelFloor - tolerance else { return range.lowerBound }
+            return MasterVolumeConfiguration.level(forSoftwareTaperDB: target)
+        }
+    }
+}
+
 struct MasterVolumeConfiguration: Equatable, Sendable {
     static let levelRange = 0.0...1.0
     /// Software volume uses an audio (cubic) taper: gain = level³, i.e.
@@ -758,6 +807,13 @@ struct MasterVolumeConfiguration: Equatable, Sendable {
     static func softwareTaperGain(forLevel level: Double) -> Double {
         guard level.isFinite, level > 0 else { return 0 }
         return pow(min(level, 1), softwareTaperExponent)
+    }
+
+    /// The slider level whose taper gives `decibels` (≤ 0), the inverse of
+    /// `softwareTaperDB`: level = 10^(dB / (20 × exponent)).
+    static func level(forSoftwareTaperDB decibels: Double) -> Double {
+        guard decibels.isFinite else { return decibels > 0 ? 1 : 0 }
+        return min(pow(10, min(decibels, 0) / (20 * softwareTaperExponent)), 1)
     }
 
     /// Attenuation shown beside the percentage, nil at silence.

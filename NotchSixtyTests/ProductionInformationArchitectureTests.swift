@@ -14,6 +14,85 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         XCTAssertEqual(VolumeFeedbackPresentation.readout(level: 0.678, muted: true), "Muted")
     }
 
+    func testDecibelVolumeReadoutClimbsToZeroAtFullScale() {
+        XCTAssertEqual(VolumeFeedbackPresentation.readout(level: 1, muted: false, decibels: true), "0 dB")
+        let twelveDown = MasterVolumeConfiguration.level(forSoftwareTaperDB: -12)
+        XCTAssertEqual(VolumeFeedbackPresentation.readout(level: twelveDown, muted: false, decibels: true), "−12 dB")
+        let halfDown = MasterVolumeConfiguration.level(forSoftwareTaperDB: -0.5)
+        XCTAssertEqual(VolumeFeedbackPresentation.readout(level: halfDown, muted: false, decibels: true), "−0.5 dB")
+        XCTAssertEqual(VolumeFeedbackPresentation.readout(level: 0, muted: false, decibels: true), "−∞ dB")
+        XCTAssertEqual(VolumeFeedbackPresentation.readout(level: 0.5, muted: true, decibels: true), "Muted")
+        XCTAssertEqual(VolumeFeedbackPresentation.readout(level: 0.678, muted: false), "68%")
+    }
+
+    func testDecibelKeyStepsLandOnTheStepGridBetweenSilenceAndZero() throws {
+        func db(_ level: Double) throws -> Double {
+            try XCTUnwrap(MasterVolumeConfiguration.softwareTaperDB(forLevel: level))
+        }
+        let oneDB = MasterVolumeKeyStep.decibels(1)
+        XCTAssertEqual(try db(oneDB.level(afterPress: -1, from: 1)), -1, accuracy: 1e-9)
+        XCTAssertEqual(oneDB.level(afterPress: 1, from: 1), 1, "capped at 0 dB")
+
+        // Off-grid levels snap to the next whole step in the pressed direction.
+        let offGrid = MasterVolumeConfiguration.level(forSoftwareTaperDB: -12.3)
+        XCTAssertEqual(try db(oneDB.level(afterPress: 1, from: offGrid)), -12, accuracy: 1e-9)
+        XCTAssertEqual(try db(oneDB.level(afterPress: -1, from: offGrid)), -13, accuracy: 1e-9)
+
+        var level = 1.0
+        for _ in 0..<4 { level = MasterVolumeKeyStep.decibels(0.5).level(afterPress: -1, from: level) }
+        XCTAssertEqual(try db(level), -2, accuracy: 1e-9, "four half-dB presses")
+        for _ in 0..<4 { level = MasterVolumeKeyStep.decibels(0.5).level(afterPress: 1, from: level) }
+        XCTAssertEqual(level, 1, accuracy: 1e-9)
+
+        let floor = MasterVolumeConfiguration.level(forSoftwareTaperDB: MasterVolumeKeyStep.decibelFloor)
+        let fourDB = MasterVolumeKeyStep.decibels(4)
+        XCTAssertEqual(fourDB.level(afterPress: -1, from: floor), 0, "below the floor is silence")
+        XCTAssertEqual(fourDB.level(afterPress: 1, from: 0), floor, accuracy: 1e-12, "up from silence")
+        XCTAssertEqual(fourDB.level(afterPress: -1, from: 0), 0)
+    }
+
+    func testFractionKeyStepsAndStepValidationAreUnchanged() {
+        XCTAssertEqual(MasterVolumeKeyStep.fraction(denominator: 16).level(afterPress: -1, from: 1), 15.0 / 16, accuracy: 1e-12)
+        XCTAssertEqual(MasterVolumeKeyStep.fraction(denominator: 64).level(afterPress: 1, from: 1), 1)
+        XCTAssertEqual(MasterVolumeKeyStep.fraction(denominator: 16).level(afterPress: -1, from: 0), 0)
+        XCTAssertTrue(MasterVolumeKeyStep.fraction(denominator: 32).isValid)
+        XCTAssertFalse(MasterVolumeKeyStep.fraction(denominator: 10).isValid)
+        XCTAssertTrue(MasterVolumeKeyStep.decibels(0.5).isValid)
+        XCTAssertFalse(MasterVolumeKeyStep.decibels(0).isValid)
+        XCTAssertFalse(MasterVolumeKeyStep.decibels(.nan).isValid)
+    }
+
+    func testVolumeStepResolutionKeepsStoredValuesAndMapsDecibelSteps() {
+        // Raw values are persisted in UserDefaults and backups.
+        XCTAssertEqual(ApplicationVolumeStepResolution.standard.rawValue, 16)
+        XCTAssertEqual(ApplicationVolumeStepResolution.fine.rawValue, 32)
+        XCTAssertEqual(ApplicationVolumeStepResolution.precision.rawValue, 64)
+        XCTAssertEqual(ApplicationVolumeStepResolution.fine.keyStep, .fraction(denominator: 32))
+        XCTAssertFalse(ApplicationVolumeStepResolution.fine.usesDecibels)
+        XCTAssertEqual(
+            ApplicationVolumeStepResolution.decibelSteps.map(\.keyStep),
+            [.decibels(0.5), .decibels(1), .decibels(2), .decibels(4)]
+        )
+        XCTAssertTrue(ApplicationVolumeStepResolution.decibelSteps.allSatisfy(\.usesDecibels))
+        XCTAssertEqual(
+            Set(ApplicationVolumeStepResolution.fractions + ApplicationVolumeStepResolution.decibelSteps),
+            Set(ApplicationVolumeStepResolution.allCases)
+        )
+        for resolution in ApplicationVolumeStepResolution.allCases {
+            XCTAssertTrue(resolution.keyStep.isValid, "\(resolution)")
+        }
+    }
+
+    func testUserGuideListsALoneSameNameArticleWithoutAHeading() throws {
+        let gettingStarted = ProductionUserGuideCatalog.articles.filter { $0.category == .gettingStarted }
+        XCTAssertEqual(gettingStarted.map(\.title), ["Getting Started"])
+        XCTAssertFalse(ProductionUserGuideCategory.gettingStarted.showsSidebarHeader(for: gettingStarted))
+
+        let processing = ProductionUserGuideCatalog.articles.filter { $0.category == .processing }
+        XCTAssertTrue(ProductionUserGuideCategory.processing.showsSidebarHeader(for: processing))
+        XCTAssertFalse(ProductionUserGuideCategory.processing.showsSidebarHeader(for: []))
+    }
+
     func testVolumePopupLayoutPlacesGlassPopupBesideOrOverTheSystemPopup() {
         // 1920 × 1080 display with a 30 pt menu bar, as measured on macOS 27.
         let visible = CGRect(x: 0, y: 0, width: 1920, height: 1050)
@@ -39,7 +118,12 @@ final class ProductionInformationArchitectureTests: XCTestCase {
 
         let cover = VolumePopupLayoutFixture.make(.topRight, cover: true, visible)
         XCTAssertEqual(cover.style, .solidGlass)
-        XCTAssertEqual(cover.frame, system)
+        XCTAssertEqual(cover.frame.width, system.width, accuracy: 0.001)
+        XCTAssertEqual(cover.frame.minX, system.minX, accuracy: 0.001)
+        XCTAssertEqual(cover.frame.midY, system.midY, accuracy: 0.001)
+        XCTAssertEqual(cover.frame.height, VolumeFeedbackPopupLayout.coverHeight, accuracy: 0.001)
+        XCTAssertLessThan(cover.frame.height, system.height, "tighter than the system frame")
+        XCTAssertTrue(system.contains(cover.frame))
         XCTAssertGreaterThan(cover.level.rawValue, SystemVolumePopupGeometry.windowLevel.rawValue)
         XCTAssertGreaterThan(cover.displayDuration, SystemVolumePopupGeometry.displayDuration)
     }
