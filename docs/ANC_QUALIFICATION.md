@@ -48,7 +48,7 @@ with the independent measurement microphone (not the error microphone).
 
 | Check | Target (proposed) |
 | --- | --- |
-| Howl / instability detection | Trips within 50 ms of an injected growing loop at every standard rate (44.1, 48, 88.2, 96, 176.4, 192, 352.8, 384 kHz), then ramps ANC output to zero within 10 ms and stays muted until re-armed |
+| Howl / instability detection | At every standard rate (44.1, 48, 88.2, 96, 176.4, 192, 352.8, 384 kHz), trips within 50 ms of an injected growing loop at 30 Hz or above that grows at least 10 dB per 20 ms, or at least 20 dB per 20 ms when it also loops through the reference microphone; slower howls and those below 30 Hz are caught by the error-rise check or the −6 dBFS output ceiling. Then ramps ANC output to zero within 10 ms and stays muted until re-armed (owner, 18 Oct 2026) |
 | False trips | Zero trips in a 1-hour soak with music, programme transients and a stable tone |
 | Output level | Existing caps hold: −24 dBFS per tone, −18 dBFS aggregate; feed-forward combined stereo peak ≤ 0.10 |
 | Fault shutdown | Every PR99 fault probe reports shutdown within its limit |

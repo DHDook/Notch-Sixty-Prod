@@ -120,6 +120,16 @@ harness pr107_program_fir_runtime "${STRICT[@]}" -O2 -I"$RT" ci/validate_pr107_p
 harness pr101_realtime_resource_soak "${STRICT[@]}" -O3 -arch arm64 -include stddef.h -I"$RT" \
     ci/validate_pr101_realtime_resource_soak.c $ALL_RT -framework Accelerate -framework CoreAudio
 
+# E4 S4: speaker-ANC howl guard, the first C++20 engine core. Compiled once,
+# then linked into its C harness.
+if selected e4_anc_guard; then
+    if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -I"$RT" -c "$RT/n60_anc_guard.cpp" -o "$OUT/n60_anc_guard.o"; then
+        harness e4_anc_guard "${STRICT[@]}" -O2 -I"$RT" ci/harness_e4_anc_guard.c "$OUT/n60_anc_guard.o" -lc++ -lm
+    else
+        failed+=(e4_anc_guard)
+    fi
+fi
+
 # Acoustic reference lab: production-header probes checked against independent
 # Python oracles at every standard rate from 44.1 to 384 kHz.
 for name in pr117_acoustic_reference_lab pr117b_fir_latency_headroom pr117c_spatial_reference; do
@@ -128,6 +138,15 @@ for name in pr117_acoustic_reference_lab pr117b_fir_latency_headroom pr117c_spat
     if python3 "ci/validate_$name.py"; then passed+=("$name"); else failed+=("$name"); fi
     echo "::endgroup::"
 done
+if selected e4_anc_guard_reference; then
+    echo "::group::e4_anc_guard_reference"
+    if python3 ci/acoustic_reference_lab/e4_anc_guard_reference.py; then
+        passed+=(e4_anc_guard_reference)
+    else
+        failed+=(e4_anc_guard_reference)
+    fi
+    echo "::endgroup::"
+fi
 
 echo
 echo "Harnesses passed: ${#passed[@]}"

@@ -7,6 +7,7 @@
 #import "N60FeedForwardReferenceBridge.h"
 #import "N60FeedForwardPreviewFIR.h"
 #import "N60FeedForwardDeadlineBridge.h"
+#import "N60AncGuard.h"
 #import "N60TargetedRoomMeasurementBridge.h"
 #import "N60Convolution.h"
 #import "N60LinearPhaseEQ.h"
