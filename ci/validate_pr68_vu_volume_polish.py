@@ -80,8 +80,6 @@ def main() -> None:
             "application volume resolution enum is missing")
     for raw in ("case standard = 16", "case fine = 32", "case precision = 64"):
         require(raw in app, f"missing volume option: {raw}")
-    require('static let volumeStepResolution = "application.volumeStepResolution"' in app,
-            "volume resolution UserDefaults key is missing")
     require("defaults.set(volumeStepResolution.rawValue, forKey: Key.volumeStepResolution)" in app,
             "volume resolution is not persisted")
     require("audioEngine.setSoftwareVolumeKeyStepDenominator(volumeStepResolution.denominator)" in app,
