@@ -642,6 +642,8 @@ private struct ProductSafeLaunchSheet: View {
 
 private struct ProductionDashboardView: View {
     @ObservedObject var engine: AudioIOEngine
+    @AppStorage(PreferenceKeys.Application.volumeStepResolution)
+    private var storedVolumeStepResolution = ApplicationVolumeStepResolution.standard.rawValue
     @State private var actionError: String?
 
     private func perform(_ action: () throws -> Void) {
@@ -716,8 +718,21 @@ private struct ProductionDashboardView: View {
         }
     }
 
+    /// dB key steps on a software-DSP output: the fader and readout are
+    /// dB-scaled, as on a console or monitor controller.
+    private var masterVolumeUsesDecibelScale: Bool {
+        engine.masterVolumeCapabilities.controlMode == .softwareDSP
+            && ApplicationVolumeStepResolution(storedValue: storedVolumeStepResolution)?.usesDecibels == true
+    }
+
     private var masterVolumeReadout: String {
         let level = engine.masterVolumeConfiguration.level
+        if masterVolumeUsesDecibelScale {
+            return VolumeFeedbackPresentation.decibelReadout(
+                MasterVolumeConfiguration.softwareTaperDB(forLevel: level),
+                alwaysTenths: true
+            )
+        }
         let percent = String(format: "%.1f%%", level * 100)
         guard engine.masterVolumeCapabilities.controlMode == .softwareDSP else {
             return percent
@@ -870,13 +885,32 @@ private struct ProductionDashboardView: View {
                         Text(masterVolumeReadout)
                             .monospacedDigit().foregroundStyle(.secondary)
                     }
-                    Slider(
-                        value: Binding(
-                            get: { engine.masterVolumeConfiguration.level },
-                            set: { level in perform { try engine.setMasterVolumeLevel(level) } }
-                        ),
-                        in: MasterVolumeConfiguration.levelRange
-                    )
+                    if masterVolumeUsesDecibelScale {
+                        Slider(
+                            value: Binding(
+                                get: {
+                                    VolumeFeedbackPresentation.decibelScalePosition(
+                                        level: engine.masterVolumeConfiguration.level
+                                    )
+                                },
+                                set: { position in
+                                    let level = VolumeFeedbackPresentation.level(
+                                        forDecibelScalePosition: position
+                                    )
+                                    perform { try engine.setMasterVolumeLevel(level) }
+                                }
+                            ),
+                            in: 0...1
+                        )
+                    } else {
+                        Slider(
+                            value: Binding(
+                                get: { engine.masterVolumeConfiguration.level },
+                                set: { level in perform { try engine.setMasterVolumeLevel(level) } }
+                            ),
+                            in: MasterVolumeConfiguration.levelRange
+                        )
+                    }
                 }
 
                 Divider().frame(height: 34)

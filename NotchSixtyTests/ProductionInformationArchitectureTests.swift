@@ -77,6 +77,28 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         }
     }
 
+    /// dB-scaled bar and fader: equal distances are equal dB, −80 dB just
+    /// above the bottom stop, silence at the stop, and the inverse round-trips.
+    func testDecibelScalePositionIsLinearInDecibels() {
+        func position(_ db: Double) -> Double {
+            VolumeFeedbackPresentation.decibelScalePosition(
+                level: MasterVolumeConfiguration.level(forSoftwareTaperDB: db)
+            )
+        }
+        XCTAssertEqual(position(0), 1, accuracy: 1e-9)
+        XCTAssertEqual(position(-40), 0.5, accuracy: 1e-9)
+        XCTAssertEqual(position(-20), 0.75, accuracy: 1e-9)
+        XCTAssertEqual(position(-80), 0, accuracy: 1e-9)
+        XCTAssertEqual(VolumeFeedbackPresentation.decibelScalePosition(level: 0), 0)
+
+        XCTAssertEqual(VolumeFeedbackPresentation.level(forDecibelScalePosition: 0), 0)
+        XCTAssertEqual(VolumeFeedbackPresentation.level(forDecibelScalePosition: 1), 1, accuracy: 1e-12)
+        for p in stride(from: 0.05, through: 1.0, by: 0.05) {
+            let level = VolumeFeedbackPresentation.level(forDecibelScalePosition: p)
+            XCTAssertEqual(VolumeFeedbackPresentation.decibelScalePosition(level: level), p, accuracy: 1e-9)
+        }
+    }
+
     func testDecibelKeyStepsLandOnTheStepGridBetweenSilenceAndZero() throws {
         func db(_ level: Double) throws -> Double {
             try XCTUnwrap(MasterVolumeConfiguration.softwareTaperDB(forLevel: level))

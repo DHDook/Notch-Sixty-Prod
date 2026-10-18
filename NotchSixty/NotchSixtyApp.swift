@@ -1552,6 +1552,28 @@ enum VolumeFeedbackPresentation {
         )
     }
 
+    /// Position on a dB-scaled fader or bar, as on professional consoles and
+    /// monitor controllers: equal distances are equal dB changes, from
+    /// `MasterVolumeKeyStep.decibelFloor` (−80 dB) just above the bottom
+    /// stop to 0 dB at the top. The bottom stop itself is silence (−∞ dB).
+    static func decibelScalePosition(level: Double) -> Double {
+        guard let decibels = MasterVolumeConfiguration.softwareTaperDB(forLevel: level) else {
+            return 0
+        }
+        let floor = MasterVolumeKeyStep.decibelFloor
+        return min(max((decibels - floor) / -floor, 0), 1)
+    }
+
+    /// The slider level for a dB-scale position; the inverse of
+    /// `decibelScalePosition`. Position 0 is silence.
+    static func level(forDecibelScalePosition position: Double) -> Double {
+        guard position.isFinite, position > 0 else { return 0 }
+        let floor = MasterVolumeKeyStep.decibelFloor
+        return MasterVolumeConfiguration.level(
+            forSoftwareTaperDB: floor * (1 - min(position, 1))
+        )
+    }
+
     /// The widest strings `readout` can return in one mode, with 8 standing
     /// in for any digit (digits are tabular, so all share one width).
     /// The menu bar reserves the widest of these so the readout never
@@ -1768,6 +1790,16 @@ private struct VolumeFeedbackHUDView: View {
         )
     }
 
+    /// With a dB readout the bar is dB-scaled, so it agrees with the number;
+    /// otherwise it shows the slider position.
+    private var barPosition: Double {
+        if configuration.muted { return 0 }
+        if decibels {
+            return VolumeFeedbackPresentation.decibelScalePosition(level: configuration.level)
+        }
+        return min(max(configuration.level, 0), 1)
+    }
+
     private var shape: RoundedRectangle {
         RoundedRectangle(cornerRadius: style == .solidGlass ? 28 : 22)
     }
@@ -1809,10 +1841,7 @@ private struct VolumeFeedbackHUDView: View {
                     .font(style == .solidGlass ? .title3.weight(.semibold) : .headline)
                     .monospacedDigit()
                 }
-                ProgressView(
-                    value: configuration.muted ? 0.0 :
-                        min(max(configuration.level, 0.0), 1.0)
-                )
+                ProgressView(value: barPosition)
                 .tint(.orange)
             }
         }
