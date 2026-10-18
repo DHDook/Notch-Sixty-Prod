@@ -144,6 +144,11 @@ typedef struct {
     N60AncComplex toneSeed[N60_FXLMS_MAX_TONES];
     float pathFloor;                       /* default 1e-3 */
     bool probeEnabled;                     /* default false */
+    /// Shadow mode (S6): the output is not played, so adapt on the virtual
+    /// error e + sum_k Re(S_k W_k exp(j 2 pi f_k (n - G) / fs)). Requires the
+    /// probe off (the probe is output; ConfigIsValid rejects both). Process
+    /// still writes the output; the caller meters and discards it.
+    bool shadow;
     float probeLevelDBFS;                  /* default -50, -90 to -40 */
     uint64_t probeSeed;
     uint32_t pathTaps;                     /* default 64, 8 to 128 */
@@ -164,6 +169,13 @@ typedef struct {
     N60AncComplex weight[N60_FXLMS_MAX_TONES];
     N60AncComplex path[N60_FXLMS_MAX_TONES];
     bool adapting[N60_FXLMS_MAX_TONES];
+    /// Complex tone amplitude at the microphone (0.5 s one-pole average of
+    /// 2 e exp(-j phase), valid once the decimator has warmed up), as
+    /// measured and as predicted with the adaptive output. Equal unless
+    /// shadowed. Other tones beat in at |f_j - f_k|: about 6% ripple at 5 Hz
+    /// spacing, so read them as levels for well-separated tones.
+    N60AncComplex measuredTone[N60_FXLMS_MAX_TONES];
+    N60AncComplex predictedTone[N60_FXLMS_MAX_TONES];
 } N60AdaptiveTonalStatus;
 
 typedef struct N60AdaptiveTonal N60AdaptiveTonal;

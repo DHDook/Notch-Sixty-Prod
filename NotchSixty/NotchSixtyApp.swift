@@ -75,6 +75,7 @@ final class ProductController: ObservableObject {
     let roomTreatmentAdvisor: RoomTreatmentAdvisorController
     let ambientCompensation: AmbientCompensationController
     let activeQuietZone: ActiveQuietZoneController
+    let adaptiveQuietZone: AdaptiveQuietZoneShadow
     let hardwareAcceptance: HardwareAcceptanceController
     let backup: NotchSixtyBackupService
     let recovery: ProductRecoveryController
@@ -132,9 +133,14 @@ final class ProductController: ObservableObject {
             projects: roomProjects
         )
         self.ambientCompensation = ambientCompensation
-        self.activeQuietZone = ActiveQuietZoneController(
+        let activeQuietZone = ActiveQuietZoneController(
             engine: audioEngine,
             profiles: profiles,
+            ambient: ambientCompensation
+        )
+        self.activeQuietZone = activeQuietZone
+        self.adaptiveQuietZone = AdaptiveQuietZoneShadow(
+            quietZone: activeQuietZone,
             ambient: ambientCompensation
         )
         self.hardwareAcceptance = HardwareAcceptanceController()
@@ -204,9 +210,14 @@ final class ProductController: ObservableObject {
             projects: roomProjects
         )
         self.ambientCompensation = ambientCompensation
-        self.activeQuietZone = ActiveQuietZoneController(
+        let activeQuietZone = ActiveQuietZoneController(
             engine: audioEngine,
             profiles: profiles,
+            ambient: ambientCompensation
+        )
+        self.activeQuietZone = activeQuietZone
+        self.adaptiveQuietZone = AdaptiveQuietZoneShadow(
+            quietZone: activeQuietZone,
             ambient: ambientCompensation
         )
         self.hardwareAcceptance = HardwareAcceptanceController()

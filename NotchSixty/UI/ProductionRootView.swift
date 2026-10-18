@@ -235,6 +235,10 @@ struct ProductionRootView: View {
     @Environment(\.openWindow) private var openWindow
     #endif
     @State private var commandError: String?
+    @EnvironmentObject private var featureFlags: FeatureFlags
+
+    /// E4: the adaptive Quiet Zone shadow runs only with its flag on.
+    private var adaptiveANCEnabled: Bool { featureFlags.isEnabled(.adaptiveANC) }
 
     private var engine: AudioIOEngine { product.audioEngine }
 
@@ -284,6 +288,9 @@ struct ProductionRootView: View {
         }
         .frame(minWidth: minimumWindowWidth, minHeight: 680)
         .task { product.prepareForUse() }
+        .task(id: adaptiveANCEnabled) {
+            product.adaptiveQuietZone.setActive(adaptiveANCEnabled)
+        }
         .sheet(
             isPresented: Binding(
                 get: { product.recovery.safeLaunchActive },
@@ -349,6 +356,7 @@ struct ProductionRootView: View {
                 engine: engine,
                 ambient: product.ambientCompensation,
                 quietZone: product.activeQuietZone,
+                adaptiveQuietZone: product.adaptiveQuietZone,
                 microphone: product.calibration,
                 projects: product.roomCorrectionProjects
             )

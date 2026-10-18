@@ -11,6 +11,8 @@ predictions from the written rules (N60Fxlms.h) and the plant formula
   and zero phase once its 8 D delay is removed.
 - FIXED: with a path seed 0.8x and 30 deg off, the narrowband update's fixed
   point is W = -D / (S + lambda tau S_seed).
+- SHADOW: with the output never played the core adapts on the virtual error,
+  whose path is the seed itself, so W = -D / (S_seed (1 + lambda tau)).
 - PATH: the auxiliary-noise model converges to the plant's secondary path,
   including the one-buffer I/O delay.
 - PROBE: the probe's RMS equals the configured -50 dBFS (RBJ Butterworth noise
@@ -105,7 +107,7 @@ def probe_noise_gain(rate):
 
 
 def main():
-    seen = {"DEC": set(), "FIXED": set(), "PATH": set(), "PROBE": set()}
+    seen = {"DEC": set(), "FIXED": set(), "SHADOW": set(), "PATH": set(), "PROBE": set()}
     for line in build_and_run():
         f = line.split()
         kind, rate = f[0], int(f[1])
@@ -127,6 +129,13 @@ def main():
             want = -amp * cmath.exp(1j * ph) / (s + 0.5 * 0.25 * seed)
             require(abs(got - want) / abs(want) < 0.005,
                     "%d Hz tone %d: weight %s, fixed point %s" % (rate, k, got, want))
+        elif kind == "SHADOW":
+            k, got = int(f[2]), complex(float(f[3]), float(f[4]))
+            hz, amp, ph = ((60.0, 0.02, 0.7), (120.0, 0.015, -1.9))[k]
+            seed = plant_path(rate, hz) * 0.8 * cmath.exp(1j * math.pi / 6)
+            want = -amp * cmath.exp(1j * ph) / (seed * (1 + 0.5 * 0.25))
+            require(abs(got - want) / abs(want) < 0.005,
+                    "%d Hz shadow tone %d: weight %s, fixed point %s" % (rate, k, got, want))
         elif kind == "PATH":
             got = complex(float(f[2]), float(f[3]))
             want = plant_path(rate, 60.0)

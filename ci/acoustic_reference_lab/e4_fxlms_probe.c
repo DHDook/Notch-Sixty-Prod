@@ -7,9 +7,11 @@
  * FIXED <rate> <k> <re> <im>       converged weight, path seed 0.8x at +30 deg
  * PATH <rate> <re> <im>            path estimate at 60 Hz after 3 s of probe
  * PROBE <rate> <rms>               probe RMS over 2 s
+ * SHADOW <rate> <k> <re> <im>      shadow weight (output never played), seed 0.8x at +30 deg
  */
 #include <complex.h>
 #include <math.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -64,18 +66,18 @@ static void decimator(double fs) {
 
 /* Runs the closed loop for the given time; the mic hears each buffer one
  * buffer later. */
-static void loop(N60AdaptiveTonal *core, Plant *p, double seconds) {
+static void loop(N60AdaptiveTonal *core, Plant *p, double seconds, bool play) {
     float played[BUFFER] = {0}, out[BUFFER], err[BUFFER];
     const uint64_t buffers = (uint64_t)ceil(seconds * p->fs / BUFFER);
     for (uint64_t b = 0; b < buffers; ++b) {
         for (uint32_t n = 0; n < BUFFER; ++n) err[n] = (float)plant_step(p, played[n]);
         N60AdaptiveTonalProcess(core, err, out, BUFFER);
         N60AdaptiveTonalService(core);
-        for (uint32_t n = 0; n < BUFFER; ++n) played[n] = out[n];
+        for (uint32_t n = 0; n < BUFFER; ++n) played[n] = play ? out[n] : 0.0f;
     }
 }
 
-static void fixed_point(double fs) {
+static void fixed_point(double fs, bool shadow) {
     Plant p = plant_make(fs, 0.001, 800.0, 0.5, 0.0, 1);
     plant_add_tone(&p, 60.0, 0.02, 0.7);
     plant_add_tone(&p, 120.0, 0.015, -1.9);
@@ -84,6 +86,7 @@ static void fixed_point(double fs) {
     c.toneHz[0] = 60.0f;
     c.toneHz[1] = 120.0f;
     c.leakagePerSecond = 0.5;  /* large enough to move the fixed point visibly */
+    c.shadow = shadow;
     for (int k = 0; k < 2; ++k) {
         double re, im;
         plant_response(&p, c.toneHz[k], BUFFER, &re, &im);
@@ -93,10 +96,11 @@ static void fixed_point(double fs) {
     }
     N60AdaptiveTonal *core = N60AdaptiveTonalCreate(&c);
     if (!core) fail("core");
-    loop(core, &p, 4.0);
+    loop(core, &p, 4.0, !shadow);
     const N60AdaptiveTonalStatus st = N60AdaptiveTonalReadStatus(core);
     for (int k = 0; k < 2; ++k) {
-        printf("FIXED %.0f %d %.9g %.9g\n", fs, k, st.weight[k].re, st.weight[k].im);
+        printf("%s %.0f %d %.9g %.9g\n", shadow ? "SHADOW" : "FIXED", fs, k, st.weight[k].re,
+               st.weight[k].im);
     }
     N60AdaptiveTonalDestroy(core);
     plant_free(&p);
@@ -111,7 +115,7 @@ static void path(double fs) {
     c.probeEnabled = true;
     N60AdaptiveTonal *core = N60AdaptiveTonalCreate(&c);
     if (!core) fail("core");
-    loop(core, &p, 3.0);
+    loop(core, &p, 3.0, true);
     const N60AdaptiveTonalStatus st = N60AdaptiveTonalReadStatus(core);
     printf("PATH %.0f %.9g %.9g\n", fs, st.path[0].re, st.path[0].im);
     N60AdaptiveTonalDestroy(core);
@@ -138,7 +142,8 @@ static void probe_level(double fs) {
 int main(void) {
     for (size_t r = 0; r < sizeof kRates / sizeof kRates[0]; ++r) {
         decimator(kRates[r]);
-        fixed_point(kRates[r]);
+        fixed_point(kRates[r], false);
+        fixed_point(kRates[r], true);
         path(kRates[r]);
         probe_level(kRates[r]);
     }

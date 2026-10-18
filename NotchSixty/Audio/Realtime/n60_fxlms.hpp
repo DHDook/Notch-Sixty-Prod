@@ -132,6 +132,8 @@ private:
     double aggregateCap_;
     double pathFloor2_;
     bool probeEnabled_;
+    bool shadow_;
+    double meterAlpha_;
     double probeScale_;
     std::uint64_t probeSeed_;
     std::uint32_t chunkFrames_;
@@ -167,6 +169,8 @@ private:
     std::array<Complex, kTones> weights_{};
     std::array<Complex, kTones> pathAtTone_{};
     std::array<bool, kTones> adapting_{};
+    std::array<Complex, kTones> measuredTone_{};
+    std::array<Complex, kTones> predictedTone_{};
     std::uint64_t expectedFrame_ = 0;
     bool started_ = false;
     std::uint64_t sinceRestart_ = 0;
