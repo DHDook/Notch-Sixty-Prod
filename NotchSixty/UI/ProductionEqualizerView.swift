@@ -372,6 +372,7 @@ struct ProductionEqualizerView: View {
                             destination: .dspReference,
                             label: "Open EQ filter math in DSP Reference"
                         )
+                        .buttonStyle(.borderless)
                     }
                 }
             }

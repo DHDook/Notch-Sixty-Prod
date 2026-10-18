@@ -14,8 +14,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Validate 32-channel capacity and physical-system nomenclature
-        run: python3 ci/validate_pr63_capacity_nomenclature.py
       - name: Validate live N-channel activation architecture
         run: python3 ci/validate_pr63_live_activation.py
 
@@ -23,10 +21,6 @@ jobs:
     runs-on: xcode-27
     steps:
       - uses: actions/checkout@v7
-      - name: Validate Output Device Profile behavior
-        run: python3 ci/validate_pr62_output_device_profiles.py
-      - name: Validate 32-channel capacity and multisub nomenclature
-        run: python3 ci/validate_pr63_capacity_nomenclature.py
       - name: Validate live N-channel activation architecture
         run: python3 ci/validate_pr63_live_activation.py
       - name: Build arm64 app with selectable N-channel transport

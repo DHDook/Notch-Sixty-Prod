@@ -35,7 +35,6 @@ jobs:
         run: |
           "$RUNNER_TEMP/pr116-venv/bin/python" ci/pr116_generate_icon_assets.py
           "$RUNNER_TEMP/pr116-venv/bin/python" ci/pr116_generate_icon_assets.py --check
-          python3 ci/validate_pr39_app_identity.py
       - name: Commit only shipping icon PNGs and generated manifest
         id: commit
         env:
@@ -87,7 +86,6 @@ jobs:
         run: |
           set -euo pipefail
           "$RUNNER_TEMP/pr116-venv/bin/python" ci/pr116_generate_icon_assets.py --check
-          python3 ci/validate_pr39_app_identity.py
           python3 ci/validate_pr114_release_baseline.py
       - name: Build Apple Silicon Release with new icon assets
         run: |

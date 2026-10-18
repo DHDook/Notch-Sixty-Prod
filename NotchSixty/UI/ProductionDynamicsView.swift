@@ -840,6 +840,7 @@ private struct DynamicsParameterRow: View {
                         destination: .dspReference,
                         label: "Open \(title) math in DSP Reference"
                     )
+                    .buttonStyle(.borderless)
                 }
             }
         }

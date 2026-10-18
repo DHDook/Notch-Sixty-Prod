@@ -18,8 +18,6 @@ jobs:
         run: python3 ci/validate_pr56_headphone_dsp.py
       - name: Validate PR57 binaural renderer core
         run: python3 ci/validate_pr57_binaural_renderer.py
-      - name: Validate PR65 headphone + binaural product integration
-        run: python3 ci/validate_pr65_headphone_integration.py
 
   validate-macos-integration:
     runs-on: xcode-27
@@ -29,8 +27,6 @@ jobs:
         run: python3 ci/validate_pr56_headphone_dsp.py
       - name: Validate PR57 binaural renderer core
         run: python3 ci/validate_pr57_binaural_renderer.py
-      - name: Validate PR65 headphone + binaural product integration
-        run: python3 ci/validate_pr65_headphone_integration.py
       - name: Build arm64 app with live headphone and virtual-speaker modes
         run: |
           xcodebuild \

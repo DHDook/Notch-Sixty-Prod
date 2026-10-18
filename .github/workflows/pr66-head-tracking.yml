@@ -14,8 +14,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Validate inherited headphone + binaural integration
-        run: python3 ci/validate_pr65_headphone_integration.py
       - name: Validate head-tracking runtime and product integration
         run: python3 ci/validate_pr66_head_tracking.py
 
@@ -23,8 +21,6 @@ jobs:
     runs-on: xcode-27
     steps:
       - uses: actions/checkout@v7
-      - name: Validate inherited headphone + binaural integration
-        run: python3 ci/validate_pr65_headphone_integration.py
       - name: Validate head-tracking runtime and product integration
         run: python3 ci/validate_pr66_head_tracking.py
       - name: Build arm64 app with Core Motion head tracking

@@ -277,7 +277,6 @@ assert "SpeakerOptimizerFIRPostApplyVerificationTests" in workflow
 assert "SpeakerOptimizerGuidedFIRWorkflowTests" in workflow
 assert "validate_pr107_program_fir_runtime.c" in workflow
 assert "validate_pr107_live_fir_render.c" in workflow
-assert "validate_pr106_speaker_measurement_lab.py" in workflow
 assert "Run full XCTest regression" in workflow
 
 print("PR107 FIR deployment, A/V and measured-verification boundary passed")

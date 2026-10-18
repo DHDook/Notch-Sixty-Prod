@@ -13,6 +13,10 @@
 		A10000000000000000000012 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000022 /* Assets.xcassets */; };
 		A10000000000000000000013 /* NotchSixtyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000024 /* NotchSixtyTests.swift */; };
 		A10000000000000000000014 /* ConvolutionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000027 /* ConvolutionTests.swift */; };
+		A100000000000000000E2107 /* OutputDeviceProfileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000E2108 /* OutputDeviceProfileTests.swift */; };
+		A100000000000000000E2105 /* LiveNChannelIOProcTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000E2106 /* LiveNChannelIOProcTests.swift */; };
+		A100000000000000000E2103 /* RealtimeStageContractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000E2104 /* RealtimeStageContractTests.swift */; };
+		A100000000000000000E2101 /* FactoryContentPresetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000E2102 /* FactoryContentPresetTests.swift */; };
 		A100000000000000000E2001 /* DeploymentTargetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000E2002 /* DeploymentTargetTests.swift */; };
 		A10000000000000000000015 /* LiveLinearPhaseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000028 /* LiveLinearPhaseTests.swift */; };
 		A10000000000000000000016 /* StereoPlaybackControlTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000029 /* StereoPlaybackControlTests.swift */; };
@@ -325,6 +329,10 @@
 		A10000000000000000000025 /* Notch Sixty.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Notch Sixty.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000026 /* NotchSixtyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = NotchSixtyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000027 /* ConvolutionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConvolutionTests.swift; sourceTree = "<group>"; };
+		A100000000000000000E2108 /* OutputDeviceProfileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutputDeviceProfileTests.swift; sourceTree = "<group>"; };
+		A100000000000000000E2106 /* LiveNChannelIOProcTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveNChannelIOProcTests.swift; sourceTree = "<group>"; };
+		A100000000000000000E2104 /* RealtimeStageContractTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealtimeStageContractTests.swift; sourceTree = "<group>"; };
+		A100000000000000000E2102 /* FactoryContentPresetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FactoryContentPresetTests.swift; sourceTree = "<group>"; };
 		A100000000000000000E2002 /* DeploymentTargetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeploymentTargetTests.swift; sourceTree = "<group>"; };
 		A10000000000000000000028 /* LiveLinearPhaseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveLinearPhaseTests.swift; sourceTree = "<group>"; };
 		A10000000000000000000029 /* StereoPlaybackControlTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StereoPlaybackControlTests.swift; sourceTree = "<group>"; };
@@ -684,6 +692,10 @@
 			children = (
 				A10000000000000000000024 /* NotchSixtyTests.swift */,
 				A10000000000000000000027 /* ConvolutionTests.swift */,
+				A100000000000000000E2108 /* OutputDeviceProfileTests.swift */,
+				A100000000000000000E2106 /* LiveNChannelIOProcTests.swift */,
+				A100000000000000000E2104 /* RealtimeStageContractTests.swift */,
+				A100000000000000000E2102 /* FactoryContentPresetTests.swift */,
 				A100000000000000000E2002 /* DeploymentTargetTests.swift */,
 				A10000000000000000000028 /* LiveLinearPhaseTests.swift */,
 				A10000000000000000000029 /* StereoPlaybackControlTests.swift */,
@@ -1224,6 +1236,10 @@
 			files = (
 				A10000000000000000000013 /* NotchSixtyTests.swift in Sources */,
 				A10000000000000000000014 /* ConvolutionTests.swift in Sources */,
+				A100000000000000000E2107 /* OutputDeviceProfileTests.swift in Sources */,
+				A100000000000000000E2105 /* LiveNChannelIOProcTests.swift in Sources */,
+				A100000000000000000E2103 /* RealtimeStageContractTests.swift in Sources */,
+				A100000000000000000E2101 /* FactoryContentPresetTests.swift in Sources */,
 				A100000000000000000E2001 /* DeploymentTargetTests.swift in Sources */,
 				A10000000000000000000015 /* LiveLinearPhaseTests.swift in Sources */,
 				A10000000000000000000016 /* StereoPlaybackControlTests.swift in Sources */,
