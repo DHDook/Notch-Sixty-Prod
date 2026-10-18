@@ -2004,7 +2004,6 @@ private struct ProductionMenuBarView: View {
 private struct ProductionSettingsView: View {
     @ObservedObject var preferences: ApplicationPreferences
     @ObservedObject var product: ProductController
-    @ObservedObject var reference: ProductionReferenceNavigator
     @State private var backupMessage: String?
 
     private var version: String {
@@ -2130,37 +2129,18 @@ private struct ProductionSettingsView: View {
     }
 
     var body: some View {
-        TabView(selection: $reference.selectedTab) {
-            generalSettings
-                .tabItem {
-                    Label("General", systemImage: "gearshape")
-                }
-                .tag(ProductionReferenceTab.general)
-
-            ProductionUserGuideView(navigator: reference)
-                .tabItem {
-                    Label("User Guide", systemImage: "book.closed")
-                }
-                .tag(ProductionReferenceTab.userGuide)
-
-            ProductionDSPReferenceView(navigator: reference)
-                .tabItem {
-                    Label("DSP Reference", systemImage: "function")
-                }
-                .tag(ProductionReferenceTab.dspReference)
-        }
-        .task {
-            preferences.apply(to: product.audioEngine)
-            preferences.refreshLaunchAtLoginStatus()
-        }
-        .navigationTitle("Preferences & Reference")
-        .accessibilityLabel("Preferences & Reference")
-        .frame(
-            minWidth: 760,
-            idealWidth: 960,
-            minHeight: 620,
-            idealHeight: 720
-        )
+        generalSettings
+            .task {
+                preferences.apply(to: product.audioEngine)
+                preferences.refreshLaunchAtLoginStatus()
+            }
+            .navigationTitle("Settings")
+            .frame(
+                minWidth: 560,
+                idealWidth: 600,
+                minHeight: 520,
+                idealHeight: 720
+            )
     }
 
     private var generalSettings: some View {
@@ -2385,6 +2365,17 @@ private struct ProductionSettingsView: View {
 
 }
 
+private struct ProductionHelpMenuCommand: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("Notch Sixty Help") {
+            openWindow(id: ProductionReferenceNavigator.windowID)
+        }
+        .keyboardShortcut("?", modifiers: .command)
+    }
+}
+
 private final class NotchSixtyAppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
@@ -2435,9 +2426,18 @@ struct NotchSixtyApp: App {
         Settings {
             ProductionSettingsView(
                 preferences: preferences,
-                product: product,
-                reference: product.reference
+                product: product
             )
+        }
+
+        Window("Notch Sixty Help", id: ProductionReferenceNavigator.windowID) {
+            ProductionHelpView(navigator: product.reference)
+        }
+        .defaultSize(width: 960, height: 720)
+        .commands {
+            CommandGroup(replacing: .help) {
+                ProductionHelpMenuCommand()
+            }
         }
 
         #if DEBUG

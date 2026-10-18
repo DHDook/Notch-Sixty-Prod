@@ -186,7 +186,7 @@ enum ProductionUserGuideCatalog {
                     "recovery-backup",
                     "6. Protect a good setup",
                     [
-                        "Preferences & Reference → General → Backup & Restore can save a .n60backup before major system changes. Restored hardware identities that are unavailable on a different Mac remain Needs Mapping rather than being silently rebound.",
+                        "Settings → Backup & Restore can save a .n60backup before major system changes. Restored hardware identities that are unavailable on a different Mac remain Needs Mapping rather than being silently rebound.",
                         "If a prior launch ended unexpectedly or repeated audio / plug-in starts fail, Safe Launch keeps audio idle and offers Open Normally, a temporary Plug-ins Bypassed launch, Restore Last Known Good and Copy Diagnostics. Recovery does not overwrite physical-acceptance authority.",
                         "Copy Diagnostics when troubleshooting or asking for support. Diagnostics are evidence about software/runtime state, not permission to deploy an unverified physical configuration."
                     ]
@@ -902,22 +902,48 @@ enum ProductionUserGuideCatalog {
     }
 }
 
-enum ProductionReferenceTab: String, Hashable {
-    case general
+enum ProductionReferenceMode: String, CaseIterable, Identifiable, Hashable {
     case userGuide
     case dspReference
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .userGuide: return "User Guide"
+        case .dspReference: return "DSP Reference"
+        }
+    }
+
+    var searchPrompt: String {
+        switch self {
+        case .userGuide: return "Search features, controls or math"
+        case .dspReference: return "Search equations, terms or features"
+        }
+    }
+
+    /// DSP Reference lists only articles that carry equations.
+    func includes(_ article: ProductionUserGuideArticle) -> Bool {
+        switch self {
+        case .userGuide: return true
+        case .dspReference: return !article.formulas.isEmpty
+        }
+    }
 }
 
 @MainActor
 final class ProductionReferenceNavigator: ObservableObject {
-    @Published var selectedTab: ProductionReferenceTab = .general
+    /// Scene identifier of the standalone help window.
+    static let windowID = "help"
+
+    @Published var mode: ProductionReferenceMode = .userGuide
     @Published var selectedArticleID: String? = "getting-started"
     @Published var selectedFormulaID: String?
 
     func openGuide(articleID: String) {
         selectedArticleID = articleID
         selectedFormulaID = nil
-        selectedTab = .userGuide
+        mode = .userGuide
     }
 
     func openDSPReference(
@@ -926,11 +952,29 @@ final class ProductionReferenceNavigator: ObservableObject {
     ) {
         selectedArticleID = articleID
         selectedFormulaID = formulaID
-        selectedTab = .dspReference
+        mode = .dspReference
     }
 
     func resetFormulaFocus() {
         selectedFormulaID = nil
+    }
+
+    /// Sidebar articles for the current mode and search text.
+    func articles(matching searchText: String) -> [ProductionUserGuideArticle] {
+        ProductionUserGuideCatalog.search(searchText).filter(mode.includes)
+    }
+
+    /// The article the detail pane shows: the selection when the current
+    /// mode can show it, otherwise the first match. Nil when nothing matches.
+    func displayedArticle(matching searchText: String) -> ProductionUserGuideArticle? {
+        let candidates = articles(matching: searchText)
+        guard !candidates.isEmpty else { return nil }
+        if let selectedArticleID,
+           let article = ProductionUserGuideCatalog.article(id: selectedArticleID),
+           mode.includes(article) {
+            return article
+        }
+        return candidates.first
     }
 }
 
@@ -946,8 +990,9 @@ struct ProductionReferenceHelpButton: View {
     var destination: Destination = .userGuide
     var label: String = "Open reference"
 
-    @Environment(\.openSettings) private var openSettings
+    @Environment(\.openWindow) private var openWindow
 
+    // No button style here: toolbar call sites use glass, inline ones borderless.
     var body: some View {
         Button {
             switch destination {
@@ -959,44 +1004,49 @@ struct ProductionReferenceHelpButton: View {
                     formulaID: formulaID
                 )
             }
-            openSettings()
+            openWindow(id: ProductionReferenceNavigator.windowID)
         } label: {
-            Image(systemName: "questionmark.circle")
+            Label(label, systemImage: "questionmark.circle")
+                .labelStyle(.iconOnly)
                 .imageScale(.medium)
         }
-        .buttonStyle(.borderless)
         .help(label)
         .accessibilityLabel(label)
     }
 }
 
-struct ProductionUserGuideView: View {
+/// Help window content. One split view switches between the User Guide and
+/// the DSP Reference with a toolbar picker; it is never nested in a TabView,
+/// because a split view inside a toolbar-style TabView takes over the
+/// window toolbar and leaves the tab buttons unresponsive.
+struct ProductionHelpView: View {
     @ObservedObject var navigator: ProductionReferenceNavigator
     @State private var searchText = ""
 
-    private var filteredArticles: [ProductionUserGuideArticle] {
-        ProductionUserGuideCatalog.search(searchText)
+    private var articles: [ProductionUserGuideArticle] {
+        navigator.articles(matching: searchText)
     }
 
-    private var selectedArticle: ProductionUserGuideArticle? {
-        guard let selectedArticleID = navigator.selectedArticleID else {
-            return nil
-        }
-        return ProductionUserGuideCatalog.article(id: selectedArticleID)
+    private var displayedArticle: ProductionUserGuideArticle? {
+        navigator.displayedArticle(matching: searchText)
     }
 
     var body: some View {
         NavigationSplitView {
             List(selection: selectedArticleBinding) {
                 ForEach(ProductionUserGuideCategory.allCases) { category in
-                    let matches = filteredArticles.filter {
+                    let matches = articles.filter {
                         $0.category == category
                     }
                     if !matches.isEmpty {
                         Section {
                             ForEach(matches) { article in
-                                Label(article.title, systemImage: article.systemImage)
-                                    .tag(Optional(article.id))
+                                Label(
+                                    article.title,
+                                    systemImage: navigator.mode == .dspReference
+                                        ? "function" : article.systemImage
+                                )
+                                .tag(Optional(article.id))
                             }
                         } header: {
                             Label(category.title, systemImage: category.systemImage)
@@ -1007,7 +1057,7 @@ struct ProductionUserGuideView: View {
             .searchable(
                 text: $searchText,
                 placement: .sidebar,
-                prompt: "Search features, controls or math"
+                prompt: navigator.mode.searchPrompt
             )
             .navigationSplitViewColumnWidth(
                 min: 220,
@@ -1015,121 +1065,54 @@ struct ProductionUserGuideView: View {
                 max: 340
             )
         } detail: {
-            if filteredArticles.isEmpty {
+            if let article = displayedArticle {
+                switch navigator.mode {
+                case .userGuide:
+                    ProductionUserGuideArticleView(
+                        article: article,
+                        targetFormulaID: navigator.selectedFormulaID
+                    )
+                case .dspReference:
+                    ProductionDSPReferenceArticleView(
+                        article: article,
+                        targetFormulaID: navigator.selectedFormulaID
+                    )
+                }
+            } else {
                 ContentUnavailableView(
-                    "No Guide Results",
-                    systemImage: "magnifyingglass",
+                    navigator.mode == .userGuide
+                        ? "No Guide Results" : "No DSP Reference Results",
+                    systemImage: navigator.mode == .userGuide
+                        ? "magnifyingglass" : "function",
                     description: Text(
                         "Try a feature name, control, measurement term or equation."
                     )
                 )
-            } else if let article = selectedArticle {
-                ProductionUserGuideArticleView(
-                    article: article,
-                    targetFormulaID: navigator.selectedFormulaID
-                )
-            } else if let first = filteredArticles.first {
-                ProductionUserGuideArticleView(
-                    article: first,
-                    targetFormulaID: nil
-                )
-            } else {
-                EmptyView()
             }
         }
-        .onAppear {
-            if navigator.selectedArticleID == nil {
-                navigator.selectedArticleID = "getting-started"
-            }
-        }
-    }
-
-    private var selectedArticleBinding: Binding<String?> {
-        Binding(
-            get: { navigator.selectedArticleID },
-            set: { newValue in
-                navigator.selectedArticleID = newValue
-                navigator.resetFormulaFocus()
-            }
-        )
-    }
-}
-
-struct ProductionDSPReferenceView: View {
-    @ObservedObject var navigator: ProductionReferenceNavigator
-    @State private var searchText = ""
-
-    private var mathArticles: [ProductionUserGuideArticle] {
-        ProductionUserGuideCatalog.search(searchText)
-            .filter { !$0.formulas.isEmpty }
-    }
-
-    private var selectedArticle: ProductionUserGuideArticle? {
-        guard
-            let id = navigator.selectedArticleID,
-            let article = ProductionUserGuideCatalog.article(id: id),
-            !article.formulas.isEmpty
-        else {
-            return mathArticles.first
-        }
-        return article
-    }
-
-    var body: some View {
-        NavigationSplitView {
-            List(selection: selectedArticleBinding) {
-                ForEach(ProductionUserGuideCategory.allCases) { category in
-                    let matches = mathArticles.filter {
-                        $0.category == category
-                    }
-                    if !matches.isEmpty {
-                        Section {
-                            ForEach(matches) { article in
-                                Label(article.title, systemImage: "function")
-                                    .tag(Optional(article.id))
-                            }
-                        } header: {
-                            Label(category.title, systemImage: category.systemImage)
-                        }
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Picker("Reference", selection: $navigator.mode) {
+                    ForEach(ProductionReferenceMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
                     }
                 }
-            }
-            .searchable(
-                text: $searchText,
-                placement: .sidebar,
-                prompt: "Search equations, terms or features"
-            )
-            .navigationSplitViewColumnWidth(
-                min: 220,
-                ideal: 270,
-                max: 340
-            )
-        } detail: {
-            if mathArticles.isEmpty {
-                ContentUnavailableView(
-                    "No DSP Reference Results",
-                    systemImage: "function",
-                    description: Text(
-                        "Try a processor, measurement term or equation name."
-                    )
-                )
-            } else if let article = selectedArticle {
-                ProductionDSPReferenceArticleView(
-                    article: article,
-                    targetFormulaID: navigator.selectedFormulaID
-                )
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .help("Switch between the User Guide and the DSP Reference")
             }
         }
-        .onAppear {
-            if selectedArticle == nil {
-                navigator.selectedArticleID = mathArticles.first?.id
-            }
-        }
+        .frame(
+            minWidth: 760,
+            idealWidth: 960,
+            minHeight: 560,
+            idealHeight: 720
+        )
     }
 
     private var selectedArticleBinding: Binding<String?> {
         Binding(
-            get: { selectedArticle?.id },
+            get: { displayedArticle?.id },
             set: { newValue in
                 navigator.selectedArticleID = newValue
                 navigator.resetFormulaFocus()
@@ -1137,6 +1120,7 @@ struct ProductionDSPReferenceView: View {
         )
     }
 }
+
 
 private struct ProductionUserGuideArticleView: View {
     let article: ProductionUserGuideArticle
