@@ -547,7 +547,7 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         let navigator = ProductionReferenceNavigator()
 
         navigator.openGuide(articleID: "room-correction")
-        XCTAssertEqual(navigator.selectedTab, .userGuide)
+        XCTAssertEqual(navigator.mode, .userGuide)
         XCTAssertEqual(navigator.selectedArticleID, "room-correction")
         XCTAssertNil(navigator.selectedFormulaID)
 
@@ -555,9 +555,39 @@ final class ProductionInformationArchitectureTests: XCTestCase {
             articleID: "dynamics",
             formulaID: "compressor-ratio"
         )
-        XCTAssertEqual(navigator.selectedTab, .dspReference)
+        XCTAssertEqual(navigator.mode, .dspReference)
         XCTAssertEqual(navigator.selectedArticleID, "dynamics")
         XCTAssertEqual(navigator.selectedFormulaID, "compressor-ratio")
+    }
+
+    @MainActor
+    func testReferenceNavigatorStartsInGuideAndFiltersDSPModeToMathArticles() throws {
+        let navigator = ProductionReferenceNavigator()
+        XCTAssertEqual(navigator.mode, .userGuide)
+        XCTAssertEqual(
+            navigator.articles(matching: "").count,
+            ProductionUserGuideCatalog.articles.count
+        )
+
+        let plain = try XCTUnwrap(
+            ProductionUserGuideCatalog.articles.first { $0.formulas.isEmpty }
+        )
+        navigator.openGuide(articleID: plain.id)
+        XCTAssertEqual(navigator.displayedArticle(matching: "")?.id, plain.id)
+
+        // Switching to DSP Reference with an equation-free selection falls
+        // back to the first math article instead of showing an empty pane.
+        navigator.mode = .dspReference
+        let math = navigator.articles(matching: "")
+        XCTAssertFalse(math.isEmpty)
+        XCTAssertTrue(math.allSatisfy { !$0.formulas.isEmpty })
+        XCTAssertEqual(navigator.displayedArticle(matching: "")?.id, math.first?.id)
+
+        navigator.openDSPReference(articleID: "dynamics")
+        XCTAssertEqual(navigator.displayedArticle(matching: "")?.id, "dynamics")
+        XCTAssertNil(
+            navigator.displayedArticle(matching: "zzzz-no-such-term-zzzz")
+        )
     }
 
     func testWorkflowVocabularySeparatesDraftAndLiveRecoverySemantics() {

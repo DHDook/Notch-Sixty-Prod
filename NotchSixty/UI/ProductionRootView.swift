@@ -453,10 +453,10 @@ struct ProductionRootView: View {
             .buttonStyle(.glass)
 
             SettingsLink {
-                Label("Preferences & Reference", systemImage: "gearshape")
+                Label("Settings", systemImage: "gearshape")
             }
             .buttonStyle(.glass)
-            .help("Open Preferences & Reference")
+            .help("Open Settings")
         }
     }
 }
