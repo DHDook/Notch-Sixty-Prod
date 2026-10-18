@@ -1,8 +1,0 @@
-# Source-text validators awaiting behavioural replacements (E1 S3c).
-# pr.yml runs every line. Do not add new entries.
-ci/validate_pr109_cross_feature_contracts.py
-ci/validate_pr42_interchange.py
-ci/validate_pr64_multichannel_calibration.py
-ci/validate_pr90_active_quiet_zone.py
-ci/audit_pr98_disconnected_boundary.py
--m unittest discover -s ci/tests -p test_pr109_cross_feature_contracts.py

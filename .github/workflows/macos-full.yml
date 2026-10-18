@@ -55,9 +55,6 @@ jobs:
       - name: Behavioural C harnesses
         run: ci/run_harnesses.sh
 
-      - name: Legacy validators (retired by E1 S3)
-        run: ci/run_legacy_validators.sh
-
       - name: Render and bridge benchmarks
         run: |
           set -euo pipefail

@@ -14,6 +14,9 @@
 		A10000000000000000000013 /* NotchSixtyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000024 /* NotchSixtyTests.swift */; };
 		A10000000000000000000014 /* ConvolutionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000027 /* ConvolutionTests.swift */; };
 		A100000000000000000E2205 /* FeatureFlagsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000E2206 /* FeatureFlagsTests.swift */; };
+		A100000000000000000E1301 /* PresetInterchangeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000E1302 /* PresetInterchangeTests.swift */; };
+		A100000000000000000E1303 /* MultichannelCalibrationDesignerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000E1304 /* MultichannelCalibrationDesignerTests.swift */; };
+		A100000000000000000E1305 /* FeedForwardShadowIsolationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000E1306 /* FeedForwardShadowIsolationTests.swift */; };
 		A100000000000000000E2107 /* OutputDeviceProfileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000E2108 /* OutputDeviceProfileTests.swift */; };
 		A100000000000000000E2105 /* LiveNChannelIOProcTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000E2106 /* LiveNChannelIOProcTests.swift */; };
 		A100000000000000000E2103 /* RealtimeStageContractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100000000000000000E2104 /* RealtimeStageContractTests.swift */; };
@@ -333,6 +336,9 @@
 		A10000000000000000000026 /* NotchSixtyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = NotchSixtyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000027 /* ConvolutionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConvolutionTests.swift; sourceTree = "<group>"; };
 		A100000000000000000E2206 /* FeatureFlagsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureFlagsTests.swift; sourceTree = "<group>"; };
+		A100000000000000000E1302 /* PresetInterchangeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PresetInterchangeTests.swift; sourceTree = "<group>"; };
+		A100000000000000000E1304 /* MultichannelCalibrationDesignerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultichannelCalibrationDesignerTests.swift; sourceTree = "<group>"; };
+		A100000000000000000E1306 /* FeedForwardShadowIsolationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedForwardShadowIsolationTests.swift; sourceTree = "<group>"; };
 		A100000000000000000E2108 /* OutputDeviceProfileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutputDeviceProfileTests.swift; sourceTree = "<group>"; };
 		A100000000000000000E2106 /* LiveNChannelIOProcTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveNChannelIOProcTests.swift; sourceTree = "<group>"; };
 		A100000000000000000E2104 /* RealtimeStageContractTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealtimeStageContractTests.swift; sourceTree = "<group>"; };
@@ -699,6 +705,9 @@
 				A10000000000000000000024 /* NotchSixtyTests.swift */,
 				A10000000000000000000027 /* ConvolutionTests.swift */,
 				A100000000000000000E2206 /* FeatureFlagsTests.swift */,
+				A100000000000000000E1302 /* PresetInterchangeTests.swift */,
+				A100000000000000000E1304 /* MultichannelCalibrationDesignerTests.swift */,
+				A100000000000000000E1306 /* FeedForwardShadowIsolationTests.swift */,
 				A100000000000000000E2108 /* OutputDeviceProfileTests.swift */,
 				A100000000000000000E2106 /* LiveNChannelIOProcTests.swift */,
 				A100000000000000000E2104 /* RealtimeStageContractTests.swift */,
@@ -1246,6 +1255,9 @@
 				A10000000000000000000013 /* NotchSixtyTests.swift in Sources */,
 				A10000000000000000000014 /* ConvolutionTests.swift in Sources */,
 				A100000000000000000E2205 /* FeatureFlagsTests.swift in Sources */,
+				A100000000000000000E1301 /* PresetInterchangeTests.swift in Sources */,
+				A100000000000000000E1303 /* MultichannelCalibrationDesignerTests.swift in Sources */,
+				A100000000000000000E1305 /* FeedForwardShadowIsolationTests.swift in Sources */,
 				A100000000000000000E2107 /* OutputDeviceProfileTests.swift in Sources */,
 				A100000000000000000E2105 /* LiveNChannelIOProcTests.swift in Sources */,
 				A100000000000000000E2103 /* RealtimeStageContractTests.swift in Sources */,

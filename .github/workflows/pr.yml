@@ -1,7 +1,7 @@
 name: PR check
 
-# Every pull request to main: build, full XCTest, behavioural C harnesses and the
-# remaining legacy validators. Target: under 10 minutes.
+# Every pull request to main: build, full XCTest and behavioural C harnesses.
+# Target: under 10 minutes.
 on:
   pull_request:
     branches:
@@ -57,5 +57,3 @@ jobs:
       - name: Behavioural C harnesses
         run: ci/run_harnesses.sh
 
-      - name: Legacy validators (retired by E1 S3)
-        run: ci/run_legacy_validators.sh
