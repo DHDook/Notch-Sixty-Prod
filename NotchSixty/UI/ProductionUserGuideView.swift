@@ -645,7 +645,7 @@ enum ProductionUserGuideCatalog {
                     "research-mixed-phase",
                     "Offline mixed-phase FIR comparisons",
                     [
-                        "Select and generate an existing Room Correction minimum-phase FIR. Tools → Acoustic Research can form a bounded mixed-phase candidate by blending a symmetric FIR component and reviewing its actual Fourier magnitude, pre-ringing, A/V delay and headroom. The preview is not installed and cannot establish better room acoustics without a new physical measurement.",
+                        "Select and generate an existing Room Correction minimum-phase FIR. Developer → Acoustic Research (turn on Show developer tools in Settings) can form a bounded mixed-phase candidate by blending a symmetric FIR component and reviewing its actual Fourier magnitude, pre-ringing, A/V delay and headroom. The preview is not installed and cannot establish better room acoustics without a new physical measurement.",
                         "Larger linear shares can increase ringing, shift phase, alter the target magnitude or exceed latency/headroom. Any blocked proposal stays unapplied."
                     ]
                 ),

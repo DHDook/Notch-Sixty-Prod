@@ -102,7 +102,7 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         XCTAssertEqual(roundtrip.showVolumePopup, true)
     }
 
-    func testDashboardIsStandaloneAndNotInAGroup() {
+    func testDashboardIsStandaloneAndEverySectionIsReachable() {
         let grouped =
             ProductionSection.playback
             + ProductionSection.system
@@ -112,9 +112,11 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         XCTAssertFalse(grouped.contains(.dashboard))
         XCTAssertEqual(Set(grouped).count, grouped.count)
         XCTAssertEqual(
-            Set(grouped + [.dashboard]),
-            Set(ProductionSection.allCases)
+            Set(grouped + ProductionSection.developerTools + [.dashboard]),
+            Set(ProductionSection.allCases),
+            "every section is in the sidebar or the Developer menu"
         )
+        XCTAssertTrue(Set(grouped).isDisjoint(with: ProductionSection.developerTools))
     }
 
     func testPlaybackGroupContainsOnlyContentFacingDailyControls() {
@@ -138,18 +140,12 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         )
     }
 
-    func testToolsGroupContainsOccasionalAdvisoryAndAcceptanceWorkflows() {
-        XCTAssertEqual(
-            ProductionSection.tools,
-            [.roomAdvisor, .blindListening, .acousticResearch, .hardwareAcceptance]
-        )
+    func testToolsGroupContainsOccasionalAdvisoryWorkflows() {
+        XCTAssertEqual(ProductionSection.tools, [.roomAdvisor, .blindListening])
     }
 
-    func testSidebarKeepsTodaysLayoutWithTheUIScopeFlagOff() {
-        let groups = ProductionSection.sidebarGroups(
-            simplifiedLayout: false,
-            selection: .hardwareAcceptance
-        )
+    func testSidebarGroupsLeaveDeveloperToolsToTheDeveloperMenu() {
+        let groups = ProductionSection.sidebarGroups()
         XCTAssertEqual(groups.map(\.title), ["Playback", "System", "Tools", "Extensions"])
         XCTAssertEqual(
             groups.map(\.sections),
@@ -162,29 +158,13 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         )
     }
 
-    func testSimplifiedSidebarMovesDeveloperToolsOut() {
-        let groups = ProductionSection.sidebarGroups(simplifiedLayout: true)
-        let shown = groups.flatMap(\.sections)
-
-        XCTAssertEqual(groups.map(\.title), ["Playback", "System", "Tools", "Extensions"])
+    func testSidebarKeepsASelectedDeveloperToolVisible() {
         for tool in ProductionSection.developerTools {
-            XCTAssertFalse(shown.contains(tool), "\(tool) should open from the Developer menu")
-        }
-        XCTAssertEqual(groups[2].sections, [.roomAdvisor, .blindListening])
-        XCTAssertEqual(
-            Set(shown + ProductionSection.developerTools + [.dashboard]),
-            Set(ProductionSection.allCases),
-            "every section stays reachable from the sidebar or the Developer menu"
-        )
-    }
-
-    func testSimplifiedSidebarKeepsASelectedDeveloperToolVisible() {
-        for tool in ProductionSection.developerTools {
-            let groups = ProductionSection.sidebarGroups(simplifiedLayout: true, selection: tool)
+            let groups = ProductionSection.sidebarGroups(selection: tool)
             XCTAssertEqual(groups.last?.title, "Developer")
             XCTAssertEqual(groups.last?.sections, [tool])
         }
-        let groups = ProductionSection.sidebarGroups(simplifiedLayout: true, selection: .equalizer)
+        let groups = ProductionSection.sidebarGroups(selection: .equalizer)
         XCTAssertFalse(groups.map(\.title).contains("Developer"))
     }
 
@@ -195,36 +175,17 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         )
     }
 
-    func testUIScopeFlagIsKnownAndOffByDefault() {
-        XCTAssertTrue(FeatureFlag.all.contains(.uiScope))
-        XCTAssertEqual(FeatureFlag.uiScope.id, "e5.ui-scope")
-        XCTAssertEqual(FeatureFlag.uiScope.epic, "E5")
-        XCTAssertFalse(FeatureFlag.uiScope.defaultEnabled)
-    }
-
-    func testDynamicsNavigatorKeepsTodaysGroupsWithTheUIScopeFlagOff() {
-        let groups = ProductionDynamicsLayout.groups(signalChainOrder: false)
-        XCTAssertEqual(groups.map(\.id), ProductionDynamicsGroup.allCases.map(\.rawValue))
-        for (group, legacy) in zip(groups, ProductionDynamicsGroup.allCases) {
-            XCTAssertEqual(group.shown, legacy.modules)
-            XCTAssertTrue(group.more.isEmpty)
-        }
-    }
-
-    func testDynamicsNavigatorListsEveryProcessorOnceInEitherLayout() {
-        for chainOrder in [false, true] {
-            let modules = ProductionDynamicsLayout.groups(signalChainOrder: chainOrder)
-                .flatMap(\.modules)
-            XCTAssertEqual(modules.count, ProductionDynamicsModule.allCases.count)
-            XCTAssertEqual(Set(modules), Set(ProductionDynamicsModule.allCases))
-        }
+    func testDynamicsNavigatorListsEveryProcessorOnce() {
+        let modules = ProductionDynamicsLayout.groups.flatMap(\.modules)
+        XCTAssertEqual(modules.count, ProductionDynamicsModule.allCases.count)
+        XCTAssertEqual(Set(modules), Set(ProductionDynamicsModule.allCases))
     }
 
     /// The order the engine runs these processors: input headroom gain, the
     /// pre-EQ stages, then core dynamics after room correction, the pause
     /// gate, and protection (`docs/DSP_KERNEL.md`, `N60Dynamics.c`,
     /// `N60Protection.c`). Oversampling sets the protection stage's rate.
-    func testSignalChainNavigatorFollowsTheEngineStageOrder() {
+    func testDynamicsNavigatorFollowsTheEngineStageOrder() {
         let engineOrder: [ProductionDynamicsModule] = [
             .automaticHeadroom,
             .dcOffset, .infrasonic, .mainsHum, .denoiser,
@@ -235,14 +196,11 @@ final class ProductionInformationArchitectureTests: XCTestCase {
             .pauseGate,
             .gainRider, .softClipper, .limiter, .oversampling,
         ]
-        XCTAssertEqual(
-            ProductionDynamicsLayout.groups(signalChainOrder: true).flatMap(\.modules),
-            engineOrder
-        )
+        XCTAssertEqual(ProductionDynamicsLayout.groups.flatMap(\.modules), engineOrder)
     }
 
-    func testSignalChainNavigatorFoldsOnlyNicheProcessorsAndNotesTheEQBoundary() {
-        let groups = ProductionDynamicsLayout.groups(signalChainOrder: true)
+    func testDynamicsNavigatorFoldsOnlyNicheProcessorsAndNotesTheEQBoundary() {
+        let groups = ProductionDynamicsLayout.groups
         XCTAssertEqual(
             groups.map(\.title),
             ["Input & Clean-up", "Stereo", "Level & Dialogue", "Tone", "Dynamics", "Output"]
@@ -260,14 +218,26 @@ final class ProductionInformationArchitectureTests: XCTestCase {
     }
 
     func testFoldedMoreRowShowsABadgeWhenAProcessorUnderItIsOn() throws {
-        let input = try XCTUnwrap(
-            ProductionDynamicsLayout.groups(signalChainOrder: true).first
-        )
+        let input = try XCTUnwrap(ProductionDynamicsLayout.groups.first)
         XCTAssertFalse(input.moreHasActiveModule { _ in false })
         XCTAssertTrue(input.moreHasActiveModule { $0 == .denoiser })
         XCTAssertFalse(
             input.moreHasActiveModule { $0 == .mainsHum },
             "a visible processor that is on does not badge More"
+        )
+    }
+
+    func testMeasurementLabTabsCoverEveryModeOnce() {
+        let measure = SpeakerMeasurementLabTab.measure.modes
+        let advanced = SpeakerMeasurementLabTab.advanced.modes
+        XCTAssertEqual(measure, [.wholeSpeakerOnAxis, .subwooferNearField, .coherentMainsSubTiming])
+        XCTAssertEqual(advanced, [.wholeSpeakerOffAxis, .protectedDriverNearField])
+        XCTAssertEqual(Set(measure + advanced), Set(SpeakerMeasurementLabMode.allCases))
+        XCTAssertEqual(measure.count + advanced.count, SpeakerMeasurementLabMode.allCases.count)
+        XCTAssertEqual(
+            SpeakerMeasurementLabTab.tab(for: SpeakerMeasurementLabProtocolDraft().mode),
+            .measure,
+            "a new protocol draft starts in the Measure tab"
         )
     }
 

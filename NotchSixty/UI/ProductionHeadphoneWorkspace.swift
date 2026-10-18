@@ -730,7 +730,7 @@ struct ProductionHeadphoneWorkspace: View {
                 }
                 .productionGlassPickerChrome()
                 Text(
-                    "User-rated HRTF preferences can be reviewed in Tools → Acoustic Research. Selection changes this draft only; Apply still requires a matching device rate and stopped playback."
+                    "User-rated HRTF preferences can be reviewed in Developer → Acoustic Research (turn on Show developer tools in Settings). Selection changes this draft only; Apply still requires a matching device rate and stopped playback."
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)

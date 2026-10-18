@@ -2517,13 +2517,11 @@ private struct ProductionSettingsView: View {
                         }
                     }
 
-                    if featureFlags.isEnabled(.uiScope) {
-                        settingsCard(title: "Developer Tools", systemImage: "wrench.adjustable") {
-                            Toggle("Show developer tools", isOn: $showDeveloperTools)
-                            Text("Adds a Developer menu with Hardware Acceptance and Acoustic Research, the bench and research workspaces used to qualify a system.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
+                    settingsCard(title: "Developer Tools", systemImage: "wrench.adjustable") {
+                        Toggle("Show developer tools", isOn: $showDeveloperTools)
+                        Text("Adds a Developer menu with Hardware Acceptance and Acoustic Research, the bench and research workspaces used to qualify a system.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
 
                     #if DEBUG
@@ -2606,17 +2604,15 @@ private struct ProductionHelpMenuCommand: View {
     }
 }
 
-/// The Developer menu: bench and research workspaces that the simplified
-/// layout (E5) keeps out of the sidebar. Shown only when the layout flag is on
-/// and the user has turned on "Show developer tools" in Settings.
+/// The Developer menu: bench and research workspaces kept out of the sidebar.
+/// Shown only when the user has turned on "Show developer tools" in Settings.
 private struct ProductionDeveloperCommands: Commands {
     @ObservedObject var navigation: ProductionNavigation
-    @ObservedObject var featureFlags: FeatureFlags
     @AppStorage(PreferenceKeys.Application.showDeveloperTools)
     private var showDeveloperTools = false
 
     var body: some Commands {
-        if featureFlags.isEnabled(.uiScope), showDeveloperTools {
+        if showDeveloperTools {
             CommandMenu("Developer") {
                 ProductionDeveloperMenuItems(navigation: navigation)
             }
@@ -2707,7 +2703,7 @@ struct NotchSixtyApp: App {
         .windowResizability(.contentMinSize)
         .windowToolbarStyle(.unified)
         .commands {
-            ProductionDeveloperCommands(navigation: navigation, featureFlags: featureFlags)
+            ProductionDeveloperCommands(navigation: navigation)
         }
 
         MenuBarExtra(isInserted: trayInserted) {

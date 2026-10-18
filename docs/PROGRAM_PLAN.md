@@ -96,9 +96,9 @@ XCTest is green on macOS 27. (Owner, 17 Oct 2026: no macOS 26 machine; 26 suppor
 
 ### E5 UI scope clean-up
 
-- [ ] Move Hardware Acceptance and Acoustic Research to a hidden developer menu (S1, behind `e5.ui-scope`)
-- [ ] Order the dynamics navigator by signal chain and fold niche processors (denoiser/de-hiss, de-esser, expander, DC offset, oversampling) under "More" within each group (revised with owner, 18 Oct 2026)
-- [ ] Fold Speaker Measurement Lab directivity and quasi-anechoic tools into an Advanced tab
+- [x] Move Hardware Acceptance and Acoustic Research to a hidden developer menu (#153)
+- [x] Order the dynamics navigator by signal chain and fold niche processors (denoiser/de-hiss, de-esser, expander, DC offset, oversampling) under "More" within each group (revised with owner, 18 Oct 2026) (#154)
+- [x] Fold Speaker Measurement Lab directivity tools into an Advanced tab; quasi-anechoic has no UI yet and moves to E11 (owner, 18 Oct 2026)
 
 ### E19 MIMO room treatment qualification, ART class (runs Phases 1–3)
 
@@ -205,6 +205,7 @@ minimum-phase in blind ABX at three or more seats, and measurement results match
 - [ ] RT60 and EDT per octave and third-octave band
 - [ ] Simultaneous multi-microphone capture to speed up multi-seat measurement
 - [ ] Measurement management: overlays, groups, notes, A/B against a reference
+- [ ] Quasi-anechoic (gated) speaker response view in the Measurement Lab's Advanced tab, using the existing analyser (`SpeakerMeasurementLabQuasiAnechoic.swift`; from E5)
 - [ ] Import and export REW text, FRD and ZMA; a cross-check suite against REW on shared captures
 
 ### E10 Mixed-phase room correction and bass control

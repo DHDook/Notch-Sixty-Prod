@@ -54,44 +54,27 @@ enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
     static let tools: [ProductionSection] = [
         .roomAdvisor,
         .blindListening,
-        .acousticResearch,
-        .hardwareAcceptance,
     ]
 
     static let extensions: [ProductionSection] = [
         .plugins,
     ]
 
-    /// Bench and research workspaces. With the simplified layout they leave
-    /// the sidebar and open from the Developer menu instead.
+    /// Bench and research workspaces. They are not in the sidebar; they open
+    /// from the Developer menu once "Show developer tools" is on in Settings.
     static let developerTools: [ProductionSection] = [
         .hardwareAcceptance,
         .acousticResearch,
     ]
 
     /// The sidebar's groups, in order. The dashboard is a standalone row
-    /// above them. With `simplifiedLayout` the developer tools are left out,
-    /// except a selected one, which stays visible in a Developer group until
-    /// the user moves to another section.
-    static func sidebarGroups(
-        simplifiedLayout: Bool,
-        selection: ProductionSection? = nil
-    ) -> [ProductionSidebarGroup] {
-        guard simplifiedLayout else {
-            return [
-                ProductionSidebarGroup(title: "Playback", sections: playback),
-                ProductionSidebarGroup(title: "System", sections: system),
-                ProductionSidebarGroup(title: "Tools", sections: tools),
-                ProductionSidebarGroup(title: "Extensions", sections: extensions),
-            ]
-        }
+    /// above them. A selected developer tool stays visible in a Developer
+    /// group until the user moves to another section.
+    static func sidebarGroups(selection: ProductionSection? = nil) -> [ProductionSidebarGroup] {
         var groups = [
             ProductionSidebarGroup(title: "Playback", sections: playback),
             ProductionSidebarGroup(title: "System", sections: system),
-            ProductionSidebarGroup(
-                title: "Tools",
-                sections: tools.filter { !developerTools.contains($0) }
-            ),
+            ProductionSidebarGroup(title: "Tools", sections: tools),
             ProductionSidebarGroup(title: "Extensions", sections: extensions),
         ]
         if let selection, developerTools.contains(selection) {
@@ -248,7 +231,6 @@ final class ProductionNavigation: ObservableObject {
 struct ProductionRootView: View {
     @ObservedObject var product: ProductController
     @ObservedObject var navigation: ProductionNavigation
-    @EnvironmentObject private var featureFlags: FeatureFlags
     #if DEBUG
     @Environment(\.openWindow) private var openWindow
     #endif
@@ -283,12 +265,7 @@ struct ProductionRootView: View {
                 )
                 .tag(ProductionSection.dashboard)
 
-                ForEach(
-                    ProductionSection.sidebarGroups(
-                        simplifiedLayout: featureFlags.isEnabled(.uiScope),
-                        selection: selection
-                    )
-                ) { group in
+                ForEach(ProductionSection.sidebarGroups(selection: selection)) { group in
                     Section(group.title) {
                         ForEach(group.sections) { section in
                             Label(section.title, systemImage: section.systemImage)
