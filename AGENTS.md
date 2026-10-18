@@ -121,6 +121,8 @@ Normal Quit must stop/fade audio before teardown. A true force-quit cannot rely 
 
 ## 6. App Store constraints
 
+The minimum supported macOS is 26. Raising it again needs the project owner's explicit approval.
+
 App Sandbox is required from the beginning. Do not introduce architecture that depends on:
 - root privileges
 - Authorization Services
@@ -149,6 +151,10 @@ Do not add GPL/AGPL dependencies to production targets.
 Every audio-path change should include deterministic tests where possible and identify required hardware/manual validation.
 
 No audio architecture change is considered complete solely because it compiles.
+
+Tests check behaviour, not source text. Do not add `ci/validate_*.py` scripts (or similar) that grep Swift, C or C++ source; write a deterministic XCTest or C harness that exercises the behaviour instead. The only remaining Python validators check release metadata that exists only in the release job.
+
+DSP changes need deterministic tests and an acoustic reference-lab case at the standard rates: 44.1, 48, 88.2, 96, 176.4, 192, 352.8 and 384 kHz.
 
 Regression requirements include:
 - 44.1 / 48 / 96 kHz
@@ -181,5 +187,26 @@ Each substantial PR should state:
 - tests added/run
 - manual validation required
 - App Sandbox/App Store impact
+- feature flag used, if any
+- required bench/hardware checks (remote CI never substitutes for them)
 
 If a PR introduces DSP math, cite the public specification or derivation used to implement it.
+
+## 11. Trunk, feature flags and CI
+
+`main` is the trunk and must always build, pass CI and be shippable with every flag off.
+
+- Work in short-lived branches, one slice per PR, merged to `main` by squash. Do not build stacked or long-lived draft PR chains.
+- Name branches `e<n>/<slice>` and name the program-plan epic (`docs/PROGRAM_PLAN.md`) in every branch, commit and PR.
+- Unfinished user-visible work merges dark behind its epic's feature flag (`FeatureFlag.all` in `NotchSixty/State/FeatureFlags.swift`; see `docs/FEATURE_FLAGS.md`). Flags default off. Release builds ignore stored overrides and honour only the `-NotchSixtyFeatures` launch argument.
+- Only Swift reads flags. The realtime engine never does: Swift decides and publishes the resulting configuration through the normal snapshot path.
+- A flag is removed, with its dead branch, once the epic ships.
+
+CI is three workflows:
+
+- `pr.yml`: every PR to `main`. Debug build, XCTest and the behavioural C harnesses. Docs-only PRs skip it.
+- `macos-full.yml`: pushes to `main`, PRs labelled `full-ci`, and manual runs. Full XCTest, the Release performance build and render benchmarks.
+- `release.yml`: manual only. Builds, checks and packages a release.
+
+Do not add per-PR or per-branch workflows. Extend one of these three instead.
+

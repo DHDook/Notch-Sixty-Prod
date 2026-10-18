@@ -7,7 +7,7 @@
 - Helper agents in `.claude/agents/`: code-scout, build-test-runner, plan-tracker, pr-writer
   (Haiku) and realtime-reviewer (Sonnet).
 
-**Current focus:** E1: S1–S5 done; next S6 AGENTS.md alignment (needs owner approval). Plan in `docs/epics/E1.md`.
+**Current focus:** E1: S1–S6 done, which closes E1. Next: Phase 1's other epics (E2–E5, E19); see `docs/PROGRAM_PLAN.md`.
 <!-- plan-tracker keeps the line above current -->
 
 @AGENTS.md
@@ -18,8 +18,9 @@ All work follows the v1 program plan in `docs/PROGRAM_PLAN.md` (21 epics, E1–E
 gates G1–G4). Read the relevant epic there before planning any change, and name the epic ID in
 every branch, commit and PR (for example `e2/macos26-deployment-target`).
 
-Owner decisions of 17 Oct 2026. Where they conflict with `AGENTS.md`, these win until E1/E21
-update `AGENTS.md`:
+Owner decisions of 17 Oct 2026. `AGENTS.md` records the trunk, macOS 26, feature-flag,
+behavioural-test and three-workflow rules (E1 S6). Where the rest conflicts with `AGENTS.md`, these
+win until E21 updates `AGENTS.md`:
 
 - `main` is the trunk. Use short-lived branches and PRs, one slice each, behind the epic's
   feature flag. Do not build stacked draft chains.
