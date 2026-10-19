@@ -103,13 +103,13 @@ harness pr35_render_context_snapshot_pointer -std=c11 -Wall -Wextra -include std
     ci/validate_pr35_render_context_snapshot_pointer.c $ALL_RT_NO_BRIDGE -framework Accelerate
 # shellcheck disable=SC2086
 harness pr35_transition_ack "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/validate_pr35_transition_ack.c $ALL_RT \
-    -Icore/include "${CORE_OBJS[@]}" -lc++ -framework Accelerate -framework CoreAudio
+    -Icore/include ${CORE_OBJS[@]+"${CORE_OBJS[@]}"} -lc++ -framework Accelerate -framework CoreAudio
 # shellcheck disable=SC2086
 harness pr38_denoiser_advanced "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/validate_pr38_denoiser_advanced.c $ALL_RT_NO_BRIDGE \
     -framework Accelerate
 # shellcheck disable=SC2086
 harness pr41_same_device_output_map "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/validate_pr41_same_device_output_map.c $ALL_RT \
-    -Icore/include "${CORE_OBJS[@]}" -lc++ -framework Accelerate -framework CoreAudio
+    -Icore/include ${CORE_OBJS[@]+"${CORE_OBJS[@]}"} -lc++ -framework Accelerate -framework CoreAudio
 
 # Adaptive-rate transport (PR69-71).
 harness pr69_adaptive_src "${STRICT[@]}" -O2 -I"$RT" ci/validate_pr69_adaptive_src.c "$RT/N60AdaptiveSampleRate.c" -lm
@@ -142,7 +142,7 @@ harness pr107_live_fir_render "${STRICT[@]}" -O2 -I"$RT" ci/validate_pr107_live_
 harness pr107_program_fir_runtime "${STRICT[@]}" -O2 -I"$RT" ci/validate_pr107_program_fir_runtime.c -lm
 # shellcheck disable=SC2086
 harness pr101_realtime_resource_soak "${STRICT[@]}" -O3 -arch arm64 -include stddef.h -I"$RT" \
-    ci/validate_pr101_realtime_resource_soak.c $ALL_RT -Icore/include "${CORE_OBJS[@]}" -lc++ -framework Accelerate -framework CoreAudio
+    ci/validate_pr101_realtime_resource_soak.c $ALL_RT -Icore/include ${CORE_OBJS[@]+"${CORE_OBJS[@]}"} -lc++ -framework Accelerate -framework CoreAudio
 
 # E4 S4: speaker-ANC howl guard, the first C++20 engine core. Compiled once,
 # then linked into its C harness.
