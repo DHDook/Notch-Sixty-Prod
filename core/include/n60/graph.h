@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 3u
+#define N60_GRAPH_ABI_VERSION 4u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -69,7 +69,27 @@ typedef enum n60_stage_kind {
     N60_STAGE_COMPRESSOR = 12,/* position 10. See "Compressor" below. */
     N60_STAGE_EXPANDER = 13,  /* position 11. See "Expander" below. */
     N60_STAGE_METER_OUT = 7,  /* position 12. Post-EQ meter, like METER_IN. */
-    N60_STAGE_DELAY = 8       /* position 13. Integer delay. params[0] = frames (0..capacityFrames); changes crossfade over 5 ms. */
+    /* ABI v4 system stages (E6 S5), in processing order. See "System stages" below. */
+    N60_STAGE_BASS_MGMT = 17,     /* position 13. Multichannel bass management and crossover. */
+    N60_STAGE_ROOM_FIR = 14,      /* position 14. Room-correction convolver (Program FIR rules). */
+    N60_STAGE_SPEAKER_IR = 15,    /* position 15. Speaker IR convolver (Program FIR rules). */
+    N60_STAGE_AMBIENT = 18,       /* position 16. Ambient compensation: ramped level plus three peaking bands. */
+    N60_STAGE_CORE_DYNAMICS = 16, /* position 17. Post-EQ core dynamics (Compressor rules). */
+    N60_STAGE_SYMMETRY = 20,      /* position 18. Pair stage: symmetry position gains. */
+    N60_STAGE_CROSSFEED = 21,     /* position 19. Pair stage: speaker crossfeed. */
+    N60_STAGE_CROSSTALK = 22,     /* position 20. Pair stage: crosstalk cancellation. */
+    N60_STAGE_OUTPUT_GAIN = 19,   /* position 21. Output gain and balance (GAIN rules, one lane per stage for balance). */
+    N60_STAGE_HEADPHONE = 23,     /* position 22. Pair stage: headphone crossfeed and channel correction. */
+    N60_STAGE_PAUSE_GATE = 24,    /* position 23. Linked silence gate. */
+    N60_STAGE_DELAY = 8,          /* position 24. Integer delay. params[0] = frames (0..capacityFrames); changes crossfade over 5 ms.
+                                   * (Position 13 before ABI v4: ICD and master gain now precede protection.) */
+    N60_STAGE_ANC_GUARD = 25,     /* position 25. ANC howl guard on the anti-noise lane. */
+    N60_STAGE_ANC_INJECT = 26,    /* position 26. ANC injection point; silent unless authorised in the snapshot. */
+    N60_STAGE_PROTECTION = 27,    /* position 27. Limiter and true-peak guard; the last audio-modifying stage. */
+    N60_STAGE_MUTE = 28,          /* position 28. Ramped mute. */
+    N60_STAGE_ANC_CAPTURE = 29,   /* position 29. ANC reference capture point. */
+    N60_STAGE_FINAL_SANITISE = 30,/* position 30. Sanitise rules. */
+    N60_STAGE_FINAL_METER = 31    /* position 31. Meter rules; read with n60_graph_read_meter. */
 } n60_stage_kind;
 
 /* Lane selection for the ABI v3 stages (DENOISER, DYN_EQ, FIR, COMPRESSOR, EXPANDER):
@@ -111,6 +131,44 @@ typedef enum n60_stage_kind {
  *  Uniformly partitioned convolution, 256-frame partitions: latency 256 frames plus
  *  capacityFrames, which for this kind is the filter's own declared group delay (it is
  *  reported, never applied). Taps are not live: publish a new snapshot. */
+/* System stages (ABI v4). Lane rules: BASS_MGMT, PAUSE_GATE and ANC_CAPTURE take laneMask; AMBIENT, MUTE and
+ * PROTECTION take laneMask or laneA/N60_LANE_ALL; SYMMETRY, CROSSFEED, CROSSTALK and HEADPHONE are pair
+ * stages on (laneA, laneB); ANC_GUARD and ANC_INJECT address one lane with laneA. ROOM_FIR, SPEAKER_IR,
+ * CORE_DYNAMICS, OUTPUT_GAIN, FINAL_SANITISE and FINAL_METER follow the FIR, COMPRESSOR, GAIN, SANITISE and
+ * METER_OUT rules. A "live" parameter may be posted; the rest need a new snapshot (UNSUPPORTED).
+ *
+ * BASS_MGMT (mask = main lanes). params: [0] crossover Hz (live), [1] redirect dB (live, -24..12),
+ *  [2] sub lane, [3] LFE lane (-1 none; may equal the sub lane), [4] LFE low-pass Hz (live, 20..500),
+ *  [5] LFE gain dB (live, -24..24), [6] sub gain dB (live, -60..24), [7] sub polarity (0 normal, 1 invert),
+ *  [8] sub EQ section count n (0..4), then 4 per section (type, Hz, dB, Q). paramCount 9+4n.
+ *  Mains get a Linkwitz-Riley 4 high-pass, their low-pass is summed (x redirect) with the LFE low-pass into
+ *  the sub lane, which is replaced. The sub and LFE lanes must not be in the mask. Sub delay is a DELAY stage.
+ * AMBIENT. params: [0] level dB (live, -60..24), then three peaking bands (Hz, dB, Q). paramCount 10.
+ * SYMMETRY. params: [0] position -1..1 (live). CROSSFEED. params: [0] amount 0..0.5 (live).
+ * CROSSTALK. params: [0] shadow low-pass Hz 200..2000 (live), [1] amount 0..1 (live).
+ * HEADPHONE (pair A, B). params: [0] headroom dB (-24..0), [1] crossfeed amount 0..1 (live), [2] angle 15..90 deg,
+ *  [3] radius 0.06..0.12 m, [4] crossfeed low-pass Hz (200..2000), [5] gain A dB, [6] gain B dB (live, -24..24),
+ *  [7] polarity A, [8] polarity B (0/1), [9] sections nA, [10] sections nB (0..16), then 4 per section (A, then B).
+ * PAUSE_GATE (linked). params: [0] threshold dBFS (-120..-20), [1] hysteresis dB (0..24), [2] hold ms (0..5000),
+ *  [3] fade-out ms (0.05..1000), [4] fade-in ms (0.05..5000). paramCount 5. Starts open.
+ * PROTECTION (linked over its lanes). params: [0] limiter on (0/1), [1] ceiling dB (live, -20..0), [2] attack ms
+ *  (live, 0.1..50), [3] release ms (live, 5..500), [4] look-ahead ms (0..20), [5] true-peak guard (0/1),
+ *  [6] oversampling 1/2/4. paramCount 7. With the limiter and guard both on the factor is 4. Latency is the
+ *  half-band delay (32 at 2x, 48 at 4x) plus ceil(look-ahead high samples / factor) frames. The kernel's soft
+ *  clipper and gain rider are not part of this stage.
+ * MUTE. params: [0] muted (0/1, live); 10 ms ramp.
+ * ANC_GUARD (laneA = anti-noise lane, modified in place; the error and reference lanes are read-only).
+ *  params: [0] error lane (-1 none), [1] reference lane (-1 none), [2] growth dB per 20 ms (0.5..40),
+ *  [3] growth blocks (1..10), [4] reference allowance dB (0..20), [5] error rise dB (0.5..40), [6] error rise
+ *  blocks (1..10), [7] output ceiling (0..1], [8] activity floor dB (-160..0), [9] mute ramp s (0.001..0.1),
+ *  [10] has baseline (0/1), [11] rearm revision (live; a change re-arms), [12..27] baseline dB per band
+ *  (-200..0). paramCount 28. Status through n60_graph_read_guard.
+ * ANC_INJECT (laneA = target speaker lane). params: [0] source lane, [1] authorised (0/1, NOT live, default 0),
+ *  [2] gain dB (live, -96..0). Adds the source lane into the target only when authorised, and always clears the
+ *  source lane. Authorisation exists only as this snapshot value; the core never sets it.
+ * ANC_CAPTURE (mask). capacityFrames = ring length per lane (1..4194304). params: [0] authorised (0/1, NOT live,
+ *  default 0): nothing is written when 0. Read with n60_graph_read_capture. */
+#define N60_ANC_GUARD_BANDS 16u
 #define N60_FIR_PARTITION_FRAMES 256u
 #define N60_FIR_MAX_TAPS (128u * N60_FIR_PARTITION_FRAMES)
 #define N60_DYN_EQ_MAX_BANDS 64u
@@ -218,9 +276,27 @@ void n60_graph_get_stats(const n60_graph *graph, n60_graph_stats *outStats);
  * thread has stopped using it. NULL is allowed. */
 void n60_graph_retire(n60_graph *graph);
 
+/* Howl guard status (ANC_GUARD). trip: 0 none, 1 growth, 2 error rise, 3 non-finite, 4 over ceiling. */
+typedef struct n60_guard_status {
+    uint32_t trip;
+    uint32_t muted;
+    uint64_t tripFrame;       /* frames since arm at the trip */
+    uint64_t processedFrames;
+    uint64_t tripCount;
+} n60_guard_status;
+
+/* Control thread. Reads the guard stage of the newest published snapshot. */
+n60_status n60_graph_read_guard(n60_graph *graph, uint32_t stageId, n60_guard_status *out);
+
+/* Control thread. Copies `frames` captured samples of one lane of an ANC_CAPTURE stage, starting at absolute
+ * sample index startSample (counted from the snapshot's first frame), into dst. *written receives the number of
+ * samples written so far. N60_STATUS_UNSUPPORTED when the range is not (or no longer) in the ring. */
+n60_status n60_graph_read_capture(n60_graph *graph, uint32_t stageId, uint32_t lane, uint64_t startSample,
+                                  float *dst, uint32_t frames, uint64_t *written);
+
 /* Largest total latency in frames over the output lanes for the live graph: the sum, per
- * lane, of its DELAY stages, FIR stages (256 + declared latency) and denoiser stages (FFT
- * size); 0 with none. Updated by the realtime thread when
+ * lane, of its DELAY stages, FIR-type stages (256 + declared latency), denoiser stages (FFT
+ * size) and protection stages (oversampling plus look-ahead); 0 with none. Updated by the realtime thread when
  * it adopts a snapshot or applies a delay parameter. */
 uint32_t n60_graph_latency_frames(const n60_graph *graph);
 

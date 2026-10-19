@@ -20,6 +20,7 @@
 
 #include "n60/graph.h"
 #include "snapshot.hpp"
+#include "stages_system.hpp"
 
 namespace {
 
@@ -239,6 +240,17 @@ n60_status n60_graph_post_params(n60_graph *g, const n60_param_record *records, 
 n60_status n60_graph_read_meter(n60_graph *g, uint32_t stageId, uint32_t lane, float *peak, float *rms) {
     if (g == nullptr || peak == nullptr || rms == nullptr) return N60_STATUS_BAD_ARGUMENT;
     return n60::readMeter(g->latest, stageId, lane, peak, rms) ? N60_STATUS_OK : N60_STATUS_BAD_ARGUMENT;
+}
+
+n60_status n60_graph_read_guard(n60_graph *g, uint32_t stageId, n60_guard_status *out) {
+    if (g == nullptr || out == nullptr) return N60_STATUS_BAD_ARGUMENT;
+    return n60::readGuardStatus(g->latest, stageId, out) ? N60_STATUS_OK : N60_STATUS_BAD_ARGUMENT;
+}
+
+n60_status n60_graph_read_capture(n60_graph *g, uint32_t stageId, uint32_t lane, uint64_t startSample, float *dst,
+                                  uint32_t frames, uint64_t *written) {
+    if (g == nullptr || (dst == nullptr && frames != 0)) return N60_STATUS_BAD_ARGUMENT;
+    return n60::readCapture(g->latest, stageId, lane, startSample, dst, frames, written);
 }
 
 void n60_graph_get_stats(const n60_graph *g, n60_graph_stats *s) {

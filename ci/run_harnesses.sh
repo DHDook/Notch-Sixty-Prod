@@ -163,7 +163,7 @@ fi
 if selected e6_core_graph; then
     CORE_OK=1
     CORE_OBJS=()
-    for src in graph snapshot fft stages_dsp; do
+    for src in graph snapshot fft stages_dsp stages_system; do
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -fno-exceptions -fno-rtti -Icore/include \
             -c "core/src/$src.cpp" -o "$OUT/n60core_$src.o"; then
             CORE_OBJS+=("$OUT/n60core_$src.o")
@@ -179,6 +179,10 @@ if selected e6_core_graph; then
         harness e6_core_parity "${STRICT[@]}" -O2 -Icore/include core/tests/test_parity.c \
             "${CORE_OBJS[@]}" -lc++ -lm
         harness e6_core_dsp "${STRICT[@]}" -O2 -Icore/include core/tests/test_dsp.c \
+            "${CORE_OBJS[@]}" -lc++ -lm
+        harness e6_core_protection_parity "${STRICT[@]}" -O2 -Icore/include core/tests/test_protection_parity.c \
+            "$RT/N60Protection.c" "${CORE_OBJS[@]}" -lc++ -lm
+        harness e6_core_system "${STRICT[@]}" -O2 -Icore/include core/tests/test_system.c \
             "${CORE_OBJS[@]}" -lc++ -lm
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include core/tests/test_alloc.cpp \
             "${CORE_OBJS[@]}" -o "$OUT/e6_core_alloc" \
