@@ -62,6 +62,9 @@ static n60_graph *buildOrDie(double rate, uint32_t maxBlock, uint32_t ch, const 
     n60_graph *g = NULL;
     n60_status s = n60_graph_build(&d, &g);
     CHECK(s == N60_STATUS_OK && g, "build status %d", s);
+    /* These tests pin snapshot hand-off semantics; the faded rebuild has its own tests (test_rebuild.c). */
+    n60_rebuild_options o = {sizeof o, 0.0f, 0.0f, 0};
+    if (g) CHECK(n60_graph_set_rebuild_options(g, &o) == N60_STATUS_OK, "instant swaps");
     return g;
 }
 
@@ -474,7 +477,9 @@ static void testMailbox(double rate) {
     for (int i = 0; i < 2000; i++) { many[i].stageId = 1; many[i].value = 1.0f; }
     CHECK(n60_graph_post_params(g, many, 1024) == N60_STATUS_OK, "1024 records fit");
     CHECK(n60_graph_post_params(g, many, 1) == N60_STATUS_QUEUE_FULL, "mailbox full");
-    render(g, in, out, 1, 64, 64);
+    render(g, in, out, 1, 64, 64); /* the drain cap (256 records per block) leaves the rest for later blocks */
+    CHECK(n60_graph_post_params(g, many, 1000) == N60_STATUS_QUEUE_FULL, "drain is capped per block");
+    for (int k = 0; k < 4; k++) render(g, in, out, 1, 64, 64);
     CHECK(n60_graph_post_params(g, many, 1000) == N60_STATUS_OK, "room again after the callback drained it");
     free(many);
 
@@ -482,7 +487,7 @@ static void testMailbox(double rate) {
     float g9 = 0.75f;
     n60_stage_desc re[1] = {stage(N60_STAGE_GAIN, 1, 0, &g9, 1)};
     n60_graph_desc rd = makeDesc(rate, N, 1, re, 1);
-    render(g, in, out, 1, 64, 64); /* drain whatever is left */
+    for (int k = 0; k < 4; k++) render(g, in, out, 1, 64, 64); /* drain whatever is left */
     n60_param_record stale = {1, 0, 0.1f, 0};
     CHECK(n60_graph_post_params(g, &stale, 1) == N60_STATUS_OK, "post before publish");
     CHECK(n60_graph_publish(g, &rd) == N60_STATUS_OK, "publish");
@@ -502,8 +507,8 @@ static void testMailbox(double rate) {
 
     /* Parameters that need a new topology are refused, not half applied. */
     g = buildOrDie(rate, N, 1, st, 3);
-    n60_param_record peq = {2, 0, 1.0f, 0};
-    CHECK(n60_graph_post_params(g, &peq, 1) == N60_STATUS_UNSUPPORTED, "PEQ edit needs a topology publish");
+    n60_param_record peq = {2, 0, 9.0f, 0};
+    CHECK(n60_graph_post_params(g, &peq, 1) == N60_STATUS_BAD_ARGUMENT, "PEQ type outside 0..7 refused");
     n60_graph_retire(g);
 }
 

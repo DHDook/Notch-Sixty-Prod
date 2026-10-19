@@ -324,7 +324,7 @@ static void testGuard(double rate) {
         if (!g) return;
         uint64_t pos = 0;
         for (int b = 0; b < 40; b++) toneThrough(g, 1, rate, 0, 200, 0.1, 1, 0, &pos);
-        n60_guard_status s;
+        n60_guard_status s = {0}; s.structSize = sizeof s;
         CHECK(n60_graph_read_guard(g, 1, &s) == N60_STATUS_OK && s.trip == 0 && s.muted == 0, "rate %.0f guard quiet on steady tone", rate);
         CHECK(fabs(peakOf(bufOut[0], 0, 1024) - 0.1) < 1e-5, "guard passes a steady tone");
         n60_graph_retire(g);
@@ -346,12 +346,12 @@ static void testGuard(double rate) {
             }
             run(g, 1, block);
             frame += block;
-            n60_guard_status s;
+            n60_guard_status s = {0}; s.structSize = sizeof s;
             n60_graph_read_guard(g, 1, &s);
             if (tripAt < 0 && s.trip != 0) tripAt = (int64_t)frame;
         }
         CHECK(tripAt >= 0 && tripAt <= (int64_t)(rate * 0.050), "rate %.0f: guard tripped at %.1f ms", rate, tripAt < 0 ? -1.0 : 1000.0 * tripAt / rate);
-        n60_guard_status s;
+        n60_guard_status s = {0}; s.structSize = sizeof s;
         n60_graph_read_guard(g, 1, &s);
         CHECK(s.muted == 1 && s.tripCount >= 1, "rate %.0f: guard muted", rate);
         CHECK(peakOf(bufOut[0], 0, block) == 0.0, "rate %.0f: muted output is silent", rate);

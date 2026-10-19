@@ -146,7 +146,7 @@ uint32_t expectedParamCount(uint32_t kind, const float *p, uint32_t have) {
         case N60_STAGE_PROTECTION: return 7;
         case N60_STAGE_MUTE: return 1;
         case N60_STAGE_ANC_GUARD: return kGuardParams;
-        case N60_STAGE_ANC_INJECT: return 3;
+        case N60_STAGE_ANC_INJECT: return have == 4 ? 4u : 3u;
         case N60_STAGE_ANC_CAPTURE: return 1;
         default: return 0;
     }
@@ -202,6 +202,8 @@ struct CtShared {
     Ramp amt;
     float seenAmt, seenHz;
     double alpha, sL, sR;
+    double alphaTarget, alphaStep;  // shadow low-pass coefficient ramps over the ramp window
+    uint32_t alphaLeft, pad;
 };
 struct HpShared {
     Ramp mix, gA, gB;
@@ -220,10 +222,14 @@ struct GateShared {
 };
 struct BassLane {
     Bq hp1, hp2, lp1, lp2;
+    Bq nhp1, nhp2, nlp1, nlp2;  // incoming crossover during a coefficient crossfade
 };
 struct BassShared {
     double hp[5], lp[5], lfe[5], eq[4][5];
     Bq lfe1, lfe2, eqz[4];
+    double hpN[5], lpN[5], lfeN[5];  // incoming coefficients during a crossfade
+    Bq lfe1n, lfe2n;
+    uint32_t xfX, xfLfe;             // frames left in the crossover and LFE low-pass crossfades
     Ramp redirect, lfeG, subG;
     float seenX, seenR, seenLfeHz, seenLfeG, seenSubG, pol;
     uint32_t subLane, nEq;
@@ -235,8 +241,12 @@ struct MuteLane {
 };
 struct InjectShared {
     Ramp g;
+    Ramp hold;        // 10 ms mute ramp driven by rebuilds (E6 S6): 1 = passing, 0 = held
     float seen;
+    float seenRev;    // last re-arm revision acted on (params[3])
+    float holdWant;   // target the hold ramp was last aimed at
     uint32_t authorised;
+    uint32_t held;    // set by a rebuild; cleared only by a change of the re-arm revision
 };
 struct CapShared {
     std::atomic<uint64_t> written;  // frames fully published
@@ -253,7 +263,9 @@ struct ProtLane {
 struct ProtShared {
     uint64_t seq;
     double gain;
-    uint32_t ph2, ph1, head, count, cap, pad;
+    uint32_t ph2, ph1, head, count, cap, cfgValid;
+    float seenCeil, seenAtk, seenRel, pad2;  // protCfg inputs the cached cfg was derived from
+    ProtCfg cfg;                              // cached: pow/exp are not redone every block
     // followed by float val[cap]; uint64_t idx[cap]
 };
 
@@ -386,6 +398,7 @@ bool paramOk(uint32_t kind, uint32_t i, float v, const float *p, double rate, ui
             switch (i) {
                 case 0: return isInt(v) && v >= 0.0f && v < static_cast<float>(outCh);
                 case 1: return v == 0.0f || v == 1.0f;
+                case 3: return isInt(v) && v >= 0.0f && v <= 16777216.0f;
                 default: return inR(v, -96.0, 0.0);
             }
         case N60_STAGE_ANC_CAPTURE: return v == 0.0f || v == 1.0f;
@@ -544,7 +557,7 @@ void systemInit(SnapHeader *h, const StageRec &r) {
             rampInit(s->amt, p[1]);
             s->seenAmt = p[1];
             s->seenHz = p[0];
-            s->alpha = 1.0 - std::exp(-2.0 * kPi * p[0] / rate);
+            s->alpha = s->alphaTarget = 1.0 - std::exp(-2.0 * kPi * p[0] / rate);
             break;
         }
         case N60_STAGE_HEADPHONE: {
@@ -619,6 +632,9 @@ void systemInit(SnapHeader *h, const StageRec &r) {
             InjectShared *s = reinterpret_cast<InjectShared *>(sh);
             s->authorised = p[1] != 0.0f ? 1u : 0u;
             s->seen = p[2];
+            s->seenRev = r.paramCount > 3 ? p[3] : 0.0f;
+            s->holdWant = 1.0f;
+            rampInit(s->hold, 1.0f);
             rampInit(s->g, 0.0f);
             if (s->authorised != 0) rampSet(s->g, static_cast<float>(db2lin(p[2])), ramp);  // fade in, no click
             break;
@@ -687,7 +703,7 @@ n60_status validateSystemParam(const SnapHeader *h, const StageRec &r, uint32_t 
         case N60_STAGE_PROTECTION: live = idx >= 1 && idx <= 3; break;
         case N60_STAGE_MUTE: live = true; break;
         case N60_STAGE_ANC_GUARD: live = idx == 11; break;
-        case N60_STAGE_ANC_INJECT: live = idx == 2; break;
+        case N60_STAGE_ANC_INJECT: live = idx == 2 || idx == 3; break;
         default: live = false; break;  // pause gate, capture, authorisation: new snapshot only
     }
     const float *p = paramsOf(h, r);
@@ -763,7 +779,9 @@ void runCrosstalk(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
     const float *p = paramsOf(h, r);
     if (p[0] != s.seenHz) {
         s.seenHz = p[0];
-        s.alpha = 1.0 - std::exp(-2.0 * kPi * static_cast<double>(p[0]) / h->sampleRate);
+        s.alphaTarget = 1.0 - std::exp(-2.0 * kPi * static_cast<double>(p[0]) / h->sampleRate);
+        s.alphaLeft = h->rampFrames;  // ramped, not stepped: a step changes the filter output by d(alpha)*(x-s)
+        s.alphaStep = (s.alphaTarget - s.alpha) / static_cast<double>(h->rampFrames);
     }
     if (p[1] != s.seenAmt) {
         s.seenAmt = p[1];
@@ -772,6 +790,10 @@ void runCrosstalk(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
     float *a = lanes[r.laneA];
     float *b = lanes[r.laneB];
     for (uint32_t i = 0; i < frames; ++i) {
+        if (s.alphaLeft != 0) {
+            --s.alphaLeft;
+            s.alpha = s.alphaTarget - s.alphaStep * static_cast<double>(s.alphaLeft);
+        }
         const double l = a[i], rr = b[i];
         s.sL += s.alpha * (l - s.sL);
         s.sR += s.alpha * (rr - s.sR);
@@ -838,7 +860,10 @@ void runGate(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
     double gain = s.gain;
     for (uint32_t i = 0; i < frames; ++i) {
         double x = 0.0;
-        for (uint32_t l = 0; l < r.laneCount; ++l) { const double a = std::fabs(static_cast<double>(ptr[l][i])); if (std::isfinite(a)) x = std::max(x, a); }
+        for (uint32_t l = 0; l < r.laneCount; ++l) {
+            if (!std::isfinite(ptr[l][i])) ptr[l][i] = 0.0f;  // a gate never passes NaN or Inf through
+            x = std::max(x, std::fabs(static_cast<double>(ptr[l][i])));
+        }
         const double coef = x > env ? s.atk : s.rel;
         env = x + coef * (env - x);
         if (s.open == 0) {
@@ -867,49 +892,89 @@ void runBass(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
     BassShared &s = *reinterpret_cast<BassShared *>(sharedState(h, r));
     const float *p = paramsOf(h, r);
     const double rate = h->sampleRate;
-    if (p[0] != s.seenX) {
-        s.seenX = p[0];
-        designInto(4, rate, p[0], 0.0, kButterQ, s.hp);
-        designInto(3, rate, p[0], 0.0, kButterQ, s.lp);
-    }
-    if (p[1] != s.seenR) {
-        s.seenR = p[1];
-        rampSet(s.redirect, static_cast<float>(db2lin(p[1])), h->rampFrames);
-    }
-    if (p[4] != s.seenLfeHz) {
-        s.seenLfeHz = p[4];
-        designInto(3, rate, p[4], 0.0, kButterQ, s.lfe);
-    }
-    if (p[5] != s.seenLfeG) {
-        s.seenLfeG = p[5];
-        rampSet(s.lfeG, static_cast<float>(db2lin(p[5])), h->rampFrames);
-    }
-    if (p[6] != s.seenSubG) {
-        s.seenSubG = p[6];
-        rampSet(s.subG, static_cast<float>(db2lin(p[6])), h->rampFrames);
-    }
+    const uint32_t ramp = h->rampFrames;
     float *ptr[kMaxLanes];
     BassLane *st[kMaxLanes];
     for (uint32_t l = 0; l < r.laneCount; ++l) {
         ptr[l] = lanes[laneOf(r, l)];
         st[l] = reinterpret_cast<BassLane *>(laneState(h, r, l));
     }
+    // A changed crossover runs as a second instance (new coefficients, state continued from the
+    // old one) and the two are crossfaded over the ramp window; an edit that arrives while a
+    // crossfade runs is picked up when it ends (seenX still differs).
+    if (p[0] != s.seenX && s.xfX == 0) {
+        s.seenX = p[0];
+        designInto(4, rate, p[0], 0.0, kButterQ, s.hpN);
+        designInto(3, rate, p[0], 0.0, kButterQ, s.lpN);
+        for (uint32_t l = 0; l < r.laneCount; ++l) {
+            st[l]->nhp1 = st[l]->hp1; st[l]->nhp2 = st[l]->hp2;
+            st[l]->nlp1 = st[l]->lp1; st[l]->nlp2 = st[l]->lp2;
+        }
+        s.xfX = ramp;
+    }
+    if (p[1] != s.seenR) {
+        s.seenR = p[1];
+        rampSet(s.redirect, static_cast<float>(db2lin(p[1])), ramp);
+    }
+    if (p[4] != s.seenLfeHz && s.xfLfe == 0) {
+        s.seenLfeHz = p[4];
+        designInto(3, rate, p[4], 0.0, kButterQ, s.lfeN);
+        s.lfe1n = s.lfe1;
+        s.lfe2n = s.lfe2;
+        s.xfLfe = ramp;
+    }
+    if (p[5] != s.seenLfeG) {
+        s.seenLfeG = p[5];
+        rampSet(s.lfeG, static_cast<float>(db2lin(p[5])), ramp);
+    }
+    if (p[6] != s.seenSubG) {
+        s.seenSubG = p[6];
+        rampSet(s.subG, static_cast<float>(db2lin(p[6])), ramp);
+    }
     float *sub = lanes[s.subLane];
     float *lfe = s.lfeLane >= 0 ? lanes[static_cast<uint32_t>(s.lfeLane)] : nullptr;
     const bool clearLfe = lfe != nullptr && lfe != sub;
+    const double invRamp = 1.0 / static_cast<double>(ramp);
     for (uint32_t i = 0; i < frames; ++i) {
+        const bool xf = s.xfX != 0;
+        const double t = xf ? static_cast<double>(ramp - s.xfX + 1) * invRamp : 0.0;
         double acc = 0.0;
         for (uint32_t l = 0; l < r.laneCount; ++l) {
             const double x = ptr[l][i];
-            const double hp = bqRun(s.hp, st[l]->hp2, bqRun(s.hp, st[l]->hp1, x));
-            acc += bqRun(s.lp, st[l]->lp2, bqRun(s.lp, st[l]->lp1, x));
+            double hp = bqRun(s.hp, st[l]->hp2, bqRun(s.hp, st[l]->hp1, x));
+            double lp = bqRun(s.lp, st[l]->lp2, bqRun(s.lp, st[l]->lp1, x));
+            if (xf) {
+                const double hn = bqRun(s.hpN, st[l]->nhp2, bqRun(s.hpN, st[l]->nhp1, x));
+                const double ln = bqRun(s.lpN, st[l]->nlp2, bqRun(s.lpN, st[l]->nlp1, x));
+                hp += t * (hn - hp);
+                lp += t * (ln - lp);
+            }
+            acc += lp;
             ptr[l][i] = static_cast<float>(hp);
+        }
+        if (xf && --s.xfX == 0) {  // finished: the incoming instance becomes the live one
+            std::memcpy(s.hp, s.hpN, sizeof s.hp);
+            std::memcpy(s.lp, s.lpN, sizeof s.lp);
+            for (uint32_t l = 0; l < r.laneCount; ++l) {
+                st[l]->hp1 = st[l]->nhp1; st[l]->hp2 = st[l]->nhp2;
+                st[l]->lp1 = st[l]->nlp1; st[l]->lp2 = st[l]->nlp2;
+            }
         }
         double v = acc * rampNext(s.redirect);
         if (lfe != nullptr) {
-            const double lf = bqRun(s.lfe, s.lfe2, bqRun(s.lfe, s.lfe1, static_cast<double>(lfe[i])));
+            double lf = bqRun(s.lfe, s.lfe2, bqRun(s.lfe, s.lfe1, static_cast<double>(lfe[i])));
+            if (s.xfLfe != 0) {
+                const double ln = bqRun(s.lfeN, s.lfe2n, bqRun(s.lfeN, s.lfe1n, static_cast<double>(lfe[i])));
+                lf += (static_cast<double>(ramp - s.xfLfe + 1) * invRamp) * (ln - lf);
+                if (--s.xfLfe == 0) {
+                    std::memcpy(s.lfe, s.lfeN, sizeof s.lfe);
+                    s.lfe1 = s.lfe1n;
+                    s.lfe2 = s.lfe2n;
+                }
+            }
             v += lf * rampNext(s.lfeG);
         } else {
+            if (s.xfLfe != 0 && --s.xfLfe == 0) std::memcpy(s.lfe, s.lfeN, sizeof s.lfe);  // no LFE lane: adopt the design
             rampNext(s.lfeG);
         }
         v *= static_cast<double>(rampNext(s.subG)) * s.pol;
@@ -919,8 +984,12 @@ void runBass(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
     }
     for (uint32_t l = 0; l < r.laneCount; ++l) {
         bqFlush(st[l]->hp1); bqFlush(st[l]->hp2); bqFlush(st[l]->lp1); bqFlush(st[l]->lp2);
+        if (s.xfX != 0) {
+            bqFlush(st[l]->nhp1); bqFlush(st[l]->nhp2); bqFlush(st[l]->nlp1); bqFlush(st[l]->nlp2);
+        }
     }
     bqFlush(s.lfe1); bqFlush(s.lfe2);
+    if (s.xfLfe != 0) { bqFlush(s.lfe1n); bqFlush(s.lfe2n); }
     for (uint32_t k = 0; k < s.nEq; ++k) bqFlush(s.eqz[k]);
 }
 
@@ -948,8 +1017,20 @@ void runInject(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames)
             s.seen = p[2];
             rampSet(s.g, static_cast<float>(db2lin(p[2])), h->rampFrames);
         }
+        // A rebuild holds injection at zero. The hold ends only when the host posts a different
+        // re-arm revision, which it does from the ANC authorisation path; the core never re-arms itself.
+        const float rev = r.paramCount > 3 ? p[3] : 0.0f;
+        if (rev != s.seenRev) {
+            s.seenRev = rev;
+            s.held = 0;
+        }
+        const float want = s.held != 0 ? 0.0f : 1.0f;
+        if (want != s.holdWant) {
+            s.holdWant = want;
+            rampSet(s.hold, want, std::max<uint32_t>(1u, static_cast<uint32_t>(std::lround(0.010 * h->sampleRate))));
+        }
         float *dst = lanes[r.laneA];
-        for (uint32_t i = 0; i < frames; ++i) dst[i] += src[i] * rampNext(s.g);
+        for (uint32_t i = 0; i < frames; ++i) dst[i] += src[i] * rampNext(s.g) * rampNext(s.hold);
     }
     std::memset(src, 0, sizeof(float) * frames);  // the anti-noise source never reaches an output unrouted
 }
@@ -1017,9 +1098,16 @@ constexpr float kEps = 1.0e-12f;
 
 void runProtection(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
     const float *p = paramsOf(h, r);
-    const ProtCfg c = protCfg(p, h->sampleRate);
-    if (c.factor == 1 && !c.limiter) return;  // bypass: no processing, no latency
     ProtShared &sh = *reinterpret_cast<ProtShared *>(sharedState(h, r));
+    if (sh.cfgValid == 0 || p[1] != sh.seenCeil || p[2] != sh.seenAtk || p[3] != sh.seenRel) {
+        sh.cfg = protCfg(p, h->sampleRate);  // only the live parameters 1..3 can differ from the snapshot's
+        sh.seenCeil = p[1];
+        sh.seenAtk = p[2];
+        sh.seenRel = p[3];
+        sh.cfgValid = 1;
+    }
+    const ProtCfg c = sh.cfg;
+    if (c.factor == 1 && !c.limiter) return;  // bypass: no processing, no latency
     float *val = protVal(&sh);
     uint64_t *idx = protIdx(&sh);
     const uint32_t n = r.laneCount;
@@ -1268,6 +1356,27 @@ void runSystem(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames)
         case N60_STAGE_ANC_GUARD: runGuard(h, r, lanes, frames); break;
         default: break;
     }
+}
+
+// ---- rebuild support ---------------------------------------------------------------------------
+
+uint32_t systemRebuildMute(SnapHeader *h, bool silentNow) {
+    uint32_t n = 0;
+    StageRec *table = stages(h);
+    for (uint32_t i = 0; i < h->stageCount; ++i) {
+        if (table[i].kind != N60_STAGE_ANC_INJECT) continue;
+        InjectShared &s = *reinterpret_cast<InjectShared *>(sharedState(h, table[i]));
+        const float *p = paramsOf(h, table[i]);
+        s.held = 1;
+        // A revision already in the snapshot (or posted during the rebuild) is not a re-arm.
+        s.seenRev = table[i].paramCount > 3 ? p[3] : 0.0f;
+        if (silentNow) {  // the incoming instance has never been audible: start it at zero
+            rampInit(s.hold, 0.0f);
+            s.holdWant = 0.0f;
+        }
+        ++n;
+    }
+    return n;
 }
 
 // ---- control-thread reads ---------------------------------------------------------------------

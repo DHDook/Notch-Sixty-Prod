@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 4u
+#define N60_GRAPH_ABI_VERSION 5u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -164,7 +164,8 @@ typedef enum n60_stage_kind {
  *  [10] has baseline (0/1), [11] rearm revision (live; a change re-arms), [12..27] baseline dB per band
  *  (-200..0). paramCount 28. Status through n60_graph_read_guard.
  * ANC_INJECT (laneA = target speaker lane). params: [0] source lane, [1] authorised (0/1, NOT live, default 0),
- *  [2] gain dB (live, -96..0). Adds the source lane into the target only when authorised, and always clears the
+ *  [2] gain dB (live, -96..0), [3] re-arm revision (optional, live, integer 0..16777216; a change after a
+ *  rebuild lets injection resume, see n60_rebuild_status). paramCount 3 or 4. Adds the source lane into the target only when authorised, and always clears the
  *  source lane. Authorisation exists only as this snapshot value; the core never sets it.
  * ANC_CAPTURE (mask). capacityFrames = ring length per lane (1..4194304). params: [0] authorised (0/1, NOT live,
  *  default 0): nothing is written when 0. Read with n60_graph_read_capture. */
@@ -230,11 +231,52 @@ n60_status n60_graph_build(const n60_graph_desc *desc, n60_graph **outGraph);
  * live graph is untouched. Returns N60_STATUS_QUEUE_FULL if too many retired
  * snapshots await n60_graph_collect. A snapshot published twice before the
  * realtime thread runs supersedes the first, which is freed without ever rendering.
- * Adoption starts the new snapshot from fresh state (filters, delays, meters, gain at
- * its target), so a topology change is not click-free; parameter edits that must be
- * smooth go through n60_graph_post_params. Parameter records posted before a publish
+ * The new snapshot has fresh state (filters, delays, meters, gain at its target). Since
+ * ABI v5 it is not swapped in cold: the realtime thread renders it next to the live one
+ * (silent warm-up long enough to fill its latency), then crossfades live -> new with an
+ * equal-power law over the fade length (default 20 ms; see n60_rebuild_options). Both
+ * graphs run during the rebuild, and the next publish waits until it finishes. Live ANC
+ * injection is muted in both instances for the whole rebuild and stays muted until the
+ * host posts a new re-arm revision. Parameter records posted before a publish
  * are dropped at adoption: repeat them in the new descriptor. */
 n60_status n60_graph_publish(n60_graph *graph, const n60_graph_desc *desc);
+
+/* ABI v5 rebuild policy. fadeMs: crossfade length for later publishes, 0..500, default 20; 0 swaps
+ * instantly (not click-free). cpuBudgetPercent: 0 = off (default); otherwise a rebuild is refused,
+ * and the live graph kept, when the measured cost of rendering both graphs during the warm-up exceeds
+ * this percent of real time. */
+typedef struct n60_rebuild_options {
+    uint32_t structSize; /* sizeof(n60_rebuild_options) */
+    float fadeMs;
+    float cpuBudgetPercent;
+    uint32_t reserved;   /* must be 0 */
+} n60_rebuild_options;
+
+n60_status n60_graph_set_rebuild_options(n60_graph *graph, const n60_rebuild_options *options);
+
+/* Rebuild progress. state: 0 idle, 1 warming, 2 fading. lastResult: 0 none, 1 completed, 2 refused for
+ * CPU budget, 3 cancelled because the new graph produced non-finite output; in cases 2 and 3 the live
+ * graph kept running. ancStagesHeld: ANC injection stages muted by the last rebuild (they stay muted
+ * until a new re-arm revision, ANC_INJECT params[3], is posted after the rebuild is idle; revisions
+ * posted during a rebuild are ignored; a 3-parameter ANC_INJECT has no revision and so stays muted after
+ * any rebuild). Known limits: records posted against a snapshot that is then refused or cancelled are
+ * dropped and counted; a mid-fade cancel returns to the old graph at once (not crossfaded); the incoming
+ * graph's latency is not compensated during the fade; the CPU budget reads steady_clock once per warm-up
+ * block (the one clock read on the callback path, a documented exception). The caller sets structSize
+ * before the call. */
+typedef struct n60_rebuild_status {
+    uint32_t structSize; /* sizeof(n60_rebuild_status) */
+    uint32_t state;
+    uint32_t lastResult;
+    uint32_t ancStagesHeld;
+    uint64_t completed;
+    uint64_t refused;
+    uint64_t cancelled;
+    float lastWarmupCpuPercent; /* measured at the end of the last budgeted warm-up, else 0 */
+    uint32_t reserved;
+} n60_rebuild_status;
+
+n60_status n60_graph_get_rebuild_status(const n60_graph *graph, n60_rebuild_status *outStatus);
 
 /* Control thread. Frees snapshots the realtime thread has retired. Returns how many. */
 uint32_t n60_graph_collect(n60_graph *graph);
@@ -248,9 +290,10 @@ uint32_t n60_graph_collect(n60_graph *graph);
 n60_status n60_graph_process(n60_graph *graph, const float *const *in, float *const *out, uint32_t frames);
 
 /* One parameter target for a stage (latest wins, coalesced at block start).
- * Live parameters in S3: GAIN params[0] (linear, 0..10000) and DELAY params[0]
- * (frames, rounded, 0..capacityFrames). Anything else that needs a new topology
- * (PEQ, M/S, ...) returns N60_STATUS_UNSUPPORTED; publish a new snapshot instead.
+ * Live parameters: see each stage kind (GAIN params[0] linear 0..10000, DELAY params[0] frames rounded
+ * 0..capacityFrames, PEQ every section parameter, ...). Edits are ramped or crossfaded inside the stage
+ * (5 ms) and never reset state. Anything that needs a new topology returns N60_STATUS_UNSUPPORTED;
+ * publish a new snapshot instead.
  * A batch is validated whole and applied all or nothing. Unknown stage ids or
  * indexes are N60_STATUS_BAD_ARGUMENT. Records are tagged with the newest
  * published epoch; the realtime thread drops records older than the snapshot it
@@ -278,6 +321,7 @@ void n60_graph_retire(n60_graph *graph);
 
 /* Howl guard status (ANC_GUARD). trip: 0 none, 1 growth, 2 error rise, 3 non-finite, 4 over ceiling. */
 typedef struct n60_guard_status {
+    uint32_t structSize;      /* sizeof(n60_guard_status) as seen by the caller (ABI v5) */
     uint32_t trip;
     uint32_t muted;
     uint64_t tripFrame;       /* frames since arm at the trip */
