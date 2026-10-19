@@ -43,6 +43,30 @@ harness() {
     echo "::endgroup::"
 }
 
+# build_core_objs: compiles libn60core once into CORE_OBJS (CORE_OK=0 on failure).
+# The realtime bridge calls n60_graph_*, so bridge harnesses link these objects too.
+CORE_BUILT=0
+CORE_OK=0
+CORE_OBJS=()
+build_core_objs() {
+    [ "$CORE_BUILT" = 1 ] && return 0
+    CORE_BUILT=1
+    CORE_OK=1
+    local src
+    for src in graph snapshot fft stages_dsp stages_system stages_matrix layout; do
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -fno-exceptions -fno-rtti -Icore/include \
+            -c "core/src/$src.cpp" -o "$OUT/n60core_$src.o"; then
+            CORE_OBJS+=("$OUT/n60core_$src.o")
+        else
+            CORE_OK=0
+        fi
+    done
+}
+# Bridge harnesses: build the core only when one of them is selected.
+if selected pr35_transition_ack || selected pr41_same_device_output_map || selected pr101_realtime_resource_soak; then
+    build_core_objs
+fi
+
 # Standalone DSP maths (PR34 parity set).
 for name in bandpass compiled_eq constantq linkwitz midside; do
     harness "pr34_$name" "${STRICT[@]}" "ci/validate_pr34_$name.c"
@@ -79,13 +103,13 @@ harness pr35_render_context_snapshot_pointer -std=c11 -Wall -Wextra -include std
     ci/validate_pr35_render_context_snapshot_pointer.c $ALL_RT_NO_BRIDGE -framework Accelerate
 # shellcheck disable=SC2086
 harness pr35_transition_ack "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/validate_pr35_transition_ack.c $ALL_RT \
-    -framework Accelerate -framework CoreAudio
+    -Icore/include ${CORE_OBJS[@]+"${CORE_OBJS[@]}"} -lc++ -framework Accelerate -framework CoreAudio
 # shellcheck disable=SC2086
 harness pr38_denoiser_advanced "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/validate_pr38_denoiser_advanced.c $ALL_RT_NO_BRIDGE \
     -framework Accelerate
 # shellcheck disable=SC2086
 harness pr41_same_device_output_map "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/validate_pr41_same_device_output_map.c $ALL_RT \
-    -framework Accelerate -framework CoreAudio
+    -Icore/include ${CORE_OBJS[@]+"${CORE_OBJS[@]}"} -lc++ -framework Accelerate -framework CoreAudio
 
 # Adaptive-rate transport (PR69-71).
 harness pr69_adaptive_src "${STRICT[@]}" -O2 -I"$RT" ci/validate_pr69_adaptive_src.c "$RT/N60AdaptiveSampleRate.c" -lm
@@ -118,7 +142,7 @@ harness pr107_live_fir_render "${STRICT[@]}" -O2 -I"$RT" ci/validate_pr107_live_
 harness pr107_program_fir_runtime "${STRICT[@]}" -O2 -I"$RT" ci/validate_pr107_program_fir_runtime.c -lm
 # shellcheck disable=SC2086
 harness pr101_realtime_resource_soak "${STRICT[@]}" -O3 -arch arm64 -include stddef.h -I"$RT" \
-    ci/validate_pr101_realtime_resource_soak.c $ALL_RT -framework Accelerate -framework CoreAudio
+    ci/validate_pr101_realtime_resource_soak.c $ALL_RT -Icore/include ${CORE_OBJS[@]+"${CORE_OBJS[@]}"} -lc++ -framework Accelerate -framework CoreAudio
 
 # E4 S4: speaker-ANC howl guard, the first C++20 engine core. Compiled once,
 # then linked into its C harness.
@@ -161,16 +185,7 @@ fi
 # E6 S2/S3: libn60core (portable C++ core behind its versioned C ABI): graph skeleton,
 # snapshot swap, lane stages, allocation hook, and parity with the kernel biquad.
 if selected e6_core_graph; then
-    CORE_OK=1
-    CORE_OBJS=()
-    for src in graph snapshot fft stages_dsp stages_system stages_matrix layout; do
-        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -fno-exceptions -fno-rtti -Icore/include \
-            -c "core/src/$src.cpp" -o "$OUT/n60core_$src.o"; then
-            CORE_OBJS+=("$OUT/n60core_$src.o")
-        else
-            CORE_OK=0
-        fi
-    done
+    build_core_objs
     if [ "$CORE_OK" = 1 ]; then
         harness e6_core_graph "${STRICT[@]}" -O2 -Icore/include core/tests/test_graph.c \
             "${CORE_OBJS[@]}" -lc++ -lm

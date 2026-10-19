@@ -1,5 +1,7 @@
 #include "N60RealtimeAudioBridge.h"
 
+#include "n60/graph.h"
+
 #include <math.h>
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -71,7 +73,20 @@ typedef struct {
 } N60SpeakerBusSplitterRuntime;
 
 
+// E6 S8: an alternate render path through libn60core. The attachment is built and freed
+// on the control thread only; the audio callback loads the pointer (acquire) and calls
+// n60_graph_process on planar scratch whose lifetime the callback does not own.
+// The attachment (and its scratch) is allocated once on first attach and lives until the
+// bridge is destroyed, so the callback can never touch freed memory; attach and detach only
+// swap the graph pointer inside it.
+typedef struct N60UnifiedGraphAttachment {
+    _Atomic(n60_graph *) graph;
+    float *scratch;       // 4 * maxFrames floats: planar in (2 lanes) then planar out (2 lanes)
+    uint32_t maxFrames;
+} N60UnifiedGraphAttachment;
+
 struct N60RealtimeAudioBridge {
+    _Atomic(N60UnifiedGraphAttachment *) unifiedGraph;
     uint32_t capacityFrames;
     N60StereoFrame *frames;
     N60AdaptiveSRC *adaptiveSRC;
@@ -523,6 +538,56 @@ static void process_speaker_bus_splitter(
     (void)N60SpeakerBusFrameSet(frame, N60SpeakerOutputBusRightHigh, highRight);
 }
 
+static void free_unified_attachment(N60UnifiedGraphAttachment *attachment) {
+    if (attachment == NULL) return;
+    free(attachment->scratch);
+    free(attachment);
+}
+
+bool N60RealtimeAudioBridgeSetUnifiedGraph(
+    N60RealtimeAudioBridge *bridge,
+    void *graph,
+    uint32_t maxFrames
+) {
+    if (bridge == NULL) return false;
+    N60UnifiedGraphAttachment *attachment = atomic_load_explicit(
+        &bridge->unifiedGraph, memory_order_acquire
+    );
+    if (graph == NULL) {
+        if (attachment != NULL) {
+            atomic_store_explicit(&attachment->graph, NULL, memory_order_release);
+        }
+        return true;
+    }
+    if (maxFrames == 0u || maxFrames > (1u << 20)) return false;
+    if (attachment == NULL) {
+        attachment = calloc(1, sizeof(N60UnifiedGraphAttachment));
+        if (attachment == NULL) return false;
+        attachment->scratch = calloc((size_t)maxFrames * 4u, sizeof(float));
+        if (attachment->scratch == NULL) {
+            free(attachment);
+            return false;
+        }
+        attachment->maxFrames = maxFrames;
+        atomic_store_explicit(&attachment->graph, (n60_graph *)graph, memory_order_relaxed);
+        atomic_store_explicit(&bridge->unifiedGraph, attachment, memory_order_release);
+        return true;
+    }
+    // The scratch size is fixed by the first attach; a graph built for larger blocks is refused.
+    if (maxFrames > attachment->maxFrames) return false;
+    atomic_store_explicit(&attachment->graph, (n60_graph *)graph, memory_order_release);
+    return true;
+}
+
+bool N60RealtimeAudioBridgeUnifiedGraphActive(const N60RealtimeAudioBridge *bridge) {
+    if (bridge == NULL) return false;
+    N60UnifiedGraphAttachment *attachment = atomic_load_explicit(
+        (_Atomic(N60UnifiedGraphAttachment *) *)&bridge->unifiedGraph, memory_order_acquire
+    );
+    return attachment != NULL
+        && atomic_load_explicit(&attachment->graph, memory_order_acquire) != NULL;
+}
+
 N60RealtimeAudioBridge *N60RealtimeAudioBridgeCreate(uint32_t capacityFrames) {
     if (capacityFrames == 0) return NULL;
     N60RealtimeAudioBridge *bridge = calloc(1, sizeof(N60RealtimeAudioBridge));
@@ -587,6 +652,7 @@ N60RealtimeAudioBridge *N60RealtimeAudioBridgeCreate(uint32_t capacityFrames) {
 
 void N60RealtimeAudioBridgeDestroy(N60RealtimeAudioBridge *bridge) {
     if (bridge == NULL) return;
+    free_unified_attachment(atomic_load_explicit(&bridge->unifiedGraph, memory_order_acquire));
     N60AdaptiveSRCDestroy(bridge->adaptiveSRC);
     N60RenderKernelDestroy(bridge->renderKernel);
     free(bridge->adaptiveCaptureScratch);
@@ -2234,6 +2300,46 @@ OSStatus N60OutputIOProc(
             renderedFrames += 1u;
         }
     } else {
+        // E6 S8: with a unified graph attached, one whole-buffer n60_graph_process call
+        // replaces the per-frame kernel for this block. No allocation, no locks; the
+        // kernel is skipped, so its state does not advance while the graph renders.
+        N60UnifiedGraphAttachment *unified = atomic_load_explicit(
+            &bridge->unifiedGraph, memory_order_acquire
+        );
+        bool unifiedRendered = false;
+        float *unifiedOut = NULL;
+        n60_graph *unifiedGraph = unified != NULL
+            ? atomic_load_explicit(&unified->graph, memory_order_acquire) : NULL;
+        if (unifiedGraph != NULL && framesToRead <= unified->maxFrames) {
+            float *planarIn = unified->scratch;
+            float *planarOut = unified->scratch + (size_t)unified->maxFrames * 2u;
+            uint32_t readPosition = ringReadIndex;
+            for (UInt32 i = 0; i < framesToRead; ++i) {
+                N60StereoFrame source;
+                if (adaptiveSampleRate) {
+                    const size_t base = (size_t)i * 2u;
+                    source = (N60StereoFrame){
+                        bridge->adaptiveOutputScratch[base],
+                        bridge->adaptiveOutputScratch[base + 1u]
+                    };
+                } else {
+                    source = bridge->frames[readPosition];
+                    readPosition += 1u;
+                    if (readPosition == bridge->capacityFrames) readPosition = 0u;
+                }
+                planarIn[i] = source.left;
+                planarIn[unified->maxFrames + i] = source.right;
+            }
+            const float *inLanes[2] = { planarIn, planarIn + unified->maxFrames };
+            float *outLanes[2] = { planarOut, planarOut + unified->maxFrames };
+            // On a process error the block is silence, never a splice of stale kernel state.
+            if (n60_graph_process(unifiedGraph, inLanes, outLanes, framesToRead)
+                    != N60_STATUS_OK) {
+                memset(planarOut, 0, (size_t)unified->maxFrames * 2u * sizeof(float));
+            }
+            unifiedRendered = true;
+            unifiedOut = planarOut;
+        }
         for (UInt32 frameIndex = 0;
              frameIndex < framesToRead;
              ++frameIndex) {
@@ -2252,14 +2358,19 @@ OSStatus N60OutputIOProc(
                 }
             }
             N60StereoFrame processed;
-            N60RenderKernelProcessStereoFrameInContext(
-                bridge->renderKernel,
-                &renderContext,
-                frame.left,
-                frame.right,
-                &processed.left,
-                &processed.right
-            );
+            if (unifiedRendered) {
+                processed.left = unifiedOut[frameIndex];
+                processed.right = unifiedOut[unified->maxFrames + frameIndex];
+            } else {
+                N60RenderKernelProcessStereoFrameInContext(
+                    bridge->renderKernel,
+                    &renderContext,
+                    frame.left,
+                    frame.right,
+                    &processed.left,
+                    &processed.right
+                );
+            }
 
             if (frameIndex < analysisFramesToWrite) {
                 bridge->analysisFrames[analysisRingIndex] =

@@ -104,6 +104,8 @@ final class ProductController: ObservableObject {
             ),
             masterVolumeStore: UserDefaultsMasterVolumeStore()
         )
+        // E6 S8: Swift decides; the engine only receives the result. Read once at launch.
+        audioEngine.unifiedGraphEnabled = FeatureFlags().isEnabled(.unifiedGraph)
         let audioUnitHost = AudioUnitHostController()
         let profiles = ProductProfileController(
             engine: audioEngine,
