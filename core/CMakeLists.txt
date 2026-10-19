@@ -33,3 +33,8 @@ add_executable(n60core_system_test tests/test_system.c)
 set_target_properties(n60core_system_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
 target_link_libraries(n60core_system_test PRIVATE n60core m)
 add_test(NAME n60core_system COMMAND n60core_system_test)
+
+add_executable(n60core_rebuild_test tests/test_rebuild.c)
+set_target_properties(n60core_rebuild_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
+target_link_libraries(n60core_rebuild_test PRIVATE n60core m)
+add_test(NAME n60core_rebuild COMMAND n60core_rebuild_test)

@@ -30,7 +30,7 @@ struct StageRec {
     uint32_t stateOff;   // laneCount records of stateStride bytes
     uint32_t stateStride;
     uint32_t capacity;   // DELAY: capacity in frames
-    uint32_t coefOff;    // PEQ: double[sections][5] (b0 b1 b2 a1 a2)
+    uint32_t coefOff;    // PEQ: PeqSec[sections] (live and incoming biquad coefficients, crossfade counter)
     uint32_t sharedOff;  // ABI v3 stages: state shared by all of the stage's lanes
     float applied;       // last target the state acted on (GAIN, DELAY)
 };
@@ -46,7 +46,7 @@ struct SnapHeader {
     uint32_t stageTableOff;
     uint32_t rampFrames;  // 5 ms, clamped to 32..4096 frames
     uint32_t rawPad;      // bytes from the raw allocation to this header
-    uint32_t pad;
+    uint32_t fadeFrames;  // rebuild crossfade length when this snapshot is adopted (0 = instant swap)
 };
 
 inline uint8_t *bytes(SnapHeader *h) { return reinterpret_cast<uint8_t *>(h); }
@@ -90,8 +90,9 @@ void runSnapshot(SnapHeader *snap, float *const *lanes, uint32_t frames,
 // parameter needs a new topology). Reads only immutable snapshot fields.
 n60_status validateParam(const SnapHeader *snap, const StageRec &stage, uint32_t paramIndex, float value);
 
-// Realtime thread. Applies one mailbox record; false when it no longer fits.
-bool applyParam(SnapHeader *snap, uint32_t stageId, uint32_t paramIndex, float value);
+// Realtime thread. Applies one mailbox record; false when it no longer fits. Sets
+// *latencyMayChange when the applied parameter can change the reported latency.
+bool applyParam(SnapHeader *snap, uint32_t stageId, uint32_t paramIndex, float value, bool *latencyMayChange);
 uint32_t snapshotLatency(const SnapHeader *snap);
 
 // Control thread (immutable fields only).

@@ -49,6 +49,16 @@ struct DelayLane {
 
 struct PeqLane {
     double z[N60_PEQ_MAX_SECTIONS][2];
+    double zn[N60_PEQ_MAX_SECTIONS][2];  // incoming section state during a coefficient crossfade
+};
+
+// Per-section control block, stored in the stage's coefficient region (shared by all lanes).
+struct PeqSec {
+    double cur[5];       // live coefficients (b0 b1 b2 a1 a2)
+    double nxt[5];       // incoming coefficients while xfLeft != 0
+    float seen[4];       // parameters the live/incoming design was made from
+    uint32_t xfLeft;     // frames left in the crossfade (0 = none)
+    uint32_t pad;
 };
 
 struct MeterLane {
@@ -367,7 +377,7 @@ n60_status buildSnapshot(const n60_graph_desc &d, uint32_t epoch, SnapHeader **o
         plan[i].state = off;
         off += alignUp(stateStrideFor(s, d.sampleRate) * laneCountFor(s, d.outputChannels));
         plan[i].coef = off;
-        if (s.kind == N60_STAGE_PEQ) off += alignUp(sizeof(double) * 5 * (s.paramCount / 4));
+        if (s.kind == N60_STAGE_PEQ) off += alignUp(sizeof(PeqSec) * (s.paramCount / 4));
         plan[i].shared = off;
         off += alignUp(sharedBytesFor(s, d.sampleRate));
         if (off > kMaxArenaBytes) return N60_STATUS_OUT_OF_MEMORY;
@@ -441,10 +451,11 @@ n60_status buildSnapshot(const n60_graph_desc &d, uint32_t epoch, SnapHeader **o
         if (isDspKind(s.kind)) dspInit(h, r);
         if (isSystemKind(s.kind)) systemInit(h, r);
         if (s.kind == N60_STAGE_PEQ) {
-            double *coef = reinterpret_cast<double *>(bytes(h) + r.coefOff);
+            PeqSec *sec = reinterpret_cast<PeqSec *>(bytes(h) + r.coefOff);
             for (uint32_t k = 0; k < s.paramCount / 4; ++k) {
                 const float *p = s.params + 4 * k;
-                designBiquad(static_cast<uint32_t>(p[0]), d.sampleRate, p[1], p[2], p[3], coef + 5 * k);
+                designBiquad(static_cast<uint32_t>(p[0]), d.sampleRate, p[1], p[2], p[3], sec[k].cur);
+                for (int j = 0; j < 4; ++j) sec[k].seen[j] = p[j];
             }
         }
     }
@@ -475,13 +486,25 @@ n60_status validateParam(const SnapHeader *snap, const StageRec &r, uint32_t par
             return (paramIndex != 0 || value < 0.0f || value > static_cast<float>(r.capacity))
                        ? N60_STATUS_BAD_ARGUMENT
                        : N60_STATUS_OK;
+        case N60_STAGE_PEQ: {
+            // Every section parameter is live. Ranges are chosen so that any combination of valid
+            // values designs successfully (the realtime thread designs; it cannot report failure).
+            if (paramIndex >= r.paramCount) return N60_STATUS_BAD_ARGUMENT;
+            const double v = value;
+            switch (paramIndex % 4) {
+                case 0: return (v >= 0.0 && v <= 7.0 && v == std::floor(v)) ? N60_STATUS_OK : N60_STATUS_BAD_ARGUMENT;
+                case 1: return (v > 0.0 && v < snap->sampleRate * 0.5) ? N60_STATUS_OK : N60_STATUS_BAD_ARGUMENT;
+                case 2: return (v >= -24.0 && v <= 24.0) ? N60_STATUS_OK : N60_STATUS_BAD_ARGUMENT;
+                default: return (v >= 0.01 && v <= 1000.0) ? N60_STATUS_OK : N60_STATUS_BAD_ARGUMENT;
+            }
+        }
         default:
             if (isSystemKind(r.kind)) return validateSystemParam(snap, r, paramIndex, value);
             return isDspKind(r.kind) ? validateDspParam(snap, r, paramIndex, value) : N60_STATUS_UNSUPPORTED;
     }
 }
 
-bool applyParam(SnapHeader *snap, uint32_t stageId, uint32_t paramIndex, float value) {
+bool applyParam(SnapHeader *snap, uint32_t stageId, uint32_t paramIndex, float value, bool *latencyMayChange) {
     StageRec *table = stages(snap);
     for (uint32_t i = 0; i < snap->stageCount; ++i) {
         StageRec &r = table[i];
@@ -489,6 +512,9 @@ bool applyParam(SnapHeader *snap, uint32_t stageId, uint32_t paramIndex, float v
         if (validateParam(snap, r, paramIndex, value) != N60_STATUS_OK) return false;
         float *params = paramsOf(snap, r);
         params[paramIndex] = r.kind == N60_STAGE_DELAY ? std::floor(value + 0.5f) : value;
+        // Only DELAY targets and protection look-ahead/oversampling feed the reported latency
+        // (protection's latency inputs are not live, so DELAY is the only kind that changes it).
+        if (latencyMayChange != nullptr && r.kind == N60_STAGE_DELAY) *latencyMayChange = true;
         return true;
     }
     return false;
@@ -597,19 +623,59 @@ void runMSDecode(float *a, float *b, uint32_t frames) {
 
 void runPeq(SnapHeader *h, const StageRec &r, float *const *lanes, uint32_t frames) {
     const uint32_t sections = r.paramCount / 4;
-    const double *coef = reinterpret_cast<const double *>(bytes(h) + r.coefOff);
+    PeqSec *sec = reinterpret_cast<PeqSec *>(bytes(h) + r.coefOff);
+    const float *params = paramsOf(h, r);
+    const uint32_t ramp = h->rampFrames;
+    // A changed section is rendered twice: old coefficients, and new coefficients with state
+    // continued from the old section. The two outputs are crossfaded over the ramp window and the
+    // old one is dropped. An edit that lands during a crossfade starts the next one afterwards.
+    for (uint32_t s = 0; s < sections; ++s) {
+        const float *p = params + 4 * s;
+        PeqSec &q = sec[s];
+        if (q.xfLeft != 0 || (p[0] == q.seen[0] && p[1] == q.seen[1] && p[2] == q.seen[2] && p[3] == q.seen[3])) continue;
+        if (!designBiquad(static_cast<uint32_t>(p[0]), h->sampleRate, p[1], p[2], p[3], q.nxt)) {
+            for (int j = 0; j < 4; ++j) q.seen[j] = p[j];  // unreachable for validated values; keep the old design
+            continue;
+        }
+        for (int j = 0; j < 4; ++j) q.seen[j] = p[j];
+        q.xfLeft = ramp;
+        for (uint32_t l = 0; l < r.laneCount; ++l) {
+            PeqLane &st = *reinterpret_cast<PeqLane *>(laneState(h, r, l));
+            st.zn[s][0] = st.z[s][0];
+            st.zn[s][1] = st.z[s][1];
+        }
+    }
     for (uint32_t l = 0; l < r.laneCount; ++l) {
         PeqLane &st = *reinterpret_cast<PeqLane *>(laneState(h, r, l));
         float *buf = lanes[r.laneFirst + l];
-        double z[N60_PEQ_MAX_SECTIONS][2];
+        double z[N60_PEQ_MAX_SECTIONS][2], zn[N60_PEQ_MAX_SECTIONS][2];
         std::memcpy(z, st.z, sizeof z);
+        std::memcpy(zn, st.zn, sizeof zn);
+        uint32_t xf[N60_PEQ_MAX_SECTIONS];
+        const double *live[N60_PEQ_MAX_SECTIONS];
+        for (uint32_t s = 0; s < sections; ++s) {
+            xf[s] = sec[s].xfLeft;
+            live[s] = sec[s].cur;
+        }
         for (uint32_t i = 0; i < frames; ++i) {
             double x = buf[i];
             for (uint32_t s = 0; s < sections; ++s) {  // transposed direct form II
-                const double *c = coef + 5 * s;
-                const double y = c[0] * x + z[s][0];
+                const double *c = live[s];
+                double y = c[0] * x + z[s][0];
                 z[s][0] = c[1] * x - c[3] * y + z[s][1];
                 z[s][1] = c[2] * x - c[4] * y;
+                if (xf[s] != 0) {
+                    const double *n = sec[s].nxt;
+                    const double yn = n[0] * x + zn[s][0];
+                    zn[s][0] = n[1] * x - n[3] * yn + zn[s][1];
+                    zn[s][1] = n[2] * x - n[4] * yn;
+                    y += (static_cast<double>(ramp - xf[s] + 1) / static_cast<double>(ramp)) * (yn - y);
+                    if (--xf[s] == 0) {  // the incoming section takes over, state and all
+                        z[s][0] = zn[s][0];
+                        z[s][1] = zn[s][1];
+                        live[s] = sec[s].nxt;
+                    }
+                }
                 x = y;
             }
             buf[i] = static_cast<float>(x);
@@ -618,9 +684,21 @@ void runPeq(SnapHeader *h, const StageRec &r, float *const *lanes, uint32_t fram
         for (uint32_t s = 0; s < sections; ++s) {
             for (int k = 0; k < 2; ++k) {
                 if (std::fabs(z[s][k]) < 1e-30) z[s][k] = 0.0;
+                if (std::fabs(zn[s][k]) < 1e-30) zn[s][k] = 0.0;
             }
         }
         std::memcpy(st.z, z, sizeof z);
+        std::memcpy(st.zn, zn, sizeof zn);
+    }
+    for (uint32_t s = 0; s < sections; ++s) {
+        PeqSec &q = sec[s];
+        if (q.xfLeft == 0) continue;
+        if (q.xfLeft <= frames) {
+            std::memcpy(q.cur, q.nxt, sizeof q.cur);
+            q.xfLeft = 0;
+        } else {
+            q.xfLeft -= frames;
+        }
     }
 }
 

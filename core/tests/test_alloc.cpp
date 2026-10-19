@@ -85,6 +85,8 @@ int main() {
 
         n60_graph *g = nullptr;
         CHECK(n60_graph_build(&da, &g) == N60_STATUS_OK, "build");
+        n60_rebuild_options instant{sizeof instant, 0.0f, 0.0f, 0};
+        CHECK(n60_graph_set_rebuild_options(g, &instant) == N60_STATUS_OK, "instant swaps");
         float l[N], r[N], ol[N], orr[N];
         for (uint32_t i = 0; i < N; i++) { l[i] = 0.1f * std::sin(0.05f * i); r[i] = 0.1f * std::cos(0.07f * i); }
         l[3] = NAN;
@@ -143,6 +145,7 @@ int main() {
         db.stages = b; db.stageCount = 2;
         n60_graph *g = nullptr;
         CHECK(n60_graph_build(&da, &g) == N60_STATUS_OK, "build S4 graph at %.0f", rate);
+        { n60_rebuild_options instant{sizeof instant, 0.0f, 0.0f, 0}; n60_graph_set_rebuild_options(g, &instant); }
         static float buf[4][N], obuf[4][N];
         const float *in[4];
         float *out[4];
@@ -214,6 +217,7 @@ int main() {
         db.stages = b; db.stageCount = 2;
         n60_graph *g = nullptr;
         CHECK(n60_graph_build(&da, &g) == N60_STATUS_OK, "build S5 graph at %.0f", rate);
+        { n60_rebuild_options instant{sizeof instant, 0.0f, 0.0f, 0}; n60_graph_set_rebuild_options(g, &instant); }
         if (g == nullptr) continue;
         static float buf[4][N], obuf[4][N];
         const float *in[4];
@@ -243,6 +247,93 @@ int main() {
                   allocs.load(), frees.load());
             n60_graph_collect(g);
         }
+        n60_graph_retire(g);
+    }
+    // S6: ramped live edits and the faded rebuild (warm-up, crossfade, completion, NaN cancel and CPU-budget
+    // refusal) run entirely on preallocated state: no allocation or free anywhere in the callback.
+    for (double rate : rates) {
+        constexpr uint32_t N = 256;
+        const float gain = 0.9f;
+        const float peq[8] = {0, static_cast<float>(1000 * rate / 48000), 3, 1, 1, static_cast<float>(300 * rate / 48000), -2, 0.7f};
+        float taps0[64] = {1.0f}, taps1[64] = {0};
+        taps1[7] = 0.5f;
+        const float delay = 20;
+        const float inj[4] = {1, 1, -6, 3};
+        n60_stage_desc a[6] = {
+            stage(N60_STAGE_SANITISE, 1, N60_LANE_ALL, nullptr, 0),
+            stage(N60_STAGE_GAIN, 2, N60_LANE_ALL, &gain, 1),
+            stage(N60_STAGE_PEQ, 3, N60_LANE_ALL, peq, 8),
+            stage(N60_STAGE_FIR, 4, N60_LANE_ALL, taps0, 64),
+            stage(N60_STAGE_DELAY, 5, N60_LANE_ALL, &delay, 1, 300),
+            stage(N60_STAGE_ANC_INJECT, 6, 0, inj, 4),
+        };
+        n60_stage_desc b[5] = {a[0], a[1], stage(N60_STAGE_FIR, 4, N60_LANE_ALL, taps1, 64), a[4], a[5]};
+        n60_stage_desc nanb[2] = {a[1], a[4]};  // no sanitiser: NaN input reaches the output
+        n60_graph_desc da{}, db{}, dn{};
+        da.structSize = db.structSize = dn.structSize = sizeof da;
+        da.abiVersion = db.abiVersion = dn.abiVersion = N60_GRAPH_ABI_VERSION;
+        da.sampleRate = db.sampleRate = dn.sampleRate = rate;
+        da.maxBlockFrames = db.maxBlockFrames = dn.maxBlockFrames = N;
+        da.inputChannels = da.outputChannels = db.inputChannels = db.outputChannels = dn.inputChannels = dn.outputChannels = 2;
+        da.stages = a; da.stageCount = 6;
+        db.stages = b; db.stageCount = 5;
+        dn.stages = nanb; dn.stageCount = 2;
+        n60_graph *g = nullptr;
+        CHECK(n60_graph_build(&da, &g) == N60_STATUS_OK, "build S6 graph at %.0f", rate);
+        if (g == nullptr) continue;
+        static float buf[2][N], obuf[2][N];
+        const float *in[2];
+        float *out[2];
+        for (int c = 0; c < 2; c++) { in[c] = buf[c]; out[c] = obuf[c]; }
+        uint32_t seed = 5;
+        long blocks = 0;
+        for (int round = 0; round < 12; round++) {
+            const int kind = round % 4;  // 0 faded rebuild, 1 NaN cancel, 2 CPU refusal, 3 rebuild back to the full graph
+            n60_rebuild_options o{sizeof o, 20.0f, kind == 2 ? 1e-7f : 0.0f, 0};
+            CHECK(n60_graph_set_rebuild_options(g, &o) == N60_STATUS_OK, "options");
+            n60_graph_desc &d = kind == 1 ? dn : (kind == 3 ? da : db);
+            CHECK(n60_graph_publish(g, &d) == N60_STATUS_OK, "publish S6");
+            for (int step = 0; step < 400; step++) {
+                // Edits every block: PEQ gain and frequency, gain, delay.
+                const n60_param_record rec[4] = {{3, 2, static_cast<float>((step % 11) - 5), 0},
+                                                 {3, 1, static_cast<float>((200 + 37 * step) % 5000 + 100), 0},
+                                                 {2, 0, 0.5f + 0.01f * static_cast<float>(step % 50), 0},
+                                                 {5, 0, static_cast<float>(step % 200), 0}};
+                if (kind == 0 || kind == 3) n60_graph_post_params(g, rec, 4);
+                for (int c = 0; c < 2; c++) {
+                    for (uint32_t i = 0; i < N; i++) {
+                        seed = seed * 1664525u + 1013904223u;
+                        buf[c][i] = 0.3f * (static_cast<float>((seed >> 8) & 0xFFFF) / 65536.0f - 0.5f);
+                    }
+                }
+                if (kind == 1 && step == 1) buf[0][5] = NAN;
+                allocs = 0;
+                frees = 0;
+                armed = true;
+                n60_status st = n60_graph_process(g, in, out, N);
+                armed = false;
+                ++blocks;
+                CHECK(st == N60_STATUS_OK, "process S6");
+                CHECK(allocs == 0 && frees == 0, "rate %.0f S6 round %d step %d: realtime call allocated %ld / freed %ld", rate,
+                      round, step, allocs.load(), frees.load());
+                n60_rebuild_status rs{};
+                rs.structSize = sizeof rs;
+                n60_graph_get_rebuild_status(g, &rs);
+                if (step > 2 && rs.state == 0) break;
+            }
+            n60_rebuild_status rs{};
+            rs.structSize = sizeof rs;
+            n60_graph_get_rebuild_status(g, &rs);
+            CHECK(rs.state == 0, "round %d rebuild finished", round);
+            CHECK(rs.lastResult == (kind == 1 ? 3u : (kind == 2 ? 2u : 1u)), "round %d result %u", round, rs.lastResult);
+            n60_graph_collect(g);
+            if (kind == 1 || kind == 2) {
+                // The failed rebuild left the previous graph live; nothing else to undo.
+                n60_rebuild_options off{sizeof off, 20.0f, 0.0f, 0};
+                n60_graph_set_rebuild_options(g, &off);
+            }
+        }
+        CHECK(blocks > 12, "S6 rounds ran");
         n60_graph_retire(g);
     }
     if (failures) {

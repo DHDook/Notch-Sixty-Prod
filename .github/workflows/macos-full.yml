@@ -107,7 +107,7 @@ jobs:
               -c core/src/$f.cpp -o "$RUNNER_TEMP/n60core_$f.o"
           done
           LIB=("$RUNNER_TEMP/n60core_graph.o" "$RUNNER_TEMP/n60core_snapshot.o" "$RUNNER_TEMP/n60core_fft.o" "$RUNNER_TEMP/n60core_stages_dsp.o" "$RUNNER_TEMP/n60core_stages_system.o")
-          for t in test_graph test_stages test_dsp test_system; do
+          for t in test_graph test_stages test_dsp test_system test_rebuild; do
             clang -std=c11 -O2 -Wall -Wextra -Werror -Icore/include -c core/tests/$t.c -o "$RUNNER_TEMP/$t.o"
             clang++ "$RUNNER_TEMP/$t.o" "${LIB[@]}" -lm -pthread -o "$RUNNER_TEMP/$t"
             "$RUNNER_TEMP/$t"

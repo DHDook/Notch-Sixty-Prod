@@ -184,6 +184,8 @@ if selected e6_core_graph; then
             "$RT/N60Protection.c" "${CORE_OBJS[@]}" -lc++ -lm
         harness e6_core_system "${STRICT[@]}" -O2 -Icore/include core/tests/test_system.c \
             "${CORE_OBJS[@]}" -lc++ -lm
+        harness e6_core_rebuild "${STRICT[@]}" -O2 -Icore/include core/tests/test_rebuild.c \
+            "${CORE_OBJS[@]}" -lc++ -lm
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include core/tests/test_alloc.cpp \
             "${CORE_OBJS[@]}" -o "$OUT/e6_core_alloc" \
             && "$OUT/e6_core_alloc"; then :; else failed+=(e6_core_alloc); fi

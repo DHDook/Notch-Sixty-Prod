@@ -29,6 +29,12 @@ n60_status validateSystemParam(const SnapHeader *h, const StageRec &r, uint32_t 
 // Frames of latency one lane of this stage adds.
 uint32_t systemLatency(const SnapHeader *h, const StageRec &r);
 
+// Realtime thread. A rebuild starts: every ANC injection stage of this snapshot begins its 10 ms
+// mute ramp and stays held until the host posts a new re-arm revision (any revision already present is
+// absorbed). silentNow starts the hold at zero for an instance that has not yet been audible. Returns how
+// many stages.
+uint32_t systemRebuildMute(SnapHeader *h, bool silentNow);
+
 // Control thread. Howl guard status and capture ring reads (immutable fields plus atomics).
 bool readGuardStatus(const SnapHeader *h, uint32_t stageId, n60_guard_status *out);
 n60_status readCapture(const SnapHeader *h, uint32_t stageId, uint32_t lane, uint64_t startSample, float *dst,
