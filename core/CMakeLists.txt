@@ -1,0 +1,15 @@
+# libn60core: portable engine core (E6 S2, E21). No Apple framework, no third-party code.
+cmake_minimum_required(VERSION 3.20)
+project(n60core LANGUAGES C CXX)
+
+add_library(n60core STATIC src/graph.cpp)
+target_compile_features(n60core PUBLIC cxx_std_20)
+target_include_directories(n60core PUBLIC include)
+target_compile_options(n60core PRIVATE -Wall -Wextra -Werror -fno-exceptions -fno-rtti)
+
+enable_testing()
+add_executable(n60core_graph_test tests/test_graph.c)
+set_target_properties(n60core_graph_test PROPERTIES C_STANDARD 11)
+target_link_libraries(n60core_graph_test PRIVATE n60core m)
+set_target_properties(n60core_graph_test PROPERTIES LINKER_LANGUAGE CXX)
+add_test(NAME n60core_graph COMMAND n60core_graph_test)
