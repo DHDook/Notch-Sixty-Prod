@@ -14,6 +14,7 @@
 #include "snapshot.hpp"
 
 #include "stages_dsp.hpp"
+#include "stages_matrix.hpp"
 #include "stages_system.hpp"
 
 #include <algorithm>
@@ -174,7 +175,7 @@ uint32_t laneCountFor(const n60_stage_desc &s, uint32_t outCh) {
 
 // Position of a kind in the processing order (the numeric values predate ABI v3 and are
 // kept for compatibility; the new kinds slot in by rank).
-uint32_t rankOf(uint32_t kind) {
+uint32_t rankBase(uint32_t kind) {
     switch (kind) {
         case N60_STAGE_SANITISE: return 1;
         case N60_STAGE_METER_IN: return 2;
@@ -211,6 +212,13 @@ uint32_t rankOf(uint32_t kind) {
     }
 }
 
+// Ranks are scaled by ten so a stage can sit between two older kinds (BINAURAL, 17.5: after
+// CORE_DYNAMICS and before SYMMETRY).
+uint32_t rankOf(uint32_t kind) {
+    if (kind == N60_STAGE_BINAURAL) return 175;
+    return rankBase(kind) * 10;
+}
+
 // Kinds that reuse another stage's implementation run as that canonical kind; only the
 // rank (position in the chain) differs.
 uint32_t canonKind(uint32_t kind) {
@@ -238,6 +246,7 @@ size_t stateStrideFor(const n60_stage_desc &s, double rate) {
             size_t lane = 0, shared = 0;
             if (isDspKind(s.kind)) dspSizes(s, lane, shared);
             else if (isSystemKind(s.kind)) systemSizes(s, rate, lane, shared);
+            else if (isMatrixKind(s.kind)) matrixSizes(s, lane, shared);
             return lane;
         }
     }
@@ -247,6 +256,7 @@ size_t sharedBytesFor(const n60_stage_desc &s, double rate) {
     size_t lane = 0, shared = 0;
     if (isDspKind(s.kind)) dspSizes(s, lane, shared);
     else if (isSystemKind(s.kind)) systemSizes(s, rate, lane, shared);
+    else if (isMatrixKind(s.kind)) matrixSizes(s, lane, shared);
     return shared;
 }
 
@@ -294,6 +304,14 @@ n60_status validateDesc(const n60_graph_desc &d) {
             const n60_status v = validateDspStage(s, d.sampleRate, d.outputChannels);
             if (v != N60_STATUS_OK) return v;
             total += (stateStrideFor(s, d.sampleRate) * laneCountFor(s, d.outputChannels)) + sharedBytesFor(s, d.sampleRate);
+            if (total > kMaxArenaBytes) return N60_STATUS_OUT_OF_MEMORY;
+            continue;
+        }
+        if (isMatrixKind(s.kind)) {
+            const n60_status v = validateMatrixStage(s, d.sampleRate, d.outputChannels);
+            if (v != N60_STATUS_OK) return v;
+            total += (stateStrideFor(s, d.sampleRate) * laneCountFor(s, d.outputChannels)) + sharedBytesFor(s, d.sampleRate) +
+                     size_t(s.paramCount) * sizeof(float);
             if (total > kMaxArenaBytes) return N60_STATUS_OUT_OF_MEMORY;
             continue;
         }
@@ -450,6 +468,7 @@ n60_status buildSnapshot(const n60_graph_desc &d, uint32_t epoch, SnapHeader **o
         }
         if (isDspKind(s.kind)) dspInit(h, r);
         if (isSystemKind(s.kind)) systemInit(h, r);
+        if (isMatrixKind(s.kind)) matrixInit(h, r);
         if (s.kind == N60_STAGE_PEQ) {
             PeqSec *sec = reinterpret_cast<PeqSec *>(bytes(h) + r.coefOff);
             for (uint32_t k = 0; k < s.paramCount / 4; ++k) {
@@ -500,6 +519,7 @@ n60_status validateParam(const SnapHeader *snap, const StageRec &r, uint32_t par
         }
         default:
             if (isSystemKind(r.kind)) return validateSystemParam(snap, r, paramIndex, value);
+            if (isMatrixKind(r.kind)) return validateMatrixParam(snap, r, paramIndex, value);
             return isDspKind(r.kind) ? validateDspParam(snap, r, paramIndex, value) : N60_STATUS_UNSUPPORTED;
     }
 }
@@ -532,6 +552,13 @@ uint32_t snapshotLatency(const SnapHeader *snap) {
             frames = dspLatency(snap, r);
         } else if (isSystemKind(r.kind)) {
             frames = systemLatency(snap, r);
+        } else if (isMatrixKind(r.kind)) {
+            // N source lanes collapse onto two ear lanes: the ears carry the worst source latency.
+            uint32_t worstSrc = 0;
+            for (uint32_t l = 0; l < r.laneCount; ++l) worstSrc = std::max(worstSrc, perLane[laneOf(r, l)]);
+            for (uint32_t l = 0; l < r.laneCount; ++l) perLane[laneOf(r, l)] = 0;
+            perLane[r.laneA] = perLane[r.laneB] = worstSrc + matrixLatency(snap, r);
+            continue;
         }
         if (frames == 0) continue;
         for (uint32_t l = 0; l < r.laneCount; ++l) perLane[laneOf(r, l)] += frames;
@@ -775,6 +802,8 @@ void runSnapshot(SnapHeader *h, float *const *lanes, uint32_t frames, std::atomi
             default:
                 if (isSystemKind(r.kind)) {
                     runSystem(h, r, lanes, frames);
+                } else if (isMatrixKind(r.kind)) {
+                    runMatrix(h, r, lanes, frames);
                 } else {
                     runDsp(h, r, lanes, frames);
                 }

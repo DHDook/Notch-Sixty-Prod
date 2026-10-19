@@ -47,6 +47,17 @@ Every realtime DSP component must document:
 8. bypass behavior
 9. denormal/NaN handling where relevant
 
+## Allowed callback system interaction (libn60core rebuild)
+
+The only system interaction permitted in libn60core's callback path is the `steady_clock` read used for
+the rebuild CPU-budget refusal: two reads per warm-up block, and only when a CPU budget is set. On macOS it
+is a user-space read (commpage/`mach_absolute_time`) with no syscall, lock or allocation. It fails safe: a
+callback preempted between the two reads can wrongly refuse a rebuild, never corrupt audio. No other clock,
+syscall or system call is allowed.
+
+ANC muted by a refused or cancelled rebuild stays held (muted) on the live graph until the host re-arms it;
+the core never re-enables ANC by itself.
+
 ## Acceptance targets
 
 ```text

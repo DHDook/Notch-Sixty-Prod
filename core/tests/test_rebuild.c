@@ -807,7 +807,7 @@ static void testDeferred(double rate) {
 }
 
 int main(void) {
-    CHECK(n60_graph_abi_version() == N60_GRAPH_ABI_VERSION && N60_GRAPH_ABI_VERSION == 5u, "ABI v5");
+    CHECK(n60_graph_abi_version() == N60_GRAPH_ABI_VERSION && N60_GRAPH_ABI_VERSION >= 5u, "ABI v5 or later");
     for (unsigned i = 0; i < sizeof kRates / sizeof *kRates; i++) {
         const double rate = kRates[i];
         testPeqSweep(rate);

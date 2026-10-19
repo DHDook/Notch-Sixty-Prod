@@ -2,7 +2,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(n60core LANGUAGES C CXX)
 
-add_library(n60core STATIC src/graph.cpp src/snapshot.cpp src/fft.cpp src/stages_dsp.cpp src/stages_system.cpp)
+add_library(n60core STATIC src/graph.cpp src/snapshot.cpp src/fft.cpp src/stages_dsp.cpp src/stages_system.cpp src/stages_matrix.cpp src/layout.cpp)
 target_compile_features(n60core PUBLIC cxx_std_20)
 target_include_directories(n60core PUBLIC include)
 target_compile_options(n60core PRIVATE -Wall -Wextra -Werror -fno-exceptions -fno-rtti)
@@ -38,3 +38,8 @@ add_executable(n60core_rebuild_test tests/test_rebuild.c)
 set_target_properties(n60core_rebuild_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
 target_link_libraries(n60core_rebuild_test PRIVATE n60core m)
 add_test(NAME n60core_rebuild COMMAND n60core_rebuild_test)
+
+add_executable(n60core_layout_test tests/test_layout.c)
+set_target_properties(n60core_layout_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
+target_link_libraries(n60core_layout_test PRIVATE n60core m)
+add_test(NAME n60core_layout COMMAND n60core_layout_test)

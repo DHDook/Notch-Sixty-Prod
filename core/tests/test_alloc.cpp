@@ -336,6 +336,88 @@ int main() {
         CHECK(blocks > 12, "S6 rounds ran");
         n60_graph_retire(g);
     }
+    // S7: layouts and the binaural graph stage. Mode switches (5.1 speakers <-> binaural with three head
+    // orientation sets) rebuild with the fade while the head yaw is posted every block; the callback
+    // allocates and frees nothing, including the blocks that blend and fade orientation sets.
+    for (double rate : rates) {
+        constexpr uint32_t N = 200;
+        n60_layout lay{};
+        CHECK(n60_layout_standard(N60_LAYOUT_5_1, &lay) == N60_STATUS_OK, "5.1 layout");
+        static float resp[3 * 6 * 2 * 300];
+        uint32_t rng = 99;
+        for (float &v : resp) {
+            rng = rng * 1664525u + 1013904223u;
+            v = 0.02f * (static_cast<float>((rng >> 8) & 0xFFFF) / 65536.0f - 0.5f);
+        }
+        n60_binaural_profile prof{};
+        prof.structSize = sizeof prof;
+        prof.taps = 300;
+        prof.orientations = 3;
+        prof.yawStartDeg = -90;
+        prof.yawStepDeg = 90;
+        prof.equalEarChannel = 3;
+        prof.declaredLatency = 10;
+        prof.responses = resp;
+        const float peq[8] = {0, static_cast<float>(1000 * rate / 48000), 3, 1, 1, static_cast<float>(300 * rate / 48000), -2, 0.7f};
+        n60_layout_options o{};
+        o.structSize = sizeof o;
+        o.sampleRate = rate;
+        o.maxBlockFrames = N;
+        o.graphChannels = 8;
+        o.layout = &lay;
+        o.midSide = 1;
+        o.peq = peq;
+        o.peqParamCount = 8;
+        o.linkedDynamics = 1;
+        o.protection = 1;
+        n60_layout_graph *spk = nullptr, *bin = nullptr;
+        CHECK(n60_layout_graph_build(&o, &spk) == N60_STATUS_OK, "speakers graph at %.0f", rate);
+        o.mode = N60_MODE_BINAURAL;
+        o.binaural = &prof;
+        CHECK(n60_layout_graph_build(&o, &bin) == N60_STATUS_OK, "binaural graph at %.0f", rate);
+        if (spk == nullptr || bin == nullptr) continue;
+        n60_graph *g = nullptr;
+        CHECK(n60_graph_build(n60_layout_graph_desc(spk), &g) == N60_STATUS_OK, "build S7 graph");
+        if (g == nullptr) continue;
+        static float buf[8][N], obuf[8][N];
+        const float *in[8];
+        float *out[8];
+        for (int c = 0; c < 8; c++) { in[c] = buf[c]; out[c] = obuf[c]; }
+        long blocks = 0;
+        for (int round = 0; round < 6; round++) {
+            CHECK(n60_graph_publish(g, n60_layout_graph_desc((round & 1) ? spk : bin)) == N60_STATUS_OK, "publish S7");
+            for (int step = 0; step < 600; step++) {
+                const n60_param_record rec[3] = {{N60_LSTAGE_BINAURAL, 0, -120.0f + static_cast<float>((step * 37) % 240), 0},
+                                                 {N60_LSTAGE_BINAURAL, 1, static_cast<float>(step % 40), 0},
+                                                 {N60_LSTAGE_BINAURAL, 2, 5.0f, 0}};
+                if (round & 1) n60_graph_post_params(g, rec, 0); else n60_graph_post_params(g, rec, 3);
+                for (int c = 0; c < 8; c++) {
+                    for (uint32_t i = 0; i < N; i++) {
+                        rng = rng * 1664525u + 1013904223u;
+                        buf[c][i] = c < 6 ? 0.3f * (static_cast<float>((rng >> 8) & 0xFFFF) / 65536.0f - 0.5f) : 0.0f;
+                    }
+                }
+                allocs = 0;
+                frees = 0;
+                armed = true;
+                n60_status st = n60_graph_process(g, in, out, N);
+                armed = false;
+                ++blocks;
+                CHECK(st == N60_STATUS_OK, "process S7");
+                CHECK(allocs == 0 && frees == 0, "rate %.0f S7 round %d step %d: realtime call allocated %ld / freed %ld", rate,
+                      round, step, allocs.load(), frees.load());
+                n60_rebuild_status rs{};
+                rs.structSize = sizeof rs;
+                n60_graph_get_rebuild_status(g, &rs);
+                if (step > 2 && rs.state == 0) break;
+            }
+            n60_graph_collect(g);
+        }
+        CHECK(blocks > 6, "S7 rounds ran");
+        n60_graph_retire(g);
+        n60_layout_graph_free(spk);
+        n60_layout_graph_free(bin);
+    }
     if (failures) {
         std::fprintf(stderr, "%d failure(s)\n", failures);
         return 1;

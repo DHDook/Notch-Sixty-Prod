@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 5u
+#define N60_GRAPH_ABI_VERSION 6u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -89,7 +89,9 @@ typedef enum n60_stage_kind {
     N60_STAGE_MUTE = 28,          /* position 28. Ramped mute. */
     N60_STAGE_ANC_CAPTURE = 29,   /* position 29. ANC reference capture point. */
     N60_STAGE_FINAL_SANITISE = 30,/* position 30. Sanitise rules. */
-    N60_STAGE_FINAL_METER = 31    /* position 31. Meter rules; read with n60_graph_read_meter. */
+    N60_STAGE_FINAL_METER = 31,   /* position 31. Meter rules; read with n60_graph_read_meter. */
+    /* ABI v6 matrix stage (E6 S7). See "Binaural" below. */
+    N60_STAGE_BINAURAL = 32       /* position 17.5: after CORE_DYNAMICS, before SYMMETRY. N source lanes in, two lanes out. */
 } n60_stage_kind;
 
 /* Lane selection for the ABI v3 stages (DENOISER, DYN_EQ, FIR, COMPRESSOR, EXPANDER):
@@ -169,6 +171,34 @@ typedef enum n60_stage_kind {
  *  source lane. Authorisation exists only as this snapshot value; the core never sets it.
  * ANC_CAPTURE (mask). capacityFrames = ring length per lane (1..4194304). params: [0] authorised (0/1, NOT live,
  *  default 0): nothing is written when 0. Read with n60_graph_read_capture. */
+/* Binaural (ABI v6, matrix stage). laneMask = the N source lanes (virtual speakers, in layout order);
+ * laneA / laneB = the left / right ear output lanes (distinct, any lane, may be source lanes). The stage
+ * reads every source lane, writes the two ear signals into laneA and laneB, and clears every other source
+ * lane, so the host reads the ears from those two output channels. The graph's channel counts stay fixed
+ * for the handle: a binaural graph is built with outputChannels >= the source count and the host listens to
+ * the two ear lanes. Each source is convolved with its own pair of ear impulse responses (uniformly
+ * partitioned, 128-frame partitions, 256-point FFT), so the stage matches the shipping N60BinauralRenderer.
+ * params: [0] head yaw deg (live, -720..720), [1] head pitch deg (live, -180..180), [2] head roll deg
+ *  (live, -180..180), [3] taps per impulse response (1..8192), [4] orientation sets O (1..64),
+ *  [5] yaw of set 0 in deg (-360..360), [6] yaw step between sets in deg ((0,360], or 0..360 when O = 1),
+ *  [7] wrap (0/1; 1 = the O sets cover a full circle and the last neighbours the first),
+ *  [8] equal-ear source index (-1 none, else 0..N-1: that source's two responses are averaged and used for
+ *  both ears, as the kernel does for the LFE), [9] declared extra latency of the responses in frames
+ *  (0..N60_GRAPH_MAX_DELAY_FRAMES; reported, never applied), then 10 + (set, source, ear, tap) floats:
+ *  paramCount = 10 + O * N * 2 * taps, set-major, then source, then ear (0 left, 1 right), then tap.
+ * Cost: the whole partition runs at the 128th frame of each block (spiky for small host buffers); it scales with
+ * sources x partitions x 129 bins x 2 ears, doubled for a two-set blend and again while the head moves. Hosts
+ * budget taps and source counts accordingly (rebuild CPU-budget refusal covers publishes). Responses must be finite.
+ * Head tracking: the host posts yaw (and pitch and roll) through the mailbox like any live parameter.
+ * Set k is the response set for head yaw = [5] + k * [6]. The live yaw is slew-smoothed (about 10 ms) into a
+ * fractional set position and the two neighbouring sets are blended in the frequency domain, per 128-frame
+ * block; while the position is moving the output fades linearly across the block from the previous
+ * position's blend to the new one, so there is no step at block boundaries. Pitch and roll are accepted and stored for the host (and for later elevation sets) but do not yet
+ * change the rendering. Latency 128 frames plus [9]. Not live: taps, sets, responses and every other
+ * parameter (publish a new snapshot; the rebuild fade makes that click-free). */
+#define N60_GRAPH_BINAURAL_PARTITION_FRAMES 128u
+#define N60_GRAPH_BINAURAL_MAX_TAPS 8192u
+#define N60_GRAPH_BINAURAL_MAX_SETS 64u
 #define N60_ANC_GUARD_BANDS 16u
 #define N60_FIR_PARTITION_FRAMES 256u
 #define N60_FIR_MAX_TAPS (128u * N60_FIR_PARTITION_FRAMES)
@@ -343,6 +373,126 @@ n60_status n60_graph_read_capture(n60_graph *graph, uint32_t stageId, uint32_t l
  * size) and protection stages (oversampling plus look-ahead); 0 with none. Updated by the realtime thread when
  * it adopts a snapshot or applies a delay parameter. */
 uint32_t n60_graph_latency_frames(const n60_graph *graph);
+
+/* ===== ABI v6 (E6 S7): program layouts and the graph builder ================================
+ * Stereo is the 2-channel layout {FL, FR}; 5.1 and larger layouts are lists of semantic roles
+ * (the numbering matches the app's N60ProgramChannelRole, so the shell converts by value).
+ * n60_layout_graph_build turns a layout and a render mode into a ready n60_graph_desc: the same
+ * builder produces stereo, 5.1 and larger speaker graphs and the binaural graph; switching mode is
+ * publishing the other description (a topology rebuild with the fade). Control thread only. */
+#define N60_LAYOUT_MAX_CHANNELS 32u
+
+typedef enum n60_channel_role {
+    N60_ROLE_UNUSED = 0, N60_ROLE_FRONT_LEFT = 1, N60_ROLE_FRONT_RIGHT = 2, N60_ROLE_FRONT_CENTER = 3,
+    N60_ROLE_LFE = 4, N60_ROLE_SIDE_LEFT = 5, N60_ROLE_SIDE_RIGHT = 6, N60_ROLE_REAR_LEFT = 7,
+    N60_ROLE_REAR_RIGHT = 8, N60_ROLE_WIDE_LEFT = 9, N60_ROLE_WIDE_RIGHT = 10,
+    N60_ROLE_TOP_FRONT_LEFT = 11, N60_ROLE_TOP_FRONT_RIGHT = 12, N60_ROLE_TOP_MIDDLE_LEFT = 13,
+    N60_ROLE_TOP_MIDDLE_RIGHT = 14, N60_ROLE_TOP_REAR_LEFT = 15, N60_ROLE_TOP_REAR_RIGHT = 16,
+    N60_ROLE_CUSTOM_1 = 17 /* .. N60_ROLE_CUSTOM_1 + 15 = 32 */
+} n60_channel_role;
+
+typedef enum n60_layout_id {
+    N60_LAYOUT_CUSTOM = 0, N60_LAYOUT_STEREO = 1, N60_LAYOUT_5_1 = 2, N60_LAYOUT_7_1 = 3,
+    N60_LAYOUT_5_1_2 = 4, N60_LAYOUT_5_1_4 = 5, N60_LAYOUT_7_1_4 = 6, N60_LAYOUT_9_1_6 = 7
+} n60_layout_id;
+
+typedef struct n60_layout {
+    uint32_t structSize;    /* sizeof(n60_layout) */
+    uint32_t identifier;    /* n60_layout_id; a standard identifier must match its canonical role order */
+    uint32_t channelCount;  /* 1..N60_LAYOUT_MAX_CHANNELS; channel c is graph lane c */
+    uint32_t roles[N60_LAYOUT_MAX_CHANNELS];
+} n60_layout;
+
+/* Fills *out with a standard layout (identifier 1..7). BAD_ARGUMENT for custom or unknown identifiers. */
+n60_status n60_layout_standard(uint32_t identifier, n60_layout *out);
+/* OK when the structure is well formed: roles unique and semantic, standard identifiers canonical. */
+n60_status n60_layout_validate(const n60_layout *layout);
+
+#define N60_LAYOUT_MAX_PAIRS 16u
+/* Pairing used for M/S and linked dynamics: (FL,FR), (SL,SR), (RL,RR), (WL,WR), (TFL,TFR), (TML,TMR),
+ * (TRL,TRR) and (Custom 2k-1, Custom 2k), in that order, when both roles are present. */
+typedef struct n60_layout_info {
+    uint32_t structSize;     /* sizeof(n60_layout_info) */
+    uint32_t pairCount;
+    uint32_t pairLaneA[N60_LAYOUT_MAX_PAIRS];
+    uint32_t pairLaneB[N60_LAYOUT_MAX_PAIRS];
+    int32_t centerLane;      /* lane of FRONT_CENTER, or -1 */
+    int32_t lfeLane;         /* lane of LFE, or -1 */
+    int32_t frontLeftLane;   /* or -1 */
+    int32_t frontRightLane;  /* or -1 */
+    uint64_t pairedMask;     /* lanes that belong to a pair */
+    uint64_t singleMask;     /* non-LFE lanes that are in no pair */
+} n60_layout_info;
+
+n60_status n60_layout_describe(const n60_layout *layout, n60_layout_info *out);
+
+typedef enum n60_render_mode {
+    N60_MODE_SPEAKERS = 0, /* every layout lane is an output (stereo, 5.1, ...) */
+    N60_MODE_BINAURAL = 1  /* the layout's lanes are virtual speakers; the ears come out on lanes 0 and 1 */
+} n60_render_mode;
+
+/* Binaural response set for N60_MODE_BINAURAL: the data of the stage parameters [3]..[9] and the
+ * responses, in the stage's order (set-major, then layout channel, then ear, then tap). */
+typedef struct n60_binaural_profile {
+    uint32_t structSize;      /* sizeof(n60_binaural_profile) */
+    uint32_t taps;
+    uint32_t orientations;
+    float yawStartDeg;
+    float yawStepDeg;
+    uint32_t wrap;
+    int32_t equalEarChannel;  /* layout channel index averaged to both ears (the LFE), or -1 */
+    uint32_t declaredLatency;
+    float headYawDeg, headPitchDeg, headRollDeg;  /* initial head pose */
+    const float *responses;   /* orientations * layout.channelCount * 2 * taps floats (copied) */
+} n60_binaural_profile;
+
+/* Well known stage ids in a built description, for live posts. */
+#define N60_LSTAGE_SANITISE 1u
+#define N60_LSTAGE_METER_IN 2u
+#define N60_LSTAGE_INPUT_GAIN 3u      /* params[0] linear gain, all lanes */
+#define N60_LSTAGE_PEQ 5u             /* LANE_ALL; the per-lane stages are N60_LSTAGE_PEQ_LANE + lane */
+#define N60_LSTAGE_METER_OUT 7u
+#define N60_LSTAGE_BINAURAL 60u
+#define N60_LSTAGE_HEADPHONE 61u
+#define N60_LSTAGE_PROTECTION 62u
+#define N60_LSTAGE_FINAL_SANITISE 63u
+#define N60_LSTAGE_FINAL_METER 64u
+#define N60_LSTAGE_OUTPUT_GAIN 65u    /* + lane (speakers: one per layout lane; binaural: lanes 0 and 1) */
+#define N60_LSTAGE_MS_ENCODE 100u     /* + pair index */
+#define N60_LSTAGE_MS_DECODE 120u     /* + pair index */
+#define N60_LSTAGE_PAIR_DYNAMICS 140u /* + pair index: linked compressor on the pair */
+#define N60_LSTAGE_LANE_DYNAMICS 160u /* + lane: compressor on an unpaired non-LFE lane */
+#define N60_LSTAGE_PEQ_LANE 200u      /* + lane */
+#define N60_LSTAGE_SILENCE 300u       /* + lane: gain 0 on graph lanes beyond the layout */
+
+typedef struct n60_layout_options {
+    uint32_t structSize;          /* sizeof(n60_layout_options) */
+    double sampleRate;
+    uint32_t maxBlockFrames;
+    uint32_t graphChannels;       /* channel count of the graph handle (in = out); 0 = layout.channelCount; else >= it */
+    const n60_layout *layout;
+    uint32_t mode;                /* n60_render_mode */
+    float inputGain;              /* linear; 0 = 1 */
+    uint32_t midSide;             /* 1: encode each pair to M/S around the PEQ */
+    const float *peq;             /* optional PEQ section params (4 per section), applied on every layout lane */
+    uint32_t peqParamCount;
+    uint32_t linkedDynamics;      /* 1: one linked compressor per pair, one per unpaired non-LFE lane */
+    const float *compressor;      /* 10 compressor params, or NULL for the defaults; [9] is forced linked on pairs */
+    float headphoneCrossfeed;     /* 0 = off; else crossfeed amount 0..1 on the output pair */
+    float outputGain;             /* linear; 0 = 1 */
+    uint32_t protection;          /* 1: limiter on the output lanes (ceiling -1 dB) */
+    const n60_binaural_profile *binaural; /* required in N60_MODE_BINAURAL */
+    uint32_t reserved;            /* must be 0 */
+} n60_layout_options;
+
+typedef struct n60_layout_graph n60_layout_graph; /* opaque; owns the description and its parameter storage */
+
+/* Builds a description. OK with *out set; BAD_ARGUMENT, OUT_OF_MEMORY or the validation status of the
+ * description otherwise. The description is validated by n60_graph_build / n60_graph_publish as usual. */
+n60_status n60_layout_graph_build(const n60_layout_options *options, n60_layout_graph **out);
+/* Valid until n60_layout_graph_free. Pass to n60_graph_build or n60_graph_publish, which copy everything. */
+const n60_graph_desc *n60_layout_graph_desc(const n60_layout_graph *graph);
+void n60_layout_graph_free(n60_layout_graph *graph); /* NULL allowed */
 
 #ifdef __cplusplus
 }
