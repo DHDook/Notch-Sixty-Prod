@@ -161,18 +161,27 @@ fi
 # E6 S2/S3: libn60core (portable C++ core behind its versioned C ABI): graph skeleton,
 # snapshot swap, lane stages, allocation hook, and parity with the kernel biquad.
 if selected e6_core_graph; then
-    if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -fno-exceptions -fno-rtti -Icore/include \
-        -c core/src/graph.cpp -o "$OUT/n60core_graph.o" \
-        && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -fno-exceptions -fno-rtti -Icore/include \
-        -c core/src/snapshot.cpp -o "$OUT/n60core_snapshot.o"; then
+    CORE_OK=1
+    CORE_OBJS=()
+    for src in graph snapshot fft stages_dsp; do
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -fno-exceptions -fno-rtti -Icore/include \
+            -c "core/src/$src.cpp" -o "$OUT/n60core_$src.o"; then
+            CORE_OBJS+=("$OUT/n60core_$src.o")
+        else
+            CORE_OK=0
+        fi
+    done
+    if [ "$CORE_OK" = 1 ]; then
         harness e6_core_graph "${STRICT[@]}" -O2 -Icore/include core/tests/test_graph.c \
-            "$OUT/n60core_graph.o" "$OUT/n60core_snapshot.o" -lc++ -lm
+            "${CORE_OBJS[@]}" -lc++ -lm
         harness e6_core_stages "${STRICT[@]}" -O2 -Icore/include core/tests/test_stages.c \
-            "$OUT/n60core_graph.o" "$OUT/n60core_snapshot.o" -lc++ -lm -lpthread
+            "${CORE_OBJS[@]}" -lc++ -lm -lpthread
         harness e6_core_parity "${STRICT[@]}" -O2 -Icore/include core/tests/test_parity.c \
-            "$OUT/n60core_graph.o" "$OUT/n60core_snapshot.o" -lc++ -lm
+            "${CORE_OBJS[@]}" -lc++ -lm
+        harness e6_core_dsp "${STRICT[@]}" -O2 -Icore/include core/tests/test_dsp.c \
+            "${CORE_OBJS[@]}" -lc++ -lm
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include core/tests/test_alloc.cpp \
-            "$OUT/n60core_graph.o" "$OUT/n60core_snapshot.o" -o "$OUT/e6_core_alloc" \
+            "${CORE_OBJS[@]}" -o "$OUT/e6_core_alloc" \
             && "$OUT/e6_core_alloc"; then :; else failed+=(e6_core_alloc); fi
     else
         failed+=(e6_core_graph)

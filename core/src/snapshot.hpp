@@ -9,6 +9,8 @@
 #define N60_CORE_SNAPSHOT_HPP
 
 #include <atomic>
+#include <bit>
+#include <cstddef>
 #include <cstdint>
 
 #include "n60/graph.h"
@@ -16,6 +18,7 @@
 namespace n60 {
 
 struct StageRec {
+    uint64_t laneMask;   // ABI v3 lane set (0 = laneA / laneFirst + laneCount)
     uint32_t kind;
     uint32_t id;
     uint32_t laneA;
@@ -28,8 +31,8 @@ struct StageRec {
     uint32_t stateStride;
     uint32_t capacity;   // DELAY: capacity in frames
     uint32_t coefOff;    // PEQ: double[sections][5] (b0 b1 b2 a1 a2)
+    uint32_t sharedOff;  // ABI v3 stages: state shared by all of the stage's lanes
     float applied;       // last target the state acted on (GAIN, DELAY)
-    uint32_t pad;
 };
 
 struct SnapHeader {
@@ -46,6 +49,32 @@ struct SnapHeader {
     uint32_t pad;
 };
 
+inline uint8_t *bytes(SnapHeader *h) { return reinterpret_cast<uint8_t *>(h); }
+inline const uint8_t *bytes(const SnapHeader *h) { return reinterpret_cast<const uint8_t *>(h); }
+inline StageRec *stages(SnapHeader *h) { return reinterpret_cast<StageRec *>(bytes(h) + h->stageTableOff); }
+inline const StageRec *stages(const SnapHeader *h) {
+    return reinterpret_cast<const StageRec *>(bytes(h) + h->stageTableOff);
+}
+inline float *paramsOf(SnapHeader *h, const StageRec &s) { return reinterpret_cast<float *>(bytes(h) + s.paramsOff); }
+inline const float *paramsOf(const SnapHeader *h, const StageRec &s) {
+    return reinterpret_cast<const float *>(bytes(h) + s.paramsOff);
+}
+inline uint8_t *laneState(SnapHeader *h, const StageRec &s, uint32_t laneIndex) {
+    return bytes(h) + s.stateOff + size_t(laneIndex) * s.stateStride;
+}
+inline uint8_t *sharedState(SnapHeader *h, const StageRec &s) { return bytes(h) + s.sharedOff; }
+
+// The k-th output lane of a stage.
+inline uint32_t laneOf(const StageRec &r, uint32_t k) {
+    if (r.laneMask == 0) return r.laneFirst + k;
+    uint64_t m = r.laneMask;
+    while (k-- != 0) m &= m - 1;
+    return static_cast<uint32_t>(std::countr_zero(m));
+}
+
+// RBJ Audio EQ Cookbook biquad, normalised by a0 (b0 b1 b2 a1 a2), double precision.
+bool designBiquad(uint32_t type, double rate, double f, double gainDb, double q, double out[5]);
+
 // Control thread. Validates the description (everything in n60_graph_desc) and builds
 // the snapshot. Never touches live state.
 n60_status buildSnapshot(const n60_graph_desc &desc, uint32_t epoch, SnapHeader **out);
@@ -55,6 +84,11 @@ void freeSnapshot(SnapHeader *snap);
 // Realtime thread. Runs the stages in place on `lanes` (outputChannels pointers).
 void runSnapshot(SnapHeader *snap, float *const *lanes, uint32_t frames,
                  std::atomic<uint64_t> &sanitisedSamples);
+
+// Control or realtime thread (pure). Checks one live parameter edit against the stage's
+// kind and ranges: OK, BAD_ARGUMENT (index or value out of range) or UNSUPPORTED (the
+// parameter needs a new topology). Reads only immutable snapshot fields.
+n60_status validateParam(const SnapHeader *snap, const StageRec &stage, uint32_t paramIndex, float value);
 
 // Realtime thread. Applies one mailbox record; false when it no longer fits.
 bool applyParam(SnapHeader *snap, uint32_t stageId, uint32_t paramIndex, float value);
