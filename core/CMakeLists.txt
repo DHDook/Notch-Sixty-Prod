@@ -43,3 +43,8 @@ add_executable(n60core_layout_test tests/test_layout.c)
 set_target_properties(n60core_layout_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
 target_link_libraries(n60core_layout_test PRIVATE n60core m)
 add_test(NAME n60core_layout COMMAND n60core_layout_test)
+
+add_executable(n60core_multisub_test tests/test_multisub.c)
+set_target_properties(n60core_multisub_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
+target_link_libraries(n60core_multisub_test PRIVATE n60core m)
+add_test(NAME n60core_multisub COMMAND n60core_multisub_test)

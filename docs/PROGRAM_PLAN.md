@@ -146,7 +146,7 @@ parity suite, and live edits are click-free on hardware in stereo, 5.1 and binau
 - [ ] Any number of ways per speaker, on any layout, not stereo only
 - [ ] Linear-phase FIR crossovers reusing the Speaker Optimizer's linear-phase synthesis
 - [ ] Driver linearisation from Measurement Lab near-field captures
-- [ ] Raise the subwoofer limit from 4 to 8
+- [ ] Raise the subwoofer limit from 4 to 8 (core bass management already supports 8 sub lanes since E6 S7b, ABI v7)
 - [ ] Advanced pipeline view for power users, plus CamillaDSP YAML import alongside the existing export
 - [ ] Migrate existing bi/tri-amp profiles automatically
 

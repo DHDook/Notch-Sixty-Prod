@@ -33,6 +33,9 @@ namespace {
 
 constexpr double kPi = 3.14159265358979323846;
 constexpr uint32_t kMaxLanes = N60_GRAPH_MAX_CHANNELS;
+constexpr uint32_t kBassFixed = 9;     // BASS_MGMT: globals plus subwoofer 0 (its lane, gain, polarity, section count)
+constexpr uint32_t kBassMaxSubs = 8;
+constexpr uint32_t kBassMaxEq = 8;
 
 size_t up(size_t v) { return (v + 15) & ~size_t(15); }
 double db2lin(double db) { return std::pow(10.0, db / 20.0); }
@@ -116,7 +119,6 @@ Lanes ruleOf(uint32_t kind) {
 
 // ---- parameter layouts ---------------------------------------------------------------
 
-constexpr uint32_t kBassFixed = 9;
 constexpr uint32_t kHpFixed = 11;
 constexpr uint32_t kGuardParams = 12 + N60_ANC_GUARD_BANDS;
 constexpr uint32_t kHpRing = 512;
@@ -127,12 +129,44 @@ bool sectionOk(const float *p, double rate) {
            designBiquad(static_cast<uint32_t>(p[0]), rate, p[1], p[2], p[3], c);
 }
 
+// BASS_MGMT parameter layout (ABI v7). Subwoofer 0 is the v6 fixed block: [2] lane, [6] gain, [7] polarity, [8] section
+// count n0, then 4 per section. When more follow, the next value is the extra subwoofer count m (1..7) and each extra
+// sub is: lane, gain dB, polarity, section count n, then 4 per section. A v6 parameter list is a one-sub list.
+struct BassSubIdx {
+    uint32_t lane, gain, pol, nEq, eq;
+};
+struct BassLayout {
+    uint32_t subs, end;
+    BassSubIdx s[kBassMaxSubs];
+};
+bool parseBass(const float *p, uint32_t have, BassLayout &L) {
+    if (have < kBassFixed || !isInt(p[8]) || p[8] < 0.0f || p[8] > static_cast<float>(kBassMaxEq)) return false;
+    L.subs = 1;
+    L.s[0] = {2, 6, 7, 8, 9};
+    uint32_t pos = kBassFixed + 4u * static_cast<uint32_t>(p[8]);
+    if (have < pos) return false;
+    if (have > pos) {
+        if (!isInt(p[pos]) || p[pos] < 1.0f || p[pos] > static_cast<float>(kBassMaxSubs - 1)) return false;
+        const uint32_t m = static_cast<uint32_t>(p[pos++]);
+        for (uint32_t k = 0; k < m; ++k) {
+            if (have < pos + 4) return false;
+            const float n = p[pos + 3];
+            if (!isInt(n) || n < 0.0f || n > static_cast<float>(kBassMaxEq)) return false;
+            L.s[L.subs++] = {pos, pos + 1, pos + 2, pos + 3, pos + 4};
+            pos += 4u + 4u * static_cast<uint32_t>(n);
+            if (have < pos) return false;
+        }
+    }
+    L.end = pos;
+    return true;
+}
+
 uint32_t expectedParamCount(uint32_t kind, const float *p, uint32_t have) {
     switch (kind) {
-        case N60_STAGE_BASS_MGMT:
-            return have >= kBassFixed && isInt(p[8]) && p[8] >= 0.0f && p[8] <= 4.0f
-                       ? kBassFixed + 4u * static_cast<uint32_t>(p[8])
-                       : 0u;
+        case N60_STAGE_BASS_MGMT: {
+            BassLayout L;
+            return parseBass(p, have, L) ? L.end : 0u;
+        }
         case N60_STAGE_AMBIENT: return 10;
         case N60_STAGE_SYMMETRY: return 1;
         case N60_STAGE_CROSSFEED: return 1;
@@ -224,16 +258,27 @@ struct BassLane {
     Bq hp1, hp2, lp1, lp2;
     Bq nhp1, nhp2, nlp1, nlp2;  // incoming crossover during a coefficient crossfade
 };
+// One subwoofer output of BASS_MGMT (ABI v7): own gain, polarity and EQ sections, all live.
+struct BassSub {
+    Ramp g, pol;                        // gain and polarity (+1 / -1) ramps: a flip passes through zero
+    float seenG, seenPol;
+    float seenEq[kBassMaxEq][3];        // last acted-on Hz, dB, Q of each section
+    double eq[kBassMaxEq][5], eqN[kBassMaxEq][5];  // live and incoming coefficients
+    Bq z[kBassMaxEq], zN[kBassMaxEq];
+    uint32_t xf[kBassMaxEq];            // frames left in a section's coefficient crossfade
+    uint32_t lane, nEq, gainIdx, polIdx, eqIdx;
+};
 struct BassShared {
-    double hp[5], lp[5], lfe[5], eq[4][5];
-    Bq lfe1, lfe2, eqz[4];
+    double hp[5], lp[5], lfe[5];
+    Bq lfe1, lfe2;
     double hpN[5], lpN[5], lfeN[5];  // incoming coefficients during a crossfade
     Bq lfe1n, lfe2n;
     uint32_t xfX, xfLfe;             // frames left in the crossover and LFE low-pass crossfades
-    Ramp redirect, lfeG, subG;
-    float seenX, seenR, seenLfeHz, seenLfeG, seenSubG, pol;
-    uint32_t subLane, nEq;
+    Ramp redirect, lfeG;
+    float seenX, seenR, seenLfeHz, seenLfeG;
+    uint32_t nSubs, clearLfe;
     int32_t lfeLane;
+    BassSub sub[kBassMaxSubs];
 };
 struct MuteLane {
     Ramp g;
@@ -338,7 +383,7 @@ bool paramOk(uint32_t kind, uint32_t i, float v, const float *p, double rate, ui
                 case 6: return inR(v, -60.0, 24.0);
                 case 7: return v == 0.0f || v == 1.0f;
                 case 8: return true;  // checked by expectedParamCount
-                default: return (i - kBassFixed) % 4 != 0 || true;  // sections: checked below
+                default: return true;  // extra subs and sections: checked by parseBass and the full validation
             }
         case N60_STAGE_AMBIENT:
             if (i == 0) return inR(v, -60.0, 24.0);
@@ -424,14 +469,23 @@ n60_status validateSystemStage(const n60_stage_desc &s, double rate, uint32_t ou
     }
     switch (s.kind) {
         case N60_STAGE_BASS_MGMT: {
-            const uint32_t sub = static_cast<uint32_t>(p[2]);
-            if (((s.laneMask >> sub) & 1u) != 0) return N60_STATUS_BAD_ARGUMENT;
+            BassLayout L;
+            if (!parseBass(p, s.paramCount, L)) return N60_STATUS_BAD_ARGUMENT;
+            uint64_t seen = 0;
+            for (uint32_t q = 0; q < L.subs; ++q) {
+                const BassSubIdx &x = L.s[q];
+                if (!isInt(p[x.lane]) || p[x.lane] < 0.0f || p[x.lane] >= static_cast<float>(outCh)) return N60_STATUS_BAD_ARGUMENT;
+                const uint32_t sub = static_cast<uint32_t>(p[x.lane]);
+                if (((s.laneMask >> sub) & 1u) != 0 || ((seen >> sub) & 1u) != 0) return N60_STATUS_BAD_ARGUMENT;
+                seen |= uint64_t(1) << sub;
+                if (!inR(p[x.gain], -60.0, 24.0) || (p[x.pol] != 0.0f && p[x.pol] != 1.0f)) return N60_STATUS_BAD_ARGUMENT;
+                for (uint32_t k = 0; k < static_cast<uint32_t>(p[x.nEq]); ++k) {
+                    if (!sectionOk(p + x.eq + 4 * k, rate)) return N60_STATUS_BAD_ARGUMENT;
+                }
+            }
             if (p[3] >= 0.0f) {
                 const uint32_t lfe = static_cast<uint32_t>(p[3]);
                 if (((s.laneMask >> lfe) & 1u) != 0) return N60_STATUS_BAD_ARGUMENT;
-            }
-            for (uint32_t k = 0; k < static_cast<uint32_t>(p[8]); ++k) {
-                if (!sectionOk(p + kBassFixed + 4 * k, rate)) return N60_STATUS_BAD_ARGUMENT;
             }
             break;
         }
@@ -603,21 +657,37 @@ void systemInit(SnapHeader *h, const StageRec &r) {
             designInto(4, rate, p[0], 0.0, kButterQ, s->hp);
             designInto(3, rate, p[0], 0.0, kButterQ, s->lp);
             designInto(3, rate, p[4], 0.0, kButterQ, s->lfe);
-            s->nEq = static_cast<uint32_t>(p[8]);
-            for (uint32_t k = 0; k < s->nEq; ++k) {
-                const float *q = p + kBassFixed + 4 * k;
-                designInto(static_cast<uint32_t>(q[0]), rate, q[1], q[2], q[3], s->eq[k]);
+            BassLayout L;
+            if (!parseBass(p, r.paramCount, L)) break;  // unreachable: validated at build
+            s->nSubs = L.subs;
+            s->clearLfe = p[3] >= 0.0f ? 1u : 0u;
+            for (uint32_t q = 0; q < L.subs; ++q) {
+                const BassSubIdx &x = L.s[q];
+                BassSub &b = s->sub[q];
+                b.nEq = static_cast<uint32_t>(p[x.nEq]);
+                b.lane = static_cast<uint32_t>(p[x.lane]);
+                b.gainIdx = x.gain;
+                b.polIdx = x.pol;
+                b.eqIdx = x.eq;
+                for (uint32_t k = 0; k < b.nEq; ++k) {
+                    const float *e = p + x.eq + 4 * k;
+                    designInto(static_cast<uint32_t>(e[0]), rate, e[1], e[2], e[3], b.eq[k]);
+                    b.seenEq[k][0] = e[1];
+                    b.seenEq[k][1] = e[2];
+                    b.seenEq[k][2] = e[3];
+                }
+                if (static_cast<int32_t>(b.lane) == static_cast<int32_t>(p[3])) s->clearLfe = 0u;
+                rampInit(b.g, static_cast<float>(db2lin(p[x.gain])));
+                rampInit(b.pol, p[x.pol] != 0.0f ? -1.0f : 1.0f);
+                b.seenG = p[x.gain];
+                b.seenPol = p[x.pol];
             }
             rampInit(s->redirect, static_cast<float>(db2lin(p[1])));
             rampInit(s->lfeG, static_cast<float>(db2lin(p[5])));
-            rampInit(s->subG, static_cast<float>(db2lin(p[6])));
             s->seenX = p[0];
             s->seenR = p[1];
             s->seenLfeHz = p[4];
             s->seenLfeG = p[5];
-            s->seenSubG = p[6];
-            s->pol = p[7] != 0.0f ? -1.0f : 1.0f;
-            s->subLane = static_cast<uint32_t>(p[2]);
             s->lfeLane = static_cast<int32_t>(p[3]);
             break;
         }
@@ -694,7 +764,38 @@ n60_status validateSystemParam(const SnapHeader *h, const StageRec &r, uint32_t 
     if (idx >= r.paramCount) return N60_STATUS_BAD_ARGUMENT;
     bool live = false;
     switch (r.kind) {
-        case N60_STAGE_BASS_MGMT: live = idx <= 1 || idx == 4 || idx == 5 || idx == 6; break;
+        case N60_STAGE_BASS_MGMT: {
+            // Live: crossover, redirect, LFE low-pass and gain, and per sub the gain, polarity and each section's
+            // Hz / dB / Q (a section's type is fixed). Sub lanes and counts need a new snapshot (a rebuild).
+            if (idx <= 1 || idx == 4 || idx == 5) {
+                live = true;
+                break;
+            }
+            BassLayout L;
+            const float *bp = paramsOf(h, r);
+            if (!parseBass(bp, r.paramCount, L)) return N60_STATUS_BAD_ARGUMENT;
+            for (uint32_t q = 0; q < L.subs; ++q) {
+                const BassSubIdx &x = L.s[q];
+                if (idx == x.gain) {
+                    if (!inR(value, -60.0, 24.0)) return N60_STATUS_BAD_ARGUMENT;
+                    return N60_STATUS_OK;
+                }
+                if (idx == x.pol) {
+                    if (value != 0.0f && value != 1.0f) return N60_STATUS_BAD_ARGUMENT;
+                    return N60_STATUS_OK;
+                }
+                if (idx >= x.eq && idx < x.eq + 4u * static_cast<uint32_t>(bp[x.nEq])) {
+                    float sec[4];
+                    std::memcpy(sec, bp + x.eq + 4 * ((idx - x.eq) / 4), sizeof sec);
+                    const uint32_t f = (idx - x.eq) % 4;
+                    sec[f] = value;
+                    if (!sectionOk(sec, h->sampleRate)) return N60_STATUS_BAD_ARGUMENT;
+                    return f == 0 ? N60_STATUS_UNSUPPORTED : N60_STATUS_OK;
+                }
+            }
+            if (idx == 2 || idx == 3 || idx == 8) return paramOk(r.kind, idx, value, bp, h->sampleRate, h->outputChannels) ? N60_STATUS_UNSUPPORTED : N60_STATUS_BAD_ARGUMENT;
+            return N60_STATUS_UNSUPPORTED;  // lane indexes, section counts, extra-sub count
+        }
         case N60_STAGE_AMBIENT: live = idx == 0; break;
         case N60_STAGE_SYMMETRY:
         case N60_STAGE_CROSSFEED: live = true; break;
@@ -927,13 +1028,36 @@ void runBass(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
         s.seenLfeG = p[5];
         rampSet(s.lfeG, static_cast<float>(db2lin(p[5])), ramp);
     }
-    if (p[6] != s.seenSubG) {
-        s.seenSubG = p[6];
-        rampSet(s.subG, static_cast<float>(db2lin(p[6])), ramp);
+    for (uint32_t q = 0; q < s.nSubs; ++q) {
+        BassSub &b = s.sub[q];
+        if (p[b.gainIdx] != b.seenG) {
+            b.seenG = p[b.gainIdx];
+            rampSet(b.g, static_cast<float>(db2lin(p[b.gainIdx])), ramp);
+        }
+        if (p[b.polIdx] != b.seenPol) {
+            b.seenPol = p[b.polIdx];
+            rampSet(b.pol, b.seenPol != 0.0f ? -1.0f : 1.0f, ramp);
+        }
+        for (uint32_t k = 0; k < b.nEq; ++k) {
+            const float *e = p + b.eqIdx + 4 * k;
+            if ((e[1] != b.seenEq[k][0] || e[2] != b.seenEq[k][1] || e[3] != b.seenEq[k][2]) && b.xf[k] == 0) {
+                b.seenEq[k][0] = e[1];
+                b.seenEq[k][1] = e[2];
+                b.seenEq[k][2] = e[3];
+                designInto(static_cast<uint32_t>(e[0]), rate, e[1], e[2], e[3], b.eqN[k]);
+                if (ramp == 0) {
+                    std::memcpy(b.eq[k], b.eqN[k], sizeof b.eq[k]);
+                } else {
+                    b.zN[k] = b.z[k];  // incoming section continues from the live one's state
+                    b.xf[k] = ramp;
+                }
+            }
+        }
     }
-    float *sub = lanes[s.subLane];
+    float *sub[kBassMaxSubs];
+    for (uint32_t q = 0; q < s.nSubs; ++q) sub[q] = lanes[s.sub[q].lane];
     float *lfe = s.lfeLane >= 0 ? lanes[static_cast<uint32_t>(s.lfeLane)] : nullptr;
-    const bool clearLfe = lfe != nullptr && lfe != sub;
+    const bool clearLfe = lfe != nullptr && s.clearLfe != 0;
     const double invRamp = 1.0 / static_cast<double>(ramp);
     for (uint32_t i = 0; i < frames; ++i) {
         const bool xf = s.xfX != 0;
@@ -977,9 +1101,24 @@ void runBass(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
             if (s.xfLfe != 0 && --s.xfLfe == 0) std::memcpy(s.lfe, s.lfeN, sizeof s.lfe);  // no LFE lane: adopt the design
             rampNext(s.lfeG);
         }
-        v *= static_cast<double>(rampNext(s.subG)) * s.pol;
-        for (uint32_t k = 0; k < s.nEq; ++k) v = bqRun(s.eq[k], s.eqz[k], v);
-        sub[i] = static_cast<float>(v);
+        // One bass sum, then each sub's own gain, polarity and EQ. (The LFE lane may be a sub lane: it is read above.)
+        for (uint32_t q = 0; q < s.nSubs; ++q) {
+            BassSub &b = s.sub[q];
+            double y = v * (static_cast<double>(rampNext(b.g)) * static_cast<double>(rampNext(b.pol)));
+            for (uint32_t k = 0; k < b.nEq; ++k) {
+                double o = bqRun(b.eq[k], b.z[k], y);
+                if (b.xf[k] != 0) {
+                    const double on = bqRun(b.eqN[k], b.zN[k], y);
+                    o += (static_cast<double>(ramp - b.xf[k] + 1) * invRamp) * (on - o);
+                    if (--b.xf[k] == 0) {
+                        std::memcpy(b.eq[k], b.eqN[k], sizeof b.eq[k]);
+                        b.z[k] = b.zN[k];
+                    }
+                }
+                y = o;
+            }
+            sub[q][i] = static_cast<float>(y);
+        }
         if (clearLfe) lfe[i] = 0.0f;
     }
     for (uint32_t l = 0; l < r.laneCount; ++l) {
@@ -990,7 +1129,12 @@ void runBass(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
     }
     bqFlush(s.lfe1); bqFlush(s.lfe2);
     if (s.xfLfe != 0) { bqFlush(s.lfe1n); bqFlush(s.lfe2n); }
-    for (uint32_t k = 0; k < s.nEq; ++k) bqFlush(s.eqz[k]);
+    for (uint32_t q = 0; q < s.nSubs; ++q) {
+        for (uint32_t k = 0; k < s.sub[q].nEq; ++k) {
+            bqFlush(s.sub[q].z[k]);
+            if (s.sub[q].xf[k] != 0) bqFlush(s.sub[q].zN[k]);
+        }
+    }
 }
 
 void runMute(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
