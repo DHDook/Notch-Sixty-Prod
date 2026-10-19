@@ -111,6 +111,68 @@ int main() {
         CHECK(swaps == 40, "every swap retired a snapshot (%ld)", swaps);
         n60_graph_retire(g);
     }
+
+    // S4 stages: denoiser, dynamic EQ, FIR, compressor and expander on four lanes, with
+    // lane masks, published, edited live and rendered with blocks that straddle FFT frames.
+    for (double rate : rates) {
+        constexpr uint32_t N = 512;
+        const float dn[9] = {2, 0, 1, -30, 1, 100, 4000, 1, 1};
+        float band[16] = {1, 0, 1000, 1, 0, -30, 4, -24, 10, 10, 0, -60, 1, 0, 1, 20};
+        band[2] = static_cast<float>(1000 * rate / 48000);
+        float comp[10] = {-20, 4, 6, 1, 100, 0, 0, 1, 80, 1};
+        const float exp6[6] = {-50, 2, -30, 1, 100, 0};
+        float taps[700];
+        for (int i = 0; i < 700; i++) taps[i] = 0.001f * static_cast<float>(std::sin(0.1 * i));
+        n60_stage_desc a[5] = {
+            stage(N60_STAGE_DENOISER, 1, N60_LANE_ALL, dn, 9),
+            stage(N60_STAGE_DYN_EQ, 2, N60_LANE_ALL, band, 16),
+            stage(N60_STAGE_FIR, 3, 0, taps, 700, 5),
+            stage(N60_STAGE_COMPRESSOR, 4, 0, comp, 10),
+            stage(N60_STAGE_EXPANDER, 5, N60_LANE_ALL, exp6, 6),
+        };
+        a[2].laneMask = 0x5; a[2].laneA = 0;
+        a[3].laneMask = 0xB; a[3].laneA = 0;
+        n60_stage_desc b[2] = {a[3], a[4]};
+        n60_graph_desc da{}, db{};
+        da.structSize = db.structSize = sizeof da;
+        da.abiVersion = db.abiVersion = N60_GRAPH_ABI_VERSION;
+        da.sampleRate = db.sampleRate = rate;
+        da.maxBlockFrames = db.maxBlockFrames = N;
+        da.inputChannels = da.outputChannels = db.inputChannels = db.outputChannels = 4;
+        da.stages = a; da.stageCount = 5;
+        db.stages = b; db.stageCount = 2;
+        n60_graph *g = nullptr;
+        CHECK(n60_graph_build(&da, &g) == N60_STATUS_OK, "build S4 graph at %.0f", rate);
+        static float buf[4][N], obuf[4][N];
+        const float *in[4];
+        float *out[4];
+        for (int c = 0; c < 4; c++) { in[c] = buf[c]; out[c] = obuf[c]; }
+        uint32_t seed = 7;
+        for (int round = 0; round < 24; round++) {
+            n60_graph_desc &d = (round % 8 == 7) ? db : da;
+            CHECK(n60_graph_publish(g, &d) == N60_STATUS_OK, "publish S4");
+            n60_param_record rec[3] = {{4, 0, -30.0f + round, 0}, {1, 3, -60.0f + round, 0}, {2, 4, -10.0f, 0}};
+            n60_status ps = n60_graph_post_params(g, rec, (round % 8 == 7) ? 1 : 3);
+            CHECK(ps == N60_STATUS_OK, "post S4 (%d)", ps);
+            for (int c = 0; c < 4; c++) {
+                for (uint32_t i = 0; i < N; i++) {
+                    seed = seed * 1664525u + 1013904223u;
+                    buf[c][i] = 0.2f * (static_cast<float>((seed >> 8) & 0xFFFF) / 65536.0f - 0.5f);
+                }
+            }
+            allocs = 0;
+            frees = 0;
+            armed = true;
+            n60_status st = n60_graph_process(g, in, out, N);
+            for (int k = 0; k < 4; k++) st = static_cast<n60_status>(st | n60_graph_process(g, in, out, 1 + 100 * k));
+            armed = false;
+            CHECK(st == N60_STATUS_OK, "process S4");
+            CHECK(allocs == 0 && frees == 0, "rate %.0f S4 round %d: realtime call allocated %ld / freed %ld", rate, round,
+                  allocs.load(), frees.load());
+            n60_graph_collect(g);
+        }
+        n60_graph_retire(g);
+    }
     if (failures) {
         std::fprintf(stderr, "%d failure(s)\n", failures);
         return 1;

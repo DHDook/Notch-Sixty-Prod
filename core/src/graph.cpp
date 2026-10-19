@@ -221,15 +221,8 @@ n60_status n60_graph_post_params(n60_graph *g, const n60_param_record *records, 
         if (r.reserved != 0 || !std::isfinite(r.value)) return N60_STATUS_BAD_ARGUMENT;
         const n60::StageRec *stage = n60::findStage(g->latest, r.stageId);
         if (stage == nullptr) return N60_STATUS_BAD_ARGUMENT;
-        if (stage->kind == N60_STAGE_GAIN) {
-            if (r.paramIndex != 0 || r.value < 0.0f || r.value > 10000.0f) return N60_STATUS_BAD_ARGUMENT;
-        } else if (stage->kind == N60_STAGE_DELAY) {
-            if (r.paramIndex != 0 || r.value < 0.0f || r.value > static_cast<float>(stage->capacity)) {
-                return N60_STATUS_BAD_ARGUMENT;
-            }
-        } else {
-            return N60_STATUS_UNSUPPORTED;
-        }
+        const n60_status v = n60::validateParam(g->latest, *stage, r.paramIndex, r.value);
+        if (v != N60_STATUS_OK) return v;
     }
     const uint32_t head = g->mailHead.load(std::memory_order_acquire);
     uint32_t tail = g->mailTail.load(std::memory_order_relaxed);
