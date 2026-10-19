@@ -63,7 +63,7 @@ build_core_objs() {
     done
 }
 # Bridge harnesses: build the core only when one of them is selected.
-if selected pr35_transition_ack || selected pr41_same_device_output_map || selected pr101_realtime_resource_soak; then
+if selected pr35_transition_ack || selected pr41_same_device_output_map || selected pr101_realtime_resource_soak || selected e6_graph_takeover; then
     build_core_objs
 fi
 
@@ -103,6 +103,9 @@ harness pr35_render_context_snapshot_pointer -std=c11 -Wall -Wextra -include std
     ci/validate_pr35_render_context_snapshot_pointer.c $ALL_RT_NO_BRIDGE -framework Accelerate
 # shellcheck disable=SC2086
 harness pr35_transition_ack "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/validate_pr35_transition_ack.c $ALL_RT \
+    -Icore/include ${CORE_OBJS[@]+"${CORE_OBJS[@]}"} -lc++ -framework Accelerate -framework CoreAudio
+# shellcheck disable=SC2086
+harness e6_graph_takeover "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/validate_e6_graph_takeover.c $ALL_RT \
     -Icore/include ${CORE_OBJS[@]+"${CORE_OBJS[@]}"} -lc++ -framework Accelerate -framework CoreAudio
 # shellcheck disable=SC2086
 harness pr38_denoiser_advanced "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/validate_pr38_denoiser_advanced.c $ALL_RT_NO_BRIDGE \

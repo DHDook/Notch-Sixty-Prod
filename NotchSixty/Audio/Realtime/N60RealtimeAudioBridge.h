@@ -128,16 +128,31 @@ typedef struct {
 
 N60RealtimeAudioBridge * _Nullable N60RealtimeAudioBridgeCreate(uint32_t capacityFrames);
 void N60RealtimeAudioBridgeDestroy(N60RealtimeAudioBridge * _Nonnull bridge);
-// E6 S8. Control thread only. Attaches (graph != NULL) or detaches (NULL) a libn60core
-// n60_graph used by the plain-stereo callback branch for blocks up to maxFrames; larger
-// blocks, the AU rack and same-device branches keep using the kernel. The bridge never
-// owns or frees the graph. Allocates the scratch here, never in the callback.
+// E6 S8/S8b. Control thread only. Attaches (graph != NULL) or detaches (NULL) a libn60core
+// n60_graph used by the plain-stereo callback branch. The callback owns the hand-over: the
+// side taking over is warmed on the live input for 50 ms (the kernel is cold-started first),
+// then crossfaded in over 20 ms, so attach and detach neither step nor resume stale state.
+// Blocks larger than maxFrames are rendered in chunks. maxFrames and sampleRate are fixed by the
+// first attach (a later attach with a larger maxFrames or another rate is refused until Release),
+// and a different graph object is accepted only after the previous hand-over has ended. The
+// crossfade assumes kernel and graph are time-aligned within the fade; any latency difference is
+// not compensated. Route changes to the AU rack or same-device branch happen with IO stopped. The AU rack and same-device branches
+// always use the kernel. The bridge never owns or frees the graph; a detached graph pointer
+// stays referenced until ReleaseUnifiedGraph or N60RealtimeAudioBridgeDestroy, so the owner
+// releases the graph only after one of those (with IO stopped). sampleRate sets the warm-up and fade lengths.
+// Allocates the scratch on first attach, never in the callback.
 bool N60RealtimeAudioBridgeSetUnifiedGraph(
     N60RealtimeAudioBridge * _Nonnull bridge,
     void * _Nullable graph,
-    uint32_t maxFrames
+    uint32_t maxFrames,
+    double sampleRate
 );
+// Drops the graph reference and returns the callback to kernel-only. IO must be stopped.
+void N60RealtimeAudioBridgeReleaseUnifiedGraph(N60RealtimeAudioBridge * _Nonnull bridge);
+// True while a graph is attached and wanted (a detach in progress reads false).
 bool N60RealtimeAudioBridgeUnifiedGraphActive(const N60RealtimeAudioBridge * _Nonnull bridge);
+// Weight of the graph in the output as of the last block: 0 kernel only, 1 graph only.
+float N60RealtimeAudioBridgeUnifiedGraphMix(const N60RealtimeAudioBridge * _Nonnull bridge);
 void N60RealtimeAudioBridgeReset(N60RealtimeAudioBridge * _Nonnull bridge);
 void N60RealtimeAudioBridgeSetOutputGain(N60RealtimeAudioBridge * _Nonnull bridge, float gain);
 void N60RealtimeAudioBridgeSetTransitionGainImmediate(

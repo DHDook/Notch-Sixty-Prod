@@ -77,13 +77,37 @@ typedef struct {
 // on the control thread only; the audio callback loads the pointer (acquire) and calls
 // n60_graph_process on planar scratch whose lifetime the callback does not own.
 // The attachment (and its scratch) is allocated once on first attach and lives until the
-// bridge is destroyed, so the callback can never touch freed memory; attach and detach only
-// swap the graph pointer inside it.
+// bridge is destroyed, so the callback can never touch freed memory.
+//
+// E6 S8b: the control thread only states a wish (`wantGraph`); the callback owns the
+// hand-over. The side that is taking over is first run cold-to-warm on the live input for
+// `warmFrames` with its output discarded, then crossfaded in over `fadeFrames` while the
+// other side keeps running, so neither attach nor detach steps or restarts from stale
+// state. The kernel is cold-started (N60RenderKernelColdStart) before it takes over; the
+// graph keeps its state but is warmed the same way because it was not processed meanwhile.
 typedef struct N60UnifiedGraphAttachment {
     _Atomic(n60_graph *) graph;
+    _Atomic bool wantGraph;
+    _Atomic uint32_t publishedMixBits;  // callback -> control, for diagnostics and tests
     float *scratch;       // 4 * maxFrames floats: planar in (2 lanes) then planar out (2 lanes)
     uint32_t maxFrames;
+    uint32_t warmFrames;
+    uint32_t fadeFrames;
+    // Callback-owned hand-over state (control thread touches it only while IO is stopped).
+    float mix;            // weight of the graph output, 0 = kernel only, 1 = graph only
+    uint32_t graphWarmLeft;
+    uint32_t kernelWarmLeft;
+    bool graphCold;       // graph was not processed since it was last idle
+    bool kernelCold;      // kernel was not processed since it was last idle
 } N60UnifiedGraphAttachment;
+
+typedef struct N60UnifiedGraphPlan {
+    N60UnifiedGraphAttachment *attachment;
+    n60_graph *graph;
+    bool graphRunning;
+    bool kernelRunning;
+    float mixStep;        // signed per-frame change of mix once the warm-up has run out
+} N60UnifiedGraphPlan;
 
 struct N60RealtimeAudioBridge {
     _Atomic(N60UnifiedGraphAttachment *) unifiedGraph;
@@ -547,19 +571,25 @@ static void free_unified_attachment(N60UnifiedGraphAttachment *attachment) {
 bool N60RealtimeAudioBridgeSetUnifiedGraph(
     N60RealtimeAudioBridge *bridge,
     void *graph,
-    uint32_t maxFrames
+    uint32_t maxFrames,
+    double sampleRate
 ) {
     if (bridge == NULL) return false;
     N60UnifiedGraphAttachment *attachment = atomic_load_explicit(
         &bridge->unifiedGraph, memory_order_acquire
     );
     if (graph == NULL) {
+        // Detach: the callback warms the kernel and fades to it. The graph pointer stays
+        // valid for that fade; the owner releases it with ReleaseUnifiedGraph once IO stops.
         if (attachment != NULL) {
-            atomic_store_explicit(&attachment->graph, NULL, memory_order_release);
+            atomic_store_explicit(&attachment->wantGraph, false, memory_order_release);
         }
         return true;
     }
     if (maxFrames == 0u || maxFrames > (1u << 20)) return false;
+    if (!(sampleRate >= 8000.0 && sampleRate <= 768000.0)) return false;
+    const uint32_t warmFrames = (uint32_t)(sampleRate * 0.050);
+    const uint32_t fadeFrames = (uint32_t)(sampleRate * 0.020);
     if (attachment == NULL) {
         attachment = calloc(1, sizeof(N60UnifiedGraphAttachment));
         if (attachment == NULL) return false;
@@ -569,14 +599,46 @@ bool N60RealtimeAudioBridgeSetUnifiedGraph(
             return false;
         }
         attachment->maxFrames = maxFrames;
+        attachment->warmFrames = warmFrames;
+        attachment->fadeFrames = fadeFrames;
+        attachment->graphCold = true;
         atomic_store_explicit(&attachment->graph, (n60_graph *)graph, memory_order_relaxed);
+        atomic_store_explicit(&attachment->wantGraph, true, memory_order_relaxed);
         atomic_store_explicit(&bridge->unifiedGraph, attachment, memory_order_release);
         return true;
     }
-    // The scratch size is fixed by the first attach; a graph built for larger blocks is refused.
+    // The scratch size and the warm-up/fade lengths are fixed by the first attach; a graph built
+    // for larger blocks or another sample rate is refused (Release first, with IO stopped).
     if (maxFrames > attachment->maxFrames) return false;
-    atomic_store_explicit(&attachment->graph, (n60_graph *)graph, memory_order_release);
+    if (warmFrames != attachment->warmFrames || fadeFrames != attachment->fadeFrames) return false;
+    // A different graph object is accepted only once the previous hand-over has fully ended
+    // (not wanted, mix published as 0), so the callback never sees the pointer change mid-use.
+    if (atomic_load_explicit(&attachment->graph, memory_order_relaxed) != (n60_graph *)graph) {
+        if (atomic_load_explicit(&attachment->wantGraph, memory_order_acquire)
+            || atomic_load_explicit(&attachment->publishedMixBits, memory_order_relaxed) != 0u) {
+            return false;
+        }
+        atomic_store_explicit(&attachment->graph, (n60_graph *)graph, memory_order_release);
+        attachment->graphCold = true;
+    }
+    atomic_store_explicit(&attachment->wantGraph, true, memory_order_release);
     return true;
+}
+
+void N60RealtimeAudioBridgeReleaseUnifiedGraph(N60RealtimeAudioBridge *bridge) {
+    if (bridge == NULL) return;
+    N60UnifiedGraphAttachment *attachment = atomic_load_explicit(
+        &bridge->unifiedGraph, memory_order_acquire
+    );
+    if (attachment == NULL) return;
+    atomic_store_explicit(&attachment->wantGraph, false, memory_order_release);
+    atomic_store_explicit(&attachment->graph, NULL, memory_order_release);
+    attachment->mix = 0.0f;
+    attachment->graphWarmLeft = 0u;
+    attachment->kernelWarmLeft = 0u;
+    attachment->graphCold = true;
+    attachment->kernelCold = true;
+    atomic_store_explicit(&attachment->publishedMixBits, 0u, memory_order_relaxed);
 }
 
 bool N60RealtimeAudioBridgeUnifiedGraphActive(const N60RealtimeAudioBridge *bridge) {
@@ -585,7 +647,82 @@ bool N60RealtimeAudioBridgeUnifiedGraphActive(const N60RealtimeAudioBridge *brid
         (_Atomic(N60UnifiedGraphAttachment *) *)&bridge->unifiedGraph, memory_order_acquire
     );
     return attachment != NULL
-        && atomic_load_explicit(&attachment->graph, memory_order_acquire) != NULL;
+        && atomic_load_explicit(&attachment->graph, memory_order_acquire) != NULL
+        && atomic_load_explicit(&attachment->wantGraph, memory_order_acquire);
+}
+
+float N60RealtimeAudioBridgeUnifiedGraphMix(const N60RealtimeAudioBridge *bridge) {
+    if (bridge == NULL) return 0.0f;
+    N60UnifiedGraphAttachment *attachment = atomic_load_explicit(
+        (_Atomic(N60UnifiedGraphAttachment *) *)&bridge->unifiedGraph, memory_order_acquire
+    );
+    if (attachment == NULL) return 0.0f;
+    const uint32_t bits = atomic_load_explicit(&attachment->publishedMixBits, memory_order_relaxed);
+    float value;
+    memcpy(&value, &bits, sizeof(value));
+    return value;
+}
+
+// Callback. Decides, once per block and before the kernel renders, which sides run.
+// Cold-starts the kernel when it is about to take over; never allocates or locks.
+static N60UnifiedGraphPlan plan_unified_block(
+    N60RealtimeAudioBridge *bridge,
+    uint32_t framesToRead,
+    bool eligibleBranch
+) {
+    N60UnifiedGraphPlan plan = {0};
+    N60UnifiedGraphAttachment *a = atomic_load_explicit(&bridge->unifiedGraph, memory_order_acquire);
+    plan.attachment = a;
+    plan.kernelRunning = true;
+    if (a == NULL) return plan;
+    n60_graph *graph = atomic_load_explicit(&a->graph, memory_order_acquire);
+    bool want = graph != NULL && eligibleBranch
+        && atomic_load_explicit(&a->wantGraph, memory_order_acquire);
+    if (graph == NULL || !eligibleBranch) {
+        // No graph to hand over from (released, or a branch the graph does not serve):
+        // the kernel renders, from a cold start if the graph had been rendering.
+        if (a->mix > 0.0f) {
+            a->mix = 0.0f;
+            a->kernelWarmLeft = 0u;
+            if (a->kernelCold) {
+                N60RenderKernelColdStart(bridge->renderKernel);
+                a->kernelCold = false;
+            }
+        }
+        a->graphWarmLeft = 0u;
+        a->graphCold = true;
+        return plan;
+    }
+    (void)framesToRead;
+    plan.graph = graph;
+    const float step = a->fadeFrames > 0u ? 1.0f / (float)a->fadeFrames : 1.0f;
+    if (want) {
+        a->kernelWarmLeft = 0u;
+        if (a->graphCold) {
+            a->graphWarmLeft = a->warmFrames;
+            a->graphCold = false;
+        }
+        plan.graphRunning = true;
+        plan.kernelRunning = a->mix < 1.0f;
+        plan.mixStep = step;
+    } else if (a->mix > 0.0f) {
+        a->graphWarmLeft = 0u;
+        if (a->kernelCold) {
+            N60RenderKernelColdStart(bridge->renderKernel);
+            a->kernelWarmLeft = a->warmFrames;
+            a->kernelCold = false;
+        }
+        plan.graphRunning = true;
+        plan.kernelRunning = true;
+        plan.mixStep = -step;
+    } else {
+        a->graphWarmLeft = 0u;
+        a->graphCold = true;
+        plan.graph = NULL;
+    }
+    // A side that does not run this block is stale the next time it is needed.
+    if (!plan.kernelRunning) a->kernelCold = true;
+    return plan;
 }
 
 N60RealtimeAudioBridge *N60RealtimeAudioBridgeCreate(uint32_t capacityFrames) {
@@ -724,6 +861,16 @@ void N60RealtimeAudioBridgeReset(N60RealtimeAudioBridge *bridge) {
         N60AdaptiveSRCReset(bridge->adaptiveSRC);
     }
     N60RenderKernelReset(bridge->renderKernel);
+    N60UnifiedGraphAttachment *unified = atomic_load_explicit(&bridge->unifiedGraph, memory_order_acquire);
+    if (unified != NULL) {
+        // The kernel was just reset; the graph starts from a warm-up again (IO is stopped).
+        unified->mix = 0.0f;
+        unified->graphWarmLeft = 0u;
+        unified->kernelWarmLeft = 0u;
+        unified->graphCold = true;
+        unified->kernelCold = false;
+        atomic_store_explicit(&unified->publishedMixBits, 0u, memory_order_relaxed);
+    }
 }
 
 bool N60RealtimeAudioBridgeConfigureAdaptiveSampleRate(
@@ -2058,6 +2205,12 @@ OSStatus N60OutputIOProc(
     N60TransitionRampRuntime transitionRamp = bridge->transitionRuntime;
     N60StartupFadeRuntime startupFade = bridge->startupFadeRuntime;
 
+    // E6 S8b: decide the graph/kernel hand-over for this block before the kernel prepares.
+    N60UnifiedGraphPlan unifiedPlan = plan_unified_block(
+        bridge,
+        framesToRead,
+        !N60AudioUnitLiveRackProcessorIsValid(&bridge->audioUnitRack) && !sameDeviceMultiOutput
+    );
     N60RenderKernelRenderContext renderContext =
         N60RenderKernelBeginRender(bridge->renderKernel);
     UInt32 renderedFrames = 0;
@@ -2300,46 +2453,20 @@ OSStatus N60OutputIOProc(
             renderedFrames += 1u;
         }
     } else {
-        // E6 S8: with a unified graph attached, one whole-buffer n60_graph_process call
-        // replaces the per-frame kernel for this block. No allocation, no locks; the
-        // kernel is skipped, so its state does not advance while the graph renders.
-        N60UnifiedGraphAttachment *unified = atomic_load_explicit(
-            &bridge->unifiedGraph, memory_order_acquire
-        );
-        bool unifiedRendered = false;
-        float *unifiedOut = NULL;
-        n60_graph *unifiedGraph = unified != NULL
-            ? atomic_load_explicit(&unified->graph, memory_order_acquire) : NULL;
-        if (unifiedGraph != NULL && framesToRead <= unified->maxFrames) {
-            float *planarIn = unified->scratch;
-            float *planarOut = unified->scratch + (size_t)unified->maxFrames * 2u;
-            uint32_t readPosition = ringReadIndex;
-            for (UInt32 i = 0; i < framesToRead; ++i) {
-                N60StereoFrame source;
-                if (adaptiveSampleRate) {
-                    const size_t base = (size_t)i * 2u;
-                    source = (N60StereoFrame){
-                        bridge->adaptiveOutputScratch[base],
-                        bridge->adaptiveOutputScratch[base + 1u]
-                    };
-                } else {
-                    source = bridge->frames[readPosition];
-                    readPosition += 1u;
-                    if (readPosition == bridge->capacityFrames) readPosition = 0u;
-                }
-                planarIn[i] = source.left;
-                planarIn[unified->maxFrames + i] = source.right;
-            }
-            const float *inLanes[2] = { planarIn, planarIn + unified->maxFrames };
-            float *outLanes[2] = { planarOut, planarOut + unified->maxFrames };
-            // On a process error the block is silence, never a splice of stale kernel state.
-            if (n60_graph_process(unifiedGraph, inLanes, outLanes, framesToRead)
-                    != N60_STATUS_OK) {
-                memset(planarOut, 0, (size_t)unified->maxFrames * 2u * sizeof(float));
-            }
-            unifiedRendered = true;
-            unifiedOut = planarOut;
-        }
+        // E6 S8/S8b: with a unified graph attached, whole-buffer n60_graph_process calls
+        // (in chunks of at most maxFrames) replace the per-frame kernel once the hand-over
+        // has finished; while it is in progress both run and their outputs are crossfaded.
+        // No allocation, no locks.
+        N60UnifiedGraphAttachment *unified = unifiedPlan.attachment;
+        const bool graphRuns = unifiedPlan.graphRunning && unifiedPlan.graph != NULL;
+        const bool kernelRuns = unifiedPlan.kernelRunning;
+        float mix = graphRuns ? unified->mix : 0.0f;
+        uint32_t graphWarmLeft = graphRuns ? unified->graphWarmLeft : 0u;
+        uint32_t kernelWarmLeft = graphRuns ? unified->kernelWarmLeft : 0u;
+        uint32_t graphReadPosition = ringReadIndex;
+        uint32_t graphChunkStart = 0u;
+        uint32_t graphChunkFrames = 0u;
+        float *graphOut = graphRuns ? unified->scratch + (size_t)unified->maxFrames * 2u : NULL;
         for (UInt32 frameIndex = 0;
              frameIndex < framesToRead;
              ++frameIndex) {
@@ -2357,19 +2484,71 @@ OSStatus N60OutputIOProc(
                     ringReadIndex = 0u;
                 }
             }
-            N60StereoFrame processed;
-            if (unifiedRendered) {
-                processed.left = unifiedOut[frameIndex];
-                processed.right = unifiedOut[unified->maxFrames + frameIndex];
-            } else {
+            N60StereoFrame processed = {0.0f, 0.0f};
+            N60StereoFrame kernelFrame = {0.0f, 0.0f};
+            if (graphRuns && frameIndex >= graphChunkStart + graphChunkFrames) {
+                // Render the next chunk of the block through the graph.
+                graphChunkStart = frameIndex;
+                graphChunkFrames = framesToRead - frameIndex;
+                if (graphChunkFrames > unified->maxFrames) graphChunkFrames = unified->maxFrames;
+                float *planarIn = unified->scratch;
+                for (uint32_t i = 0; i < graphChunkFrames; ++i) {
+                    N60StereoFrame source;
+                    if (adaptiveSampleRate) {
+                        const size_t base = ((size_t)graphChunkStart + i) * 2u;
+                        source = (N60StereoFrame){
+                            bridge->adaptiveOutputScratch[base],
+                            bridge->adaptiveOutputScratch[base + 1u]
+                        };
+                    } else {
+                        source = bridge->frames[graphReadPosition];
+                        graphReadPosition += 1u;
+                        if (graphReadPosition == bridge->capacityFrames) graphReadPosition = 0u;
+                    }
+                    planarIn[i] = source.left;
+                    planarIn[unified->maxFrames + i] = source.right;
+                }
+                const float *inLanes[2] = { planarIn, planarIn + unified->maxFrames };
+                float *outLanes[2] = { graphOut, graphOut + unified->maxFrames };
+                // On a process error the chunk is silence, never a splice of stale state.
+                if (n60_graph_process(unifiedPlan.graph, inLanes, outLanes,
+                                      graphChunkFrames) != N60_STATUS_OK) {
+                    memset(graphOut, 0, (size_t)graphChunkFrames * sizeof(float));
+                    memset(graphOut + unified->maxFrames, 0, (size_t)graphChunkFrames * sizeof(float));
+                }
+            }
+            if (kernelRuns || !graphRuns) {
                 N60RenderKernelProcessStereoFrameInContext(
                     bridge->renderKernel,
                     &renderContext,
                     frame.left,
                     frame.right,
-                    &processed.left,
-                    &processed.right
+                    &kernelFrame.left,
+                    &kernelFrame.right
                 );
+            }
+            if (graphRuns) {
+                const uint32_t offset = frameIndex - graphChunkStart;
+                const float graphLeft = graphOut[offset];
+                const float graphRight = graphOut[unified->maxFrames + offset];
+                if (kernelRuns) {
+                    processed.left = kernelFrame.left + (graphLeft - kernelFrame.left) * mix;
+                    processed.right = kernelFrame.right + (graphRight - kernelFrame.right) * mix;
+                } else {
+                    processed.left = graphLeft;
+                    processed.right = graphRight;
+                }
+                if (graphWarmLeft > 0u) {
+                    graphWarmLeft -= 1u;
+                } else if (kernelWarmLeft > 0u) {
+                    kernelWarmLeft -= 1u;
+                } else if (unifiedPlan.mixStep != 0.0f) {
+                    mix += unifiedPlan.mixStep;
+                    if (mix > 1.0f) mix = 1.0f;
+                    if (mix < 0.0f) mix = 0.0f;
+                }
+            } else {
+                processed = kernelFrame;
             }
 
             if (frameIndex < analysisFramesToWrite) {
@@ -2493,6 +2672,14 @@ OSStatus N60OutputIOProc(
                 outputRight += outputView.rightStride;
             }
             renderedFrames += 1u;
+        }
+        if (graphRuns) {
+            unified->mix = mix;
+            unified->graphWarmLeft = graphWarmLeft;
+            unified->kernelWarmLeft = kernelWarmLeft;
+            uint32_t mixBits;
+            memcpy(&mixBits, &mix, sizeof(mixBits));
+            atomic_store_explicit(&unified->publishedMixBits, mixBits, memory_order_relaxed);
         }
     }
 
