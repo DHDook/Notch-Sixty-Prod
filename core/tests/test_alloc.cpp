@@ -418,6 +418,73 @@ int main() {
         n60_layout_graph_free(spk);
         n60_layout_graph_free(bin);
     }
+    // S7b: eight sub lanes with per-sub EQ; live gain, polarity and EQ edits every block and a sub-count
+    // rebuild (8 default-mode subs to 3 host-weighted and back) allocate nothing in the callback.
+    for (double rate : rates) {
+        constexpr uint32_t N = 256, CH = 11;
+        float bass8[9 + 4 + 1 + 7 * 8], bass3[9 + 4 + 1 + 2 * 8];
+        auto fill = [](float *p, uint32_t subs, bool weighted) {
+            const float head[9] = {200, -6, 3, 2, 120, 0, 0, 0, 1};
+            std::memcpy(p, head, sizeof head);
+            uint32_t n = 9;
+            p[n++] = 0; p[n++] = 50; p[n++] = 3; p[n++] = 1;
+            p[n++] = static_cast<float>(subs - 1) + (weighted ? 8.0f : 0.0f);
+            for (uint32_t q = 1; q < subs; ++q) {
+                p[n++] = static_cast<float>(3 + q); p[n++] = -1.0f * static_cast<float>(q); p[n++] = static_cast<float>(q & 1u); p[n++] = 1;
+                p[n++] = 0; p[n++] = 50; p[n++] = 3; p[n++] = 1;
+            }
+            return n;
+        };
+        const uint32_t n8 = fill(bass8, 8, false), n3 = fill(bass3, 3, true);
+        n60_stage_desc a = stage(N60_STAGE_BASS_MGMT, 1, 0, bass8, n8), b = stage(N60_STAGE_BASS_MGMT, 1, 0, bass3, n3);
+        a.laneMask = b.laneMask = 0x3;
+        n60_graph_desc da{}, db{};
+        da.structSize = db.structSize = sizeof da;
+        da.abiVersion = db.abiVersion = N60_GRAPH_ABI_VERSION;
+        da.sampleRate = db.sampleRate = rate;
+        da.maxBlockFrames = db.maxBlockFrames = N;
+        da.inputChannels = da.outputChannels = db.inputChannels = db.outputChannels = CH;
+        da.stages = &a; da.stageCount = 1;
+        db.stages = &b; db.stageCount = 1;
+        n60_graph *g = nullptr;
+        CHECK(n60_graph_build(&da, &g) == N60_STATUS_OK, "build S7b graph at %.0f", rate);
+        if (g == nullptr) continue;
+        static float buf[CH][N], obuf[CH][N];
+        const float *in[CH];
+        float *out[CH];
+        for (uint32_t c = 0; c < CH; c++) { in[c] = buf[c]; out[c] = obuf[c]; }
+        uint32_t seed = 3;
+        for (int round = 0; round < 6; round++) {
+            n60_graph_desc &d = (round % 2 == 0) ? db : da;
+            CHECK(n60_graph_publish(g, &d) == N60_STATUS_OK, "publish S7b");
+            for (int step = 0; step < 300; step++) {
+                const n60_param_record rec[3] = {{1, 6, static_cast<float>(step % 7) - 3.0f, 0},
+                                                 {1, 7, static_cast<float>(step & 1), 0},
+                                                 {1, 11, static_cast<float>((step * 5) % 24) - 12.0f, 0}};
+                n60_graph_post_params(g, rec, 3);
+                for (uint32_t c = 0; c < CH; c++) {
+                    for (uint32_t i = 0; i < N; i++) {
+                        seed = seed * 1664525u + 1013904223u;
+                        buf[c][i] = 0.3f * (static_cast<float>((seed >> 8) & 0xFFFF) / 65536.0f - 0.5f);
+                    }
+                }
+                allocs = 0;
+                frees = 0;
+                armed = true;
+                n60_status st = n60_graph_process(g, in, out, N);
+                armed = false;
+                CHECK(st == N60_STATUS_OK, "process S7b");
+                CHECK(allocs == 0 && frees == 0, "rate %.0f S7b round %d step %d: realtime call allocated %ld / freed %ld", rate,
+                      round, step, allocs.load(), frees.load());
+                n60_rebuild_status rs{};
+                rs.structSize = sizeof rs;
+                n60_graph_get_rebuild_status(g, &rs);
+                if (step > 2 && rs.state == 0) break;
+            }
+            n60_graph_collect(g);
+        }
+        n60_graph_retire(g);
+    }
     if (failures) {
         std::fprintf(stderr, "%d failure(s)\n", failures);
         return 1;

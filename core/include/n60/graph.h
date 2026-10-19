@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 6u
+#define N60_GRAPH_ABI_VERSION 7u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -140,11 +140,23 @@ typedef enum n60_stage_kind {
  * METER_OUT rules. A "live" parameter may be posted; the rest need a new snapshot (UNSUPPORTED).
  *
  * BASS_MGMT (mask = main lanes). params: [0] crossover Hz (live), [1] redirect dB (live, -24..12),
- *  [2] sub lane, [3] LFE lane (-1 none; may equal the sub lane), [4] LFE low-pass Hz (live, 20..500),
- *  [5] LFE gain dB (live, -24..24), [6] sub gain dB (live, -60..24), [7] sub polarity (0 normal, 1 invert),
- *  [8] sub EQ section count n (0..4), then 4 per section (type, Hz, dB, Q). paramCount 9+4n.
- *  Mains get a Linkwitz-Riley 4 high-pass, their low-pass is summed (x redirect) with the LFE low-pass into
- *  the sub lane, which is replaced. The sub and LFE lanes must not be in the mask. Sub delay is a DELAY stage.
+ *  [2] sub 0 lane, [3] LFE lane (-1 none; may equal a sub lane), [4] LFE low-pass Hz (live, 20..500),
+ *  [5] LFE gain dB (live, -24..24), [6] sub 0 gain dB (live, -60..24), [7] sub 0 polarity (0 normal, 1 invert; live),
+ *  [8] sub 0 EQ section count n0 (0..8), then 4 per section (type, Hz, dB, Q; Hz, dB and Q are live, type is not).
+ *  Mains get a Linkwitz-Riley 4 high-pass, their low-pass is summed (x redirect) with the LFE low-pass into ONE bass
+ *  sum. ABI v7 (E6 S7b): that sum drives 1 to 8 sub lanes. After sub 0's sections an optional extension follows:
+ *  [9+4*n0] extension word w (0..15): m = w mod 8 extra subs (0..7), and w >= 8 selects host-weighted mode. Then
+ *  for each extra sub: lane, gain dB (live), polarity (live), section count n (0..8), then 4 per section. paramCount
+ *  is 9+4*n0 for one sub (identical to ABI v6), otherwise the sum of the blocks. Each sub is bass sum * norm * its
+ *  gain * its polarity, then its sections in order. Default mode: norm = 1/N (N = sub count), matching the shipping
+ *  engine's 1/N redirect, so N coherent subs sum to the level of one; norm is exactly 1 for one sub, which keeps the
+ *  v6 list bit-identical. Host-weighted mode (w >= 8, for room optimisation): norm = 1 and the per-sub gains are
+ *  used as given. The mode is part of the topology: changing it, the sub count, lanes or section counts needs a new
+ *  snapshot (rebuild fade; a live post to w is UNSUPPORTED). Sub lanes are replaced, must be distinct and outside
+ *  the mask; the LFE lane is cleared unless it is a sub lane. A live edit ramps over the ramp window (gain,
+ *  polarity: a flip passes through zero) or crossfades the section's coefficients (Hz, dB, Q). Per-sub delay is a
+ *  DELAY stage on the sub lane (rank 24, after this stage).
+ *  No added latency.
  * AMBIENT. params: [0] level dB (live, -60..24), then three peaking bands (Hz, dB, Q). paramCount 10.
  * SYMMETRY. params: [0] position -1..1 (live). CROSSFEED. params: [0] amount 0..0.5 (live).
  * CROSSTALK. params: [0] shadow low-pass Hz 200..2000 (live), [1] amount 0..1 (live).

@@ -186,6 +186,8 @@ if selected e6_core_graph; then
             "${CORE_OBJS[@]}" -lc++ -lm
         harness e6_core_rebuild "${STRICT[@]}" -O2 -Icore/include core/tests/test_rebuild.c \
             "${CORE_OBJS[@]}" -lc++ -lm
+        harness e6_core_multisub "${STRICT[@]}" -O2 -Icore/include core/tests/test_multisub.c \
+            "${CORE_OBJS[@]}" -lc++ -lm
         harness e6_core_layout "${STRICT[@]}" -O2 -Icore/include core/tests/test_layout.c \
             "${CORE_OBJS[@]}" -lc++ -lm
         harness e6_core_binaural_parity "${STRICT[@]}" -O2 -Icore/include -I"$RT" core/tests/test_binaural_parity.c \
