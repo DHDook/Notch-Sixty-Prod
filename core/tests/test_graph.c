@@ -1,5 +1,5 @@
 /*
- * E6 S2: behavioural harness for the libn60core graph skeleton through its C ABI:
+ * E6 S2: behavioural harness for the libn60core empty graph through its C ABI:
  * pass-through at the eight standard rates, ABI mismatch rejection, argument
  * validation, 1-frame and maximum block sizes, in-place and channel-count mismatch.
  */
@@ -144,7 +144,7 @@ int main(void) {
         CHECK(n60_graph_process(g, in, nullOut, 8) == N60_STATUS_BAD_ARGUMENT, "null out channel");
 
         n60_param_record rec = {0, 0, 1.0f, 0};
-        CHECK(n60_graph_post_params(g, &rec, 1) == N60_STATUS_UNSUPPORTED, "params unsupported");
+        CHECK(n60_graph_post_params(g, &rec, 1) == N60_STATUS_BAD_ARGUMENT, "params for a stage that does not exist");
         CHECK(n60_graph_post_params(g, NULL, 0) == N60_STATUS_OK, "empty params");
         CHECK(n60_graph_post_params(g, NULL, 1) == N60_STATUS_BAD_ARGUMENT, "null records");
         n60_graph_retire(g);
@@ -155,6 +155,6 @@ int main(void) {
         fprintf(stderr, "%d failure(s)\n", failures);
         return 1;
     }
-    puts("n60core graph skeleton: all checks passed");
+    puts("n60core empty graph: all checks passed");
     return 0;
 }

@@ -158,12 +158,22 @@ if selected e4_ff_survey; then
     fi
 fi
 
-# E6 S2: libn60core skeleton (portable C++ core behind its versioned C ABI).
+# E6 S2/S3: libn60core (portable C++ core behind its versioned C ABI): graph skeleton,
+# snapshot swap, lane stages, allocation hook, and parity with the kernel biquad.
 if selected e6_core_graph; then
     if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -fno-exceptions -fno-rtti -Icore/include \
-        -c core/src/graph.cpp -o "$OUT/n60core_graph.o"; then
+        -c core/src/graph.cpp -o "$OUT/n60core_graph.o" \
+        && clang++ -std=c++20 -O2 -Wall -Wextra -Werror -fno-exceptions -fno-rtti -Icore/include \
+        -c core/src/snapshot.cpp -o "$OUT/n60core_snapshot.o"; then
         harness e6_core_graph "${STRICT[@]}" -O2 -Icore/include core/tests/test_graph.c \
-            "$OUT/n60core_graph.o" -lc++ -lm
+            "$OUT/n60core_graph.o" "$OUT/n60core_snapshot.o" -lc++ -lm
+        harness e6_core_stages "${STRICT[@]}" -O2 -Icore/include core/tests/test_stages.c \
+            "$OUT/n60core_graph.o" "$OUT/n60core_snapshot.o" -lc++ -lm -lpthread
+        harness e6_core_parity "${STRICT[@]}" -O2 -Icore/include core/tests/test_parity.c \
+            "$OUT/n60core_graph.o" "$OUT/n60core_snapshot.o" -lc++ -lm
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include core/tests/test_alloc.cpp \
+            "$OUT/n60core_graph.o" "$OUT/n60core_snapshot.o" -o "$OUT/e6_core_alloc" \
+            && "$OUT/e6_core_alloc"; then :; else failed+=(e6_core_alloc); fi
     else
         failed+=(e6_core_graph)
     fi
