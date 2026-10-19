@@ -173,6 +173,78 @@ int main() {
         }
         n60_graph_retire(g);
     }
+    // S5 system stages: every ABI v4 stage on four lanes, published, edited live and rendered.
+    for (double rate : rates) {
+        constexpr uint32_t N = 512;
+        const float bm[9] = {80, 0, 2, 3, 120, 0, 0, 0, 0};
+        const float amb[10] = {3, 100, 0, 1, 1000, 1, 1, 8000, 0, 1};
+        const float sym[1] = {0.2f}, cf[1] = {0.2f}, ct[2] = {900, 0.3f}, og[1] = {0.9f};
+        const float hp[11] = {-1, 0.5f, 45, 0.09f, 700, 0, 0, 0, 0, 0, 0};
+        const float gate[5] = {-90, 6, 10, 5, 5};
+        float gp[28] = {-1, -1, 3, 2, 6, 6, 3, 0.9f, -60, 0.005f, 0, 0};
+        for (int i = 12; i < 28; i++) gp[i] = -100;
+        const float inj[3] = {3, 0, 0}, prot[7] = {1, -1, 1, 50, 5, 1, 2}, mute[1] = {0}, cap[1] = {1};
+        float taps[300];
+        for (int i = 0; i < 300; i++) taps[i] = 0.002f * static_cast<float>(std::sin(0.2 * i));
+        n60_stage_desc a[14] = {
+            stage(N60_STAGE_BASS_MGMT, 1, 0, bm, 9),
+            stage(N60_STAGE_ROOM_FIR, 2, 0, taps, 300),
+            stage(N60_STAGE_AMBIENT, 3, N60_LANE_ALL, amb, 10),
+            stage(N60_STAGE_SYMMETRY, 4, 0, sym, 1, 0, 1),
+            stage(N60_STAGE_CROSSFEED, 5, 0, cf, 1, 0, 1),
+            stage(N60_STAGE_CROSSTALK, 6, 0, ct, 2, 0, 1),
+            stage(N60_STAGE_OUTPUT_GAIN, 7, 0, og, 1),
+            stage(N60_STAGE_HEADPHONE, 8, 0, hp, 11, 0, 1),
+            stage(N60_STAGE_PAUSE_GATE, 9, 0, gate, 5),
+            stage(N60_STAGE_ANC_GUARD, 10, 2, gp, 28),
+            stage(N60_STAGE_ANC_INJECT, 11, 0, inj, 3),
+            stage(N60_STAGE_PROTECTION, 12, N60_LANE_ALL, prot, 7),
+            stage(N60_STAGE_MUTE, 13, N60_LANE_ALL, mute, 1),
+            stage(N60_STAGE_ANC_CAPTURE, 14, 0, cap, 1, 4096),
+        };
+        a[0].laneMask = 0x3; a[1].laneMask = 0x3; a[8].laneMask = 0xF; a[13].laneMask = 0xF;
+        n60_stage_desc b[2] = {a[11], a[12]};
+        n60_graph_desc da{}, db{};
+        da.structSize = db.structSize = sizeof da;
+        da.abiVersion = db.abiVersion = N60_GRAPH_ABI_VERSION;
+        da.sampleRate = db.sampleRate = rate;
+        da.maxBlockFrames = db.maxBlockFrames = N;
+        da.inputChannels = da.outputChannels = db.inputChannels = db.outputChannels = 4;
+        da.stages = a; da.stageCount = 14;
+        db.stages = b; db.stageCount = 2;
+        n60_graph *g = nullptr;
+        CHECK(n60_graph_build(&da, &g) == N60_STATUS_OK, "build S5 graph at %.0f", rate);
+        if (g == nullptr) continue;
+        static float buf[4][N], obuf[4][N];
+        const float *in[4];
+        float *out[4];
+        for (int c = 0; c < 4; c++) { in[c] = buf[c]; out[c] = obuf[c]; }
+        uint32_t seed = 11;
+        for (int round = 0; round < 16; round++) {
+            n60_graph_desc &d = (round % 8 == 7) ? db : da;
+            CHECK(n60_graph_publish(g, &d) == N60_STATUS_OK, "publish S5");
+            n60_param_record rec[4] = {{1, 1, -3.0f + round * 0.1f, 0}, {4, 0, -0.5f + 0.05f * round, 0}, {12, 1, -2.0f, 0}, {9, 0, 0, 0}};
+            n60_status ps = n60_graph_post_params(g, rec, (round % 8 == 7) ? 0 : 3);
+            CHECK(ps == N60_STATUS_OK, "post S5 (%d)", ps);
+            for (int c = 0; c < 4; c++) {
+                for (uint32_t i = 0; i < N; i++) {
+                    seed = seed * 1664525u + 1013904223u;
+                    buf[c][i] = 0.3f * (static_cast<float>((seed >> 8) & 0xFFFF) / 65536.0f - 0.5f);
+                }
+            }
+            allocs = 0;
+            frees = 0;
+            armed = true;
+            n60_status st = n60_graph_process(g, in, out, N);
+            for (int k = 0; k < 4; k++) st = static_cast<n60_status>(st | n60_graph_process(g, in, out, 1 + 100 * k));
+            armed = false;
+            CHECK(st == N60_STATUS_OK, "process S5");
+            CHECK(allocs == 0 && frees == 0, "rate %.0f S5 round %d: realtime call allocated %ld / freed %ld", rate, round,
+                  allocs.load(), frees.load());
+            n60_graph_collect(g);
+        }
+        n60_graph_retire(g);
+    }
     if (failures) {
         std::fprintf(stderr, "%d failure(s)\n", failures);
         return 1;

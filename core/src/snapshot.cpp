@@ -14,6 +14,7 @@
 #include "snapshot.hpp"
 
 #include "stages_dsp.hpp"
+#include "stages_system.hpp"
 
 #include <algorithm>
 #include <cfloat>
@@ -177,13 +178,45 @@ uint32_t rankOf(uint32_t kind) {
         case N60_STAGE_COMPRESSOR: return 10;
         case N60_STAGE_EXPANDER: return 11;
         case N60_STAGE_METER_OUT: return 12;
-        case N60_STAGE_DELAY: return 13;
+        case N60_STAGE_BASS_MGMT: return 13;
+        case N60_STAGE_ROOM_FIR: return 14;
+        case N60_STAGE_SPEAKER_IR: return 15;
+        case N60_STAGE_AMBIENT: return 16;
+        case N60_STAGE_CORE_DYNAMICS: return 17;
+        case N60_STAGE_SYMMETRY: return 18;
+        case N60_STAGE_CROSSFEED: return 19;
+        case N60_STAGE_CROSSTALK: return 20;
+        case N60_STAGE_OUTPUT_GAIN: return 21;
+        case N60_STAGE_HEADPHONE: return 22;
+        case N60_STAGE_PAUSE_GATE: return 23;
+        case N60_STAGE_DELAY: return 24;
+        case N60_STAGE_ANC_GUARD: return 25;
+        case N60_STAGE_ANC_INJECT: return 26;
+        case N60_STAGE_PROTECTION: return 27;
+        case N60_STAGE_MUTE: return 28;
+        case N60_STAGE_ANC_CAPTURE: return 29;
+        case N60_STAGE_FINAL_SANITISE: return 30;
+        case N60_STAGE_FINAL_METER: return 31;
         default: return 0;
     }
 }
 
+// Kinds that reuse another stage's implementation run as that canonical kind; only the
+// rank (position in the chain) differs.
+uint32_t canonKind(uint32_t kind) {
+    switch (kind) {
+        case N60_STAGE_ROOM_FIR:
+        case N60_STAGE_SPEAKER_IR: return N60_STAGE_FIR;
+        case N60_STAGE_CORE_DYNAMICS: return N60_STAGE_COMPRESSOR;
+        case N60_STAGE_OUTPUT_GAIN: return N60_STAGE_GAIN;
+        case N60_STAGE_FINAL_SANITISE: return N60_STAGE_SANITISE;
+        case N60_STAGE_FINAL_METER: return N60_STAGE_METER_OUT;
+        default: return kind;
+    }
+}
+
 // Per-stage state size in bytes for one lane.
-size_t stateStrideFor(const n60_stage_desc &s) {
+size_t stateStrideFor(const n60_stage_desc &s, double rate) {
     switch (s.kind) {
         case N60_STAGE_METER_IN:
         case N60_STAGE_METER_OUT: return sizeof(MeterLane);
@@ -194,14 +227,16 @@ size_t stateStrideFor(const n60_stage_desc &s) {
         default: {
             size_t lane = 0, shared = 0;
             if (isDspKind(s.kind)) dspSizes(s, lane, shared);
+            else if (isSystemKind(s.kind)) systemSizes(s, rate, lane, shared);
             return lane;
         }
     }
 }
 
-size_t sharedBytesFor(const n60_stage_desc &s) {
+size_t sharedBytesFor(const n60_stage_desc &s, double rate) {
     size_t lane = 0, shared = 0;
     if (isDspKind(s.kind)) dspSizes(s, lane, shared);
+    else if (isSystemKind(s.kind)) systemSizes(s, rate, lane, shared);
     return shared;
 }
 
@@ -226,9 +261,10 @@ n60_status validateDesc(const n60_graph_desc &d) {
     uint32_t lastRank = 0;
     size_t total = 0;
     for (uint32_t i = 0; i < d.stageCount; ++i) {
-        const n60_stage_desc &s = d.stages[i];
+        n60_stage_desc s = d.stages[i];
         if (s.structSize != sizeof(n60_stage_desc)) return N60_STATUS_ABI_MISMATCH;
         const uint32_t rank = rankOf(s.kind);
+        s.kind = canonKind(s.kind);
         if (rank == 0 || rank < lastRank || s.reserved != 0) return N60_STATUS_BAD_ARGUMENT;
         lastRank = rank;
         for (uint32_t j = 0; j < i; ++j) {
@@ -237,10 +273,17 @@ n60_status validateDesc(const n60_graph_desc &d) {
         if (s.paramCount > 0 && s.params == nullptr) return N60_STATUS_BAD_ARGUMENT;
         if (!paramsFinite(s)) return N60_STATUS_BAD_ARGUMENT;
         const bool isMS = s.kind == N60_STAGE_MS_ENCODE || s.kind == N60_STAGE_MS_DECODE;
+        if (isSystemKind(s.kind)) {
+            const n60_status v = validateSystemStage(s, d.sampleRate, d.outputChannels);
+            if (v != N60_STATUS_OK) return v;
+            total += (stateStrideFor(s, d.sampleRate) * laneCountFor(s, d.outputChannels)) + sharedBytesFor(s, d.sampleRate);
+            if (total > kMaxArenaBytes) return N60_STATUS_OUT_OF_MEMORY;
+            continue;
+        }
         if (isDspKind(s.kind)) {
             const n60_status v = validateDspStage(s, d.sampleRate, d.outputChannels);
             if (v != N60_STATUS_OK) return v;
-            total += (stateStrideFor(s) * laneCountFor(s, d.outputChannels)) + sharedBytesFor(s);
+            total += (stateStrideFor(s, d.sampleRate) * laneCountFor(s, d.outputChannels)) + sharedBytesFor(s, d.sampleRate);
             if (total > kMaxArenaBytes) return N60_STATUS_OUT_OF_MEMORY;
             continue;
         }
@@ -281,7 +324,7 @@ n60_status validateDesc(const n60_graph_desc &d) {
                 if (s.paramCount != 0) return N60_STATUS_BAD_ARGUMENT;
                 break;
         }
-        total += stateStrideFor(s) * laneCountFor(s, d.outputChannels);
+        total += stateStrideFor(s, d.sampleRate) * laneCountFor(s, d.outputChannels);
         if (total > kMaxArenaBytes) return N60_STATUS_OUT_OF_MEMORY;
     }
     // Every M/S decode must undo exactly one earlier encode on the same lane pair.
@@ -317,15 +360,16 @@ n60_status buildSnapshot(const n60_graph_desc &d, uint32_t epoch, SnapHeader **o
     struct Plan { size_t params, state, coef, shared; };
     Plan plan[N60_GRAPH_MAX_STAGES];
     for (uint32_t i = 0; i < d.stageCount; ++i) {
-        const n60_stage_desc &s = d.stages[i];
+        n60_stage_desc s = d.stages[i];
+        s.kind = canonKind(s.kind);
         plan[i].params = off;
         off += alignUp(sizeof(float) * s.paramCount);
         plan[i].state = off;
-        off += alignUp(stateStrideFor(s) * laneCountFor(s, d.outputChannels));
+        off += alignUp(stateStrideFor(s, d.sampleRate) * laneCountFor(s, d.outputChannels));
         plan[i].coef = off;
         if (s.kind == N60_STAGE_PEQ) off += alignUp(sizeof(double) * 5 * (s.paramCount / 4));
         plan[i].shared = off;
-        off += alignUp(sharedBytesFor(s));
+        off += alignUp(sharedBytesFor(s, d.sampleRate));
         if (off > kMaxArenaBytes) return N60_STATUS_OUT_OF_MEMORY;
     }
 
@@ -348,7 +392,8 @@ n60_status buildSnapshot(const n60_graph_desc &d, uint32_t epoch, SnapHeader **o
 
     // Pass 2: fill the stage table, parameters and initial state.
     for (uint32_t i = 0; i < d.stageCount; ++i) {
-        const n60_stage_desc &s = d.stages[i];
+        n60_stage_desc s = d.stages[i];
+        s.kind = canonKind(s.kind);
         StageRec &r = stages(h)[i];
         r.laneMask = s.laneMask;
         r.kind = s.kind;
@@ -361,7 +406,7 @@ n60_status buildSnapshot(const n60_graph_desc &d, uint32_t epoch, SnapHeader **o
         r.paramCount = s.paramCount;
         r.paramsOff = static_cast<uint32_t>(plan[i].params);
         r.stateOff = static_cast<uint32_t>(plan[i].state);
-        r.stateStride = static_cast<uint32_t>(stateStrideFor(s));
+        r.stateStride = static_cast<uint32_t>(stateStrideFor(s, d.sampleRate));
         r.capacity = s.capacityFrames;
         r.coefOff = static_cast<uint32_t>(plan[i].coef);
         r.sharedOff = static_cast<uint32_t>(plan[i].shared);
@@ -394,6 +439,7 @@ n60_status buildSnapshot(const n60_graph_desc &d, uint32_t epoch, SnapHeader **o
             }
         }
         if (isDspKind(s.kind)) dspInit(h, r);
+        if (isSystemKind(s.kind)) systemInit(h, r);
         if (s.kind == N60_STAGE_PEQ) {
             double *coef = reinterpret_cast<double *>(bytes(h) + r.coefOff);
             for (uint32_t k = 0; k < s.paramCount / 4; ++k) {
@@ -430,6 +476,7 @@ n60_status validateParam(const SnapHeader *snap, const StageRec &r, uint32_t par
                        ? N60_STATUS_BAD_ARGUMENT
                        : N60_STATUS_OK;
         default:
+            if (isSystemKind(r.kind)) return validateSystemParam(snap, r, paramIndex, value);
             return isDspKind(r.kind) ? validateDspParam(snap, r, paramIndex, value) : N60_STATUS_UNSUPPORTED;
     }
 }
@@ -457,6 +504,8 @@ uint32_t snapshotLatency(const SnapHeader *snap) {
             frames = static_cast<uint32_t>(reinterpret_cast<const float *>(bytes(snap) + r.paramsOff)[0]);
         } else if (isDspKind(r.kind)) {
             frames = dspLatency(snap, r);
+        } else if (isSystemKind(r.kind)) {
+            frames = systemLatency(snap, r);
         }
         if (frames == 0) continue;
         for (uint32_t l = 0; l < r.laneCount; ++l) perLane[laneOf(r, l)] += frames;
@@ -645,7 +694,13 @@ void runSnapshot(SnapHeader *h, float *const *lanes, uint32_t frames, std::atomi
             case N60_STAGE_PEQ: runPeq(h, r, lanes, frames); break;
             case N60_STAGE_MS_DECODE: runMSDecode(lanes[r.laneA], lanes[r.laneB], frames); break;
             case N60_STAGE_DELAY: runDelay(h, r, lanes, frames); break;
-            default: runDsp(h, r, lanes, frames); break;
+            default:
+                if (isSystemKind(r.kind)) {
+                    runSystem(h, r, lanes, frames);
+                } else {
+                    runDsp(h, r, lanes, frames);
+                }
+                break;
         }
     }
 }
