@@ -18,13 +18,21 @@ struct FeatureFlag: Hashable, Identifiable, Sendable {
 extension FeatureFlag {
     /// Every flag the app knows. Add one when an epic starts merging dark;
     /// delete it, and the checks that read it, once the epic ships.
-    static let all: [FeatureFlag] = [.adaptiveANC]
+    static let all: [FeatureFlag] = [.adaptiveANC, .unifiedGraph]
 
     /// E4: adaptive Quiet Zone controls and the shadow-mode adaptive path.
     static let adaptiveANC = FeatureFlag(
         id: "e4.adaptive-anc",
         title: "Adaptive Quiet Zone",
         epic: "E4"
+    )
+
+    /// E6: the unified live N-channel graph (libn60core). Nothing reads it until the
+    /// epic wires the graph into the live path; Swift decides, the engine never reads flags.
+    static let unifiedGraph = FeatureFlag(
+        id: "e6.unified-graph",
+        title: "Unified N-channel graph",
+        epic: "E6"
     )
 }
 

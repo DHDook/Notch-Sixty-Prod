@@ -1,0 +1,603 @@
+// libn60core snapshot build and lane stages (E6 S3). Portable C++20: standard library
+// only, no Apple framework, compiled without exceptions or RTTI.
+//
+// Realtime documentation (docs/REALTIME_RULES.md), for runSnapshot and applyParam:
+//  - allocation: none. Everything a stage needs lives in the snapshot arena.
+//  - synchronisation: none except relaxed atomics for meters; stage state is owned by
+//    the realtime thread once the snapshot is published.
+//  - latency: GAIN, PEQ, sanitise, meters and M/S add 0 frames; DELAY adds its target.
+//  - sample rate: any rate in [8 kHz, 768 kHz]. The ramp window is 5 ms of frames,
+//    clamped to 32..4096. PEQ state and coefficients are double precision.
+//  - channels: 1..64 lanes; stages address lanes by index; M/S needs two distinct lanes.
+//  - reset: a fresh snapshot starts with zero filter and delay memory and meters at 0.
+//    There is no in-place reset; a new topology is a new snapshot.
+#include "snapshot.hpp"
+
+#include <algorithm>
+#include <cfloat>
+#include <cmath>
+#include <cstddef>
+#include <cstring>
+#include <new>
+
+namespace n60 {
+namespace {
+
+constexpr double kPi = 3.14159265358979323846;
+constexpr size_t kMaxArenaBytes = size_t(1) << 31;
+constexpr size_t kAlign = 16;
+
+struct GainLane {
+    float cur;        // value after the last rendered sample
+    float step;
+    float target;     // ramp destination
+    uint32_t remaining;
+};
+
+struct DelayLane {
+    uint32_t wp;
+    uint32_t dCur;
+    uint32_t dNew;
+    uint32_t xfLeft;
+    int32_t pending;
+    uint32_t pad[3];
+    // followed by float ring[capacity + 1]
+};
+
+struct PeqLane {
+    double z[N60_PEQ_MAX_SECTIONS][2];
+};
+
+struct MeterLane {
+    std::atomic<uint32_t> peakBits;  // positive floats order like their bit patterns
+    std::atomic<uint32_t> rmsBits;
+};
+
+size_t alignUp(size_t v) { return (v + (kAlign - 1)) & ~(kAlign - 1); }
+
+uint8_t *bytes(SnapHeader *h) { return reinterpret_cast<uint8_t *>(h); }
+const uint8_t *bytes(const SnapHeader *h) { return reinterpret_cast<const uint8_t *>(h); }
+StageRec *stages(SnapHeader *h) { return reinterpret_cast<StageRec *>(bytes(h) + h->stageTableOff); }
+const StageRec *stages(const SnapHeader *h) {
+    return reinterpret_cast<const StageRec *>(bytes(h) + h->stageTableOff);
+}
+float *paramsOf(SnapHeader *h, const StageRec &s) { return reinterpret_cast<float *>(bytes(h) + s.paramsOff); }
+uint8_t *laneState(SnapHeader *h, const StageRec &s, uint32_t laneIndex) {
+    return bytes(h) + s.stateOff + size_t(laneIndex) * s.stateStride;
+}
+
+uint32_t floatBits(float v) {
+    uint32_t b;
+    std::memcpy(&b, &v, sizeof b);
+    return b;
+}
+float bitsFloat(uint32_t b) {
+    float v;
+    std::memcpy(&v, &b, sizeof v);
+    return v;
+}
+
+uint32_t rampFramesFor(double rate) {
+    long frames = std::lround(0.005 * rate);
+    return static_cast<uint32_t>(std::clamp<long>(frames, 32, 4096));
+}
+
+// RBJ Audio EQ Cookbook biquads, normalised by a0, in double precision.
+// Same forms and limits as the kernel's control-plane design (N60Biquad.h).
+bool designBiquad(uint32_t type, double rate, double f, double gainDb, double q, double out[5]) {
+    if (!std::isfinite(f) || f <= 0.0 || f >= rate * 0.5 || !std::isfinite(gainDb) || gainDb < -24.0 ||
+        gainDb > 24.0 || !std::isfinite(q) || q <= 0.0) {
+        return false;
+    }
+    const double w = 2.0 * kPi * f / rate;
+    const double cw = std::cos(w);
+    const double sw = std::sin(w);
+    const double alpha = sw / (2.0 * q);
+    double b0 = 0, b1 = 0, b2 = 0, a0 = 1, a1 = 0, a2 = 0;
+    switch (type) {
+        case 0: {  // peaking
+            const double A = std::pow(10.0, gainDb / 40.0);
+            b0 = 1 + alpha * A; b1 = -2 * cw; b2 = 1 - alpha * A;
+            a0 = 1 + alpha / A; a1 = -2 * cw; a2 = 1 - alpha / A;
+            break;
+        }
+        case 1: {  // low shelf
+            const double A = std::pow(10.0, gainDb / 40.0);
+            const double beta = 2.0 * std::sqrt(A) * alpha;
+            b0 = A * ((A + 1) - (A - 1) * cw + beta);
+            b1 = 2 * A * ((A - 1) - (A + 1) * cw);
+            b2 = A * ((A + 1) - (A - 1) * cw - beta);
+            a0 = (A + 1) + (A - 1) * cw + beta;
+            a1 = -2 * ((A - 1) + (A + 1) * cw);
+            a2 = (A + 1) + (A - 1) * cw - beta;
+            break;
+        }
+        case 2: {  // high shelf
+            const double A = std::pow(10.0, gainDb / 40.0);
+            const double beta = 2.0 * std::sqrt(A) * alpha;
+            b0 = A * ((A + 1) + (A - 1) * cw + beta);
+            b1 = -2 * A * ((A - 1) + (A + 1) * cw);
+            b2 = A * ((A + 1) + (A - 1) * cw - beta);
+            a0 = (A + 1) - (A - 1) * cw + beta;
+            a1 = 2 * ((A - 1) - (A + 1) * cw);
+            a2 = (A + 1) - (A - 1) * cw - beta;
+            break;
+        }
+        case 3:  // low pass
+            b0 = (1 - cw) * 0.5; b1 = 1 - cw; b2 = (1 - cw) * 0.5;
+            a0 = 1 + alpha; a1 = -2 * cw; a2 = 1 - alpha;
+            break;
+        case 4:  // high pass
+            b0 = (1 + cw) * 0.5; b1 = -(1 + cw); b2 = (1 + cw) * 0.5;
+            a0 = 1 + alpha; a1 = -2 * cw; a2 = 1 - alpha;
+            break;
+        case 5:  // notch
+            b0 = 1; b1 = -2 * cw; b2 = 1;
+            a0 = 1 + alpha; a1 = -2 * cw; a2 = 1 - alpha;
+            break;
+        case 6:  // all pass
+            b0 = 1 - alpha; b1 = -2 * cw; b2 = 1 + alpha;
+            a0 = 1 + alpha; a1 = -2 * cw; a2 = 1 - alpha;
+            break;
+        case 7:  // band pass, constant 0 dB peak
+            b0 = alpha; b1 = 0; b2 = -alpha;
+            a0 = 1 + alpha; a1 = -2 * cw; a2 = 1 - alpha;
+            break;
+        default:
+            return false;
+    }
+    if (!std::isfinite(a0) || std::fabs(a0) < 1e-20) return false;
+    out[0] = b0 / a0; out[1] = b1 / a0; out[2] = b2 / a0; out[3] = a1 / a0; out[4] = a2 / a0;
+    for (int i = 0; i < 5; ++i) {
+        if (!std::isfinite(out[i])) return false;
+    }
+    return true;
+}
+
+bool paramsFinite(const n60_stage_desc &s) {
+    for (uint32_t i = 0; i < s.paramCount; ++i) {
+        if (!std::isfinite(s.params[i])) return false;
+    }
+    return true;
+}
+
+uint32_t laneCountFor(const n60_stage_desc &s, uint32_t outCh) { return s.laneA == N60_LANE_ALL ? outCh : 1u; }
+
+// Per-stage state size in bytes for one lane.
+size_t stateStrideFor(const n60_stage_desc &s) {
+    switch (s.kind) {
+        case N60_STAGE_METER_IN:
+        case N60_STAGE_METER_OUT: return sizeof(MeterLane);
+        case N60_STAGE_GAIN: return sizeof(GainLane);
+        case N60_STAGE_PEQ: return sizeof(PeqLane);
+        case N60_STAGE_DELAY:
+            return alignUp(sizeof(DelayLane) + (size_t(s.capacityFrames) + 1) * sizeof(float));
+        default: return 0;
+    }
+}
+
+}  // namespace
+
+n60_status validateDesc(const n60_graph_desc &d) {
+    if (d.abiVersion != N60_GRAPH_ABI_VERSION || d.structSize != sizeof(n60_graph_desc)) {
+        return N60_STATUS_ABI_MISMATCH;
+    }
+    if (!std::isfinite(d.sampleRate) || d.sampleRate < N60_GRAPH_MIN_SAMPLE_RATE ||
+        d.sampleRate > N60_GRAPH_MAX_SAMPLE_RATE) {
+        return N60_STATUS_BAD_ARGUMENT;
+    }
+    auto validChannels = [](uint32_t n) { return n >= 1 && n <= N60_GRAPH_MAX_CHANNELS; };
+    if (d.maxBlockFrames < 1 || d.maxBlockFrames > N60_GRAPH_MAX_BLOCK_FRAMES || !validChannels(d.inputChannels) ||
+        !validChannels(d.outputChannels) || d.reserved != 0) {
+        return N60_STATUS_BAD_ARGUMENT;
+    }
+    if (d.stageCount > N60_GRAPH_MAX_STAGES || (d.stageCount > 0 && d.stages == nullptr)) {
+        return N60_STATUS_BAD_ARGUMENT;
+    }
+    uint32_t lastKind = 0;
+    size_t total = 0;
+    for (uint32_t i = 0; i < d.stageCount; ++i) {
+        const n60_stage_desc &s = d.stages[i];
+        if (s.structSize != sizeof(n60_stage_desc)) return N60_STATUS_ABI_MISMATCH;
+        if (s.kind < N60_STAGE_SANITISE || s.kind > N60_STAGE_DELAY || s.kind < lastKind) {
+            return N60_STATUS_BAD_ARGUMENT;
+        }
+        lastKind = s.kind;
+        for (uint32_t j = 0; j < i; ++j) {
+            if (d.stages[j].stageId == s.stageId) return N60_STATUS_BAD_ARGUMENT;
+        }
+        if (s.paramCount > 0 && s.params == nullptr) return N60_STATUS_BAD_ARGUMENT;
+        if (!paramsFinite(s)) return N60_STATUS_BAD_ARGUMENT;
+        const bool isMS = s.kind == N60_STAGE_MS_ENCODE || s.kind == N60_STAGE_MS_DECODE;
+        if (isMS) {
+            if (s.laneA >= d.outputChannels || s.laneB >= d.outputChannels || s.laneA == s.laneB) {
+                return N60_STATUS_BAD_ARGUMENT;
+            }
+        } else if (s.laneA != N60_LANE_ALL && s.laneA >= d.outputChannels) {
+            return N60_STATUS_BAD_ARGUMENT;
+        }
+        if (s.kind != N60_STAGE_DELAY && s.capacityFrames != 0) return N60_STATUS_BAD_ARGUMENT;
+        switch (s.kind) {
+            case N60_STAGE_GAIN:
+                if (s.paramCount != 1 || s.params[0] < 0.0f || s.params[0] > 10000.0f) return N60_STATUS_BAD_ARGUMENT;
+                break;
+            case N60_STAGE_DELAY:
+                if (s.paramCount != 1 || s.capacityFrames > N60_GRAPH_MAX_DELAY_FRAMES || s.params[0] < 0.0f ||
+                    s.params[0] > static_cast<float>(s.capacityFrames)) {
+                    return N60_STATUS_BAD_ARGUMENT;
+                }
+                break;
+            case N60_STAGE_PEQ: {
+                if (s.paramCount == 0 || s.paramCount % 4 != 0 || s.paramCount / 4 > N60_PEQ_MAX_SECTIONS) {
+                    return N60_STATUS_BAD_ARGUMENT;
+                }
+                for (uint32_t k = 0; k < s.paramCount / 4; ++k) {
+                    const float *p = s.params + 4 * k;
+                    double c[5];
+                    if (!(p[0] >= 0.0f && p[0] <= 7.0f) || p[0] != std::floor(p[0]) ||
+                        !designBiquad(static_cast<uint32_t>(p[0]), d.sampleRate, p[1], p[2], p[3], c)) {
+                        return N60_STATUS_BAD_ARGUMENT;
+                    }
+                }
+                break;
+            }
+            default:
+                if (s.paramCount != 0) return N60_STATUS_BAD_ARGUMENT;
+                break;
+        }
+        total += stateStrideFor(s) * laneCountFor(s, d.outputChannels);
+        if (total > kMaxArenaBytes) return N60_STATUS_OUT_OF_MEMORY;
+    }
+    // Every M/S decode must undo exactly one earlier encode on the same lane pair.
+    bool used[N60_GRAPH_MAX_STAGES] = {};
+    for (uint32_t i = 0; i < d.stageCount; ++i) {
+        if (d.stages[i].kind != N60_STAGE_MS_DECODE) continue;
+        bool matched = false;
+        for (uint32_t j = 0; j < i && !matched; ++j) {
+            const n60_stage_desc &e = d.stages[j];
+            if (e.kind == N60_STAGE_MS_ENCODE && !used[j] && e.laneA == d.stages[i].laneA &&
+                e.laneB == d.stages[i].laneB) {
+                used[j] = true;
+                matched = true;
+            }
+        }
+        if (!matched) return N60_STATUS_BAD_ARGUMENT;
+    }
+    for (uint32_t j = 0; j < d.stageCount; ++j) {
+        if (d.stages[j].kind == N60_STAGE_MS_ENCODE && !used[j]) return N60_STATUS_BAD_ARGUMENT;
+    }
+    return N60_STATUS_OK;
+}
+
+n60_status buildSnapshot(const n60_graph_desc &d, uint32_t epoch, SnapHeader **out) {
+    *out = nullptr;
+    const n60_status valid = validateDesc(d);
+    if (valid != N60_STATUS_OK) return valid;
+
+    // Pass 1: lay out the arena.
+    size_t off = alignUp(sizeof(SnapHeader));
+    const size_t tableOff = off;
+    off += alignUp(sizeof(StageRec) * d.stageCount);
+    struct Plan { size_t params, state, coef; };
+    Plan plan[N60_GRAPH_MAX_STAGES];
+    for (uint32_t i = 0; i < d.stageCount; ++i) {
+        const n60_stage_desc &s = d.stages[i];
+        plan[i].params = off;
+        off += alignUp(sizeof(float) * s.paramCount);
+        plan[i].state = off;
+        off += alignUp(stateStrideFor(s) * laneCountFor(s, d.outputChannels));
+        plan[i].coef = off;
+        if (s.kind == N60_STAGE_PEQ) off += alignUp(sizeof(double) * 5 * (s.paramCount / 4));
+        if (off > kMaxArenaBytes) return N60_STATUS_OUT_OF_MEMORY;
+    }
+
+    // One allocation, aligned to 64 bytes by hand (no aligned-new on the build path).
+    uint8_t *raw = new (std::nothrow) uint8_t[off + 64];
+    if (raw == nullptr) return N60_STATUS_OUT_OF_MEMORY;
+    uint8_t *base = raw + ((64 - (reinterpret_cast<uintptr_t>(raw) & 63)) & 63);
+    std::memset(base, 0, off);
+    SnapHeader *h = reinterpret_cast<SnapHeader *>(base);
+    h->abiVersion = N60_GRAPH_ABI_VERSION;
+    h->epoch = epoch;
+    h->sampleRate = d.sampleRate;
+    h->maxBlockFrames = d.maxBlockFrames;
+    h->inputChannels = d.inputChannels;
+    h->outputChannels = d.outputChannels;
+    h->stageCount = d.stageCount;
+    h->stageTableOff = static_cast<uint32_t>(tableOff);
+    h->rampFrames = rampFramesFor(d.sampleRate);
+    h->rawPad = static_cast<uint32_t>(base - raw);
+
+    // Pass 2: fill the stage table, parameters and initial state.
+    for (uint32_t i = 0; i < d.stageCount; ++i) {
+        const n60_stage_desc &s = d.stages[i];
+        StageRec &r = stages(h)[i];
+        r.kind = s.kind;
+        r.id = s.stageId;
+        r.laneA = s.laneA;
+        r.laneB = s.laneB;
+        r.laneFirst = s.laneA == N60_LANE_ALL ? 0u : s.laneA;
+        r.laneCount = laneCountFor(s, d.outputChannels);
+        r.paramCount = s.paramCount;
+        r.paramsOff = static_cast<uint32_t>(plan[i].params);
+        r.stateOff = static_cast<uint32_t>(plan[i].state);
+        r.stateStride = static_cast<uint32_t>(stateStrideFor(s));
+        r.capacity = s.capacityFrames;
+        r.coefOff = static_cast<uint32_t>(plan[i].coef);
+        float *params = paramsOf(h, r);
+        for (uint32_t k = 0; k < s.paramCount; ++k) params[k] = s.params[k];
+        if (s.kind == N60_STAGE_DELAY) params[0] = std::floor(params[0] + 0.5f);
+        r.applied = s.paramCount > 0 ? params[0] : 0.0f;
+        for (uint32_t l = 0; l < r.laneCount; ++l) {
+            uint8_t *st = laneState(h, r, l);
+            switch (s.kind) {
+                case N60_STAGE_METER_IN:
+                case N60_STAGE_METER_OUT: {
+                    MeterLane *m = new (st) MeterLane;
+                    m->peakBits.store(0, std::memory_order_relaxed);
+                    m->rmsBits.store(0, std::memory_order_relaxed);
+                    break;
+                }
+                case N60_STAGE_GAIN: {
+                    GainLane *g = reinterpret_cast<GainLane *>(st);
+                    g->cur = g->target = params[0];
+                    break;
+                }
+                case N60_STAGE_DELAY: {
+                    DelayLane *dl = reinterpret_cast<DelayLane *>(st);
+                    dl->dCur = dl->dNew = static_cast<uint32_t>(params[0]);
+                    dl->pending = -1;
+                    break;
+                }
+                default: break;
+            }
+        }
+        if (s.kind == N60_STAGE_PEQ) {
+            double *coef = reinterpret_cast<double *>(bytes(h) + r.coefOff);
+            for (uint32_t k = 0; k < s.paramCount / 4; ++k) {
+                const float *p = s.params + 4 * k;
+                designBiquad(static_cast<uint32_t>(p[0]), d.sampleRate, p[1], p[2], p[3], coef + 5 * k);
+            }
+        }
+    }
+    *out = h;
+    return N60_STATUS_OK;
+}
+
+void freeSnapshot(SnapHeader *snap) {
+    if (snap == nullptr) return;
+    uint8_t *raw = bytes(snap) - snap->rawPad;
+    delete[] raw;
+}
+
+const StageRec *findStage(const SnapHeader *snap, uint32_t stageId) {
+    const StageRec *table = stages(snap);
+    for (uint32_t i = 0; i < snap->stageCount; ++i) {
+        if (table[i].id == stageId) return &table[i];
+    }
+    return nullptr;
+}
+
+bool applyParam(SnapHeader *snap, uint32_t stageId, uint32_t paramIndex, float value) {
+    StageRec *table = stages(snap);
+    for (uint32_t i = 0; i < snap->stageCount; ++i) {
+        StageRec &r = table[i];
+        if (r.id != stageId) continue;
+        if (paramIndex != 0 || !std::isfinite(value)) return false;
+        float *params = paramsOf(snap, r);
+        if (r.kind == N60_STAGE_GAIN) {
+            if (value < 0.0f || value > 10000.0f) return false;
+            params[0] = value;
+            return true;
+        }
+        if (r.kind == N60_STAGE_DELAY) {
+            const float rounded = std::floor(value + 0.5f);
+            if (rounded < 0.0f) return false;
+            params[0] = std::min(rounded, static_cast<float>(r.capacity));
+            return true;
+        }
+        return false;
+    }
+    return false;
+}
+
+uint32_t snapshotLatency(const SnapHeader *snap) {
+    uint32_t perLane[N60_GRAPH_MAX_CHANNELS] = {};
+    const StageRec *table = stages(snap);
+    for (uint32_t i = 0; i < snap->stageCount; ++i) {
+        const StageRec &r = table[i];
+        if (r.kind != N60_STAGE_DELAY) continue;
+        const uint32_t frames = static_cast<uint32_t>(
+            reinterpret_cast<const float *>(bytes(snap) + r.paramsOff)[0]);
+        for (uint32_t l = 0; l < r.laneCount; ++l) perLane[r.laneFirst + l] += frames;
+    }
+    uint32_t worst = 0;
+    for (uint32_t l = 0; l < snap->outputChannels; ++l) worst = std::max(worst, perLane[l]);
+    return worst;
+}
+
+bool readMeter(SnapHeader *snap, uint32_t stageId, uint32_t lane, float *peak, float *rms) {
+    const StageRec *r = findStage(snap, stageId);
+    if (r == nullptr || (r->kind != N60_STAGE_METER_IN && r->kind != N60_STAGE_METER_OUT) ||
+        lane < r->laneFirst || lane >= r->laneFirst + r->laneCount) {
+        return false;
+    }
+    MeterLane *m = reinterpret_cast<MeterLane *>(laneState(snap, *r, lane - r->laneFirst));
+    *peak = bitsFloat(m->peakBits.exchange(0, std::memory_order_relaxed));
+    *rms = bitsFloat(m->rmsBits.load(std::memory_order_relaxed));
+    return true;
+}
+
+namespace {
+
+void runSanitise(float *buf, uint32_t frames, uint64_t &bad) {
+    for (uint32_t i = 0; i < frames; ++i) {
+        if (!(std::fabs(buf[i]) <= FLT_MAX)) {  // false for NaN and Inf
+            buf[i] = 0.0f;
+            ++bad;
+        }
+    }
+}
+
+void runMeter(MeterLane &m, const float *buf, uint32_t frames) {
+    float peak = 0.0f;
+    double sum = 0.0;
+    for (uint32_t i = 0; i < frames; ++i) {
+        const float a = std::fabs(buf[i]);
+        peak = a > peak ? a : peak;
+        sum += double(buf[i]) * double(buf[i]);
+    }
+    const uint32_t pb = floatBits(peak);
+    uint32_t seen = m.peakBits.load(std::memory_order_relaxed);
+    while (pb > seen && !m.peakBits.compare_exchange_weak(seen, pb, std::memory_order_relaxed)) {
+    }
+    m.rmsBits.store(floatBits(static_cast<float>(std::sqrt(sum / frames))), std::memory_order_relaxed);
+}
+
+void runGain(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
+    const float target = paramsOf(h, r)[0];
+    const bool retarget = target != r.applied;
+    r.applied = target;
+    for (uint32_t l = 0; l < r.laneCount; ++l) {
+        GainLane &g = *reinterpret_cast<GainLane *>(laneState(h, r, l));
+        if (retarget) {
+            g.remaining = h->rampFrames;
+            g.target = target;
+            g.step = (target - g.cur) / static_cast<float>(h->rampFrames);
+        }
+        float *buf = lanes[r.laneFirst + l];
+        uint32_t i = 0;
+        const uint32_t n = std::min(g.remaining, frames);
+        // Computed from the destination so the last ramp sample is exactly the target
+        // and the ramp is monotone in float.
+        for (; i < n; ++i) {
+            --g.remaining;
+            g.cur = g.target - g.step * static_cast<float>(g.remaining);
+            buf[i] *= g.cur;
+        }
+        const float c = g.cur;
+        for (; i < frames; ++i) buf[i] *= c;
+    }
+}
+
+void runMSEncode(float *a, float *b, uint32_t frames) {
+    for (uint32_t i = 0; i < frames; ++i) {
+        const float l = a[i], r = b[i];
+        a[i] = 0.5f * (l + r);
+        b[i] = 0.5f * (l - r);
+    }
+}
+
+void runMSDecode(float *a, float *b, uint32_t frames) {
+    for (uint32_t i = 0; i < frames; ++i) {
+        const float m = a[i], s = b[i];
+        a[i] = m + s;
+        b[i] = m - s;
+    }
+}
+
+void runPeq(SnapHeader *h, const StageRec &r, float *const *lanes, uint32_t frames) {
+    const uint32_t sections = r.paramCount / 4;
+    const double *coef = reinterpret_cast<const double *>(bytes(h) + r.coefOff);
+    for (uint32_t l = 0; l < r.laneCount; ++l) {
+        PeqLane &st = *reinterpret_cast<PeqLane *>(laneState(h, r, l));
+        float *buf = lanes[r.laneFirst + l];
+        double z[N60_PEQ_MAX_SECTIONS][2];
+        std::memcpy(z, st.z, sizeof z);
+        for (uint32_t i = 0; i < frames; ++i) {
+            double x = buf[i];
+            for (uint32_t s = 0; s < sections; ++s) {  // transposed direct form II
+                const double *c = coef + 5 * s;
+                const double y = c[0] * x + z[s][0];
+                z[s][0] = c[1] * x - c[3] * y + z[s][1];
+                z[s][1] = c[2] * x - c[4] * y;
+                x = y;
+            }
+            buf[i] = static_cast<float>(x);
+        }
+        // Flush decayed state so a quiet tail never lingers in denormals (slow on some CPUs).
+        for (uint32_t s = 0; s < sections; ++s) {
+            for (int k = 0; k < 2; ++k) {
+                if (std::fabs(z[s][k]) < 1e-30) z[s][k] = 0.0;
+            }
+        }
+        std::memcpy(st.z, z, sizeof z);
+    }
+}
+
+void runDelay(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
+    const uint32_t target = static_cast<uint32_t>(paramsOf(h, r)[0]);
+    const uint32_t ramp = h->rampFrames;
+    const uint32_t ringSize = r.capacity + 1;
+    for (uint32_t l = 0; l < r.laneCount; ++l) {
+        DelayLane &d = *reinterpret_cast<DelayLane *>(laneState(h, r, l));
+        float *ring = reinterpret_cast<float *>(&d + 1);
+        if (d.xfLeft == 0) {
+            if (target != d.dCur) {
+                d.dNew = target;
+                d.xfLeft = ramp;
+            }
+        } else if (target == d.dNew) {
+            d.pending = -1;
+        } else {
+            d.pending = static_cast<int32_t>(target);
+        }
+        float *buf = lanes[r.laneFirst + l];
+        uint32_t wp = d.wp;
+        for (uint32_t i = 0; i < frames; ++i) {
+            ring[wp] = buf[i];
+            int64_t oi = int64_t(wp) - d.dCur;
+            if (oi < 0) oi += ringSize;
+            float y = ring[oi];
+            if (d.xfLeft != 0) {
+                int64_t ni = int64_t(wp) - d.dNew;
+                if (ni < 0) ni += ringSize;
+                const float t = static_cast<float>(ramp - d.xfLeft + 1) / static_cast<float>(ramp);
+                y += t * (ring[ni] - y);
+                if (--d.xfLeft == 0) {
+                    d.dCur = d.dNew;
+                    if (d.pending >= 0 && static_cast<uint32_t>(d.pending) != d.dCur) {
+                        d.dNew = static_cast<uint32_t>(d.pending);
+                        d.xfLeft = ramp;
+                    }
+                    d.pending = -1;
+                }
+            }
+            buf[i] = y;
+            if (++wp == ringSize) wp = 0;
+        }
+        d.wp = wp;
+    }
+    r.applied = static_cast<float>(target);
+}
+
+}  // namespace
+
+void runSnapshot(SnapHeader *h, float *const *lanes, uint32_t frames, std::atomic<uint64_t> &sanitisedSamples) {
+    StageRec *table = stages(h);
+    for (uint32_t i = 0; i < h->stageCount; ++i) {
+        StageRec &r = table[i];
+        switch (r.kind) {
+            case N60_STAGE_SANITISE: {
+                uint64_t bad = 0;
+                for (uint32_t l = 0; l < r.laneCount; ++l) runSanitise(lanes[r.laneFirst + l], frames, bad);
+                if (bad != 0) sanitisedSamples.fetch_add(bad, std::memory_order_relaxed);
+                break;
+            }
+            case N60_STAGE_METER_IN:
+            case N60_STAGE_METER_OUT:
+                for (uint32_t l = 0; l < r.laneCount; ++l) {
+                    runMeter(*reinterpret_cast<MeterLane *>(laneState(h, r, l)), lanes[r.laneFirst + l], frames);
+                }
+                break;
+            case N60_STAGE_GAIN: runGain(h, r, lanes, frames); break;
+            case N60_STAGE_MS_ENCODE: runMSEncode(lanes[r.laneA], lanes[r.laneB], frames); break;
+            case N60_STAGE_PEQ: runPeq(h, r, lanes, frames); break;
+            case N60_STAGE_MS_DECODE: runMSDecode(lanes[r.laneA], lanes[r.laneB], frames); break;
+            case N60_STAGE_DELAY: runDelay(h, r, lanes, frames); break;
+            default: break;
+        }
+    }
+}
+
+}  // namespace n60
