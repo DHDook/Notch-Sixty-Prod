@@ -418,6 +418,13 @@ bool N60RenderKernelConfigureHeadphoneDSP(
 void N60RenderKernelClearHeadphoneDSP(N60RenderKernel * _Nonnull kernel);
 void N60RenderKernelDestroy(N60RenderKernel * _Nonnull kernel);
 void N60RenderKernelReset(N60RenderKernel * _Nonnull kernel);
+// E6 S8b: clears every DSP state (filters, dynamics, limiter, delays, gain ramps; not the convolvers, whose multi-MB clear is
+// left to Reset with IO stopped)
+// and re-prepares from the published snapshot on the next render. Unlike Reset it keeps the
+// diagnostic counters and the headphone DSP. Memset only (no allocation, no locks), so the
+// render thread may call it before N60RenderKernelBeginRender when the kernel takes over
+// from the unified graph.
+void N60RenderKernelColdStart(N60RenderKernel * _Nonnull kernel);
 bool N60RenderKernelPrepareConvolutionProgram(
     N60RenderKernel * _Nonnull kernel,
     uint32_t slot,

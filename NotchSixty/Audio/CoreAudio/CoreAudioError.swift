@@ -436,6 +436,7 @@ final class CoreAudioTransportSession {
     /// rendered through a libn60core graph; anything else keeps the kernel path.
     var unifiedGraphEnabled = false
     private var unifiedGraphHost: UnifiedGraphHost?
+    private var headphoneDSPConfigured = false
     private var graphPublicationCoordinator: DSPGraphPublicationCoordinator?
     private var analysisWorker: ProductionAnalysisWorker?
     private var audioUnitRack: AudioUnitLiveRackSwitchboard?
@@ -1075,6 +1076,10 @@ final class CoreAudioTransportSession {
         } else {
             N60RealtimeAudioBridgeClearHeadphoneDSP(bridge)
         }
+        headphoneDSPConfigured = snapshot != nil
+        // IO is stopped here, so the callback cannot be mid-hand-over; the next publish
+        // re-evaluates eligibility, and until then the kernel (which has the headphone DSP) renders.
+        if headphoneDSPConfigured { detachUnifiedGraph() }
     }
 
     /// Whether the plain-stereo callback is currently rendering through libn60core.
@@ -1090,7 +1095,8 @@ final class CoreAudioTransportSession {
     /// detaches it so the kernel renders. Any failure falls back to the kernel.
     private func refreshUnifiedGraph(for snapshot: N60DSPGraphSnapshot) {
         guard let bridge else { return }
-        guard unifiedGraphEnabled, !isSameDeviceOrRackRoute else {
+        // The graph has no headphone DSP stage yet; the kernel keeps rendering that setup.
+        guard unifiedGraphEnabled, !isSameDeviceOrRackRoute, !headphoneDSPConfigured else {
             detachUnifiedGraph()
             return
         }
@@ -1109,7 +1115,7 @@ final class CoreAudioTransportSession {
             }
             guard let host = unifiedGraphHost, let raw = host.rawGraph else { return }
             if !N60RealtimeAudioBridgeUnifiedGraphActive(bridge) {
-                guard N60RealtimeAudioBridgeSetUnifiedGraph(bridge, raw, spec.maxBlockFrames) else {
+                guard N60RealtimeAudioBridgeSetUnifiedGraph(bridge, raw, spec.maxBlockFrames, spec.sampleRate) else {
                     detachUnifiedGraph()
                     return
                 }
@@ -1122,7 +1128,7 @@ final class CoreAudioTransportSession {
 
     private func detachUnifiedGraph() {
         if let bridge, N60RealtimeAudioBridgeUnifiedGraphActive(bridge) {
-            _ = N60RealtimeAudioBridgeSetUnifiedGraph(bridge, nil, 0)
+            _ = N60RealtimeAudioBridgeSetUnifiedGraph(bridge, nil, 0, 0)
         }
     }
 

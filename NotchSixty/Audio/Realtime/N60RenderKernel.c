@@ -1411,26 +1411,17 @@ void N60RenderKernelDestroy(N60RenderKernel *kernel) {
     free(kernel);
 }
 
-void N60RenderKernelReset(N60RenderKernel *kernel) {
+void N60RenderKernelColdStart(N60RenderKernel *kernel) {
     if (kernel == NULL) return;
     reset_eq_runtime(kernel);
     reset_ambient_compensation_runtime(kernel);
     reset_crossover_runtime(&kernel->crossoverRuntime, N60CrossoverSnapshotMakeBypassed());
     N60DynamicsRuntimeReset(&kernel->dynamicsRuntime);
     N60SpectralDenoiserReset(kernel->denoiserRuntime);
-    if (kernel->headphoneDSPRuntime != NULL) {
-        if (kernel->headphoneDSPEnabled) {
-            (void)N60HeadphoneDSPRuntimePrepare(
-                kernel->headphoneDSPRuntime, &kernel->headphoneDSPSnapshot
-            );
-        } else {
-            memset(kernel->headphoneDSPRuntime, 0, sizeof(*kernel->headphoneDSPRuntime));
-        }
-    }
     N60ProtectionRuntimeReset(kernel->protectionRuntime);
-    N60PartitionedConvolverReset(kernel->convolver);
-    N60PartitionedConvolverReset(kernel->roomCorrectionConvolver);
-    N60PartitionedConvolverReset(kernel->speakerIRConvolver);
+    /* Convolvers are deliberately not reset here: this runs in the audio callback and their
+     * resets clear MBs and race the control-thread program preparation. N60RenderKernelReset
+     * (IO stopped) clears them. Convolution snapshots are not graph-eligible. */
     reset_smoothed_gain(&kernel->inputGain, 1.0f);
     reset_smoothed_gain(&kernel->headroomGain, 1.0f);
     reset_smoothed_gain(&kernel->outputGain, 1.0f);
@@ -1455,6 +1446,23 @@ void N60RenderKernelReset(N60RenderKernel *kernel) {
     kernel->preparedProtectionFactor = N60OversamplingFactor1x;
     kernel->preparedLimiterEnabled = false;
     kernel->preparedLimiterLookAheadHighSamples = 0;
+}
+
+void N60RenderKernelReset(N60RenderKernel *kernel) {
+    if (kernel == NULL) return;
+    N60RenderKernelColdStart(kernel);
+    N60PartitionedConvolverReset(kernel->convolver);
+    N60PartitionedConvolverReset(kernel->roomCorrectionConvolver);
+    N60PartitionedConvolverReset(kernel->speakerIRConvolver);
+    if (kernel->headphoneDSPRuntime != NULL) {
+        if (kernel->headphoneDSPEnabled) {
+            (void)N60HeadphoneDSPRuntimePrepare(
+                kernel->headphoneDSPRuntime, &kernel->headphoneDSPSnapshot
+            );
+        } else {
+            memset(kernel->headphoneDSPRuntime, 0, sizeof(*kernel->headphoneDSPRuntime));
+        }
+    }
     atomic_store_explicit(&kernel->renderedFrames, 0, memory_order_relaxed);
     atomic_store_explicit(&kernel->sanitizedNonFiniteSamples, 0, memory_order_relaxed);
     atomic_store_explicit(&kernel->flushedDenormalSamples, 0, memory_order_relaxed);
