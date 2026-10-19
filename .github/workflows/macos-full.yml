@@ -88,3 +88,23 @@ jobs:
             ${{ runner.temp }}/benchmarks/benchmarks.txt
           if-no-files-found: warn
           retention-days: 14
+
+  # E6 S2: the portable engine core builds and passes its tests with clang on
+  # Linux, proving it has no Apple framework dependency.
+  core-linux:
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Build and test libn60core (clang, Linux)
+        run: |
+          set -euo pipefail
+          clang++ --version
+          clang++ -std=c++20 -O2 -Wall -Wextra -Werror -fno-exceptions -fno-rtti -Icore/include \
+            -c core/src/graph.cpp -o "$RUNNER_TEMP/n60core_graph.o"
+          clang -std=c11 -O2 -Wall -Wextra -Werror -Icore/include -c core/tests/test_graph.c \
+            -o "$RUNNER_TEMP/test_graph.o"
+          clang++ "$RUNNER_TEMP/test_graph.o" "$RUNNER_TEMP/n60core_graph.o" -lm -o "$RUNNER_TEMP/test_graph"
+          "$RUNNER_TEMP/test_graph"

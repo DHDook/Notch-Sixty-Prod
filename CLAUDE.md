@@ -7,7 +7,7 @@
 - Agents in `.claude/agents/`: slice-builder (Sonnet, builds one slice in a fresh context),
   realtime-reviewer (Sonnet), and code-scout, build-test-runner, plan-tracker, pr-writer (Haiku).
 
-**Current focus:** E6 (unified live N-channel graph), the Phase 2 critical path: design note and plan in `docs/epics/E6.md` (PR e6/design-note) awaiting owner approval. E4 software slices are merged through S9c (#166); S8 and S10 wait for E22 bench work and S11 for E6. E19 still needs a plan.
+**Current focus:** E6 (unified live N-channel graph), slice 2 of 11 `e6/core-skeleton` in PR (needs-owner); next S3 `e6/graph-core`.
 <!-- plan-tracker keeps the line above current -->
 
 @AGENTS.md

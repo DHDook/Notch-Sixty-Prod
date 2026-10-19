@@ -158,6 +158,17 @@ if selected e4_ff_survey; then
     fi
 fi
 
+# E6 S2: libn60core skeleton (portable C++ core behind its versioned C ABI).
+if selected e6_core_graph; then
+    if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -fno-exceptions -fno-rtti -Icore/include \
+        -c core/src/graph.cpp -o "$OUT/n60core_graph.o"; then
+        harness e6_core_graph "${STRICT[@]}" -O2 -Icore/include core/tests/test_graph.c \
+            "$OUT/n60core_graph.o" -lc++ -lm
+    else
+        failed+=(e6_core_graph)
+    fi
+fi
+
 # Acoustic reference lab: production-header probes checked against independent
 # Python oracles at every standard rate from 44.1 to 384 kHz.
 for name in pr117_acoustic_reference_lab pr117b_fir_latency_headroom pr117c_spatial_reference; do
