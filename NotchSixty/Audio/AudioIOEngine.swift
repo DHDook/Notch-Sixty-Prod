@@ -1019,6 +1019,10 @@ private struct PreparedSpeakerIRProgram {
 
 @MainActor
 final class AudioIOEngine: ObservableObject {
+    /// E6 S8: set by the app shell from the `e6.unified-graph` flag. The engine never reads
+    /// the flag itself; with this false the kernel path runs exactly as before.
+    var unifiedGraphEnabled = false
+
     private let deviceCatalog: any OutputDeviceCataloging
     private let eventMonitor: AudioHardwareEventMonitor
     private let masterVolumeController: any MasterVolumeDeviceControlling
@@ -4270,6 +4274,7 @@ final class AudioIOEngine: ObservableObject {
             speakerDriverProcessingSnapshot: speakerDriverProcessingSnapshot,
             audioUnitRack: stagedAudioUnitRack
         )
+        session.unifiedGraphEnabled = unifiedGraphEnabled
         try session.configureHeadphoneDSP(headphoneSnapshot)
         activeEQFIRProgram = nil
         nextEQFIRProgramSlot = 0

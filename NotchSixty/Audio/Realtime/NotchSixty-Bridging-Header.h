@@ -2,6 +2,8 @@
 #import "N60AudioUnitLiveRackBridge.h"
 #import "N60AudioUnitRackExchange.h"
 #import "N60RealtimeAudioBridge.h"
+#import "n60/graph.h"
+#import "../UnifiedGraph/N60UnifiedGraphEligibility.h"
 #import "N60RoomMeasurementBridge.h"
 #import "N60AmbientMonitorBridge.h"
 #import "N60FeedForwardReferenceBridge.h"

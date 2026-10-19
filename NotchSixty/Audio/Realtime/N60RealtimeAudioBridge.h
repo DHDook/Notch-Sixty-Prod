@@ -128,6 +128,16 @@ typedef struct {
 
 N60RealtimeAudioBridge * _Nullable N60RealtimeAudioBridgeCreate(uint32_t capacityFrames);
 void N60RealtimeAudioBridgeDestroy(N60RealtimeAudioBridge * _Nonnull bridge);
+// E6 S8. Control thread only. Attaches (graph != NULL) or detaches (NULL) a libn60core
+// n60_graph used by the plain-stereo callback branch for blocks up to maxFrames; larger
+// blocks, the AU rack and same-device branches keep using the kernel. The bridge never
+// owns or frees the graph. Allocates the scratch here, never in the callback.
+bool N60RealtimeAudioBridgeSetUnifiedGraph(
+    N60RealtimeAudioBridge * _Nonnull bridge,
+    void * _Nullable graph,
+    uint32_t maxFrames
+);
+bool N60RealtimeAudioBridgeUnifiedGraphActive(const N60RealtimeAudioBridge * _Nonnull bridge);
 void N60RealtimeAudioBridgeReset(N60RealtimeAudioBridge * _Nonnull bridge);
 void N60RealtimeAudioBridgeSetOutputGain(N60RealtimeAudioBridge * _Nonnull bridge, float gain);
 void N60RealtimeAudioBridgeSetTransitionGainImmediate(

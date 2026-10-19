@@ -432,6 +432,10 @@ final class CoreAudioTransportSession {
     }
 
     private var bridge: OpaquePointer?
+    /// E6 S8: when true, each published stereo snapshot the core can reproduce is also
+    /// rendered through a libn60core graph; anything else keeps the kernel path.
+    var unifiedGraphEnabled = false
+    private var unifiedGraphHost: UnifiedGraphHost?
     private var graphPublicationCoordinator: DSPGraphPublicationCoordinator?
     private var analysisWorker: ProductionAnalysisWorker?
     private var audioUnitRack: AudioUnitLiveRackSwitchboard?
@@ -1073,8 +1077,62 @@ final class CoreAudioTransportSession {
         }
     }
 
+    /// Whether the plain-stereo callback is currently rendering through libn60core.
+    var unifiedGraphActive: Bool {
+        guard let bridge else { return false }
+        return N60RealtimeAudioBridgeUnifiedGraphActive(bridge)
+    }
+
+    /// The live graph host, for metering and latency readbacks (nil while the kernel renders).
+    var unifiedGraphReadback: UnifiedGraphHost? { unifiedGraphActive ? unifiedGraphHost : nil }
+
+    /// Control thread. Builds or updates the core graph for `snapshot` and attaches it, or
+    /// detaches it so the kernel renders. Any failure falls back to the kernel.
+    private func refreshUnifiedGraph(for snapshot: N60DSPGraphSnapshot) {
+        guard let bridge else { return }
+        guard unifiedGraphEnabled, !isSameDeviceOrRackRoute else {
+            detachUnifiedGraph()
+            return
+        }
+        var mutable = snapshot
+        guard let configuration = UnifiedGraphTranslator.stereoConfiguration(
+            snapshot: &mutable, sampleRate: outputFormat.sampleRate
+        ), let spec = try? configuration.makeSpec() else {
+            detachUnifiedGraph()
+            return
+        }
+        do {
+            if let host = unifiedGraphHost {
+                try host.apply(spec)
+            } else {
+                unifiedGraphHost = try UnifiedGraphHost(spec: spec)
+            }
+            guard let host = unifiedGraphHost, let raw = host.rawGraph else { return }
+            if !N60RealtimeAudioBridgeUnifiedGraphActive(bridge) {
+                guard N60RealtimeAudioBridgeSetUnifiedGraph(bridge, raw, spec.maxBlockFrames) else {
+                    detachUnifiedGraph()
+                    return
+                }
+            }
+            unifiedGraphHost?.collect()
+        } catch {
+            detachUnifiedGraph()
+        }
+    }
+
+    private func detachUnifiedGraph() {
+        if let bridge, N60RealtimeAudioBridgeUnifiedGraphActive(bridge) {
+            _ = N60RealtimeAudioBridgeSetUnifiedGraph(bridge, nil, 0)
+        }
+    }
+
+    private var isSameDeviceOrRackRoute: Bool {
+        sameDeviceOutputPlan != nil || aggregateDeviceOutputPlan != nil || audioUnitRack != nil
+    }
+
     func publishDSPGraph(_ snapshot: N60DSPGraphSnapshot) throws {
         guard let bridge else { throw CoreAudioTransportError.dspGraphPublicationFailed }
+        refreshUnifiedGraph(for: snapshot)
         if !isOutputStarted || !isCaptureStarted {
             guard N60RealtimeAudioBridgePublishDSPGraph(bridge, snapshot) else {
                 throw CoreAudioTransportError.dspGraphPublicationFailed
@@ -1090,6 +1148,7 @@ final class CoreAudioTransportSession {
 
     func transitionDSPGraph(_ snapshot: N60DSPGraphSnapshot) throws {
         guard bridge != nil else { throw CoreAudioTransportError.dspGraphPublicationFailed }
+        refreshUnifiedGraph(for: snapshot)
 
         if !isOutputStarted || !isCaptureStarted {
             try publishDSPGraph(snapshot)
@@ -1165,6 +1224,8 @@ final class CoreAudioTransportSession {
             N60RealtimeAudioBridgeDestroy(bridge)
             self.bridge = nil
         }
+        // The host outlives the bridge that rendered it; release it only after destroy.
+        unifiedGraphHost = nil
         audioUnitRack = nil
         graphPublicationCoordinator = nil
     }

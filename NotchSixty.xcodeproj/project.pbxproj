@@ -7,6 +7,18 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		E6D000000000000000000101 /* UnifiedGraphSpec.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D000000000000000000001 /* UnifiedGraphSpec.swift */; };
+		E6D000000000000000000102 /* UnifiedGraphHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D000000000000000000002 /* UnifiedGraphHost.swift */; };
+		E6D000000000000000000103 /* UnifiedGraphConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D000000000000000000003 /* UnifiedGraphConfiguration.swift */; };
+		E6D000000000000000000104 /* UnifiedGraphTranslator.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D000000000000000000004 /* UnifiedGraphTranslator.swift */; };
+		E6D000000000000000000106 /* UnifiedGraphEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D000000000000000000006 /* UnifiedGraphEngineTests.swift */; };
+		E6C000000000000000000030 /* graph.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E6C000000000000000000010 /* graph.cpp */; };
+		E6C000000000000000000031 /* snapshot.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E6C000000000000000000011 /* snapshot.cpp */; };
+		E6C000000000000000000032 /* fft.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E6C000000000000000000012 /* fft.cpp */; };
+		E6C000000000000000000033 /* stages_dsp.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E6C000000000000000000013 /* stages_dsp.cpp */; };
+		E6C000000000000000000034 /* stages_system.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E6C000000000000000000014 /* stages_system.cpp */; };
+		E6C000000000000000000035 /* stages_matrix.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E6C000000000000000000015 /* stages_matrix.cpp */; };
+		E6C000000000000000000036 /* layout.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E6C000000000000000000016 /* layout.cpp */; };
 		F10200000000000000000001 /* ThirdPartyNotices.txt in Resources */ = {isa = PBXBuildFile; fileRef = F10200000000000000000011 /* ThirdPartyNotices.txt */; };
 		A10000000000000000000010 /* NotchSixtyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000020 /* NotchSixtyApp.swift */; };
 		A10000000000000000000011 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000021 /* ContentView.swift */; };
@@ -353,6 +365,24 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		E6D000000000000000000001 /* UnifiedGraphSpec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphSpec.swift; sourceTree = "<group>"; };
+		E6D000000000000000000002 /* UnifiedGraphHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphHost.swift; sourceTree = "<group>"; };
+		E6D000000000000000000003 /* UnifiedGraphConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphConfiguration.swift; sourceTree = "<group>"; };
+		E6D000000000000000000004 /* UnifiedGraphTranslator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphTranslator.swift; sourceTree = "<group>"; };
+		E6D000000000000000000005 /* N60UnifiedGraphEligibility.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60UnifiedGraphEligibility.h; sourceTree = "<group>"; };
+		E6D000000000000000000006 /* UnifiedGraphEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphEngineTests.swift; sourceTree = "<group>"; };
+		E6C000000000000000000010 /* graph.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = graph.cpp; sourceTree = "<group>"; };
+		E6C000000000000000000011 /* snapshot.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = snapshot.cpp; sourceTree = "<group>"; };
+		E6C000000000000000000012 /* fft.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = fft.cpp; sourceTree = "<group>"; };
+		E6C000000000000000000013 /* stages_dsp.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = stages_dsp.cpp; sourceTree = "<group>"; };
+		E6C000000000000000000014 /* stages_system.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = stages_system.cpp; sourceTree = "<group>"; };
+		E6C000000000000000000015 /* stages_matrix.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = stages_matrix.cpp; sourceTree = "<group>"; };
+		E6C000000000000000000016 /* layout.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = layout.cpp; sourceTree = "<group>"; };
+		E6C000000000000000000020 /* fft.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = fft.hpp; sourceTree = "<group>"; };
+		E6C000000000000000000021 /* snapshot.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = snapshot.hpp; sourceTree = "<group>"; };
+		E6C000000000000000000022 /* stages_dsp.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = stages_dsp.hpp; sourceTree = "<group>"; };
+		E6C000000000000000000023 /* stages_system.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = stages_system.hpp; sourceTree = "<group>"; };
+		E6C000000000000000000024 /* stages_matrix.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = stages_matrix.hpp; sourceTree = "<group>"; };
 		F10200000000000000000011 /* ThirdPartyNotices.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = ThirdPartyNotices.txt; sourceTree = "<group>"; };
 		A10000000000000000000020 /* NotchSixtyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchSixtyApp.swift; sourceTree = "<group>"; };
 		A10000000000000000000021 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -717,9 +747,42 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		E6D0000000000000000000F1 /* UnifiedGraph */ = {
+			isa = PBXGroup;
+			children = (
+				E6D000000000000000000001 /* UnifiedGraphSpec.swift */,
+				E6D000000000000000000002 /* UnifiedGraphHost.swift */,
+				E6D000000000000000000003 /* UnifiedGraphConfiguration.swift */,
+				E6D000000000000000000004 /* UnifiedGraphTranslator.swift */,
+				E6D000000000000000000005 /* N60UnifiedGraphEligibility.h */,
+			);
+			path = UnifiedGraph;
+			sourceTree = "<group>";
+		};
+		E6C0000000000000000000F1 /* libn60core */ = {
+			isa = PBXGroup;
+			children = (
+				E6C000000000000000000010 /* graph.cpp */,
+				E6C000000000000000000011 /* snapshot.cpp */,
+				E6C000000000000000000012 /* fft.cpp */,
+				E6C000000000000000000013 /* stages_dsp.cpp */,
+				E6C000000000000000000014 /* stages_system.cpp */,
+				E6C000000000000000000015 /* stages_matrix.cpp */,
+				E6C000000000000000000016 /* layout.cpp */,
+				E6C000000000000000000020 /* fft.hpp */,
+				E6C000000000000000000021 /* snapshot.hpp */,
+				E6C000000000000000000022 /* stages_dsp.hpp */,
+				E6C000000000000000000023 /* stages_system.hpp */,
+				E6C000000000000000000024 /* stages_matrix.hpp */,
+			);
+			name = libn60core;
+			path = core/src;
+			sourceTree = SOURCE_ROOT;
+		};
 		A10000000000000000000050 = {
 			isa = PBXGroup;
 			children = (
+				E6C0000000000000000000F1 /* libn60core */,
 				A10000000000000000000051 /* NotchSixty */,
 				A10000000000000000000052 /* NotchSixtyTests */,
 				A10000000000000000000053 /* Products */,
@@ -763,6 +826,7 @@
 			isa = PBXGroup;
 			children = (
 				A10000000000000000000024 /* NotchSixtyTests.swift */,
+				E6D000000000000000000006 /* UnifiedGraphEngineTests.swift */,
 				A10000000000000000000027 /* ConvolutionTests.swift */,
 				A100000000000000000E2206 /* FeatureFlagsTests.swift */,
 				A100000000000000000E1302 /* PresetInterchangeTests.swift */,
@@ -902,6 +966,7 @@
 		A20000000000000000000050 /* Audio */ = {
 			isa = PBXGroup;
 			children = (
+				E6D0000000000000000000F1 /* UnifiedGraph */,
 				A20000000000000000000051 /* CoreAudio */,
 				A20000000000000000000052 /* Devices */,
 				A20000000000000000000053 /* Routing */,
@@ -1143,6 +1208,17 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E6D000000000000000000101 /* UnifiedGraphSpec.swift in Sources */,
+				E6D000000000000000000102 /* UnifiedGraphHost.swift in Sources */,
+				E6D000000000000000000103 /* UnifiedGraphConfiguration.swift in Sources */,
+				E6D000000000000000000104 /* UnifiedGraphTranslator.swift in Sources */,
+				E6C000000000000000000030 /* graph.cpp in Sources */,
+				E6C000000000000000000031 /* snapshot.cpp in Sources */,
+				E6C000000000000000000032 /* fft.cpp in Sources */,
+				E6C000000000000000000033 /* stages_dsp.cpp in Sources */,
+				E6C000000000000000000034 /* stages_system.cpp in Sources */,
+				E6C000000000000000000035 /* stages_matrix.cpp in Sources */,
+				E6C000000000000000000036 /* layout.cpp in Sources */,
 				A10000000000000000000011 /* ContentView.swift in Sources */,
 				A10000000000000000000010 /* NotchSixtyApp.swift in Sources */,
 				A40000000000000000000010 /* ProductionRootView.swift in Sources */,
@@ -1356,6 +1432,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E6D000000000000000000106 /* UnifiedGraphEngineTests.swift in Sources */,
 				A10000000000000000000013 /* NotchSixtyTests.swift in Sources */,
 				A10000000000000000000014 /* ConvolutionTests.swift in Sources */,
 				A100000000000000000E2205 /* FeatureFlagsTests.swift in Sources */,
@@ -1516,6 +1593,10 @@
 					"$(inherited)",
 					"-lz",
 				);
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/core/include",
+				);
 				SWIFT_OBJC_BRIDGING_HEADER = "NotchSixty/Audio/Realtime/NotchSixty-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 			};
@@ -1546,6 +1627,10 @@
 					"$(inherited)",
 					"-lz",
 				);
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/core/include",
+				);
 				SWIFT_OBJC_BRIDGING_HEADER = "NotchSixty/Audio/Realtime/NotchSixty-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 			};
@@ -1555,6 +1640,10 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/core/include",
+				);
 				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = com.dhdook.NotchSixtyTests;
@@ -1568,6 +1657,10 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/core/include",
+				);
 				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = com.dhdook.NotchSixtyTests;
