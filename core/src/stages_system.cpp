@@ -130,24 +130,31 @@ bool sectionOk(const float *p, double rate) {
 }
 
 // BASS_MGMT parameter layout (ABI v7). Subwoofer 0 is the v6 fixed block: [2] lane, [6] gain, [7] polarity, [8] section
-// count n0, then 4 per section. When more follow, the next value is the extra subwoofer count m (1..7) and each extra
-// sub is: lane, gain dB, polarity, section count n, then 4 per section. A v6 parameter list is a one-sub list.
+// count n0, then 4 per section. When more follow, the next value is the extension word w (0..15): m = w mod 8 extra
+// subs, and w >= 8 selects host-weighted mode (no 1/N). Each extra sub is: lane, gain dB, polarity, section count n,
+// then 4 per section. A v6 parameter list is a one-sub list in the default mode (1/N, which is 1 for one sub).
 struct BassSubIdx {
     uint32_t lane, gain, pol, nEq, eq;
 };
 struct BassLayout {
-    uint32_t subs, end;
+    uint32_t subs, end, ext;  // ext: index of the extension word, 0 when absent
+    bool weighted;
     BassSubIdx s[kBassMaxSubs];
 };
 bool parseBass(const float *p, uint32_t have, BassLayout &L) {
     if (have < kBassFixed || !isInt(p[8]) || p[8] < 0.0f || p[8] > static_cast<float>(kBassMaxEq)) return false;
     L.subs = 1;
+    L.ext = 0;
+    L.weighted = false;
     L.s[0] = {2, 6, 7, 8, 9};
     uint32_t pos = kBassFixed + 4u * static_cast<uint32_t>(p[8]);
     if (have < pos) return false;
     if (have > pos) {
-        if (!isInt(p[pos]) || p[pos] < 1.0f || p[pos] > static_cast<float>(kBassMaxSubs - 1)) return false;
-        const uint32_t m = static_cast<uint32_t>(p[pos++]);
+        if (!isInt(p[pos]) || p[pos] < 0.0f || p[pos] > 15.0f) return false;
+        const uint32_t w = static_cast<uint32_t>(p[pos]);
+        L.ext = pos++;
+        L.weighted = w >= 8;
+        const uint32_t m = w & 7u;
         for (uint32_t k = 0; k < m; ++k) {
             if (have < pos + 4) return false;
             const float n = p[pos + 3];
@@ -277,6 +284,7 @@ struct BassShared {
     Ramp redirect, lfeG;
     float seenX, seenR, seenLfeHz, seenLfeG;
     uint32_t nSubs, clearLfe;
+    double norm;  // 1/N in the default mode, 1 when host-weighted
     int32_t lfeLane;
     BassSub sub[kBassMaxSubs];
 };
@@ -660,6 +668,7 @@ void systemInit(SnapHeader *h, const StageRec &r) {
             BassLayout L;
             if (!parseBass(p, r.paramCount, L)) break;  // unreachable: validated at build
             s->nSubs = L.subs;
+            s->norm = L.weighted ? 1.0 : 1.0 / static_cast<double>(L.subs);
             s->clearLfe = p[3] >= 0.0f ? 1u : 0u;
             for (uint32_t q = 0; q < L.subs; ++q) {
                 const BassSubIdx &x = L.s[q];
@@ -793,6 +802,7 @@ n60_status validateSystemParam(const SnapHeader *h, const StageRec &r, uint32_t 
                     return f == 0 ? N60_STATUS_UNSUPPORTED : N60_STATUS_OK;
                 }
             }
+            if (L.ext != 0 && idx == L.ext) return N60_STATUS_UNSUPPORTED;  // mode and counts are topology
             if (idx == 2 || idx == 3 || idx == 8) return paramOk(r.kind, idx, value, bp, h->sampleRate, h->outputChannels) ? N60_STATUS_UNSUPPORTED : N60_STATUS_BAD_ARGUMENT;
             return N60_STATUS_UNSUPPORTED;  // lane indexes, section counts, extra-sub count
         }
@@ -1102,9 +1112,10 @@ void runBass(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
             rampNext(s.lfeG);
         }
         // One bass sum, then each sub's own gain, polarity and EQ. (The LFE lane may be a sub lane: it is read above.)
+        const double vn = v * s.norm;
         for (uint32_t q = 0; q < s.nSubs; ++q) {
             BassSub &b = s.sub[q];
-            double y = v * (static_cast<double>(rampNext(b.g)) * static_cast<double>(rampNext(b.pol)));
+            double y = vn * (static_cast<double>(rampNext(b.g)) * static_cast<double>(rampNext(b.pol)));
             for (uint32_t k = 0; k < b.nEq; ++k) {
                 double o = bqRun(b.eq[k], b.z[k], y);
                 if (b.xf[k] != 0) {

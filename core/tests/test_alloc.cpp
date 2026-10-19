@@ -419,23 +419,23 @@ int main() {
         n60_layout_graph_free(bin);
     }
     // S7b: eight sub lanes with per-sub EQ; live gain, polarity and EQ edits every block and a sub-count
-    // rebuild (8 to 3 to 8) allocate nothing in the callback.
+    // rebuild (8 default-mode subs to 3 host-weighted and back) allocate nothing in the callback.
     for (double rate : rates) {
         constexpr uint32_t N = 256, CH = 11;
         float bass8[9 + 4 + 1 + 7 * 8], bass3[9 + 4 + 1 + 2 * 8];
-        auto fill = [](float *p, uint32_t subs) {
+        auto fill = [](float *p, uint32_t subs, bool weighted) {
             const float head[9] = {200, -6, 3, 2, 120, 0, 0, 0, 1};
             std::memcpy(p, head, sizeof head);
             uint32_t n = 9;
             p[n++] = 0; p[n++] = 50; p[n++] = 3; p[n++] = 1;
-            p[n++] = static_cast<float>(subs - 1);
+            p[n++] = static_cast<float>(subs - 1) + (weighted ? 8.0f : 0.0f);
             for (uint32_t q = 1; q < subs; ++q) {
                 p[n++] = static_cast<float>(3 + q); p[n++] = -1.0f * static_cast<float>(q); p[n++] = static_cast<float>(q & 1u); p[n++] = 1;
                 p[n++] = 0; p[n++] = 50; p[n++] = 3; p[n++] = 1;
             }
             return n;
         };
-        const uint32_t n8 = fill(bass8, 8), n3 = fill(bass3, 3);
+        const uint32_t n8 = fill(bass8, 8, false), n3 = fill(bass3, 3, true);
         n60_stage_desc a = stage(N60_STAGE_BASS_MGMT, 1, 0, bass8, n8), b = stage(N60_STAGE_BASS_MGMT, 1, 0, bass3, n3);
         a.laneMask = b.laneMask = 0x3;
         n60_graph_desc da{}, db{};

@@ -17,6 +17,9 @@
 #define LANES 11u    /* 0, 1 mains; 2 LFE; 3..10 subs */
 #define MAXSUB 8u
 static int failures = 0;
+/* Mode of the lists buildCfg emits: 1 = host-weighted (no 1/N), 0 = default (1/N). Most tests run host-weighted so
+ * N identical subs compare bit for bit with one; testModes covers both. */
+static int gWeighted = 1;
 #define CHECK(cond, ...) do { if (!(cond)) { fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__); \
     fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); failures++; } } while (0)
 
@@ -66,6 +69,7 @@ typedef struct {
     float p[160];
     uint32_t n;
     uint32_t gainIdx[MAXSUB], polIdx[MAXSUB], eqIdx[MAXSUB];
+    uint32_t ext;  /* index of the extension word, 0 when the list has none (a v6 one-sub list) */
 } Cfg;
 
 static SubSpec subDefault(uint32_t lane) {
@@ -92,8 +96,9 @@ static void buildCfg(Cfg *c, float xover, float redirectDb, float lfeLane, const
     c->eqIdx[0] = 9;
     uint32_t n = 9;
     for (uint32_t k = 0; k < subs[0].nEq; k++) for (int j = 0; j < 4; j++) p[n++] = subs[0].sec[k][j];
-    if (count > 1) {
-        p[n++] = (float)(count - 1);
+    if (count > 1 || gWeighted) {
+        c->ext = n;
+        p[n++] = (float)(count - 1) + (gWeighted ? 8.0f : 0.0f);
         for (uint32_t q = 1; q < count; q++) {
             p[n++] = (float)subs[q].lane;
             c->gainIdx[q] = n;
@@ -334,7 +339,9 @@ static void testSingleSubExact(double rate) {
     sp[2].nEq = 1;
     { float s[4] = {0, 60, 3, 1}; memcpy(sp[2].sec[0], s, sizeof s); }
     Cfg one, four;
+    gWeighted = 0;  /* a pure v6 list */
     buildCfg(&one, 200, 0, 2, sp, 1);
+    gWeighted = 1;
     buildCfg(&four, 200, 0, 2, sp, 4);
     CHECK(one.n == 9 + 8, "rate %.0f: a one-sub list is the v6 length (%u)", rate, one.n);
     Rig a, b;
@@ -405,15 +412,23 @@ static void testValidation(double rate) {
     CHECK(tryBuild(rate, c.p, c.n, 0x3) == N60_STATUS_OK, "one sub accepted");
     /* nine subs: extension count 8 */
     buildCfg(&c, 200, 0, -1, sp, 8);
-    c.p[9] = 8;
+    c.p[9] = 16;
     float nine[160];
     memcpy(nine, c.p, sizeof nine);
     uint32_t n = c.n;
     nine[n++] = 2; nine[n++] = 0; nine[n++] = 0; nine[n++] = 0;
-    CHECK(tryBuild(rate, nine, n, 0x3) == N60_STATUS_BAD_ARGUMENT, "rate %.0f: nine subs refused", rate);
+    CHECK(tryBuild(rate, nine, n, 0x3) == N60_STATUS_BAD_ARGUMENT, "rate %.0f: extension word 16 refused", rate);
     buildCfg(&c, 200, 0, -1, sp, 2);
     c.p[9] = 0;
     CHECK(tryBuild(rate, c.p, c.n, 0x3) == N60_STATUS_BAD_ARGUMENT, "zero extra subs with data refused");
+    buildCfg(&c, 200, 0, -1, sp, 2);
+    c.p[9] = -1;
+    CHECK(tryBuild(rate, c.p, c.n, 0x3) == N60_STATUS_BAD_ARGUMENT, "negative extension word refused");
+    buildCfg(&c, 200, 0, -1, sp, 2);
+    c.p[9] = 1.5f;
+    CHECK(tryBuild(rate, c.p, c.n, 0x3) == N60_STATUS_BAD_ARGUMENT, "fractional extension word refused");
+    buildCfg(&c, 200, 0, -1, sp, 1);
+    CHECK(c.ext != 0 && c.p[c.ext] == 8 && tryBuild(rate, c.p, c.n, 0x3) == N60_STATUS_OK, "one host-weighted sub accepted");
     buildCfg(&c, 200, 0, -1, sp, 3);
     CHECK(tryBuild(rate, c.p, c.n - 1, 0x3) == N60_STATUS_BAD_ARGUMENT, "truncated list refused");
     c.p[c.n] = 0;
@@ -459,6 +474,8 @@ static void testValidation(double rate) {
     CHECK(n60_graph_post_params(g, &r, 1) == N60_STATUS_OK, "section Hz is live");
     r.paramIndex = c.eqIdx[2]; r.value = 1;
     CHECK(n60_graph_post_params(g, &r, 1) == N60_STATUS_UNSUPPORTED, "section type is not live");
+    r.paramIndex = c.ext; r.value = 2;
+    CHECK(n60_graph_post_params(g, &r, 1) == N60_STATUS_UNSUPPORTED, "sub count / mode is not live");
     r.paramIndex = c.gainIdx[2] - 1; r.value = 9;
     CHECK(n60_graph_post_params(g, &r, 1) == N60_STATUS_UNSUPPORTED, "sub lane is not live");
     r.paramIndex = c.gainIdx[2]; r.value = 99;
@@ -578,6 +595,113 @@ static void testSubCountRebuild(double rate) {
     rigFree(&r);
 }
 
+/* ---- default (1/N) and host-weighted modes -------------------------------------- */
+
+static void testModes(double rate) {
+    const double sec = 0.3;
+    const uint32_t len = framesFor(rate, sec), w0 = len - framesFor(rate, 0.05);
+    const uint32_t counts[] = {1, 2, 4, 8};
+    gWeighted = 1;
+    Rig ref = uniformRig(rate, 1, 0, sec);  /* one sub: both modes give this */
+    const double refPk = peakRange(lane(&ref, 3), w0, len);
+    gWeighted = 0;
+    Rig v6 = uniformRig(rate, 1, 0, sec);   /* a pure v6 list (no extension word) */
+    CHECK(bitEqual(lane(&v6, 3), lane(&ref, 3), 0, len), "rate %.0f: v6 one-sub list equals the host-weighted one-sub output", rate);
+    rigFree(&v6);
+    for (unsigned k = 0; k < 4; k++) {
+        const uint32_t n = counts[k];
+        gWeighted = 0;
+        Rig d = uniformRig(rate, n, 0, sec);
+        gWeighted = 1;
+        Rig w = uniformRig(rate, n, 0, sec);
+        for (uint32_t q = 0; q < n; q++) {
+            CHECK(bitEqual(lane(&w, 3 + q), lane(&ref, 3), 0, len), "rate %.0f: host-weighted %u subs, sub %u passes the sum through", rate, n, q);
+            const double pk = peakRange(lane(&d, 3 + q), w0, len);
+            CHECK(fabs(pk - refPk / n) < 0.005 * refPk / n + 1e-6, "rate %.0f: default %u subs, sub %u at 1/N (%.5f vs %.5f)", rate, n, q, pk, refPk / n);
+            double err = 0;
+            for (uint32_t i = 0; i < len; i++) err = fmax(err, fabs((double)lane(&d, 3 + q)[i] - (double)lane(&ref, 3)[i] / n));
+            CHECK(err < 1e-6, "rate %.0f: default %u subs, sub %u equals the sum / N (err %g)", rate, n, q, err);
+        }
+        if (n == 1) CHECK(bitEqual(lane(&d, 3), lane(&w, 3), 0, len), "rate %.0f: one sub is identical in both modes", rate);
+        /* the coherent acoustic sum of the default mode is the level of one sub */
+        double acc = 0;
+        for (uint32_t i = w0; i < len; i++) {
+            double t = 0;
+            for (uint32_t q = 0; q < n; q++) t += lane(&d, 3 + q)[i];
+            acc = fmax(acc, fabs(t));
+        }
+        CHECK(fabs(acc - refPk) < 0.005 * refPk, "rate %.0f: default %u subs sum acoustically to one sub (%.5f vs %.5f)", rate, n, acc, refPk);
+        rigFree(&d);
+        rigFree(&w);
+    }
+    /* per-sub gains are applied on top of 1/N in the default mode and as given when host-weighted */
+    {
+        SubSpec sp[2] = {subDefault(3), subDefault(4)};
+        sp[0].gainDb = -6;
+        sp[1].gainDb = 3;
+        for (int mode = 0; mode < 2; mode++) {
+            gWeighted = mode;
+            Cfg c;
+            buildCfg(&c, 200, 0, -1, sp, 2);
+            Rig r;
+            rigInit(&r, rate, buildGraph(rate, &c, 0x3, NULL, 0), sec);
+            tones(&r, 50, 0.5, 0.3);
+            render(&r, len);
+            const double norm = mode ? 1.0 : 0.5;
+            double e0 = 0, e1 = 0;
+            for (uint32_t i = 0; i < len; i++) {
+                e0 = fmax(e0, fabs((double)lane(&r, 3)[i] - norm * pow(10.0, -6.0 / 20.0) * (double)lane(&ref, 3)[i]));
+                e1 = fmax(e1, fabs((double)lane(&r, 4)[i] - norm * pow(10.0, 3.0 / 20.0) * (double)lane(&ref, 3)[i]));
+            }
+            CHECK(e0 < 2e-6 && e1 < 2e-6, "rate %.0f: %s mode gains (err %g, %g)", rate, mode ? "host-weighted" : "default", e0, e1);
+            rigFree(&r);
+        }
+    }
+    gWeighted = 1;
+    rigFree(&ref);
+
+    /* switching the mode is a topology change: the rebuild fade, no click */
+    for (int dir = 0; dir < 2; dir++) {
+        SubSpec sp[4];
+        for (uint32_t q = 0; q < 4; q++) sp[q] = subDefault(3 + q);
+        Cfg from, to;
+        gWeighted = dir;
+        buildCfg(&from, 200, 0, -1, sp, 4);
+        gWeighted = !dir;
+        buildCfg(&to, 200, 0, -1, sp, 4);
+        gWeighted = 1;
+        Rig r;
+        rigInit(&r, rate, buildGraph(rate, &from, 0x3, NULL, 0), 1.0);
+        tones(&r, 50, 0.4, 0.4);
+        render(&r, framesFor(rate, 0.15));
+        const uint32_t before = (uint32_t)r.pos;
+        n60_stage_desc st[1] = {stgMask(N60_STAGE_BASS_MGMT, 1, 0x3, to.p, to.n)};
+        n60_graph_desc d = desc(rate, st, 1);
+        CHECK(n60_graph_publish(r.g, &d) == N60_STATUS_OK, "publish mode switch");
+        n60_rebuild_status rs;
+        int guard = 0;
+        do {
+            render(&r, BLOCK);
+            memset(&rs, 0, sizeof rs);
+            rs.structSize = sizeof rs;
+            n60_graph_get_rebuild_status(r.g, &rs);
+        } while ((rs.state != 0 || rs.completed == 0) && ++guard < 4000);
+        render(&r, framesFor(rate, 0.1));
+        const uint32_t end = (uint32_t)r.pos;
+        CHECK(rs.completed == 1, "rate %.0f: mode-switch rebuild completed", rate);
+        const double hi = maxStep(lane(&r, 3), dir ? before - framesFor(rate, 0.04) : end - framesFor(rate, 0.04), dir ? before : end);
+        for (uint32_t q = 0; q < 4; q++) {
+            const double st2 = maxStep(lane(&r, 3 + q), before, end);
+            CHECK(st2 < 3.0 * hi, "rate %.0f: sub %u step across the mode switch %g vs %g", rate, q, st2, hi);
+        }
+        const double a = peakRange(lane(&r, 3), before - framesFor(rate, 0.05), before);
+        const double b = peakRange(lane(&r, 3), end - framesFor(rate, 0.05), end);
+        const double ratio = dir ? a / b : b / a;  /* weighted / default = N */
+        CHECK(fabs(ratio - 4.0) < 0.04, "rate %.0f: weighted level is N times the default (%.3f)", rate, ratio);
+        rigFree(&r);
+    }
+}
+
 int main(void) {
     for (unsigned i = 0; i < sizeof kRates / sizeof *kRates; i++) {
         const double rate = kRates[i];
@@ -590,6 +714,7 @@ int main(void) {
         testValidation(rate);
         testLiveEdits(rate);
         testSubCountRebuild(rate);
+        testModes(rate);
         printf("rate %.0f done\n", rate);
     }
     if (failures) {
