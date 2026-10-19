@@ -235,7 +235,7 @@ void rebuildBlock(n60_graph *g, float *const *out, uint32_t frames) {
     const uint32_t outCount = g->outputChannels;
     const float budget = loadFloat(g->cpuBudgetBits);
     const bool timed = g->phase == 1 && budget > 0.0f;
-    std::chrono::steady_clock::time_point t0;
+    std::chrono::steady_clock::time_point t0{};  // epoch unless timed
     if (timed) t0 = std::chrono::steady_clock::now();
 
     const size_t bytes = static_cast<size_t>(frames) * sizeof(float);
