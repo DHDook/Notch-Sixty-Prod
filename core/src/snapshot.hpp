@@ -12,6 +12,7 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 
 #include "n60/graph.h"
 
@@ -98,6 +99,30 @@ uint32_t snapshotLatency(const SnapHeader *snap);
 // Control thread (immutable fields only).
 const StageRec *findStage(const SnapHeader *snap, uint32_t stageId);
 bool readMeter(SnapHeader *snap, uint32_t stageId, uint32_t lane, float *peak, float *rms);
+// ABI v8 (E6 S8c). Control thread: over-range count of a meter stage lane (reset by the read), and the
+// dynamics readback of a compressor, expander or protection stage lane (grMaxDb, peaks reset by the read).
+bool readOverRange(SnapHeader *snap, uint32_t stageId, uint32_t lane, uint64_t *count);
+bool readDynamics(SnapHeader *snap, uint32_t stageId, uint32_t lane, n60_dynamics_readback *out);
+
+// Non-negative floats order like their bit patterns, so a peak-hold is an atomic max on the bits. The realtime
+// thread raises it; the control thread resets it with exchange(0). Wait-free on the realtime side apart from
+// the (bounded, lock-free) compare-exchange retry against the one reader.
+inline uint32_t floatToBits(float v) {
+    uint32_t b;
+    std::memcpy(&b, &v, sizeof b);
+    return b;
+}
+inline float bitsToFloat(uint32_t b) {
+    float v;
+    std::memcpy(&v, &b, sizeof v);
+    return v;
+}
+inline void atomicMaxFloat(std::atomic<uint32_t> &a, float v) {
+    const uint32_t nb = floatToBits(v);
+    uint32_t seen = a.load(std::memory_order_relaxed);
+    while (nb > seen && !a.compare_exchange_weak(seen, nb, std::memory_order_relaxed)) {
+    }
+}
 
 }  // namespace n60
 

@@ -48,3 +48,8 @@ add_executable(n60core_multisub_test tests/test_multisub.c)
 set_target_properties(n60core_multisub_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
 target_link_libraries(n60core_multisub_test PRIVATE n60core m)
 add_test(NAME n60core_multisub COMMAND n60core_multisub_test)
+
+add_executable(n60core_readbacks_test tests/test_readbacks.c)
+set_target_properties(n60core_readbacks_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
+target_link_libraries(n60core_readbacks_test PRIVATE n60core m)
+add_test(NAME n60core_readbacks COMMAND n60core_readbacks_test)

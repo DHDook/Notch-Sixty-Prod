@@ -2862,6 +2862,15 @@ final class AudioIOEngine: ObservableObject {
         let stereoFinalReading: StereoMeterReading? =
             (transportSession?.unifiedGraphReadback != nil && !N60RealtimeAudioBridgeOutputVUMeterDemand())
             ? stereoRenderDiagnostics?.outputMeter : nil
+        // S8c: the stereo overlay also took this snapshot's gain-reduction and true-peak readings.
+        let stereoDynamicsReading: UnifiedGraphDynamicsReading? = stereoRenderDiagnostics.flatMap { diagnostics in
+            transportSession?.unifiedGraphReadback == nil ? nil : UnifiedGraphDynamicsReading(
+                compressorGainReductionDB: diagnostics.compressorGainReductionDB,
+                limiterGainReductionDB: diagnostics.limiterGainReductionDB,
+                inputTruePeakLinear: diagnostics.inputTruePeakLinear,
+                outputTruePeakLinear: diagnostics.outputTruePeakLinear,
+                truePeakGuardActive: diagnostics.truePeakGuardActive)
+        }
         return AudioDiagnosticsSnapshot(
             lifecycleState: lifecycle.state,
             selectedOutputUID: routeConfiguration.selectedOutputUID,
@@ -2896,7 +2905,8 @@ final class AudioIOEngine: ObservableObject {
                         ?? nChannelTransportSession?.unifiedGraphFallbackReason
                         ?? binauralHeadphoneTransportSession?.unifiedGraphFallbackReason)
                     : nil,
-                stereoFinalReading: stereoFinalReading
+                stereoFinalReading: stereoFinalReading,
+                stereoDynamicsReading: stereoDynamicsReading
             )
         )
     }

@@ -311,6 +311,10 @@ struct Hb {
 };
 struct ProtLane {
     Hb up1, up2, dn2, dn1;
+    std::atomic<uint32_t> inTpBits;   // ABI v8: peak at the oversampled limiter input, since the last read
+    std::atomic<uint32_t> outTpBits;  // and at its output
+    std::atomic<uint32_t> grMaxBits;  // deepest limiter reduction (dB) since the last read (the same on every lane)
+    std::atomic<uint32_t> grNowBits;  // reduction at the end of the last block
     // followed by float ring[laHigh + 2]
 };
 struct ProtShared {
@@ -318,6 +322,8 @@ struct ProtShared {
     double gain;
     uint32_t ph2, ph1, head, count, cap, cfgValid;
     float seenCeil, seenAtk, seenRel, pad2;  // protCfg inputs the cached cfg was derived from
+    std::atomic<uint32_t> guardActive;       // ABI v8: 1 when the limiter runs with oversampling
+    uint32_t pad3;
     ProtCfg cfg;                              // cached: pow/exp are not redone every block
     // followed by float val[cap]; uint64_t idx[cap]
 };
@@ -1262,7 +1268,15 @@ void runProtection(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
         sh.cfgValid = 1;
     }
     const ProtCfg c = sh.cfg;
-    if (c.factor == 1 && !c.limiter) return;  // bypass: no processing, no latency
+    if (c.factor == 1 && !c.limiter) {
+        // Bypass: no processing, no latency. Clear the "now" readbacks so a switched-off limiter
+        // never reads as active; the peaks and max reduction stay as the reader left them.
+        sh.guardActive.store(0u, std::memory_order_relaxed);
+        for (uint32_t l = 0; l < r.laneCount; ++l) {
+            reinterpret_cast<ProtLane *>(laneState(h, r, l))->grNowBits.store(0u, std::memory_order_relaxed);
+        }
+        return;
+    }
     float *val = protVal(&sh);
     uint64_t *idx = protIdx(&sh);
     const uint32_t n = r.laneCount;
@@ -1277,6 +1291,9 @@ void runProtection(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
     const uint32_t cap = sh.cap;
     const double attackStep = 1.0 / static_cast<double>(std::max(1u, c.atkHigh));
     float hi[kMaxLanes][4];
+    float inPeak[kMaxLanes] = {};   // readback peaks for this block (merged into the lane atomics at the end)
+    float outPeak[kMaxLanes] = {};
+    double minGain = 1.0;
 
     auto limitHigh = [&](uint32_t k) {  // one high-rate sample across all lanes
         const uint64_t seq = sh.seq;
@@ -1284,7 +1301,9 @@ void runProtection(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
         float peak = 0.0f;
         for (uint32_t l = 0; l < n; ++l) {
             ring[l][w] = hi[l][k];
-            peak = std::fmax(peak, std::fabs(hi[l][k]));
+            const float a = std::fabs(hi[l][k]);
+            peak = std::fmax(peak, a);
+            inPeak[l] = std::fmax(inPeak[l], a);
         }
         while (sh.count > 0) {  // deque_push
             const uint32_t tail = (sh.head + sh.count - 1u) % cap;
@@ -1307,6 +1326,7 @@ void runProtection(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
         } else {
             sh.gain = target + c.relCoef * (sh.gain - target);
         }
+        minGain = std::fmin(minGain, sh.gain);
         float safety = 0.0f;
         for (uint32_t l = 0; l < n; ++l) {
             const float delayed = seq >= c.laHigh ? ring[l][static_cast<uint32_t>(outSeq % cap)] : 0.0f;
@@ -1317,6 +1337,7 @@ void runProtection(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
             const float sg = c.ceilLin / std::fmax(safety, kEps);
             for (uint32_t l = 0; l < n; ++l) hi[l][k] *= sg;
         }
+        for (uint32_t l = 0; l < n; ++l) outPeak[l] = std::fmax(outPeak[l], std::fabs(hi[l][k]));
         sh.seq = seq + 1u;
     };
 
@@ -1379,6 +1400,17 @@ void runProtection(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
                 if (emit) ptr[l][i] = f;
             }
         }
+    }
+
+    // Readbacks for the control thread (relaxed atomics; peaks reset by the reader).
+    const float grMax = minGain < 1.0 ? static_cast<float>(-20.0 * std::log10(std::fmax(minGain, 1e-12))) : 0.0f;
+    const float grNow = sh.gain < 1.0 ? static_cast<float>(-20.0 * std::log10(std::fmax(sh.gain, 1e-12))) : 0.0f;
+    sh.guardActive.store(c.limiter && c.factor > 1 ? 1u : 0u, std::memory_order_relaxed);
+    for (uint32_t l = 0; l < n; ++l) {
+        atomicMaxFloat(pl[l]->inTpBits, inPeak[l]);
+        atomicMaxFloat(pl[l]->outTpBits, outPeak[l]);
+        atomicMaxFloat(pl[l]->grMaxBits, grMax);
+        pl[l]->grNowBits.store(floatToBits(grNow), std::memory_order_relaxed);
     }
 }
 
@@ -1535,6 +1567,25 @@ uint32_t systemRebuildMute(SnapHeader *h, bool silentNow) {
 }
 
 // ---- control-thread reads ---------------------------------------------------------------------
+
+bool readProtectionDynamics(SnapHeader *h, const StageRec &r, uint32_t lane, n60_dynamics_readback *out) {
+    if (r.kind != N60_STAGE_PROTECTION) return false;
+    uint32_t k = 0;
+    for (; k < r.laneCount; ++k) {
+        if (laneOf(r, k) == lane) break;
+    }
+    if (k == r.laneCount) return false;
+    ProtShared &sh = *reinterpret_cast<ProtShared *>(sharedState(h, r));
+    ProtLane &pl = *reinterpret_cast<ProtLane *>(laneState(h, r, k));
+    out->kind = r.kind;
+    out->grMaxDb = bitsToFloat(pl.grMaxBits.exchange(0, std::memory_order_relaxed));
+    out->grNowDb = bitsToFloat(pl.grNowBits.load(std::memory_order_relaxed));
+    out->inTruePeak = bitsToFloat(pl.inTpBits.exchange(0, std::memory_order_relaxed));
+    out->outTruePeak = bitsToFloat(pl.outTpBits.exchange(0, std::memory_order_relaxed));
+    out->guardActive = sh.guardActive.load(std::memory_order_relaxed);
+    out->reserved = 0;
+    return true;
+}
 
 bool readGuardStatus(const SnapHeader *h, uint32_t stageId, n60_guard_status *out) {
     const StageRec *r = findStage(h, stageId);

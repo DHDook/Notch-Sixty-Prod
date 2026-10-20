@@ -167,8 +167,10 @@ final class UnifiedGraphHost: @unchecked Sendable {
     /// its reported latency, replacing the kernel's, which does not run while the graph renders.
     /// `latencyFrames` is passed in because the session removes the integer inter-channel taps
     /// (the kernel's figure excludes them). The output reading is left alone when `includeOutput`
-    /// is false (the bridge's output VU already supplies it). Over-range counts are not tracked by
-    /// the core and read 0. Peaks are read-and-reset in the core. One locked pass; control plane.
+    /// is false (the bridge's output VU already supplies it). S8c: also fills over-range counts,
+    /// the compressor and limiter gain reduction, the limiter's input and output true peaks and the
+    /// true-peak guard flag from the graph (ABI v8). Peaks, over-range counts and the max gain
+    /// reduction are read-and-reset in the core. One locked pass; control plane.
     func overlayStereoReadbacks(
         _ diagnostics: inout N60RenderKernelDiagnostics,
         latencyFrames: UInt32,
@@ -177,19 +179,58 @@ final class UnifiedGraphHost: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         guard let graph else { return }
         func reading(_ stage: UInt32) -> N60StereoMeterReading {
+            var over = [UInt64](repeating: 0, count: 2)
+            for lane in 0..<2 {
+                _ = n60_graph_read_over_range(graph, stage, UInt32(lane), &over[lane])
+            }
             var peak = [Float](repeating: 0, count: 2)
             var rms = [Float](repeating: 0, count: 2)
             for lane in 0..<2 {
                 _ = n60_graph_read_meter(graph, stage, UInt32(lane), &peak[lane], &rms[lane])
             }
             return N60StereoMeterReading(
-                peakLeft: peak[0], peakRight: peak[1], rmsLeft: rms[0], rmsRight: rms[1], overRangeSamples: 0
+                peakLeft: peak[0], peakRight: peak[1], rmsLeft: rms[0], rmsRight: rms[1], overRangeSamples: over[0] &+ over[1]
             )
         }
         diagnostics.inputMeter = reading(N60_LSTAGE_METER_IN)
         diagnostics.postEQMeter = reading(N60_LSTAGE_METER_OUT)
         if includeOutput { diagnostics.outputMeter = reading(N60_LSTAGE_FINAL_METER) }
         diagnostics.latencyFrames = latencyFrames
+        if let comp = dynamicsReading(graph, stageId: UnifiedGraphConfiguration.compressorStageId) {
+            diagnostics.compressorGainReductionDB = comp.grMaxDb
+        }
+        if let prot = dynamicsReading(graph, stageId: N60_LSTAGE_PROTECTION) {
+            diagnostics.limiterGainReductionDB = prot.grMaxDb
+            diagnostics.inputTruePeakLinear = prot.inTruePeak
+            diagnostics.outputTruePeakLinear = prot.outTruePeak
+            diagnostics.truePeakGuardActive = prot.guardActive != 0
+        }
+    }
+
+    /// The reading for lane 0 (linked groups publish the same value on every lane); nil when the
+    /// stage is not in the live graph. Caller holds `lock`.
+    private func dynamicsReading(_ graph: OpaquePointer, stageId: UInt32) -> n60_dynamics_readback? {
+        var out = n60_dynamics_readback()
+        out.structSize = UInt32(MemoryLayout<n60_dynamics_readback>.size)
+        guard n60_graph_read_dynamics(graph, stageId, 0, &out) == N60_STATUS_OK else { return nil }
+        return out
+    }
+
+    /// Gain reduction, true-peak and guard readings of the graph's compressor and protection
+    /// stages for the diagnostics record; nil when no stage is present. Control plane.
+    func dynamicsReadings() -> UnifiedGraphDynamicsReading? {
+        lock.lock(); defer { lock.unlock() }
+        guard let graph else { return nil }
+        let comp = dynamicsReading(graph, stageId: UnifiedGraphConfiguration.compressorStageId)
+        let prot = dynamicsReading(graph, stageId: N60_LSTAGE_PROTECTION)
+        guard comp != nil || prot != nil else { return nil }
+        return UnifiedGraphDynamicsReading(
+            compressorGainReductionDB: comp?.grMaxDb ?? 0,
+            limiterGainReductionDB: prot?.grMaxDb ?? 0,
+            inputTruePeakLinear: prot?.inTruePeak ?? 0,
+            outputTruePeakLinear: prot?.outTruePeak ?? 0,
+            truePeakGuardActive: (prot?.guardActive ?? 0) != 0
+        )
     }
 
     var latencyFrames: UInt32 {
@@ -254,4 +295,13 @@ final class UnifiedGraphHost: @unchecked Sendable {
         guard status == N60_STATUS_OK else { throw UnifiedGraphError.coreStatus(status.rawValue) }
         return outStorage.map { Array(UnsafeBufferPointer(start: $0, count: frames)) }
     }
+}
+
+/// E6 S8c: graph gain-reduction, true-peak and guard readbacks (values since the last read).
+struct UnifiedGraphDynamicsReading: Equatable, Sendable {
+    let compressorGainReductionDB: Float
+    let limiterGainReductionDB: Float
+    let inputTruePeakLinear: Float
+    let outputTruePeakLinear: Float
+    let truePeakGuardActive: Bool
 }

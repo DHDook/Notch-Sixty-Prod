@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 #include <new>
 
 #include "n60/graph.h"
@@ -483,6 +484,73 @@ int main() {
             }
             n60_graph_collect(g);
         }
+        n60_graph_retire(g);
+    }
+    // E6 S8c: meters (with over-range counting), compressor, expander and protection while the
+    // control thread reads the ABI v8 readbacks between blocks; the audio call must not allocate.
+    for (double rate : rates) {
+        constexpr uint32_t CH = 2, N = 256;
+        const float comp[10] = {-20, 4, 6, 1, 50, 0, 0, 1, 80, 1};
+        const float expa[6] = {-50, 2, -40, 2, 50, 1};
+        const float prot[7] = {1, -3, 1, 50, 5, 1, 4};
+        n60_stage_desc st[6] = {stage(N60_STAGE_METER_IN, 1, N60_LANE_ALL, nullptr, 0),
+                                stage(N60_STAGE_COMPRESSOR, 2, 0, comp, 10),
+                                stage(N60_STAGE_EXPANDER, 3, 0, expa, 6),
+                                stage(N60_STAGE_METER_OUT, 4, N60_LANE_ALL, nullptr, 0),
+                                stage(N60_STAGE_PROTECTION, 5, N60_LANE_ALL, prot, 7),
+                                stage(N60_STAGE_FINAL_METER, 6, N60_LANE_ALL, nullptr, 0)};
+        st[1].laneMask = st[2].laneMask = 0x3;
+        n60_graph_desc d{};
+        d.structSize = sizeof d;
+        d.abiVersion = N60_GRAPH_ABI_VERSION;
+        d.sampleRate = rate;
+        d.maxBlockFrames = N;
+        d.inputChannels = d.outputChannels = CH;
+        d.stages = st;
+        d.stageCount = 6;
+        n60_graph *g = nullptr;
+        CHECK(n60_graph_build(&d, &g) == N60_STATUS_OK, "build S8c graph at %.0f", rate);
+        if (g == nullptr) continue;
+        static float buf[CH][N], obuf[CH][N];
+        const float *in[CH];
+        float *out[CH];
+        for (uint32_t c = 0; c < CH; c++) { in[c] = buf[c]; out[c] = obuf[c]; }
+        float peakGr = 0.0f;
+        uint64_t overTotal = 0;
+        uint32_t seed = 11;
+        for (int step = 0; step < 400; step++) {
+            for (uint32_t c = 0; c < CH; c++) {
+                for (uint32_t i = 0; i < N; i++) {
+                    seed = seed * 1664525u + 1013904223u;
+                    buf[c][i] = 3.0f * (static_cast<float>((seed >> 8) & 0xFFFF) / 65536.0f - 0.5f);  // over-range input
+                }
+            }
+            allocs = 0;
+            frees = 0;
+            armed = true;
+            n60_status s = n60_graph_process(g, in, out, N);
+            armed = false;
+            CHECK(s == N60_STATUS_OK, "process S8c");
+            CHECK(allocs == 0 && frees == 0, "rate %.0f S8c step %d: realtime call allocated %ld / freed %ld", rate, step,
+                  allocs.load(), frees.load());
+            n60_dynamics_readback r{};
+            r.structSize = sizeof r;
+            for (uint32_t stageId : {2u, 3u, 5u}) {
+                for (uint32_t lane = 0; lane < CH; lane++) {
+                    CHECK(n60_graph_read_dynamics(g, stageId, lane, &r) == N60_STATUS_OK, "read dynamics %u", stageId);
+                    if (stageId == 5u && r.grMaxDb > peakGr) peakGr = r.grMaxDb;
+                }
+            }
+            for (uint32_t stageId : {1u, 4u, 6u}) {
+                for (uint32_t lane = 0; lane < CH; lane++) {
+                    uint64_t over = 0;
+                    CHECK(n60_graph_read_over_range(g, stageId, lane, &over) == N60_STATUS_OK, "read over-range %u", stageId);
+                    if (stageId == 1u) overTotal += over;
+                }
+            }
+        }
+        CHECK(peakGr > 0.0f, "rate %.0f S8c: limiter reduction was never read back", rate);
+        CHECK(overTotal > 0, "rate %.0f S8c: input over-range was never counted", rate);
         n60_graph_retire(g);
     }
     if (failures) {

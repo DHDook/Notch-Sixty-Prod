@@ -65,6 +65,7 @@ struct PeqSec {
 struct MeterLane {
     std::atomic<uint32_t> peakBits;  // positive floats order like their bit patterns
     std::atomic<uint32_t> rmsBits;
+    std::atomic<uint64_t> overRange;  // ABI v8: samples with |x| > 1.0 since the last read
 };
 
 size_t alignUp(size_t v) { return (v + (kAlign - 1)) & ~(kAlign - 1); }
@@ -450,6 +451,7 @@ n60_status buildSnapshot(const n60_graph_desc &d, uint32_t epoch, SnapHeader **o
                     MeterLane *m = new (st) MeterLane;
                     m->peakBits.store(0, std::memory_order_relaxed);
                     m->rmsBits.store(0, std::memory_order_relaxed);
+                    m->overRange.store(0, std::memory_order_relaxed);
                     break;
                 }
                 case N60_STAGE_GAIN: {
@@ -568,6 +570,24 @@ uint32_t snapshotLatency(const SnapHeader *snap) {
     return worst;
 }
 
+bool readOverRange(SnapHeader *snap, uint32_t stageId, uint32_t lane, uint64_t *count) {
+    const StageRec *r = findStage(snap, stageId);
+    if (r == nullptr || (r->kind != N60_STAGE_METER_IN && r->kind != N60_STAGE_METER_OUT) ||
+        lane < r->laneFirst || lane >= r->laneFirst + r->laneCount) {
+        return false;
+    }
+    MeterLane *m = reinterpret_cast<MeterLane *>(laneState(snap, *r, lane - r->laneFirst));
+    *count = m->overRange.exchange(0, std::memory_order_relaxed);
+    return true;
+}
+
+bool readDynamics(SnapHeader *snap, uint32_t stageId, uint32_t lane, n60_dynamics_readback *out) {
+    const StageRec *r = findStage(snap, stageId);
+    if (r == nullptr) return false;
+    if (r->kind == N60_STAGE_PROTECTION) return readProtectionDynamics(snap, *r, lane, out);
+    return readDspDynamics(snap, *r, lane, out);
+}
+
 bool readMeter(SnapHeader *snap, uint32_t stageId, uint32_t lane, float *peak, float *rms) {
     const StageRec *r = findStage(snap, stageId);
     if (r == nullptr || (r->kind != N60_STAGE_METER_IN && r->kind != N60_STAGE_METER_OUT) ||
@@ -594,11 +614,14 @@ void runSanitise(float *buf, uint32_t frames, uint64_t &bad) {
 void runMeter(MeterLane &m, const float *buf, uint32_t frames) {
     float peak = 0.0f;
     double sum = 0.0;
+    uint64_t over = 0;
     for (uint32_t i = 0; i < frames; ++i) {
         const float a = std::fabs(buf[i]);
         peak = a > peak ? a : peak;
+        over += a > 1.0f ? 1u : 0u;  // false for NaN
         sum += double(buf[i]) * double(buf[i]);
     }
+    if (over != 0) m.overRange.fetch_add(over, std::memory_order_relaxed);
     const uint32_t pb = floatBits(peak);
     uint32_t seen = m.peakBits.load(std::memory_order_relaxed);
     while (pb > seen && !m.peakBits.compare_exchange_weak(seen, pb, std::memory_order_relaxed)) {

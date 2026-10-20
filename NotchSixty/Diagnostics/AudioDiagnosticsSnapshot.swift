@@ -281,6 +281,9 @@ struct UnifiedGraphDiagnostics: Equatable, Sendable {
     /// `n60_rebuild_status.state`: 0 when the live graph is steady.
     let rebuildState: UInt32
     let finalMeters: [LaneMeter]
+    /// E6 S8c: gain-reduction, true-peak and guard readings since the previous snapshot; nil when
+    /// the graph has no compressor or protection stage (or no graph renders).
+    let dynamics: UnifiedGraphDynamicsReading?
     /// Set when the graph was requested but the legacy path renders the session; the other
     /// fields are then empty. nil while the graph renders.
     let fallbackReason: UnifiedGraphFallbackReason?
@@ -294,6 +297,7 @@ struct UnifiedGraphDiagnostics: Equatable, Sendable {
         latencyFrames = 0
         rebuildState = 0
         finalMeters = []
+        dynamics = nil
         self.fallbackReason = fallbackReason
     }
 
@@ -304,7 +308,8 @@ struct UnifiedGraphDiagnostics: Equatable, Sendable {
         host: UnifiedGraphHost?,
         programChannelCount: Int,
         fallbackReason: UnifiedGraphFallbackReason? = nil,
-        stereoFinalReading: StereoMeterReading? = nil
+        stereoFinalReading: StereoMeterReading? = nil,
+        stereoDynamicsReading: UnifiedGraphDynamicsReading? = nil
     ) {
         guard let host else {
             guard let fallbackReason else { return nil }
@@ -313,6 +318,7 @@ struct UnifiedGraphDiagnostics: Equatable, Sendable {
             latencyFrames = 0
             rebuildState = 0
             finalMeters = []
+            dynamics = nil
             self.fallbackReason = fallbackReason
             return
         }
@@ -322,6 +328,9 @@ struct UnifiedGraphDiagnostics: Equatable, Sendable {
         self.programChannelCount = programChannelCount
         self.latencyFrames = host.latencyFrames
         self.rebuildState = host.rebuildState
+        // Core gain reduction and true peaks are read-and-reset: reuse the stereo overlay's reading
+        // of this snapshot rather than read the stages a second time.
+        self.dynamics = stereoDynamicsReading ?? host.dynamicsReadings()
         self.finalMeters = (0..<count).map { lane in
             // Core peaks are read-and-reset: when the stereo diagnostics overlay already took this
             // snapshot's FINAL_METER reading, reuse it rather than read the stage a second time.

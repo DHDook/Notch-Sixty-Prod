@@ -448,6 +448,19 @@ n60_status n60_graph_read_meter(n60_graph *g, uint32_t stageId, uint32_t lane, f
     return n60::readMeter(g->latest, stageId, lane, peak, rms) ? N60_STATUS_OK : N60_STATUS_BAD_ARGUMENT;
 }
 
+n60_status n60_graph_read_dynamics(n60_graph *g, uint32_t stageId, uint32_t lane, n60_dynamics_readback *out) {
+    if (g == nullptr || out == nullptr) return N60_STATUS_BAD_ARGUMENT;
+    if (out->structSize != sizeof(n60_dynamics_readback)) return N60_STATUS_ABI_MISMATCH;
+    syncLatest(g);
+    return n60::readDynamics(g->latest, stageId, lane, out) ? N60_STATUS_OK : N60_STATUS_BAD_ARGUMENT;
+}
+
+n60_status n60_graph_read_over_range(n60_graph *g, uint32_t stageId, uint32_t lane, uint64_t *count) {
+    if (g == nullptr || count == nullptr) return N60_STATUS_BAD_ARGUMENT;
+    syncLatest(g);
+    return n60::readOverRange(g->latest, stageId, lane, count) ? N60_STATUS_OK : N60_STATUS_BAD_ARGUMENT;
+}
+
 n60_status n60_graph_read_guard(n60_graph *g, uint32_t stageId, n60_guard_status *out) {
     if (g == nullptr || out == nullptr) return N60_STATUS_BAD_ARGUMENT;
     if (out->structSize != sizeof(n60_guard_status)) return N60_STATUS_ABI_MISMATCH;
