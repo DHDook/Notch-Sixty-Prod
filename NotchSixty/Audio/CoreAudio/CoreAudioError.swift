@@ -436,6 +436,8 @@ final class CoreAudioTransportSession {
     /// rendered through a libn60core graph; anything else keeps the kernel path.
     var unifiedGraphEnabled = false
     private var unifiedGraphHost: UnifiedGraphHost?
+    /// Why the kernel renders although the graph is enabled; nil while the graph renders or is off.
+    private(set) var unifiedGraphFallbackReason: UnifiedGraphFallbackReason?
     private var headphoneDSPConfigured = false
     private var graphPublicationCoordinator: DSPGraphPublicationCoordinator?
     private var analysisWorker: ProductionAnalysisWorker?
@@ -1095,15 +1097,33 @@ final class CoreAudioTransportSession {
     /// detaches it so the kernel renders. Any failure falls back to the kernel.
     private func refreshUnifiedGraph(for snapshot: N60DSPGraphSnapshot) {
         guard let bridge else { return }
+        unifiedGraphFallbackReason = nil
+        guard unifiedGraphEnabled else {
+            detachUnifiedGraph()
+            return
+        }
         // The graph has no headphone DSP stage yet; the kernel keeps rendering that setup.
-        guard unifiedGraphEnabled, !isSameDeviceOrRackRoute, !headphoneDSPConfigured else {
+        guard !isSameDeviceOrRackRoute else {
+            unifiedGraphFallbackReason = .unsupportedRoute
+            detachUnifiedGraph()
+            return
+        }
+        guard !headphoneDSPConfigured else {
+            unifiedGraphFallbackReason = .headphoneDSP
             detachUnifiedGraph()
             return
         }
         var mutable = snapshot
-        guard let configuration = UnifiedGraphTranslator.stereoConfiguration(
-            snapshot: &mutable, sampleRate: outputFormat.sampleRate
-        ), let spec = try? configuration.makeSpec() else {
+        let configuration: UnifiedGraphConfiguration
+        switch UnifiedGraphTranslator.stereoEligibility(snapshot: &mutable, sampleRate: outputFormat.sampleRate) {
+        case .success(let accepted): configuration = accepted
+        case .failure(let reason):
+            unifiedGraphFallbackReason = reason
+            detachUnifiedGraph()
+            return
+        }
+        guard let spec = try? configuration.makeSpec() else {
+            unifiedGraphFallbackReason = .specRejected
             detachUnifiedGraph()
             return
         }
@@ -1116,12 +1136,14 @@ final class CoreAudioTransportSession {
             guard let host = unifiedGraphHost, let raw = host.rawGraph else { return }
             if !N60RealtimeAudioBridgeUnifiedGraphActive(bridge) {
                 guard N60RealtimeAudioBridgeSetUnifiedGraph(bridge, raw, spec.maxBlockFrames, spec.sampleRate) else {
+                    unifiedGraphFallbackReason = .attachFailed
                     detachUnifiedGraph()
                     return
                 }
             }
             unifiedGraphHost?.collect()
         } catch {
+            unifiedGraphFallbackReason = unifiedGraphHost == nil ? .graphBuildFailed : .specRejected
             detachUnifiedGraph()
         }
     }
@@ -1231,6 +1253,7 @@ final class CoreAudioTransportSession {
             self.bridge = nil
         }
         // The host outlives the bridge that rendered it; release it only after destroy.
+        unifiedGraphHost?.release()
         unifiedGraphHost = nil
         audioUnitRack = nil
         graphPublicationCoordinator = nil

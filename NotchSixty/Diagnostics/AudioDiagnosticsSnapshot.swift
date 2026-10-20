@@ -281,10 +281,37 @@ struct UnifiedGraphDiagnostics: Equatable, Sendable {
     /// `n60_rebuild_status.state`: 0 when the live graph is steady.
     let rebuildState: UInt32
     let finalMeters: [LaneMeter]
+    /// Set when the graph was requested but the legacy path renders the session; the other
+    /// fields are then empty. nil while the graph renders.
+    let fallbackReason: UnifiedGraphFallbackReason?
 
+    var isActive: Bool { fallbackReason == nil }
+
+    /// A requested graph that is not rendering, with the reason.
+    init(fallbackReason: UnifiedGraphFallbackReason) {
+        channelCount = 0
+        programChannelCount = 0
+        latencyFrames = 0
+        rebuildState = 0
+        finalMeters = []
+        self.fallbackReason = fallbackReason
+    }
+
+    /// The live graph's readbacks; or, when there is no host but a recorded `fallbackReason`,
+    /// the fallback record; nil when neither applies.
     @MainActor
-    init?(host: UnifiedGraphHost?, programChannelCount: Int) {
-        guard let host else { return nil }
+    init?(host: UnifiedGraphHost?, programChannelCount: Int, fallbackReason: UnifiedGraphFallbackReason? = nil) {
+        guard let host else {
+            guard let fallbackReason else { return nil }
+            channelCount = 0
+            self.programChannelCount = 0
+            latencyFrames = 0
+            rebuildState = 0
+            finalMeters = []
+            self.fallbackReason = fallbackReason
+            return
+        }
+        self.fallbackReason = nil
         let count = Int(host.outputChannels)
         self.channelCount = count
         self.programChannelCount = programChannelCount

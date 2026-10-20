@@ -2882,7 +2882,11 @@ final class AudioIOEngine: ObservableObject {
                     ?? nChannelTransportSession?.unifiedGraphReadback,
                 programChannelCount: nChannelTransportSession.map {
                     $0.routePlan.programLayout.roles.count
-                } ?? 2
+                } ?? 2,
+                fallbackReason: unifiedGraphEnabled
+                    ? (transportSession?.unifiedGraphFallbackReason
+                        ?? nChannelTransportSession?.unifiedGraphFallbackReason)
+                    : nil
             )
         )
     }
@@ -4059,6 +4063,19 @@ final class AudioIOEngine: ObservableObject {
             gainConfiguration: gainConfiguration,
             bassManagementConfiguration: bassManagementConfiguration
         )
+        var graphConfiguration: UnifiedGraphConfiguration?
+        var graphIneligibility: UnifiedGraphFallbackReason?
+        if unifiedGraphEnabled {
+            switch UnifiedGraphTranslator.nChannelEligibility(
+                routePlan: routePlan,
+                sampleRate: output.nominalSampleRate,
+                gainConfiguration: gainConfiguration,
+                bassManagementConfiguration: bassManagementConfiguration
+            ) {
+            case .success(let configuration): graphConfiguration = configuration
+            case .failure(let reason): graphIneligibility = reason
+            }
+        }
         let session = try CoreAudioNChannelTransportSession(
             selectedOutput: output,
             routePlan: routePlan,
@@ -4066,14 +4083,8 @@ final class AudioIOEngine: ObservableObject {
             outputGain: currentMasterSoftwareGain,
             roomTreatment: stagedRoomTreatment,
             audioUnitRack: stagedAudioUnitRack,
-            unifiedGraphConfiguration: unifiedGraphEnabled
-                ? UnifiedGraphTranslator.nChannelConfiguration(
-                    routePlan: routePlan,
-                    sampleRate: output.nominalSampleRate,
-                    gainConfiguration: gainConfiguration,
-                    bassManagementConfiguration: bassManagementConfiguration
-                )
-                : nil
+            unifiedGraphConfiguration: graphConfiguration,
+            unifiedGraphIneligibility: graphIneligibility
         )
         activeEQFIRProgram = nil
         activeRoomCorrectionProgram = nil

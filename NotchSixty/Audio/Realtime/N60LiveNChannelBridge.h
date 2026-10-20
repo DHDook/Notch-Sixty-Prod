@@ -578,20 +578,9 @@ static inline N60LiveNChannelMeterSnapshot N60LiveNChannelBridgeGetMeterSnapshot
             &bridge->meterProgramOverRangeSamples[channel], memory_order_relaxed
         );
     }
-    if (bridge->unifiedGraph != NULL && result.enabled) {
-        // With the graph attached the lane meter is the graph's METER_OUT stage (the same point
-        // as the per-lane accumulator: after the lane EQ, before bass management). The graph
-        // does not count over-range samples.
-        for (uint32_t channel = 0; channel < result.programChannelCount; ++channel) {
-            float peak = 0.0f;
-            float rms = 0.0f;
-            if (n60_graph_read_meter(bridge->unifiedGraph, N60_LSTAGE_METER_OUT, channel, &peak, &rms)
-                == N60_STATUS_OK) {
-                result.programPeak[channel] = peak;
-                result.programRMS[channel] = rms;
-            }
-        }
-    }
+    // With a graph attached the lane meter is the graph's METER_OUT stage. n60_graph_read_meter is
+    // control-thread-only, so this function (callable from any thread) never touches the graph:
+    // Swift overlays those levels under UnifiedGraphHost's lock (see N60LiveNChannelMeterSetProgramLevels).
     for (uint32_t physical = 0; physical < result.physicalChannelCount; ++physical) {
         result.physicalPeak[physical] = N60LiveNChannelBitsToFloat(atomic_load_explicit(
             &bridge->meterPhysicalPeakBits[physical], memory_order_relaxed
@@ -604,6 +593,15 @@ static inline N60LiveNChannelMeterSnapshot N60LiveNChannelBridgeGetMeterSnapshot
         );
     }
     return result;
+}
+
+/// Overlay one program lane's level read from the graph by the control plane.
+static inline void N60LiveNChannelMeterSetProgramLevels(
+    N60LiveNChannelMeterSnapshot * _Nonnull meter, uint32_t channel, float peak, float rms
+) {
+    if (channel >= meter->programChannelCount) return;
+    meter->programPeak[channel] = peak;
+    meter->programRMS[channel] = rms;
 }
 
 static inline float N60LiveNChannelMeterProgramPeak(
@@ -1035,6 +1033,8 @@ static inline OSStatus N60LiveNChannelOutputIOProc(
         return noErr;
     }
     bool graphRendered = false;
+    // renderFailures counts failed blocks, not frames: set once the block has been counted.
+    bool blockFailureCounted = false;
     if (graphActive) {
         const uint32_t graphChannels = bridge->graphChannels;
         float * const planarIn = graphPlanes;
@@ -1067,6 +1067,7 @@ static inline OSStatus N60LiveNChannelOutputIOProc(
         graphRendered = n60_graph_process(graph, inPointers, outPointers, frameCount) == N60_STATUS_OK;
         if (!graphRendered) {
             atomic_fetch_add_explicit(&bridge->renderFailures, 1u, memory_order_relaxed);
+            blockFailureCounted = true;
         }
     }
 
@@ -1135,7 +1136,10 @@ static inline OSStatus N60LiveNChannelOutputIOProc(
         }
         if (!frameRendered) {
             (void)N60ProgramTransportZeroOutputFrame(outOutputData, frameIndex);
-            atomic_fetch_add_explicit(&bridge->renderFailures, 1u, memory_order_relaxed);
+            if (!blockFailureCounted) {
+                atomic_fetch_add_explicit(&bridge->renderFailures, 1u, memory_order_relaxed);
+                blockFailureCounted = true;
+            }
             continue;
         }
 
@@ -1145,7 +1149,10 @@ static inline OSStatus N60LiveNChannelOutputIOProc(
                 physical.values,
                 physical.physicalChannelCount)) {
             (void)N60ProgramTransportZeroOutputFrame(outOutputData, frameIndex);
-            atomic_fetch_add_explicit(&bridge->renderFailures, 1u, memory_order_relaxed);
+            if (!blockFailureCounted) {
+                atomic_fetch_add_explicit(&bridge->renderFailures, 1u, memory_order_relaxed);
+                blockFailureCounted = true;
+            }
             continue;
         }
 

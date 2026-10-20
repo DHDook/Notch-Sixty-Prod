@@ -355,7 +355,7 @@ enum LiveNChannelRenderGraphCompiler {
 final class CoreAudioNChannelTransportSession {
     private static let bridgeCapacityFrames: UInt32 = 65_536
     /// Largest Core Audio buffer the graph path renders in one block.
-    private static let graphMaxBlockFrames: UInt32 = 32_768
+    static let graphMaxBlockFrames: UInt32 = 32_768
 
     let selectedOutput: AudioOutputDevice
     let routePlan: LiveNChannelOutputRoutePlan
@@ -374,6 +374,9 @@ final class CoreAudioNChannelTransportSession {
     /// the setup is one the core reproduces. Created before IO starts and released only after
     /// the bridge is destroyed (see `stop`), so the callback never sees it freed.
     private var unifiedGraphHost: UnifiedGraphHost?
+    /// Why the legacy render core kept this session although the graph was requested; nil when
+    /// the graph renders it or was not requested.
+    private(set) var unifiedGraphFallbackReason: UnifiedGraphFallbackReason?
     private var audioUnitRack: AudioUnitLiveRackSwitchboard?
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateDeviceID = AudioDeviceID(kAudioObjectUnknown)
@@ -391,7 +394,8 @@ final class CoreAudioNChannelTransportSession {
         outputGain: Float,
         roomTreatment: LiveMIMORoomTreatmentPreparation? = nil,
         audioUnitRack: AudioUnitLiveRackSwitchboard? = nil,
-        unifiedGraphConfiguration: UnifiedGraphConfiguration? = nil
+        unifiedGraphConfiguration: UnifiedGraphConfiguration? = nil,
+        unifiedGraphIneligibility: UnifiedGraphFallbackReason? = nil
     ) throws {
         self.selectedOutput = selectedOutput
         self.routePlan = routePlan
@@ -632,23 +636,21 @@ final class CoreAudioNChannelTransportSession {
                     true
                 )
             }
-            // Any reason the core cannot take the session leaves the legacy render core in place.
-            if var configuration = unifiedGraphConfiguration,
-               abs(configuration.sampleRate - outputFormat.sampleRate) < 0.5,
-               configuration.lanes.count == Int(renderGraph.programLayout.channelCount) {
-                configuration.maxBlockFrames = Self.graphMaxBlockFrames
-                if outputBufferFrames <= configuration.maxBlockFrames,
-                   let spec = try? configuration.makeSpec(),
-                   let host = try? UnifiedGraphHost(spec: spec),
-                   let raw = host.rawGraph,
-                   N60LiveNChannelBridgeAttachGraph(
-                    newBridge,
-                    raw,
-                    UInt32(configuration.channelCount),
-                    configuration.maxBlockFrames
-                   ) {
-                    unifiedGraphHost = host
+            // Any reason the core cannot take the session leaves the legacy render core in place,
+            // and is recorded so diagnostics can say why.
+            if let configuration = unifiedGraphConfiguration {
+                switch Self.makeUnifiedGraph(
+                    configuration: configuration,
+                    bridge: newBridge,
+                    sampleRate: outputFormat.sampleRate,
+                    laneCount: Int(renderGraph.programLayout.channelCount),
+                    outputBufferFrames: outputBufferFrames
+                ) {
+                case .success(let host): unifiedGraphHost = host
+                case .failure(let reason): unifiedGraphFallbackReason = reason
                 }
+            } else {
+                unifiedGraphFallbackReason = unifiedGraphIneligibility
             }
             bridge = newBridge
             N60LiveNChannelBridgeSetOutputGain(newBridge, outputGain)
@@ -794,9 +796,36 @@ final class CoreAudioNChannelTransportSession {
         N60LiveNChannelBridgeSetMeteringDemand(bridge, enabled)
     }
 
+    /// Bridge counters and meters. With the graph attached, the program lane levels come from
+    /// the host (under its lock, serialised with publish and release), never from the bridge.
     func bridgeSnapshot() -> N60LiveNChannelBridgeSnapshot? {
         guard let bridge else { return nil }
-        return N60LiveNChannelBridgeGetSnapshot(bridge)
+        var snapshot = N60LiveNChannelBridgeGetSnapshot(bridge)
+        unifiedGraphHost?.overlayProgramMeters(&snapshot.meter)
+        return snapshot
+    }
+
+    /// Builds the graph for a session and attaches it to `bridge`, or says why it cannot.
+    static func makeUnifiedGraph(
+        configuration: UnifiedGraphConfiguration,
+        bridge: UnsafeMutablePointer<N60LiveNChannelBridge>,
+        sampleRate: Double,
+        laneCount: Int,
+        outputBufferFrames: UInt32
+    ) -> Result<UnifiedGraphHost, UnifiedGraphFallbackReason> {
+        var configuration = configuration
+        guard abs(configuration.sampleRate - sampleRate) < 0.5 else { return .failure(.sampleRateMismatch) }
+        guard configuration.lanes.count == laneCount else { return .failure(.laneCountMismatch) }
+        configuration.maxBlockFrames = graphMaxBlockFrames
+        guard outputBufferFrames <= configuration.maxBlockFrames else { return .failure(.blockSizeTooLarge) }
+        guard let spec = try? configuration.makeSpec() else { return .failure(.specRejected) }
+        guard let host = try? UnifiedGraphHost(spec: spec), let raw = host.rawGraph else {
+            return .failure(.graphBuildFailed)
+        }
+        guard N60LiveNChannelBridgeAttachGraph(
+            bridge, raw, UInt32(configuration.channelCount), configuration.maxBlockFrames
+        ) else { return .failure(.attachFailed) }
+        return .success(host)
     }
 
     func counters() -> AudioTransportCounters {
@@ -873,6 +902,7 @@ final class CoreAudioNChannelTransportSession {
             self.bridge = nil
         }
         // The bridge (and so the callback) is gone; only now may the graph be retired.
+        unifiedGraphHost?.release()
         unifiedGraphHost = nil
         audioUnitRack = nil
     }

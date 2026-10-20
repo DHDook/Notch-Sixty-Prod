@@ -42,7 +42,16 @@ final class UnifiedGraphHost: @unchecked Sendable {
     }
 
     deinit {
+        release()
+    }
+
+    /// Retires the graph under the host lock, so a concurrent `meter`, `apply` or readback sees
+    /// either the live graph or none, never a freed one. Idempotent. Only after the bridge that
+    /// renders the graph has been destroyed.
+    func release() {
+        lock.lock(); defer { lock.unlock() }
         if let graph { n60_graph_retire(graph) }
+        graph = nil
     }
 
     /// The graph pointer for `N60RealtimeAudioBridgeSetUnifiedGraph`. Valid while the host lives.
@@ -95,6 +104,23 @@ final class UnifiedGraphHost: @unchecked Sendable {
             return nil
         }
         return (peak, rms)
+    }
+
+    /// Fills the program lane levels of a bridge meter snapshot from the graph's METER_OUT stage.
+    /// `n60_graph_read_meter` is control-thread-only, so every graph meter read goes through this
+    /// host's lock (shared with `apply` and `release`); the audio callback never takes it.
+    func overlayProgramMeters(_ meter: inout N60LiveNChannelMeterSnapshot) {
+        guard meter.enabled else { return }
+        lock.lock(); defer { lock.unlock() }
+        guard let graph else { return }
+        // One locked pass, so a publish cannot interleave between lanes.
+        for channel in 0..<meter.programChannelCount {
+            var peak: Float = 0
+            var rms: Float = 0
+            if n60_graph_read_meter(graph, N60_LSTAGE_METER_OUT, channel, &peak, &rms) == N60_STATUS_OK {
+                N60LiveNChannelMeterSetProgramLevels(&meter, channel, peak, rms)
+            }
+        }
     }
 
     var latencyFrames: UInt32 {
