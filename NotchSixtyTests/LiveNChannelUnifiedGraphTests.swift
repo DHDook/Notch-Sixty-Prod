@@ -139,7 +139,8 @@ final class LiveNChannelUnifiedGraphTests: XCTestCase {
     /// Asserts the graph render matches the legacy render to better than -60 dB of each
     /// channel's level (the 1-frame startup fade excluded), and that the channel is not silent.
     private func assertParity(
-        plan: LiveNChannelOutputRoutePlan, bass: BassManagementConfiguration, label: String
+        plan: LiveNChannelOutputRoutePlan, bass: BassManagementConfiguration, label: String,
+        legacyFloatEQChannels: Set<Int> = []
     ) throws {
         for sampleRate in Self.standardSampleRates {
             var legacyHost: UnifiedGraphHost?
@@ -168,11 +169,16 @@ final class LiveNChannelUnifiedGraphTests: XCTestCase {
                 if !unused {
                     XCTAssertGreaterThan(energy, 0, "\(label) \(sampleRate) Hz channel \(channel) is silent")
                 }
-                // Sub outputs (a 60-80 Hz band in float biquads) lose precision above 176 kHz in
-                // either core, so they get a looser bound there than the full-band lanes.
-                let looseSub = channel >= 6 && sampleRate >= 176_000
+                // The legacy path runs calibration EQ in float32 biquads (N60Biquad.h: float
+                // coefficients and state); libn60core runs double. A 60 Hz peaking band at
+                // 176.4 kHz and above has poles within ~1e-3 of z=1, so float32 coefficient
+                // rounding in the legacy path shifts its response (about 0.15 dB at 384 kHz,
+                // 0.003 dB at 96 kHz). That is legacy error, not graph error, so only the lanes
+                // with such a band get the looser bound; the crossover-only sub lanes are
+                // double in both paths and keep the tight bound at every rate.
+                let legacyFloatEQ = legacyFloatEQChannels.contains(channel) && sampleRate >= 176_000
                 XCTAssertLessThanOrEqual(
-                    error, energy * (looseSub ? 1.0e-2 : 1.0e-6),
+                    error, energy * (legacyFloatEQ ? 1.0e-3 : 1.0e-6),
                     "\(label) \(sampleRate) Hz channel \(channel): error \(error) vs energy \(energy)")
             }
             let snapshot = N60LiveNChannelBridgeGetSnapshot(graph)
@@ -210,7 +216,7 @@ final class LiveNChannelUnifiedGraphTests: XCTestCase {
             bass: bass, label: "1 sub")
         try assertParity(
             plan: plan(subs: 2, bass: true, speakers: speakers, subCalibrations: [subOne, subTwo]),
-            bass: bass, label: "2 subs")
+            bass: bass, label: "2 subs", legacyFloatEQChannels: [7])
     }
 
     func testIneligibleSetupsStayOnTheLegacyRenderCore() {
