@@ -9,6 +9,7 @@
 #include <stdbool.h>
 #include <math.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "../Realtime/N60RenderKernel.h"
 
@@ -198,6 +199,117 @@ static inline bool N60UnifiedGraphIntegerDelay(
     return true;
 }
 
+// Spectral denoiser, in core parameter order: tuning, quality, reduction, threshold dBFS,
+// protected range on, protected low Hz, protected high Hz, profile command, profile revision.
+// The kernel derives its smoothing, FFT size and latency from tuning and quality alone, and the
+// core derives the same set from the same two numbers, so the rebuilt snapshot must match all of
+// them exactly (an advanced-tuning override does not, and keeps the kernel). A pending Capture
+// command is never carried over: a fresh core stage would record program audio as the noise
+// profile. A Reset command is harmless on a fresh stage and is passed through.
+static inline bool N60UnifiedGraphDenoiserParams(
+    const N60DSPGraphSnapshot * _Nonnull s, float out[_Nonnull 9]
+) {
+    const N60SpectralDenoiserSnapshot *d = &s->dynamics.spectralDenoiser;
+    if (d->profileCommand == N60DenoiserProfileCommandCapture) return false;
+    if (d->profileRevision > 16777216u) return false;
+    N60SpectralDenoiserSnapshot rebuilt = N60SpectralDenoiserSnapshotMakeBypassed(s->sampleRate);
+    if (!N60SpectralDenoiserSnapshotConfigure(
+            &rebuilt, s->sampleRate, true, d->tuning, d->quality, d->reductionAmount, d->thresholdDBFS,
+            d->protectedRangeEnabled, d->protectedLowHz, d->protectedHighHz, d->profileRevision,
+            d->profileCommand)) return false;
+    if (rebuilt.fftSize != d->fftSize || rebuilt.hopSize != d->hopSize
+        || rebuilt.latencyFrames != d->latencyFrames
+        || rebuilt.minimumGain != d->minimumGain
+        || rebuilt.decisionDirectedAlpha != d->decisionDirectedAlpha
+        || rebuilt.suppressionAttack != d->suppressionAttack
+        || rebuilt.suppressionRelease != d->suppressionRelease
+        || rebuilt.spectralSmoothingRadius != d->spectralSmoothingRadius
+        || rebuilt.dehissStrength != d->dehissStrength) return false;
+    out[0] = (float)d->tuning; out[1] = (float)d->quality; out[2] = d->reductionAmount;
+    out[3] = d->thresholdDBFS; out[4] = d->protectedRangeEnabled ? 1.0f : 0.0f;
+    out[5] = d->protectedLowHz; out[6] = d->protectedHighHz;
+    out[7] = (float)d->profileCommand; out[8] = (float)d->profileRevision;
+    return true;
+}
+
+// Dynamic EQ, in core parameter order: linked, then 15 numbers per enabled band (shape, Hz, Q,
+// static dB, threshold dB, ratio, range dB, attack ms, release ms, direction, boost threshold dB,
+// boost ratio, max boost dB, detector mode, RMS window ms). *count is the number of floats
+// written (1 + 15 per band) or 0 when no band is enabled, in which case the stage is left out.
+// Linked stereo maps to the core's linked group and dual mono to per-lane detectors, but only
+// when the kernel's second (right-channel) band set equals the first, which is all the core can
+// express. Mid/side is not representable and keeps the kernel.
+#define N60_UNIFIED_DYN_EQ_MAX_PARAMS 961u /* 1 + 15 * N60_DYNAMIC_EQ_MAX_BANDS (64) */
+
+static inline bool N60UnifiedGraphDynamicEQBandParams(
+    double rate, const N60DynamicEQBandSnapshot * _Nonnull b, float out[_Nonnull 15]
+) {
+    float attack = 0.0f, release = 0.0f, rms = 0.0f;
+    if (!N60UnifiedGraphMsFromPole(rate, b->attackCoefficient, &attack)
+        || !N60UnifiedGraphMsFromPole(rate, b->releaseCoefficient, &release)
+        || !N60UnifiedGraphMsFromPole(rate, b->rmsCoefficient, &rms)) return false;
+    N60DynamicEQSnapshot rebuilt = N60DynamicEQSnapshotMakeBypassed(rate);
+    if (!N60DynamicEQSnapshotSetBandForLane(
+            &rebuilt, rate, N60DynamicEQLanePrimary, 0u, true, b->shape, b->frequencyHz, b->q,
+            b->staticGainDB, b->thresholdDB, b->ratio, b->rangeDB, attack, release, b->direction,
+            b->boostThresholdDB, b->boostRatio, b->maxBoostDB, b->detectorMode, rms)) return false;
+    const N60DynamicEQBandSnapshot *r = &rebuilt.bands[0];
+    if (!N60UnifiedGraphClose(r->attackCoefficient, b->attackCoefficient)
+        || !N60UnifiedGraphClose(r->releaseCoefficient, b->releaseCoefficient)
+        || !N60UnifiedGraphClose(r->rmsCoefficient, b->rmsCoefficient)) return false;
+    const N60DynamicEQBiquadCoefficients pairs[3][2] = {
+        {r->analysisBandPass, b->analysisBandPass}, {r->basisPrimary, b->basisPrimary},
+        {r->basisSecondary, b->basisSecondary}
+    };
+    for (int k = 0; k < 3; ++k) {
+        if (pairs[k][0].b0 != pairs[k][1].b0 || pairs[k][0].b1 != pairs[k][1].b1
+            || pairs[k][0].b2 != pairs[k][1].b2 || pairs[k][0].a1 != pairs[k][1].a1
+            || pairs[k][0].a2 != pairs[k][1].a2) return false;
+    }
+    out[0] = (float)b->shape; out[1] = (float)b->frequencyHz; out[2] = b->q;
+    out[3] = b->staticGainDB; out[4] = b->thresholdDB; out[5] = b->ratio; out[6] = b->rangeDB;
+    out[7] = attack; out[8] = release; out[9] = (float)b->direction;
+    out[10] = b->boostThresholdDB; out[11] = b->boostRatio; out[12] = b->maxBoostDB;
+    out[13] = (float)b->detectorMode; out[14] = rms;
+    return true;
+}
+
+static inline bool N60UnifiedGraphDynamicEQParams(
+    const N60DSPGraphSnapshot * _Nonnull s, float out[_Nonnull N60_UNIFIED_DYN_EQ_MAX_PARAMS],
+    uint32_t * _Nonnull count
+) {
+    const N60DynamicEQSnapshot *q = &s->dynamics.dynamicEQ;
+    const double rate = s->sampleRate;
+    *count = 0u;
+    if (q->domain == N60DynamicEQDomainMidSide) return false;
+    if (q->bandCount > N60_DYNAMIC_EQ_MAX_BANDS || q->secondaryBandCount > N60_DYNAMIC_EQ_MAX_BANDS) return false;
+    const float transition = (float)exp(-1.0 / (rate * 0.005));
+    if (!N60UnifiedGraphClose(q->bypassTransitionCoefficient, transition)) return false;
+    const bool dual = q->domain == N60DynamicEQDomainDualMono;
+    uint32_t bands = 0u;
+    for (uint32_t i = 0; i < q->bandCount; ++i) {
+        if (!q->bands[i].enabled) continue;
+        if (!N60UnifiedGraphDynamicEQBandParams(rate, &q->bands[i], out + 1u + 15u * bands)) return false;
+        bands += 1u;
+    }
+    if (dual) {
+        uint32_t second = 0u;
+        for (uint32_t i = 0; i < q->secondaryBandCount; ++i) {
+            if (!q->secondaryBands[i].enabled) continue;
+            float other[15];
+            if (second >= bands
+                || !N60UnifiedGraphDynamicEQBandParams(rate, &q->secondaryBands[i], other)
+                || memcmp(other, out + 1u + 15u * second, sizeof other) != 0) return false;
+            second += 1u;
+        }
+        if (second != bands) return false;
+    }
+    if (bands == 0u) return true;
+    out[0] = dual ? 0.0f : 1.0f;
+    *count = 1u + 15u * bands;
+    return true;
+}
+
 static inline N60UnifiedGraphUnsupportedReason N60UnifiedGraphSnapshotUnsupportedReason(
     const N60DSPGraphSnapshot * _Nonnull s
 ) {
@@ -246,13 +358,23 @@ static inline N60UnifiedGraphUnsupportedReason N60UnifiedGraphSnapshotUnsupporte
     if (d->stereoMode.mode != N60StereoModeStereo || d->stereoWidener.enabled
             || d->dcOffsetFilter.enabled || d->infrasonicFilter.enabled
             || d->mainsNotch.enabled || d->mainsHumDetector.enabled
-            || d->spectralDenoiser.enabled || d->loudnessMatch.enabled
+            || d->loudnessMatch.enabled
             || d->loudnessContour.enabled || d->dialogueLeveler.enabled
-            || d->dynamicEQ.enabled || d->deHarsh.enabled || d->deEsser.enabled
+            || d->deHarsh.enabled || d->deEsser.enabled
             || d->multibandCompressor.enabled) {
         return N60UnifiedGraphUnsupportedDynamics;
     }
     float scratch[10];
+    if (d->spectralDenoiser.enabled && !N60UnifiedGraphDenoiserParams(s, scratch)) {
+        return N60UnifiedGraphUnsupportedDynamics;
+    }
+    if (d->dynamicEQ.enabled && !s->eqBypassed) {
+        // The kernel runs the dynamic EQ after the mid/side decode; the core runs it before.
+        if (s->eqMidSideMode) return N60UnifiedGraphUnsupportedDynamics;
+        float dynParams[N60_UNIFIED_DYN_EQ_MAX_PARAMS];
+        uint32_t dynCount = 0u;
+        if (!N60UnifiedGraphDynamicEQParams(s, dynParams, &dynCount)) return N60UnifiedGraphUnsupportedDynamics;
+    }
     if (d->compressor.enabled && !N60UnifiedGraphCompressorParams(s, scratch)) {
         return N60UnifiedGraphUnsupportedDynamics;
     }

@@ -127,7 +127,7 @@ int main() {
         float taps[700];
         for (int i = 0; i < 700; i++) taps[i] = 0.001f * static_cast<float>(std::sin(0.1 * i));
         n60_stage_desc a[5] = {
-            stage(N60_STAGE_DENOISER, 1, N60_LANE_ALL, dn, 9),
+            stage(N60_STAGE_DENOISER, 1, 0, dn, 9),
             stage(N60_STAGE_DYN_EQ, 2, N60_LANE_ALL, band, 16),
             stage(N60_STAGE_FIR, 3, 0, taps, 700, 5),
             stage(N60_STAGE_COMPRESSOR, 4, 0, comp, 10),
@@ -176,6 +176,63 @@ int main() {
             n60_graph_collect(g);
         }
         n60_graph_retire(g);
+    }
+    // E6 S8d: the shapes the stereo translator emits: a two-lane denoiser (all tunings and
+    // qualities, a Reset command) before a dual-mono dynamic EQ with a tilt band, edited live.
+    for (double rate : rates) {
+        constexpr uint32_t N = 512;
+        const int qualities[3] = {0, 1, 2};
+        for (int quality : qualities) {
+            float dn[9] = {static_cast<float>(quality + 1), static_cast<float>(quality), 0.9f, -45, 1, 0, 400, 2, 3};
+            float bands[1 + 3 * 15] = {0};
+            const float b0[15] = {0, 1000, 1.4f, -2, -40, 4, -12, 5, 80, 0, -30, 2, 6, 0, 50};
+            const float b1[15] = {1, 250, 0.8f, 1, -20, 2, -6, 10, 200, 2, -18, 3, 6, 1, 40};
+            const float b2[15] = {5, 1700, 1.0f, 0, -35, 3, -9, 8, 120, 0, -30, 2, 6, 0, 50};
+            std::memcpy(bands + 1, b0, sizeof b0);
+            std::memcpy(bands + 16, b1, sizeof b1);
+            std::memcpy(bands + 31, b2, sizeof b2);
+            n60_stage_desc a[2] = {
+                stage(N60_STAGE_DENOISER, 1, 0, dn, 9),
+                stage(N60_STAGE_DYN_EQ, 2, 0, bands, 46),
+            };
+            a[0].laneMask = a[1].laneMask = 0x3;
+            n60_graph_desc da{};
+            da.structSize = sizeof da;
+            da.abiVersion = N60_GRAPH_ABI_VERSION;
+            da.sampleRate = rate;
+            da.maxBlockFrames = N;
+            da.inputChannels = da.outputChannels = 2;
+            da.stages = a; da.stageCount = 2;
+            n60_graph *g = nullptr;
+            CHECK(n60_graph_build(&da, &g) == N60_STATUS_OK, "build S8d graph at %.0f q%d", rate, quality);
+            if (g == nullptr) continue;
+            static float buf[2][N], obuf[2][N];
+            const float *in[2] = {buf[0], buf[1]};
+            float *out[2] = {obuf[0], obuf[1]};
+            uint32_t seed = 11;
+            for (int round = 0; round < 12; round++) {
+                CHECK(n60_graph_publish(g, &da) == N60_STATUS_OK, "publish S8d");
+                n60_param_record rec[2] = {{2, 5, -30.0f + round, 0}, {1, 2, 0.5f + 0.03f * round, 0}};
+                CHECK(n60_graph_post_params(g, rec, 2) == N60_STATUS_OK, "post S8d");
+                for (int c = 0; c < 2; c++) {
+                    for (uint32_t i = 0; i < N; i++) {
+                        seed = seed * 1664525u + 1013904223u;
+                        buf[c][i] = 0.2f * (static_cast<float>((seed >> 8) & 0xFFFF) / 65536.0f - 0.5f);
+                    }
+                }
+                allocs = 0;
+                frees = 0;
+                armed = true;
+                n60_status st = n60_graph_process(g, in, out, N);
+                for (int k = 0; k < 4; k++) st = static_cast<n60_status>(st | n60_graph_process(g, in, out, 1 + 100 * k));
+                armed = false;
+                CHECK(st == N60_STATUS_OK, "process S8d");
+                CHECK(allocs == 0 && frees == 0, "rate %.0f S8d q%d round %d: realtime call allocated %ld / freed %ld",
+                      rate, quality, round, allocs.load(), frees.load());
+                n60_graph_collect(g);
+            }
+            n60_graph_retire(g);
+        }
     }
     // S5 system stages: every ABI v4 stage on four lanes, published, edited live and rendered.
     for (double rate : rates) {

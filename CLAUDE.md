@@ -7,7 +7,7 @@
 - Agents in `.claude/agents/`: slice-builder (Sonnet, builds one slice in a fresh context),
   realtime-reviewer (Sonnet), and code-scout, build-test-runner, plan-tracker, pr-writer (Haiku).
 
-**Current focus:** E6 S8c follow-ups (diagnostics UI row, bypassed-limiter and concurrent-reader tests) built in #190; next S8d (move the kernel-fallback stereo stages to the graph, including fractional delay), then S8e (AU rack and same-device/aggregate routes on the graph), then S9 (remove the three-path restrictions).
+**Current focus:** E6 S8d group 1 (dyn EQ, denoiser) in PR awaiting owner; next the remaining S8d groups, then S8e, S9.
 <!-- plan-tracker keeps the line above current -->
 
 @AGENTS.md

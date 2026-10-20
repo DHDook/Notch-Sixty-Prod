@@ -737,7 +737,194 @@ final class UnifiedGraphStageParityTests: XCTestCase {
         XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000))
         s = N60DSPGraphSnapshotMakeUnity(48_000)
         s.dynamics.dynamicEQ.enabled = true
-        XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000))
+        XCTAssertNotNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000),
+                        "a dynamic EQ with no enabled band is the identity")
+        s = dynamicEQSnapshot(rate: 48_000)
+        s.eqMidSideMode = true
+        XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000),
+                     "the kernel runs the dynamic EQ after the mid/side decode, the core before")
+    }
+
+    // MARK: dynamic EQ and spectral denoiser (E6 S8d, first stage group)
+
+    private func dynamicEQSnapshot(
+        rate: Double, domain: N60DynamicEQDomain = N60DynamicEQDomainLinkedStereo
+    ) -> N60DSPGraphSnapshot {
+        var s = N60DSPGraphSnapshotMakeUnity(rate)
+        XCTAssertTrue(N60DynamicsSnapshotSetDynamicEQEnabled(&s.dynamics, true))
+        XCTAssertTrue(N60DynamicEQSnapshotSetDomain(&s.dynamics.dynamicEQ, domain))
+        // A cutting peak band the program exceeds, plus an RMS-detected boosting low shelf.
+        XCTAssertTrue(N60DynamicEQSnapshotSetBandForLane(
+            &s.dynamics.dynamicEQ, rate, N60DynamicEQLanePrimary, 0, true, N60DynamicEQShapePeak,
+            1_000, 1.4, -2, -40, 4, -12, 5, 80, N60DynamicEQDirectionCutOnly, -30, 2, 6,
+            N60DynamicEQDetectorPeak, 50))
+        XCTAssertTrue(N60DynamicEQSnapshotSetBandForLane(
+            &s.dynamics.dynamicEQ, rate, N60DynamicEQLanePrimary, 1, true, N60DynamicEQShapeLowShelf,
+            250, 0.8, 1, -20, 2, -6, 10, 200, N60DynamicEQDirectionBoth, -18, 3, 6,
+            N60DynamicEQDetectorRMS, 40))
+        XCTAssertTrue(N60DynamicEQSnapshotSetBandForLane(
+            &s.dynamics.dynamicEQ, rate, N60DynamicEQLanePrimary, 2, true, N60DynamicEQShapeTilt,
+            1_700, 1.0, 0, -35, 3, -9, 8, 120, N60DynamicEQDirectionCutOnly, -30, 2, 6,
+            N60DynamicEQDetectorPeak, 50))
+        return s
+    }
+
+    func testDynamicEQMatchesTheKernelAtEveryRate() throws {
+        for rate in Self.rates {
+            var s = dynamicEQSnapshot(rate: rate)
+            try assertParity(s, rate: rate, tolerance: 0.02, "linked dynamic EQ")
+            // Per-channel detectors, the same band set on both channels.
+            s = dynamicEQSnapshot(rate: rate, domain: N60DynamicEQDomainDualMono)
+            withUnsafeMutablePointer(to: &s.dynamics.dynamicEQ) { q in
+                withUnsafeMutablePointer(to: &q.pointee.secondaryBands) { second in
+                    second.withMemoryRebound(to: N60DynamicEQBandSnapshot.self, capacity: 3) { dst in
+                        withUnsafeMutablePointer(to: &q.pointee.bands) { first in
+                            first.withMemoryRebound(to: N60DynamicEQBandSnapshot.self, capacity: 3) { src in
+                                for i in 0..<3 { dst[i] = src[i] }
+                            }
+                        }
+                    }
+                }
+                q.pointee.secondaryBandCount = 3
+            }
+            try assertParity(s, rate: rate, tolerance: 0.02, "dual-mono dynamic EQ")
+        }
+    }
+
+    func testDynamicEQWithAnEQAndDynamicsKeepsKernelOrder() throws {
+        for rate in Self.rates {
+            var s = dynamicEQSnapshot(rate: rate)
+            XCTAssertTrue(N60DSPGraphSnapshotSetEQBandForChannels(
+                &s, 0, UInt8(N60_EQ_CHANNEL_STEREO), N60BiquadFilterTypePeaking, 2_500, 4, 1.0, true))
+            XCTAssertTrue(N60DynamicsSnapshotSetCompressorAdvanced(
+                &s.dynamics, rate, true, -24, 3, 6, 8, 120, 2, N60CompressorTopologyFeedForward, false, 80))
+            try assertParity(s, rate: rate, sampleWise: false, tolerance: 0.05, "dynamic EQ, EQ and compressor")
+        }
+    }
+
+    func testUnrepresentableDynamicEQKeepsTheKernel() {
+        var s = dynamicEQSnapshot(rate: 48_000, domain: N60DynamicEQDomainMidSide)
+        XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000), "mid/side domain")
+        // Dual mono whose right channel has a different band set cannot be one core stage.
+        s = dynamicEQSnapshot(rate: 48_000, domain: N60DynamicEQDomainDualMono)
+        XCTAssertTrue(N60DynamicEQSnapshotSetBandForLane(
+            &s.dynamics.dynamicEQ, 48_000, N60DynamicEQLaneSecondary, 0, true, N60DynamicEQShapePeak,
+            3_000, 1, 0, -30, 2, -6, 5, 50, N60DynamicEQDirectionCutOnly, -30, 2, 6, N60DynamicEQDetectorPeak, 50))
+        XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000), "different channel sets")
+        // A transition pole other than the kernel's own 5 ms is not what the core reproduces.
+        s = dynamicEQSnapshot(rate: 48_000)
+        s.dynamics.dynamicEQ.bypassTransitionCoefficient = 0.5
+        XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000), "transition pole")
+        // The kernel skips the dynamic EQ while the EQ is bypassed, so the graph has no stage either.
+        s = dynamicEQSnapshot(rate: 48_000)
+        s.eqBypassed = true
+        var configuration = UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000)
+        XCTAssertNotNil(configuration)
+        XCTAssertNil(configuration?.stereoStages.dynamicEQ)
+        s = dynamicEQSnapshot(rate: 48_000)
+        configuration = UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000)
+        XCTAssertEqual(configuration?.stereoStages.dynamicEQ?.count, 1 + 15 * 3)
+    }
+
+    /// Low-level noise under the program so the denoiser learns a profile.
+    private func noisyStimulus(rate: Double, seconds: Double) -> [[Float]] {
+        let frames = Int(rate * seconds) / 512 * 512
+        var seed: UInt32 = 12_345
+        func noise() -> Float {
+            seed = seed &* 1_664_525 &+ 1_013_904_223
+            return (Float(seed >> 8) / Float(1 << 24) - 0.5) * 0.002
+        }
+        let base = stimulus(rate: rate, amplitude: 0.05)
+        let left = (0..<frames).map { base[0][$0 % base[0].count] + noise() }
+        let right = (0..<frames).map { base[1][$0 % base[1].count] + noise() }
+        return [left, right]
+    }
+
+    func testSpectralDenoiserMatchesTheKernelAtEveryRate() throws {
+        for rate in Self.rates {
+            var s = N60DSPGraphSnapshotMakeUnity(rate)
+            XCTAssertTrue(N60DynamicsSnapshotSetSpectralDenoiser(
+                &s.dynamics, rate, true, N60DenoiserTuningStandard, N60DenoiserQualityHigh,
+                0.7, -50, false, 0, 150, 0, N60DenoiserProfileCommandNone))
+            var latencyCopy = s
+            let configuration = try XCTUnwrap(
+                UnifiedGraphTranslator.stereoConfiguration(snapshot: &latencyCopy, sampleRate: rate)
+            )
+            let latencyHost = try UnifiedGraphHost(spec: try configuration.makeSpec())
+            XCTAssertEqual(latencyHost.latencyFrames, s.latencyFrames + s.dynamics.spectralDenoiser.latencyFrames, "denoiser latency, rate \(rate)")
+            let input = noisyStimulus(rate: rate, seconds: 2.5)
+            let reference = try kernelRender(s, input)
+            let candidate = try graphRender(s, input, rate: rate)
+            let start = input[0].count * 3 / 4
+            for lane in 0..<2 {
+                let expected = rms(reference[lane][start...])
+                XCTAssertEqual(rms(candidate[lane][start...]), expected, accuracy: expected * 0.05,
+                               "denoiser lane \(lane) rate \(rate)")
+                XCTAssertLessThan(rms(candidate[lane][start...]), rms(input[lane][start...]) * 0.999,
+                                  "the denoiser should be removing something at \(rate)")
+            }
+        }
+    }
+
+    func testSpectralDenoiserVariantsMatchTheKernel() throws {
+        let rate = 48_000.0
+        let variants: [(N60DenoiserTuning, N60DenoiserQuality, Bool, UInt32, N60DenoiserProfileCommand)] = [
+            (N60DenoiserTuningNatural, N60DenoiserQualityQuality, false, 0, N60DenoiserProfileCommandNone),
+            (N60DenoiserTuningAggressive, N60DenoiserQualityUltra, true, 0, N60DenoiserProfileCommandNone),
+            (N60DenoiserTuningDehiss, N60DenoiserQualityHigh, false, 3, N60DenoiserProfileCommandReset),
+            (N60DenoiserTuningCustom, N60DenoiserQualityHigh, false, 0, N60DenoiserProfileCommandNone),
+        ]
+        for (tuning, quality, protected, revision, command) in variants {
+            var s = N60DSPGraphSnapshotMakeUnity(rate)
+            XCTAssertTrue(N60DynamicsSnapshotSetSpectralDenoiser(
+                &s.dynamics, rate, true, tuning, quality, 0.9, -45, protected, 0, 400, revision, command))
+            let input = noisyStimulus(rate: rate, seconds: 4)
+            let reference = try kernelRender(s, input)
+            let candidate = try graphRender(s, input, rate: rate)
+            let start = input[0].count * 3 / 4
+            for lane in 0..<2 {
+                let expected = rms(reference[lane][start...])
+                XCTAssertEqual(rms(candidate[lane][start...]), expected, accuracy: expected * 0.05,
+                               "denoiser \(tuning) \(quality) lane \(lane)")
+            }
+        }
+    }
+
+    func testDenoiserWithEQAndExpanderKeepsKernelOrder() throws {
+        let rate = 48_000.0
+        var s = N60DSPGraphSnapshotMakeUnity(rate)
+        XCTAssertTrue(N60DynamicsSnapshotSetSpectralDenoiser(
+            &s.dynamics, rate, true, N60DenoiserTuningStandard, N60DenoiserQualityHigh,
+            0.7, -50, false, 0, 150, 0, N60DenoiserProfileCommandNone))
+        XCTAssertTrue(N60DSPGraphSnapshotSetEQBandForChannels(
+            &s, 0, UInt8(N60_EQ_CHANNEL_STEREO), N60BiquadFilterTypePeaking, 2_000, -3, 1.2, true))
+        XCTAssertTrue(N60DynamicsSnapshotSetExpander(&s.dynamics, rate, true, -60, 2, -20, 2, 80))
+        let input = noisyStimulus(rate: rate, seconds: 3)
+        let reference = try kernelRender(s, input)
+        let candidate = try graphRender(s, input, rate: rate)
+        let start = input[0].count * 3 / 4
+        for lane in 0..<2 {
+            let expected = rms(reference[lane][start...])
+            XCTAssertEqual(rms(candidate[lane][start...]), expected, accuracy: expected * 0.06, "lane \(lane)")
+        }
+    }
+
+    func testUnrepresentableDenoiserKeepsTheKernel() {
+        var s = N60DSPGraphSnapshotMakeUnity(48_000)
+        // A capture in flight would record program audio as noise on a fresh stage.
+        XCTAssertTrue(N60DynamicsSnapshotSetSpectralDenoiser(
+            &s.dynamics, 48_000, true, N60DenoiserTuningStandard, N60DenoiserQualityHigh,
+            0.7, -50, false, 0, 150, 1, N60DenoiserProfileCommandCapture))
+        XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000), "capture")
+        // Advanced smoothing the core's tuning table does not carry.
+        s = N60DSPGraphSnapshotMakeUnity(48_000)
+        XCTAssertTrue(N60DynamicsSnapshotSetSpectralDenoiser(
+            &s.dynamics, 48_000, true, N60DenoiserTuningStandard, N60DenoiserQualityHigh,
+            0.7, -50, false, 0, 150, 0, N60DenoiserProfileCommandNone))
+        s.dynamics.spectralDenoiser.minimumGain = 0.5
+        XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000), "advanced tuning")
+        s.dynamics.spectralDenoiser.minimumGain = 0.20
+        XCTAssertNotNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000))
     }
 
     func testUnrecoverableSmoothingKeepsTheKernel() {
