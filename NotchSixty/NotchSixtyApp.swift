@@ -1554,26 +1554,14 @@ enum VolumeFeedbackPresentation {
         )
     }
 
-    /// Position on a dB-scaled fader or bar, as on professional consoles and
-    /// monitor controllers: equal distances are equal dB changes, from
-    /// `MasterVolumeKeyStep.decibelFloor` (−80 dB) just above the bottom
-    /// stop to 0 dB at the top. The bottom stop itself is silence (−∞ dB).
-    static func decibelScalePosition(level: Double) -> Double {
-        guard let decibels = MasterVolumeConfiguration.softwareTaperDB(forLevel: level) else {
-            return 0
-        }
-        let floor = MasterVolumeKeyStep.decibelFloor
-        return min(max((decibels - floor) / -floor, 0), 1)
-    }
+    /// Console-style dB marks on the software-volume fader, from 0 dB down.
+    /// The loudness taper makes the slider position the level itself, so
+    /// each mark sits at `level(forSoftwareTaperDB:)`; −∞ is the bottom stop.
+    static let faderTickDecibels: [Double] = [0, -5, -10, -20, -30, -40, -60]
 
-    /// The slider level for a dB-scale position; the inverse of
-    /// `decibelScalePosition`. Position 0 is silence.
-    static func level(forDecibelScalePosition position: Double) -> Double {
-        guard position.isFinite, position > 0 else { return 0 }
-        let floor = MasterVolumeKeyStep.decibelFloor
-        return MasterVolumeConfiguration.level(
-            forSoftwareTaperDB: floor * (1 - min(position, 1))
-        )
+    static func faderTickLabel(_ decibels: Double?) -> String {
+        guard let decibels else { return "−∞" }
+        return decibels == 0 ? "0" : "−\(Int(-decibels))"
     }
 
     /// The widest strings `readout` can return in one mode, with 8 standing
@@ -1606,7 +1594,7 @@ enum VolumeFeedbackPopupPosition: String, CaseIterable, Identifiable {
     var displayName: String {
         switch self {
         case .bottomCenter: return "Bottom Center"
-        case .topRight: return "Top Right"
+        case .topRight: return "Follow macOS Popup"
         }
     }
 }
@@ -1628,6 +1616,71 @@ enum SystemVolumePopupGeometry {
             y: visibleFrame.maxY - size.height,
             width: size.width,
             height: size.height
+        )
+    }
+
+    /// While another app is full screen, macOS moves its popup to the top
+    /// centre of that screen. UNMEASURED: assumes the same window size, centred
+    /// on the full screen frame and flush with its top edge. Replace with the
+    /// bench measurement (docs/epics/E5.md, "Bench checks").
+    static func fullScreenFrame(in screenFrame: CGRect) -> CGRect {
+        CGRect(
+            x: screenFrame.midX - size.width / 2,
+            y: screenFrame.maxY - size.height,
+            width: size.width,
+            height: size.height
+        )
+    }
+}
+
+/// Whether the frontmost app is full screen on a given display, from the
+/// public on-screen window list (owner, layer and bounds need no Screen
+/// Recording permission). Checked once per popup, never polled.
+enum FullScreenAppDetector {
+    /// `windows` is `CGWindowListCopyWindowInfo` output, whose bounds are in
+    /// global top-left coordinates; `primaryScreenHeight` converts them to
+    /// AppKit's bottom-left space. Full screen means a normal-layer window of
+    /// `ownerPID` covering `screenFrame` exactly, menu bar area included.
+    static func isFullScreen(
+        windows: [[String: Any]],
+        ownerPID: pid_t,
+        screenFrame: CGRect,
+        primaryScreenHeight: CGFloat
+    ) -> Bool {
+        let tolerance: CGFloat = 1
+        return windows.contains { window in
+            guard (window[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == ownerPID,
+                  (window[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
+                  let boundsDictionary = window[kCGWindowBounds as String] as? NSDictionary,
+                  let bounds = CGRect(dictionaryRepresentation: boundsDictionary as CFDictionary)
+            else { return false }
+            let appKitBounds = CGRect(
+                x: bounds.minX,
+                y: primaryScreenHeight - bounds.maxY,
+                width: bounds.width,
+                height: bounds.height
+            )
+            return abs(appKitBounds.minX - screenFrame.minX) <= tolerance
+                && abs(appKitBounds.minY - screenFrame.minY) <= tolerance
+                && abs(appKitBounds.width - screenFrame.width) <= tolerance
+                && abs(appKitBounds.height - screenFrame.height) <= tolerance
+        }
+    }
+
+    @MainActor
+    static func frontmostAppIsFullScreen(on screen: NSScreen) -> Bool {
+        guard let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier,
+              let primary = NSScreen.screens.first,
+              let windows = CGWindowListCopyWindowInfo(
+                  [.optionOnScreenOnly, .excludeDesktopElements],
+                  kCGNullWindowID
+              ) as? [[String: Any]]
+        else { return false }
+        return isFullScreen(
+            windows: windows,
+            ownerPID: pid,
+            screenFrame: screen.frame,
+            primaryScreenHeight: primary.frame.height
         )
     }
 }
@@ -1655,11 +1708,14 @@ struct VolumeFeedbackPopupLayout: Equatable {
     let level: NSWindow.Level
     let displayDuration: TimeInterval
 
-    /// Covering applies only at Top Right, where the system popup appears.
+    /// Covering applies only with Follow macOS Popup. `fullScreenFrame` is the
+    /// screen's full frame when another app is full screen there; the popup
+    /// then follows the system one to the top centre.
     static func make(
         position: VolumeFeedbackPopupPosition,
         coverSystemPopup: Bool,
-        visibleFrame: CGRect
+        visibleFrame: CGRect,
+        fullScreenFrame: CGRect? = nil
     ) -> VolumeFeedbackPopupLayout {
         let size = standardSize
         switch position {
@@ -1676,7 +1732,8 @@ struct VolumeFeedbackPopupLayout: Equatable {
                 displayDuration: 1.4
             )
         case .topRight:
-            let system = SystemVolumePopupGeometry.frame(in: visibleFrame)
+            let system = fullScreenFrame.map(SystemVolumePopupGeometry.fullScreenFrame(in:))
+                ?? SystemVolumePopupGeometry.frame(in: visibleFrame)
             if coverSystemPopup {
                 // One level above the system popup, and up longer than it, so
                 // it never peeks out before or after ours.
@@ -1726,10 +1783,13 @@ private final class VolumeFeedbackHUDController {
         alwaysTenths: Bool
     ) {
         guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
+        let followsFullScreen = position == .topRight
+            && FullScreenAppDetector.frontmostAppIsFullScreen(on: screen)
         let layout = VolumeFeedbackPopupLayout.make(
             position: position,
             coverSystemPopup: coverSystemPopup,
-            visibleFrame: screen.visibleFrame
+            visibleFrame: screen.visibleFrame,
+            fullScreenFrame: followsFullScreen ? screen.frame : nil
         )
         let window: NSPanel
         if let panel {
@@ -1792,13 +1852,10 @@ private struct VolumeFeedbackHUDView: View {
         )
     }
 
-    /// With a dB readout the bar is dB-scaled, so it agrees with the number;
-    /// otherwise it shows the slider position.
+    /// The slider position, which on the loudness taper is also the
+    /// relative loudness, in both readout modes.
     private var barPosition: Double {
         if configuration.muted { return 0 }
-        if decibels {
-            return VolumeFeedbackPresentation.decibelScalePosition(level: configuration.level)
-        }
         return min(max(configuration.level, 0), 1)
     }
 
@@ -1958,7 +2015,7 @@ final class ApplicationPreferences: ObservableObject {
         didSet { defaults.set(volumePopupPosition.rawValue, forKey: Key.volumePopupPosition) }
     }
 
-    /// The stored choice; it only takes effect at Top Right.
+    /// The stored choice; it only takes effect with Follow macOS Popup.
     @Published var coverSystemVolumePopup: Bool {
         didSet { defaults.set(coverSystemVolumePopup, forKey: Key.coverSystemVolumePopup) }
     }
@@ -2564,10 +2621,10 @@ private struct ProductionSettingsView: View {
                             .labelsHidden()
                             .productionGlassPickerChrome()
                             .pickerStyle(.segmented)
-                            .frame(width: 220)
+                            .frame(width: 300)
                         }
                         .disabled(!preferences.showVolumePopup)
-                        Text("Briefly display Notch Sixty's volume when it changes. At Top Right it appears beside the macOS volume indicator, which macOS gives sandboxed apps no public way to hide.")
+                        Text("Briefly display Notch Sixty's volume when it changes. Follow macOS Popup appears beside the macOS volume indicator, at the top right or, while another app is full screen, the top centre. macOS gives sandboxed apps no public way to hide its indicator.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
 
@@ -2576,7 +2633,7 @@ private struct ProductionSettingsView: View {
                                 !preferences.showVolumePopup
                                     || preferences.volumePopupPosition != .topRight
                             )
-                        Text("Top Right only. Draws Notch Sixty's popup over the macOS one, with a solid glass style so it does not show through. The macOS popup still appears underneath and may flash briefly.")
+                        Text("Follow macOS Popup only. Draws Notch Sixty's popup over the macOS one, with a solid glass style so it does not show through. The macOS popup still appears underneath and may flash briefly.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
