@@ -288,6 +288,16 @@ final class SpatialHeadTrackingController {
             return
         }
 
+        // E6 S8b2d: with the unified graph the pose goes to the BINAURAL stage's live parameters.
+        if session.unifiedGraphActive {
+            if session.postHeadPose(predicted) {
+                lastPreparedPose = predicted
+                lastPreparedTimestamp = sample.timestamp
+                onStatus(.active)
+            }
+            return
+        }
+
         do {
             let prepared = try asset.prepare(for: layout, headPose: predicted)
             let sampleRate = prepared.descriptor.sampleRate

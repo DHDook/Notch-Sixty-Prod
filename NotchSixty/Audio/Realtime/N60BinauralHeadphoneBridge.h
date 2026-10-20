@@ -15,6 +15,7 @@
 #include "N60HeadTrackedBinauralRuntime.h"
 #include "N60HeadphoneDSP.h"
 #include "N60Protection.h"
+#include "n60/graph.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -58,6 +59,15 @@ typedef struct N60BinauralHeadphoneBridge {
     N60HeadphoneDSPSnapshot headphoneSnapshot;
     N60ProtectionSnapshot protectionSnapshot;
     float programGainLinear;
+
+    // E6 S8b2d: optional libn60core graph (binaural matrix, headphone correction, protection)
+    // that replaces the legacy per-frame binaural, headphone DSP and protection chain. Set only
+    // by AttachGraph with IO stopped, so the callback only reads these. The graph is owned by
+    // the caller (UnifiedGraphHost); the bridge owns only the planar scratch. Program gain is
+    // applied while gathering, the master gain, fades and metering stay in this bridge.
+    n60_graph * _Nullable unifiedGraph;
+    float * _Nullable graphScratch;
+    uint32_t graphMaxFrames;
 
     uint32_t outputGateMinimumBufferedFrames;
     uint32_t startupFadeFrames;
@@ -210,6 +220,40 @@ static inline N60BinauralHeadphoneBridge * _Nullable N60BinauralHeadphoneBridgeC
     return bridge;
 }
 
+/// Control plane only, IO stopped. Routes the binaural, headphone and protection stages through
+/// `graph` (ownership stays with the caller, who keeps it alive until after
+/// N60BinauralHeadphoneBridgeDestroy). The graph must have one input lane per program channel
+/// and at least two output lanes (the ears on lanes 0 and 1). `maxFrames` is its maxBlockFrames.
+/// Pass a NULL graph to detach.
+static inline bool N60BinauralHeadphoneBridgeAttachGraph(
+    N60BinauralHeadphoneBridge * _Nonnull bridge,
+    void * _Nullable graphHandle,
+    uint32_t graphChannels,
+    uint32_t maxFrames
+) {
+    n60_graph * _Nullable graph = (n60_graph *)graphHandle;
+    if (bridge == NULL) return false;
+    free(bridge->graphScratch);
+    bridge->graphScratch = NULL;
+    bridge->unifiedGraph = NULL;
+    bridge->graphMaxFrames = 0u;
+    if (graph == NULL) return true;
+    const uint32_t programChannels = bridge->binauralDescriptor.programLayout.channelCount;
+    if (graphChannels != programChannels
+        || graphChannels < 2u
+        || graphChannels > N60_GRAPH_MAX_CHANNELS
+        || maxFrames == 0u) {
+        return false;
+    }
+    // Planar input and output blocks side by side.
+    float * const scratch = (float *)calloc((size_t)graphChannels * maxFrames * 2u, sizeof(float));
+    if (scratch == NULL) return false;
+    bridge->graphScratch = scratch;
+    bridge->graphMaxFrames = maxFrames;
+    bridge->unifiedGraph = graph;
+    return true;
+}
+
 static inline void N60BinauralHeadphoneBridgeDestroy(
     N60BinauralHeadphoneBridge * _Nullable bridge
 ) {
@@ -219,6 +263,9 @@ static inline void N60BinauralHeadphoneBridgeDestroy(
     N60HeadphoneDSPRuntimeDestroy(bridge->headphoneRuntime);
     N60ProtectionRuntimeDestroy(bridge->protectionRuntime);
     free(bridge->audioUnitRackScratch);
+    free(bridge->graphScratch);
+    bridge->graphScratch = NULL;
+    bridge->unifiedGraph = NULL;
     bridge->transport = NULL;
     bridge->binauralRuntime = NULL;
     bridge->headphoneRuntime = NULL;
@@ -367,6 +414,13 @@ static inline uint64_t N60BinauralHeadphoneBridgeLatencyFrames(
         > bridge->headphoneSnapshot.channels[1].delayFrames
         ? bridge->headphoneSnapshot.channels[0].delayFrames
         : bridge->headphoneSnapshot.channels[1].delayFrames;
+    if (bridge->unifiedGraph != NULL) {
+        // The graph reports the binaural, headphone and protection latency together.
+        return (N60AudioUnitLiveRackProcessorIsValid(&bridge->audioUnitRack)
+                ? bridge->audioUnitRack.latencyFrames
+                : 0u)
+            + (uint64_t)n60_graph_latency_frames(bridge->unifiedGraph);
+    }
     return (N60AudioUnitLiveRackProcessorIsValid(&bridge->audioUnitRack)
             ? bridge->audioUnitRack.latencyFrames
             : 0u)
@@ -605,7 +659,94 @@ static inline OSStatus N60BinauralHeadphoneOutputIOProc(
         }
     }
 
+    // E6 S8b2d graph path: gather the block's program input (with the program gain) into planar
+    // scratch and render the whole block through libn60core; the per-frame loop below then only
+    // applies the master gain, fades, metering and the write. The graph is attached before IO
+    // starts, so this decision is stable per session.
+    n60_graph * const graph = bridge->unifiedGraph;
+    float * const graphPlanes = bridge->graphScratch;
+    const bool graphActive = graph != NULL && graphPlanes != NULL
+        && frameCount <= bridge->graphMaxFrames;
+    if (graph != NULL && !graphActive) {
+        // A block larger than the graph was sized for: silence, never a mixed render.
+        N60BinauralHeadphoneZeroOutput(outOutputData);
+        atomic_fetch_add_explicit(&bridge->renderFailures, 1u, memory_order_relaxed);
+        if (!rackConfigured) {
+            N60ProgramTransportFrame discarded = {0};
+            for (uint32_t frameIndex = 0; frameIndex < underrunAvailableFrames; ++frameIndex) {
+                (void)N60ProgramTransportDequeueFrame(bridge->transport, &discarded);
+            }
+        }
+        return noErr;
+    }
+    bool graphRendered = false;
+    const float *graphLeft = NULL;
+    const float *graphRight = NULL;
+    if (graphActive) {
+        const size_t stride = bridge->graphMaxFrames;
+        float * const planarIn = graphPlanes;
+        float * const planarOut = graphPlanes + (size_t)programChannels * stride;
+        for (uint32_t frameIndex = 0; frameIndex < frameCount; ++frameIndex) {
+            N60ProgramTransportFrame gathered = {0};
+            const float *source = gathered.channels;
+            if (rackConfigured) {
+                source = bridge->audioUnitRackScratch + (size_t)frameIndex * programChannels;
+            } else {
+                (void)N60ProgramTransportDequeueFrame(bridge->transport, &gathered);
+                for (uint32_t channel = 0; channel < programChannels; ++channel) {
+                    gathered.channels[channel] *= bridge->programGainLinear;
+                }
+            }
+            for (uint32_t channel = 0; channel < programChannels; ++channel) {
+                planarIn[channel * stride + frameIndex] = source[channel];
+            }
+        }
+        const float *inPointers[N60_GRAPH_MAX_CHANNELS];
+        float *outPointers[N60_GRAPH_MAX_CHANNELS];
+        for (uint32_t channel = 0; channel < programChannels; ++channel) {
+            inPointers[channel] = planarIn + channel * stride;
+            outPointers[channel] = planarOut + channel * stride;
+        }
+        graphRendered = n60_graph_process(graph, inPointers, outPointers, frameCount)
+            == N60_STATUS_OK;
+        graphLeft = planarOut;
+        graphRight = planarOut + stride;
+        if (!graphRendered) {
+            // Counted once per failed block; every frame of it is silence.
+            atomic_fetch_add_explicit(&bridge->renderFailures, 1u, memory_order_relaxed);
+        }
+    }
+
     for (uint32_t frameIndex = 0; frameIndex < frameCount; ++frameIndex) {
+        if (graphActive) {
+            float left = graphRendered && isfinite(graphLeft[frameIndex]) ? graphLeft[frameIndex] : 0.0f;
+            float right = graphRendered && isfinite(graphRight[frameIndex]) ? graphRight[frameIndex] : 0.0f;
+            float gain = N60BinauralHeadphoneNextOutputGain(bridge, masterGain);
+            if (underrunFadeOut) {
+                gain *= frameIndex < underrunAvailableFrames ? underrunFade : 0.0f;
+                underrunFade -= underrunFadeStep;
+                if (underrunFade < 0.0f) underrunFade = 0.0f;
+            }
+            left *= gain;
+            right *= gain;
+            if (meterDemand) {
+                const float leftMagnitude = fabsf(left);
+                const float rightMagnitude = fabsf(right);
+                if (leftMagnitude > meterPeakLeft) meterPeakLeft = leftMagnitude;
+                if (rightMagnitude > meterPeakRight) meterPeakRight = rightMagnitude;
+                meterSquareLeft += (double)left * (double)left;
+                meterSquareRight += (double)right * (double)right;
+                if (leftMagnitude > 1.0f) meterOverLeft += 1u;
+                if (rightMagnitude > 1.0f) meterOverRight += 1u;
+            }
+            if (!N60BinauralHeadphoneWriteStereoFrame(outOutputData, frameIndex, left, right)) {
+                N60BinauralHeadphoneZeroOutput(outOutputData);
+                atomic_fetch_add_explicit(&bridge->outputWriteFailures, 1u, memory_order_relaxed);
+                return noErr;
+            }
+            atomic_fetch_add_explicit(&bridge->renderedFrames, 1u, memory_order_relaxed);
+            continue;
+        }
         N60ProgramTransportFrame program = {0};
         if (rackConfigured) {
             memcpy(

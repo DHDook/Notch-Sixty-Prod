@@ -272,6 +272,140 @@ enum UnifiedGraphTranslator {
         var responses: [Float]
     }
 
+    /// Largest response set (floats) a binaural graph may carry: 8M floats, 32 MB.
+    static let binauralMaxResponseFloats = 8 * 1024 * 1024
+    /// Head-yaw cells of a head-tracked set (15 degree steps, wrapped).
+    static let binauralTrackedOrientations: UInt32 = 24
+
+    /// Selection rule and spec for a binaural headphone session (E6 S8b2d): the output must be
+    /// a 2-channel headphone endpoint, the program layout must have more than 2 channels and
+    /// the profile must carry an asset. `asset` is already resampled to `sampleRate`. The
+    /// HEADPHONE stage carries the profile's headroom, channel gain, polarity and EQ; channel
+    /// delay and a headroom above 24 dB stay on the legacy path (`headphoneDSP`). Protection
+    /// matches the legacy limiter. Program gain is applied by the bridge while gathering.
+    static func binauralSpec(
+        asset: BinauralProfileAsset?,
+        layout: OutputProgramLayout,
+        profile: HeadphoneDeviceProfileConfiguration,
+        outputChannels: UInt32,
+        sampleRate: Double,
+        headTracking: Bool,
+        maxBlockFrames: UInt32 = 16_384
+    ) -> Result<UnifiedGraphSpec, UnifiedGraphFallbackReason> {
+        guard outputChannels == 2 else { return .failure(.binauralOutputNotStereo) }
+        guard layout.roles.count > 2 else { return .failure(.noProgramLanes) }
+        guard layout.roles.count <= Int(N60_LAYOUT_MAX_CHANNELS),
+              layout.roles.count <= Int(N60_GRAPH_MAX_CHANNELS) else { return .failure(.tooManyChannels) }
+        guard let asset else { return .failure(.binauralProfileMissing) }
+        guard abs(asset.sampleRate - sampleRate) < 0.5 else { return .failure(.sampleRateMismatch) }
+        guard asset.tapCount >= 1, asset.tapCount <= Int(N60_GRAPH_BINAURAL_MAX_TAPS) else {
+            return .failure(.binauralBudget)
+        }
+        // Headphone correction the stage cannot reproduce stays on the legacy path.
+        guard profile.headroomAttenuationDB.isFinite, (0.0...24.0).contains(profile.headroomAttenuationDB),
+              profile.left.delayMilliseconds == 0, profile.right.delayMilliseconds == 0,
+              profile.left.eqBands.filter(\.enabled).count <= 16,
+              profile.right.eqBands.filter(\.enabled).count <= 16,
+              (-24.0...24.0).contains(profile.left.gainDB), (-24.0...24.0).contains(profile.right.gainDB)
+        else { return .failure(.headphoneDSP) }
+
+        let channels = layout.roles.count
+        let orientations = headTracking ? binauralTrackedOrientations : 1
+        let perSet = channels * 2 * asset.tapCount
+        guard perSet * Int(orientations) <= binauralMaxResponseFloats else { return .failure(.binauralBudget) }
+        let step: Float = headTracking ? 360 / Float(orientations) : 0
+        let start: Float = headTracking ? -180 : 0
+        var responses: [Float] = []
+        responses.reserveCapacity(perSet * Int(orientations))
+        var equalEar: Int32 = -1
+        do {
+            for set in 0..<Int(orientations) {
+                let pose = N60HeadPose(
+                    yawDegrees: N60HeadPoseWrap180(Double(start + step * Float(set))),
+                    pitchDegrees: 0, rollDegrees: 0)
+                let prepared = try asset.prepare(for: layout, headPose: pose)
+                if set == 0, prepared.descriptor.lfeMode == N60BinauralLFEModeEqualEar,
+                   let lfe = layout.roles.firstIndex(of: .lowFrequencyEffects) {
+                    equalEar = Int32(lfe)
+                }
+                for channel in 0..<channels {
+                    let base = channel * asset.tapCount
+                    responses.append(contentsOf: prepared.leftIRs[base..<(base + asset.tapCount)])
+                    responses.append(contentsOf: prepared.rightIRs[base..<(base + asset.tapCount)])
+                }
+            }
+        } catch {
+            return .failure(.specRejected)
+        }
+
+        var layoutC = n60_layout()
+        layoutC.structSize = UInt32(MemoryLayout<n60_layout>.size)
+        layoutC.identifier = UInt32(N60_LAYOUT_CUSTOM.rawValue)
+        layoutC.channelCount = UInt32(channels)
+        withUnsafeMutableBytes(of: &layoutC.roles) { raw in
+            let roles = raw.bindMemory(to: UInt32.self)
+            for (index, role) in layout.roles.enumerated() { roles[index] = UInt32(role.realtimeCType.rawValue) }
+        }
+        var options = n60_layout_options()
+        options.structSize = UInt32(MemoryLayout<n60_layout_options>.size)
+        options.sampleRate = sampleRate
+        options.maxBlockFrames = maxBlockFrames
+        options.mode = N60_MODE_BINAURAL.rawValue
+        options.protection = 1
+        var built: OpaquePointer?
+        let status: n60_status = responses.withUnsafeBufferPointer { responsePointer in
+            var binaural = n60_binaural_profile()
+            binaural.structSize = UInt32(MemoryLayout<n60_binaural_profile>.size)
+            binaural.taps = UInt32(asset.tapCount)
+            binaural.orientations = orientations
+            binaural.yawStartDeg = start
+            binaural.yawStepDeg = step
+            binaural.wrap = headTracking ? 1 : 0
+            binaural.equalEarChannel = equalEar
+            binaural.declaredLatency = UInt32(max(0, asset.declaredLatencyFrames))
+            binaural.responses = responsePointer.baseAddress
+            return withUnsafePointer(to: &layoutC) { layoutPointer in
+                options.layout = layoutPointer
+                return withUnsafePointer(to: &binaural) { binauralPointer in
+                    options.binaural = binauralPointer
+                    return n60_layout_graph_build(&options, &built)
+                }
+            }
+        }
+        guard status == N60_STATUS_OK, let built else { return .failure(.specRejected) }
+        defer { n60_layout_graph_free(built) }
+        guard let description = n60_layout_graph_desc(built) else { return .failure(.specRejected) }
+        var spec = UnifiedGraphSpec(copying: description)
+        spec.maxBlockFrames = maxBlockFrames
+
+        // Headphone stage: pair (left, right) on lanes 0 and 1, crossfeed off (the virtual
+        // speakers already carry the spatial image).
+        func bands(_ side: HeadphoneChannelCorrection) -> [Float] {
+            side.eqBands.filter(\.enabled).flatMap { band -> [Float] in
+                [Float(band.type.realtimeCType.rawValue), Float(band.frequencyHz), Float(band.gainDB), Float(band.q)]
+            }
+        }
+        let leftBands = bands(profile.left)
+        let rightBands = bands(profile.right)
+        var headphone: [Float] = [
+            -Float(profile.headroomAttenuationDB), 0, 30, 0.0875, 700,
+            Float(profile.left.gainDB), Float(profile.right.gainDB),
+            profile.left.polarityInverted ? 1 : 0, profile.right.polarityInverted ? 1 : 0,
+            Float(leftBands.count / 4), Float(rightBands.count / 4),
+        ]
+        headphone += leftBands + rightBands
+        let stage = UnifiedGraphStageSpec(
+            kind: UInt32(N60_STAGE_HEADPHONE.rawValue), stageId: N60_LSTAGE_HEADPHONE,
+            laneA: 0, laneB: 1, laneMask: 0, params: headphone)
+        guard let protectionIndex = spec.stages.firstIndex(where: { $0.stageId == N60_LSTAGE_PROTECTION }) else {
+            return .failure(.specRejected)
+        }
+        // Same limiter as the legacy bridge: -1 dB ceiling, 0.5/90 ms, 2 ms look-ahead, 4x true-peak.
+        spec.stages[protectionIndex].params = [1, -1, 0.5, 90, 2, 1, 4]
+        spec.stages.insert(stage, at: protectionIndex)
+        return .success(spec)
+    }
+
     /// A standard layout (`N60_LAYOUT_*`) rendered to speakers or, with a profile, to ears
     /// on lanes 0 and 1, through the core's own layout builder.
     static func layoutSpec(
@@ -379,6 +513,13 @@ enum UnifiedGraphFallbackReason: String, Error, Equatable, Sendable, CaseIterabl
     case specRejected
     case graphBuildFailed
     case attachFailed
+    // Binaural (S8b2d).
+    /// The headphone profile carries no imported HRTF/SOFA asset the graph could use.
+    case binauralProfileMissing
+    /// The output is not a two-channel headphone endpoint.
+    case binauralOutputNotStereo
+    /// The response set exceeds the core's tap or memory budget at this rate.
+    case binauralBudget
 
     /// Short text for the diagnostics row.
     var displayText: String {
@@ -407,6 +548,9 @@ enum UnifiedGraphFallbackReason: String, Error, Equatable, Sendable, CaseIterabl
         case .specRejected: "graph spec rejected"
         case .graphBuildFailed: "graph build failed"
         case .attachFailed: "graph attach failed"
+        case .binauralProfileMissing: "no HRTF profile asset"
+        case .binauralOutputNotStereo: "output is not two-channel headphones"
+        case .binauralBudget: "HRTF set over the graph budget"
         }
     }
 }
