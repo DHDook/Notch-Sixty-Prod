@@ -262,6 +262,39 @@ struct AudioDiagnosticsSnapshot: Equatable, Sendable {
     let recoverySuccesses: UInt64
     let recoveryFailures: UInt64
     let lastErrorDescription: String?
+    /// E6 S8b2b: set while libn60core renders the session (stereo or N-channel); nil while the
+    /// kernel or the legacy N-channel render core does.
+    var unifiedGraph: UnifiedGraphDiagnostics? = nil
+}
+
+/// Readbacks from a live unified graph: its stage-reported latency, rebuild state and
+/// post-protection meter per lane (program lanes, then sub lanes).
+struct UnifiedGraphDiagnostics: Equatable, Sendable {
+    struct LaneMeter: Equatable, Sendable {
+        let peakLinear: Float
+        let rmsLinear: Float
+    }
+
+    let channelCount: Int
+    let programChannelCount: Int
+    let latencyFrames: UInt32
+    /// `n60_rebuild_status.state`: 0 when the live graph is steady.
+    let rebuildState: UInt32
+    let finalMeters: [LaneMeter]
+
+    @MainActor
+    init?(host: UnifiedGraphHost?, programChannelCount: Int) {
+        guard let host else { return nil }
+        let count = Int(host.outputChannels)
+        self.channelCount = count
+        self.programChannelCount = programChannelCount
+        self.latencyFrames = host.latencyFrames
+        self.rebuildState = host.rebuildState
+        self.finalMeters = (0..<count).map { lane in
+            let reading = host.meter(stageId: N60_LSTAGE_FINAL_METER, lane: UInt32(lane))
+            return LaneMeter(peakLinear: reading?.peak ?? 0, rmsLinear: reading?.rms ?? 0)
+        }
+    }
 }
 
 

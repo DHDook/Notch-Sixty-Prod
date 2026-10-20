@@ -148,6 +148,88 @@ enum UnifiedGraphTranslator {
         return configuration
     }
 
+    /// The live N-channel session's lanes, bass management and 1 to 8 subs as a graph
+    /// configuration (E6 S8b2b), or nil when the legacy render core must keep the session. It
+    /// mirrors `LiveNChannelRenderGraphCompiler.makeGraph` field for field. Ineligible, because
+    /// the core cannot reproduce them exactly: an optimizer FIR, a polarity-inverted or silent
+    /// lane, a lane delay under bass management (the legacy order puts it before the
+    /// crossover, the core after), and any crossover other than Linkwitz-Riley 24.
+    static func nChannelConfiguration(
+        routePlan: LiveNChannelOutputRoutePlan,
+        sampleRate: Double,
+        gainConfiguration: DSPGainConfiguration,
+        bassManagementConfiguration: BassManagementConfiguration
+    ) -> UnifiedGraphConfiguration? {
+        guard routePlan.speakerOptimizerFIR == nil else { return nil }
+        let roles = routePlan.programLayout.roles
+        let bassEnabled = bassManagementConfiguration.enabled
+        let subCount = Int(routePlan.subwooferCount)
+        if bassEnabled {
+            guard bassManagementConfiguration.topology == .linkwitzRiley24,
+                  (1...UnifiedGraphConfiguration.maxSubwoofers).contains(subCount),
+                  routePlan.subwooferCalibrations.count >= subCount else { return nil }
+        }
+        guard !roles.isEmpty, roles.count + (bassEnabled ? subCount : 0) <= Int(N60_GRAPH_MAX_CHANNELS) else {
+            return nil
+        }
+        let combinedDB = gainConfiguration.inputPreampDB + gainConfiguration.headroomAttenuationDB
+            + gainConfiguration.outputGainDB
+            - (routePlan.speakerOptimizerFIR?.requiredHeadroomDB ?? 0)
+        let combined = DSPGainConfiguration.linearGain(forDB: combinedDB)
+        guard combined.isFinite, combined > 0, combined <= 16 else { return nil }
+
+        func sections(_ bands: [OutputCalibrationEQBand]) -> [UnifiedGraphPEQSection] {
+            bands.map { UnifiedGraphPEQSection(type: 0, frequencyHz: $0.frequencyHz, gainDB: $0.gainDB, q: $0.q) }
+        }
+        var lanes: [UnifiedGraphLane] = []
+        var lfeLane: Int?
+        for (index, role) in roles.enumerated() {
+            let calibration = routePlan.speakerCalibrations[role]
+            if calibration?.polarityInverted == true { return nil }
+            let delay = calibration?.delayMilliseconds ?? 0
+            if bassEnabled, delay > 0 { return nil }
+            let lfeGainDB = role == .lowFrequencyEffects && !bassEnabled
+                ? LiveNChannelRenderGraphCompiler.lfeInBandGainDB : 0
+            let gain = combined * DSPGainConfiguration.linearGain(
+                forDB: (calibration?.trimDB ?? 0) + lfeGainDB)
+            guard gain.isFinite, gain > 0, gain <= 10_000 else { return nil }
+            var peq = sections(calibration?.eqBands ?? [])
+            if let optimizer = routePlan.speakerOptimizerPEQ[role] {
+                peq += optimizer.map {
+                    UnifiedGraphPEQSection(type: 0, frequencyHz: $0.frequencyHz, gainDB: $0.gainDB, q: $0.q)
+                }
+            }
+            if peq.count > Int(N60_PEQ_MAX_SECTIONS) { return nil }
+            lanes.append(UnifiedGraphLane(preGain: gain, delayMilliseconds: delay, eq: peq))
+            if role == .lowFrequencyEffects { lfeLane = index }
+        }
+        var configuration = UnifiedGraphConfiguration(sampleRate: sampleRate, lanes: lanes)
+        if bassEnabled {
+            var subs: [UnifiedGraphSubwoofer] = []
+            for index in 0..<subCount {
+                let calibration = routePlan.subwooferCalibrations[index]
+                let gainDB = bassManagementConfiguration.subGainDB + (calibration?.gainDB ?? 0)
+                guard (-60.0...24.0).contains(gainDB),
+                      (calibration?.eqBands.count ?? 0) <= 8 else { return nil }
+                subs.append(UnifiedGraphSubwoofer(
+                    gainDB: gainDB,
+                    polarityInverted: bassManagementConfiguration.subPolarityInverted
+                        != (calibration?.polarityInverted ?? false),
+                    delayMilliseconds: calibration?.delayMilliseconds ?? 0,
+                    eq: sections(calibration?.eqBands ?? [])
+                ))
+            }
+            configuration.bassManagement = UnifiedGraphBassManagement(
+                crossoverHz: bassManagementConfiguration.frequencyHz,
+                lfeLane: lfeLane,
+                lfeLowPassHz: LiveNChannelRenderGraphCompiler.lfeLowPassHz,
+                lfeGainDB: LiveNChannelRenderGraphCompiler.lfeInBandGainDB,
+                subwoofers: subs
+            )
+        }
+        return configuration
+    }
+
     /// Binaural profile data for `layoutSpec`: `orientations * channels * 2 * taps` responses.
     struct BinauralProfile {
         var taps: UInt32

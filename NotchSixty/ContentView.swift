@@ -1455,6 +1455,13 @@ struct ContentView: View {
                 diagnosticRow("Startup gate", "\(gateOpened ? "open" : "armed") / target \(targetFrames) / activate \(activationFrames)")
             }
 
+            if let graph = snapshot.unifiedGraph {
+                diagnosticRow(
+                    "Unified graph",
+                    "\(graph.programChannelCount) program + \(graph.channelCount - graph.programChannelCount) sub lanes / latency \(graph.latencyFrames) frames\(graph.rebuildState == 0 ? "" : " / rebuilding")"
+                )
+            }
+
             if let render = snapshot.renderKernelDiagnostics {
                 diagnosticRow("DSP graph", "generation \(render.publishedGeneration) / \(render.bypassed ? "bypassed" : "active")")
                 diagnosticRow("DSP rate", formattedRate(render.sampleRate))

@@ -354,6 +354,8 @@ enum LiveNChannelRenderGraphCompiler {
 /// stereo session remains untouched and is still the fallback/default path.
 final class CoreAudioNChannelTransportSession {
     private static let bridgeCapacityFrames: UInt32 = 65_536
+    /// Largest Core Audio buffer the graph path renders in one block.
+    private static let graphMaxBlockFrames: UInt32 = 32_768
 
     let selectedOutput: AudioOutputDevice
     let routePlan: LiveNChannelOutputRoutePlan
@@ -368,6 +370,10 @@ final class CoreAudioNChannelTransportSession {
     }
 
     private var bridge: UnsafeMutablePointer<N60LiveNChannelBridge>?
+    /// E6 S8b2b: the libn60core graph rendering this session, when `e6.unified-graph` is on and
+    /// the setup is one the core reproduces. Created before IO starts and released only after
+    /// the bridge is destroyed (see `stop`), so the callback never sees it freed.
+    private var unifiedGraphHost: UnifiedGraphHost?
     private var audioUnitRack: AudioUnitLiveRackSwitchboard?
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateDeviceID = AudioDeviceID(kAudioObjectUnknown)
@@ -384,7 +390,8 @@ final class CoreAudioNChannelTransportSession {
         renderGraph: N60LiveNChannelRenderGraph,
         outputGain: Float,
         roomTreatment: LiveMIMORoomTreatmentPreparation? = nil,
-        audioUnitRack: AudioUnitLiveRackSwitchboard? = nil
+        audioUnitRack: AudioUnitLiveRackSwitchboard? = nil,
+        unifiedGraphConfiguration: UnifiedGraphConfiguration? = nil
     ) throws {
         self.selectedOutput = selectedOutput
         self.routePlan = routePlan
@@ -625,6 +632,24 @@ final class CoreAudioNChannelTransportSession {
                     true
                 )
             }
+            // Any reason the core cannot take the session leaves the legacy render core in place.
+            if var configuration = unifiedGraphConfiguration,
+               abs(configuration.sampleRate - outputFormat.sampleRate) < 0.5,
+               configuration.lanes.count == Int(renderGraph.programLayout.channelCount) {
+                configuration.maxBlockFrames = Self.graphMaxBlockFrames
+                if outputBufferFrames <= configuration.maxBlockFrames,
+                   let spec = try? configuration.makeSpec(),
+                   let host = try? UnifiedGraphHost(spec: spec),
+                   let raw = host.rawGraph,
+                   N60LiveNChannelBridgeAttachGraph(
+                    newBridge,
+                    raw,
+                    UInt32(configuration.channelCount),
+                    configuration.maxBlockFrames
+                   ) {
+                    unifiedGraphHost = host
+                }
+            }
             bridge = newBridge
             N60LiveNChannelBridgeSetOutputGain(newBridge, outputGain)
 
@@ -847,8 +872,16 @@ final class CoreAudioNChannelTransportSession {
             N60LiveNChannelBridgeDestroy(bridge)
             self.bridge = nil
         }
+        // The bridge (and so the callback) is gone; only now may the graph be retired.
+        unifiedGraphHost = nil
         audioUnitRack = nil
     }
+
+    /// Whether the callback renders lanes, bass management and subs through libn60core.
+    var unifiedGraphActive: Bool { unifiedGraphHost != nil && bridge != nil }
+
+    /// The live graph host for metering and latency readbacks (nil while the legacy core renders).
+    var unifiedGraphReadback: UnifiedGraphHost? { unifiedGraphActive ? unifiedGraphHost : nil }
 
     private func startIO() throws {
         guard !stopped else { throw LiveNChannelTransportError.ioProcUnavailable(role: "stopped") }

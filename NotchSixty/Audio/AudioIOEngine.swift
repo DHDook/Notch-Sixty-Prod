@@ -2876,7 +2876,14 @@ final class AudioIOEngine: ObservableObject {
             recoveryAttempts: recoveryAttempts,
             recoverySuccesses: recoverySuccesses,
             recoveryFailures: recoveryFailures,
-            lastErrorDescription: lastErrorDescription
+            lastErrorDescription: lastErrorDescription,
+            unifiedGraph: UnifiedGraphDiagnostics(
+                host: transportSession?.unifiedGraphReadback
+                    ?? nChannelTransportSession?.unifiedGraphReadback,
+                programChannelCount: nChannelTransportSession.map {
+                    $0.routePlan.programLayout.roles.count
+                } ?? 2
+            )
         )
     }
 
@@ -4058,7 +4065,15 @@ final class AudioIOEngine: ObservableObject {
             renderGraph: graph,
             outputGain: currentMasterSoftwareGain,
             roomTreatment: stagedRoomTreatment,
-            audioUnitRack: stagedAudioUnitRack
+            audioUnitRack: stagedAudioUnitRack,
+            unifiedGraphConfiguration: unifiedGraphEnabled
+                ? UnifiedGraphTranslator.nChannelConfiguration(
+                    routePlan: routePlan,
+                    sampleRate: output.nominalSampleRate,
+                    gainConfiguration: gainConfiguration,
+                    bassManagementConfiguration: bassManagementConfiguration
+                )
+                : nil
         )
         activeEQFIRProgram = nil
         activeRoomCorrectionProgram = nil
