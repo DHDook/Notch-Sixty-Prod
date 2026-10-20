@@ -9,7 +9,7 @@ all rates from 44.1 to 384 kHz.
 
 ## Decisions taken
 
-Eight owner decisions, all from 17 Oct 2026, fix the plan's shape. Where `AGENTS.md` conflicts
+Owner decisions from 17 Oct 2026 (and later, where dated) fix the plan's shape. Where `AGENTS.md` conflicts
 with them, these decisions win until E1/E21 update `AGENTS.md`.
 
 | Decision | Choice |
@@ -22,10 +22,11 @@ with them, these decisions win until E1/E21 update `AGENTS.md`.
 | v1 timing | Ship only when every scoped epic is complete, for a single high-impact launch |
 | Engine language | C++20/23 for the whole engine core (realtime kernel and design maths) behind one versioned C interface; Swift stays for the macOS app |
 | Engine performance architecture | Whole-buffer processing, multirate processing for low-frequency paths, multiple realtime threads, and best-in-class algorithms |
+| New engine quality (20 Oct 2026) | The unified graph is at least equal to `N60RenderKernel` in every area and better where it can be; the kernel stays as a frozen fallback until E23 deletes it before v1 |
 
 ## Epics at a glance
 
-Twenty-two epics in four phases close every gap in the analysis and set the engine up for other
+Twenty-three epics in four phases close every gap in the analysis and set the engine up for other
 platforms; E6 (the unified graph) is the critical path, because eleven later epics build on it.
 
 | ID | Epic | Phase | Depends on | Where the work happens | Done when |
@@ -50,6 +51,7 @@ platforms; E6 (the unified graph) is the critical path, because eleven later epi
 | E15 | Device-aware profiles | 4 | E6 | Claude Code (Mac) | Profile follows the output when the user opts in |
 | E16 | Automation and remote | 4 | E6 | Claude Code (Mac) | App Intents, local API and iPhone remote ship |
 | E17 | Export and dither | 4 | E8, E10 | Claude Code (Mac) | MiniDSP, APO and WAV exports; automatic dither |
+| E23 | Legacy engine removal | 4 | E6, E4 S11, E7–E17 | Claude Code (Mac) | `N60RenderKernel`, the old N-channel path and the `e6.*` flags are gone; full suite green |
 | E22 | Hardware validation | 4 | all software epics | Bench | Every deferred bench check passes on `main` at every rate |
 | E18 | Launch readiness | 4 | all | Owner + Claude Code | Signed, reviewed, accessible, competitive ABX done, App Store live |
 
@@ -115,8 +117,8 @@ Dirac now sells ART on the Mac, so this needs the same path to authorisation as 
 ## Phase 2 — Unified engine
 
 Phase 2 replaces the three render paths with one graph that every later feature builds on.
-**Gate G2:** stereo output is sample-identical (within float rounding) to today's kernel on the
-parity suite, and live edits are click-free on hardware in stereo, 5.1 and binaural modes.
+**Gate G2:** stereo output matches today's kernel on the parity suite within -120 dBFS peak
+(deliberate improvements excepted where the reference lab shows them equal or better), and live edits are click-free on hardware in stereo, 5.1 and binaural modes.
 
 ### E6 Unified live N-channel graph
 
@@ -126,10 +128,11 @@ parity suite, and live edits are click-free on hardware in stereo, 5.1 and binau
 - [x] Represent stereo as a 2-channel layout and the binaural renderer as a stage, not a separate transport
 - [ ] Make parameter edits live with ramped coefficients; rebuild with a short fade only on topology changes
 - [ ] S8c `e6/dynamics-readbacks`: gain-reduction, true-peak and over-range readbacks through a core ABI addition
+- [ ] S8e `e6/rack-and-routes`: AU rack as an external-processor node; same-device and aggregate routes render through the graph
 - [ ] S8d `e6/translate-remaining-stereo`: move the kernel-fallback stereo stages (dynamic EQ, FIR/IR/convolution, mixed phase, crossover and bass management, denoiser, fractional delay, soft clipper, gain rider) to the graph
 - [ ] Remove the `unsupportedActiveDSP` and `immutableSemanticTransportActive` restrictions in `AudioIOEngine.swift`, and the idle-only headphone profile rule
 - [ ] Build a parity suite that renders the old stereo kernel and the new graph side by side
-- [ ] Retire `N60RenderKernel` once parity holds; keep it behind a flag for one release cycle
+- [ ] Make the graph the default once parity holds; keep `N60RenderKernel` as a frozen fallback behind a flag until E23
 - [x] S8b2a `e6/engine-integration-3` built on branch (needs-owner, behind `e6.unified-graph`): graph reproduces M/S EQ, compressor, expander, ambient compensation, symmetry, crossfeed, crosstalk cancellation, integer inter-channel delay and pause gate; everything else keeps the kernel fallback
 - [x] S8b2b: translate dynamic EQ, FIR/room/speaker IR, stereo crossover and bass management, denoiser, soft clipper and gain rider (or document keep-on-kernel); wire multichannel, layouts, 1 to 8 subs and binaural into the live N-channel session; metering and latency readbacks; compensate kernel/graph latency difference across the hand-over fade
 - [x] S8b2c (next): wire live binaural into the N-channel session (it has no binaural mode today) and compensate kernel/graph fade latency (the N-channel path attaches the graph statically, with no mid-stream hand-over). S8b2c is split: S8b2c1 built on branch `e6/engine-integration-5` (needs-owner); S8b2d awaits owner approval of the binaural proposal
@@ -266,6 +269,16 @@ complete, speaker ANC qualified, and a full hardware regression passing at every
 
 - [ ] Filter export to MiniDSP, Equalizer APO and WAV convolution sets
 - [ ] Automatic TPDF dither only when the device's physical format is 16-bit integer
+
+### E23 Legacy engine removal
+
+Owner decision, 20 Oct 2026: the kernel stays behind `e6.legacy-kernel` until late in the roadmap,
+then this epic deletes it before E22 hardware validation, so v1 ships and is validated on the
+unified graph only.
+
+- [ ] Confirm nothing falls back to the kernel (E6 S8d, S8e; E4 S11 for AQZ/ANC)
+- [ ] Delete `N60RenderKernel`, the old N-channel path and the `e6.unified-graph` and `e6.legacy-kernel` flags
+- [ ] Update `docs/DSP_KERNEL.md`, `docs/ARCHITECTURE.md` and the `AGENTS.md` mention, in coordination with E21
 
 ### E22 Hardware validation
 
