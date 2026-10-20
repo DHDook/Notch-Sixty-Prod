@@ -436,6 +436,8 @@ final class CoreAudioTransportSession {
     /// rendered through a libn60core graph; anything else keeps the kernel path.
     var unifiedGraphEnabled = false
     private var unifiedGraphHost: UnifiedGraphHost?
+    /// Integer inter-channel taps of the attached stereo graph, excluded from its reported latency.
+    private var unifiedGraphLaneTapFrames: UInt32 = 0
     /// Why the kernel renders although the graph is enabled; nil while the graph renders or is off.
     private(set) var unifiedGraphFallbackReason: UnifiedGraphFallbackReason?
     private var headphoneDSPConfigured = false
@@ -916,7 +918,16 @@ final class CoreAudioTransportSession {
 
     func renderDiagnostics() -> RenderKernelDiagnostics? {
         guard let bridge else { return nil }
-        return RenderKernelDiagnostics(N60RealtimeAudioBridgeGetRenderDiagnostics(bridge))
+        var raw = N60RealtimeAudioBridgeGetRenderDiagnostics(bridge)
+        // E6 S8: while libn60core renders, meters and latency come from the graph.
+        if let host = unifiedGraphReadback {
+            host.overlayStereoReadbacks(
+                &raw,
+                latencyFrames: host.latencyFrames &- min(host.latencyFrames, unifiedGraphLaneTapFrames),
+                includeOutput: !N60RealtimeAudioBridgeOutputVUMeterDemand()
+            )
+        }
+        return RenderKernelDiagnostics(raw)
     }
 
     func prepareConvolutionProgram(
@@ -1141,6 +1152,7 @@ final class CoreAudioTransportSession {
             // eligible stereo setup has one tap pair, so the larger of the two is the lane offset).
             // Published before the attach so the callback never fades with a stale value.
             let taps = configuration.lanes.map(\.interChannelTapFrames).max() ?? 0
+            unifiedGraphLaneTapFrames = taps
             N60RealtimeAudioBridgeSetUnifiedGraphLatency(bridge, host.latencyFrames &- min(host.latencyFrames, taps))
             if !N60RealtimeAudioBridgeUnifiedGraphActive(bridge) {
                 guard N60RealtimeAudioBridgeSetUnifiedGraph(bridge, raw, spec.maxBlockFrames, spec.sampleRate) else {
@@ -1157,6 +1169,7 @@ final class CoreAudioTransportSession {
     }
 
     private func detachUnifiedGraph() {
+        unifiedGraphLaneTapFrames = 0
         if let bridge, N60RealtimeAudioBridgeUnifiedGraphActive(bridge) {
             _ = N60RealtimeAudioBridgeSetUnifiedGraph(bridge, nil, 0, 0)
         }

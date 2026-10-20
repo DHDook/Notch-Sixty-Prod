@@ -244,6 +244,33 @@ final class UnifiedGraphEngineTests: XCTestCase {
         XCTAssertEqual(host.latencyFrames, 0)
     }
 
+    func testStereoDiagnosticsOverlayComesFromTheGraphAtEveryRate() throws {
+        for rate in Self.rates {
+            var snapshot = N60DSPGraphSnapshotMakeUnity(rate)
+            snapshot.masterGainLinear = 0.5
+            let configuration = try XCTUnwrap(
+                UnifiedGraphTranslator.stereoConfiguration(snapshot: &snapshot, sampleRate: rate)
+            )
+            let host = try UnifiedGraphHost(spec: try configuration.makeSpec())
+            let tone = sine(1_000, rate: rate, frames: 4_096, amplitude: 0.5)
+            _ = try host.processOffline(input: [tone, tone], frames: 4_096)
+            var diagnostics = N60RenderKernelDiagnostics()
+            diagnostics.latencyFrames = 12_345
+            diagnostics.inputMeter.peakLeft = 9
+            host.overlayStereoReadbacks(&diagnostics, latencyFrames: 77, includeOutput: true)
+            XCTAssertEqual(diagnostics.inputMeter.peakLeft, 0.5, accuracy: 0.01, "input rate \(rate)")
+            XCTAssertEqual(diagnostics.inputMeter.peakRight, 0.5, accuracy: 0.01, "input rate \(rate)")
+            XCTAssertEqual(diagnostics.postEQMeter.peakLeft, 0.5, accuracy: 0.01, "postEQ rate \(rate)")
+            XCTAssertEqual(diagnostics.outputMeter.peakLeft, 0.25, accuracy: 0.01, "output rate \(rate)")
+            XCTAssertEqual(diagnostics.latencyFrames, 77)
+            // includeOutput false leaves the bridge VU's output reading alone.
+            diagnostics.outputMeter.peakLeft = 3
+            _ = try host.processOffline(input: [tone, tone], frames: 4_096)
+            host.overlayStereoReadbacks(&diagnostics, latencyFrames: 0, includeOutput: false)
+            XCTAssertEqual(diagnostics.outputMeter.peakLeft, 3)
+        }
+    }
+
     // MARK: Hand-over between kernel and graph (S8b1)
 
     /// Runs `blocks` capture+output callbacks of a 1 kHz tone through the bridge. Returns the

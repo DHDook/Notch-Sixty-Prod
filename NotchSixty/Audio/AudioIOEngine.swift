@@ -2857,6 +2857,11 @@ final class AudioIOEngine: ObservableObject {
         let startupGateActivationFrames = transportSession?.startupGateActivationFrames
             ?? nChannelTransportSession?.startupGateActivationFrames
             ?? binauralHeadphoneTransportSession?.startupGateActivationFrames
+        let stereoRenderDiagnostics = transportSession?.renderDiagnostics()
+        // The stereo overlay already read FINAL_METER into outputMeter unless the bridge VU supplied it.
+        let stereoFinalReading: StereoMeterReading? =
+            (transportSession?.unifiedGraphReadback != nil && !N60RealtimeAudioBridgeOutputVUMeterDemand())
+            ? stereoRenderDiagnostics?.outputMeter : nil
         return AudioDiagnosticsSnapshot(
             lifecycleState: lifecycle.state,
             selectedOutputUID: routeConfiguration.selectedOutputUID,
@@ -2868,7 +2873,7 @@ final class AudioIOEngine: ObservableObject {
             outputSampleRate: activeOutputSampleRate,
             sessionTransportCounters: processingSessionCounters,
             lifetimeTransportCounters: lifetimeCounters,
-            renderKernelDiagnostics: transportSession?.renderDiagnostics(),
+            renderKernelDiagnostics: stereoRenderDiagnostics,
             startupGateOpened: startupGateOpened,
             startupGateTargetFrames: startupGateTargetFrames,
             startupGateActivationFrames: startupGateActivationFrames,
@@ -2890,7 +2895,8 @@ final class AudioIOEngine: ObservableObject {
                     ? (transportSession?.unifiedGraphFallbackReason
                         ?? nChannelTransportSession?.unifiedGraphFallbackReason
                         ?? binauralHeadphoneTransportSession?.unifiedGraphFallbackReason)
-                    : nil
+                    : nil,
+                stereoFinalReading: stereoFinalReading
             )
         )
     }
