@@ -7,7 +7,7 @@
 - Agents in `.claude/agents/`: slice-builder (Sonnet, builds one slice in a fresh context),
   realtime-reviewer (Sonnet), and code-scout, build-test-runner, plan-tracker, pr-writer (Haiku).
 
-**Current focus:** E6 slice S8 closed (configuration-matrix tests, branch e6/engine-integration-tests, low-risk); next S9 (remove the three-path restrictions); follow-up: gain-reduction, true-peak and over-range readbacks need a core ABI addition.
+**Current focus:** E6 slice S8 closed (configuration-matrix tests, branch e6/engine-integration-tests, low-risk); next S8c (gain-reduction, true-peak and over-range readbacks via a core ABI addition), then S9 (remove the three-path restrictions).
 <!-- plan-tracker keeps the line above current -->
 
 @AGENTS.md
