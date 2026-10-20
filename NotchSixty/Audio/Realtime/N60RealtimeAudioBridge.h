@@ -135,8 +135,10 @@ void N60RealtimeAudioBridgeDestroy(N60RealtimeAudioBridge * _Nonnull bridge);
 // Blocks larger than maxFrames are rendered in chunks. maxFrames and sampleRate are fixed by the
 // first attach (a later attach with a larger maxFrames or another rate is refused until Release),
 // and a different graph object is accepted only after the previous hand-over has ended. The
-// crossfade assumes kernel and graph are time-aligned within the fade; any latency difference is
-// not compensated. Route changes to the AU rack or same-device branch happen with IO stopped. The AU rack and same-device branches
+// crossfade time-aligns the two paths (E6 S8b2c): the callback reads the kernel's latency from its
+// snapshot and the graph's from SetUnifiedGraphLatency, and delays the lower-latency side by the
+// difference (slewed with the mix, clamped to the warm-up length), so the fade mixes aligned
+// signals. Route changes to the AU rack or same-device branch happen with IO stopped. The AU rack and same-device branches
 // always use the kernel. The bridge never owns or frees the graph; a detached graph pointer
 // stays referenced until ReleaseUnifiedGraph or N60RealtimeAudioBridgeDestroy, so the owner
 // releases the graph only after one of those (with IO stopped). sampleRate sets the warm-up and fade lengths.
@@ -147,6 +149,15 @@ bool N60RealtimeAudioBridgeSetUnifiedGraph(
     uint32_t maxFrames,
     double sampleRate
 );
+// Control thread. Publishes the graph's path latency (n60_graph_latency_frames) for the fade
+// alignment. Call before the attach and after every graph update. The applied alignment is
+// capped at a quarter of the 20 ms fade (and by the warm-up and a 16384-frame ring).
+void N60RealtimeAudioBridgeSetUnifiedGraphLatency(
+    N60RealtimeAudioBridge * _Nonnull bridge,
+    uint32_t latencyFrames
+);
+// Test/diagnostic accessor: graph minus kernel latency (frames) latched for the most recent fade.
+int32_t N60RealtimeAudioBridgeUnifiedGraphAlignmentFrames(const N60RealtimeAudioBridge * _Nonnull bridge);
 // Drops the graph reference and returns the callback to kernel-only. IO must be stopped.
 void N60RealtimeAudioBridgeReleaseUnifiedGraph(N60RealtimeAudioBridge * _Nonnull bridge);
 // True while a graph is attached and wanted (a detach in progress reads false).

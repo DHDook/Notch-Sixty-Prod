@@ -1134,6 +1134,14 @@ final class CoreAudioTransportSession {
                 unifiedGraphHost = try UnifiedGraphHost(spec: spec)
             }
             guard let host = unifiedGraphHost, let raw = host.rawGraph else { return }
+            // E6 S8b2c: the bridge aligns the kernel and graph paths across the hand-over fade
+            // by the difference between this and the kernel snapshot's latency.
+            // The integer inter-channel taps are applied per lane by both paths and are not part
+            // of the kernel's reported latency, so they are removed from the graph's readback (the
+            // eligible stereo setup has one tap pair, so the larger of the two is the lane offset).
+            // Published before the attach so the callback never fades with a stale value.
+            let taps = configuration.lanes.map(\.interChannelTapFrames).max() ?? 0
+            N60RealtimeAudioBridgeSetUnifiedGraphLatency(bridge, host.latencyFrames &- min(host.latencyFrames, taps))
             if !N60RealtimeAudioBridgeUnifiedGraphActive(bridge) {
                 guard N60RealtimeAudioBridgeSetUnifiedGraph(bridge, raw, spec.maxBlockFrames, spec.sampleRate) else {
                     unifiedGraphFallbackReason = .attachFailed

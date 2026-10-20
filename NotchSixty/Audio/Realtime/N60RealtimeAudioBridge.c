@@ -73,6 +73,12 @@ typedef struct {
 } N60SpeakerBusSplitterRuntime;
 
 
+// E6 S8b2c: capacity of each latency-alignment delay ring (power of two). The applied
+// alignment is clamped to the warm-up length (rings must be full of live data when a fade
+// starts) and to N60_ALIGN_RING_FRAMES - 2 (linear-interpolated read).
+#define N60_ALIGN_RING_FRAMES 16384u
+#define N60_ALIGN_RING_MASK (N60_ALIGN_RING_FRAMES - 1u)
+
 // E6 S8: an alternate render path through libn60core. The attachment is built and freed
 // on the control thread only; the audio callback loads the pointer (acquire) and calls
 // n60_graph_process on planar scratch whose lifetime the callback does not own.
@@ -90,6 +96,15 @@ typedef struct N60UnifiedGraphAttachment {
     _Atomic bool wantGraph;
     _Atomic uint32_t publishedMixBits;  // callback -> control, for diagnostics and tests
     float *scratch;       // 4 * maxFrames floats: planar in (2 lanes) then planar out (2 lanes)
+    // E6 S8b2c: latency alignment across the hand-over fade. Four delay rings of
+    // N60_ALIGN_RING_FRAMES (kernel L, kernel R, graph L, graph R), allocated with the scratch.
+    // The control thread publishes the graph's latency; the callback reads the kernel's from
+    // its own snapshot and slews a delay on the lower-latency side across the fade.
+    float *alignRing;
+    uint32_t lastKernelLatency;  // callback-owned: last kernel latency read from a snapshot
+    _Atomic int32_t publishedAlignFrames;  // callback -> control: latched graph - kernel latency
+    uint32_t alignWrite;       // callback-owned ring write index
+    int32_t alignLatched;      // callback-owned: graph - kernel latency used for the current fade
     uint32_t maxFrames;
     uint32_t warmFrames;
     uint32_t fadeFrames;
@@ -111,6 +126,7 @@ typedef struct N60UnifiedGraphPlan {
 
 struct N60RealtimeAudioBridge {
     _Atomic(N60UnifiedGraphAttachment *) unifiedGraph;
+    _Atomic uint32_t unifiedGraphLatency;  // control -> callback: attached graph's latency frames
     uint32_t capacityFrames;
     N60StereoFrame *frames;
     N60AdaptiveSRC *adaptiveSRC;
@@ -564,6 +580,7 @@ static void process_speaker_bus_splitter(
 
 static void free_unified_attachment(N60UnifiedGraphAttachment *attachment) {
     if (attachment == NULL) return;
+    free(attachment->alignRing);
     free(attachment->scratch);
     free(attachment);
 }
@@ -598,6 +615,12 @@ bool N60RealtimeAudioBridgeSetUnifiedGraph(
             free(attachment);
             return false;
         }
+        attachment->alignRing = calloc((size_t)N60_ALIGN_RING_FRAMES * 4u, sizeof(float));
+        if (attachment->alignRing == NULL) {
+            free(attachment->scratch);
+            free(attachment);
+            return false;
+        }
         attachment->maxFrames = maxFrames;
         attachment->warmFrames = warmFrames;
         attachment->fadeFrames = fadeFrames;
@@ -625,6 +648,23 @@ bool N60RealtimeAudioBridgeSetUnifiedGraph(
     return true;
 }
 
+void N60RealtimeAudioBridgeSetUnifiedGraphLatency(
+    N60RealtimeAudioBridge *bridge,
+    uint32_t latencyFrames
+) {
+    if (bridge == NULL) return;
+    atomic_store_explicit(&bridge->unifiedGraphLatency, latencyFrames, memory_order_relaxed);
+}
+
+int32_t N60RealtimeAudioBridgeUnifiedGraphAlignmentFrames(const N60RealtimeAudioBridge *bridge) {
+    if (bridge == NULL) return 0;
+    N60UnifiedGraphAttachment *attachment = atomic_load_explicit(
+        (_Atomic(N60UnifiedGraphAttachment *) *)&bridge->unifiedGraph, memory_order_acquire
+    );
+    if (attachment == NULL) return 0;
+    return atomic_load_explicit(&attachment->publishedAlignFrames, memory_order_relaxed);
+}
+
 void N60RealtimeAudioBridgeReleaseUnifiedGraph(N60RealtimeAudioBridge *bridge) {
     if (bridge == NULL) return;
     N60UnifiedGraphAttachment *attachment = atomic_load_explicit(
@@ -639,6 +679,11 @@ void N60RealtimeAudioBridgeReleaseUnifiedGraph(N60RealtimeAudioBridge *bridge) {
     attachment->graphCold = true;
     attachment->kernelCold = true;
     atomic_store_explicit(&attachment->publishedMixBits, 0u, memory_order_relaxed);
+    atomic_store_explicit(&bridge->unifiedGraphLatency, 0u, memory_order_relaxed);
+    memset(attachment->alignRing, 0, (size_t)N60_ALIGN_RING_FRAMES * 4u * sizeof(float));
+    attachment->lastKernelLatency = 0u;
+    atomic_store_explicit(&attachment->publishedAlignFrames, 0, memory_order_relaxed);
+    attachment->alignLatched = 0;
 }
 
 bool N60RealtimeAudioBridgeUnifiedGraphActive(const N60RealtimeAudioBridge *bridge) {
@@ -2463,6 +2508,43 @@ OSStatus N60OutputIOProc(
         float mix = graphRuns ? unified->mix : 0.0f;
         uint32_t graphWarmLeft = graphRuns ? unified->graphWarmLeft : 0u;
         uint32_t kernelWarmLeft = graphRuns ? unified->kernelWarmLeft : 0u;
+        // E6 S8b2c: graph minus kernel latency, latched while a fade is in progress so the
+        // slewed delay cannot jump. delta > 0: the kernel leads and is delayed by delta * mix;
+        // delta < 0: the graph leads and is delayed by -delta * (1 - mix). Either way the
+        // delayed side is at full delay when its weight reaches zero and undelayed when it is
+        // the only side audible, so no step is introduced at either end of the fade.
+        int32_t alignDelta = 0;
+        uint32_t alignWrite = 0u;
+        float *alignRing = NULL;
+        if (graphRuns) {
+            alignRing = unified->alignRing;
+            alignWrite = unified->alignWrite;
+            if (mix > 0.0f && mix < 1.0f) {
+                alignDelta = unified->alignLatched;
+            } else {
+                const int64_t graphLatency = (int64_t)atomic_load_explicit(
+                    &bridge->unifiedGraphLatency, memory_order_relaxed
+                );
+                // Without a snapshot this block, keep the last kernel latency seen.
+                if (renderContext.acquired && renderContext.snapshot != NULL) {
+                    unified->lastKernelLatency = renderContext.snapshot->latencyFrames;
+                }
+                const int64_t kernelLatency = (int64_t)unified->lastKernelLatency;
+                int64_t delta = graphLatency - kernelLatency;
+                // The delayed side's read position moves at (1 - delta/fadeFrames) frames per
+                // frame, so |delta| is capped at a quarter of the fade (at most 25% speed
+                // change on a side that is fading out); a larger difference is only partly
+                // compensated. The warm-up length and ring size cap it further.
+                int64_t limit = (int64_t)(unified->fadeFrames / 4u);
+                if (limit > (int64_t)unified->warmFrames) limit = (int64_t)unified->warmFrames;
+                if (limit > (int64_t)N60_ALIGN_RING_FRAMES - 2) limit = (int64_t)N60_ALIGN_RING_FRAMES - 2;
+                if (delta > limit) delta = limit;
+                if (delta < -limit) delta = -limit;
+                alignDelta = (int32_t)delta;
+                unified->alignLatched = alignDelta;
+                atomic_store_explicit(&unified->publishedAlignFrames, alignDelta, memory_order_relaxed);
+            }
+        }
         uint32_t graphReadPosition = ringReadIndex;
         uint32_t graphChunkStart = 0u;
         uint32_t graphChunkFrames = 0u;
@@ -2529,8 +2611,41 @@ OSStatus N60OutputIOProc(
             }
             if (graphRuns) {
                 const uint32_t offset = frameIndex - graphChunkStart;
-                const float graphLeft = graphOut[offset];
-                const float graphRight = graphOut[unified->maxFrames + offset];
+                float graphLeft = graphOut[offset];
+                float graphRight = graphOut[unified->maxFrames + offset];
+                if (kernelRuns) {
+                    // E6 S8b2c: record both sides, then read the leading side back through a
+                    // delay slewed with the mix (linear interpolation).
+                    float *kRingL = alignRing;
+                    float *kRingR = alignRing + N60_ALIGN_RING_FRAMES;
+                    float *gRingL = alignRing + 2u * N60_ALIGN_RING_FRAMES;
+                    float *gRingR = alignRing + 3u * N60_ALIGN_RING_FRAMES;
+                    kRingL[alignWrite] = kernelFrame.left;
+                    kRingR[alignWrite] = kernelFrame.right;
+                    gRingL[alignWrite] = graphLeft;
+                    gRingR[alignWrite] = graphRight;
+                    if (alignDelta != 0) {
+                        const bool delayKernel = alignDelta > 0;
+                        const float amount = (float)(delayKernel ? alignDelta : -alignDelta);
+                        const float delay = amount * (delayKernel ? mix : 1.0f - mix);
+                        const uint32_t whole = (uint32_t)delay;
+                        const float frac = delay - (float)whole;
+                        const uint32_t i0 = (alignWrite - whole) & N60_ALIGN_RING_MASK;
+                        const uint32_t i1 = (i0 - 1u) & N60_ALIGN_RING_MASK;
+                        float *ringL = delayKernel ? kRingL : gRingL;
+                        float *ringR = delayKernel ? kRingR : gRingR;
+                        const float dl = ringL[i0] + (ringL[i1] - ringL[i0]) * frac;
+                        const float dr = ringR[i0] + (ringR[i1] - ringR[i0]) * frac;
+                        if (delayKernel) {
+                            kernelFrame.left = dl;
+                            kernelFrame.right = dr;
+                        } else {
+                            graphLeft = dl;
+                            graphRight = dr;
+                        }
+                    }
+                    alignWrite = (alignWrite + 1u) & N60_ALIGN_RING_MASK;
+                }
                 if (kernelRuns) {
                     processed.left = kernelFrame.left + (graphLeft - kernelFrame.left) * mix;
                     processed.right = kernelFrame.right + (graphRight - kernelFrame.right) * mix;
@@ -2677,6 +2792,7 @@ OSStatus N60OutputIOProc(
             unified->mix = mix;
             unified->graphWarmLeft = graphWarmLeft;
             unified->kernelWarmLeft = kernelWarmLeft;
+            unified->alignWrite = alignWrite;
             uint32_t mixBits;
             memcpy(&mixBits, &mix, sizeof(mixBits));
             atomic_store_explicit(&unified->publishedMixBits, mixBits, memory_order_relaxed);
