@@ -125,6 +125,8 @@ parity suite, and live edits are click-free on hardware in stereo, 5.1 and binau
 - [ ] Give every lane the full stereo stage set: PEQ, M/S where paired, dynamic EQ, dynamics, FIR, delay, protection
 - [x] Represent stereo as a 2-channel layout and the binaural renderer as a stage, not a separate transport
 - [ ] Make parameter edits live with ramped coefficients; rebuild with a short fade only on topology changes
+- [ ] S8c `e6/dynamics-readbacks`: gain-reduction, true-peak and over-range readbacks through a core ABI addition
+- [ ] S8d `e6/translate-remaining-stereo`: move the kernel-fallback stereo stages (dynamic EQ, FIR/IR/convolution, mixed phase, crossover and bass management, denoiser, fractional delay, soft clipper, gain rider) to the graph
 - [ ] Remove the `unsupportedActiveDSP` and `immutableSemanticTransportActive` restrictions in `AudioIOEngine.swift`, and the idle-only headphone profile rule
 - [ ] Build a parity suite that renders the old stereo kernel and the new graph side by side
 - [ ] Retire `N60RenderKernel` once parity holds; keep it behind a flag for one release cycle
