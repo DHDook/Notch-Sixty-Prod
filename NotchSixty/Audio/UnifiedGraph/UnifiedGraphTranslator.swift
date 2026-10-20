@@ -42,6 +42,10 @@ enum UnifiedGraphTranslator {
             ]
         )
         configuration.inputGain = snapshot.inputGainLinear * snapshot.headroomGainLinear
+        guard let stages = stereoStages(snapshot: &snapshot, configuration: &configuration) else {
+            return nil
+        }
+        configuration.stereoStages = stages
         if snapshot.protection.limiterEnabled || snapshot.protection.truePeakGuardEnabled {
             let p = snapshot.protection
             let ceilingDB = 20.0 * log10(Double(max(p.limiterCeilingLinear, 1e-6)))
@@ -62,6 +66,58 @@ enum UnifiedGraphTranslator {
             )
         }
         return configuration
+    }
+
+    /// The kernel stages between the EQ and the output gain that the core reproduces. The
+    /// eligibility check has already accepted every parameter list read here; a failed read is
+    /// still treated as ineligible rather than approximated.
+    private static func stereoStages(
+        snapshot: inout N60DSPGraphSnapshot,
+        configuration: inout UnifiedGraphConfiguration
+    ) -> UnifiedGraphStereoStages? {
+        var stages = UnifiedGraphStereoStages()
+        stages.midSideEQ = snapshot.eqMidSideMode && !snapshot.eqBypassed
+        var ok = true
+        withUnsafePointer(to: &snapshot) { pointer in
+            let dynamics = pointer.pointee.dynamics
+            if dynamics.compressor.enabled {
+                var values = [Float](repeating: 0, count: 10)
+                if N60UnifiedGraphCompressorParams(pointer, &values) { stages.compressor = values } else { ok = false }
+            }
+            if dynamics.expander.enabled {
+                var values = [Float](repeating: 0, count: 6)
+                if N60UnifiedGraphExpanderParams(pointer, &values) { stages.expander = values } else { ok = false }
+            }
+            if dynamics.pauseGate.enabled {
+                var values = [Float](repeating: 0, count: 5)
+                if N60UnifiedGraphPauseGateParams(pointer, &values) { stages.pauseGate = values } else { ok = false }
+            }
+            if pointer.pointee.ambientCompensation.enabled {
+                var values = [Float](repeating: 0, count: 10)
+                if N60UnifiedGraphAmbientParams(pointer, &values) { stages.ambient = values } else { ok = false }
+            }
+            if pointer.pointee.symmetryBalance.enabled {
+                stages.symmetryPosition = Float(pointer.pointee.symmetryBalance.position)
+            }
+            if pointer.pointee.speakerCrossfeed.enabled {
+                stages.crossfeedAmount = pointer.pointee.speakerCrossfeed.amount
+            }
+            if pointer.pointee.crosstalkCancellation.enabled {
+                let c = pointer.pointee.crosstalkCancellation
+                stages.crosstalk = [Float(c.headShadowFrequencyHz), c.amount]
+            }
+            if pointer.pointee.interChannelDelay.enabled {
+                var frames: (UInt32, UInt32) = (0, 0)
+                let read = withUnsafeMutablePointer(to: &frames) { tuple in
+                    tuple.withMemoryRebound(to: UInt32.self, capacity: 2) { N60UnifiedGraphIntegerDelay(pointer, $0) }
+                }
+                if read {
+                    configuration.lanes[0].delayFrames = frames.0
+                    configuration.lanes[1].delayFrames = frames.1
+                } else { ok = false }
+            }
+        }
+        return ok ? stages : nil
     }
 
     /// A multichannel speaker layout with `programChannels` lanes and 0 to 8 sub lanes.

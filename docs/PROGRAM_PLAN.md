@@ -128,6 +128,8 @@ parity suite, and live edits are click-free on hardware in stereo, 5.1 and binau
 - [ ] Remove the `unsupportedActiveDSP` and `immutableSemanticTransportActive` restrictions in `AudioIOEngine.swift`, and the idle-only headphone profile rule
 - [ ] Build a parity suite that renders the old stereo kernel and the new graph side by side
 - [ ] Retire `N60RenderKernel` once parity holds; keep it behind a flag for one release cycle
+- [x] S8b2a `e6/engine-integration-3` built on branch (needs-owner, behind `e6.unified-graph`): graph reproduces M/S EQ, compressor, expander, ambient compensation, symmetry, crossfeed, crosstalk cancellation, integer inter-channel delay and pause gate; everything else keeps the kernel fallback
+- [ ] S8b2b (next): translate dynamic EQ, FIR/room/speaker IR, stereo crossover and bass management, denoiser, soft clipper and gain rider (or document keep-on-kernel); wire multichannel, layouts, 1 to 8 subs and binaural into the live N-channel session; metering and latency readbacks; compensate kernel/graph latency difference across the hand-over fade
 
 ### E7 384 kHz everywhere
 

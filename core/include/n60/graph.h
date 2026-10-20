@@ -73,7 +73,7 @@ typedef enum n60_stage_kind {
     N60_STAGE_BASS_MGMT = 17,     /* position 13. Multichannel bass management and crossover. */
     N60_STAGE_ROOM_FIR = 14,      /* position 14. Room-correction convolver (Program FIR rules). */
     N60_STAGE_SPEAKER_IR = 15,    /* position 15. Speaker IR convolver (Program FIR rules). */
-    N60_STAGE_AMBIENT = 18,       /* position 16. Ambient compensation: ramped level plus three peaking bands. */
+    N60_STAGE_AMBIENT = 18,       /* position 16. Ambient compensation: ramped level plus low-shelf, peaking and high-shelf bands. */
     N60_STAGE_CORE_DYNAMICS = 16, /* position 17. Post-EQ core dynamics (Compressor rules). */
     N60_STAGE_SYMMETRY = 20,      /* position 18. Pair stage: symmetry position gains. */
     N60_STAGE_CROSSFEED = 21,     /* position 19. Pair stage: speaker crossfeed. */
@@ -157,7 +157,7 @@ typedef enum n60_stage_kind {
  *  polarity: a flip passes through zero) or crossfades the section's coefficients (Hz, dB, Q). Per-sub delay is a
  *  DELAY stage on the sub lane (rank 24, after this stage).
  *  No added latency.
- * AMBIENT. params: [0] level dB (live, -60..24), then three peaking bands (Hz, dB, Q). paramCount 10.
+ * AMBIENT. params: [0] level dB (live, -60..24), then low-shelf, peaking and high-shelf bands (Hz, dB, Q). paramCount 10.
  * SYMMETRY. params: [0] position -1..1 (live). CROSSFEED. params: [0] amount 0..0.5 (live).
  * CROSSTALK. params: [0] shadow low-pass Hz 200..2000 (live), [1] amount 0..1 (live).
  * HEADPHONE (pair A, B). params: [0] headroom dB (-24..0), [1] crossfeed amount 0..1 (live), [2] angle 15..90 deg,

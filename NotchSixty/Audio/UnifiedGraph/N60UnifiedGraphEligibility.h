@@ -7,6 +7,7 @@
 // Pure function of the snapshot; no allocation; never called from the audio callback.
 
 #include <stdbool.h>
+#include <math.h>
 #include <stdint.h>
 
 #include "../Realtime/N60RenderKernel.h"
@@ -14,6 +15,9 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// Mirrors N60_GRAPH_MAX_DELAY_FRAMES in core/include/n60/graph.h without including it here.
+#define N60_GRAPH_MAX_DELAY_FRAMES_C 4194304u
 
 typedef enum {
     N60UnifiedGraphSupported = 0,
@@ -30,13 +34,177 @@ typedef enum {
     N60UnifiedGraphUnsupportedGain = 11,
 } N60UnifiedGraphUnsupportedReason;
 
+// ---- verified parameter recovery ---------------------------------------------------------
+// The kernel snapshot stores filter coefficients and smoothing poles, not the user's numbers.
+// Each function below recovers the numbers, rebuilds the kernel's own snapshot from them with
+// the kernel's own setter and accepts only a match (to float rounding), so a snapshot the core
+// cannot reproduce keeps the kernel path instead of being approximated.
+
+static inline bool N60UnifiedGraphClose(float a, float b) {
+    return fabsf(a - b) <= 1.0e-6f * fmaxf(1.0f, fmaxf(fabsf(a), fabsf(b)));
+}
+
+// Time constant in ms of a one-pole coefficient exp(-1 / (rate * ms / 1000)). The float pole
+// cannot pin the time down exactly at high rates, so a round value (0.01 ms grid) that yields
+// the very same float pole wins over the raw inverse.
+static inline bool N60UnifiedGraphMsFromPole(double rate, float pole, float * _Nonnull ms) {
+    if (!(pole > 0.0f && pole < 1.0f)) return false;
+    const double value = -1000.0 / (rate * log((double)pole));
+    if (!isfinite(value)) return false;
+    const double snapped = floor(value * 100.0 + 0.5) / 100.0;
+    if (snapped >= 0.01 && (float)exp(-1.0 / (rate * snapped / 1000.0)) == pole) {
+        *ms = (float)snapped;
+    } else {
+        *ms = (float)value;
+    }
+    return true;
+}
+
+static inline bool N60UnifiedGraphCoefficientsClose(N60BiquadCoefficients a, N60BiquadCoefficients b) {
+    return N60UnifiedGraphClose(a.b0, b.b0) && N60UnifiedGraphClose(a.b1, b.b1)
+        && N60UnifiedGraphClose(a.b2, b.b2) && N60UnifiedGraphClose(a.a1, b.a1)
+        && N60UnifiedGraphClose(a.a2, b.a2);
+}
+
+// Sidechain high-pass back to Hz; 0 when it is the identity. The float coefficients cannot be
+// inverted precisely at high rates, so the kernel's own design is searched on a 0.5 Hz grid and
+// only an exact match is accepted.
+static inline bool N60UnifiedGraphSidechainHz(double rate, N60BiquadCoefficients c, float * _Nonnull hz) {
+    if (c.b0 == 1.0f && c.b1 == 0.0f && c.b2 == 0.0f && c.a1 == 0.0f && c.a2 == 0.0f) {
+        *hz = 0.0f;
+        return true;
+    }
+    for (int k = 1; k <= 600; ++k) {
+        const double f = 0.5 * (double)k;
+        if (f >= rate * 0.45) break;
+        N60BiquadCoefficients t;
+        if (!N60BiquadDesign(N60BiquadFilterTypeHighPass, rate, f, 0.0, 0.7071067811865476, &t)) continue;
+        if (t.b0 == c.b0 && t.b1 == c.b1 && t.b2 == c.b2 && t.a1 == c.a1 && t.a2 == c.a2) {
+            *hz = (float)f;
+            return true;
+        }
+    }
+    return false;
+}
+
+// Compressor, in core parameter order: threshold dB, ratio, knee dB, attack ms, release ms,
+// makeup dB, topology, program-dependent release, sidechain Hz, linked.
+static inline bool N60UnifiedGraphCompressorParams(
+    const N60DSPGraphSnapshot * _Nonnull s, float out[_Nonnull 10]
+) {
+    const N60CompressorSnapshot *c = &s->dynamics.compressor;
+    const double rate = s->sampleRate;
+    float attack = 0.0f, release = 0.0f, hz = 0.0f;
+    if (!N60UnifiedGraphMsFromPole(rate, c->attackCoefficient, &attack)
+        || !N60UnifiedGraphMsFromPole(rate, c->releaseCoefficient, &release)
+        || !N60UnifiedGraphSidechainHz(rate, c->sidechainHighPass, &hz)) return false;
+    N60DynamicsSnapshot rebuilt = {0};
+    if (!N60DynamicsSnapshotSetCompressorAdvanced(
+            &rebuilt, rate, true, c->thresholdDB, c->ratio, c->kneeWidthDB, attack, release,
+            c->makeupGainDB, c->topology, c->programDependentRelease, hz)) return false;
+    const N60CompressorSnapshot *r = &rebuilt.compressor;
+    if (!N60UnifiedGraphClose(r->attackCoefficient, c->attackCoefficient)
+        || !N60UnifiedGraphClose(r->releaseCoefficient, c->releaseCoefficient)
+        || !N60UnifiedGraphClose(r->releaseFastCoefficient, c->releaseFastCoefficient)
+        || !N60UnifiedGraphClose(r->releaseSlowCoefficient, c->releaseSlowCoefficient)
+        || !N60UnifiedGraphCoefficientsClose(r->sidechainHighPass, c->sidechainHighPass)) return false;
+    out[0] = c->thresholdDB; out[1] = c->ratio; out[2] = c->kneeWidthDB;
+    out[3] = attack; out[4] = release; out[5] = c->makeupGainDB;
+    out[6] = (float)c->topology; out[7] = c->programDependentRelease ? 1.0f : 0.0f;
+    out[8] = hz; out[9] = 1.0f;
+    return true;
+}
+
+// Expander: threshold dB, ratio, range dB, attack ms, release ms, linked.
+static inline bool N60UnifiedGraphExpanderParams(
+    const N60DSPGraphSnapshot * _Nonnull s, float out[_Nonnull 6]
+) {
+    const N60ExpanderSnapshot *e = &s->dynamics.expander;
+    const double rate = s->sampleRate;
+    float attack = 0.0f, release = 0.0f;
+    if (!N60UnifiedGraphMsFromPole(rate, e->attackCoefficient, &attack)
+        || !N60UnifiedGraphMsFromPole(rate, e->releaseCoefficient, &release)) return false;
+    N60DynamicsSnapshot rebuilt = {0};
+    if (!N60DynamicsSnapshotSetExpander(&rebuilt, rate, true, e->thresholdDB, e->ratio, e->rangeDB,
+                                        attack, release)) return false;
+    if (!N60UnifiedGraphClose(rebuilt.expander.attackCoefficient, e->attackCoefficient)
+        || !N60UnifiedGraphClose(rebuilt.expander.releaseCoefficient, e->releaseCoefficient)) return false;
+    out[0] = e->thresholdDB; out[1] = e->ratio; out[2] = e->rangeDB;
+    out[3] = attack; out[4] = release; out[5] = 1.0f;
+    return true;
+}
+
+// Pause gate: threshold dBFS, hysteresis dB, hold ms, fade-out ms, fade-in ms. The kernel gates
+// after its output gain but before its master gain; the core folds the master gain into the
+// output gain, so the threshold moves with it (the gate sees the same level relative to it).
+static inline bool N60UnifiedGraphPauseGateParams(
+    const N60DSPGraphSnapshot * _Nonnull s, float out[_Nonnull 5]
+) {
+    const N60PauseGateSnapshot *g = &s->dynamics.pauseGate;
+    const double rate = s->sampleRate;
+    float fadeOut = 0.0f, fadeIn = 0.0f;
+    if (!N60UnifiedGraphMsFromPole(rate, g->fadeOutCoefficient, &fadeOut)
+        || !N60UnifiedGraphMsFromPole(rate, g->fadeInCoefficient, &fadeIn)) return false;
+    const float holdMs = (float)((double)g->holdFrames * 1000.0 / rate);
+    N60DynamicsSnapshot rebuilt = {0};
+    if (!N60DynamicsSnapshotSetPauseGate(&rebuilt, rate, true, g->thresholdDBFS, holdMs, fadeOut,
+                                         fadeIn, g->hysteresisDB)) return false;
+    const N60PauseGateSnapshot *r = &rebuilt.pauseGate;
+    if (r->holdFrames != g->holdFrames
+        || !N60UnifiedGraphClose(r->fadeOutCoefficient, g->fadeOutCoefficient)
+        || !N60UnifiedGraphClose(r->fadeInCoefficient, g->fadeInCoefficient)
+        || !N60UnifiedGraphClose(r->detectorAttackCoefficient, g->detectorAttackCoefficient)
+        || !N60UnifiedGraphClose(r->detectorReleaseCoefficient, g->detectorReleaseCoefficient)) return false;
+    const float threshold = g->thresholdDBFS + 20.0f * log10f(s->masterGainLinear);
+    if (!(threshold >= -120.0f && threshold <= -20.0f)) return false;
+    out[0] = threshold; out[1] = g->hysteresisDB; out[2] = holdMs; out[3] = fadeOut; out[4] = fadeIn;
+    return true;
+}
+
+// Ambient compensation: level dB, then (Hz, dB, Q) for the low shelf, peak and high shelf. A band
+// the kernel leaves off is a 0 dB band here, which the core designs as an identity.
+static inline bool N60UnifiedGraphAmbientParams(
+    const N60DSPGraphSnapshot * _Nonnull s, float out[_Nonnull 10]
+) {
+    const N60AmbientCompensationSnapshot *a = &s->ambientCompensation;
+    if (!(a->levelGainLinear >= 0.001f && a->levelGainLinear <= 2.0f)) return false;
+    static const N60BiquadFilterType types[3] = {
+        N60BiquadFilterTypeLowShelf, N60BiquadFilterTypePeaking, N60BiquadFilterTypeHighShelf
+    };
+    out[0] = 20.0f * log10f(a->levelGainLinear);
+    for (uint32_t k = 0; k < 3; ++k) {
+        const N60BiquadBandSnapshot *b = &a->bands[k];
+        if (b->type != types[k]) return false;
+        const bool on = b->enabled;
+        if (!(b->frequencyHz > 0.0 && b->frequencyHz < s->sampleRate * 0.5 && b->q > 0.0)) return false;
+        if (on && !(b->gainDB >= -24.0 && b->gainDB <= 24.0)) return false;
+        out[1 + 3 * k] = (float)b->frequencyHz;
+        out[2 + 3 * k] = on ? (float)b->gainDB : 0.0f;
+        out[3 + 3 * k] = (float)b->q;
+    }
+    return true;
+}
+
+// Inter-channel delay as whole frames per lane, or false for the fractional (Thiran) case.
+static inline bool N60UnifiedGraphIntegerDelay(
+    const N60DSPGraphSnapshot * _Nonnull s, uint32_t frames[_Nonnull 2]
+) {
+    const N60InterChannelDelaySnapshot *d = &s->interChannelDelay;
+    if (d->left.order != 0u || d->right.order != 0u) return false;
+    if (d->left.integerFrames > N60_GRAPH_MAX_DELAY_FRAMES_C
+        || d->right.integerFrames > N60_GRAPH_MAX_DELAY_FRAMES_C) return false;
+    frames[0] = d->left.integerFrames;
+    frames[1] = d->right.integerFrames;
+    return true;
+}
+
 static inline N60UnifiedGraphUnsupportedReason N60UnifiedGraphSnapshotUnsupportedReason(
     const N60DSPGraphSnapshot * _Nonnull s
 ) {
     if (s->bypassed || s->auditionMode != N60AuditionModeProcessed) {
         return N60UnifiedGraphUnsupportedBypassOrAudition;
     }
-    if (s->eqMidSideMode || s->mixedPhaseEnabled) {
+    if (s->mixedPhaseEnabled) {
         return N60UnifiedGraphUnsupportedMidSideOrMixedPhase;
     }
     if (s->eqBandCount > N60_MAX_EQ_RENDER_SLOTS) return N60UnifiedGraphUnsupportedEQSection;
@@ -54,12 +222,26 @@ static inline N60UnifiedGraphUnsupportedReason N60UnifiedGraphSnapshotUnsupporte
         if (mask & N60_EQ_CHANNEL_RIGHT) perLane[1] += 1u;
     }
     if (perLane[0] > 16u || perLane[1] > 16u) return N60UnifiedGraphUnsupportedEQSection;
-    if (s->symmetryBalance.enabled || s->speakerCrossfeed.enabled
-            || s->crosstalkCancellation.enabled) {
+    if (s->symmetryBalance.enabled
+            && !(s->symmetryBalance.position >= -1.0 && s->symmetryBalance.position <= 1.0)) {
+        return N60UnifiedGraphUnsupportedSpatial;
+    }
+    if (s->speakerCrossfeed.enabled
+            && !(s->speakerCrossfeed.amount >= 0.0f && s->speakerCrossfeed.amount <= 0.5f)) {
+        return N60UnifiedGraphUnsupportedSpatial;
+    }
+    if (s->crosstalkCancellation.enabled
+            && !(s->crosstalkCancellation.amount >= 0.0f && s->crosstalkCancellation.amount <= 1.0f
+                 && s->crosstalkCancellation.headShadowFrequencyHz >= 200.0
+                 && s->crosstalkCancellation.headShadowFrequencyHz <= 2000.0
+                 && s->crosstalkCancellation.headShadowFrequencyHz < s->sampleRate * 0.5)) {
         return N60UnifiedGraphUnsupportedSpatial;
     }
     if (s->crossover.enabled) return N60UnifiedGraphUnsupportedCrossover;
-    if (s->interChannelDelay.enabled) return N60UnifiedGraphUnsupportedDelay;
+    if (s->interChannelDelay.enabled) {
+        uint32_t delayFrames[2];
+        if (!N60UnifiedGraphIntegerDelay(s, delayFrames)) return N60UnifiedGraphUnsupportedDelay;
+    }
     const N60DynamicsSnapshot *d = &s->dynamics;
     if (d->stereoMode.mode != N60StereoModeStereo || d->stereoWidener.enabled
             || d->dcOffsetFilter.enabled || d->infrasonicFilter.enabled
@@ -67,9 +249,22 @@ static inline N60UnifiedGraphUnsupportedReason N60UnifiedGraphSnapshotUnsupporte
             || d->spectralDenoiser.enabled || d->loudnessMatch.enabled
             || d->loudnessContour.enabled || d->dialogueLeveler.enabled
             || d->dynamicEQ.enabled || d->deHarsh.enabled || d->deEsser.enabled
-            || d->multibandCompressor.enabled || d->compressor.enabled
-            || d->expander.enabled || d->pauseGate.enabled) {
+            || d->multibandCompressor.enabled) {
         return N60UnifiedGraphUnsupportedDynamics;
+    }
+    float scratch[10];
+    if (d->compressor.enabled && !N60UnifiedGraphCompressorParams(s, scratch)) {
+        return N60UnifiedGraphUnsupportedDynamics;
+    }
+    if (d->expander.enabled && !N60UnifiedGraphExpanderParams(s, scratch)) {
+        return N60UnifiedGraphUnsupportedDynamics;
+    }
+    if (d->pauseGate.enabled && !N60UnifiedGraphPauseGateParams(s, scratch)) {
+        return N60UnifiedGraphUnsupportedDynamics;
+    }
+    // The kernel runs ambient before its dynamics, the core after the compressor and expander.
+    if (s->ambientCompensation.enabled && (d->compressor.enabled || d->expander.enabled)) {
+        return N60UnifiedGraphUnsupportedAmbientOrANC;
     }
     if (s->protection.softClipperEnabled || s->protection.gainRiderEnabled) {
         return N60UnifiedGraphUnsupportedProtection;
@@ -77,7 +272,8 @@ static inline N60UnifiedGraphUnsupportedReason N60UnifiedGraphSnapshotUnsupporte
     if (s->convolution.enabled || s->roomCorrection.enabled || s->speakerIR.enabled) {
         return N60UnifiedGraphUnsupportedConvolution;
     }
-    if (s->ambientCompensation.enabled || s->activeQuietZone.enabled) {
+    if (s->activeQuietZone.enabled) return N60UnifiedGraphUnsupportedAmbientOrANC;
+    if (s->ambientCompensation.enabled && !N60UnifiedGraphAmbientParams(s, scratch)) {
         return N60UnifiedGraphUnsupportedAmbientOrANC;
     }
     const float gains[7] = {

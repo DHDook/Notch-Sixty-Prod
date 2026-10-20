@@ -15,7 +15,26 @@ struct UnifiedGraphLane: Equatable, Sendable {
     /// Linear gain applied after bass management (output, balance, master).
     var outputGain: Float = 1
     var delayMilliseconds: Double = 0
+    /// Whole frames of delay added to `delayMilliseconds` (the kernel's integer inter-channel taps).
+    var delayFrames: UInt32 = 0
     var eq: [UnifiedGraphPEQSection] = []
+}
+
+/// Stereo-only stages the kernel runs between the EQ and the output gain, as raw core
+/// parameter lists (see `n60/graph.h`). Every list was verified against the kernel's own
+/// snapshot setters by `N60UnifiedGraphEligibility.h` before it gets here.
+struct UnifiedGraphStereoStages: Equatable, Sendable {
+    /// Mid/Side EQ: the EQ sections run on (mid, side) instead of (left, right).
+    var midSideEQ = false
+    var compressor: [Float]?
+    var expander: [Float]?
+    var ambient: [Float]?
+    var symmetryPosition: Float?
+    var crossfeedAmount: Float?
+    var crosstalk: [Float]?
+    var pauseGate: [Float]?
+
+    var isEmpty: Bool { self == UnifiedGraphStereoStages() }
 }
 
 struct UnifiedGraphSubwoofer: Equatable, Sendable {
@@ -56,6 +75,8 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
     var inputGain: Float = 1
     var bassManagement: UnifiedGraphBassManagement?
     var protection: UnifiedGraphProtection?
+    /// Two-lane configurations only.
+    var stereoStages = UnifiedGraphStereoStages()
 
     var subwooferCount: Int { bassManagement?.subwoofers.count ?? 0 }
     var channelCount: Int { lanes.count + subwooferCount }
@@ -75,6 +96,15 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
             throw UnifiedGraphError.invalidConfiguration("input gain")
         }
         let all = N60_LANE_ALL
+        let stereo = stereoStages
+        if !stereo.isEmpty, programLanes != 2 {
+            throw UnifiedGraphError.unsupportedConfiguration("stereo stages need two lanes")
+        }
+        if stereo.ambient != nil, stereo.compressor != nil || stereo.expander != nil {
+            // The kernel runs ambient before its dynamics; the core runs them the other way round.
+            throw UnifiedGraphError.unsupportedConfiguration("ambient with compressor or expander")
+        }
+        let programMask: UInt64 = (UInt64(1) << UInt64(programLanes)) - 1
         var stages: [UnifiedGraphStageSpec] = []
         func add(_ kind: n60_stage_kind, _ id: UInt32, lane: UInt32 = 0, mask: UInt64 = 0,
                  capacity: UInt32 = 0, params: [Float] = []) {
@@ -94,9 +124,24 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
             add(N60_STAGE_GAIN, Self.preGainStageBase + UInt32(index), lane: UInt32(index),
                 params: [lane.preGain])
         }
+        let msActive = stereo.midSideEQ && lanes.contains(where: { !$0.eq.isEmpty })
+        if msActive {
+            stages.append(UnifiedGraphStageSpec(
+                kind: N60_STAGE_MS_ENCODE.rawValue, stageId: N60_LSTAGE_MS_ENCODE, laneA: 0, laneB: 1))
+        }
         for (index, lane) in lanes.enumerated() where !lane.eq.isEmpty {
             add(N60_STAGE_PEQ, N60_LSTAGE_PEQ_LANE + UInt32(index), lane: UInt32(index),
                 params: try Self.peqParameters(lane.eq))
+        }
+        if msActive {
+            stages.append(UnifiedGraphStageSpec(
+                kind: N60_STAGE_MS_DECODE.rawValue, stageId: N60_LSTAGE_MS_DECODE, laneA: 0, laneB: 1))
+        }
+        if let params = stereo.compressor {
+            add(N60_STAGE_COMPRESSOR, Self.compressorStageId, mask: programMask, params: params)
+        }
+        if let params = stereo.expander {
+            add(N60_STAGE_EXPANDER, Self.expanderStageId, mask: programMask, params: params)
         }
         add(N60_STAGE_METER_OUT, N60_LSTAGE_METER_OUT, lane: all)
 
@@ -107,12 +152,34 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
             add(N60_STAGE_BASS_MGMT, Self.bassStageId, mask: mainMask,
                 params: try Self.bassParameters(bass, firstSubLane: programLanes))
         }
+        if let params = stereo.ambient {
+            add(N60_STAGE_AMBIENT, Self.ambientStageId, mask: programMask, params: params)
+        }
+        if let position = stereo.symmetryPosition {
+            stages.append(UnifiedGraphStageSpec(
+                kind: N60_STAGE_SYMMETRY.rawValue, stageId: Self.symmetryStageId, laneA: 0, laneB: 1,
+                params: [position]))
+        }
+        if let amount = stereo.crossfeedAmount {
+            stages.append(UnifiedGraphStageSpec(
+                kind: N60_STAGE_CROSSFEED.rawValue, stageId: Self.crossfeedStageId, laneA: 0, laneB: 1,
+                params: [amount]))
+        }
+        if let params = stereo.crosstalk {
+            stages.append(UnifiedGraphStageSpec(
+                kind: N60_STAGE_CROSSTALK.rawValue, stageId: Self.crosstalkStageId, laneA: 0, laneB: 1,
+                params: params))
+        }
         for (index, lane) in lanes.enumerated() {
             add(N60_STAGE_OUTPUT_GAIN, N60_LSTAGE_OUTPUT_GAIN + UInt32(index), lane: UInt32(index),
                 params: [lane.outputGain])
         }
+        if let params = stereo.pauseGate {
+            add(N60_STAGE_PAUSE_GATE, Self.pauseGateStageId, mask: programMask, params: params)
+        }
         for (index, lane) in lanes.enumerated() {
-            if let frames = try Self.delayFrames(lane.delayMilliseconds, sampleRate: sampleRate) {
+            if let frames = try Self.delayFrames(lane.delayMilliseconds, extraFrames: lane.delayFrames,
+                                                 sampleRate: sampleRate) {
                 add(N60_STAGE_DELAY, Self.delayStageBase + UInt32(index), lane: UInt32(index),
                     capacity: frames, params: [Float(frames)])
             }
@@ -145,12 +212,21 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
     static let preGainStageBase: UInt32 = 400
     static let delayStageBase: UInt32 = 500
     static let bassStageId: UInt32 = 90
+    static let compressorStageId: UInt32 = 600
+    static let expanderStageId: UInt32 = 601
+    static let ambientStageId: UInt32 = 602
+    static let symmetryStageId: UInt32 = 603
+    static let crossfeedStageId: UInt32 = 604
+    static let crosstalkStageId: UInt32 = 605
+    static let pauseGateStageId: UInt32 = 606
 
-    private static func delayFrames(_ milliseconds: Double, sampleRate: Double) throws -> UInt32? {
+    private static func delayFrames(
+        _ milliseconds: Double, extraFrames: UInt32 = 0, sampleRate: Double
+    ) throws -> UInt32? {
         guard milliseconds.isFinite, milliseconds >= 0 else {
             throw UnifiedGraphError.invalidConfiguration("delay")
         }
-        let frames = (milliseconds * 0.001 * sampleRate).rounded()
+        let frames = (milliseconds * 0.001 * sampleRate).rounded() + Double(extraFrames)
         guard frames <= Double(N60_GRAPH_MAX_DELAY_FRAMES) else {
             throw UnifiedGraphError.invalidConfiguration("delay")
         }

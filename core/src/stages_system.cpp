@@ -592,7 +592,7 @@ void systemInit(SnapHeader *h, const StageRec &r) {
     switch (r.kind) {
         case N60_STAGE_AMBIENT: {
             AmbShared *s = reinterpret_cast<AmbShared *>(sh);
-            for (uint32_t k = 0; k < 3; ++k) designInto(0, rate, p[1 + 3 * k], p[2 + 3 * k], p[3 + 3 * k], s->coef[k]);
+            for (uint32_t k = 0; k < 3; ++k) designInto(k == 0 ? 1u : (k == 2 ? 2u : 0u), rate, p[1 + 3 * k], p[2 + 3 * k], p[3 + 3 * k], s->coef[k]);
             for (uint32_t l = 0; l < r.laneCount; ++l) {
                 AmbLane *a = reinterpret_cast<AmbLane *>(laneState(h, r, l));
                 rampInit(a->g, static_cast<float>(db2lin(p[0])));

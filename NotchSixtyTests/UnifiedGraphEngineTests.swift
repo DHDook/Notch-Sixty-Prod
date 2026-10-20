@@ -81,7 +81,7 @@ final class UnifiedGraphEngineTests: XCTestCase {
 
     func testIneligibleSnapshotsKeepTheKernelPath() {
         var snapshot = N60DSPGraphSnapshotMakeUnity(48_000)
-        snapshot.speakerCrossfeed.enabled = true
+        snapshot.crossover.enabled = true
         XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &snapshot, sampleRate: 48_000))
         snapshot = N60DSPGraphSnapshotMakeUnity(48_000)
         snapshot.convolution.enabled = true
@@ -342,5 +342,202 @@ final class UnifiedGraphEngineTests: XCTestCase {
             XCTAssertEqual(da.output, db.output)
         }
         XCTAssertEqual(da.output.map(abs).max() ?? 0, 0.2, accuracy: 0.01)
+    }
+}
+
+
+/// E6 S8b2a: each newly eligible kernel stage renders through libn60core the way the kernel
+/// renders it, at every standard rate. The kernel is the reference: the same snapshot goes to
+/// a real `N60RenderKernel` and to the translated graph, and the settled output is compared.
+final class UnifiedGraphStageParityTests: XCTestCase {
+    private static let rates: [Double] = [44_100, 48_000, 88_200, 96_000, 176_400, 192_000, 352_800, 384_000]
+
+    private func tone(_ hz: Double, rate: Double, frames: Int, amplitude: Float) -> [Float] {
+        (0..<frames).map { Float(Double(amplitude) * sin(2.0 * .pi * hz * Double($0) / rate)) }
+    }
+
+    /// Two different program signals so a channel mix-up cannot pass.
+    private func stimulus(rate: Double, amplitude: Float = 0.25) -> [[Float]] {
+        let frames = Int(rate * 0.4) / 512 * 512
+        let left = zip(tone(1_000, rate: rate, frames: frames, amplitude: amplitude),
+                       tone(310, rate: rate, frames: frames, amplitude: amplitude * 0.5)).map { $0 + $1 }
+        let right = tone(1_700, rate: rate, frames: frames, amplitude: amplitude * 0.8)
+        return [left, right]
+    }
+
+    private func kernelRender(_ snapshot: N60DSPGraphSnapshot, _ input: [[Float]]) throws -> [[Float]] {
+        let kernel = try XCTUnwrap(N60RenderKernelCreate())
+        defer { N60RenderKernelDestroy(kernel) }
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, snapshot))
+        var left = [Float](repeating: 0, count: input[0].count)
+        var right = left
+        for i in 0..<left.count {
+            N60RenderKernelProcessStereoFrame(kernel, input[0][i], input[1][i], &left[i], &right[i])
+        }
+        return [left, right]
+    }
+
+    private func graphRender(_ snapshot: N60DSPGraphSnapshot, _ input: [[Float]], rate: Double) throws -> [[Float]] {
+        var snapshot = snapshot
+        let configuration = try XCTUnwrap(
+            UnifiedGraphTranslator.stereoConfiguration(snapshot: &snapshot, sampleRate: rate),
+            "snapshot should be eligible at \(rate)"
+        )
+        let host = try UnifiedGraphHost(spec: try configuration.makeSpec())
+        var out: [[Float]] = [[], []]
+        var position = 0
+        while position + 512 <= input[0].count {
+            let chunk = input.map { Array($0[position..<position + 512]) }
+            let rendered = try host.processOffline(input: chunk, frames: 512)
+            out[0] += rendered[0]
+            out[1] += rendered[1]
+            position += 512
+        }
+        return out
+    }
+
+    private func rms(_ x: ArraySlice<Float>) -> Double {
+        sqrt(x.reduce(0.0) { $0 + Double($1) * Double($1) } / Double(max(x.count, 1)))
+    }
+
+    /// Final quarter: sample-wise difference (linear stages) or RMS ratio (dynamics).
+    private func assertParity(
+        _ snapshot: N60DSPGraphSnapshot, rate: Double, sampleWise: Bool = true,
+        amplitude: Float = 0.25, tolerance: Double = 0.01, _ label: String
+    ) throws {
+        let input = stimulus(rate: rate, amplitude: amplitude)
+        let reference = try kernelRender(snapshot, input)
+        let candidate = try graphRender(snapshot, input, rate: rate)
+        let start = input[0].count * 3 / 4
+        for lane in 0..<2 {
+            let ref = reference[lane][start...]
+            let got = candidate[lane][start...]
+            if sampleWise {
+                var worst: Float = 0
+                for (a, b) in zip(ref, got) { worst = max(worst, abs(a - b)) }
+                XCTAssertLessThan(Double(worst), tolerance * max(rms(ref) * 4, 0.05), "\(label) lane \(lane) rate \(rate)")
+            } else {
+                let expected = rms(ref)
+                XCTAssertEqual(rms(got), expected, accuracy: max(expected * tolerance, 1e-5),
+                               "\(label) lane \(lane) rate \(rate)")
+            }
+        }
+    }
+
+    func testMidSideEQMatchesTheKernelAtEveryRate() throws {
+        for rate in Self.rates {
+            var s = N60DSPGraphSnapshotMakeUnity(rate)
+            XCTAssertTrue(N60DSPGraphSnapshotSetEQBandForChannels(
+                &s, 0, UInt8(N60_EQ_CHANNEL_LEFT), N60BiquadFilterTypePeaking, 1_000, 6, 1.0, true))
+            XCTAssertTrue(N60DSPGraphSnapshotSetEQBandForChannels(
+                &s, 1, UInt8(N60_EQ_CHANNEL_RIGHT), N60BiquadFilterTypeHighShelf, 4_000, -4, 0.707, true))
+            s.eqMidSideMode = true
+            try assertParity(s, rate: rate, "mid/side EQ")
+        }
+    }
+
+    func testSymmetryCrossfeedAndCrosstalkMatchTheKernelAtEveryRate() throws {
+        for rate in Self.rates {
+            var s = N60DSPGraphSnapshotMakeUnity(rate)
+            XCTAssertTrue(N60DSPGraphSnapshotSetSymmetryBalance(&s, 0.4, true))
+            try assertParity(s, rate: rate, "symmetry")
+            s = N60DSPGraphSnapshotMakeUnity(rate)
+            XCTAssertTrue(N60DSPGraphSnapshotSetSpeakerCrossfeed(&s, 0.3, true))
+            try assertParity(s, rate: rate, "crossfeed")
+            s = N60DSPGraphSnapshotMakeUnity(rate)
+            XCTAssertTrue(N60DSPGraphSnapshotSetCrosstalkCancellation(&s, 0.5, 700, true))
+            try assertParity(s, rate: rate, "crosstalk")
+        }
+    }
+
+    func testIntegerInterChannelDelayMatchesTheKernelAndFractionalKeepsTheKernel() throws {
+        for rate in Self.rates {
+            var s = N60DSPGraphSnapshotMakeUnity(rate)
+            // 48 frames: an exact integer at every rate, so the kernel bypasses its all-pass.
+            XCTAssertTrue(N60DSPGraphSnapshotSetInterChannelDelay(&s, 48.0 * 1000.0 / rate))
+            XCTAssertEqual(s.interChannelDelay.right.order, 0)
+            try assertParity(s, rate: rate, "integer delay")
+            XCTAssertTrue(N60DSPGraphSnapshotSetInterChannelDelay(&s, -(48.0 * 1000.0 / rate)))
+            try assertParity(s, rate: rate, "negative integer delay")
+        }
+        var s = N60DSPGraphSnapshotMakeUnity(48_000)
+        XCTAssertTrue(N60DSPGraphSnapshotSetInterChannelDelay(&s, 0.3))
+        XCTAssertGreaterThan(s.interChannelDelay.right.order, 0)
+        XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000))
+    }
+
+    func testAmbientCompensationMatchesTheKernelAtEveryRate() throws {
+        for rate in Self.rates {
+            var s = N60DSPGraphSnapshotMakeUnity(rate)
+            XCTAssertTrue(N60DSPGraphSnapshotSetAmbientCompensation(&s, 2, 1.5, 1, 0.5, true))
+            try assertParity(s, rate: rate, "ambient")
+        }
+    }
+
+    func testCompressorMatchesTheKernelAtEveryRate() throws {
+        for rate in Self.rates {
+            var s = N60DSPGraphSnapshotMakeUnity(rate)
+            XCTAssertTrue(N60DynamicsSnapshotSetCompressorAdvanced(
+                &s.dynamics, rate, true, -24, 3, 6, 8, 120, 2, N60CompressorTopologyFeedForward, false, 80))
+            try assertParity(s, rate: rate, sampleWise: false, tolerance: 0.05, "compressor")
+            XCTAssertTrue(N60DynamicsSnapshotSetCompressorAdvanced(
+                &s.dynamics, rate, true, -18, 2, 0, 3, 60, 0, N60CompressorTopologyFeedBack, true, 0))
+            try assertParity(s, rate: rate, sampleWise: false, tolerance: 0.05, "feedback compressor")
+        }
+    }
+
+    func testExpanderMatchesTheKernelAtEveryRate() throws {
+        for rate in Self.rates {
+            var s = N60DSPGraphSnapshotMakeUnity(rate)
+            XCTAssertTrue(N60DynamicsSnapshotSetExpander(&s.dynamics, rate, true, -26, 2, -30, 2, 80))
+            try assertParity(s, rate: rate, sampleWise: false, amplitude: 0.04, tolerance: 0.05, "expander")
+        }
+    }
+
+    func testPauseGateMatchesTheKernelAtEveryRate() throws {
+        for rate in Self.rates {
+            var s = N60DSPGraphSnapshotMakeUnity(rate)
+            XCTAssertTrue(N60DynamicsSnapshotSetPauseGate(&s.dynamics, rate, true, -50, 20, 2, 10, 6))
+            s.masterGainLinear = 0.5
+            // Loud passes, quiet is gated away; both must agree with the kernel.
+            try assertParity(s, rate: rate, sampleWise: false, amplitude: 0.25, "pause gate open")
+            try assertParity(s, rate: rate, sampleWise: false, amplitude: 0.001, tolerance: 0.2, "pause gate closed")
+        }
+    }
+
+    func testCombinedStageChainMatchesTheKernelAtEveryRate() throws {
+        for rate in Self.rates {
+            var s = N60DSPGraphSnapshotMakeUnity(rate)
+            XCTAssertTrue(N60DSPGraphSnapshotSetEQBandForChannels(
+                &s, 0, UInt8(N60_EQ_CHANNEL_STEREO), N60BiquadFilterTypePeaking, 2_000, -3, 1.2, true))
+            s.eqMidSideMode = true
+            XCTAssertTrue(N60DSPGraphSnapshotSetSymmetryBalance(&s, -0.2, true))
+            XCTAssertTrue(N60DSPGraphSnapshotSetSpeakerCrossfeed(&s, 0.2, true))
+            XCTAssertTrue(N60DSPGraphSnapshotSetInterChannelDelay(&s, 24.0 * 1000.0 / rate))
+            s.outputGainLinear = 0.8
+            try assertParity(s, rate: rate, "combined chain")
+        }
+    }
+
+    func testOrderingConflictsKeepTheKernel() {
+        var s = N60DSPGraphSnapshotMakeUnity(48_000)
+        XCTAssertTrue(N60DSPGraphSnapshotSetAmbientCompensation(&s, 2, 1.5, 1, 0.5, true))
+        XCTAssertTrue(N60DynamicsSnapshotSetExpander(&s.dynamics, 48_000, true, -26, 2, -30, 2, 80))
+        XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000),
+                     "the kernel runs ambient before its expander, the core after")
+        s = N60DSPGraphSnapshotMakeUnity(48_000)
+        s.mixedPhaseEnabled = true
+        XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000))
+        s = N60DSPGraphSnapshotMakeUnity(48_000)
+        s.dynamics.dynamicEQ.enabled = true
+        XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000))
+    }
+
+    func testUnrecoverableSmoothingKeepsTheKernel() {
+        var s = N60DSPGraphSnapshotMakeUnity(48_000)
+        XCTAssertTrue(N60DynamicsSnapshotSetExpander(&s.dynamics, 48_000, true, -26, 2, -30, 2, 80))
+        s.dynamics.expander.attackCoefficient = 0.5  // not what any in-range attack time yields exactly
+        s.dynamics.expander.releaseCoefficient = 1.5 // not a valid pole
+        XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000))
     }
 }
