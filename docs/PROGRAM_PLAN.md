@@ -127,7 +127,7 @@ Phase 2 replaces the three render paths with one graph that every later feature 
 - [ ] Give every lane the full stereo stage set: PEQ, M/S where paired, dynamic EQ, dynamics, FIR, delay, protection
 - [x] Represent stereo as a 2-channel layout and the binaural renderer as a stage, not a separate transport
 - [ ] Make parameter edits live with ramped coefficients; rebuild with a short fade only on topology changes
-- [ ] S8c `e6/dynamics-readbacks`: gain-reduction, true-peak and over-range readbacks through a core ABI addition
+- [x] S8c `e6/dynamics-readbacks`: gain-reduction, true-peak and over-range readbacks through a core ABI addition (#187; diagnostics UI row and two tests follow up)
 - [ ] S8e `e6/rack-and-routes`: AU rack as an external-processor node; same-device and aggregate routes render through the graph
 - [ ] S8d `e6/translate-remaining-stereo`: move the kernel-fallback stereo stages (dynamic EQ, FIR/IR/convolution, mixed phase, crossover and bass management, denoiser, fractional delay, soft clipper, gain rider) to the graph
 - [ ] Remove the `unsupportedActiveDSP` and `immutableSemanticTransportActive` restrictions in `AudioIOEngine.swift`, and the idle-only headphone profile rule
@@ -179,6 +179,7 @@ chain once per frame, with no SIMD, on one thread.
 - [ ] RealtimeSanitizer plus `nonblocking` / `nonallocating` attributes on every realtime entry point, run in CI
 - [ ] CI benchmarks: per-stage ns/sample and worst-case callback time at 48, 192 and 384 kHz, with fail thresholds
 - [ ] UI: move `ObservableObject` controllers (23 `@Published` in `AudioIOEngine`, 33 in `RoomTreatmentAdvisorController`) to `@Observable`, and draw meters with Canvas at display rate
+- [ ] User-facing dynamics meters from the E6 S8c readbacks: gain reduction on the compressor, expander and limiter controls, true-peak beside the output meter, and a latching over-range indicator (owner, 20 Oct 2026)
 
 ### E21 Portable C++ core (starts with E6, runs to Phase 4)
 
