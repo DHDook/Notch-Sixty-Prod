@@ -125,4 +125,17 @@ final class UnifiedGraphBinauralTests: XCTestCase {
         XCTAssertThrowsError(try host.setBinauralPose(yaw: 10, pitch: 0, roll: 0))
         host.release()
     }
+
+    func testPoseIsRefusedWhenBuiltWithoutHeadTracking() throws {
+        let host = try UnifiedGraphHost(spec: try spec(rate: 48_000, headTracking: false).get())
+        XCTAssertThrowsError(try host.setBinauralPose(yaw: 30, pitch: 0, roll: 0))
+        host.release()
+    }
+
+    func testYawWrapsAndRepeatedPoseIsUnchanged() throws {
+        let host = try UnifiedGraphHost(spec: try spec(rate: 48_000, headTracking: true).get())
+        XCTAssertEqual(try host.setBinauralPose(yaw: 190, pitch: 0, roll: 0), .posted(count: 3))
+        XCTAssertEqual(try host.setBinauralPose(yaw: -170, pitch: 0, roll: 0), .unchanged)
+        host.release()
+    }
 }

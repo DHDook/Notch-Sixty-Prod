@@ -73,6 +73,8 @@ final class CoreAudioBinauralHeadphoneTransportSession {
     private var unifiedGraphHost: UnifiedGraphHost?
     /// Serialises the head-tracking thread's read of `unifiedGraphHost` with `stop`.
     private let graphReferenceLock = NSLock()
+    /// Head poses the graph refused (single-orientation stage, full mailbox); guarded by `graphReferenceLock`.
+    private(set) var headPosePostFailures: UInt64 = 0
     /// Why the legacy binaural pipeline kept this session although the graph was requested.
     private(set) var unifiedGraphFallbackReason: UnifiedGraphFallbackReason?
     private var audioUnitRack: AudioUnitLiveRackSwitchboard?
@@ -413,7 +415,16 @@ final class CoreAudioBinauralHeadphoneTransportSession {
         let host = bridge != nil ? unifiedGraphHost : nil
         graphReferenceLock.unlock()
         guard let host else { return false }
-        return (try? host.setBinauralPose(yaw: Float(pose.yawDegrees), pitch: Float(pose.pitchDegrees), roll: Float(pose.rollDegrees))) != nil
+        do {
+            try host.setBinauralPose(
+                yaw: Float(pose.yawDegrees), pitch: Float(pose.pitchDegrees), roll: Float(pose.rollDegrees))
+            return true
+        } catch {
+            graphReferenceLock.lock()
+            headPosePostFailures += 1
+            graphReferenceLock.unlock()
+            return false
+        }
     }
 
     func prepareHeadTrackedGeneration(

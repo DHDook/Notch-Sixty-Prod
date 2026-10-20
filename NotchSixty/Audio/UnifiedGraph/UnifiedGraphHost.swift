@@ -72,19 +72,38 @@ final class UnifiedGraphHost: @unchecked Sendable {
     }
 
     /// Posts a head pose to the BINAURAL stage (yaw, pitch and roll are its live parameters 0 to 2;
-    /// the stage glides between the response cells). Control thread; no rebuild.
+    /// the stage glides between the response cells). Control thread; no rebuild and no spec copy:
+    /// three parameter records go straight to the mailbox. Throws when the stage was built with a
+    /// single orientation (head tracking off at build time), because the yaw would be ignored.
     @discardableResult
     func setBinauralPose(yaw: Float, pitch: Float, roll: Float) throws -> UnifiedGraphApplyResult {
         lock.lock(); defer { lock.unlock() }
-        var next = spec
-        guard let index = next.stages.firstIndex(where: { $0.stageId == N60_LSTAGE_BINAURAL }),
-              next.stages[index].params.count >= 3 else {
+        guard let graph else { throw UnifiedGraphError.invalidConfiguration("graph released") }
+        guard let index = spec.stages.firstIndex(where: { $0.stageId == N60_LSTAGE_BINAURAL }),
+              spec.stages[index].params.count >= 5 else {
             throw UnifiedGraphError.invalidConfiguration("no binaural stage")
         }
-        next.stages[index].params[0] = Float(N60HeadPoseWrap180(Double(yaw)))
-        next.stages[index].params[1] = min(180, max(-180, pitch))
-        next.stages[index].params[2] = min(180, max(-180, roll))
-        return try applyLocked(next)
+        guard spec.stages[index].params[4] > 1 else {
+            throw UnifiedGraphError.unsupportedConfiguration("binaural stage has one orientation")
+        }
+        let values: [Float] = [
+            Float(N60HeadPoseWrap180(Double(yaw))),
+            min(180, max(-180, pitch)),
+            min(180, max(-180, roll)),
+        ]
+        if values.enumerated().allSatisfy({ spec.stages[index].params[$0.offset] == $0.element }) {
+            return .unchanged
+        }
+        let stageId = spec.stages[index].stageId
+        let records = values.enumerated().map {
+            n60_param_record(stageId: stageId, paramIndex: UInt32($0.offset), value: $0.element, reserved: 0)
+        }
+        let status = records.withUnsafeBufferPointer {
+            n60_graph_post_params(graph, $0.baseAddress, UInt32($0.count))
+        }
+        guard status == N60_STATUS_OK else { throw UnifiedGraphError.coreStatus(status.rawValue) }
+        for (offset, value) in values.enumerated() { spec.stages[index].params[offset] = value }
+        return .posted(count: records.count)
     }
 
     private func applyLocked(_ newSpec: UnifiedGraphSpec) throws -> UnifiedGraphApplyResult {
