@@ -300,9 +300,15 @@ struct ProductionEqualizerView: View {
     }
 
     private func inspectorHeader(band: EQBand, binding: Binding<EQBand>) -> some View {
+        // The switch sits beside the section title it controls, as in
+        // System Settings, so its position alone reads as on or off.
         HStack {
-            Toggle("Enabled", isOn: binding.enabled).toggleStyle(.switch)
+            Text("Band").font(.headline)
             Spacer()
+            Toggle("Band", isOn: binding.enabled)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .help(band.enabled ? "Band is on. Click to turn it off." : "Band is off. Click to turn it on.")
             Button(role: .destructive) {
                 removeBand(band.id)
             } label: {
@@ -317,8 +323,6 @@ struct ProductionEqualizerView: View {
     @ViewBuilder
     private func staticControls(band: EQBand, binding: Binding<EQBand>) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Band").font(.headline)
-
             LabeledContent("Filter") {
                 Picker("Filter", selection: binding.type) {
                     ForEach(EQFilterType.allCases) { type in

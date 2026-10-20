@@ -105,7 +105,8 @@ struct ProductionHeadphoneWorkspace: View {
             HStack {
                 Text("Headphone Device Profile").font(.headline)
                 Spacer()
-                Toggle("Enabled", isOn: $draft.enabled)
+                Toggle("Headphone Device Profile", isOn: $draft.enabled)
+                    .labelsHidden()
                     .toggleStyle(.switch)
             }
 
@@ -776,7 +777,7 @@ struct ProductionHeadphoneWorkspace: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Toggle("Enabled", isOn: Binding(
+                Toggle("Head Tracking", isOn: Binding(
                     get: { draft.headTracking?.enabled ?? false },
                     set: { enabled in
                         var configuration = draft.headTracking ?? HeadTrackingConfiguration()
@@ -784,6 +785,7 @@ struct ProductionHeadphoneWorkspace: View {
                         draft.headTracking = configuration
                     }
                 ))
+                .labelsHidden()
                 .toggleStyle(.switch)
             }
 

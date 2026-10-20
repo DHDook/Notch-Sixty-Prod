@@ -4,6 +4,41 @@ import XCTest
 @testable import NotchSixty
 
 final class ProductionInformationArchitectureTests: XCTestCase {
+    func testProcessingStatusReadsStoppedWhenTheEngineIsNotRunning() {
+        // Bypass is irrelevant once the tap is torn down.
+        for bypassed in [false, true] {
+            let stopped = ProductionProcessingStatus(lifecycleState: .idle, bypassed: bypassed)
+            XCTAssertEqual(stopped.title, "Stopped")
+            XCTAssertEqual(stopped.tone, .stopped)
+        }
+        XCTAssertEqual(ProductionProcessingStatus(lifecycleState: .running, bypassed: false).tone, .active)
+        XCTAssertEqual(ProductionProcessingStatus(lifecycleState: .running, bypassed: true).tone, .bypassed)
+        XCTAssertEqual(ProductionProcessingStatus(lifecycleState: .failed, bypassed: false).tone, .failed)
+        for state in [AudioLifecycleState.requestingPermission, .creatingTap, .creatingAggregate,
+                      .openingOutput, .starting, .reconfiguring, .recoveringOutput, .stopping] {
+            XCTAssertEqual(
+                ProductionProcessingStatus(lifecycleState: state, bypassed: true).tone,
+                .transitioning,
+                "\(state)"
+            )
+        }
+        // Every tone reads differently, so colour is never the only cue.
+        let titles = Set(AudioLifecycleState.allCases.flatMap { state in
+            [false, true].map { ProductionProcessingStatus(lifecycleState: state, bypassed: $0).title }
+        })
+        XCTAssertTrue(titles.isSuperset(of: ["Active", "Bypassed", "Stopped", "Failed"]))
+    }
+
+    func testFlatVUSweepKeepsTheScaleAndCentresOnVertical() {
+        XCTAssertEqual(ProductionVUScale.sweepDegrees, 54)
+        // Symmetric about straight up (270°), so the needle rests and peaks
+        // at matching tilts.
+        XCTAssertEqual(ProductionVUScale.startAngleDegrees + ProductionVUScale.sweepDegrees / 2, 270)
+        XCTAssertEqual(ProductionVUScale.angle(forVU: ProductionVUScale.minimumVU), 243)
+        XCTAssertEqual(ProductionVUScale.angle(forVU: ProductionVUScale.maximumVU), 297)
+        XCTAssertEqual(ProductionVUScale.normalizedPosition(forVU: 0), 0.790, accuracy: 1e-12)
+    }
+
     func testVolumeFeedbackRoundingAndMuteSemantics() {
         XCTAssertEqual(VolumeFeedbackPresentation.percentage(0), 0)
         XCTAssertEqual(VolumeFeedbackPresentation.percentage(0.678), 68)

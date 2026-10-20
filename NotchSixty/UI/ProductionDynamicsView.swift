@@ -645,7 +645,8 @@ struct ProductionDynamicsView: View {
                 }
                 Spacer()
                 if let enabled {
-                    Toggle("Enabled", isOn: enabled)
+                    Toggle(module.title, isOn: enabled)
+                        .labelsHidden()
                         .toggleStyle(.switch)
                 }
                 Button("Reset", action: reset)

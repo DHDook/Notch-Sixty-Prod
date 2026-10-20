@@ -178,8 +178,10 @@ enum ProductionVUScale {
         current + (target - current) * (target > current ? 0.39 : 0.15)
     }
 
-    static let startAngleDegrees = 224.0
-    static let sweepDegrees = 92.0
+    // A shallow 54° sweep on a long needle, like a 1970s receiver meter and
+    // the app icon. Scale positions above are unchanged; only the arc is.
+    static let startAngleDegrees = 243.0
+    static let sweepDegrees = 54.0
     static var endAngleDegrees: Double { startAngleDegrees + sweepDegrees }
 
     static func angle(forVU vu: Double) -> Double {
@@ -189,6 +191,49 @@ enum ProductionVUScale {
     static func point(center: CGPoint, radius: CGFloat, angle: Double) -> CGPoint {
         let radians = angle * .pi / 180
         return CGPoint(x: center.x + cos(radians) * radius, y: center.y + sin(radians) * radius)
+    }
+}
+
+/// What the toolbar's processing readout says. Bypass only matters while the
+/// tap is running: a stopped engine reads Stopped whatever the bypass switch.
+struct ProductionProcessingStatus: Equatable {
+    enum Tone: Equatable {
+        case active, bypassed, stopped, transitioning, failed
+    }
+
+    let title: String
+    let systemImage: String
+    let tone: Tone
+
+    init(lifecycleState: AudioLifecycleState, bypassed: Bool) {
+        switch lifecycleState {
+        case .running where bypassed:
+            (title, systemImage, tone) = ("Bypassed", "arrow.trianglehead.branch", .bypassed)
+        case .running:
+            (title, systemImage, tone) = ("Active", "waveform", .active)
+        case .idle:
+            (title, systemImage, tone) = ("Stopped", "waveform.slash", .stopped)
+        case .requestingPermission, .creatingTap, .creatingAggregate, .openingOutput, .starting:
+            (title, systemImage, tone) = ("Starting…", "hourglass", .transitioning)
+        case .reconfiguring:
+            (title, systemImage, tone) = ("Reconfiguring…", "hourglass", .transitioning)
+        case .recoveringOutput:
+            (title, systemImage, tone) = ("Waiting for Output", "hourglass", .transitioning)
+        case .stopping:
+            (title, systemImage, tone) = ("Stopping…", "hourglass", .transitioning)
+        case .failed:
+            (title, systemImage, tone) = ("Failed", "exclamationmark.triangle.fill", .failed)
+        }
+    }
+
+    var help: String {
+        switch tone {
+        case .active: return "Processing: audio plays through the DSP chain"
+        case .bypassed: return "Bypassed: audio keeps playing, unprocessed"
+        case .stopped: return "Processing is stopped: audio plays straight to the output"
+        case .transitioning: return "Processing is changing state"
+        case .failed: return "Processing failed. Start Processing to try again."
+        }
     }
 }
 
@@ -401,7 +446,24 @@ struct ProductionRootView: View {
                 .buttonStyle(.glass)
                 .help("Open the retained engineering validation tools")
                 #endif
+            }
+        }
 
+        if selection != .roomAdvisor {
+            // A readout, not a control: no glass, so it reads as status text.
+            ToolbarItem(placement: .primaryAction) {
+                ProductionProcessingStatusReadout(
+                    status: ProductionProcessingStatus(
+                        lifecycleState: engine.lifecycleState,
+                        bypassed: engine.playbackControlConfiguration.globalBypassed
+                    )
+                )
+            }
+            .sharedBackgroundVisibility(.hidden)
+        }
+
+        ToolbarItemGroup(placement: .primaryAction) {
+            if selection != .roomAdvisor {
                 // Bypass keeps the tap running and passes audio unprocessed;
                 // Start/Stop beside it tears the tap down.
                 Button {
@@ -453,17 +515,22 @@ struct ProductionRootView: View {
                         }
                     }
                 } label: {
+                    // A power switch rather than play/stop, which read as
+                    // transport controls. Tinted green while processing.
                     Label(
                         engine.lifecycleState == .running
                             ? "Stop Processing"
                             : "Start Processing",
-                        systemImage:
-                            engine.lifecycleState == .running
-                            ? "stop.fill"
-                            : "play.fill"
+                        systemImage: "power"
                     )
                 }
-                .buttonStyle(.glassProminent)
+                .buttonStyle(.glass)
+                .tint(engine.lifecycleState == .running ? .green : nil)
+                .help(
+                    engine.lifecycleState == .running
+                        ? "Processing is on. Click to stop processing."
+                        : "Processing is off. Click to start processing."
+                )
                 .disabled(
                     product.recovery.safeLaunchActive
                         || (
@@ -495,6 +562,31 @@ struct ProductionRootView: View {
 }
 
 
+
+private struct ProductionProcessingStatusReadout: View {
+    let status: ProductionProcessingStatus
+
+    private var color: Color {
+        switch status.tone {
+        case .active: return .green
+        case .bypassed: return .orange
+        case .stopped: return .secondary
+        case .transitioning: return .yellow
+        case .failed: return .red
+        }
+    }
+
+    var body: some View {
+        Label(status.title, systemImage: status.systemImage)
+            .labelStyle(.titleAndIcon)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(color)
+            .fixedSize()
+            .padding(.horizontal, 4)
+            .help(status.help)
+            .accessibilityLabel("Processing \(status.title)")
+    }
+}
 
 private struct ProductSafeLaunchSheet: View {
     @ObservedObject var product: ProductController
@@ -658,8 +750,9 @@ private struct ProductionDashboardView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                // Processing state lives in the toolbar's Start/Stop and
-                // Bypass buttons, so the dashboard spends no line on it.
+                // Processing state lives in the toolbar's status readout and
+                // its Bypass and Start/Stop buttons, so the dashboard spends
+                // no line on it.
                 if engine.selectedOutputDevice == nil {
                     Text("Choose an output below to begin.")
                         .foregroundStyle(.secondary)
@@ -913,22 +1006,6 @@ private struct ProductionDashboardView: View {
                     }
                 }
 
-                Divider().frame(height: 34)
-                // Readout only; the toolbar's Bypass button switches it.
-                Label(
-                    engine.playbackControlConfiguration.globalBypassed ? "Bypassed" : "Active",
-                    systemImage: engine.playbackControlConfiguration.globalBypassed
-                        ? "arrow.trianglehead.branch" : "waveform.path"
-                )
-                .font(.subheadline.bold())
-                .foregroundStyle(
-                    engine.playbackControlConfiguration.globalBypassed
-                        ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary)
-                )
-                .accessibilityLabel(
-                    engine.playbackControlConfiguration.globalBypassed
-                        ? "DSP bypassed" : "DSP active"
-                )
             }
             .padding(14)
             .frame(maxHeight: .infinity)
@@ -964,7 +1041,7 @@ private struct StereoSignatureVUMeterPanel: View {
         // corners, either side of the branding, like a faceplate's legends.
         let palette = StereoSignatureVUPalette(darkAppearance: colorScheme == .dark)
         StereoSignatureVUMeter(leftVU: leftVU, rightVU: rightVU)
-            .frame(minHeight: 285)
+            .frame(minHeight: 250)
             .overlay(alignment: .bottomLeading) {
                 Text("OUTPUT  ·  0 VU = −18 dBFS")
                     .font(.caption2.weight(.semibold).monospacedDigit())
@@ -1097,17 +1174,25 @@ struct StereoSignatureVUPalette {
     }
 }
 
-/// Window geometry for one meter, derived from its pivot and scale radius so
-/// the scale is unchanged: the window spans the scale and labels and ends
-/// above the pivot, which therefore stays hidden like the icon's needle.
+/// Window geometry for one meter. `unit` sizes the window, ticks and labels;
+/// the needle radius is 1.55 units, so the flat arc spans the same width and
+/// arc length as a compact meter. The window ends far above the pivot, which
+/// stays hidden like the icon's needle.
 private struct StereoSignatureVUWindow {
+    static let radiusInUnits: CGFloat = 1.55
+    static let widthInUnits: CGFloat = 1.64
+    static let heightInUnits: CGFloat = 0.55
+    /// Window top above the scale arc's crown.
+    static let headroomInUnits: CGFloat = 0.095
+
     let center: CGPoint
-    let radius: CGFloat
+    let unit: CGFloat
+    var radius: CGFloat { unit * Self.radiusInUnits }
+    var scaleRadius: CGFloat { radius * 0.985 }
     var rect: CGRect {
-        let width = radius * 1.64
-        let top = center.y - radius * 1.08
-        let bottom = center.y - radius * 0.45
-        return CGRect(x: center.x - width / 2, y: top, width: width, height: bottom - top)
+        let width = unit * Self.widthInUnits
+        let top = center.y - scaleRadius - unit * Self.headroomInUnits
+        return CGRect(x: center.x - width / 2, y: top, width: width, height: unit * Self.heightInUnits)
     }
     var cornerRadius: CGFloat { rect.height * 0.16 }
 }
@@ -1121,15 +1206,18 @@ struct StereoSignatureVUMeter: View {
         GeometryReader { proxy in
             let width = proxy.size.width
             let height = proxy.size.height
-            // Two icon-style windows side by side; layout in housing heights.
-            let radius = min(height * 0.80, width * 0.25)
-            let pivotY = height * 0.12 + radius * 1.08
+            // Two icon-style windows side by side; the housing is 1.10 units
+            // tall: window from 0.15 to 0.70, branding centred at 0.92.
+            let unit = min(height / 1.10, width * 0.25)
+            let windowTop = unit * 0.15
+            let pivotY = windowTop + unit * StereoSignatureVUWindow.headroomInUnits
+                + unit * StereoSignatureVUWindow.radiusInUnits * 0.985
             let leftCenter = CGPoint(x: width * 0.263, y: pivotY)
             let rightCenter = CGPoint(x: width * 0.737, y: pivotY)
             let palette = StereoSignatureVUPalette(darkAppearance: colorScheme == .dark)
             let windows = [
-                StereoSignatureVUWindow(center: leftCenter, radius: radius),
-                StereoSignatureVUWindow(center: rightCenter, radius: radius),
+                StereoSignatureVUWindow(center: leftCenter, unit: unit),
+                StereoSignatureVUWindow(center: rightCenter, unit: unit),
             ]
 
             ZStack {
@@ -1146,14 +1234,14 @@ struct StereoSignatureVUMeter: View {
                 }
 
                 Text("NOTCH SIXTY")
-                    .font(.system(size: max(13, height * 0.075), weight: .regular, design: .default))
-                    .tracking(max(4, height * 0.028))
+                    .font(.system(size: max(13, height * 0.085), weight: .regular, design: .default))
+                    .tracking(max(4, height * 0.032))
                     .foregroundStyle(palette.branding)
                     .shadow(color: palette.brandingHighlight, radius: 0, y: colorScheme == .dark ? -0.8 : 0.9)
-                    .position(x: width * 0.50, y: height * 0.84)
+                    .position(x: width * 0.50, y: height * 0.836)
             }
         }
-        .aspectRatio(3.2, contentMode: .fit)
+        .aspectRatio(4 / 1.10, contentMode: .fit)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Stereo output VU meter")
         .accessibilityValue("Left \(leftVU, specifier: "%.1f") VU, right \(rightVU, specifier: "%.1f") VU")
@@ -1216,7 +1304,8 @@ struct StereoSignatureVUMeter: View {
 
                 StereoSignatureVUScaleFace(
                     center: window.center,
-                    radius: window.radius,
+                    scaleRadius: window.scaleRadius,
+                    unit: window.unit,
                     darkAppearance: colorScheme == .dark
                 )
                 .equatable()
@@ -1225,10 +1314,10 @@ struct StereoSignatureVUMeter: View {
                     .font(.system(size: 10, weight: .bold, design: .rounded))
                     .tracking(2.1)
                     .foregroundStyle(palette.legend.opacity(0.75))
-                    .position(x: window.center.x, y: window.center.y - window.radius * 0.575)
+                    .position(x: window.center.x, y: window.center.y - window.scaleRadius + window.unit * 0.37)
 
                 Canvas { context, _ in
-                    drawNeedle(context: &context, center: window.center, radius: window.radius, vu: vu, color: palette.needle)
+                    drawNeedle(context: &context, center: window.center, radius: window.scaleRadius, vu: vu, color: palette.needle)
                 }
             }
             .frame(width: size.width, height: size.height)
@@ -1325,7 +1414,7 @@ struct StereoSignatureVUMeter: View {
         // Drawn from the hidden pivot; the window clip shows only the upper
         // segment, emerging from the lower edge like the icon's needle.
         path.move(to: center)
-        path.addLine(to: ProductionVUScale.point(center: center, radius: radius * 0.985, angle: angle))
+        path.addLine(to: ProductionVUScale.point(center: center, radius: radius, angle: angle))
         context.stroke(path, with: .color(.black.opacity(0.18)), style: StrokeStyle(lineWidth: 3.6, lineCap: .round))
         context.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: 2.4, lineCap: .round))
     }
@@ -1333,7 +1422,10 @@ struct StereoSignatureVUMeter: View {
 
 private struct StereoSignatureVUScaleFace: View, Equatable {
     let center: CGPoint
-    let radius: CGFloat
+    let scaleRadius: CGFloat
+    /// Tick and label insets are in window units, not radius fractions, so
+    /// they keep their size on the long-needle arc.
+    let unit: CGFloat
     let darkAppearance: Bool
 
     var body: some View {
@@ -1350,7 +1442,6 @@ private struct StereoSignatureVUScaleFace: View, Equatable {
         // -10 so label spacing stays roughly even (about 9-12% of the sweep)
         // across the compressed quiet end.
         let labels: Set<Double> = [-40, -30, -20, -15, -10, -7, -5, -3, -2, -1, 0, 1, 2, 3]
-        let scaleRadius = radius * 0.985
 
         var arc = Path()
         arc.addArc(
@@ -1381,7 +1472,7 @@ private struct StereoSignatureVUScaleFace: View, Equatable {
             let major = labels.contains(value)
             let inner = ProductionVUScale.point(
                 center: center,
-                radius: radius * (major ? 0.895 : 0.925),
+                radius: scaleRadius - unit * (major ? 0.09 : 0.06),
                 angle: angle
             )
             let outer = ProductionVUScale.point(center: center, radius: scaleRadius, angle: angle)
@@ -1395,7 +1486,7 @@ private struct StereoSignatureVUScaleFace: View, Equatable {
             )
 
             if major {
-                let point = ProductionVUScale.point(center: center, radius: radius * 0.815, angle: angle)
+                let point = ProductionVUScale.point(center: center, radius: scaleRadius - unit * 0.17, angle: angle)
                 let label = value > 0 ? "+\(Int(value))" : "\(Int(value))"
                 context.draw(
                     Text(label)
@@ -1411,7 +1502,7 @@ private struct StereoSignatureVUScaleFace: View, Equatable {
                 .font(.system(size: 10, weight: .bold, design: .rounded))
                 .tracking(1.4)
                 .foregroundStyle(palette.legend.opacity(0.82)),
-            at: CGPoint(x: center.x, y: center.y - radius * 0.72)
+            at: CGPoint(x: center.x, y: center.y - scaleRadius + unit * 0.265)
         )
     }
 }
@@ -1515,7 +1606,7 @@ private struct ProductionSpeakersView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Toggle("Enabled", isOn: Binding(
+                Toggle("Crossover Design", isOn: Binding(
                     get: { engine.bassManagementConfiguration.enabled },
                     set: { value in updateCrossover { $0.enabled = value } }
                 ))
@@ -1660,7 +1751,7 @@ private struct ProductionSpeakersView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Toggle("Enabled", isOn: Binding(
+                Toggle("Sub Phase Alignment", isOn: Binding(
                     get: { engine.bassManagementConfiguration.subPhaseAlignmentEnabled },
                     set: { value in updateCrossover { $0.subPhaseAlignmentEnabled = value } }
                 ))
@@ -1714,7 +1805,7 @@ private struct ProductionSpeakersView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Toggle("Enabled", isOn: Binding(
+                Toggle("Physical Output Matrix", isOn: Binding(
                     get: { routing.enabled },
                     set: { value in updateRouting { $0.enabled = value } }
                 ))
