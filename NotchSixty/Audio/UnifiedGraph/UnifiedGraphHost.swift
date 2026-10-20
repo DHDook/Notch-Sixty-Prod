@@ -162,6 +162,36 @@ final class UnifiedGraphHost: @unchecked Sendable {
         }
     }
 
+    /// E6 S8 remainder: fills the stereo meter readings and the latency of a render diagnostics
+    /// record from the graph's own METER_IN, METER_OUT and FINAL_METER stages (lanes 0 and 1) and
+    /// its reported latency, replacing the kernel's, which does not run while the graph renders.
+    /// `latencyFrames` is passed in because the session removes the integer inter-channel taps
+    /// (the kernel's figure excludes them). The output reading is left alone when `includeOutput`
+    /// is false (the bridge's output VU already supplies it). Over-range counts are not tracked by
+    /// the core and read 0. Peaks are read-and-reset in the core. One locked pass; control plane.
+    func overlayStereoReadbacks(
+        _ diagnostics: inout N60RenderKernelDiagnostics,
+        latencyFrames: UInt32,
+        includeOutput: Bool
+    ) {
+        lock.lock(); defer { lock.unlock() }
+        guard let graph else { return }
+        func reading(_ stage: UInt32) -> N60StereoMeterReading {
+            var peak = [Float](repeating: 0, count: 2)
+            var rms = [Float](repeating: 0, count: 2)
+            for lane in 0..<2 {
+                _ = n60_graph_read_meter(graph, stage, UInt32(lane), &peak[lane], &rms[lane])
+            }
+            return N60StereoMeterReading(
+                peakLeft: peak[0], peakRight: peak[1], rmsLeft: rms[0], rmsRight: rms[1], overRangeSamples: 0
+            )
+        }
+        diagnostics.inputMeter = reading(N60_LSTAGE_METER_IN)
+        diagnostics.postEQMeter = reading(N60_LSTAGE_METER_OUT)
+        if includeOutput { diagnostics.outputMeter = reading(N60_LSTAGE_FINAL_METER) }
+        diagnostics.latencyFrames = latencyFrames
+    }
+
     var latencyFrames: UInt32 {
         lock.lock(); defer { lock.unlock() }
         guard let graph else { return 0 }

@@ -300,7 +300,12 @@ struct UnifiedGraphDiagnostics: Equatable, Sendable {
     /// The live graph's readbacks; or, when there is no host but a recorded `fallbackReason`,
     /// the fallback record; nil when neither applies.
     @MainActor
-    init?(host: UnifiedGraphHost?, programChannelCount: Int, fallbackReason: UnifiedGraphFallbackReason? = nil) {
+    init?(
+        host: UnifiedGraphHost?,
+        programChannelCount: Int,
+        fallbackReason: UnifiedGraphFallbackReason? = nil,
+        stereoFinalReading: StereoMeterReading? = nil
+    ) {
         guard let host else {
             guard let fallbackReason else { return nil }
             channelCount = 0
@@ -318,6 +323,14 @@ struct UnifiedGraphDiagnostics: Equatable, Sendable {
         self.latencyFrames = host.latencyFrames
         self.rebuildState = host.rebuildState
         self.finalMeters = (0..<count).map { lane in
+            // Core peaks are read-and-reset: when the stereo diagnostics overlay already took this
+            // snapshot's FINAL_METER reading, reuse it rather than read the stage a second time.
+            if let stereo = stereoFinalReading, lane < 2 {
+                return LaneMeter(
+                    peakLinear: lane == 0 ? stereo.peakLeft : stereo.peakRight,
+                    rmsLinear: lane == 0 ? stereo.rmsLeft : stereo.rmsRight
+                )
+            }
             let reading = host.meter(stageId: N60_LSTAGE_FINAL_METER, lane: UInt32(lane))
             return LaneMeter(peakLinear: reading?.peak ?? 0, rmsLinear: reading?.rms ?? 0)
         }
