@@ -46,6 +46,9 @@ struct UnifiedGraphSpec: Equatable {
                 || a.laneB != b.laneB || a.laneMask != b.laneMask
                 || a.capacityFrames != b.capacityFrames
                 || a.params.count != b.params.count { return false }
+            // FIR taps are not live parameters: new taps are a rebuild (the core carries unchanged filters across it).
+            if a.kind == N60_STAGE_FIR.rawValue || a.kind == N60_STAGE_ROOM_FIR.rawValue
+                || a.kind == N60_STAGE_SPEAKER_IR.rawValue, a.params != b.params { return false }
         }
         return true
     }

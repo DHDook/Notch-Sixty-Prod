@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 9u
+#define N60_GRAPH_ABI_VERSION 10u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -134,7 +134,10 @@ typedef enum n60_stage_kind {
  * Program FIR. params = the taps (1..32768 floats), identical on every selected lane.
  *  Uniformly partitioned convolution, 256-frame partitions: latency 256 frames plus
  *  capacityFrames, which for this kind is the filter's own declared group delay (it is
- *  reported, never applied). Taps are not live: publish a new snapshot. */
+ *  reported, never applied). Taps are not live: publish a new snapshot. Since ABI v10 a rebuild that leaves a FIR
+ *  stage unchanged (same stage id, taps and lanes) copies its running state into the new snapshot, so the convolver
+ *  does not restart; a new or changed FIR warms silently for its full tap length (+256 frames) before the crossfade.
+ *  Only partitions written since the stage last started (or since n60_graph_invalidate_history) are accumulated. */
 /* System stages (ABI v4). Lane rules: BASS_MGMT, PAUSE_GATE and ANC_CAPTURE take laneMask; AMBIENT, MUTE and
  * PROTECTION take laneMask or laneA/N60_LANE_ALL; SYMMETRY, CROSSFEED, CROSSTALK and HEADPHONE are pair
  * stages on (laneA, laneB); ANC_GUARD and ANC_INJECT address one lane with laneA. ROOM_FIR, SPEAKER_IR,
@@ -300,6 +303,16 @@ n60_status n60_graph_build(const n60_graph_desc *desc, n60_graph **outGraph);
  * Returns 1 when there is one, 0 when not (then *out is untouched). */
 int n60_graph_denoiser_export(n60_graph *graph, n60_denoiser_state *out);
 
+/* ABI v10 (E6 S8d). Realtime thread only. Drops the input history of every FIR / ROOM_FIR / SPEAKER_IR stage of the
+ * live graph (and the incoming and waiting snapshots of a rebuild) in O(1): the stages restart from silence the next time they run, so a
+ * graph that was not rendering does not replay stale audio when it takes over. Nothing is cleared or allocated here. */
+void n60_graph_invalidate_history(n60_graph *graph);
+
+/* ABI v10. Realtime thread only. Input frames the FIR stages of the live, incoming and waiting snapshots need to be fully warm (longest taps plus
+ * one 256-frame partition; 0 when there is none). A host that renders the graph silently before it takes over should
+ * warm it at least this long. */
+uint32_t n60_graph_history_frames(n60_graph *graph);
+
 /* Realtime thread only. `in` must come from a denoiser export (the counters and arrays are trusted, not
  * range-checked). Makes `in` the graph's profile (stage or parked, and the incoming snapshot of a
  * rebuild). fftSize 0 clears it. A state of another FFT size than the stage's is dropped. */
@@ -322,7 +335,8 @@ void n60_graph_denoiser_import(n60_graph *graph, const n60_denoiser_state *in);
 n60_status n60_graph_publish(n60_graph *graph, const n60_graph_desc *desc);
 
 /* ABI v5 rebuild policy. fadeMs: crossfade length for later publishes, 0..500, default 20; 0 swaps
- * instantly (not click-free). cpuBudgetPercent: 0 = off (default); otherwise a rebuild is refused,
+ * instantly (not click-free, and without the silent warm-up, so a new or changed FIR is heard partially built).
+ * cpuBudgetPercent: 0 = off (default); otherwise a rebuild is refused,
  * and the live graph kept, when the measured cost of rendering both graphs during the warm-up exceeds
  * this percent of real time. */
 typedef struct n60_rebuild_options {

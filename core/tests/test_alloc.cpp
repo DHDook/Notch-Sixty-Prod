@@ -381,6 +381,8 @@ int main() {
             CHECK(n60_graph_set_rebuild_options(g, &o) == N60_STATUS_OK, "options");
             n60_graph_desc &d = kind == 1 ? dn : (kind == 3 ? da : db);
             CHECK(n60_graph_publish(g, &d) == N60_STATUS_OK, "publish S6");
+            // S8d: the control thread drops the FIR history; the next realtime blocks must not allocate or clear.
+            if (round % 3 == 0) n60_graph_invalidate_history(g);  // single-threaded test: control and render are the same thread
             for (int step = 0; step < 400; step++) {
                 // Edits every block: PEQ gain and frequency, gain, delay.
                 const n60_param_record rec[4] = {{3, 2, static_cast<float>((step % 11) - 5), 0},

@@ -7,7 +7,7 @@
 - Agents in `.claude/agents/`: slice-builder (Sonnet, builds one slice in a fresh context),
   realtime-reviewer (Sonnet), and code-scout, build-test-runner, plan-tracker, pr-writer (Haiku).
 
-**Current focus:** E6 S8d group 1 (dyn EQ, denoiser) in PR awaiting owner; next the remaining S8d groups, then S8e, S9.
+**Current focus:** E6 S8d group 2 (program FIR, room FIR, speaker IR, convolution) pending merge; remaining S8d groups, then S8e, S9.
 <!-- plan-tracker keeps the line above current -->
 
 @AGENTS.md

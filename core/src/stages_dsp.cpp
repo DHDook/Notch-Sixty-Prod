@@ -725,10 +725,13 @@ constexpr uint32_t kFft = 2 * kPart;                  // 512
 constexpr uint32_t kFirBins = kPart + 1;              // 257
 
 struct FirShared {
-    uint32_t parts, taps, pad[2];
+    uint32_t parts, taps, hashLo, hashHi;  // hash: FNV-1a of the tap bit patterns (identity for state carry)
 };
+// epoch: which SnapHeader::historyEpoch the lane state belongs to (a mismatch means the history is stale and is
+// dropped, O(1), before the lane runs). valid: partition spectra written since then (capped at the part count);
+// only those take part in the multiply-accumulate, so stale spectra never need clearing.
 struct FirLane {
-    uint32_t fill, head, pad[2];
+    uint32_t fill, head, epoch, valid;
 };
 
 struct FirLayout {
@@ -753,6 +756,15 @@ size_t firLaneBytes(uint32_t parts) {
     return up(sizeof(FirLane) + sizeof(float) * (kFft + kPart) + sizeof(Complex) * kFirBins * parts);
 }
 uint32_t firParts(uint32_t taps) { return (taps + kPart - 1) / kPart; }
+uint64_t firTapHash(const float *p, uint32_t n) {
+    uint64_t h = 1469598103934665603ull;
+    for (uint32_t i = 0; i < n; ++i) {
+        uint32_t b;
+        std::memcpy(&b, &p[i], sizeof b);
+        h = (h ^ b) * 1099511628211ull;
+    }
+    return h;
+}
 
 void runFir(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
     uint8_t *shBase = sharedState(h, r);
@@ -769,6 +781,13 @@ void runFir(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
         float *in = reinterpret_cast<float *>(lb + sizeof(FirLane));
         float *out = in + kFft;
         Complex *fdl = reinterpret_cast<Complex *>(out + kPart);
+        if (st.epoch != h->historyEpoch) {
+            st.epoch = h->historyEpoch;
+            st.fill = 0;
+            st.head = 0;
+            st.valid = 0;
+            std::memset(in, 0, sizeof(float) * (kFft + kPart));
+        }
         float *buf = lanes[laneOf(r, l)];
         for (uint32_t i = 0; i < frames; ++i) {
             const float y = out[st.fill];
@@ -779,9 +798,10 @@ void runFir(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
             for (uint32_t k = 0; k < kFft; ++k) work[k] = {in[k], 0.0f};
             fft::forward(plan, work);
             std::memcpy(fdl + size_t(st.head) * kFirBins, work, sizeof(Complex) * kFirBins);
+            if (st.valid < P) ++st.valid;
             for (uint32_t k = 0; k < kFirBins; ++k) acc[k] = {0.0f, 0.0f};
             uint32_t slot = st.head;
-            for (uint32_t q = 0; q < P; ++q) {
+            for (uint32_t q = 0; q < st.valid; ++q) {
                 const Complex *x = fdl + size_t(slot) * kFirBins;
                 const Complex *hq = H + size_t(q) * kFirBins;
                 for (uint32_t k = 0; k < kFirBins; ++k) {
@@ -940,6 +960,9 @@ void dspInit(SnapHeader *h, const StageRec &r) {
             FirShared *s = reinterpret_cast<FirShared *>(sh);
             s->parts = firParts(r.paramCount);
             s->taps = r.paramCount;
+            const uint64_t hash = firTapHash(p, r.paramCount);
+            s->hashLo = static_cast<uint32_t>(hash);
+            s->hashHi = static_cast<uint32_t>(hash >> 32);
             const FirLayout L = firLayout(s->parts);
             fft::planInit(sh + L.plan, kFft);
             Complex *H = reinterpret_cast<Complex *>(sh + L.spectra);
@@ -981,6 +1004,72 @@ uint32_t dspLatency(const SnapHeader *h, const StageRec &r) {
     if (r.kind == N60_STAGE_FIR) return kPart + r.capacity;
     if (r.kind == N60_STAGE_DENOISER) return denoiseFft(paramsOf(h, r)[1]);
     return 0;
+}
+
+// ---- ABI v10 FIR state carry ---------------------------------------------------------
+
+bool dspFirSameFilter(const SnapHeader *a, const StageRec &ra, const SnapHeader *b, const StageRec &rb) {
+    if (ra.kind != N60_STAGE_FIR || rb.kind != N60_STAGE_FIR || ra.id != rb.id) return false;
+    if (ra.paramCount != rb.paramCount || ra.laneCount != rb.laneCount) return false;
+    const FirShared &x = *reinterpret_cast<const FirShared *>(bytes(a) + ra.sharedOff);
+    const FirShared &y = *reinterpret_cast<const FirShared *>(bytes(b) + rb.sharedOff);
+    if (x.parts != y.parts || x.taps != y.taps || x.hashLo != y.hashLo || x.hashHi != y.hashHi) return false;
+    for (uint32_t k = 0; k < ra.laneCount; ++k) {
+        if (laneOf(ra, k) != laneOf(rb, k)) return false;
+    }
+    return true;
+}
+
+uint32_t dspFirCarry(SnapHeader *from, SnapHeader *to) {
+    uint32_t warm = 0;
+    StageRec *dst = stages(to);
+    for (uint32_t i = 0; i < to->stageCount; ++i) {
+        StageRec &b = dst[i];
+        if (b.kind != N60_STAGE_FIR) continue;
+        bool carried = false, staleSource = false;
+        StageRec *src = stages(from);
+        for (uint32_t j = 0; j < from->stageCount && !carried; ++j) {
+            StageRec &a = src[j];
+            if (!dspFirSameFilter(from, a, to, b)) continue;
+            const uint32_t P = reinterpret_cast<FirShared *>(sharedState(to, b))->parts;
+            const size_t headBytes = sizeof(FirLane) + sizeof(float) * (kFft + kPart);
+            for (uint32_t k = 0; k < b.laneCount; ++k) {
+                uint8_t *sl = laneState(from, a, k);
+                uint8_t *dl = laneState(to, b, k);
+                const FirLane &s = *reinterpret_cast<FirLane *>(sl);
+                // A source lane whose history was invalidated and has not run since is empty: ours stays
+                // empty and needs the full silent warm.
+                if (s.epoch != from->historyEpoch) {
+                    staleSource = true;
+                    continue;
+                }
+                // Bounded copy: the lane header and sample rings, then only the spectra written so far
+                // (at most the whole delay line, 1 KiB per 256 taps; it runs once per rebuild, never per block).
+                std::memcpy(dl, sl, headBytes);
+                const Complex *sf = reinterpret_cast<const Complex *>(sl + headBytes);
+                Complex *df = reinterpret_cast<Complex *>(dl + headBytes);
+                uint32_t slot = s.head;
+                for (uint32_t q = 0; q < s.valid && q < P; ++q) {
+                    std::memcpy(df + size_t(slot) * kFirBins, sf + size_t(slot) * kFirBins, sizeof(Complex) * kFirBins);
+                    slot = slot == 0 ? P - 1 : slot - 1;
+                }
+                reinterpret_cast<FirLane *>(dl)->epoch = to->historyEpoch;
+            }
+            carried = true;
+        }
+        if (!carried || staleSource) warm = std::max(warm, b.paramCount + kPart);
+    }
+    return warm;
+}
+
+uint32_t dspFirHistoryFrames(const SnapHeader *h) {
+    if (h == nullptr) return 0;
+    uint32_t frames = 0;
+    const StageRec *s = stages(h);
+    for (uint32_t i = 0; i < h->stageCount; ++i) {
+        if (s[i].kind == N60_STAGE_FIR) frames = std::max(frames, s[i].paramCount + kPart);
+    }
+    return frames;
 }
 
 // ---- ABI v9 denoiser profile hand-off ----------------------------------------------

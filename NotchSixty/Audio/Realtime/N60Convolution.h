@@ -113,6 +113,11 @@ bool N60FIRConvolveControlPlane(
 N60PartitionedConvolver * _Nullable N60PartitionedConvolverCreate(void);
 void N60PartitionedConvolverDestroy(N60PartitionedConvolver * _Nonnull convolver);
 void N60PartitionedConvolverReset(N60PartitionedConvolver * _Nonnull convolver);
+// E6 S8d. Any thread, realtime-safe, no allocation: marks every slot's runtime stale (the convolver was not rendering,
+// so its history holds old audio). The render thread restarts the active slot from silence on its next sample: a
+// bounded clear of the small rings and scratch (about 160 KB, once per MarkIdle); spectral history is invalidated by
+// count, never cleared. Safe against control-thread Prepare because Prepare never touches the active slot.
+void N60PartitionedConvolverMarkIdle(N60PartitionedConvolver * _Nonnull convolver);
 
 // Control-plane only. FFT preparation, allocation-independent kernel conversion,
 // and runtime reset happen before publication. The slot must not be the slot
