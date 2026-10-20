@@ -44,7 +44,7 @@ platforms; E6 (the unified graph) is the critical path, because eleven later epi
 | E20 | Engine performance | 2 | E6 | Claude Code (Mac) | Published CPU budgets met at 384 kHz on the slowest supported Mac |
 | E21 | Portable C++ core | 2→4 | E6 | Claude Code (Mac + Linux CI) | Core engine and design maths build and pass tests on Linux and Windows CI |
 | E10 | Mixed-phase room correction and bass control | 3 | E6, E11 | Claude Code + bench | Beats min-phase in blind ABX at several seats |
-| E11 | Measurement suite | 3 | E6 | Claude Code + bench | Results match REW on the same captures |
+| E11 | Measurement suite | 3 | E1 (live overlays on the graph after E6) | Claude Code + bench | Results match REW on the same captures |
 | E12 | Guided setup and IA | 3 | E10, E11 | Claude Code (Mac) | New user reaches a verified calibration in one flow |
 | E13 | Headphones complete | 4 | E6, E7 | Claude Code (Mac) | BYO files to PEQ in one click; live tuning |
 | E14 | Upmixer | 4 | E6 | Claude Code + bench | Stereo plays on 5.1–7.1.4 layouts |
@@ -54,6 +54,28 @@ platforms; E6 (the unified graph) is the critical path, because eleven later epi
 | E23 | Legacy engine removal | 4 | E6, E4 S11, E7–E17 | Claude Code (Mac) | `N60RenderKernel`, the old N-channel path and the `e6.*` flags are gone; full suite green |
 | E22 | Hardware validation | 4 | all software epics | Bench | Every deferred bench check passes on `main` at every rate |
 | E18 | Launch readiness | 4 | all | Owner + Claude Code | Signed, reviewed, accessible, competitive ABX done, App Store live |
+
+## Execution order (owner, 20 Oct 2026)
+
+`/next` works down this list: the first epic with open slices whose dependencies are met. Within
+an epic, slices go in their written order. Competitive features come first (what buyers and
+reviewers compare with Dirac and REW), then engine depth, then breadth.
+
+1. E6 Unified live N-channel graph, through S11
+2. E11 Measurement suite
+3. E10 Mixed-phase room correction and bass control
+4. E8 Routing matrix and crossovers
+5. E12 Guided setup and information architecture
+6. E13 Headphones complete (bring-your-own import first)
+7. E9 Multichannel protection and FIR parity
+8. E7 384 kHz everywhere
+9. E20 Engine performance
+10. E19 MIMO room treatment, software parts (plan first)
+11. E4 S11 Re-qualify ANC on the unified graph
+12. E21 Portable C++ core, remaining items
+13. E14 Upmixer, E15 Device-aware profiles, E17 Export and dither, E16 Automation and remote
+14. E23 Legacy engine removal
+15. E22 Hardware validation and E18 Launch readiness (owner-led)
 
 ## Phase 1 — Consolidate and qualify
 

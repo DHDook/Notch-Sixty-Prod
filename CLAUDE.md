@@ -7,7 +7,7 @@
 - Agents in `.claude/agents/`: slice-builder (Sonnet, builds one slice in a fresh context),
   realtime-reviewer (Sonnet), and code-scout, build-test-runner, plan-tracker, pr-writer (Haiku).
 
-**Current focus:** E6 S8d group 2 (program FIR, room FIR, speaker IR, convolution) pending merge; remaining S8d groups, then S8e, S9.
+**Current focus:** E6: rest of S8d (stereo crossover and bass management, mixed phase, soft clipper, gain rider, fractional delay), then S8e, S9, S10, S11. After E6, follow the Execution order in `docs/PROGRAM_PLAN.md` (E11 next).
 <!-- plan-tracker keeps the line above current -->
 
 @AGENTS.md
@@ -49,17 +49,22 @@ The owner already has a local test build of `main`; do not rebuild a baseline un
 2. **Plan only for a new epic** or a slice whose approach isn't recorded yet; save it to
    `docs/epics/E<n>.md` and get approval. Otherwise build straight away.
 3. **One branch per PR** named `e<n>/<slice>`, behind the epic's feature flag (add it to
-   `FeatureFlag.all`; see `docs/FEATURE_FLAGS.md`). Small related slices may share one PR.
+   `FeatureFlag.all`; see `docs/FEATURE_FLAGS.md`). PRs aim for about 800–1,500 changed lines of
+   product code: combine small slices, split only to separate risk classes. Never open a PR that
+   only edits plans or records decisions (a new epic plan awaiting approval is the exception).
+   The order of epics is the "Execution order" list in `docs/PROGRAM_PLAN.md`.
 4. **Verify narrowly** (affected tests only; CI runs the full suite), and use
    `realtime-reviewer` for any engine or realtime change.
-5. **Plan updates ride in the same PR** (plan-tracker); never open a separate plan-update PR.
+5. **Plan updates ride in the same PR** (plan-tracker). Epic files keep a Status of at most
+   five lines; history goes in their `## Log` section, which agents only grep when needed.
 6. **Merge policy:** low-risk PRs are merged by Claude with `gh pr merge --squash
    --delete-branch` once CI is green. PRs that touch the realtime engine, Core Audio transport,
    `AudioIOEngine.swift`, ANC / MIMO / protection code, `AGENTS.md`, `.claude/`, workflows,
    dependencies, the minimum OS, or remove a user-visible feature get the `needs-owner` label
    and wait for the owner.
-7. **Keep going** to the next slice after a merge; stop after three merged PRs, or at a
-   `needs-owner` PR, a plan approval, bench work, or a phase gate.
+7. **Keep going.** After a merge, or while a `needs-owner` PR waits, continue with the next
+   slice that is independent of open PRs (branch from `main`, never stack). Stop after four PRs
+   in a session, two open `needs-owner` PRs, a plan approval, bench work, or a phase gate.
 8. **Bench work:** when a step needs physical hardware, write the steps as a checklist in
    `docs/epics/E<n>.md` under "Bench checks", tell the owner, and stop that slice there.
 

@@ -16,23 +16,28 @@ yourself beyond what the steps below name. All building happens in subagents.
    changes, run `git pull --ff-only origin main`. If that changed `CLAUDE.md` or `.claude/`,
    tell the owner to restart the session and stop. If not on `main`, report the branch and its
    last commit and ask whether to continue there or return to `main`.
-1. **Pick the slice.** Run `grep -n '^### E\|^- \[ \]' docs/PROGRAM_PLAN.md | head -80` and
-   `grep -n 'Status' docs/epics/<EPIC>.md` for the target epic. Choose the first open slice
-   whose dependencies are met; group two or three only if they are small, related and the same
-   risk class. Say what you picked in one sentence.
+1. **Pick the work.** Read the order with
+   `sed -n '/^## Execution order/,/^## Phase 1/p' docs/PROGRAM_PLAN.md` (or use the epic in
+   $ARGUMENTS). Take the first epic in that order with open slices whose dependencies are met,
+   and read only its Status with `grep -n -A5 '^\*\*Status' docs/epics/<EPIC>.md`. Pick the
+   next slice; slice-builder sizes the PR and may fold in the following small slice. Say what
+   you picked in one sentence.
 2. **Build it in a fresh context.** Start the slice-builder agent with: the epic ID, the slice
-   name(s), and one sentence of intent. Wait for its summary. Do not repeat its work.
+   name(s), one sentence of intent, and any owner decision from this session that affects it. Wait for its summary. Do not repeat its work.
    - "PLAN NEEDS APPROVAL": tell the owner the PR link and stop.
    - "BLOCKED": report the failure in two lines and stop.
 3. **Merge or hand over.**
-   - `needs-owner`: report the PR link and why it needs the owner, and stop.
+   - `needs-owner`: note the PR link and why it needs the owner, and do not wait. Go back to
+     step 1 and pick the next slice that does not depend on any open `needs-owner` PR and will
+     not touch the same files (look further down the Execution order if needed; branch from
+     `main`, never from an unmerged branch). Stop when two `needs-owner` PRs are open.
    - `low-risk`: run `gh pr checks <number> --watch --fail-fast` (Bash timeout 600000). If
      green, `gh pr merge <number> --squash --delete-branch`. If red, run
      `gh run view <run-id> --log-failed | tail -60`, resume the same slice-builder (SendMessage
      to it) with the failing lines to fix and push, then wait again. At most two fix rounds.
 4. **Continue.** After a merge: `git switch main && git pull --ff-only origin main`, then back
-   to step 1. Stop after three merged PRs, or at a `needs-owner` PR, a plan approval, bench
-   work, a phase gate, or a block.
+   to step 1. Stop after four PRs in this session (merged or waiting), two open `needs-owner`
+   PRs, a plan approval, bench work, a phase gate, or a block.
 5. **Report** at the end: one line per PR (number, title, merged or waiting) and anything the
    owner must do.
 

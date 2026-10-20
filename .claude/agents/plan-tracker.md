@@ -11,7 +11,11 @@ You keep the program plan current.
 
 - Tick only the checklist items the task names as done in `docs/PROGRAM_PLAN.md`; never rewrite
   other text.
-- In `docs/epics/E<n>.md`, update the status line and the slice list for the epic named.
+- In `docs/epics/E<n>.md`, replace the `**Status` line with at most five lines: what is merged
+  (slice range and PR numbers), what is next, and any open owner decision. Then append one line
+  to the `## Log` section at the end (create it if missing):
+  `- <slice> (#<PR>): <one sentence on what changed>; bench: <none or where it went>`.
+  Never put slice history, test lists or fallback lists in the Status line.
 - If a phase gate (G1–G4) is now satisfied according to the task, add one dated line under that
   phase heading: `Gate G<n> passed on YYYY-MM-DD (commit <sha>)`.
 - Update the single `**Current focus:**` line near the top of `CLAUDE.md` to the next epic and
