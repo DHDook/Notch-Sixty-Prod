@@ -245,7 +245,7 @@ final class StereoPlaybackControlTests: XCTestCase {
         XCTAssertEqual(normal.softwareGain(for: hardware), 1.0)
         XCTAssertEqual(muted.softwareGain(for: hardware), 1.0)
         XCTAssertEqual(software.controlMode, .softwareDSP)
-        XCTAssertEqual(normal.softwareGain(for: software), 0.015_625, accuracy: 0.000_001, "0.25 on the cubic software taper")
+        XCTAssertEqual(normal.softwareGain(for: software), 0.1, accuracy: 0.000_001, "0.25 on the loudness taper is −20 dB")
         XCTAssertEqual(muted.softwareGain(for: software), 0.0)
     }
 
@@ -278,7 +278,7 @@ final class StereoPlaybackControlTests: XCTestCase {
         XCTAssertEqual(fixedVolume.controlMode, .softwareDSP)
         XCTAssertEqual(
             MasterVolumeConfiguration(level: 0.375, muted: false).softwareGain(for: fixedVolume),
-            Float(pow(0.375, 3.0)),
+            Float(pow(0.375, MasterVolumeConfiguration.softwareTaperExponent)),
             accuracy: 0.000_001
         )
     }

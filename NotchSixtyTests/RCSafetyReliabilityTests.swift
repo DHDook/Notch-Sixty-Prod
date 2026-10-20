@@ -74,12 +74,56 @@ final class RCSafetyReliabilityTests: XCTestCase {
                 muted: false
             )
         )
-        XCTAssertLessThan(UserDefaultsMasterVolumeStore.firstUseSoftwareLevel, 1.0)
+        XCTAssertEqual(
+            try XCTUnwrap(MasterVolumeConfiguration.softwareTaperDB(
+                forLevel: UserDefaultsMasterVolumeStore.firstUseSoftwareLevel
+            )),
+            -18,
+            accuracy: 1e-9,
+            "first use stays at −18 dB"
+        )
 
         store.storeSoftwareVolume(MasterVolumeConfiguration(level: 0.55, muted: true), forOutputUID: "dac")
         XCTAssertEqual(
             UserDefaultsMasterVolumeStore(defaults: defaults).restoredSoftwareVolume(forOutputUID: "dac"),
             MasterVolumeConfiguration(level: 0.55, muted: true)
+        )
+    }
+
+    /// Levels saved under the cubic taper keep their dB after the update, so
+    /// nothing plays louder; entries saved under the loudness taper are read
+    /// as they are.
+    func testUserDefaultsStoreConvertsCubicTaperLevelsAtTheSameDecibels() throws {
+        let suite = "com.dhdook.NotchSixty.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(
+            [
+                "old": ["level": 0.5, "muted": false],
+                "silent": ["level": 0.0, "muted": true],
+                "full": ["level": 1.0, "muted": false],
+            ],
+            forKey: UserDefaultsMasterVolumeStore.defaultsKey
+        )
+        let store = UserDefaultsMasterVolumeStore(defaults: defaults)
+
+        let old = try XCTUnwrap(store.restoredSoftwareVolume(forOutputUID: "old"))
+        XCTAssertEqual(
+            try XCTUnwrap(MasterVolumeConfiguration.softwareTaperDB(forLevel: old.level)),
+            20 * 3 * log10(0.5),
+            accuracy: 1e-9,
+            "same −18.06 dB as the cubic taper gave"
+        )
+        XCTAssertEqual(old.level, 0.286, accuracy: 0.001)
+        XCTAssertEqual(store.restoredSoftwareVolume(forOutputUID: "silent"), MasterVolumeConfiguration(level: 0, muted: true))
+        XCTAssertEqual(store.restoredSoftwareVolume(forOutputUID: "full")?.level, 1)
+
+        store.storeSoftwareVolume(old, forOutputUID: "old")
+        XCTAssertEqual(
+            try XCTUnwrap(UserDefaultsMasterVolumeStore(defaults: defaults).restoredSoftwareVolume(forOutputUID: "old")).level,
+            old.level,
+            accuracy: 1e-12,
+            "converted once, not again on the next launch"
         )
     }
 
@@ -90,7 +134,7 @@ final class RCSafetyReliabilityTests: XCTestCase {
         try engine.setMasterVolumeLevel(0.5)
 
         let graph = try engine.stereoTransportStartGraph(sampleRate: 48_000)
-        XCTAssertEqual(graph.masterGainLinear, 0.125, accuracy: 1.0e-6, "0.5 on the cubic software taper")
+        XCTAssertEqual(graph.masterGainLinear, 0.316_228, accuracy: 1.0e-6, "0.5 on the loudness taper is −10 dB")
 
         try engine.setMasterMuted(true)
         XCTAssertEqual(try engine.stereoTransportStartGraph(sampleRate: 48_000).masterGainLinear, 0)
@@ -99,9 +143,21 @@ final class RCSafetyReliabilityTests: XCTestCase {
     func testSoftwareTaperGivesFineLowLevelControl() throws {
         XCTAssertEqual(MasterVolumeConfiguration.softwareTaperGain(forLevel: 1), 1)
         XCTAssertEqual(MasterVolumeConfiguration.softwareTaperGain(forLevel: 0), 0)
-        XCTAssertEqual(try XCTUnwrap(MasterVolumeConfiguration.softwareTaperDB(forLevel: 0.5)), -18.06, accuracy: 0.01)
+        // Loudness taper: −10 dB (half as loud) per halving of the position.
+        XCTAssertEqual(try XCTUnwrap(MasterVolumeConfiguration.softwareTaperDB(forLevel: 0.5)), -10, accuracy: 1e-9)
+        XCTAssertEqual(try XCTUnwrap(MasterVolumeConfiguration.softwareTaperDB(forLevel: 0.25)), -20, accuracy: 1e-9)
+        XCTAssertEqual(try XCTUnwrap(MasterVolumeConfiguration.softwareTaperDB(forLevel: 0.75)), -4.15, accuracy: 0.01)
         let topStep = try XCTUnwrap(MasterVolumeConfiguration.softwareTaperDB(forLevel: 15.0 / 16.0))
-        XCTAssertEqual(topStep, -1.68, accuracy: 0.01)
+        XCTAssertEqual(topStep, -0.93, accuracy: 0.01, "fine control near full scale")
+        for db in stride(from: -80.0, through: 0, by: 2.5) {
+            XCTAssertEqual(
+                try XCTUnwrap(MasterVolumeConfiguration.softwareTaperDB(
+                    forLevel: MasterVolumeConfiguration.level(forSoftwareTaperDB: db)
+                )),
+                db,
+                accuracy: 1e-9
+            )
+        }
         let levels = (1...16).map { Double($0) / 16 }
         let steps = zip(levels.dropFirst(), levels).map {
             MasterVolumeConfiguration.softwareTaperDB(forLevel: $0)!

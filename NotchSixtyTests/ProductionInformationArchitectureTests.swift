@@ -112,26 +112,18 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         }
     }
 
-    /// dB-scaled bar and fader: equal distances are equal dB, −80 dB just
-    /// above the bottom stop, silence at the stop, and the inverse round-trips.
-    func testDecibelScalePositionIsLinearInDecibels() {
-        func position(_ db: Double) -> Double {
-            VolumeFeedbackPresentation.decibelScalePosition(
-                level: MasterVolumeConfiguration.level(forSoftwareTaperDB: db)
-            )
-        }
-        XCTAssertEqual(position(0), 1, accuracy: 1e-9)
-        XCTAssertEqual(position(-40), 0.5, accuracy: 1e-9)
-        XCTAssertEqual(position(-20), 0.75, accuracy: 1e-9)
-        XCTAssertEqual(position(-80), 0, accuracy: 1e-9)
-        XCTAssertEqual(VolumeFeedbackPresentation.decibelScalePosition(level: 0), 0)
-
-        XCTAssertEqual(VolumeFeedbackPresentation.level(forDecibelScalePosition: 0), 0)
-        XCTAssertEqual(VolumeFeedbackPresentation.level(forDecibelScalePosition: 1), 1, accuracy: 1e-12)
-        for p in stride(from: 0.05, through: 1.0, by: 0.05) {
-            let level = VolumeFeedbackPresentation.level(forDecibelScalePosition: p)
-            XCTAssertEqual(VolumeFeedbackPresentation.decibelScalePosition(level: level), p, accuracy: 1e-9)
-        }
+    /// Fader marks sit at their dB on the loudness taper, 0 dB at the top and
+    /// −∞ at the bottom stop, each 10 dB step half the distance of the last.
+    func testFaderMarksSitAtTheirDecibelsOnTheLoudnessTaper() throws {
+        XCTAssertEqual(VolumeFeedbackPresentation.faderTickDecibels, [0, -5, -10, -20, -30, -40, -60])
+        XCTAssertEqual(VolumeFeedbackPresentation.faderTickLabel(0), "0")
+        XCTAssertEqual(VolumeFeedbackPresentation.faderTickLabel(-20), "−20")
+        XCTAssertEqual(VolumeFeedbackPresentation.faderTickLabel(nil), "−∞")
+        XCTAssertEqual(MasterVolumeConfiguration.level(forSoftwareTaperDB: 0), 1, accuracy: 1e-12)
+        XCTAssertEqual(MasterVolumeConfiguration.level(forSoftwareTaperDB: -10), 0.5, accuracy: 1e-12)
+        XCTAssertEqual(MasterVolumeConfiguration.level(forSoftwareTaperDB: -20), 0.25, accuracy: 1e-12)
+        XCTAssertEqual(MasterVolumeConfiguration.level(forSoftwareTaperDB: -30), 0.125, accuracy: 1e-12)
+        XCTAssertEqual(MasterVolumeConfiguration.level(forSoftwareTaperDB: -.infinity), 0)
     }
 
     func testDecibelKeyStepsLandOnTheStepGridBetweenSilenceAndZero() throws {
@@ -244,6 +236,66 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         XCTAssertTrue(system.contains(cover.frame))
         XCTAssertGreaterThan(cover.level.rawValue, SystemVolumePopupGeometry.windowLevel.rawValue)
         XCTAssertGreaterThan(cover.displayDuration, SystemVolumePopupGeometry.displayDuration)
+    }
+
+    /// While another app is full screen, Follow macOS Popup moves to the top
+    /// centre with the system popup, beside it or covering it.
+    func testFollowMacOSPopupMovesToTopCentreWhileAnotherAppIsFullScreen() {
+        let screen = CGRect(x: 0, y: 0, width: 1920, height: 1080)
+        let visible = CGRect(x: 0, y: 0, width: 1920, height: 1050)
+        let system = SystemVolumePopupGeometry.fullScreenFrame(in: screen)
+        XCTAssertEqual(system.midX, screen.midX, accuracy: 0.001)
+        XCTAssertEqual(system.maxY, screen.maxY, accuracy: 0.001)
+
+        let cover = VolumePopupLayoutFixture.make(.topRight, cover: true, visible, fullScreen: screen)
+        XCTAssertEqual(cover.style, .solidGlass)
+        XCTAssertEqual(cover.frame.midX, screen.midX, accuracy: 0.001)
+        XCTAssertTrue(system.contains(cover.frame))
+
+        let beside = VolumePopupLayoutFixture.make(.topRight, cover: false, visible, fullScreen: screen)
+        XCTAssertFalse(beside.frame.intersects(system))
+        XCTAssertEqual(beside.frame.maxX, system.minX - 8, accuracy: 0.001)
+        XCTAssertTrue(screen.contains(beside.frame))
+
+        XCTAssertEqual(
+            VolumePopupLayoutFixture.make(.bottomCenter, cover: false, visible, fullScreen: screen),
+            VolumePopupLayoutFixture.make(.bottomCenter, cover: false, visible),
+            "Bottom Center ignores full screen"
+        )
+        XCTAssertEqual(VolumeFeedbackPopupPosition.topRight.displayName, "Follow macOS Popup")
+    }
+
+    /// Full screen is a normal-layer window of the frontmost app covering the
+    /// screen's whole frame, in CG top-left coordinates, on that screen only.
+    func testFullScreenDetectorMatchesOnlyTheFrontmostAppCoveringTheScreen() {
+        func window(pid: pid_t, layer: Int = 0, _ rect: CGRect) -> [String: Any] {
+            [
+                kCGWindowOwnerPID as String: NSNumber(value: pid),
+                kCGWindowLayer as String: NSNumber(value: layer),
+                kCGWindowBounds as String: rect.dictionaryRepresentation as NSDictionary,
+            ]
+        }
+        let primary = CGRect(x: 0, y: 0, width: 1920, height: 1080)
+        // A 1440 × 900 display above the primary one, in AppKit coordinates.
+        let upper = CGRect(x: 0, y: 1080, width: 1440, height: 900)
+        func isFullScreen(_ windows: [[String: Any]], on screen: CGRect) -> Bool {
+            FullScreenAppDetector.isFullScreen(
+                windows: windows,
+                ownerPID: 42,
+                screenFrame: screen,
+                primaryScreenHeight: primary.height
+            )
+        }
+
+        let fullScreen = window(pid: 42, CGRect(x: 0, y: 0, width: 1920, height: 1080))
+        XCTAssertTrue(isFullScreen([fullScreen], on: primary))
+        XCTAssertFalse(isFullScreen([fullScreen], on: upper), "only the screen the popup is on")
+        XCTAssertTrue(isFullScreen([window(pid: 42, CGRect(x: 0, y: -900, width: 1440, height: 900))], on: upper))
+
+        XCTAssertFalse(isFullScreen([window(pid: 7, CGRect(x: 0, y: 0, width: 1920, height: 1080))], on: primary), "another app")
+        XCTAssertFalse(isFullScreen([window(pid: 42, layer: 25, CGRect(x: 0, y: 0, width: 1920, height: 1080))], on: primary), "overlay layer")
+        XCTAssertFalse(isFullScreen([window(pid: 42, CGRect(x: 0, y: 30, width: 1920, height: 1050))], on: primary), "zoomed, not full screen")
+        XCTAssertFalse(isFullScreen([[kCGWindowOwnerPID as String: NSNumber(value: 42)]], on: primary), "no bounds")
     }
 
     @MainActor
@@ -1982,12 +2034,14 @@ private enum VolumePopupLayoutFixture {
     static func make(
         _ position: VolumeFeedbackPopupPosition,
         cover: Bool,
-        _ visible: CGRect
+        _ visible: CGRect,
+        fullScreen: CGRect? = nil
     ) -> VolumeFeedbackPopupLayout {
         VolumeFeedbackPopupLayout.make(
             position: position,
             coverSystemPopup: cover,
-            visibleFrame: visible
+            visibleFrame: visible,
+            fullScreenFrame: fullScreen
         )
     }
 }

@@ -793,13 +793,17 @@ enum MasterVolumeKeyStep: Equatable, Sendable {
 
 struct MasterVolumeConfiguration: Equatable, Sendable {
     static let levelRange = 0.0...1.0
-    /// Software volume uses an audio (cubic) taper: gain = level³, i.e.
-    /// 60 dB per decade of slider position. 50% ≈ -18 dB, 25% ≈ -36 dB, and a
-    /// 1/16 key step from full scale ≈ -1.7 dB, giving fine control at low
-    /// listening levels instead of a linear-amplitude slider whose last step
-    /// jumps from -24 dB to silence. Device-mode outputs use the driver's own
+    /// Software volume follows perceived loudness (Stevens' power law: loudness
+    /// in sones doubles per +10 dB). The slider position is relative loudness,
+    /// so gain = level^(1 / (2 log10 2)) ≈ level^1.661, i.e. 10 dB per halving
+    /// of the position: 50% ≈ −10 dB (half as loud), 25% ≈ −20 dB, 75% ≈
+    /// −4.2 dB. A 1/16 key step is ≈ 0.9 dB near full scale and coarser toward
+    /// silence, like a console fader. Device-mode outputs use the driver's own
     /// volume scalar and are unaffected.
-    static let softwareTaperExponent = 3.0
+    static let softwareTaperExponent = 1 / (2 * log10(2.0))
+    /// The cubic taper (gain = level³) used before the loudness taper. Saved
+    /// levels written under it are converted through their dB value.
+    static let legacyCubicTaperExponent = 3.0
 
     var level: Double = 1.0
     var muted = false
@@ -842,11 +846,23 @@ protocol MasterVolumePersisting: AnyObject {
 }
 
 final class UserDefaultsMasterVolumeStore: MasterVolumePersisting {
-    /// Level used the first time a software-volume output is seen: 50% on the
-    /// software taper (≈ -18 dB), never full scale into an amplifier that has
-    /// no volume control of its own.
-    static let firstUseSoftwareLevel = 0.5
+    /// Level used the first time a software-volume output is seen: −18 dB
+    /// (≈ 29% on the loudness taper), never full scale into an amplifier that
+    /// has no volume control of its own.
+    static let firstUseSoftwareLevel = MasterVolumeConfiguration.level(forSoftwareTaperDB: -18)
     static let defaultsKey = "audio.masterVolume.softwareByOutputUID"
+    /// Marks an entry saved under the loudness taper. Entries without it were
+    /// saved under the cubic taper and are converted at the same dB, so an
+    /// update never makes playback louder.
+    static let taperKey = "taper"
+    static let loudnessTaperValue = "loudness"
+
+    /// The loudness-taper level giving the same gain a cubic-taper level gave.
+    static func loudnessLevel(fromCubicLevel level: Double) -> Double {
+        guard level > 0 else { return 0 }
+        let decibels = 20 * MasterVolumeConfiguration.legacyCubicTaperExponent * log10(min(level, 1))
+        return MasterVolumeConfiguration.level(forSoftwareTaperDB: decibels)
+    }
 
     private let defaults: UserDefaults
 
@@ -861,14 +877,22 @@ final class UserDefaultsMasterVolumeStore: MasterVolumePersisting {
               MasterVolumeConfiguration.levelRange.contains(level) else {
             return MasterVolumeConfiguration(level: Self.firstUseSoftwareLevel, muted: false)
         }
-        return MasterVolumeConfiguration(level: level, muted: entry["muted"] as? Bool ?? false)
+        let isLoudness = entry[Self.taperKey] as? String == Self.loudnessTaperValue
+        return MasterVolumeConfiguration(
+            level: isLoudness ? level : Self.loudnessLevel(fromCubicLevel: level),
+            muted: entry["muted"] as? Bool ?? false
+        )
     }
 
     func storeSoftwareVolume(_ configuration: MasterVolumeConfiguration, forOutputUID uid: String) {
         guard configuration.level.isFinite,
               MasterVolumeConfiguration.levelRange.contains(configuration.level) else { return }
         var entries = defaults.dictionary(forKey: Self.defaultsKey) ?? [:]
-        entries[uid] = ["level": configuration.level, "muted": configuration.muted]
+        entries[uid] = [
+            "level": configuration.level,
+            "muted": configuration.muted,
+            Self.taperKey: Self.loudnessTaperValue,
+        ]
         defaults.set(entries, forKey: Self.defaultsKey)
     }
 }

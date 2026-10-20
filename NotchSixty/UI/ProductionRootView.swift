@@ -811,8 +811,8 @@ private struct ProductionDashboardView: View {
         }
     }
 
-    /// dB key steps on a software-DSP output: the fader and readout are
-    /// dB-scaled, as on a console or monitor controller.
+    /// dB key steps on a software-DSP output: the readout shows dB, as on a
+    /// console or monitor controller.
     private var masterVolumeUsesDecibelScale: Bool {
         engine.masterVolumeCapabilities.controlMode == .softwareDSP
             && ApplicationVolumeStepResolution(storedValue: storedVolumeStepResolution)?.usesDecibels == true
@@ -978,31 +978,15 @@ private struct ProductionDashboardView: View {
                         Text(masterVolumeReadout)
                             .monospacedDigit().foregroundStyle(.secondary)
                     }
-                    if masterVolumeUsesDecibelScale {
-                        Slider(
-                            value: Binding(
-                                get: {
-                                    VolumeFeedbackPresentation.decibelScalePosition(
-                                        level: engine.masterVolumeConfiguration.level
-                                    )
-                                },
-                                set: { position in
-                                    let level = VolumeFeedbackPresentation.level(
-                                        forDecibelScalePosition: position
-                                    )
-                                    perform { try engine.setMasterVolumeLevel(level) }
-                                }
-                            ),
-                            in: 0...1
-                        )
-                    } else {
-                        Slider(
-                            value: Binding(
-                                get: { engine.masterVolumeConfiguration.level },
-                                set: { level in perform { try engine.setMasterVolumeLevel(level) } }
-                            ),
-                            in: MasterVolumeConfiguration.levelRange
-                        )
+                    Slider(
+                        value: Binding(
+                            get: { engine.masterVolumeConfiguration.level },
+                            set: { level in perform { try engine.setMasterVolumeLevel(level) } }
+                        ),
+                        in: MasterVolumeConfiguration.levelRange
+                    )
+                    if engine.masterVolumeCapabilities.controlMode == .softwareDSP {
+                        MasterVolumeFaderScale()
                     }
                 }
 
@@ -2421,5 +2405,43 @@ struct ProductionActionErrorBanner: View {
             .padding(10)
             .background(.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
         }
+    }
+}
+
+/// Console-style dB marks under the software-volume fader. On the loudness
+/// taper the slider position is the level, so each mark sits at its level.
+struct MasterVolumeFaderScale: View {
+    /// Approximate distance from the slider's ends to its knob centre at the
+    /// stops, so marks line up with the knob.
+    private let trackInset: CGFloat = 10
+
+    private var marks: [(label: String, position: Double)] {
+        [(VolumeFeedbackPresentation.faderTickLabel(nil), 0)]
+            + VolumeFeedbackPresentation.faderTickDecibels.reversed().map {
+                (
+                    VolumeFeedbackPresentation.faderTickLabel($0),
+                    MasterVolumeConfiguration.level(forSoftwareTaperDB: $0)
+                )
+            }
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            let track = max(proxy.size.width - 2 * trackInset, 0)
+            ForEach(marks, id: \.label) { mark in
+                VStack(spacing: 1) {
+                    Rectangle().frame(width: 1, height: 4)
+                    // −60 dB sits a few points from −∞ on the loudness
+                    // taper: tick only, so the labels never collide.
+                    Text(mark.label).font(.caption2).monospacedDigit()
+                        .opacity(mark.label == "−60" ? 0 : 1)
+                }
+                .foregroundStyle(.secondary)
+                .fixedSize()
+                .position(x: trackInset + track * mark.position, y: proxy.size.height / 2)
+            }
+        }
+        .frame(height: 18)
+        .accessibilityHidden(true)
     }
 }
