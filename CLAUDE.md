@@ -7,7 +7,7 @@
 - Agents in `.claude/agents/`: slice-builder (Sonnet, builds one slice in a fresh context),
   realtime-reviewer (Sonnet), and code-scout, build-test-runner, plan-tracker, pr-writer (Haiku).
 
-**Current focus:** E6 slice 8b2a of 12 `e6/engine-integration-3` built on branch (needs-owner); next S8b2b.
+**Current focus:** E6 slice 8b2b built on branch e6/engine-integration-4 (needs-owner); next S8b2c.
 <!-- plan-tracker keeps the line above current -->
 
 @AGENTS.md

@@ -262,6 +262,66 @@ struct AudioDiagnosticsSnapshot: Equatable, Sendable {
     let recoverySuccesses: UInt64
     let recoveryFailures: UInt64
     let lastErrorDescription: String?
+    /// E6 S8b2b: set while libn60core renders the session (stereo or N-channel); nil while the
+    /// kernel or the legacy N-channel render core does.
+    var unifiedGraph: UnifiedGraphDiagnostics? = nil
+}
+
+/// Readbacks from a live unified graph: its stage-reported latency, rebuild state and
+/// post-protection meter per lane (program lanes, then sub lanes).
+struct UnifiedGraphDiagnostics: Equatable, Sendable {
+    struct LaneMeter: Equatable, Sendable {
+        let peakLinear: Float
+        let rmsLinear: Float
+    }
+
+    let channelCount: Int
+    let programChannelCount: Int
+    let latencyFrames: UInt32
+    /// `n60_rebuild_status.state`: 0 when the live graph is steady.
+    let rebuildState: UInt32
+    let finalMeters: [LaneMeter]
+    /// Set when the graph was requested but the legacy path renders the session; the other
+    /// fields are then empty. nil while the graph renders.
+    let fallbackReason: UnifiedGraphFallbackReason?
+
+    var isActive: Bool { fallbackReason == nil }
+
+    /// A requested graph that is not rendering, with the reason.
+    init(fallbackReason: UnifiedGraphFallbackReason) {
+        channelCount = 0
+        programChannelCount = 0
+        latencyFrames = 0
+        rebuildState = 0
+        finalMeters = []
+        self.fallbackReason = fallbackReason
+    }
+
+    /// The live graph's readbacks; or, when there is no host but a recorded `fallbackReason`,
+    /// the fallback record; nil when neither applies.
+    @MainActor
+    init?(host: UnifiedGraphHost?, programChannelCount: Int, fallbackReason: UnifiedGraphFallbackReason? = nil) {
+        guard let host else {
+            guard let fallbackReason else { return nil }
+            channelCount = 0
+            self.programChannelCount = 0
+            latencyFrames = 0
+            rebuildState = 0
+            finalMeters = []
+            self.fallbackReason = fallbackReason
+            return
+        }
+        self.fallbackReason = nil
+        let count = Int(host.outputChannels)
+        self.channelCount = count
+        self.programChannelCount = programChannelCount
+        self.latencyFrames = host.latencyFrames
+        self.rebuildState = host.rebuildState
+        self.finalMeters = (0..<count).map { lane in
+            let reading = host.meter(stageId: N60_LSTAGE_FINAL_METER, lane: UInt32(lane))
+            return LaneMeter(peakLinear: reading?.peak ?? 0, rmsLinear: reading?.rms ?? 0)
+        }
+    }
 }
 
 

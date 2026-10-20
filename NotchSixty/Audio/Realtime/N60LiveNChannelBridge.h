@@ -10,6 +10,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "n60/graph.h"
+
 #include "N60AdaptiveSampleRate.h"
 #include "N60AudioUnitLiveRackBridge.h"
 #include "N60LiveNChannelRenderCore.h"
@@ -72,6 +74,16 @@ typedef struct N60LiveNChannelBridge {
     float * _Nullable audioUnitRackScratch;
     N60ProgramInputMap inputMap;
     N60LiveNChannelRenderGraph graph;
+
+    // E6 S8b2b: optional libn60core graph that replaces the per-frame lane and bass-management
+    // render for the whole session. Attached by the control plane while IO is stopped and never
+    // changed afterwards, so the callback only reads these. The graph is owned by the caller
+    // (UnifiedGraphHost); the bridge owns only the planar scratch. Channels 0..<program are the
+    // program lanes, program..<graphChannels the sub lanes (fed silence).
+    n60_graph * _Nullable unifiedGraph;
+    float * _Nullable graphScratch;
+    uint32_t graphChannels;
+    uint32_t graphMaxFrames;
 
     uint32_t outputGateMinimumBufferedFrames;
     uint32_t startupFadeFrames;
@@ -273,6 +285,40 @@ static inline bool N60LiveNChannelBridgeConfigureProgramFIR(
     return true;
 }
 
+/// Control plane only, IO stopped. Routes the session's lane and bass-management render through
+/// `graph` (ownership stays with the caller, who must keep it alive until after
+/// N60LiveNChannelBridgeDestroy). `graphChannels` is the program count plus the sub count the
+/// graph was built with and `maxFrames` its maxBlockFrames. Pass a NULL graph to detach.
+static inline bool N60LiveNChannelBridgeAttachGraph(
+    N60LiveNChannelBridge * _Nonnull bridge,
+    void * _Nullable graphHandle,
+    uint32_t graphChannels,
+    uint32_t maxFrames
+) {
+    n60_graph * _Nullable graph = (n60_graph *)graphHandle;
+    if (bridge == NULL) return false;
+    free(bridge->graphScratch);
+    bridge->graphScratch = NULL;
+    bridge->unifiedGraph = NULL;
+    bridge->graphChannels = 0u;
+    bridge->graphMaxFrames = 0u;
+    if (graph == NULL) return true;
+    const uint32_t programChannels = bridge->graph.programLayout.channelCount;
+    if (graphChannels < programChannels
+        || graphChannels > N60_GRAPH_MAX_CHANNELS
+        || maxFrames == 0u) {
+        return false;
+    }
+    // Planar input and output blocks side by side.
+    float * const scratch = (float *)calloc((size_t)graphChannels * maxFrames * 2u, sizeof(float));
+    if (scratch == NULL) return false;
+    bridge->graphScratch = scratch;
+    bridge->graphChannels = graphChannels;
+    bridge->graphMaxFrames = maxFrames;
+    bridge->unifiedGraph = graph;
+    return true;
+}
+
 static inline void N60LiveNChannelBridgeDestroy(
     N60LiveNChannelBridge * _Nullable bridge
 ) {
@@ -284,6 +330,9 @@ static inline void N60LiveNChannelBridgeDestroy(
     free(bridge->adaptiveCaptureScratch);
     free(bridge->adaptiveOutputScratch);
     free(bridge->audioUnitRackScratch);
+    free(bridge->graphScratch);
+    bridge->graphScratch = NULL;
+    bridge->unifiedGraph = NULL;
     bridge->transport = NULL;
     bridge->renderRuntime = NULL;
     bridge->roomTreatment = NULL;
@@ -529,6 +578,9 @@ static inline N60LiveNChannelMeterSnapshot N60LiveNChannelBridgeGetMeterSnapshot
             &bridge->meterProgramOverRangeSamples[channel], memory_order_relaxed
         );
     }
+    // With a graph attached the lane meter is the graph's METER_OUT stage. n60_graph_read_meter is
+    // control-thread-only, so this function (callable from any thread) never touches the graph:
+    // Swift overlays those levels under UnifiedGraphHost's lock (see N60LiveNChannelMeterSetProgramLevels).
     for (uint32_t physical = 0; physical < result.physicalChannelCount; ++physical) {
         result.physicalPeak[physical] = N60LiveNChannelBitsToFloat(atomic_load_explicit(
             &bridge->meterPhysicalPeakBits[physical], memory_order_relaxed
@@ -541,6 +593,15 @@ static inline N60LiveNChannelMeterSnapshot N60LiveNChannelBridgeGetMeterSnapshot
         );
     }
     return result;
+}
+
+/// Overlay one program lane's level read from the graph by the control plane.
+static inline void N60LiveNChannelMeterSetProgramLevels(
+    N60LiveNChannelMeterSnapshot * _Nonnull meter, uint32_t channel, float peak, float rms
+) {
+    if (channel >= meter->programChannelCount) return;
+    meter->programPeak[channel] = peak;
+    meter->programRMS[channel] = rms;
 }
 
 static inline float N60LiveNChannelMeterProgramPeak(
@@ -601,7 +662,9 @@ static inline N60LiveNChannelBridgeSnapshot N60LiveNChannelBridgeGetSnapshot(
         ),
         .outputGateOpen = atomic_load_explicit(&bridge->outputGateOpen, memory_order_acquire),
         .algorithmicLatencyFrames =
-            N60LiveNChannelRenderGraphLatencyFrames(&bridge->graph)
+            (bridge->unifiedGraph != NULL
+                ? (uint64_t)n60_graph_latency_frames(bridge->unifiedGraph)
+                : N60LiveNChannelRenderGraphLatencyFrames(&bridge->graph))
             + (N60AudioUnitLiveRackProcessorIsValid(&bridge->audioUnitRack)
                 ? bridge->audioUnitRack.latencyFrames
                 : 0u),
@@ -950,9 +1013,69 @@ static inline OSStatus N60LiveNChannelOutputIOProc(
         }
     }
 
+    // E6 S8b2b graph path: gather the block's program input into planar scratch, render the
+    // whole block through libn60core, then the per-frame loop below only maps, limits and
+    // writes. The graph is attached before IO starts, so this decision is stable per session.
+    n60_graph * const graph = bridge->unifiedGraph;
+    float * const graphPlanes = bridge->graphScratch;
+    const bool graphActive = graph != NULL && graphPlanes != NULL
+        && frameCount <= bridge->graphMaxFrames;
+    if (bridge->unifiedGraph != NULL && !graphActive) {
+        // A block larger than the graph was sized for: silence, never a mixed render.
+        N60LiveNChannelZeroOutput(outOutputData);
+        atomic_fetch_add_explicit(&bridge->renderFailures, 1u, memory_order_relaxed);
+        if (!adaptiveSampleRate && !rackConfigured) {
+            N60ProgramTransportFrame discarded = {0};
+            for (uint32_t frameIndex = 0; frameIndex < underrunAvailableFrames; ++frameIndex) {
+                (void)N60ProgramTransportDequeueFrame(bridge->transport, &discarded);
+            }
+        }
+        return noErr;
+    }
+    bool graphRendered = false;
+    // renderFailures counts failed blocks, not frames: set once the block has been counted.
+    bool blockFailureCounted = false;
+    if (graphActive) {
+        const uint32_t graphChannels = bridge->graphChannels;
+        float * const planarIn = graphPlanes;
+        float * const planarOut = graphPlanes + (size_t)graphChannels * bridge->graphMaxFrames;
+        const size_t stride = bridge->graphMaxFrames;
+        for (uint32_t frameIndex = 0; frameIndex < frameCount; ++frameIndex) {
+            N60ProgramTransportFrame gathered = {0};
+            const float *source = gathered.channels;
+            if (rackConfigured) {
+                source = bridge->audioUnitRackScratch + (size_t)frameIndex * programChannels;
+            } else if (adaptiveSampleRate) {
+                source = bridge->adaptiveOutputScratch + (size_t)frameIndex * programChannels;
+            } else {
+                (void)N60ProgramTransportDequeueFrame(bridge->transport, &gathered);
+            }
+            for (uint32_t channel = 0; channel < programChannels; ++channel) {
+                planarIn[channel * stride + frameIndex] = source[channel];
+            }
+        }
+        // Sub lanes ignore their input; keep it silent.
+        for (uint32_t channel = programChannels; channel < graphChannels; ++channel) {
+            memset(planarIn + channel * stride, 0, (size_t)frameCount * sizeof(float));
+        }
+        const float *inPointers[N60_GRAPH_MAX_CHANNELS];
+        float *outPointers[N60_GRAPH_MAX_CHANNELS];
+        for (uint32_t channel = 0; channel < graphChannels; ++channel) {
+            inPointers[channel] = planarIn + channel * stride;
+            outPointers[channel] = planarOut + channel * stride;
+        }
+        graphRendered = n60_graph_process(graph, inPointers, outPointers, frameCount) == N60_STATUS_OK;
+        if (!graphRendered) {
+            atomic_fetch_add_explicit(&bridge->renderFailures, 1u, memory_order_relaxed);
+            blockFailureCounted = true;
+        }
+    }
+
     for (uint32_t frameIndex = 0; frameIndex < frameCount; ++frameIndex) {
         N60ProgramTransportFrame input = {0};
-        if (rackConfigured) {
+        if (graphActive) {
+            // Already consumed by the pre-pass.
+        } else if (rackConfigured) {
             memcpy(
                 input.channels,
                 bridge->audioUnitRackScratch
@@ -974,14 +1097,49 @@ static inline OSStatus N60LiveNChannelOutputIOProc(
         }
 
         N60LiveNChannelPhysicalFrame physical = {0};
-        if (!N60LiveNChannelRenderProcessFrame(
+        bool frameRendered;
+        if (graphActive) {
+            frameRendered = graphRendered;
+            if (frameRendered) {
+                const float * const planarOut = graphPlanes
+                    + (size_t)bridge->graphChannels * bridge->graphMaxFrames;
+                const size_t stride = bridge->graphMaxFrames;
+                physical.physicalChannelCount = bridge->graph.outputMap.physicalChannelCount;
+                for (uint32_t program = 0; program < programChannels; ++program) {
+                    const uint32_t target = bridge->graph.outputMap.physicalChannelForProgram[program];
+                    if (target == N60_LIVE_PHYSICAL_CHANNEL_UNMAPPED) continue;
+                    if (target >= physical.physicalChannelCount) { frameRendered = false; break; }
+                    const float value = planarOut[program * stride + frameIndex];
+                    physical.values[target] = isfinite(value) ? value : 0.0f;
+                }
+                for (uint32_t sub = 0;
+                     frameRendered && programChannels + sub < bridge->graphChannels
+                         && sub < bridge->graph.outputMap.subwooferCount;
+                     ++sub) {
+                    const uint32_t target = bridge->graph.outputMap.physicalChannelForSubwoofer[sub];
+                    if (target == N60_LIVE_PHYSICAL_CHANNEL_UNMAPPED
+                        || target >= physical.physicalChannelCount) {
+                        frameRendered = false;
+                        break;
+                    }
+                    const float value = planarOut[(programChannels + sub) * stride + frameIndex];
+                    physical.values[target] = isfinite(value) ? value : 0.0f;
+                }
+            }
+        } else {
+            frameRendered = N60LiveNChannelRenderProcessFrame(
                 bridge->renderRuntime,
                 &bridge->graph,
                 &input,
                 &physical,
-                meterDemand ? &programMeter : NULL)) {
+                meterDemand ? &programMeter : NULL);
+        }
+        if (!frameRendered) {
             (void)N60ProgramTransportZeroOutputFrame(outOutputData, frameIndex);
-            atomic_fetch_add_explicit(&bridge->renderFailures, 1u, memory_order_relaxed);
+            if (!blockFailureCounted) {
+                atomic_fetch_add_explicit(&bridge->renderFailures, 1u, memory_order_relaxed);
+                blockFailureCounted = true;
+            }
             continue;
         }
 
@@ -991,7 +1149,10 @@ static inline OSStatus N60LiveNChannelOutputIOProc(
                 physical.values,
                 physical.physicalChannelCount)) {
             (void)N60ProgramTransportZeroOutputFrame(outOutputData, frameIndex);
-            atomic_fetch_add_explicit(&bridge->renderFailures, 1u, memory_order_relaxed);
+            if (!blockFailureCounted) {
+                atomic_fetch_add_explicit(&bridge->renderFailures, 1u, memory_order_relaxed);
+                blockFailureCounted = true;
+            }
             continue;
         }
 
@@ -1027,8 +1188,10 @@ static inline OSStatus N60LiveNChannelOutputIOProc(
     }
 
     if (meterDemand) {
-        const N60ProgramLaneMeterReading reading =
-            N60ProgramLaneMeterAccumulatorReading(&programMeter);
+        // With the graph attached the program lane meter is read from its METER_OUT stage.
+        const N60ProgramLaneMeterReading reading = graphActive
+            ? (N60ProgramLaneMeterReading){0}
+            : N60ProgramLaneMeterAccumulatorReading(&programMeter);
         for (uint32_t channel = 0; channel < reading.channelCount; ++channel) {
             atomic_store_explicit(
                 &bridge->meterProgramPeakBits[channel],

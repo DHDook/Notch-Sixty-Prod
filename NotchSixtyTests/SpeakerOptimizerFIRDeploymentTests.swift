@@ -272,6 +272,23 @@ final class SpeakerOptimizerFIRDeploymentTests: XCTestCase {
         }
     }
 
+    /// E6 S8b2b: a route with an optimizer FIR stays on the legacy core and says why.
+    func testUnifiedGraphFallbackReportsOptimizerFIR() throws {
+        let profile = makeStereoProfile()
+        let deployment = makeDeployment(
+            profile: profile, sources: [makeSource(role: .frontLeft, centerTap: 1.0)], requiredHeadroomDB: 1.0)
+        let routePlan = LiveNChannelOutputRoutePlan(
+            programLayout: .stereo, orderedDeviceUIDs: ["fir-output"], referenceDeviceUID: "fir-output",
+            physicalChannelCount: 2, programPhysicalChannels: [0, 1], subwooferPhysicalChannels: [],
+            subwooferCount: 0, bassManagementEnabled: false, speakerCalibrations: [:],
+            subwooferCalibrations: [], speakerOptimizerFIR: deployment)
+        let result = UnifiedGraphTranslator.nChannelEligibility(
+            routePlan: routePlan, sampleRate: 48_000, gainConfiguration: DSPGainConfiguration(),
+            bassManagementConfiguration: BassManagementConfiguration(enabled: false))
+        guard case .failure(let reason) = result else { return XCTFail("optimizer FIR must be ineligible") }
+        XCTAssertEqual(reason, .optimizerFIR)
+    }
+
     func testLegacyOutputDeviceProfileDecodesWithFIRAbsent() throws {
         let profile = makeStereoProfile()
         let data = try JSONEncoder().encode(profile)

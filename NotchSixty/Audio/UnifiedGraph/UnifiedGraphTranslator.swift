@@ -12,9 +12,21 @@ enum UnifiedGraphTranslator {
         subwoofers: [UnifiedGraphSubwoofer] = [],
         crossoverHz: Double = 80
     ) -> UnifiedGraphConfiguration? {
+        try? stereoEligibility(
+            snapshot: &snapshot, sampleRate: sampleRate, subwoofers: subwoofers, crossoverHz: crossoverHz
+        ).get()
+    }
+
+    /// As `stereoConfiguration`, but says why the kernel keeps the snapshot.
+    static func stereoEligibility(
+        snapshot: inout N60DSPGraphSnapshot,
+        sampleRate: Double,
+        subwoofers: [UnifiedGraphSubwoofer] = [],
+        crossoverHz: Double = 80
+    ) -> Result<UnifiedGraphConfiguration, UnifiedGraphFallbackReason> {
         guard withUnsafePointer(to: &snapshot, {
             N60UnifiedGraphSnapshotUnsupportedReason($0) == N60UnifiedGraphSupported
-        }) else { return nil }
+        }) else { return .failure(.unsupportedKernelStage) }
 
         var left: [UnifiedGraphPEQSection] = []
         var right: [UnifiedGraphPEQSection] = []
@@ -43,13 +55,13 @@ enum UnifiedGraphTranslator {
         )
         configuration.inputGain = snapshot.inputGainLinear * snapshot.headroomGainLinear
         guard let stages = stereoStages(snapshot: &snapshot, configuration: &configuration) else {
-            return nil
+            return .failure(.stageParametersUnreadable)
         }
         configuration.stereoStages = stages
         if snapshot.protection.limiterEnabled || snapshot.protection.truePeakGuardEnabled {
             let p = snapshot.protection
             let ceilingDB = 20.0 * log10(Double(max(p.limiterCeilingLinear, 1e-6)))
-            guard ceilingDB >= -20, ceilingDB <= 0 else { return nil }
+            guard ceilingDB >= -20, ceilingDB <= 0 else { return .failure(.protectionCeilingOutOfRange) }
             configuration.protection = UnifiedGraphProtection(
                 limiterEnabled: p.limiterEnabled,
                 ceilingDB: ceilingDB,
@@ -65,7 +77,7 @@ enum UnifiedGraphTranslator {
                 crossoverHz: crossoverHz, lfeLane: nil, subwoofers: subwoofers
             )
         }
-        return configuration
+        return .success(configuration)
     }
 
     /// The kernel stages between the EQ and the output gain that the core reproduces. The
@@ -148,6 +160,107 @@ enum UnifiedGraphTranslator {
         return configuration
     }
 
+    /// The live N-channel session's lanes, bass management and 1 to 8 subs as a graph
+    /// configuration (E6 S8b2b), or nil when the legacy render core must keep the session. It
+    /// mirrors `LiveNChannelRenderGraphCompiler.makeGraph` field for field. Ineligible, because
+    /// the core cannot reproduce them exactly: an optimizer FIR, a polarity-inverted or silent
+    /// lane, a lane delay under bass management (the legacy order puts it before the
+    /// crossover, the core after), and any crossover other than Linkwitz-Riley 24.
+    static func nChannelConfiguration(
+        routePlan: LiveNChannelOutputRoutePlan,
+        sampleRate: Double,
+        gainConfiguration: DSPGainConfiguration,
+        bassManagementConfiguration: BassManagementConfiguration
+    ) -> UnifiedGraphConfiguration? {
+        try? nChannelEligibility(
+            routePlan: routePlan, sampleRate: sampleRate, gainConfiguration: gainConfiguration,
+            bassManagementConfiguration: bassManagementConfiguration
+        ).get()
+    }
+
+    /// As `nChannelConfiguration`, but says why the legacy render core keeps the session.
+    static func nChannelEligibility(
+        routePlan: LiveNChannelOutputRoutePlan,
+        sampleRate: Double,
+        gainConfiguration: DSPGainConfiguration,
+        bassManagementConfiguration: BassManagementConfiguration
+    ) -> Result<UnifiedGraphConfiguration, UnifiedGraphFallbackReason> {
+        guard routePlan.speakerOptimizerFIR == nil else { return .failure(.optimizerFIR) }
+        let roles = routePlan.programLayout.roles
+        let bassEnabled = bassManagementConfiguration.enabled
+        let subCount = Int(routePlan.subwooferCount)
+        if bassEnabled {
+            guard bassManagementConfiguration.topology == .linkwitzRiley24 else {
+                return .failure(.nonLR4Crossover)
+            }
+            guard subCount <= UnifiedGraphConfiguration.maxSubwoofers else { return .failure(.tooManySubs) }
+            guard subCount >= 1 else { return .failure(.noSubForBassManagement) }
+            guard routePlan.subwooferCalibrations.count >= subCount else {
+                return .failure(.subCalibrationMissing)
+            }
+        }
+        guard !roles.isEmpty else { return .failure(.noProgramLanes) }
+        guard roles.count + (bassEnabled ? subCount : 0) <= Int(N60_GRAPH_MAX_CHANNELS) else {
+            return .failure(.tooManyChannels)
+        }
+        let combinedDB = gainConfiguration.inputPreampDB + gainConfiguration.headroomAttenuationDB
+            + gainConfiguration.outputGainDB
+            - (routePlan.speakerOptimizerFIR?.requiredHeadroomDB ?? 0)
+        let combined = DSPGainConfiguration.linearGain(forDB: combinedDB)
+        guard combined.isFinite, combined > 0, combined <= 16 else { return .failure(.gainOutOfRange) }
+
+        func sections(_ bands: [OutputCalibrationEQBand]) -> [UnifiedGraphPEQSection] {
+            bands.map { UnifiedGraphPEQSection(type: 0, frequencyHz: $0.frequencyHz, gainDB: $0.gainDB, q: $0.q) }
+        }
+        var lanes: [UnifiedGraphLane] = []
+        var lfeLane: Int?
+        for (index, role) in roles.enumerated() {
+            let calibration = routePlan.speakerCalibrations[role]
+            if calibration?.polarityInverted == true { return .failure(.invertedPolarity) }
+            let delay = calibration?.delayMilliseconds ?? 0
+            if bassEnabled, delay > 0 { return .failure(.laneDelayUnderBassMgmt) }
+            let lfeGainDB = role == .lowFrequencyEffects && !bassEnabled
+                ? LiveNChannelRenderGraphCompiler.lfeInBandGainDB : 0
+            let gain = combined * DSPGainConfiguration.linearGain(
+                forDB: (calibration?.trimDB ?? 0) + lfeGainDB)
+            guard gain.isFinite, gain > 0, gain <= 10_000 else { return .failure(.gainOutOfRange) }
+            var peq = sections(calibration?.eqBands ?? [])
+            if let optimizer = routePlan.speakerOptimizerPEQ[role] {
+                peq += optimizer.map {
+                    UnifiedGraphPEQSection(type: 0, frequencyHz: $0.frequencyHz, gainDB: $0.gainDB, q: $0.q)
+                }
+            }
+            if peq.count > Int(N60_PEQ_MAX_SECTIONS) { return .failure(.laneEQTooLarge) }
+            lanes.append(UnifiedGraphLane(preGain: gain, delayMilliseconds: delay, eq: peq))
+            if role == .lowFrequencyEffects { lfeLane = index }
+        }
+        var configuration = UnifiedGraphConfiguration(sampleRate: sampleRate, lanes: lanes)
+        if bassEnabled {
+            var subs: [UnifiedGraphSubwoofer] = []
+            for index in 0..<subCount {
+                let calibration = routePlan.subwooferCalibrations[index]
+                let gainDB = bassManagementConfiguration.subGainDB + (calibration?.gainDB ?? 0)
+                guard (-60.0...24.0).contains(gainDB) else { return .failure(.subGainOutOfRange) }
+                guard (calibration?.eqBands.count ?? 0) <= 8 else { return .failure(.subEQTooLarge) }
+                subs.append(UnifiedGraphSubwoofer(
+                    gainDB: gainDB,
+                    polarityInverted: bassManagementConfiguration.subPolarityInverted
+                        != (calibration?.polarityInverted ?? false),
+                    delayMilliseconds: calibration?.delayMilliseconds ?? 0,
+                    eq: sections(calibration?.eqBands ?? [])
+                ))
+            }
+            configuration.bassManagement = UnifiedGraphBassManagement(
+                crossoverHz: bassManagementConfiguration.frequencyHz,
+                lfeLane: lfeLane,
+                lfeLowPassHz: LiveNChannelRenderGraphCompiler.lfeLowPassHz,
+                lfeGainDB: LiveNChannelRenderGraphCompiler.lfeInBandGainDB,
+                subwoofers: subs
+            )
+        }
+        return .success(configuration)
+    }
+
     /// Binaural profile data for `layoutSpec`: `orientations * channels * 2 * taps` responses.
     struct BinauralProfile {
         var taps: UInt32
@@ -221,5 +334,79 @@ enum UnifiedGraphTranslator {
         var spec = UnifiedGraphSpec(copying: description)
         spec.maxBlockFrames = maxBlockFrames
         return spec
+    }
+}
+
+
+/// E6 S8b2b: why a session that asked for the unified graph (`e6.unified-graph` on) is still
+/// rendered by the legacy path. Recorded by the translator and the transport sessions and
+/// surfaced in `UnifiedGraphDiagnostics`, so a fallback is never silent.
+enum UnifiedGraphFallbackReason: String, Error, Equatable, Sendable, CaseIterable {
+    // N-channel and stereo eligibility (translator).
+    /// A speaker optimizer FIR is in the route; the core has no equivalent FIR lane stage.
+    case optimizerFIR
+    /// A lane or sub with inverted polarity that the legacy core applies in a different place.
+    case invertedPolarity
+    /// A lane delay under bass management (legacy: before the crossover; core: after).
+    case laneDelayUnderBassMgmt
+    /// Bass management with a crossover other than Linkwitz-Riley 24 dB.
+    case nonLR4Crossover
+    /// More than eight subwoofers.
+    case tooManySubs
+    /// Bass management enabled with no subwoofer lane.
+    case noSubForBassManagement
+    /// Fewer sub calibrations than subwoofers.
+    case subCalibrationMissing
+    case noProgramLanes
+    /// Program plus sub lanes exceed `N60_GRAPH_MAX_CHANNELS`.
+    case tooManyChannels
+    case gainOutOfRange
+    case laneEQTooLarge
+    case subGainOutOfRange
+    case subEQTooLarge
+    /// Stereo: the kernel snapshot uses a stage the core does not reproduce.
+    case unsupportedKernelStage
+    case stageParametersUnreadable
+    case protectionCeilingOutOfRange
+    /// Stereo: same-device, aggregate or rack route.
+    case unsupportedRoute
+    /// Stereo: headphone DSP is configured.
+    case headphoneDSP
+    // Session-level (after the configuration was accepted).
+    case sampleRateMismatch
+    case laneCountMismatch
+    case blockSizeTooLarge
+    case specRejected
+    case graphBuildFailed
+    case attachFailed
+
+    /// Short text for the diagnostics row.
+    var displayText: String {
+        switch self {
+        case .optimizerFIR: "speaker optimizer FIR"
+        case .invertedPolarity: "inverted polarity"
+        case .laneDelayUnderBassMgmt: "lane delay under bass management"
+        case .nonLR4Crossover: "crossover is not LR4"
+        case .tooManySubs: "more than 8 subs"
+        case .noSubForBassManagement: "bass management without a sub"
+        case .subCalibrationMissing: "sub calibration missing"
+        case .noProgramLanes: "no program lanes"
+        case .tooManyChannels: "too many lanes"
+        case .gainOutOfRange: "lane gain out of range"
+        case .laneEQTooLarge: "lane EQ too large"
+        case .subGainOutOfRange: "sub gain out of range"
+        case .subEQTooLarge: "sub EQ too large"
+        case .unsupportedKernelStage: "kernel stage not in the core"
+        case .stageParametersUnreadable: "stage parameters unreadable"
+        case .protectionCeilingOutOfRange: "protection ceiling out of range"
+        case .unsupportedRoute: "same-device, aggregate or rack route"
+        case .headphoneDSP: "headphone DSP"
+        case .sampleRateMismatch: "sample rate mismatch"
+        case .laneCountMismatch: "lane count mismatch"
+        case .blockSizeTooLarge: "buffer larger than graph block"
+        case .specRejected: "graph spec rejected"
+        case .graphBuildFailed: "graph build failed"
+        case .attachFailed: "graph attach failed"
+        }
     }
 }
