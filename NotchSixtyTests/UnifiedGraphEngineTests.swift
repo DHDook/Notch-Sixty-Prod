@@ -326,6 +326,54 @@ final class UnifiedGraphEngineTests: XCTestCase {
         }
     }
 
+    /// E6 S8b2c: the kernel snapshot's latency and the graph's readback agree for the eligible
+    /// integer inter-channel delay, so a translated setup needs no fade alignment, and the
+    /// bridge latches zero. A published graph latency larger than the kernel's is latched as
+    /// the alignment, with the fade still step-free.
+    func testFadeAlignmentUsesGraphMinusKernelLatencyAtEveryRate() throws {
+        for rate in Self.rates {
+            var snapshot = N60DSPGraphSnapshotMakeUnity(rate)
+            XCTAssertTrue(N60DSPGraphSnapshotSetInterChannelDelay(&snapshot, 48.0 * 1000.0 / rate))
+            var mutable = snapshot
+            let configuration = try XCTUnwrap(
+                UnifiedGraphTranslator.stereoConfiguration(snapshot: &mutable, sampleRate: rate)
+            )
+            let host = try UnifiedGraphHost(spec: try configuration.makeSpec())
+            // The graph reports the kernel's per-lane integer taps as latency; the session removes
+            // them (they are applied by both paths), leaving the kernel-reported figure.
+            let taps = configuration.lanes.map(\.interChannelTapFrames).max() ?? 0
+            XCTAssertGreaterThan(taps, 0, "rate \(rate)")
+            let pathLatency = host.latencyFrames - min(host.latencyFrames, taps)
+            XCTAssertEqual(pathLatency, snapshot.latencyFrames, "readback vs kernel, rate \(rate)")
+
+            let bridge = try XCTUnwrap(N60RealtimeAudioBridgeCreate(262_144))
+            defer { N60RealtimeAudioBridgeDestroy(bridge) }
+            XCTAssertTrue(N60RealtimeAudioBridgePublishDSPGraph(bridge, snapshot))
+            N60RealtimeAudioBridgeConfigureOutputGate(bridge, 0, 0)
+            let settle = Int(rate * 0.2 / 256) + 8
+            let slope = Float(0.4 * 2.0 * .pi * 1_000.0 / rate)
+            var driver = Driver()
+            drive(bridge, rate: rate, blocks: settle, driver: &driver)
+            XCTAssertTrue(N60RealtimeAudioBridgeSetUnifiedGraph(bridge, host.rawGraph, 256, rate))
+            N60RealtimeAudioBridgeSetUnifiedGraphLatency(bridge, pathLatency)
+            driver.maxStep = 0
+            drive(bridge, rate: rate, blocks: settle, driver: &driver)
+            XCTAssertEqual(N60RealtimeAudioBridgeUnifiedGraphAlignmentFrames(bridge), 0, "rate \(rate)")
+            XCTAssertLessThan(driver.maxStep, 4 * slope + 1e-4, "rate \(rate)")
+
+            // Report 24 frames more graph latency than the kernel declares and fade back and forth.
+            N60RealtimeAudioBridgeSetUnifiedGraphLatency(bridge, pathLatency + 24)
+            XCTAssertTrue(N60RealtimeAudioBridgeSetUnifiedGraph(bridge, nil, 0, 0))
+            driver.maxStep = 0
+            drive(bridge, rate: rate, blocks: settle, driver: &driver)
+            XCTAssertTrue(N60RealtimeAudioBridgeSetUnifiedGraph(bridge, host.rawGraph, 256, rate))
+            drive(bridge, rate: rate, blocks: settle, driver: &driver)
+            XCTAssertEqual(N60RealtimeAudioBridgeUnifiedGraphAlignmentFrames(bridge), 24, "rate \(rate)")
+            XCTAssertLessThan(driver.maxStep, 4 * slope + 1e-4, "aligned fade, rate \(rate)")
+            N60RealtimeAudioBridgeReleaseUnifiedGraph(bridge)
+        }
+    }
+
     func testBridgeWithNoGraphIsBitIdenticalWhetherOrNotDetachWasCalled() throws {
         let rate = 48_000.0
         let (a, _) = try makeBridge(rate: rate, gain: 0.5)

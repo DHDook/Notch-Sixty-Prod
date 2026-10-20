@@ -20,6 +20,12 @@ struct UnifiedGraphLane: Equatable, Sendable {
     var eq: [UnifiedGraphPEQSection] = []
 }
 
+extension UnifiedGraphLane {
+    /// The kernel's integer inter-channel taps. The kernel applies them per lane without adding
+    /// them to its snapshot latency, so they are not a path difference to align across a fade.
+    var interChannelTapFrames: UInt32 { delayFrames }
+}
+
 /// Stereo-only stages the kernel runs between the EQ and the output gain, as raw core
 /// parameter lists (see `n60/graph.h`). Every list was verified against the kernel's own
 /// snapshot setters by `N60UnifiedGraphEligibility.h` before it gets here.
