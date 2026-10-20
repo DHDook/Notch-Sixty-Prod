@@ -284,6 +284,9 @@ struct UnifiedGraphDiagnostics: Equatable, Sendable {
     /// E6 S8c: gain-reduction, true-peak and guard readings since the previous snapshot; nil when
     /// the graph has no compressor or protection stage (or no graph renders).
     let dynamics: UnifiedGraphDynamicsReading?
+    /// E6 S8c: samples beyond full scale at the graph's final output, all lanes, since the previous
+    /// snapshot (read-and-reset in the core); 0 when no graph renders.
+    let overRangeSamples: UInt64
     /// Set when the graph was requested but the legacy path renders the session; the other
     /// fields are then empty. nil while the graph renders.
     let fallbackReason: UnifiedGraphFallbackReason?
@@ -298,6 +301,7 @@ struct UnifiedGraphDiagnostics: Equatable, Sendable {
         rebuildState = 0
         finalMeters = []
         dynamics = nil
+        overRangeSamples = 0
         self.fallbackReason = fallbackReason
     }
 
@@ -319,6 +323,7 @@ struct UnifiedGraphDiagnostics: Equatable, Sendable {
             rebuildState = 0
             finalMeters = []
             dynamics = nil
+            overRangeSamples = 0
             self.fallbackReason = fallbackReason
             return
         }
@@ -331,6 +336,14 @@ struct UnifiedGraphDiagnostics: Equatable, Sendable {
         // Core gain reduction and true peaks are read-and-reset: reuse the stereo overlay's reading
         // of this snapshot rather than read the stages a second time.
         self.dynamics = stereoDynamicsReading ?? host.dynamicsReadings()
+        var overRange: UInt64 = 0
+        if let stereoFinalReading {
+            overRange = stereoFinalReading.overRangeSamples
+            for lane in 2..<max(2, count) { overRange &+= host.overRangeSamples(stageId: N60_LSTAGE_FINAL_METER, lane: UInt32(lane)) }
+        } else {
+            for lane in 0..<count { overRange &+= host.overRangeSamples(stageId: N60_LSTAGE_FINAL_METER, lane: UInt32(lane)) }
+        }
+        self.overRangeSamples = overRange
         self.finalMeters = (0..<count).map { lane in
             // Core peaks are read-and-reset: when the stereo diagnostics overlay already took this
             // snapshot's FINAL_METER reading, reuse it rather than read the stage a second time.

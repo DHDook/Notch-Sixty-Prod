@@ -1462,6 +1462,7 @@ struct ContentView: View {
                     "Unified graph",
                     "\(graph.programChannelCount) program + \(graph.channelCount - graph.programChannelCount) sub lanes / latency \(graph.latencyFrames) frames\(graph.rebuildState == 0 ? "" : " / rebuilding")"
                 )
+                diagnosticRow("Graph dynamics", graphDynamicsText(graph))
             }
 
             if let render = snapshot.renderKernelDiagnostics {
@@ -1587,6 +1588,14 @@ struct ContentView: View {
     private func formattedGain(_ linear: Float) -> String {
         guard linear > 0 else { return "−∞ dB" }
         return String(format: "%+.2f dB", 20.0 * log10(Double(linear)))
+    }
+
+    /// E6 S8c developer readout (flag on, graph rendering): gain reduction, true peak and over-range
+    /// since the previous refresh. User-facing meters are E20.
+    private func graphDynamicsText(_ graph: UnifiedGraphDiagnostics) -> String {
+        let overRange = "over-range \(graph.overRangeSamples)"
+        guard let dynamics = graph.dynamics else { return "no compressor or limiter stage / \(overRange)" }
+        return "comp GR \(String(format: "%.1f", dynamics.compressorGainReductionDB)) dB / limiter GR \(String(format: "%.1f", dynamics.limiterGainReductionDB)) dB / true peak in \(formattedLevel(dynamics.inputTruePeakLinear)) out \(formattedLevel(dynamics.outputTruePeakLinear)) / guard \(dynamics.truePeakGuardActive ? "active" : "idle") / \(overRange)"
     }
 
     private func formattedLevel(_ linear: Float) -> String {
