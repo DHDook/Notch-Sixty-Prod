@@ -1431,7 +1431,7 @@ void N60RenderKernelColdStart(N60RenderKernel *kernel) {
     N60ProtectionRuntimeReset(kernel->protectionRuntime);
     /* Convolvers are deliberately not reset here: this runs in the audio callback and their
      * resets clear MBs and race the control-thread program preparation. N60RenderKernelReset
-     * (IO stopped) clears them. Convolution snapshots are not graph-eligible. */
+     * (IO stopped) clears them; N60RenderKernelMarkIdle invalidates them in O(1) for the hand-over. */
     reset_smoothed_gain(&kernel->inputGain, 1.0f);
     reset_smoothed_gain(&kernel->headroomGain, 1.0f);
     reset_smoothed_gain(&kernel->outputGain, 1.0f);
@@ -1456,6 +1456,26 @@ void N60RenderKernelColdStart(N60RenderKernel *kernel) {
     kernel->preparedProtectionFactor = N60OversamplingFactor1x;
     kernel->preparedLimiterEnabled = false;
     kernel->preparedLimiterLookAheadHighSamples = 0;
+}
+
+void N60RenderKernelMarkIdle(N60RenderKernel *kernel) {
+    if (kernel == NULL) return;
+    N60PartitionedConvolverMarkIdle(kernel->convolver);
+    N60PartitionedConvolverMarkIdle(kernel->roomCorrectionConvolver);
+    N60PartitionedConvolverMarkIdle(kernel->speakerIRConvolver);
+}
+
+uint32_t N60RenderKernelConvolutionHistoryFrames(N60RenderKernel *kernel) {
+    if (kernel == NULL) return 0u;
+    N60RenderKernelRenderContext context = acquire_render_context(kernel);
+    if (!context.acquired) return 0u;
+    uint32_t frames = 0u;
+    const N60DSPGraphSnapshot *snapshot = context.snapshot;
+    if (snapshot->convolution.enabled && snapshot->convolution.tapCount > frames) frames = snapshot->convolution.tapCount;
+    if (snapshot->roomCorrection.enabled && snapshot->roomCorrection.tapCount > frames) frames = snapshot->roomCorrection.tapCount;
+    if (snapshot->speakerIR.enabled && snapshot->speakerIR.tapCount > frames) frames = snapshot->speakerIR.tapCount;
+    atomic_fetch_sub_explicit(&kernel->slots[context.slotIndex].readers, 1, memory_order_release);
+    return frames;
 }
 
 void N60RenderKernelReset(N60RenderKernel *kernel) {

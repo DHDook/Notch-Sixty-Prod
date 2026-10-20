@@ -425,6 +425,13 @@ void N60RenderKernelReset(N60RenderKernel * _Nonnull kernel);
 // render thread may call it before N60RenderKernelBeginRender when the kernel takes over
 // from the unified graph.
 void N60RenderKernelColdStart(N60RenderKernel * _Nonnull kernel);
+// E6 S8d: marks the program, room and speaker-IR convolvers stale (they keep running state across a ColdStart). Call when
+// the kernel stops rendering and the graph takes over; the convolvers restart from silence, without a clear, when the
+// kernel next uses them.
+void N60RenderKernelMarkIdle(N60RenderKernel * _Nonnull kernel);
+/* E6 S8d: the longest enabled convolver tap count in the active snapshot: the silent history the kernel needs after a
+ * MarkIdle restart before its convolvers are fully heard. Audio callback only; no allocation. */
+uint32_t N60RenderKernelConvolutionHistoryFrames(N60RenderKernel * _Nonnull kernel);
 
 /* E6 S8d: hand the spectral-denoiser noise profile between the kernel and the unified graph. Audio callback only,
  * between blocks. Export reads the kernel's profile; import replaces it (after a ColdStart, which clears it). */

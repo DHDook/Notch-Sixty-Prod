@@ -21,7 +21,10 @@
 //    adopting realtime block copies it from the live stage into the new one (a bounded copy of at most three
 //    arrays of 2049 floats and a few counters), parks it in a preallocated slot while no stage exists, and
 //    restores it when a stage of the same FFT size returns. The stream state (input, overlap-add, gain
-//    history) is not copied: the new stage's warm-up covers it.
+//    history) is not copied: the new stage's warm-up covers it. The second exception, ABI v10 (E6 S8d): a FIR
+//    stage that is the same filter in the new snapshot (id, taps, lanes) has its running state copied at adoption
+//    (one bounded memcpy per lane), so an unrelated topology change never restarts a convolver; a new or changed
+//    one warms for its whole tap length before the crossfade.
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -195,6 +198,9 @@ void adopt(n60_graph *g) {
     n60::SnapHeader *next = g->pending.exchange(nullptr, std::memory_order_acq_rel);
     if (next == nullptr) return;
     carryDenoiserIn(g, g->current, next);
+    // ABI v10: a FIR stage that is unchanged keeps its running state; one that is new or changed needs its whole
+    // tap length of silent history before it is heard.
+    const uint32_t firWarm = n60::dspFirCarry(g->current, next);
     if (next->fadeFrames == 0) {
         settleDenoiser(g, g->current, next);
         retireSnapshot(g, g->current);
@@ -207,7 +213,7 @@ void adopt(n60_graph *g) {
     g->incoming = next;
     const uint32_t latency = n60::snapshotLatency(next);
     const uint32_t cap = static_cast<uint32_t>(std::min(g->sampleRate, 4.0e6));
-    g->warmLeft = std::max(next->rampFrames, std::min(latency, cap));
+    g->warmLeft = std::max({next->rampFrames, std::min(latency, cap), firWarm});
     g->fadePos = 0;
     g->warmSeconds = 0.0;
     g->warmCost = 0.0;
@@ -369,6 +375,22 @@ int n60_graph_denoiser_export(n60_graph *g, n60_denoiser_state *out) {
     if (g->parked.fftSize == 0) return 0;
     copyDenoiserState(out, &g->parked);
     return 1;
+}
+
+void n60_graph_invalidate_history(n60_graph *g) {
+    if (g == nullptr) return;
+    g->current->historyEpoch++;
+    if (g->incoming != nullptr) g->incoming->historyEpoch++;
+    // A published snapshot not adopted yet is only ever taken on this (realtime) thread, so bumping it is race-free.
+    n60::SnapHeader *waiting = g->pending.load(std::memory_order_acquire);
+    if (waiting != nullptr) waiting->historyEpoch++;
+}
+
+uint32_t n60_graph_history_frames(n60_graph *g) {
+    if (g == nullptr) return 0;
+    uint32_t frames = n60::dspFirHistoryFrames(g->current);
+    frames = std::max(frames, n60::dspFirHistoryFrames(g->incoming));
+    return std::max(frames, n60::dspFirHistoryFrames(g->pending.load(std::memory_order_acquire)));
 }
 
 void n60_graph_denoiser_import(n60_graph *g, const n60_denoiser_state *in) {

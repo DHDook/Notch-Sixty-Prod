@@ -438,6 +438,11 @@ final class CoreAudioTransportSession {
     private var unifiedGraphHost: UnifiedGraphHost?
     /// Integer inter-channel taps of the attached stereo graph, excluded from its reported latency.
     private var unifiedGraphLaneTapFrames: UInt32 = 0
+    /// E6 S8d: the taps of recently prepared kernel convolver programs, by generation, so a snapshot that references
+    /// one can be rebuilt on the graph. The kernel snapshot carries only the generation. Only programs the core can
+    /// hold (up to 32768 taps) are kept, newest few per convolver (the kernel has three slots).
+    private var retainedPrograms: [UnifiedGraphProgramKind: [UInt64: UnifiedGraphFIRProgram]] = [:]
+    private let retainedProgramsLock = NSLock()
     /// Why the kernel renders although the graph is enabled; nil while the graph renders or is off.
     private(set) var unifiedGraphFallbackReason: UnifiedGraphFallbackReason?
     private var headphoneDSPConfigured = false
@@ -930,6 +935,25 @@ final class CoreAudioTransportSession {
         return RenderKernelDiagnostics(raw)
     }
 
+    private func retainProgram(
+        _ kind: UnifiedGraphProgramKind, info: N60ConvolutionProgramInfo,
+        left: [Float], right: [Float]?, declaredLatencyFrames: UInt32
+    ) {
+        retainedProgramsLock.lock(); defer { retainedProgramsLock.unlock() }
+        guard info.tapCount <= 32_768 else { return }
+        var forKind = retainedPrograms[kind] ?? [:]
+        forKind[info.generation] = UnifiedGraphFIRProgram(
+            generation: info.generation, left: left, right: right, declaredLatencyFrames: declaredLatencyFrames
+        )
+        while forKind.count > 4, let oldest = forKind.keys.min() { forKind[oldest] = nil }
+        retainedPrograms[kind] = forKind
+    }
+
+    private func retainedProgram(_ kind: UnifiedGraphProgramKind, generation: UInt64) -> UnifiedGraphFIRProgram? {
+        retainedProgramsLock.lock(); defer { retainedProgramsLock.unlock() }
+        return retainedPrograms[kind]?[generation]
+    }
+
     func prepareConvolutionProgram(
         slot: UInt32,
         leftTaps: [Float],
@@ -972,6 +996,7 @@ final class CoreAudioTransportSession {
             )
         }
         guard prepared else { throw CoreAudioTransportError.convolutionProgramPreparationFailed }
+        retainProgram(.convolution, info: info, left: leftTaps, right: rightTaps, declaredLatencyFrames: declaredLatencyFrames)
         return info
     }
 
@@ -1030,6 +1055,7 @@ final class CoreAudioTransportSession {
             )
         }
         guard prepared else { throw CoreAudioTransportError.roomCorrectionProgramPreparationFailed }
+        retainProgram(.roomCorrection, info: info, left: leftTaps, right: rightTaps, declaredLatencyFrames: declaredLatencyFrames)
         return info
     }
 
@@ -1075,6 +1101,7 @@ final class CoreAudioTransportSession {
             )
         }
         guard prepared else { throw CoreAudioTransportError.speakerIRProgramPreparationFailed }
+        retainProgram(.speakerIR, info: info, left: leftTaps, right: rightTaps, declaredLatencyFrames: declaredLatencyFrames)
         return info
     }
 
@@ -1126,7 +1153,10 @@ final class CoreAudioTransportSession {
         }
         var mutable = snapshot
         let configuration: UnifiedGraphConfiguration
-        switch UnifiedGraphTranslator.stereoEligibility(snapshot: &mutable, sampleRate: outputFormat.sampleRate) {
+        switch UnifiedGraphTranslator.stereoEligibility(
+            snapshot: &mutable, sampleRate: outputFormat.sampleRate,
+            programs: { [self] kind, generation in retainedProgram(kind, generation: generation) }
+        ) {
         case .success(let accepted): configuration = accepted
         case .failure(let reason):
             unifiedGraphFallbackReason = reason

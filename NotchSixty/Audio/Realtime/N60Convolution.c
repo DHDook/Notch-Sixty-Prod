@@ -76,10 +76,14 @@ typedef struct {
     float *accumulatorImag[N60_CONVOLUTION_CHANNELS];
     float *overlap[N60_CONVOLUTION_CHANNELS];
     uint32_t historyWrite;
+    // Blocks written since the runtime last started from silence (capped at the partition count). Older history
+    // partitions beyond this are stale and are skipped, so a restart needs no multi-MB clear.
+    uint32_t validBlocks;
 } N60ConvolutionSegmentRuntime;
 
 typedef struct {
     uint64_t position;
+    uint32_t seenEpoch;
     float *inputRing[N60_CONVOLUTION_CHANNELS];
     float *outputRing[N60_CONVOLUTION_CHANNELS];
     N60ConvolutionSegmentRuntime segments[N60_CONVOLUTION_SEGMENT_COUNT];
@@ -92,6 +96,9 @@ struct N60PartitionedConvolver {
     // Realtime scratch: one render thread per convolver.
     float *renderTime;
     _Atomic uint32_t activeSlot;
+    // Bumped (any thread) when the convolver has not been rendering and its slots hold stale audio. The render thread
+    // restarts the active slot from silence lazily, in O(block) work.
+    _Atomic uint32_t idleEpoch;
     uint64_t nextGeneration;
 };
 
@@ -259,8 +266,10 @@ static void free_slot(N60PartitionedConvolver *convolver, uint32_t slot) {
 /// the prepared tap count rather than the maximum capacity.
 static void reset_runtime(
     const N60ConvolutionProgram *program,
-    N60ConvolutionRuntime *runtime
+    N60ConvolutionRuntime *runtime,
+    uint32_t epoch
 ) {
+    runtime->seenEpoch = epoch;
     runtime->position = 0u;
     for (uint32_t channel = 0; channel < N60_CONVOLUTION_CHANNELS; ++channel) {
         memset(runtime->inputRing[channel], 0, N60_CONVOLUTION_INPUT_RING * sizeof(float));
@@ -278,6 +287,29 @@ static void reset_runtime(
             memset(segmentRuntime->overlap[channel], 0, layout.block * sizeof(float));
         }
         segmentRuntime->historyWrite = 0u;
+        segmentRuntime->validBlocks = 0u;
+    }
+}
+
+/// Realtime-safe restart of the active slot: clears the rings and per-block scratch only (small and bounded) and
+/// invalidates the spectral history by count instead of clearing it.
+static void invalidate_runtime(N60ConvolutionRuntime *runtime, uint32_t epoch) {
+    runtime->seenEpoch = epoch;
+    runtime->position = 0u;
+    for (uint32_t channel = 0; channel < N60_CONVOLUTION_CHANNELS; ++channel) {
+        memset(runtime->inputRing[channel], 0, N60_CONVOLUTION_INPUT_RING * sizeof(float));
+        memset(runtime->outputRing[channel], 0, N60_CONVOLUTION_OUTPUT_RING * sizeof(float));
+    }
+    for (uint32_t segment = 0; segment < N60_CONVOLUTION_SEGMENT_COUNT; ++segment) {
+        const N60ConvolutionSegmentLayout layout = kSegmentLayouts[segment];
+        N60ConvolutionSegmentRuntime *segmentRuntime = &runtime->segments[segment];
+        for (uint32_t channel = 0; channel < N60_CONVOLUTION_CHANNELS; ++channel) {
+            memset(segmentRuntime->accumulatorReal[channel], 0, layout.block * sizeof(float));
+            memset(segmentRuntime->accumulatorImag[channel], 0, layout.block * sizeof(float));
+            memset(segmentRuntime->overlap[channel], 0, layout.block * sizeof(float));
+        }
+        segmentRuntime->historyWrite = 0u;
+        segmentRuntime->validBlocks = 0u;
     }
 }
 
@@ -311,7 +343,8 @@ void N60PartitionedConvolverDestroy(N60PartitionedConvolver *convolver) {
 void N60PartitionedConvolverReset(N60PartitionedConvolver *convolver) {
     if (convolver == NULL) return;
     for (uint32_t slot = 0; slot < N60_CONVOLUTION_PROGRAM_SLOTS; ++slot) {
-        reset_runtime(&convolver->programs[slot], &convolver->runtimes[slot]);
+        reset_runtime(&convolver->programs[slot], &convolver->runtimes[slot],
+                      atomic_load_explicit(&convolver->idleEpoch, memory_order_relaxed));
     }
     atomic_store_explicit(&convolver->activeSlot, N60_CONVOLUTION_NO_PROGRAM, memory_order_release);
 }
@@ -417,7 +450,8 @@ bool N60PartitionedConvolverPrepareProgram(
     program->partitionCount = N60ConvolutionPartitionCountForTapCount(tapCount);
     program->declaredLatencyFrames = declaredLatencyFrames;
     program->generation = ++convolver->nextGeneration;
-    reset_runtime(program, &convolver->runtimes[slot]);
+    reset_runtime(program, &convolver->runtimes[slot],
+                  atomic_load_explicit(&convolver->idleEpoch, memory_order_relaxed));
     program->prepared = true;
     if (generationOut != NULL) *generationOut = program->generation;
     return true;
@@ -478,6 +512,7 @@ static void process_tick(
             const uint32_t begin = 1u + (phase * older) / ticksPerBlock;
             const uint32_t end = 1u + ((phase + 1u) * older) / ticksPerBlock;
             for (uint32_t partition = begin; partition < end; ++partition) {
+                if (partition > segmentRuntime->validBlocks) break;
                 const uint32_t historyIndex =
                     (segmentRuntime->historyWrite + partitions - partition) % partitions;
                 for (uint32_t channel = 0; channel < N60_CONVOLUTION_CHANNELS; ++channel) {
@@ -540,6 +575,7 @@ static void process_tick(
             memset(accumulator.imagp, 0, block * sizeof(float));
         }
         segmentRuntime->historyWrite = (historyIndex + 1u) % partitions;
+        if (segmentRuntime->validBlocks < partitions) ++segmentRuntime->validBlocks;
     }
 }
 
@@ -561,6 +597,8 @@ bool N60PartitionedConvolverProcessSample(
 
     N60ConvolutionRuntime *runtime = &convolver->runtimes[slot];
     atomic_store_explicit(&convolver->activeSlot, slot, memory_order_release);
+    const uint32_t epoch = atomic_load_explicit(&convolver->idleEpoch, memory_order_acquire);
+    if (runtime->seenEpoch != epoch) invalidate_runtime(runtime, epoch);
     const uint64_t position = runtime->position;
     const uint32_t outputIndex = (uint32_t)position & (N60_CONVOLUTION_OUTPUT_RING - 1u);
     *outputLeft = runtime->outputRing[0][outputIndex];
@@ -576,4 +614,9 @@ bool N60PartitionedConvolverProcessSample(
         process_tick(convolver, &convolver->programs[slot], runtime);
     }
     return true;
+}
+
+void N60PartitionedConvolverMarkIdle(N60PartitionedConvolver *convolver) {
+    if (convolver == NULL) return;
+    atomic_fetch_add_explicit(&convolver->idleEpoch, 1u, memory_order_release);
 }

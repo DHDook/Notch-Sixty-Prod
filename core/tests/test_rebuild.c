@@ -770,6 +770,59 @@ static void testIrChange(double rate) {
     n60_graph_retire(g);
 }
 
+/* ---- FIR carry across an unrelated rebuild, and O(1) history invalidation (E6 S8d) ------------- */
+
+static void testFirCarryAndInvalidate(double rate) {
+    enum { TAPS = 4000, DELAY = 3000 };
+    static float h[TAPS];
+    memset(h, 0, sizeof h);
+    h[DELAY] = 1.0f;
+    const float unity = 1.0f;
+    n60_stage_desc a[1] = {stg(N60_STAGE_FIR, 1, N60_LANE_ALL, h, TAPS)};
+    n60_stage_desc b[2] = {stg(N60_STAGE_GAIN, 2, N60_LANE_ALL, &unity, 1), a[0]};
+    n60_graph *g = build(rate, 1, a, 1);
+    if (!g) return;
+    Src s;
+    srcInit(&s, rate, 1);
+    s.freq[0] = 300;
+    s.amp[0] = 0.5;
+    double prev = 0, pk = 0;
+    runMaxStep(g, &s, 0, blocksFor(rate, 0.15), &prev, &pk);
+    /* Unrelated rebuild: the long filter's tail must not dip. */
+    n60_graph_desc db = desc(rate, 1, b, 2);
+    CHECK(n60_graph_publish(g, &db) == N60_STATUS_OK, "publish unrelated rebuild");
+    double worst = runMaxStep(g, &s, 0, 1, &prev, &pk);
+    int n = 0;
+    while (status(g).state != 0 && n++ < 100000) worst = fmax(worst, runMaxStep(g, &s, 0, 1, &prev, &pk));
+    worst = fmax(worst, runMaxStep(g, &s, 0, blocksFor(rate, 0.02), &prev, &pk));
+    const double slope = 0.5 * 2.0 * kPi * 300.0 / rate;
+    /* Identical old and new output: the equal-power fade swells up to sqrt(2), a property of every rebuild. */
+    CHECK(isfinite(worst) && worst < slope * 1.5, "rate %.0f FIR carry step %g vs %g", rate, worst, slope * 1.5);
+    CHECK(status(g).completed == 1, "unrelated rebuild completed");
+    n60_graph_collect(g);
+    /* Invalidate: output whose source predates the call is silent, then the filter resumes. */
+    const uint64_t cut = s.pos;
+    n60_graph_invalidate_history(g);
+    CHECK(n60_graph_history_frames(g) >= (uint32_t)TAPS, "history frames cover the taps (%u)", n60_graph_history_frames(g));
+    const int blocks = (int)((DELAY + 256 + 4 * BLOCK) / BLOCK) + 2;
+    double ghost = 0, resumed = 0;
+    for (int blk = 0; blk < blocks; blk++) {
+        step(g, &s, BLOCK);
+        const uint64_t base = s.pos - BLOCK;
+        for (uint32_t i = 0; i < BLOCK; i++) {
+            const long src = (long)(base + i) - 256 - DELAY;
+            if (base + i >= cut + 2 * BLOCK && src < (long)cut - 2 * BLOCK) ghost = fmax(ghost, fabs(s.out[0][i]));
+            if (src >= (long)cut + 2 * BLOCK) {
+                const double want = 0.5 * sin(2.0 * kPi * 300.0 * (double)src / rate);
+                resumed = fmax(resumed, fabs(s.out[0][i] - want));
+            }
+        }
+    }
+    CHECK(ghost < 1e-6, "rate %.0f no ghost of pre-invalidate history (%g)", rate, ghost);
+    CHECK(resumed < 1e-4, "rate %.0f filter resumes after invalidate (err %g)", rate, resumed);
+    n60_graph_retire(g);
+}
+
 /* ---- deferred fixes from S4/S5 ------------------------------------------------------ */
 
 static void testDeferred(double rate) {
@@ -825,6 +878,7 @@ int main(void) {
         testRandomEdits(rate);
         testDrainCap(rate);
         testIrChange(rate);
+        testFirCarryAndInvalidate(rate);
         testDeferred(rate);
         printf("rate %.0f done\n", rate);
     }

@@ -35,6 +35,12 @@ uint32_t dspLatency(const SnapHeader *h, const StageRec &r);
 // Copies the profile of the first DENOISER stage of `from` into that of `to` when both exist at the same FFT
 // size; false otherwise.
 bool dspDenoiserCarry(SnapHeader *from, SnapHeader *to);
+// ABI v10 (E6 S8d). Realtime thread. Copies the running state of every FIR stage of `to` that is the same filter
+// (stage id, taps, lanes) in `from`, so an unrelated topology change does not restart a convolver. Returns the
+// frames of silent warm-up the stages that could not be carried need to fill their history (0 = none).
+uint32_t dspFirCarry(SnapHeader *from, SnapHeader *to);
+// Control or realtime thread (pure). Frames of input history the FIR stages of `h` hold (longest taps + one partition).
+uint32_t dspFirHistoryFrames(const SnapHeader *h);
 // Profile of the first DENOISER stage of `h` to / from a plain value; false when `h` has no such stage.
 bool dspDenoiserExport(SnapHeader *h, n60_denoiser_state *out);
 bool dspDenoiserImport(SnapHeader *h, const n60_denoiser_state *in);

@@ -4,16 +4,24 @@ import Foundation
 /// multichannel route plan, the sub calibration) into a `UnifiedGraphConfiguration`.
 /// Returns nil (never throws) when the core cannot reproduce the snapshot, so the caller
 /// keeps the kernel path for that snapshot. Control thread only.
+/// Which kernel convolver a retained program belongs to.
+enum UnifiedGraphProgramKind: Sendable { case convolution, roomCorrection, speakerIR }
+
+/// Looks up the taps the control plane prepared for a program generation (nil when it was not retained).
+typealias UnifiedGraphProgramLookup = (UnifiedGraphProgramKind, UInt64) -> UnifiedGraphFIRProgram?
+
 enum UnifiedGraphTranslator {
     /// Stereo snapshot to a two-lane configuration, or nil when the kernel must render it.
     static func stereoConfiguration(
         snapshot: inout N60DSPGraphSnapshot,
         sampleRate: Double,
         subwoofers: [UnifiedGraphSubwoofer] = [],
-        crossoverHz: Double = 80
+        crossoverHz: Double = 80,
+        programs: UnifiedGraphProgramLookup = { _, _ in nil }
     ) -> UnifiedGraphConfiguration? {
         try? stereoEligibility(
-            snapshot: &snapshot, sampleRate: sampleRate, subwoofers: subwoofers, crossoverHz: crossoverHz
+            snapshot: &snapshot, sampleRate: sampleRate, subwoofers: subwoofers, crossoverHz: crossoverHz,
+            programs: programs
         ).get()
     }
 
@@ -22,7 +30,8 @@ enum UnifiedGraphTranslator {
         snapshot: inout N60DSPGraphSnapshot,
         sampleRate: Double,
         subwoofers: [UnifiedGraphSubwoofer] = [],
-        crossoverHz: Double = 80
+        crossoverHz: Double = 80,
+        programs: UnifiedGraphProgramLookup = { _, _ in nil }
     ) -> Result<UnifiedGraphConfiguration, UnifiedGraphFallbackReason> {
         guard withUnsafePointer(to: &snapshot, {
             N60UnifiedGraphSnapshotUnsupportedReason($0) == N60UnifiedGraphSupported
@@ -54,8 +63,28 @@ enum UnifiedGraphTranslator {
             ]
         )
         configuration.inputGain = snapshot.inputGainLinear * snapshot.headroomGainLinear
-        guard let stages = stereoStages(snapshot: &snapshot, configuration: &configuration) else {
+        guard var stages = stereoStages(snapshot: &snapshot, configuration: &configuration) else {
             return .failure(.stageParametersUnreadable)
+        }
+        // E6 S8d: recover each enabled convolver's taps by generation and verify them against the snapshot's record.
+        let states = [
+            (UnifiedGraphProgramKind.convolution, snapshot.convolution),
+            (.roomCorrection, snapshot.roomCorrection),
+            (.speakerIR, snapshot.speakerIR),
+        ]
+        for (kind, state) in states where state.enabled {
+            guard let program = programs(kind, state.programGeneration),
+                  recoveredProgramMatches(program, state) else {
+                return .failure(.convolutionProgramUnavailable)
+            }
+            switch kind {
+            case .convolution: stages.programFIR = program
+            case .roomCorrection: stages.roomFIR = program
+            case .speakerIR: stages.speakerIR = program
+            }
+        }
+        if (stages.roomFIR != nil || stages.speakerIR != nil), !subwoofers.isEmpty {
+            return .failure(.convolverWithSubwoofer)
         }
         configuration.stereoStages = stages
         if snapshot.protection.limiterEnabled || snapshot.protection.truePeakGuardEnabled {
@@ -78,6 +107,17 @@ enum UnifiedGraphTranslator {
             )
         }
         return .success(configuration)
+    }
+
+    /// The retained taps are the ones the kernel was prepared with: same generation, tap count, shared-or-stereo shape
+    /// and declared latency as the snapshot's record, all finite, within what the core holds.
+    static func recoveredProgramMatches(_ program: UnifiedGraphFIRProgram, _ state: N60ConvolutionGraphState) -> Bool {
+        guard program.generation == state.programGeneration,
+              program.left.count == Int(state.tapCount), program.left.count <= 32_768,
+              program.right == nil || program.right?.count == program.left.count,
+              program.declaredLatencyFrames == state.declaredLatencyFrames,
+              program.declaredLatencyFrames <= N60_GRAPH_MAX_DELAY_FRAMES else { return false }
+        return program.left.allSatisfy(\.isFinite) && (program.right?.allSatisfy(\.isFinite) ?? true)
     }
 
     /// The kernel stages between the EQ and the output gain that the core reproduces. The
@@ -520,6 +560,10 @@ enum UnifiedGraphFallbackReason: String, Error, Equatable, Sendable, CaseIterabl
     /// Stereo: the kernel snapshot uses a stage the core does not reproduce.
     case unsupportedKernelStage
     case stageParametersUnreadable
+    /// Stereo: a convolver's taps were not retained, or do not match the snapshot's program record.
+    case convolutionProgramUnavailable
+    /// Stereo: room correction or speaker IR with a subwoofer lane.
+    case convolverWithSubwoofer
     case protectionCeilingOutOfRange
     /// Stereo: same-device, aggregate or rack route.
     case unsupportedRoute
@@ -558,6 +602,8 @@ enum UnifiedGraphFallbackReason: String, Error, Equatable, Sendable, CaseIterabl
         case .subEQTooLarge: "sub EQ too large"
         case .unsupportedKernelStage: "kernel stage not in the core"
         case .stageParametersUnreadable: "stage parameters unreadable"
+        case .convolutionProgramUnavailable: "convolver taps not retained or not matching"
+        case .convolverWithSubwoofer: "room or speaker IR with a subwoofer"
         case .protectionCeilingOutOfRange: "protection ceiling out of range"
         case .unsupportedRoute: "same-device, aggregate or rack route"
         case .headphoneDSP: "headphone DSP"

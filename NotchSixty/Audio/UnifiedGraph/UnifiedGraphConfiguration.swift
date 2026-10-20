@@ -26,6 +26,16 @@ extension UnifiedGraphLane {
     var interChannelTapFrames: UInt32 { delayFrames }
 }
 
+/// E6 S8d: the taps of a kernel convolver program (program FIR, room correction or speaker IR), as the control plane
+/// prepared them. `right == nil` means the kernel uses `left` on both channels.
+struct UnifiedGraphFIRProgram: Equatable, Sendable {
+    var generation: UInt64
+    var left: [Float]
+    var right: [Float]?
+    /// The filter's own group delay, reported in the snapshot latency but never applied.
+    var declaredLatencyFrames: UInt32
+}
+
 /// Stereo-only stages the kernel runs between the EQ and the output gain, as raw core
 /// parameter lists (see `n60/graph.h`). Every list was verified against the kernel's own
 /// snapshot setters by `N60UnifiedGraphEligibility.h` before it gets here.
@@ -43,6 +53,11 @@ struct UnifiedGraphStereoStages: Equatable, Sendable {
     var crossfeedAmount: Float?
     var crosstalk: [Float]?
     var pauseGate: [Float]?
+    /// Program convolution (kernel: after the EQ, before the compressor).
+    var programFIR: UnifiedGraphFIRProgram?
+    /// Room correction and speaker IR (kernel: after bass management's slot, before ambient and the core dynamics).
+    var roomFIR: UnifiedGraphFIRProgram?
+    var speakerIR: UnifiedGraphFIRProgram?
 
     var isEmpty: Bool { self == UnifiedGraphStereoStages() }
 }
@@ -116,6 +131,18 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
             // The kernel runs ambient before its dynamics; the core runs them the other way round.
             throw UnifiedGraphError.unsupportedConfiguration("ambient with compressor or expander")
         }
+        if stereo.programFIR != nil, stereo.dynamicEQ != nil || stereo.midSideEQ {
+            // The kernel runs the convolution inside the mid/side pair and before the dynamic EQ.
+            throw UnifiedGraphError.unsupportedConfiguration("program FIR with mid/side or dynamic EQ")
+        }
+        let hasPostConvolver = stereo.roomFIR != nil || stereo.speakerIR != nil
+        if hasPostConvolver, stereo.expander != nil {
+            throw UnifiedGraphError.unsupportedConfiguration("expander with room or speaker IR")
+        }
+        if hasPostConvolver, !(bassManagement?.subwoofers.isEmpty ?? true) {
+            // Where the kernel feeds the sub relative to the room and speaker convolvers is not reproduced.
+            throw UnifiedGraphError.unsupportedConfiguration("room or speaker IR with subwoofers")
+        }
         let programMask: UInt64 = (UInt64(1) << UInt64(programLanes)) - 1
         var stages: [UnifiedGraphStageSpec] = []
         func add(_ kind: n60_stage_kind, _ id: UInt32, lane: UInt32 = 0, mask: UInt64 = 0,
@@ -124,6 +151,21 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
                 kind: kind.rawValue, stageId: id, laneA: lane, laneMask: mask,
                 capacityFrames: capacity, params: params
             ))
+        }
+        /// One FIR stage when both channels share taps, else one per lane (the core applies identical taps to every
+        /// lane a stage selects).
+        func addFIR(_ kind: n60_stage_kind, _ program: UnifiedGraphFIRProgram, baseId: UInt32) throws {
+            guard !program.left.isEmpty, program.left.count <= 32_768,
+                  program.right == nil || program.right?.count == program.left.count,
+                  program.declaredLatencyFrames <= N60_GRAPH_MAX_DELAY_FRAMES else {
+                throw UnifiedGraphError.unsupportedConfiguration("FIR taps")
+            }
+            if let right = program.right {
+                add(kind, baseId, lane: 0, capacity: program.declaredLatencyFrames, params: program.left)
+                add(kind, baseId + 1, lane: 1, capacity: program.declaredLatencyFrames, params: right)
+            } else {
+                add(kind, baseId, mask: programMask, capacity: program.declaredLatencyFrames, params: program.left)
+            }
         }
         add(N60_STAGE_SANITISE, N60_LSTAGE_SANITISE, lane: all)
         add(N60_STAGE_METER_IN, N60_LSTAGE_METER_IN, lane: all)
@@ -159,7 +201,10 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
             stages.append(UnifiedGraphStageSpec(
                 kind: N60_STAGE_MS_DECODE.rawValue, stageId: N60_LSTAGE_MS_DECODE, laneA: 0, laneB: 1))
         }
-        if let params = stereo.compressor {
+        if let program = stereo.programFIR {
+            try addFIR(N60_STAGE_FIR, program, baseId: Self.programFIRStageId)
+        }
+        if let params = stereo.compressor, !hasPostConvolver {
             add(N60_STAGE_COMPRESSOR, Self.compressorStageId, mask: programMask, params: params)
         }
         if let params = stereo.expander {
@@ -174,8 +219,18 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
             add(N60_STAGE_BASS_MGMT, Self.bassStageId, mask: mainMask,
                 params: try Self.bassParameters(bass, firstSubLane: programLanes))
         }
+        if let room = stereo.roomFIR {
+            try addFIR(N60_STAGE_ROOM_FIR, room, baseId: Self.roomFIRStageId)
+        }
+        if let speaker = stereo.speakerIR {
+            try addFIR(N60_STAGE_SPEAKER_IR, speaker, baseId: Self.speakerIRStageId)
+        }
         if let params = stereo.ambient {
             add(N60_STAGE_AMBIENT, Self.ambientStageId, mask: programMask, params: params)
+        }
+        if let params = stereo.compressor, hasPostConvolver {
+            // The kernel runs its core dynamics after the room and speaker convolvers.
+            add(N60_STAGE_CORE_DYNAMICS, Self.compressorStageId, mask: programMask, params: params)
         }
         if let position = stereo.symmetryPosition {
             stages.append(UnifiedGraphStageSpec(
@@ -244,6 +299,10 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
     static let pauseGateStageId: UInt32 = 606
     static let denoiserStageId: UInt32 = 607
     static let dynamicEQStageId: UInt32 = 608
+    /// FIR stages take two consecutive ids (left, right) when the channels differ.
+    static let programFIRStageId: UInt32 = 610
+    static let roomFIRStageId: UInt32 = 612
+    static let speakerIRStageId: UInt32 = 614
 
     private static func delayFrames(
         _ milliseconds: Double, extraFrames: UInt32 = 0, sampleRate: Double

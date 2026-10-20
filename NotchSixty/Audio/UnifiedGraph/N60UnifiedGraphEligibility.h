@@ -325,6 +325,14 @@ static inline bool N60UnifiedGraphDynamicEQParams(
     return true;
 }
 
+// A convolution state the core can hold: 1..32768 taps (N60_FIR_MAX_TAPS), the kernel's 256-frame engine latency, and
+// a declared latency within N60_GRAPH_MAX_DELAY_FRAMES. A disabled state is always acceptable.
+static inline bool N60UnifiedGraphConvolutionState(const N60ConvolutionGraphState * _Nonnull c) {
+    if (!c->enabled) return true;
+    return c->programGeneration != 0 && c->tapCount >= 1u && c->tapCount <= 32768u
+        && c->engineLatencyFrames == 256u && c->declaredLatencyFrames <= (1u << 22);
+}
+
 static inline N60UnifiedGraphUnsupportedReason N60UnifiedGraphSnapshotUnsupportedReason(
     const N60DSPGraphSnapshot * _Nonnull s
 ) {
@@ -410,8 +418,24 @@ static inline N60UnifiedGraphUnsupportedReason N60UnifiedGraphSnapshotUnsupporte
     if (s->protection.softClipperEnabled || s->protection.gainRiderEnabled) {
         return N60UnifiedGraphUnsupportedProtection;
     }
+    // E6 S8d: program FIR, room FIR and speaker IR. The snapshot carries no taps, so this only checks what the
+    // core can hold and where the kernel runs the stage; the translator then recovers the taps by generation from
+    // the control plane's retained program and verifies them against this record (see UnifiedGraphFIRProgram).
     if (s->convolution.enabled || s->roomCorrection.enabled || s->speakerIR.enabled) {
-        return N60UnifiedGraphUnsupportedConvolution;
+        if (!N60UnifiedGraphConvolutionState(&s->convolution) || !N60UnifiedGraphConvolutionState(&s->roomCorrection)
+                || !N60UnifiedGraphConvolutionState(&s->speakerIR)) {
+            return N60UnifiedGraphUnsupportedConvolution;
+        }
+        // The kernel runs the program convolution inside the mid/side pair and before the dynamic EQ; the core
+        // runs the FIR after both.
+        if (s->convolution.enabled && (s->eqMidSideMode || (d->dynamicEQ.enabled && !s->eqBypassed))) {
+            return N60UnifiedGraphUnsupportedConvolution;
+        }
+        // The kernel runs the expander after the room and speaker convolvers; the core has no expander position
+        // there (the compressor moves to CORE_DYNAMICS).
+        if ((s->roomCorrection.enabled || s->speakerIR.enabled) && d->expander.enabled) {
+            return N60UnifiedGraphUnsupportedConvolution;
+        }
     }
     if (s->activeQuietZone.enabled) return N60UnifiedGraphUnsupportedAmbientOrANC;
     if (s->ambientCompensation.enabled && !N60UnifiedGraphAmbientParams(s, scratch)) {

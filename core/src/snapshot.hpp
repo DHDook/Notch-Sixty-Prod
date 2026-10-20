@@ -51,6 +51,7 @@ struct SnapHeader {
     uint32_t parkRevision;
     uint32_t parkCommand;
     uint32_t fadeFrames;  // rebuild crossfade length when this snapshot is adopted (0 = instant swap)
+    uint32_t historyEpoch;  // ABI v10: bumped (realtime thread) to drop the FIR input history; lanes compare it
 };
 
 inline uint8_t *bytes(SnapHeader *h) { return reinterpret_cast<uint8_t *>(h); }

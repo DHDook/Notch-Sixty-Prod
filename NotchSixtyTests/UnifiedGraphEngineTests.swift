@@ -1036,6 +1036,288 @@ final class UnifiedGraphStageParityTests: XCTestCase {
 }
 
 
+// MARK: program FIR, room FIR and speaker IR (E6 S8d, second stage group)
+
+extension UnifiedGraphStageParityTests {
+    private struct Prepared {
+        var info: N60ConvolutionProgramInfo
+        var program: UnifiedGraphFIRProgram
+    }
+
+    private func taps(count: Int, seed: Double, scale: Float = 0.5) -> [Float] {
+        (0..<count).map { i in
+            let t = Double(i)
+            return scale * Float(exp(-t / (Double(count) * 0.25)) * sin(seed * t + 0.3 * seed) / 8.0)
+        }
+    }
+
+    private func prepare(
+        _ kernel: OpaquePointer, kind: UnifiedGraphProgramKind, slot: UInt32,
+        left: [Float], right: [Float]?, declared: UInt32
+    ) throws -> Prepared {
+        var info = N60ConvolutionProgramInfo()
+        let count = UInt32(left.count)
+        let ok: Bool = left.withUnsafeBufferPointer { l in
+            func call(_ r: UnsafePointer<Float>?) -> Bool {
+                switch kind {
+                case .convolution:
+                    return N60RenderKernelPrepareConvolutionProgram(kernel, slot, l.baseAddress!, r, count, declared, &info)
+                case .roomCorrection:
+                    return N60RenderKernelPrepareRoomCorrectionProgram(kernel, slot, l.baseAddress!, r, count, declared, &info)
+                case .speakerIR:
+                    return N60RenderKernelPrepareSpeakerIRProgram(kernel, slot, l.baseAddress!, r, count, declared, &info)
+                }
+            }
+            if let right { return right.withUnsafeBufferPointer { call($0.baseAddress) } }
+            return call(nil)
+        }
+        XCTAssertTrue(ok)
+        return Prepared(info: info, program: UnifiedGraphFIRProgram(
+            generation: info.generation, left: left, right: right, declaredLatencyFrames: declared))
+    }
+
+    private func select(_ s: inout N60DSPGraphSnapshot, kind: UnifiedGraphProgramKind, slot: UInt32, _ p: Prepared) {
+        switch kind {
+        case .convolution: XCTAssertTrue(N60DSPGraphSnapshotSetConvolutionProgram(&s, slot, p.info, true))
+        case .roomCorrection: XCTAssertTrue(N60DSPGraphSnapshotSetRoomCorrectionProgram(&s, slot, p.info, true))
+        case .speakerIR: XCTAssertTrue(N60DSPGraphSnapshotSetSpeakerIRProgram(&s, slot, p.info, true))
+        }
+    }
+
+    private func lookup(_ kind: UnifiedGraphProgramKind, _ all: [Prepared]) -> UnifiedGraphProgramLookup {
+        { k, g in k == kind ? all.first { $0.info.generation == g }?.program : nil }
+    }
+
+    private func firRate(_ rate: Double) -> Int { Int(rate * 0.4) / 512 * 512 }
+
+    private func runKernel(_ kernel: OpaquePointer, _ input: [[Float]], from: Int, to: Int, into out: inout [[Float]]) {
+        for i in from..<to {
+            var l: Float = 0, r: Float = 0
+            N60RenderKernelProcessStereoFrame(kernel, input[0][i], input[1][i], &l, &r)
+            out[0][i] = l
+            out[1][i] = r
+        }
+    }
+
+    private func checkParity(_ ref: [[Float]], _ got: [[Float]], tolerance: Double, _ label: String) {
+        let start = ref[0].count * 3 / 4
+        for lane in 0..<2 {
+            let a = ref[lane][start...], b = got[lane][start...]
+            var worst: Float = 0
+            for (x, y) in zip(a, b) { worst = max(worst, abs(x - y)) }
+            XCTAssertLessThan(Double(worst), tolerance * max(rms(a) * 4, 0.05), "\(label) lane \(lane)")
+        }
+    }
+
+    private func firCase(
+        rate: Double, kind: UnifiedGraphProgramKind, stereoTaps: Bool, tapCount: Int, declared: UInt32,
+        extra: (inout N60DSPGraphSnapshot) -> Void = { _ in }, _ label: String
+    ) throws {
+        let kernel = try XCTUnwrap(N60RenderKernelCreate())
+        defer { N60RenderKernelDestroy(kernel) }
+        let left = taps(count: tapCount, seed: 0.21)
+        let right = stereoTaps ? taps(count: tapCount, seed: 0.37) : nil
+        let prepared = try prepare(kernel, kind: kind, slot: 0, left: left, right: right, declared: declared)
+        var s = N60DSPGraphSnapshotMakeUnity(rate)
+        select(&s, kind: kind, slot: 0, prepared)
+        extra(&s)
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, s))
+        let input = stimulus(rate: rate)
+        var ref: [[Float]] = [[Float](repeating: 0, count: input[0].count), [Float](repeating: 0, count: input[0].count)]
+        runKernel(kernel, input, from: 0, to: input[0].count, into: &ref)
+
+        var graphSnapshot = s
+        let configuration = try XCTUnwrap(
+            UnifiedGraphTranslator.stereoConfiguration(
+                snapshot: &graphSnapshot, sampleRate: rate, programs: lookup(kind, [prepared])),
+            "\(label) should be eligible at \(rate)")
+        let host = try UnifiedGraphHost(spec: try configuration.makeSpec())
+        XCTAssertEqual(host.latencyFrames, prepared.info.engineLatencyFrames + prepared.info.declaredLatencyFrames,
+                       "\(label) latency at \(rate)")
+        var got: [[Float]] = [[], []]
+        var position = 0
+        while position + 512 <= input[0].count {
+            let r = try host.processOffline(input: input.map { Array($0[position..<position + 512]) }, frames: 512)
+            got[0] += r[0]; got[1] += r[1]
+            position += 512
+        }
+        checkParity(ref, got, tolerance: 0.02, "\(label) rate \(rate)")
+    }
+
+    func testProgramFIRMatchesTheKernelAtEveryRate() throws {
+        for rate in Self.rates {
+            try firCase(rate: rate, kind: .convolution, stereoTaps: false, tapCount: 700, declared: 5, "program FIR mono")
+            try firCase(rate: rate, kind: .convolution, stereoTaps: true, tapCount: 1_500, declared: 0, "program FIR stereo")
+        }
+    }
+
+    func testRoomFIRMatchesTheKernelAtEveryRate() throws {
+        for rate in Self.rates {
+            try firCase(rate: rate, kind: .roomCorrection, stereoTaps: false, tapCount: 900, declared: 12, "room FIR mono")
+            try firCase(rate: rate, kind: .roomCorrection, stereoTaps: true, tapCount: 2_000, declared: 3, "room FIR stereo")
+        }
+    }
+
+    func testSpeakerIRMatchesTheKernelAtEveryRate() throws {
+        for rate in Self.rates {
+            try firCase(rate: rate, kind: .speakerIR, stereoTaps: true, tapCount: 1_100, declared: 7, "speaker IR")
+        }
+    }
+
+    func testRoomFIRWithCompressorKeepsKernelOrderAtEveryRate() throws {
+        for rate in Self.rates {
+            try firCase(rate: rate, kind: .roomCorrection, stereoTaps: true, tapCount: 800, declared: 0, extra: { s in
+                XCTAssertTrue(N60DynamicsSnapshotSetCompressorAdvanced(
+                    &s.dynamics, rate, true, -24, 3, 6, 8, 120, 2, N60CompressorTopologyFeedForward, false, 80))
+            }, "room FIR and compressor")
+        }
+    }
+
+    func testProgramFIRWithEQMatchesTheKernel() throws {
+        for rate in Self.rates {
+            try firCase(rate: rate, kind: .convolution, stereoTaps: false, tapCount: 600, declared: 0, extra: { s in
+                XCTAssertTrue(N60DSPGraphSnapshotSetEQBandForChannels(
+                    &s, 0, UInt8(N60_EQ_CHANNEL_STEREO), N60BiquadFilterTypePeaking, 2_500, 4, 1.0, true))
+            }, "EQ then program FIR")
+        }
+    }
+
+    func testConvolverFallbackCasesKeepTheKernel() throws {
+        let rate = 48_000.0
+        let kernel = try XCTUnwrap(N60RenderKernelCreate())
+        defer { N60RenderKernelDestroy(kernel) }
+        let p = try prepare(kernel, kind: .roomCorrection, slot: 0, left: taps(count: 500, seed: 0.2), right: nil, declared: 0)
+        var s = N60DSPGraphSnapshotMakeUnity(rate)
+        select(&s, kind: .roomCorrection, slot: 0, p)
+        XCTAssertNotNil(UnifiedGraphTranslator.stereoConfiguration(
+            snapshot: &s, sampleRate: rate, programs: lookup(.roomCorrection, [p])))
+        // The control plane did not retain the taps.
+        XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: rate))
+        // Retained under another generation.
+        var other = p
+        other.program.generation &+= 1
+        XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(
+            snapshot: &s, sampleRate: rate, programs: { _, _ in other.program }))
+        // Wrong kind.
+        XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(
+            snapshot: &s, sampleRate: rate, programs: lookup(.speakerIR, [p])))
+        // Room FIR before the expander.
+        XCTAssertTrue(N60DynamicsSnapshotSetExpander(&s.dynamics, rate, true, -26, 2, -30, 2, 80))
+        XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(
+            snapshot: &s, sampleRate: rate, programs: lookup(.roomCorrection, [p])))
+    }
+
+    /// An IR change on the kernel ducks 8 ms and cuts to a cold runtime; the graph rebuilds with a fully warm filter
+    /// and a 20 ms equal-power crossfade. Both must settle on the new filter, and the graph must not click.
+    func testIRChangeSettlesOnTheNewFilterWithoutClicksAtEveryRate() throws {
+        for rate in Self.rates {
+            let kernel = try XCTUnwrap(N60RenderKernelCreate())
+            defer { N60RenderKernelDestroy(kernel) }
+            let first = try prepare(kernel, kind: .roomCorrection, slot: 0,
+                                    left: taps(count: 900, seed: 0.21), right: nil, declared: 0)
+            let second = try prepare(kernel, kind: .roomCorrection, slot: 1,
+                                     left: taps(count: 1_300, seed: 0.55, scale: 0.8), right: nil, declared: 0)
+            var s0 = N60DSPGraphSnapshotMakeUnity(rate)
+            select(&s0, kind: .roomCorrection, slot: 0, first)
+            var s1 = N60DSPGraphSnapshotMakeUnity(rate)
+            select(&s1, kind: .roomCorrection, slot: 1, second)
+            let input = stimulus(rate: rate)
+            let n = input[0].count
+            let switchAt = n / 2 / 512 * 512
+            var ref: [[Float]] = [[Float](repeating: 0, count: n), [Float](repeating: 0, count: n)]
+            XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, s0))
+            runKernel(kernel, input, from: 0, to: switchAt, into: &ref)
+            XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, s1))
+            runKernel(kernel, input, from: switchAt, to: n, into: &ref)
+
+            let all = [first, second]
+            var g0 = s0, g1 = s1
+            let c0 = try XCTUnwrap(UnifiedGraphTranslator.stereoConfiguration(
+                snapshot: &g0, sampleRate: rate, programs: lookup(.roomCorrection, all)))
+            let c1 = try XCTUnwrap(UnifiedGraphTranslator.stereoConfiguration(
+                snapshot: &g1, sampleRate: rate, programs: lookup(.roomCorrection, all)))
+            let host = try UnifiedGraphHost(spec: try c0.makeSpec())
+            var got: [[Float]] = [[], []]
+            var position = 0
+            while position + 512 <= n {
+                if position == switchAt {
+                    XCTAssertEqual(try host.apply(try c1.makeSpec()), .published)
+                }
+                let r = try host.processOffline(input: input.map { Array($0[position..<position + 512]) }, frames: 512)
+                got[0] += r[0]; got[1] += r[1]
+                position += 512
+            }
+            checkParity(ref, got, tolerance: 0.02, "IR change rate \(rate)")
+            // No click: the crossfade moves smoothly, so the largest step stays near the steady-state step.
+            for lane in 0..<2 {
+                var steady: Float = 0, around: Float = 0
+                for i in 1..<n {
+                    let d = abs(got[lane][i] - got[lane][i - 1])
+                    if i < switchAt - 1_024 || i > n * 3 / 4 { steady = max(steady, d) } else { around = max(around, d) }
+                }
+                XCTAssertLessThan(around, steady * 3 + 0.01, "IR change click, lane \(lane) rate \(rate)")
+            }
+        }
+    }
+
+    /// Hand-over: a kernel that was not rendering holds old audio in its convolver. Marking it idle restarts the
+    /// runtime from silence in O(block) work, so no ghost of that audio reaches the output.
+    func testIdleKernelConvolverRestartsFromSilence() throws {
+        let rate = 48_000.0
+        let kernel = try XCTUnwrap(N60RenderKernelCreate())
+        defer { N60RenderKernelDestroy(kernel) }
+        var impulse = [Float](repeating: 0, count: 3_000)
+        impulse[2_000] = 1
+        let p = try prepare(kernel, kind: .roomCorrection, slot: 0, left: impulse, right: nil, declared: 0)
+        var s = N60DSPGraphSnapshotMakeUnity(rate)
+        select(&s, kind: .roomCorrection, slot: 0, p)
+        XCTAssertTrue(N60RenderKernelPublishSnapshot(kernel, s))
+        let tone = tone(1_000, rate: rate, frames: 6_000, amplitude: 0.5)
+        let silence = [Float](repeating: 0, count: 6_000)
+        var out: [[Float]] = [[Float](repeating: 0, count: 6_000), [Float](repeating: 0, count: 6_000)]
+        runKernel(kernel, [tone, tone], from: 0, to: 6_000, into: &out)
+        N60RenderKernelMarkIdle(kernel)
+        runKernel(kernel, [silence, silence], from: 0, to: 6_000, into: &out)
+        XCTAssertLessThan(out[0].max() ?? 1, 1e-6)
+        XCTAssertLessThan(out[1].max() ?? 1, 1e-6)
+        // And it renders normally afterwards.
+        runKernel(kernel, [tone, tone], from: 0, to: 6_000, into: &out)
+        XCTAssertGreaterThan(out[0].map { abs($0) }.max() ?? 0, 0.1)
+    }
+
+    func testUnchangedFIRKeepsItsStateAcrossAnUnrelatedRebuild() throws {
+        let rate = 48_000.0
+        let kernel = try XCTUnwrap(N60RenderKernelCreate())
+        defer { N60RenderKernelDestroy(kernel) }
+        let p = try prepare(kernel, kind: .convolution, slot: 0, left: taps(count: 4_000, seed: 0.3), right: nil, declared: 0)
+        var s = N60DSPGraphSnapshotMakeUnity(rate)
+        select(&s, kind: .convolution, slot: 0, p)
+        var a = s
+        let c0 = try XCTUnwrap(UnifiedGraphTranslator.stereoConfiguration(
+            snapshot: &a, sampleRate: rate, programs: lookup(.convolution, [p])))
+        XCTAssertTrue(N60DSPGraphSnapshotSetSymmetryBalance(&s, 0.4, true))
+        var b = s
+        let c1 = try XCTUnwrap(UnifiedGraphTranslator.stereoConfiguration(
+            snapshot: &b, sampleRate: rate, programs: lookup(.convolution, [p])))
+        XCTAssertFalse(try c1.makeSpec().hasSameTopology(as: try c0.makeSpec()))
+        let host = try UnifiedGraphHost(spec: try c0.makeSpec())
+        let input = stimulus(rate: rate)
+        var peakBefore: Float = 0, peakAfter: Float = 0
+        var position = 0
+        let switchAt = 9_216
+        while position + 512 <= input[0].count {
+            if position == switchAt { _ = try host.apply(try c1.makeSpec()) }
+            let r = try host.processOffline(input: input.map { Array($0[position..<position + 512]) }, frames: 512)
+            let m = r[0].map { abs($0) }.max() ?? 0
+            if position < switchAt && position > switchAt - 4_096 { peakBefore = max(peakBefore, m) }
+            if position >= switchAt && position < switchAt + 4_096 { peakAfter = max(peakAfter, m) }
+            position += 512
+        }
+        // The filter's tail is carried, so the level does not dip to a cold restart.
+        XCTAssertGreaterThan(peakAfter, peakBefore * 0.5)
+    }
+}
+
 private final class LockedCounter: @unchecked Sendable {
     private let lock = NSLock()
     private var count: UInt64 = 0

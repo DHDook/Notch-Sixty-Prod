@@ -750,6 +750,8 @@ static void hand_denoiser_profile_to_kernel(
 ) {
     bool have = graph != NULL && n60_graph_denoiser_export(graph, &a->profileHandover.graph) != 0;
     N60RenderKernelColdStart(bridge->renderKernel);
+    // The convolvers keep state across a cold start (their clear is multi-MB); invalidate them in O(1) instead.
+    N60RenderKernelMarkIdle(bridge->renderKernel);
     if (have) N60RenderKernelImportDenoiserProfile(bridge->renderKernel, &a->profileHandover.kernel);
 }
 
@@ -793,7 +795,11 @@ static N60UnifiedGraphPlan plan_unified_block(
             // is stale. A kernel that has not run yet exports a fresh profile, which is what it has.
             N60RenderKernelExportDenoiserProfile(bridge->renderKernel, &a->profileHandover.kernel);
             n60_graph_denoiser_import(graph, &a->profileHandover.graph);
-            a->graphWarmLeft = a->warmFrames;
+            // FIR stages restart from silence (O(1), no clear) and warm for their whole tap length, so no stale
+            // history from before the graph last ran is heard and the filter is fully built when it fades in.
+            n60_graph_invalidate_history(graph);
+            const uint32_t firFrames = n60_graph_history_frames(graph);
+            a->graphWarmLeft = firFrames > a->warmFrames ? firFrames : a->warmFrames;
             a->graphCold = false;
         }
         plan.graphRunning = true;
@@ -803,7 +809,9 @@ static N60UnifiedGraphPlan plan_unified_block(
         a->graphWarmLeft = 0u;
         if (a->kernelCold) {
             hand_denoiser_profile_to_kernel(bridge, a, graph);
-            a->kernelWarmLeft = a->warmFrames;
+            // The kernel's convolvers restarted from silence: warm for their longest tap count.
+            const uint32_t convFrames = N60RenderKernelConvolutionHistoryFrames(bridge->renderKernel);
+            a->kernelWarmLeft = convFrames > a->warmFrames ? convFrames : a->warmFrames;
             a->kernelCold = false;
         }
         plan.graphRunning = true;
