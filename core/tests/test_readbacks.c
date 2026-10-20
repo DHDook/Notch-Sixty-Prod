@@ -7,6 +7,7 @@
  *    reach 0.707 of the amplitude, its true peak is the full amplitude), limiter reduction and the
  *    guard flag,
  *  - over-range counts on a clipped burst,
+ *  - limiter switched off and on again during playback,
  *  - reset-on-read, argument validation.
  */
 #include <math.h>
@@ -229,6 +230,85 @@ static void testProtection(double rate) {
     }
 }
 
+/* Publishes `st` as the graph's new topology (same rate and channels as `build`). */
+static void republish(n60_graph *g, double rate, uint32_t ch, const n60_stage_desc *st, uint32_t n) {
+    n60_graph_desc d;
+    memset(&d, 0, sizeof d);
+    d.structSize = sizeof d;
+    d.abiVersion = N60_GRAPH_ABI_VERSION;
+    d.sampleRate = rate;
+    d.maxBlockFrames = BLOCK;
+    d.inputChannels = d.outputChannels = ch;
+    d.stages = st;
+    d.stageCount = n;
+    CHECK(n60_graph_publish(g, &d) == N60_STATUS_OK, "publish at %.0f", rate);
+}
+
+/* S8c follow-up: the limiter is switched off, then on again, while the graph is rendering. The limiter
+ * flag is not a live parameter (only 1..3 are), so the switch is a topology publish; the readbacks must
+ * follow it: a bypassed limiter reads zero reduction and no guard, passes the signal through unchanged,
+ * and reading again after the switch back shows the limiter working. */
+static void testLimiterBypassedDuringPlayback(double rate) {
+    const float on[7] = {1, -6, 1, 50, 10, 1, 4};
+    const float off[7] = {0, -6, 1, 50, 10, 1, 4};
+    const double ceilLin = pow(10.0, -6.0 / 20.0);
+    n60_stage_desc stOn = stage(N60_STAGE_PROTECTION, 20, N60_LANE_ALL, 0, on, 7);
+    n60_stage_desc stOff = stage(N60_STAGE_PROTECTION, 20, N60_LANE_ALL, 0, off, 7);
+    n60_graph *g = build(rate, 2, &stOn, 1);
+    double sig[2] = {0.9, 0.9};
+    uint64_t pos = 0;
+    const uint64_t settle = (uint64_t)(rate * 0.3);
+    run(g, 2, pos, settle, isp, rate, sig);
+    pos += settle;
+    n60_dynamics_readback r = readDyn(g, 20, 0, NULL);
+    CHECK(r.guardActive == 1 && r.grNowDb > 1.0 && r.grMaxDb > 1.0, "%.0f limiter working before bypass: gr %.3f guard %u", rate, r.grNowDb, r.guardActive);
+
+    /* A live parameter post cannot flip the limiter flag. */
+    n60_param_record rec = {20, 0, 0.0f, 0};
+    CHECK(n60_graph_post_params(g, &rec, 1) == N60_STATUS_UNSUPPORTED, "limiter flag is not a live parameter");
+
+    /* Bypass during playback. Drain the switch (new snapshot adopted by the next block), then measure. */
+    republish(g, rate, 2, &stOff, 1);
+    run(g, 2, pos, BLOCK * 4, isp, rate, sig);
+    pos += BLOCK * 4;
+    (void)readDyn(g, 20, 0, NULL);
+    (void)readDyn(g, 20, 1, NULL);
+    (void)n60_graph_collect(g);
+    run(g, 2, pos, (uint64_t)(rate * 0.1), isp, rate, sig);
+    pos += (uint64_t)(rate * 0.1);
+    for (uint32_t lane = 0; lane < 2; lane++) {
+        n60_status s;
+        r = readDyn(g, 20, lane, &s);
+        CHECK(s == N60_STATUS_OK && r.kind == N60_STAGE_PROTECTION, "bypassed read status %d", s);
+        CHECK(r.grNowDb == 0.0f && r.grMaxDb == 0.0f && r.guardActive == 0 && r.inTruePeak == 0.0f && r.outTruePeak == 0.0f,
+              "%.0f bypassed lane %u reads zero: gr %.3f/%.3f guard %u in %.3f out %.3f", rate, lane,
+              r.grNowDb, r.grMaxDb, r.guardActive, r.inTruePeak, r.outTruePeak);
+    }
+    /* The bypassed stage passes the signal through unchanged and adds no latency. */
+    {
+        static float in[2][BLOCK], out[2][BLOCK];
+        const float *ip[2] = {in[0], in[1]};
+        float *op[2] = {out[0], out[1]};
+        for (uint32_t i = 0; i < BLOCK; i++) in[0][i] = in[1][i] = isp(0, pos + i, rate, sig);
+        CHECK(n60_graph_process(g, ip, op, BLOCK) == N60_STATUS_OK, "process bypassed");
+        int same = 1;
+        for (uint32_t i = 0; i < BLOCK; i++) same &= out[0][i] == in[0][i] && out[1][i] == in[1][i];
+        CHECK(same, "%.0f bypassed limiter is bit-exact", rate);
+        pos += BLOCK;
+    }
+
+    /* Back on during playback: the limiter and the guard report again, within the ceiling. */
+    republish(g, rate, 2, &stOn, 1);
+    run(g, 2, pos, settle, isp, rate, sig);
+    pos += settle;
+    (void)readDyn(g, 20, 0, NULL);
+    run(g, 2, pos, (uint64_t)(rate * 0.05), isp, rate, sig);
+    r = readDyn(g, 20, 0, NULL);
+    CHECK(r.guardActive == 1 && r.grNowDb > 1.0 && r.outTruePeak <= ceilLin * 1.001,
+          "%.0f limiter back on: gr %.3f guard %u out %.4f", rate, r.grNowDb, r.guardActive, r.outTruePeak);
+    n60_graph_retire(g);
+}
+
 static void testOverRange(double rate) {
     n60_stage_desc st[3];
     st[0] = stage(N60_STAGE_METER_IN, 2, N60_LANE_ALL, 0, NULL, 0);
@@ -293,6 +373,7 @@ int main(void) {
         testExpander(kRates[i]);
         testProtection(kRates[i]);
         testOverRange(kRates[i]);
+        testLimiterBypassedDuringPlayback(kRates[i]);
     }
     testArguments();
     if (failures) {

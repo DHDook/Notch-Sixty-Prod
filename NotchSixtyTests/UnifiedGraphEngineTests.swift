@@ -316,6 +316,93 @@ final class UnifiedGraphEngineTests: XCTestCase {
         }
     }
 
+    /// E6 S8c follow-up: switching the limiter off while the graph renders makes the limiter readbacks
+    /// read zero (no reduction, no guard, no peaks) and the diagnostics row carry them; switching it
+    /// back on brings them back. The flag is a topology change, so `apply` publishes.
+    @MainActor
+    func testLimiterBypassedDuringPlaybackReadsZeroAtEveryRate() throws {
+        for rate in Self.rates {
+            func configuration(limiter: Bool) throws -> UnifiedGraphConfiguration {
+                var snapshot = N60DSPGraphSnapshotMakeUnity(rate)
+                snapshot.protection.limiterEnabled = limiter
+                snapshot.protection.truePeakGuardEnabled = true
+                snapshot.protection.limiterCeilingLinear = 0.5
+                return try XCTUnwrap(
+                    UnifiedGraphTranslator.stereoConfiguration(snapshot: &snapshot, sampleRate: rate), "rate \(rate)")
+            }
+            let host = try UnifiedGraphHost(spec: try configuration(limiter: true).makeSpec())
+            let loud = sine(1_000, rate: rate, frames: Int(rate * 0.3), amplitude: 0.9)
+            func render(_ from: Int, _ blocks: Int) throws {
+                for b in 0..<blocks {
+                    let start = (from + b * 512) % (loud.count - 512)
+                    let chunk = Array(loud[start..<start + 512])
+                    _ = try host.processOffline(input: [chunk, chunk], frames: 512)
+                }
+            }
+            try render(0, Int(rate * 0.3) / 512)
+            let active = try XCTUnwrap(host.dynamicsReadings(), "rate \(rate)")
+            XCTAssertGreaterThan(active.limiterGainReductionDB, 1, "limiter working, rate \(rate)")
+            XCTAssertTrue(active.truePeakGuardActive, "guard on, rate \(rate)")
+
+            XCTAssertEqual(try host.apply(try configuration(limiter: false).makeSpec()), .published, "rate \(rate)")
+            try render(0, 8)
+            _ = host.dynamicsReadings()  // discard what the swap-over block measured
+            try render(0, 8)
+            let bypassed = try XCTUnwrap(host.dynamicsReadings(), "rate \(rate)")
+            XCTAssertEqual(bypassed.limiterGainReductionDB, 0, "bypassed reduction, rate \(rate)")
+            XCTAssertFalse(bypassed.truePeakGuardActive, "bypassed guard, rate \(rate)")
+            XCTAssertEqual(bypassed.inputTruePeakLinear, 0, "bypassed input peak, rate \(rate)")
+            XCTAssertEqual(bypassed.outputTruePeakLinear, 0, "bypassed output peak, rate \(rate)")
+            try render(0, 2)
+            let record = try XCTUnwrap(UnifiedGraphDiagnostics(host: host, programChannelCount: 2))
+            XCTAssertEqual(record.dynamics?.limiterGainReductionDB, 0, "diagnostics record, rate \(rate)")
+
+            XCTAssertEqual(try host.apply(try configuration(limiter: true).makeSpec()), .published, "rate \(rate)")
+            try render(0, Int(rate * 0.3) / 512)
+            let back = try XCTUnwrap(host.dynamicsReadings(), "rate \(rate)")
+            XCTAssertGreaterThan(back.limiterGainReductionDB, 1, "limiter back on, rate \(rate)")
+            XCTAssertTrue(back.truePeakGuardActive, "guard back on, rate \(rate)")
+        }
+    }
+
+    /// E6 S8c follow-up: two diagnostics readers and a renderer running at once. Over-range counts are
+    /// read-and-reset behind the host lock, so every clipped sample is counted by exactly one reader.
+    @MainActor
+    func testConcurrentReadersSeeEveryOverRangeSampleOnce() throws {
+        let rate = 48_000.0
+        var snapshot = N60DSPGraphSnapshotMakeUnity(rate)
+        snapshot.protection.limiterEnabled = true
+        snapshot.protection.limiterCeilingLinear = 0.5
+        let configuration = try XCTUnwrap(UnifiedGraphTranslator.stereoConfiguration(snapshot: &snapshot, sampleRate: rate))
+        let host = try UnifiedGraphHost(spec: try configuration.makeSpec())
+        let blocks = 400
+        let clipped = [Float](repeating: 1.5, count: 512)
+        let total = LockedCounter()
+        let renderDone = LockedFlag()
+        let readers = DispatchGroup()
+        for _ in 0..<2 {
+            readers.enter()
+            DispatchQueue.global().async {
+                repeat {
+                    var d = N60RenderKernelDiagnostics()
+                    host.overlayStereoReadbacks(&d, latencyFrames: 0, includeOutput: true)
+                    total.add(d.inputMeter.overRangeSamples)
+                    _ = host.dynamicsReadings()
+                    _ = host.meter(stageId: N60_LSTAGE_FINAL_METER, lane: 0)
+                } while !renderDone.isSet
+                readers.leave()
+            }
+        }
+        for _ in 0..<blocks { _ = try host.processOffline(input: [clipped, clipped], frames: 512) }
+        renderDone.set()
+        readers.wait()
+        var last = N60RenderKernelDiagnostics()
+        host.overlayStereoReadbacks(&last, latencyFrames: 0, includeOutput: true)
+        total.add(last.inputMeter.overRangeSamples)
+        // Two lanes of 512 clipped samples per block.
+        XCTAssertEqual(total.value, UInt64(blocks * 512 * 2))
+    }
+
     // MARK: Hand-over between kernel and graph (S8b1)
 
     /// Runs `blocks` capture+output callbacks of a 1 kHz tone through the bridge. Returns the
@@ -660,4 +747,19 @@ final class UnifiedGraphStageParityTests: XCTestCase {
         s.dynamics.expander.releaseCoefficient = 1.5 // not a valid pole
         XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000))
     }
+}
+
+
+private final class LockedCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count: UInt64 = 0
+    func add(_ n: UInt64) { lock.lock(); count &+= n; lock.unlock() }
+    var value: UInt64 { lock.lock(); defer { lock.unlock() }; return count }
+}
+
+private final class LockedFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var flag = false
+    func set() { lock.lock(); flag = true; lock.unlock() }
+    var isSet: Bool { lock.lock(); defer { lock.unlock() }; return flag }
 }

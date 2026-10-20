@@ -145,6 +145,15 @@ final class UnifiedGraphHost: @unchecked Sendable {
         return (peak, rms)
     }
 
+    /// Over-range sample count of a meter stage lane since the previous read (reset by the read).
+    func overRangeSamples(stageId: UInt32, lane: UInt32) -> UInt64 {
+        lock.lock(); defer { lock.unlock() }
+        guard let graph else { return 0 }
+        var count: UInt64 = 0
+        guard n60_graph_read_over_range(graph, stageId, lane, &count) == N60_STATUS_OK else { return 0 }
+        return count
+    }
+
     /// Fills the program lane levels of a bridge meter snapshot from the graph's METER_OUT stage.
     /// `n60_graph_read_meter` is control-thread-only, so every graph meter read goes through this
     /// host's lock (shared with `apply` and `release`); the audio callback never takes it.
