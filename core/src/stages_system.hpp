@@ -35,6 +35,9 @@ uint32_t systemLatency(const SnapHeader *h, const StageRec &r);
 // many stages.
 uint32_t systemRebuildMute(SnapHeader *h, bool silentNow);
 
+// Control thread. Protection limiter and true-peak readback (ABI v8); false for other kinds or lanes.
+bool readProtectionDynamics(SnapHeader *h, const StageRec &r, uint32_t lane, n60_dynamics_readback *out);
+
 // Control thread. Howl guard status and capture ring reads (immutable fields plus atomics).
 bool readGuardStatus(const SnapHeader *h, uint32_t stageId, n60_guard_status *out);
 n60_status readCapture(const SnapHeader *h, uint32_t stageId, uint32_t lane, uint64_t startSample, float *dst,

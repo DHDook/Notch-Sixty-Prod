@@ -141,7 +141,8 @@ uint32_t denoiseFft(float quality) { return 1024u << static_cast<uint32_t>(quali
 struct CompLane {
     double z[2];     // sidechain high-pass state
     float gainDB;    // smoothed gain; the shared gain of a linked group lives in the group's first lane
-    float pad;
+    std::atomic<uint32_t> grMaxBits;  // ABI v8: deepest reduction (dB, >= 0) since the last read, on every lane of the group
+    std::atomic<uint32_t> grNowBits;  // reduction at the end of the last block
 };
 
 struct CompShared {
@@ -152,8 +153,25 @@ struct CompShared {
 
 struct ExpLane {
     float gainDB;
-    float pad[3];
+    std::atomic<uint32_t> grMaxBits;  // as CompLane
+    std::atomic<uint32_t> grNowBits;
+    float pad;
 };
+
+// Publishes the per-group gain reduction of one block to every lane of the group (control-thread readback).
+// The caller has already flushed denormals in the gain; st[g * per] holds the group's gain.
+template <typename Lane>
+void publishReduction(Lane *const *st, uint32_t per, uint32_t groups, const float *grMax) {
+    for (uint32_t g = 0; g < groups; ++g) {
+        const float now = std::max(0.0f, -st[g * per]->gainDB);
+        const float peak = std::max(0.0f, grMax[g]);
+        for (uint32_t k = 0; k < per; ++k) {
+            Lane &ln = *st[g * per + k];
+            atomicMaxFloat(ln.grMaxBits, peak);
+            ln.grNowBits.store(floatToBits(now), std::memory_order_relaxed);
+        }
+    }
+}
 
 float compTargetDb(float detDb, float thr, float slope, float knee, float makeup) {
     const float over = detDb - thr;
@@ -194,6 +212,7 @@ void runCompressor(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
         st[l] = reinterpret_cast<CompLane *>(laneState(h, r, l));
     }
     const uint32_t per = linked ? n : 1, groups = linked ? 1 : n;
+    float grMax[kMaxLanes] = {};
     for (uint32_t i = 0; i < frames; ++i) {
         for (uint32_t g = 0; g < groups; ++g) {
             CompLane &gs = *st[g * per];
@@ -217,6 +236,7 @@ void runCompressor(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
                 c = rel;
             }
             gs.gainDB = target + c * (gs.gainDB - target);
+            grMax[g] = std::max(grMax[g], -gs.gainDB);
             const float gain = db2lin(gs.gainDB);
             for (uint32_t k = 0; k < per; ++k) lp[g * per + k][i] *= gain;
         }
@@ -225,6 +245,7 @@ void runCompressor(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
         flush(st[l]->z);
         fz(st[l]->gainDB);
     }
+    publishReduction(st, per, groups, grMax);
 }
 
 void runExpander(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
@@ -241,6 +262,7 @@ void runExpander(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frame
         st[l] = reinterpret_cast<ExpLane *>(laneState(h, r, l));
     }
     const uint32_t per = linked ? n : 1, groups = linked ? 1 : n;
+    float grMax[kMaxLanes] = {};
     for (uint32_t i = 0; i < frames; ++i) {
         for (uint32_t g = 0; g < groups; ++g) {
             ExpLane &gs = *st[g * per];
@@ -250,6 +272,7 @@ void runExpander(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frame
             const float target = detDb >= thr ? 0.0f : std::max((ratio - 1.0f) * (detDb - thr), range);
             const float c = target < gs.gainDB ? atk : rel;
             gs.gainDB = target + c * (gs.gainDB - target);
+            grMax[g] = std::max(grMax[g], -gs.gainDB);
             const float gain = db2lin(gs.gainDB);
             for (uint32_t k = 0; k < per; ++k) lp[g * per + k][i] *= gain;
         }
@@ -257,6 +280,7 @@ void runExpander(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frame
     for (uint32_t l = 0; l < n; ++l) {
         fz(st[l]->gainDB);
     }
+    publishReduction(st, per, groups, grMax);
 }
 
 // ---- dynamic EQ --------------------------------------------------------------------
@@ -778,6 +802,33 @@ void runFir(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
 }  // namespace
 
 // ---- public entry points -----------------------------------------------------------
+
+bool readDspDynamics(SnapHeader *h, const StageRec &r, uint32_t lane, n60_dynamics_readback *out) {
+    if (r.kind != N60_STAGE_COMPRESSOR && r.kind != N60_STAGE_EXPANDER) return false;
+    uint32_t k = 0;
+    for (; k < r.laneCount; ++k) {
+        if (laneOf(r, k) == lane) break;
+    }
+    if (k == r.laneCount) return false;
+    uint8_t *st = laneState(h, r, k);
+    std::atomic<uint32_t> *maxBits;
+    std::atomic<uint32_t> *nowBits;
+    if (r.kind == N60_STAGE_COMPRESSOR) {
+        maxBits = &reinterpret_cast<CompLane *>(st)->grMaxBits;
+        nowBits = &reinterpret_cast<CompLane *>(st)->grNowBits;
+    } else {
+        maxBits = &reinterpret_cast<ExpLane *>(st)->grMaxBits;
+        nowBits = &reinterpret_cast<ExpLane *>(st)->grNowBits;
+    }
+    out->kind = r.kind;
+    out->grMaxDb = bitsToFloat(maxBits->exchange(0, std::memory_order_relaxed));
+    out->grNowDb = bitsToFloat(nowBits->load(std::memory_order_relaxed));
+    out->inTruePeak = 0.0f;
+    out->outTruePeak = 0.0f;
+    out->guardActive = 0;
+    out->reserved = 0;
+    return true;
+}
 
 bool isDspKind(uint32_t kind) {
     return kind == N60_STAGE_COMPRESSOR || kind == N60_STAGE_EXPANDER || kind == N60_STAGE_DYN_EQ ||

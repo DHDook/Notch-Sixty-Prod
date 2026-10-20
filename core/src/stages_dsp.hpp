@@ -25,6 +25,9 @@ void runDsp(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames);
 // Pure range and liveness check for one parameter (see validateParam).
 n60_status validateDspParam(const SnapHeader *h, const StageRec &r, uint32_t idx, float value);
 
+// Control thread. Gain-reduction readback of a COMPRESSOR or EXPANDER lane (ABI v8); false for other kinds.
+bool readDspDynamics(SnapHeader *h, const StageRec &r, uint32_t lane, n60_dynamics_readback *out);
+
 // Frames of latency one lane of this stage adds.
 uint32_t dspLatency(const SnapHeader *h, const StageRec &r);
 

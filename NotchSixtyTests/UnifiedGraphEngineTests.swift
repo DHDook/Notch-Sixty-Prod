@@ -271,6 +271,51 @@ final class UnifiedGraphEngineTests: XCTestCase {
         }
     }
 
+    /// E6 S8c: gain reduction, true peaks, the guard flag and over-range counts come from the core
+    /// at every rate, through the stereo overlay and through `UnifiedGraphDiagnostics`.
+    @MainActor
+    func testDynamicsReadbacksComeFromTheGraphAtEveryRate() throws {
+        for rate in Self.rates {
+            var snapshot = N60DSPGraphSnapshotMakeUnity(rate)
+            XCTAssertTrue(N60DynamicsSnapshotSetCompressorAdvanced(
+                &snapshot.dynamics, rate, true, -24, 4, 0, 5, 80, 0, N60CompressorTopologyFeedForward, false, 0))
+            snapshot.protection.limiterEnabled = true
+            snapshot.protection.truePeakGuardEnabled = true
+            snapshot.protection.limiterCeilingLinear = 0.5
+            let configuration = try XCTUnwrap(
+                UnifiedGraphTranslator.stereoConfiguration(snapshot: &snapshot, sampleRate: rate), "rate \(rate)")
+            let host = try UnifiedGraphHost(spec: try configuration.makeSpec())
+            let loud = sine(1_000, rate: rate, frames: Int(rate * 0.3), amplitude: 1.5)
+            var block = 0
+            while block + 512 <= loud.count {
+                let chunk = Array(loud[block..<block + 512])
+                _ = try host.processOffline(input: [chunk, chunk], frames: 512)
+                block += 512
+            }
+            var diagnostics = N60RenderKernelDiagnostics()
+            host.overlayStereoReadbacks(&diagnostics, latencyFrames: 0, includeOutput: true)
+            XCTAssertGreaterThan(diagnostics.inputMeter.overRangeSamples, 0, "over-range rate \(rate)")
+            XCTAssertGreaterThan(diagnostics.compressorGainReductionDB, 1, "compressor GR rate \(rate)")
+            XCTAssertGreaterThan(diagnostics.limiterGainReductionDB, 1, "limiter GR rate \(rate)")
+            XCTAssertGreaterThan(diagnostics.inputTruePeakLinear, 0.5, "input true peak rate \(rate)")
+            XCTAssertLessThanOrEqual(diagnostics.outputTruePeakLinear, 0.55, "output true peak rate \(rate)")
+            XCTAssertTrue(diagnostics.truePeakGuardActive, "guard rate \(rate)")
+            // Reads reset: with silence in, the next reading is back at rest.
+            let silence = [Float](repeating: 0, count: 512)
+            _ = try host.processOffline(input: [silence, silence], frames: 512)
+            var rest = N60RenderKernelDiagnostics()
+            host.overlayStereoReadbacks(&rest, latencyFrames: 0, includeOutput: true)
+            XCTAssertEqual(rest.inputMeter.overRangeSamples, 0, "reset rate \(rate)")
+            // The diagnostics record carries the same values for any session type.
+            let chunk = Array(loud[0..<512])
+            _ = try host.processOffline(input: [chunk, chunk], frames: 512)
+            let record = try XCTUnwrap(UnifiedGraphDiagnostics(host: host, programChannelCount: 2))
+            let dynamics = try XCTUnwrap(record.dynamics, "dynamics rate \(rate)")
+            XCTAssertTrue(dynamics.truePeakGuardActive)
+            XCTAssertGreaterThan(dynamics.inputTruePeakLinear, 0.05)
+        }
+    }
+
     // MARK: Hand-over between kernel and graph (S8b1)
 
     /// Runs `blocks` capture+output callbacks of a 1 kHz tone through the bridge. Returns the

@@ -214,6 +214,8 @@ if selected e6_core_graph; then
             "${CORE_OBJS[@]}" -lc++ -lm
         harness e6_core_layout "${STRICT[@]}" -O2 -Icore/include core/tests/test_layout.c \
             "${CORE_OBJS[@]}" -lc++ -lm
+        harness e6_core_readbacks "${STRICT[@]}" -O2 -Icore/include core/tests/test_readbacks.c \
+            "${CORE_OBJS[@]}" -lc++ -lm
         harness e6_core_binaural_parity "${STRICT[@]}" -O2 -Icore/include -I"$RT" core/tests/test_binaural_parity.c \
             "${CORE_OBJS[@]}" -lc++ -lm
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include core/tests/test_alloc.cpp \

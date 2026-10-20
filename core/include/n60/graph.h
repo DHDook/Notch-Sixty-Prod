@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 7u
+#define N60_GRAPH_ABI_VERSION 8u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -354,6 +354,32 @@ n60_status n60_graph_post_params(n60_graph *graph, const n60_param_record *recor
  * is the RMS of the most recent block. Both are 0 until the realtime thread has
  * rendered that snapshot. */
 n60_status n60_graph_read_meter(n60_graph *graph, uint32_t stageId, uint32_t lane, float *peak, float *rms);
+
+/* ===== ABI v8 (E6 S8c): dynamics, true-peak and over-range readbacks ===========================
+ * Same pattern as n60_graph_read_meter: control thread only, reads the newest published snapshot,
+ * non-blocking (relaxed atomics written by the realtime thread), and peaks, reductions and counts
+ * are reset by the read. All values are 0 until the realtime thread has rendered that snapshot. */
+typedef struct n60_dynamics_readback {
+    uint32_t structSize;      /* sizeof(n60_dynamics_readback) as seen by the caller */
+    uint32_t kind;            /* the stage's canonical kind: COMPRESSOR (also CORE_DYNAMICS), EXPANDER or PROTECTION */
+    float grMaxDb;            /* deepest gain reduction (>= 0 dB) since the previous read; reset by the read */
+    float grNowDb;            /* reduction at the end of the most recently rendered block (not reset) */
+    float inTruePeak;         /* PROTECTION: largest |x| at the oversampled input of the limiter (factor 1 = sample peak), linear, since the previous read */
+    float outTruePeak;        /* PROTECTION: the same after the limiter (factor 1 = sample peak) */
+    uint32_t guardActive;     /* PROTECTION: 1 when the limiter runs with oversampling (the true-peak guard) */
+    uint32_t reserved;
+} n60_dynamics_readback;
+
+/* Reads a COMPRESSOR, CORE_DYNAMICS, EXPANDER or PROTECTION stage for one output lane. A linked group
+ * reports its shared gain reduction on every lane it covers; the protection limiter is linked across its
+ * lanes, so grMaxDb and grNowDb are the same for all of them while the true peaks are per lane. Gain
+ * reduction is max(0, -gain dB) with the stage's make-up gain included, as in the stereo kernel.
+ * BAD_ARGUMENT for another kind of stage or a lane the stage does not cover; ABI_MISMATCH on structSize. */
+n60_status n60_graph_read_dynamics(n60_graph *graph, uint32_t stageId, uint32_t lane, n60_dynamics_readback *out);
+
+/* Reads the over-range counter of a METER_IN, METER_OUT or FINAL_METER stage lane: samples with
+ * |x| > 1.0 since the previous read (reset by the read). */
+n60_status n60_graph_read_over_range(n60_graph *graph, uint32_t stageId, uint32_t lane, uint64_t *count);
 
 void n60_graph_get_stats(const n60_graph *graph, n60_graph_stats *outStats);
 
