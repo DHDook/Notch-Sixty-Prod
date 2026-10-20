@@ -226,9 +226,39 @@ int main() {
                 n60_status st = n60_graph_process(g, in, out, N);
                 for (int k = 0; k < 4; k++) st = static_cast<n60_status>(st | n60_graph_process(g, in, out, 1 + 100 * k));
                 armed = false;
+                // ABI v9 profile carry: the hand-over export and import are bounded copies on the realtime thread.
+                static n60_denoiser_state ds;
+                allocs = 0;
+                frees = 0;
+                armed = true;
+                (void)n60_graph_denoiser_export(g, &ds);
+                n60_graph_denoiser_import(g, &ds);
+                armed = false;
+                CHECK(allocs == 0 && frees == 0, "rate %.0f S8d q%d round %d: profile export/import allocated %ld / freed %ld",
+                      rate, quality, round, allocs.load(), frees.load());
                 CHECK(st == N60_STATUS_OK, "process S8d");
                 CHECK(allocs == 0 && frees == 0, "rate %.0f S8d q%d round %d: realtime call allocated %ld / freed %ld",
                       rate, quality, round, allocs.load(), frees.load());
+                n60_graph_collect(g);
+            }
+            // The denoiser switched off (parked profile) and back on, a quality change, all under the counter.
+            for (int phase = 0; phase < 4; phase++) {
+                n60_stage_desc only[1] = {a[1]};
+                n60_graph_desc dp = da;
+                if (phase == 0 || phase == 2) {
+                    dp.stages = only; dp.stageCount = 1;
+                    dp.parkFftSize = 1024u << quality; dp.parkRevision = static_cast<uint32_t>(phase); dp.parkCommand = phase == 2 ? 2u : 0u;
+                }
+                CHECK(n60_graph_publish(g, &dp) == N60_STATUS_OK, "publish park phase %d", phase);
+                allocs = 0;
+                frees = 0;
+                armed = true;
+                n60_status st = N60_STATUS_OK;
+                for (int k = 0; k < 8; k++) st = static_cast<n60_status>(st | n60_graph_process(g, in, out, N));
+                armed = false;
+                CHECK(st == N60_STATUS_OK, "process park phase");
+                CHECK(allocs == 0 && frees == 0, "rate %.0f S8d q%d park phase %d: realtime call allocated %ld / freed %ld",
+                      rate, quality, phase, allocs.load(), frees.load());
                 n60_graph_collect(g);
             }
             n60_graph_retire(g);

@@ -95,6 +95,13 @@ enum UnifiedGraphTranslator {
             if dynamics.spectralDenoiser.enabled {
                 var values = [Float](repeating: 0, count: 9)
                 if N60UnifiedGraphDenoiserParams(pointer, &values) { stages.denoiser = values } else { ok = false }
+            } else {
+                var view = [UInt32](repeating: 0, count: 3)
+                if N60UnifiedGraphDenoiserParkView(pointer, &view) {
+                    configuration.denoiserPark = UnifiedGraphDenoiserPark(
+                        fftSize: view[0], revision: view[1], command: view[2]
+                    )
+                } else { ok = false }
             }
             // The kernel skips the dynamic EQ while the EQ is bypassed.
             if dynamics.dynamicEQ.enabled, !pointer.pointee.eqBypassed {

@@ -87,6 +87,8 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
     var protection: UnifiedGraphProtection?
     /// Two-lane configurations only.
     var stereoStages = UnifiedGraphStereoStages()
+    /// The kernel denoiser's view while it is off (ignored when the denoiser stage is present).
+    var denoiserPark: UnifiedGraphDenoiserPark?
 
     var subwooferCount: Int { bassManagement?.subwoofers.count ?? 0 }
     var channelCount: Int { lanes.count + subwooferCount }
@@ -225,7 +227,8 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
         return UnifiedGraphSpec(
             sampleRate: sampleRate, maxBlockFrames: maxBlockFrames,
             inputChannels: UInt32(channelCount), outputChannels: UInt32(channelCount),
-            stages: stages
+            stages: stages,
+            denoiserPark: stereo.denoiser == nil ? denoiserPark : nil
         )
     }
 

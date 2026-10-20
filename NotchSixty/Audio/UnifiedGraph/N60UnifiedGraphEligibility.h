@@ -203,14 +203,13 @@ static inline bool N60UnifiedGraphIntegerDelay(
 // protected range on, protected low Hz, protected high Hz, profile command, profile revision.
 // The kernel derives its smoothing, FFT size and latency from tuning and quality alone, and the
 // core derives the same set from the same two numbers, so the rebuilt snapshot must match all of
-// them exactly (an advanced-tuning override does not, and keeps the kernel). A pending Capture
-// command is never carried over: a fresh core stage would record program audio as the noise
-// profile. A Reset command is harmless on a fresh stage and is passed through.
+// them exactly (an advanced-tuning override does not, and keeps the kernel). Profile commands are
+// passed through: the core carries the profile and the last revision across rebuilds and hand-overs
+// (ABI v9), so a command runs once per revision, as in the kernel.
 static inline bool N60UnifiedGraphDenoiserParams(
     const N60DSPGraphSnapshot * _Nonnull s, float out[_Nonnull 9]
 ) {
     const N60SpectralDenoiserSnapshot *d = &s->dynamics.spectralDenoiser;
-    if (d->profileCommand == N60DenoiserProfileCommandCapture) return false;
     if (d->profileRevision > 16777216u) return false;
     N60SpectralDenoiserSnapshot rebuilt = N60SpectralDenoiserSnapshotMakeBypassed(s->sampleRate);
     if (!N60SpectralDenoiserSnapshotConfigure(
@@ -229,6 +228,22 @@ static inline bool N60UnifiedGraphDenoiserParams(
     out[3] = d->thresholdDBFS; out[4] = d->protectedRangeEnabled ? 1.0f : 0.0f;
     out[5] = d->protectedLowHz; out[6] = d->protectedHighHz;
     out[7] = (float)d->profileCommand; out[8] = (float)d->profileRevision;
+    return true;
+}
+
+// What the kernel's denoiser sees while it is switched off (ABI v9 park view): FFT size of the quality
+// setting, profile revision and command. The kernel keeps its profile while off, applies a Reset command
+// and drops the profile on a quality change, all of which the core reproduces from these three numbers. A
+// Capture command while off stays with the kernel: it keeps recording while the denoiser is off, which a
+// graph without the stage cannot. Returns false when the kernel must keep the snapshot.
+static inline bool N60UnifiedGraphDenoiserParkView(
+    const N60DSPGraphSnapshot * _Nonnull s, uint32_t out[_Nonnull 3]
+) {
+    const N60SpectralDenoiserSnapshot *d = &s->dynamics.spectralDenoiser;
+    if (d->profileCommand == N60DenoiserProfileCommandCapture) return false;
+    if (d->profileRevision > 16777216u) return false;
+    if (d->fftSize != 1024u && d->fftSize != 2048u && d->fftSize != 4096u) return false;
+    out[0] = d->fftSize; out[1] = d->profileRevision; out[2] = (uint32_t)d->profileCommand;
     return true;
 }
 
@@ -366,6 +381,10 @@ static inline N60UnifiedGraphUnsupportedReason N60UnifiedGraphSnapshotUnsupporte
     }
     float scratch[10];
     if (d->spectralDenoiser.enabled && !N60UnifiedGraphDenoiserParams(s, scratch)) {
+        return N60UnifiedGraphUnsupportedDynamics;
+    }
+    uint32_t parkView[3];
+    if (!d->spectralDenoiser.enabled && !N60UnifiedGraphDenoiserParkView(s, parkView)) {
         return N60UnifiedGraphUnsupportedDynamics;
     }
     if (d->dynamicEQ.enabled && !s->eqBypassed) {

@@ -550,6 +550,53 @@ final class UnifiedGraphEngineTests: XCTestCase {
         }
         XCTAssertEqual(da.output.map(abs).max() ?? 0, 0.2, accuracy: 0.01)
     }
+
+    /// The profile travels with the hand-over in both directions. The kernel captures, the graph takes over and
+    /// must hold that profile (not capture again); it goes back to the kernel and again to the graph, still held.
+    func testHandOverKeepsTheDenoiserProfileAtEveryRate() throws {
+        for rate in Self.rates {
+            var snapshot = N60DSPGraphSnapshotMakeUnity(rate)
+            XCTAssertTrue(N60DynamicsSnapshotSetSpectralDenoiser(
+                &snapshot.dynamics, rate, true, N60DenoiserTuningStandard, N60DenoiserQualityHigh,
+                0.7, -50, false, 0, 150, 1, N60DenoiserProfileCommandCapture))
+            let bridge = try XCTUnwrap(N60RealtimeAudioBridgeCreate(262_144))
+            defer { N60RealtimeAudioBridgeDestroy(bridge) }
+            XCTAssertTrue(N60RealtimeAudioBridgePublishDSPGraph(bridge, snapshot))
+            N60RealtimeAudioBridgeConfigureOutputGate(bridge, 0, 0)
+            var mutable = snapshot
+            let configuration = try XCTUnwrap(
+                UnifiedGraphTranslator.stereoConfiguration(snapshot: &mutable, sampleRate: rate)
+            )
+            let host = try UnifiedGraphHost(spec: try configuration.makeSpec())
+            let raw = try XCTUnwrap(host.rawGraph)
+            let graph = OpaquePointer(raw)
+            let state = UnsafeMutablePointer<n60_denoiser_state>.allocate(capacity: 1)
+            defer { state.deallocate() }
+
+            var driver = Driver()
+            // The kernel captures for about a second of program.
+            drive(bridge, rate: rate, blocks: Int(rate * 1.6 / 256) + 8, driver: &driver)
+            let settle = Int(rate * 0.3 / 256) + 8
+
+            func assertHeld(_ label: String) {
+                memset(state, 0, MemoryLayout<n60_denoiser_state>.size)
+                XCTAssertEqual(n60_graph_denoiser_export(graph, state), 1, "\(label) rate \(rate)")
+                XCTAssertNotEqual(state.pointee.flags & 1, 0, "\(label): profile ready, rate \(rate)")
+                XCTAssertNotEqual(state.pointee.flags & 2, 0, "\(label): captured, rate \(rate)")
+                XCTAssertEqual(state.pointee.flags & 4, 0, "\(label): no repeat capture, rate \(rate)")
+            }
+
+            XCTAssertTrue(N60RealtimeAudioBridgeSetUnifiedGraph(bridge, raw, 256, rate))
+            drive(bridge, rate: rate, blocks: settle, driver: &driver)
+            assertHeld("kernel to graph")
+            XCTAssertTrue(N60RealtimeAudioBridgeSetUnifiedGraph(bridge, nil, 0, 0))
+            drive(bridge, rate: rate, blocks: settle, driver: &driver)
+            XCTAssertTrue(N60RealtimeAudioBridgeSetUnifiedGraph(bridge, raw, 256, rate))
+            drive(bridge, rate: rate, blocks: settle, driver: &driver)
+            assertHeld("graph to kernel to graph")
+            N60RealtimeAudioBridgeReleaseUnifiedGraph(bridge)
+        }
+    }
 }
 
 
@@ -911,11 +958,16 @@ final class UnifiedGraphStageParityTests: XCTestCase {
 
     func testUnrepresentableDenoiserKeepsTheKernel() {
         var s = N60DSPGraphSnapshotMakeUnity(48_000)
-        // A capture in flight would record program audio as noise on a fresh stage.
+        // A capture while the denoiser is off: the kernel keeps recording, a graph without the stage cannot.
+        XCTAssertTrue(N60DynamicsSnapshotSetSpectralDenoiser(
+            &s.dynamics, 48_000, false, N60DenoiserTuningStandard, N60DenoiserQualityHigh,
+            0.7, -50, false, 0, 150, 1, N60DenoiserProfileCommandCapture))
+        XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000), "capture while off")
+        // The same command with the denoiser on is carried: the core remembers the revision across rebuilds.
         XCTAssertTrue(N60DynamicsSnapshotSetSpectralDenoiser(
             &s.dynamics, 48_000, true, N60DenoiserTuningStandard, N60DenoiserQualityHigh,
             0.7, -50, false, 0, 150, 1, N60DenoiserProfileCommandCapture))
-        XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000), "capture")
+        XCTAssertNotNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000), "capture while on")
         // Advanced smoothing the core's tuning table does not carry.
         s = N60DSPGraphSnapshotMakeUnity(48_000)
         XCTAssertTrue(N60DynamicsSnapshotSetSpectralDenoiser(
@@ -925,6 +977,53 @@ final class UnifiedGraphStageParityTests: XCTestCase {
         XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000), "advanced tuning")
         s.dynamics.spectralDenoiser.minimumGain = 0.20
         XCTAssertNotNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000))
+    }
+
+    /// A captured profile must sound the same through the graph as through the kernel, at every rate.
+    func testCapturedProfileMatchesTheKernelAtEveryRate() throws {
+        for rate in Self.rates {
+            var s = N60DSPGraphSnapshotMakeUnity(rate)
+            XCTAssertTrue(N60DynamicsSnapshotSetSpectralDenoiser(
+                &s.dynamics, rate, true, N60DenoiserTuningStandard, N60DenoiserQualityHigh,
+                0.9, -50, false, 0, 150, 1, N60DenoiserProfileCommandCapture))
+            let input = noisyStimulus(rate: rate, seconds: 3.0)
+            let reference = try kernelRender(s, input)
+            let candidate = try graphRender(s, input, rate: rate)
+            let start = input[0].count * 3 / 4
+            for lane in 0..<2 {
+                let expected = rms(reference[lane][start...])
+                XCTAssertEqual(rms(candidate[lane][start...]), expected, accuracy: max(expected * 0.05, 2e-5),
+                               "captured profile lane \(lane) rate \(rate)")
+            }
+        }
+    }
+
+    /// The denoiser's off view: the quality's FFT size and the profile revision, so the core can keep the
+    /// kernel's profile while the stage is absent. A change in it must publish.
+    func testDisabledDenoiserCarriesItsParkView() throws {
+        var s = N60DSPGraphSnapshotMakeUnity(48_000)
+        XCTAssertTrue(N60DynamicsSnapshotSetSpectralDenoiser(
+            &s.dynamics, 48_000, false, N60DenoiserTuningStandard, N60DenoiserQualityHigh,
+            0.7, -50, false, 0, 150, 4, N60DenoiserProfileCommandReset))
+        let a = try XCTUnwrap(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000))
+        let park = try XCTUnwrap(a.denoiserPark)
+        XCTAssertEqual(park.revision, 4)
+        XCTAssertEqual(park.command, 2)
+        XCTAssertTrue([1_024, 2_048, 4_096].contains(park.fftSize))
+        let specA = try a.makeSpec()
+        XCTAssertEqual(specA.denoiserPark, park)
+        XCTAssertTrue(specA.hasSameTopology(as: specA))
+        XCTAssertTrue(N60DynamicsSnapshotSetSpectralDenoiser(
+            &s.dynamics, 48_000, false, N60DenoiserTuningStandard, N60DenoiserQualityHigh,
+            0.7, -50, false, 0, 150, 5, N60DenoiserProfileCommandReset))
+        let b = try XCTUnwrap(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000))
+        XCTAssertFalse(specA.hasSameTopology(as: try b.makeSpec()), "a new revision while off must publish")
+        // With the denoiser on, the view is not used.
+        XCTAssertTrue(N60DynamicsSnapshotSetSpectralDenoiser(
+            &s.dynamics, 48_000, true, N60DenoiserTuningStandard, N60DenoiserQualityHigh,
+            0.7, -50, false, 0, 150, 5, N60DenoiserProfileCommandNone))
+        let on = try XCTUnwrap(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000))
+        XCTAssertNil(try on.makeSpec().denoiserPark)
     }
 
     func testUnrecoverableSmoothingKeepsTheKernel() {

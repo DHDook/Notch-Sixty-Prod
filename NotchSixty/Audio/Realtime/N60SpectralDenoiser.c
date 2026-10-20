@@ -320,6 +320,61 @@ void N60SpectralDenoiserReset(N60SpectralDenoiserRuntime *runtime) {
     runtime->activeFFTSize = active > 0 ? active : 2048u;
 }
 
+void N60SpectralDenoiserExportProfile(const N60SpectralDenoiserRuntime *runtime, N60SpectralDenoiserProfileState *out) {
+    if (runtime == NULL || out == NULL) return;
+    uint32_t size = runtime->activeFFTSize;
+    out->fftSize = size;
+    out->flags = (runtime->profileReady ? 1u : 0u) | (runtime->capturedProfile ? 2u : 0u)
+        | (runtime->captureActive ? 4u : 0u) | (runtime->adaptiveBlockFresh ? 8u : 0u);
+    out->adaptiveFrames = runtime->adaptiveFramesInBlock;
+    out->adaptiveTarget = runtime->adaptiveBlockTargetFrames;
+    out->adaptiveBlocks = runtime->adaptiveBlocksCompleted;
+    out->lastRevision = runtime->lastProfileRevision;
+    out->captureCollected = runtime->captureFramesCollected;
+    out->captureTarget = runtime->captureTargetFrames;
+    if (size == 0u || size > N60_DENOISER_MAX_FFT_SIZE) return;
+    size_t bytes = sizeof(float) * (size_t)(size / 2u + 1u);
+    memcpy(out->noise, runtime->noisePower, bytes);
+    memcpy(out->adaptiveMinimum, runtime->adaptiveMinimum, bytes);
+    memcpy(out->captureSum, runtime->captureSum, bytes);
+}
+
+void N60SpectralDenoiserImportProfile(N60SpectralDenoiserRuntime *runtime, const N60SpectralDenoiserProfileState *state) {
+    if (runtime == NULL || state == NULL) return;
+    uint32_t size = state->fftSize;
+    if (size != 1024u && size != 2048u && size != 4096u) {
+        // No usable state: the fresh profile the kernel has after a reset.
+        runtime->profileReady = false;
+        runtime->capturedProfile = false;
+        runtime->captureActive = false;
+        runtime->captureFramesCollected = 0;
+        runtime->captureTargetFrames = 0;
+        runtime->adaptiveBlocksCompleted = 0;
+        runtime->adaptiveFramesInBlock = 0;
+        runtime->adaptiveBlockTargetFrames = 0;
+        runtime->adaptiveBlockFresh = true;
+        runtime->lastProfileRevision = 0;
+        runtime->enhancementHistoryValid = false;
+        return;
+    }
+    runtime->activeFFTSize = size;
+    runtime->profileReady = (state->flags & 1u) != 0u;
+    runtime->capturedProfile = (state->flags & 2u) != 0u;
+    runtime->captureActive = (state->flags & 4u) != 0u;
+    runtime->adaptiveBlockFresh = (state->flags & 8u) != 0u;
+    runtime->adaptiveFramesInBlock = state->adaptiveFrames;
+    runtime->adaptiveBlockTargetFrames = state->adaptiveTarget;
+    runtime->adaptiveBlocksCompleted = state->adaptiveBlocks;
+    runtime->lastProfileRevision = state->lastRevision;
+    runtime->captureFramesCollected = state->captureCollected;
+    runtime->captureTargetFrames = state->captureTarget;
+    runtime->enhancementHistoryValid = false;
+    size_t bytes = sizeof(float) * (size_t)(size / 2u + 1u);
+    memcpy(runtime->noisePower, state->noise, bytes);
+    memcpy(runtime->adaptiveMinimum, state->adaptiveMinimum, bytes);
+    memcpy(runtime->captureSum, state->captureSum, bytes);
+}
+
 static const float *window_for_size(const N60SpectralDenoiserRuntime *runtime, uint32_t size, float *sumOut) {
     switch (size) {
     case 1024u:
