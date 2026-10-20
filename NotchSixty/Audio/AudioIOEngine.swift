@@ -2879,13 +2879,17 @@ final class AudioIOEngine: ObservableObject {
             lastErrorDescription: lastErrorDescription,
             unifiedGraph: UnifiedGraphDiagnostics(
                 host: transportSession?.unifiedGraphReadback
-                    ?? nChannelTransportSession?.unifiedGraphReadback,
+                    ?? nChannelTransportSession?.unifiedGraphReadback
+                    ?? binauralHeadphoneTransportSession?.unifiedGraphReadback,
                 programChannelCount: nChannelTransportSession.map {
                     $0.routePlan.programLayout.roles.count
+                } ?? binauralHeadphoneTransportSession.map {
+                    $0.programLayout.roles.count
                 } ?? 2,
                 fallbackReason: unifiedGraphEnabled
                     ? (transportSession?.unifiedGraphFallbackReason
-                        ?? nChannelTransportSession?.unifiedGraphFallbackReason)
+                        ?? nChannelTransportSession?.unifiedGraphFallbackReason
+                        ?? binauralHeadphoneTransportSession?.unifiedGraphFallbackReason)
                     : nil
             )
         )
@@ -4175,6 +4179,24 @@ final class AudioIOEngine: ObservableObject {
         guard programGain.isFinite, programGain >= 0, programGain <= 16 else {
             throw BinauralHeadphoneTransportError.bridgeAllocationFailed
         }
+        // E6 S8b2d: with the flag on, the core renders binaural, headphone DSP and protection when
+        // the setup is one it reproduces; otherwise the legacy pipeline stays and the reason shows
+        // in diagnostics.
+        var graphSpec: UnifiedGraphSpec?
+        var graphIneligibility: UnifiedGraphFallbackReason?
+        if unifiedGraphEnabled {
+            switch UnifiedGraphTranslator.binauralSpec(
+                asset: asset,
+                layout: profile.programLayout,
+                profile: profile,
+                outputChannels: UInt32(output.outputChannelCount),
+                sampleRate: output.nominalSampleRate,
+                headTracking: profile.headTracking?.enabled == true
+            ) {
+            case .success(let spec): graphSpec = spec
+            case .failure(let reason): graphIneligibility = reason
+            }
+        }
         let session = try CoreAudioBinauralHeadphoneTransportSession(
             selectedOutput: output,
             programSource: source,
@@ -4183,7 +4205,9 @@ final class AudioIOEngine: ObservableObject {
             headphoneSnapshot: headphoneSnapshot,
             programGain: programGain,
             outputGain: currentMasterSoftwareGain,
-            audioUnitRack: stagedAudioUnitRack
+            audioUnitRack: stagedAudioUnitRack,
+            unifiedGraphSpec: graphSpec,
+            unifiedGraphIneligibility: graphIneligibility
         )
         activeEQFIRProgram = nil
         activeRoomCorrectionProgram = nil

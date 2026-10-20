@@ -67,6 +67,14 @@ final class CoreAudioBinauralHeadphoneTransportSession {
     }
 
     private var bridge: UnsafeMutablePointer<N60BinauralHeadphoneBridge>?
+    /// E6 S8b2d: the libn60core graph rendering the program (binaural, headphone DSP and
+    /// protection), when `e6.unified-graph` is on and the setup is one the core reproduces. Created
+    /// before IO starts and released only after the bridge is destroyed (see `stop`).
+    private var unifiedGraphHost: UnifiedGraphHost?
+    /// Serialises the head-tracking thread's read of `unifiedGraphHost` with `stop`.
+    private let graphReferenceLock = NSLock()
+    /// Why the legacy binaural pipeline kept this session although the graph was requested.
+    private(set) var unifiedGraphFallbackReason: UnifiedGraphFallbackReason?
     private var audioUnitRack: AudioUnitLiveRackSwitchboard?
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateDeviceID = AudioDeviceID(kAudioObjectUnknown)
@@ -84,7 +92,9 @@ final class CoreAudioBinauralHeadphoneTransportSession {
         headphoneSnapshot: N60HeadphoneDSPSnapshot,
         programGain: Float,
         outputGain: Float,
-        audioUnitRack: AudioUnitLiveRackSwitchboard? = nil
+        audioUnitRack: AudioUnitLiveRackSwitchboard? = nil,
+        unifiedGraphSpec: UnifiedGraphSpec? = nil,
+        unifiedGraphIneligibility: UnifiedGraphFallbackReason? = nil
     ) throws {
         self.selectedOutput = selectedOutput
         self.programSource = programSource
@@ -241,6 +251,24 @@ final class CoreAudioBinauralHeadphoneTransportSession {
                     throw CoreAudioTransportError.audioUnitRackConfigurationFailed
                 }
             }
+            if let spec = unifiedGraphSpec {
+                if audioUnitRack != nil {
+                    unifiedGraphFallbackReason = .unsupportedRoute
+                } else {
+                    switch Self.makeUnifiedGraph(
+                        spec: spec,
+                        bridge: newBridge,
+                        sampleRate: outputFormat.sampleRate,
+                        laneCount: programLayout.roles.count,
+                        outputBufferFrames: outputBufferFrames
+                    ) {
+                    case .success(let host): unifiedGraphHost = host
+                    case .failure(let reason): unifiedGraphFallbackReason = reason
+                    }
+                }
+            } else {
+                unifiedGraphFallbackReason = unifiedGraphIneligibility
+            }
             bridge = newBridge
             N60BinauralHeadphoneBridgeSetOutputGain(newBridge, outputGain)
 
@@ -345,6 +373,49 @@ final class CoreAudioBinauralHeadphoneTransportSession {
         return N60BinauralHeadphoneBridgeGetSnapshot(bridge).headTracking
     }
 
+    /// Whether the callback renders binaural, headphone DSP and protection through libn60core.
+    var unifiedGraphActive: Bool {
+        graphReferenceLock.lock(); defer { graphReferenceLock.unlock() }
+        return unifiedGraphHost != nil && bridge != nil
+    }
+
+    /// The live graph host for latency readbacks (nil while the legacy pipeline renders).
+    var unifiedGraphReadback: UnifiedGraphHost? {
+        graphReferenceLock.lock(); defer { graphReferenceLock.unlock() }
+        return bridge != nil ? unifiedGraphHost : nil
+    }
+
+    /// Builds the graph for a session and attaches it to `bridge`, or says why it cannot.
+    static func makeUnifiedGraph(
+        spec: UnifiedGraphSpec,
+        bridge: UnsafeMutablePointer<N60BinauralHeadphoneBridge>,
+        sampleRate: Double,
+        laneCount: Int,
+        outputBufferFrames: UInt32
+    ) -> Result<UnifiedGraphHost, UnifiedGraphFallbackReason> {
+        guard abs(spec.sampleRate - sampleRate) < 0.5 else { return .failure(.sampleRateMismatch) }
+        guard Int(spec.inputChannels) == laneCount else { return .failure(.laneCountMismatch) }
+        guard outputBufferFrames <= spec.maxBlockFrames else { return .failure(.blockSizeTooLarge) }
+        guard let host = try? UnifiedGraphHost(spec: spec), let raw = host.rawGraph else {
+            return .failure(.graphBuildFailed)
+        }
+        guard N60BinauralHeadphoneBridgeAttachGraph(
+            bridge, raw, spec.inputChannels, spec.maxBlockFrames
+        ) else { return .failure(.attachFailed) }
+        return .success(host)
+    }
+
+    /// Head tracking with the graph: the pose goes to the BINAURAL stage's live parameters; the
+    /// stage glides between its precomputed yaw cells, so there is no generation to prepare.
+    @discardableResult
+    func postHeadPose(_ pose: N60HeadPose) -> Bool {
+        graphReferenceLock.lock()
+        let host = bridge != nil ? unifiedGraphHost : nil
+        graphReferenceLock.unlock()
+        guard let host else { return false }
+        return (try? host.setBinauralPose(yaw: Float(pose.yawDegrees), pitch: Float(pose.pitchDegrees), roll: Float(pose.rollDegrees))) != nil
+    }
+
     func prepareHeadTrackedGeneration(
         preparedProfile: PreparedBinauralProfile,
         pose: N60HeadPose,
@@ -429,6 +500,12 @@ final class CoreAudioBinauralHeadphoneTransportSession {
             N60BinauralHeadphoneBridgeDestroy(bridge)
             self.bridge = nil
         }
+        // The bridge (and so the callback) is gone; only now may the graph be retired.
+        graphReferenceLock.lock()
+        let retiring = unifiedGraphHost
+        unifiedGraphHost = nil
+        graphReferenceLock.unlock()
+        retiring?.release()
         audioUnitRack = nil
     }
 

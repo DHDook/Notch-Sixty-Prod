@@ -68,6 +68,26 @@ final class UnifiedGraphHost: @unchecked Sendable {
     @discardableResult
     func apply(_ newSpec: UnifiedGraphSpec) throws -> UnifiedGraphApplyResult {
         lock.lock(); defer { lock.unlock() }
+        return try applyLocked(newSpec)
+    }
+
+    /// Posts a head pose to the BINAURAL stage (yaw, pitch and roll are its live parameters 0 to 2;
+    /// the stage glides between the response cells). Control thread; no rebuild.
+    @discardableResult
+    func setBinauralPose(yaw: Float, pitch: Float, roll: Float) throws -> UnifiedGraphApplyResult {
+        lock.lock(); defer { lock.unlock() }
+        var next = spec
+        guard let index = next.stages.firstIndex(where: { $0.stageId == N60_LSTAGE_BINAURAL }),
+              next.stages[index].params.count >= 3 else {
+            throw UnifiedGraphError.invalidConfiguration("no binaural stage")
+        }
+        next.stages[index].params[0] = Float(N60HeadPoseWrap180(Double(yaw)))
+        next.stages[index].params[1] = min(180, max(-180, pitch))
+        next.stages[index].params[2] = min(180, max(-180, roll))
+        return try applyLocked(next)
+    }
+
+    private func applyLocked(_ newSpec: UnifiedGraphSpec) throws -> UnifiedGraphApplyResult {
         guard let graph else { throw UnifiedGraphError.invalidConfiguration("graph released") }
         if newSpec == spec { return .unchanged }
         if newSpec.hasSameTopology(as: spec) {
