@@ -425,6 +425,11 @@ void N60RenderKernelReset(N60RenderKernel * _Nonnull kernel);
 // render thread may call it before N60RenderKernelBeginRender when the kernel takes over
 // from the unified graph.
 void N60RenderKernelColdStart(N60RenderKernel * _Nonnull kernel);
+
+/* E6 S8d: hand the spectral-denoiser noise profile between the kernel and the unified graph. Audio callback only,
+ * between blocks. Export reads the kernel's profile; import replaces it (after a ColdStart, which clears it). */
+void N60RenderKernelExportDenoiserProfile(const N60RenderKernel * _Nonnull kernel, N60SpectralDenoiserProfileState * _Nonnull out);
+void N60RenderKernelImportDenoiserProfile(N60RenderKernel * _Nonnull kernel, const N60SpectralDenoiserProfileState * _Nonnull state);
 bool N60RenderKernelPrepareConvolutionProgram(
     N60RenderKernel * _Nonnull kernel,
     uint32_t slot,

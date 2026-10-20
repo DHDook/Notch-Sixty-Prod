@@ -3,6 +3,7 @@
 #include "n60/graph.h"
 
 #include <math.h>
+#include <stddef.h>
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
@@ -91,6 +92,8 @@ typedef struct {
 // other side keeps running, so neither attach nor detach steps or restarts from stale
 // state. The kernel is cold-started (N60RenderKernelColdStart) before it takes over; the
 // graph keeps its state but is warmed the same way because it was not processed meanwhile.
+// E6 S8d: the spectral-denoiser noise profile is the one thing that is not discarded or left stale at a
+// hand-over: it is copied from the side that was rendering to the side that takes over.
 typedef struct N60UnifiedGraphAttachment {
     _Atomic(n60_graph *) graph;
     _Atomic bool wantGraph;
@@ -114,7 +117,36 @@ typedef struct N60UnifiedGraphAttachment {
     uint32_t kernelWarmLeft;
     bool graphCold;       // graph was not processed since it was last idle
     bool kernelCold;      // kernel was not processed since it was last idle
+    // E6 S8d: the denoiser noise profile in transit between the two sides at a hand-over, the same bytes seen
+    // as either side's type. Preallocated with the attachment; callback-owned.
+    union {
+        n60_denoiser_state graph;
+        N60SpectralDenoiserProfileState kernel;
+    } profileHandover;
 } N60UnifiedGraphAttachment;
+
+_Static_assert(sizeof(n60_denoiser_state) == sizeof(N60SpectralDenoiserProfileState),
+               "kernel and graph denoiser profile states must share a layout");
+_Static_assert(offsetof(n60_denoiser_state, fftSize) == offsetof(N60SpectralDenoiserProfileState, fftSize),
+               "kernel and graph denoiser profile header fields must line up");
+_Static_assert(offsetof(n60_denoiser_state, flags) == offsetof(N60SpectralDenoiserProfileState, flags),
+               "kernel and graph denoiser profile header fields must line up");
+_Static_assert(offsetof(n60_denoiser_state, adaptiveFrames) == offsetof(N60SpectralDenoiserProfileState, adaptiveFrames),
+               "kernel and graph denoiser profile header fields must line up");
+_Static_assert(offsetof(n60_denoiser_state, adaptiveTarget) == offsetof(N60SpectralDenoiserProfileState, adaptiveTarget),
+               "kernel and graph denoiser profile header fields must line up");
+_Static_assert(offsetof(n60_denoiser_state, adaptiveBlocks) == offsetof(N60SpectralDenoiserProfileState, adaptiveBlocks),
+               "kernel and graph denoiser profile header fields must line up");
+_Static_assert(offsetof(n60_denoiser_state, lastRevision) == offsetof(N60SpectralDenoiserProfileState, lastRevision),
+               "kernel and graph denoiser profile header fields must line up");
+_Static_assert(offsetof(n60_denoiser_state, captureCollected) == offsetof(N60SpectralDenoiserProfileState, captureCollected),
+               "kernel and graph denoiser profile header fields must line up");
+_Static_assert(offsetof(n60_denoiser_state, captureTarget) == offsetof(N60SpectralDenoiserProfileState, captureTarget),
+               "kernel and graph denoiser profile header fields must line up");
+_Static_assert(offsetof(n60_denoiser_state, noise) == offsetof(N60SpectralDenoiserProfileState, noise)
+               && offsetof(n60_denoiser_state, adaptiveMin) == offsetof(N60SpectralDenoiserProfileState, adaptiveMinimum)
+               && offsetof(n60_denoiser_state, captureSum) == offsetof(N60SpectralDenoiserProfileState, captureSum),
+               "kernel and graph denoiser profile arrays must line up");
 
 typedef struct N60UnifiedGraphPlan {
     N60UnifiedGraphAttachment *attachment;
@@ -708,6 +740,19 @@ float N60RealtimeAudioBridgeUnifiedGraphMix(const N60RealtimeAudioBridge *bridge
     return value;
 }
 
+// Callback. The kernel is about to take over from the graph: cold-start it, then give it the graph's denoiser
+// noise profile (the cold start clears the kernel's own), so the profile survives the switch. `graph` may be NULL
+// (released), in which case the kernel simply starts cold.
+static void hand_denoiser_profile_to_kernel(
+    N60RealtimeAudioBridge *bridge,
+    N60UnifiedGraphAttachment *a,
+    n60_graph *graph
+) {
+    bool have = graph != NULL && n60_graph_denoiser_export(graph, &a->profileHandover.graph) != 0;
+    N60RenderKernelColdStart(bridge->renderKernel);
+    if (have) N60RenderKernelImportDenoiserProfile(bridge->renderKernel, &a->profileHandover.kernel);
+}
+
 // Callback. Decides, once per block and before the kernel renders, which sides run.
 // Cold-starts the kernel when it is about to take over; never allocates or locks.
 static N60UnifiedGraphPlan plan_unified_block(
@@ -730,7 +775,7 @@ static N60UnifiedGraphPlan plan_unified_block(
             a->mix = 0.0f;
             a->kernelWarmLeft = 0u;
             if (a->kernelCold) {
-                N60RenderKernelColdStart(bridge->renderKernel);
+                hand_denoiser_profile_to_kernel(bridge, a, graph);
                 a->kernelCold = false;
             }
         }
@@ -744,6 +789,10 @@ static N60UnifiedGraphPlan plan_unified_block(
     if (want) {
         a->kernelWarmLeft = 0u;
         if (a->graphCold) {
+            // The kernel's noise profile (captured or learned) goes with the hand-over; the graph's own copy
+            // is stale. A kernel that has not run yet exports a fresh profile, which is what it has.
+            N60RenderKernelExportDenoiserProfile(bridge->renderKernel, &a->profileHandover.kernel);
+            n60_graph_denoiser_import(graph, &a->profileHandover.graph);
             a->graphWarmLeft = a->warmFrames;
             a->graphCold = false;
         }
@@ -753,7 +802,7 @@ static N60UnifiedGraphPlan plan_unified_block(
     } else if (a->mix > 0.0f) {
         a->graphWarmLeft = 0u;
         if (a->kernelCold) {
-            N60RenderKernelColdStart(bridge->renderKernel);
+            hand_denoiser_profile_to_kernel(bridge, a, graph);
             a->kernelWarmLeft = a->warmFrames;
             a->kernelCold = false;
         }

@@ -32,6 +32,10 @@ extension UnifiedGraphLane {
 struct UnifiedGraphStereoStages: Equatable, Sendable {
     /// Mid/Side EQ: the EQ sections run on (mid, side) instead of (left, right).
     var midSideEQ = false
+    /// Spectral denoiser (runs before the EQ, as in the kernel).
+    var denoiser: [Float]?
+    /// Dynamic EQ (runs after the EQ sections).
+    var dynamicEQ: [Float]?
     var compressor: [Float]?
     var expander: [Float]?
     var ambient: [Float]?
@@ -83,6 +87,8 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
     var protection: UnifiedGraphProtection?
     /// Two-lane configurations only.
     var stereoStages = UnifiedGraphStereoStages()
+    /// The kernel denoiser's view while it is off (ignored when the denoiser stage is present).
+    var denoiserPark: UnifiedGraphDenoiserPark?
 
     var subwooferCount: Int { bassManagement?.subwoofers.count ?? 0 }
     var channelCount: Int { lanes.count + subwooferCount }
@@ -130,6 +136,13 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
             add(N60_STAGE_GAIN, Self.preGainStageBase + UInt32(index), lane: UInt32(index),
                 params: [lane.preGain])
         }
+        if stereo.dynamicEQ != nil, stereo.midSideEQ {
+            // The kernel runs the dynamic EQ after the mid/side decode; the core runs it before.
+            throw UnifiedGraphError.unsupportedConfiguration("dynamic EQ with mid/side EQ")
+        }
+        if let params = stereo.denoiser {
+            add(N60_STAGE_DENOISER, Self.denoiserStageId, mask: programMask, params: params)
+        }
         let msActive = stereo.midSideEQ && lanes.contains(where: { !$0.eq.isEmpty })
         if msActive {
             stages.append(UnifiedGraphStageSpec(
@@ -138,6 +151,9 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
         for (index, lane) in lanes.enumerated() where !lane.eq.isEmpty {
             add(N60_STAGE_PEQ, N60_LSTAGE_PEQ_LANE + UInt32(index), lane: UInt32(index),
                 params: try Self.peqParameters(lane.eq))
+        }
+        if let params = stereo.dynamicEQ {
+            add(N60_STAGE_DYN_EQ, Self.dynamicEQStageId, mask: programMask, params: params)
         }
         if msActive {
             stages.append(UnifiedGraphStageSpec(
@@ -211,7 +227,8 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
         return UnifiedGraphSpec(
             sampleRate: sampleRate, maxBlockFrames: maxBlockFrames,
             inputChannels: UInt32(channelCount), outputChannels: UInt32(channelCount),
-            stages: stages
+            stages: stages,
+            denoiserPark: stereo.denoiser == nil ? denoiserPark : nil
         )
     }
 
@@ -225,6 +242,8 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
     static let crossfeedStageId: UInt32 = 604
     static let crosstalkStageId: UInt32 = 605
     static let pauseGateStageId: UInt32 = 606
+    static let denoiserStageId: UInt32 = 607
+    static let dynamicEQStageId: UInt32 = 608
 
     private static func delayFrames(
         _ milliseconds: Double, extraFrames: UInt32 = 0, sampleRate: Double

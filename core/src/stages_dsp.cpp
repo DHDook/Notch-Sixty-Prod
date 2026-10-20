@@ -983,4 +983,125 @@ uint32_t dspLatency(const SnapHeader *h, const StageRec &r) {
     return 0;
 }
 
+// ---- ABI v9 denoiser profile hand-off ----------------------------------------------
+
+namespace {
+
+constexpr uint32_t kDnReady = 1, kDnCaptured = 2, kDnCapturing = 4, kDnFresh = 8;
+
+StageRec *firstDenoiser(SnapHeader *h) {
+    for (uint32_t i = 0; i < h->stageCount; ++i) {
+        if (stages(h)[i].kind == N60_STAGE_DENOISER) return &stages(h)[i];
+    }
+    return nullptr;
+}
+
+// Back to a fresh profile; the stream state (and the arrays, which are only read once flagged) is untouched.
+void dnClearProfile(DnShared &S, uint32_t lastRevision) {
+    S.profileReady = S.captured = S.captureActive = false;
+    S.history = false;
+    S.adaptiveFresh = true;
+    S.adaptiveFrames = S.adaptiveTarget = S.adaptiveBlocks = 0;
+    S.captureCollected = S.captureTarget = 0;
+    S.lastRevision = lastRevision;
+}
+
+}  // namespace
+
+void denoiserStateFresh(n60_denoiser_state *st, uint32_t fftSize, uint32_t lastRevision) {
+    st->fftSize = fftSize;
+    st->flags = kDnFresh;
+    st->adaptiveFrames = st->adaptiveTarget = st->adaptiveBlocks = 0;
+    st->captureCollected = st->captureTarget = 0;
+    st->lastRevision = lastRevision;
+}
+
+void denoiserParkedApplyView(n60_denoiser_state *st, uint32_t fftSize, uint32_t revision, uint32_t command) {
+    if (fftSize == 0) return;
+    if (st->fftSize != fftSize) {  // the kernel resets on a quality change, then reads the command
+        denoiserStateFresh(st, fftSize, revision);
+        return;
+    }
+    if (revision == st->lastRevision) return;
+    st->lastRevision = revision;
+    if (command == 2) {
+        const uint32_t rev = st->lastRevision;
+        denoiserStateFresh(st, fftSize, rev);
+    }
+}
+
+bool dspDenoiserCarry(SnapHeader *from, SnapHeader *to) {
+    StageRec *a = firstDenoiser(from);
+    StageRec *b = firstDenoiser(to);
+    if (a == nullptr || b == nullptr) return false;
+    DnView src = dnView(sharedState(from, *a));
+    DnView dst = dnView(sharedState(to, *b));
+    if (src.s->n != dst.s->n) return false;
+    DnShared &S = *src.s, &D = *dst.s;
+    D.adaptiveFrames = S.adaptiveFrames;
+    D.adaptiveTarget = S.adaptiveTarget;
+    D.adaptiveBlocks = S.adaptiveBlocks;
+    D.lastRevision = S.lastRevision;
+    D.captureCollected = S.captureCollected;
+    D.captureTarget = S.captureTarget;
+    D.adaptiveFresh = S.adaptiveFresh;
+    D.profileReady = S.profileReady;
+    D.captured = S.captured;
+    D.captureActive = S.captureActive;
+    D.history = false;  // the new stage's stream is fresh
+    const size_t bytes = sizeof(float) * S.bins;
+    std::memcpy(dst.noise, src.noise, bytes);
+    std::memcpy(dst.aMin, src.aMin, bytes);
+    std::memcpy(dst.capSum, src.capSum, bytes);
+    return true;
+}
+
+bool dspDenoiserExport(SnapHeader *h, n60_denoiser_state *out) {
+    StageRec *r = firstDenoiser(h);
+    if (r == nullptr) return false;
+    DnView V = dnView(sharedState(h, *r));
+    const DnShared &S = *V.s;
+    out->fftSize = S.n;
+    out->flags = (S.profileReady ? kDnReady : 0u) | (S.captured ? kDnCaptured : 0u) |
+                 (S.captureActive ? kDnCapturing : 0u) | (S.adaptiveFresh ? kDnFresh : 0u);
+    out->adaptiveFrames = S.adaptiveFrames;
+    out->adaptiveTarget = S.adaptiveTarget;
+    out->adaptiveBlocks = S.adaptiveBlocks;
+    out->lastRevision = S.lastRevision;
+    out->captureCollected = S.captureCollected;
+    out->captureTarget = S.captureTarget;
+    const size_t bytes = sizeof(float) * S.bins;
+    std::memcpy(out->noise, V.noise, bytes);
+    std::memcpy(out->adaptiveMin, V.aMin, bytes);
+    std::memcpy(out->captureSum, V.capSum, bytes);
+    return true;
+}
+
+bool dspDenoiserImport(SnapHeader *h, const n60_denoiser_state *in) {
+    StageRec *r = firstDenoiser(h);
+    if (r == nullptr) return false;
+    DnView V = dnView(sharedState(h, *r));
+    DnShared &S = *V.s;
+    if (in->fftSize != S.n) {  // nothing usable for this stage: a fresh profile, as the kernel has after a reset
+        dnClearProfile(S, 0);
+        return true;
+    }
+    S.adaptiveFrames = in->adaptiveFrames;
+    S.adaptiveTarget = in->adaptiveTarget;
+    S.adaptiveBlocks = in->adaptiveBlocks;
+    S.lastRevision = in->lastRevision;
+    S.captureCollected = in->captureCollected;
+    S.captureTarget = in->captureTarget;
+    S.adaptiveFresh = (in->flags & kDnFresh) != 0;
+    S.profileReady = (in->flags & kDnReady) != 0;
+    S.captured = (in->flags & kDnCaptured) != 0;
+    S.captureActive = (in->flags & kDnCapturing) != 0;
+    S.history = false;
+    const size_t bytes = sizeof(float) * S.bins;
+    std::memcpy(V.noise, in->noise, bytes);
+    std::memcpy(V.aMin, in->adaptiveMin, bytes);
+    std::memcpy(V.capSum, in->captureSum, bytes);
+    return true;
+}
+
 }  // namespace n60

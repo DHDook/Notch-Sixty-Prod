@@ -31,6 +31,18 @@ bool readDspDynamics(SnapHeader *h, const StageRec &r, uint32_t lane, n60_dynami
 // Frames of latency one lane of this stage adds.
 uint32_t dspLatency(const SnapHeader *h, const StageRec &r);
 
+// ABI v9 denoiser profile hand-off. All realtime thread, bounded copies, no allocation.
+// Copies the profile of the first DENOISER stage of `from` into that of `to` when both exist at the same FFT
+// size; false otherwise.
+bool dspDenoiserCarry(SnapHeader *from, SnapHeader *to);
+// Profile of the first DENOISER stage of `h` to / from a plain value; false when `h` has no such stage.
+bool dspDenoiserExport(SnapHeader *h, n60_denoiser_state *out);
+bool dspDenoiserImport(SnapHeader *h, const n60_denoiser_state *in);
+// Applies the kernel's "denoiser off" bookkeeping (quality change, profile command) to a parked state.
+void denoiserParkedApplyView(n60_denoiser_state *st, uint32_t fftSize, uint32_t revision, uint32_t command);
+// Clears a state to the fresh profile of that FFT size, remembering `lastRevision`.
+void denoiserStateFresh(n60_denoiser_state *st, uint32_t fftSize, uint32_t lastRevision);
+
 }  // namespace n60
 
 #endif

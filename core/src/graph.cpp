@@ -16,7 +16,12 @@
 //  - sample rate: fixed at build, any rate in [8 kHz, 768 kHz]; no resampling.
 //  - channels: 1..N60_GRAPH_MAX_CHANNELS in and out, fixed at build.
 //  - reset: a topology change is a new snapshot with fresh state, warmed up before it is heard; there is
-//    no in-place reset, and parameters never reset state.
+//    no in-place reset, and parameters never reset state. One exception, the denoiser noise profile (ABI v9):
+//    it is the only state that takes seconds of program audio to learn or is captured by the user, so the
+//    adopting realtime block copies it from the live stage into the new one (a bounded copy of at most three
+//    arrays of 2049 floats and a few counters), parks it in a preallocated slot while no stage exists, and
+//    restores it when a stage of the same FFT size returns. The stream state (input, overlap-add, gain
+//    history) is not copied: the new stage's warm-up covers it.
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -27,6 +32,7 @@
 
 #include "n60/graph.h"
 #include "snapshot.hpp"
+#include "stages_dsp.hpp"
 #include "stages_system.hpp"
 
 namespace {
@@ -101,6 +107,10 @@ struct n60_graph {
     std::atomic<uint64_t> paramsDropped{0};
     std::atomic<uint64_t> sanitised{0};
     std::atomic<uint64_t> snapshotsRetired{0};
+
+    // ABI v9. Realtime thread only: the denoiser profile kept while the live snapshot has no DENOISER stage
+    // (fftSize 0 = none). Part of the handle, so nothing is allocated when it is used.
+    n60_denoiser_state parked{};
 };
 
 namespace {
@@ -136,6 +146,47 @@ void storeFloat(std::atomic<uint32_t> &a, float f) {
     a.store(bits, std::memory_order_relaxed);
 }
 
+bool hasDenoiser(const n60::SnapHeader *h) {
+    for (uint32_t i = 0; i < h->stageCount; ++i) {
+        if (n60::stages(h)[i].kind == N60_STAGE_DENOISER) return true;
+    }
+    return false;
+}
+
+// Copies the used part of a denoiser state (the header and three arrays of fftSize / 2 + 1 floats).
+void copyDenoiserState(n60_denoiser_state *dst, const n60_denoiser_state *src) {
+    const size_t bins = src->fftSize / 2 + 1;
+    std::memcpy(dst, src, offsetof(n60_denoiser_state, noise));
+    std::memcpy(dst->noise, src->noise, sizeof(float) * bins);
+    std::memcpy(dst->adaptiveMin, src->adaptiveMin, sizeof(float) * bins);
+    std::memcpy(dst->captureSum, src->captureSum, sizeof(float) * bins);
+}
+
+bool validFft(uint32_t n) { return n == 1024 || n == 2048 || n == 4096; }
+
+// Realtime thread: `next` starts running next to (or in place of) `cur`. Its denoiser starts from the live
+// stage's profile, or from the parked one when the live snapshot had no stage.
+void carryDenoiserIn(n60_graph *g, n60::SnapHeader *cur, n60::SnapHeader *next) {
+    if (!hasDenoiser(next)) return;
+    if (n60::dspDenoiserCarry(cur, next)) return;
+    if (!hasDenoiser(cur) && g->parked.fftSize != 0) n60::dspDenoiserImport(next, &g->parked);
+}
+
+// Realtime thread: `next` is now the live snapshot and `old` stops. A stage that disappears parks its profile,
+// a parked profile is updated with the kernel's "denoiser off" bookkeeping, and a stage that came back owns it.
+void settleDenoiser(n60_graph *g, n60::SnapHeader *old, n60::SnapHeader *next) {
+    if (hasDenoiser(next)) {
+        g->parked.fftSize = 0;
+        return;
+    }
+    if (hasDenoiser(old)) {
+        if (!n60::dspDenoiserExport(old, &g->parked)) g->parked.fftSize = 0;
+    }
+    if (next->parkFftSize != 0) {
+        n60::denoiserParkedApplyView(&g->parked, next->parkFftSize, next->parkRevision, next->parkCommand);
+    }
+}
+
 // Realtime thread: take a published snapshot. A fade-less snapshot replaces the live one at once;
 // otherwise it starts a rebuild. While a rebuild runs the next published snapshot waits in pending.
 void adopt(n60_graph *g) {
@@ -143,7 +194,9 @@ void adopt(n60_graph *g) {
     if (g->pending.load(std::memory_order_relaxed) == nullptr) return;
     n60::SnapHeader *next = g->pending.exchange(nullptr, std::memory_order_acq_rel);
     if (next == nullptr) return;
+    carryDenoiserIn(g, g->current, next);
     if (next->fadeFrames == 0) {
+        settleDenoiser(g, g->current, next);
         retireSnapshot(g, g->current);
         g->current = next;
         g->liveSnap.store(next, std::memory_order_release);
@@ -170,6 +223,7 @@ void adopt(n60_graph *g) {
 void finishRebuild(n60_graph *g, uint32_t result) {
     // result: 1 completed (incoming becomes live), 2 refused for CPU budget, 3 cancelled on non-finite output.
     if (result == 1) {
+        settleDenoiser(g, g->current, g->incoming);
         retireSnapshot(g, g->current);
         g->current = g->incoming;
         g->liveSnap.store(g->current, std::memory_order_release);
@@ -309,6 +363,26 @@ extern "C" {
 
 uint32_t n60_graph_abi_version(void) { return N60_GRAPH_ABI_VERSION; }
 
+int n60_graph_denoiser_export(n60_graph *g, n60_denoiser_state *out) {
+    if (g == nullptr || out == nullptr) return 0;
+    if (n60::dspDenoiserExport(g->current, out)) return 1;
+    if (g->parked.fftSize == 0) return 0;
+    copyDenoiserState(out, &g->parked);
+    return 1;
+}
+
+void n60_graph_denoiser_import(n60_graph *g, const n60_denoiser_state *in) {
+    if (g == nullptr || in == nullptr) return;
+    const bool live = n60::dspDenoiserImport(g->current, in);
+    if (g->incoming != nullptr) n60::dspDenoiserImport(g->incoming, in);
+    if (live) return;
+    if (in->fftSize == 0 || !validFft(in->fftSize)) {
+        g->parked.fftSize = 0;
+    } else {
+        copyDenoiserState(&g->parked, in);
+    }
+}
+
 n60_status n60_graph_build(const n60_graph_desc *desc, n60_graph **outGraph) {
     if (outGraph == nullptr) return N60_STATUS_BAD_ARGUMENT;
     *outGraph = nullptr;
@@ -335,6 +409,8 @@ n60_status n60_graph_build(const n60_graph_desc *desc, n60_graph **outGraph) {
         g->scratchLane[c] = g->scratch + static_cast<size_t>(c) * desc->maxBlockFrames;
     }
     g->fadeFrames = static_cast<uint32_t>(std::lround(0.020 * desc->sampleRate));
+    g->parked.fftSize = 0;
+    if (!hasDenoiser(snap)) settleDenoiser(g, snap, snap);
     g->current = snap;
     g->latest = snap;
     g->liveSnap.store(snap, std::memory_order_relaxed);

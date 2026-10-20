@@ -47,6 +47,9 @@ struct SnapHeader {
     uint32_t stageTableOff;
     uint32_t rampFrames;  // 5 ms, clamped to 32..4096 frames
     uint32_t rawPad;      // bytes from the raw allocation to this header
+    uint32_t parkFftSize;   // ABI v9: the kernel denoiser's view while it is off (0 = not tracked)
+    uint32_t parkRevision;
+    uint32_t parkCommand;
     uint32_t fadeFrames;  // rebuild crossfade length when this snapshot is adopted (0 = instant swap)
 };
 

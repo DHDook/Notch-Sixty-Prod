@@ -70,6 +70,28 @@ typedef struct {
 
 typedef struct N60SpectralDenoiserRuntime N60SpectralDenoiserRuntime;
 
+// The learned or captured noise profile as a plain value, laid out like libn60core's n60_denoiser_state (E6 S8d)
+// so the kernel and the graph can hand a profile to each other. fftSize 0 = no state. flags: 1 profile ready,
+// 2 captured, 4 capture active, 8 adaptive block fresh.
+typedef struct {
+    uint32_t fftSize;
+    uint32_t flags;
+    uint32_t adaptiveFrames;
+    uint32_t adaptiveTarget;
+    uint32_t adaptiveBlocks;
+    uint32_t lastRevision;
+    uint32_t captureCollected;
+    uint32_t captureTarget;
+    float noise[N60_DENOISER_MAX_BINS];
+    float adaptiveMinimum[N60_DENOISER_MAX_BINS];
+    float captureSum[N60_DENOISER_MAX_BINS];
+} N60SpectralDenoiserProfileState;
+
+// Realtime thread, between blocks; bounded copies. Export reads the profile and its bookkeeping, import replaces
+// them and leaves the stream state (input, overlap-add, gain history) alone.
+void N60SpectralDenoiserExportProfile(const N60SpectralDenoiserRuntime *runtime, N60SpectralDenoiserProfileState *out);
+void N60SpectralDenoiserImportProfile(N60SpectralDenoiserRuntime *runtime, const N60SpectralDenoiserProfileState *state);
+
 N60SpectralDenoiserSnapshot N60SpectralDenoiserSnapshotMakeBypassed(double sampleRate);
 
 bool N60SpectralDenoiserSnapshotConfigure(

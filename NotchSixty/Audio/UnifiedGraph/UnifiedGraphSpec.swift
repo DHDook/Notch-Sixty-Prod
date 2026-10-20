@@ -14,12 +14,21 @@ struct UnifiedGraphStageSpec: Equatable {
     var params: [Float] = []
 }
 
+/// E6 S8d (ABI v9): what the kernel's denoiser sees while it is off, so a graph without the stage keeps
+/// the noise profile the kernel would keep. See `n60_graph_desc.parkFftSize`.
+struct UnifiedGraphDenoiserPark: Equatable, Sendable {
+    var fftSize: UInt32
+    var revision: UInt32
+    var command: UInt32
+}
+
 struct UnifiedGraphSpec: Equatable {
     var sampleRate: Double
     var maxBlockFrames: UInt32
     var inputChannels: UInt32
     var outputChannels: UInt32
     var stages: [UnifiedGraphStageSpec]
+    var denoiserPark: UnifiedGraphDenoiserPark?
 
     /// Two specs share a topology when a rebuild is not needed to move between them,
     /// as far as the control plane can tell without asking the core: same rate, size,
@@ -30,6 +39,8 @@ struct UnifiedGraphSpec: Equatable {
         guard sampleRate == other.sampleRate, maxBlockFrames == other.maxBlockFrames,
               inputChannels == other.inputChannels, outputChannels == other.outputChannels,
               stages.count == other.stages.count else { return false }
+        // A change in the denoiser's off view is applied when a snapshot is adopted, so it needs one.
+        guard denoiserPark == other.denoiserPark else { return false }
         for (a, b) in zip(stages, other.stages) {
             if a.kind != b.kind || a.stageId != b.stageId || a.laneA != b.laneA
                 || a.laneB != b.laneB || a.laneMask != b.laneMask
@@ -77,6 +88,11 @@ struct UnifiedGraphSpec: Equatable {
             }
         }
         stages = out
+        if d.parkFftSize != 0 {
+            denoiserPark = UnifiedGraphDenoiserPark(
+                fftSize: d.parkFftSize, revision: d.parkRevision, command: d.parkCommand
+            )
+        }
     }
 
     init(
@@ -84,13 +100,15 @@ struct UnifiedGraphSpec: Equatable {
         maxBlockFrames: UInt32,
         inputChannels: UInt32,
         outputChannels: UInt32,
-        stages: [UnifiedGraphStageSpec]
+        stages: [UnifiedGraphStageSpec],
+        denoiserPark: UnifiedGraphDenoiserPark? = nil
     ) {
         self.sampleRate = sampleRate
         self.maxBlockFrames = maxBlockFrames
         self.inputChannels = inputChannels
         self.outputChannels = outputChannels
         self.stages = stages
+        self.denoiserPark = denoiserPark
     }
 
     /// Runs `body` with a C description that is valid only for the call (the core copies
@@ -128,6 +146,11 @@ struct UnifiedGraphSpec: Equatable {
             graphDesc.outputChannels = outputChannels
             graphDesc.stages = stageBuffer.baseAddress
             graphDesc.stageCount = UInt32(stages.count)
+            if let park = denoiserPark {
+                graphDesc.parkFftSize = park.fftSize
+                graphDesc.parkRevision = park.revision
+                graphDesc.parkCommand = park.command
+            }
             return withUnsafePointer(to: &graphDesc) { body($0) }
         }
     }

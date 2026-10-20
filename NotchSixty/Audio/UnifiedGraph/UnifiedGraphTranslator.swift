@@ -92,6 +92,25 @@ enum UnifiedGraphTranslator {
         var ok = true
         withUnsafePointer(to: &snapshot) { pointer in
             let dynamics = pointer.pointee.dynamics
+            if dynamics.spectralDenoiser.enabled {
+                var values = [Float](repeating: 0, count: 9)
+                if N60UnifiedGraphDenoiserParams(pointer, &values) { stages.denoiser = values } else { ok = false }
+            } else {
+                var view = [UInt32](repeating: 0, count: 3)
+                if N60UnifiedGraphDenoiserParkView(pointer, &view) {
+                    configuration.denoiserPark = UnifiedGraphDenoiserPark(
+                        fftSize: view[0], revision: view[1], command: view[2]
+                    )
+                } else { ok = false }
+            }
+            // The kernel skips the dynamic EQ while the EQ is bypassed.
+            if dynamics.dynamicEQ.enabled, !pointer.pointee.eqBypassed {
+                var values = [Float](repeating: 0, count: 1 + 15 * Int(N60_DYNAMIC_EQ_MAX_BANDS))
+                var count: UInt32 = 0
+                if N60UnifiedGraphDynamicEQParams(pointer, &values, &count) {
+                    if count > 0 { stages.dynamicEQ = Array(values.prefix(Int(count))) }
+                } else { ok = false }
+            }
             if dynamics.compressor.enabled {
                 var values = [Float](repeating: 0, count: 10)
                 if N60UnifiedGraphCompressorParams(pointer, &values) { stages.compressor = values } else { ok = false }

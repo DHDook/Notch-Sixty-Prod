@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 8u
+#define N60_GRAPH_ABI_VERSION 9u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -126,7 +126,9 @@ typedef enum n60_stage_kind {
  *  [3] threshold dBFS (-96..-30), [4] protected range on (0/1), [5] protected low Hz,
  *  [6] protected high Hz (below Nyquist), [7] profile command (0 none, 1 capture,
  *  2 reset), [8] profile revision (integer 0..16777216; a command runs when this
- *  changes). paramCount 9. Live: [2]..[8]. Sqrt-Hann STFT at 50% overlap, linked
+ *  changes). paramCount 9. Live: [2]..[8]. Since ABI v9 the noise profile (captured or learned), its counters and
+ *  the last profile revision survive a rebuild of the same quality, and are kept while the stage is absent (the
+ *  kernel keeps them while the denoiser is off; see parkFftSize). A quality change starts a fresh profile. Sqrt-Hann STFT at 50% overlap, linked
  *  Wiener gain over all selected lanes. Latency fftSize frames.
  *
  * Program FIR. params = the taps (1..32768 floats), identical on every selected lane.
@@ -247,6 +249,14 @@ typedef struct n60_graph_desc {
     const n60_stage_desc *stages; /* NULL when stageCount is 0 */
     uint32_t stageCount;
     uint32_t reserved;            /* must be 0 */
+    /* ABI v9: what the legacy kernel's denoiser sees while it is switched off, so a graph without a DENOISER
+     * stage keeps the profile the kernel would keep. parkFftSize 0 = not tracked (1024, 2048 or 4096 otherwise,
+     * the FFT size of the quality setting), parkRevision / parkCommand = the profile revision and command (0 none,
+     * 1 capture, 2 reset). Ignored when the description has a DENOISER stage. A change publishes a new snapshot. */
+    uint32_t parkFftSize;
+    uint32_t parkRevision;
+    uint32_t parkCommand;
+    uint32_t reserved2;           /* must be 0 */
 } n60_graph_desc;
 
 /* Counters since build. Safe to read from the control thread at any time. */
@@ -259,6 +269,24 @@ typedef struct n60_graph_stats {
     uint64_t snapshotsRetired;   /* snapshots handed back by the realtime thread */
 } n60_graph_stats;
 
+/* ABI v9. The learned or captured noise profile of a DENOISER stage, as a plain value. The same layout the
+ * kernel's denoiser exports, so the two engines hand a profile to each other at a switch. fftSize 0 = no
+ * state (a fresh profile). flags: 1 profile ready, 2 captured, 4 capture active, 8 adaptive block fresh. */
+#define N60_DENOISER_STATE_MAX_BINS 2049u
+typedef struct n60_denoiser_state {
+    uint32_t fftSize;
+    uint32_t flags;
+    uint32_t adaptiveFrames;
+    uint32_t adaptiveTarget;
+    uint32_t adaptiveBlocks;
+    uint32_t lastRevision;
+    uint32_t captureCollected;
+    uint32_t captureTarget;
+    float noise[N60_DENOISER_STATE_MAX_BINS];
+    float adaptiveMin[N60_DENOISER_STATE_MAX_BINS];
+    float captureSum[N60_DENOISER_STATE_MAX_BINS];
+} n60_denoiser_state;
+
 /* ABI version of the loaded library; compare with N60_GRAPH_ABI_VERSION. */
 uint32_t n60_graph_abi_version(void);
 
@@ -266,6 +294,16 @@ uint32_t n60_graph_abi_version(void);
  * On success *outGraph owns it; on failure *outGraph is NULL (when outGraph itself
  * is valid). The rate and channel counts are fixed for the life of the handle. */
 n60_status n60_graph_build(const n60_graph_desc *desc, n60_graph **outGraph);
+
+/* Realtime thread only (the thread that calls n60_graph_process; bounded copies, no allocation). Copies the
+ * denoiser profile of the live graph into *out: the DENOISER stage's, or the one kept while the stage is absent.
+ * Returns 1 when there is one, 0 when not (then *out is untouched). */
+int n60_graph_denoiser_export(n60_graph *graph, n60_denoiser_state *out);
+
+/* Realtime thread only. `in` must come from a denoiser export (the counters and arrays are trusted, not
+ * range-checked). Makes `in` the graph's profile (stage or parked, and the incoming snapshot of a
+ * rebuild). fftSize 0 clears it. A state of another FFT size than the stage's is dropped. */
+void n60_graph_denoiser_import(n60_graph *graph, const n60_denoiser_state *in);
 
 /* Control thread. Builds a new topology snapshot (stages, order, parameters) and
  * publishes it for the realtime thread. desc must repeat the handle's sampleRate,

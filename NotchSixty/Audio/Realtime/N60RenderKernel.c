@@ -1411,6 +1411,16 @@ void N60RenderKernelDestroy(N60RenderKernel *kernel) {
     free(kernel);
 }
 
+void N60RenderKernelExportDenoiserProfile(const N60RenderKernel *kernel, N60SpectralDenoiserProfileState *out) {
+    if (kernel == NULL || out == NULL) return;
+    N60SpectralDenoiserExportProfile(kernel->denoiserRuntime, out);
+}
+
+void N60RenderKernelImportDenoiserProfile(N60RenderKernel *kernel, const N60SpectralDenoiserProfileState *state) {
+    if (kernel == NULL || state == NULL) return;
+    N60SpectralDenoiserImportProfile(kernel->denoiserRuntime, state);
+}
+
 void N60RenderKernelColdStart(N60RenderKernel *kernel) {
     if (kernel == NULL) return;
     reset_eq_runtime(kernel);

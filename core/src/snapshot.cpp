@@ -273,7 +273,11 @@ n60_status validateDesc(const n60_graph_desc &d) {
     }
     auto validChannels = [](uint32_t n) { return n >= 1 && n <= N60_GRAPH_MAX_CHANNELS; };
     if (d.maxBlockFrames < 1 || d.maxBlockFrames > N60_GRAPH_MAX_BLOCK_FRAMES || !validChannels(d.inputChannels) ||
-        !validChannels(d.outputChannels) || d.reserved != 0) {
+        !validChannels(d.outputChannels) || d.reserved != 0 || d.reserved2 != 0) {
+        return N60_STATUS_BAD_ARGUMENT;
+    }
+    if ((d.parkFftSize != 0 && d.parkFftSize != 1024 && d.parkFftSize != 2048 && d.parkFftSize != 4096) ||
+        d.parkCommand > 2 || d.parkRevision > 16777216u) {
         return N60_STATUS_BAD_ARGUMENT;
     }
     if (d.stageCount > N60_GRAPH_MAX_STAGES || (d.stageCount > 0 && d.stages == nullptr)) {
@@ -418,6 +422,9 @@ n60_status buildSnapshot(const n60_graph_desc &d, uint32_t epoch, SnapHeader **o
     h->stageTableOff = static_cast<uint32_t>(tableOff);
     h->rampFrames = rampFramesFor(d.sampleRate);
     h->rawPad = static_cast<uint32_t>(base - raw);
+    h->parkFftSize = d.parkFftSize;
+    h->parkRevision = d.parkRevision;
+    h->parkCommand = d.parkCommand;
 
     // Pass 2: fill the stage table, parameters and initial state.
     for (uint32_t i = 0; i < d.stageCount; ++i) {

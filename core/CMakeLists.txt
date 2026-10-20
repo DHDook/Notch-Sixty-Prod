@@ -39,6 +39,11 @@ set_target_properties(n60core_rebuild_test PROPERTIES C_STANDARD 11 LINKER_LANGU
 target_link_libraries(n60core_rebuild_test PRIVATE n60core m)
 add_test(NAME n60core_rebuild COMMAND n60core_rebuild_test)
 
+add_executable(n60core_denoiser_carry_test tests/test_denoiser_carry.c)
+set_target_properties(n60core_denoiser_carry_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
+target_link_libraries(n60core_denoiser_carry_test PRIVATE n60core m)
+add_test(NAME n60core_denoiser_carry COMMAND n60core_denoiser_carry_test)
+
 add_executable(n60core_layout_test tests/test_layout.c)
 set_target_properties(n60core_layout_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
 target_link_libraries(n60core_layout_test PRIVATE n60core m)
