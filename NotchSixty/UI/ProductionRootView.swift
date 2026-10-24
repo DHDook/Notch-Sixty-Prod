@@ -2,23 +2,6 @@ import AppKit
 import Foundation
 import SwiftUI
 
-struct ProductionGlassPickerChromeModifier: ViewModifier {
-    func body(content: Content) -> some View {
-        content
-            // Picker owns pointer/press interaction. Keep the surrounding Liquid Glass
-            // visual-only so hover/click state cannot perturb layout. A constant inset
-            // keeps text and segmented labels clear of the capsule edge in every state.
-            .padding(.horizontal, 6)
-            .glassEffect(.regular, in: .capsule)
-    }
-}
-
-extension View {
-    func productionGlassPickerChrome() -> some View {
-        modifier(ProductionGlassPickerChromeModifier())
-    }
-}
-
 enum ProductionSection: String, CaseIterable, Identifiable, Hashable {
     case dashboard
     case equalizer
@@ -232,7 +215,7 @@ struct ProductionProcessingStatus: Equatable {
         case .bypassed: return "Bypassed: audio keeps playing, unprocessed"
         case .stopped: return "Processing is stopped: audio plays straight to the output"
         case .transitioning: return "Processing is changing state"
-        case .failed: return "Processing failed. Start Processing to try again."
+        case .failed: return "Processing failed. Switch Processing on to try again."
         }
     }
 }
@@ -465,7 +448,7 @@ struct ProductionRootView: View {
         ToolbarItemGroup(placement: .primaryAction) {
             if selection != .roomAdvisor {
                 // Bypass keeps the tap running and passes audio unprocessed;
-                // Start/Stop beside it tears the tap down.
+                // the Processing switch beside it tears the tap down.
                 Button {
                     do {
                         try engine.setGlobalDSPBypassed(
@@ -491,45 +474,49 @@ struct ProductionRootView: View {
                         ? "DSP is bypassed: audio plays unprocessed. Click to process again."
                         : "Bypass all DSP: audio keeps playing, unprocessed"
                 )
+                .disabled(engine.lifecycleState != .running)
 
-                Button {
-                    Task { @MainActor in
-                        await Task.yield()
-                        if engine.lifecycleState == .running {
-                            engine.stop()
-                            commandError = nil
-                        } else {
-                            if engine.lifecycleState == .failed {
-                                engine.stop()
-                            }
-                            guard engine.lifecycleState == .idle else {
-                                return
-                            }
-                            do {
-                                try await product.startProcessing()
-                                commandError = nil
-                            } catch {
-                                commandError =
-                                    error.localizedDescription
+                // A switch, not a button: processing is a standing on/off
+                // state, and play/stop or power icons read as transport or
+                // app power. Bypass beside it only applies while running.
+                HStack(spacing: 8) {
+                    Text("Processing")
+                    Toggle("Processing", isOn: Binding(
+                        get: { engine.lifecycleState == .running },
+                        set: { on in
+                            Task { @MainActor in
+                                await Task.yield()
+                                if !on {
+                                    guard engine.lifecycleState == .running else { return }
+                                    engine.stop()
+                                    commandError = nil
+                                    return
+                                }
+                                if engine.lifecycleState == .failed {
+                                    engine.stop()
+                                }
+                                guard engine.lifecycleState == .idle else {
+                                    return
+                                }
+                                do {
+                                    try await product.startProcessing()
+                                    commandError = nil
+                                } catch {
+                                    commandError =
+                                        error.localizedDescription
+                                }
                             }
                         }
-                    }
-                } label: {
-                    // A power switch rather than play/stop, which read as
-                    // transport controls. Tinted green while processing.
-                    Label(
-                        engine.lifecycleState == .running
-                            ? "Stop Processing"
-                            : "Start Processing",
-                        systemImage: "power"
-                    )
+                    ))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .tint(.green)
                 }
-                .buttonStyle(.glass)
-                .tint(engine.lifecycleState == .running ? .green : nil)
+                .padding(.horizontal, 8)
                 .help(
                     engine.lifecycleState == .running
-                        ? "Processing is on. Click to stop processing."
-                        : "Processing is off. Click to start processing."
+                        ? "Processing is on. Switch off to stop processing."
+                        : "Processing is off. Switch on to start processing."
                 )
                 .disabled(
                     product.recovery.safeLaunchActive
@@ -773,6 +760,8 @@ private struct ProductionDashboardView: View {
                 }
                 .fixedSize(horizontal: false, vertical: true)
 
+                levelControls
+
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
                     summaryCard(
                         title: "Playback Path",
@@ -816,6 +805,26 @@ private struct ProductionDashboardView: View {
     private var masterVolumeUsesDecibelScale: Bool {
         engine.masterVolumeCapabilities.controlMode == .softwareDSP
             && ApplicationVolumeStepResolution(storedValue: storedVolumeStepResolution)?.usesDecibels == true
+    }
+
+    /// In the dB step modes the fader is linear in dB; otherwise its
+    /// position is the loudness-taper level itself.
+    private var masterVolumeSliderPosition: Binding<Double> {
+        let decibelLinear = masterVolumeUsesDecibelScale
+        return Binding(
+            get: {
+                let level = engine.masterVolumeConfiguration.level
+                return decibelLinear
+                    ? MasterVolumeConfiguration.decibelFaderPosition(forLevel: level)
+                    : level
+            },
+            set: { position in
+                let level = decibelLinear
+                    ? MasterVolumeConfiguration.level(forDecibelFaderPosition: position)
+                    : position
+                perform { try engine.setMasterVolumeLevel(level) }
+            }
+        )
     }
 
     private var masterVolumeReadout: String {
@@ -936,7 +945,6 @@ private struct ProductionDashboardView: View {
                         Text(device.name).tag(Optional(device.uid))
                     }
                 }
-                .productionGlassPickerChrome()
                 .labelsHidden()
                 .frame(maxWidth: .infinity)
                 .disabled(engine.lifecycleState != .idle)
@@ -979,14 +987,11 @@ private struct ProductionDashboardView: View {
                             .monospacedDigit().foregroundStyle(.secondary)
                     }
                     Slider(
-                        value: Binding(
-                            get: { engine.masterVolumeConfiguration.level },
-                            set: { level in perform { try engine.setMasterVolumeLevel(level) } }
-                        ),
+                        value: masterVolumeSliderPosition,
                         in: MasterVolumeConfiguration.levelRange
                     )
                     if engine.masterVolumeCapabilities.controlMode == .softwareDSP {
-                        MasterVolumeFaderScale()
+                        MasterVolumeFaderScale(decibelLinear: masterVolumeUsesDecibelScale)
                     }
                 }
 
@@ -995,6 +1000,89 @@ private struct ProductionDashboardView: View {
             .frame(maxHeight: .infinity)
             .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 18))
         }
+    }
+
+    /// Everyday trims beside volume: input gain (preamp headroom), L/R
+    /// balance and output gain. Double-clicking a control resets it.
+    private var levelControls: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Levels").font(.subheadline.bold())
+            HStack(alignment: .top, spacing: 24) {
+                levelSlider(
+                    title: "Input Gain",
+                    value: Binding(
+                        get: { engine.gainConfiguration.inputPreampDB },
+                        set: { value in perform { try engine.setInputPreampDB(value) } }
+                    ),
+                    range: DSPGainConfiguration.inputPreampRange,
+                    step: 0.5,
+                    reset: 0,
+                    readout: Self.decibelReadout(engine.gainConfiguration.inputPreampDB),
+                    help: "Gain before all processing. Lower it to leave headroom for EQ boosts."
+                )
+                levelSlider(
+                    title: "Balance",
+                    value: Binding(
+                        get: { engine.playbackControlConfiguration.balance },
+                        set: { value in perform { try engine.setChannelBalance(value) } }
+                    ),
+                    range: PlaybackControlConfiguration.balanceRange,
+                    step: 0.01,
+                    reset: 0,
+                    readout: Self.balanceReadout(engine.playbackControlConfiguration.balance),
+                    help: "Left/right balance. Centre is unity on both channels."
+                )
+                levelSlider(
+                    title: "Output Gain",
+                    value: Binding(
+                        get: { engine.gainConfiguration.outputGainDB },
+                        set: { value in perform { try engine.setOutputGainDB(value) } }
+                    ),
+                    range: DSPGainConfiguration.outputGainRange,
+                    step: 0.5,
+                    reset: 0,
+                    readout: Self.decibelReadout(engine.gainConfiguration.outputGainDB),
+                    help: "Gain after all processing, before the output device."
+                )
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+    }
+
+    private func levelSlider(
+        title: String,
+        value: Binding<Double>,
+        range: ClosedRange<Double>,
+        step: Double,
+        reset: Double,
+        readout: String,
+        help: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Text(title).font(.caption.bold()).foregroundStyle(.secondary)
+                Spacer()
+                Text(readout).font(.caption).monospacedDigit().foregroundStyle(.secondary)
+            }
+            Slider(value: value, in: range, step: step)
+                .simultaneousGesture(TapGesture(count: 2).onEnded { value.wrappedValue = reset })
+        }
+        .frame(maxWidth: .infinity)
+        .help(help + " Double-click to reset.")
+    }
+
+    static func decibelReadout(_ db: Double) -> String {
+        let rounded = (db * 10).rounded() / 10
+        if rounded == 0 { return "0.0 dB" }
+        return String(format: "%@%.1f dB", rounded > 0 ? "+" : "−", abs(rounded))
+    }
+
+    static func balanceReadout(_ balance: Double) -> String {
+        let percent = Int((abs(balance) * 100).rounded())
+        if percent == 0 { return "Centre" }
+        return balance < 0 ? "L \(percent)" : "R \(percent)"
     }
 
     private func summaryCard(
@@ -1620,7 +1708,6 @@ private struct ProductionSpeakersView: View {
                         Text(mode.displayName).tag(Optional(mode))
                     }
                 }
-                .productionGlassPickerChrome()
                 .labelsHidden()
                 .frame(width: 260)
             }
@@ -1649,7 +1736,6 @@ private struct ProductionSpeakersView: View {
                         Text(topology.displayName).tag(topology)
                     }
                 }
-                .productionGlassPickerChrome()
                 .labelsHidden()
                 .frame(width: 280)
             }
@@ -1682,7 +1768,6 @@ private struct ProductionSpeakersView: View {
                             Text(topology.displayName).tag(topology)
                         }
                     }
-                    .productionGlassPickerChrome()
                     .labelsHidden()
                     .frame(width: 280)
                 }
@@ -1809,7 +1894,6 @@ private struct ProductionSpeakersView: View {
                         .tag(MultiOutputSynchronizationMode.softwarePLL)
                         .disabled(true)
                 }
-                .productionGlassPickerChrome()
                 .labelsHidden()
                 .frame(width: 240)
             }
@@ -1826,7 +1910,6 @@ private struct ProductionSpeakersView: View {
                             Text(deviceName(uid)).tag(Optional(uid))
                         }
                     }
-                    .productionGlassPickerChrome()
                     .labelsHidden()
                     .frame(width: 300)
                 }
@@ -1897,7 +1980,6 @@ private struct ProductionSpeakersView: View {
                     Text(bus.displayName).tag(bus)
                 }
             }
-            .productionGlassPickerChrome()
             .labelsHidden()
             .frame(width: 180)
 
@@ -1914,7 +1996,6 @@ private struct ProductionSpeakersView: View {
                     Text(device.name).tag(device.uid)
                 }
             }
-            .productionGlassPickerChrome()
             .labelsHidden()
             .frame(minWidth: 230)
 
@@ -1926,9 +2007,8 @@ private struct ProductionSpeakersView: View {
                     Text("Ch \(channel + 1)").tag(UInt32(channel))
                 }
             }
-            .productionGlassPickerChrome()
             .labelsHidden()
-            .frame(width: 80)
+            .frame(minWidth: 80)
 
             Button(role: .destructive) {
                 removeRoute(route.id)
@@ -2124,9 +2204,8 @@ private struct ProductionSpeakersView: View {
                     Text(EQFilterType.notch.displayName).tag(EQFilterType.notch)
                     Text(EQFilterType.allPass.displayName).tag(EQFilterType.allPass)
                 }
-                .productionGlassPickerChrome()
                 .labelsHidden()
-                .frame(width: 150)
+                .frame(minWidth: 150)
 
                 Spacer()
                 Button(role: .destructive) {
@@ -2264,7 +2343,6 @@ private struct ProductionSpeakersView: View {
                         Text(mode.displayName).tag(mode)
                     }
                 }
-                .productionGlassPickerChrome()
                 .pickerStyle(.segmented)
 
                 Text("The verification monitor affects the ordinary logical stereo crossover preview. Physical split routes are generated independently after the shared stereo DSP chain and are protected by their mandatory crossover even when raw Global Bypass is used.")
@@ -2409,18 +2487,26 @@ struct ProductionActionErrorBanner: View {
 }
 
 /// Console-style dB marks under the software-volume fader. On the loudness
-/// taper the slider position is the level, so each mark sits at its level.
+/// taper the slider position is the level, so each mark sits at its level;
+/// on the dB-linear fader the marks are evenly spaced.
 struct MasterVolumeFaderScale: View {
+    var decibelLinear = false
     /// Approximate distance from the slider's ends to its knob centre at the
     /// stops, so marks line up with the knob.
     private let trackInset: CGFloat = 10
 
     private var marks: [(label: String, position: Double)] {
-        [(VolumeFeedbackPresentation.faderTickLabel(nil), 0)]
-            + VolumeFeedbackPresentation.faderTickDecibels.reversed().map {
-                (
+        let ticks = decibelLinear
+            ? VolumeFeedbackPresentation.decibelFaderTickDecibels
+            : VolumeFeedbackPresentation.faderTickDecibels
+        return [(VolumeFeedbackPresentation.faderTickLabel(nil), 0)]
+            + ticks.reversed().map {
+                let level = MasterVolumeConfiguration.level(forSoftwareTaperDB: $0)
+                return (
                     VolumeFeedbackPresentation.faderTickLabel($0),
-                    MasterVolumeConfiguration.level(forSoftwareTaperDB: $0)
+                    decibelLinear
+                        ? MasterVolumeConfiguration.decibelFaderPosition(forLevel: level)
+                        : level
                 )
             }
     }
@@ -2434,7 +2520,7 @@ struct MasterVolumeFaderScale: View {
                     // −60 dB sits a few points from −∞ on the loudness
                     // taper: tick only, so the labels never collide.
                     Text(mark.label).font(.caption2).monospacedDigit()
-                        .opacity(mark.label == "−60" ? 0 : 1)
+                        .opacity(!decibelLinear && mark.label == "−60" ? 0 : 1)
                 }
                 .foregroundStyle(.secondary)
                 .fixedSize()

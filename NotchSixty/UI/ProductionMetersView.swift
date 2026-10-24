@@ -182,7 +182,6 @@ struct ProductionMetersView: View {
                 Label(page.title, systemImage: page.systemImage).tag(page)
             }
         }
-        .productionGlassPickerChrome()
         .pickerStyle(.segmented)
         .labelsHidden()
         .frame(maxWidth: 720)

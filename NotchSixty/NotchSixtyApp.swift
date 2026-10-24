@@ -1559,6 +1559,9 @@ enum VolumeFeedbackPresentation {
     /// each mark sits at `level(forSoftwareTaperDB:)`; −∞ is the bottom stop.
     static let faderTickDecibels: [Double] = [0, -5, -10, -20, -30, -40, -60]
 
+    /// Marks on the dB-linear fader: evenly spaced, since position is dB.
+    static let decibelFaderTickDecibels: [Double] = [0, -10, -20, -30, -40, -50, -60, -70]
+
     static func faderTickLabel(_ decibels: Double?) -> String {
         guard let decibels else { return "−∞" }
         return decibels == 0 ? "0" : "−\(Int(-decibels))"
@@ -2348,7 +2351,6 @@ private struct ProductionMenuBarView: View {
                     }
                 }
                 .labelsHidden()
-                .productionGlassPickerChrome()
                 .pickerStyle(.menu)
                 .frame(maxWidth: .infinity)
             }
@@ -2570,9 +2572,8 @@ private struct ProductionSettingsView: View {
                                 }
                             }
                             .labelsHidden()
-                            .productionGlassPickerChrome()
                             .pickerStyle(.segmented)
-                            .frame(width: 220)
+                            .fixedSize()
                         }
                     }
 
@@ -2594,7 +2595,7 @@ private struct ProductionSettingsView: View {
                             }
                             .labelsHidden()
                             .pickerStyle(.menu)
-                            .frame(width: 140)
+                            .fixedSize()
                         }
 
                         Text("Controls Notch Sixty's software master-volume change for each intercepted volume-key press. Fractions move the slider by 1/16, 1/32 or 1/64 of its range. dB steps change the level by a fixed amount, down to −80 dB and then silence, and show the volume in dB (0 dB at full volume) in the menu bar and popup. The physical output-device volume is not stepped by this setting.")
@@ -2619,9 +2620,8 @@ private struct ProductionSettingsView: View {
                                 }
                             }
                             .labelsHidden()
-                            .productionGlassPickerChrome()
                             .pickerStyle(.segmented)
-                            .frame(width: 300)
+                            .fixedSize()
                         }
                         .disabled(!preferences.showVolumePopup)
                         Text("Briefly display Notch Sixty's volume when it changes. Follow macOS Popup appears beside the macOS volume indicator, at the top right or, while another app is full screen, the top centre. macOS gives sandboxed apps no public way to hide its indicator.")
@@ -2647,9 +2647,8 @@ private struct ProductionSettingsView: View {
                                 }
                             }
                             .labelsHidden()
-                            .productionGlassPickerChrome()
                             .pickerStyle(.segmented)
-                            .frame(width: 250)
+                            .fixedSize()
                         }
 
                         Text("Menu Bar mode keeps processing and preset controls available without a Dock icon. Both shows the app in both places.")

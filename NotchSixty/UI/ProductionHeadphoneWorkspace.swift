@@ -127,7 +127,6 @@ struct ProductionHeadphoneWorkspace: View {
                         Text(mode.displayName).tag(mode)
                     }
                 }
-                .productionGlassPickerChrome()
                 .frame(maxWidth: 260)
             }
 
@@ -152,7 +151,6 @@ struct ProductionHeadphoneWorkspace: View {
                             Text(target.displayName).tag(target)
                         }
                     }
-                    .productionGlassPickerChrome()
                     .labelsHidden()
                 }
                 VStack(alignment: .leading, spacing: 8) {
@@ -314,7 +312,6 @@ struct ProductionHeadphoneWorkspace: View {
                         .tag(UUID?.some(model.id))
                 }
             }
-            .productionGlassPickerChrome()
             if let model = modelRecords.first(where: { $0.id == selectedModelID }) {
                 Text(
                     "Credit: " + model.sourceAttribution
@@ -563,7 +560,6 @@ struct ProductionHeadphoneWorkspace: View {
                     Text(type.displayName).tag(type)
                 }
             }
-            .productionGlassPickerChrome()
             HStack {
                 Text("Hz").frame(width: 37, alignment: .leading)
                 Slider(
@@ -647,7 +643,6 @@ struct ProductionHeadphoneWorkspace: View {
                         Text(preset.displayName).tag(preset)
                     }
                 }
-                .productionGlassPickerChrome()
                 .frame(maxWidth: 220)
                 .disabled(draft.spatialMode == .virtualSpeakers)
             }
@@ -678,7 +673,6 @@ struct ProductionHeadphoneWorkspace: View {
                     Text(layout.displayName).tag(layout)
                 }
             }
-            .productionGlassPickerChrome()
 
             Picker("Decoded Program Source", selection: Binding(
                 get: { draft.programSourceDeviceUID ?? engine.selectedOutputDevice?.uid },
@@ -692,7 +686,6 @@ struct ProductionHeadphoneWorkspace: View {
                         .tag(Optional(device.uid))
                 }
             }
-            .productionGlassPickerChrome()
 
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
@@ -729,7 +722,6 @@ struct ProductionHeadphoneWorkspace: View {
                             .tag(UUID?.some(asset.id))
                     }
                 }
-                .productionGlassPickerChrome()
                 Text(
                     "User-rated HRTF preferences can be reviewed in Developer → Acoustic Research (turn on Show developer tools in Settings). Selection changes this draft only; Apply still requires a matching device rate and stopped playback."
                 )

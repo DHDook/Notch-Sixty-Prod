@@ -52,7 +52,7 @@ struct ProductionRoomGeometrySection: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 104)
+                .fixedSize()
             }
 
             if advisor.geometryDraft == nil {

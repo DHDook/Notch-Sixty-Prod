@@ -965,4 +965,24 @@ final class StereoPlaybackControlTests: XCTestCase {
         XCTAssertNil(reloaded.selectedContentPresetID)
     }
 
+    func testDecibelFaderIsLinearInDecibelsAndKeepsTheLevelsGain() {
+        // Position is linear in dB from the −80 dB floor to 0 dB; 0 is silence.
+        XCTAssertEqual(MasterVolumeConfiguration.level(forDecibelFaderPosition: 0), 0)
+        XCTAssertEqual(MasterVolumeConfiguration.level(forDecibelFaderPosition: 1), 1, accuracy: 1e-12)
+        XCTAssertEqual(MasterVolumeConfiguration.decibelFaderPosition(forLevel: 0), 0)
+        XCTAssertEqual(MasterVolumeConfiguration.decibelFaderPosition(forLevel: 1), 1, accuracy: 1e-12)
+        for (position, decibels) in [(0.25, -60.0), (0.5, -40.0), (0.75, -20.0), (0.875, -10.0)] {
+            let level = MasterVolumeConfiguration.level(forDecibelFaderPosition: position)
+            XCTAssertEqual(MasterVolumeConfiguration.softwareTaperDB(forLevel: level)!, decibels, accuracy: 1e-9)
+            XCTAssertEqual(MasterVolumeConfiguration.decibelFaderPosition(forLevel: level), position, accuracy: 1e-12)
+        }
+        // The fader only remaps the slider: the stored level, and so the gain,
+        // is the same one the percentage modes use for that dB value.
+        let tenDecibelsDown = MasterVolumeConfiguration.level(forSoftwareTaperDB: -10)
+        XCTAssertEqual(
+            MasterVolumeConfiguration.level(forDecibelFaderPosition: 0.875),
+            tenDecibelsDown,
+            accuracy: 1e-12
+        )
+    }
 }
