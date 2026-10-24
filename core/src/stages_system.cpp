@@ -189,6 +189,7 @@ uint32_t expectedParamCount(uint32_t kind, const float *p, uint32_t have) {
         case N60_STAGE_PROTECTION: return have == 7 ? 7u : (have == kProtParamsV12 ? kProtParamsV12 : 0u);
         case N60_STAGE_STEREO_CROSSOVER: return 8;
         case N60_STAGE_MUTE: return 1;
+        case N60_STAGE_EXTERNAL: return 1;
         case N60_STAGE_FRAC_DELAY: return 2;
         case N60_STAGE_ANC_GUARD: return kGuardParams;
         case N60_STAGE_ANC_INJECT: return have == 4 ? 4u : 3u;
@@ -465,6 +466,7 @@ bool isSystemKind(uint32_t kind) {
         case N60_STAGE_MUTE:
         case N60_STAGE_FRAC_DELAY:
         case N60_STAGE_STEREO_CROSSOVER:
+        case N60_STAGE_EXTERNAL:
         case N60_STAGE_ANC_CAPTURE: return true;
         default: return false;
     }
@@ -549,6 +551,7 @@ bool paramOk(uint32_t kind, uint32_t i, float v, const float *p, double rate, ui
                 default: return v > 0.0f;  // 7: alignment Q
             }
         case N60_STAGE_MUTE: return v == 0.0f || v == 1.0f;
+        case N60_STAGE_EXTERNAL: return v == 0.0f || v == 1.0f;
         case N60_STAGE_FRAC_DELAY: return i == 0 ? (isInt(v) && v >= 0.0f && v <= static_cast<float>(kFdCapacity - 2u)) : inR(v, 0.0, 1.0);
         case N60_STAGE_ANC_GUARD:
             switch (i) {
@@ -584,6 +587,8 @@ n60_status validateSystemStage(const n60_stage_desc &s, double rate, uint32_t ou
     if (!lanesOk(s, outCh, ruleOf(s.kind))) return N60_STATUS_BAD_ARGUMENT;
     if (s.kind == N60_STAGE_ANC_CAPTURE) {
         if (s.capacityFrames < 1 || s.capacityFrames > N60_GRAPH_MAX_DELAY_FRAMES) return N60_STATUS_BAD_ARGUMENT;
+    } else if (s.kind == N60_STAGE_EXTERNAL) {
+        if (s.capacityFrames > N60_GRAPH_MAX_DELAY_FRAMES) return N60_STATUS_BAD_ARGUMENT;
     } else if (s.capacityFrames != 0) {
         return N60_STATUS_BAD_ARGUMENT;
     }
@@ -982,6 +987,7 @@ n60_status validateSystemParam(const SnapHeader *h, const StageRec &r, uint32_t 
         case N60_STAGE_HEADPHONE: live = idx == 1 || idx == 5 || idx == 6; break;
         case N60_STAGE_PROTECTION: live = idx >= 1 && idx <= 3; break;
         case N60_STAGE_MUTE: live = true; break;
+        case N60_STAGE_EXTERNAL: live = idx == 0; break;
         case N60_STAGE_ANC_GUARD: live = idx == 11; break;
         case N60_STAGE_ANC_INJECT: live = idx == 2 || idx == 3; break;
         default: live = false; break;  // pause gate, capture, authorisation: new snapshot only
@@ -993,6 +999,7 @@ n60_status validateSystemParam(const SnapHeader *h, const StageRec &r, uint32_t 
 
 uint32_t systemLatency(const SnapHeader *h, const StageRec &r) {
     if (r.kind == N60_STAGE_FRAC_DELAY) return static_cast<uint32_t>(paramsOf(h, r)[0]);
+    if (r.kind == N60_STAGE_EXTERNAL) return r.capacity;
     if (r.kind != N60_STAGE_PROTECTION) return 0;
     return protCfg(paramsOf(h, r), h->sampleRate, r.paramCount).latency;
 }
@@ -1403,6 +1410,46 @@ void runFracDelay(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fram
         }
         d.wp = wp;
     }
+}
+
+// ABI v13. Host callback stage. The live snapshot calls the host once per block and keeps the processor's effect
+// (output minus input) for the incoming snapshot of a rebuild, which adds it instead of calling the host again.
+// The cached effect is exact for a processor that is linear in its input; during the short rebuild crossfade it is an
+// approximation for nonlinear or time-varying racks and settles exactly when the fade ends. The host owns processor
+// reset; the callback sees the graph's sample rate.
+void runExternal(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
+    ExternalSlot *x = h->external;
+    if (x == nullptr || paramsOf(h, r)[0] == 0.0f) return;
+    const n60_external_process_fn fn = x->fn.load(std::memory_order_acquire);
+    const uint32_t n = r.laneCount;
+    if (fn == nullptr) return;
+    if (n != x->channels || frames > x->deltaStride) {
+        x->faults.fetch_add(1, std::memory_order_relaxed);  // misconfigured host: pass through, but never silently
+        return;
+    }
+    if (h->follower != 0) {
+        if (x->deltaFrames != frames) return;
+        for (uint32_t k = 0; k < n; ++k) {
+            float *buf = lanes[laneOf(r, k)];
+            const float *d = x->delta + static_cast<size_t>(k) * x->deltaStride;
+            for (uint32_t i = 0; i < frames; ++i) buf[i] += d[i];
+        }
+        return;
+    }
+    float *ptr[N60_GRAPH_MAX_CHANNELS];
+    for (uint32_t k = 0; k < n; ++k) {
+        ptr[k] = lanes[laneOf(r, k)];
+        std::memcpy(x->delta + static_cast<size_t>(k) * x->deltaStride, ptr[k], sizeof(float) * frames);
+    }
+    x->calls.fetch_add(1, std::memory_order_relaxed);
+    const bool ok = fn(x->context, ptr, ptr, n, frames) != 0;
+    for (uint32_t k = 0; k < n; ++k) {
+        float *d = x->delta + static_cast<size_t>(k) * x->deltaStride;
+        if (!ok) std::memset(ptr[k], 0, sizeof(float) * frames);
+        for (uint32_t i = 0; i < frames; ++i) d[i] = ptr[k][i] - d[i];
+    }
+    if (!ok) x->faults.fetch_add(1, std::memory_order_relaxed);
+    x->deltaFrames = frames;
 }
 
 void runMute(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
@@ -1854,6 +1901,7 @@ void runSystem(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames)
         case N60_STAGE_PAUSE_GATE: runGate(h, r, lanes, frames); break;
         case N60_STAGE_BASS_MGMT: runBass(h, r, lanes, frames); break;
         case N60_STAGE_MUTE: runMute(h, r, lanes, frames); break;
+        case N60_STAGE_EXTERNAL: runExternal(h, r, lanes, frames); break;
         case N60_STAGE_FRAC_DELAY: runFracDelay(h, r, lanes, frames); break;
         case N60_STAGE_STEREO_CROSSOVER: runStereoCrossover(h, r, lanes, frames); break;
         case N60_STAGE_ANC_INJECT: runInject(h, r, lanes, frames); break;

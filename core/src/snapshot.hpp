@@ -36,6 +36,18 @@ struct StageRec {
     float applied;       // last target the state acted on (GAIN, DELAY)
 };
 
+// ABI v13. The host callback of the EXTERNAL stage, owned by the graph handle (snapshots hold a pointer to it).
+struct ExternalSlot {
+    std::atomic<n60_external_process_fn> fn{nullptr};
+    void *context = nullptr;      // written before fn is stored
+    uint32_t channels = 0;
+    float *delta = nullptr;       // channels * deltaStride floats: the processor's effect on the live block
+    uint32_t deltaStride = 0;     // maxBlockFrames
+    uint32_t deltaFrames = 0;     // realtime thread only: frames of valid delta this block (0 = none)
+    std::atomic<uint64_t> calls{0};
+    std::atomic<uint64_t> faults{0};
+};
+
 struct SnapHeader {
     uint32_t abiVersion;
     uint32_t epoch;
@@ -52,6 +64,8 @@ struct SnapHeader {
     uint32_t parkCommand;
     uint32_t fadeFrames;  // rebuild crossfade length when this snapshot is adopted (0 = instant swap)
     uint32_t historyEpoch;  // ABI v10: bumped (realtime thread) to drop the FIR input history; lanes compare it
+    uint32_t follower;      // ABI v13: realtime thread only; 1 while this snapshot is the incoming side of a rebuild
+    ExternalSlot *external; // ABI v13: the graph's EXTERNAL callback slot (set by the graph before publication)
 };
 
 inline uint8_t *bytes(SnapHeader *h) { return reinterpret_cast<uint8_t *>(h); }
@@ -87,8 +101,9 @@ n60_status validateDesc(const n60_graph_desc &desc);
 void freeSnapshot(SnapHeader *snap);
 
 // Realtime thread. Runs the stages in place on `lanes` (outputChannels pointers).
+// follower: the incoming side of a rebuild (see "External processor" in graph.h).
 void runSnapshot(SnapHeader *snap, float *const *lanes, uint32_t frames,
-                 std::atomic<uint64_t> &sanitisedSamples);
+                 std::atomic<uint64_t> &sanitisedSamples, bool follower = false);
 
 // Control or realtime thread (pure). Checks one live parameter edit against the stage's
 // kind and ranges: OK, BAD_ARGUMENT (index or value out of range) or UNSUPPORTED (the

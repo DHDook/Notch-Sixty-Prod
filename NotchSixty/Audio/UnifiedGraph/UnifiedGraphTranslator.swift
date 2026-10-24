@@ -603,7 +603,7 @@ enum UnifiedGraphFallbackReason: String, Error, Equatable, Sendable, CaseIterabl
     /// Stereo: room correction or speaker IR with a subwoofer lane.
     case convolverWithSubwoofer
     case protectionCeilingOutOfRange
-    /// Stereo: same-device, aggregate or rack route.
+    /// Retired in E6 S8e (those routes render through the graph); kept so diagnostics stay stable.
     case unsupportedRoute
     /// Stereo: headphone DSP is configured.
     case headphoneDSP

@@ -114,6 +114,9 @@ struct n60_graph {
     // ABI v9. Realtime thread only: the denoiser profile kept while the live snapshot has no DENOISER stage
     // (fftSize 0 = none). Part of the handle, so nothing is allocated when it is used.
     n60_denoiser_state parked{};
+
+    // ABI v13: the EXTERNAL stage's host callback and its rebuild-fade scratch.
+    n60::ExternalSlot external;
 };
 
 namespace {
@@ -305,8 +308,9 @@ void rebuildBlock(n60_graph *g, float *const *out, uint32_t frames) {
         n60::systemRebuildMute(g->current, false);
         n60::systemRebuildMute(g->incoming, false);
     }
+    g->external.deltaFrames = 0;
     n60::runSnapshot(g->current, out, frames, g->sanitised);
-    n60::runSnapshot(g->incoming, g->scratchLane, frames, g->sanitised);
+    n60::runSnapshot(g->incoming, g->scratchLane, frames, g->sanitised, true);
 
     for (uint32_t c = 0; c < outCount; ++c) {
         if (!allFinite(g->scratchLane[c], frames)) {
@@ -418,6 +422,7 @@ n60_status n60_graph_build(const n60_graph_desc *desc, n60_graph **outGraph) {
         n60::freeSnapshot(snap);
         return N60_STATUS_OUT_OF_MEMORY;
     }
+    snap->external = &g->external;
     g->sampleRate = desc->sampleRate;
     g->maxBlockFrames = desc->maxBlockFrames;
     g->inputChannels = desc->inputChannels;
@@ -458,6 +463,7 @@ n60_status n60_graph_publish(n60_graph *g, const n60_graph_desc *desc) {
     const n60_status st = n60::buildSnapshot(*desc, g->nextEpoch, &snap);
     if (st != N60_STATUS_OK) return st;
     ++g->nextEpoch;
+    snap->external = &g->external;
     snap->fadeFrames = g->fadeFrames;
     g->latest = snap;
     g->publishedEpoch.store(snap->epoch, std::memory_order_release);
@@ -591,7 +597,38 @@ void n60_graph_retire(n60_graph *g) {
     n60::freeSnapshot(g->incoming);
     n60::freeSnapshot(g->current);
     delete[] g->scratch;
+    delete[] g->external.delta;
     delete g;
+}
+
+n60_status n60_graph_set_external_processor(n60_graph *g, n60_external_process_fn process, void *context,
+                                            uint32_t channels) {
+    if (g == nullptr) return N60_STATUS_BAD_ARGUMENT;
+    if (process == nullptr) {
+        g->external.fn.store(nullptr, std::memory_order_release);
+        return N60_STATUS_OK;
+    }
+    if (channels == 0 || channels > N60_GRAPH_MAX_CHANNELS || channels > g->outputChannels) return N60_STATUS_BAD_ARGUMENT;
+    n60::ExternalSlot &x = g->external;
+    x.fn.store(nullptr, std::memory_order_release);
+    if (x.delta == nullptr || x.channels < channels) {
+        float *fresh = new (std::nothrow) float[static_cast<size_t>(channels) * g->maxBlockFrames]();
+        if (fresh == nullptr) return N60_STATUS_OUT_OF_MEMORY;
+        delete[] x.delta;
+        x.delta = fresh;
+    }
+    x.deltaStride = g->maxBlockFrames;
+    x.channels = channels;
+    x.context = context;
+    x.calls.store(0, std::memory_order_relaxed);
+    x.faults.store(0, std::memory_order_relaxed);
+    x.fn.store(process, std::memory_order_release);
+    return N60_STATUS_OK;
+}
+
+void n60_graph_external_stats(const n60_graph *g, uint64_t *calls, uint64_t *faults) {
+    if (calls != nullptr) *calls = g != nullptr ? g->external.calls.load(std::memory_order_relaxed) : 0;
+    if (faults != nullptr) *faults = g != nullptr ? g->external.faults.load(std::memory_order_relaxed) : 0;
 }
 
 n60_status n60_graph_set_rebuild_options(n60_graph *g, const n60_rebuild_options *o) {

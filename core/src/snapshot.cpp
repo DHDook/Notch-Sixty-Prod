@@ -219,6 +219,7 @@ uint32_t rankBase(uint32_t kind) {
 // CORE_DYNAMICS and before SYMMETRY).
 uint32_t rankOf(uint32_t kind) {
     if (kind == N60_STAGE_BINAURAL) return 175;
+    if (kind == N60_STAGE_EXTERNAL) return 125;
     return rankBase(kind) * 10;
 }
 
@@ -299,6 +300,11 @@ n60_status validateDesc(const n60_graph_desc &d) {
         }
         if (s.paramCount > 0 && s.params == nullptr) return N60_STATUS_BAD_ARGUMENT;
         if (!paramsFinite(s)) return N60_STATUS_BAD_ARGUMENT;
+        if (s.kind == N60_STAGE_EXTERNAL) {  // ABI v13: one host callback per graph
+            for (uint32_t j = 0; j < i; ++j) {
+                if (d.stages[j].kind == N60_STAGE_EXTERNAL) return N60_STATUS_BAD_ARGUMENT;
+            }
+        }
         const bool isMS = s.kind == N60_STAGE_MS_ENCODE || s.kind == N60_STAGE_MS_DECODE;
         if (isSystemKind(s.kind)) {
             const n60_status v = validateSystemStage(s, d.sampleRate, d.outputChannels);
@@ -809,7 +815,9 @@ void runDelay(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) 
 
 }  // namespace
 
-void runSnapshot(SnapHeader *h, float *const *lanes, uint32_t frames, std::atomic<uint64_t> &sanitisedSamples) {
+void runSnapshot(SnapHeader *h, float *const *lanes, uint32_t frames, std::atomic<uint64_t> &sanitisedSamples,
+                 bool follower) {
+    h->follower = follower ? 1u : 0u;
     StageRec *table = stages(h);
     for (uint32_t i = 0; i < h->stageCount; ++i) {
         StageRec &r = table[i];
