@@ -998,9 +998,7 @@ private struct ProductionDashboardView: View {
                         value: masterVolumeSliderPosition,
                         in: MasterVolumeConfiguration.levelRange
                     )
-                    if engine.masterVolumeCapabilities.controlMode == .softwareDSP {
-                        MasterVolumeFaderScale(decibelLinear: masterVolumeUsesDecibelScale)
-                    }
+                    MasterVolumeFaderScale(decibelLinear: masterVolumeUsesDecibelScale)
                 }
 
             }
@@ -2493,18 +2491,21 @@ struct MasterVolumeFaderScale: View {
     /// stops, so marks line up with the knob.
     private let trackInset: CGFloat = 10
 
+    /// The scale follows the volume step mode, like the readout: dB marks
+    /// evenly spaced on the dB-linear fader, percent marks otherwise.
     private var marks: [(label: String, position: Double)] {
-        let ticks = decibelLinear
-            ? VolumeFeedbackPresentation.decibelFaderTickDecibels
-            : VolumeFeedbackPresentation.faderTickDecibels
+        guard decibelLinear else {
+            return VolumeFeedbackPresentation.faderTickPercents.map {
+                ("\($0)", Double($0) / 100)
+            }
+        }
         return [(VolumeFeedbackPresentation.faderTickLabel(nil), 0)]
-            + ticks.reversed().map {
-                let level = MasterVolumeConfiguration.level(forSoftwareTaperDB: $0)
-                return (
+            + VolumeFeedbackPresentation.decibelFaderTickDecibels.reversed().map {
+                (
                     VolumeFeedbackPresentation.faderTickLabel($0),
-                    decibelLinear
-                        ? MasterVolumeConfiguration.decibelFaderPosition(forLevel: level)
-                        : level
+                    MasterVolumeConfiguration.decibelFaderPosition(
+                        forLevel: MasterVolumeConfiguration.level(forSoftwareTaperDB: $0)
+                    )
                 )
             }
     }
@@ -2515,10 +2516,7 @@ struct MasterVolumeFaderScale: View {
             ForEach(marks, id: \.label) { mark in
                 VStack(spacing: 1) {
                     Rectangle().frame(width: 1, height: 4)
-                    // −60 dB sits a few points from −∞ on the loudness
-                    // taper: tick only, so the labels never collide.
                     Text(mark.label).font(.caption2).monospacedDigit()
-                        .opacity(!decibelLinear && mark.label == "−60" ? 0 : 1)
                 }
                 .foregroundStyle(.secondary)
                 .fixedSize()

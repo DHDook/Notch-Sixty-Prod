@@ -112,10 +112,10 @@ final class ProductionInformationArchitectureTests: XCTestCase {
         }
     }
 
-    /// Fader marks sit at their dB on the loudness taper, 0 dB at the top and
-    /// −∞ at the bottom stop, each 10 dB step half the distance of the last.
-    func testFaderMarksSitAtTheirDecibelsOnTheLoudnessTaper() throws {
-        XCTAssertEqual(VolumeFeedbackPresentation.faderTickDecibels, [0, -5, -10, -20, -30, -40, -60])
+    /// Percent modes mark the fader in percent; the dB modes use dB labels,
+    /// and the loudness taper halves the level every 10 dB.
+    func testFaderMarksAndTheLoudnessTaper() throws {
+        XCTAssertEqual(VolumeFeedbackPresentation.faderTickPercents, [0, 25, 50, 75, 100])
         XCTAssertEqual(VolumeFeedbackPresentation.faderTickLabel(0), "0")
         XCTAssertEqual(VolumeFeedbackPresentation.faderTickLabel(-20), "−20")
         XCTAssertEqual(VolumeFeedbackPresentation.faderTickLabel(nil), "−∞")
