@@ -1326,32 +1326,46 @@ inline float xoRun(const double *c, Bq &s, float in) {
     return static_cast<float>(y);
 }
 
+// Blockwise: each section runs over a whole chunk before the next, so the loops carry one recursion each.
 void runStereoCrossover(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
     XoShared &x = *reinterpret_cast<XoShared *>(sharedState(h, r));
     XoLane &st = *reinterpret_cast<XoLane *>(laneState(h, r, 0));
     float *a = lanes[r.laneA];
     float *b = lanes[r.laneB];
     const uint32_t n = x.sections;
-    for (uint32_t i = 0; i < frames; ++i) {
-        float ml = a[i], mr = b[i];
-        float sub = (a[i] + b[i]) * 0.5f;
-        for (uint32_t k = 0; k < n; ++k) {
-            ml = xoRun(x.hp[k], st.hp[0][k], ml);
-            mr = xoRun(x.hp[k], st.hp[1][k], mr);
-            sub = xoRun(x.lp[k], x.lpState[k], sub);
+    constexpr uint32_t kChunk = 256;
+    float ml[kChunk], mr[kChunk], sub[kChunk];
+    for (uint32_t base = 0; base < frames; base += kChunk) {
+        const uint32_t len = std::min(kChunk, frames - base);
+        for (uint32_t i = 0; i < len; ++i) {  // non-finite input must never reach the filter state
+            float l = a[base + i], rr = b[base + i];
+            if (!(std::fabs(l) <= 3.0e38f)) l = 0.0f;
+            if (!(std::fabs(rr) <= 3.0e38f)) rr = 0.0f;
+            ml[i] = l;
+            mr[i] = rr;
+            sub[i] = (l + rr) * 0.5f;
         }
-        if (x.align != 0u) sub = xoRun(x.ap, x.apState, sub);
-        sub *= x.gain;
-        if (x.invert != 0u) sub = -sub;
-        if (x.mode == 1u) {
-            a[i] = ml;
-            b[i] = mr;
-        } else if (x.mode == 2u) {
-            a[i] = sub;
-            b[i] = sub;
-        } else {
-            a[i] = ml + sub;
-            b[i] = mr + sub;
+        for (uint32_t k = 0; k < n; ++k) {
+            for (uint32_t i = 0; i < len; ++i) ml[i] = xoRun(x.hp[k], st.hp[0][k], ml[i]);
+            for (uint32_t i = 0; i < len; ++i) mr[i] = xoRun(x.hp[k], st.hp[1][k], mr[i]);
+            for (uint32_t i = 0; i < len; ++i) sub[i] = xoRun(x.lp[k], x.lpState[k], sub[i]);
+        }
+        if (x.align != 0u) {
+            for (uint32_t i = 0; i < len; ++i) sub[i] = xoRun(x.ap, x.apState, sub[i]);
+        }
+        for (uint32_t i = 0; i < len; ++i) {
+            const float sb = sub[i] * x.gain;
+            const float s2 = x.invert != 0u ? -sb : sb;
+            if (x.mode == 1u) {
+                a[base + i] = ml[i];
+                b[base + i] = mr[i];
+            } else if (x.mode == 2u) {
+                a[base + i] = s2;
+                b[base + i] = s2;
+            } else {
+                a[base + i] = ml[i] + s2;
+                b[base + i] = mr[i] + s2;
+            }
         }
     }
     for (uint32_t k = 0; k < n; ++k) {  // keep denormals out of silent input
@@ -1498,9 +1512,9 @@ inline float clipCurve(uint32_t curve, float u, bool negative) {
     u = std::fmin(std::fmax(u, 0.0f), 1.0f);
     const float halfPi = static_cast<float>(kPi) * 0.5f;
     switch (curve) {
-        case 1: return 1.0f - std::pow(1.0f - u, 3.0f);
+        case 1: return 1.0f - (1.0f - u) * (1.0f - u) * (1.0f - u);
         case 2: return std::sin(halfPi * u);
-        case 3: return negative ? 1.0f - std::pow(1.0f - u, 2.5f) : std::sin(halfPi * u);
+        case 3: return negative ? 1.0f - (1.0f - u) * (1.0f - u) * std::sqrt(1.0f - u) : std::sin(halfPi * u);
         default: return 2.0f * u - u * u;
     }
 }
@@ -1621,6 +1635,7 @@ void runProtection(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
     }
     float sustained = static_cast<float>(sh.riderSustained);
     float atten = static_cast<float>(sh.riderAtten);
+    float gainAtten = -1.0f, riderGain = 1.0f;
     for (uint32_t i = 0; i < frames; ++i) {
         if (c.riderCfg) {
             // The kernel's update_gain_rider, once per frame from the limiter gain as the previous frame left it.
@@ -1635,7 +1650,12 @@ void runProtection(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
             atten = desired + c.riderRespCoef * (atten - desired);
             if (atten < 1e-6f) atten = 0.0f;  // flush the decaying tail (no denormals, no endless pow)
             if (atten != 0.0f) {
-                const float g = dbToLin(-atten);
+                // The rider moves over seconds: redo the pow only after a 1e-4 dB change (a 1e-5 relative gain error).
+                if (std::fabs(atten - gainAtten) > 1.0e-4f) {
+                    gainAtten = atten;
+                    riderGain = dbToLin(-atten);
+                }
+                const float g = riderGain;
                 for (uint32_t l = 0; l < n; ++l) ptr[l][i] *= g;
             }
         }
