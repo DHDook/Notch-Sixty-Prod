@@ -479,12 +479,13 @@ struct ProductionRootView: View {
                 // A switch, not a button: processing is a standing on/off
                 // state, and play/stop or power icons read as transport or
                 // app power. Bypass beside it only applies while running.
-                // Fixed sizes: the toolbar otherwise wraps the label and
-                // stretches the switch to the item's height.
+                // A waveform glyph stands in for the visible label; the
+                // toggle keeps "Processing" for VoiceOver and the tooltip.
+                // Fixed sizes stop the toolbar stretching the switch.
                 HStack(spacing: 6) {
-                    Text("Processing")
-                        .lineLimit(1)
-                        .fixedSize()
+                    Image(systemName: "waveform")
+                        .foregroundStyle(engine.lifecycleState == .running ? .primary : .secondary)
+                        .accessibilityHidden(true)
                     Toggle("Processing", isOn: Binding(
                         get: { engine.lifecycleState == .running },
                         set: { on in
@@ -1027,20 +1028,22 @@ private struct ProductionDashboardView: View {
     private var gainControls: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Gain").font(.subheadline.bold())
-            ProductionGainStepper(
-                title: "Input",
-                value: engine.gainConfiguration.inputPreampDB,
-                range: DSPGainConfiguration.inputPreampRange,
-                set: { value in perform { try engine.setInputPreampDB(value) } }
-            )
-            .help("Gain before all processing. Lower it to leave headroom for EQ boosts.")
-            ProductionGainStepper(
-                title: "Output",
-                value: engine.gainConfiguration.outputGainDB,
-                range: DSPGainConfiguration.outputGainRange,
-                set: { value in perform { try engine.setOutputGainDB(value) } }
-            )
-            .help("Gain after all processing, before the output device.")
+            HStack(spacing: 20) {
+                ProductionGainStepper(
+                    title: "Input",
+                    value: engine.gainConfiguration.inputPreampDB,
+                    range: DSPGainConfiguration.inputPreampRange,
+                    set: { value in perform { try engine.setInputPreampDB(value) } }
+                )
+                .help("Gain before all processing. Lower it to leave headroom for EQ boosts.")
+                ProductionGainStepper(
+                    title: "Output",
+                    value: engine.gainConfiguration.outputGainDB,
+                    range: DSPGainConfiguration.outputGainRange,
+                    set: { value in perform { try engine.setOutputGainDB(value) } }
+                )
+                .help("Gain after all processing, before the output device.")
+            }
         }
         .padding(14)
     }
@@ -1053,21 +1056,16 @@ private struct ProductionDashboardView: View {
                 Text(Self.balanceReadout(engine.playbackControlConfiguration.balance))
                     .monospacedDigit().foregroundStyle(.secondary)
             }
-            ProductionBalanceBar(
-                balance: Binding(
-                    get: { engine.playbackControlConfiguration.balance },
-                    set: { value in perform { try engine.setChannelBalance(value) } }
+            HStack(spacing: 10) {
+                Text("L").font(.caption.bold()).foregroundStyle(.secondary)
+                ProductionBalanceBar(
+                    balance: Binding(
+                        get: { engine.playbackControlConfiguration.balance },
+                        set: { value in perform { try engine.setChannelBalance(value) } }
+                    )
                 )
-            )
-            HStack {
-                Text("L")
-                Spacer()
-                Text("C")
-                Spacer()
-                Text("R")
+                Text("R").font(.caption.bold()).foregroundStyle(.secondary)
             }
-            .font(.caption2.bold())
-            .foregroundStyle(.secondary)
         }
         .padding(14)
         .help("Left/right balance. Centre is unity on both channels. Double-click to recentre.")
@@ -2565,7 +2563,7 @@ private struct ProductionGainStepper: View {
                 .textFieldStyle(.roundedBorder)
                 .multilineTextAlignment(.trailing)
                 .monospacedDigit()
-                .frame(width: 78)
+                .frame(width: 70)
                 .focused($editing)
                 .onSubmit { commitDraft() }
                 .onChange(of: editing) { _, isEditing in
