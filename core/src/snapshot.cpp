@@ -202,6 +202,7 @@ uint32_t rankBase(uint32_t kind) {
         case N60_STAGE_HEADPHONE: return 22;
         case N60_STAGE_PAUSE_GATE: return 23;
         case N60_STAGE_DELAY: return 24;
+        case N60_STAGE_FRAC_DELAY: return 24;
         case N60_STAGE_ANC_GUARD: return 25;
         case N60_STAGE_ANC_INJECT: return 26;
         case N60_STAGE_PROTECTION: return 27;

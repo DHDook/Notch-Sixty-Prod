@@ -185,7 +185,16 @@ enum UnifiedGraphTranslator {
                 if read {
                     configuration.lanes[0].delayFrames = frames.0
                     configuration.lanes[1].delayFrames = frames.1
-                } else { ok = false }
+                } else {
+                    var totals: (Double, Double) = (0, 0)
+                    let fractional = withUnsafeMutablePointer(to: &totals) { tuple in
+                        tuple.withMemoryRebound(to: Double.self, capacity: 2) { N60UnifiedGraphFractionalDelay(pointer, $0) }
+                    }
+                    if fractional {
+                        configuration.lanes[0].fractionalDelayFrames = totals.0
+                        configuration.lanes[1].fractionalDelayFrames = totals.1
+                    } else { ok = false }
+                }
             }
         }
         return ok ? stages : nil

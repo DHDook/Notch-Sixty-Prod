@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 10u
+#define N60_GRAPH_ABI_VERSION 11u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -91,10 +91,18 @@ typedef enum n60_stage_kind {
     N60_STAGE_FINAL_SANITISE = 30,/* position 30. Sanitise rules. */
     N60_STAGE_FINAL_METER = 31,   /* position 31. Meter rules; read with n60_graph_read_meter. */
     /* ABI v6 matrix stage (E6 S7). See "Binaural" below. */
-    N60_STAGE_BINAURAL = 32       /* position 17.5: after CORE_DYNAMICS, before SYMMETRY. N source lanes in, two lanes out. */
+    N60_STAGE_BINAURAL = 32,      /* position 17.5: after CORE_DYNAMICS, before SYMMETRY. N source lanes in, two lanes out. */
+    /* ABI v11 (E6 S8d group 3). */
+    N60_STAGE_FRAC_DELAY = 33     /* position 24, with DELAY. Fractional delay: Thiran all-pass. See "Fractional delay" below. */
 } n60_stage_kind;
 
-/* Lane selection for the ABI v3 stages (DENOISER, DYN_EQ, FIR, COMPRESSOR, EXPANDER):
+/* Fractional delay (ABI v11). params: [0] whole frames, the integer part of the requested delay
+ * (0..8190), [1] fraction (0..1). The core designs the same causal Thiran all-pass (highest stable
+ * order up to 3, exact integer delays bypass the all-pass) the stereo kernel uses, in double, and
+ * runs it in float. paramCount 2, no capacityFrames, one independent delay line per lane. Both
+ * params are topology: a change is a new snapshot (the host fades the rebuild). Latency is [0]. State (an 8192-frame ring, about 21 ms at 384 kHz, and the all-pass history, float like the kernel) is zeroed at snapshot build and never rebuilt in place.
+ *
+ * Lane selection for the ABI v3 stages (DENOISER, DYN_EQ, FIR, COMPRESSOR, EXPANDER):
  * laneMask != 0 selects exactly the lanes whose bit is set (bit c = output lane c; laneA
  * must then be 0); otherwise laneA picks one lane or N60_LANE_ALL. Stages that link lanes
  * (see each kind) treat the selected lanes as one group, so one stage with N60_LANE_ALL

@@ -8,7 +8,7 @@
   builds one slice in a fresh context), realtime-reviewer (Sonnet), and code-scout,
   build-test-runner, plan-tracker, pr-writer (Haiku). `/next` itself runs on Sonnet.
 
-**Current focus:** E6: rest of S8d (stereo crossover and bass management, mixed phase, soft clipper, gain rider, fractional delay), then S8e, S9, S10, S11. After E6, follow the Execution order in `docs/PROGRAM_PLAN.md` (E11 next).
+**Current focus:** E6 (unified graph), S8d group 4: stereo crossover and bass management, soft clipper, gain rider; then S8e, S9, S10, S11. After E6, follow the Execution order in `docs/PROGRAM_PLAN.md` (E11 next).
 <!-- plan-tracker keeps the line above current -->
 
 @AGENTS.md

@@ -704,7 +704,7 @@ final class UnifiedGraphStageParityTests: XCTestCase {
         }
     }
 
-    func testIntegerInterChannelDelayMatchesTheKernelAndFractionalKeepsTheKernel() throws {
+    func testIntegerInterChannelDelayMatchesTheKernel() throws {
         for rate in Self.rates {
             var s = N60DSPGraphSnapshotMakeUnity(rate)
             // 48 frames: an exact integer at every rate, so the kernel bypasses its all-pass.
@@ -714,10 +714,33 @@ final class UnifiedGraphStageParityTests: XCTestCase {
             XCTAssertTrue(N60DSPGraphSnapshotSetInterChannelDelay(&s, -(48.0 * 1000.0 / rate)))
             try assertParity(s, rate: rate, "negative integer delay")
         }
-        var s = N60DSPGraphSnapshotMakeUnity(48_000)
-        XCTAssertTrue(N60DSPGraphSnapshotSetInterChannelDelay(&s, 0.3))
-        XCTAssertGreaterThan(s.interChannelDelay.right.order, 0)
-        XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000))
+    }
+
+    /// E6 S8d group 3: the Thiran fractional delay runs as FRAC_DELAY stages and matches the kernel.
+    func testFractionalInterChannelDelayMatchesTheKernelAtEveryRate() throws {
+        for rate in Self.rates {
+            for delayMilliseconds in [0.3, -0.713, 6.25] {
+                var s = N60DSPGraphSnapshotMakeUnity(rate)
+                XCTAssertTrue(N60DSPGraphSnapshotSetInterChannelDelay(&s, delayMilliseconds))
+                try assertParity(s, rate: rate, "fractional delay \(delayMilliseconds) ms")
+            }
+        }
+    }
+
+    /// E6 S8d group 3: mixed-phase EQ is all-pass correction sections in the EQ band list.
+    func testMixedPhaseEQMatchesTheKernelAtEveryRate() throws {
+        for rate in Self.rates {
+            var s = N60DSPGraphSnapshotMakeUnity(rate)
+            XCTAssertTrue(N60DSPGraphSnapshotSetEQBandForChannels(
+                &s, 0, UInt8(N60_EQ_CHANNEL_STEREO), N60BiquadFilterTypePeaking, 1_500, -4, 1.1, true))
+            XCTAssertTrue(N60DSPGraphSnapshotSetEQBandForChannels(
+                &s, 1, UInt8(N60_EQ_CHANNEL_STEREO), N60BiquadFilterTypeAllPass, 300, 0, 0.7, true))
+            XCTAssertTrue(N60DSPGraphSnapshotSetEQBandForChannels(
+                &s, 2, UInt8(N60_EQ_CHANNEL_STEREO), N60BiquadFilterTypeAllPass, 4_000, 0, 1.3, true))
+            s.mixedPhaseEnabled = true
+            s.mixedPhaseCorrectionSectionCount = 2
+            try assertParity(s, rate: rate, "mixed phase")
+        }
     }
 
     func testAmbientCompensationMatchesTheKernelAtEveryRate() throws {
@@ -779,9 +802,6 @@ final class UnifiedGraphStageParityTests: XCTestCase {
         XCTAssertTrue(N60DynamicsSnapshotSetExpander(&s.dynamics, 48_000, true, -26, 2, -30, 2, 80))
         XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000),
                      "the kernel runs ambient before its expander, the core after")
-        s = N60DSPGraphSnapshotMakeUnity(48_000)
-        s.mixedPhaseEnabled = true
-        XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000))
         s = N60DSPGraphSnapshotMakeUnity(48_000)
         s.dynamics.dynamicEQ.enabled = true
         XCTAssertNotNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000),
