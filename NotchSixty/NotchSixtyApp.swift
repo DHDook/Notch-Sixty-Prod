@@ -1554,10 +1554,9 @@ enum VolumeFeedbackPresentation {
         )
     }
 
-    /// Console-style dB marks on the software-volume fader, from 0 dB down.
-    /// The loudness taper makes the slider position the level itself, so
-    /// each mark sits at `level(forSoftwareTaperDB:)`; −∞ is the bottom stop.
-    static let faderTickDecibels: [Double] = [0, -5, -10, -20, -30, -40, -60]
+    /// Marks on the fader in the percent step modes, where position is the
+    /// level itself and the readout is a percentage.
+    static let faderTickPercents: [Int] = [0, 25, 50, 75, 100]
 
     /// Marks on the dB-linear fader: evenly spaced, since position is dB.
     static let decibelFaderTickDecibels: [Double] = [0, -10, -20, -30, -40, -50, -60, -70]
