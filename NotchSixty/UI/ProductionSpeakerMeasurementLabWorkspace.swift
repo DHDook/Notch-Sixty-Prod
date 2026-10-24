@@ -405,7 +405,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                                     }
                                 }
                                 .labelsHidden()
-                                .frame(width: 150)
+                                .frame(minWidth: 150)
                                 TextField(
                                     "Optional label",
                                     text:
@@ -623,7 +623,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
             }
         }
         .labelsHidden()
-        .frame(width: 120)
+        .frame(minWidth: 120)
     }
 
     @ViewBuilder

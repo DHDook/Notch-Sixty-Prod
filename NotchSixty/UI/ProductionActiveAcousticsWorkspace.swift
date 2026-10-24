@@ -266,7 +266,6 @@ struct ProductionActiveAcousticsWorkspace: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                .productionGlassPickerChrome()
                 .frame(maxWidth: 520)
 
                 switch selection {
@@ -343,7 +342,6 @@ struct ProductionActiveAcousticsWorkspace: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                .productionGlassPickerChrome()
 
                 Divider()
 

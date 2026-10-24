@@ -90,10 +90,9 @@ struct ProductionEqualizerView: View {
                         )) {
                             ForEach(EQChannelMode.allCases) { mode in Text(mode.displayName).tag(mode) }
                         }
-                        .productionGlassPickerChrome()
                         .labelsHidden()
                         .pickerStyle(.segmented)
-                        .frame(width: 300)
+                        .fixedSize()
 
                         if configuration.channelMode != .linked {
                             Picker("Edit Channel", selection: Binding(
@@ -102,10 +101,9 @@ struct ProductionEqualizerView: View {
                             )) {
                                 ForEach(editChannels) { channel in Text(channel.displayName).tag(channel) }
                             }
-                            .productionGlassPickerChrome()
                             .labelsHidden()
                             .pickerStyle(.segmented)
-                            .frame(width: 160)
+                            .fixedSize()
                         }
                     }
                 }
@@ -122,10 +120,9 @@ struct ProductionEqualizerView: View {
                     )) {
                         ForEach(EQPhaseMode.allCases) { mode in Text(mode.displayName).tag(mode) }
                     }
-                    .productionGlassPickerChrome()
                     .labelsHidden()
                     .pickerStyle(.segmented)
-                    .frame(width: 330)
+                    .fixedSize()
                 }
 
                 Spacer(minLength: 8)
@@ -334,7 +331,6 @@ struct ProductionEqualizerView: View {
                             )
                     }
                 }
-                .productionGlassPickerChrome()
                 .labelsHidden()
                 .frame(width: 180)
             }
@@ -385,9 +381,8 @@ struct ProductionEqualizerView: View {
                     Picker("Slope", selection: binding.slope) {
                         ForEach(EQFilterSlope.allCases) { slope in Text(slope.displayName).tag(slope) }
                     }
-                    .productionGlassPickerChrome()
                     .labelsHidden()
-                    .frame(width: 150)
+                    .frame(minWidth: 150)
                 }
             }
 
@@ -437,8 +432,7 @@ struct ProductionEqualizerView: View {
                     Picker("Direction", selection: binding.dynamic.direction) {
                         ForEach(DynamicEQDirection.allCases) { direction in Text(direction.displayName).tag(direction) }
                     }
-                    .productionGlassPickerChrome()
-                    .labelsHidden().frame(width: 150)
+                    .labelsHidden().frame(minWidth: 150)
                     .disabled(band.type == .notch)
                 }
 
@@ -452,8 +446,7 @@ struct ProductionEqualizerView: View {
                     Picker("Detector", selection: binding.dynamic.detectorMode) {
                         ForEach(DynamicEQDetectorMode.allCases) { mode in Text(mode.displayName).tag(mode) }
                     }
-                    .productionGlassPickerChrome()
-                    .labelsHidden().frame(width: 120)
+                    .labelsHidden().frame(minWidth: 120)
                 }
 
                 if band.dynamic.detectorMode == .rms {

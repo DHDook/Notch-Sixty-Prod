@@ -827,6 +827,25 @@ struct MasterVolumeConfiguration: Equatable, Sendable {
         return 20 * log10(gain)
     }
 
+    /// Bottom of the dB-linear fader, the same floor the dB key steps use.
+    static let decibelFaderFloor = MasterVolumeKeyStep.decibelFloor
+
+    /// Fader position (0…1) for `level` on the dB-linear fader shown in the
+    /// dB step modes: position is linear in dB, as on a DAW fader, from
+    /// `decibelFaderFloor` at the bottom to 0 dB at the top; silence is 0.
+    /// Only the slider mapping changes, so a level keeps its gain when the
+    /// step mode changes.
+    static func decibelFaderPosition(forLevel level: Double) -> Double {
+        guard let decibels = softwareTaperDB(forLevel: level) else { return 0 }
+        return min(max(1 - decibels / decibelFaderFloor, 0), 1)
+    }
+
+    /// The inverse of `decibelFaderPosition`: position 0 is silence.
+    static func level(forDecibelFaderPosition position: Double) -> Double {
+        guard position.isFinite, position > 0 else { return 0 }
+        return level(forSoftwareTaperDB: decibelFaderFloor * (1 - min(position, 1)))
+    }
+
     func softwareGain(for capabilities: MasterVolumeDeviceCapabilities) -> Float {
         let volumeGain = capabilities.controlMode == .device
             ? 1.0

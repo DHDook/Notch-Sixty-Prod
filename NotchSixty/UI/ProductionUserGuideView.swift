@@ -169,7 +169,7 @@ enum ProductionUserGuideCatalog {
                     "first-sound",
                     "3. Make first sound deliberately",
                     [
-                        "Start Processing only after routing and system state look correct. Processing never starts merely because Notch Sixty launches or because Launch at Login is enabled.",
+                        "Switch Processing on only after routing and system state look correct. Processing never starts merely because Notch Sixty launches or because Launch at Login is enabled.",
                         "Use familiar program material at a conservative level. Confirm that the expected device is producing sound and that Dashboard or Meters activity follows the program. Global Bypass provides a fast processed-versus-unprocessed check without discarding configuration.",
                         "After basic playback is stable, Meters → Dynamics can show true-peak and gain-structure evidence. Headroom Assistant is optional: use a representative loud passage, not a quiet excerpt, and treat its result as an advisory reserve recommendation rather than a guarantee about every possible recording."
                     ]

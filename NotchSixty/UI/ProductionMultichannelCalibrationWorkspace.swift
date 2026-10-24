@@ -255,7 +255,6 @@ struct ProductionMultichannelCalibrationWorkspace: View {
                                         .tag(Optional(device.uid))
                                 }
                             }
-                            .productionGlassPickerChrome()
                             .labelsHidden()
                             .frame(minWidth: 330)
                             .disabled(calibration.state == .measuring || calibration.state == .analyzing)
