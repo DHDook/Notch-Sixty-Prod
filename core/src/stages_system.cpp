@@ -211,7 +211,8 @@ struct ProtCfg {
     float drive, threshold, knee, comp, trimPos, trimNeg;
     bool riderCfg;  // the stage carries the v12 parameters: the rider state tracks even while it is off
     bool rider;
-    float riderTarget, riderMax, riderMeasCoef, riderRespCoef;
+    float riderTarget, riderMax;
+    double riderMeasCoef, riderRespCoef;  // double: float cannot hold 1 - 9e-8 (30 s at 384 kHz)
 };
 
 uint32_t osLatency(uint32_t factor) { return factor == 2 ? 32u : (factor == 4 ? 48u : 0u); }
@@ -248,8 +249,8 @@ ProtCfg protCfg(const float *p, double rate, uint32_t n) {
         c.riderTarget = p[15];
         c.riderMax = p[16];
         const float seconds = p[17] == 0.0f ? 3.0f : (p[17] == 2.0f ? 30.0f : 10.0f);
-        c.riderMeasCoef = std::exp(-1.0f / std::fmax(1.0f, 1.0f * static_cast<float>(rate)));
-        c.riderRespCoef = std::exp(-1.0f / std::fmax(1.0f, seconds * static_cast<float>(rate)));
+        c.riderMeasCoef = std::exp(-1.0 / std::fmax(1.0, static_cast<double>(rate)));
+        c.riderRespCoef = std::exp(-1.0 / std::fmax(1.0, static_cast<double>(seconds) * static_cast<double>(rate)));
     }
     return c;
 }
@@ -1633,27 +1634,28 @@ void runProtection(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
             if (!(std::fabs(ptr[l][i]) <= 3.0e38f)) ptr[l][i] = 0.0f;
         }
     }
-    float sustained = static_cast<float>(sh.riderSustained);
-    float atten = static_cast<float>(sh.riderAtten);
-    float gainAtten = -1.0f, riderGain = 1.0f;
+    double sustained = sh.riderSustained;
+    double atten = sh.riderAtten;
+    double gainAtten = -1.0;
+    float riderGain = 1.0f;
     for (uint32_t i = 0; i < frames; ++i) {
         if (c.riderCfg) {
             // The kernel's update_gain_rider, once per frame from the limiter gain as the previous frame left it.
-            const float inst = c.limiter && sh.gain < 1.0
-                                   ? std::fmax(0.0f, -20.0f * std::log10(std::fmax(static_cast<float>(sh.gain), kEps)))
-                                   : 0.0f;
+            const double inst = c.limiter && sh.gain < 1.0
+                                    ? std::fmax(0.0, static_cast<double>(-20.0f * std::log10(std::fmax(static_cast<float>(sh.gain), kEps))))
+                                    : 0.0;
             sustained = inst + c.riderMeasCoef * (sustained - inst);
-            float desired = 0.0f;
+            double desired = 0.0;
             if (c.rider && c.limiter) {
-                desired = std::fmin(c.riderMax, std::fmax(0.0f, atten + (sustained - c.riderTarget)));
+                desired = std::fmin(static_cast<double>(c.riderMax), std::fmax(0.0, atten + (sustained - static_cast<double>(c.riderTarget))));
             }
             atten = desired + c.riderRespCoef * (atten - desired);
-            if (atten < 1e-6f) atten = 0.0f;  // flush the decaying tail (no denormals, no endless pow)
-            if (atten != 0.0f) {
+            if (atten < 1e-6) atten = 0.0;  // flush the decaying tail (no denormals, no endless pow)
+            if (atten != 0.0) {
                 // The rider moves over seconds: redo the pow only after a 1e-4 dB change (a 1e-5 relative gain error).
-                if (std::fabs(atten - gainAtten) > 1.0e-4f) {
+                if (std::fabs(atten - gainAtten) > 1.0e-4) {
                     gainAtten = atten;
-                    riderGain = dbToLin(-atten);
+                    riderGain = dbToLin(static_cast<float>(-atten));
                 }
                 const float g = riderGain;
                 for (uint32_t l = 0; l < n; ++l) ptr[l][i] *= g;
@@ -1714,8 +1716,8 @@ void runProtection(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
         }
     }
 
-    sh.riderSustained = static_cast<double>(sustained);
-    sh.riderAtten = static_cast<double>(atten);
+    sh.riderSustained = sustained;
+    sh.riderAtten = atten;
 
     // Readbacks for the control thread (relaxed atomics; peaks reset by the reader).
     const float grMax = minGain < 1.0 ? static_cast<float>(-20.0 * std::log10(std::fmax(minGain, 1e-12))) : 0.0f;
