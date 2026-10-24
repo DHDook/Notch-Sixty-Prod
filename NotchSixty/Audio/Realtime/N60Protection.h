@@ -60,8 +60,8 @@ typedef struct {
     float gainRiderTargetGRDB;
     float gainRiderMaxReductionDB;
     N60GainRiderSpeed gainRiderSpeed;
-    float gainRiderMeasurementCoefficient;
-    float gainRiderResponseCoefficient;
+    double gainRiderMeasurementCoefficient;
+    double gainRiderResponseCoefficient;
 } N60ProtectionSnapshot;
 
 typedef struct N60ProtectionRuntime N60ProtectionRuntime;

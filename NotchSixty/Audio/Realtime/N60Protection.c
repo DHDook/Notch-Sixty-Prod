@@ -56,8 +56,8 @@ struct N60ProtectionRuntime {
     float limiterDelayRight[N60_PROTECTION_MAX_LOOKAHEAD_HIGH_SAMPLES + 1u];
     uint64_t limiterSequence;
     float limiterGain;
-    float gainRiderAttenuationDB;
-    float sustainedLimiterGainReductionDB;
+    double gainRiderAttenuationDB;  // double: the 30 s coefficient at 384 kHz is 1 - 9e-8
+    double sustainedLimiterGainReductionDB;
 
     float peakDequeValue[N60_PROTECTION_MAX_LOOKAHEAD_HIGH_SAMPLES + 1u];
     uint64_t peakDequeIndex[N60_PROTECTION_MAX_LOOKAHEAD_HIGH_SAMPLES + 1u];
@@ -81,8 +81,8 @@ static float linear_to_db(float linear) {
     return 20.0f * log10f(fmaxf(linear, N60_EPSILON));
 }
 
-static float coefficient_for_seconds(double sampleRate, float seconds) {
-    return expf(-1.0f / fmaxf(1.0f, seconds * (float)sampleRate));
+static double coefficient_for_seconds(double sampleRate, float seconds) {
+    return exp(-1.0 / fmax(1.0, (double)seconds * sampleRate));
 }
 
 static uint32_t oversampling_latency_frames(N60OversamplingFactor factor) {
@@ -282,8 +282,8 @@ bool N60ProtectionSnapshotIsValid(const N60ProtectionSnapshot *snapshot) {
         && isfinite(snapshot->gainRiderTargetGRDB) && snapshot->gainRiderTargetGRDB >= 0.5f && snapshot->gainRiderTargetGRDB <= 6.0f
         && isfinite(snapshot->gainRiderMaxReductionDB) && snapshot->gainRiderMaxReductionDB >= 3.0f && snapshot->gainRiderMaxReductionDB <= 12.0f
         && snapshot->gainRiderSpeed >= N60GainRiderSpeedFast && snapshot->gainRiderSpeed <= N60GainRiderSpeedSlow
-        && isfinite(snapshot->gainRiderMeasurementCoefficient) && snapshot->gainRiderMeasurementCoefficient >= 0.0f && snapshot->gainRiderMeasurementCoefficient < 1.0f
-        && isfinite(snapshot->gainRiderResponseCoefficient) && snapshot->gainRiderResponseCoefficient >= 0.0f && snapshot->gainRiderResponseCoefficient < 1.0f
+        && isfinite(snapshot->gainRiderMeasurementCoefficient) && snapshot->gainRiderMeasurementCoefficient >= 0.0 && snapshot->gainRiderMeasurementCoefficient < 1.0
+        && isfinite(snapshot->gainRiderResponseCoefficient) && snapshot->gainRiderResponseCoefficient >= 0.0 && snapshot->gainRiderResponseCoefficient < 1.0
         && isfinite(snapshot->limiterCeilingLinear) && snapshot->limiterCeilingLinear > 0.0f
         && snapshot->limiterCeilingLinear <= 1.0f
         && isfinite(snapshot->limiterAttackMs)
@@ -322,8 +322,8 @@ void N60ProtectionRuntimeReset(N60ProtectionRuntime *runtime) {
 
     runtime->limiterSequence = 0u;
     runtime->limiterGain = 1.0f;
-    runtime->gainRiderAttenuationDB = 0.0f;
-    runtime->sustainedLimiterGainReductionDB = 0.0f;
+    runtime->gainRiderAttenuationDB = 0.0;
+    runtime->sustainedLimiterGainReductionDB = 0.0;
 
     runtime->peakDequeHead = 0u;
     runtime->peakDequeCount = 0u;
@@ -540,26 +540,26 @@ static void update_gain_rider(
     N60ProtectionRuntime *runtime,
     const N60ProtectionSnapshot *snapshot
 ) {
-    float instantaneousGRDB = snapshot->limiterEnabled
-        ? fmaxf(0.0f, -linear_to_db(fminf(runtime->limiterGain, 1.0f)))
-        : 0.0f;
+    double instantaneousGRDB = snapshot->limiterEnabled
+        ? fmax(0.0, (double)-linear_to_db(fminf(runtime->limiterGain, 1.0f)))
+        : 0.0;
     runtime->sustainedLimiterGainReductionDB = instantaneousGRDB
         + snapshot->gainRiderMeasurementCoefficient
             * (runtime->sustainedLimiterGainReductionDB - instantaneousGRDB);
 
-    float desiredAttenuationDB = 0.0f;
+    double desiredAttenuationDB = 0.0;
     if (snapshot->gainRiderEnabled && snapshot->limiterEnabled) {
         // Integral-style correction: once sustained limiter GR settles at the
         // requested target, attenuation is held instead of collapsing back to 0.
-        float errorDB = runtime->sustainedLimiterGainReductionDB - snapshot->gainRiderTargetGRDB;
-        desiredAttenuationDB = fminf(snapshot->gainRiderMaxReductionDB,
-            fmaxf(0.0f, runtime->gainRiderAttenuationDB + errorDB));
+        double errorDB = runtime->sustainedLimiterGainReductionDB - (double)snapshot->gainRiderTargetGRDB;
+        desiredAttenuationDB = fmin((double)snapshot->gainRiderMaxReductionDB,
+            fmax(0.0, runtime->gainRiderAttenuationDB + errorDB));
     }
     runtime->gainRiderAttenuationDB = desiredAttenuationDB
         + snapshot->gainRiderResponseCoefficient
             * (runtime->gainRiderAttenuationDB - desiredAttenuationDB);
-    runtime->telemetry.gainRiderAttenuationDB = runtime->gainRiderAttenuationDB;
-    runtime->telemetry.sustainedLimiterGainReductionDB = runtime->sustainedLimiterGainReductionDB;
+    runtime->telemetry.gainRiderAttenuationDB = (float)runtime->gainRiderAttenuationDB;
+    runtime->telemetry.sustainedLimiterGainReductionDB = (float)runtime->sustainedLimiterGainReductionDB;
     runtime->telemetry.truePeakGuardActive = snapshot->limiterEnabled && snapshot->truePeakGuardEnabled;
 }
 
@@ -574,8 +574,8 @@ void N60ProtectionProcessStereoFrame(
     if (snapshot->effectiveFactor == N60OversamplingFactor1x
         && !snapshot->softClipperEnabled
         && !snapshot->limiterEnabled) {
-        runtime->gainRiderAttenuationDB = 0.0f;
-        runtime->sustainedLimiterGainReductionDB = 0.0f;
+        runtime->gainRiderAttenuationDB = 0.0;
+        runtime->sustainedLimiterGainReductionDB = 0.0;
         runtime->telemetry.gainRiderAttenuationDB = 0.0f;
         runtime->telemetry.sustainedLimiterGainReductionDB = 0.0f;
         runtime->telemetry.truePeakGuardActive = false;
@@ -583,7 +583,7 @@ void N60ProtectionProcessStereoFrame(
     }
 
     update_gain_rider(runtime, snapshot);
-    float riderGain = db_to_linear(-runtime->gainRiderAttenuationDB);
+    float riderGain = db_to_linear((float)-runtime->gainRiderAttenuationDB);
     *left *= riderGain;
     *right *= riderGain;
 
