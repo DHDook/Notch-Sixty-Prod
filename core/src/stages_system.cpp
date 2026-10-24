@@ -186,6 +186,7 @@ uint32_t expectedParamCount(uint32_t kind, const float *p, uint32_t have) {
         case N60_STAGE_PAUSE_GATE: return 5;
         case N60_STAGE_PROTECTION: return 7;
         case N60_STAGE_MUTE: return 1;
+        case N60_STAGE_FRAC_DELAY: return 2;
         case N60_STAGE_ANC_GUARD: return kGuardParams;
         case N60_STAGE_ANC_INJECT: return have == 4 ? 4u : 3u;
         case N60_STAGE_ANC_CAPTURE: return 1;
@@ -288,6 +289,43 @@ struct BassShared {
     int32_t lfeLane;
     BassSub sub[kBassMaxSubs];
 };
+// Fractional delay (ABI v11): the kernel's causal Thiran all-pass (N60FractionalDelay.h), designed in double.
+constexpr uint32_t kFdCapacity = 8192;
+struct FdLane {
+    uint32_t wp, order, intFrames, pad;
+    float den[4];
+    float inH[3], outH[3];
+    float ring[kFdCapacity];
+};
+void fdDesign(double total, FdLane &d) {
+    d.order = 0;
+    d.den[0] = 1.0f;
+    const double fl = std::floor(total);
+    const double fr = total - fl;
+    if (fr < 1.0e-6 || (1.0 - fr) < 1.0e-6) {
+        d.intFrames = static_cast<uint32_t>(std::llround(total));
+        return;
+    }
+    const uint32_t floorFrames = static_cast<uint32_t>(fl);
+    const uint32_t order = floorFrames >= 2u ? 3u : floorFrames + 1u;
+    const uint32_t designedInt = floorFrames - (order - 1u);
+    d.intFrames = floorFrames;  // plain integer delay if the design below is rejected
+    const double want = static_cast<double>(order - 1u) + fr;
+    static const double binom[4][4] = {{1, 0, 0, 0}, {1, 1, 0, 0}, {1, 2, 1, 0}, {1, 3, 3, 1}};
+    float den[4] = {1.0f, 0.0f, 0.0f, 0.0f};
+    for (uint32_t k = 1; k <= order; ++k) {
+        double prod = 1.0;
+        for (uint32_t n = 0; n <= order; ++n) {
+            prod *= (want - order + n) / (want - order + k + n);
+        }
+        const double c = ((k & 1u) ? -1.0 : 1.0) * binom[order][k] * prod;
+        if (!std::isfinite(c) || std::fabs(c) >= 1.0) return;  // unreachable for validated ranges: stay a plain integer delay
+        den[k] = static_cast<float>(c);
+    }
+    d.order = order;
+    d.intFrames = designedInt;
+    for (uint32_t k = 0; k <= order; ++k) d.den[k] = den[k];
+}
 struct MuteLane {
     Ramp g;
     float seen;
@@ -375,6 +413,7 @@ bool isSystemKind(uint32_t kind) {
         case N60_STAGE_ANC_INJECT:
         case N60_STAGE_PROTECTION:
         case N60_STAGE_MUTE:
+        case N60_STAGE_FRAC_DELAY:
         case N60_STAGE_ANC_CAPTURE: return true;
         default: return false;
     }
@@ -437,6 +476,7 @@ bool paramOk(uint32_t kind, uint32_t i, float v, const float *p, double rate, ui
                 default: return v == 1.0f || v == 2.0f || v == 4.0f;
             }
         case N60_STAGE_MUTE: return v == 0.0f || v == 1.0f;
+        case N60_STAGE_FRAC_DELAY: return i == 0 ? (isInt(v) && v >= 0.0f && v <= static_cast<float>(kFdCapacity - 2u)) : inR(v, 0.0, 1.0);
         case N60_STAGE_ANC_GUARD:
             switch (i) {
                 case 0:
@@ -549,6 +589,7 @@ void systemSizes(const n60_stage_desc &s, double rate, size_t &perLane, size_t &
         case N60_STAGE_PAUSE_GATE: shared = up(sizeof(GateShared)); break;
         case N60_STAGE_BASS_MGMT: perLane = up(sizeof(BassLane)); shared = up(sizeof(BassShared)); break;
         case N60_STAGE_MUTE: perLane = up(sizeof(MuteLane)); break;
+        case N60_STAGE_FRAC_DELAY: perLane = up(sizeof(FdLane)); break;
         case N60_STAGE_ANC_INJECT: shared = up(sizeof(InjectShared)); break;
         case N60_STAGE_ANC_GUARD: shared = up(sizeof(GuardState)); break;
         case N60_STAGE_ANC_CAPTURE:
@@ -706,6 +747,12 @@ void systemInit(SnapHeader *h, const StageRec &r) {
             s->lfeLane = static_cast<int32_t>(p[3]);
             break;
         }
+        case N60_STAGE_FRAC_DELAY:
+            for (uint32_t l = 0; l < r.laneCount; ++l) {
+                FdLane *d = reinterpret_cast<FdLane *>(laneState(h, r, l));
+                fdDesign(static_cast<double>(p[0]) + static_cast<double>(p[1]), *d);
+            }
+            break;
         case N60_STAGE_MUTE:
             for (uint32_t l = 0; l < r.laneCount; ++l) {
                 MuteLane *m = reinterpret_cast<MuteLane *>(laneState(h, r, l));
@@ -829,6 +876,7 @@ n60_status validateSystemParam(const SnapHeader *h, const StageRec &r, uint32_t 
 }
 
 uint32_t systemLatency(const SnapHeader *h, const StageRec &r) {
+    if (r.kind == N60_STAGE_FRAC_DELAY) return static_cast<uint32_t>(paramsOf(h, r)[0]);
     if (r.kind != N60_STAGE_PROTECTION) return 0;
     return protCfg(paramsOf(h, r), h->sampleRate).latency;
 }
@@ -1151,6 +1199,34 @@ void runBass(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
             bqFlush(s.sub[q].z[k]);
             if (s.sub[q].xf[k] != 0) bqFlush(s.sub[q].zN[k]);
         }
+    }
+}
+
+void runFracDelay(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
+    constexpr uint32_t mask = kFdCapacity - 1u;
+    for (uint32_t l = 0; l < r.laneCount; ++l) {
+        FdLane &d = *reinterpret_cast<FdLane *>(laneState(h, r, l));
+        float *buf = lanes[laneOf(r, l)];
+        uint32_t wp = d.wp;
+        for (uint32_t i = 0; i < frames; ++i) {
+            d.ring[wp] = buf[i];
+            const float x = d.ring[(wp + kFdCapacity - d.intFrames) & mask];
+            float y = x;
+            if (d.order != 0) {
+                const uint32_t n = d.order;
+                y = d.den[n] * x;
+                for (uint32_t k = 1; k <= n; ++k) y += d.den[n - k] * d.inH[k - 1] - d.den[k] * d.outH[k - 1];
+                for (uint32_t k = n - 1; k > 0; --k) {
+                    d.inH[k] = d.inH[k - 1];
+                    d.outH[k] = d.outH[k - 1];
+                }
+                d.inH[0] = x;
+                d.outH[0] = y;
+            }
+            buf[i] = y;
+            wp = (wp + 1u) & mask;
+        }
+        d.wp = wp;
     }
 }
 
@@ -1537,6 +1613,7 @@ void runSystem(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames)
         case N60_STAGE_PAUSE_GATE: runGate(h, r, lanes, frames); break;
         case N60_STAGE_BASS_MGMT: runBass(h, r, lanes, frames); break;
         case N60_STAGE_MUTE: runMute(h, r, lanes, frames); break;
+        case N60_STAGE_FRAC_DELAY: runFracDelay(h, r, lanes, frames); break;
         case N60_STAGE_ANC_INJECT: runInject(h, r, lanes, frames); break;
         case N60_STAGE_ANC_CAPTURE: runCapture(h, r, lanes, frames); break;
         case N60_STAGE_PROTECTION: runProtection(h, r, lanes, frames); break;

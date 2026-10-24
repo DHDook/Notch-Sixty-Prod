@@ -199,6 +199,32 @@ static inline bool N60UnifiedGraphIntegerDelay(
     return true;
 }
 
+// Fractional inter-channel delay (Thiran all-pass, ABI v11 FRAC_DELAY): the total delay in frames of each
+// lane, recovered from the signed delay and the rate and verified by redesigning the taps and comparing
+// them with the snapshot's, so any other tap source keeps the kernel.
+static inline bool N60UnifiedGraphFractionalDelay(
+    const N60DSPGraphSnapshot * _Nonnull s, double total[_Nonnull 2]
+) {
+    const N60InterChannelDelaySnapshot *d = &s->interChannelDelay;
+    if (!d->enabled || d->commonLatencyFrames != N60_FRACTIONAL_DELAY_COMMON_FRAMES) return false;
+    N60InterChannelDelaySnapshot rebuilt;
+    if (!N60InterChannelDelaySnapshotMake(s->sampleRate, d->signedDelayMs, &rebuilt)) return false;
+    const N60FractionalDelayTap *want[2] = {&rebuilt.left, &rebuilt.right};
+    const N60FractionalDelayTap *have[2] = {&d->left, &d->right};
+    for (int lane = 0; lane < 2; ++lane) {
+        if (want[lane]->integerFrames != have[lane]->integerFrames || want[lane]->order != have[lane]->order) return false;
+        for (uint32_t k = 0; k <= want[lane]->order; ++k) {
+            if (want[lane]->denominator[k] != have[lane]->denominator[k]) return false;
+        }
+    }
+    const double relative = fabs(d->signedDelayMs) * s->sampleRate / 1000.0;
+    const double common = (double)N60_FRACTIONAL_DELAY_COMMON_FRAMES;
+    if (!(common + relative < 8190.0)) return false;
+    total[0] = d->signedDelayMs > 0.0 ? common : common + relative;
+    total[1] = d->signedDelayMs > 0.0 ? common + relative : common;
+    return true;
+}
+
 // Spectral denoiser, in core parameter order: tuning, quality, reduction, threshold dBFS,
 // protected range on, protected low Hz, protected high Hz, profile command, profile revision.
 // The kernel derives its smoothing, FFT size and latency from tuning and quality alone, and the
@@ -339,9 +365,6 @@ static inline N60UnifiedGraphUnsupportedReason N60UnifiedGraphSnapshotUnsupporte
     if (s->bypassed || s->auditionMode != N60AuditionModeProcessed) {
         return N60UnifiedGraphUnsupportedBypassOrAudition;
     }
-    if (s->mixedPhaseEnabled) {
-        return N60UnifiedGraphUnsupportedMidSideOrMixedPhase;
-    }
     if (s->eqBandCount > N60_MAX_EQ_RENDER_SLOTS) return N60UnifiedGraphUnsupportedEQSection;
     uint32_t perLane[2] = {0u, 0u};
     for (uint32_t i = 0; i < s->eqBandCount; ++i) {
@@ -375,7 +398,10 @@ static inline N60UnifiedGraphUnsupportedReason N60UnifiedGraphSnapshotUnsupporte
     if (s->crossover.enabled) return N60UnifiedGraphUnsupportedCrossover;
     if (s->interChannelDelay.enabled) {
         uint32_t delayFrames[2];
-        if (!N60UnifiedGraphIntegerDelay(s, delayFrames)) return N60UnifiedGraphUnsupportedDelay;
+        double fractional[2];
+        if (!N60UnifiedGraphIntegerDelay(s, delayFrames) && !N60UnifiedGraphFractionalDelay(s, fractional)) {
+            return N60UnifiedGraphUnsupportedDelay;
+        }
     }
     const N60DynamicsSnapshot *d = &s->dynamics;
     if (d->stereoMode.mode != N60StereoModeStereo || d->stereoWidener.enabled

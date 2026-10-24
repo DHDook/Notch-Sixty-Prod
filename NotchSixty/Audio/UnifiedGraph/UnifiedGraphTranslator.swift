@@ -141,7 +141,16 @@ enum UnifiedGraphTranslator {
                     configuration.denoiserPark = UnifiedGraphDenoiserPark(
                         fftSize: view[0], revision: view[1], command: view[2]
                     )
-                } else { ok = false }
+                } else {
+                    var totals: (Double, Double) = (0, 0)
+                    let fractional = withUnsafeMutablePointer(to: &totals) { tuple in
+                        tuple.withMemoryRebound(to: Double.self, capacity: 2) { N60UnifiedGraphFractionalDelay(pointer, $0) }
+                    }
+                    if fractional {
+                        configuration.lanes[0].fractionalDelayFrames = totals.0
+                        configuration.lanes[1].fractionalDelayFrames = totals.1
+                    } else { ok = false }
+                }
             }
             // The kernel skips the dynamic EQ while the EQ is bypassed.
             if dynamics.dynamicEQ.enabled, !pointer.pointee.eqBypassed {

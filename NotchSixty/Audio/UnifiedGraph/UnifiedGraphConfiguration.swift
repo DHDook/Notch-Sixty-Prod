@@ -17,13 +17,20 @@ struct UnifiedGraphLane: Equatable, Sendable {
     var delayMilliseconds: Double = 0
     /// Whole frames of delay added to `delayMilliseconds` (the kernel's integer inter-channel taps).
     var delayFrames: UInt32 = 0
+    /// Total fractional (Thiran) delay in frames from the kernel's inter-channel delay; replaces `delayFrames`
+    /// with a FRAC_DELAY stage when set.
+    var fractionalDelayFrames: Double?
     var eq: [UnifiedGraphPEQSection] = []
 }
 
 extension UnifiedGraphLane {
     /// The kernel's integer inter-channel taps. The kernel applies them per lane without adding
     /// them to its snapshot latency, so they are not a path difference to align across a fade.
-    var interChannelTapFrames: UInt32 { delayFrames }
+    var interChannelTapFrames: UInt32 {
+        let fractional = fractionalDelayFrames ?? 0
+        guard fractional.isFinite, fractional >= 0, fractional < 8190 else { return delayFrames }
+        return delayFrames + UInt32(fractional.rounded(.down))
+    }
 }
 
 /// E6 S8d: the taps of a kernel convolver program (program FIR, room correction or speaker IR), as the control plane
@@ -255,7 +262,13 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
             add(N60_STAGE_PAUSE_GATE, Self.pauseGateStageId, mask: programMask, params: params)
         }
         for (index, lane) in lanes.enumerated() {
-            if let frames = try Self.delayFrames(lane.delayMilliseconds, extraFrames: lane.delayFrames,
+            if let total = lane.fractionalDelayFrames {
+                guard total.isFinite, total >= 0, total < 8190 else {
+                    throw UnifiedGraphError.invalidConfiguration("fractional delay")
+                }
+                add(N60_STAGE_FRAC_DELAY, Self.delayStageBase + UInt32(index), lane: UInt32(index),
+                    params: [Float(total.rounded(.down)), Float(total - total.rounded(.down))])
+            } else if let frames = try Self.delayFrames(lane.delayMilliseconds, extraFrames: lane.delayFrames,
                                                  sampleRate: sampleRate) {
                 add(N60_STAGE_DELAY, Self.delayStageBase + UInt32(index), lane: UInt32(index),
                     capacity: frames, params: [Float(frames)])
