@@ -214,7 +214,8 @@ static inline bool N60UnifiedGraphFractionalDelay(
     for (int lane = 0; lane < 2; ++lane) {
         if (want[lane]->integerFrames != have[lane]->integerFrames || want[lane]->order != have[lane]->order) return false;
         for (uint32_t k = 0; k <= want[lane]->order; ++k) {
-            if (want[lane]->denominator[k] != have[lane]->denominator[k]) return false;
+            // The two designs may be compiled with different floating-point contraction: allow rounding noise.
+            if (fabsf(want[lane]->denominator[k] - have[lane]->denominator[k]) > 1.0e-6f) return false;
         }
     }
     const double relative = fabs(d->signedDelayMs) * s->sampleRate / 1000.0;
