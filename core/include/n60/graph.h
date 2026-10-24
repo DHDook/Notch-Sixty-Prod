@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 11u
+#define N60_GRAPH_ABI_VERSION 12u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -93,8 +93,17 @@ typedef enum n60_stage_kind {
     /* ABI v6 matrix stage (E6 S7). See "Binaural" below. */
     N60_STAGE_BINAURAL = 32,      /* position 17.5: after CORE_DYNAMICS, before SYMMETRY. N source lanes in, two lanes out. */
     /* ABI v11 (E6 S8d group 3). */
-    N60_STAGE_FRAC_DELAY = 33     /* position 24, with DELAY. Fractional delay: Thiran all-pass. See "Fractional delay" below. */
+    N60_STAGE_FRAC_DELAY = 33,    /* position 24, with DELAY. Fractional delay: Thiran all-pass. See "Fractional delay" below. */
+    /* ABI v12 (E6 S8d group 4). */
+    N60_STAGE_STEREO_CROSSOVER = 34 /* position 13, with BASS_MGMT. Pair stage: stereo crossover. See "Stereo crossover" below. */
 } n60_stage_kind;
+
+/* Stereo crossover (ABI v12). Pair stage (laneA, laneB). params: [0] frequency Hz (>0, below Nyquist),
+ * [1] topology 0 LR24 or 1 LR48, [2] monitor mode 0 recombined, 1 mains only, 2 sub only, [3] sub gain (linear,
+ * >= 0), [4] sub polarity inverted (0/1), [5] sub phase alignment on (0/1), [6] alignment Hz, [7] alignment Q.
+ * paramCount 8, all fixed at build time. Mains are a high-pass per lane, the sub is (A + B) * 0.5 through the
+ * low-pass (then the all-pass), gain and polarity. Double-precision sections with a float result between them.
+ * Latency 0. Reset clears the section states. */
 
 /* Fractional delay (ABI v11). params: [0] whole frames, the integer part of the requested delay
  * (0..8190), [1] fraction (0..1). The core designs the same causal Thiran all-pass (highest stable
@@ -180,9 +189,15 @@ typedef enum n60_stage_kind {
  *  [3] fade-out ms (0.05..1000), [4] fade-in ms (0.05..5000). paramCount 5. Starts open.
  * PROTECTION (linked over its lanes). params: [0] limiter on (0/1), [1] ceiling dB (live, -20..0), [2] attack ms
  *  (live, 0.1..50), [3] release ms (live, 5..500), [4] look-ahead ms (0..20), [5] true-peak guard (0/1),
- *  [6] oversampling 1/2/4. paramCount 7. With the limiter and guard both on the factor is 4. Latency is the
- *  half-band delay (32 at 2x, 48 at 4x) plus ceil(look-ahead high samples / factor) frames. The kernel's soft
- *  clipper and gain rider are not part of this stage.
+ *  [6] oversampling 1/2/4. paramCount 7 (limiter only) or 18 (ABI v12, with the soft clipper and gain rider):
+ *  [7] clipper on (0/1), [8] drive dB (0..12), [9] threshold dB (-6..0), [10] knee 0..1, [11] curve 0..3
+ *  (quadratic, cubic, sine, asymmetric tube), [12] auto compensation (0/1), [13] asymmetry trim dB (-3..3),
+ *  [14] gain rider on (0/1), [15] target reduction dB (0.5..6), [16] max reduction dB (3..12), [17] speed 0/1/2
+ *  (3, 10, 30 s). With the limiter and guard both on the factor is 4. Latency is the half-band delay (32 at 2x,
+ *  48 at 4x) plus ceil(look-ahead high samples / factor) frames. With the limiter off the stage is a bypass
+ *  unless the clipper is on, when it runs at factor [6]. The clipper acts per oversampled sample before the
+ *  limiter; the rider (active only with the limiter on) scales each frame by the sustained limiter reduction
+ *  before oversampling. Its state is carried across a rebuild.
  * MUTE. params: [0] muted (0/1, live); 10 ms ramp.
  * ANC_GUARD (laneA = anti-noise lane, modified in place; the error and reference lanes are read-only).
  *  params: [0] error lane (-1 none), [1] reference lane (-1 none), [2] growth dB per 20 ms (0.5..40),

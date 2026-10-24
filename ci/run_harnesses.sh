@@ -206,6 +206,8 @@ if selected e6_core_graph; then
             "${CORE_OBJS[@]}" -lc++ -lm
         harness e6_core_protection_parity "${STRICT[@]}" -O2 -Icore/include core/tests/test_protection_parity.c \
             "$RT/N60Protection.c" "${CORE_OBJS[@]}" -lc++ -lm
+        harness e6_core_xover_clipper_parity "${STRICT[@]}" -O2 -Icore/include core/tests/test_xover_clipper_parity.c \
+            "$RT/N60Protection.c" "${CORE_OBJS[@]}" -lc++ -lm
         harness e6_core_fracdelay_parity "${STRICT[@]}" -O2 -Icore/include core/tests/test_fracdelay_parity.c \
             "${CORE_OBJS[@]}" -lc++ -lm
         harness e6_core_system "${STRICT[@]}" -O2 -Icore/include core/tests/test_system.c \

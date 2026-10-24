@@ -191,6 +191,7 @@ uint32_t rankBase(uint32_t kind) {
         case N60_STAGE_EXPANDER: return 11;
         case N60_STAGE_METER_OUT: return 12;
         case N60_STAGE_BASS_MGMT: return 13;
+        case N60_STAGE_STEREO_CROSSOVER: return 13;
         case N60_STAGE_ROOM_FIR: return 14;
         case N60_STAGE_SPEAKER_IR: return 15;
         case N60_STAGE_AMBIENT: return 16;

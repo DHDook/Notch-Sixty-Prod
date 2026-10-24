@@ -65,6 +65,8 @@ struct UnifiedGraphStereoStages: Equatable, Sendable {
     /// Room correction and speaker IR (kernel: after bass management's slot, before ambient and the core dynamics).
     var roomFIR: UnifiedGraphFIRProgram?
     var speakerIR: UnifiedGraphFIRProgram?
+    /// Stereo crossover and bass management of the kernel's snapshot (core stage parameters, 8 values; E6 S8d group 4).
+    var crossover: [Float]?
 
     var isEmpty: Bool { self == UnifiedGraphStereoStages() }
 }
@@ -95,6 +97,26 @@ struct UnifiedGraphProtection: Equatable, Sendable {
     var lookAheadMilliseconds: Double
     var truePeakGuard: Bool
     var oversampling: Int
+    /// ABI v12 extension: the soft clipper and the gain rider (nil leaves the stage at its seven-parameter form).
+    var clipper: UnifiedGraphSoftClipper?
+    var rider: UnifiedGraphGainRider?
+}
+
+struct UnifiedGraphSoftClipper: Equatable, Sendable {
+    var enabled: Bool
+    var driveDB: Double
+    var thresholdDB: Double
+    var knee: Double
+    var curve: Int
+    var autoCompensate: Bool
+    var asymmetryDB: Double
+}
+
+struct UnifiedGraphGainRider: Equatable, Sendable {
+    var enabled: Bool
+    var targetDB: Double
+    var maxDB: Double
+    var speed: Int
 }
 
 /// What the engine wants rendered: program lanes (and optional sub lanes) in the shipping
@@ -219,6 +241,11 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
         }
         add(N60_STAGE_METER_OUT, N60_LSTAGE_METER_OUT, lane: all)
 
+        if let params = stereo.crossover {
+            stages.append(UnifiedGraphStageSpec(
+                kind: N60_STAGE_STEREO_CROSSOVER.rawValue, stageId: Self.crossoverStageId, laneA: 0, laneB: 1,
+                params: params))
+        }
         if let bass = bassManagement {
             let lfe = bass.lfeLane
             var mainMask: UInt64 = 0
@@ -284,11 +311,22 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
         if let protection {
             var mask: UInt64 = 0
             for index in 0..<programLanes { mask |= UInt64(1) << UInt64(index) }
-            add(N60_STAGE_PROTECTION, N60_LSTAGE_PROTECTION, mask: mask, params: [
+            var params: [Float] = [
                 protection.limiterEnabled ? 1 : 0, Float(protection.ceilingDB), Float(protection.attackMilliseconds),
                 Float(protection.releaseMilliseconds), Float(protection.lookAheadMilliseconds),
                 protection.truePeakGuard ? 1 : 0, Float(protection.oversampling),
-            ])
+            ]
+            if protection.clipper != nil || protection.rider != nil {
+                let c = protection.clipper ?? UnifiedGraphSoftClipper(
+                    enabled: false, driveDB: 0, thresholdDB: 0, knee: 0, curve: 0, autoCompensate: false, asymmetryDB: 0)
+                let r = protection.rider ?? UnifiedGraphGainRider(enabled: false, targetDB: 2, maxDB: 6, speed: 1)
+                params += [
+                    c.enabled ? 1 : 0, Float(c.driveDB), Float(c.thresholdDB), Float(c.knee), Float(c.curve),
+                    c.autoCompensate ? 1 : 0, Float(c.asymmetryDB),
+                    r.enabled ? 1 : 0, Float(r.targetDB), Float(r.maxDB), Float(r.speed),
+                ]
+            }
+            add(N60_STAGE_PROTECTION, N60_LSTAGE_PROTECTION, mask: mask, params: params)
         }
         add(N60_STAGE_FINAL_SANITISE, N60_LSTAGE_FINAL_SANITISE, lane: all)
         add(N60_STAGE_FINAL_METER, N60_LSTAGE_FINAL_METER, lane: all)
@@ -312,6 +350,7 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
     static let pauseGateStageId: UInt32 = 606
     static let denoiserStageId: UInt32 = 607
     static let dynamicEQStageId: UInt32 = 608
+    static let crossoverStageId: UInt32 = 616
     /// FIR stages take two consecutive ids (left, right) when the channels differ.
     static let programFIRStageId: UInt32 = 610
     static let roomFIRStageId: UInt32 = 612
