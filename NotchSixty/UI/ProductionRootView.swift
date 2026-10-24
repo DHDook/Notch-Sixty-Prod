@@ -479,8 +479,12 @@ struct ProductionRootView: View {
                 // A switch, not a button: processing is a standing on/off
                 // state, and play/stop or power icons read as transport or
                 // app power. Bypass beside it only applies while running.
-                HStack(spacing: 8) {
+                // Fixed sizes: the toolbar otherwise wraps the label and
+                // stretches the switch to the item's height.
+                HStack(spacing: 6) {
                     Text("Processing")
+                        .lineLimit(1)
+                        .fixedSize()
                     Toggle("Processing", isOn: Binding(
                         get: { engine.lifecycleState == .running },
                         set: { on in
@@ -510,9 +514,12 @@ struct ProductionRootView: View {
                     ))
                     .labelsHidden()
                     .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .fixedSize()
                     .tint(.green)
                 }
-                .padding(.horizontal, 8)
+                .fixedSize()
+                .padding(.horizontal, 10)
                 .help(
                     engine.lifecycleState == .running
                         ? "Processing is on. Switch off to stop processing."
@@ -1002,75 +1009,68 @@ private struct ProductionDashboardView: View {
         }
     }
 
-    /// Everyday trims beside volume: input gain (preamp headroom), L/R
-    /// balance and output gain. Double-clicking a control resets it.
+    /// Everyday trims beside volume: input and output gain in one card,
+    /// L/R balance in its own. Gain steps in 0.5 dB or takes a typed value;
+    /// balance is a centre-detent bar. Double-clicking balance recentres it.
     private var levelControls: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Levels").font(.subheadline.bold())
-            HStack(alignment: .top, spacing: 24) {
-                levelSlider(
-                    title: "Input Gain",
-                    value: Binding(
-                        get: { engine.gainConfiguration.inputPreampDB },
-                        set: { value in perform { try engine.setInputPreampDB(value) } }
-                    ),
-                    range: DSPGainConfiguration.inputPreampRange,
-                    step: 0.5,
-                    reset: 0,
-                    readout: Self.decibelReadout(engine.gainConfiguration.inputPreampDB),
-                    help: "Gain before all processing. Lower it to leave headroom for EQ boosts."
-                )
-                levelSlider(
-                    title: "Balance",
-                    value: Binding(
-                        get: { engine.playbackControlConfiguration.balance },
-                        set: { value in perform { try engine.setChannelBalance(value) } }
-                    ),
-                    range: PlaybackControlConfiguration.balanceRange,
-                    step: 0.01,
-                    reset: 0,
-                    readout: Self.balanceReadout(engine.playbackControlConfiguration.balance),
-                    help: "Left/right balance. Centre is unity on both channels."
-                )
-                levelSlider(
-                    title: "Output Gain",
-                    value: Binding(
-                        get: { engine.gainConfiguration.outputGainDB },
-                        set: { value in perform { try engine.setOutputGainDB(value) } }
-                    ),
-                    range: DSPGainConfiguration.outputGainRange,
-                    step: 0.5,
-                    reset: 0,
-                    readout: Self.decibelReadout(engine.gainConfiguration.outputGainDB),
-                    help: "Gain after all processing, before the output device."
-                )
-            }
+        HStack(alignment: .top, spacing: 16) {
+            gainControls
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .glassEffect(.regular, in: .rect(cornerRadius: 18))
+            balanceControls
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .glassEffect(.regular, in: .rect(cornerRadius: 18))
         }
-        .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular, in: .rect(cornerRadius: 18))
+        .fixedSize(horizontal: false, vertical: true)
     }
 
-    private func levelSlider(
-        title: String,
-        value: Binding<Double>,
-        range: ClosedRange<Double>,
-        step: Double,
-        reset: Double,
-        readout: String,
-        help: String
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack {
-                Text(title).font(.caption.bold()).foregroundStyle(.secondary)
-                Spacer()
-                Text(readout).font(.caption).monospacedDigit().foregroundStyle(.secondary)
-            }
-            Slider(value: value, in: range, step: step)
-                .simultaneousGesture(TapGesture(count: 2).onEnded { value.wrappedValue = reset })
+    private var gainControls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Gain").font(.subheadline.bold())
+            ProductionGainStepper(
+                title: "Input",
+                value: engine.gainConfiguration.inputPreampDB,
+                range: DSPGainConfiguration.inputPreampRange,
+                set: { value in perform { try engine.setInputPreampDB(value) } }
+            )
+            .help("Gain before all processing. Lower it to leave headroom for EQ boosts.")
+            ProductionGainStepper(
+                title: "Output",
+                value: engine.gainConfiguration.outputGainDB,
+                range: DSPGainConfiguration.outputGainRange,
+                set: { value in perform { try engine.setOutputGainDB(value) } }
+            )
+            .help("Gain after all processing, before the output device.")
         }
-        .frame(maxWidth: .infinity)
-        .help(help + " Double-click to reset.")
+        .padding(14)
+    }
+
+    private var balanceControls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Balance").font(.subheadline.bold())
+                Spacer()
+                Text(Self.balanceReadout(engine.playbackControlConfiguration.balance))
+                    .monospacedDigit().foregroundStyle(.secondary)
+            }
+            ProductionBalanceBar(
+                balance: Binding(
+                    get: { engine.playbackControlConfiguration.balance },
+                    set: { value in perform { try engine.setChannelBalance(value) } }
+                )
+            )
+            HStack {
+                Text("L")
+                Spacer()
+                Text("C")
+                Spacer()
+                Text("R")
+            }
+            .font(.caption2.bold())
+            .foregroundStyle(.secondary)
+        }
+        .padding(14)
+        .help("Left/right balance. Centre is unity on both channels. Double-click to recentre.")
     }
 
     static func decibelReadout(_ db: Double) -> String {
@@ -2529,5 +2529,145 @@ struct MasterVolumeFaderScale: View {
         }
         .frame(height: 18)
         .accessibilityHidden(true)
+    }
+}
+
+/// One gain trim: −/+ step 0.5 dB, and the value box takes a typed dB
+/// value on Return. Values clamp to the trim's range.
+private struct ProductionGainStepper: View {
+    let title: String
+    let value: Double
+    let range: ClosedRange<Double>
+    let set: (Double) -> Void
+
+    static let step = 0.5
+
+    @State private var draft = ""
+    @FocusState private var editing: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(title)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            Button {
+                commit(value - Self.step)
+            } label: {
+                Image(systemName: "minus").frame(width: 14, height: 14)
+            }
+            .buttonStyle(.glass)
+            .disabled(value <= range.lowerBound)
+            .accessibilityLabel("Decrease \(title.lowercased()) gain")
+
+            TextField(title, text: $draft)
+                .labelsHidden()
+                .textFieldStyle(.roundedBorder)
+                .multilineTextAlignment(.trailing)
+                .monospacedDigit()
+                .frame(width: 78)
+                .focused($editing)
+                .onSubmit { commitDraft() }
+                .onChange(of: editing) { _, isEditing in
+                    if !isEditing { commitDraft() }
+                }
+                .accessibilityLabel("\(title) gain in decibels")
+
+            Button {
+                commit(value + Self.step)
+            } label: {
+                Image(systemName: "plus").frame(width: 14, height: 14)
+            }
+            .buttonStyle(.glass)
+            .disabled(value >= range.upperBound)
+            .accessibilityLabel("Increase \(title.lowercased()) gain")
+        }
+        .onAppear { draft = ProductionDashboardView.decibelReadout(value) }
+        .onChange(of: value) { _, newValue in
+            if !editing { draft = ProductionDashboardView.decibelReadout(newValue) }
+        }
+    }
+
+    private func commit(_ proposed: Double) {
+        let stepped = (proposed / Self.step).rounded() * Self.step
+        set(min(max(stepped, range.lowerBound), range.upperBound))
+    }
+
+    private func commitDraft() {
+        if let typed = Self.parseDecibels(draft) {
+            set(min(max(typed, range.lowerBound), range.upperBound))
+        }
+        draft = ProductionDashboardView.decibelReadout(value)
+    }
+
+    /// Accepts "3", "+3.5", "-6 dB" and the readout's own "−6.0 dB".
+    static func parseDecibels(_ text: String) -> Double? {
+        let cleaned = text
+            .replacingOccurrences(of: "−", with: "-")
+            .replacingOccurrences(of: "dB", with: "", options: .caseInsensitive)
+            .trimmingCharacters(in: .whitespaces)
+        guard let parsed = Double(cleaned), parsed.isFinite else { return nil }
+        return parsed
+    }
+}
+
+/// Balance as a centre-detent bar: the fill runs from the centre toward
+/// the side that is favoured, so centre reads as neutral rather than half
+/// full. Dragging snaps to centre within 2 %; double-click recentres.
+private struct ProductionBalanceBar: View {
+    @Binding var balance: Double
+
+    private static let snap = 0.02
+    private let knob: CGFloat = 16
+
+    var body: some View {
+        GeometryReader { geometry in
+            let width = geometry.size.width
+            let travel = max(width - knob, 1)
+            let centre = width / 2
+            let clamped = min(max(balance, -1), 1)
+            let knobX = knob / 2 + CGFloat((clamped + 1) / 2) * travel
+
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(.quaternary)
+                    .frame(height: 6)
+                Capsule()
+                    .fill(Color.accentColor)
+                    .frame(width: abs(knobX - centre), height: 6)
+                    .offset(x: min(knobX, centre))
+                Rectangle()
+                    .fill(.secondary)
+                    .frame(width: 2, height: 14)
+                    .offset(x: centre - 1)
+                Circle()
+                    .fill(.white)
+                    .shadow(color: .black.opacity(0.25), radius: 1.5, y: 0.5)
+                    .frame(width: knob, height: knob)
+                    .offset(x: knobX - knob / 2)
+            }
+            .frame(width: width, height: geometry.size.height)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0).onChanged { drag in
+                    let position = (drag.location.x - knob / 2) / travel
+                    var value = Double(min(max(position, 0), 1)) * 2 - 1
+                    if abs(value) < Self.snap { value = 0 }
+                    balance = (value * 100).rounded() / 100
+                }
+            )
+            .simultaneousGesture(TapGesture(count: 2).onEnded { balance = 0 })
+        }
+        .frame(height: 22)
+        .accessibilityElement()
+        .accessibilityLabel("Balance")
+        .accessibilityValue(ProductionDashboardView.balanceReadout(balance))
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: balance = min(balance + 0.05, 1)
+            case .decrement: balance = max(balance - 0.05, -1)
+            @unknown default: break
+            }
+        }
     }
 }
