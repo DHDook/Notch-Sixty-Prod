@@ -110,6 +110,7 @@ Lanes ruleOf(uint32_t kind) {
         case N60_STAGE_SYMMETRY:
         case N60_STAGE_CROSSFEED:
         case N60_STAGE_CROSSTALK:
+        case N60_STAGE_STEREO_CROSSOVER:
         case N60_STAGE_HEADPHONE: return Lanes::Pair;
         case N60_STAGE_ANC_GUARD:
         case N60_STAGE_ANC_INJECT: return Lanes::Single;
@@ -120,6 +121,7 @@ Lanes ruleOf(uint32_t kind) {
 // ---- parameter layouts ---------------------------------------------------------------
 
 constexpr uint32_t kHpFixed = 11;
+constexpr uint32_t kProtParamsV12 = 18;
 constexpr uint32_t kGuardParams = 12 + N60_ANC_GUARD_BANDS;
 constexpr uint32_t kHpRing = 512;
 
@@ -184,7 +186,8 @@ uint32_t expectedParamCount(uint32_t kind, const float *p, uint32_t have) {
                        ? kHpFixed + 4u * (static_cast<uint32_t>(p[9]) + static_cast<uint32_t>(p[10]))
                        : 0u;
         case N60_STAGE_PAUSE_GATE: return 5;
-        case N60_STAGE_PROTECTION: return 7;
+        case N60_STAGE_PROTECTION: return have == 7 ? 7u : (have == kProtParamsV12 ? kProtParamsV12 : 0u);
+        case N60_STAGE_STEREO_CROSSOVER: return 8;
         case N60_STAGE_MUTE: return 1;
         case N60_STAGE_FRAC_DELAY: return 2;
         case N60_STAGE_ANC_GUARD: return kGuardParams;
@@ -202,15 +205,27 @@ struct ProtCfg {
     uint32_t atkHigh;
     double relCoef;
     uint32_t latency;
+    // ABI v12: soft clipper (per oversampled sample, before the limiter) and gain rider (per frame).
+    bool clipper;
+    uint32_t curve;
+    float drive, threshold, knee, comp, trimPos, trimNeg;
+    bool riderCfg;  // the stage carries the v12 parameters: the rider state tracks even while it is off
+    bool rider;
+    float riderTarget, riderMax, riderMeasCoef, riderRespCoef;
 };
 
 uint32_t osLatency(uint32_t factor) { return factor == 2 ? 32u : (factor == 4 ? 48u : 0u); }
 
-ProtCfg protCfg(const float *p, double rate) {
+inline float dbToLin(float db) { return std::pow(10.0f, db / 20.0f); }
+
+// n is the stage's parameter count: 7 (limiter only) or 18 (ABI v12).
+ProtCfg protCfg(const float *p, double rate, uint32_t n) {
     ProtCfg c{};
     c.limiter = p[0] != 0.0f;
     const bool tp = p[5] != 0.0f;
-    c.factor = !c.limiter ? 1u : (tp ? 4u : static_cast<uint32_t>(p[6]));  // limiter off = bypass
+    c.clipper = n >= kProtParamsV12 && p[7] != 0.0f;
+    // Limiter off is a bypass unless the clipper is on; then the user's oversampling factor applies, as in the kernel.
+    c.factor = (!c.limiter && !c.clipper) ? 1u : ((c.limiter && tp) ? 4u : static_cast<uint32_t>(p[6]));
     const double highRate = rate * static_cast<double>(c.factor);
     c.ceilLin = std::pow(10.0f, p[1] / 20.0f);
     c.laHigh = c.limiter ? static_cast<uint32_t>(std::ceil(static_cast<double>(p[4]) * 0.001 * highRate)) : 0u;
@@ -218,6 +233,24 @@ ProtCfg protCfg(const float *p, double rate) {
     c.relCoef = c.limiter ? std::exp(-1.0 / std::fmax(1.0, static_cast<double>(p[3]) * 0.001 * highRate)) : 0.0;
     const uint32_t laFrames = c.laHigh == 0 ? 0u : (c.laHigh + c.factor - 1u) / c.factor;
     c.latency = osLatency(c.factor) + laFrames;
+    if (c.clipper) {
+        c.drive = dbToLin(p[8]);
+        c.threshold = dbToLin(p[9]);
+        c.knee = p[10];
+        c.curve = static_cast<uint32_t>(p[11]);
+        c.comp = p[12] != 0.0f ? 1.0f / c.drive : 1.0f;
+        c.trimPos = dbToLin(p[13]);
+        c.trimNeg = dbToLin(-p[13]);
+    }
+    if (n >= kProtParamsV12) {
+        c.riderCfg = true;
+        c.rider = p[14] != 0.0f;
+        c.riderTarget = p[15];
+        c.riderMax = p[16];
+        const float seconds = p[17] == 0.0f ? 3.0f : (p[17] == 2.0f ? 30.0f : 10.0f);
+        c.riderMeasCoef = std::exp(-1.0f / std::fmax(1.0f, 1.0f * static_cast<float>(rate)));
+        c.riderRespCoef = std::exp(-1.0f / std::fmax(1.0f, seconds * static_cast<float>(rate)));
+    }
     return c;
 }
 
@@ -359,11 +392,27 @@ struct ProtShared {
     uint64_t seq;
     double gain;
     uint32_t ph2, ph1, head, count, cap, cfgValid;
+    double riderSustained, riderAtten;       // ABI v12: sustained limiter reduction and rider attenuation (dB)
     float seenCeil, seenAtk, seenRel, pad2;  // protCfg inputs the cached cfg was derived from
     std::atomic<uint32_t> guardActive;       // ABI v8: 1 when the limiter runs with oversampling
     uint32_t pad3;
     ProtCfg cfg;                              // cached: pow/exp are not redone every block
     // followed by float val[cap]; uint64_t idx[cap]
+};
+
+constexpr uint32_t kXoSections = 4;
+struct XoLane {  // a pair stage has one state slot: the mains high-pass sections of both lanes
+    Bq hp[2][kXoSections];
+};
+struct XoShared {
+    double hp[kXoSections][5];
+    double lp[kXoSections][5];
+    double ap[5];
+    Bq lpState[kXoSections];
+    Bq apState;
+    uint32_t sections, mode;
+    uint32_t align, invert;
+    float gain, pad;
 };
 
 struct GuardBand {
@@ -414,6 +463,7 @@ bool isSystemKind(uint32_t kind) {
         case N60_STAGE_PROTECTION:
         case N60_STAGE_MUTE:
         case N60_STAGE_FRAC_DELAY:
+        case N60_STAGE_STEREO_CROSSOVER:
         case N60_STAGE_ANC_CAPTURE: return true;
         default: return false;
     }
@@ -473,7 +523,29 @@ bool paramOk(uint32_t kind, uint32_t i, float v, const float *p, double rate, ui
                 case 2: return inR(v, 0.1, 50.0);
                 case 3: return inR(v, 5.0, 500.0);
                 case 4: return inR(v, 0.0, 20.0);
-                default: return v == 1.0f || v == 2.0f || v == 4.0f;
+                case 6: return v == 1.0f || v == 2.0f || v == 4.0f;
+                case 7:
+                case 12:
+                case 14: return v == 0.0f || v == 1.0f;
+                case 8: return inR(v, 0.0, 12.0);
+                case 9: return inR(v, -6.0, 0.0);
+                case 10: return inR(v, 0.0, 1.0);
+                case 11: return v == 0.0f || v == 1.0f || v == 2.0f || v == 3.0f;
+                case 13: return inR(v, -3.0, 3.0);
+                case 15: return inR(v, 0.5, 6.0);
+                case 16: return inR(v, 3.0, 12.0);
+                default: return v == 0.0f || v == 1.0f || v == 2.0f;  // 17: rider speed
+            }
+        case N60_STAGE_STEREO_CROSSOVER:
+            switch (i) {
+                case 0:
+                case 6: return v > 0.0f && static_cast<double>(v) < rate * 0.5;
+                case 1:
+                case 4:
+                case 5: return v == 0.0f || v == 1.0f;
+                case 2: return v == 0.0f || v == 1.0f || v == 2.0f;
+                case 3: return v >= 0.0f;
+                default: return v > 0.0f;  // 7: alignment Q
             }
         case N60_STAGE_MUTE: return v == 0.0f || v == 1.0f;
         case N60_STAGE_FRAC_DELAY: return i == 0 ? (isInt(v) && v >= 0.0f && v <= static_cast<float>(kFdCapacity - 2u)) : inR(v, 0.0, 1.0);
@@ -568,7 +640,7 @@ n60_status validateSystemStage(const n60_stage_desc &s, double rate, uint32_t ou
             if (static_cast<uint32_t>(p[0]) == s.laneA) return N60_STATUS_BAD_ARGUMENT;
             break;
         case N60_STAGE_PROTECTION: {
-            const ProtCfg c = protCfg(p, rate);
+            const ProtCfg c = protCfg(p, rate, s.paramCount);
             if (c.laHigh > 65536u) return N60_STATUS_BAD_ARGUMENT;
             break;
         }
@@ -590,6 +662,7 @@ void systemSizes(const n60_stage_desc &s, double rate, size_t &perLane, size_t &
         case N60_STAGE_BASS_MGMT: perLane = up(sizeof(BassLane)); shared = up(sizeof(BassShared)); break;
         case N60_STAGE_MUTE: perLane = up(sizeof(MuteLane)); break;
         case N60_STAGE_FRAC_DELAY: perLane = up(sizeof(FdLane)); break;
+        case N60_STAGE_STEREO_CROSSOVER: perLane = up(sizeof(XoLane)); shared = up(sizeof(XoShared)); break;
         case N60_STAGE_ANC_INJECT: shared = up(sizeof(InjectShared)); break;
         case N60_STAGE_ANC_GUARD: shared = up(sizeof(GuardState)); break;
         case N60_STAGE_ANC_CAPTURE:
@@ -597,7 +670,7 @@ void systemSizes(const n60_stage_desc &s, double rate, size_t &perLane, size_t &
             shared = up(sizeof(CapShared));
             break;
         case N60_STAGE_PROTECTION: {
-            const ProtCfg c = protCfg(s.params, rate);
+            const ProtCfg c = protCfg(s.params, rate, s.paramCount);
             perLane = up(sizeof(ProtLane)) + protRingBytes(c);
             shared = protSharedBytes(c);
             break;
@@ -609,6 +682,30 @@ void systemSizes(const n60_stage_desc &s, double rate, size_t &perLane, size_t &
 // ---- initialisation ---------------------------------------------------------------------
 
 namespace {
+
+// Same RBJ designs as the kernel's N60CrossoverPreciseDesign (double precision, normalised by a0).
+// type: 0 low-pass, 1 high-pass, 2 all-pass.
+void xoDesign(uint32_t type, double rate, double hz, double q, double *c) {
+    const double omega = 2.0 * kPi * hz / rate;
+    const double cosine = std::cos(omega);
+    const double alpha = std::sin(omega) / (2.0 * q);
+    const double a0 = 1.0 + alpha;
+    c[3] = (-2.0 * cosine) / a0;
+    c[4] = (1.0 - alpha) / a0;
+    if (type == 0) {
+        c[0] = (1.0 - cosine) / (2.0 * a0);
+        c[1] = 2.0 * c[0];
+        c[2] = c[0];
+    } else if (type == 1) {
+        c[0] = (1.0 + cosine) / (2.0 * a0);
+        c[1] = -2.0 * c[0];
+        c[2] = c[0];
+    } else {
+        c[0] = (1.0 - alpha) / a0;
+        c[1] = (-2.0 * cosine) / a0;
+        c[2] = 1.0;
+    }
+}
 
 void designInto(uint32_t type, double rate, double f, double db, double q, double *out) {
     double c[5];
@@ -753,6 +850,24 @@ void systemInit(SnapHeader *h, const StageRec &r) {
                 fdDesign(static_cast<double>(p[0]) + static_cast<double>(p[1]), *d);
             }
             break;
+        case N60_STAGE_STEREO_CROSSOVER: {
+            XoShared *x = reinterpret_cast<XoShared *>(sh);
+            static const double q24[2] = {0.7071067811865476, 0.7071067811865476};
+            static const double q48[4] = {0.5411961001461970, 1.3065629648763766, 0.5411961001461970, 1.3065629648763766};
+            const bool lr48 = p[1] != 0.0f;
+            x->sections = lr48 ? 4u : 2u;
+            for (uint32_t k = 0; k < x->sections; ++k) {
+                const double q = lr48 ? q48[k] : q24[k];
+                xoDesign(1, rate, static_cast<double>(p[0]), q, x->hp[k]);
+                xoDesign(0, rate, static_cast<double>(p[0]), q, x->lp[k]);
+            }
+            x->mode = static_cast<uint32_t>(p[2]);
+            x->gain = p[3];
+            x->invert = p[4] != 0.0f ? 1u : 0u;
+            x->align = p[5] != 0.0f ? 1u : 0u;
+            if (x->align != 0u) xoDesign(2, rate, static_cast<double>(p[6]), static_cast<double>(p[7]), x->ap);
+            break;
+        }
         case N60_STAGE_MUTE:
             for (uint32_t l = 0; l < r.laneCount; ++l) {
                 MuteLane *m = reinterpret_cast<MuteLane *>(laneState(h, r, l));
@@ -778,7 +893,7 @@ void systemInit(SnapHeader *h, const StageRec &r) {
             }
             break;
         case N60_STAGE_PROTECTION: {
-            const ProtCfg c = protCfg(p, rate);
+            const ProtCfg c = protCfg(p, rate, r.paramCount);
             ProtShared *s = reinterpret_cast<ProtShared *>(sh);
             s->gain = 1.0;
             s->cap = c.laHigh + 2;
@@ -878,7 +993,7 @@ n60_status validateSystemParam(const SnapHeader *h, const StageRec &r, uint32_t 
 uint32_t systemLatency(const SnapHeader *h, const StageRec &r) {
     if (r.kind == N60_STAGE_FRAC_DELAY) return static_cast<uint32_t>(paramsOf(h, r)[0]);
     if (r.kind != N60_STAGE_PROTECTION) return 0;
-    return protCfg(paramsOf(h, r), h->sampleRate).latency;
+    return protCfg(paramsOf(h, r), h->sampleRate, r.paramCount).latency;
 }
 
 // ---- run ----------------------------------------------------------------------------------
@@ -1202,6 +1317,65 @@ void runBass(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
     }
 }
 
+// Float in, float out, double section state: the kernel's N60CrossoverPreciseProcessSample.
+inline float xoRun(const double *c, Bq &s, float in) {
+    const double x = static_cast<double>(in);
+    const double y = c[0] * x + s.z1;
+    s.z1 = c[1] * x - c[3] * y + s.z2;
+    s.z2 = c[2] * x - c[4] * y;
+    return static_cast<float>(y);
+}
+
+// Blockwise: each section runs over a whole chunk before the next, so the loops carry one recursion each.
+void runStereoCrossover(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
+    XoShared &x = *reinterpret_cast<XoShared *>(sharedState(h, r));
+    XoLane &st = *reinterpret_cast<XoLane *>(laneState(h, r, 0));
+    float *a = lanes[r.laneA];
+    float *b = lanes[r.laneB];
+    const uint32_t n = x.sections;
+    constexpr uint32_t kChunk = 256;
+    float ml[kChunk], mr[kChunk], sub[kChunk];
+    for (uint32_t base = 0; base < frames; base += kChunk) {
+        const uint32_t len = std::min(kChunk, frames - base);
+        for (uint32_t i = 0; i < len; ++i) {  // non-finite input must never reach the filter state
+            float l = a[base + i], rr = b[base + i];
+            if (!(std::fabs(l) <= 3.0e38f)) l = 0.0f;
+            if (!(std::fabs(rr) <= 3.0e38f)) rr = 0.0f;
+            ml[i] = l;
+            mr[i] = rr;
+            sub[i] = (l + rr) * 0.5f;
+        }
+        for (uint32_t k = 0; k < n; ++k) {
+            for (uint32_t i = 0; i < len; ++i) ml[i] = xoRun(x.hp[k], st.hp[0][k], ml[i]);
+            for (uint32_t i = 0; i < len; ++i) mr[i] = xoRun(x.hp[k], st.hp[1][k], mr[i]);
+            for (uint32_t i = 0; i < len; ++i) sub[i] = xoRun(x.lp[k], x.lpState[k], sub[i]);
+        }
+        if (x.align != 0u) {
+            for (uint32_t i = 0; i < len; ++i) sub[i] = xoRun(x.ap, x.apState, sub[i]);
+        }
+        for (uint32_t i = 0; i < len; ++i) {
+            const float sb = sub[i] * x.gain;
+            const float s2 = x.invert != 0u ? -sb : sb;
+            if (x.mode == 1u) {
+                a[base + i] = ml[i];
+                b[base + i] = mr[i];
+            } else if (x.mode == 2u) {
+                a[base + i] = s2;
+                b[base + i] = s2;
+            } else {
+                a[base + i] = ml[i] + s2;
+                b[base + i] = mr[i] + s2;
+            }
+        }
+    }
+    for (uint32_t k = 0; k < n; ++k) {  // keep denormals out of silent input
+        bqFlush(st.hp[0][k]);
+        bqFlush(st.hp[1][k]);
+        bqFlush(x.lpState[k]);
+    }
+    bqFlush(x.apState);
+}
+
 void runFracDelay(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
     constexpr uint32_t mask = kFdCapacity - 1u;
     for (uint32_t l = 0; l < r.laneCount; ++l) {
@@ -1333,20 +1507,50 @@ inline void interp2(Hb &f, float in, float out[2]) {
 
 constexpr float kEps = 1.0e-12f;
 
+// The kernel's soft_clip_sample (N60Protection.c), in float, with the trim powers precomputed.
+inline float clipCurve(uint32_t curve, float u, bool negative) {
+    u = std::fmin(std::fmax(u, 0.0f), 1.0f);
+    const float halfPi = static_cast<float>(kPi) * 0.5f;
+    switch (curve) {
+        case 1: return 1.0f - (1.0f - u) * (1.0f - u) * (1.0f - u);
+        case 2: return std::sin(halfPi * u);
+        case 3: return negative ? 1.0f - (1.0f - u) * (1.0f - u) * std::sqrt(1.0f - u) : std::sin(halfPi * u);
+        default: return 2.0f * u - u * u;
+    }
+}
+
+inline float softClip(const ProtCfg &c, float input) {
+    const float driven = input * c.drive * (input < 0.0f ? c.trimNeg : c.trimPos);
+    const float sign = driven < 0.0f ? -1.0f : 1.0f;
+    const float magnitude = std::fabs(driven);
+    const float linearLimited = std::fmin(magnitude, 1.0f);
+    float shaped = linearLimited;
+    if (magnitude > c.threshold) {
+        const float headroom = std::fmax(1.0f - c.threshold, 1.0e-6f);
+        const float u = (magnitude - c.threshold) / headroom;
+        shaped = std::fmin(c.threshold + headroom * clipCurve(c.curve, u, sign < 0.0f), 1.0f);
+    }
+    const float mixed = linearLimited + (shaped - linearLimited) * c.knee;
+    return sign * std::fmin(mixed, 1.0f) * c.comp;
+}
+
 void runProtection(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames) {
     const float *p = paramsOf(h, r);
     ProtShared &sh = *reinterpret_cast<ProtShared *>(sharedState(h, r));
     if (sh.cfgValid == 0 || p[1] != sh.seenCeil || p[2] != sh.seenAtk || p[3] != sh.seenRel) {
-        sh.cfg = protCfg(p, h->sampleRate);  // only the live parameters 1..3 can differ from the snapshot's
+        sh.cfg = protCfg(p, h->sampleRate, r.paramCount);  // only the live parameters 1..3 can differ from the snapshot's
         sh.seenCeil = p[1];
         sh.seenAtk = p[2];
         sh.seenRel = p[3];
         sh.cfgValid = 1;
     }
     const ProtCfg c = sh.cfg;
-    if (c.factor == 1 && !c.limiter) {
+    if (c.factor == 1 && !c.limiter && !c.clipper) {
         // Bypass: no processing, no latency. Clear the "now" readbacks so a switched-off limiter
-        // never reads as active; the peaks and max reduction stay as the reader left them.
+        // never reads as active; the peaks and max reduction stay as the reader left them. The rider resets,
+        // as the kernel's bypass does.
+        sh.riderSustained = 0.0;
+        sh.riderAtten = 0.0;
         sh.guardActive.store(0u, std::memory_order_relaxed);
         for (uint32_t l = 0; l < r.laneCount; ++l) {
             reinterpret_cast<ProtLane *>(laneState(h, r, l))->grNowBits.store(0u, std::memory_order_relaxed);
@@ -1377,9 +1581,7 @@ void runProtection(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
         float peak = 0.0f;
         for (uint32_t l = 0; l < n; ++l) {
             ring[l][w] = hi[l][k];
-            const float a = std::fabs(hi[l][k]);
-            peak = std::fmax(peak, a);
-            inPeak[l] = std::fmax(inPeak[l], a);
+            peak = std::fmax(peak, std::fabs(hi[l][k]));
         }
         while (sh.count > 0) {  // deque_push
             const uint32_t tail = (sh.head + sh.count - 1u) % cap;
@@ -1413,8 +1615,17 @@ void runProtection(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
             const float sg = c.ceilLin / std::fmax(safety, kEps);
             for (uint32_t l = 0; l < n; ++l) hi[l][k] *= sg;
         }
-        for (uint32_t l = 0; l < n; ++l) outPeak[l] = std::fmax(outPeak[l], std::fabs(hi[l][k]));
         sh.seq = seq + 1u;
+    };
+
+    // One high-rate sample: input peak (before the clipper, as the kernel measures it), clipper, limiter, output peak.
+    auto procHigh = [&](uint32_t k) {
+        for (uint32_t l = 0; l < n; ++l) inPeak[l] = std::fmax(inPeak[l], std::fabs(hi[l][k]));
+        if (c.clipper) {
+            for (uint32_t l = 0; l < n; ++l) hi[l][k] = softClip(c, hi[l][k]);
+        }
+        if (c.limiter) limitHigh(k);
+        for (uint32_t l = 0; l < n; ++l) outPeak[l] = std::fmax(outPeak[l], std::fabs(hi[l][k]));
     };
 
     for (uint32_t l = 0; l < n; ++l) {  // non-finite input must never reach the filter or window state
@@ -1422,10 +1633,35 @@ void runProtection(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
             if (!(std::fabs(ptr[l][i]) <= 3.0e38f)) ptr[l][i] = 0.0f;
         }
     }
+    float sustained = static_cast<float>(sh.riderSustained);
+    float atten = static_cast<float>(sh.riderAtten);
+    float gainAtten = -1.0f, riderGain = 1.0f;
     for (uint32_t i = 0; i < frames; ++i) {
+        if (c.riderCfg) {
+            // The kernel's update_gain_rider, once per frame from the limiter gain as the previous frame left it.
+            const float inst = c.limiter && sh.gain < 1.0
+                                   ? std::fmax(0.0f, -20.0f * std::log10(std::fmax(static_cast<float>(sh.gain), kEps)))
+                                   : 0.0f;
+            sustained = inst + c.riderMeasCoef * (sustained - inst);
+            float desired = 0.0f;
+            if (c.rider && c.limiter) {
+                desired = std::fmin(c.riderMax, std::fmax(0.0f, atten + (sustained - c.riderTarget)));
+            }
+            atten = desired + c.riderRespCoef * (atten - desired);
+            if (atten < 1e-6f) atten = 0.0f;  // flush the decaying tail (no denormals, no endless pow)
+            if (atten != 0.0f) {
+                // The rider moves over seconds: redo the pow only after a 1e-4 dB change (a 1e-5 relative gain error).
+                if (std::fabs(atten - gainAtten) > 1.0e-4f) {
+                    gainAtten = atten;
+                    riderGain = dbToLin(-atten);
+                }
+                const float g = riderGain;
+                for (uint32_t l = 0; l < n; ++l) ptr[l][i] *= g;
+            }
+        }
         if (c.factor == 1) {
             for (uint32_t l = 0; l < n; ++l) hi[l][0] = ptr[l][i];
-            limitHigh(0);
+            procHigh(0);
             for (uint32_t l = 0; l < n; ++l) ptr[l][i] = hi[l][0];
             continue;
         }
@@ -1445,7 +1681,7 @@ void runProtection(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
             }
         }
         if (c.factor == 2) {
-            for (uint32_t k = 0; k < 2; ++k) limitHigh(k);
+            for (uint32_t k = 0; k < 2; ++k) procHigh(k);
             for (uint32_t k = 0; k < 2; ++k) {
                 const bool emit = sh.ph1 == 0u;
                 sh.ph1 ^= 1u;
@@ -1456,7 +1692,7 @@ void runProtection(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
             }
             continue;
         }
-        for (uint32_t k = 0; k < 4; ++k) limitHigh(k);
+        for (uint32_t k = 0; k < 4; ++k) procHigh(k);
         float down[kMaxLanes][2];
         uint32_t emitted = 0;
         for (uint32_t k = 0; k < 4; ++k) {
@@ -1477,6 +1713,9 @@ void runProtection(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t fra
             }
         }
     }
+
+    sh.riderSustained = static_cast<double>(sustained);
+    sh.riderAtten = static_cast<double>(atten);
 
     // Readbacks for the control thread (relaxed atomics; peaks reset by the reader).
     const float grMax = minGain < 1.0 ? static_cast<float>(-20.0 * std::log10(std::fmax(minGain, 1e-12))) : 0.0f;
@@ -1614,6 +1853,7 @@ void runSystem(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames)
         case N60_STAGE_BASS_MGMT: runBass(h, r, lanes, frames); break;
         case N60_STAGE_MUTE: runMute(h, r, lanes, frames); break;
         case N60_STAGE_FRAC_DELAY: runFracDelay(h, r, lanes, frames); break;
+        case N60_STAGE_STEREO_CROSSOVER: runStereoCrossover(h, r, lanes, frames); break;
         case N60_STAGE_ANC_INJECT: runInject(h, r, lanes, frames); break;
         case N60_STAGE_ANC_CAPTURE: runCapture(h, r, lanes, frames); break;
         case N60_STAGE_PROTECTION: runProtection(h, r, lanes, frames); break;
@@ -1623,6 +1863,23 @@ void runSystem(SnapHeader *h, StageRec &r, float *const *lanes, uint32_t frames)
 }
 
 // ---- rebuild support ---------------------------------------------------------------------------
+
+void systemRiderCarry(SnapHeader *from, SnapHeader *to) {
+    if (from == nullptr || to == nullptr) return;
+    const StageRec *src = stages(from);
+    StageRec *dst = stages(to);
+    for (uint32_t i = 0; i < to->stageCount; ++i) {
+        if (dst[i].kind != N60_STAGE_PROTECTION) continue;
+        for (uint32_t j = 0; j < from->stageCount; ++j) {
+            if (src[j].kind != N60_STAGE_PROTECTION || src[j].id != dst[i].id) continue;
+            const ProtShared &a = *reinterpret_cast<const ProtShared *>(sharedState(from, src[j]));
+            ProtShared &b = *reinterpret_cast<ProtShared *>(sharedState(to, dst[i]));
+            b.riderSustained = a.riderSustained;
+            b.riderAtten = a.riderAtten;
+            break;
+        }
+    }
+}
 
 uint32_t systemRebuildMute(SnapHeader *h, bool silentNow) {
     uint32_t n = 0;

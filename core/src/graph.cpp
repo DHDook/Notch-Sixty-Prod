@@ -201,6 +201,7 @@ void adopt(n60_graph *g) {
     // ABI v10: a FIR stage that is unchanged keeps its running state; one that is new or changed needs its whole
     // tap length of silent history before it is heard.
     const uint32_t firWarm = n60::dspFirCarry(g->current, next);
+    n60::systemRiderCarry(g->current, next);  // ABI v12
     if (next->fadeFrames == 0) {
         settleDenoiser(g, g->current, next);
         retireSnapshot(g, g->current);

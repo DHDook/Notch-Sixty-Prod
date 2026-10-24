@@ -581,12 +581,14 @@ int main() {
         constexpr uint32_t CH = 2, N = 256;
         const float comp[10] = {-20, 4, 6, 1, 50, 0, 0, 1, 80, 1};
         const float expa[6] = {-50, 2, -40, 2, 50, 1};
-        const float prot[7] = {1, -3, 1, 50, 5, 1, 4};
-        n60_stage_desc st[6] = {stage(N60_STAGE_METER_IN, 1, N60_LANE_ALL, nullptr, 0),
+        const float prot[18] = {1, -3, 1, 50, 5, 1, 4, 1, 6, 0, 0.5f, 2, 0, 1, 0, 2, 6, 1};
+        const float xo[8] = {120, 1, 0, 1, 0, 1, 80, 0.7f};
+        n60_stage_desc st[7] = {stage(N60_STAGE_METER_IN, 1, N60_LANE_ALL, nullptr, 0),
                                 stage(N60_STAGE_COMPRESSOR, 2, 0, comp, 10),
                                 stage(N60_STAGE_EXPANDER, 3, 0, expa, 6),
                                 stage(N60_STAGE_METER_OUT, 4, N60_LANE_ALL, nullptr, 0),
-                                stage(N60_STAGE_PROTECTION, 5, N60_LANE_ALL, prot, 7),
+                                stage(N60_STAGE_STEREO_CROSSOVER, 7, 0, xo, 8, 0, 1),
+                                stage(N60_STAGE_PROTECTION, 5, N60_LANE_ALL, prot, 18),
                                 stage(N60_STAGE_FINAL_METER, 6, N60_LANE_ALL, nullptr, 0)};
         st[1].laneMask = st[2].laneMask = 0x3;
         n60_graph_desc d{};
@@ -596,9 +598,9 @@ int main() {
         d.maxBlockFrames = N;
         d.inputChannels = d.outputChannels = CH;
         d.stages = st;
-        d.stageCount = 6;
+        d.stageCount = 7;
         n60_graph *g = nullptr;
-        CHECK(n60_graph_build(&d, &g) == N60_STATUS_OK, "build S8c graph at %.0f", rate);
+        { n60_status bs = n60_graph_build(&d, &g); CHECK(bs == N60_STATUS_OK, "build S8c graph at %.0f (status %d)", rate, static_cast<int>(bs)); }
         if (g == nullptr) continue;
         static float buf[CH][N], obuf[CH][N];
         const float *in[CH];

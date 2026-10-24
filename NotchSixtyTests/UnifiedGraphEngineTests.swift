@@ -82,6 +82,7 @@ final class UnifiedGraphEngineTests: XCTestCase {
     func testIneligibleSnapshotsKeepTheKernelPath() {
         var snapshot = N60DSPGraphSnapshotMakeUnity(48_000)
         snapshot.crossover.enabled = true
+        snapshot.crossover.frequencyHz = 0  // not a crossover the core can design
         XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &snapshot, sampleRate: 48_000))
         snapshot = N60DSPGraphSnapshotMakeUnity(48_000)
         snapshot.convolution.enabled = true
@@ -741,6 +742,53 @@ final class UnifiedGraphStageParityTests: XCTestCase {
             s.mixedPhaseCorrectionSectionCount = 2
             try assertParity(s, rate: rate, "mixed phase")
         }
+    }
+
+    /// E6 S8d group 4: the stereo crossover (both topologies, every monitor mode, polarity, alignment) matches the kernel.
+    func testStereoCrossoverMatchesTheKernelAtEveryRate() throws {
+        for rate in Self.rates {
+            for (topology, mode, align, invert) in [
+                (N60CrossoverTopologyLinkwitzRiley24, N60CrossoverMonitorModeRecombined, false, false),
+                (N60CrossoverTopologyLinkwitzRiley48, N60CrossoverMonitorModeRecombined, true, true),
+                (N60CrossoverTopologyLinkwitzRiley24, N60CrossoverMonitorModeMainsOnly, false, false),
+                (N60CrossoverTopologyLinkwitzRiley48, N60CrossoverMonitorModeSubOnly, true, false),
+            ] {
+                var s = N60DSPGraphSnapshotMakeUnity(rate)
+                XCTAssertTrue(N60CrossoverSnapshotMake(rate, 90, topology, mode, 0.7, invert, true, &s.crossover))
+                XCTAssertTrue(N60CrossoverSnapshotSetSubPhaseAlignment(rate, 70, 0.8, align, &s.crossover))
+                try assertParity(s, rate: rate, tolerance: 0.002, "crossover \(topology.rawValue) \(mode.rawValue)")
+            }
+        }
+    }
+
+    /// E6 S8d group 4: the soft clipper (every curve), alone and in front of the limiter, and the gain rider.
+    func testSoftClipperAndGainRiderMatchTheKernelAtEveryRate() throws {
+        for rate in Self.rates {
+            for curve in [N60ClipperCurveQuadratic, N60ClipperCurveCubic, N60ClipperCurveSine, N60ClipperCurveAsymmetricTube] {
+                var s = N60DSPGraphSnapshotMakeUnity(rate)
+                XCTAssertTrue(N60ProtectionSnapshotSetSoftClipperAdvanced(&s.protection, true, 6, -2, 0.5, curve, true, 1.0))
+                try assertParity(s, rate: rate, amplitude: 0.6, tolerance: 0.01, "clipper curve \(curve.rawValue)")
+                XCTAssertTrue(N60ProtectionSnapshotSetLimiterAdvanced(&s.protection, true, -3, 1, 80, 2, false))
+                try assertParity(s, rate: rate, amplitude: 0.6, tolerance: 0.01, "clipper and limiter \(curve.rawValue)")
+            }
+            var s = N60DSPGraphSnapshotMakeUnity(rate)
+            XCTAssertTrue(N60ProtectionSnapshotSetLimiterAdvanced(&s.protection, true, -3, 1, 80, 2, true))
+            XCTAssertTrue(N60ProtectionSnapshotSetGainRider(&s.protection, true, 2, 6, N60GainRiderSpeedFast))
+            try assertParity(s, rate: rate, sampleWise: false, amplitude: 0.9, tolerance: 0.05, "gain rider")
+        }
+    }
+
+    func testCrossoverAndProtectionIneligibleCasesKeepTheKernel() {
+        var s = N60DSPGraphSnapshotMakeUnity(48_000)
+        XCTAssertTrue(N60CrossoverSnapshotMake(48_000, 90, N60CrossoverTopologyLinkwitzRiley24, N60CrossoverMonitorModeRecombined, 1, false, true, &s.crossover))
+        XCTAssertNotNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000))
+        // The core has no stereo crossover beside the sub-lane bass management.
+        XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(
+            snapshot: &s, sampleRate: 48_000, subwoofers: [UnifiedGraphSubwoofer()]))
+        // Oversampling with neither limiter nor clipper: the kernel adds latency the core does not.
+        s = N60DSPGraphSnapshotMakeUnity(48_000)
+        XCTAssertTrue(N60ProtectionSnapshotSetOversamplingFactor(&s.protection, N60OversamplingFactor4x))
+        XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000))
     }
 
     func testAmbientCompensationMatchesTheKernelAtEveryRate() throws {

@@ -35,6 +35,10 @@ uint32_t systemLatency(const SnapHeader *h, const StageRec &r);
 // many stages.
 uint32_t systemRebuildMute(SnapHeader *h, bool silentNow);
 
+// Realtime thread. ABI v12: a protection stage that continues from the live snapshot keeps the gain rider's
+// sustained reduction and attenuation (the limiter and half-band state restart, as before).
+void systemRiderCarry(SnapHeader *from, SnapHeader *to);
+
 // Control thread. Protection limiter and true-peak readback (ABI v8); false for other kinds or lanes.
 bool readProtectionDynamics(SnapHeader *h, const StageRec &r, uint32_t lane, n60_dynamics_readback *out);
 

@@ -396,7 +396,20 @@ static inline N60UnifiedGraphUnsupportedReason N60UnifiedGraphSnapshotUnsupporte
                  && s->crosstalkCancellation.headShadowFrequencyHz < s->sampleRate * 0.5)) {
         return N60UnifiedGraphUnsupportedSpatial;
     }
-    if (s->crossover.enabled) return N60UnifiedGraphUnsupportedCrossover;
+    // E6 S8d group 4: the stereo crossover. The core rebuilds its coefficients from the user-level values, so the
+    // topology, monitor mode, frequency and alignment must be ones it accepts.
+    if (s->crossover.enabled) {
+        const N60CrossoverSnapshot *x = &s->crossover;
+        const double nyquist = s->sampleRate * 0.5;
+        if (!(x->frequencyHz > 0.0 && x->frequencyHz < nyquist
+              && ((int)x->topology == 0 || (int)x->topology == 1)
+              && (int)x->monitorMode >= 0 && (int)x->monitorMode <= 2
+              && isfinite(x->subGainLinear) && x->subGainLinear >= 0.0f
+              && x->subPhaseAlignmentFrequencyHz > 0.0 && x->subPhaseAlignmentFrequencyHz < nyquist
+              && x->subPhaseAlignmentQ > 0.0 && isfinite(x->subPhaseAlignmentQ))) {
+            return N60UnifiedGraphUnsupportedCrossover;
+        }
+    }
     if (s->interChannelDelay.enabled) {
         uint32_t delayFrames[2];
         double fractional[2];
@@ -442,8 +455,29 @@ static inline N60UnifiedGraphUnsupportedReason N60UnifiedGraphSnapshotUnsupporte
     if (s->ambientCompensation.enabled && (d->compressor.enabled || d->expander.enabled)) {
         return N60UnifiedGraphUnsupportedAmbientOrANC;
     }
-    if (s->protection.softClipperEnabled || s->protection.gainRiderEnabled) {
-        return N60UnifiedGraphUnsupportedProtection;
+    // E6 S8d group 4: the soft clipper and gain rider. The core holds the ranges below; the oversampling factor must be
+    // one the core applies (it bypasses, with no oversampling latency, when neither the limiter nor the clipper is on).
+    {
+        const N60ProtectionSnapshot *p = &s->protection;
+        if (p->softClipperEnabled) {
+            const float driveDB = 20.0f * log10f(p->clipperDriveLinear);
+            const float thresholdDB = 20.0f * log10f(p->clipperThresholdLinear);
+            if (!(driveDB >= -0.001f && driveDB <= 12.001f && thresholdDB >= -6.001f && thresholdDB <= 0.001f
+                  && p->clipperKneeSmooth >= 0.0f && p->clipperKneeSmooth <= 1.0f
+                  && (int)p->clipperCurve >= 0 && (int)p->clipperCurve <= 3
+                  && p->clipperAsymmetryTrimDB >= -3.0f && p->clipperAsymmetryTrimDB <= 3.0f)) {
+                return N60UnifiedGraphUnsupportedProtection;
+            }
+        }
+        if (p->gainRiderEnabled
+                && !(p->gainRiderTargetGRDB >= 0.5f && p->gainRiderTargetGRDB <= 6.0f
+                     && p->gainRiderMaxReductionDB >= 3.0f && p->gainRiderMaxReductionDB <= 12.0f
+                     && (int)p->gainRiderSpeed >= 0 && (int)p->gainRiderSpeed <= 2)) {
+            return N60UnifiedGraphUnsupportedProtection;
+        }
+        if (!p->limiterEnabled && !p->softClipperEnabled && (int)p->effectiveFactor > 1) {
+            return N60UnifiedGraphUnsupportedProtection;
+        }
     }
     // E6 S8d: program FIR, room FIR and speaker IR. The snapshot carries no taps, so this only checks what the
     // core can hold and where the kernel runs the stage; the translator then recovers the taps by generation from

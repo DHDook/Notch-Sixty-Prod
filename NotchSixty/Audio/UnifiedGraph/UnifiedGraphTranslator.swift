@@ -86,20 +86,41 @@ enum UnifiedGraphTranslator {
         if (stages.roomFIR != nil || stages.speakerIR != nil), !subwoofers.isEmpty {
             return .failure(.convolverWithSubwoofer)
         }
+        if stages.crossover != nil, !subwoofers.isEmpty {
+            return .failure(.unsupportedKernelStage)
+        }
         configuration.stereoStages = stages
-        if snapshot.protection.limiterEnabled || snapshot.protection.truePeakGuardEnabled {
-            let p = snapshot.protection
+        let p = snapshot.protection
+        if p.limiterEnabled || p.truePeakGuardEnabled || p.softClipperEnabled || p.gainRiderEnabled {
             let ceilingDB = 20.0 * log10(Double(max(p.limiterCeilingLinear, 1e-6)))
             guard ceilingDB >= -20, ceilingDB <= 0 else { return .failure(.protectionCeilingOutOfRange) }
-            configuration.protection = UnifiedGraphProtection(
+            var protection = UnifiedGraphProtection(
                 limiterEnabled: p.limiterEnabled,
                 ceilingDB: ceilingDB,
                 attackMilliseconds: Double(p.limiterAttackMs),
                 releaseMilliseconds: Double(p.limiterReleaseMs),
                 lookAheadMilliseconds: Double(p.limiterLookAheadMs),
                 truePeakGuard: p.truePeakGuardEnabled,
-                oversampling: (p.limiterEnabled && p.truePeakGuardEnabled) ? 4 : 2
+                oversampling: Int(p.effectiveFactor.rawValue)
             )
+            if p.softClipperEnabled || p.gainRiderEnabled {
+                protection.clipper = UnifiedGraphSoftClipper(
+                    enabled: p.softClipperEnabled,
+                    driveDB: 20.0 * log10(Double(max(p.clipperDriveLinear, 1e-6))),
+                    thresholdDB: 20.0 * log10(Double(max(p.clipperThresholdLinear, 1e-6))),
+                    knee: Double(p.clipperKneeSmooth),
+                    curve: Int(p.clipperCurve.rawValue),
+                    autoCompensate: p.clipperCompensationLinear != 1,
+                    asymmetryDB: Double(p.clipperAsymmetryTrimDB)
+                )
+                protection.rider = UnifiedGraphGainRider(
+                    enabled: p.gainRiderEnabled,
+                    targetDB: Double(p.gainRiderTargetGRDB),
+                    maxDB: Double(p.gainRiderMaxReductionDB),
+                    speed: Int(p.gainRiderSpeed.rawValue)
+                )
+            }
+            configuration.protection = protection
         }
         if !subwoofers.isEmpty {
             configuration.bassManagement = UnifiedGraphBassManagement(
@@ -166,6 +187,14 @@ enum UnifiedGraphTranslator {
             if pointer.pointee.ambientCompensation.enabled {
                 var values = [Float](repeating: 0, count: 10)
                 if N60UnifiedGraphAmbientParams(pointer, &values) { stages.ambient = values } else { ok = false }
+            }
+            if pointer.pointee.crossover.enabled {
+                let x = pointer.pointee.crossover
+                stages.crossover = [
+                    Float(x.frequencyHz), Float(x.topology.rawValue), Float(x.monitorMode.rawValue), x.subGainLinear,
+                    x.subPolarityInverted ? 1 : 0, x.subPhaseAlignmentEnabled ? 1 : 0,
+                    Float(x.subPhaseAlignmentFrequencyHz), Float(x.subPhaseAlignmentQ),
+                ]
             }
             if pointer.pointee.symmetryBalance.enabled {
                 stages.symmetryPosition = Float(pointer.pointee.symmetryBalance.position)
