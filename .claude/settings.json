@@ -1,5 +1,5 @@
 {
-  "model": "opusplan",
+  "model": "sonnet",
   "autoCompactWindow": 200000,
   "env": {
     "CLAUDE_CODE_SUBAGENT_MODEL": "haiku"

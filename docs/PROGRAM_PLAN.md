@@ -347,8 +347,7 @@ you pull while a session is open, restart the session so new agents and instruct
 
 - **`CLAUDE.md`** holds the session protocol (orient, plan, build one slice, verify, open a PR,
   close out, stop for bench work), the token rules, and the owner decisions.
-- **`.claude/settings.json`** sets the model to `opusplan` (Opus in plan mode, Sonnet when
-  executing) and pre-approves routine git, build and test commands. Direct pushes to `main` and
+- **`.claude/settings.json`** sets the model to Sonnet (Opus only through the epic-planner agent) and pre-approves routine git, build and test commands. Direct pushes to `main` and
   force pushes are denied, so every change arrives as a PR.
 - **`.claude/agents/`** holds five helper agents that do routine work on cheaper models:
   `code-scout`, `build-test-runner`, `plan-tracker` and `pr-writer` (Haiku), and

@@ -15,15 +15,14 @@ so everything you need is in the task message, `CLAUDE.md`, the epic's section o
    target slice's section, and only the design-note sections that slice names (find them with
    `grep -n '^## \|^### '`). Do not read the `## Log` section unless the slice needs a past
    decision, and then grep it.
-2. If the slice's approach is not recorded in `docs/epics/<EPIC>.md`, do not build: write the
-   proposed plan into that file on branch `<epic>/plan`, open a PR labelled `needs-owner`, and
-   return "PLAN NEEDS APPROVAL" with the PR link.
+2. If the slice's approach is not recorded in `docs/epics/<EPIC>.md`, do not build or plan:
+   return "NEEDS PLAN" with one line on what is missing. Planning belongs to the epic-planner
+   agent.
 3. Size the PR: aim for about 800–1,500 changed lines of product code (tests and generated
    files extra). If the slice is much smaller, also build the next slice in the same epic when
    it has the same risk class and needs no new owner decision; split only when one PR would
    mix risk classes or exceed about 2,500 lines. Never open a PR that only edits plans or
-   records decisions: those edits ride in this slice's PR. The one exception is a new epic plan
-   awaiting owner approval (step 2).
+   records decisions: those edits ride in this slice's PR.
    Create branch `<epic-lowercase>/<slice-name>` from an up-to-date `main`. Use the code-scout
    agent to find files instead of reading large files. Never read `AudioIOEngine.swift`,
    `N60RenderKernel.c` or `ProductProfiles.swift` whole; read line ranges.

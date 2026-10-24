@@ -4,8 +4,9 @@
 
 - The owner starts work with `/next` (or `/next E2`). That command holds the full workflow.
 - Plan: `docs/PROGRAM_PLAN.md`. Per-epic plans and status: `docs/epics/E<n>.md`.
-- Agents in `.claude/agents/`: slice-builder (Sonnet, builds one slice in a fresh context),
-  realtime-reviewer (Sonnet), and code-scout, build-test-runner, plan-tracker, pr-writer (Haiku).
+- Agents in `.claude/agents/`: epic-planner (Opus, plans a new epic), slice-builder (Sonnet,
+  builds one slice in a fresh context), realtime-reviewer (Sonnet), and code-scout,
+  build-test-runner, plan-tracker, pr-writer (Haiku). `/next` itself runs on Sonnet.
 
 **Current focus:** E6: rest of S8d (stereo crossover and bass management, mixed phase, soft clipper, gain rider, fractional delay), then S8e, S9, S10, S11. After E6, follow the Execution order in `docs/PROGRAM_PLAN.md` (E11 next).
 <!-- plan-tracker keeps the line above current -->
@@ -46,12 +47,12 @@ The owner already has a local test build of `main`; do not rebuild a baseline un
 1. **The main session coordinates; slice-builder builds.** Each slice is built by the
    slice-builder agent in its own fresh context, so the main conversation only collects short
    summaries and does not need compacting between slices.
-2. **Plan only for a new epic** or a slice whose approach isn't recorded yet; save it to
-   `docs/epics/E<n>.md` and get approval. Otherwise build straight away.
+2. **Plan only for a new epic** (epic-planner, Opus) or a slice whose approach isn't recorded
+   yet; the plan goes to `docs/epics/E<n>.md` for approval. Otherwise build straight away.
 3. **One branch per PR** named `e<n>/<slice>`, behind the epic's feature flag (add it to
    `FeatureFlag.all`; see `docs/FEATURE_FLAGS.md`). PRs aim for about 800–1,500 changed lines of
    product code: combine small slices, split only to separate risk classes. Never open a PR that
-   only edits plans or records decisions (a new epic plan awaiting approval is the exception).
+   only edits plans or records decisions (a new epic plan from epic-planner is the exception).
    The order of epics is the "Execution order" list in `docs/PROGRAM_PLAN.md`.
 4. **Verify narrowly** (affected tests only; CI runs the full suite), and use
    `realtime-reviewer` for any engine or realtime change.
@@ -73,9 +74,10 @@ minimum OS, removing a user-visible feature, or enabling any live ANC or MIMO tr
 
 ## Conserving tokens
 
-- The project model is `opusplan`: Opus plans, Sonnet executes. For design-heavy slices (E4
-  adaptive ANC, E6 graph design, E10 mixed-phase, E19 MIMO), the owner may switch to
-  `/model opus` for that session.
+- Opus is used only by epic-planner, for new epic plans. `/next` runs on Sonnet whatever model
+  the session shows, slice-builder and realtime-reviewer use Sonnet, and the other helpers use
+  Haiku. The project model is Sonnet; switch with `/model opus` only for a
+  one-off hard question.
 - Delegate: slice work to `slice-builder`; searching to `code-scout`; builds and tests to
   `build-test-runner`; plan updates to `plan-tracker`; PR text to `pr-writer`; engine reviews to
   `realtime-reviewer`. Any other subagent defaults to Haiku. Do not do these jobs in the main
