@@ -34,7 +34,7 @@ extern "C" {
 #endif
 
 /* Bumped on any incompatible change to a struct or function below. */
-#define N60_GRAPH_ABI_VERSION 12u
+#define N60_GRAPH_ABI_VERSION 13u
 
 typedef struct n60_graph n60_graph; /* opaque */
 
@@ -95,8 +95,28 @@ typedef enum n60_stage_kind {
     /* ABI v11 (E6 S8d group 3). */
     N60_STAGE_FRAC_DELAY = 33,    /* position 24, with DELAY. Fractional delay: Thiran all-pass. See "Fractional delay" below. */
     /* ABI v12 (E6 S8d group 4). */
-    N60_STAGE_STEREO_CROSSOVER = 34 /* position 13, with BASS_MGMT. Pair stage: stereo crossover. See "Stereo crossover" below. */
+    N60_STAGE_STEREO_CROSSOVER = 34,/* position 13, with BASS_MGMT. Pair stage: stereo crossover. See "Stereo crossover" below. */
+    /* ABI v13 (E6 S8e). */
+    N60_STAGE_EXTERNAL = 35         /* position 12.5: after METER_OUT, before BASS_MGMT. Host-supplied processor. See "External processor" below. */
 } n60_stage_kind;
+
+/* External processor (ABI v13). The graph calls back into the host for work the core cannot do itself and must
+ * not know about (the macOS app's Audio Unit rack). The stage sits between the playback half and the system half
+ * of the chain, as the rack does in the stereo kernel. desc: laneA / laneMask select the lanes it covers
+ * (laneCount must equal the processor's channel count, else the stage passes audio through), capacityFrames =
+ * the processor's declared latency in frames (0..N60_GRAPH_MAX_DELAY_FRAMES, added to the path latency), paramCount 1,
+ * params[0] = active (0 bypass, 1 process; live, a 0/1 switch applied at the next block). At most one EXTERNAL
+ * stage per graph. The callback itself is not part of a snapshot: n60_graph_set_external_processor registers it
+ * for the whole graph (control thread, IO stopped or the previous callback cleared first).
+ * The callback runs on the realtime thread inside n60_graph_process, so it must obey the realtime rules itself.
+ * It processes `frames` frames of `channels` planar lanes in place (in and out are the same pointers) and returns
+ * non-zero on success. On failure the stage outputs silence for the block and counts a fault.
+ * Rebuild fade: the callback is called once per block, by the live snapshot only. While a rebuild runs, the
+ * incoming snapshot's EXTERNAL stage adds the processor's effect (output minus input) from the live snapshot's
+ * call instead of calling the host a second time; when the live snapshot has no active EXTERNAL stage the
+ * incoming one passes audio through until it becomes live. */
+typedef int (*n60_external_process_fn)(void *context, const float *const *in, float *const *out, uint32_t channels,
+                                       uint32_t frames);
 
 /* Stereo crossover (ABI v12). Pair stage (laneA, laneB). params: [0] frequency Hz (>0, below Nyquist),
  * [1] topology 0 LR24 or 1 LR48, [2] monitor mode 0 recombined, 1 mains only, 2 sub only, [3] sub gain (linear,
@@ -461,6 +481,14 @@ void n60_graph_get_stats(const n60_graph *graph, n60_graph_stats *outStats);
 /* Control thread. Frees the graph and every snapshot, only after the realtime
  * thread has stopped using it. NULL is allowed. */
 void n60_graph_retire(n60_graph *graph);
+
+/* ABI v13. Control thread. Registers (process != NULL) or clears (NULL) the host callback of the graph's EXTERNAL
+ * stage. channels is 1..N60_GRAPH_MAX_CHANNELS. Allocates the rebuild-fade scratch, so it is not realtime. Change it
+ * only while the realtime thread is not inside n60_graph_process, or clear it before the context is freed. */
+n60_status n60_graph_set_external_processor(n60_graph *graph, n60_external_process_fn process, void *context,
+                                            uint32_t channels);
+/* Calls made to the callback and failures (callback returned 0) since registration. Safe at any time. */
+void n60_graph_external_stats(const n60_graph *graph, uint64_t *calls, uint64_t *faults);
 
 /* Howl guard status (ANC_GUARD). trip: 0 none, 1 growth, 2 error rise, 3 non-finite, 4 over ceiling. */
 typedef struct n60_guard_status {

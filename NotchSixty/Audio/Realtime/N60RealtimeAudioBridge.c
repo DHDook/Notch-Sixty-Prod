@@ -159,6 +159,9 @@ typedef struct N60UnifiedGraphPlan {
 struct N60RealtimeAudioBridge {
     _Atomic(N60UnifiedGraphAttachment *) unifiedGraph;
     _Atomic uint32_t unifiedGraphLatency;  // control -> callback: attached graph's latency frames
+    void *rackBoundGraph;                  // E6 S8e: control-thread only; the graph whose callback points at this bridge
+    _Atomic bool unifiedGraphHostsRack;    // E6 S8e: the graph's EXTERNAL stage calls this bridge's AU rack
+    double graphRackSampleTime;            // callback thread only: output sample time of the graph chunk being rendered
     uint32_t capacityFrames;
     N60StereoFrame *frames;
     N60AdaptiveSRC *adaptiveSRC;
@@ -680,6 +683,69 @@ bool N60RealtimeAudioBridgeSetUnifiedGraph(
     return true;
 }
 
+// E6 S8e. Callback thread (called by the graph's EXTERNAL stage). Interleaves the planar lanes, runs the AU rack in
+// slices of at most its maximumFramesPerSlice, and writes the result back to the lanes. Uses the rack scratch (the
+// rack branch and this path never run in the same block). Returns 0 on any rack failure; the graph then outputs
+// silence for the block and counts a fault. Allocation: none. Locks: none. Latency: the rack's own.
+static int graph_rack_trampoline(
+    void *context,
+    const float *const *in,
+    float *const *out,
+    uint32_t channels,
+    uint32_t frames
+) {
+    N60RealtimeAudioBridge *bridge = (N60RealtimeAudioBridge *)context;
+    if (bridge == NULL || channels != 2u || bridge->audioUnitRackScratch == NULL
+        || !N60AudioUnitLiveRackProcessorIsValid(&bridge->audioUnitRack)) {
+        return 0;
+    }
+    const uint32_t maxSlice = bridge->audioUnitRack.maximumFramesPerSlice;
+    float *scratch = bridge->audioUnitRackScratch;
+    for (uint32_t start = 0; start < frames;) {
+        uint32_t n = frames - start;
+        if (n > maxSlice) n = maxSlice;
+        for (uint32_t i = 0; i < n; ++i) {
+            scratch[2u * i] = in[0][start + i];
+            scratch[2u * i + 1u] = in[1][start + i];
+        }
+        if (!N60AudioUnitLiveRackProcess(
+                &bridge->audioUnitRack, scratch, scratch, n, 2u,
+                bridge->graphRackSampleTime + (double)start)) {
+            return 0;
+        }
+        for (uint32_t i = 0; i < n; ++i) {
+            out[0][start + i] = scratch[2u * i];
+            out[1][start + i] = scratch[2u * i + 1u];
+        }
+        start += n;
+    }
+    return 1;
+}
+
+bool N60RealtimeAudioBridgeBindRackToGraph(N60RealtimeAudioBridge *bridge, void *graph) {
+    if (bridge == NULL || graph == NULL
+        || !N60AudioUnitLiveRackProcessorIsValid(&bridge->audioUnitRack)
+        || bridge->audioUnitRackScratch == NULL) {
+        return false;
+    }
+    if (n60_graph_set_external_processor((n60_graph *)graph, graph_rack_trampoline, bridge, 2u) != N60_STATUS_OK) {
+        return false;
+    }
+    bridge->rackBoundGraph = graph;
+    atomic_store_explicit(&bridge->unifiedGraphHostsRack, true, memory_order_release);
+    return true;
+}
+
+void N60RealtimeAudioBridgeUnbindRackFromGraph(N60RealtimeAudioBridge *bridge, void *graph) {
+    if (bridge == NULL) return;
+    atomic_store_explicit(&bridge->unifiedGraphHostsRack, false, memory_order_release);
+    if (graph == NULL) graph = bridge->rackBoundGraph;
+    if (graph != NULL) {
+        (void)n60_graph_set_external_processor((n60_graph *)graph, NULL, NULL, 0u);
+    }
+    bridge->rackBoundGraph = NULL;
+}
+
 void N60RealtimeAudioBridgeSetUnifiedGraphLatency(
     N60RealtimeAudioBridge *bridge,
     uint32_t latencyFrames
@@ -699,6 +765,8 @@ int32_t N60RealtimeAudioBridgeUnifiedGraphAlignmentFrames(const N60RealtimeAudio
 
 void N60RealtimeAudioBridgeReleaseUnifiedGraph(N60RealtimeAudioBridge *bridge) {
     if (bridge == NULL) return;
+    // The graph's callback points at this bridge, so it is cleared whenever the bridge lets go of the graph.
+    N60RealtimeAudioBridgeUnbindRackFromGraph(bridge, NULL);
     N60UnifiedGraphAttachment *attachment = atomic_load_explicit(
         &bridge->unifiedGraph, memory_order_acquire
     );
@@ -891,6 +959,7 @@ N60RealtimeAudioBridge *N60RealtimeAudioBridgeCreate(uint32_t capacityFrames) {
 
 void N60RealtimeAudioBridgeDestroy(N60RealtimeAudioBridge *bridge) {
     if (bridge == NULL) return;
+    N60RealtimeAudioBridgeUnbindRackFromGraph(bridge, NULL);
     free_unified_attachment(atomic_load_explicit(&bridge->unifiedGraph, memory_order_acquire));
     N60AdaptiveSRCDestroy(bridge->adaptiveSRC);
     N60RenderKernelDestroy(bridge->renderKernel);
@@ -2311,7 +2380,8 @@ OSStatus N60OutputIOProc(
     N60UnifiedGraphPlan unifiedPlan = plan_unified_block(
         bridge,
         framesToRead,
-        !N60AudioUnitLiveRackProcessorIsValid(&bridge->audioUnitRack) && !sameDeviceMultiOutput
+        !N60AudioUnitLiveRackProcessorIsValid(&bridge->audioUnitRack)
+            || atomic_load_explicit(&bridge->unifiedGraphHostsRack, memory_order_acquire)
     );
     N60RenderKernelRenderContext renderContext =
         N60RenderKernelBeginRender(bridge->renderKernel);
@@ -2320,8 +2390,11 @@ OSStatus N60OutputIOProc(
         (uint32_t)(readIndex % bridge->capacityFrames);
     float *outputLeft = outputView.left;
     float *outputRight = outputView.right;
+    // E6 S8e: with the graph rendering, its EXTERNAL stage hosts the rack, so the kernel rack branch runs
+    // only when the graph does not.
     const bool rackConfigured =
-        N60AudioUnitLiveRackProcessorIsValid(&bridge->audioUnitRack);
+        N60AudioUnitLiveRackProcessorIsValid(&bridge->audioUnitRack)
+        && !(unifiedPlan.graphRunning && unifiedPlan.graph != NULL);
     const double outputSampleTime =
         inOutputTime != NULL
         && (inOutputTime->mFlags & kAudioTimeStampSampleTimeValid) != 0
@@ -2647,6 +2720,7 @@ OSStatus N60OutputIOProc(
                     planarIn[i] = source.left;
                     planarIn[unified->maxFrames + i] = source.right;
                 }
+                bridge->graphRackSampleTime = outputSampleTime + (double)graphChunkStart;
                 const float *inLanes[2] = { planarIn, planarIn + unified->maxFrames };
                 float *outLanes[2] = { graphOut, graphOut + unified->maxFrames };
                 // On a process error the chunk is silence, never a splice of stale state.

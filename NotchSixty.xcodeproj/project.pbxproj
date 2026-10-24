@@ -12,6 +12,7 @@
 		E6D000000000000000000103 /* UnifiedGraphConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D000000000000000000003 /* UnifiedGraphConfiguration.swift */; };
 		E6D000000000000000000104 /* UnifiedGraphTranslator.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D000000000000000000004 /* UnifiedGraphTranslator.swift */; };
 		E6D000000000000000000107 /* LiveNChannelUnifiedGraphTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D000000000000000000007 /* LiveNChannelUnifiedGraphTests.swift */; };
+		E6D000000000000000000108 /* UnifiedGraphRoutesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D000000000000000000009 /* UnifiedGraphRoutesTests.swift */; };
 		E6D000000000000000000106 /* UnifiedGraphEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D000000000000000000006 /* UnifiedGraphEngineTests.swift */; };
 		E6D0000000000000000000B8 /* UnifiedGraphConfigurationMatrixTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D0000000000000000000B7 /* UnifiedGraphConfigurationMatrixTests.swift */; };
 		E6D0000000000000000001A0 /* UnifiedGraphBinauralTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D0000000000000000000A0 /* UnifiedGraphBinauralTests.swift */; };
@@ -375,6 +376,7 @@
 		E6D000000000000000000005 /* N60UnifiedGraphEligibility.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60UnifiedGraphEligibility.h; sourceTree = "<group>"; };
 		E6D000000000000000000007 /* LiveNChannelUnifiedGraphTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveNChannelUnifiedGraphTests.swift; sourceTree = "<group>"; };
 		E6D0000000000000000000A0 /* UnifiedGraphBinauralTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphBinauralTests.swift; sourceTree = "<group>"; };
+		E6D000000000000000000009 /* UnifiedGraphRoutesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphRoutesTests.swift; sourceTree = "<group>"; };
 		E6D000000000000000000006 /* UnifiedGraphEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphEngineTests.swift; sourceTree = "<group>"; };
 		E6D0000000000000000000B7 /* UnifiedGraphConfigurationMatrixTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphConfigurationMatrixTests.swift; sourceTree = "<group>"; };
 		E6C000000000000000000010 /* graph.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = graph.cpp; sourceTree = "<group>"; };
@@ -833,6 +835,7 @@
 			children = (
 				A10000000000000000000024 /* NotchSixtyTests.swift */,
 				E6D000000000000000000006 /* UnifiedGraphEngineTests.swift */,
+				E6D000000000000000000009 /* UnifiedGraphRoutesTests.swift */,
 				E6D0000000000000000000B7 /* UnifiedGraphConfigurationMatrixTests.swift */,
 				E6D0000000000000000000A0 /* UnifiedGraphBinauralTests.swift */,
 				E6D000000000000000000007 /* LiveNChannelUnifiedGraphTests.swift */,
@@ -1442,6 +1445,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				E6D000000000000000000106 /* UnifiedGraphEngineTests.swift in Sources */,
+				E6D000000000000000000108 /* UnifiedGraphRoutesTests.swift in Sources */,
 				E6D0000000000000000000B8 /* UnifiedGraphConfigurationMatrixTests.swift in Sources */,
 				E6D0000000000000000001A0 /* UnifiedGraphBinauralTests.swift in Sources */,
 				E6D000000000000000000107 /* LiveNChannelUnifiedGraphTests.swift in Sources */,

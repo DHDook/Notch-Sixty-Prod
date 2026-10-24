@@ -210,6 +210,8 @@ if selected e6_core_graph; then
             "$RT/N60Protection.c" "${CORE_OBJS[@]}" -lc++ -lm
         harness e6_core_fracdelay_parity "${STRICT[@]}" -O2 -Icore/include core/tests/test_fracdelay_parity.c \
             "${CORE_OBJS[@]}" -lc++ -lm
+        harness e6_core_external "${STRICT[@]}" -O2 -Icore/include core/tests/test_external.c \
+            "${CORE_OBJS[@]}" -lc++ -lm
         harness e6_core_system "${STRICT[@]}" -O2 -Icore/include core/tests/test_system.c \
             "${CORE_OBJS[@]}" -lc++ -lm
         harness e6_core_rebuild "${STRICT[@]}" -O2 -Icore/include core/tests/test_rebuild.c \

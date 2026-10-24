@@ -150,7 +150,7 @@ Phase 2 replaces the three render paths with one graph that every later feature 
 - [x] Represent stereo as a 2-channel layout and the binaural renderer as a stage, not a separate transport
 - [ ] Make parameter edits live with ramped coefficients; rebuild with a short fade only on topology changes
 - [x] S8c `e6/dynamics-readbacks`: gain-reduction, true-peak and over-range readbacks through a core ABI addition (#187; diagnostics UI row and two tests follow up)
-- [ ] S8e `e6/rack-and-routes`: AU rack as an external-processor node; same-device and aggregate routes render through the graph
+- [x] S8e `e6/rack-and-routes`: AU rack as an external-processor node; same-device and aggregate routes render through the graph
 - [ ] S8d `e6/translate-remaining-stereo`: move the kernel-fallback stereo stages (dynamic EQ, FIR/IR/convolution, mixed phase, crossover and bass management, denoiser, fractional delay, soft clipper, gain rider) to the graph
 - [ ] Remove the `unsupportedActiveDSP` and `immutableSemanticTransportActive` restrictions in `AudioIOEngine.swift`, and the idle-only headphone profile rule
 - [ ] Build a parity suite that renders the old stereo kernel and the new graph side by side

@@ -158,3 +158,29 @@ struct UnifiedGraphSpec: Equatable {
         }
     }
 }
+
+extension UnifiedGraphSpec {
+    /// Stage id of the EXTERNAL stage that hosts the AU rack (E6 S8e).
+    static let externalRackStageId: UInt32 = 700
+
+    /// Kinds that run before the AU rack in the kernel (everything up to the post-EQ meter); the rack follows
+    /// the last of them, ahead of the crossover and the system stages.
+    private static let beforeRackKinds: Set<UInt32> = [
+        N60_STAGE_SANITISE, N60_STAGE_METER_IN, N60_STAGE_GAIN, N60_STAGE_DENOISER, N60_STAGE_MS_ENCODE,
+        N60_STAGE_PEQ, N60_STAGE_DYN_EQ, N60_STAGE_MS_DECODE, N60_STAGE_FIR, N60_STAGE_COMPRESSOR,
+        N60_STAGE_EXPANDER, N60_STAGE_METER_OUT,
+    ].reduce(into: Set<UInt32>()) { $0.insert($1.rawValue) }
+
+    /// A copy with the AU rack's EXTERNAL stage on both stereo lanes, at the kernel's rack seam. The declared
+    /// latency is the rack's reported latency; the stage starts active (the rack's own bypass is its runtime).
+    func insertingExternalRackStage(latencyFrames: UInt32) -> UnifiedGraphSpec {
+        var copy = self
+        copy.stages.removeAll { $0.kind == N60_STAGE_EXTERNAL.rawValue }
+        let index = (copy.stages.lastIndex { Self.beforeRackKinds.contains($0.kind) }).map { $0 + 1 } ?? 0
+        copy.stages.insert(UnifiedGraphStageSpec(
+            kind: N60_STAGE_EXTERNAL.rawValue, stageId: Self.externalRackStageId, laneA: 0,
+            laneMask: 0b11, capacityFrames: latencyFrames, params: [1]
+        ), at: index)
+        return copy
+    }
+}

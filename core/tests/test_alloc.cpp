@@ -644,6 +644,63 @@ int main() {
         CHECK(overTotal > 0, "rate %.0f S8c: input over-range was never counted", rate);
         n60_graph_retire(g);
     }
+    // ABI v13 EXTERNAL stage: a host callback runs in the graph, through publishes (with the default
+    // warm-up and crossfade, where the follower reuses the cached delta), live bypass and a failing host.
+    for (double rate : rates) {
+        constexpr uint32_t N = 512;
+        const float active = 1.0f, gain = 0.9f, gain2 = 1.1f;
+        struct Host { int calls = 0; bool fail = false; };
+        Host host;
+        auto fn = [](void *c, const float *const *in, float *const *out, uint32_t ch, uint32_t frames) -> int {
+            Host *h = static_cast<Host *>(c);
+            h->calls++;
+            if (h->fail) return 0;
+            for (uint32_t k = 0; k < ch; k++)
+                for (uint32_t i = 0; i < frames; i++) out[k][i] = 0.5f * in[k][i];
+            return 1;
+        };
+        n60_stage_desc ext = stage(N60_STAGE_EXTERNAL, 2, 0, &active, 1, 32);
+        ext.laneMask = 3;
+        n60_stage_desc a[2] = {stage(N60_STAGE_GAIN, 1, N60_LANE_ALL, &gain, 1), ext};
+        n60_stage_desc b[2] = {stage(N60_STAGE_GAIN, 1, N60_LANE_ALL, &gain2, 1), ext};
+        n60_graph_desc da{}, db{};
+        da.structSize = db.structSize = sizeof da;
+        da.abiVersion = db.abiVersion = N60_GRAPH_ABI_VERSION;
+        da.sampleRate = db.sampleRate = rate;
+        da.maxBlockFrames = db.maxBlockFrames = N;
+        da.inputChannels = da.outputChannels = db.inputChannels = db.outputChannels = 2;
+        da.stages = a;
+        db.stages = b;
+        da.stageCount = db.stageCount = 2;
+        n60_graph *g = nullptr;
+        CHECK(n60_graph_build(&da, &g) == N60_STATUS_OK, "build external");
+        CHECK(n60_graph_set_external_processor(g, fn, &host, 2) == N60_STATUS_OK, "register external");
+        float l[N], r[N], ol[N], orr[N];
+        for (uint32_t i = 0; i < N; i++) { l[i] = 0.1f * std::sin(0.05f * i); r[i] = 0.1f * std::cos(0.07f * i); }
+        const float *in[2] = {l, r};
+        float *out[2] = {ol, orr};
+        for (int round = 0; round < 12; round++) {
+            CHECK(n60_graph_publish(g, (round & 1) ? &db : &da) == N60_STATUS_OK, "publish external");
+            host.fail = (round % 5) == 4;
+            for (int blk = 0; blk < 12; blk++) {
+                n60_param_record rec{2, 0, (blk % 7) == 3 ? 0.0f : 1.0f, 0};
+                CHECK(n60_graph_post_params(g, &rec, 1) == N60_STATUS_OK, "post external");
+                allocs = 0;
+                frees = 0;
+                armed = true;
+                n60_status st = n60_graph_process(g, in, out, N);
+                st = static_cast<n60_status>(st | n60_graph_process(g, in, out, 77));
+                armed = false;
+                CHECK(st == N60_STATUS_OK, "process external");
+                CHECK(allocs == 0 && frees == 0, "rate %.0f external round %d: realtime call allocated %ld / freed %ld",
+                      rate, round, allocs.load(), frees.load());
+            }
+            n60_graph_collect(g);
+        }
+        CHECK(host.calls > 0, "external host was called");
+        n60_graph_set_external_processor(g, nullptr, nullptr, 0);
+        n60_graph_retire(g);
+    }
     if (failures) {
         std::fprintf(stderr, "%d failure(s)\n", failures);
         return 1;

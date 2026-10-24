@@ -449,6 +449,8 @@ final class CoreAudioTransportSession {
     private var graphPublicationCoordinator: DSPGraphPublicationCoordinator?
     private var analysisWorker: ProductionAnalysisWorker?
     private var audioUnitRack: AudioUnitLiveRackSwitchboard?
+    /// The graph whose EXTERNAL stage this transport's rack was bound to (E6 S8e).
+    private var rackBoundGraph: UnsafeMutableRawPointer?
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateDeviceID = AudioDeviceID(kAudioObjectUnknown)
     private var captureIOProcID: AudioDeviceIOProcID?
@@ -1140,12 +1142,9 @@ final class CoreAudioTransportSession {
             detachUnifiedGraph()
             return
         }
-        // The graph has no headphone DSP stage yet; the kernel keeps rendering that setup.
-        guard !isSameDeviceOrRackRoute else {
-            unifiedGraphFallbackReason = .unsupportedRoute
-            detachUnifiedGraph()
-            return
-        }
+        // E6 S8e: same-device, aggregate and AU rack routes render through the graph too (the rack as its
+        // EXTERNAL stage, the speaker-bus split in the bridge). The graph has no headphone DSP stage yet; the
+        // kernel keeps rendering that setup.
         guard !headphoneDSPConfigured else {
             unifiedGraphFallbackReason = .headphoneDSP
             detachUnifiedGraph()
@@ -1163,10 +1162,13 @@ final class CoreAudioTransportSession {
             detachUnifiedGraph()
             return
         }
-        guard let spec = try? configuration.makeSpec() else {
+        guard var spec = try? configuration.makeSpec() else {
             unifiedGraphFallbackReason = .specRejected
             detachUnifiedGraph()
             return
+        }
+        if let audioUnitRack {
+            spec = spec.insertingExternalRackStage(latencyFrames: UInt32(clamping: max(audioUnitRack.latencyFrames, 0)))
         }
         do {
             if let host = unifiedGraphHost {
@@ -1175,6 +1177,16 @@ final class CoreAudioTransportSession {
                 unifiedGraphHost = try UnifiedGraphHost(spec: spec)
             }
             guard let host = unifiedGraphHost, let raw = host.rawGraph else { return }
+            // E6 S8e: the graph's EXTERNAL stage calls this transport's AU rack (once per graph; the graph
+            // is attached only after this succeeds).
+            if audioUnitRack != nil, rackBoundGraph != raw {
+                guard N60RealtimeAudioBridgeBindRackToGraph(bridge, raw) else {
+                    unifiedGraphFallbackReason = .attachFailed
+                    detachUnifiedGraph()
+                    return
+                }
+                rackBoundGraph = raw
+            }
             // E6 S8b2c: the bridge aligns the kernel and graph paths across the hand-over fade
             // by the difference between this and the kernel snapshot's latency.
             // The integer inter-channel taps are applied per lane by both paths and are not part
@@ -1205,9 +1217,6 @@ final class CoreAudioTransportSession {
         }
     }
 
-    private var isSameDeviceOrRackRoute: Bool {
-        sameDeviceOutputPlan != nil || aggregateDeviceOutputPlan != nil || audioUnitRack != nil
-    }
 
     func publishDSPGraph(_ snapshot: N60DSPGraphSnapshot) throws {
         guard let bridge else { throw CoreAudioTransportError.dspGraphPublicationFailed }
@@ -1306,6 +1315,7 @@ final class CoreAudioTransportSession {
         // The host outlives the bridge that rendered it; release it only after destroy.
         unifiedGraphHost?.release()
         unifiedGraphHost = nil
+        rackBoundGraph = nil
         audioUnitRack = nil
         graphPublicationCoordinator = nil
     }
