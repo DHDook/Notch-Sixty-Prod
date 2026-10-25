@@ -31,7 +31,14 @@ struct MeasurementRTASPLCard: View {
             }
             .padding(4)
         }
-        .onDisappear { monitor.stop() }
+        .onChange(of: monitor.spectrum) { _, spectrum in
+            MeasurementLiveOverlayStore.shared.rtaCurve = MeasurementOverlays.rtaCurve(
+                spectrum: spectrum, relativeToMean: true)
+        }
+        .onDisappear {
+            monitor.stop()
+            MeasurementLiveOverlayStore.shared.rtaCurve = nil
+        }
     }
 
     private var controls: some View {

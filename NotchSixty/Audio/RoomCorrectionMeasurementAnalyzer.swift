@@ -64,14 +64,6 @@ struct RoomCorrectionMeasurementAnalyzer: Sendable {
     /// Fraction of the right window given to its half-Hann taper.
     static let rightWindowTaperFraction = 0.25
 
-    /// E11 S1: deconvolve in libn60core instead of the local float DFT. Set by Swift
-    /// from the `e11.measurement-suite` flag; off keeps today's path exactly.
-    var usesMeasurementCore = false
-
-    init(usesMeasurementCore: Bool = false) {
-        self.usesMeasurementCore = usesMeasurementCore
-    }
-
     func analyze(
         capture: RoomCorrectionCalibrationCapture,
         plan: RoomCorrectionMeasurementPlan,
@@ -169,57 +161,12 @@ struct RoomCorrectionMeasurementAnalyzer: Sendable {
 
         let transformSize = try Self.transformSize(requiredFrames: observed.count)
         let dft = try RoomCorrectionDFT(size: transformSize)
-        let fullImpulse: [Float]
-        if usesMeasurementCore {
-            // E11 S1: the same regularised division in the portable core (double precision),
-            // returning the full circular response.
-            fullImpulse = try MeasurementCore.deconvolve(
-                excitation: excitation,
-                observed: observed,
-                regularizationRatio: Double(Self.regularizationPowerRatio)
-            )
-        } else {
-            let excitationSpectrum = dft.forward(excitation)
-            let observedSpectrum = dft.forward(observed)
-
-            var maximumExcitationPower: Float = 0
-            for index in 0..<transformSize {
-                let real = excitationSpectrum.real[index]
-                let imaginary = excitationSpectrum.imaginary[index]
-                maximumExcitationPower = max(
-                    maximumExcitationPower,
-                    real * real + imaginary * imaginary
-                )
-            }
-            guard maximumExcitationPower.isFinite, maximumExcitationPower > Float.leastNonzeroMagnitude else {
-                throw RoomCorrectionMeasurementAnalysisError.unusableExcitation
-            }
-
-            let regularization = max(
-                maximumExcitationPower * Self.regularizationPowerRatio,
-                Float.leastNonzeroMagnitude
-            )
-            var transferReal = [Float](repeating: 0, count: transformSize)
-            var transferImaginary = [Float](repeating: 0, count: transformSize)
-            for index in 0..<transformSize {
-                let sourceReal = excitationSpectrum.real[index]
-                let sourceImaginary = excitationSpectrum.imaginary[index]
-                let measuredReal = observedSpectrum.real[index]
-                let measuredImaginary = observedSpectrum.imaginary[index]
-                let sourcePower = sourceReal * sourceReal + sourceImaginary * sourceImaginary
-                let denominator = sourcePower + regularization
-
-                // Y * conj(X) / (|X|^2 + lambda)
-                transferReal[index] = (
-                    measuredReal * sourceReal + measuredImaginary * sourceImaginary
-                ) / denominator
-                transferImaginary[index] = (
-                    measuredImaginary * sourceReal - measuredReal * sourceImaginary
-                ) / denominator
-            }
-
-            fullImpulse = dft.inverse(real: transferReal, imaginary: transferImaginary)
-        }
+        // Regularised division in the portable core (double precision), returning the full circular response.
+        let fullImpulse = try MeasurementCore.deconvolve(
+            excitation: excitation,
+            observed: observed,
+            regularizationRatio: Double(Self.regularizationPowerRatio)
+        )
         let arrivalFrame = try directArrivalFrame(
             impulse: fullImpulse,
             sampleRate: program.sampleRate,
