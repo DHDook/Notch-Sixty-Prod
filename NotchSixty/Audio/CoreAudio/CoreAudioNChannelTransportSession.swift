@@ -23,6 +23,9 @@ enum LiveNChannelTransportError: Error, Equatable, LocalizedError {
     /// E6 S9a: stereo-class DSP is active and the unified graph cannot reproduce the setup, so it never starts on a
     /// path that would drop that DSP.
     case unifiedGraphRejected(UnifiedGraphFallbackReason)
+    /// E6 S9b: a live edit was refused by the running graph (for example the CPU budget for the fade); the
+    /// running graph and the engine state are unchanged.
+    case graphRepublishRefused(String)
 
     var errorDescription: String? {
         switch self {
@@ -58,6 +61,8 @@ enum LiveNChannelTransportError: Error, Equatable, LocalizedError {
             return "The persisted Speaker Optimizer FIR could not be bound to the live semantic program graph with its required latency/headroom contract."
         case .configurationChangeRequiresRestart:
             return "Stop N-channel processing before changing DSP or Output Device Profile configuration."
+        case .graphRepublishRefused(let detail):
+            return "The running graph refused the change and keeps rendering as before (\(detail))."
         case .unifiedGraphRejected(let reason):
             return "The active stereo DSP cannot run on this multichannel or Virtual Speakers setup: \(reason.displayText)."
         }
@@ -818,6 +823,31 @@ final class CoreAudioNChannelTransportSession {
         var snapshot = N60LiveNChannelBridgeGetSnapshot(bridge)
         unifiedGraphHost?.overlayProgramMeters(&snapshot.meter)
         return snapshot
+    }
+
+    /// E6 S9b: moves the running graph to `configuration` (posted parameters, or a faded rebuild). The channel
+    /// counts must match the running graph; a CPU-budget or core refusal throws and the running graph keeps
+    /// rendering.
+    @discardableResult
+    func republishGraph(_ configuration: UnifiedGraphConfiguration) throws -> UnifiedGraphApplyResult {
+        guard let host = unifiedGraphReadback else {
+            throw LiveNChannelTransportError.configurationChangeRequiresRestart
+        }
+        var configuration = configuration
+        guard abs(configuration.sampleRate - outputFormat.sampleRate) < 0.5 else {
+            throw LiveNChannelTransportError.unifiedGraphRejected(.sampleRateMismatch)
+        }
+        configuration.maxBlockFrames = Self.graphMaxBlockFrames
+        let spec: UnifiedGraphSpec
+        do { spec = try configuration.makeSpec() } catch let reason as UnifiedGraphFallbackReason {
+            throw LiveNChannelTransportError.unifiedGraphRejected(reason)
+        } catch { throw LiveNChannelTransportError.unifiedGraphRejected(.specRejected) }
+        guard spec.inputChannels == host.inputChannels, spec.outputChannels == host.outputChannels else {
+            throw LiveNChannelTransportError.unifiedGraphRejected(.laneCountMismatch)
+        }
+        do { return try host.apply(spec) } catch {
+            throw LiveNChannelTransportError.graphRepublishRefused(String(describing: error))
+        }
     }
 
     /// Builds the graph for a session and attaches it to `bridge`, or says why it cannot.

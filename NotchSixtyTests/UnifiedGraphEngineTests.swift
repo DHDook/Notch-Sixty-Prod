@@ -848,8 +848,8 @@ final class UnifiedGraphStageParityTests: XCTestCase {
         var s = N60DSPGraphSnapshotMakeUnity(48_000)
         XCTAssertTrue(N60DSPGraphSnapshotSetAmbientCompensation(&s, 2, 1.5, 1, 0.5, true))
         XCTAssertTrue(N60DynamicsSnapshotSetExpander(&s.dynamics, 48_000, true, -26, 2, -30, 2, 80))
-        XCTAssertNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000),
-                     "the kernel runs ambient before its expander, the core after")
+        XCTAssertNotNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000),
+                        "owner decision of 24 Oct 2026: ambient runs after the compressor and expander on every path")
         s = N60DSPGraphSnapshotMakeUnity(48_000)
         s.dynamics.dynamicEQ.enabled = true
         XCTAssertNotNil(UnifiedGraphTranslator.stereoConfiguration(snapshot: &s, sampleRate: 48_000),

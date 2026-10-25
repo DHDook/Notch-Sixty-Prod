@@ -391,7 +391,7 @@ enum UnifiedGraphTranslator {
     /// the profile must carry an asset. `asset` is already resampled to `sampleRate`. The
     /// HEADPHONE stage carries the profile's headroom, channel gain, polarity and EQ; channel
     /// delay and a headroom above 24 dB stay on the legacy path (`headphoneDSP`). Protection
-    /// matches the legacy limiter. Program gain is applied by the bridge while gathering.
+    /// matches the legacy limiter. Program gain is the INPUT_GAIN stage (the bridge applies it only on the legacy pipeline).
     static func binauralSpec(
         asset: BinauralProfileAsset?,
         layout: OutputProgramLayout,
@@ -400,8 +400,54 @@ enum UnifiedGraphTranslator {
         sampleRate: Double,
         headTracking: Bool,
         maxBlockFrames: UInt32 = 16_384,
-        programDSP: UnifiedGraphProgramDSP? = nil
+        programDSP: UnifiedGraphProgramDSP? = nil,
+        programGain: Float = 1
     ) -> Result<UnifiedGraphSpec, UnifiedGraphFallbackReason> {
+        switch binauralBaseSpec(
+            asset: asset, layout: layout, profile: profile, outputChannels: outputChannels,
+            sampleRate: sampleRate, headTracking: headTracking, maxBlockFrames: maxBlockFrames,
+            programGain: programGain
+        ) {
+        case .failure(let reason): return .failure(reason)
+        case .success(let base): return binauralApplyProgram(base: base, programDSP: programDSP, programGain: programGain)
+        }
+    }
+
+    /// E6 S9b: the program DSP and program gain laid onto a binaural base spec (`binauralBaseSpec`), without
+    /// rebuilding the response set. A live edit calls this with the session's retained base; the host then posts
+    /// the parameters or fades to the new topology.
+    static func binauralApplyProgram(
+        base: UnifiedGraphSpec,
+        programDSP: UnifiedGraphProgramDSP?,
+        programGain: Float
+    ) -> Result<UnifiedGraphSpec, UnifiedGraphFallbackReason> {
+        guard programGain.isFinite, programGain > 0, programGain <= 16 else { return .failure(.gainOutOfRange) }
+        var spec = base
+        guard let gainIndex = spec.stages.firstIndex(where: { $0.stageId == N60_LSTAGE_INPUT_GAIN }),
+              !spec.stages[gainIndex].params.isEmpty else { return .failure(.specRejected) }
+        spec.stages[gainIndex].params[0] = programGain
+        if var programDSP, !programDSP.isNeutral {
+            programDSP.virtualSpeakers = true
+            do { try programDSP.apply(to: &spec) } catch let reason as UnifiedGraphFallbackReason {
+                return .failure(reason)
+            } catch { return .failure(.specRejected) }
+        }
+        return .success(spec)
+    }
+
+    /// The binaural layout graph with the HEADPHONE stage and the safety limiter, before any program DSP.
+    /// `programGain` is the INPUT_GAIN stage's value (the bridge does not apply it while the graph renders).
+    static func binauralBaseSpec(
+        asset: BinauralProfileAsset?,
+        layout: OutputProgramLayout,
+        profile: HeadphoneDeviceProfileConfiguration,
+        outputChannels: UInt32,
+        sampleRate: Double,
+        headTracking: Bool,
+        maxBlockFrames: UInt32 = 16_384,
+        programGain: Float = 1
+    ) -> Result<UnifiedGraphSpec, UnifiedGraphFallbackReason> {
+        guard programGain.isFinite, programGain > 0, programGain <= 16 else { return .failure(.gainOutOfRange) }
         guard outputChannels == 2 else { return .failure(.binauralOutputNotStereo) }
         guard layout.roles.count > 2 else { return .failure(.noProgramLanes) }
         guard layout.roles.count <= Int(N60_LAYOUT_MAX_CHANNELS),
@@ -462,6 +508,7 @@ enum UnifiedGraphTranslator {
         options.maxBlockFrames = maxBlockFrames
         options.mode = N60_MODE_BINAURAL.rawValue
         options.protection = 1
+        options.inputGain = programGain
         var built: OpaquePointer?
         let status: n60_status = responses.withUnsafeBufferPointer { responsePointer in
             var binaural = n60_binaural_profile()
@@ -513,12 +560,6 @@ enum UnifiedGraphTranslator {
         // Same limiter as the legacy bridge: -1 dB ceiling, 0.5/90 ms, 2 ms look-ahead, 4x true-peak.
         spec.stages[protectionIndex].params = [1, -1, 0.5, 90, 2, 1, 4]
         spec.stages.insert(stage, at: protectionIndex)
-        if var programDSP, !programDSP.isNeutral {
-            programDSP.virtualSpeakers = true
-            do { try programDSP.apply(to: &spec) } catch let reason as UnifiedGraphFallbackReason {
-                return .failure(reason)
-            } catch { return .failure(.specRejected) }
-        }
         return .success(spec)
     }
 
