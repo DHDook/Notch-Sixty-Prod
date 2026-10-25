@@ -141,6 +141,7 @@ Dirac now sells ART on the Mac, so this needs the same path to authorisation as 
 Phase 2 replaces the three render paths with one graph that every later feature builds on.
 **Gate G2:** stereo output matches today's kernel on the parity suite within -120 dBFS peak
 (deliberate improvements excepted where the reference lab shows them equal or better), and live edits are click-free on hardware in stereo, 5.1 and binaural modes.
+Gate G2 passed on 2026-10-25 (commit 07e82c6)
 
 ### E6 Unified live N-channel graph
 
@@ -154,7 +155,7 @@ Phase 2 replaces the three render paths with one graph that every later feature 
 - [ ] S8d `e6/translate-remaining-stereo`: move the kernel-fallback stereo stages (dynamic EQ, FIR/IR/convolution, mixed phase, crossover and bass management, denoiser, fractional delay, soft clipper, gain rider) to the graph
 - [ ] Remove the `unsupportedActiveDSP` and `immutableSemanticTransportActive` restrictions in `AudioIOEngine.swift`, and the idle-only headphone profile rule
 - [ ] Build a parity suite that renders the old stereo kernel and the new graph side by side
-- [ ] Make the graph the default once parity holds; keep `N60RenderKernel` as a frozen fallback behind a flag until E23
+- [x] Make the graph the default once parity holds; keep `N60RenderKernel` as a frozen fallback behind a flag until E23
 - [x] S8b2a `e6/engine-integration-3` built on branch (needs-owner, behind `e6.unified-graph`): graph reproduces M/S EQ, compressor, expander, ambient compensation, symmetry, crossfeed, crosstalk cancellation, integer inter-channel delay and pause gate; everything else keeps the kernel fallback
 - [x] S8b2b: translate dynamic EQ, FIR/room/speaker IR, stereo crossover and bass management, denoiser, soft clipper and gain rider (or document keep-on-kernel); wire multichannel, layouts, 1 to 8 subs and binaural into the live N-channel session; metering and latency readbacks; compensate kernel/graph latency difference across the hand-over fade
 - [x] S8b2c (next): wire live binaural into the N-channel session (it has no binaural mode today) and compensate kernel/graph fade latency (the N-channel path attaches the graph statically, with no mid-stream hand-over). S8b2c is split: S8b2c1 built on branch `e6/engine-integration-5` (needs-owner); S8b2d awaits owner approval of the binaural proposal
@@ -302,7 +303,7 @@ then this epic deletes it before E22 hardware validation, so v1 ships and is val
 unified graph only.
 
 - [ ] Confirm nothing falls back to the kernel (E6 S8d, S8e; E4 S11 for AQZ/ANC)
-- [ ] Delete `N60RenderKernel`, the old N-channel path and the `e6.unified-graph` and `e6.legacy-kernel` flags
+- [ ] Delete `N60RenderKernel`, the old N-channel path and the `e6.legacy-kernel` flag
 - [ ] Update `docs/DSP_KERNEL.md`, `docs/ARCHITECTURE.md` and the `AGENTS.md` mention, in coordination with E21
 
 ### E22 Hardware validation

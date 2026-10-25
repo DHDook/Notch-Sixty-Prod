@@ -2,9 +2,9 @@ import Foundation
 
 /// E6 S9a: how the graph orders the program DSP (EQ, dynamics, FIR, room, image) against the rest.
 enum UnifiedGraphOrderPolicy: Equatable, Sendable {
-    /// Two-lane stereo as the kernel orders it. Every guard of `UnifiedGraphConfiguration.makeSpec` stays.
+    /// The kernel's stage order, frozen for tests (E6 S11 moved every path to `.canonical`). Every guard of `UnifiedGraphConfiguration.makeSpec` stays.
     case kernelParity
-    /// The core's own stage order, used by N-channel and binaural graphs. Four kernel-order guards are lifted
+    /// The core's own stage order, used by every graph since E6 S11. Four kernel-order guards are lifted
     /// (program FIR with dynamic EQ, expander with room or IR, room or IR with subs, dynamic EQ with M/S).
     /// Ambient runs after the compressor and expander in every mode (owner decision of 24 Oct 2026).
     case canonical
