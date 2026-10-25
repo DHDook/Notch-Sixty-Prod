@@ -37,7 +37,7 @@ final class MeasurementCoreTests: XCTestCase {
     }
 
     func testABIVersionAndFlagRegistration() {
-        XCTAssertEqual(MeasurementCore.abiVersion, 2)
+        XCTAssertEqual(MeasurementCore.abiVersion, 3)
         XCTAssertFalse(FeatureFlag.all.contains { $0.epic == "E11" }, "E11 flag is removed")
     }
 

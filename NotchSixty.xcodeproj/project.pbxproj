@@ -61,6 +61,11 @@
 		E11C00000000000000000032 /* ess.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E11C00000000000000000012 /* ess.cpp */; };
 		E11C00000000000000000033 /* deconvolve.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E11C00000000000000000013 /* deconvolve.cpp */; };
 		E11C00000000000000000034 /* reference_room.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E11C00000000000000000014 /* reference_room.cpp */; };
+		E10A00000000000000000021 /* minphase.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E10A00000000000000000011 /* minphase.cpp */; };
+		E10A00000000000000000022 /* design.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E10A00000000000000000012 /* design.cpp */; };
+		E10A00000000000000000023 /* synth.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E10A00000000000000000013 /* synth.cpp */; };
+		E10A00000000000000000031 /* RoomCorrectionCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10A00000000000000000041 /* RoomCorrectionCore.swift */; };
+		E10A00000000000000000032 /* RoomCorrectionCoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10A00000000000000000042 /* RoomCorrectionCoreTests.swift */; };
 		E11D00000000000000000001 /* MeasurementCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11D00000000000000000011 /* MeasurementCore.swift */; };
 		E11D00000000000000000002 /* MeasurementCoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11D00000000000000000012 /* MeasurementCoreTests.swift */; };
 		E6C000000000000000000033 /* stages_dsp.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E6C000000000000000000013 /* stages_dsp.cpp */; };
@@ -471,6 +476,11 @@
 		E11C0000000000000000001D /* rta.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = measure/rta.cpp; sourceTree = "<group>"; };
 		E11C00000000000000000018 /* waterfall.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = measure/waterfall.cpp; sourceTree = "<group>"; };
 		E11C00000000000000000020 /* offline_fft.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = measure/offline_fft.hpp; sourceTree = "<group>"; };
+		E10A00000000000000000011 /* minphase.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = correct/minphase.cpp; sourceTree = "<group>"; };
+		E10A00000000000000000012 /* design.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = correct/design.cpp; sourceTree = "<group>"; };
+		E10A00000000000000000013 /* synth.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = correct/synth.cpp; sourceTree = "<group>"; };
+		E10A00000000000000000041 /* RoomCorrectionCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionCore.swift; sourceTree = "<group>"; };
+		E10A00000000000000000042 /* RoomCorrectionCoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionCoreTests.swift; sourceTree = "<group>"; };
 		E11D00000000000000000011 /* MeasurementCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementCore.swift; sourceTree = "<group>"; };
 		E11D00000000000000000012 /* MeasurementCoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementCoreTests.swift; sourceTree = "<group>"; };
 		E6C000000000000000000013 /* stages_dsp.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = stages_dsp.cpp; sourceTree = "<group>"; };
@@ -882,6 +892,9 @@
 				E11C00000000000000000017 /* decay.cpp */,
 				E11C00000000000000000018 /* waterfall.cpp */,
 				E11C0000000000000000001D /* rta.cpp */,
+				E10A00000000000000000011 /* minphase.cpp */,
+				E10A00000000000000000012 /* design.cpp */,
+				E10A00000000000000000013 /* synth.cpp */,
 				E11C0000000000000000001C /* spl.cpp */,
 				E11C0000000000000000001B /* monitor_ring.cpp */,
 				E11C00000000000000000020 /* offline_fft.hpp */,
@@ -956,6 +969,7 @@
 				A10000000000000000000027 /* ConvolutionTests.swift */,
 				A100000000000000000E2206 /* FeatureFlagsTests.swift */,
 				E11D00000000000000000012 /* MeasurementCoreTests.swift */,
+				E10A00000000000000000042 /* RoomCorrectionCoreTests.swift */,
 				E11E0000000000000000000C /* MeasurementLiveAnalysisTests.swift */,
 				E11F0000000000000000000D /* MeasurementMultiMicTests.swift */,
 				E11F00000000000000000015 /* MeasurementSeatPlanTests.swift */,
@@ -1158,6 +1172,7 @@
 				F10600000000000000000036 /* SpeakerMeasurementLabController.swift */,
 				A2000000000000000000002E /* RoomCorrectionMeasurementAnalyzer.swift */,
 				E11D00000000000000000011 /* MeasurementCore.swift */,
+				E10A00000000000000000041 /* RoomCorrectionCore.swift */,
 				E11E00000000000000000002 /* MeasurementLiveAnalysis.swift */,
 				E11F0000000000000000000B /* MeasurementMultiMic.swift */,
 				E11F00000000000000000011 /* MeasurementSeatPlan.swift */,
@@ -1376,6 +1391,9 @@
 				E11C00000000000000000037 /* decay.cpp in Sources */,
 				E11C00000000000000000038 /* waterfall.cpp in Sources */,
 				E11C0000000000000000003C /* rta.cpp in Sources */,
+				E10A00000000000000000021 /* minphase.cpp in Sources */,
+				E10A00000000000000000022 /* design.cpp in Sources */,
+				E10A00000000000000000023 /* synth.cpp in Sources */,
 				E11C0000000000000000003B /* spl.cpp in Sources */,
 				E11C0000000000000000003A /* monitor_ring.cpp in Sources */,
 				A10000000000000000000011 /* ContentView.swift in Sources */,
@@ -1478,6 +1496,7 @@
 				A2000000000000000000001D /* RoomCorrectionCalibrationController.swift in Sources */,
 				A2000000000000000000001E /* RoomCorrectionMeasurementAnalyzer.swift in Sources */,
 				E11D00000000000000000001 /* MeasurementCore.swift in Sources */,
+				E10A00000000000000000031 /* RoomCorrectionCore.swift in Sources */,
 				E11E00000000000000000003 /* MeasurementLiveAnalysis.swift in Sources */,
 				E11F0000000000000000000A /* MeasurementMultiMic.swift in Sources */,
 				E11F00000000000000000010 /* MeasurementSeatPlan.swift in Sources */,
@@ -1623,6 +1642,7 @@
 				A10000000000000000000014 /* ConvolutionTests.swift in Sources */,
 				A100000000000000000E2205 /* FeatureFlagsTests.swift in Sources */,
 				E11D00000000000000000002 /* MeasurementCoreTests.swift in Sources */,
+				E10A00000000000000000032 /* RoomCorrectionCoreTests.swift in Sources */,
 				E11E0000000000000000000D /* MeasurementLiveAnalysisTests.swift in Sources */,
 				E11F0000000000000000000C /* MeasurementMultiMicTests.swift in Sources */,
 				E11F00000000000000000014 /* MeasurementSeatPlanTests.swift in Sources */,

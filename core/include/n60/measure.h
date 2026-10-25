@@ -18,7 +18,7 @@
 extern "C" {
 #endif
 
-#define N60_MEASURE_ABI_VERSION 2
+#define N60_MEASURE_ABI_VERSION 3
 
 #define N60_MEASURE_OK 0
 #define N60_MEASURE_ERR_ARGUMENT (-1)
@@ -117,6 +117,42 @@ int32_t n60_measure_room_capture_length(const n60_measure_room_params *params,
 int32_t n60_measure_room_capture(const n60_measure_room_params *params,
                                  const float *excitation, uint64_t excitation_count,
                                  float *out, uint64_t capacity, uint64_t *count_out);
+
+/* ---- Multi-source, multi-seat reference room (E10 S1) ----
+ * N sources by K seats. Every seat shares the direct sound's early reflections (coherent), has its
+ * own modal gains (so levels differ between seats), its own diffuse tail and noise, and one set of
+ * second-order allpass sections gives every path a known excess phase and group delay.
+ */
+#define N60_MEASURE_MULTIROOM_MAX 8
+#define N60_MEASURE_MULTIROOM_REFLECTIONS 4
+#define N60_MEASURE_MULTIROOM_ALLPASS 4
+
+typedef struct n60_measure_multiroom_params {
+    uint32_t struct_size;
+    n60_measure_room_params base;     /* direct path, modes, diffuse tail; capture fields unused */
+    uint32_t source_count;            /* 1 .. MULTIROOM_MAX */
+    uint32_t seat_count;              /* 1 .. MULTIROOM_MAX */
+    double source_delay_seconds[N60_MEASURE_MULTIROOM_MAX]; /* added to the direct delay per source */
+    double seat_delay_seconds[N60_MEASURE_MULTIROOM_MAX];   /* added to the direct delay per seat */
+    double modal_variation;           /* seat modal gain = 1 + modal_variation * u, u in [-1, 1) seeded */
+    uint32_t reflection_count;
+    double reflection_delay_seconds[N60_MEASURE_MULTIROOM_REFLECTIONS]; /* after the base direct delay */
+    double reflection_gain_db[N60_MEASURE_MULTIROOM_REFLECTIONS];       /* re the direct impulse */
+    uint32_t allpass_count;
+    double allpass_f0_hz[N60_MEASURE_MULTIROOM_ALLPASS];
+    double allpass_q[N60_MEASURE_MULTIROOM_ALLPASS];
+    double ir_noise_dbfs;             /* seeded white noise added per (source, seat) IR; <= -200 off */
+} n60_measure_multiroom_params;
+
+void n60_measure_multiroom_defaults(double sample_rate, n60_measure_multiroom_params *params);
+int32_t n60_measure_multiroom_ir_length(const n60_measure_multiroom_params *params, uint64_t *frames_out);
+int32_t n60_measure_multiroom_ir(const n60_measure_multiroom_params *params, uint32_t source, uint32_t seat,
+                                 float *out, uint64_t capacity, uint64_t *count_out);
+/* Direct arrival of one path in frames. */
+double n60_measure_multiroom_arrival_frames(const n60_measure_multiroom_params *params, uint32_t source, uint32_t seat);
+/* Analytic phase (radians, continuous from 0) and group delay (seconds) of the allpass sections. */
+double n60_measure_multiroom_allpass_phase(const n60_measure_multiroom_params *params, double hz);
+double n60_measure_multiroom_allpass_group_delay(const n60_measure_multiroom_params *params, double hz);
 
 /* ---- Timing reference and repeat averaging (E11 S2, design notes 4 and 5) ---- */
 

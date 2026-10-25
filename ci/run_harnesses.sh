@@ -54,7 +54,7 @@ build_core_objs() {
     CORE_OK=1
     local src
     for src in graph snapshot fft stages_dsp stages_system stages_matrix stages_generator layout \
-        measure/offline_fft measure/ess measure/deconvolve measure/reference_room measure/timing measure/distortion measure/decay measure/waterfall measure/monitor_ring measure/spl measure/rta; do
+        measure/offline_fft measure/ess measure/deconvolve measure/reference_room measure/timing measure/distortion measure/decay measure/waterfall measure/monitor_ring measure/spl measure/rta correct/minphase correct/design correct/synth; do
         local obj="$OUT/n60core_${src//\//_}.o"
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -fno-exceptions -fno-rtti -Icore/include -Icore/src \
             -c "core/src/$src.cpp" -o "$obj"; then
@@ -210,6 +210,21 @@ if selected e11_measure_core; then
         done
     else
         failed+=(e11_measure_core)
+    fi
+fi
+
+# E10 S1: room-correction design core (minimum-phase parity maths, FDW, excess phase, synthesis, pre-ringing audit).
+if selected e10_correct_core; then
+    build_core_objs
+    if [ "$CORE_OK" = 1 ]; then
+        if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src core/tests/test_correct.cpp \
+            "${CORE_OBJS[@]}" -o "$OUT/e10_core_correct" && "$OUT/e10_core_correct"; then
+            passed+=(e10_core_correct)
+        else
+            failed+=(e10_core_correct)
+        fi
+    else
+        failed+=(e10_correct_core)
     fi
 fi
 
