@@ -66,4 +66,19 @@ final class SpeakerMeasurementLabQuasiAnechoicTests: XCTestCase {
             return .init(id:UUID(),protocolID:p.id,repeatIndex:r,capturedAt:Date(timeIntervalSince1970:1704300100+Double(r)),playbackSystemID:system,routingSignature:"gated-route",microphone:microphone ?? mic,sampleRate:sr,source:sourceOverride ?? source,impulseResponse:impulse,transferFunction:.init(frequenciesHz:grid,magnitudeDB:Array(repeating:0,count:grid.count),phaseRadians:grid.map{_ in Double(r-1)*0.002}),quality:.init(clipped:false,playbackPeakDBFS:-20,capturePeakDBFS:-12,estimatedNoiseFloorDBFS:-70,estimatedSNRDB:snr,sweepComplete:true,directArrivalSeconds:Double(arrival)/sr + Double(r)*0.00001,usableLowHz:80,usableHighHz:18000,warnings:[]))
         }
     }
+
+    // E11 S4: the gated view's lowest valid frequency is the analyser's floor.
+    func testGatedPlotLimitMatchesAnalyser() throws {
+        let p=proto(); var s=session([p]); s.captures=captures(p,late:0)
+        let capture=s.captures[0]
+        for post in [4.0,6.0,10.0] {
+            let w=SpeakerMeasurementLabQuasiAnechoicWindow(preArrivalMilliseconds:0.75,reflectionFreePostArrivalMilliseconds:post,fadeOutMilliseconds:1,minimumCyclesForReliableMagnitude:2)
+            let plot=try XCTUnwrap(MeasurementGatedPlot(impulseResponse:capture.impulseResponse,sampleRate:capture.sampleRate,directArrivalSeconds:try XCTUnwrap(capture.quality.directArrivalSeconds),window:w))
+            let report=try SpeakerMeasurementLabQuasiAnechoicAnalyzer().analyze(session:s,protocolID:p.id,window:w)
+            XCTAssertGreaterThanOrEqual(report.minimumReliableFrequencyHz,plot.lowestValidFrequencyHz-1e-9)
+            XCTAssertLessThan(report.minimumReliableFrequencyHz/plot.lowestValidFrequencyHz,1.1)
+            XCTAssertEqual(plot.oneOverGateHz,1000/post,accuracy:1e-9)
+            XCTAssertEqual(plot.gateEndSeconds-plot.arrivalSeconds,post/1000,accuracy:1e-12)
+        }
+    }
 }

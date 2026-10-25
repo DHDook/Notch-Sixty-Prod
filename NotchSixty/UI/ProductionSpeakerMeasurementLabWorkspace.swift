@@ -27,6 +27,7 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
     @ObservedObject var engine: AudioIOEngine
     @ObservedObject var microphone: RoomCorrectionCalibrationController
     @ObservedObject var profiles: ProductProfileController
+    @EnvironmentObject private var featureFlags: FeatureFlags
     @StateObject private var lab: SpeakerMeasurementLabController
     @StateObject private var alignment:
         CoherentSubwooferAlignmentGuidedController
@@ -92,6 +93,9 @@ struct ProductionSpeakerMeasurementLabWorkspace: View {
                 sessionCard
                 reportCard
                 if tab == .advanced {
+                    if featureFlags.isEnabled(.measurementSuite) {
+                        MeasurementAnalysisCard(capture: lab.session?.captures.last)
+                    }
                     protectedDriverCommissioningCard
                 } else {
                     coherentAlignmentCard

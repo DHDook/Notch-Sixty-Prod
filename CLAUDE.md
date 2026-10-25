@@ -8,7 +8,7 @@
   builds one slice in a fresh context), realtime-reviewer (Sonnet), and code-scout,
   build-test-runner, plan-tracker, pr-writer (Haiku). `/next` itself runs on Sonnet.
 
-**Current focus:** E11 (measurement suite), slice 4 of 10: `e11/waterfall-spectrogram-gated` (low-risk)
+**Current focus:** E11 (measurement suite), slice 5 of 10: `e11/library` (low-risk)
 <!-- plan-tracker keeps the line above current -->
 
 @AGENTS.md

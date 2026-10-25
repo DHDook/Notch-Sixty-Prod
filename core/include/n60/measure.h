@@ -271,6 +271,71 @@ int32_t n60_measure_decay_analyze(const float *ir, uint64_t count, double sample
                                   uint32_t bands_per_octave, double min_centre_hz, double max_centre_hz,
                                   n60_measure_decay_band *bands, uint32_t capacity, uint32_t *band_count);
 
+/* ---- Waterfall (cumulative spectral decay) and spectrogram (E11 S4, design note 9) ---- */
+
+typedef struct n60_measure_waterfall_params {
+    double sample_rate;
+    uint64_t arrival_index;     /* direct arrival frame; UINT64_MAX: largest |sample| */
+    double step_seconds;        /* slice spacing: 0.0003 (speaker) or 0.02 (room) */
+    uint32_t slice_count;       /* 40 (speaker) or 30 (room) */
+    double window_seconds;      /* fixed end of every window, measured from the arrival */
+    double rise_seconds;        /* half-Hann rise ending at each slice start; 0.0001 */
+    double smoothing_octaves;   /* power smoothing; 1/24 */
+    uint32_t points_per_octave; /* log-spaced output grid; 24 */
+    double min_hz;              /* 20 */
+    double max_hz;              /* min(20000, 0.45 fs) */
+} n60_measure_waterfall_params;
+
+typedef struct n60_measure_waterfall_info {
+    uint32_t point_count;       /* frequency points per slice */
+    uint32_t slice_count;
+    uint64_t arrival_index;     /* as used */
+    uint64_t end_index;         /* fixed window end (exclusive), clamped to the response length */
+} n60_measure_waterfall_info;
+
+/* room = 0: speaker preset (0.3 ms x 40, window 3x the slice span); 1: room preset (20 ms x 30, 2x). */
+void n60_measure_waterfall_defaults(double sample_rate, uint32_t room, n60_measure_waterfall_params *params);
+
+/* Grid sizes only (no data needed). */
+int32_t n60_measure_waterfall_describe(const n60_measure_waterfall_params *params, n60_measure_waterfall_info *info_out);
+
+/*
+ * Slice i covers [arrival + i step, end) with a half-Hann rise in the frames before it and a half-Hann
+ * fall over the last quarter of the fixed window; its power spectrum is smoothed and read on the log
+ * grid. out_db is slice-major (slice * point_count + point), dB with the loudest cell at 0, and holds
+ * out_capacity cells (>= slice_count * point_count). A slice with under 16 frames left reads
+ * N60_MEASURE_NO_DATA_DB.
+ */
+int32_t n60_measure_waterfall_analyze(const n60_measure_waterfall_params *params, const float *ir,
+                                      uint64_t count, double *frequency_hz, double *out_db,
+                                      uint64_t out_capacity, n60_measure_waterfall_info *info_out);
+
+typedef struct n60_measure_spectrogram_params {
+    double sample_rate;
+    double window_seconds;      /* Hann (periodic); 0.01 */
+    double max_hz;              /* 0: min(20000, 0.45 fs) */
+    uint64_t begin_index;       /* first frame analysed */
+    uint64_t end_index;         /* 0: the whole response */
+} n60_measure_spectrogram_params;
+
+typedef struct n60_measure_spectrogram_info {
+    uint32_t frame_count;
+    uint32_t bin_count;         /* bins 0 .. bin_count-1 at k * hz_per_bin */
+    uint32_t window_frames;
+    uint32_t hop_frames;        /* window / 4: 75 % overlap */
+    uint32_t fft_size;
+    double hz_per_bin;
+    uint64_t begin_index;       /* frame j covers [begin + j hop, begin + j hop + window) */
+} n60_measure_spectrogram_info;
+
+void n60_measure_spectrogram_defaults(double sample_rate, n60_measure_spectrogram_params *params);
+int32_t n60_measure_spectrogram_describe(const n60_measure_spectrogram_params *params, uint64_t count,
+                                         n60_measure_spectrogram_info *info_out);
+/* out_db is frame-major (frame * bin_count + bin), dB with the loudest cell at 0, floor -200. */
+int32_t n60_measure_spectrogram_analyze(const n60_measure_spectrogram_params *params, const float *ir,
+                                        uint64_t count, double *out_db, uint64_t out_capacity,
+                                        n60_measure_spectrogram_info *info_out);
+
 #ifdef __cplusplus
 }
 #endif

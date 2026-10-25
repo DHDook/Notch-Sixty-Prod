@@ -12,11 +12,13 @@
 #include <limits>
 #include <vector>
 
+#include "band_mean.hpp"
 #include "offline_fft.hpp"
 #include "n60/measure.h"
 
 namespace {
 
+using n60::measure::BandMean;
 using n60::fft::offline::Cplx;
 constexpr double kPi = 3.14159265358979323846264338327950288;
 constexpr int kHarmonics = N60_MEASURE_MAX_HARMONIC;
@@ -55,26 +57,6 @@ bool windowedPower(const float *x, uint64_t n, uint64_t centre, uint64_t pre, ui
     for (size_t k = 0; k < spectrum.size(); ++k) power[k] = spectrum[k].re * spectrum[k].re + spectrum[k].im * spectrum[k].im;
     return true;
 }
-
-struct BandMean {
-    std::vector<double> prefix;  // prefix[k] = sum of power[0..k)
-    double binHz = 0;
-    explicit BandMean(const std::vector<double> &power, double hzPerBin) : prefix(power.size() + 1, 0.0), binHz(hzPerBin) {
-        for (size_t k = 0; k < power.size(); ++k) prefix[k + 1] = prefix[k] + power[k];
-    }
-    double mean(double lo, double hi, double centre) const {
-        const int64_t last = static_cast<int64_t>(prefix.size()) - 2;
-        int64_t a = static_cast<int64_t>(std::ceil(lo / binHz));
-        int64_t b = static_cast<int64_t>(std::floor(hi / binHz));
-        a = std::max<int64_t>(a, 1);
-        b = std::min<int64_t>(b, last);
-        if (b < a) {
-            const int64_t k = std::min<int64_t>(std::max<int64_t>(static_cast<int64_t>(std::llround(centre / binHz)), 1), last);
-            return prefix[k + 1] - prefix[k];
-        }
-        return (prefix[b + 1] - prefix[a]) / static_cast<double>(b - a + 1);
-    }
-};
 
 double gapFrames(const n60_measure_distortion_params *p, int k) {  // harmonic k to harmonic k-1 (k=2: to the linear)
     return p->sweep_rate_seconds * std::log(static_cast<double>(k) / (k - 1)) * p->sample_rate;
