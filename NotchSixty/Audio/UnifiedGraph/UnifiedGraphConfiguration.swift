@@ -162,10 +162,9 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
         if !stereo.isEmpty, programLanes != 2 {
             throw UnifiedGraphError.unsupportedConfiguration("stereo stages need two lanes")
         }
-        if stereo.ambient != nil, stereo.compressor != nil || stereo.expander != nil {
-            // The kernel runs ambient before its dynamics; the core runs them the other way round.
-            throw UnifiedGraphError.unsupportedConfiguration("ambient with compressor or expander")
-        }
+        // Owner decision of 24 Oct 2026: ambient compensation runs after the compressor and expander and before
+        // protection on every path, so the ambient boost never feeds the dynamics' detectors. The kernel runs it
+        // before them; that difference stays until S11 (the kernel is then the frozen fallback).
         let canonical = orderPolicy == .canonical
         if let programDSP {
             guard stereo.isEmpty, programDSP.shape.laneCount == programLanes else {
@@ -245,7 +244,10 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
         if let program = stereo.programFIR {
             try addFIR(N60_STAGE_FIR, program, baseId: Self.programFIRStageId)
         }
-        if let params = stereo.compressor, !hasPostConvolver || canonical {
+        // With ambient on, the compressor takes its ordinary slot even after a room or speaker convolver, because the
+        // core ranks CORE_DYNAMICS after AMBIENT (see the decision above).
+        let compressorBeforeAmbient = !hasPostConvolver || canonical || stereo.ambient != nil
+        if let params = stereo.compressor, compressorBeforeAmbient {
             add(N60_STAGE_COMPRESSOR, Self.compressorStageId, mask: programMask, params: params)
         }
         if let params = stereo.expander {
@@ -274,7 +276,7 @@ struct UnifiedGraphConfiguration: Equatable, Sendable {
         if let params = stereo.ambient {
             add(N60_STAGE_AMBIENT, Self.ambientStageId, mask: programMask, params: params)
         }
-        if let params = stereo.compressor, hasPostConvolver, !canonical {
+        if let params = stereo.compressor, !compressorBeforeAmbient {
             // The kernel runs its core dynamics after the room and speaker convolvers.
             add(N60_STAGE_CORE_DYNAMICS, Self.compressorStageId, mask: programMask, params: params)
         }

@@ -77,6 +77,9 @@ final class CoreAudioBinauralHeadphoneTransportSession {
     private(set) var headPosePostFailures: UInt64 = 0
     /// Why the legacy binaural pipeline kept this session although the graph was requested.
     private(set) var unifiedGraphFallbackReason: UnifiedGraphFallbackReason?
+    /// E6 S9b: the graph before any program DSP, kept so a live edit re-lays the program DSP and gain without
+    /// rebuilding the response set.
+    private(set) var unifiedGraphBaseSpec: UnifiedGraphSpec?
     private var audioUnitRack: AudioUnitLiveRackSwitchboard?
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateDeviceID = AudioDeviceID(kAudioObjectUnknown)
@@ -96,6 +99,7 @@ final class CoreAudioBinauralHeadphoneTransportSession {
         outputGain: Float,
         audioUnitRack: AudioUnitLiveRackSwitchboard? = nil,
         unifiedGraphSpec: UnifiedGraphSpec? = nil,
+        unifiedGraphBaseSpec baseSpec: UnifiedGraphSpec? = nil,
         unifiedGraphIneligibility: UnifiedGraphFallbackReason? = nil,
         unifiedGraphRequired: Bool = false
     ) throws {
@@ -272,7 +276,12 @@ final class CoreAudioBinauralHeadphoneTransportSession {
                         laneCount: programLayout.roles.count,
                         outputBufferFrames: outputBufferFrames
                     ) {
-                    case .success(let host): unifiedGraphHost = host
+                    case .success(let host):
+                        unifiedGraphHost = host
+                        unifiedGraphBaseSpec = baseSpec
+                        // The graph's INPUT_GAIN stage carries the program gain from here on, so it can follow
+                        // live edits; the bridge must not apply it a second time.
+                        newBridge.pointee.programGainLinear = 1
                     case .failure(let reason):
                         try rejectIfRequired(reason)
                         unifiedGraphFallbackReason = reason
@@ -396,6 +405,23 @@ final class CoreAudioBinauralHeadphoneTransportSession {
     var unifiedGraphReadback: UnifiedGraphHost? {
         graphReferenceLock.lock(); defer { graphReferenceLock.unlock() }
         return bridge != nil ? unifiedGraphHost : nil
+    }
+
+    /// E6 S9b: moves the running graph to `spec` (posted parameters, or a faded rebuild). The channel counts must
+    /// match the running graph; a CPU-budget or core refusal throws and the running graph keeps rendering.
+    @discardableResult
+    func republishGraph(_ spec: UnifiedGraphSpec) throws -> UnifiedGraphApplyResult {
+        graphReferenceLock.lock()
+        let host = bridge != nil ? unifiedGraphHost : nil
+        graphReferenceLock.unlock()
+        guard let host else { throw LiveNChannelTransportError.configurationChangeRequiresRestart }
+        guard spec.inputChannels == host.inputChannels, spec.outputChannels == host.outputChannels,
+              abs(spec.sampleRate - outputFormat.sampleRate) < 0.5 else {
+            throw LiveNChannelTransportError.unifiedGraphRejected(.laneCountMismatch)
+        }
+        do { return try host.apply(spec) } catch {
+            throw LiveNChannelTransportError.graphRepublishRefused(String(describing: error))
+        }
     }
 
     /// Builds the graph for a session and attaches it to `bridge`, or says why it cannot.

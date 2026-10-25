@@ -106,6 +106,13 @@ struct ProductionEqualizerView: View {
                             .fixedSize()
                         }
                     }
+
+                    if let note = engine.unpairedEQLaneNote {
+                        Text(note)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
 
                 VStack(alignment: .leading, spacing: 6) {

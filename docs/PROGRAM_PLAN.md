@@ -158,6 +158,7 @@ Phase 2 replaces the three render paths with one graph that every later feature 
 - [x] S8b2a `e6/engine-integration-3` built on branch (needs-owner, behind `e6.unified-graph`): graph reproduces M/S EQ, compressor, expander, ambient compensation, symmetry, crossfeed, crosstalk cancellation, integer inter-channel delay and pause gate; everything else keeps the kernel fallback
 - [x] S8b2b: translate dynamic EQ, FIR/room/speaker IR, stereo crossover and bass management, denoiser, soft clipper and gain rider (or document keep-on-kernel); wire multichannel, layouts, 1 to 8 subs and binaural into the live N-channel session; metering and latency readbacks; compensate kernel/graph latency difference across the hand-over fade
 - [x] S8b2c (next): wire live binaural into the N-channel session (it has no binaural mode today) and compensate kernel/graph fade latency (the N-channel path attaches the graph statically, with no mid-stream hand-over). S8b2c is split: S8b2c1 built on branch `e6/engine-integration-5` (needs-owner); S8b2d awaits owner approval of the binaural proposal
+- [x] S9b `e6/live-session-edits` (needs-owner): setters live while an N-channel or binaural graph renders, with a fresh-build equality test at eight rates; bench in E22
 
 ### E7 384 kHz everywhere
 

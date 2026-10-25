@@ -6,7 +6,7 @@ enum UnifiedGraphOrderPolicy: Equatable, Sendable {
     case kernelParity
     /// The core's own stage order, used by N-channel and binaural graphs. Four kernel-order guards are lifted
     /// (program FIR with dynamic EQ, expander with room or IR, room or IR with subs, dynamic EQ with M/S).
-    /// Ambient with compressor or expander stays rejected.
+    /// Ambient runs after the compressor and expander in every mode (owner decision of 24 Oct 2026).
     case canonical
 }
 
@@ -150,9 +150,6 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
         let st = stages
         guard inputGain.isFinite, inputGain > 0, inputGain <= 10_000 else {
             throw UnifiedGraphFallbackReason.gainOutOfRange
-        }
-        if st.ambient != nil, st.compressor != nil || st.expander != nil {
-            throw UnifiedGraphFallbackReason.unsupportedKernelStage
         }
         if eqMode == .midSide, st.programFIR != nil {
             throw UnifiedGraphFallbackReason.midSideProgramFIR

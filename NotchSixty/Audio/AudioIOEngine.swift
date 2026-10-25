@@ -1148,10 +1148,17 @@ final class AudioIOEngine: ObservableObject {
     }
 
     var ambientCompensationStereoSpeakerRuntimeAvailable: Bool {
-        transportSession != nil
+        (transportSession != nil
             && nChannelTransportSession == nil
             && binauralHeadphoneTransportSession == nil
-            && headphoneDeviceProfileConfiguration?.enabled != true
+            && headphoneDeviceProfileConfiguration?.enabled != true)
+            || ambientCompensationGraphRuntimeAvailable
+    }
+
+    /// E6 S9b: a graph-rendered N-channel speaker session runs ambient compensation in the graph (after the
+    /// compressor and expander, before protection). Binaural headphones stay without it.
+    var ambientCompensationGraphRuntimeAvailable: Bool {
+        nChannelTransportSession != nil && liveGraphEditsAvailable
     }
 
     func replaceAmbientCompensationRuntimeTarget(
@@ -1210,6 +1217,15 @@ final class AudioIOEngine: ObservableObject {
         if requestsDSP,
            !ambientCompensationStereoSpeakerRuntimeAvailable {
             throw AmbientCompensationError.runtimeUnsupported
+        }
+
+        if ambientCompensationGraphRuntimeAvailable {
+            var inputs = currentLiveGraphInputs
+            inputs.ambient = target
+            try republishLiveGraph(inputs)
+            ambientCompensationRuntimeTarget = target
+            lastErrorDescription = nil
+            return
         }
 
         guard let session = transportSession else {
@@ -2033,13 +2049,6 @@ final class AudioIOEngine: ObservableObject {
             )
         }
 
-        if immutableSemanticTransportActive,
-           state.stereoEQ != stereoEQConfiguration
-            || state.dynamics != dynamicsConfiguration
-            || targetGain != gainConfiguration {
-            throw LiveNChannelTransportError.configurationChangeRequiresRestart
-        }
-
         let clampedAmbientTarget =
             ambientTargetClampedToHeadroom(
                 ambientCompensationRuntimeTarget,
@@ -2052,7 +2061,20 @@ final class AudioIOEngine: ObservableObject {
                 ambientTarget: clampedAmbientTarget
             )
 
-        if let session = transportSession {
+        if immutableSemanticTransportActive {
+            if state.stereoEQ != stereoEQConfiguration
+                || state.dynamics != dynamicsConfiguration
+                || targetGain != gainConfiguration
+                || clampedAmbientTarget != ambientCompensationRuntimeTarget {
+                try requireLiveGraphEdits()
+                var inputs = currentLiveGraphInputs
+                inputs.stereoEQ = state.stereoEQ
+                inputs.dynamics = state.dynamics
+                inputs.gain = targetGain
+                inputs.ambient = clampedAmbientTarget
+                try republishLiveGraph(inputs)
+            }
+        } else if let session = transportSession {
             var graph = try state.stereoEQ.makeGraphSnapshot(
                 sampleRate: session.outputFormat.sampleRate,
                 gainConfiguration: targetGain,
@@ -2148,12 +2170,6 @@ final class AudioIOEngine: ObservableObject {
         var updated = gainConfiguration
         updated.headroomAttenuationDB = value
 
-        if immutableSemanticTransportActive,
-           updated != gainConfiguration {
-            throw LiveNChannelTransportError
-                .configurationChangeRequiresRestart
-        }
-
         let clampedAmbientTarget =
             ambientTargetClampedToHeadroom(
                 ambientCompensationRuntimeTarget,
@@ -2166,7 +2182,15 @@ final class AudioIOEngine: ObservableObject {
                 ambientTarget: clampedAmbientTarget
             )
 
-        if let session = transportSession {
+        if immutableSemanticTransportActive {
+            if updated != gainConfiguration || clampedAmbientTarget != ambientCompensationRuntimeTarget {
+                try requireLiveGraphEdits()
+                var inputs = currentLiveGraphInputs
+                inputs.gain = updated
+                inputs.ambient = clampedAmbientTarget
+                try republishLiveGraph(inputs)
+            }
+        } else if let session = transportSession {
             var graph = try stereoEQConfiguration
                 .makeGraphSnapshot(
                     sampleRate:
@@ -2367,10 +2391,20 @@ final class AudioIOEngine: ObservableObject {
             try outputDeviceProfile.validateStructure(bassManagementEnabled: configuration.enabled)
         }
         if immutableSemanticTransportActive, configuration != bassManagementConfiguration {
-            throw LiveNChannelTransportError.configurationChangeRequiresRestart
+            // The crossover topology (and the binaural graph's bass handling) is fixed when the session starts;
+            // retuning an enabled N-channel crossover republishes the graph.
+            if binauralHeadphoneTransportSession != nil || configuration.enabled != bassManagementConfiguration.enabled {
+                throw LiveNChannelTransportError.configurationChangeRequiresRestart
+            }
         }
         if physicalSpeakerBusRoutingActive, lifecycle.state != .idle, configuration != bassManagementConfiguration {
             throw BassManagementConfigurationError.physicalCrossoverChangeRequiresIdle
+        }
+        if immutableSemanticTransportActive, configuration != bassManagementConfiguration {
+            try requireLiveGraphEdits()
+            var inputs = currentLiveGraphInputs
+            inputs.bass = configuration
+            try republishLiveGraph(inputs)
         }
         if let session = transportSession {
             var graph = try stereoEQConfiguration.makeGraphSnapshot(
@@ -2466,14 +2500,18 @@ final class AudioIOEngine: ObservableObject {
     }
 
     func replaceDynamicsConfiguration(_ configuration: DynamicsConfiguration) throws {
-        if immutableSemanticTransportActive, configuration != dynamicsConfiguration {
-            throw LiveNChannelTransportError.configurationChangeRequiresRestart
-        }
         let validationRate = transportSession?.outputFormat.sampleRate
             ?? nChannelTransportSession?.outputFormat.sampleRate
+            ?? binauralHeadphoneTransportSession?.outputFormat.sampleRate
             ?? 48_000
         _ = try configuration.makeSnapshot(sampleRate: validationRate)
         let newProtection = try configuration.makeProtectionSnapshot(sampleRate: validationRate)
+        if immutableSemanticTransportActive, configuration != dynamicsConfiguration {
+            try requireLiveGraphEdits()
+            var inputs = currentLiveGraphInputs
+            inputs.dynamics = configuration
+            try republishLiveGraph(inputs)
+        }
         if let session = transportSession {
             let oldProtection = try dynamicsConfiguration.makeProtectionSnapshot(sampleRate: session.outputFormat.sampleRate)
             var graph = try stereoEQConfiguration.makeGraphSnapshot(
@@ -2968,7 +3006,10 @@ final class AudioIOEngine: ObservableObject {
     private func applyStereoEQConfiguration(_ configuration: StereoEQConfiguration) throws {
         try validateStereoEQStorage(configuration)
         if immutableSemanticTransportActive, configuration != stereoEQConfiguration {
-            throw LiveNChannelTransportError.configurationChangeRequiresRestart
+            try requireLiveGraphEdits()
+            var inputs = currentLiveGraphInputs
+            inputs.stereoEQ = configuration
+            try republishLiveGraph(inputs)
         }
 
         if let session = transportSession {
@@ -3036,7 +3077,10 @@ final class AudioIOEngine: ObservableObject {
             throw PlaybackControlConfigurationError.invalidInterChannelDelay(configuration.interChannelDelayMs)
         }
         if immutableSemanticTransportActive, configuration != playbackControlConfiguration {
-            throw LiveNChannelTransportError.configurationChangeRequiresRestart
+            try requireLiveGraphEdits()
+            var inputs = currentLiveGraphInputs
+            inputs.playback = configuration
+            try republishLiveGraph(inputs)
         }
 
         if let session = transportSession {
@@ -3273,10 +3317,6 @@ final class AudioIOEngine: ObservableObject {
     }
 
     private func applyGainConfiguration(_ configuration: DSPGainConfiguration) throws {
-        if immutableSemanticTransportActive, configuration != gainConfiguration {
-            throw LiveNChannelTransportError.configurationChangeRequiresRestart
-        }
-
         let clampedAmbientTarget =
             ambientTargetClampedToHeadroom(
                 ambientCompensationRuntimeTarget,
@@ -3289,6 +3329,15 @@ final class AudioIOEngine: ObservableObject {
                 gainConfiguration: configuration,
                 ambientTarget: clampedAmbientTarget
             )
+
+        if immutableSemanticTransportActive,
+           configuration != gainConfiguration || clampedAmbientTarget != ambientCompensationRuntimeTarget {
+            try requireLiveGraphEdits()
+            var inputs = currentLiveGraphInputs
+            inputs.gain = configuration
+            inputs.ambient = clampedAmbientTarget
+            try republishLiveGraph(inputs)
+        }
 
         if let session = transportSession {
             var graph = try stereoEQConfiguration.makeGraphSnapshot(
@@ -3333,11 +3382,14 @@ final class AudioIOEngine: ObservableObject {
     }
 
     private func applyRoomCorrectionConfiguration(_ configuration: RoomCorrectionConfiguration) throws {
-        if immutableSemanticTransportActive, configuration != roomCorrectionConfiguration {
-            throw LiveNChannelTransportError.configurationChangeRequiresRestart
-        }
         if configuration.enabled && configuration.filter == nil {
             throw RoomCorrectionConfigurationError.filterRequired
+        }
+        if immutableSemanticTransportActive, configuration != roomCorrectionConfiguration {
+            try requireLiveGraphEdits()
+            var inputs = currentLiveGraphInputs
+            inputs.room = configuration
+            try republishLiveGraph(inputs)
         }
 
         if let session = transportSession {
@@ -3399,11 +3451,14 @@ final class AudioIOEngine: ObservableObject {
     }
 
     private func applySpeakerIRConfiguration(_ configuration: SpeakerIRConfiguration) throws {
-        if immutableSemanticTransportActive, configuration != speakerIRConfiguration {
-            throw LiveNChannelTransportError.configurationChangeRequiresRestart
-        }
         if configuration.enabled && configuration.filter == nil {
             throw SpeakerIRConfigurationError.filterRequired
+        }
+        if immutableSemanticTransportActive, configuration != speakerIRConfiguration {
+            try requireLiveGraphEdits()
+            var inputs = currentLiveGraphInputs
+            inputs.speakerIR = configuration
+            try republishLiveGraph(inputs)
         }
 
         if let session = transportSession {
@@ -3720,22 +3775,30 @@ final class AudioIOEngine: ObservableObject {
     func makeUnifiedProgramDSP(
         sampleRate: Double,
         shape: UnifiedGraphLayoutShape,
-        virtualSpeakers: Bool
+        virtualSpeakers: Bool,
+        inputs candidate: LiveGraphInputs? = nil
     ) throws -> UnifiedGraphProgramDSP? {
         guard unifiedGraphEnabled else { return nil }
-        let playback = playbackControlConfiguration
+        let inputs = candidate ?? currentLiveGraphInputs
+        let playback = inputs.playback
         if FIRUpdatePolicy.isRawBypassed(playback) || playback.auditionMode == .reference { return nil }
         if playback.auditionMode == .delta {
             throw LiveNChannelTransportError.unsupportedActiveDSP("delta audition")
         }
-        var snapshot = try stereoEQConfiguration.makeGraphSnapshot(
+        var snapshot = try inputs.stereoEQ.makeGraphSnapshot(
             sampleRate: sampleRate,
             gainConfiguration: DSPGainConfiguration(),
             bassManagementConfiguration: BassManagementConfiguration(),
-            dynamicsConfiguration: dynamicsConfiguration,
+            dynamicsConfiguration: inputs.dynamics,
             playbackConfiguration: playback,
             masterGainLinear: 1
         )
+        // The ambient live target rides in the snapshot like the stereo path (E6 S9b); the stereo engine only
+        // runs it on speakers, so Virtual Speakers keeps it off.
+        if !virtualSpeakers {
+            try attachAmbientCompensation(
+                ambientTargetClampedToHeadroom(inputs.ambient, gainConfiguration: inputs.gain), to: &snapshot)
+        }
         // The graph never reads the kernel's convolver slots; it takes the taps by generation. Generations here are
         // local to this one translation (1 EQ FIR, 2 room correction, 3 Speaker IR).
         var retained: [UInt64: UnifiedGraphFIRProgram] = [:]
@@ -3749,8 +3812,8 @@ final class AudioIOEngine: ObservableObject {
                 declaredLatencyFrames: declared
             )
         }
-        if FIRUpdatePolicy.shouldPrepareEQFIR(stereoEQ: stereoEQConfiguration, playback: playback) {
-            let taps = try eqFIRTaps(stereoEQConfiguration, sampleRate: sampleRate)
+        if FIRUpdatePolicy.shouldPrepareEQFIR(stereoEQ: inputs.stereoEQ, playback: playback) {
+            let taps = try eqFIRTaps(inputs.stereoEQ, sampleRate: sampleRate)
             retained[1] = UnifiedGraphFIRProgram(
                 generation: 1, left: taps.left, right: taps.right, declaredLatencyFrames: taps.declaredLatencyFrames)
             guard N60DSPGraphSnapshotSetConvolutionProgram(
@@ -3758,8 +3821,8 @@ final class AudioIOEngine: ObservableObject {
                 throw EQConfigurationError.convolutionProgramUnavailable
             }
         }
-        if roomCorrectionConfiguration.enabled {
-            guard let filter = roomCorrectionConfiguration.filter else {
+        if inputs.room.enabled {
+            guard let filter = inputs.room.filter else {
                 throw RoomCorrectionConfigurationError.filterRequired
             }
             try validateRoomCorrectionFilter(filter, outputSampleRate: sampleRate)
@@ -3772,8 +3835,8 @@ final class AudioIOEngine: ObservableObject {
                 throw RoomCorrectionConfigurationError.graphAttachmentFailed
             }
         }
-        if speakerIRConfiguration.enabled {
-            guard let filter = speakerIRConfiguration.filter else {
+        if inputs.speakerIR.enabled {
+            guard let filter = inputs.speakerIR.filter else {
                 throw SpeakerIRConfigurationError.filterRequired
             }
             try validateSpeakerIRFilter(filter, outputSampleRate: sampleRate)
@@ -3795,7 +3858,7 @@ final class AudioIOEngine: ObservableObject {
         }
         // Bypassed EQ covers every lane (the other program stages follow the lane set of the EQ mode).
         let mode: UnifiedGraphProgramDSP.EQMode
-        switch stereoEQConfiguration.bypassed ? .linked : stereoEQConfiguration.channelMode {
+        switch inputs.stereoEQ.bypassed ? .linked : inputs.stereoEQ.channelMode {
         case .linked: mode = .linked
         case .independent: mode = .independent
         case .midSide: mode = .midSide
@@ -3803,6 +3866,94 @@ final class AudioIOEngine: ObservableObject {
         let program = UnifiedGraphProgramDSP(
             stereo: stereo, shape: shape, eqMode: mode, virtualSpeakers: virtualSpeakers)
         return program.isNeutral ? nil : program
+    }
+
+    // MARK: E6 S9b live edits on a graph-rendered N-channel or binaural session
+
+    /// Every engine setting that shapes an N-channel or binaural graph, so a setter can build the graph for the
+    /// candidate value and publish it before it commits the value.
+    struct LiveGraphInputs {
+        var stereoEQ: StereoEQConfiguration
+        var dynamics: DynamicsConfiguration
+        var playback: PlaybackControlConfiguration
+        var gain: DSPGainConfiguration
+        var bass: BassManagementConfiguration
+        var room: RoomCorrectionConfiguration
+        var speakerIR: SpeakerIRConfiguration
+        var ambient: AmbientCompensationTarget
+    }
+
+    var currentLiveGraphInputs: LiveGraphInputs {
+        LiveGraphInputs(
+            stereoEQ: stereoEQConfiguration, dynamics: dynamicsConfiguration,
+            playback: playbackControlConfiguration, gain: gainConfiguration,
+            bass: bassManagementConfiguration, room: roomCorrectionConfiguration,
+            speakerIR: speakerIRConfiguration, ambient: ambientCompensationRuntimeTarget)
+    }
+
+    /// True when the flag is on and the running N-channel or binaural session is rendered by the graph, so the
+    /// setters can republish it instead of asking for a restart. A session that started on the legacy path (or any
+    /// session with the flag off) keeps `configurationChangeRequiresRestart`.
+    var liveGraphEditsAvailable: Bool {
+        guard unifiedGraphEnabled else { return false }
+        if let session = nChannelTransportSession { return session.unifiedGraphActive }
+        if let session = binauralHeadphoneTransportSession { return session.unifiedGraphActive }
+        return false
+    }
+
+    /// E6 decision 8: independent (left/right) stereo EQ applies no EQ to a layout's unpaired lanes (centre, centre
+    /// surround, ...). Non-nil text for the equaliser view when the running N-channel layout has such lanes.
+    var unpairedEQLaneNote: String? {
+        guard stereoEQConfiguration.channelMode == .independent,
+              let session = nChannelTransportSession,
+              let shape = UnifiedGraphLayoutShape(roles: session.routePlan.programLayout.roles) else { return nil }
+        var covered = Set(shape.pairs.flatMap { [$0.a, $0.b] })
+        if let lfe = shape.lfeLane { covered.insert(lfe) }
+        guard covered.count < shape.laneCount else { return nil }
+        return "Independent mode applies the left and right curves to channel pairs only. Unpaired channels "
+            + "(such as centre) get no stereo EQ; use Linked or Mid/Side to include them."
+    }
+
+    /// Call where a setter used to throw for a changed value: it still throws `configurationChangeRequiresRestart`
+    /// unless the session's graph can take the edit.
+    private func requireLiveGraphEdits() throws {
+        guard liveGraphEditsAvailable else { throw LiveNChannelTransportError.configurationChangeRequiresRestart }
+    }
+
+    /// Builds the graph for `inputs` and moves the running graph to it. Throws (a named reason) and leaves the
+    /// running graph untouched when the graph cannot take the edit; call it as the last step before committing state.
+    private func republishLiveGraph(_ inputs: LiveGraphInputs) throws {
+        if let session = nChannelTransportSession {
+            let rate = session.outputFormat.sampleRate
+            guard let shape = UnifiedGraphLayoutShape(roles: session.routePlan.programLayout.roles) else {
+                throw LiveNChannelTransportError.unifiedGraphRejected(.laneCountMismatch)
+            }
+            let program = try makeUnifiedProgramDSP(
+                sampleRate: rate, shape: shape, virtualSpeakers: false, inputs: inputs)
+            switch UnifiedGraphTranslator.nChannelEligibility(
+                routePlan: session.routePlan, sampleRate: rate, gainConfiguration: inputs.gain,
+                bassManagementConfiguration: renderBassManagementConfiguration(inputs.bass), programDSP: program
+            ) {
+            case .success(let configuration): try session.republishGraph(configuration)
+            case .failure(let reason): throw LiveNChannelTransportError.unifiedGraphRejected(reason)
+            }
+        } else if let session = binauralHeadphoneTransportSession {
+            guard let base = session.unifiedGraphBaseSpec,
+                  let shape = UnifiedGraphLayoutShape(roles: session.programLayout.roles) else {
+                throw LiveNChannelTransportError.configurationChangeRequiresRestart
+            }
+            let program = try makeUnifiedProgramDSP(
+                sampleRate: session.outputFormat.sampleRate, shape: shape, virtualSpeakers: true, inputs: inputs)
+            let combinedDB = inputs.gain.inputPreampDB + inputs.gain.headroomAttenuationDB + inputs.gain.outputGainDB
+            switch UnifiedGraphTranslator.binauralApplyProgram(
+                base: base, programDSP: program, programGain: Float(DSPGainConfiguration.linearGain(forDB: combinedDB))
+            ) {
+            case .success(let spec): try session.republishGraph(spec)
+            case .failure(let reason): throw LiveNChannelTransportError.unifiedGraphRejected(reason)
+            }
+        } else {
+            throw LiveNChannelTransportError.configurationChangeRequiresRestart
+        }
     }
 
     private func attachEQFIRProgram(
@@ -4310,13 +4461,14 @@ final class AudioIOEngine: ObservableObject {
             + gainConfiguration.headroomAttenuationDB
             + gainConfiguration.outputGainDB
         let programGain = DSPGainConfiguration.linearGain(forDB: combinedGainDB)
-        guard programGain.isFinite, programGain >= 0, programGain <= 16 else {
+        guard programGain.isFinite, programGain > 0, programGain <= 16 else {
             throw BinauralHeadphoneTransportError.bridgeAllocationFailed
         }
         // E6 S8b2d: with the flag on, the core renders binaural, headphone DSP and protection when
         // the setup is one it reproduces; otherwise the legacy pipeline stays and the reason shows
         // in diagnostics.
         var graphSpec: UnifiedGraphSpec?
+        var graphBaseSpec: UnifiedGraphSpec?
         var graphIneligibility: UnifiedGraphFallbackReason?
         var programDSP: UnifiedGraphProgramDSP?
         if unifiedGraphEnabled {
@@ -4325,16 +4477,24 @@ final class AudioIOEngine: ObservableObject {
             }
             programDSP = try makeUnifiedProgramDSP(
                 sampleRate: output.nominalSampleRate, shape: shape, virtualSpeakers: true)
-            switch UnifiedGraphTranslator.binauralSpec(
+            switch UnifiedGraphTranslator.binauralBaseSpec(
                 asset: asset,
                 layout: profile.programLayout,
                 profile: profile,
                 outputChannels: UInt32(output.outputChannelCount),
                 sampleRate: output.nominalSampleRate,
                 headTracking: profile.headTracking?.enabled == true,
-                programDSP: programDSP
+                programGain: Float(programGain)
             ) {
-            case .success(let spec): graphSpec = spec
+            case .success(let base):
+                switch UnifiedGraphTranslator.binauralApplyProgram(
+                    base: base, programDSP: programDSP, programGain: Float(programGain)
+                ) {
+                case .success(let spec):
+                    graphBaseSpec = base
+                    graphSpec = spec
+                case .failure(let reason): graphIneligibility = reason
+                }
             case .failure(let reason): graphIneligibility = reason
             }
         }
@@ -4348,6 +4508,7 @@ final class AudioIOEngine: ObservableObject {
             outputGain: currentMasterSoftwareGain,
             audioUnitRack: stagedAudioUnitRack,
             unifiedGraphSpec: graphSpec,
+            unifiedGraphBaseSpec: graphBaseSpec,
             unifiedGraphIneligibility: graphIneligibility,
             unifiedGraphRequired: programDSP != nil
         )

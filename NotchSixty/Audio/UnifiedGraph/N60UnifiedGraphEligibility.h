@@ -451,10 +451,7 @@ static inline N60UnifiedGraphUnsupportedReason N60UnifiedGraphSnapshotUnsupporte
     if (d->pauseGate.enabled && !N60UnifiedGraphPauseGateParams(s, scratch)) {
         return N60UnifiedGraphUnsupportedDynamics;
     }
-    // The kernel runs ambient before its dynamics, the core after the compressor and expander.
-    if (s->ambientCompensation.enabled && (d->compressor.enabled || d->expander.enabled)) {
-        return N60UnifiedGraphUnsupportedAmbientOrANC;
-    }
+    // Ambient after the compressor and expander is the owner's order (24 Oct 2026): the core's, not the kernel's.
     // E6 S8d group 4: the soft clipper and gain rider. The core holds the ranges below; the oversampling factor must be
     // one the core applies (it bypasses, with no oversampling latency, when neither the limiter nor the clipper is on).
     {
