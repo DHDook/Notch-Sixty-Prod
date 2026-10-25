@@ -2,9 +2,11 @@
 cmake_minimum_required(VERSION 3.20)
 project(n60core LANGUAGES C CXX)
 
-add_library(n60core STATIC src/graph.cpp src/snapshot.cpp src/fft.cpp src/stages_dsp.cpp src/stages_system.cpp src/stages_matrix.cpp src/layout.cpp)
+add_library(n60core STATIC src/graph.cpp src/snapshot.cpp src/fft.cpp src/stages_dsp.cpp src/stages_system.cpp src/stages_matrix.cpp src/layout.cpp
+    src/measure/offline_fft.cpp src/measure/ess.cpp src/measure/deconvolve.cpp src/measure/reference_room.cpp)
 target_compile_features(n60core PUBLIC cxx_std_20)
 target_include_directories(n60core PUBLIC include)
+target_include_directories(n60core PRIVATE src)
 target_compile_options(n60core PRIVATE -Wall -Wextra -Werror -fno-exceptions -fno-rtti)
 
 enable_testing()
@@ -63,3 +65,14 @@ add_executable(n60core_readbacks_test tests/test_readbacks.c)
 set_target_properties(n60core_readbacks_test PROPERTIES C_STANDARD 11 LINKER_LANGUAGE CXX)
 target_link_libraries(n60core_readbacks_test PRIVATE n60core m)
 add_test(NAME n60core_readbacks COMMAND n60core_readbacks_test)
+
+# E11 S1: measurement core (n60/measure.h). The tests reach the internal offline FFT, so they see src/.
+add_executable(n60core_measure_fft_test tests/test_measure_fft.cpp)
+target_include_directories(n60core_measure_fft_test PRIVATE src)
+target_link_libraries(n60core_measure_fft_test PRIVATE n60core)
+add_test(NAME n60core_measure_fft COMMAND n60core_measure_fft_test)
+
+add_executable(n60core_measure_test tests/test_measure.cpp)
+target_include_directories(n60core_measure_test PRIVATE src)
+target_link_libraries(n60core_measure_test PRIVATE n60core)
+add_test(NAME n60core_measure COMMAND n60core_measure_test)

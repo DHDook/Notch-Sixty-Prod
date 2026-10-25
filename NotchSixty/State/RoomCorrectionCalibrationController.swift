@@ -106,21 +106,23 @@ final class RoomCorrectionCalibrationController: ObservableObject {
                 plan: plan
             )
         },
-        analysisOperation: @escaping RoomCorrectionMeasurementAnalysisOperation = { capture, plan, calibration in
+        useMeasurementCore: Bool = false,
+        analysisOperation: RoomCorrectionMeasurementAnalysisOperation? = nil
+    ) {
+        self.engine = engine
+        self.inputCatalog = inputCatalog
+        self.permissionClient = permissionClient
+        self.transportFactory = transportFactory
+        // E11 S1: the flag-on analyser deconvolves in the portable core.
+        self.analysisOperation = analysisOperation ?? { capture, plan, calibration in
             try await Task.detached(priority: .userInitiated) {
-                try RoomCorrectionMeasurementAnalyzer().analyze(
+                try RoomCorrectionMeasurementAnalyzer(usesMeasurementCore: useMeasurementCore).analyze(
                     capture: capture,
                     plan: plan,
                     microphoneCalibration: calibration
                 )
             }.value
         }
-    ) {
-        self.engine = engine
-        self.inputCatalog = inputCatalog
-        self.permissionClient = permissionClient
-        self.transportFactory = transportFactory
-        self.analysisOperation = analysisOperation
         self.permissionStatus = permissionClient.currentStatus()
     }
 
