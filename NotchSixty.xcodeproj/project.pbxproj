@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+
 		E11F0000000000000000000A /* MeasurementMultiMic.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11F0000000000000000000B /* MeasurementMultiMic.swift */; };
 		E11F00000000000000000014 /* MeasurementSeatPlanTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11F00000000000000000015 /* MeasurementSeatPlanTests.swift */; };
 		E11F00000000000000000012 /* MeasurementSeatPickerCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11F00000000000000000013 /* MeasurementSeatPickerCard.swift */; };
@@ -66,7 +67,11 @@
 		E10A00000000000000000023 /* synth.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E10A00000000000000000013 /* synth.cpp */; };
 		E10A00000000000000000033 /* RoomCorrectionLanePlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10A00000000000000000043 /* RoomCorrectionLanePlan.swift */; };
 		E10A00000000000000000024 /* bass.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E10A00000000000000000014 /* bass.cpp */; };
+		E10A00000000000000000071 /* RoomCorrectionBassApply.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10A00000000000000000072 /* RoomCorrectionBassApply.swift */; };
+		E10B00000000000000000001 /* RoomCorrectionPostApply.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10B00000000000000000002 /* RoomCorrectionPostApply.swift */; };
 		E10A00000000000000000031 /* RoomCorrectionCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10A00000000000000000041 /* RoomCorrectionCore.swift */; };
+		E10A00000000000000000073 /* RoomCorrectionBassApplyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10A00000000000000000074 /* RoomCorrectionBassApplyTests.swift */; };
+		E10B00000000000000000005 /* RoomCorrectionDeployControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10B00000000000000000006 /* RoomCorrectionDeployControllerTests.swift */; };
 		E10A00000000000000000034 /* RoomCorrectionLanePlanTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10A00000000000000000044 /* RoomCorrectionLanePlanTests.swift */; };
 		E10A00000000000000000032 /* RoomCorrectionCoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10A00000000000000000042 /* RoomCorrectionCoreTests.swift */; };
 		E11D00000000000000000001 /* MeasurementCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11D00000000000000000011 /* MeasurementCore.swift */; };
@@ -143,6 +148,7 @@
 		A2000000000000000000001D /* RoomCorrectionCalibrationController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000002D /* RoomCorrectionCalibrationController.swift */; };
 		A2000000000000000000001E /* RoomCorrectionMeasurementAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000002E /* RoomCorrectionMeasurementAnalyzer.swift */; };
 		A2000000000000000000001F /* RoomCorrectionProjectController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000002F /* RoomCorrectionProjectController.swift */; };
+		E10B00000000000000000003 /* RoomCorrectionDeployController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10B00000000000000000004 /* RoomCorrectionDeployController.swift */; };
 		E20000000000000000000001 /* RoomCorrectionTargetDesigner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000030 /* RoomCorrectionTargetDesigner.swift */; };
 		E20000000000000000000002 /* RoomCorrectionFIRDesigner.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000012 /* RoomCorrectionFIRDesigner.swift */; };
 		A30000000000000000000010 /* N60RealtimeAudioBridge.c in Sources */ = {isa = PBXBuildFile; fileRef = A30000000000000000000020 /* N60RealtimeAudioBridge.c */; };
@@ -425,6 +431,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+
 		E11F0000000000000000000B /* MeasurementMultiMic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementMultiMic.swift; sourceTree = "<group>"; };
 		E11F00000000000000000015 /* MeasurementSeatPlanTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementSeatPlanTests.swift; sourceTree = "<group>"; };
 		E11F00000000000000000013 /* MeasurementSeatPickerCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementSeatPickerCard.swift; sourceTree = "<group>"; };
@@ -487,7 +494,11 @@
 		E10A00000000000000000013 /* synth.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = correct/synth.cpp; sourceTree = "<group>"; };
 		E10A00000000000000000043 /* RoomCorrectionLanePlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionLanePlan.swift; sourceTree = "<group>"; };
 		E10A00000000000000000014 /* bass.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = correct/bass.cpp; sourceTree = "<group>"; };
+		E10A00000000000000000072 /* RoomCorrectionBassApply.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionBassApply.swift; sourceTree = "<group>"; };
+		E10B00000000000000000002 /* RoomCorrectionPostApply.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionPostApply.swift; sourceTree = "<group>"; };
 		E10A00000000000000000041 /* RoomCorrectionCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionCore.swift; sourceTree = "<group>"; };
+		E10A00000000000000000074 /* RoomCorrectionBassApplyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionBassApplyTests.swift; sourceTree = "<group>"; };
+		E10B00000000000000000006 /* RoomCorrectionDeployControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionDeployControllerTests.swift; sourceTree = "<group>"; };
 		E10A00000000000000000044 /* RoomCorrectionLanePlanTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionLanePlanTests.swift; sourceTree = "<group>"; };
 		E10A00000000000000000042 /* RoomCorrectionCoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionCoreTests.swift; sourceTree = "<group>"; };
 		E11D00000000000000000011 /* MeasurementCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementCore.swift; sourceTree = "<group>"; };
@@ -560,6 +571,7 @@
 		A2000000000000000000002D /* RoomCorrectionCalibrationController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionCalibrationController.swift; sourceTree = "<group>"; };
 		A2000000000000000000002E /* RoomCorrectionMeasurementAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionMeasurementAnalyzer.swift; sourceTree = "<group>"; };
 		A2000000000000000000002F /* RoomCorrectionProjectController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionProjectController.swift; sourceTree = "<group>"; };
+		E10B00000000000000000004 /* RoomCorrectionDeployController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionDeployController.swift; sourceTree = "<group>"; };
 		A20000000000000000000030 /* RoomCorrectionTargetDesigner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionTargetDesigner.swift; sourceTree = "<group>"; };
 		E20000000000000000000012 /* RoomCorrectionFIRDesigner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionFIRDesigner.swift; sourceTree = "<group>"; };
 		F65000000000000000000011 /* HeadphoneDeviceProfileConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeadphoneDeviceProfileConfiguration.swift; sourceTree = "<group>"; };
@@ -983,6 +995,8 @@
 				A100000000000000000E2206 /* FeatureFlagsTests.swift */,
 				E11D00000000000000000012 /* MeasurementCoreTests.swift */,
 				E10A00000000000000000042 /* RoomCorrectionCoreTests.swift */,
+				E10A00000000000000000074 /* RoomCorrectionBassApplyTests.swift */,
+				E10B00000000000000000006 /* RoomCorrectionDeployControllerTests.swift */,
 				E10A00000000000000000044 /* RoomCorrectionLanePlanTests.swift */,
 				E10A00000000000000000063 /* RoomCorrectionTargetEditorTests.swift */,
 				E11E0000000000000000000C /* MeasurementLiveAnalysisTests.swift */,
@@ -1187,6 +1201,8 @@
 				F10600000000000000000036 /* SpeakerMeasurementLabController.swift */,
 				A2000000000000000000002E /* RoomCorrectionMeasurementAnalyzer.swift */,
 				E11D00000000000000000011 /* MeasurementCore.swift */,
+				E10A00000000000000000072 /* RoomCorrectionBassApply.swift */,
+				E10B00000000000000000002 /* RoomCorrectionPostApply.swift */,
 				E10A00000000000000000041 /* RoomCorrectionCore.swift */,
 				E10A00000000000000000043 /* RoomCorrectionLanePlan.swift */,
 				E10A00000000000000000061 /* RoomCorrectionTargetShaping.swift */,
@@ -1270,7 +1286,7 @@
 			path = Backup;
 			sourceTree = "<group>";
 		};
-		A20000000000000000000054 /* State */ = {isa = PBXGroup; children = (A20000000000000000000025 /* AudioLifecycleState.swift */, A100000000000000000E2204 /* FeatureFlags.swift */, A100000000000000000E2202 /* PreferenceKeys.swift */, A2000000000000000000002B /* ProductProfiles.swift */, B113B0000000000000000061 /* ProductRecovery.swift */, B113B0000000000000000071 /* HeadroomAssistant.swift */, F64000000000000000000014 /* MultichannelCalibrationController.swift */, A2000000000000000000002D /* RoomCorrectionCalibrationController.swift */, A2000000000000000000002F /* RoomCorrectionProjectController.swift */, F89300000000000000000011 /* AmbientCompensationController.swift */, F90200000000000000000011 /* ActiveQuietZoneController.swift */, E4D000000000000000000011 /* AdaptiveQuietZoneShadow.swift */, E4F200000000000000000013 /* QuietZoneFeedForwardSurveyController.swift */, E4F300000000000000000012 /* QuietZoneFeedForwardShadow.swift */, F92000000000000000000012 /* RoomTreatmentAdvisorController.swift */,); path = State; sourceTree = "<group>"; };
+		A20000000000000000000054 /* State */ = {isa = PBXGroup; children = (A20000000000000000000025 /* AudioLifecycleState.swift */, A100000000000000000E2204 /* FeatureFlags.swift */, A100000000000000000E2202 /* PreferenceKeys.swift */, A2000000000000000000002B /* ProductProfiles.swift */, B113B0000000000000000061 /* ProductRecovery.swift */, B113B0000000000000000071 /* HeadroomAssistant.swift */, F64000000000000000000014 /* MultichannelCalibrationController.swift */, A2000000000000000000002D /* RoomCorrectionCalibrationController.swift */, A2000000000000000000002F /* RoomCorrectionProjectController.swift */, F89300000000000000000011 /* AmbientCompensationController.swift */, F90200000000000000000011 /* ActiveQuietZoneController.swift */, E4D000000000000000000011 /* AdaptiveQuietZoneShadow.swift */, E4F200000000000000000013 /* QuietZoneFeedForwardSurveyController.swift */, E4F300000000000000000012 /* QuietZoneFeedForwardShadow.swift */, F92000000000000000000012 /* RoomTreatmentAdvisorController.swift */, E10B00000000000000000004 /* RoomCorrectionDeployController.swift */,); path = State; sourceTree = "<group>"; };
 		A20000000000000000000055 /* Diagnostics */ = {isa = PBXGroup; children = (A20000000000000000000026 /* AudioDiagnosticsSnapshot.swift */, A2000000000000000000002A /* ProductionAnalysisWorker.swift */,); path = Diagnostics; sourceTree = "<group>"; };
 		A30000000000000000000050 /* Realtime */ = {
 			isa = PBXGroup;
@@ -1514,6 +1530,8 @@
 				A2000000000000000000001D /* RoomCorrectionCalibrationController.swift in Sources */,
 				A2000000000000000000001E /* RoomCorrectionMeasurementAnalyzer.swift in Sources */,
 				E11D00000000000000000001 /* MeasurementCore.swift in Sources */,
+				E10A00000000000000000071 /* RoomCorrectionBassApply.swift in Sources */,
+				E10B00000000000000000001 /* RoomCorrectionPostApply.swift in Sources */,
 				E10A00000000000000000031 /* RoomCorrectionCore.swift in Sources */,
 				E10A00000000000000000033 /* RoomCorrectionLanePlan.swift in Sources */,
 				E10A00000000000000000051 /* RoomCorrectionTargetShaping.swift in Sources */,
@@ -1534,6 +1552,7 @@
 				E11D00000000000000000080 /* MeasurementGeneratorCard.swift in Sources */,
 				E11D00000000000000000082 /* SignalGeneratorSettings.swift in Sources */,
 				A2000000000000000000001F /* RoomCorrectionProjectController.swift in Sources */,
+				E10B00000000000000000003 /* RoomCorrectionDeployController.swift in Sources */,
 				E20000000000000000000001 /* RoomCorrectionTargetDesigner.swift in Sources */,
 				E20000000000000000000002 /* RoomCorrectionFIRDesigner.swift in Sources */,
 				B50000000000000000000001 /* OptionalAcousticResearch.swift in Sources */,
@@ -1664,6 +1683,8 @@
 				A100000000000000000E2205 /* FeatureFlagsTests.swift in Sources */,
 				E11D00000000000000000002 /* MeasurementCoreTests.swift in Sources */,
 				E10A00000000000000000032 /* RoomCorrectionCoreTests.swift in Sources */,
+				E10A00000000000000000073 /* RoomCorrectionBassApplyTests.swift in Sources */,
+				E10B00000000000000000005 /* RoomCorrectionDeployControllerTests.swift in Sources */,
 				E10A00000000000000000034 /* RoomCorrectionLanePlanTests.swift in Sources */,
 				E10A00000000000000000053 /* RoomCorrectionTargetEditorTests.swift in Sources */,
 				E11E0000000000000000000D /* MeasurementLiveAnalysisTests.swift in Sources */,
