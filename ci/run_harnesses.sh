@@ -54,7 +54,7 @@ build_core_objs() {
     CORE_OK=1
     local src
     for src in graph snapshot fft stages_dsp stages_system stages_matrix stages_generator layout \
-        measure/offline_fft measure/ess measure/deconvolve measure/reference_room measure/timing measure/distortion measure/decay measure/waterfall; do
+        measure/offline_fft measure/ess measure/deconvolve measure/reference_room measure/timing measure/distortion measure/decay measure/waterfall measure/monitor_ring measure/spl measure/rta; do
         local obj="$OUT/n60core_${src//\//_}.o"
         if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -fno-exceptions -fno-rtti -Icore/include -Icore/src \
             -c "core/src/$src.cpp" -o "$obj"; then
@@ -200,7 +200,7 @@ fi
 if selected e11_measure_core; then
     build_core_objs
     if [ "$CORE_OK" = 1 ]; then
-        for t in measure_fft measure measure_timing measure_analysis measure_waterfall generator; do
+        for t in measure_fft measure measure_timing measure_analysis measure_waterfall measure_monitor generator; do
             if clang++ -std=c++20 -O2 -Wall -Wextra -Werror -Icore/include -Icore/src "core/tests/test_$t.cpp" \
                 "${CORE_OBJS[@]}" -o "$OUT/e11_core_$t" && "$OUT/e11_core_$t"; then
                 passed+=("e11_core_$t")

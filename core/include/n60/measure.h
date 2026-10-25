@@ -18,7 +18,7 @@
 extern "C" {
 #endif
 
-#define N60_MEASURE_ABI_VERSION 1
+#define N60_MEASURE_ABI_VERSION 2
 
 #define N60_MEASURE_OK 0
 #define N60_MEASURE_ERR_ARGUMENT (-1)
@@ -335,6 +335,99 @@ int32_t n60_measure_spectrogram_describe(const n60_measure_spectrogram_params *p
 int32_t n60_measure_spectrogram_analyze(const n60_measure_spectrogram_params *params, const float *ir,
                                         uint64_t count, double *out_db, uint64_t out_capacity,
                                         n60_measure_spectrogram_info *info_out);
+
+/* ---- Live monitor: SPSC ring, SPL meter, RTA (E11 S8, design note 7) ---- */
+
+/*
+ * Input monitor ring. One producer (the input-only IOProc) and one consumer (the analysis worker).
+ * Mono float samples. Producer calls are wait-free and allocation-free; create and destroy are
+ * control-plane. When the ring is full the frames that do not fit are dropped and counted, never
+ * waited for.
+ */
+typedef struct n60_monitor_ring n60_monitor_ring;
+
+/* capacity_frames: power of two, 256 .. 2^24. */
+int32_t n60_monitor_ring_create(uint32_t capacity_frames, n60_monitor_ring **ring_out);
+void n60_monitor_ring_destroy(n60_monitor_ring *ring);
+/* Producer. Reads `frames` samples spaced `stride` floats apart (interleaved channel); non-finite samples are
+ * stored as 0. Returns the frames accepted; the rest are counted as overruns. */
+uint32_t n60_monitor_ring_push(n60_monitor_ring *ring, const float *samples, uint32_t stride, uint32_t frames);
+/* Consumer. Returns frames copied (<= max_frames). */
+uint32_t n60_monitor_ring_pop(n60_monitor_ring *ring, float *out, uint32_t max_frames);
+uint32_t n60_monitor_ring_available(const n60_monitor_ring *ring);
+uint64_t n60_monitor_ring_overrun_frames(const n60_monitor_ring *ring);
+/* Consumer, while the producer is stopped. */
+void n60_monitor_ring_reset(n60_monitor_ring *ring);
+
+/*
+ * SPL meter (IEC 61672-1 weightings as double-precision IIR designed per rate by the bilinear transform,
+ * pre-warped at 1 kHz and normalised to 0 dB there). Levels are dB re digital full scale (a sine of peak 1.0
+ * reads -3.01) plus the calibration offset. Fast and Slow are exponential time weightings (125 ms, 1 s) of
+ * the weighted mean square; Leq is the weighted mean square since reset; C-peak is the largest absolute
+ * C-weighted sample. Worker thread only. create allocates; process does not.
+ */
+#define N60_SPL_WEIGHT_Z 0
+#define N60_SPL_WEIGHT_A 1
+#define N60_SPL_WEIGHT_C 2
+#define N60_SPL_FLOOR_DB (-200.0)
+
+typedef struct n60_spl_meter n60_spl_meter;
+
+typedef struct n60_spl_reading {
+    double fast_db;
+    double slow_db;
+    double leq_db;
+    double c_peak_db;
+    double elapsed_seconds;
+} n60_spl_reading;
+
+int32_t n60_spl_create(double sample_rate, uint32_t weighting, n60_spl_meter **meter_out);
+void n60_spl_destroy(n60_spl_meter *meter);
+void n60_spl_reset(n60_spl_meter *meter);
+/* Offset in dB added to every reading (acoustic calibrator or microphone sensitivity). */
+int32_t n60_spl_set_calibration_db(n60_spl_meter *meter, double offset_db);
+int32_t n60_spl_process(n60_spl_meter *meter, const float *samples, uint64_t count);
+int32_t n60_spl_read(const n60_spl_meter *meter, n60_spl_reading *reading_out);
+/* Magnitude in dB of the designed digital weighting at frequency_hz (0 dB at 1 kHz). */
+int32_t n60_spl_weighting_response_db(double sample_rate, uint32_t weighting, double frequency_hz, double *db_out);
+
+/*
+ * Real-time analyser. IEC 61260-1 base-10 fractional-octave bands (1, 3, 6, 12, 24, 48 per octave) read from a
+ * Hann-windowed FFT with 50 % overlap; each band is the power density integrated over its exact edges, so a
+ * band narrower than a bin still reads correctly. Levels are dB re full scale plus calibration_db. Averaging
+ * is in the power domain. Worker thread only.
+ */
+#define N60_RTA_AVERAGE_NONE 0
+#define N60_RTA_AVERAGE_EXPONENTIAL 1
+#define N60_RTA_AVERAGE_INFINITE 2
+
+typedef struct n60_rta_params {
+    double sample_rate;
+    uint32_t fft_size;           /* power of two, 1024 .. 2^20; see n60_rta_default_fft_size */
+    uint32_t bands_per_octave;   /* 1, 3, 6, 12, 24 or 48 */
+    uint32_t averaging;          /* N60_RTA_AVERAGE_* */
+    double time_constant_seconds;/* exponential averaging */
+    double min_hz;               /* 0: 20 */
+    double max_hz;               /* 0: min(20000, sample_rate / 2) */
+    double calibration_db;
+} n60_rta_params;
+
+typedef struct n60_rta n60_rta;
+
+/* Smallest power of two whose bin width is at most half the 20 Hz band width, within 4096 .. 2^20. */
+int32_t n60_rta_default_fft_size(double sample_rate, uint32_t bands_per_octave, uint32_t *size_out);
+/* Centres and edges of the bands with centre in [min_hz, max_hz] and upper edge at or below sample_rate / 2. */
+int32_t n60_rta_band_layout(uint32_t bands_per_octave, double sample_rate, double min_hz, double max_hz,
+                            double *centre_hz, double *lower_hz, double *upper_hz, uint32_t capacity,
+                            uint32_t *band_count);
+int32_t n60_rta_create(const n60_rta_params *params, n60_rta **rta_out);
+void n60_rta_destroy(n60_rta *rta);
+void n60_rta_reset(n60_rta *rta);
+int32_t n60_rta_process(n60_rta *rta, const float *samples, uint64_t count);
+uint32_t n60_rta_band_count(const n60_rta *rta);
+uint64_t n60_rta_frames_analysed(const n60_rta *rta);
+/* Writes band_count centres and levels (floor N60_SPL_FLOOR_DB); fails with ERR_CAPACITY when too small. */
+int32_t n60_rta_read(const n60_rta *rta, double *centre_hz, double *level_db, uint32_t capacity, uint32_t *band_count);
 
 #ifdef __cplusplus
 }
