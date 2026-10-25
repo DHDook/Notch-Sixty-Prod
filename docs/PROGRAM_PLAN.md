@@ -250,7 +250,7 @@ minimum-phase in blind ABX at three or more seats, and measurement results match
 - [ ] Excess-phase correction with frequency-dependent windowing, built on the PR129 research designer
 - [x] Pre-ringing limits and a latency budget; keep minimum-phase as a low-latency / video mode
 - [x] Multi-seat robustness: correct only phase that is coherent across seats, with per-seat weighting
-- [ ] Joint mains-and-subwoofer bass optimisation across all channels (Dirac Bass Control class), not subwoofers alone
+- [x] Joint mains-and-subwoofer bass optimisation across all channels (Dirac Bass Control class), not subwoofers alone
 - [x] Target editor with curtain, limited-range, per-channel offsets and saved target library
 - [ ] Flip `canDeploy` only through the verification path, with prediction and post-apply measurement
 - [ ] Bench: blind ABX against minimum-phase on the reference room
