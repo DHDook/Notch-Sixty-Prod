@@ -4,6 +4,7 @@
 #import "N60RealtimeAudioBridge.h"
 #import "n60/graph.h"
 #import "n60/measure.h"
+#import "N60MeasurementMonitorProc.h"
 #import "../UnifiedGraph/N60UnifiedGraphEligibility.h"
 #import "N60RoomMeasurementBridge.h"
 #import "N60AmbientMonitorBridge.h"

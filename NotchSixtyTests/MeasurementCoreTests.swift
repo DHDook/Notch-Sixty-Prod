@@ -37,7 +37,7 @@ final class MeasurementCoreTests: XCTestCase {
     }
 
     func testABIVersionAndFlagRegistration() {
-        XCTAssertEqual(MeasurementCore.abiVersion, 1)
+        XCTAssertEqual(MeasurementCore.abiVersion, 2)
         XCTAssertTrue(FeatureFlag.all.contains(.measurementSuite))
         XCTAssertFalse(FeatureFlag.measurementSuite.defaultEnabled)
     }
