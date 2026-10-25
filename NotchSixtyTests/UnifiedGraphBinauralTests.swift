@@ -73,10 +73,11 @@ final class UnifiedGraphBinauralTests: XCTestCase {
         }
         XCTAssertEqual(budget, .binauralBudget)
 
-        var delayed = HeadphoneDeviceProfileConfiguration()
-        delayed.left.delayMilliseconds = 1
-        guard case .failure(let dsp) = spec(rate: rate, profile: delayed) else {
-            return XCTFail("channel delay must fall back")
+        // E6 S9c: channel delay is covered by the ear DELAY stages; a headroom above 24 dB still is not.
+        var deep = HeadphoneDeviceProfileConfiguration()
+        deep.headroomAttenuationDB = 27
+        guard case .failure(let dsp) = spec(rate: rate, profile: deep) else {
+            return XCTFail("a headroom above 24 dB must fall back")
         }
         XCTAssertEqual(dsp, .headphoneDSP)
 
