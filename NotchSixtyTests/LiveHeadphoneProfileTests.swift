@@ -169,13 +169,13 @@ final class LiveHeadphoneProfileTests: XCTestCase {
 
     // MARK: refusals
 
-    func testHeadroomAboveTwentyFourAndHugeDelayAreRefusedAndTheRunningGraphKeepsRendering() throws {
+    func testHeadroomAboveThirtyAndHugeDelayAreRefusedAndTheRunningGraphKeepsRendering() throws {
         let rate = 48_000.0
         let start = try base(rate, profile())
         let host = try UnifiedGraphHost(spec: start)
         var position = 0
         try run(host, rate: rate, seconds: 0.1, from: &position)
-        for bad in [profile { $0.headroomAttenuationDB = 27 }, profile { $0.left.delayMilliseconds = 100 }] {
+        for bad in [profile { $0.headroomAttenuationDB = 31 }, profile { $0.left.delayMilliseconds = 100 }] {
             guard case .failure(let reason) = UnifiedGraphTranslator.binauralApplyHeadphone(base: start, profile: bad) else {
                 return XCTFail("the stages cannot reproduce this profile")
             }

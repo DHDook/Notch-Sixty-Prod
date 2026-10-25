@@ -390,7 +390,8 @@ enum UnifiedGraphTranslator {
     /// a 2-channel headphone endpoint, the program layout must have more than 2 channels and
     /// the profile must carry an asset. `asset` is already resampled to `sampleRate`. The
     /// HEADPHONE stage carries the profile's headroom, channel gain, polarity and EQ and a DELAY stage per ear
-    /// carries the channel delay (S9c); a headroom above 24 dB stays on the legacy path (`headphoneDSP`). Protection
+    /// carries the channel delay (S9c). The stage covers the profile's whole range (headroom 0 to 30 dB, 16 bands a side,
+    /// the same ceilings the legacy `N60HeadphoneDSP` validates), so a valid profile never falls back. Protection
     /// matches the legacy limiter. Program gain is the INPUT_GAIN stage (the bridge applies it only on the legacy pipeline).
     static func binauralSpec(
         asset: BinauralProfileAsset?,
@@ -546,13 +547,14 @@ enum UnifiedGraphTranslator {
     /// First DELAY stage id of the ear lanes of a binaural graph (lane 0, lane 1).
     static let headphoneDelayStageBase: UInt32 = 2_400
 
-    /// True when the HEADPHONE stage and the ear DELAY stages reproduce `profile`: headroom up to 24 dB (the stage's
-    /// range; a deeper headroom stays on the legacy path), at most 16 enabled bands a side, channel gain within the
-    /// stage's range and a delay within the delay capacity.
+    /// True when the HEADPHONE stage and the ear DELAY stages reproduce `profile`: headroom 0 to 30 dB (the profile's
+    /// full range), at most `N60_HEADPHONE_MAX_EQ_SECTIONS` (16, the legacy maximum, which `validateStructure` also
+    /// enforces) enabled bands a side, channel gain within the stage's range and a delay within the delay capacity.
+    /// A profile that passed `validateStructure` always satisfies this; it guards hand-built configurations.
     static func headphoneStagesEligible(profile: HeadphoneDeviceProfileConfiguration, sampleRate: Double) -> Bool {
-        guard profile.headroomAttenuationDB.isFinite, (0.0...24.0).contains(profile.headroomAttenuationDB),
-              profile.left.eqBands.filter(\.enabled).count <= 16,
-              profile.right.eqBands.filter(\.enabled).count <= 16,
+        guard profile.headroomAttenuationDB.isFinite, (0.0...30.0).contains(profile.headroomAttenuationDB),
+              profile.left.eqBands.filter(\.enabled).count <= Int(N60_HEADPHONE_MAX_EQ_SECTIONS),
+              profile.right.eqBands.filter(\.enabled).count <= Int(N60_HEADPHONE_MAX_EQ_SECTIONS),
               (-24.0...24.0).contains(profile.left.gainDB), (-24.0...24.0).contains(profile.right.gainDB),
               sampleRate.isFinite, sampleRate > 0 else { return false }
         for side in [profile.left, profile.right] {

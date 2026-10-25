@@ -526,9 +526,25 @@ final class CoreAudioBinauralHeadphoneTransportSession {
         )
     }
 
+    /// E6 S9c2: ramps the output to silence in the callback (sample domain) and waits, bounded, for the ramp to end,
+    /// so a session-kind change, sleep or quit never steps to zero. Control plane only; waits at most 100 ms.
+    private func rampOutputToSilence() {
+        guard let bridge, isOutputStarted, N60BinauralHeadphoneBridgeGetSnapshot(bridge).outputGateOpen else { return }
+        let frames = UInt32(min(max((max(outputFormat.sampleRate, 1) * 0.020).rounded(), 1), Double(UInt32.max)))
+        N60BinauralHeadphoneBridgeRequestShutdownFade(bridge, frames)
+        var waited: UInt32 = 0
+        while waited < 100_000, !N60BinauralHeadphoneBridgeShutdownFadeComplete(bridge) {
+            usleep(250)
+            waited &+= 250
+        }
+    }
+
     func stop(fadeOut: Bool) {
         guard !stopped else { return }
         stopped = true
+        if fadeOut {
+            rampOutputToSilence()
+        }
         if fadeOut, let bridge {
             N60BinauralHeadphoneBridgeSetOutputGain(bridge, 0)
         }

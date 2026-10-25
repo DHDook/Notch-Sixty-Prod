@@ -73,11 +73,16 @@ final class UnifiedGraphBinauralTests: XCTestCase {
         }
         XCTAssertEqual(budget, .binauralBudget)
 
-        // E6 S9c: channel delay is covered by the ear DELAY stages; a headroom above 24 dB still is not.
+        // E6 S9c2: the headphone profile's whole 0...30 dB headroom range is in the graph; the only DSP refusals left
+        // are values the profile itself rejects (headroom above 30 dB, more than the legacy 16 EQ sections per side).
         var deep = HeadphoneDeviceProfileConfiguration()
         deep.headroomAttenuationDB = 27
+        XCTAssertNoThrow(try spec(rate: rate, profile: deep).get())
+        deep.headroomAttenuationDB = 30
+        XCTAssertNoThrow(try spec(rate: rate, profile: deep).get())
+        deep.headroomAttenuationDB = 31
         guard case .failure(let dsp) = spec(rate: rate, profile: deep) else {
-            return XCTFail("a headroom above 24 dB must fall back")
+            return XCTFail("a headroom above 30 dB must fall back")
         }
         XCTAssertEqual(dsp, .headphoneDSP)
 
@@ -85,6 +90,38 @@ final class UnifiedGraphBinauralTests: XCTestCase {
             rate: rate, asset: BinauralProfileAsset.validationStereo(sampleRate: 44_100)
         ) else { return XCTFail("an unconverted rate must fall back") }
         XCTAssertEqual(mismatch, .sampleRateMismatch)
+    }
+
+    /// The legacy headphone path allows 16 EQ sections per side (`N60_HEADPHONE_MAX_EQ_SECTIONS`); the graph takes
+    /// all 16 at every rate and still refuses a 17th rather than silently dropping it.
+    func testSixteenHeadphoneEQBandsPerSideBuildAndRenderAtEveryRate() throws {
+        func bands(_ count: Int, _ rate: Double) -> [HeadphoneCorrectionEQBand] {
+            (0..<count).map { index in
+                var band = HeadphoneCorrectionEQBand()
+                band.frequencyHz = min(100.0 * pow(1.28, Double(index)), rate * 0.4)
+                band.gainDB = index.isMultiple(of: 2) ? 3 : -3
+                band.q = 1.5
+                return band
+            }
+        }
+        for rate in Self.rates {
+            var profile = HeadphoneDeviceProfileConfiguration()
+            profile.headroomAttenuationDB = 12
+            profile.left.eqBands = bands(16, rate)
+            profile.right.eqBands = bands(16, rate)
+            let built = try spec(rate: rate, profile: profile).get()
+            let host = try UnifiedGraphHost(spec: built)
+            let (left, right) = try earLevels(host: host, rate: rate, lanes: 6)
+            XCTAssertGreaterThan(left, 0.0005, "rate \(rate)")
+            XCTAssertGreaterThan(right, 0.0001, "rate \(rate)")
+            host.release()
+
+            profile.left.eqBands = bands(17, rate)
+            guard case .failure(let reason) = spec(rate: rate, profile: profile) else {
+                return XCTFail("a 17th band must fall back at rate \(rate)")
+            }
+            XCTAssertEqual(reason, .headphoneDSP, "rate \(rate)")
+        }
     }
 
     func testBinauralGraphRendersEarLevelsAtEveryRate() throws {
