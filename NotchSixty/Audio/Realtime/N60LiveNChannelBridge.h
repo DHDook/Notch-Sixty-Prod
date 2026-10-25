@@ -88,12 +88,18 @@ typedef struct N60LiveNChannelBridge {
     uint32_t outputGateMinimumBufferedFrames;
     uint32_t startupFadeFrames;
     uint32_t startupFadeRemaining;
+    // E6 S9c2: callback-owned shutdown ramp. The control plane requests a fade-out length once; the callback
+    // latches it at the next block, ramps the output gain linearly to zero and raises the complete flag.
+    uint32_t shutdownFadeTotal;
+    uint32_t shutdownFadeRemaining;
     float safetyLimiterGain[N60_LIVE_MAX_PHYSICAL_CHANNELS];
     float safetyLimiterReleaseAlpha;
 
     _Atomic bool outputGateOpen;
     _Atomic uint64_t safetyLimiterEngagedSamples;
     _Atomic uint32_t outputGainBits;
+    _Atomic uint32_t shutdownFadeRequestFrames;
+    _Atomic bool shutdownFadeComplete;
     _Atomic bool meteringDemand;
     _Atomic uint32_t meterProgramPeakBits[N60_MAX_PROGRAM_CHANNELS];
     _Atomic uint32_t meterProgramRMSBits[N60_MAX_PROGRAM_CHANNELS];
@@ -357,6 +363,10 @@ static inline bool N60LiveNChannelBridgeReset(
         N60MIMOTreatmentLiveIntegrationReset(bridge->roomTreatment);
     }
     bridge->startupFadeRemaining = 0u;
+    bridge->shutdownFadeTotal = 0u;
+    bridge->shutdownFadeRemaining = 0u;
+    atomic_store_explicit(&bridge->shutdownFadeRequestFrames, 0u, memory_order_relaxed);
+    atomic_store_explicit(&bridge->shutdownFadeComplete, false, memory_order_relaxed);
     for (uint32_t physical = 0; physical < N60_LIVE_MAX_PHYSICAL_CHANNELS; ++physical) {
         bridge->safetyLimiterGain[physical] = 1.0f;
     }
@@ -762,13 +772,44 @@ static inline float N60LiveNChannelBridgeNextOutputGain(
     N60LiveNChannelBridge * _Nonnull bridge,
     float masterGain
 ) {
-    if (bridge == NULL || bridge->startupFadeRemaining == 0u || bridge->startupFadeFrames == 0u) {
-        return masterGain;
+    if (bridge == NULL) return masterGain;
+    float shutdown = 1.0f;
+    if (bridge->shutdownFadeTotal != 0u) {
+        shutdown = (float)bridge->shutdownFadeRemaining / (float)bridge->shutdownFadeTotal;
+        if (bridge->shutdownFadeRemaining > 0u) {
+            bridge->shutdownFadeRemaining -= 1u;
+            if (bridge->shutdownFadeRemaining == 0u) {
+                atomic_store_explicit(&bridge->shutdownFadeComplete, true, memory_order_release);
+            }
+        }
+    }
+    if (bridge->startupFadeRemaining == 0u || bridge->startupFadeFrames == 0u) {
+        return masterGain * shutdown;
     }
     const uint32_t completed = bridge->startupFadeFrames - bridge->startupFadeRemaining + 1u;
     const float fade = (float)completed / (float)bridge->startupFadeFrames;
     bridge->startupFadeRemaining -= 1u;
-    return masterGain * fade;
+    return masterGain * fade * shutdown;
+}
+
+/// Callback only, once per block: latches a shutdown fade requested by the control plane.
+static inline void N60LiveNChannelBridgeLatchShutdownFade(N60LiveNChannelBridge * _Nonnull bridge) {
+    if (bridge->shutdownFadeTotal != 0u) return;
+    const uint32_t request = atomic_load_explicit(&bridge->shutdownFadeRequestFrames, memory_order_acquire);
+    if (request == 0u) return;
+    bridge->shutdownFadeTotal = request;
+    bridge->shutdownFadeRemaining = request;
+}
+
+/// Control plane. Asks the callback to ramp the output to silence over `frames` frames (E6 S9c2). Allocation:
+/// none. Synchronisation: one release store; the callback latches it at the next block. Reset: Reset clears it.
+static inline void N60LiveNChannelBridgeRequestShutdownFade(N60LiveNChannelBridge * _Nullable bridge, uint32_t frames) {
+    if (bridge == NULL || frames == 0u) return;
+    atomic_store_explicit(&bridge->shutdownFadeRequestFrames, frames, memory_order_release);
+}
+
+static inline bool N60LiveNChannelBridgeShutdownFadeComplete(const N60LiveNChannelBridge * _Nullable bridge) {
+    return bridge != NULL && atomic_load_explicit(&bridge->shutdownFadeComplete, memory_order_acquire);
 }
 
 /// Realtime capture callback: Core Audio stream order -> canonical semantic ring.
@@ -929,6 +970,7 @@ static inline OSStatus N60LiveNChannelOutputIOProc(
     const float masterGain = N60LiveNChannelBitsToFloat(
         atomic_load_explicit(&bridge->outputGainBits, memory_order_acquire)
     );
+    N60LiveNChannelBridgeLatchShutdownFade(bridge);
     const bool meterDemand = atomic_load_explicit(
         &bridge->meteringDemand, memory_order_acquire
     );

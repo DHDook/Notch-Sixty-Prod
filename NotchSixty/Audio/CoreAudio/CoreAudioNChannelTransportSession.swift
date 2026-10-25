@@ -771,6 +771,47 @@ final class CoreAudioNChannelTransportSession {
         }
     }
 
+    /// Test seam (E6 S9c2): a hardware-free session. It owns a real bridge and a real graph host built exactly as
+    /// the production init builds them, but opens no tap, aggregate or IO procs, so the engine's live-edit and
+    /// session-kind paths can be exercised without Core Audio. Never used by the app.
+    init(
+        testingSelectedOutput selectedOutput: AudioOutputDevice,
+        routePlan: LiveNChannelOutputRoutePlan,
+        renderGraph: N60LiveNChannelRenderGraph,
+        inputMap: N60ProgramInputMap,
+        sampleRate: Double,
+        outputBufferFrames: UInt32 = 512,
+        unifiedGraphConfiguration: UnifiedGraphConfiguration?
+    ) throws {
+        self.selectedOutput = selectedOutput
+        self.routePlan = routePlan
+        let asbd = AudioStreamBasicDescription(
+            mSampleRate: sampleRate,
+            mFormatID: kAudioFormatLinearPCM,
+            mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked,
+            mBytesPerPacket: 4 * renderGraph.programLayout.channelCount,
+            mFramesPerPacket: 1,
+            mBytesPerFrame: 4 * renderGraph.programLayout.channelCount,
+            mChannelsPerFrame: renderGraph.programLayout.channelCount,
+            mBitsPerChannel: 32,
+            mReserved: 0)
+        tapFormat = AudioStreamFormatDescription(asbd)
+        outputFormat = AudioStreamFormatDescription(asbd)
+        guard let newBridge = N60LiveNChannelBridgeCreate(Self.bridgeCapacityFrames, inputMap, renderGraph, 0, 1) else {
+            throw LiveNChannelTransportError.realtimeBridgeAllocationFailed
+        }
+        if let configuration = unifiedGraphConfiguration {
+            switch Self.makeUnifiedGraph(
+                configuration: configuration, bridge: newBridge, sampleRate: sampleRate,
+                laneCount: Int(renderGraph.programLayout.channelCount), outputBufferFrames: outputBufferFrames
+            ) {
+            case .success(let host): unifiedGraphHost = host
+            case .failure(let reason): unifiedGraphFallbackReason = reason
+            }
+        }
+        bridge = newBridge
+    }
+
     deinit {
         stop(fadeOut: false)
     }
@@ -915,13 +956,27 @@ final class CoreAudioNChannelTransportSession {
         )
     }
 
+    /// E6 S9c2: ramps the output to silence in the callback (sample domain) and waits, bounded, for the ramp to end,
+    /// so a session-kind change, sleep or quit never steps to zero. Control plane only; waits at most 100 ms.
+    private func rampOutputToSilence() {
+        guard let bridge, isOutputStarted, N60LiveNChannelBridgeGetSnapshot(bridge).outputGateOpen else { return }
+        let frames = UInt32(min(max((max(outputFormat.sampleRate, 1) * 0.020).rounded(), 1), Double(UInt32.max)))
+        N60LiveNChannelBridgeRequestShutdownFade(bridge, frames)
+        var waited: UInt32 = 0
+        while waited < 100_000, !N60LiveNChannelBridgeShutdownFadeComplete(bridge) {
+            usleep(250)
+            waited &+= 250
+        }
+    }
+
     func stop(fadeOut: Bool) {
         guard !stopped else { return }
         stopped = true
+        if fadeOut {
+            rampOutputToSilence()
+        }
         if fadeOut, let bridge {
-            // PR61 has an atomic master-gain control but no callback-owned shutdown
-            // ramp yet. Fail silent immediately rather than sleeping on the audio
-            // thread or freeing a bridge that may still be referenced by Core Audio.
+            // The callback-owned ramp above has ended (or timed out); make silence permanent before teardown.
             N60LiveNChannelBridgeSetOutputGain(bridge, 0)
         }
         if isOutputStarted, let outputIOProcID {

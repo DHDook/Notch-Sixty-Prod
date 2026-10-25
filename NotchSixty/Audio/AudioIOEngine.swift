@@ -1400,6 +1400,24 @@ final class AudioIOEngine: ObservableObject {
     }
 
     var liveNChannelActive: Bool { nChannelTransportSession != nil }
+
+    /// Test seam (E6 S9c2): puts the engine in `.running` with a hardware-free N-channel session, so the live
+    /// setters, the planner and the session-kind paths run against a real bridge and graph without Core Audio.
+    func installTestingNChannelSession(_ session: CoreAudioNChannelTransportSession) throws {
+        precondition(lifecycle.state == .idle && nChannelTransportSession == nil, "test seam needs an idle engine")
+        for state: AudioLifecycleState in [.creatingTap, .creatingAggregate, .openingOutput, .starting, .running] {
+            try setLifecycle(state)
+        }
+        nChannelTransportSession = session
+    }
+
+    /// Test seam: stops and drops the seam session and returns the engine to idle.
+    func removeTestingNChannelSession() {
+        nChannelTransportSession?.stop(fadeOut: false)
+        nChannelTransportSession = nil
+        try? setLifecycle(.stopping)
+        try? setLifecycle(.idle)
+    }
     var liveBinauralHeadphoneActive: Bool { binauralHeadphoneTransportSession != nil }
     private var immutableSemanticTransportActive: Bool {
         nChannelTransportSession != nil || binauralHeadphoneTransportSession != nil
@@ -2350,7 +2368,7 @@ final class AudioIOEngine: ObservableObject {
                 try validateHeadphoneSessionKindChange(configuration)
                 headphoneDeviceProfileConfiguration = configuration
                 lastErrorDescription = nil
-                scheduleSampleRateReconfiguration(countsAsSampleRateChange: false)
+                scheduleSampleRateReconfiguration(countsAsSampleRateChange: false, fadeOut: true, settleDelay: 0.03)
                 return
             }
         }
@@ -2514,16 +2532,21 @@ final class AudioIOEngine: ObservableObject {
             try outputDeviceProfile.validateStructure(bassManagementEnabled: configuration.enabled)
         }
         if immutableSemanticTransportActive, configuration != bassManagementConfiguration {
-            // The crossover topology (and the binaural graph's bass handling) is fixed when the session starts;
-            // retuning an enabled N-channel crossover republishes the graph.
-            if binauralHeadphoneTransportSession != nil || configuration.enabled != bassManagementConfiguration.enabled {
+            // The crossover topology is fixed when the session starts, so toggling bass management restarts.
+            // Retuning an enabled N-channel crossover republishes the graph. A graph-rendered binaural
+            // session has no bass stage in the graph, so with `enabled` unchanged its bass edits are live
+            // state commits. A legacy binaural session still needs a restart for any change.
+            let binauralGraphLive = binauralHeadphoneTransportSession?.unifiedGraphActive == true
+            if (binauralHeadphoneTransportSession != nil && !binauralGraphLive)
+                || configuration.enabled != bassManagementConfiguration.enabled {
                 throw LiveNChannelTransportError.configurationChangeRequiresRestart
             }
         }
         if physicalSpeakerBusRoutingActive, lifecycle.state != .idle, configuration != bassManagementConfiguration {
             throw BassManagementConfigurationError.physicalCrossoverChangeRequiresIdle
         }
-        if immutableSemanticTransportActive, configuration != bassManagementConfiguration {
+        if immutableSemanticTransportActive, configuration != bassManagementConfiguration,
+           binauralHeadphoneTransportSession == nil {
             try requireLiveGraphEdits()
             var inputs = currentLiveGraphInputs
             inputs.bass = configuration
@@ -4954,14 +4977,21 @@ final class AudioIOEngine: ObservableObject {
         }
     }
 
-    private func scheduleSampleRateReconfiguration(countsAsSampleRateChange: Bool = true) {
+    /// `fadeOut` ramps the live session to silence before teardown (about 20 ms, bridge-owned) so a
+    /// user-initiated session rebuild never steps the output; device-driven rebuilds cannot fade
+    /// because the device is already changing. `settleDelay` is the wait before the rebuild.
+    private func scheduleSampleRateReconfiguration(
+        countsAsSampleRateChange: Bool = true,
+        fadeOut: Bool = false,
+        settleDelay: TimeInterval = 0.15
+    ) {
         guard lifecycle.state == .running else { return }
 
         reconfigurationWorkItem?.cancel()
         do {
             try setLifecycle(.reconfiguring)
             eventMonitor.removeSelectedOutputSampleRateMonitor()
-            tearDownTransport(fadeOut: false)
+            tearDownTransport(fadeOut: fadeOut)
         } catch {
             tearDownTransport(fadeOut: false)
             forceFailedState(error)
@@ -4972,7 +5002,7 @@ final class AudioIOEngine: ObservableObject {
             self?.performSampleRateReconfiguration(countsAsSampleRateChange: countsAsSampleRateChange)
         }
         reconfigurationWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: workItem)
+        DispatchQueue.main.asyncAfter(deadline: .now() + settleDelay, execute: workItem)
     }
 
     private func performSampleRateReconfiguration(countsAsSampleRateChange: Bool) {

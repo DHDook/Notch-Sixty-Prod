@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		E6D0000000000000000109A3 /* LiveHeadphoneProfileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D0000000000000000009A3 /* LiveHeadphoneProfileTests.swift */; };
+		E6D0000000000000000109B1 /* LiveSessionFixtureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D0000000000000000009B1 /* LiveSessionFixtureTests.swift */; };
 		E6D0000000000000000109A2 /* HeadphoneLiveEditPlanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D0000000000000000009A2 /* HeadphoneLiveEditPlanner.swift */; };
 		E6D0000000000000000109A1 /* BinauralResampledAssetCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D0000000000000000009A1 /* BinauralResampledAssetCache.swift */; };
 		E6D000000000000000000101 /* UnifiedGraphSpec.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D000000000000000000001 /* UnifiedGraphSpec.swift */; };
@@ -376,6 +377,7 @@
 
 /* Begin PBXFileReference section */
 		E6D0000000000000000009A3 /* LiveHeadphoneProfileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveHeadphoneProfileTests.swift; sourceTree = "<group>"; };
+		E6D0000000000000000009B1 /* LiveSessionFixtureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSessionFixtureTests.swift; sourceTree = "<group>"; };
 		E6D0000000000000000009A2 /* HeadphoneLiveEditPlanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeadphoneLiveEditPlanner.swift; sourceTree = "<group>"; };
 		E6D0000000000000000009A1 /* BinauralResampledAssetCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BinauralResampledAssetCache.swift; sourceTree = "<group>"; };
 		E6D000000000000000000001 /* UnifiedGraphSpec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphSpec.swift; sourceTree = "<group>"; };
@@ -853,6 +855,7 @@
 				E6D0000000000000000000A0 /* UnifiedGraphBinauralTests.swift */,
 				E6D0000000000000000000E5 /* UnifiedGraphLiveEditTests.swift */,
 				E6D0000000000000000009A3 /* LiveHeadphoneProfileTests.swift */,
+				E6D0000000000000000009B1 /* LiveSessionFixtureTests.swift */,
 				E6D0000000000000000000B1 /* UnifiedGraphProgramDSPTests.swift */,
 				E6D000000000000000000007 /* LiveNChannelUnifiedGraphTests.swift */,
 				A10000000000000000000027 /* ConvolutionTests.swift */,
@@ -1469,6 +1472,7 @@
 				E6D0000000000000000001A0 /* UnifiedGraphBinauralTests.swift in Sources */,
 				E6D0000000000000000001E5 /* UnifiedGraphLiveEditTests.swift in Sources */,
 				E6D0000000000000000109A3 /* LiveHeadphoneProfileTests.swift in Sources */,
+				E6D0000000000000000109B1 /* LiveSessionFixtureTests.swift in Sources */,
 				E6D0000000000000000001B1 /* UnifiedGraphProgramDSPTests.swift in Sources */,
 				E6D000000000000000000107 /* LiveNChannelUnifiedGraphTests.swift in Sources */,
 				A10000000000000000000013 /* NotchSixtyTests.swift in Sources */,

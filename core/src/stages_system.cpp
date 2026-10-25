@@ -499,7 +499,7 @@ bool paramOk(uint32_t kind, uint32_t i, float v, const float *p, double rate, ui
         case N60_STAGE_CROSSTALK: return i == 0 ? inR(v, 200.0, 2000.0) : inR(v, 0.0, 1.0);
         case N60_STAGE_HEADPHONE:
             switch (i) {
-                case 0: return inR(v, -24.0, 0.0);
+                case 0: return inR(v, -30.0, 0.0);
                 case 1: return inR(v, 0.0, 1.0);
                 case 2: return inR(v, 15.0, 90.0);
                 case 3: return inR(v, 0.06, 0.12);

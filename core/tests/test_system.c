@@ -257,6 +257,19 @@ static void testPairs(double rate) {
         double r = peakOf(bufOut[1], 0, 1024);
         CHECK(r > 0.2 && r < 0.3, "rate %.0f headphone crossfeed level (%.3f)", rate, r);
         n60_graph_retire(g);
+        /* E6 S9c2: the full 30 dB headphone headroom is accepted and applied; beyond it is refused. */
+        hp[1] = 0.0f;
+        hp[0] = -30.0f;
+        CHECK(build(rate, 2, st, 1, &g) == N60_STATUS_OK && g, "rate %.0f headphone -30 dB headroom builds", rate);
+        pos = 0;
+        double deep = toneThrough(g, 2, rate, 0, 300, 0.5, 4, 0, &pos);
+        CHECK(fabs(deep - 0.5 * pow(10.0, -30.0 / 20.0)) < 1e-4, "rate %.0f headphone -30 dB level (%.5f)", rate, deep);
+        n60_graph_retire(g);
+        hp[0] = -31.0f;
+        n60_graph *refused = NULL;
+        CHECK(build(rate, 2, st, 1, &refused) != N60_STATUS_OK, "rate %.0f headphone -31 dB headroom refused", rate);
+        if (refused) n60_graph_retire(refused);
+        hp[0] = 0.0f;
     }
 }
 

@@ -63,7 +63,7 @@ build_core_objs() {
     done
 }
 # Bridge harnesses: build the core only when one of them is selected.
-if selected pr35_transition_ack || selected pr41_same_device_output_map || selected pr101_realtime_resource_soak || selected e6_graph_takeover || selected e6_fade_alignment || selected e6_nchannel_graph; then
+if selected pr35_transition_ack || selected pr41_same_device_output_map || selected pr101_realtime_resource_soak || selected e6_graph_takeover || selected e6_fade_alignment || selected e6_nchannel_graph || selected e6_shutdown_fade; then
     build_core_objs
 fi
 
@@ -112,6 +112,9 @@ harness e6_fade_alignment "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/harnes
     -Icore/include ${CORE_OBJS[@]+"${CORE_OBJS[@]}"} -lc++ -framework Accelerate -framework CoreAudio
 # shellcheck disable=SC2086
 harness e6_nchannel_graph "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/harness_e6_nchannel_graph.c $ALL_RT \
+    -Icore/include ${CORE_OBJS[@]+"${CORE_OBJS[@]}"} -lc++ -framework Accelerate -framework CoreAudio
+# shellcheck disable=SC2086
+harness e6_shutdown_fade "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/harness_e6_shutdown_fade.c $ALL_RT \
     -Icore/include ${CORE_OBJS[@]+"${CORE_OBJS[@]}"} -lc++ -framework Accelerate -framework CoreAudio
 # shellcheck disable=SC2086
 harness pr38_denoiser_advanced "${STRICT[@]}" -O2 -include stddef.h -I"$RT" ci/validate_pr38_denoiser_advanced.c $ALL_RT_NO_BRIDGE \

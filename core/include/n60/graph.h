@@ -202,7 +202,7 @@ typedef int (*n60_external_process_fn)(void *context, const float *const *in, fl
  * AMBIENT. params: [0] level dB (live, -60..24), then low-shelf, peaking and high-shelf bands (Hz, dB, Q). paramCount 10.
  * SYMMETRY. params: [0] position -1..1 (live). CROSSFEED. params: [0] amount 0..0.5 (live).
  * CROSSTALK. params: [0] shadow low-pass Hz 200..2000 (live), [1] amount 0..1 (live).
- * HEADPHONE (pair A, B). params: [0] headroom dB (-24..0), [1] crossfeed amount 0..1 (live), [2] angle 15..90 deg,
+ * HEADPHONE (pair A, B). params: [0] headroom dB (-30..0), [1] crossfeed amount 0..1 (live), [2] angle 15..90 deg,
  *  [3] radius 0.06..0.12 m, [4] crossfeed low-pass Hz (200..2000), [5] gain A dB, [6] gain B dB (live, -24..24),
  *  [7] polarity A, [8] polarity B (0/1), [9] sections nA, [10] sections nB (0..16), then 4 per section (A, then B).
  * PAUSE_GATE (linked). params: [0] threshold dBFS (-120..-20), [1] hysteresis dB (0..24), [2] hold ms (0..5000),
