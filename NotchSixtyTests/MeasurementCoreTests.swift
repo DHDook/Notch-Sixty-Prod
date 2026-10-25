@@ -89,4 +89,53 @@ final class MeasurementCoreTests: XCTestCase {
             accuracy: 1.0 / 48_000.0
         )
     }
+
+    // MARK: - E11 S2 timing and averaging
+
+    func testFindArrivalLocatesDelayedChirpToASubSample() throws {
+        let rate = 48_000.0
+        let chirp = try MeasurementCore.makeReferenceChirp(sampleRate: rate)
+        var capture = [Float](repeating: 0, count: chirp.count + 6_000)
+        let delay = 1_234
+        for (i, v) in chirp.enumerated() { capture[delay + i] = 0.3 * v }
+        let arrival = try MeasurementCore.findArrival(template: chirp, in: capture, sampleRate: rate)
+        XCTAssertEqual(arrival.frames, Double(delay), accuracy: 0.01)
+    }
+
+    func testFindArrivalRejectsAWeakReference() throws {
+        let chirp = try MeasurementCore.makeReferenceChirp(sampleRate: 48_000)
+        let silence = [Float](repeating: 0, count: chirp.count + 2_000)
+        XCTAssertThrowsError(try MeasurementCore.findArrival(template: chirp, in: silence, sampleRate: 48_000)) {
+            XCTAssertEqual($0 as? MeasurementTimingError, .weakReference)
+        }
+    }
+
+    func testAverageRepeatsAlignsAndRejectsAnOutlier() throws {
+        let rate = 48_000.0
+        let chirp = try MeasurementCore.makeReferenceChirp(sampleRate: rate)
+        let length = chirp.count + 4_000
+        var repeats: [[Float]] = []
+        var arrivals: [Double] = []
+        for (r, delay) in [300, 307, 292, 301].enumerated() {
+            var pass = [Float](repeating: 0, count: length)
+            let gain: Float = r == 3 ? 4.0 : 1.0 // repeat 3 is far louder: a level outlier
+            for (i, v) in chirp.enumerated() { pass[delay + i] = gain * v }
+            repeats.append(pass)
+            arrivals.append(Double(delay))
+        }
+        let result = try MeasurementCore.averageRepeats(
+            repeats, arrivals: arrivals, sampleRate: rate, repeatPeriodFrames: length
+        )
+        XCTAssertEqual(result.rejectedRepeats, [3])
+        XCTAssertEqual(result.acceptedCount, 3)
+        XCTAssertEqual(result.samples.count, length)
+        // Aligned to repeat 0: the chirp starts at frame 300 with unit gain.
+        XCTAssertEqual(result.samples[300 + 100], chirp[100], accuracy: 1e-3)
+    }
+
+    func testAverageRepeatsRejectsMismatchedInput() {
+        XCTAssertThrowsError(try MeasurementCore.averageRepeats(
+            [[0, 1], [0, 1, 2]], arrivals: [0, 0], sampleRate: 48_000, repeatPeriodFrames: 2
+        )) { XCTAssertEqual($0 as? MeasurementTimingError, .invalidArguments) }
+    }
 }

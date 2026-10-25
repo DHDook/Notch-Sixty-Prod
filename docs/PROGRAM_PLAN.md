@@ -233,7 +233,7 @@ minimum-phase in blind ABX at three or more seats, and measurement results match
 
 ### E11 Measurement suite (start first; E10 uses it)
 
-- [ ] Repeat-sweep averaging and an acoustic timing reference for separate-clock USB microphones
+- [x] Repeat-sweep averaging and an acoustic timing reference for separate-clock USB microphones
 - [ ] RTA with selectable fractional-octave resolution, plus an SPL meter and logger with A/C/Z weighting
 - [ ] Signal generator: pink and white noise, band-limited noise, tones, for level matching and listening checks
 - [ ] Waterfall / CSD and spectrogram from the existing impulse response

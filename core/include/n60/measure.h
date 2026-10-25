@@ -26,6 +26,8 @@ extern "C" {
 #define N60_MEASURE_ERR_CAPACITY (-3)
 #define N60_MEASURE_ERR_UNUSABLE_EXCITATION (-4)
 #define N60_MEASURE_ERR_ALLOC (-5)
+#define N60_MEASURE_ERR_TIMING_REFERENCE (-6)   /* reference correlation peak too weak (E11 S2) */
+#define N60_MEASURE_ERR_NO_ACCEPTED_REPEATS (-7)
 
 /* Largest offline transform: 2^24 points (a 30 s sweep plus tail at 384 kHz). */
 #define N60_MEASURE_MAX_TRANSFORM 16777216u
@@ -95,6 +97,7 @@ typedef struct n60_measure_room_params {
     double latency_seconds;          /* playback-to-capture latency */
     double drift_ppm;                /* capture clock fast (+) or slow (-) against playback */
     double noise_dbfs;               /* RMS of seeded white noise; <= -200 off */
+    uint32_t noise_seed;             /* 0: use seed; else an independent noise stream (repeats) */
 } n60_measure_room_params;
 
 /* Fills a deterministic default room for the rate (flat direct, 0.4 s RT60, no distortion). */
@@ -114,6 +117,81 @@ int32_t n60_measure_room_capture_length(const n60_measure_room_params *params,
 int32_t n60_measure_room_capture(const n60_measure_room_params *params,
                                  const float *excitation, uint64_t excitation_count,
                                  float *out, uint64_t capacity, uint64_t *count_out);
+
+/* ---- Timing reference and repeat averaging (E11 S2, design notes 4 and 5) ---- */
+
+#define N60_MEASURE_MAX_REPEATS 16
+
+/* Timing tiers recorded on each measurement. */
+#define N60_MEASURE_TIMING_LOOPBACK 1  /* electrical loopback channel: exact */
+#define N60_MEASURE_TIMING_ACOUSTIC 2  /* reference chirp on a reference speaker */
+#define N60_MEASURE_TIMING_NONE 3      /* direct arrival, no inter-channel delay reported */
+
+typedef struct n60_measure_chirp_params {
+    double sample_rate;
+    double start_hz;          /* 2000 */
+    double end_hz;            /* 0: min(20000, 0.45 * sample_rate) */
+    double duration_seconds;  /* 0.25 */
+    double level_dbfs;        /* peak, <= 0 */
+    double fade_seconds;      /* half-Hann rise and fall; 0.005 */
+} n60_measure_chirp_params;
+
+void n60_measure_chirp_defaults(double sample_rate, n60_measure_chirp_params *params);
+int32_t n60_measure_chirp_length(const n60_measure_chirp_params *params, uint64_t *frames_out);
+int32_t n60_measure_chirp_generate(const n60_measure_chirp_params *params, float *out, uint64_t capacity,
+                                   uint64_t *count_out);
+
+typedef struct n60_measure_arrival {
+    double arrival_frames;          /* sub-sample capture frame at which the template begins */
+    double peak_to_neighbourhood_db;/* correlation peak over the RMS of the rest of the correlation */
+} n60_measure_arrival;
+
+/*
+ * Matched-filter arrival of `tmpl` inside `capture` (FFT cross-correlation, parabolic peak).
+ * Used for tier (a) (template = the loopback program) and tier (b) (template = the chirp).
+ * Returns ERR_TIMING_REFERENCE when the peak is under `min_peak_db` above the neighbourhood
+ * (default 20); `arrival_out` is still filled so the UI can show why it failed.
+ */
+int32_t n60_measure_find_arrival(const float *tmpl, uint64_t tmpl_count, const float *capture,
+                                 uint64_t capture_count, double sample_rate, double min_peak_db,
+                                 n60_measure_arrival *arrival_out);
+
+/* Tier (c): sub-sample position of the largest |sample| of [begin, end) with a parabolic peak. */
+int32_t n60_measure_peak_position(const float *data, uint64_t count, uint64_t begin, uint64_t end,
+                                  double *position_out);
+
+typedef struct n60_measure_average_params {
+    double sample_rate;
+    uint32_t repeat_count;           /* 1..N60_MEASURE_MAX_REPEATS */
+    uint64_t length_frames;          /* every repeat has this many frames */
+    uint64_t repeat_period_frames;   /* start-to-start spacing of the repeats, for the drift estimate */
+    double min_coherence;            /* 0.9 */
+    double max_level_diff_db;        /* 1.0, 200 Hz - 5 kHz level against the median repeat */
+    double drift_warning_ppm;        /* 20 */
+} n60_measure_average_params;
+
+typedef struct n60_measure_average_result {
+    uint32_t accepted_count;
+    uint32_t rejected_mask;          /* bit r set: repeat r rejected */
+    uint32_t drift_warning;          /* 1 when |drift_ppm| > drift_warning_ppm */
+    double drift_ppm;                /* slope of the reference arrivals across repeats */
+    double coherence[N60_MEASURE_MAX_REPEATS];
+    double level_db[N60_MEASURE_MAX_REPEATS];
+} n60_measure_average_result;
+
+void n60_measure_average_defaults(double sample_rate, n60_measure_average_params *params);
+
+/*
+ * Aligns every repeat to repeat 0 using its reference `arrivals[r]` (frames, sub-sample, from
+ * n60_measure_find_arrival or n60_measure_peak_position) with an exact FFT fractional shift,
+ * rejects repeats whose coherence with the median repeat or whose level differ too much
+ * (needs three or more repeats to reject), and writes the coherent time-domain mean of the
+ * rest. Output length is length_frames. Deterministic.
+ */
+int32_t n60_measure_average_repeats(const n60_measure_average_params *params,
+                                    const float *const *repeats, const double *arrivals,
+                                    float *out, uint64_t capacity,
+                                    n60_measure_average_result *result_out);
 
 #ifdef __cplusplus
 }

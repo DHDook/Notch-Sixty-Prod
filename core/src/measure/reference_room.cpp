@@ -237,7 +237,7 @@ int32_t n60_measure_room_capture(const n60_measure_room_params *params,
     // Latency and clock drift: sample the room output at fractional positions (cubic Lagrange).
     const double rate = 1.0 + params->drift_ppm * 1e-6;
     const double latencyFrames = params->latency_seconds * params->sample_rate;
-    Rng rng(params->seed ^ 0xA5A5A5A5u);
+    Rng rng((params->noise_seed != 0 ? params->noise_seed : params->seed) ^ 0xA5A5A5A5u);
     const double noiseRms = params->noise_dbfs > -199.0 ? std::pow(10.0, params->noise_dbfs / 20.0) : 0.0;
     for (uint64_t j = 0; j < total; ++j) {
         const double position = static_cast<double>(j) * rate - latencyFrames;
@@ -248,16 +248,19 @@ int32_t n60_measure_room_capture(const n60_measure_room_params *params,
             if (f == 0.0) {
                 value = room[static_cast<uint64_t>(base)];
             } else {
-                double s[4];
-                for (int t = 0; t < 4; ++t) {
-                    const int64_t idx = base - 1 + t;
-                    s[t] = (idx >= 0 && idx < static_cast<int64_t>(convLen)) ? room[static_cast<uint64_t>(idx)] : 0.0;
+                // Lanczos (a = 12) windowed-sinc fractional delay: flat to ~0.9 of Nyquist, so
+                // alignment tests are limited by the estimator and not by the simulator.
+                constexpr int kA = 12;
+                double sum = 0.0;
+                for (int t = -kA + 1; t <= kA; ++t) {
+                    const int64_t idx = base + t;
+                    if (idx < 0 || idx >= static_cast<int64_t>(convLen)) continue;
+                    const double x = f - static_cast<double>(t);
+                    const double px = kPi * x;
+                    const double kernel = std::fabs(x) < 1e-12 ? 1.0 : (std::sin(px) / px) * (std::sin(px / kA) / (px / kA));
+                    sum += kernel * room[static_cast<uint64_t>(idx)];
                 }
-                const double c0 = -f * (f - 1) * (f - 2) / 6.0;
-                const double c1 = (f + 1) * (f - 1) * (f - 2) / 2.0;
-                const double c2 = -(f + 1) * f * (f - 2) / 2.0;
-                const double c3 = (f + 1) * f * (f - 1) / 6.0;
-                value = c0 * s[0] + c1 * s[1] + c2 * s[2] + c3 * s[3];
+                value = sum;
             }
         }
         if (noiseRms > 0.0) value += noiseRms * rng.gaussian();
