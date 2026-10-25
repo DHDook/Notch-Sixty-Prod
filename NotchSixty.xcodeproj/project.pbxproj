@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		E11D00000000000000000023 /* MeasurementAnalysisViewsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11D00000000000000000033 /* MeasurementAnalysisViewsTests.swift */; };
+		E11D00000000000000000022 /* MeasurementAnalysisViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11D00000000000000000032 /* MeasurementAnalysisViews.swift */; };
+		E11D00000000000000000021 /* MeasurementGatedPlot.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11D00000000000000000031 /* MeasurementGatedPlot.swift */; };
 		E6D0000000000000000109A3 /* LiveHeadphoneProfileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D0000000000000000009A3 /* LiveHeadphoneProfileTests.swift */; };
 		E6D0000000000000000109A4 /* UnifiedGraphStereoHeadphoneTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D0000000000000000009A4 /* UnifiedGraphStereoHeadphoneTests.swift */; };
 		E6D0000000000000000109B1 /* LiveSessionFixtureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D0000000000000000009B1 /* LiveSessionFixtureTests.swift */; };
@@ -30,6 +33,7 @@
 		E11C00000000000000000035 /* timing.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E11C00000000000000000015 /* timing.cpp */; };
 		E11C00000000000000000036 /* distortion.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E11C00000000000000000016 /* distortion.cpp */; };
 		E11C00000000000000000037 /* decay.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E11C00000000000000000017 /* decay.cpp */; };
+		E11C00000000000000000038 /* waterfall.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E11C00000000000000000018 /* waterfall.cpp */; };
 		E11C00000000000000000031 /* offline_fft.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E11C00000000000000000011 /* offline_fft.cpp */; };
 		E11C00000000000000000032 /* ess.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E11C00000000000000000012 /* ess.cpp */; };
 		E11C00000000000000000033 /* deconvolve.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E11C00000000000000000013 /* deconvolve.cpp */; };
@@ -386,6 +390,9 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		E11D00000000000000000033 /* MeasurementAnalysisViewsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementAnalysisViewsTests.swift; sourceTree = "<group>"; };
+		E11D00000000000000000032 /* MeasurementAnalysisViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementAnalysisViews.swift; sourceTree = "<group>"; };
+		E11D00000000000000000031 /* MeasurementGatedPlot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementGatedPlot.swift; sourceTree = "<group>"; };
 		E6D0000000000000000009A3 /* LiveHeadphoneProfileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveHeadphoneProfileTests.swift; sourceTree = "<group>"; };
 		E6D0000000000000000009A4 /* UnifiedGraphStereoHeadphoneTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphStereoHeadphoneTests.swift; sourceTree = "<group>"; };
 		E6D0000000000000000009B1 /* LiveSessionFixtureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSessionFixtureTests.swift; sourceTree = "<group>"; };
@@ -414,6 +421,7 @@
 		E11C00000000000000000015 /* timing.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = measure/timing.cpp; sourceTree = "<group>"; };
 		E11C00000000000000000016 /* distortion.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = measure/distortion.cpp; sourceTree = "<group>"; };
 		E11C00000000000000000017 /* decay.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = measure/decay.cpp; sourceTree = "<group>"; };
+		E11C00000000000000000018 /* waterfall.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = measure/waterfall.cpp; sourceTree = "<group>"; };
 		E11C00000000000000000020 /* offline_fft.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = measure/offline_fft.hpp; sourceTree = "<group>"; };
 		E11D00000000000000000011 /* MeasurementCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementCore.swift; sourceTree = "<group>"; };
 		E11D00000000000000000012 /* MeasurementCoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementCoreTests.swift; sourceTree = "<group>"; };
@@ -820,6 +828,7 @@
 				E11C00000000000000000015 /* timing.cpp */,
 				E11C00000000000000000016 /* distortion.cpp */,
 				E11C00000000000000000017 /* decay.cpp */,
+				E11C00000000000000000018 /* waterfall.cpp */,
 				E11C00000000000000000020 /* offline_fft.hpp */,
 				E6C000000000000000000020 /* fft.hpp */,
 				E6C000000000000000000021 /* snapshot.hpp */,
@@ -891,6 +900,7 @@
 				A10000000000000000000027 /* ConvolutionTests.swift */,
 				A100000000000000000E2206 /* FeatureFlagsTests.swift */,
 				E11D00000000000000000012 /* MeasurementCoreTests.swift */,
+				E11D00000000000000000033 /* MeasurementAnalysisViewsTests.swift */,
 				A100000000000000000E1302 /* PresetInterchangeTests.swift */,
 				A100000000000000000E1304 /* MultichannelCalibrationDesignerTests.swift */,
 				A100000000000000000E1306 /* FeedForwardShadowIsolationTests.swift */,
@@ -1085,6 +1095,7 @@
 				F10600000000000000000036 /* SpeakerMeasurementLabController.swift */,
 				A2000000000000000000002E /* RoomCorrectionMeasurementAnalyzer.swift */,
 				E11D00000000000000000011 /* MeasurementCore.swift */,
+				E11D00000000000000000031 /* MeasurementGatedPlot.swift */,
 				A20000000000000000000030 /* RoomCorrectionTargetDesigner.swift */,
 				E20000000000000000000012 /* RoomCorrectionFIRDesigner.swift */,
 				B50000000000000000000011 /* OptionalAcousticResearch.swift */,
@@ -1208,7 +1219,7 @@
 			path = Realtime;
 			sourceTree = "<group>";
 		};
-		A40000000000000000000050 /* UI */ = {isa = PBXGroup; children = (A40000000000000000000020 /* ProductionRootView.swift */, A40000000000000000000021 /* ProductionEqualizerView.swift */, A40000000000000000000022 /* ProductionDynamicsView.swift */, A40000000000000000000023 /* ProductionDynamicsTelemetryView.swift */, A40000000000000000000024 /* ProductionMetersView.swift */, A40000000000000000000025 /* ProductionAnalysisViews.swift */, A40000000000000000000026 /* ProductionProfileToolbar.swift */, F65000000000000000000015 /* ProductionHeadphoneWorkspace.swift */, B40000000000000000000012 /* ProductionBlindListeningWorkspace.swift */, B50000000000000000000013 /* ProductionOptionalAudioResearchWorkspace.swift */, F64000000000000000000015 /* ProductionMultichannelCalibrationWorkspace.swift */, F10600000000000000000035 /* ProductionSpeakerMeasurementLabWorkspace.swift */, A40000000000000000000027 /* ProductionRoomCorrectionWorkspace.swift */, F78000000000000000000011 /* ProductionActiveAcousticsWorkspace.swift */, F92000000000000000000013 /* ProductionRoomTreatmentAdvisorWorkspace.swift */, F96000000000000000000013 /* ProductionFeedForwardReadinessCard.swift */, E4D000000000000000000012 /* ProductionAdaptiveQuietZoneCard.swift */, E4F200000000000000000014 /* ProductionFeedForwardDesignSurveyCard.swift */, E4F300000000000000000013 /* ProductionFeedForwardShadowCard.swift */, F93000000000000000000012 /* ProductionRoomGeometrySection.swift */, F94000000000000000000013 /* ProductionRoomTreatmentDesignSection.swift */, F78000000000000000000012 /* ProductionPluginWorkspace.swift */, F112A0000000000000000013 /* ProductionHardwareAcceptanceWorkspace.swift */, F11300000000000000000011 /* ProductionUserGuideView.swift */,); path = UI; sourceTree = "<group>"; };
+		A40000000000000000000050 /* UI */ = {isa = PBXGroup; children = (A40000000000000000000020 /* ProductionRootView.swift */, A40000000000000000000021 /* ProductionEqualizerView.swift */, A40000000000000000000022 /* ProductionDynamicsView.swift */, A40000000000000000000023 /* ProductionDynamicsTelemetryView.swift */, A40000000000000000000024 /* ProductionMetersView.swift */, A40000000000000000000025 /* ProductionAnalysisViews.swift */, A40000000000000000000026 /* ProductionProfileToolbar.swift */, F65000000000000000000015 /* ProductionHeadphoneWorkspace.swift */, B40000000000000000000012 /* ProductionBlindListeningWorkspace.swift */, B50000000000000000000013 /* ProductionOptionalAudioResearchWorkspace.swift */, F64000000000000000000015 /* ProductionMultichannelCalibrationWorkspace.swift */, F10600000000000000000035 /* ProductionSpeakerMeasurementLabWorkspace.swift */, E11D00000000000000000032 /* MeasurementAnalysisViews.swift */, A40000000000000000000027 /* ProductionRoomCorrectionWorkspace.swift */, F78000000000000000000011 /* ProductionActiveAcousticsWorkspace.swift */, F92000000000000000000013 /* ProductionRoomTreatmentAdvisorWorkspace.swift */, F96000000000000000000013 /* ProductionFeedForwardReadinessCard.swift */, E4D000000000000000000012 /* ProductionAdaptiveQuietZoneCard.swift */, E4F200000000000000000014 /* ProductionFeedForwardDesignSurveyCard.swift */, E4F300000000000000000013 /* ProductionFeedForwardShadowCard.swift */, F93000000000000000000012 /* ProductionRoomGeometrySection.swift */, F94000000000000000000013 /* ProductionRoomTreatmentDesignSection.swift */, F78000000000000000000012 /* ProductionPluginWorkspace.swift */, F112A0000000000000000013 /* ProductionHardwareAcceptanceWorkspace.swift */, F11300000000000000000011 /* ProductionUserGuideView.swift */,); path = UI; sourceTree = "<group>"; };
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -1290,6 +1301,7 @@
 				E11C00000000000000000035 /* timing.cpp in Sources */,
 				E11C00000000000000000036 /* distortion.cpp in Sources */,
 				E11C00000000000000000037 /* decay.cpp in Sources */,
+				E11C00000000000000000038 /* waterfall.cpp in Sources */,
 				A10000000000000000000011 /* ContentView.swift in Sources */,
 				A10000000000000000000010 /* NotchSixtyApp.swift in Sources */,
 				A40000000000000000000010 /* ProductionRootView.swift in Sources */,
@@ -1390,6 +1402,8 @@
 				A2000000000000000000001D /* RoomCorrectionCalibrationController.swift in Sources */,
 				A2000000000000000000001E /* RoomCorrectionMeasurementAnalyzer.swift in Sources */,
 				E11D00000000000000000001 /* MeasurementCore.swift in Sources */,
+				E11D00000000000000000022 /* MeasurementAnalysisViews.swift in Sources */,
+				E11D00000000000000000021 /* MeasurementGatedPlot.swift in Sources */,
 				A2000000000000000000001F /* RoomCorrectionProjectController.swift in Sources */,
 				E20000000000000000000001 /* RoomCorrectionTargetDesigner.swift in Sources */,
 				E20000000000000000000002 /* RoomCorrectionFIRDesigner.swift in Sources */,
@@ -1520,6 +1534,7 @@
 				A10000000000000000000014 /* ConvolutionTests.swift in Sources */,
 				A100000000000000000E2205 /* FeatureFlagsTests.swift in Sources */,
 				E11D00000000000000000002 /* MeasurementCoreTests.swift in Sources */,
+				E11D00000000000000000023 /* MeasurementAnalysisViewsTests.swift in Sources */,
 				A100000000000000000E1301 /* PresetInterchangeTests.swift in Sources */,
 				A100000000000000000E1303 /* MultichannelCalibrationDesignerTests.swift in Sources */,
 				A100000000000000000E1305 /* FeedForwardShadowIsolationTests.swift in Sources */,

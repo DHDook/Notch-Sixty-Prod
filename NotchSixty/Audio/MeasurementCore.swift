@@ -331,3 +331,70 @@ extension MeasurementCore {
         }
     }
 }
+
+// MARK: - E11 S4: waterfall (CSD) and spectrogram
+
+extension MeasurementCore {
+    /// Cumulative spectral decay: `levelsDB[slice][point]`, loudest cell 0 dB, `noDataDB` where a slice is past the response.
+    struct Waterfall: Equatable, Sendable {
+        var frequencyHz: [Double]
+        var sliceTimesSeconds: [Double]
+        var levelsDB: [[Double]]
+        static let noDataDB = -999.0
+    }
+
+    /// STFT magnitude: `levelsDB[frame][bin]`, loudest cell 0 dB, floor -200 dB.
+    struct Spectrogram: Equatable, Sendable {
+        var frameTimesSeconds: [Double]  // window centres
+        var binFrequenciesHz: [Double]
+        var levelsDB: [[Double]]
+    }
+
+    /// `room` selects the room preset (20 ms x 30) instead of the speaker preset (0.3 ms x 40).
+    static func analyzeWaterfall(
+        impulseResponse: [Float], sampleRate: Double, room: Bool = false, arrivalIndex: Int? = nil
+    ) throws -> Waterfall {
+        var params = n60_measure_waterfall_params()
+        n60_measure_waterfall_defaults(sampleRate, room ? 1 : 0, &params)
+        if let arrivalIndex { params.arrival_index = UInt64(max(0, arrivalIndex)) }
+        var info = n60_measure_waterfall_info()
+        guard n60_measure_waterfall_describe(&params, &info) == N60_MEASURE_OK else { throw MeasurementAnalysisError.invalidArguments }
+        let points = Int(info.point_count), slices = Int(info.slice_count)
+        var frequency = [Double](repeating: 0, count: points)
+        var cells = [Double](repeating: 0, count: points * slices)
+        let status = impulseResponse.withUnsafeBufferPointer { ir in
+            n60_measure_waterfall_analyze(
+                &params, ir.baseAddress, UInt64(ir.count), &frequency, &cells, UInt64(cells.count), &info)
+        }
+        guard status == N60_MEASURE_OK else { throw analysisError(status) }
+        return Waterfall(
+            frequencyHz: frequency,
+            sliceTimesSeconds: (0..<slices).map { Double($0) * params.step_seconds },
+            levelsDB: (0..<slices).map { Array(cells[($0 * points)..<(($0 + 1) * points)]) })
+    }
+
+    static func analyzeSpectrogram(
+        impulseResponse: [Float], sampleRate: Double, windowSeconds: Double = 0.01, maxFrequencyHz: Double = 0
+    ) throws -> Spectrogram {
+        var params = n60_measure_spectrogram_params()
+        n60_measure_spectrogram_defaults(sampleRate, &params)
+        params.window_seconds = windowSeconds
+        params.max_hz = maxFrequencyHz
+        var info = n60_measure_spectrogram_info()
+        guard n60_measure_spectrogram_describe(&params, UInt64(impulseResponse.count), &info) == N60_MEASURE_OK else {
+            throw MeasurementAnalysisError.invalidArguments
+        }
+        let frames = Int(info.frame_count), bins = Int(info.bin_count)
+        var cells = [Double](repeating: 0, count: frames * bins)
+        let status = impulseResponse.withUnsafeBufferPointer { ir in
+            n60_measure_spectrogram_analyze(
+                &params, ir.baseAddress, UInt64(ir.count), &cells, UInt64(cells.count), &info)
+        }
+        guard status == N60_MEASURE_OK else { throw analysisError(status) }
+        let hop = Double(info.hop_frames), half = Double(info.window_frames) / 2
+        return Spectrogram(
+            frameTimesSeconds: (0..<frames).map { (Double($0) * hop + half) / sampleRate },
+            binFrequenciesHz: (0..<bins).map { Double($0) * info.hz_per_bin },
+            levelsDB: (0..<frames).map { Array(cells[($0 * bins)..<(($0 + 1) * bins)]) })
+    }
+}
