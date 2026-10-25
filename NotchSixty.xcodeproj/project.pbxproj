@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		E6D000000000000000000101 /* UnifiedGraphSpec.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D000000000000000000001 /* UnifiedGraphSpec.swift */; };
+		E6D0000000000000000001B0 /* UnifiedGraphProgramDSP.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D0000000000000000000B0 /* UnifiedGraphProgramDSP.swift */; };
 		E6D000000000000000000102 /* UnifiedGraphHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D000000000000000000002 /* UnifiedGraphHost.swift */; };
 		E6D000000000000000000103 /* UnifiedGraphConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D000000000000000000003 /* UnifiedGraphConfiguration.swift */; };
 		E6D000000000000000000104 /* UnifiedGraphTranslator.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D000000000000000000004 /* UnifiedGraphTranslator.swift */; };
@@ -16,6 +17,7 @@
 		E6D000000000000000000106 /* UnifiedGraphEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D000000000000000000006 /* UnifiedGraphEngineTests.swift */; };
 		E6D0000000000000000000B8 /* UnifiedGraphConfigurationMatrixTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D0000000000000000000B7 /* UnifiedGraphConfigurationMatrixTests.swift */; };
 		E6D0000000000000000001A0 /* UnifiedGraphBinauralTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D0000000000000000000A0 /* UnifiedGraphBinauralTests.swift */; };
+		E6D0000000000000000001B1 /* UnifiedGraphProgramDSPTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6D0000000000000000000B1 /* UnifiedGraphProgramDSPTests.swift */; };
 		E6C000000000000000000030 /* graph.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E6C000000000000000000010 /* graph.cpp */; };
 		E6C000000000000000000031 /* snapshot.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E6C000000000000000000011 /* snapshot.cpp */; };
 		E6C000000000000000000032 /* fft.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E6C000000000000000000012 /* fft.cpp */; };
@@ -370,12 +372,14 @@
 
 /* Begin PBXFileReference section */
 		E6D000000000000000000001 /* UnifiedGraphSpec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphSpec.swift; sourceTree = "<group>"; };
+		E6D0000000000000000000B0 /* UnifiedGraphProgramDSP.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphProgramDSP.swift; sourceTree = "<group>"; };
 		E6D000000000000000000002 /* UnifiedGraphHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphHost.swift; sourceTree = "<group>"; };
 		E6D000000000000000000003 /* UnifiedGraphConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphConfiguration.swift; sourceTree = "<group>"; };
 		E6D000000000000000000004 /* UnifiedGraphTranslator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphTranslator.swift; sourceTree = "<group>"; };
 		E6D000000000000000000005 /* N60UnifiedGraphEligibility.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = N60UnifiedGraphEligibility.h; sourceTree = "<group>"; };
 		E6D000000000000000000007 /* LiveNChannelUnifiedGraphTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveNChannelUnifiedGraphTests.swift; sourceTree = "<group>"; };
 		E6D0000000000000000000A0 /* UnifiedGraphBinauralTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphBinauralTests.swift; sourceTree = "<group>"; };
+		E6D0000000000000000000B1 /* UnifiedGraphProgramDSPTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphProgramDSPTests.swift; sourceTree = "<group>"; };
 		E6D000000000000000000009 /* UnifiedGraphRoutesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphRoutesTests.swift; sourceTree = "<group>"; };
 		E6D000000000000000000006 /* UnifiedGraphEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphEngineTests.swift; sourceTree = "<group>"; };
 		E6D0000000000000000000B7 /* UnifiedGraphConfigurationMatrixTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedGraphConfigurationMatrixTests.swift; sourceTree = "<group>"; };
@@ -759,6 +763,7 @@
 			isa = PBXGroup;
 			children = (
 				E6D000000000000000000001 /* UnifiedGraphSpec.swift */,
+				E6D0000000000000000000B0 /* UnifiedGraphProgramDSP.swift */,
 				E6D000000000000000000002 /* UnifiedGraphHost.swift */,
 				E6D000000000000000000003 /* UnifiedGraphConfiguration.swift */,
 				E6D000000000000000000004 /* UnifiedGraphTranslator.swift */,
@@ -838,6 +843,7 @@
 				E6D000000000000000000009 /* UnifiedGraphRoutesTests.swift */,
 				E6D0000000000000000000B7 /* UnifiedGraphConfigurationMatrixTests.swift */,
 				E6D0000000000000000000A0 /* UnifiedGraphBinauralTests.swift */,
+				E6D0000000000000000000B1 /* UnifiedGraphProgramDSPTests.swift */,
 				E6D000000000000000000007 /* LiveNChannelUnifiedGraphTests.swift */,
 				A10000000000000000000027 /* ConvolutionTests.swift */,
 				A100000000000000000E2206 /* FeatureFlagsTests.swift */,
@@ -1221,6 +1227,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				E6D000000000000000000101 /* UnifiedGraphSpec.swift in Sources */,
+				E6D0000000000000000001B0 /* UnifiedGraphProgramDSP.swift in Sources */,
 				E6D000000000000000000102 /* UnifiedGraphHost.swift in Sources */,
 				E6D000000000000000000103 /* UnifiedGraphConfiguration.swift in Sources */,
 				E6D000000000000000000104 /* UnifiedGraphTranslator.swift in Sources */,
@@ -1448,6 +1455,7 @@
 				E6D000000000000000000108 /* UnifiedGraphRoutesTests.swift in Sources */,
 				E6D0000000000000000000B8 /* UnifiedGraphConfigurationMatrixTests.swift in Sources */,
 				E6D0000000000000000001A0 /* UnifiedGraphBinauralTests.swift in Sources */,
+				E6D0000000000000000001B1 /* UnifiedGraphProgramDSPTests.swift in Sources */,
 				E6D000000000000000000107 /* LiveNChannelUnifiedGraphTests.swift in Sources */,
 				A10000000000000000000013 /* NotchSixtyTests.swift in Sources */,
 				A10000000000000000000014 /* ConvolutionTests.swift in Sources */,

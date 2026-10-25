@@ -96,7 +96,8 @@ final class CoreAudioBinauralHeadphoneTransportSession {
         outputGain: Float,
         audioUnitRack: AudioUnitLiveRackSwitchboard? = nil,
         unifiedGraphSpec: UnifiedGraphSpec? = nil,
-        unifiedGraphIneligibility: UnifiedGraphFallbackReason? = nil
+        unifiedGraphIneligibility: UnifiedGraphFallbackReason? = nil,
+        unifiedGraphRequired: Bool = false
     ) throws {
         self.selectedOutput = selectedOutput
         self.programSource = programSource
@@ -253,8 +254,15 @@ final class CoreAudioBinauralHeadphoneTransportSession {
                     throw CoreAudioTransportError.audioUnitRackConfigurationFailed
                 }
             }
+            // E6 S9a: with stereo-class DSP active the session never falls back to the legacy pipeline.
+            func rejectIfRequired(_ reason: UnifiedGraphFallbackReason) throws {
+                guard unifiedGraphRequired else { return }
+                N60BinauralHeadphoneBridgeDestroy(newBridge)
+                throw LiveNChannelTransportError.unifiedGraphRejected(reason)
+            }
             if let spec = unifiedGraphSpec {
                 if audioUnitRack != nil {
+                    try rejectIfRequired(.unsupportedRoute)
                     unifiedGraphFallbackReason = .unsupportedRoute
                 } else {
                     switch Self.makeUnifiedGraph(
@@ -265,10 +273,13 @@ final class CoreAudioBinauralHeadphoneTransportSession {
                         outputBufferFrames: outputBufferFrames
                     ) {
                     case .success(let host): unifiedGraphHost = host
-                    case .failure(let reason): unifiedGraphFallbackReason = reason
+                    case .failure(let reason):
+                        try rejectIfRequired(reason)
+                        unifiedGraphFallbackReason = reason
                     }
                 }
             } else {
+                try rejectIfRequired(unifiedGraphIneligibility ?? .specRejected)
                 unifiedGraphFallbackReason = unifiedGraphIneligibility
             }
             bridge = newBridge
