@@ -132,11 +132,8 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
     static let interChannelDelayBase: UInt32 = 1_000
     static let firPartitionFrames: UInt32 = 256
     static let maxStages = 256
-
-    private static func denoiserFFTSize(_ params: [Float]) -> UInt32 {
-        let quality = params.count > 1 ? Int(params[1]) : 1
-        return [1_024, 2_048, 4_096][min(max(quality, 0), 2)]
-    }
+    /// The user's protection on the ears of a binaural graph, ahead of the layout's own safety limiter.
+    static let userProtectionStageId: UInt32 = 2_300
 
     private static func mask(_ lanes: [Int]) -> UInt64 {
         lanes.reduce(into: UInt64(0)) { $0 |= UInt64(1) << UInt64($1) }
@@ -239,8 +236,9 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
         var coveredLatency: UInt32 = 0
         if !covered.isEmpty {
             if let params = st.denoiser {
+                guard st.denoiserLatencyFrames > 0 else { throw UnifiedGraphFallbackReason.specRejected }
                 add(N60_STAGE_DENOISER, UnifiedGraphConfiguration.denoiserStageId, mask: coveredMask, params: params)
-                coveredLatency += Self.denoiserFFTSize(params)
+                coveredLatency += st.denoiserLatencyFrames
             }
             if midSideActive {
                 for (index, pair) in shape.pairs.enumerated() {
@@ -342,10 +340,11 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
 
         if let protection {
             let params = UnifiedGraphConfiguration.protectionParameters(protection)
-            if let index = spec.stages.firstIndex(where: { $0.stageId == N60_LSTAGE_PROTECTION }) {
-                // Binaural: the ears stage exists already; the user's protection replaces its parameters.
+            if spec.stages.contains(where: { $0.stageId == N60_LSTAGE_PROTECTION }) {
+                // Binaural: the layout's safety limiter on the ears is never replaced. The user's protection is a
+                // second stage on the ears that runs ahead of it.
                 guard virtualSpeakers else { throw UnifiedGraphFallbackReason.specRejected }
-                spec.stages[index].params = params
+                add(N60_STAGE_PROTECTION, Self.userProtectionStageId, mask: 0b11, params: params)
             } else {
                 add(N60_STAGE_PROTECTION, N60_LSTAGE_PROTECTION, mask: Self.mask(Array(0..<count)), params: params)
             }
@@ -379,6 +378,11 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
         merged.sort { ($0.position, $0.origin, $0.index) < ($1.position, $1.origin, $1.index) }
         guard merged.count <= Self.maxStages else { throw UnifiedGraphFallbackReason.stageBudget }
         spec.stages = merged.map(\.stage)
+        // The safety limiter stays the last protection stage.
+        if let user = spec.stages.firstIndex(where: { $0.stageId == Self.userProtectionStageId }),
+           let safety = spec.stages.firstIndex(where: { $0.stageId == N60_LSTAGE_PROTECTION }), safety < user {
+            spec.stages.insert(spec.stages.remove(at: safety), at: user)
+        }
     }
 
     /// The core's processing position of each stage kind (`n60/graph.h`).

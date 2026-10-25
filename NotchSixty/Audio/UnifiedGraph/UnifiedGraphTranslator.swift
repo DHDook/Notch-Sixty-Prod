@@ -155,7 +155,10 @@ enum UnifiedGraphTranslator {
             let dynamics = pointer.pointee.dynamics
             if dynamics.spectralDenoiser.enabled {
                 var values = [Float](repeating: 0, count: 9)
-                if N60UnifiedGraphDenoiserParams(pointer, &values) { stages.denoiser = values } else { ok = false }
+                if N60UnifiedGraphDenoiserParams(pointer, &values) {
+                    stages.denoiser = values
+                    stages.denoiserLatencyFrames = dynamics.spectralDenoiser.latencyFrames
+                } else { ok = false }
             } else {
                 var view = [UInt32](repeating: 0, count: 3)
                 if N60UnifiedGraphDenoiserParkView(pointer, &view) {
