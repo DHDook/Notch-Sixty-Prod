@@ -279,9 +279,10 @@ final class LiveHeadphoneProfileTests: XCTestCase {
         XCTAssertEqual(plan(eq, context(nChannel: true)), .refuse)
         XCTAssertEqual(plan(nil, context(session: .legacy)), .refuse)
 
-        // From no headphone session only Virtual Speakers on reconfigures.
+        // From no headphone session, turning a profile on reconfigures.
         XCTAssertEqual(HeadphoneLiveEditPlanner.plan(from: nil, to: old, context: context(session: .none)), .reconfigure)
-        XCTAssertEqual(HeadphoneLiveEditPlanner.plan(from: nil, to: stereo, context: context(session: .none)), .refuse)
+        // A stereo profile from no headphone session is a session-kind change too (E6 S9d).
+        XCTAssertEqual(HeadphoneLiveEditPlanner.plan(from: nil, to: stereo, context: context(session: .none)), .reconfigure)
         XCTAssertEqual(HeadphoneLiveEditPlanner.plan(from: nil, to: old, context: context(flag: false, session: .none)), .refuse)
     }
 }

@@ -5,7 +5,7 @@ import Foundation
 enum HeadphoneLiveEditPlan: Equatable {
     /// The configuration is the one already in force.
     case unchanged
-    /// Same session kind on a graph-rendered binaural session: republish the graph. `assetChanged` prepares the new
+    /// Same session kind on a graph-rendered binaural or stereo headphone session: republish the graph. `assetChanged` prepares the new
     /// response set off the main actor first, with the old one rendering meanwhile.
     case liveEdit(assetChanged: Bool)
     /// A different session kind (profile on or off, Virtual Speakers on or off, another layout, source device or
@@ -29,6 +29,17 @@ enum HeadphoneLiveEditPlanner {
         var lifecycleRunning: Bool
         var binauralSession: BinauralSession
         var nChannelSessionActive: Bool
+        /// A running stereo session whose graph renders a headphone profile (E6 S9d).
+        var stereoHeadphoneGraphActive = false
+    }
+
+    /// Two stereo profiles are the same session kind when only the correction and crossfeed differ (E6 S9d).
+    static func sameStereoSessionKind(
+        _ old: HeadphoneDeviceProfileConfiguration, _ new: HeadphoneDeviceProfileConfiguration
+    ) -> Bool {
+        old.enabled && new.enabled
+            && old.spatialMode == .stereo && new.spatialMode == .stereo
+            && old.outputDeviceUID == new.outputDeviceUID
     }
 
     /// Two profiles describe the same session kind when only things the running graph can republish differ:
@@ -63,9 +74,12 @@ enum HeadphoneLiveEditPlanner {
         case .legacy:
             return .refuse
         case .none:
-            // Only turning Virtual Speakers on is a session-kind change this slice owns; stereo headphone
-            // sessions on the graph are S9d.
-            if let new, new.enabled, new.spatialMode == .virtualSpeakers { return .reconfigure }
+            if context.stereoHeadphoneGraphActive, let old, let new, sameStereoSessionKind(old, new) {
+                return .liveEdit(assetChanged: false)
+            }
+            // A change of session kind (profile on or off, stereo or Virtual Speakers, another device) rebuilds the
+            // transport through the fade; two disabled profiles change nothing a running session renders.
+            if (old?.enabled == true) || (new?.enabled == true) { return .reconfigure }
             return .refuse
         }
     }

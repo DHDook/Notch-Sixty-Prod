@@ -552,6 +552,15 @@ enum UnifiedGraphTranslator {
     /// enforces) enabled bands a side, channel gain within the stage's range and a delay within the delay capacity.
     /// A profile that passed `validateStructure` always satisfies this; it guards hand-built configurations.
     static func headphoneStagesEligible(profile: HeadphoneDeviceProfileConfiguration, sampleRate: Double) -> Bool {
+        if profile.crossfeedActive {
+            // The stage's crossfeed ranges (graph.h, HEADPHONE); a wider legacy setting stays on the kernel.
+            let crossfeed = profile.crossfeed
+            guard crossfeed.amount.isFinite, (0.0...1.0).contains(crossfeed.amount),
+                  crossfeed.virtualSpeakerAngleDegrees.isFinite, (15.0...90.0).contains(crossfeed.virtualSpeakerAngleDegrees),
+                  crossfeed.headRadiusMeters.isFinite, (0.06...0.12).contains(crossfeed.headRadiusMeters),
+                  crossfeed.headShadowFrequencyHz.isFinite, (200.0...2000.0).contains(crossfeed.headShadowFrequencyHz)
+            else { return false }
+        }
         guard profile.headroomAttenuationDB.isFinite, (0.0...30.0).contains(profile.headroomAttenuationDB),
               profile.left.eqBands.filter(\.enabled).count <= Int(N60_HEADPHONE_MAX_EQ_SECTIONS),
               profile.right.eqBands.filter(\.enabled).count <= Int(N60_HEADPHONE_MAX_EQ_SECTIONS),
@@ -575,8 +584,13 @@ enum UnifiedGraphTranslator {
         }
         let leftBands = bands(profile.left)
         let rightBands = bands(profile.right)
+        // Crossfeed runs only for a stereo profile (the legacy bridge's rule); the virtual speakers already carry the image.
+        let crossfeed = profile.crossfeedActive
+            ? [Float(profile.crossfeed.amount), Float(profile.crossfeed.virtualSpeakerAngleDegrees),
+               Float(profile.crossfeed.headRadiusMeters), Float(profile.crossfeed.headShadowFrequencyHz)]
+            : [0, 30, 0.0875, 700]
         var headphone: [Float] = [
-            -Float(profile.headroomAttenuationDB), 0, 30, 0.0875, 700,
+            -Float(profile.headroomAttenuationDB), crossfeed[0], crossfeed[1], crossfeed[2], crossfeed[3],
             Float(profile.left.gainDB), Float(profile.right.gainDB),
             profile.left.polarityInverted ? 1 : 0, profile.right.polarityInverted ? 1 : 0,
             Float(leftBands.count / 4), Float(rightBands.count / 4),
@@ -599,6 +613,30 @@ enum UnifiedGraphTranslator {
                 laneA: UInt32(lane), laneB: 0, laneMask: 0, capacityFrames: UInt32(N60_HEADPHONE_MAX_DELAY_FRAMES),
                 params: [Float(frames)])
         }
+    }
+
+    /// E6 S9d: the stereo graph `spec` with the profile's HEADPHONE stage after the last output gain (the kernel's
+    /// position: after output gain, before the pause gate) and the two ear DELAY stages ahead of protection. Fails with
+    /// `headphoneDSP` when the stages cannot reproduce the profile. `earDelayFrames` is the per-ear frame count, for
+    /// the caller's hand-over latency alignment (the kernel applies the delay without reporting it).
+    static func stereoApplyHeadphone(
+        spec: UnifiedGraphSpec, profile: HeadphoneDeviceProfileConfiguration
+    ) -> Result<(spec: UnifiedGraphSpec, earDelayFrames: [UInt32]), UnifiedGraphFallbackReason> {
+        guard profile.spatialMode == .stereo, headphoneStagesEligible(profile: profile, sampleRate: spec.sampleRate) else {
+            return .failure(.headphoneDSP)
+        }
+        var result = spec
+        let gainKinds = [UInt32(N60_STAGE_OUTPUT_GAIN.rawValue)]
+        guard let lastGain = result.stages.lastIndex(where: { gainKinds.contains($0.kind) }) else {
+            return .failure(.specRejected)
+        }
+        let delays = headphoneDelayStages(profile: profile, sampleRate: spec.sampleRate)
+        result.stages.insert(headphoneStage(profile: profile), at: lastGain + 1)
+        let protection = result.stages.firstIndex(where: { $0.stageId == N60_LSTAGE_PROTECTION })
+            ?? result.stages.firstIndex(where: { $0.stageId == N60_LSTAGE_FINAL_SANITISE })
+            ?? result.stages.count
+        result.stages.insert(contentsOf: delays, at: protection)
+        return .success((result, delays.map { UInt32($0.params.first ?? 0) }))
     }
 
     /// E6 S9c: `base` (a binaural base spec) with the HEADPHONE stage and ear delays of `profile`, without
