@@ -372,7 +372,8 @@ struct ProductionRootView: View {
             ProductionSpeakerMeasurementLabWorkspace(
                 engine: engine,
                 microphone: product.calibration,
-                profiles: product.profiles
+                profiles: product.profiles,
+                roomCorrectionProjects: product.roomCorrectionProjects
             )
         case .roomCorrection:
             ProductionRoomCorrectionWorkspace(
