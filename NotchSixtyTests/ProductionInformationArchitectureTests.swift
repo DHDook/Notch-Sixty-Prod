@@ -359,16 +359,16 @@ final class ProductionInformationArchitectureTests: XCTestCase {
     func testDashboardIsStandaloneAndEverySectionIsReachable() {
         let grouped =
             ProductionSection.playback
-            + ProductionSection.system
+            + ProductionSection.systemGroup
             + ProductionSection.tools
             + ProductionSection.extensions
 
         XCTAssertFalse(grouped.contains(.dashboard))
         XCTAssertEqual(Set(grouped).count, grouped.count)
         XCTAssertEqual(
-            Set(grouped + ProductionSection.developerTools + [.dashboard]),
+            Set(grouped + ProductionSection.developerTools + [.dashboard, .system]),
             Set(ProductionSection.allCases),
-            "every section is in the sidebar or the Developer menu"
+            "every section is in the sidebar or the Developer menu (.system is the flag-gated System area row)"
         )
         XCTAssertTrue(Set(grouped).isDisjoint(with: ProductionSection.developerTools))
     }
@@ -382,7 +382,7 @@ final class ProductionInformationArchitectureTests: XCTestCase {
 
     func testSystemGroupContainsHardwareCalibrationAndAcoustics() {
         XCTAssertEqual(
-            ProductionSection.system,
+            ProductionSection.systemGroup,
             [
                 .speakers,
                 .headphones,
@@ -405,7 +405,7 @@ final class ProductionInformationArchitectureTests: XCTestCase {
             groups.map(\.sections),
             [
                 ProductionSection.playback,
-                ProductionSection.system,
+                ProductionSection.systemGroup,
                 ProductionSection.tools,
                 ProductionSection.extensions,
             ]

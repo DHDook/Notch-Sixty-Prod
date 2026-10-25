@@ -18,7 +18,7 @@ struct FeatureFlag: Hashable, Identifiable, Sendable {
 extension FeatureFlag {
     /// Every flag the app knows. Add one when an epic starts merging dark;
     /// delete it, and the checks that read it, once the epic ships.
-    static let all: [FeatureFlag] = [.adaptiveANC, .legacyKernel]
+    static let all: [FeatureFlag] = [.adaptiveANC, .legacyKernel, .guidedSetup]
 
     /// E4: adaptive Quiet Zone controls and the shadow-mode adaptive path.
     static let adaptiveANC = FeatureFlag(
@@ -34,6 +34,15 @@ extension FeatureFlag {
         id: "e6.legacy-kernel",
         title: "Legacy render kernel (frozen fallback)",
         epic: "E6"
+    )
+}
+
+extension FeatureFlag {
+    /// E12: the System area (one System row with tabs) and, in later slices, the guided setup flow.
+    static let guidedSetup = FeatureFlag(
+        id: "e12.guided-setup",
+        title: "Guided setup and System area",
+        epic: "E12"
     )
 }
 

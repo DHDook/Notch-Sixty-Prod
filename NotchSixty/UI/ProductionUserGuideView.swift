@@ -839,6 +839,7 @@ enum ProductionUserGuideCatalog {
         case .equalizer: return "equalizer"
         case .dynamics: return "dynamics"
         case .meters: return "meters"
+        case .system: return "speakers"
         case .speakers: return "speakers"
         case .headphones: return "headphones"
         case .speakerCalibration: return "speaker-calibration"
