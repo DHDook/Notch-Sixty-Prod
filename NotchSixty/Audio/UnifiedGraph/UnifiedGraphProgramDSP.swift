@@ -95,6 +95,8 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
     /// E10 S4: per-lane room correction synthesised for this rate (one ROOM_FIR stage per distinct tap set,
     /// sub lanes included). Mutually exclusive with `stages.roomFIR`.
     var roomLanes: RoomCorrectionLanePlan?
+    /// E10 S7: extra per-lane delay in frames (joint bass alignment of the mains), one DELAY stage per lane.
+    var laneDelayFrames: [Int: UInt32] = [:]
 
     init(
         stereo: UnifiedGraphConfiguration,
@@ -121,7 +123,7 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
             guard lane.delayMilliseconds == 0, lane.delayFrames == 0 else { return false }
             return lane.fractionalDelayFrames == nil
         }
-        guard rest.isEmpty, roomLanes == nil, plain(left), plain(right), inputGain == 1 else { return false }
+        guard rest.isEmpty, roomLanes == nil, laneDelayFrames.isEmpty, plain(left), plain(right), inputGain == 1 else { return false }
         return protection == nil
     }
 
@@ -133,6 +135,7 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
     static let alignmentDelayBase: UInt32 = 900
     static let programPEQBase: UInt32 = 800
     static let interChannelDelayBase: UInt32 = 1_000
+    static let laneDelayBase: UInt32 = 1_100
     static let firPartitionFrames: UInt32 = 256
     static let maxStages = 256
     /// The user's protection on the ears of a binaural graph, ahead of the layout's own safety limiter.
@@ -342,6 +345,13 @@ struct UnifiedGraphProgramDSP: Equatable, Sendable {
                         capacity: frames, params: [Float(frames)])
                 }
             }
+        }
+        for (lane, frames) in laneDelayFrames.sorted(by: { $0.key < $1.key }) {
+            guard lane >= 0, lane < count, frames <= N60_GRAPH_MAX_DELAY_FRAMES else {
+                throw UnifiedGraphFallbackReason.latencyAlignment
+            }
+            add(N60_STAGE_DELAY, Self.laneDelayBase + UInt32(lane), lane: UInt32(lane),
+                capacity: frames, params: [Float(frames)])
         }
         if let params = st.pauseGate {
             let mask = virtualSpeakers ? UInt64(0b11) : programMask

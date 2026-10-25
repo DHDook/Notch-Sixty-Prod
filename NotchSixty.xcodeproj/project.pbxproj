@@ -66,7 +66,9 @@
 		E10A00000000000000000023 /* synth.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E10A00000000000000000013 /* synth.cpp */; };
 		E10A00000000000000000033 /* RoomCorrectionLanePlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10A00000000000000000043 /* RoomCorrectionLanePlan.swift */; };
 		E10A00000000000000000024 /* bass.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E10A00000000000000000014 /* bass.cpp */; };
+		E10A00000000000000000071 /* RoomCorrectionBassApply.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10A00000000000000000072 /* RoomCorrectionBassApply.swift */; };
 		E10A00000000000000000031 /* RoomCorrectionCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10A00000000000000000041 /* RoomCorrectionCore.swift */; };
+		E10A00000000000000000073 /* RoomCorrectionBassApplyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10A00000000000000000074 /* RoomCorrectionBassApplyTests.swift */; };
 		E10A00000000000000000034 /* RoomCorrectionLanePlanTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10A00000000000000000044 /* RoomCorrectionLanePlanTests.swift */; };
 		E10A00000000000000000032 /* RoomCorrectionCoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10A00000000000000000042 /* RoomCorrectionCoreTests.swift */; };
 		E11D00000000000000000001 /* MeasurementCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11D00000000000000000011 /* MeasurementCore.swift */; };
@@ -487,7 +489,9 @@
 		E10A00000000000000000013 /* synth.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = correct/synth.cpp; sourceTree = "<group>"; };
 		E10A00000000000000000043 /* RoomCorrectionLanePlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionLanePlan.swift; sourceTree = "<group>"; };
 		E10A00000000000000000014 /* bass.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = correct/bass.cpp; sourceTree = "<group>"; };
+		E10A00000000000000000072 /* RoomCorrectionBassApply.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionBassApply.swift; sourceTree = "<group>"; };
 		E10A00000000000000000041 /* RoomCorrectionCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionCore.swift; sourceTree = "<group>"; };
+		E10A00000000000000000074 /* RoomCorrectionBassApplyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionBassApplyTests.swift; sourceTree = "<group>"; };
 		E10A00000000000000000044 /* RoomCorrectionLanePlanTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionLanePlanTests.swift; sourceTree = "<group>"; };
 		E10A00000000000000000042 /* RoomCorrectionCoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomCorrectionCoreTests.swift; sourceTree = "<group>"; };
 		E11D00000000000000000011 /* MeasurementCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeasurementCore.swift; sourceTree = "<group>"; };
@@ -983,6 +987,7 @@
 				A100000000000000000E2206 /* FeatureFlagsTests.swift */,
 				E11D00000000000000000012 /* MeasurementCoreTests.swift */,
 				E10A00000000000000000042 /* RoomCorrectionCoreTests.swift */,
+				E10A00000000000000000074 /* RoomCorrectionBassApplyTests.swift */,
 				E10A00000000000000000044 /* RoomCorrectionLanePlanTests.swift */,
 				E10A00000000000000000063 /* RoomCorrectionTargetEditorTests.swift */,
 				E11E0000000000000000000C /* MeasurementLiveAnalysisTests.swift */,
@@ -1187,6 +1192,7 @@
 				F10600000000000000000036 /* SpeakerMeasurementLabController.swift */,
 				A2000000000000000000002E /* RoomCorrectionMeasurementAnalyzer.swift */,
 				E11D00000000000000000011 /* MeasurementCore.swift */,
+				E10A00000000000000000072 /* RoomCorrectionBassApply.swift */,
 				E10A00000000000000000041 /* RoomCorrectionCore.swift */,
 				E10A00000000000000000043 /* RoomCorrectionLanePlan.swift */,
 				E10A00000000000000000061 /* RoomCorrectionTargetShaping.swift */,
@@ -1514,6 +1520,7 @@
 				A2000000000000000000001D /* RoomCorrectionCalibrationController.swift in Sources */,
 				A2000000000000000000001E /* RoomCorrectionMeasurementAnalyzer.swift in Sources */,
 				E11D00000000000000000001 /* MeasurementCore.swift in Sources */,
+				E10A00000000000000000071 /* RoomCorrectionBassApply.swift in Sources */,
 				E10A00000000000000000031 /* RoomCorrectionCore.swift in Sources */,
 				E10A00000000000000000033 /* RoomCorrectionLanePlan.swift in Sources */,
 				E10A00000000000000000051 /* RoomCorrectionTargetShaping.swift in Sources */,
@@ -1664,6 +1671,7 @@
 				A100000000000000000E2205 /* FeatureFlagsTests.swift in Sources */,
 				E11D00000000000000000002 /* MeasurementCoreTests.swift in Sources */,
 				E10A00000000000000000032 /* RoomCorrectionCoreTests.swift in Sources */,
+				E10A00000000000000000073 /* RoomCorrectionBassApplyTests.swift in Sources */,
 				E10A00000000000000000034 /* RoomCorrectionLanePlanTests.swift in Sources */,
 				E10A00000000000000000053 /* RoomCorrectionTargetEditorTests.swift in Sources */,
 				E11E0000000000000000000D /* MeasurementLiveAnalysisTests.swift in Sources */,
